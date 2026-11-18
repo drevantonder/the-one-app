@@ -8,9 +8,11 @@ config :one_core,
 # A server installed on a machine is told where it is by the program that keeps it running (`one serve run`, in
 # `clients/cli/src/serving.rs`): its home, its network's address, and who it's for. The rest is the release's own: the
 # UI library's build, in `ui/`, and the Bun it builds apps with, which it fetches the first time (`OneCore.Entrypoint`).
-# `mix network` says all of this itself.
+# `mix network` says all of this itself. Windows gives its paths with backslashes, which `Path.wildcard/2` reads as
+# escapes, finding nothing under them: expanded, they're written with slashes, as Elixir's own paths are.
 if home = System.get_env("ONE_SERVER_HOME") do
-  root = System.fetch_env!("RELEASE_ROOT")
+  home = Path.expand(home)
+  root = Path.expand(System.fetch_env!("RELEASE_ROOT"))
   address = System.fetch_env!("ONE_ADDRESS")
   [url, sha256] = String.split(File.read!(Path.join(root, "bun")))
 
