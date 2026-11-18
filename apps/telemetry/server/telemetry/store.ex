@@ -14,8 +14,8 @@ defmodule Telemetry.Store do
     is let go, not put in again.
 
   Its size is in its name, so listing them says how much is kept. What's older than `days/0`, and the oldest hours
-  past `most_bytes/0`, are let go. What was kept before it was OTLP, under `batches/`, is let go as it ages, and only
-  the network's edge's spans of it, in JSON, are read meanwhile.
+  past `most_bytes/0`, are let go. What was kept before it was OTLP, under `batches/`, isn't read, and is let go as
+  it ages.
   """
   alias Telemetry.Otlp
   alias OneCore.Artifact
@@ -39,7 +39,7 @@ defmodule Telemetry.Store do
   @doc "Every export kept of an hour that started after `from`, in nanoseconds since 1970, each laid flat."
   def read(own, from) do
     since = hour(from - 3_600_000_000_000)
-    names = for name <- list(own), folder(name) > since, do: name
+    names = for name <- Artifact.list(own, "otlp/"), Path.dirname(name) > since, do: name
     decode(own, names)
   end
 
@@ -54,8 +54,7 @@ defmodule Telemetry.Store do
 
     names =
       for hour <- hours,
-          prefix <- [hour, String.replace_prefix(hour, "otlp/", "batches/")],
-          name <- Artifact.list(own, prefix <> "/"),
+          name <- Artifact.list(own, hour <> "/"),
           not hour?(name),
           to_of(name) > from,
           name not in read,
@@ -142,14 +141,9 @@ defmodule Telemetry.Store do
 
   defp list(own), do: Artifact.list(own, "otlp/") ++ Artifact.list(own, "batches/")
 
-  # Each kept export laid flat, by its name: OTLP by its signal, and of what was kept before, the edge's spans.
-  defp decode(own, names) do
-    for {name, {:ok, data, _tag}} <- Enum.zip(names, Artifact.read_all(own, names)), batch = batch(name, data), do: batch
-  end
-
-  defp batch("batches/" <> _, "{" <> _ = edge), do: Map.put(JSON.decode!(edge), "metrics", [])
-  defp batch("batches/" <> _, _term), do: nil
-  defp batch(name, data), do: Otlp.decode(signal(name), data)
+  # Each kept export laid flat, by its signal.
+  defp decode(own, names),
+    do: for({name, {:ok, data, _tag}} <- Enum.zip(names, Artifact.read_all(own, names)), do: Otlp.decode(signal(name), data))
 
   defp folder(name), do: name |> Path.dirname() |> String.replace_prefix("batches/", "otlp/")
   defp hour?(name), do: String.starts_with?(Path.basename(name), "hour-")
