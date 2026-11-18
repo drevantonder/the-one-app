@@ -875,7 +875,15 @@ impl Screen {
                 self.pump();
             }
         }
-        if self.fields.contains_key(&id) {
+        // Escape empties a search field with something typed in it, as a browser's `type="search"` does.
+        let search = self.tree.nodes.get(&id).is_some_and(|node| node.str("type") == Some("search"));
+        if search && key.key == "Escape" && self.fields.get(&id).is_some_and(|field| !field.value().text.is_empty()) {
+            // What's selected is replaced by nothing, as a cut is, which undo brings back.
+            self.edit(id, |field| {
+                field.select_all();
+                field.paste("");
+            });
+        } else if self.fields.contains_key(&id) {
             self.type_key(id, key);
         } else if matches!(key.key.as_str(), "Enter" | " ") && self.tree.nodes.get(&id).is_some_and(|node| node.listens("click")) {
             self.click(id, None)
