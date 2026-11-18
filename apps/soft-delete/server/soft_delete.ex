@@ -401,42 +401,50 @@ defmodule SoftDelete do
 
   def call("expire", _inputs, call) do
     stale = now() - @stale
-    was = records(call)
-    purged = for {id, record} <- was, name <- expired(call, id, record, stale), do: name
-    if records(call) != was, do: Call.changed(call)
-    %{purged: purged}
+    done = for {id, record} <- records(call), do: expired(call, id, record, stale)
+    if Enum.any?(done, &elem(&1, 1)), do: Call.changed(call)
+    %{purged: Enum.flat_map(done, &elem(&1, 0))}
   end
 
-  # What the clock does with each item: purges one that's due, and finishes any work on one that was cut short.
+  # What the clock does with each item: purges one that's due, and finishes any work on one that was cut short. It
+  # gives the names it purged, and whether it changed the item's record.
   defp expired(call, id, record, stale) do
     case record do
       %{"state" => "active", "since" => since} when since < stale ->
         back(call, id)
-        []
+        {[], true}
 
       %{"state" => "purged"} ->
         gone(call, id, record)
-        []
+        {[], true}
 
       %{"state" => "purging", "since" => since} when since < stale ->
         put_aside(record, id)
         change(call, id, {:fail, "It was cut short.", if(record["erasing"], do: :partly, else: :whole)})
-        []
+        {[], true}
 
       %{"state" => "deleted", "moved" => false, "at" => at} when at < stale ->
         aside(call, id)
-        []
+        {[], true}
 
       %{"state" => "deleted", "at" => at} = record ->
-        if at + @retention <= now() and Map.get(record, "retry", 0) <= now(), do: purge(call, id), else: []
+        if at + @retention <= now() and Map.get(record, "retry", 0) <= now() do
+          # A purge that failed says why in the record, and is tried again tomorrow.
+          case purge(call, id) do
+            {:error, _why} -> {[], true}
+            purged -> {purged, true}
+          end
+        else
+          {[], false}
+        end
 
       _ ->
-        []
+        {[], false}
     end
   rescue
     error ->
       Logger.error("soft-delete couldn't expire #{id}: #{Exception.message(error)}")
-      []
+      {[], true}
   end
 
   # Purges an item, or raises why it couldn't.
@@ -473,7 +481,7 @@ defmodule SoftDelete do
     end
   rescue
     error ->
-      record = records(call)[id]
+      record = record(call, id)
 
       if record["state"] == "purging" do
         try do
@@ -538,7 +546,7 @@ defmodule SoftDelete do
   # Takes each artifact of an item aside, and says so in its record once it's all there, then tells whoever keeps a list.
   # One restored meanwhile is put back by this, as the restore left it to.
   defp aside(call, id) do
-    record = records(call)[id]
+    record = record(call, id)
     moved_aside(record, id)
 
     case change(call, id, :moved) do
@@ -547,7 +555,7 @@ defmodule SoftDelete do
         record
 
       {:error, why} ->
-        if records(call)[id]["state"] == "active", do: back(call, id), else: raise(why)
+        if record(call, id)["state"] == "active", do: back(call, id), else: raise(why)
     end
   end
 
@@ -558,7 +566,7 @@ defmodule SoftDelete do
 
   # Puts what's aside back where its record says, and then it's active: its record goes.
   defp back(call, id) do
-    record = records(call)[id]
+    record = record(call, id)
 
     for {name, n} <- Enum.with_index(record["artifacts"]) do
       from = aside(record, id, n)
@@ -644,9 +652,16 @@ defmodule SoftDelete do
         do: {id, JSON.decode!(record)}
   end
 
+  # An item's record, or nil.
+  defp record(call, id) do
+    with {:ok, record, _tag} <- Artifact.read(call.own, "items/" <> id),
+         do: JSON.decode!(record),
+         else: (:absent -> nil)
+  end
+
   # An item's record, if whoever the call runs for owns it.
   defp record!(call, id) do
-    record = records(call)[id]
+    record = record(call, id)
 
     if record == nil or not owns_item?(call, record),
       do: raise("That isn't in Recently Deleted.\n\n`soft-delete list` lists what is.")
