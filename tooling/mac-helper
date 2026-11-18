@@ -46,6 +46,19 @@ set -euo pipefail
 cd "$1"
 name=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleName' helper/Info.plist)
 program=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleExecutable' helper/Info.plist)
+# A permission the helper says why it asks for (its Info.plist's usage description) needs its entitlement, or macOS
+# says no without asking.
+for needs in NSCalendarsFullAccessUsageDescription:personal-information.calendars \
+  NSRemindersFullAccessUsageDescription:personal-information.calendars NSContactsUsageDescription:personal-information.addressbook \
+  NSAppleEventsUsageDescription:automation.apple-events NSCameraUsageDescription:device.camera \
+  NSMicrophoneUsageDescription:device.audio-input NSPhotoLibraryUsageDescription:personal-information.photos-library \
+  NSLocationUsageDescription:personal-information.location; do
+  if /usr/libexec/PlistBuddy -c "Print :${needs%%:*}" helper/Info.plist >/dev/null 2>&1 &&
+    ! /usr/libexec/PlistBuddy -c "Print :com.apple.security.${needs#*:}" "helper/$program.entitlements" >/dev/null 2>&1; then
+    echo "$program.entitlements needs com.apple.security.${needs#*:}, for ${needs%%:*}: without it macOS says no without asking." >&2
+    exit 1
+  fi
+done
 bundle="out/$name.app"
 mkdir -p "$bundle/Contents/MacOS" "$bundle/Contents/Resources"
 cp helper/Info.plist "$bundle/Contents/"
