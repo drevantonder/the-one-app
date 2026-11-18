@@ -182,10 +182,11 @@ defmodule ComputerUse.Desktop do
     :ok
   end
 
-  # The display's whole size in pixels, as Cua Driver's desktop actions count them: its size in points at its scale.
+  # The display's whole size in pixels, as Cua Driver's desktop actions count them. It gives a Mac's in points, with
+  # their scale, and Windows' in pixels already, with its scale beside them: a Surface at 200% says 2736×1824 and 2.
   defp frame(service) do
     %{"width" => width, "height" => height} = size = tool(service, "get_screen_size", %{})["structuredContent"]
-    scale = size["scale_factor"] || 1
+    scale = if :os.type() == {:unix, :darwin}, do: size["scale_factor"] || 1, else: 1
     {round(width * scale), round(height * scale)}
   end
 
