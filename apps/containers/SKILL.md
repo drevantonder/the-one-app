@@ -3,7 +3,7 @@ name: containers
 description: Read before creating or using a Linux container on the user's machines, as a scratch machine, a dev environment, somewhere to run Chrome or a desktop to look at.
 metadata:
   subtitle: "Linux machines when you need one"
-  about: "Starts Linux containers on your own machines: somewhere to install, build and try things without touching your devices. Open one's desktop to watch."
+  about: "Starts Linux containers on your own machines: somewhere to install, build and try things without touching your devices."
   category: Devices
 ---
 

@@ -71,7 +71,7 @@ defmodule Containers do
   }
 
   @impl true
-  def icon, do: "client/icon.svg"
+  def icon, do: "icon.svg"
 
   # Its data is everyone's together: the network's settings, and each person's names for their containers.
   @impl true
@@ -91,9 +91,6 @@ defmodule Containers do
 
   @impl true
   def hooks, do: ["computer-use.screens"]
-
-  @impl true
-  def entrypoints, do: [%{name: "Containers", page: "client/index.html"}]
 
   @impl true
   def tools do

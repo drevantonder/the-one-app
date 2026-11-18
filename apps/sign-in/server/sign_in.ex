@@ -33,7 +33,7 @@ defmodule SignIn do
   @impl true
   def entrypoints do
     [
-      %{name: "Users & Groups", page: "client/users.html", icon: "client/users.svg"},
+      %{name: "Users & Groups", page: "client/users.html", icon: "client/users.svg", category: "Admin"},
       %{name: "Devices", page: "client/index.html", icon: "client/icon.svg", category: "Devices", subject: "user"},
       %{
         name: "Sign-In & Security",
