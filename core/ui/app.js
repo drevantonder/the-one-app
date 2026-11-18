@@ -44,6 +44,8 @@ try {
       outDir: out,
       emptyOutDir: true,
       sourcemap: true,
+      // Every browser and web view the app runs in preloads modules itself, so a page doesn't load and run a polyfill first.
+      modulePreload: { polyfill: false },
       rolldownOptions: {
         input: { ...Object.fromEntries(pages.map((page) => [page.replace(/\.html$/, ""), join(source, page)])), ...Object.fromEntries(exported) },
         external: Object.keys(shared),
