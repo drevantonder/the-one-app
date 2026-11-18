@@ -4,6 +4,7 @@ target/
 node_modules/
 *.beam
 erl_crash.dump
+__pycache__/
 .DS_Store
 # One Core's Rust NIFs as they're built for the server to load and for each kind of machine beside their source, a
 # app's NIFs and programs as they're built beside their source
