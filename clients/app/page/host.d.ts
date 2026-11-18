@@ -37,6 +37,8 @@ export interface View {
   frame: HTMLIFrameElement
   tapped?: number
   over?: boolean
+  /** Whether it's on its first screen, with nothing of its own to go back to, where its UI library says. */
+  first?: boolean
   /** Whether the device's status bar shows while it does: unless it asked otherwise (`client({ statusBar })`). */
   statusBar?: boolean
 }

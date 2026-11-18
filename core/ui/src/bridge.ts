@@ -112,13 +112,18 @@ const greet = () => greeted ??= ask<{ hostContext?: HostContext }>("ui/initializ
   protocolVersion: "2026-01-26",
   appInfo: { name: document.title, version: "1" },
   appCapabilities: {},
-}).then(({ hostContext }) => (dress(hostContext), notify("ui/notifications/initialized")))
+}).then(({ hostContext }) => (dress(hostContext), notify("ui/notifications/initialized"), said()))
 
 /// What's open over the page, the last opened last, each as the function that shuts it: a sheet, an alert, a
 /// menu, a select's list, a calendar. A device's own back shuts the last of them before it goes anywhere, so the
-/// client is told whether there are any.
+/// client is told whether there are any, and with it whether the page is on its first screen, with nothing of its own
+/// to go back to (the Navigation API's `canGoBack`, in its frame), where the device's back gesture leaves the app. A
+/// browser without the Navigation API doesn't say.
 const over: (() => void)[] = []
-const overNow = () => greet().then(() => notify("notifications/one/over", { over: over.length > 0 }))
+const said = () => notify("notifications/one/over", { over: over.length > 0, first: globalThis.navigation && !navigation.canGoBack })
+// A page that hasn't said what it is yet says this as it does.
+const overNow = () => (greeted ? greeted.then(said) : greet())
+globalThis.navigation?.addEventListener("currententrychange", () => void overNow())
 
 /// `const shut = covers(close)`: says something of the app's own has opened over its page, as a sheet or a menu
 /// does, which `close` closes: the device's own back (an iPhone's swipe in from the edge, Android's Back) calls

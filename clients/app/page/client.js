@@ -1115,9 +1115,10 @@ addEventListener("message", async ({ source, data }) => {
   if (id === undefined) {
     // The app's user went back out of it. The app stays open behind the launcher.
     if (method === "ui/notifications/request-teardown" && !view.frame.inert && depth) history.back()
-    // Something is open over its page, or nothing is any more.
+    // Something is open over its page, or nothing is any more, and whether it's on its first screen.
     if (method === "notifications/one/over") {
       view.over = params.over === true
+      view.first = params.first
       gestures()
     }
     // An app's page logs its errors as an MCP App logs to its host, and they're its app's, whatever it says.
