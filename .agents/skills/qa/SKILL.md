@@ -24,6 +24,24 @@ A phone-sized desktop window (390×844) shows most screen changes; build for a p
 is about that platform. Save pictures in your harness's scratch folder, never in the repo, and look at each before
 you show it. Screen wording and look follow `DESIGN.md`: read the section of the screen you change first.
 
+### Scenes and parity: every UI change
+
+A screen's states are scenes, with what they show beside them, so no network is needed to see one: a component's in
+`core/ui/gallery/*.scenes.tsx`, an app's in `apps/<app>/client/scenes.json` (the format is `core/ui/scenes.js`'s
+header). A change that makes a screen, or a state of one, adds its scene. Every change to how something looks runs,
+in core/ui, after `bun build.js`:
+
+    bun scenes.js --out <scratch>/before          # on main, before the change (or an earlier run)
+    bun scenes.js --out <scratch>/after --against <scratch>/before [<folder>…]
+
+It draws every scene, or those of the folders named, on the DOM in headless Chromium (Playwright's, which
+`bunx playwright-core install chromium` fetches where it's missing) and on a native host by its headless harness
+(`cargo build -p strict --example screenshot`), and says for each where the DOM's and the native host's trees and
+pictures differ, and what changed since `--against`: a tree that differs, or pictures more than 2% apart, is looked
+at in the folder it names (`dom.png`, `native.png`, `diff.png`, `changed.png`). A native host that doesn't speak the
+UI library's protocol yet draws nothing, which it says. A difference that's meant is said in the commit; one that
+isn't is fixed.
+
 ### Desktop (Linux), by WebDriver
 
 `tooling/window.py` gives a Selenium session on the window a `one:` link opens, the Home Screen's or an app's own,

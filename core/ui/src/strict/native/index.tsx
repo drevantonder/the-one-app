@@ -12,7 +12,7 @@ export { tokens } from "../../tokens.ts"
 export { Box, EditableText, Image, Layer, Path, render, Scroll, Text } from "./primitives.tsx"
 export { Checkbox, Field, Input, RadioGroup, Search, Switch, Textarea } from "../../field.tsx"
 export { Select } from "../../select.tsx"
-export { call, changed, client, connection, covers, direction, go, keydown, open, pinShortcut, reducedMotion, safeArea, sizeChanged, viewport } from "./bridge.ts"
+export { call, changed, client, connection, covers, direction, link, go, keydown, open, pinShortcut, reducedMotion, safeArea, sizeChanged, viewport } from "./bridge.ts"
 
 // The components, as the DOM's look and read: the same roles and names, from the design tokens.
 
@@ -35,8 +35,6 @@ export const LiveScreen = later("LiveScreen") as typeof Strict.LiveScreen
 export const Tabs = { Root: later("Tabs"), List: later("Tabs"), Trigger: later("Tabs"), Content: later("Tabs"), Indicator: later("Tabs") } as typeof Strict.Tabs
 export const toast = later("toast") as typeof Strict.toast
 export const leave = later("leave") as typeof Strict.leave
-/** A native host doesn't open an app to a link yet. */
-export const link: typeof Strict.link = () => undefined
 export const component = later("component") as typeof Strict.component
 export const showRecoveryKey = later("showRecoveryKey") as typeof Strict.showRecoveryKey
 export const useRecoveryKey = later("useRecoveryKey") as typeof Strict.useRecoveryKey

@@ -1,0 +1,94 @@
+{
+  "Inbox": {
+    "answers": {
+      "notifications_inbox": {
+        "notifications": [
+          {
+            "id": "n1",
+            "title": "Backup finished",
+            "text": "Your network was backed up to Backblaze B2.",
+            "from": "Backups",
+            "app": "backups",
+            "at": "2025-12-31T23:55:00Z",
+            "read": false
+          },
+          {
+            "id": "n2",
+            "title": "GitHub wants a key",
+            "text": "Vault was asked for a token for api.github.com.",
+            "from": "Vault",
+            "app": "vault",
+            "at": "2025-12-31T21:00:00Z",
+            "read": false
+          },
+          {
+            "id": "n3",
+            "title": "Sam joined Family",
+            "from": "Sign-In",
+            "app": "sign-in",
+            "at": "2025-12-29T10:00:00Z",
+            "read": true
+          }
+        ]
+      },
+      "notifications_apps": {
+        "apps": [
+          {
+            "app": "backups",
+            "name": "Backups",
+            "allowed": true
+          },
+          {
+            "app": "vault",
+            "name": "Vault",
+            "allowed": true
+          },
+          {
+            "app": "sign-in",
+            "name": "Sign-In",
+            "allowed": false
+          }
+        ]
+      }
+    }
+  },
+  "Inbox, empty": {
+    "answers": {
+      "notifications_inbox": {
+        "notifications": []
+      },
+      "notifications_apps": {
+        "apps": []
+      }
+    }
+  },
+  "Inbox, couldn't load": {
+    "answers": {
+      "notifications_inbox": {
+        "$error": "The server didn't answer."
+      },
+      "notifications_apps": {
+        "apps": []
+      }
+    }
+  },
+  "Inbox, a phone not woken": {
+    "answers": {
+      "notifications_inbox": {
+        "notifications": []
+      },
+      "notifications_apps": {
+        "apps": []
+      },
+      "one/client": {
+        "device": "iPhone",
+        "build": "0.26.0",
+        "theme": null,
+        "push": {
+          "state": "denied"
+        },
+        "settings": true
+      }
+    }
+  }
+}

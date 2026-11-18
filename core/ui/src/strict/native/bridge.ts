@@ -56,11 +56,15 @@ interface Context {
   safeAreaInsets?: ReturnType<typeof Strict.safeArea>
   containerDimensions?: { width: number; height: number }
   reducedMotion?: boolean
+  /** The link the page was opened to: what follows `#` in a page's address on the DOM (`link()`). */
+  link?: string
   /** MCP Apps' own: whether a finger points at it, and a mouse hovers. */
   deviceCapabilities?: { touch?: boolean; hover?: boolean }
 }
 const [fingered, setFingered] = createSignal(false)
+const [opened, setOpened] = createSignal<string>()
 function dress(context?: Context) {
+  if (context?.link) setOpened(context.link)
   if (context?.deviceCapabilities && "touch" in context.deviceCapabilities) setFingered(context.deviceCapabilities.touch === true)
   if (context && "breadcrumb" in context) setBreadcrumb(context.breadcrumb === true)
   if (context?.connection) setConnected(context.connection)
@@ -123,3 +127,5 @@ export function back(): void {
 export function copy(_text: string): Promise<void> {
   return Promise.reject(new Error("A native host has no clipboard yet (core/ui/src/strict/native/bridge.ts)"))
 }
+/** The link the page was opened to, as its host says (`hostContext.link`), as it comes. */
+export const link: typeof Strict.link = () => opened()
