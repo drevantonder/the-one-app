@@ -11,9 +11,12 @@ defmodule Vault.Store do
 
   alias OneCore.{Artifact, Call, Server}
 
-  # A database runs the statements it hasn't, as many as its `user_version` counts (`Database.transaction/3`): the
-  # Vaults made before these were squashed ran 20, so a statement added to them is only run once there are more.
-  @schema [
+  # A database runs the statements it hasn't, as many as its `user_version` counts (`Database.transaction/3`). The
+  # Vaults made before the schema was squashed to what follows ran 20 statements, so a new one counts the same: a
+  # statement added at the end is the 21st for a Vault of either kind.
+  @squashed List.duplicate("select 1", 17)
+
+  @schema @squashed ++ [
     # Which item each name is, as each item is an artifact of its own.
     "create table artifacts (id text primary key, name text not null)",
     """
