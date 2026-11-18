@@ -27,7 +27,7 @@ include!(concat!(env!("OUT_DIR"), "/page.rs"));
 
 /// The public half of the key the platform signs the page's `update.json` with, PAGE_SIGNING_KEY at the edge's
 /// deploy (in 1Password, "The One App page signing key").
-const KEY: &str = "9cca32185c88e006a2479367c5c24d69bfd06c29471d873b722ba3ef454e1841";
+const KEY: &str = "58a090e1ddf4e3dc9bec1cfe5ba83fe987c54a8ed05455d871ae3514e33fc4ef";
 
 /// What a network says of its page, and what a page kept here says of itself: its `update.json`.
 #[derive(Deserialize)]
