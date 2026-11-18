@@ -473,7 +473,7 @@ function AppStore(props: { market: Market; all: Owners }) {
   return (
     <>
       <Box style={{ display: covered() ? "none" : "flex", flexGrow: 1 }}>
-        <Screen back={!!view().category} onBack={out}>
+        <Screen heading="App Store" back={!!view().category} onBack={out}>
           <Marketplace market={props.market} />
         </Screen>
       </Box>
@@ -500,8 +500,8 @@ export default function Store() {
     if (fragment?.startsWith("app=")) setView({ app: decodeURIComponent(fragment.slice(4)), linked: true })
   })
   return (
-    <Errored fallback={(error) => <Screen><Problem heading="Can't show apps" text={error() as Error} /></Screen>}>
-      <Loading fallback={<Screen><Skeleton rows={4} /></Screen>}>
+    <Errored fallback={(error) => <Screen heading="App Store"><Problem heading="Can't show apps" text={error() as Error} /></Screen>}>
+      <Loading fallback={<Screen heading="App Store"><Skeleton rows={4} /></Screen>}>
         <AppStore market={market()} all={owners()} />
       </Loading>
     </Errored>
