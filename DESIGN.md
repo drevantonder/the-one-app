@@ -34,9 +34,10 @@ What users see, as the project's owner decided it. Only their decisions are here
 
 ## Strict (18 Nov)
 
-- Every app's screens and the launcher are written in strict mode (Solid Strict DOM), so they run natively on a computer (GPUI) and on Android (Lynx), and unchanged on the DOM on the web, an iPhone and in MCP Apps.
-- The strict contract (18 Nov) is built from low-level primitives the way GPUI is: a box (GPUI's `div`), a scroll (a box that scrolls), text, an image, a path (a vector shape) and a text input, with events (click, hover, focus, keys, scroll), focus, and transitions and animations. Hosts (the DOM, GPUI, Lynx) draw only these.
-- Their style is GPUI's `Styled` vocabulary, which is Tailwind's, named as Tailwind names it and by the design tokens only: flex and grid, gap, padding and margin (negative too), sizes, position with inset and z-order, overflow, colours, borders, radius, shadows, opacity, fonts (sans, mono), the type styles and weights, line height, tracking, text alignment, truncation and line clamps, cursor, and motion at the tokens' paces. Nothing arbitrary.
+- Every app's screens and the launcher are written in strict mode, so they run natively on our renderer on a computer and Android, and unchanged on the DOM on the web, an iPhone and in MCP Apps.
+- The strict contract (18 Nov) is built from low-level primitives the way GPUI is: a box, a scroll (a box that scrolls), text, an image, a path (a vector shape) and a text input, with events (click, hover, focus, keys, scroll), focus, and transitions and animations. Hosts (the DOM and our renderer) draw only these. An input's state and events are Flutter's editing state: its text, selection and composing range, and its action (Done, Go, Next, Search, Send).
+- Design tokens are typed values in one TypeScript module of the UI library, each varying by condition (dark, phone, touch, reduced motion), never a stylesheet written by hand. Styles are static, typed objects beside the component that uses them, of tokens only, resolved by the build ahead of time: the last style applied wins, with no cascade, and a component says by its types which properties a caller may override. A raw colour, size or font where a token exists fails the check.
+- One build makes every target's: the web's CSS (variables and atomic classes), and for our renderer token and style tables, which travel with the UI library and each app over the air, versioned. A host knows kinds of token and the conditions, never a token's name or value.
 - Every UI library component is written once, in strict, on those primitives, and is the same code on every host; its look stays exactly the one described here.
 - Everything written in strict updates over the air.
 

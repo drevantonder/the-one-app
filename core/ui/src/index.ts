@@ -15,28 +15,22 @@
 /// as `"paths": { "ui": ["<there>/index.d.ts"] }`, and its build doesn't check them. A field's text is never set
 /// under 16px on a touch screen, where an iPhone zooms into it: the UI library's fields and its base styles keep every
 /// `<input>`, `<textarea>` and `<select>` at 16px or more there, and a field of another size sets `--text-field`.
-/// **Strict mode.** A strict page runs natively on a computer and on Android, and unchanged on the DOM everywhere
-/// else (the web, an iPhone, MCP Apps). Every app's page is to be strict. A page is strict when its `tsconfig.json` is
-/// `{ "extends": "<ui>/tsconfig.strict.json", "include": ["**/*"] }` (in this repo
+/// **Strict mode.** A strict page runs natively, on our renderer on a computer and Android, and unchanged on the DOM
+/// everywhere else (the web, an iPhone, MCP Apps). Every app's page is to be strict. A page is strict when its
+/// `tsconfig.json` is `{ "extends": "<ui>/tsconfig.strict.json", "include": ["**/*"] }` (in this repo
 /// `../../../core/ui/tsconfig.strict.json`) and its entrypoint says so, with the protocol version it's written for:
-/// `%{page: "client/index.html", host: 2}`. It's written with the UI library alone: its components and the primitives,
-/// as GPUI's are: `Box` (GPUI's `div`), `Scroll` (a box whose content scrolls), `Text`, `Image`, `Path` (a vector
-/// shape) and `Input`, a text field. Each but `Input` is styled by its `class`, in Tailwind's names, which are GPUI's, by the design tokens
-/// only: `<Box class="flex-row items-center gap-2 px-4 bg-muted rounded-full hover:bg-accent">`. Lengths are
-/// Tailwind's spacing scale (`p-4` is 1rem) or a token (`px-gutter`, `gap-gap`, `h-control`, `size-icon`,
-/// `max-w-readable`); colours are tokens (`bg-card`, `text-muted-foreground`, `border-input`, `bg-input/30`); text is
-/// a type style (`text-body`, `text-label`, `text-headline`, `text-title`, `text-figure`, `text-subheadline`,
-/// `text-footnote`, `text-caption-1`, `text-caption-2`) in `font-sans` or `font-mono`; radii, shadows and paces are
-/// tokens (`rounded-lg`, `rounded-icon`, `shadow-md`, `duration-quick ease-settle`). The vocabulary is
-/// `core/ui/src/strict/style.ts`: a class outside it is a type error, which names it. There's no element of the DOM's
-/// (`<div>`, `<span>`, `<p>`), no stylesheet, and no `document`, `window` or other Web API; `render(() => <App />)`
-/// from `ui` draws the page. Words are in a `Text`, or in a component that takes them (a `Row`'s `heading`). A press
-/// is `onClick={() => ...}`, what's typed `onInput={(event) => setText(event.currentTarget.value)}`, a key
-/// `onKeyDown={(event) => event.key === "Enter" && save()}`, a switch's `onChange={(event) =>
-/// set(event.currentTarget.checked)}`. `bun run lint:strict apps/<app>/client`, from the repo's root, checks a page.
-/// What a strict page may use is `core/ui/src/strict/types/ui.d.ts`; one that needs what isn't there adds it there,
-/// with only what every host can draw (`protocol.ts`), and core/ui's `bun run typecheck` then says whether the DOM's
-/// component takes it. A page written for version 1 has `style` objects instead of classes, which still draw.
+/// `%{page: "client/index.html", host: 1}`. It's written with the UI library alone: its components and the primitives,
+/// `Box`, `Scroll` (a box whose content scrolls), `Text`, `Image`, `Path` (a vector shape) and `Input`, laid out and
+/// coloured by their `style`, which is CSS's names with the design tokens' values: `{ flexDirection: "row", gap:
+/// "gap", padding: 12, backgroundColor: "muted", color: "muted-foreground", borderRadius: "lg", font: "label" }`.
+/// There's no element of the DOM's (`<div>`, `<span>`, `<p>`), no `class`, no stylesheet, and no `document`, `window`
+/// or other Web API; `render(() => <App />)` from `ui` draws the page. Words are in a `Text`, or in a component that
+/// takes them (a `Row`'s `heading`). A press is `onClick={() => ...}`, what's typed `onInput={(event) =>
+/// setText(event.currentTarget.value)}`, a key `onKeyDown={(event) => event.key === "Enter" && save()}`, a switch's
+/// `onChange={(event) => set(event.currentTarget.checked)}`. `bun run lint:strict apps/<app>/client`, from the repo's
+/// root, checks a page. What a strict page may use is `core/ui/src/strict/types/ui.d.ts`: one that needs what isn't
+/// there (a component, a prop, a style) adds it there, with only what every host can draw (`protocol.ts`), and
+/// core/ui's `bun run typecheck` then says whether the DOM's component takes it.
 export { call, changed, client, component, connection, covers, haptic, leave, link, open, pinShortcut, showRecoveryKey, sizeChanged, updateReady, upload, useRecoveryKey, visible } from "./bridge.ts"
 export { pace, seen, share } from "./shared.ts"
 export { words } from "./words.ts"

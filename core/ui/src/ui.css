@@ -2226,9 +2226,9 @@ html:has(.ui-sign-in) {
   white-space: nowrap;
 }
 
-/* The strict primitives (strict/primitives.tsx), under their classes (strict/theme.css, after this): a box is a flex
-   column, as React Native's View and every native host's is, with a border only where its class gives it a width; a
-   box that's pressed is a bare button. A page written for version 1 has a text's type style by its `data-font`. */
+/* The strict primitives (strict/primitives.tsx). A box is a flex column, as React Native's View and every native host's
+   is, with a border only where its style gives it a width; a box that's pressed is a bare button. A page written for
+   version 1 has a text's type style by its `data-font`. */
 .ui-strict-box {
   display: flex;
   flex-direction: column;

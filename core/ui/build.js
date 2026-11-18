@@ -4,10 +4,8 @@
 // which the UI library and every app share (app.js leaves them out of an app). SKILL.md is the UI library's skill, and skills/ are Solid's, as the version apps are
 // built with has them, Emil Kowalski's, pstack's, Modern Web Guidance and our design rules. build/ is how an app is built against it: app.js, with what it needs to run, which a server
 // installs and runs on an app's source.
-import { cpSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs"
-import { Features, transform } from "lightningcss"
-import { classes as vocabulary, named, variants } from "./src/strict/style.ts"
-import { utilities } from "./src/strict/tailwind.js"
+import { cpSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs"
+import { transform } from "lightningcss"
 import solid from "@solidjs/vite-plugin"
 import { build } from "vite"
 import { $ } from "bun"
@@ -58,18 +56,11 @@ await build({
   },
 })
 
-// The classes in the strict style vocabulary (src/strict/style.ts) the UI library names, drawn as Tailwind draws them
-// (src/strict/theme.css), after the rest of its look, unnested for the browsers apps run in. An app's build draws them
-// again with its own, in one stylesheet (app.js), from `classes.txt` beside it.
-const classes = named(readdirSync(here("src"), { recursive: true }).filter((path) => /\.tsx?$/.test(path)).flatMap((path) => text(`src/${path}`).split(/[\s"'`{}()<>,;=]+/))).sort()
-const strict = await utilities(classes)
-const css = text("src/tokens.css") + text("src/ui.css") + strict
-writeFileSync(here("dist/client/ui.css"), transform({ filename: "ui.css", code: Buffer.from(css), minify: true, include: Features.Nesting }).code)
+const css = text("src/tokens.css") + text("src/ui.css")
+writeFileSync(here("dist/client/ui.css"), transform({ filename: "ui.css", code: Buffer.from(css), minify: true }).code)
 // The typeface, beside the stylesheet that names it (tokens.css), and what puts a page in its Colour Mode before it
 // draws, which every page loads first (app.js).
 for (const file of ["Allo-Variable.woff2", "Allo-LICENSE.txt", "colour-mode.js"]) cpSync(here(`src/${file}`), here(`dist/client/${file}`))
-// The strict style vocabulary, for a native host: every class a strict page's `class` may say, and every variant.
-writeFileSync(here("dist/client/strict.json"), JSON.stringify({ classes: vocabulary, variants }))
 
 /// The UI library's skill: every `///` comment that starts with an example, from index.ts and then from each file it
 /// exports from, in its order.
@@ -96,8 +87,6 @@ await $`${here("node_modules/.bin/tsc")} -p . --noEmit false --declaration --emi
 cpSync(here("src/strict/types"), here("dist/types/strict/types"), { recursive: true })
 
 for (const file of ["app.js", "package.json", "bun.lock", "tsconfig.json"]) cpSync(here(file), here(`dist/build/${file}`))
-for (const file of ["src/strict/style.ts", "src/strict/tailwind.js", "src/strict/theme.css"]) cpSync(here(file), here(`dist/build/${file}`))
-writeFileSync(here("dist/build/classes.txt"), classes.join("\n"))
 
 // Solid's own skills, unchanged, and the cheatsheet its primer points to, beside it.
 cpSync(here("node_modules/solid-js/skills"), here("dist/skills"), { recursive: true })

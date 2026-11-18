@@ -1,35 +1,39 @@
-// How an app written in strict mode draws on a native host (GPUI on a computer, Lynx on Android): its JS runs in a
-// sandbox of its own, and Solid's universal renderer (@solidjs/universal) sends the host what changes in its tree as
-// ops, which the host draws. What the person does comes back as events. On the web, iOS and in MCP Apps the same app
-// draws to the DOM instead, and none of this is used.
+// How an app written in strict mode draws natively, on our renderer on a computer and Android: its JS runs in a
+// sandbox of its own (rquickjs), and Solid's universal renderer (@solidjs/universal) sends the host what changes in its
+// tree as ops, which the host draws. What the person does comes back as events. On the web, iOS and in MCP Apps the
+// same app draws to the DOM instead, and none of this is used.
 //
 // This file is the protocol. A host speaks one `VERSION`; an app's entrypoint says the version it needs (`host`), and
-// a host that speaks an older one, or none, opens it in a web view. A change a host of this version couldn't draw
-// (a new type, prop, class or op) is a new version. A host draws every version up to its own.
+// a host that speaks an older one, or none, opens it in a web view. A change a host of this version couldn't draw (a
+// new type, prop, op, token kind, style property or condition) is a new version. A host draws every version up to its
+// own.
 //
-// Version 2 is the strict contract: a host draws only the primitives (`Type`), styled by the strict style vocabulary
-// (`class`, style.ts), and sends back what the person does to them (`EventName`). Every component of the UI library
-// is written once on them, so a host draws no component of its own. Version 1's `style` is still drawn, for pages
+// Version 2 is the strict contract: a host draws only the primitives (`Type`), each styled by styles (`Styles`) whose
+// values are design tokens (`Tokens`), and sends back what the person does to them (`EventName`). Every component of
+// the UI library is written once on them, so a host draws no component of its own. Both tables come with the UI
+// library and with each app, over the air, and a host knows only the kinds of token, the conditions and the style
+// properties, never a token's or a style's name or value. Version 1's `style` objects are still drawn, for pages
 // written for 1, until they're written for 2.
 
-/** The protocol's version, which a host says it speaks and an entrypoint's `host` names. */
+/** The protocol's version, which a host says it speaks, an entrypoint's `host` names, and the tables say they need. */
 export const VERSION = 2
 
 /** A node, as the host knows it. `0` is the root, which the host makes: an app's window, or its frame. */
 export type Id = number
 
-/** What a node is: one of the primitives, or a run of text inside a `text` (Lynx's `raw-text`).
- * - `box`, GPUI's `div`: a flex column unless its class says otherwise, as React Native's View, which clips nothing.
- * - `scroll`: a box whose content scrolls, down unless its class says `overflow-x-auto`, as GPUI's `div` with
- *   `overflow_y_scroll`, with no scrollbar beside it, as on a phone; one the device draws over it as it moves.
+/** What a node is: one of the primitives, or a run of text inside a `text` (`raw-text`).
+ * - `box`: a flex column unless its style says otherwise, as React Native's View, laid out as Taffy lays out flex and
+ *   grid; it clips nothing unless its style says `overflow: "hidden"`.
+ * - `scroll`: a box whose content scrolls along its `flexDirection`: down in a column, sideways in a row, with no
+ *   scrollbar beside it, as on a phone; one the device draws over it as it moves.
  * - `text`: words. One in a `text` runs on in its line, and one in a box is a block, as React Native's Text. A text
- *   takes its parent's font, type style and colour where it has none of its own, as CSS does; the root's are
- *   `font-sans`, `text-body` and `text-foreground`.
- * - `image`: a picture (`src`), as GPUI's `img`, scaled to fit its box, keeping its shape.
- * - `path`: a vector shape (`d`, in its `viewBox`), as SVG's `<path>` and GPUI's `svg`: filled with the text's
- *   colour unless its class says otherwise (`fill-none stroke-muted-foreground stroke-2`), its `viewBox` stretched to
- *   its box, its stroke as wide however it's stretched. An icon, a chart's line or area.
- * - `input`: a text field, as an `<input>`, or a `<textarea>` with `multiline`. Its look is its class, as a box's.
+ *   takes its parent's `font`, `fontWeight` and `color` where it has none of its own, as CSS does; the root's are its
+ *   page's root style's (`Styles.root`).
+ * - `image`: a picture (`src`), scaled to fit its box, keeping its shape.
+ * - `path`: a vector shape (`d`, in its `viewBox`), as SVG's `<path>`: filled with its `fill`, the text's colour
+ *   unless its style says otherwise, and stroked with its `stroke`; its `viewBox` is stretched to its box, its stroke
+ *   as wide however it's stretched. An icon, a chart's line or area.
+ * - `input`: a text field, one line, or several with `multiline`, whose text is its editing state (`Editing`).
  * A `raw-text` outside a `text` is drawn as if in one. */
 export type Type = "box" | "scroll" | "text" | "image" | "path" | "input" | "raw-text"
 
@@ -57,8 +61,10 @@ export interface Event {
   op: "event"
   id: Id
   name: EventName
-  /** An `input`'s text, with `input`. */
-  value?: string
+  /** An `input`'s editing state, with `input`: what's typed, selected and composed now. */
+  editing?: Editing
+  /** What an `input`'s action key did, with `action`. */
+  action?: Action
   /** The key, with `keydown`, as the DOM's `KeyboardEvent.key` names it (`Enter`, `Escape`, `ArrowDown`, `a`), and
    * which modifiers were held. */
   key?: string
@@ -93,11 +99,30 @@ export interface Sandbox {
 
 /** What a node can listen for, as its `on…` prop: `click` is `onClick`, `pointerenter` `onPointerEnter`, as the DOM
  * names them. `click` is a press, by a pointer, a finger, or Enter or Space where the keyboard is; `pointerenter` and
- * `pointerleave` are a mouse or a trackpad's pointer coming over it and going (GPUI's `on_hover`), never a finger;
- * `keydown` a key pressed where the keyboard is, in it or in what's in it; `scroll` a `scroll` scrolling. A host offers
- * them as accessibility actions too: `click` is AccessKit's `Click`, `input` its `SetValue`, `focus` and `blur` its
- * `Focus` and `Blur`, `scroll` its `ScrollIntoView` and `ScrollDown`. */
-export type EventName = "click" | "input" | "focus" | "blur" | "keydown" | "pointerenter" | "pointerleave" | "scroll"
+ * `pointerleave` are a mouse or a trackpad's pointer coming over it and going, never a finger; `keydown` a key pressed
+ * where the keyboard is, in it or in what's in it; `scroll` a `scroll` scrolling. An `input` says `input` with its
+ * editing state whenever it changes (what's typed, a selection, an input method's composing), and `action` when its
+ * action key is pressed (a keyboard's Enter, or a phone's Done, Go, Next, Search or Send). A host offers them as
+ * accessibility actions too: `click` is AccessKit's `Click`, `input` its `SetValue`, `focus` and `blur` its `Focus`
+ * and `Blur`, `scroll` its `ScrollIntoView` and `ScrollDown`. */
+export type EventName = "click" | "input" | "action" | "focus" | "blur" | "keydown" | "pointerenter" | "pointerleave" | "scroll"
+
+/** An input's editing state, as Flutter's `TextEditingValue`: its text, what's selected, and what an input method is
+ * still composing. Every platform's keyboard bridge and the DOM say it in this one shape. Offsets are into `text`, in
+ * UTF-16 code units, as JS counts them. */
+export interface Editing {
+  text: string
+  /** What's selected, from where it started (`base`) to where it ends (`extent`): a caret where the two are the same.
+   * `extent` before `base` is a selection made backwards. */
+  selection: { base: number; extent: number }
+  /** What an input method is composing and hasn't committed (a word being written in Japanese, a dictated phrase),
+   * from `start` to `end`, or `null`. */
+  composing: { start: number; end: number } | null
+}
+
+/** What an input's action key does, as Flutter's `TextInputAction`, which a phone's keyboard names on it: `newline`
+ * (a multiline input's Enter), `done`, `go`, `next`, `previous`, `search`, `send`. */
+export type Action = "newline" | "done" | "go" | "next" | "previous" | "search" | "send"
 
 /** Every node's props, as `set` sends them, named as a strict app's JSX names them, which are the DOM's. One semantic
  * tree, which a screen reader and an agent both read: a node's role, its name (`aria-label`, or what a `text` says),
@@ -130,11 +155,9 @@ export interface Props {
   "aria-haspopup"?: Bool | "menu" | "listbox" | "dialog"
   /** Left out of the semantic tree: it's only how it looks. */
   "aria-hidden"?: Bool
-  /** How it's laid out and looks, in the strict style vocabulary (style.ts): `"flex-row items-center gap-2 px-4
-   * bg-muted rounded-full"`, classes split by spaces, each with any variants (`hover:bg-accent`). */
-  class?: string
-  /** Version 1's: how it's laid out and looks, as the strict style subset. A host draws it for a page written for 1. */
-  style?: Style
+  /** How it's laid out and looks: its styles (`Styles`) by id, the last winning where two say the same property. A
+   * page written for 1 sends one `Version1Style` instead. */
+  style?: StyleId[] | Version1Style
   /** `image`: a `data:` address, or a file of the app's own by its path. */
   src?: string
   /** `image`: what it shows, its accessible name. Empty for one that's only how it looks. */
@@ -146,26 +169,31 @@ export interface Props {
   /** What the keyboard reaches by Tab, as the DOM's: `0` for something it reaches that it otherwise wouldn't, `-1`
    * for something focused only by a press. A press, an input and what has `onClick` are reached already. */
   tabindex?: 0 | -1
-  /** `input`: its text. */
+  /** `raw-text`: its words. */
   value?: string
-  /** `input`: what kind of text it takes, as an `<input type>`. */
+  /** `input`: its editing state, as its app last set it. What the person does to it comes back as `input` events
+   * ahead of this, which the host keeps until the app sets it again. */
+  editing?: Editing
+  /** `input`: what its action key does. One line's is `done` unless it says otherwise, several lines' `newline`. */
+  action?: Action
+  /** `input`: what kind of text it takes, as an `<input type>`: which keyboard a phone shows, and `password` hides it. */
   type?: "text" | "search" | "email" | "url" | "tel" | "number" | "password"
   /** `input`: more than one line, as a `<textarea>`. */
   multiline?: boolean
   /** `input`: the grey words in it while it's empty. */
   placeholder?: string
-  /** `input`: what a phone's keyboard capitalises, and whether it checks spelling and fills it in, as the DOM's. */
-  autocapitalize?: "off" | "none" | "on" | "sentences" | "words" | "characters"
+  /** `input`: what a phone's keyboard capitalises, whether it checks spelling, and what it may fill in (the DOM's
+   * `autocomplete` tokens: `email`, `current-password`, `one-time-code`). */
+  autocapitalize?: "none" | "sentences" | "words" | "characters"
   spellcheck?: boolean
   autocomplete?: string
-  /** `input`: what a phone's keyboard's Enter says it does, as the DOM's `enterkeyhint`. */
-  enterkeyhint?: "enter" | "done" | "go" | "next" | "previous" | "search" | "send"
   /** `input`: has the keyboard as it's drawn. */
   autofocus?: boolean
   disabled?: boolean
   required?: boolean
   onClick?: true
   onInput?: true
+  onAction?: true
   onFocus?: true
   onBlur?: true
   onKeyDown?: true
@@ -185,8 +213,8 @@ export type Role =
   | "listbox" | "option" | "combobox" | "form" | "tooltip"
 
 // Version 1's strict style subset, which a page written for 1 has as its `style`: CSS's own property names and values,
-// as React Native and Lynx take them, limited to what every host draws, with colours, radii, sizes and type by the design tokens (core/ui/src/tokens.css), never a value
-// of their own. Lengths are CSS pixels.
+// as React Native takes them, limited to what every host draws, with colours, radii, sizes and type by the design
+// tokens' names, never a value of their own. Lengths are CSS pixels.
 
 /** A colour, by its token: `muted-foreground` is `var(--muted-foreground)`. */
 export type Colour =
@@ -207,7 +235,7 @@ export type Size = number | `${number}%` | "auto" | "control" | "icon" | "readab
 /** A radius, by its token, or `full` for a pill or a circle. */
 export type Radius = 0 | "sm" | "md" | "lg" | "xl" | "full"
 
-export interface Style {
+export interface Version1Style {
   display?: "flex" | "grid" | "none"
   flexDirection?: "row" | "column" | "row-reverse" | "column-reverse"
   flexWrap?: "nowrap" | "wrap"
@@ -257,4 +285,167 @@ export interface Style {
   fontVariantNumeric?: "normal" | "tabular-nums"
   /** At most so many lines, the last cut with "…". */
   lineClamp?: number
+}
+
+// The tables. The UI library's build makes both from its own TypeScript (core/ui/src/tokens.ts, and each component's
+// styles), as it makes the web's CSS from them; each app's build makes its styles' the same way. A host fetches them
+// as it fetches a page's modules: the tokens and the UI library's styles at `/ui/client/tokens.json` and
+// `/ui/client/styles.json`, an app's styles at `styles.json` beside its page's `index.html`. Each says the protocol
+// `v`ersion it needs; a host that speaks an older one opens the page in a web view, as for an entrypoint's `host`.
+
+/** A token's id, as its table names it. A host never knows one by name: a style says which it uses. */
+export type TokenId = string
+
+/** What a token's value may depend on, which a host knows of its device and window as they change, in the order they
+ * win: where two that hold give a value, the later's is it.
+ * - `dark`: the window is dark, as its person's Colour Mode, or the device's where they chose none, says.
+ * - `touch`: what points at it is a finger, not a mouse or a trackpad (CSS's `pointer: coarse`).
+ * - `phone`: an iPhone's or Android phone's own text size, which sets `rem` to the size its person chose.
+ * - `reducedMotion`: its person asked for less motion. */
+export type Condition = "dark" | "touch" | "phone" | "reducedMotion"
+export const conditions: Condition[] = ["dark", "touch", "phone", "reducedMotion"]
+
+/** A value, or a value by condition: `default`, and what it is where a condition holds. */
+export type Varies<T> = T | ({ default: T } & { [C in Condition]?: T })
+
+/** A colour in sRGB, each channel and alpha from 0 to 1. */
+export type Rgba = [r: number, g: number, b: number, a: number]
+
+/** A length: CSS pixels, or rems, which are the device's text size (16px on a computer; on a phone, `phone`'s). */
+export type Length = { px: number } | { rem: number }
+
+/** The design tokens, by id. A host knows each `kind` and reads its value; a kind it doesn't know is a `v` it
+ * doesn't speak. */
+export interface Tokens {
+  v: number
+  tokens: Record<TokenId, Token>
+}
+
+export type Token =
+  /** A colour, as it is light, and dark (`dark`). */
+  | { kind: "colour"; value: Varies<Rgba> }
+  /** A length: a space, a size, a border's width. */
+  | { kind: "length"; value: Varies<Length> }
+  /** A corner's radius; a pill's or a circle's is half its height, `{ px: 9999 }`. */
+  | { kind: "radius"; value: Varies<Length> }
+  /** Shadows, drawn under what has it, the first nearest. */
+  | { kind: "shadow"; value: Varies<{ x: Length; y: Length; blur: Length; spread: Length; colour: Rgba }[]> }
+  /** Font families, the first a device has. */
+  | { kind: "font"; value: string[] }
+  /** A font weight, 1 to 1000, lighter in `dark` where light text on dark looks heavier. */
+  | { kind: "weight"; value: Varies<number> }
+  /** A type style (DESIGN.md: text is one of a few): its size, line height (a multiple of its size), weight,
+   * tracking (in ems) and whether its figures line up (tabular). */
+  | { kind: "type"; value: { font: TokenId; size: Varies<Length>; lineHeight: number; weight: TokenId; tracking: number; tabular: boolean } }
+  /** How a change moves: how long it takes, in milliseconds, and its easing, a cubic Bézier's two points. */
+  | { kind: "motion"; value: { duration: Varies<number>; easing: [x1: number, y1: number, x2: number, y2: number] } }
+
+/** A style's id. The same style is the same id in every table, so a host may keep them all in one. */
+export type StyleId = string
+
+/** The styles of the UI library or an app, by id, and the root's: what the root of its page is styled by (its
+ * background, its text's colour and type style), in the UI library's table. */
+export interface Styles {
+  v: number
+  styles: Record<StyleId, Style>
+  root?: StyleId
+}
+
+/** A node's state, which a style's value may depend on, as it may on a condition: `hover`, a mouse's pointer over it
+ * (never a finger); `pressed`, a pointer or a finger down on it, or Enter or Space held where the keyboard is;
+ * `focused`, where the keyboard is, as CSS's `:focus-visible`; `entering`, what it starts from as it's added, to
+ * transition from (CSS's `@starting-style`). A later one wins, as conditions do. */
+export type State = "hover" | "pressed" | "focused" | "entering"
+
+/** A style: properties, as React Native names them, each a value or a value by state (`{ default, hover }`). Every
+ * shorthand is written out (`padding` is its four sides), so the last style to say a property is all it is. */
+export type Style = { [P in keyof Properties]?: Properties[P] | ({ default?: Properties[P] } & { [S in State]?: Properties[P] }) }
+
+/** A token's value, or its negative (`{ token, negative: true }`, a margin pulling outward). */
+export type Ref = { token: TokenId; negative?: true }
+
+/** A length where one may be a part of the room or none: a token, a percentage of the parent's, or `auto`. */
+export type Dimension = Ref | `${number}%` | "auto" | 0
+
+/** Every property a style may have, laid out as Taffy lays out flex and grid. `start` and `end` are the line's: left
+ * and right where text runs left to right. */
+export interface Properties {
+  display: "flex" | "grid" | "none"
+  flexDirection: "row" | "column" | "row-reverse" | "column-reverse"
+  flexWrap: "nowrap" | "wrap"
+  flexGrow: number
+  flexShrink: number
+  flexBasis: Dimension
+  alignItems: "flex-start" | "center" | "flex-end" | "stretch" | "baseline"
+  alignSelf: "auto" | "flex-start" | "center" | "flex-end" | "stretch" | "baseline"
+  alignContent: "flex-start" | "center" | "flex-end" | "stretch" | "space-between" | "space-around"
+  justifyContent: "flex-start" | "center" | "flex-end" | "space-between" | "space-around" | "space-evenly"
+  /** Equal columns (`{ repeat: 3 }`), or as many as fit, each at least `fill` wide, sharing what's left. */
+  gridTemplateColumns: { repeat: number } | { fill: Ref }
+  gridColumn: { span: number }
+  rowGap: Ref | 0
+  columnGap: Ref | 0
+  paddingTop: Ref | 0
+  paddingBottom: Ref | 0
+  paddingStart: Ref | 0
+  paddingEnd: Ref | 0
+  marginTop: Dimension
+  marginBottom: Dimension
+  marginStart: Dimension
+  marginEnd: Dimension
+  width: Dimension
+  height: Dimension
+  minWidth: Dimension
+  minHeight: Dimension
+  maxWidth: Dimension | "none"
+  maxHeight: Dimension | "none"
+  aspectRatio: number
+  position: "relative" | "absolute"
+  top: Dimension
+  bottom: Dimension
+  start: Dimension
+  end: Dimension
+  zIndex: number
+  overflow: "visible" | "hidden"
+  /** Moved from where it's laid out, along and down, and grown, without moving what's around it. */
+  translateX: Dimension
+  translateY: Dimension
+  scale: number
+  opacity: number
+  backgroundColor: Ref
+  color: Ref
+  borderColor: Ref
+  borderTopWidth: Ref | 0
+  borderBottomWidth: Ref | 0
+  borderStartWidth: Ref | 0
+  borderEndWidth: Ref | 0
+  borderStyle: "solid" | "dashed"
+  borderTopStartRadius: Ref | 0
+  borderTopEndRadius: Ref | 0
+  borderBottomStartRadius: Ref | 0
+  borderBottomEndRadius: Ref | 0
+  boxShadow: Ref | "none"
+  /** A type style token: size, line height, weight, tracking and figures together. */
+  font: Ref
+  fontFamily: Ref
+  fontWeight: Ref
+  textAlign: "start" | "center" | "end"
+  /** At most so many lines, the last cut with "…". */
+  lineClamp: number
+  whiteSpace: "normal" | "nowrap" | "pre-wrap"
+  textDecorationLine: "none" | "underline"
+  /** A path's paint: a colour token, the text's colour, or none. */
+  fill: Ref | "currentColor" | "none"
+  stroke: Ref | "currentColor" | "none"
+  strokeWidth: number
+  cursor: "default" | "pointer" | "text" | "grab" | "grabbing" | "not-allowed"
+  pointerEvents: "auto" | "none"
+  userSelect: "auto" | "none" | "text"
+  /** What changes of it move rather than jump, and how (a motion token). */
+  transitionProperty: (keyof Properties)[]
+  transition: Ref
+  /** A motion that repeats while it's drawn, at a motion token's pace: `spin`, a turn; `pulse`, fading to half and
+   * back. */
+  animationName: "spin" | "pulse" | "none"
+  animation: Ref
 }

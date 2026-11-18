@@ -5,17 +5,14 @@
 // the props every host can draw, and the check says whether the DOM's takes them.
 import type { Element } from "solid-js"
 import type { ListCollection } from "@zag-js/collection"
-import type { Props, Style } from "../protocol.ts"
-import type { Class, Classes } from "../style.ts"
+import type { Props, Version1Style as Style } from "../protocol.ts"
 
-export type { Class, Classes, Element, Style }
+export type { Element, Style }
 
 /** What a node says it is, and its states, as ARIA has them. */
 export type Semantics = Pick<Props, Extract<keyof Props, "role" | `aria-${string}`>>
 
-// The primitives. Each takes its `class` in the strict style vocabulary (../style.ts), written out, which the
-// typecheck reads class by class: `class="flex-row gap-2 hover:bg-accent"`, or one of a few such as a condition
-// chooses (`class={open() ? "… bg-accent" : "…"}`). `style` is version 1's, for a page written for 1.
+// The primitives.
 
 /** What a key pressed is told, as the DOM's `KeyboardEvent`. */
 export type Keyed = {
@@ -31,8 +28,7 @@ export type Scrolled = {
   currentTarget: { scrollTop: number; scrollLeft: number }
 }
 
-export type BoxProps<C extends string = ""> = Semantics & {
-  class?: Classes<C>
+export type BoxProps = Semantics & {
   style?: Style
   tabindex?: 0 | -1
   onClick?: () => void
@@ -43,34 +39,32 @@ export type BoxProps<C extends string = ""> = Semantics & {
   onPointerLeave?: () => void
   children?: Element
 }
-export declare function Box<C extends string = "">(props: BoxProps<C>): Element
+export declare function Box(props: BoxProps): Element
 
-export type ScrollProps<C extends string = ""> = BoxProps<C> & {
+export type ScrollProps = BoxProps & {
   onScroll?: (event: Scrolled) => void
 }
-export declare function Scroll<C extends string = "">(props: ScrollProps<C>): Element
+export declare function Scroll(props: ScrollProps): Element
 
-export type TextProps<C extends string = ""> = Semantics & {
-  class?: Classes<C>
+export type TextProps = Semantics & {
   style?: Style
   children?: Element
 }
-export declare function Text<C extends string = "">(props: TextProps<C>): Element
+export declare function Text(props: TextProps): Element
 
-export type ImageProps<C extends string = ""> = Pick<Semantics, "aria-hidden"> & {
+export type ImageProps = Pick<Semantics, "aria-hidden"> & {
   src: string
   alt: string
-  class?: Classes<C>
   style?: Style
 }
-export declare function Image<C extends string = "">(props: ImageProps<C>): Element
+export declare function Image(props: ImageProps): Element
 
-export type PathProps<C extends string = ""> = Pick<Semantics, "role" | "aria-label" | "aria-hidden"> & {
+export type PathProps = Pick<Semantics, "role" | "aria-label" | "aria-hidden"> & {
   d: string
   viewBox: string
-  class?: Classes<C>
+  style?: Style
 }
-export declare function Path<C extends string = "">(props: PathProps<C>): Element
+export declare function Path(props: PathProps): Element
 
 /** What an `Input`'s or a `Search`'s `onInput` is told: what's in it now. */
 export type Typed = {
@@ -88,7 +82,6 @@ export type InputProps = Pick<Semantics, "aria-label" | "aria-description" | "ar
   autocapitalize?: Props["autocapitalize"]
   spellcheck?: boolean
   autocomplete?: string
-  enterkeyhint?: Props["enterkeyhint"]
   onInput?: (event: Typed) => void
   onFocus?: () => void
   onBlur?: () => void
