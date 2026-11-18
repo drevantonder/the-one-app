@@ -353,7 +353,7 @@ mod computer {
     }
 
     pub fn hide(_: bool) {}
-    pub fn resize(_: Option<f64>) {}
+    pub fn resize(_: Option<f64>, _: Option<f64>) {}
     pub fn native(_: Option<strict::platform::WindowId>) {}
     pub fn reload_native() {}
 }
