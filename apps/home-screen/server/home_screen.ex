@@ -28,20 +28,9 @@ defmodule HomeScreen do
   alias OneCore.Apps.Icons
 
   @impl true
-  def entrypoints do
-    [
-      %{page: "client/index.html", category: "launcher", runtime_version: 4},
-      %{
-        name: "Colour Mode",
-        page: "client/colour-mode.html",
-        icon: "client/colour-mode.svg",
-        subject: "user",
-        runtime_version: 4
-      }
-    ]
-  end
+  def entrypoints, do: [%{page: "client/index.html", category: "launcher", runtime_version: 4}]
 
-  # Colour Mode is Settings' Appearance (`settings.sections`), drawn by this app's component.
+  # Colour Mode is in Settings' Appearance (`settings.sections`), drawn by this app's component.
   @impl true
   def hooks, do: ["settings.sections"]
 
