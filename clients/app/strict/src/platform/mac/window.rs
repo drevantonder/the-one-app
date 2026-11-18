@@ -12,7 +12,7 @@
 // Copyright 2022 - 2025 Zed Industries, Inc. Licensed under the Apache License, Version 2.0
 // (clients/app/strict/LICENSE-APACHE); this file is changed from the original.
 
-use std::cell::Cell;
+use std::cell::{Cell, RefCell};
 use std::ffi::c_void;
 use std::ptr::NonNull;
 use std::sync::{Arc, Mutex};
@@ -76,6 +76,10 @@ pub struct NativeWindow {
     window: MainThreadBound<Retained<NSWindow>>,
     /// A panel's: see-through where it isn't drawn, over its glass.
     panel: bool,
+    /// A panel's glass where its page asked for the system's material (`set_glass`), each under its part of the page,
+    /// and how round the panel's corners are where its glass is under the whole of it.
+    glass: MainThreadBound<RefCell<Vec<Retained<NSView>>>>,
+    corner: f64,
     /// A window holds its delegate weakly.
     _delegate: MainThreadBound<Retained<Delegate>>,
     /// Its view, for Blade's surface, which lives as long as the window: an address, as AppKit's objects are the
@@ -187,6 +191,8 @@ impl Display {
             Ok(NativeWindow {
                 view: Retained::as_ptr(&view) as usize,
                 panel: options.panel.is_some(),
+                glass: MainThreadBound::new(RefCell::default(), main),
+                corner: options.panel.map_or(0.0, f64::from),
                 window: MainThreadBound::new(window, main),
                 _delegate: MainThreadBound::new(delegate, main),
                 shared,
@@ -233,13 +239,53 @@ impl Display {
         window.window.get_on_main(|window| window.orderOut(None));
     }
 
-    /// Makes a window `size`, its top where it is.
+    /// Makes a window `size`, its top and its middle where they are.
     pub fn resize(&self, window: &NativeWindow, size: Size<Pixels>) {
         window.window.get_on_main(|window| {
             let frame = window.frame();
-            let height = f64::from(size.height.0);
-            let to = NSRect::new(NSPoint::new(frame.origin.x, frame.origin.y + frame.size.height - height), NSSize::new(size.width.0.into(), height));
+            let (width, height) = (f64::from(size.width.0), f64::from(size.height.0));
+            let x = frame.origin.x + (frame.size.width - width) / 2.0;
+            let to = NSRect::new(NSPoint::new(x, frame.origin.y + frame.size.height - height), NSSize::new(width, height));
             window.setFrame_display(to, true);
+        });
+    }
+
+    /// Puts the system's glass under a panel's page where it asked for it (`regions`), as Liquid Glass shapes each of a
+    /// Mac's floating controls, and nowhere else: with none asked for, it's under the whole panel, as before a page
+    /// asked. A part that moves has its glass moved with it, frame by frame.
+    pub fn set_glass(&self, window: &NativeWindow, regions: &[crate::platform::Glass]) {
+        if !window.panel {
+            return;
+        }
+        let (views, corner) = (&window.glass, window.corner);
+        window.window.get_on_main(|window| unsafe {
+            let main = window.mtm();
+            let Some(content) = window.contentView() else { return };
+            let subviews = content.subviews();
+            // The whole panel's glass is first under the page, which is last.
+            let (Some(whole), Some(page)) = (subviews.firstObject(), subviews.lastObject()) else { return };
+            whole.setHidden(!regions.is_empty());
+            window.setHasShadow(regions.is_empty());
+            if let Some(layer) = page.layer() {
+                layer.setCornerRadius(if regions.is_empty() { corner } else { 0.0 });
+            }
+            let mut views = views.get(main).borrow_mut();
+            while views.len() > regions.len() {
+                views.pop().expect("there's one").removeFromSuperview();
+            }
+            while views.len() < regions.len() {
+                let glass = glass(NSRect::ZERO, 0.0);
+                // NSWindowBelow: under the page.
+                let () = msg_send![&*content, addSubview: &*glass, positioned: -1isize, relativeTo: &*page];
+                views.push(glass);
+            }
+            let height = content.frame().size.height;
+            for (view, region) in views.iter().zip(regions) {
+                let (x, y, w, h) = (f64::from(region.bounds.origin.x), f64::from(region.bounds.origin.y), f64::from(region.bounds.size.width), f64::from(region.bounds.size.height));
+                view.setFrame(NSRect::new(NSPoint::new(x, height - y - h), NSSize::new(w, h)));
+                view.setAlphaValue(f64::from(region.opacity));
+                round(view, f64::from(region.radius));
+            }
         });
     }
 
@@ -714,35 +760,56 @@ unsafe fn panel(window: &NSWindow, view: &View, rect: NSRect, corner: f64) {
         let clear: *mut AnyObject = msg_send![objc2::class!(NSColor), clearColor];
         let () = msg_send![window, setBackgroundColor: clear];
         window.setHasShadow(true);
+        // A view that holds the panel's glass and the page over it, and the glass under parts of it its page asks for
+        // instead (`set_glass`), all following the window's size.
+        let sizable = objc2_app_kit::NSAutoresizingMaskOptions::ViewWidthSizable | objc2_app_kit::NSAutoresizingMaskOptions::ViewHeightSizable;
+        let main = window.mtm();
+        let content = NSView::initWithFrame(main.alloc(), rect);
+        window.setContentView(Some(&content));
+        let whole = glass(rect, corner);
+        whole.setAutoresizingMask(sizable);
+        content.addSubview(&whole);
+        view.setAutoresizingMask(sizable);
+        content.addSubview(view);
+        if let Some(layer) = view.layer() {
+            layer.setCornerRadius(corner);
+            layer.setMasksToBounds(true);
+        }
+    }
+}
+
+/// The system's glass, `rect`, rounded `corner` points: Liquid Glass (NSGlassEffectView) on macOS 26, and before it the
+/// HUD window's material, blended behind the window and always active.
+unsafe fn glass(rect: NSRect, corner: f64) -> Retained<NSView> {
+    unsafe {
         let glass: *mut AnyObject = match objc2::runtime::AnyClass::get(c"NSGlassEffectView") {
             Some(class) => {
                 let glass: *mut AnyObject = msg_send![class, alloc];
-                let glass: *mut AnyObject = msg_send![glass, initWithFrame: rect];
-                let () = msg_send![glass, setCornerRadius: corner];
-                glass
+                msg_send![glass, initWithFrame: rect]
             }
             None => {
                 let glass: *mut AnyObject = msg_send![objc2::class!(NSVisualEffectView), alloc];
                 let glass: *mut AnyObject = msg_send![glass, initWithFrame: rect];
-                // HUD window material, blended behind the window, always active.
                 let () = msg_send![glass, setMaterial: 13isize];
                 let () = msg_send![glass, setBlendingMode: 0isize];
                 let () = msg_send![glass, setState: 1isize];
                 let () = msg_send![glass, setWantsLayer: true];
-                let layer: *mut AnyObject = msg_send![glass, layer];
-                let () = msg_send![layer, setCornerRadius: corner];
-                let () = msg_send![layer, setMasksToBounds: true];
                 glass
             }
         };
-        // Width and height follow the window's.
-        let () = msg_send![glass, setAutoresizingMask: 18usize];
-        window.setContentView(Some(&*(glass as *mut NSView)));
-        view.setAutoresizingMask(objc2_app_kit::NSAutoresizingMaskOptions::ViewWidthSizable | objc2_app_kit::NSAutoresizingMaskOptions::ViewHeightSizable);
-        let nothing: *mut AnyObject = std::ptr::null_mut();
-        // NSWindowAbove: over the glass.
-        let () = msg_send![glass, addSubview: view, positioned: 1isize, relativeTo: nothing];
-        if let Some(layer) = view.layer() {
+        let glass = Retained::from_raw(glass as *mut NSView).expect("AppKit made it");
+        round(&glass, corner);
+        glass
+    }
+}
+
+/// Rounds the system's glass `corner` points.
+unsafe fn round(glass: &NSView, corner: f64) {
+    unsafe {
+        let responds: bool = msg_send![glass, respondsToSelector: objc2::sel!(setCornerRadius:)];
+        if responds {
+            let () = msg_send![glass, setCornerRadius: corner];
+        } else if let Some(layer) = glass.layer() {
             layer.setCornerRadius(corner);
             layer.setMasksToBounds(true);
         }

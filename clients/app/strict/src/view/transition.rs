@@ -1,5 +1,6 @@
 //! What moves rather than jumps as a node's style changes, as CSS's transitions do: each property its style names
-//! (`transitionProperty`) goes from what's drawn now to its new value over its motion token's time, with its easing.
+//! (`transitionProperty`) goes from what's drawn now to its new value over its motion token's time, with its easing,
+//! or by its spring, which a change on the way turns from where it is at the speed it has, as SwiftUI's and Motion's do.
 //! A node that's just been added starts from its `entering` state's values, as from CSS's `@starting-style`. Where the
 //! person asked for less motion, what would slide, grow or turn goes straight to where it's going, and a node coming
 //! in fades in instead, as Apple's reduced motion has it.
@@ -7,6 +8,7 @@
 use std::collections::{HashMap, HashSet};
 
 use crate::geometry::{Hsla, Rgba};
+use crate::tokens::Spring;
 use crate::style::{Computed, Offset};
 use crate::tree::Id;
 
@@ -117,20 +119,90 @@ fn set(computed: &mut Computed, property: &str, value: Value) {
 struct Moving {
     from: Value,
     to: Value,
-    /// When it set off, on the screen's clock, and how long it takes, in milliseconds.
-    start: f64,
-    duration: f32,
-    easing: [f32; 4],
+    curve: Curve,
+}
+
+/// How a property moves: eased from when it set off, on the screen's clock, over `duration` milliseconds; or by a
+/// spring from when it set off at `velocity` (in its value's unit a second), which a change on the way keeps.
+enum Curve {
+    Eased { start: f64, duration: f32, easing: [f32; 4] },
+    Sprung { start: f64, velocity: f64, spring: Spring },
+}
+
+/// A value's number, where it's one: what a spring moves in its own unit.
+fn number(value: Value) -> Option<f32> {
+    match value {
+        Value::Number(number) | Value::Px(number) | Value::Percent(number) => Some(number),
+        Value::Colour(_) => None,
+    }
+}
+
+/// Whether two values are numbers in the same unit, which a spring moves between, keeping its speed.
+fn alike(a: Value, b: Value) -> bool {
+    matches!((a, b), (Value::Number(_), Value::Number(_)) | (Value::Px(_), Value::Px(_)) | (Value::Percent(_), Value::Percent(_)))
+}
+
+/// Of a value this close to where it's going, and moving no faster than ten times this a second, a spring has arrived:
+/// a thousandth of a scale or an opacity, a tenth of a pixel.
+fn near(value: Value) -> f64 {
+    match value {
+        Value::Px(_) => 0.1,
+        Value::Percent(_) => 0.01,
+        _ => 0.001,
+    }
+}
+
+/// `value`'s unit, at `number`.
+fn with(value: Value, number: f32) -> Value {
+    match value {
+        Value::Number(_) => Value::Number(number),
+        Value::Px(_) => Value::Px(number),
+        Value::Percent(_) => Value::Percent(number),
+        colour => colour,
+    }
 }
 
 impl Moving {
+    /// Where it is at `now`, and how fast it's moving, in its unit a second, where it's a number a spring moves.
+    fn state(&self, now: f64) -> (Value, f64) {
+        match self.curve {
+            Curve::Eased { start, duration, easing } => {
+                let part = ((now - start) / f64::from(duration.max(1.0))).clamp(0.0, 1.0) as f32;
+                (self.from.mix(self.to, ease(easing, part)).unwrap_or(self.to), 0.0)
+            }
+            Curve::Sprung { start, velocity, spring } => {
+                let seconds = ((now - start) / 1000.0).max(0.0);
+                match (number(self.from), number(self.to)) {
+                    (Some(from), Some(to)) if alike(self.from, self.to) => {
+                        let (off, speed) = spring.at(f64::from(from - to), velocity, seconds);
+                        (with(self.to, (f64::from(to) + off) as f32), speed)
+                    }
+                    // Colours, or a number between units, by how far the spring has gone, from rest.
+                    _ => {
+                        let (off, _) = spring.at(1.0, 0.0, seconds);
+                        (self.from.mix(self.to, (1.0 - off as f32).clamp(0.0, 1.0)).unwrap_or(self.to), 0.0)
+                    }
+                }
+            }
+        }
+    }
+
     fn at(&self, now: f64) -> Value {
-        let part = ((now - self.start) / f64::from(self.duration.max(1.0))).clamp(0.0, 1.0) as f32;
-        self.from.mix(self.to, ease(self.easing, part)).unwrap_or(self.to)
+        self.state(now).0
     }
 
     fn done(&self, now: f64) -> bool {
-        now - self.start >= f64::from(self.duration)
+        match self.curve {
+            Curve::Eased { start, duration, .. } => now - start >= f64::from(duration),
+            Curve::Sprung { .. } => {
+                let (at, speed) = self.state(now);
+                let close = near(self.to);
+                match (number(at), number(self.to)) {
+                    (Some(at), Some(to)) => f64::from((at - to).abs()) < close && speed.abs() < close * 10.0,
+                    _ => at == self.to,
+                }
+            }
+        }
     }
 }
 
@@ -181,15 +253,16 @@ impl Transitions {
                 continue;
             };
             let was = self.values.insert(key, to);
-            // What it's drawn as now: where a move has it, else where it was going, else where it entered from.
-            let from = match self.moving.get(&key) {
+            // What it's drawn as now, and how fast it's going: where a move has it, else where it was going, else where
+            // it entered from, at rest.
+            let (from, velocity) = match self.moving.get(&key) {
                 Some(moving) if moving.to == to => {
                     set(computed, property, moving.at(now));
                     continue;
                 }
-                Some(moving) => moving.at(now),
+                Some(moving) => moving.state(since),
                 None => match was.or_else(|| get(entering?, property)) {
-                    Some(from) => from,
+                    Some(from) => (from, 0.0),
                     None => continue,
                 },
             };
@@ -197,14 +270,20 @@ impl Transitions {
                 self.moving.remove(&key);
                 continue;
             }
-            let moving = Moving { from, to, start: since, duration: transition.duration, easing: transition.easing };
+            let curve = match transition.spring {
+                // A spring turned keeps its speed, where it's a number in the same unit.
+                Some(spring) => Curve::Sprung { start: since, velocity: if alike(from, to) { velocity } else { 0.0 }, spring },
+                None => Curve::Eased { start: since, duration: transition.duration, easing: transition.easing },
+            };
+            let moving = Moving { from, to, curve };
             set(computed, property, moving.at(now));
             self.moving.insert(key, moving);
         }
         // Coming in, with less motion: what would have slid or grown in fades in instead.
         let moved_in = entering.is_some_and(|entering| PROPERTIES.iter().any(|(property, moves)| *moves && get(entering, property) != get(computed, property)));
         if reduced && moved_in && !self.moving.contains_key(&(id, "opacity")) {
-            let moving = Moving { from: Value::Number(0.0), to: Value::Number(computed.look.opacity), start: since, duration: transition.duration, easing: transition.easing };
+            let curve = Curve::Eased { start: since, duration: transition.duration, easing: transition.easing };
+            let moving = Moving { from: Value::Number(0.0), to: Value::Number(computed.look.opacity), curve };
             set(computed, "opacity", moving.at(now));
             self.moving.insert((id, "opacity"), moving);
         }

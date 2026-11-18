@@ -229,10 +229,18 @@ impl Display {
     pub fn resize(&self, window: &NativeWindow, size: Size<Pixels>) {
         let scale = window.scale();
         let (width, height) = ((size.width.0 * scale).round() as i32, (size.height.0 * scale).round() as i32);
+        // Its top and its middle stay where they are.
+        let mut at = RECT::default();
         unsafe {
-            let _ = SetWindowPos(window.hwnd, None, 0, 0, width, height, SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE);
+            let _ = GetWindowRect(window.hwnd, &mut at);
+            let x = at.left + (at.right - at.left - width) / 2;
+            let _ = SetWindowPos(window.hwnd, None, x, at.top, width, height, SWP_NOZORDER | SWP_NOACTIVATE);
         }
     }
+
+    /// Windows has no Acrylic of its own for part of a window: its panel is Acrylic all over, and what asks for the
+    /// system's material is blurred as any material.
+    pub fn set_glass(&self, _: &NativeWindow, _: &[crate::platform::Glass]) {}
 
     /// Puts a window opened hidden on the screen.
     pub fn show(&self, window: &NativeWindow) {

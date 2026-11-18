@@ -45,8 +45,14 @@ const weight = (weight: number): Token<"weight"> => ({ kind: "weight", id: "", v
 /** A colour as another at a part of its opacity: text at 60%, an accent's 15% tint. */
 const alpha = (of: Token<"colour">, percent: number): Token<"colour"> => ({ kind: "colour", id: "", value: { of, alpha: percent / 100 } })
 /** What shows through what has it: what's behind, blurred so far and saturated so much. */
-const material = (blur: number, saturate: number): Token<"material"> => ({ kind: "material", id: "", value: { blur: px(blur), saturate } })
+/** What shows through what has it: what's behind, blurred so far and saturated so much; `system`, the system's own
+ * material where the host has one, as a launcher panel's glass is under the window (a Mac's), and else blurred as any. */
+const material = (blur: number, saturate: number, system?: boolean): Token<"material"> => ({ kind: "material", id: "", value: { blur: px(blur), saturate, ...(system ? { system } : {}) } })
 const motion = (duration: Varies<number>, easing: Varies<[number, number, number, number]>): Token<"motion"> => ({ kind: "motion", id: "", value: { duration, easing } })
+/** A spring, as SwiftUI's `.spring(duration:bounce:)` and Motion's are given: about how long it takes to get there, in
+ * milliseconds, and how far past it goes, from 0 (not at all) to 1. A change on its way is turned to the new value
+ * from where it is, at the speed it has. `easing` is for a host that draws only Béziers. */
+const spring = (duration: number, bounce: number): Token<"motion"> => ({ kind: "motion", id: "", value: { duration, bounce, easing: [0.22, 1, 0.36, 1] } })
 
 // Raycast's values as round two measured them beside it (raycast-mockups-v2): a near-black blue-grey or a near-white
 // window, one text colour, and Apple's accents but red, orange and blue, which are the mockup's. Colours CSS names
@@ -158,6 +164,10 @@ const motions = {
   quick: motion(120, out),
   settle: motion(200, out),
   travel: motion({ default: 300, reducedMotion: 200 }, { default: [0.32, 0.72, 0, 1], reducedMotion: out }),
+  /** Springs, by SwiftUI's names. Snappy: what changes size or place and can be turned back midway, a little past where
+   * it goes. Smooth: what fades or settles beside it, with no bounce. */
+  snappy: spring(460, 0.15),
+  smooth: spring(340, 0),
 }
 
 // By role.
@@ -329,7 +339,7 @@ export const tokens = {
     wrongEdge: lightDark([{ x: 0, y: 0, blur: 0, spread: 1, colour: red[0], inset: true }], [{ x: 0, y: 0, blur: 0, spread: 1, colour: red[1], inset: true }]),
     wrongFocus: lightDark([{ x: 0, y: 0, blur: 0, spread: 3, colour: "oklch(0.614 0.204 25.56 / 30%)" }], [{ x: 0, y: 0, blur: 0, spread: 3, colour: "oklch(0.7 0.191 23.4 / 30%)" }]),
   }, (key) => `shadow-${key}`),
-  material: named({ glass: material(20, 1.6), thin: material(18, 1.2) }, (key) => `material-${key}`),
+  material: named({ glass: material(20, 1.6), thin: material(18, 1.2), window: material(30, 1.8, true) }, (key) => `material-${key}`),
   font: named(fonts, (key) => `font-${key}`),
   weight: named(weightRoles, (key) => `weight-${key}`),
   type: named({

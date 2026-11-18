@@ -353,11 +353,14 @@ impl Display {
     /// Makes a window `size`, its top left where it is.
     pub fn resize(&self, window: &NativeWindow, size: Size<Pixels>) {
         let (width, height) = ((size.width.0 * self.scale).round() as u16, (size.height.0 * self.scale).round() as u16);
-        if let Ok(geometry) = self.xcb.get_geometry(window.x_window).map(|cookie| cookie.reply()) {
-            let (x, y) = geometry.map(|at| (i32::from(at.x), i32::from(at.y))).unwrap_or_default();
-            let _ = self.hint(window.x_window, x, y, width, height);
+        // Its middle stays where it is as it gets wider or narrower.
+        let mut changes = xproto::ConfigureWindowAux::new().width(u32::from(width)).height(u32::from(height));
+        if let Ok(Ok(at)) = self.xcb.get_geometry(window.x_window).map(|cookie| cookie.reply()) {
+            let x = i32::from(at.x) + (i32::from(at.width) - i32::from(width)) / 2;
+            let _ = self.hint(window.x_window, x, i32::from(at.y), width, height);
+            changes = changes.x(x);
         }
-        let _ = self.xcb.configure_window(window.x_window, &xproto::ConfigureWindowAux::new().width(u32::from(width)).height(u32::from(height)));
+        let _ = self.xcb.configure_window(window.x_window, &changes);
         let _ = self.xcb.flush();
     }
 
@@ -523,6 +526,10 @@ impl Display {
     /// The input with window `window`'s keyboard takes typing, its caret at `caret` (in the window's logical pixels),
     /// or none does: the input method's keys and where it shows what it composes, as GPUI's `update_ime_position`.
     /// An input that stops taking typing drops what was being composed in it, as GPUI's `reset_ime`.
+    /// X11 has no material of the system's to put under a page: its panel is filled, and what asks for the system's
+    /// is blurred as any material.
+    pub fn set_glass(&self, _: &NativeWindow, _: &[crate::platform::Glass]) {}
+
     pub fn set_ime(&self, window: &NativeWindow, caret: Option<Bounds<f32>>) {
         let spot = caret.map(|caret| ((caret.origin.x * self.scale) as i16, ((caret.origin.y + caret.size.height) * self.scale) as i16));
         let was = match spot {

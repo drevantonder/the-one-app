@@ -445,7 +445,7 @@ export type Token =
   | { kind: "shadow"; value: Varies<{ x: Length; y: Length; blur: Length; spread: Length; colour: Rgba; inset?: true }[]> }
   /** What shows through what has it (`backdropFilter`): what's behind, blurred so far and saturated so much (1 is as
    * it is), as Apple's materials and Liquid Glass. */
-  | { kind: "material"; value: Varies<{ blur: Length; saturate: number }> }
+  | { kind: "material"; value: Varies<{ blur: Length; saturate: number; system?: boolean }> }
   /** Font families, the first a device has. */
   | { kind: "font"; value: string[] }
   /** A font weight, 1 to 1000, lighter in `dark` where light text on dark looks heavier. */
@@ -453,8 +453,9 @@ export type Token =
   /** A type style (DESIGN.md: text is one of a few): its size, line height (a multiple of its size), weight,
    * tracking (in ems) and whether its figures line up (tabular). */
   | { kind: "type"; value: { font: TokenId; size: Varies<Length>; lineHeight: number; weight: TokenId; tracking: number; tabular: boolean } }
-  /** How a change moves: how long it takes, in milliseconds, and its easing, a cubic Bézier's two points. */
-  | { kind: "motion"; value: { duration: Varies<number>; easing: Varies<[x1: number, y1: number, x2: number, y2: number]> } }
+  /** How a change moves: how long it takes, in milliseconds, and its easing, a cubic Bézier's two points; or a spring,
+   * by its `bounce` (SwiftUI's `.spring(duration:bounce:)`), which a host that draws only Béziers draws by `easing`. */
+  | { kind: "motion"; value: { duration: Varies<number>; easing: Varies<[x1: number, y1: number, x2: number, y2: number]>; bounce?: number } }
 
 /** What a style can't know ahead: where something is as the page runs, a finger moving it or a menu placed under
  * what opened it, in CSS pixels (`rotate` in degrees, `scale` and `opacity` as numbers), as React Native's inline

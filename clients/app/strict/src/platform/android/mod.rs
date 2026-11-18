@@ -205,6 +205,9 @@ impl Display {
     pub fn put_away(&self, _: &NativeWindow, _: bool) {}
     pub fn resize(&self, _: &NativeWindow, _: Size<Pixels>) {}
 
+    /// An Android view has no panel.
+    pub fn set_glass(&self, _: &NativeWindow, _: &[crate::platform::Glass]) {}
+
     /// Android's keyboard is told where the field is as it's focused (`keyboard`), not where the caret is each frame.
     pub fn set_ime(&self, _: &NativeWindow, _: Option<crate::geometry::Bounds<f32>>) {}
 

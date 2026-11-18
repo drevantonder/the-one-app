@@ -395,9 +395,9 @@ fn respond(
         if launcher { computer::hide(true) } else { computer::summon() }
         return None;
     }
-    // The launcher is as tall as its page says it is, as Raycast's and Spotlight's panels grow and shrink.
+    // The launcher is as tall as its page says it is, as Raycast's and Spotlight's panels grow and shrink, and as wide.
     if method == "ui/notifications/size-changed" && launcher {
-        computer::resize(message["params"]["height"].as_f64());
+        computer::resize(message["params"]["width"].as_f64(), message["params"]["height"].as_f64());
         return None;
     }
     // Any other notification needs no answer, and none is heard here yet.
@@ -455,7 +455,9 @@ fn respond(
                 Some(Ok(json!({"theme": theme})))
             } else if changes.is_empty() {
                 // The launcher's page lays itself out as a computer's launcher (`client().launcher` in home.tsx).
-                Some(Ok(json!({"theme": state.chosen, "launcher": state.launcher, "mac": cfg!(target_os = "macos")})))
+                // `transparent`: the launcher's panel is see-through where its page draws nothing, so what its page draws
+                // floats over the desktop, on the system's glass where it asks for it (a Mac's).
+                Some(Ok(json!({"theme": state.chosen, "launcher": state.launcher, "mac": cfg!(target_os = "macos"), "transparent": state.launcher && cfg!(target_os = "macos")})))
             } else {
                 Some(Err(json!({"code": -32000, "message": format!("A computer's native window can't change {} yet.", changes.iter().map(|change| change.as_str()).collect::<Vec<_>>().join(", "))})))
             }

@@ -16,6 +16,19 @@
   color-scheme: light dark;
 }
 
+/* Where a strict style moves something along and down (`translateX`, `translateY`, styles.ts): each its own, never
+   its parent's, so a part moved only down isn't also moved along as what it's in is. */
+@property --ui-x {
+  syntax: "<length-percentage>";
+  inherits: false;
+  initial-value: 0px;
+}
+@property --ui-y {
+  syntax: "<length-percentage>";
+  inherits: false;
+  initial-value: 0px;
+}
+
 /* How every component of the UI library looks, from the tokens (tokens.css). The UI library's own parts are `ui-` classes. */
 
 /* The page itself, before any script has run: the theme, so nothing flashes white. */

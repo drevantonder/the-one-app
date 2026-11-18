@@ -450,7 +450,7 @@ pub(crate) async fn command(label: &str, command: &str, args: Value) -> Result<V
         "hide" => Ok(done(computer::hide(true))),
         // As tall as the launcher's content, or its tallest (`fit` in client.js).
         #[cfg(desktop)]
-        "resize" if launcher => Ok(done(computer::resize(args["height"].as_f64()))),
+        "resize" if launcher => Ok(done(computer::resize(None, args["height"].as_f64()))),
         "theme" if launcher => Ok(done(theme(serde_json::from_value(args["theme"].clone()).unwrap_or_default()))),
         "theme" => Ok(done(chose(serde_json::from_value(args["theme"].clone()).unwrap_or_default()))),
         "open_url" => {

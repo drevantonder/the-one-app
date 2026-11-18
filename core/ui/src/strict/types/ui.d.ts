@@ -387,6 +387,9 @@ export type Client = {
   pinsShortcuts?: boolean
   settings?: boolean
   launcher?: boolean
+  /** Whether the launcher's panel is see-through where its page draws nothing, so what it draws floats over the
+   * desktop, on the system's glass where it asks for it (`tokens.material.window`). */
+  transparent?: boolean
   /** Whether it's a Mac (or an iPhone or iPad), whose keys are ⌘ where a PC's are Ctrl. */
   mac?: boolean
 }

@@ -62,6 +62,16 @@ pub struct WindowOptions {
     pub panel: Option<f32>,
 }
 
+/// Where a page asked for the system's own material, as a panel's glass (a material token that's `system`): in the
+/// window's points, with its corners' radius and how opaque it's drawn. A host with that material puts it there,
+/// under the page, and none under the rest; one without has drawn it as any other material.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Glass {
+    pub bounds: crate::geometry::Bounds<f32>,
+    pub radius: f32,
+    pub opacity: f32,
+}
+
 /// Where to send the windows' thread a job.
 #[derive(Clone)]
 pub struct Strict(Sender);
@@ -152,6 +162,8 @@ struct Window {
     scene: crate::render::scene::Scene,
     dirty: bool,
     drawn: bool,
+    /// Where the system's material was put under it last.
+    glass: Vec<Glass>,
     on_event: Box<dyn FnMut(Event)>,
     tag: serde_json::Value,
 }
@@ -189,7 +201,7 @@ impl Windows {
         let panel = options.panel.is_some();
         self.windows.insert(
             id,
-            Window { native, opened, shown: panel, panel, visible: false, summoned: None, screen: Ok(screen), renderer, scene: Default::default(), dirty: true, drawn: false, on_event: Box::new(on_event), tag: options.tag },
+            Window { native, opened, shown: panel, panel, visible: false, summoned: None, screen: Ok(screen), renderer, scene: Default::default(), dirty: true, drawn: false, glass: Vec::new(), on_event: Box::new(on_event), tag: options.tag },
         );
         Ok(id)
     }
@@ -204,7 +216,7 @@ impl Windows {
         let panel = options.panel.is_some();
         self.windows.insert(
             id,
-            Window { native, opened, shown: panel, panel, visible: false, summoned: None, screen: Err(why.to_owned()), renderer, scene: Default::default(), dirty: true, drawn: false, on_event: Box::new(on_event), tag: options.tag },
+            Window { native, opened, shown: panel, panel, visible: false, summoned: None, screen: Err(why.to_owned()), renderer, scene: Default::default(), dirty: true, drawn: false, glass: Vec::new(), on_event: Box::new(on_event), tag: options.tag },
         );
         Ok(id)
     }
@@ -332,12 +344,14 @@ impl Windows {
         self.windows.get(&id).is_some_and(|window| window.visible)
     }
 
-    /// Makes window `id` `height` points tall, its top where it is, as a launcher grows and shrinks with what it shows.
-    pub fn resize(&mut self, id: WindowId, height: f32) {
+    /// Makes window `id` `height` points tall, and `width` wide where it's said, its top and its middle where they are,
+    /// as a launcher grows and shrinks with what it shows.
+    pub fn resize(&mut self, id: WindowId, width: Option<f32>, height: f32) {
         if let Some(window) = self.windows.get_mut(&id) {
             let size = window.native.size();
-            if (size.height.0 - height).abs() >= 0.5 {
-                self.display.resize(&window.native, Size { width: size.width, height: Pixels(height) });
+            let width = width.unwrap_or(size.width.0);
+            if (size.height.0 - height).abs() >= 0.5 || (size.width.0 - width).abs() >= 0.5 {
+                self.display.resize(&window.native, Size { width: Pixels(width), height: Pixels(height) });
                 window.dirty = true;
             }
         }
@@ -418,6 +432,10 @@ impl Windows {
                 Ok(screen) => {
                     screen.paint(size, scale, &mut self.text, &self.atlas, &mut window.scene);
                     window.dirty = screen.take_again();
+                    if screen.glass != window.glass {
+                        window.glass = screen.glass.clone();
+                        self.display.set_glass(&window.native, &window.glass);
+                    }
                     self.display.set_ime(&window.native, screen.caret_rect());
                 }
                 Err(why) => crate::view::paint_message(why, appearance(), size, scale, &mut self.text, &self.atlas, &mut window.scene),

@@ -31,6 +31,9 @@ use crate::{hosts, notifications};
 /// side by side with their six rows, near a phone's size (`measure` in the Home Screen's layout.ts), and the room its
 /// footer's pills float in. It's as tall as what it shows, which its page says (`resize`).
 pub(crate) const SIZE: LogicalSize<f64> = LogicalSize::new(750.0, 730.0);
+/// The most a natively drawn launcher's page may ask its panel to be, in points: on a Mac a see-through panel that
+/// holds what floats over the desktop, its search and its card, with room for their shadows.
+const MOST: LogicalSize<f64> = LogicalSize::new(1200.0, 900.0);
 /// How round the launcher's corners are, in points, as Raycast's are, and the edge its page draws inside them.
 pub(crate) const CORNER: f64 = 18.0;
 
@@ -47,8 +50,8 @@ pub(crate) enum Told {
     /// Puts it away, and with `true` gives the keyboard back to the app that had it (Escape, or its page done).
     Hide(bool),
     Theme(Option<crate::Theme>),
-    /// Makes it as tall as its page's content, or its tallest (`resize`).
-    Resize(Option<f64>),
+    /// Makes it as tall as its page's content, or its tallest, and as wide where it says (`resize`).
+    Resize(Option<f64>, Option<f64>),
     /// Loads its page again, as the device's session starts again.
     Reload,
     /// Opens a `one:` link.
@@ -86,8 +89,8 @@ pub(crate) fn hide(give_back: bool) {
 }
 
 /// Makes the launcher as tall as `height`, in points, or its tallest, as its page asks.
-pub(crate) fn resize(height: Option<f64>) {
-    tell(Told::Resize(height))
+pub(crate) fn resize(width: Option<f64>, height: Option<f64>) {
+    tell(Told::Resize(width, height))
 }
 
 /// The launcher is drawn natively in window `id`, or with none, it's the web launcher, as its page turns out to need.
@@ -392,12 +395,14 @@ fn launcher(home: std::path::PathBuf, link: Option<String>, started: std::time::
                 crate::Theme::Dark => Theme::Dark,
             })),
             // Its top stays where it is, as Raycast's and Spotlight's grow and shrink downwards.
-            Event::UserEvent(Told::Resize(height)) => {
-                let height = height.unwrap_or(SIZE.height).clamp(1.0, SIZE.height);
+            Event::UserEvent(Told::Resize(width, height)) => {
                 if let Some(id) = native {
-                    on_strict(move |windows| windows.resize(id, height as f32));
+                    let width = width.map(|width| width.clamp(1.0, MOST.width) as f32);
+                    let height = height.unwrap_or(SIZE.height).clamp(1.0, MOST.height) as f32;
+                    on_strict(move |windows| windows.resize(id, width, height));
                     return;
                 }
+                let height = height.unwrap_or(SIZE.height).clamp(1.0, SIZE.height);
                 let size = LogicalSize::new(SIZE.width, height);
                 let at = window.outer_position();
                 #[cfg(target_os = "linux")]

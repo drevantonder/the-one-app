@@ -350,10 +350,11 @@ impl Table {
             .collect()
     }
 
-    /// A material: how far what's behind is blurred, in pixels, and how saturated it is.
-    pub fn material(&self, id: &str, conditions: Conditions) -> Option<(f32, f32)> {
+    /// A material: how far what's behind is blurred, in pixels, how saturated it is, and whether it's the system's own
+    /// where the host has one.
+    pub fn material(&self, id: &str, conditions: Conditions) -> Option<(f32, f32, bool)> {
         let value = self.value(id, "material", conditions)?;
-        Some((length_of(&value["blur"])?, value["saturate"].as_f64().unwrap_or(1.0) as f32))
+        Some((length_of(&value["blur"])?, value["saturate"].as_f64().unwrap_or(1.0) as f32, value["system"] == true))
     }
 
     pub fn weight(&self, id: &str, conditions: Conditions) -> Option<f32> {
@@ -372,12 +373,62 @@ impl Table {
         })
     }
 
-    /// A motion: how long it takes, in milliseconds, and its easing, a cubic Bézier's two points.
-    pub fn motion(&self, id: &str, conditions: Conditions) -> Option<(f32, [f32; 4])> {
+    /// A motion: how long it takes, in milliseconds, and its easing, a cubic Bézier's two points, or a spring's.
+    pub fn motion(&self, id: &str, conditions: Conditions) -> Option<Motion> {
         let value = self.value(id, "motion", conditions)?;
         let duration = varies(&value["duration"], conditions).as_f64()? as f32;
         let easing = varies(&value["easing"], conditions);
         let point = |at: usize| easing.get(at).and_then(serde_json::Value::as_f64).unwrap_or(0.0) as f32;
-        Some((duration, [point(0), point(1), point(2), point(3)]))
+        let spring = value["bounce"].as_f64().map(|bounce| Spring::new(duration, bounce as f32));
+        Some(Motion { duration, easing: [point(0), point(1), point(2), point(3)], spring })
+    }
+}
+
+/// How a change moves: over `duration` milliseconds by `easing`, a cubic Bézier's two points, or by `spring`.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Motion {
+    pub duration: f32,
+    pub easing: [f32; 4],
+    pub spring: Option<Spring>,
+}
+
+/// A spring with a mass of 1, as SwiftUI's `.spring(duration:bounce:)` gives one: how stiff it is and how damped.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Spring {
+    pub stiffness: f32,
+    pub damping: f32,
+}
+
+impl Spring {
+    /// SwiftUI's: `duration` in milliseconds, and `bounce` from 0, none, to 1 (below 0, more damped than none).
+    pub fn new(duration: f32, bounce: f32) -> Spring {
+        let response = (duration / 1000.0).max(0.01);
+        let fraction = if bounce >= 0.0 { 1.0 - bounce } else { 1.0 / (1.0 + bounce) };
+        Spring { stiffness: (2.0 * std::f32::consts::PI / response).powi(2), damping: 4.0 * std::f32::consts::PI * fraction / response }
+    }
+
+    /// Where something `from` past where it's going, moving at `velocity` (each a second), is `seconds` later, and how
+    /// fast it moves then: the damped spring's own solution, so it's the same at any frame rate.
+    pub fn at(&self, from: f64, velocity: f64, seconds: f64) -> (f64, f64) {
+        let (k, c, t) = (f64::from(self.stiffness), f64::from(self.damping), seconds);
+        let natural = k.sqrt();
+        let ratio = c / (2.0 * natural);
+        if (ratio - 1.0).abs() < 1e-4 {
+            let e = (-natural * t).exp();
+            let b = velocity + natural * from;
+            ((from + b * t) * e, (velocity - natural * b * t) * e)
+        } else if ratio < 1.0 {
+            let damped = natural * (1.0 - ratio * ratio).sqrt();
+            let (a, b) = (from, (velocity + ratio * natural * from) / damped);
+            let (e, (sin, cos)) = ((-ratio * natural * t).exp(), (damped * t).sin_cos());
+            (e * (a * cos + b * sin), e * ((b * damped - ratio * natural * a) * cos - (a * damped + ratio * natural * b) * sin))
+        } else {
+            let root = natural * (ratio * ratio - 1.0).sqrt();
+            let (r1, r2) = (-ratio * natural + root, -ratio * natural - root);
+            let a = (velocity - r2 * from) / (r1 - r2);
+            let b = from - a;
+            let (e1, e2) = ((r1 * t).exp(), (r2 * t).exp());
+            (a * e1 + b * e2, a * r1 * e1 + b * r2 * e2)
+        }
     }
 }

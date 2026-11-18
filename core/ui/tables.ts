@@ -61,6 +61,11 @@ function declared(token: Token, condition: "default" | Condition): [string, stri
     case "type":
       return condition === "default" && value.tracking ? [[`${token.id.replace(/^type-/, "")}-tracking`, `${value.tracking}em`]] : []
     case "motion": {
+      if (value.bounce !== undefined) {
+        if (condition !== "default") return []
+        const { settles, easing } = sprung(value.duration, value.bounce)
+        return [[token.id, `${settles}ms`], [token.id.replace(/^move-/, "ease-"), easing]]
+      }
       const duration = at(value.duration)
       const easing = at(value.easing) as number[] | undefined
       return [
@@ -70,6 +75,27 @@ function declared(token: Token, condition: "default" | Condition): [string, stri
     }
   }
   throw new Error(`No CSS for a ${token.kind}`)
+}
+
+/** A spring from 0 to 1, as SwiftUI's `.spring(duration:bounce:)` moves (its stiffness and damping, a mass of 1), as
+ * CSS draws it: how long it takes to settle, in milliseconds, and its path then as a `linear()` easing. CSS starts each
+ * change from rest, so one turned back midway loses the speed it had, which a native host keeps. */
+function sprung(duration: number, bounce: number) {
+  const response = duration / 1000
+  const stiffness = (2 * Math.PI / response) ** 2
+  const damping = (4 * Math.PI * (bounce >= 0 ? 1 - bounce : 1 / (1 + bounce))) / response
+  const path = [0]
+  let [x, v, t] = [0, 0, 0]
+  const step = 1 / 1000
+  while (t < 5 && (Math.abs(1 - x) > 0.001 || Math.abs(v) > 0.01)) {
+    v += (stiffness * (1 - x) - damping * v) * step
+    x += v * step
+    t += step
+    path.push(x)
+  }
+  const points = 40
+  const easing = Array.from({ length: points + 1 }, (_, at) => +(at === points ? 1 : path[Math.round((at / points) * (path.length - 1))]).toFixed(4))
+  return { settles: Math.round(t * 1000), easing: `linear(${easing.join(", ")})` }
 }
 
 const indent = (rules: string) => rules.replace(/^(?=.)/gm, "  ")

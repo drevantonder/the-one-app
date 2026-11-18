@@ -98,6 +98,8 @@ pub struct Screen {
     pub breadcrumb: Option<Breadcrumb>,
     /// Its window is a panel, whose background the host draws, under its page's.
     pub panel: Option<Panel>,
+    /// Where its page asked for the system's own material, as it was last drawn, which a panel's host puts under it.
+    pub glass: Vec<crate::platform::Glass>,
     /// What the window says over its page, and where its action was drawn and whether it's pressed.
     pub notice: Option<Notice>,
     action: Option<Bounds<f32>>,
@@ -196,6 +198,7 @@ impl Screen {
             reduced_motion: false,
             breadcrumb: None,
             panel: None,
+            glass: Vec::new(),
             notice: None,
             action: None,
             pressing_action: false,
@@ -533,6 +536,7 @@ impl Screen {
             window,
             modal: None,
             turn: TransformationMatrix::unit(),
+            glass: self.panel.filter(|panel| !panel.fill).map(|_| Vec::new()),
         };
         // The window, as a page's body: its root's background and text, scrolling what's taller than it.
         let version2 = self.tree.styled();
@@ -586,6 +590,7 @@ impl Screen {
         let hovering = |bounds: &Bounds<f32>| self.pointer.is_some_and(|at| bounds.contains(&at));
         let home = self.breadcrumb.as_ref().map(|crumb| painter.breadcrumb(crumb, self.insets.top, self.home.as_ref().is_some_and(hovering)));
         self.action = self.notice.as_ref().and_then(|notice| painter.notice(notice, self.insets.top, self.action.as_ref().is_some_and(hovering)));
+        self.glass = painter.glass.take().unwrap_or_default();
         let (placed, mut tab_order, rects, animating, modal, wanted) = (painter.placed, painter.tab_order, painter.rects, painter.animating, painter.modal, painter.wanted);
         // What it wanted to draw that's by an address is fetched by its window, once.
         for src in wanted {
@@ -1335,6 +1340,9 @@ struct Painter<'a> {
     modal: Option<Id>,
     /// How what's painted now is turned, in the window: the `rotate`s of what it's in.
     turn: TransformationMatrix,
+    /// Where the system's own material goes under the page, as a panel's glass on a Mac, if the host has one: what has
+    /// a material that's the system's is drawn on it rather than blurring what the page drew (`Glass`).
+    glass: Option<Vec<crate::platform::Glass>>,
 }
 
 /// Everything outside the tree that a frame shows: its size and scale, the conditions, each node's state, how far
@@ -1671,7 +1679,11 @@ impl Painter<'_> {
             for shadow in look.shadows.iter().rev().filter(|shadow| !shadow.inset) {
                 self.shadow(shadow, bounds, radii, transform.scale, mask, opacity);
             }
-            if let Some((blur, saturate)) = look.material {
+            if let (Some((_, _, true)), Some(glass)) = (look.material, self.glass.as_mut()) {
+                if opacity > 0.0 {
+                    glass.push(crate::platform::Glass { bounds: bounds.intersect(&mask), radius: radii.top_left, opacity });
+                }
+            } else if let Some((blur, saturate, _)) = look.material {
                 self.scene.insert_primitive(Backdrop {
                     order: 0,
                     pad: 0,

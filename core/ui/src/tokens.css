@@ -98,6 +98,7 @@
   --shadow-wrong-focus: 0px 0px 0px 3px oklch(0.614 0.204 25.56 / 30%);
   --material-glass: blur(20px) saturate(1.6);
   --material-thin: blur(18px) saturate(1.2);
+  --material-window: blur(30px) saturate(1.8);
   --font-sans: Allo, -apple-system, BlinkMacSystemFont, "Segoe UI Variable", "Segoe UI", system-ui, sans-serif;
   --font-mono: ui-monospace, "SF Mono", "Cascadia Mono", monospace;
   --body-weight: 400;
@@ -113,6 +114,10 @@
   --ease-settle: cubic-bezier(0.22, 1, 0.36, 1);
   --move-travel: 300ms;
   --ease-travel: cubic-bezier(0.32, 0.72, 0, 1);
+  --move-snappy: 671ms;
+  --ease-snappy: linear(0, 0.0252, 0.0857, 0.1621, 0.2537, 0.3485, 0.4413, 0.5236, 0.6037, 0.6752, 0.7377, 0.7914, 0.8342, 0.8724, 0.9037, 0.929, 0.9481, 0.9641, 0.9765, 0.9858, 0.9927, 0.9974, 1.0009, 1.0032, 1.0046, 1.0053, 1.0056, 1.0056, 1.0053, 1.0049, 1.0044, 1.0038, 1.0033, 1.0028, 1.0024, 1.0019, 1.0016, 1.0013, 1.001, 1.0008, 1);
+  --move-smooth: 539ms;
+  --ease-smooth: linear(0, 0.0268, 0.0939, 0.1747, 0.2692, 0.3569, 0.4465, 0.5231, 0.597, 0.6576, 0.7143, 0.7596, 0.8013, 0.834, 0.8637, 0.8868, 0.9076, 0.9236, 0.9379, 0.9488, 0.9585, 0.9659, 0.972, 0.9774, 0.9815, 0.9851, 0.9878, 0.9902, 0.992, 0.9936, 0.9948, 0.9958, 0.9966, 0.9973, 0.9978, 0.9982, 0.9985, 0.9988, 0.9991, 0.9992, 1);
   --move-spin: 1000ms;
   --ease-spin: cubic-bezier(0, 0, 1, 1);
   --move-hold: 500ms;

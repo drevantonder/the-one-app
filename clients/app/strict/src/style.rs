@@ -233,8 +233,9 @@ pub struct Look {
     pub dashed: bool,
     pub radii: Corners<Radius>,
     pub shadows: Vec<Shadow>,
-    /// What's behind it, blurred so far and saturated so much, under its background.
-    pub material: Option<(f32, f32)>,
+    /// What's behind it, blurred so far and saturated so much, under its background, and whether it's the system's own
+    /// material, where the host has one.
+    pub material: Option<(f32, f32, bool)>,
     pub opacity: f32,
     pub clips: bool,
     pub scrolls: bool,
@@ -469,12 +470,13 @@ pub struct Computed {
 }
 
 /// Which properties of a node move to a new value rather than jump, over how long, in milliseconds, with which easing
-/// (a cubic Bézier's two points), as CSS's `transition`.
+/// (a cubic Bézier's two points), as CSS's `transition`, or by a spring, which keeps its speed as it's turned.
 #[derive(Clone, Debug, PartialEq)]
 pub struct Transition {
     pub properties: Vec<String>,
     pub duration: f32,
     pub easing: [f32; 4],
+    pub spring: Option<crate::tokens::Spring>,
 }
 
 #[derive(Default)]
@@ -781,7 +783,7 @@ fn computed(style: &Map<String, Value>, conditions: Conditions) -> Computed {
         stroke_width: number("strokeWidth").unwrap_or(1.0),
         animation: match word("animationName") {
             Some(name @ ("spin" | "pulse")) => {
-                let duration = get("animation").and_then(token_of).and_then(|(token, _)| table().motion(token, conditions)).map_or(1000.0, |(duration, _)| duration);
+                let duration = get("animation").and_then(token_of).and_then(|(token, _)| table().motion(token, conditions)).map_or(1000.0, |motion| motion.duration);
                 Some((name.to_owned(), duration))
             }
             _ => None,
@@ -811,7 +813,7 @@ fn computed(style: &Map<String, Value>, conditions: Conditions) -> Computed {
     let properties: Vec<String> = get("transitionProperty").and_then(Value::as_array).into_iter().flatten().filter_map(Value::as_str).map(str::to_owned).collect();
     let motion = get("transition").and_then(token_of).and_then(|(token, _)| table().motion(token, conditions));
     let transition = match motion {
-        Some((duration, easing)) if !properties.is_empty() && duration > 0.0 => Some(Transition { properties, duration, easing }),
+        Some(motion) if !properties.is_empty() && motion.duration > 0.0 => Some(Transition { properties, duration: motion.duration, easing: motion.easing, spring: motion.spring }),
         _ => None,
     };
     Computed { layout, look, text, line_clamp: number("lineClamp").map(|lines| lines as usize), fixed, transition }
