@@ -14,17 +14,20 @@ that one question for it, and a new device when they also say the code it shows 
 
 - `invite` makes a link someone joins by: they open it and make a passkey, and are that user from then on. The
   network's owners invite, and whoever they made an editor of `network/own/sign-in`. The link works once, for a
-  week, and a new one for them ends it, so pass on the newest. Inviting someone who's already in gives them a way back when
-  they've lost every passkey.
+  week, and a new one for them ends it, so pass on the newest. Whoever joins by it is that user, so only the network's
+  owner invites someone who's already in, as a way back when they've lost every passkey, and never an owner: an owner
+  adds a passkey on a device they're signed in on.
 - `devices` lists your devices, the assistants you let in and the browsers you're signed in on, and your
   passkeys. An app says whether it's `connected`, and if not when it was `last_seen`. `remove_device` takes one out: it's nobody's from the next thing it asks. `remove_passkey` removes a
-  passkey, but never your last. `add_passkey` makes a link your person makes another passkey by, in a browser, within a quarter of an hour:
-  open it for them, and pass it to nobody.
+  passkey, but never your last. `add_passkey` lets your person make another passkey: whoever opens its link makes
+  one of theirs, so the link goes only to their own screen, and you're given none. They're notified, and Sign-In &
+  Security makes it there.
 - A passkey with WebAuthn's PRF unlocks its person's key on a new device too (the encryption app's skill says how).
-  `devices` says which do (`unlocks`). A device that holds the key encrypts it to each that can with
-  `encrypt_for_passkeys`; the app does that itself as Sign-In & Security or the Vault's Security opens. A passkey
-  that hasn't said since it was made does once it's used: `unlock_with_passkey` with no device makes the link for
-  that, and with a device that's asking for the key, lets that device in.
+  `devices` says which do (`unlocks`). Whoever uses one has the key, so a device that holds it encrypts it to a
+  passkey only once its person allows that passkey there, by name and when it was added, in Sign-In & Security:
+  `encrypt_for_passkeys` with that `passkey`. Ask them first; never for a passkey they don't know they added. A
+  passkey that hasn't said since it was made does once it's used: `unlock_with_passkey` with no device makes the
+  link for that, and with a device that's asking for the key, lets that device in.
 - `people` says who people are: the name each goes by, chosen as they joined, and their email where signing in
   has one. `name` changes the name your person goes by, when they ask. `everyone` lists everyone in the network
   and everyone invited who hasn't joined yet. `remove_person` takes someone out, or ends an invitation: their

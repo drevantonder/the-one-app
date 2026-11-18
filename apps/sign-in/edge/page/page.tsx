@@ -241,17 +241,20 @@ async function unlockAsked(device: string) {
   const { asking } = await tool<{ asking: { device: string; name: string }[] }>("encryption_key", {})
   const name = asking.find((asked) => asked.device === device)?.name
   if (!name) throw new Error("That device isn't asking for your key. Choose Unlock with Passkey on it again.")
-  if (!(await unlock(device, name))) throw new Error("This passkey can't unlock your key yet. Open Sign-In & Security on a device that holds it, then try again.")
+  if (!(await unlock(device, name))) throw new Error("This passkey can't unlock your key yet. Allow it in Sign-In & Security on a device that holds your key, then try again.")
   setStage({ stage: "unlocked", name })
 }
+
+/// What a passkey made here is called, by where it was made, as its person's Sign-In & Security lists it, and asks
+/// whether it may unlock their key.
+const passkeyName = ["Passkey", Bowser.parse(navigator.userAgent).os.name].filter(Boolean).join(" on ")
 
 /// The passkey question, and what answering it lets in. Someone joining makes their passkey, and is signed in
 /// with it. Whoever was signed in here before no longer is.
 async function signIn() {
   if (flow.flow === "addPasskey") {
     await auth.signOut()
-    const name = ["Passkey", Bowser.parse(navigator.userAgent).os.name].filter(Boolean).join(" on ")
-    const result = await auth.passkey.addPasskey({ context: flow.another, name, createSession: true, extensions: PRF, returnWebAuthnResponse: true })
+    const result = await auth.passkey.addPasskey({ context: flow.another, name: passkeyName, createSession: true, extensions: PRF, returnWebAuthnResponse: true })
     const { error } = result
     // Better Auth's own words for a device that holds a passkey of theirs already, which is all the browser says.
     if ((error as { code?: string } | null)?.code === "ERROR_AUTHENTICATOR_PREVIOUSLY_REGISTERED") throw new Error("This device has a passkey of yours already. Open the link on another one.")
@@ -262,7 +265,7 @@ async function signIn() {
   if (flow.flow === "join") {
     if (!called().trim()) throw new Error("Say your name first.")
     await auth.signOut()
-    const result = await auth.passkey.addPasskey({ context: flow.invite, createSession: true, extensions: PRF, returnWebAuthnResponse: true })
+    const result = await auth.passkey.addPasskey({ context: flow.invite, name: passkeyName, createSession: true, extensions: PRF, returnWebAuthnResponse: true })
     if (result.error) throw new Error(result.error.message ?? "That passkey didn't work. Try again.")
     await made(result as Answered, false)
     await ask("/update-user", { called: called().trim() })
@@ -385,7 +388,7 @@ function shows(): Shows {
     case "unlock":
       switch (now.stage) {
         case "unlocked":
-          return { heading: "Unlock with Passkey", done: now.name ? `Unlocked: ${now.name} holds your key now. Go back to it.` : "Your passkey can unlock your key. Go back to the app." }
+          return { heading: "Unlock with Passkey", done: now.name ? `Unlocked: ${now.name} holds your key now. Go back to it.` : "Your passkey is set up. Allow it in Sign-In & Security on a device that holds your key." }
         case "failed":
           return { heading: "Unlock with Passkey", problem: failed, button: "Try Again", onSignIn: signIn }
         default:

@@ -617,10 +617,14 @@ async function tell(user: User, request: string) {
 
 /**
  * A link that `name` joins the network by, as that user, made for them if they're new. It's their only one: an
- * earlier link to join as them no longer works.
+ * earlier link to join as them no longer works. Whoever joins by it is them, so for someone who has joined already
+ * it's made only when the server says it may be (`again`): the network's owner asked, for someone who isn't an
+ * owner. An owner who lost a passkey adds one on a device they're signed in on, as Apple and Google have it.
  */
-async function invite(adapter: Adapter, internalAdapter: InternalAdapter, origin: string, name: string, user: User | undefined) {
+async function invite(adapter: Adapter, internalAdapter: InternalAdapter, origin: string, name: string, user: User | undefined, again: boolean) {
   if (!/^[a-z][a-z0-9-]*$/.test(name)) return { error: "A user's name is lowercase letters, digits and hyphens, starting with a letter." };
+  if (user && !again && (await joined(adapter, user)))
+    return { error: `${name} has joined already. Only the network's owner invites someone again, and never an owner, who adds a passkey on a device they're signed in on.` };
   const invitee = user ?? (await made(internalAdapter, origin, name));
   return { link: `${origin}/sign-in/#invite=${await invitation(adapter, invitee, INVITED_FOR)}` };
 }
@@ -665,6 +669,8 @@ export interface Ask {
   keys?: unknown;
   /** Whether the network is being built, where a server acts as whoever a client says (`mix network --development`). */
   building?: boolean;
+  /** With `invite`: whether someone who has joined may be invited again, as the server says (`invite`). */
+  again?: boolean;
 }
 
 export async function asked(auth: Auth, origin: string, { ask, who: name, building, ...about }: Ask) {
@@ -675,9 +681,9 @@ export async function asked(auth: Auth, origin: string, { ask, who: name, buildi
   // they're first asked about, so they approve a device's code as anyone who joined does.
   if (!user && building && ask !== "invite" && /^[a-z][a-z0-9-]*$/.test(named)) user = await made(internalAdapter, origin, named);
 
-  if (ask === "invite") return invite(adapter, internalAdapter, origin, named, user);
+  if (ask === "invite") return invite(adapter, internalAdapter, origin, named, user, about.again === true);
   // The network's first owner is invited only until they've joined, so a link to join as them isn't made after.
-  if (ask === "owner") return user && (await joined(adapter, user)) ? { joined: true } : invite(adapter, internalAdapter, origin, named, user);
+  if (ask === "owner") return user && (await joined(adapter, user)) ? { joined: true } : invite(adapter, internalAdapter, origin, named, user, false);
   // Everyone who has joined, and everyone invited who hasn't yet, with the name each goes by.
   if (ask === "everyone") {
     type Row = { id: string; userId: string; expiresAt?: Date; name?: string; called?: string | null; email?: string; emailVerified?: boolean };
@@ -802,18 +808,16 @@ export async function asked(auth: Auth, origin: string, { ask, who: name, buildi
   }
   // A link that this person makes another passkey by, in a browser, within a quarter of an hour.
   if (ask === "passkey") return { link: `${origin}/sign-in/#passkey=${await invitation(adapter, user, 15 * 60 * 1000)}` };
-  // A device that holds this person's key encrypted it to their passkeys whose PRF output derives `prf_key`, which
-  // is kept only for a passkey whose key it still is.
+  // A device that holds this person's key encrypted it to the passkey they confirmed there, whose PRF output derives
+  // `prf_key`. It's kept only for that passkey, and only while that's its key: whatever else a device sends, as one
+  // on a build that encrypted it to every passkey did, is never kept.
   if (ask === "encrypt_for_passkeys") {
     const keys = (about.keys ?? {}) as Record<string, { prf_key?: unknown; key?: unknown }>;
-    let kept = 0;
-    for (const passkey of await adapter.findMany<Passkey>({ model: "passkey", where: mine })) {
-      const given = keys[passkey.credentialID];
-      if (!given || !passkey.prfKey || given.prf_key !== passkey.prfKey || typeof given.key !== "string") continue;
-      await adapter.update({ model: "passkey", where: [{ field: "id", value: passkey.id }], update: { encryptedKey: given.key } });
-      kept++;
-    }
-    return { passkeys: kept };
+    const [passkey] = await adapter.findMany<Passkey>({ model: "passkey", where: [...mine, { field: "id", value: String(about.passkey ?? "") }] });
+    const given = passkey && keys[passkey.credentialID];
+    if (!given || !passkey.prfKey || given.prf_key !== passkey.prfKey || typeof given.key !== "string") return { passkeys: 0 };
+    await adapter.update({ model: "passkey", where: [{ field: "id", value: passkey.id }], update: { encryptedKey: given.key } });
+    return { passkeys: 1 };
   }
   if (ask === "remove_passkey") {
     const passkeys = await adapter.findMany<{ id: string; name?: string }>({ model: "passkey", where: mine });

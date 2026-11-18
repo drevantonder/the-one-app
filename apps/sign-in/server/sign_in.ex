@@ -64,8 +64,10 @@ defmodule SignIn do
     [
       %{
         name: "invite",
-        description:
-          "Makes a link someone joins the network by, as the user you name. It ends the one made for them before",
+        description: """
+        Makes a link someone joins the network by, as the user you name. It ends the one made for them before. Only the
+        network's owner invites someone who has joined again, and never an owner
+        """,
         inputs: %{
           type: "object",
           properties: %{name: %{type: "string", description: "Their name: lowercase letters, digits and hyphens"}},
@@ -119,37 +121,42 @@ defmodule SignIn do
       },
       %{
         name: "add_passkey",
-        description:
-          "Makes a link that you make another passkey by, in a browser, within a quarter of an hour. Open it, don't pass it on",
+        description: """
+        Lets you make another passkey, in a browser, within a quarter of an hour. Whoever opens its link makes a
+        passkey of yours, so the link goes only to your own screen: an assistant's call notifies you instead
+        """,
         inputs: none,
         outputs: %{
           type: "object",
           properties: %{
-            link: %{type: "string", description: "Where to make it, in a browser, within a quarter of an hour"}
-          },
-          required: ["link"]
+            link: %{type: "string", description: "Where to make it, given only to the app or web client on your own device"},
+            message: %{type: "string", description: "What to tell your person, when you were given no link"}
+          }
         }
       },
       %{
         name: "encrypt_for_passkeys",
         description: """
-        Lets your passkeys unlock your key on a new device: from a device that holds it, encrypts it to each passkey
-        whose PRF output derives a key and that doesn't unlock it yet. A passkey says that key as it's used to sign in.
+        Lets a passkey unlock your key on a new device, once your person has said it may: from a device that holds the
+        key, encrypts it to that passkey's key, which its PRF output derives and it says as it's used to sign in.
+        Whoever uses the passkey has your key from then on, so ask them first, naming it and when it was added
         """,
         inputs: %{
           type: "object",
           properties: %{
+            passkey: %{type: "string", description: "The passkey your person allowed, by its id as `devices` lists it"},
             keys: %{
               type: "string",
               format: "passkey-keys",
               passkeys: "devices",
-              description: "Your key, encrypted to each passkey, which this device fills in"
+              description: "Your key, encrypted to that passkey, which this device fills in"
             }
-          }
+          },
+          required: ["passkey"]
         },
         outputs: %{
           type: "object",
-          properties: %{passkeys: %{type: "integer", description: "How many more unlock it"}},
+          properties: %{passkeys: %{type: "integer", description: "1 once it unlocks your key, 0 if it couldn't"}},
           required: ["passkeys"]
         }
       },
@@ -157,8 +164,9 @@ defmodule SignIn do
         name: "unlock_with_passkey",
         description: """
         Makes a link that lets a device of yours that's asking for your key hold it, once you use a passkey that
-        unlocks it there, in a browser. Without a device, using the passkey there lets it unlock your key: a device
-        that holds it encrypts it to the passkey next. Open it, don't pass it on.
+        unlocks it there, in a browser. Without a device, using the passkey there says the key it unlocks with, which
+        a device that holds yours encrypts it to once you allow it there (`encrypt_for_passkeys`). Open it, don't pass
+        it on.
         """,
         inputs: %{
           type: "object",
@@ -401,10 +409,13 @@ defmodule SignIn do
 
   @impl true
   # Who invites is whoever may change what this app keeps for the network: its owners, and whoever they made
-  # an editor of it.
+  # an editor of it. Whoever joins by an invitation is that user, so someone who has joined is invited again only by
+  # the network's owner, and an owner never: they add a passkey on a device they're signed in on, as Apple and
+  # Google have it. The edge knows who has joined, and is told whether this may be that (`again`).
   def call("invite", %{"name" => name}, call) do
     Call.reach(call, Artifact.name(call.own), "editor")
-    %{"link" => link} = ask(%{ask: "invite", who: name})
+    again = owns_network?(call, call.actor) and not owns_network?(call, "users/#{name}")
+    %{"link" => link} = ask(%{ask: "invite", who: name, again: again})
     %{who: "users/#{name}", link: link}
   end
 
@@ -422,19 +433,40 @@ defmodule SignIn do
     %{who: who}
   end
 
-  def call("add_passkey", _inputs, call), do: %{link: ask(%{ask: "passkey", who: person(call)})["link"]}
+  # The link makes a passkey of theirs for whoever opens it, so it's shown only on their own screen, which opens it.
+  # Anything else that asks, an assistant or `one`, has them notified, and Sign-In & Security makes it there.
+  def call("add_passkey", _inputs, call) do
+    who = person(call)
+
+    if screen?(call, who) do
+      %{link: ask(%{ask: "passkey", who: who})["link"]}
+    else
+      Call.tool(call, "notifications", "send", %{
+        "title" => "Add a passkey",
+        "text" => "Open Sign-In & Security and tap Add Passkey.",
+        "to" => who,
+        "app" => call.app,
+        "page" => "client/security.html"
+      })
+
+      %{message: "Your person was notified: Sign-In & Security, on a device of theirs, makes it. The link is shown only there."}
+    end
+  end
 
   def call("devices", _inputs, call), do: devices(person(call))
 
-  def call("encrypt_for_passkeys", %{"keys" => keys}, call) do
+  def call("encrypt_for_passkeys", %{"passkey" => passkey, "keys" => keys}, call) do
     case JSON.decode(keys) do
-      {:ok, %{} = keys} -> %{passkeys: ask(%{ask: "encrypt_for_passkeys", who: person(call), keys: keys})["passkeys"]}
-      _ -> raise "Those aren't your key encrypted to your passkeys. A device that holds it fills them in."
+      {:ok, %{} = keys} ->
+        %{passkeys: ask(%{ask: "encrypt_for_passkeys", who: person(call), passkey: passkey, keys: keys})["passkeys"]}
+
+      _ ->
+        raise "That isn't your key encrypted to your passkey. A device that holds it fills it in."
     end
   end
 
   def call("encrypt_for_passkeys", _inputs, _call),
-    do: raise("A device that holds your key encrypts it to your passkeys: in the app there, or with `one` on it.")
+    do: raise("A device that holds your key encrypts it to a passkey your person allowed: in Sign-In & Security there, or with `one` on it.")
 
   def call("unlock_with_passkey", inputs, _call) do
     device = inputs["device"] || ""
@@ -550,6 +582,27 @@ defmodule SignIn do
     %{"devices" => devices} = list = ask(%{ask: "devices", who: who})
     names = Builds.names(who, for(%{"kind" => "app", "id" => id} <- devices, do: id))
     %{list | "devices" => for(device <- devices, do: Map.update!(device, "name", &Map.get(names, device["id"], &1)))}
+  end
+
+  # Whether `who` owns the network, as the apps that validate `reach` say.
+  defp owns_network?(call, who) do
+    request = %{"who" => who, "relation" => "owner", "artifact" => "network"}
+    OneCore.Hooks.validate("reach", request, {call.actor, call.subject}) == :ok
+  end
+
+  # Whether a call comes from its person's own screen: the app, or the web client, on a device of theirs that isn't an
+  # assistant. A client's name is only what it says (`Call.client/1`), so an assistant, which comes over the web too and
+  # may say it's anything, is told apart by its device, which the edge knows. What runs on a device with its key, as
+  # `one` does, could say it's the app as well, and holds what the device does already.
+  defp screen?(call, who) do
+    case Call.client(call) do
+      %{"name" => name, "device" => device} when name in ["one-app", "one-web"] ->
+        %{"devices" => devices} = ask(%{ask: "devices", who: who})
+        not Enum.any?(devices, &(&1["id"] == device and &1["kind"] == "assistant"))
+
+      _ ->
+        false
+    end
   end
 
   defp joins(name, link), do: "users/#{name} joins at #{link} within a week. It's shown once, so pass it on now."
