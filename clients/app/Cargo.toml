@@ -54,6 +54,7 @@ window = [
   "dep:wry",
   "dep:tao",
   "dep:muda",
+  "dep:strict",
   "cli/window",
 ]
 
@@ -126,6 +127,8 @@ muda = { version = "0.20", optional = true }
 objc2-foundation = { version = "0.3", default-features = false, features = ["std", "objc2-core-foundation", "NSGeometry"], optional = true }
 
 [target.'cfg(target_os = "linux")'.dependencies]
+# A strict app's own window, drawn natively (`strict`): Linux first, where it's built and checked.
+strict = { path = "strict", optional = true }
 webkit2gtk = { version = "=2.0.2", features = ["v2_38"], optional = true }
 # Ctrl-Q and Ctrl-W, as a Linux app's window has them (`linux_keys`).
 gtk = { version = "0.18", optional = true }

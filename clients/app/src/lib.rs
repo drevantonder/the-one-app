@@ -42,6 +42,8 @@ pub mod host;
 mod hosts;
 #[cfg(desktop)]
 mod title_bar;
+#[cfg(all(desktop, target_os = "linux"))]
+mod strict;
 
 pub(crate) mod page;
 

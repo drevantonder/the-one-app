@@ -67,8 +67,15 @@ struct Opened {
     link: String,
 }
 
+/// When this process started, as near as it knows: how long its window took to open counts from here.
+fn started() -> std::time::Instant {
+    static STARTED: std::sync::OnceLock<std::time::Instant> = std::sync::OnceLock::new();
+    *STARTED.get_or_init(std::time::Instant::now)
+}
+
 /// Starts the app's window and runs until it's closed: `entrypoint`, for `subject`, at `link`.
 pub fn run(entrypoint: String, subject: Option<String>, link: String) -> ExitCode {
+    started();
     let opened = Opened { entrypoint, subject, link };
     // The name the system knows it by, as the app's shortcut says it too (`shortcuts`): Windows groups its windows
     // under it in the taskbar.
@@ -90,6 +97,11 @@ pub fn run(entrypoint: String, subject: Option<String>, link: String) -> ExitCod
 
 fn window(opened: Opened, class: &str) -> anyhow::Result<ExitCode> {
     let home = ::client::home()?;
+    // An app whose page is strict is drawn natively, where this program can (`strict`).
+    #[cfg(target_os = "linux")]
+    if let Some(exit) = crate::strict::run(started(), &home, &opened.entrypoint, opened.subject.as_deref(), &opened.link, class) {
+        return Ok(exit);
+    }
     crate::page::load(&home);
     let event_loop = EventLoopBuilder::<Told>::with_user_event().build();
     // The window's class, which a Linux desktop matches to the app's entry (`StartupWMClass`), once GTK has started.
@@ -413,7 +425,7 @@ fn channel(
 /// The channel to the app's window. One that isn't running is started, with its Home Screen hidden, as only this app
 /// was opened, and connected to once it's listening: a program starting is the outside world, so this asks again
 /// every tenth of a second for up to half a minute.
-async fn connect(address: &str) -> anyhow::Result<impl AsyncRead + AsyncWrite + Send + 'static> {
+pub(crate) async fn connect(address: &str) -> anyhow::Result<impl AsyncRead + AsyncWrite + Send + 'static> {
     if let Ok(stream) = open(address).await {
         return Ok(stream);
     }
