@@ -278,7 +278,10 @@ defmodule OneCore.Servers do
           {:noreply, nil}
 
         {:error, why} ->
-          Logger.warning(
+          # The edge not taking it once is the internet's, and the next try is what does something about it: it's a
+          # warning once it has gone on for minutes, waiting the longest between tries.
+          Logger.log(
+            if(wait == @most, do: :warning, else: :info),
             "Couldn't say this server's status at the edge, so it's said again until the edge takes it: #{why}"
           )
 
