@@ -44,3 +44,7 @@ blade-graphics = { git = "https://github.com/drevantonder/blade", rev = "066b01f
 accesskit = { git = "https://github.com/drevantonder/accesskit", rev = "688806ffef103203be0546844661724041a5505c" }
 accesskit_consumer = { git = "https://github.com/drevantonder/accesskit", rev = "688806ffef103203be0546844661724041a5505c" }
 accesskit_android = { git = "https://github.com/drevantonder/accesskit", rev = "688806ffef103203be0546844661724041a5505c" }
+# QuickJS-NG with one change, until it's merged: a Proxy's getOwnPropertyDescriptor trap that answers with an accessor
+# gives an accessor, not `{ value: undefined }` (github.com/quickjs-ng/quickjs/pull/1658), so Solid's spread draws the
+# children of merged props; on the commit rquickjs-sys 0.14.0 vendors.
+rquickjs-sys = { git = "https://github.com/drevantonder/rquickjs", rev = "ee54619e28e2520c156a1109d291c639b3c8e6da" }
