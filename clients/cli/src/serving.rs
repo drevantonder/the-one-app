@@ -1679,11 +1679,12 @@ mod system {
         schtasks(&["/delete", "/tn", &name(key), "/f"])
     }
 
-    /// Tells `start` the server is running. Nothing hears it when Task Scheduler started it by itself.
+    /// Tells `start` the server is running, by opening its pipe, which is all `start` waits for. Only to read it,
+    /// which a pipe lets everyone do: one made in an ssh session lets nobody but administrators write to it, so
+    /// writing to it from the task, its person's own, was refused. Nothing hears it when Task Scheduler started it
+    /// by itself.
     pub fn ready(key: &str) -> Result<()> {
-        if let Ok(mut pipe) = fs::OpenOptions::new().write(true).open(ready_pipe(key)) {
-            let _ = std::io::Write::write_all(&mut pipe, b"READY=1");
-        }
+        let _ = fs::File::open(ready_pipe(key));
         Ok(())
     }
 
