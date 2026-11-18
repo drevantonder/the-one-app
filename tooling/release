@@ -16,8 +16,9 @@
 # the network's owner. Linux builds every server, from one set of NIFs (`tooling/nifs`), so each ships its apps as
 # the same files, and Linux's `one` and Windows', with the MSVC toolchain cargo-xwin downloads. A Mac builds a Mac's
 # `one`, which needs its system's frameworks: from Linux, it's built on the Mac `ssh mac` reaches, in its checkout
-# ~/scratch/one-release, at the same commit. A release is refused while another publishes on this machine. One
-# published while the network's update of the one before is under way takes its place there. A commit older than one
+# ~/scratch/one-release, at the same commit. A server release and a client release run at once, each in a checkout of its own, but a second of
+# the same kind is refused while the first builds. One published while the network's update of the one before is under
+# way takes its place there. A commit older than one
 # the network has published is refused, so a release that finishes late doesn't undo a newer one. A build already
 # published is left as it is, and published again, so a network that didn't hear of it does.
 #
@@ -43,10 +44,6 @@ root=$(cd "$(dirname "$0")/.." && pwd)
 command -v mix >/dev/null || exec mise exec -C "$root" -- "$0" "$@"
 cd "$root"
 
-# Each line says how many seconds into the release it is, so where a release's time goes is in what it printed. The
-# Mac's lines come through Linux's.
-[[ $(uname) != Linux ]] || exec > >(while IFS= read -r line; do printf '%4ds %s\n' "$SECONDS" "$line"; done) 2>&1
-
 usage="tooling/release [server] [client] [--dry-run], or tooling/release <name>..."
 dry= wanted=()
 for arg in "$@"; do
@@ -57,6 +54,29 @@ for arg in "$@"; do
   esac
 done
 ((${#wanted[@]})) || wanted=(server client)
+
+# Servers and clients share nothing but the network they publish to, so each is its own release, with its own lock and
+# checkout (below), and one that asks for both runs the two at once.
+want_servers=() want_clients=()
+for want in "${wanted[@]}"; do
+  case $want in server | server/*) want_servers+=("$want") ;; *) want_clients+=("$want") ;; esac
+done
+if ((${#want_servers[@]} && ${#want_clients[@]})); then
+  "$0" ${dry:+--dry-run} "${want_servers[@]}" > >(sed 's/^/server: /') 2>&1 &
+  server=$!
+  "$0" ${dry:+--dry-run} "${want_clients[@]}" > >(sed 's/^/client: /') 2>&1 &
+  client=$!
+  status=0
+  wait "$server" || status=1
+  wait "$client" || status=1
+  exit $status
+fi
+kind=server
+((${#want_servers[@]})) || kind=client
+
+# Each line says how many seconds into the release it is, so where a release's time goes is in what it printed. The
+# Mac's lines come through Linux's.
+[[ $(uname) != Linux ]] || exec > >(while IFS= read -r line; do printf '%4ds %s\n' "$SECONDS" "$line"; done) 2>&1
 
 # A build is named by its commit's version (`tooling/version`), so what's built is all committed.
 [[ -z $(git status --porcelain) ]] || { echo "Commit what's changed first: a build is named by its commit." >&2 && exit 1; }
@@ -122,25 +142,27 @@ for name in "${mac[@]}"; do echo "$name  $build, built on the Mac"; done
 # Published already: published again, which sends nothing, so a network that didn't hear of it does.
 ((${#mine[@]} + ${#mac[@]})) || { one publish --builds '[]' >/dev/null && exit; }
 
-# One release on a machine at a time, kept as a pid file rather than flock: a daemon a build starts (epmd, a compiler
-# cache) inherits a flock's descriptor and outlives the release, which then refused the next one with nothing
-# publishing. What a Mac builds is asked for by Linux's release.
+# One server release and one client release on a machine at a time, each kept as a pid file rather than flock: a daemon
+# a build starts (epmd, a compiler cache) inherits a flock's descriptor and outlives the release, which then refused
+# the next one with nothing publishing. Each holds its own checkout (below), which is what a second of its kind can't
+# share; a server's and a client's don't touch, so they build at once. What a Mac builds is asked for by Linux's
+# release, so the client's lock covers it.
 if [[ $(uname) == Linux ]]; then
-  lock=${XDG_RUNTIME_DIR:-/tmp}/one-release.pid
+  lock=${XDG_RUNTIME_DIR:-/tmp}/one-release-$kind.pid
   if ! (set -o noclobber && echo "$$ $build" >"$lock") 2>/dev/null; then
     read -r pid was <"$lock" || true
     if kill -0 "$pid" 2>/dev/null; then
-      echo "The release of $was is publishing on this machine (pid $pid): let it finish rather than publish over it." >&2
+      echo "The $kind release of $was is building on this machine (pid $pid): let it finish rather than build over it." >&2
       exit 1
     fi
     echo "$$ $build" >"$lock"
   fi
   trap 'rm -f "$lock"' EXIT
 
-  # It builds in one checkout kept for releasing on this machine, put at the commit released, so each release builds,
-  # downloads and installs only what changed since the one before, as the Mac's ~/scratch/one-release does, rather
-  # than all of it again in each new worktree (most of a server's build, 17 Nov).
-  kept=${XDG_CACHE_HOME:-$HOME/.cache}/the-one-app/release
+  # It builds in one checkout kept for releasing each kind on this machine, put at the commit released, so each release
+  # builds, downloads and installs only what changed since the one before, as the Mac's ~/scratch/one-release does,
+  # rather than all of it again in each new worktree (most of a server's build, 17 Nov).
+  kept=${XDG_CACHE_HOME:-$HOME/.cache}/the-one-app/release-$kind
   [[ -d $kept ]] || { git worktree prune && git worktree add -q --detach "$kept" "$commit"; }
   git -C "$kept" checkout -q --detach -f "$commit"
   root=$kept && cd "$root"

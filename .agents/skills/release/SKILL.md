@@ -77,8 +77,8 @@ whoever makes it (`tooling/network`).
 On a device that is also a server, `one update` is the network's Update Now. What a server did is in the log of the
 program keeping it running (`one serve run`), `journalctl --user -u one-server-<key's first 12>` on Linux.
 
-Run an edge deploy only while no release publishes on the machine, which `tooling/release` keeps as a pid file:
-`! { read -r pid _ <"${XDG_RUNTIME_DIR:-/tmp}/one-release.pid" && kill -0 "$pid"; } 2>/dev/null && bun edge.js deploy <address>`. The network's address and
+Run an edge deploy only while no server release publishes on the machine, which `tooling/release` keeps as a pid file:
+`! { read -r pid _ <"${XDG_RUNTIME_DIR:-/tmp}/one-release-server.pid" && kill -0 "$pid"; } 2>/dev/null && bun edge.js deploy <address>`. The network's address and
 where its Cloudflare token is kept are in Agent Memory, not the repo.
 
 ## What is live
