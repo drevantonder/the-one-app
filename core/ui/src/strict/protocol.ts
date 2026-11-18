@@ -26,7 +26,7 @@ export type Op =
   /** A new node, not yet in the tree. A `raw-text` has its `value`. */
   | { op: "create"; id: Id; type: Type; value?: string }
   /** One of a node's props (`Props`), or `null` for none. A `raw-text`'s only prop is its `value`. */
-  | { op: "set"; id: Id; name: keyof Props | "value"; value: unknown }
+  | { op: "set"; id: Id; name: keyof Props; value: unknown }
   /** Puts `id` into `parent` before `before`, or at its end: a node already in the tree moves. */
   | { op: "insert"; parent: Id; id: Id; before?: Id }
   /** Takes `id`, with what's in it, out of `parent`. It may be inserted again. */
@@ -34,54 +34,65 @@ export type Op =
   /** JS no longer holds `id` (it was garbage collected), so it's never inserted again and the host frees it. */
   | { op: "drop"; id: Id }
 
-/** Host → JS: what the person did to a node that listens for it (`onPress` and the rest), one at a time. */
+/** Host → JS: what the person did to a node that listens for it (its `on…` prop), one at a time. */
 export interface Event {
   v: typeof VERSION
   op: "event"
   id: Id
   name: EventName
-  /** An `input`'s text, with `input` and `submit`. */
+  /** An `input`'s text, with `input`. */
   value?: string
 }
 
-/** What a node can listen for, as its `on…` prop: `press` is `onPress`. A host offers each as an accessibility action
- * too: `press` is AccessKit's `Click`, `input` its `SetValue`, `focus` and `blur` its `Focus` and `Blur`. */
-export type EventName = "press" | "input" | "submit" | "focus" | "blur"
+/** What a node can listen for, as its `on…` prop: `click` is `onClick`, as the DOM names them. A host offers each as
+ * an accessibility action too: `click` is AccessKit's `Click`, `input` its `SetValue`, `focus` and `blur` its `Focus`
+ * and `Blur`. */
+export type EventName = "click" | "input" | "focus" | "blur"
 
-/** Every node's props, as `set` sends them. One semantic tree, which a screen reader and an agent both read: a
- * node's role, its name (`label`), its value, its states and its actions (which `on…` it has), as AccessKit's and ARIA's
- * model has them. A listener is sent as `true` while there is one, `null` once there isn't. */
+/** Every node's props, as `set` sends them, named as a strict app's JSX names them, which are the DOM's. One semantic
+ * tree, which a screen reader and an agent both read: a node's role, its name (`aria-label`, or what a `text` says),
+ * its value, its states (`aria-…`, `disabled`, `checked`) and its actions (which `on…` it has), as ARIA has them and a
+ * host maps them to AccessKit's. A listener is sent as `true` while there is one, `null` once there isn't. */
 export interface Props {
   /** What it is, by ARIA's name, which a host maps to AccessKit's `Role`. None is a plain group. */
   role?: Role
-  /** Its accessible name: a button's words, an image's alt text. A `text` is named by what it says. */
-  label?: string
+  /** Its accessible name: a button's words where it has no text, a region's name. */
+  "aria-label"?: string
   /** A longer description, read after its name. */
-  description?: string
+  "aria-description"?: string
   /** A heading's level, 1 to 6. */
-  level?: number
-  /** Its value: an `input`'s text, a progress bar's or a slider's number. */
-  value?: string | number
-  disabled?: boolean
-  selected?: boolean
-  checked?: boolean | "mixed"
-  expanded?: boolean
-  busy?: boolean
-  current?: boolean
-  invalid?: boolean
+  "aria-level"?: number
+  /** A progress bar's or a slider's number, between `aria-valuemin` and `aria-valuemax`. */
+  "aria-valuenow"?: number
+  "aria-valuemin"?: number
+  "aria-valuemax"?: number
+  "aria-disabled"?: boolean
+  "aria-selected"?: boolean
+  "aria-checked"?: boolean | "mixed"
+  "aria-expanded"?: boolean
+  "aria-busy"?: boolean
+  "aria-current"?: boolean
+  "aria-invalid"?: boolean
+  /** Left out of the semantic tree: it's only how it looks. */
+  "aria-hidden"?: boolean
   /** How it's laid out and looks: the strict style subset. */
   style?: Style
   /** `image`: a `data:` address, or a file of the app's own by its path. */
   src?: string
+  /** `image`: what it shows, its accessible name. Empty for one that's only how it looks. */
+  alt?: string
+  /** `input`: its text. */
+  value?: string
   /** `input`: what kind of text it takes, as an `<input type>`. */
   type?: "text" | "search" | "email" | "url" | "tel" | "number" | "password"
   /** `input`: more than one line, as a `<textarea>`. */
   multiline?: boolean
   /** `input`: the grey words in it while it's empty. */
   placeholder?: string
-  onPress?: true
+  disabled?: boolean
+  required?: boolean
+  onClick?: true
   onInput?: true
-  onSubmit?: true
   onFocus?: true
   onBlur?: true
 }
