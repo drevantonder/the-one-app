@@ -3,7 +3,8 @@ defmodule SoftDelete do
   Soft delete, which people see as Recently Deleted: what someone deletes waits for 30 days, so it can be restored as it
   was, before it's purged for good. Anything an app made for someone (`OneCore.Call.make/2`) is deleted with this
   app's `delete`, which an app calls for its person as Git Repos does for a repo, and which an agent calls too. So
-  is an app someone deployed (`<owner>/apps/<name>`), once nobody has it installed. An app uninstalled for
+  is an app someone deployed (`<owner>/apps/<name>`), once nobody has it installed, and one superseded by the broader
+  copy of itself that everyone who had it has now (One Core's hook `superseded`). An app uninstalled for
   someone (One Core's hook `uninstalled`) takes what it kept and made for them along, as one item, and this app's
   clock and Restore are the only ones it has: restoring the item installs the app again before what it kept is back
   (`OneCore.Apps.Lifecycle.restore/2`), and purging it removes the app for good once what it kept is erased
@@ -65,7 +66,7 @@ defmodule SoftDelete do
   def requires, do: %{"core" => ">= 0.22.18", "database" => "to keep what you deleted for 30 days"}
 
   @impl true
-  def hooks, do: ["uninstalled"]
+  def hooks, do: ["uninstalled", "superseded"]
 
   @impl true
   def entrypoints,
@@ -274,6 +275,36 @@ defmodule SoftDelete do
     :ok
   end
 
+  # An app superseded by the broader copy of itself, which everyone who had it has now, is installed for nobody, and
+  # goes as one deleted does, so it comes back as it was if it's restored. One that went already, as when two servers
+  # superseded it at once, has nothing left to delete.
+  def hook("superseded", %{"app" => app}, call) do
+    if not Servers.here?(call.installed), do: Call.forward(call, call.installed)
+
+    if app =~ @app and Bucket.list(app <> "/latest") != [] do
+      unused!(app)
+      deleted(call, app)
+    end
+
+    :ok
+  end
+
+  # Takes the artifact `name` aside as one item, whoever's it is: the item's id.
+  defp deleted(call, name) do
+    record = %{
+      "owner" => User.owner(name),
+      "artifacts" => [name],
+      "title" => title(call, app_of(name)),
+      "by" => call.actor || call.subject,
+      "at" => now()
+    }
+
+    id = id()
+    {:ok, _record} = change(call, id, {:delete, record})
+    aside(call, id)
+    id
+  end
+
   # Restores an item: each artifact at its name, or beside something new there since, and an uninstalled app before
   # what it kept. Gives its record as it was moved.
   defp restored(call, id, record) do
@@ -303,20 +334,7 @@ defmodule SoftDelete do
     owns!(call, name)
     unused!(name)
     if Bucket.list(name <> "/") == [], do: raise("There's nothing at #{name}.\n\n`soft-delete list` lists what's deleted.")
-    owner = User.owner(name)
-
-    record = %{
-      "owner" => owner,
-      "artifacts" => [name],
-      "title" => title(call, app_of(name)),
-      "by" => call.actor || call.subject,
-      "at" => now()
-    }
-
-    id = id()
-    {:ok, _record} = change(call, id, {:delete, record})
-    aside(call, id)
-    %{item: id, artifact: name}
+    %{item: deleted(call, name), artifact: name}
   end
 
   def call("list", _inputs, call) do
