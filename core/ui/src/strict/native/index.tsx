@@ -21,6 +21,7 @@ export { call, changed, client, connection, covers, direction, open, pinShortcut
 // The components, as the DOM's look and read: the same roles and names, from the design tokens.
 
 export { Badge, Button, Icon, Spinner } from "../../button.tsx"
+export { seen } from "../../seen.ts"
 import { Button, Icon, Spinner } from "../../button.tsx"
 
 export const Screen: typeof Strict.Screen = (props) => (
@@ -121,7 +122,6 @@ export const showRecoveryKey = later("showRecoveryKey") as typeof Strict.showRec
 export const useRecoveryKey = later("useRecoveryKey") as typeof Strict.useRecoveryKey
 export const go: typeof Strict.go = (change) => change()
 export const share = later("share") as typeof Strict.share
-export const seen = later("seen") as typeof Strict.seen
 export const haptic: typeof Strict.haptic = () => {}
 export const Widget = later("Widget") as typeof Strict.Widget
 export const keydown = later("keydown") as typeof Strict.keydown

@@ -40,7 +40,8 @@
 /// there adds it there, with only what every host can draw (`protocol.ts`), and core/ui's `bun run typecheck` then says
 /// whether the DOM's takes it. A page written for version 1 has one `style` object of token names instead.
 export { call, changed, client, component, connection, covers, direction, haptic, keydown, leave, link, open, pinShortcut, reducedMotion, safeArea, showRecoveryKey, sizeChanged, updateReady, upload, useRecoveryKey, viewport, visible } from "./bridge.ts"
-export { pace, seen, share } from "./shared.ts"
+export { pace, share } from "./shared.ts"
+export { seen } from "./seen.ts"
 export { words } from "./words.ts"
 export { Button, Icon, Spinner } from "./button.tsx"
 export { Badge } from "./badge.tsx"
