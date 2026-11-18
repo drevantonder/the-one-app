@@ -1,0 +1,168 @@
+defmodule Inspector do
+  @moduledoc """
+  Inspector: an agent reads a strict app's window on any of its person's devices and drives it, as a test would. A
+  strict window on a computer serves the inspector's protocol (`clients/app/strict/src/inspect.rs`, which documents
+  it), and the device's app answers each of this app's tools for it, as a tool of the device's own
+  (`OneCore.Server.ask_device/3`): `windows` lists them, and each other tool is that protocol's op of the same name,
+  its inputs passed on as they are. A device is its person's: only they, or the network's owner, inspect it.
+  """
+  @behaviour OneCore.App
+  alias OneCore.{Call, Hooks, Server}
+
+  @impl true
+  def icon, do: "icon.svg"
+
+  @impl true
+  def requires, do: %{"core" => ">= 0.25.4"}
+
+  @device %{type: "string", description: "the device, by its key or name, as `windows` lists it; the only one with a strict window open if not given"}
+  @window %{type: "integer", description: "the window, as `windows` lists it; the device's only strict window if not given"}
+  @selector %{
+    node: %{type: "integer", description: "a node by its id in the tree"},
+    role: %{type: "string", description: "ARIA's role: button, searchbox, heading, listitem"},
+    name: %{type: "string", description: "its accessible name, exactly"},
+    text: %{type: "string", description: "words in its accessible name, any case"},
+    key: %{type: "string", description: "its id prop, as the DOM's id names an element"},
+    nth: %{type: "integer", minimum: 0, description: "the nth match, from 0, rather than the first"}
+  }
+  @point %{
+    x: %{type: "number", description: "CSS pixels from the window's left, as rects are"},
+    y: %{type: "number", description: "CSS pixels from the window's top"}
+  }
+  @result %{type: "object"}
+
+  @impl true
+  def tools do
+    [
+      %{
+        name: "windows",
+        read_only: true,
+        description:
+          "The strict app windows open on your devices, each with its device, `window`, the entrypoint it shows, its size and its clock. A device whose app isn't running has none.",
+        inputs: %{type: "object", properties: %{device: @device}},
+        outputs: %{type: "object", properties: %{windows: %{type: "array", items: %{type: "object"}}}, required: ["windows"]}
+      },
+      op("tree", true, "The window's semantic tree, as a screen reader reads it: each node's id, role, name, value, states, actions and rect.", %{}),
+      op(
+        "query",
+        true,
+        "The nodes that match a selector, each with its rect, the style and class it was given, its colours and lengths as the design tokens resolve them, and the source file:line of the JSX that made it where its build says.",
+        @selector
+      ),
+      %{
+        name: "snap",
+        read_only: true,
+        description: "A PNG of the window as drawn.",
+        inputs: %{type: "object", properties: %{device: @device, window: @window}},
+        outputs: %{type: "object", properties: %{mimeType: %{type: "string"}, size: %{type: "integer"}}, required: ["mimeType"]}
+      },
+      op("tap", false, "Presses a node, by a selector, or what's at a point, as a finger does: an input takes the keyboard, and what listens for click gets one. Gives `tapped`, the node that took it.", Map.merge(@selector, @point)),
+      op("type", false, "Types text into an input, by a selector, or the one with the keyboard, a character at a time. Gives the node and its `value`.", Map.put(@selector, :text, %{type: "string", description: "what to type; with a selector, `text` is what's typed, so pick the input by `role`, `name`, `key` or `node`"}), ["text"]),
+      op(
+        "key",
+        false,
+        "Presses a key where the keyboard is, as the DOM names it: Enter, Escape, Tab, Backspace, a. Tab moves the keyboard; Enter and Space press what has it.",
+        %{key: %{type: "string"}, shift: %{type: "boolean"}, alt: %{type: "boolean"}, ctrl: %{type: "boolean"}, meta: %{type: "boolean"}},
+        ["key"]
+      ),
+      op("scroll", false, "Scrolls the window by dx and dy CSS pixels, down and right positive.", %{dx: %{type: "number"}, dy: %{type: "number"}}),
+      op(
+        "clock",
+        false,
+        "The app's clock, its Date, timers and the window's animations: `pause` true or false, `step` ms on, running each timer due at its own time, or `seek` to ms since it started. Gives its `time` and whether it's `paused`.",
+        %{pause: %{type: "boolean"}, step: %{type: "number", minimum: 0}, seek: %{type: "number", minimum: 0}}
+      ),
+      op(
+        "settle",
+        true,
+        "Waits until nothing's pending that ends by itself, or `deadline` ms (5000), and says what still is: requests the app asked that aren't answered, timers (an interval never ends, so isn't waited for), animations.",
+        %{deadline: %{type: "number", minimum: 0}}
+      )
+    ]
+  end
+
+  defp op(name, read_only, description, properties, required \\ []) do
+    %{
+      name: name,
+      read_only: read_only,
+      description: description,
+      inputs: %{type: "object", required: required, properties: Map.merge(properties, %{device: @device, window: @window})},
+      outputs: @result
+    }
+  end
+
+  @impl true
+  def call("windows", inputs, call) do
+    devices = if inputs["device"], do: [device(call, inputs["device"])], else: mine(call)
+
+    windows =
+      devices
+      |> Task.async_stream(&{&1, ask(&1, "windows", %{})}, timeout: :infinity, ordered: false)
+      |> Enum.flat_map(fn
+        {:ok, {device, {:ok, %{"structuredContent" => %{"windows" => windows} = listed}}}} ->
+          for window <- windows, do: Map.merge(window, %{"device" => device, "name" => listed["device"]})
+
+        # A device whose app has no strict windows to give: a phone, or one on a build before them.
+        {:ok, _} ->
+          []
+      end)
+
+    %{"windows" => windows}
+  end
+
+  def call(tool, inputs, call) do
+    device =
+      case inputs["device"] do
+        nil -> only(call)
+        device -> device(call, device)
+      end
+
+    case ask(device, tool, Map.delete(inputs, "device")) do
+      {:ok, %{"isError" => true, "content" => content}} -> raise Enum.map_join(content, "\n", & &1["text"])
+      {:ok, %{"content" => [%{"type" => "image", "data" => data}]}} -> {:blob, "image/png", Base.decode64!(data)}
+      {:ok, %{"structuredContent" => result}} -> result
+      {:error, why} -> raise why
+    end
+  end
+
+  # The devices the caller may inspect, of those whose app is watching: their own, or any where they own the network.
+  defp mine(call), do: Enum.filter(Server.devices(), &may?(call, &1))
+
+  defp may?(call, device), do: Hooks.whose(device) == call.subject or Call.owns?(%{call | subject: "network"})
+
+  # A device by its key, or by the name its app gives itself, which `windows` lists.
+  defp device(call, named) do
+    cond do
+      named in mine(call) -> named
+      true -> Enum.find_value(call("windows", %{}, call)["windows"], &(&1["name"] == named && &1["device"])) || raise("None of your devices called #{named} has a strict window open.")
+    end
+  end
+
+  # The one device with a strict window open, when none is named.
+  defp only(call) do
+    case Enum.uniq(for w <- call("windows", %{}, call)["windows"], do: w["device"]) do
+      [device] -> device
+      [] -> raise "None of your devices has a strict window open."
+      _ -> raise "More than one of your devices has a strict window open: say which, as `windows` lists them."
+    end
+  end
+
+  defp ask(device, tool, inputs) do
+    request = JSON.encode!(%{jsonrpc: "2.0", id: 1, method: "tools/call", params: %{name: "inspector_" <> tool, arguments: inputs}})
+
+    case Server.ask_device(device, request, wake: false) do
+      {:ok, answer} ->
+        case JSON.decode(answer) do
+          {:ok, %{"result" => result}} -> {:ok, result}
+          {:ok, %{"error" => %{"message" => why}}} -> {:error, why}
+          _ -> {:error, "The device's app answered what isn't a tool's result"}
+        end
+
+      :unreachable ->
+        {:error, "The device's app isn't running, or didn't answer."}
+
+      :stopped ->
+        {:error, "The device's app went away before it answered, so it may or may not have done it."}
+    end
+  end
+end
