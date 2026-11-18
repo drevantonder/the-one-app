@@ -345,7 +345,8 @@ defmodule SignIn do
       Application.get_env(:one_core, :address) ||
         raise "People sign in at a network's address, and this network has none."
 
-    body = JSON.encode!(what)
+    # A network being built acts as whoever a client says, who joined nowhere, so the edge makes them as it's asked.
+    body = JSON.encode!(Map.put(what, :building, Application.get_env(:one_core, :development, false)))
 
     request = [method: :post, url: address <> "/sign-in/ask", body: body, headers: Edge.signed("/sign-in/ask", body)]
 

@@ -34,6 +34,21 @@ Always set `ONE_HOME`: without it, `one` (yours or the installed one) is the own
 network. `ONE_AS` picks the user, since nobody signs in on a network being built; `ONE_SUBJECT=groups/<name>` or
 `ONE_SUBJECT=network` runs a call for a group or the network.
 
+## Signing a device in
+
+A device that isn't `<folder>/client` (a phone, the simulator, another client home) needs a network with an
+address, `--edge`. Put `{"address": "<the address>"}` in its home's `network` file (or build it with
+`TAURI_ONE_ADDRESS`), open it, and it shows a code. Then, as whoever it's to be, one step:
+
+    ONE_AS=alice one sign-in approve --code WDJB-MJHT
+
+On a network being built anyone may be named, the owner too, with no `--owner` and no passkey. For an emulator,
+`adb reverse tcp:<port> tcp:<port>` first, `adb shell run-as app.theone.client sh -c 'cat > network'` writes its
+`network`, and `adb shell pm grant app.theone.client android.permission.POST_NOTIFICATIONS` skips Android's question.
+The app says its code in `adb logcat -s RustStdoutStderr`, as `this device's session: SignIn { … code: "…" }`. To
+open the Vault there too, let it hold the key from here: `ONE_AS=alice one encryption approve --device <its id in
+one sign-in devices>`.
+
 ## Looking inside the server
 
 Each server is an Erlang node: `iex --sname dbg-$$ --cookie $(cat <folder>/cookie) --remsh <node>` attaches, with the
@@ -50,6 +65,9 @@ so a server installed with `one serve on` there reconnects by itself.
 
 ## Mistakes already made
 
+- Copying `<folder>/client`'s `key` and `network` onto a phone: that client acts as whoever `ONE_AS` says and is
+  nobody's at the address, so the phone says it was removed once its token ends. Approve the phone by its code.
+- Starting a network with `--owner` and joining it with a virtual passkey just to approve a phone.
 - Running `iex -S mix` in a fresh worktree, which has no deps: `mix deps.get` in `core/server/` first
   (`tooling/network` does it itself).
 - Restarting the network to try a change to an app, rather than deploying it into the running one.

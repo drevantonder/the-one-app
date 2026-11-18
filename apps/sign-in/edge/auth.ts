@@ -435,11 +435,18 @@ async function wrong(adapter: Adapter, user: User) {
  * A link that `name` joins the network by, as that user, made for them if they're new. It's their only one: an
  * earlier link to join as them no longer works.
  */
-async function invite(adapter: Adapter, internalAdapter: Awaited<Auth["$context"]>["internalAdapter"], origin: string, name: string, user: User | undefined) {
+async function invite(adapter: Adapter, internalAdapter: InternalAdapter, origin: string, name: string, user: User | undefined) {
   if (!/^[a-z][a-z0-9-]*$/.test(name)) return { error: "A user's name is lowercase letters, digits and hyphens, starting with a letter." };
-  // Better Auth keeps a unique email for everyone, so each has one made of their name here. Nothing is sent to it.
-  const invitee = user ?? (await internalAdapter.createUser({ name, email: `${name}@${new URL(origin).hostname}`, emailVerified: false }, { method: "admin" }));
+  const invitee = user ?? (await made(internalAdapter, origin, name));
   return { link: `${origin}/sign-in/#invite=${await invitation(adapter, invitee, INVITED_FOR)}` };
+}
+
+type InternalAdapter = Awaited<Auth["$context"]>["internalAdapter"];
+
+/** The user `name`, made here, who hasn't joined. */
+function made(internalAdapter: InternalAdapter, origin: string, name: string): Promise<User> {
+  // Better Auth keeps a unique email for everyone, so each has one made of their name here. Nothing is sent to it.
+  return internalAdapter.createUser({ name, email: `${name}@${new URL(origin).hostname}`, emailVerified: false }, { method: "admin" });
 }
 
 /**
@@ -468,12 +475,17 @@ export interface Ask {
   device?: string;
   code?: unknown;
   passkey?: string;
+  /** Whether the network is being built, where a server acts as whoever a client says (`mix network --development`). */
+  building?: boolean;
 }
 
-export async function asked(auth: Auth, origin: string, { ask, who: name, ...about }: Ask) {
+export async function asked(auth: Auth, origin: string, { ask, who: name, building, ...about }: Ask) {
   const { adapter, internalAdapter } = await auth.$context;
   const named = String(name ?? "").replace(/^users\//, "");
-  const [user] = await adapter.findMany<User>({ model: "user", where: [{ field: "name", value: named }] });
+  let [user] = await adapter.findMany<User>({ model: "user", where: [{ field: "name", value: named }] });
+  // In a network being built nobody joins, and a server asks as whoever a client says it is: they're made here as
+  // they're first asked about, so they approve a device's code as anyone who joined does.
+  if (!user && building && ask !== "invite" && /^[a-z][a-z0-9-]*$/.test(named)) user = await made(internalAdapter, origin, named);
 
   if (ask === "invite") return invite(adapter, internalAdapter, origin, named, user);
   // The network's first owner is invited only until they've joined, so a link to join as them isn't made after.

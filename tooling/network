@@ -14,7 +14,8 @@
 #
 # It's a network being built, so nobody signs in, and a client says which user it is: ONE_AS=<name> before a
 # command acts as that user, and ONE_SUBJECT=groups/<name> or ONE_SUBJECT=network has it run for a group or the network.
-# Its first owner is the user `owner`.
+# Its first owner is the user `owner`. With --edge, another device signs in at its address by the code it shows,
+# which `one sign-in approve` approves as whoever ONE_AS names.
 #
 # --standby starts a second server, which takes over when the first stops. Each server is called after its folder,
 #   `server` and `standby`, as two machines would be called what each is.
