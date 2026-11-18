@@ -132,8 +132,40 @@ html[data-launcher="solid"] body {
 #passing > * {
   pointer-events: auto;
 }
+/* "Updated · Reload": a toast, as the UI library's, a pill of glass with Reload after a hairline. */
+#update {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  min-height: var(--pill);
+  padding: 0 0.25rem 0 0.75rem;
+  box-sizing: border-box;
+  border-radius: var(--radius-full);
+  background: var(--panel);
+  -webkit-backdrop-filter: var(--material-glass);
+  backdrop-filter: var(--material-glass);
+  box-shadow: var(--shadow-window);
+  color: var(--label);
+  font-size: var(--size-medium);
+}
 #update p {
   margin: 0;
+}
+#reload {
+  height: calc(var(--pill) - 0.5rem);
+  padding: 0 0.75rem;
+  border: 0;
+  border-left: 1px solid var(--quaternary-label);
+  border-radius: 0 var(--radius-full) var(--radius-full) 0;
+  background: none;
+  color: var(--secondary-label);
+  font: inherit;
+  cursor: pointer;
+}
+@media (hover: hover) and (pointer: fine) {
+  #reload:hover {
+    color: var(--label);
+  }
 }
 
 /* The mark, in the middle of the window: what shows while the client opens and home draws. */
@@ -373,17 +405,31 @@ iframe[data-move] {
 .ui-state .empty {
   color: var(--muted-foreground);
 }
+/* A problem, as the UI library's: a box tinted by how much it needs the person, its symbol in that colour, its words
+   plain, and the action that fixes it at its end. */
 .ui-state .problem {
   display: grid;
-  grid-template-columns: auto minmax(0, 1fr);
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
   justify-self: stretch;
-  gap: 0.125rem 0.625rem;
-  padding: 0.75rem 1rem;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-md);
-  background: var(--card);
-  color: var(--destructive);
+  gap: 0.125rem 0.75rem;
+  padding: 0.75rem;
+  border-radius: var(--radius-medium);
+  background: var(--red-tint);
+  color: var(--label);
   line-height: 1.4;
+}
+.ui-state .problem > .ui-icon {
+  grid-row: 1;
+  align-self: start;
+  color: var(--red);
+}
+.ui-state .problem > strong {
+  font-weight: var(--label-weight);
+}
+.ui-state .problem > .action {
+  grid-column: 3;
+  grid-row: 1 / span 3;
 }
 /* A state in the middle of its place: what's under way, or a problem with what fills it. */
 .ui-state.middle {
@@ -446,16 +492,17 @@ iframe[data-move] {
   border-radius: 50%;
 }
 .ui-state .problem.warn {
-  color: var(--warning);
+  background: var(--orange-tint);
+}
+.ui-state .problem.warn > .ui-icon {
+  color: var(--orange);
 }
 .ui-state .problem > .ui-icon {
   margin-top: 0.15em;
 }
-.ui-state .problem > :is(p, .action) {
+.ui-state .problem > p {
   grid-column: 2;
-}
-.ui-state .problem p {
-  opacity: 0.9;
+  color: var(--secondary-label);
 }
 /* Show Details: quiet, under the sentence, and what an agent reads of the problem once it's open. */
 .ui-state .problem > details {

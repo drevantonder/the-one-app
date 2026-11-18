@@ -32,25 +32,27 @@ const look = styles({
   next: { borderTopWidth: tokens.length.hairline, borderColor: tokens.colour.quinaryLabel },
   bar: { width: "40%", height: tokens.grid[3], borderRadius: tokens.radius.small, backgroundColor: tokens.colour.quinaryLabel, animationName: "pulse", animation: tokens.motion.pulse },
   longer: { width: "70%" },
+  // As the mockup's: a box tinted by how much it needs the user, its symbol in that colour, its words plain, and the
+  // action that fixes it at its end.
   problem: {
     flexDirection: "row",
+    alignItems: "center",
     alignSelf: "stretch",
-    columnGap: tokens.grid[2.5],
+    columnGap: tokens.grid[3],
     paddingBlock: tokens.grid[3],
-    paddingInline: tokens.grid[4],
-    borderWidth: tokens.length.hairline,
-    borderColor: tokens.colour.quinaryLabel,
+    paddingInline: tokens.grid[3],
     borderRadius: tokens.radius.medium,
-    backgroundColor: tokens.colour.card,
-    color: tokens.colour.red,
+    backgroundColor: tokens.colour.redTint,
+    color: tokens.colour.label,
     textAlign: "start",
   },
   centred: { alignSelf: "center", maxWidth: tokens.length.readable },
-  warn: { color: tokens.colour.orange },
-  symbol: { paddingTop: tokens.grid[0.5] },
+  warn: { backgroundColor: tokens.colour.orangeTint },
+  symbol: { alignSelf: "flex-start", paddingTop: tokens.grid[0.5], color: tokens.colour.red },
+  warnSymbol: { color: tokens.colour.orange },
   words: { flexGrow: 1, flexShrink: 1, minWidth: 0, gap: tokens.grid[0.5], alignItems: "flex-start" },
   heading: { fontWeight: tokens.weight.medium },
-  said: { opacity: 0.9 },
+  said: { color: tokens.colour.secondaryLabel },
   // Show Details: quiet, under the sentence.
   toggle: {
     flexDirection: "row",
@@ -65,7 +67,7 @@ const look = styles({
   },
   caret: { transitionProperty: ["rotate"], transition: tokens.motion.quick },
   turned: { rotate: 90 },
-  actions: { flexDirection: "row", flexWrap: "wrap", gap: tokens.grid[2], marginTop: tokens.grid[2], color: tokens.colour.label },
+  actions: { flexDirection: "row", flexShrink: 0, gap: tokens.grid[2], color: tokens.colour.label },
   // The rest of a tool's error, as it was written, with Copy in its corner as a code block has.
   details: { position: "relative", alignSelf: "stretch", marginTop: tokens.grid[1] },
   code: {
@@ -137,7 +139,7 @@ export function Problem(props: { heading: JSX.Element; text?: JSX.Element | Erro
   return (
     <Box role="alert" style={[look.state, middle() && look.middle, middle() && look.fill]}>
       <Box style={[look.problem, middle() && look.centred, props.warn && look.warn]}>
-        <Box style={look.symbol}>
+        <Box style={[look.symbol, props.warn && look.warnSymbol]}>
           <Icon name="warning-circle" />
         </Box>
         <Box style={look.words}>
@@ -156,10 +158,10 @@ export function Problem(props: { heading: JSX.Element; text?: JSX.Element | Erro
               <Details text={all()!} />
             </Show>
           </Show>
-          <Show when={props.action}>
-            <Box style={look.actions}>{props.action}</Box>
-          </Show>
         </Box>
+        <Show when={props.action}>
+          <Box style={look.actions}>{props.action}</Box>
+        </Show>
       </Box>
     </Box>
   )
