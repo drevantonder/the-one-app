@@ -4,6 +4,7 @@
 import { configureClientErrors, createSignal } from "solid-js"
 import { readable, reduced } from "./shared.ts"
 import type { JSX } from "@solidjs/web"
+import type { Client, ClientChange } from "./strict/types/ui.d.ts"
 
 /** A JSON-RPC response, as a client answers what a page asked. */
 interface JsonRpcResponse {
@@ -288,7 +289,7 @@ export const sizeChanged = (size: { width?: number; height?: number }) => greet(
 export const pinShortcut = (entrypoint: string): Promise<unknown> => greet().then(() => ask("one/pin-shortcut", { entrypoint }))
 
 /// `const { device, network, build, server, push } = await client()`: this device's key, as Devices lists it, the
-/// network's address, if it has one, the build it's on, its server's key if it's a server, and on a phone or in a
+/// network's address, if it has one, the build it's on, its server's key and state if it's a server, and on a phone or in a
 /// browser, whether it's woken by its notifications. `await client({ theme: "dark" })` has every app drawn dark, or `"light"`, or with
 /// `null` as the device is, and `client({ leave: true })` signs this device out once it's been removed from its
 /// person's devices. `client({ serve: true })` makes this device a server of its person's and `false` stops it being
@@ -313,35 +314,3 @@ export function client(change: ClientChange = {}): Promise<Client | { message: s
     })
 }
 
-/** What `client()` answers. */
-export interface Client {
-  device: string
-  network?: string
-  build: string
-  server?: string
-  /** Where a phone or a browser is with being woken by its notifications, `homeScreen` in an iPhone's browser, which is only from its Home Screen: nothing on a computer. */
-  push?: { state: "notAsked" | "denied" | "registering" | "registered" | "homeScreen" } | { state: "failed"; why: string }
-  /** Whether a phone's person turned on Computer Use in its Accessibility settings: nothing where a device has none. */
-  computerUse?: { on: boolean }
-  /** What `client({ theme })` chose for every app here: `null` where it's as the device is. */
-  theme: "light" | "dark" | null
-  /** Whether `pinShortcut` puts an app on the device's own home screen: on Android's app. */
-  pinsShortcuts?: boolean
-  /** Whether `client({ settings: "app" })` opens this device's Settings for the app: on a phone's app. */
-  settings?: boolean
-  /** Whether the page is a computer's launcher, the panel its Home Screen is shown in, which goes once an app opens. */
-  launcher?: boolean
-  /** Whether it's a Mac (or an iPhone or iPad), whose keys are ⌘ where a PC's are Ctrl. */
-  mac?: boolean
-}
-
-/** What `client(change)` changes. */
-export interface ClientChange {
-  theme?: "light" | "dark" | null
-  statusBar?: boolean
-  leave?: boolean
-  serve?: boolean
-  update?: boolean
-  push?: boolean
-  settings?: "accessibility" | "app"
-}

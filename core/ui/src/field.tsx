@@ -2,6 +2,8 @@ import { createContext, createMemo, createSignal, createUniqueId, For, omit, Sho
 import { Icon } from "./button.tsx"
 import { messages, touch } from "./shared.ts"
 import type { JSX } from "@solidjs/web"
+import { drawn as styled } from "./strict/primitives.tsx"
+import type { Style } from "./strict/types/ui.d.ts"
 
 /** What the controls inside a `Field` read of it. */
 export interface FieldContext {
@@ -90,10 +92,12 @@ function enters(control: HTMLInputElement) {
 /// `<Input name="name" />`: one line of text, in a `Field`. It's an `<input>`, and takes what one does: `type`
 /// (`email`, `tel`, `url`, `password`, `search`), `autocomplete`, `inputmode`, `enterkeyhint`, `required`, so the
 /// device shows the right keyboard and offers what it knows. Enter sends the form, and a phone's keyboard offers
-/// that from the last field of a form that's typed in, and the next field before it.
-export function Input(props: JSX.InputHTMLAttributes<HTMLInputElement>) {
+/// that from the last field of a form that's typed in, and the next field before it. A strict page's `style` draws one
+/// its own way, as a `Box`'s does: `style={look.number}`.
+export function Input(props: Omit<JSX.InputHTMLAttributes<HTMLInputElement>, "style"> & { style?: Style }) {
   const field = useField()
-  return <input {...described(field)} {...omit(props, "class", "ref")} class={["ui-box ring", props.class]} ref={[enters, props.ref]} />
+  const look = () => styled("ui-box ring", props.style)
+  return <input {...described(field)} {...omit(props, "class", "ref", "style")} {...look()} class={[look().class, props.class]} ref={[enters, props.ref]} />
 }
 
 /// `<Textarea name="note" />`: several lines of text, in a `Field`, growing with what's typed. `rows` is how tall

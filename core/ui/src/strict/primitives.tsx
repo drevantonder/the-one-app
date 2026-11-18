@@ -42,7 +42,7 @@ type Style = Styles | Version1Style
 const v1 = (style: Style | undefined): style is Version1Style => !!style && !Array.isArray(style) && typeof style === "object" && !("$id" in style)
 /** What a primitive's element has of its `style`: its classes after the primitive's own, its inline CSS, and a version
  * 1 type style's `data-font`. */
-const drawn = (own: string, style: Style | undefined) => (v1(style) ? { class: own, style: css(style), "data-font": style.font } : (({ class: names, style: inline }) => ({ class: `${own} ${names}`, style: inline }))(web(style as Styles)))
+export const drawn = (own: string, style: Style | undefined) => (v1(style) ? { class: own, style: css(style), "data-font": style.font } : (({ class: names, style: inline }) => ({ class: `${own} ${names}`, style: inline }))(web(style as Styles)))
 
 /** What a primitive takes of the protocol's props: its role and states, with what it listens for. */
 type Semantics = Pick<Props, Extract<keyof Props, "role" | `aria-${string}`>>

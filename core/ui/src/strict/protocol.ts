@@ -208,6 +208,10 @@ export interface Props {
   action?: Action
   /** `input`: what kind of text it takes, as an `<input type>`: which keyboard a phone shows, and `password` hides it. */
   type?: "text" | "search" | "email" | "url" | "tel" | "number" | "password"
+  /** `input`: which keyboard a touch screen shows for it, as `inputmode`: `numeric` is digits alone. */
+  inputmode?: "text" | "numeric" | "decimal" | "tel" | "email" | "url" | "search"
+  /** `input`: shown, chosen and copied, but not typed in. */
+  readonly?: boolean
   /** `input`: more than one line, as a `<textarea>`. */
   multiline?: boolean
   /** `input`: the grey words in it while it's empty. */

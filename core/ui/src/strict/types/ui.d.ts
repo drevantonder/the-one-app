@@ -118,11 +118,14 @@ export type Typed = {
 }
 
 export type InputProps = Pick<Semantics, "aria-label" | "aria-description" | "aria-invalid"> & {
+  style?: Style
   name?: string
   value?: string
   type?: Props["type"]
+  inputmode?: Props["inputmode"]
   placeholder?: string
   disabled?: boolean
+  readonly?: boolean
   required?: boolean
   autofocus?: boolean
   autocapitalize?: Props["autocapitalize"]
@@ -134,8 +137,8 @@ export type InputProps = Pick<Semantics, "aria-label" | "aria-description" | "ar
   onKeyDown?: (event: Keyed) => void
 }
 export declare function Input(props: InputProps): Element
-export declare function Textarea(props: Omit<InputProps, "type">): Element
-export declare function Search(props: Omit<InputProps, "type">): Element
+export declare function Textarea(props: Omit<InputProps, "type" | "style">): Element
+export declare function Search(props: Omit<InputProps, "type" | "style">): Element
 
 // The components.
 
@@ -297,7 +300,13 @@ export type Client = {
   device: string
   network?: string
   build: string
-  server?: string
+  /** This device as a server, while it is one or is becoming one: its key, and where becoming one or stopping being
+   * one is. */
+  server?: {
+    key: string
+    server_membership: "joining" | "active" | "leaving"
+    server_membership_stage?: "registering" | "downloading" | "installing" | "starting" | "draining" | "deregistering" | "uninstalling" | null
+  }
   push?: { state: "notAsked" | "denied" | "registering" | "registered" | "homeScreen" } | { state: "failed"; why: string }
   computerUse?: { on: boolean }
   theme: "light" | "dark" | null
