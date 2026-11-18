@@ -3,9 +3,8 @@
 // by a link that works once. Each says whether it unlocks their key on a new device: one whose PRF output derives a
 // key, which it says the next time it's used, gets the key encrypted to it by a device that holds it, here, once its
 // person says it may. Whoever uses it has their key from then on, so a passkey nobody here allowed never does.
-import { createMemo, Errored, For, Loading, refresh } from "solid-js"
-import { render } from "@solidjs/web"
-import { Button, call, changed, confirm, List, open, Problem, Row, Screen, Skeleton, toast } from "ui"
+import { createEffect, createMemo, Errored, For, Loading, refresh } from "solid-js"
+import { Button, call, changed, confirm, List, open, Problem, render, Row, Screen, Skeleton, toast, visible } from "ui"
 import { on, Remove } from "./mine.tsx"
 
 /** A passkey, as `sign-in_devices` answers it. */
@@ -24,8 +23,7 @@ const again = () => [mine, holds].forEach(refresh)
 changed(again)
 // A passkey made or used in the browser says its key there, which nothing here hears of: it's looked at again as
 // this screen comes back.
-addEventListener("focus", again)
-document.addEventListener("visibilitychange", () => document.visibilityState === "visible" && again())
+createEffect(visible, (now, was) => void (now && was === false && again()))
 
 /// Whether a passkey could unlock the key, and waits for its person to say it may.
 const waiting = (passkey: Passkey) => !!passkey.prf_key && !passkey.unlocks
@@ -69,35 +67,32 @@ const opens = (tool: string, inputs?: object) => async () => {
   }
 }
 
-render(
-  () => (
-    <Screen heading="Sign-In & Security" action={<Button onClick={opens("sign-in_add_passkey")}>Add Passkey</Button>}>
-      <Errored fallback={(error) => <Problem heading="Can't show your passkeys" text={error() as Error} />}>
-        <Loading fallback={<Skeleton rows={2} />}>
-          <List>
-            <For each={mine().passkeys} keyed={(passkey) => passkey.id}>
-              {(passkey) => {
-                const only = () => mine().passkeys.length === 1
-                return (
-                  <Row
-                    heading={passkey().name}
-                    text={`${unlocks(passkey())} · ${only() ? "Your only one" : `Made ${on(passkey().added)}`}`}
-                    action={
-                      passkey().prf_key === null ? (
-                        <Button variant="secondary" onClick={opens("sign-in_unlock_with_passkey")}>Set Up</Button>
-                      ) : waiting(passkey()) && holds() ? (
-                        <Button variant="secondary" onClick={() => allow(passkey())}>Allow</Button>
-                      ) : undefined
-                    }
-                    end={<Remove name={passkey().name} disabled={only()} onClick={() => remove(passkey())} />}
-                  />
-                )
-              }}
-            </For>
-          </List>
-        </Loading>
-      </Errored>
-    </Screen>
-  ),
-  document.body,
-)
+render(() => (
+  <Screen heading="Sign-In & Security" action={<Button onClick={opens("sign-in_add_passkey")}>Add Passkey</Button>}>
+    <Errored fallback={(error) => <Problem heading="Can't show your passkeys" text={error() as Error} />}>
+      <Loading fallback={<Skeleton rows={2} />}>
+        <List>
+          <For each={mine().passkeys} keyed={(passkey) => passkey.id}>
+            {(passkey) => {
+              const only = () => mine().passkeys.length === 1
+              return (
+                <Row
+                  heading={passkey().name}
+                  text={`${unlocks(passkey())} · ${only() ? "Your only one" : `Made ${on(passkey().added)}`}`}
+                  action={
+                    passkey().prf_key === null ? (
+                      <Button variant="secondary" onClick={opens("sign-in_unlock_with_passkey")}>Set Up</Button>
+                    ) : waiting(passkey()) && holds() ? (
+                      <Button variant="secondary" onClick={() => allow(passkey())}>Allow</Button>
+                    ) : undefined
+                  }
+                  end={<Remove name={passkey().name} disabled={only()} onClick={() => remove(passkey())} />}
+                />
+              )
+            }}
+          </For>
+        </List>
+      </Loading>
+    </Errored>
+  </Screen>
+))

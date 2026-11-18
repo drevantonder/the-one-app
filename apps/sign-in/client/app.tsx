@@ -8,10 +8,8 @@
 // each stage. Above them all are the devices waiting to sign in as whoever's looking, each let in by typing the
 // number it shows, as Microsoft Authenticator has it, or blocked.
 import { createMemo, createSignal, Errored, For, Loading, refresh, Show } from "solid-js"
-import { render } from "@solidjs/web"
-import { Button, call, changed, client, confirm, Empty, Field, haptic, Input, List, Problem, Row, Screen, Section, seen, Sheet, Skeleton, Spinner, Split, Steps, Switch, toast } from "ui"
+import { Box, Button, call, changed, client, confirm, Empty, Field, haptic, Input, link, List, Problem, render, Row, Screen, Section, seen, Sheet, Skeleton, Spinner, Split, Steps, styles, Switch, toast, tokens } from "ui"
 import { on } from "./mine.tsx"
-import "./app.css"
 
 /** A build a machine is on, as `builds` answers it. */
 interface Built {
@@ -48,13 +46,6 @@ interface Builds {
   devices: (Built & { device: string })[]
   latest: Record<string, { build: string }>
   servers: (Built & ServerStatus & { server: string; name?: string; installed?: boolean; last_seen?: number })[]
-}
-
-/** This device as a server, as the app says it: its key, and where becoming one or stopping being one is. */
-interface Here {
-  key: string
-  server_membership: "joining" | "active" | "leaving"
-  server_membership_stage?: "registering" | "downloading" | "installing" | "starting" | "draining" | "deregistering" | "uninstalling" | null
 }
 
 /** An app's service a server may run, as `services` answers it. */
@@ -97,7 +88,7 @@ const mine = createMemo(async () => {
   const [{ devices }, { waiting }, here, builds, network, services, networkServices] = await Promise.all([
     json<{ devices: Omit<Thing, "here">[] }>("sign-in_devices"),
     json<{ waiting: Waiting[] }>("sign-in_waiting"),
-    client() as Promise<{ device: string; build: string; server?: Here }>,
+    client(),
     json<Builds>("builds"),
     json<Builds>("builds", {}, "network"),
     json<{ services: Service[] }>("services"),
@@ -235,6 +226,23 @@ const press = (thing: Thing, does: (thing: Thing) => Promise<unknown>) => async 
   setWorking()
 }
 
+const look = styles({
+  /// The steps of an update under way, in a box of their own where the update's row was.
+  updating: {
+    maxWidth: tokens.length.readable,
+    paddingBlock: tokens.grid[4],
+    borderWidth: tokens.length.hairline,
+    borderColor: tokens.colour.quinaryLabel,
+    borderRadius: tokens.radius.large,
+    backgroundColor: tokens.colour.background,
+  },
+  /// What isn't a list stops at the width a list does, so a button isn't a line across a wide window.
+  readable: { gap: tokens.length.gutter, maxWidth: tokens.length.readable },
+  answer: { gap: tokens.length.gutter },
+  /// The number typed, big as figures are.
+  number: { height: "auto", paddingBlock: tokens.grid[4], font: tokens.type.largeTitle, fontVariantNumeric: "tabular-nums", textAlign: "center" },
+})
+
 /// A device or a server, opened: Update when one's ready, this device's server, its services, and taking it out.
 /** Everything Devices shows. */
 type All = Awaited<ReturnType<typeof mine>>
@@ -255,20 +263,20 @@ function Detail(props: { thing: Thing; all: All }) {
     <Screen heading={thing().name ?? "Server"} back>
       <Show when={stage()}>
         <Section heading="Updating">
-          <div class="updating">
+          <Box style={look.updating}>
             <Steps
               steps={Object.values(updates).map(({ step }) => step)}
               at={Object.keys(updates).indexOf(stage()!)}
               text={stage() === "verifying" ? "If it doesn't start, it goes back to the version it had." : stage() === "checked" ? "It installs when Software Update gets to it." : undefined}
             />
-          </div>
+          </Box>
         </Section>
       </Show>
       <Show when={steps()}>
         <Section heading={membership()!.server_membership === "joining" ? "Becoming a server" : "Stopping being a server"}>
-          <div class="updating">
+          <Box style={look.updating}>
             <Steps steps={Object.values(steps()!)} at={Math.max(0, Object.keys(steps()!).indexOf(membership()!.server_membership_stage ?? ""))} />
-          </div>
+          </Box>
         </Section>
       </Show>
       <List>
@@ -312,11 +320,11 @@ function Detail(props: { thing: Thing; all: All }) {
           </List>
         </Section>
       </Show>
-      <div class="readable">
+      <Box style={look.readable}>
         <Show when={thing().kind} fallback={<Button variant="destructive" onClick={() => removeServer(thing())}>Remove</Button>}>
           <Button variant={thing().here ? "outline" : "destructive"} onClick={() => remove(thing())}>{thing().here ? "Sign Out" : "Remove"}</Button>
         </Show>
-      </div>
+      </Box>
     </Screen>
   )
 }
@@ -329,10 +337,7 @@ const named = (at: string) => {
 
 /// The device waiting to sign in that's being answered, by its request: tapping its row, or a notification's link to
 /// it (`#waiting=<request>`), opens it.
-const [answering, setAnswering] = createSignal<string>()
-const linked = () => new URLSearchParams(location.hash.slice(1)).get("waiting") ?? undefined
-setAnswering(linked())
-addEventListener("hashchange", () => setAnswering(linked()))
+const [answering, setAnswering] = createSignal<string | undefined>(() => /(?:^|&)waiting=([^&]+)/.exec(link() ?? "")?.[1])
 
 /// The person's answer to a device waiting to sign in as them: the number they typed, which lets it in if it's the
 /// one it shows and blocks it if not, or Not Me, which blocks it. Once it's in, this device hands it its person's key if
@@ -353,27 +358,37 @@ async function answer(device: Waiting, number?: number) {
 }
 
 /// Is this you signing in? The number the device shows, typed, as Microsoft Authenticator asks for it: picking one of
-/// a few could be a lucky guess. It's typed, never filled in: the device's one-time-code autofill is off. Then Yes,
-/// or Not Me.
+/// a few could be a lucky guess. It's typed, never filled in: the device's one-time-code autofill is off. It takes
+/// two digits and nothing else, big as figures are. Then Yes, or Not Me.
 function Answer(props: { device?: Waiting }) {
   return (
     <Sheet heading="Is this you signing in?" open={!!props.device} onClose={() => setAnswering()}>
       <Show when={props.device}>
-        {(device) => (
-          <form
-            class="answer"
-            onSubmit={(event) => {
-              event.preventDefault()
-              answer(device(), Number(new FormData(event.currentTarget).get("number")))
-            }}
-          >
-            <Field label={`Enter the number showing on ${device().name}`}>
-              <Input name="number" class="number" inputmode="numeric" pattern="[0-9]{2}" maxlength={2} autocomplete="off" enterkeyhint="done" required autofocus />
-            </Field>
-            <Button type="submit">Yes</Button>
-            <Button variant="outline" onClick={() => answer(device())}>Not Me</Button>
-          </form>
-        )}
+        {(device) => {
+          // Set again with every key, so what isn't a digit, or is a third, is taken out of the field as it's typed.
+          const [number, setNumber] = createSignal("", { equals: false })
+          const [error, setError] = createSignal<string>()
+          const yes = () => (number().length === 2 ? answer(device(), Number(number())) : setError(`Enter the 2 digits showing on ${device().name}.`))
+          return (
+            <Box style={look.answer}>
+              <Field label={`Enter the number showing on ${device().name}`} error={error()}>
+                <Input
+                  name="number"
+                  inputmode="numeric"
+                  autocomplete="off"
+                  required
+                  autofocus
+                  value={number()}
+                  onInput={(event) => (setNumber(event.currentTarget.value.replace(/[^0-9]/g, "").slice(0, 2)), setError())}
+                  onKeyDown={(event) => event.key === "Enter" && yes()}
+                  style={look.number}
+                />
+              </Field>
+              <Button onClick={yes}>Yes</Button>
+              <Button variant="outline" onClick={() => answer(device())}>Not Me</Button>
+            </Box>
+          )
+        }}
       </Show>
     </Sheet>
   )
@@ -433,13 +448,10 @@ function Devices(props: { all: All }) {
   )
 }
 
-render(
-  () => (
-    <Errored fallback={(error) => <Screen heading="Devices"><Problem heading="Can't show your devices" text={error() as Error} /></Screen>}>
-      <Loading fallback={<Screen heading="Devices"><Skeleton rows={3} /></Screen>}>
-        <Devices all={mine()} />
-      </Loading>
-    </Errored>
-  ),
-  document.body,
-)
+render(() => (
+  <Errored fallback={(error) => <Screen heading="Devices"><Problem heading="Can't show your devices" text={error() as Error} /></Screen>}>
+    <Loading fallback={<Screen heading="Devices"><Skeleton rows={3} /></Screen>}>
+      <Devices all={mine()} />
+    </Loading>
+  </Errored>
+))

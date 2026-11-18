@@ -21,7 +21,7 @@ defmodule SignIn do
   def icon, do: "client/security.svg"
 
   @impl true
-  def requires, do: %{"core" => ">= 0.24.20"}
+  def requires, do: %{"core" => ">= 0.26.18"}
 
   # Nothing looks into it as it runs (`server-debug`): what it's given and keeps are what people sign in with.
   @impl true
@@ -33,26 +33,29 @@ defmodule SignIn do
   @impl true
   def entrypoints do
     [
-      %{name: "Users & Groups", page: "client/users.html", icon: "client/users.svg", category: "Admin"},
+      %{name: "Users & Groups", page: "client/users.html", icon: "client/users.svg", category: "Admin", host: 2},
       %{
         name: "Devices",
         page: "client/index.html",
         icon: "client/icon.svg",
         category: "Devices",
         subject: "user",
-        badge: "waiting"
+        badge: "waiting",
+        host: 2
       },
       %{
         name: "Sign-In & Security",
         page: "client/security.html",
-        subject: "user"
+        subject: "user",
+        host: 2
       },
       %{
         name: "Connect Your AI",
         page: "client/connect.html",
         icon: "client/connect.svg",
         category: "AI",
-        subject: "user"
+        subject: "user",
+        host: 2
       }
     ]
   end

@@ -4,8 +4,14 @@
 // has a Home Screen of its own that its members see, and its owners add someone in the network to it and take members
 // out. Groups are each person's own, so they're asked for as the person, wherever the app was opened.
 import { createMemo, createSignal, Errored, For, Loading, refresh, Show } from "solid-js"
-import { render } from "@solidjs/web"
-import { Button, call, changed, confirm, Empty, Field, Icon, Input, List, Menu, Problem, Row, Screen, Section, share, Sheet, Skeleton, Split, toast } from "ui"
+import { Box, Button, call, changed, confirm, Empty, Field, Icon, Input, List, Menu, Problem, render, Row, Screen, Section, share, Sheet, Skeleton, Split, styles, Text, toast, tokens } from "ui"
+
+const look = styles({
+  form: { gap: tokens.length.gutter },
+  /// The Groups heading, with New Group at its end, as wide as the list under it.
+  groups: { flexDirection: "row", alignItems: "center", gap: tokens.grid[3], maxWidth: tokens.length.readable },
+  grows: { flexGrow: 1 },
+})
 
 /** Someone in the network, or invited to it, as `sign-in_everyone` answers it. */
 interface Person {
@@ -78,14 +84,14 @@ const [adding, setAdding] = createSignal<"group" | "member">()
 
 /// The name whoever's looking goes by, to change.
 function Name(props: { open: boolean; onClose: () => void; called?: string }) {
+  const [called, setCalled] = createSignal(() => props.called ?? "")
   const [error, setError] = createSignal<string>()
   const [working, setWorking] = createSignal(false)
-  const save = async (event: SubmitEvent & { currentTarget: HTMLFormElement }) => {
-    event.preventDefault()
+  const save = async () => {
     setWorking(true)
     setError()
     try {
-      await call("sign-in_name", { called: String(new FormData(event.currentTarget).get("called")).trim() })
+      await call("sign-in_name", { called: called().trim() })
       refresh(all)
       props.onClose()
     } catch (thrown) {
@@ -96,12 +102,12 @@ function Name(props: { open: boolean; onClose: () => void; called?: string }) {
   }
   return (
     <Sheet heading="Your Name" open={props.open} onClose={() => (props.onClose(), setError())}>
-      <form onSubmit={save}>
+      <Box style={look.form}>
         <Field label="Name" hint="As people here know you." error={error()}>
-          <Input name="called" required autofocus autocomplete="name" value={props.called ?? ""} />
+          <Input name="called" required autofocus autocomplete="name" value={called()} onInput={(event) => setCalled(event.currentTarget.value)} onKeyDown={(event) => event.key === "Enter" && save()} />
         </Field>
-        <Button type="submit" loading={working()}>Save</Button>
-      </form>
+        <Button loading={working()} onClick={save}>Save</Button>
+      </Box>
     </Sheet>
   )
 }
@@ -111,15 +117,15 @@ function Invite(props: { open: boolean; onClose: () => void }) {
   const [link, setLink] = createSignal<string>()
   const [error, setError] = createSignal<string>()
   const [working, setWorking] = createSignal(false)
-  const close = () => (props.onClose(), setLink(), setError())
-  const make = async (event: SubmitEvent & { currentTarget: HTMLFormElement }) => {
-    event.preventDefault()
-    const name = String(new FormData(event.currentTarget).get("name")).trim().toLowerCase()
+  const [name, setName] = createSignal("")
+  const close = () => (props.onClose(), setLink(), setError(), setName(""))
+  const make = async () => {
+    const who = name().trim().toLowerCase()
     setWorking(true)
     setError()
     try {
       // The tool says who joins where, and the link is its last word.
-      setLink(JSON.parse(await call("sign-in_invite", { name })).link)
+      setLink(JSON.parse(await call("sign-in_invite", { name: who })).link)
       refresh(all)
     } catch (thrown) {
       setError((thrown as Error).message)
@@ -139,18 +145,20 @@ function Invite(props: { open: boolean; onClose: () => void }) {
       <Show
         when={link()}
         fallback={
-          <form onSubmit={make}>
+          <Box style={look.form}>
             <Field label="Name" hint="Lowercase letters, digits and hyphens. It's who they are here, for good." error={error()}>
-              <Input name="name" required autofocus autocapitalize="none" autocorrect="off" spellcheck={false} pattern="[a-zA-Z][a-zA-Z0-9\-]*" />
+              <Input name="name" required autofocus autocapitalize="none" spellcheck={false} value={name()} onInput={(event) => setName(event.currentTarget.value)} onKeyDown={(event) => event.key === "Enter" && make()} />
             </Field>
-            <Button type="submit" loading={working()}>Create Link</Button>
-          </form>
+            <Button loading={working()} onClick={make}>Create Link</Button>
+          </Box>
         }
       >
-        <Field label="Link" hint="It works once, for a week.">
-          <Input readonly value={link()} onFocus={(event) => event.currentTarget.select()} />
-        </Field>
-        <Button onClick={send}>Share Link</Button>
+        <Box style={look.form}>
+          <Field label="Link" hint="It works once, for a week.">
+            <Input readonly value={link()} />
+          </Field>
+          <Button onClick={send}>Share Link</Button>
+        </Box>
       </Show>
     </Sheet>
   )
@@ -158,18 +166,19 @@ function Invite(props: { open: boolean; onClose: () => void }) {
 
 /// A sheet with one name to type: a new group's.
 function NewGroup(props: { open: boolean; onClose: () => void; me: string }) {
-  const send = async (event: SubmitEvent & { currentTarget: HTMLFormElement }) => {
-    event.preventDefault()
-    if (await change("permissions_group", { name: String(new FormData(event.currentTarget).get("name")).trim() }, props.me)) props.onClose()
+  const [name, setName] = createSignal("")
+  const close = () => (props.onClose(), setName(""))
+  const send = async () => {
+    if (await change("permissions_group", { name: name().trim() }, props.me)) close()
   }
   return (
-    <Sheet heading="New Group" open={props.open} onClose={props.onClose}>
-      <form onSubmit={send}>
+    <Sheet heading="New Group" open={props.open} onClose={close}>
+      <Box style={look.form}>
         <Field label="Name">
-          <Input name="name" required autofocus autocapitalize="words" autocorrect="off" />
+          <Input name="name" required autofocus autocapitalize="words" value={name()} onInput={(event) => setName(event.currentTarget.value)} onKeyDown={(event) => event.key === "Enter" && send()} />
         </Field>
-        <Button type="submit">New Group</Button>
-      </form>
+        <Button onClick={send}>New Group</Button>
+      </Box>
     </Sheet>
   )
 }
@@ -267,7 +276,14 @@ function UsersAndGroups(props: { all: All }) {
               </List>
             </Section>
           </Show>
-          <Section heading={<span class="groups"><span>Groups</span><Button variant="secondary" onClick={() => setAdding("group")}>New Group</Button></span>}>
+          <Section
+            heading={
+              <Box style={look.groups}>
+                <Text style={look.grows}>Groups</Text>
+                <Button variant="secondary" onClick={() => setAdding("group")}>New Group</Button>
+              </Box>
+            }
+          >
             <Show when={props.all.groups.length} fallback={<Empty>You're in no groups yet.</Empty>}>
               <List>
                 <For each={props.all.groups} keyed={({ group }) => group}>
@@ -286,16 +302,10 @@ function UsersAndGroups(props: { all: All }) {
   )
 }
 
-render(
-  () => (
-    <>
-      <style>{".groups { display: flex; align-items: center; gap: 0.75rem; max-width: var(--readable); } .groups > span { flex: 1; min-width: 0; }"}</style>
-      <Errored fallback={(error) => <Screen heading="Users & Groups"><Problem heading="Can't show who's in your network" text={error() as Error} /></Screen>}>
-        <Loading fallback={<Screen heading="Users & Groups"><Skeleton rows={3} /></Screen>}>
-          <UsersAndGroups all={all()} />
-        </Loading>
-      </Errored>
-    </>
-  ),
-  document.body,
-)
+render(() => (
+  <Errored fallback={(error) => <Screen heading="Users & Groups"><Problem heading="Can't show who's in your network" text={error() as Error} /></Screen>}>
+    <Loading fallback={<Screen heading="Users & Groups"><Skeleton rows={3} /></Screen>}>
+      <UsersAndGroups all={all()} />
+    </Loading>
+  </Errored>
+))
