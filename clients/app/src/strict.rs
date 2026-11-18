@@ -76,7 +76,8 @@ struct Page {
     module: Url,
     trusted: bool,
     tables: Vec<String>,
-    /// Its icon, as a `data:` address, for the window's breadcrumb.
+    /// Its name and icon, as a `data:` address, as its app lists them, for the window's title and breadcrumb.
+    name: Option<String>,
     icon: Option<String>,
 }
 
@@ -121,11 +122,12 @@ async fn probe(entrypoint: &str, subject: Option<&str>) -> anyhow::Result<Option
         }
         tables.push(text);
     }
-    Ok(Some(Page { module: page.join(&module)?, trusted, tables, icon }))
+    let name = resource["name"].as_str().filter(|name| !name.is_empty()).map(str::to_owned);
+    Ok(Some(Page { module: page.join(&module)?, trusted, tables, name, icon }))
 }
 
 async fn window(started: Instant, entrypoint: &str, subject: Option<&str>, link: &str) -> anyhow::Result<bool> {
-    let Some(Page { module, trusted, tables, icon }) = probe(entrypoint, subject).await? else { return Ok(false) };
+    let Some(Page { module, trusted, tables, name: listed, icon }) = probe(entrypoint, subject).await? else { return Ok(false) };
     let strict = Strict::get()?;
     let asked: Arc<Mutex<HashMap<String, Asked>>> = Arc::default();
     let window: Arc<OnceLock<WindowId>> = Arc::default();
@@ -138,7 +140,7 @@ async fn window(started: Instant, entrypoint: &str, subject: Option<&str>, link:
     let _ = to.send(json!({"id": "start", "command": "start", "args": {"entrypoint": entrypoint}}));
     let start = start.await?;
     let chosen = start["theme"].as_str().map(str::to_owned);
-    let name = start["name"].as_str().map_or_else(|| entrypoint.split('/').next().unwrap_or_default().to_owned(), str::to_owned);
+    let name = listed.or_else(|| start["name"].as_str().map(str::to_owned)).unwrap_or_else(|| entrypoint.split('/').next().unwrap_or_default().to_owned());
 
     let (files_to, files_asked) = (to.clone(), asked.clone());
     let state = Arc::new(Mutex::new(State { chosen: chosen.clone(), trusted, entrypoint: entrypoint.to_owned(), view, next: 0 }));
