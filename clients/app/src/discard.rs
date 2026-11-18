@@ -1,7 +1,7 @@
-//! A computer's window of web content (on Windows and Linux, `DISCARDS`) discards its page once it's been minimised or
-//! hidden a while, as a browser discards a tab and a phone ends an app in the background: its web view goes, and with
-//! it its web content process, and the page loads again as the window comes back. Each app's own window has one
-//! (`host`), and the launcher (`computer`).
+//! A computer's window of web content discards its page once it's been minimised or hidden a while, as a browser
+//! discards a tab and a phone ends an app in the background: its web view goes, and with it its web content process,
+//! and the page loads again as the window comes back. Each app's own window has one (`host`), and the launcher
+//! (`computer`).
 
 use std::time::{Duration, Instant};
 
@@ -11,11 +11,6 @@ use tao::window::Window;
 
 /// How long a window is minimised or hidden before its page is discarded.
 pub(crate) const DISCARD_AFTER: Duration = Duration::from_secs(60);
-
-/// Whether a page is discarded at all: not on a Mac, where wry's web view leaves its WKWebView alive as it goes, with
-/// its page, its web content process and its layers in the GPU process, so each page loaded again would hold more than
-/// the one it replaced.
-const DISCARDS: bool = !cfg!(target_os = "macos");
 
 /// A window's page, made again each time it's loaded.
 pub(crate) trait Page {
@@ -121,7 +116,7 @@ impl<P: Page> Discarding<P> {
     /// Discards the page once the window's been minimised or hidden long enough. → How the event loop waits: until
     /// then, if it may be.
     pub(crate) fn discard_due(&mut self, window: &Window) -> ControlFlow {
-        let Some(since) = self.away.filter(|_| DISCARDS && self.loaded.is_some()) else { return ControlFlow::Wait };
+        let Some(since) = self.away.filter(|_| self.loaded.is_some()) else { return ControlFlow::Wait };
         if since.elapsed() < DISCARD_AFTER {
             return ControlFlow::WaitUntil(since + DISCARD_AFTER);
         }
@@ -139,8 +134,13 @@ impl<P: Page> Discarding<P> {
         // WebDriver drives it as it does Tauri's windows, which tauri-driver says by this.
         context.set_allows_automation(std::env::var("TAURI_WEBVIEW_AUTOMATION").as_deref() == Ok("true"));
         let builder = self.page.make(wry::WebViewBuilder::new_with_web_context(&mut context));
-        #[cfg(not(target_os = "linux"))]
+        #[cfg(windows)]
         let webview = builder.build(window)?;
+        // A Mac's first page is made before the event loop runs, where no autorelease pool is drained, so what AppKit
+        // and WebKit autorelease as it's made would keep its WKWebView, with its web content process, alive after it's
+        // discarded: it's made in a pool of its own.
+        #[cfg(target_os = "macos")]
+        let webview = objc2::rc::autoreleasepool(|_| builder.build(window))?;
         #[cfg(target_os = "linux")]
         let webview = {
             use gtk::prelude::*;
