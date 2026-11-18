@@ -1485,8 +1485,9 @@ addEventListener("message", async ({ source, data }) => {
     const { code, message } = /** @type {{ code?: number, message?: string }} */ (error)
     post(view, { id, error: { code: code ?? -32000, message: message ?? String(error) } })
   }
-  // It has what it draws from once the client has answered it something.
-  if (method.startsWith("ui/") || method.startsWith("one/")) return
+  // It has what it draws from once the client has answered it something: a tool, or its client's own answer (`client()`),
+  // which is all a page that calls no tool asks for (Connect Your AI), so it isn't left waiting to draw.
+  if (method.startsWith("ui/") || (method.startsWith("one/") && method !== "one/client")) return
   if (pageOf(view)?.matches("current")) return
   page(view, { type: "drawn" })
   if (!view.frame.inert) opened(view)
