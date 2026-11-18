@@ -1,5 +1,5 @@
 //! Each app with a screen of its own, where the device lists its own apps, so it's found and opened as they are: an
-//! iPhone's Spotlight and the app's one App Shortcut, Open [app] in The One App, which Siri, Shortcuts and the Action
+//! iPhone's Spotlight and the app's one App Shortcut, Open [app] in the One App, which Siri, Shortcuts and the Action
 //! button have too (`gen/apple/Sources/app/Shortcuts.swift`), Windows' Start menu, a Mac's Applications folder, which
 //! Spotlight and Launchpad find, and a Linux desktop's applications. Each opens its app as the device's own: on a phone
 //! here by its `one:` link (`links`), and on a computer in a window of its own (`host`). They follow what's listed for
@@ -7,7 +7,7 @@
 //! has none. A Mac's and Linux's are kept only by an installed build, as only it takes the device's `one:` links: a
 //! developer's would leave behind ones to a build that's gone.
 //!
-//! An app's icon outside The One App has The One App's ring small in its corner (`badged`), so a person who finds it in
+//! An app's icon outside the One App has the One App's ring small in its corner (`badged`), so a person who finds it in
 //! Spotlight, Raycast or the Start menu sees whose it is. Android badges its pinned shortcuts with this app's icon
 //! itself, and its dynamic ones are in this app's own icon's menu, so they're plain (`MainActivity`).
 
@@ -90,10 +90,10 @@ fn png(icon: &str, side: u32) -> anyhow::Result<Vec<u8>> {
     Ok(drawn.encode_png()?)
 }
 
-/// An app's icon where it leaves The One App (Spotlight, Raycast, the Dock, the Start menu, a launcher), as a square PNG
+/// An app's icon where it leaves the One App (Spotlight, Raycast, the Dock, the Start menu, a launcher), as a square PNG
 /// `side` pixels across: on macOS's icon grid, its body 824 of 1024 across in the middle, rounded by 185, with a shadow
-/// below it, and The One App's ring small in the bottom right corner, so it reads as that app's, of The One App. It's
-/// drawn from the same numbers as `tooling/helper-icon`'s helpers. Inside The One App an icon stays plain.
+/// below it, and the One App's ring small in the bottom right corner, so it reads as that app's, of the One App. It's
+/// drawn from the same numbers as `tooling/helper-icon`'s helpers. Inside the One App an icon stays plain.
 #[cfg(any(windows, target_os = "linux", target_os = "ios"))]
 fn badged(icon: &str, side: u32) -> anyhow::Result<Vec<u8>> {
     Ok(scaled(&badged_pixmap(icon)?, side)?.encode_png()?)
@@ -222,6 +222,23 @@ mod device {
     }
 }
 
+/// Moves a folder to the name it has now if an earlier build named it with other capitals ("The One App" before it was
+/// "the One App"), once, so there aren't two: macOS and Windows take both names for one folder, so renaming is how its
+/// capitals change. Says whether it moved one.
+#[cfg(any(target_os = "macos", windows))]
+fn renamed(folder: &std::path::Path) -> anyhow::Result<bool> {
+    let (Some(parent), Some(name)) = (folder.parent(), folder.file_name()) else { return Ok(false) };
+    let Ok(entries) = std::fs::read_dir(parent) else { return Ok(false) };
+    for entry in entries.flatten() {
+        let was = entry.file_name();
+        if was != name && was.to_string_lossy().eq_ignore_ascii_case(&name.to_string_lossy()) {
+            std::fs::rename(entry.path(), folder)?;
+            return Ok(true);
+        }
+    }
+    Ok(false)
+}
+
 /// Windows' are shortcuts in the Start menu, in a folder named for this app, each to this program with its `one:` link,
 /// and with its icon and an AppUserModelID of its own (`app_id`), which the app's own window says too (`host`), so it
 /// groups under its own icon in the taskbar, apart from this app's.
@@ -246,6 +263,7 @@ mod device {
     pub fn keep(shortcuts: &[Shortcut]) -> anyhow::Result<()> {
         let start = super::data_dir()?.join("Microsoft/Windows/Start Menu/Programs").join(crate::page::NAME);
         let icons = super::local_data_dir()?.join("shortcuts");
+        super::renamed(&start)?;
         std::fs::create_dir_all(&start)?;
         std::fs::create_dir_all(&icons)?;
         let program = std::env::current_exe()?;
@@ -365,6 +383,12 @@ mod device {
             return Ok(());
         }
         let folder = folder()?;
+        // The bundles in a folder that moved are told to LaunchServices again, as it knows them by their path.
+        if super::renamed(&folder)? {
+            for kept in std::fs::read_dir(&folder)?.flatten() {
+                register(&kept.path(), "-f");
+            }
+        }
         std::fs::create_dir_all(&folder)?;
         let program = std::env::current_exe()?;
         let mut made = Vec::new();

@@ -244,7 +244,7 @@ fn requires(app: &Path) -> Vec<String> {
 /// Stops with what to build, where an app brings a NIF that isn't built for every kind of machine the network's
 /// servers run on, here or published where its `server/checksums.json` says, which the server downloads
 /// (`OneCore.Apps.Precompiled`): its source is never deployed, only the library built from it (`OneCore.App`),
-/// so the agent installing or deploying it builds it, as `tooling/nifs` does for the apps The One App ships with.
+/// so the agent installing or deploying it builds it, as `tooling/nifs` does for the apps the One App ships with.
 async fn built(client: &Client, of: &str, name: &str, app: &Path) -> Result<()> {
     if !app.join("server/nif").is_dir() {
         return Ok(());

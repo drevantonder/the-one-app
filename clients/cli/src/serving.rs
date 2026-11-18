@@ -1053,7 +1053,7 @@ async fn take_program(one: &Value, program: &Path) -> Result<()> {
 }
 
 /// Downloads the build `one` of the program `program` beside it, and gives where, once it has said it's that build.
-/// It's beside the file a link to it names, as on a Mac `~/.local/bin/one` is a link to the program in The One App's
+/// It's beside the file a link to it names, as on a Mac `~/.local/bin/one` is a link to the program in the One App's
 /// bundle.
 async fn fetched_program(one: &Value, program: &Path) -> Result<PathBuf> {
     let build = one["build"].as_str().context("a build says which it is")?;
@@ -1398,7 +1398,7 @@ mod system {
         fs::write(
             &unit,
             format!(
-                "[Unit]\nDescription=The One App's server\nStartLimitIntervalSec=600\nStartLimitBurst=10\n\n\
+                "[Unit]\nDescription=the One App's server\nStartLimitIntervalSec=600\nStartLimitBurst=10\n\n\
                  [Service]\nType=notify\nExecStart=\"{}\" serve run\n{env}Restart=on-failure\nRestartSec=10\n\
                  TimeoutStartSec={}\nKillMode=mixed\nTimeoutStopSec={}\n\n[Install]\nWantedBy=default.target\n",
                 program.display(),
@@ -1606,7 +1606,7 @@ mod system {
     use super::*;
 
     fn name(key: &str) -> String {
-        format!("The One App server {}", &key[..12])
+        format!("the One App server {}", &key[..12])
     }
 
     /// Where `start` hears that the server is running. A named pipe, as a task runs in its person's session, which
@@ -1628,7 +1628,7 @@ mod system {
         let task = format!(
             r#"<?xml version="1.0" encoding="UTF-16"?>
 <Task version="1.4" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">
-  <RegistrationInfo><Description>The One App's server, which `one serve off` removes.</Description></RegistrationInfo>
+  <RegistrationInfo><Description>the One App's server, which `one serve off` removes.</Description></RegistrationInfo>
   <Triggers>
     <LogonTrigger><UserId>{user}</UserId></LogonTrigger>
     <TimeTrigger><StartBoundary>2000-01-01T00:00:00</StartBoundary><Repetition><Interval>PT1M</Interval></Repetition></TimeTrigger>

@@ -37,7 +37,7 @@ import kotlin.math.sqrt
 /**
  * Computer Use on this phone: what an agent sees of its screen and does on it, as its person asked, through Android's
  * accessibility service, the one way Android lets an app see the screen and touch it without asking again each time.
- * Its person turns it on in Settings → Accessibility, where it's The One App. While it's on, Android keeps it
+ * Its person turns it on in Settings → Accessibility, where it's the One App. While it's on, Android keeps it
  * running. A server acting for its person asks the app's Rust (`apps/computer-use/client/native`), which asks this,
  * on a thread of its own, which waits here for Android to have done it.
  *
@@ -227,7 +227,7 @@ class ComputerUse : AccessibilityService() {
       if (Build.VERSION.SDK_INT < Build.VERSION_CODES.R) throw IllegalStateException("Computer Use needs Android 11 or later.")
       return running ?: run {
         asked(context)
-        throw IllegalStateException("Computer Use isn't on for this ${kind(context)}: its person turns on The One App in Settings → Accessibility, as Computer Use in the app shows them.")
+        throw IllegalStateException("Computer Use isn't on for this ${kind(context)}: its person turns on the One App in Settings → Accessibility, as Computer Use in the app shows them.")
       }
     }
 
@@ -244,7 +244,7 @@ class ComputerUse : AccessibilityService() {
       val shown = NotificationCompat.Builder(context, CHANNEL)
         .setSmallIcon(R.mipmap.ic_launcher)
         .setContentTitle("Your AI asked to use this ${kind(context)}")
-        .setContentText("To let it, turn on The One App in Accessibility settings.")
+        .setContentText("To let it, turn on the One App in Accessibility settings.")
         .setAutoCancel(true)
         .setContentIntent(PendingIntent.getActivity(context, ASKED, tap, PendingIntent.FLAG_IMMUTABLE or PendingIntent.FLAG_UPDATE_CURRENT))
         .build()

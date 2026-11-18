@@ -1,10 +1,10 @@
 # Building a network's app
 
-There's no app of The One App's own: each network has its own, built from this folder with the settings in its
+There's no app of the One App's own: each network has its own, built from this folder with the settings in its
 repo's `app/`, whose `README.md` gives the commands. They're Tauri's CLI's (`cargo tauri`), run here, with the
 network's repo checked out beside this one. A network's app is a Tauri config of its own (`app/tauri.conf.json`)
 merged over `tauri.conf.json` with `--config`, for a name, identifier and icon of its own, and its network's address
-(`app/address`) given to the build as `TAURI_ONE_ADDRESS`. A network's app with The One App's own name and icon has
+(`app/address`) given to the build as `TAURI_ONE_ADDRESS`. A network's app with the One App's own name and icon has
 no config of its own. `tooling/network` starts a network on this machine and opens an app built from here on it.
 
 Android needs an Android SDK and its NDK (`ANDROID_HOME`, `NDK_HOME`), and iPhone a Mac with Xcode, `xcodegen` and
@@ -31,9 +31,9 @@ Tauri merges a network's config over `tauri.conf.json` as it builds:
     {"productName": "<its name>", "identifier": "<its identifier>", "bundle": {"icon": ["../../../<its repo>/app/icons/icon.png"]}}
 
 `TAURI_CONFIG="$(cat <that file>)" cargo build --release` builds the program alone. Its identifier names the folder its
-client is kept in too, so it sits beside The One App on one device. On iPhone, Tauri's CLI puts the name and
+client is kept in too, so it sits beside the One App on one device. On iPhone, Tauri's CLI puts the name and
 identifier in the Xcode project as it builds, and `cargo tauri icon <png>` makes its icons. `gen/apple/generate <that
 file>` first makes its Xcode project, so its notification extension and App Group are named after its identifier too.
-Android's project names The One App's identifier and name itself (`app/build.gradle.kts`, `strings.xml`, the folder
+Android's project names the One App's identifier and name itself (`app/build.gradle.kts`, `strings.xml`, the folder
 of `MainActivity`), so a network's Android app with an identifier of its own is made from its own
 `cargo tauri android init --config <that file>` for now.

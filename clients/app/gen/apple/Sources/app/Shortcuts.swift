@@ -2,7 +2,7 @@ import AppIntents
 import CoreSpotlight
 import UIKit
 
-/// An app in The One App with a screen of its own, as the app last listed them (`shortcuts` in src/shortcuts.rs): in
+/// An app in the One App with a screen of its own, as the app last listed them (`shortcuts` in src/shortcuts.rs): in
 /// `shortcuts.json` in its Application Support folder, each its entrypoint (`<app>/<page>`), name and icon, a PNG.
 @available(iOS 17.0, *)
 struct InstalledApp: AppEntity {
@@ -56,11 +56,11 @@ struct InstalledApps: EnumerableEntityQuery, EntityStringQuery {
     func suggestedEntities() async throws -> [InstalledApp] { InstalledApp.listed() }
 }
 
-/// Opens an app in The One App, by its `one:` link, which the app opens as any (`links` in src/lib.rs).
+/// Opens an app in the One App, by its `one:` link, which the app opens as any (`links` in src/lib.rs).
 @available(iOS 17.0, *)
 struct OpenApp: OpenIntent {
     static let title: LocalizedStringResource = "Open App"
-    static let description = IntentDescription("Opens an app in The One App.")
+    static let description = IntentDescription("Opens an app in the One App.")
 
     @Parameter(title: "App") var target: InstalledApp
 
@@ -74,7 +74,7 @@ struct OpenApp: OpenIntent {
 }
 
 /// The app's one App Shortcut, which iOS offers in Shortcuts, Spotlight, Siri and the Action button with no setting
-/// up: Open [app] in The One App, for each app listed. iOS takes ten an app at most, so it's one, with the app as its
+/// up: Open [app] in the One App, for each app listed. iOS takes ten an app at most, so it's one, with the app as its
 /// parameter.
 @available(iOS 17.0, *)
 struct Shortcuts: AppShortcutsProvider {

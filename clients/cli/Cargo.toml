@@ -1,6 +1,6 @@
 [package]
 name = "cli"
-description = "The CLI and MCP, on One Core in a client, with the native code of the apps The One App ships with."
+description = "The CLI and MCP, on One Core in a client, with the native code of the apps the One App ships with."
 version.workspace = true
 edition.workspace = true
 license.workspace = true

@@ -1,6 +1,6 @@
 {
   "$schema": "https://schema.tauri.app/config/2",
-  "productName": "The One App",
+  "productName": "the One App",
   "identifier": "app.theone.client",
   "build": {
     "windows": { "staticVCRuntime": false },

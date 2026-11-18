@@ -12,7 +12,7 @@ configs:
 settingGroups:
   app:
     base:
-      PRODUCT_NAME: The One App
+      PRODUCT_NAME: the One App
       PRODUCT_BUNDLE_IDENTIFIER: ${ONE_IDENTIFIER}
 targetTemplates:
   app:
