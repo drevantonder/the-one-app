@@ -1,8 +1,7 @@
 //! A computer's window of web content (on Windows and Linux, `DISCARDS`) discards its page once it's been minimised or
-//! hidden a while, as a browser
-//! discards a tab and a phone ends an app in the background: its web view goes, and with it its web content process,
-//! and the page loads again as the window comes back. Each app's own window has one (`host`), and the launcher
-//! (`computer`).
+//! hidden a while, as a browser discards a tab and a phone ends an app in the background: its web view goes, and with
+//! it its web content process, and the page loads again as the window comes back. Each app's own window has one
+//! (`host`), and the launcher (`computer`).
 
 use std::time::{Duration, Instant};
 
