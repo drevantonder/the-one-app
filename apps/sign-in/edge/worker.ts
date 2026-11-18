@@ -12,7 +12,7 @@ const NETWORK = "network/";
 export default {
   async fetch(request: Request, _env, ctx) {
     const url = new URL(request.url);
-    if (request.method === "GET" && (url.pathname.startsWith("/.well-known/") || url.pathname === JWKS)) return discovery(request, ctx);
+    if (request.method === "GET" && (url.pathname.includes("/.well-known/") || url.pathname === JWKS)) return discovery(url, ctx);
     const auth = await at(url.origin);
     if (url.pathname === "/sign-in/ask") return ask(request, auth, url);
     if (url.pathname.startsWith("/sign-in/auth/") || url.pathname.startsWith("/.well-known/")) return auth.handler(request);
@@ -30,22 +30,25 @@ const DISCOVERED = 60;
  * an assistant finding out how to sign in never waits for Better Auth to start, even just after a deploy. One that's
  * older than `DISCOVERED`, or from another deploy, is answered as it is and asked for again behind it.
  */
-async function discovery(request: Request, ctx: ExecutionContext) {
+async function discovery(url: URL, ctx: ExecutionContext) {
   const version = `"${env.VERSION.id}"`;
+  // Nothing it's asked with changes it, so it's kept by its address alone.
+  const kept = `${url.origin}${url.pathname}`;
   const fresh = async () => {
-    const answer = await (await at(new URL(request.url).origin)).handler(new Request(request.url));
+    const answer = await (await at(url.origin)).handler(new Request(kept));
     if (!answer.ok) return answer;
-    const kept = new Response(answer.body, answer);
-    kept.headers.set("cache-control", `public, max-age=${DISCOVERED}`);
-    kept.headers.set("etag", version);
-    kept.headers.set("date", new Date().toUTCString());
-    // Kept for a day, as the cache keeps what its headers say, and answered from for as long.
-    const stored = new Response(kept.clone().body, kept);
-    stored.headers.set("cache-control", "public, max-age=86400");
-    await caches.default.put(request.url, stored);
-    return kept;
+    const answered = new Response(answer.body, answer);
+    answered.headers.set("cache-control", `public, max-age=${DISCOVERED}`);
+    answered.headers.set("etag", version);
+    answered.headers.set("date", new Date().toUTCString());
+    // The cache keeps it as long as its headers say, and it's asked for again behind it as it's answered, so it's
+    // kept for a year.
+    const stored = new Response(answered.clone().body, answered);
+    stored.headers.set("cache-control", "public, max-age=31536000");
+    await caches.default.put(kept, stored);
+    return answered;
   };
-  const cached = await caches.default.match(request.url);
+  const cached = await caches.default.match(kept);
   if (!cached) return fresh();
   const age = Date.now() - Date.parse(cached.headers.get("date") ?? "");
   if (cached.headers.get("etag") !== version || !(age < DISCOVERED * 1000)) ctx.waitUntil(fresh());
