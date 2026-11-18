@@ -165,6 +165,8 @@ pub struct Screen {
     /// The tree as Taffy lays it out, kept from frame to frame (`Retained`), the states its styles were last resolved
     /// in, and the frame it's on.
     layout: Retained,
+    /// When its JS's garbage is collected, once nothing's happened for `IDLE`.
+    collect: Option<Instant>,
     styled: States,
     frame: u64,
     /// What the last frame showed, which a frame that would show the same doesn't paint again.
@@ -240,6 +242,7 @@ impl Screen {
             again: false,
             transitions: Default::default(),
             layout: Retained::default(),
+            collect: None,
             styled: States::default(),
             frame: 0,
             seen: None,
@@ -335,7 +338,8 @@ impl Screen {
         let settle = self.settling.iter().map(|(until, _)| until.saturating_duration_since(now)).min();
         // What moves by itself draws again each frame.
         let frame = self.animating.then_some(Duration::from_millis(16));
-        timer.into_iter().chain(settle).chain(frame).chain(self.blinks()).min()
+        let collect = self.collect.map(|at| at.saturating_duration_since(now));
+        timer.into_iter().chain(settle).chain(frame).chain(self.blinks()).chain(collect).min()
     }
 
     /// How long until the caret blinks on or off: as GTK's does, on two thirds of each 1.2 s and off a third, until
@@ -360,6 +364,10 @@ impl Screen {
 
     /// Runs the app's timers that are due, and tells the `settle`s whose time has come.
     pub fn fire(&mut self) {
+        if self.collect.is_some_and(|at| at <= Instant::now()) {
+            self.collect = None;
+            self.sandbox.collect();
+        }
         if self.sandbox.due().is_some_and(|due| due <= 0.0) {
             if let Err(error) = self.sandbox.fire() {
                 self.threw(error);
@@ -371,6 +379,8 @@ impl Screen {
 
     /// Applies what the app has posted, and answers what it asked that the host answers at once.
     fn pump(&mut self) {
+        // What its JS dropped is collected once it's been still a while (`Sandbox::collect`).
+        self.collect = Some(Instant::now() + IDLE);
         loop {
             let mut answers = Vec::new();
             let appearance = self.theme.unwrap_or(self.appearance);
@@ -1860,7 +1870,13 @@ impl Painter<'_> {
                     })
                     .collect();
                 children.sort_by_key(|(at, _, z, positioned)| (*z, *positioned, *at));
-                let inside = if look.clips || look.scrolls { around.intersect(&near) } else { around };
+                // What scrolls is near as far as it'd be scrolled into view, however tight what it's in clips: its box
+                // and what it's in, each grown by the margin. What only clips cuts what's near to it.
+                let inside = match (look.scrolls, look.clips) {
+                    (true, _) => self.grown(around).intersect(&near),
+                    (false, true) => around.intersect(&near),
+                    (false, false) => around,
+                };
                 for (_, child, _, _) in children {
                     if self.layout.leaf(child).fixed {
                         let window = self.window;
@@ -2174,6 +2190,9 @@ impl Painter<'_> {
 /// A caret's blink, in milliseconds on the app's clock: on two thirds of it and off a third, as GTK's, until it's been
 /// still `BLINK_STOPS`.
 const BLINK: f64 = 1200.0;
+/// How long its JS is still before what it dropped is collected: a pause in scrolling or typing, as a browser's idle
+/// time is.
+const IDLE: Duration = Duration::from_millis(250);
 const BLINK_STOPS: f64 = 10_000.0;
 
 /// Where an input's text was drawn: its paragraph (of its display text, or its placeholder while it's `empty`), its

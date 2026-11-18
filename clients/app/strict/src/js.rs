@@ -151,6 +151,8 @@ impl Sandbox {
         let to = rejected.clone();
         block_on(async {
             runtime.set_memory_limit(MEMORY).await;
+            // Collected while it's idle (`collect`), not as it allocates.
+            runtime.set_gc_threshold(MEMORY / 4).await;
             runtime.set_max_stack_size(STACK).await;
             runtime.set_loader(Resolve, Modules { files, cache }).await;
             // QuickJS tells of a rejected promise with no handler as it's rejected, and again if one is added after.
@@ -274,6 +276,17 @@ impl Sandbox {
                 run(&ctx, told)
             }))?;
         }
+    }
+
+    /// Collects what its JS no longer holds, as a browser does while nothing's happening, and puts off its next
+    /// collection until it holds twice as much and 8 MB more, within its memory, so a frame doesn't wait on one:
+    /// QuickJS's collector goes through all it holds at once, 15 to 25 ms for a long list's page.
+    pub fn collect(&self) {
+        block_on(async {
+            self.runtime.run_gc().await;
+            let held = usize::try_from(self.runtime.memory_usage().await.malloc_size).unwrap_or(0);
+            self.runtime.set_gc_threshold((held * 2 + (8 << 20)).min(MEMORY * 3 / 4).max(held + (4 << 20))).await;
+        })
     }
 
     /// What it has given its host since this was last asked.
