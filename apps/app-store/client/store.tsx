@@ -79,18 +79,32 @@ type Owners = Awaited<ReturnType<typeof owners>>
 type Market = Awaited<ReturnType<typeof market>>
 
 /// Where the app is: every app, a category's every app, an app's page and its See All. Each step in is a step in the
-/// history, so the device's back goes back out.
+/// history, so the device's back goes back out. An app's page a link opened (`linked`) is where the App Store starts,
+/// so its Back closes it.
 interface View {
   category?: string
   app?: string
   details?: boolean
+  linked?: boolean
 }
 const [view, setView] = createSignal<View>(history.state?.apps ?? {})
-const to = (next: View) => go(() => (history.pushState({ ...history.state, apps: next }, ""), setView(next)))
+const to = (next: View) => go(() => (history.pushState({ ...history.state, apps: { ...next, linked: undefined } }, ""), setView({ ...next, linked: undefined })))
 addEventListener("popstate", () => {
   const now: View = history.state?.apps ?? {}
   if (JSON.stringify(now) !== JSON.stringify(view())) go(() => setView(now), { back: true })
 })
+/// A link to an app's page, `one:app-store#app=<its artifact>`, as an App Library's app with no screen of its own opens
+/// it: its page, where the App Store starts. It's followed once, and the address forgets it, so the same link is
+/// followed again.
+function linked() {
+  const app = new URLSearchParams(location.hash.slice(1)).get("app")
+  if (!app) return
+  const next: View = { app, linked: true }
+  history.replaceState({ ...history.state, apps: next }, "", location.pathname + location.search)
+  setView(next)
+}
+linked()
+addEventListener("hashchange", linked)
 
 /// The app a page is of: its artifact, or for one only the directory has, its source and name.
 const key = (listed: Listed) => listed.app ?? `${listed.source}#${listed.name}`
@@ -466,7 +480,8 @@ function Details(props: { listed: Listed }) {
 }
 
 function AppStore(props: { market: Market; all: Owners; onBack?: () => void }) {
-  const opened = () => props.market.apps.find((listed) => key(listed) === view().app)
+  // An app the Marketplace doesn't list, as an installed one may not be, still has its page, as a link opens it.
+  const opened = () => props.market.apps.find((listed) => key(listed) === view().app) ?? (view().app ? installed(props.market, props.all, view().app!) : undefined)
   const covered = () => !!(view().app && opened())
   // The Marketplace stays mounted, hidden, under an app's page, so going back shows it as it was, scroll and all, as
   // a navigation stack keeps the screen before.
@@ -478,7 +493,7 @@ function AppStore(props: { market: Market; all: Owners; onBack?: () => void }) {
         </Screen>
       </div>
       <Show when={covered()}>
-        <Show when={view().details} fallback={<Screen back heading={opened()!.title}><Page market={props.market} all={props.all} listed={opened()!} /></Screen>}>
+        <Show when={view().details} fallback={<Screen back onBack={view().linked ? props.onBack : undefined} heading={opened()!.title}><Page market={props.market} all={props.all} listed={opened()!} /></Screen>}>
           <Details listed={opened()!} />
         </Show>
       </Show>
@@ -513,9 +528,10 @@ const installed = (market: Market, all: Owners, app: string) => {
 
 /// The App Store, as its page and the launcher's show it. `onBack` is its Back, out of it, where it has one.
 export default function Store(props: { onBack?: () => void }) {
-  // A step in, to a category or an app, is a step the device's own back goes back out of.
+  // A step in, to a category or an app, is a step the device's own back goes back out of; an app's page a link opened
+  // is where the App Store starts, and the device's back closes it.
   createEffect(
-    createMemo(() => !!(view().category || view().app)),
+    createMemo(() => !!(view().category || view().app) && !view().linked),
     (deep) => (deep ? covers(() => history.back()) : undefined),
   )
   return (

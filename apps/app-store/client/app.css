@@ -222,6 +222,109 @@
   }
 }
 
+/* As an app of its own, its screens start under the status bar and a top row, drawn as the Home Screen's is: Back at
+   the row's start, round, in Liquid Glass, where it goes back a screen, or on the first, closes the App Store; the
+   Marketplace's search in the row beside it, with no title; and a screen's name small in its middle (an app's page
+   fades its name in once the big one has scrolled away, above). What scrolls under the clock and the row softens into
+   the background there, as iOS 26's scroll edge does. Its controls are a computer's own size under a pointer and a
+   fingertip under a finger, as the Home Screen's are. */
+body > .app-store {
+  --bar: 2rem;
+  --top-row: calc(var(--bar) + 1rem);
+  --top-bar: calc(var(--safe-top, 0px) + var(--top-row));
+  --glass: color-mix(in oklab, var(--popover) 66%, transparent);
+  --rim: inset 0 0 0 0.5px color-mix(in oklab, var(--foreground) 12%, transparent), inset 0 1px 0 color-mix(in oklab, white 30%, transparent);
+
+  &::before {
+    content: "";
+    position: sticky;
+    z-index: 1;
+    top: 0;
+    display: block;
+    height: calc(var(--top-bar) + 1rem);
+    margin-bottom: calc(-1 * (var(--top-bar) + 1rem));
+    background: linear-gradient(var(--background) var(--safe-top, 0px), color-mix(in oklab, var(--background) 85%, transparent) calc(100% - 1.5rem), transparent);
+    -webkit-backdrop-filter: blur(12px);
+    backdrop-filter: blur(12px);
+    -webkit-mask-image: linear-gradient(black calc(100% - 1.5rem), transparent);
+    mask-image: linear-gradient(black calc(100% - 1.5rem), transparent);
+    pointer-events: none;
+  }
+  .ui-screen > header {
+    min-height: 0;
+    height: 0;
+    padding: 0;
+    z-index: 3;
+    pointer-events: none;
+  }
+  .ui-screen > header::before {
+    display: none;
+  }
+  .ui-screen > header > h1 {
+    position: absolute;
+    top: var(--safe-top, 0px);
+    inset-inline: calc(2 * var(--gutter) + var(--bar));
+    display: block;
+    height: var(--top-row);
+    padding: 0;
+    overflow: hidden;
+    font-size: var(--text-base);
+    font-weight: var(--title-weight);
+    line-height: var(--top-row);
+    text-align: center;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .ui-screen > header > .back {
+    position: absolute;
+    top: calc(var(--safe-top, 0px) + (var(--top-row) - var(--bar)) / 2);
+    inset-inline-start: calc(var(--gutter) + var(--safe-left, 0px));
+    width: var(--bar);
+    height: var(--bar);
+    margin: 0;
+    border: 0;
+    border-radius: 999px;
+    background: var(--glass);
+    box-shadow: var(--rim);
+    -webkit-backdrop-filter: blur(20px) saturate(1.8);
+    backdrop-filter: blur(20px) saturate(1.8);
+    pointer-events: auto;
+  }
+  .ui-screen > main {
+    padding-top: calc(var(--top-bar) + 0.75rem);
+  }
+  .ui-screen > main:has(> .ui-search:first-child) {
+    padding-top: 0;
+  }
+  .ui-screen > main > .ui-search:first-child {
+    position: sticky;
+    z-index: 2;
+    top: calc(var(--safe-top, 0px) + (var(--top-row) - var(--bar)) / 2);
+    width: min(100% - 2 * var(--bar) - 1rem, 24rem);
+    max-width: none;
+    margin: calc(var(--safe-top, 0px) + (var(--top-row) - var(--bar)) / 2) auto calc((var(--top-row) - var(--bar)) / 2 - var(--gap, 1.25rem) + 0.5rem);
+  }
+  .ui-search > .ui-box {
+    height: var(--bar);
+    border: 0;
+    border-radius: 999px;
+    background: var(--glass);
+    box-shadow: var(--rim), 0 8px 24px -10px oklch(0 0 0 / 0.3);
+    -webkit-backdrop-filter: blur(20px) saturate(1.8);
+    backdrop-filter: blur(20px) saturate(1.8);
+    font-size: var(--text-sm);
+  }
+  /* Its magnifier is over the glass. */
+  .ui-search > .ui-icon {
+    z-index: 1;
+  }
+}
+@media (pointer: coarse) {
+  body > .app-store {
+    --bar: 2.75rem;
+  }
+}
+
 @keyframes app-name {
   from {
     opacity: 0;
