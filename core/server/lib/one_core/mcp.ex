@@ -517,6 +517,7 @@ defmodule OneCore.Mcp do
   # Solid. It depends on nothing but the page's own version, so the page is still read once.
   @shared %{
     "solid-js" => "/ui/client/solid.js",
+    "solid-js/internal" => "/ui/client/internal.js",
     "@solidjs/web" => "/ui/client/web.js",
     "@zag-js/solid" => "/ui/client/zag.js",
     "ui" => "/ui/client/ui.js"

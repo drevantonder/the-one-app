@@ -18,7 +18,7 @@ import { stylesCss, stylesPlugin } from "./tables.ts"
 const [source, out] = process.argv.slice(2)
 
 // What an app imports that the app `ui` serves, by where it's served (ui/build.js).
-const shared = { "solid-js": "/ui/client/solid.js", "@solidjs/web": "/ui/client/web.js", "@zag-js/solid": "/ui/client/zag.js", ui: "/ui/client/ui.js" }
+const shared = { "solid-js": "/ui/client/solid.js", "solid-js/internal": "/ui/client/internal.js", "@solidjs/web": "/ui/client/web.js", "@zag-js/solid": "/ui/client/zag.js", ui: "/ui/client/ui.js" }
 
 /** The app's styles (src/styles.ts), made as each module is built. */
 const made = { css: new Map(), table: {} }

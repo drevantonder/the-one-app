@@ -10,7 +10,7 @@ import { outline } from "./src/strict/outline.ts"
 
 const dist = new URL("dist/client/", import.meta.url).pathname
 // What a page imports of the UI library, as a native host loads it.
-const native = { "/ui/client/solid.js": "solid.js", "/ui/client/web.js": "native/web.js", "/ui/client/ui.js": "native/ui.js" }
+const native = { "/ui/client/solid.js": "solid.js", "/ui/client/internal.js": "internal.js", "/ui/client/web.js": "native/web.js", "/ui/client/ui.js": "native/ui.js" }
 Bun.plugin({
   name: "native",
   setup(build) {
