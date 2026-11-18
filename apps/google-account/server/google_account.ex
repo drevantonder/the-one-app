@@ -1,8 +1,8 @@
 defmodule GoogleAccount do
   @moduledoc """
   What the Google apps (gmail, google-calendar, google-drive, google-docs and google-sheets) share: their person's
-  Google accounts and Google's sign-in, and their calls to Google's APIs. A Google app calls this one's tools, which
-  act for the app that called them (its `caller`), which they name by its title.
+  Google accounts and Google's sign-in, and their calls to Google's APIs. A Google app calls `request`, which acts
+  for the app that called it (its `caller`), which it names by its title.
 
   Each Google account is one item of its person's Vault, "Google <address>", of this app's type (`vault.types`), and
   every Google app uses it through this one: it's switched on for this app alone, which signs it in, with what
@@ -61,13 +61,15 @@ defmodule GoogleAccount do
     string = &%{type: "string", description: &1}
     account = string.("Which account: its address, or a part of it only it has. The first if left out")
     object = &%{type: "object", properties: &1, required: &2}
+    # What a Google app's code gives as it has it: an input that's null is left out.
+    nullable = &Map.update!(&1, :type, fn type -> [type, "null"] end)
 
     [
       %{
         name: "apps",
         read_only: true,
         description:
-          "The Google apps you have (Gmail, Google Calendar, Drive, Docs, Sheets), each by the name its tools start with. Each one's accounts tool lists its accounts.",
+          "The Google apps you have (Gmail, Google Calendar, Drive, Docs, Sheets), each by the name its tools start with. Every one uses the accounts google-account_accounts lists.",
         inputs: %{type: "object", properties: %{}},
         outputs: %{
           type: "object",
@@ -91,7 +93,7 @@ defmodule GoogleAccount do
         name: "accounts",
         read_only: true,
         description:
-          "For a Google app's code: the Google accounts signed in for the app that calls this, each with ok, and why when it's false.",
+          "The Google accounts signed in, which every Google app you have uses, the default first: each with ok, and why when it's false (google-account_sign_in with that account fixes it). Every Google app's account input takes one of these.",
         inputs: object.(%{}, []),
         outputs: %{
           type: "object",
@@ -134,24 +136,25 @@ defmodule GoogleAccount do
         description: """
         For a Google app's code: calls a Google API as one of the accounts signed in for the app that calls this,
         and gives its status, headers and body, decoded where it's JSON. An answer that isn't a success raises,
-        saying what went wrong for whoever reads it.
+        saying what went wrong for whoever reads it. An input that's null is left out.
         """,
         inputs:
           object.(
             %{
-              account: account,
-              method: string.("GET if left out"),
+              account: nullable.(account),
+              method: nullable.(string.("GET if left out")),
               url: string.("The API's address"),
-              query: %{
-                type: "object",
-                description: "The query, by name: a list is given once for each, and null or \"\" not at all"
-              },
+              query:
+                nullable.(%{
+                  type: "object",
+                  description: "The query, by name: a list is given once for each, and null or \"\" not at all"
+                }),
               json: %{description: "The body, as JSON"},
-              body: string.("Or the body as text, with type. Neither may say {{...}}: base64 it"),
-              type: string.("The body's MIME type"),
-              headers: %{type: "object", additionalProperties: %{type: "string"}, description: "More headers"},
-              missing: string.("What to say when what the URL names isn't there, or the account can't open it"),
-              hint: string.("What to add to what Google says about an input it can't take")
+              body: nullable.(string.("Or the body as text, with type. Neither may say {{...}}: base64 it")),
+              type: nullable.(string.("The body's MIME type")),
+              headers: nullable.(%{type: "object", additionalProperties: %{type: "string"}, description: "More headers"}),
+              missing: nullable.(string.("What to say when what the URL names isn't there, or the account can't open it")),
+              hint: nullable.(string.("What to add to what Google says about an input it can't take"))
             },
             ["url"]
           ),
@@ -178,8 +181,8 @@ defmodule GoogleAccount do
     %{apps: Enum.sort_by(apps, & &1.title)}
   end
 
-  def call(tool, _inputs, %OneCore.Call{caller: nil}) when tool in ~w(accounts request),
-    do: raise("google-account_#{tool} is for the Google apps' code. Each has its own tools.")
+  def call("request", _inputs, %OneCore.Call{caller: nil}),
+    do: raise("google-account_request is for the Google apps' code. Each has its own tools.")
 
   def call("accounts", _inputs, call) do
     accounts =
@@ -226,7 +229,8 @@ defmodule GoogleAccount do
     }
   end
 
-  def call("request", %{"url" => url} = inputs, call) do
+  def call("request", inputs, call) do
+    %{"url" => url} = inputs = Map.reject(inputs, fn {_input, value} -> value == nil end)
     email = account(call, inputs["account"])
 
     {body, type} =
@@ -277,7 +281,7 @@ defmodule GoogleAccount do
   defp account(call, name) do
     case {emails(call), name} do
       {[], _} ->
-        raise "Sign in to a Google account first: #{app(call)}_sign_in gives the link."
+        raise "Sign in to a Google account first: google-account_sign_in gives the link."
 
       {[first | _], blank} when blank in [nil, ""] ->
         first
@@ -311,7 +315,7 @@ defmodule GoogleAccount do
     title = title(call)
     status = response["status"]
     message = message(response["body"]) || "#{status}"
-    again = "#{email} needs signing in again, to let #{title} in: #{app(call)}_sign_in with account #{email}."
+    again = "#{email} needs signing in again#{if call.caller, do: ", to let #{title} in"}: google-account_sign_in with account #{email}."
 
     cond do
       status == 401 ->
@@ -325,7 +329,7 @@ defmodule GoogleAccount do
         hints["missing"]
 
       hints["missing"] && status == 403 ->
-        "#{email} can't open it (#{String.trim_trailing(message, ".")}): use the account it's shared with (#{app(call)}_accounts lists them), or ask its owner to share it."
+        "#{email} can't open it (#{String.trim_trailing(message, ".")}): use the account it's shared with (google-account_accounts lists them), or ask its owner to share it."
 
       hints["hint"] && status == 400 ->
         "#{title}: #{String.trim_trailing(message, ".")}: #{hints["hint"]}"
@@ -363,10 +367,9 @@ defmodule GoogleAccount do
     vault(call, "state", %{"item" => item(email), "state" => to_string(state), "message" => message, "action" => action} |> Map.reject(fn {_, value} -> value == nil end))
   end
 
-  # The app that called, by the name its tools start with.
-  defp app(call), do: Path.basename(call.caller)
+  # What a person calls the app that called, or Google when a person asked.
+  defp title(%OneCore.Call{caller: nil}), do: "Google"
 
-  # What a person calls the app that called.
   defp title(call) do
     Enum.find_value(OneCore.Apps.running(call.subject), fn {_name, version} ->
       version.artifact == call.caller && version.title
