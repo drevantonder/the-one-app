@@ -50,3 +50,7 @@ export interface Pages {
   store: string | null
   apps: { app: string; name: string }[]
 }
+
+/** Where this page loads an icon, from its address, `ui://icons/<sha256>/<file>`: beside its app's own files, at that
+ * hash, where the client serves every app's files by version (`<app>@<version>/`), so it's asked for once. */
+export const src = (icon: string) => icon.replace(/^ui:\/\/([^/]+)\/([^/]+)\//, "../../$1@$2/")

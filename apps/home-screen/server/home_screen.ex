@@ -22,9 +22,10 @@ defmodule HomeScreen do
   def icon, do: "client/home.svg"
 
   @impl true
-  def requires, do: %{"core" => ">= 0.22.18"}
+  def requires, do: %{"core" => ">= 0.23.30"}
 
   alias OneCore.{Artifact, Call}
+  alias OneCore.Apps.Icons
 
   @impl true
   def entrypoints do
@@ -49,7 +50,7 @@ defmodule HomeScreen do
         entrypoint: %{type: "string", description: "Its app's name and its page: notes/client/index.html"},
         app: %{type: "string"},
         name: %{type: "string"},
-        icon: %{type: "string", description: "A data: address"},
+        icon: %{type: "string", description: "Where a client reads it, named for what's in it: ui://icons/<sha256>/icon.svg"},
         category: %{type: "string", description: "Its category in the App Library: its own, or else its app's"},
         subject: %{type: "string", description: "`user` for an app opened for whoever opens it"}
       },
@@ -399,7 +400,7 @@ defmodule HomeScreen do
         entrypoint: "#{app.name}/#{entrypoint.page}",
         app: app.app,
         name: entrypoint.name,
-        icon: entrypoint.icon,
+        icon: Icons.address(entrypoint.icon),
         category: category
       },
       about
@@ -438,7 +439,7 @@ defmodule HomeScreen do
 
   # An app as its App Library shows it: its entrypoints, or with none, itself.
   defp shown(%{entrypoints: []} = app),
-    do: [%{entrypoint: nil, app: app.app, name: app.title, icon: app.icon, category: app.category}]
+    do: [%{entrypoint: nil, app: app.app, name: app.title, icon: Icons.address(app.icon), category: app.category}]
 
   defp shown(app),
     do: for(entrypoint <- app.entrypoints, entrypoint.category != "launcher", do: entry(app, entrypoint))

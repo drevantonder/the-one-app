@@ -21,6 +21,7 @@ import { give, glide, jump, settle, speed, spring, type Spring, stop } from "./p
 import { offset, reflow } from "./reflow.ts"
 import { type At, carries, COLUMNS, type Drop, type Editing, fitted, type Held, type Kind, machine, nearest, pack, type Page, type Placed, ROWS, shown, spans } from "./machine.ts"
 import type { Entrypoint, Category, Item, Listed, Pages, Size, Widget as WidgetItem } from "./types.ts"
+import { src } from "./types.ts"
 
 const SIZES: Record<Size, string> = { "2x2": "Small", "4x2": "Medium", "4x4": "Large" }
 const json = <T,>(tool: string, inputs?: object, subject?: string): Promise<T> => call(tool, inputs, { subject }).then(JSON.parse)
@@ -323,7 +324,7 @@ function HomePage(props: { owner: Owner; index: number; page: number; placed: Pl
                 <Show when={placed().item.item}>
                   {(item) => (
                     <>
-                      <Show when={item().widget} fallback={<Tile name={(item() as Entrypoint).name} onPress={(behind, icon) => state().matches("nothing") && launch(item() as Entrypoint, props.owner, behind, icon)}><img src={(item() as Entrypoint).icon} alt="" /></Tile>}>
+                      <Show when={item().widget} fallback={<Tile name={(item() as Entrypoint).name} onPress={(behind, icon) => state().matches("nothing") && launch(item() as Entrypoint, props.owner, behind, icon)}><img src={src((item() as Entrypoint).icon)} alt="" /></Tile>}>
                         <Card item={item() as WidgetItem} owner={props.owner} still={props.small || editingHere()} />
                       </Show>
                       <Show when={waiting(placed().item) && state().matches({ editing: "installing" })}>
@@ -424,7 +425,7 @@ function Library(props: { owner: Owner; places: Record<string, HTMLElement> }) {
                 <Show when={category().entrypoints.length > 4}>
                   <button type="button" class="more" aria-label={`All of ${category().category}`}>
                     <For each={category().entrypoints.slice(3, 7)} keyed={(entrypoint) => entrypoint.entrypoint ?? entrypoint.app}>
-                      {(entrypoint) => <img src={entrypoint().icon} alt="" />}
+                      {(entrypoint) => <img src={src(entrypoint().icon)} alt="" />}
                     </For>
                   </button>
                 </Show>
@@ -481,7 +482,7 @@ function LibraryEntrypoint(props: { entrypoint: Listed; owner: Owner }) {
       onPointerDown={() => state().matches("nothing") && opens(props.entrypoint) && launch(opens(props.entrypoint)!, props.owner, true)}
       onClick={(event) => (event.stopPropagation(), state().matches("nothing") && press(props.entrypoint, props.owner, false, event.currentTarget.querySelector("img") ?? undefined))}
     >
-      <img src={props.entrypoint.icon} alt="" />
+      <img src={src(props.entrypoint.icon)} alt="" />
       <span>{props.entrypoint.name}</span>
     </button>
   )
@@ -562,7 +563,7 @@ function OpenCategory(props: { owner: Owner; opened: string; places: Record<stri
             {(entrypoint) => (
               <div class="cell">
                 <Tile name={entrypoint().name} onPress={(behind, icon) => phase() === "open" && press(entrypoint(), props.owner, behind, icon)}>
-                  <img src={entrypoint().icon} alt="" />
+                  <img src={src(entrypoint().icon)} alt="" />
                 </Tile>
               </div>
             )}
@@ -719,7 +720,7 @@ function Holding(props: { owner: Owner; index: number; held: Held }) {
       <Show when={item ?? (props.held.listed as Item | undefined)}>
         {(item) => (
           <div class="lifted-copy" ref={copy} style={{ left: `${rect.x}px`, top: `${rect.y}px`, width: `${rect.width}px`, height: `${rect.height}px` }}>
-            <Show when={item().widget} fallback={library ? <img class="alone" src={(item() as Entrypoint).icon} alt="" /> : <Tile name={(item() as Entrypoint).name}><img src={(item() as Entrypoint).icon} alt="" /></Tile>}>
+            <Show when={item().widget} fallback={library ? <img class="alone" src={src((item() as Entrypoint).icon)} alt="" /> : <Tile name={(item() as Entrypoint).name}><img src={src((item() as Entrypoint).icon)} alt="" /></Tile>}>
               <Card item={item() as WidgetItem} owner={props.owner} still />
             </Show>
           </div>
@@ -824,7 +825,7 @@ function Gallery(props: { owner: Owner }) {
           <Show when={props.owner.widgets.length} fallback={<Empty>No widgets yet.</Empty>}>
             <List>
               <For each={props.owner.widgets} keyed={(widget) => widget.widget}>
-                {(widget) => <Row heading={widget().name} start={widget().opens ? <img class="logo" src={widget().opens!.icon} alt="" /> : undefined} onClick={() => (setPicked(widget()), setSize(widget().sizes[0]))} />}
+                {(widget) => <Row heading={widget().name} start={widget().opens ? <img class="logo" src={src(widget().opens!.icon)} alt="" /> : undefined} onClick={() => (setPicked(widget()), setSize(widget().sizes[0]))} />}
               </For>
             </List>
           </Show>
@@ -1099,7 +1100,7 @@ function Asking(props: { owner: Owner; held: Held }) {
       <div class="asking">
         <div class="icons">
           <For each={missing()} keyed={({ item }) => item.entrypoint}>
-            {(app) => <img src={app().item.icon} alt="" />}
+            {(app) => <img src={src(app().item.icon)} alt="" />}
           </For>
         </div>
         <p>{reach()}</p>
@@ -1457,7 +1458,7 @@ function HomeScreen(props: { owners: Owner[] }) {
         copy.querySelector(".minus")?.remove()
         if (item.size) copy.dataset.size = item.size
         copy.style.setProperty("--tile", getComputedStyle(lifted).getPropertyValue("--tile"))
-      } else copy.innerHTML = `<span class="tile"><span class="icon"><img src="${(item as Entrypoint).icon}" alt=""></span><span>${(item as Entrypoint).name}</span></span>`
+      } else copy.innerHTML = `<span class="tile"><span class="icon"><img src="${src((item as Entrypoint).icon)}" alt=""></span><span>${(item as Entrypoint).name}</span></span>`
       root.append(copy)
       if (!still.matches) copy.animate([{ scale: `${scale}`, filter: "drop-shadow(0 0 0 oklch(0 0 0 / 0))" }, {}], paced("settle"))
       haptic("medium")
