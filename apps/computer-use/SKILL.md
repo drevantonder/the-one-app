@@ -1,6 +1,6 @@
 ---
 name: computer-use
-description: Read before looking at or acting on a screen (a desktop, an app, a person's own Mac or Linux desktop, anything that isn't only a web page), by screenshot, click, type, scroll and keys, or when a Mac's screen says macOS doesn't allow Screen Recording or Accessibility.
+description: Read before looking at or acting on a screen (a desktop, an app, a person's own Mac, Linux or Windows desktop, anything that isn't only a web page), by screenshot, click, type, scroll and keys, or when a Mac's screen says macOS doesn't allow Screen Recording or Accessibility.
 metadata:
   title: "Computer Use"
   subtitle: "Your AI uses a screen"
@@ -33,7 +33,7 @@ buy, send or delete there without them asking for it.
 
 ## A person's own computer
 
-Each Mac or Linux desktop running Computer Use's service is a screen, called what the computer is called: its main
+Each Mac, Linux or Windows desktop running Computer Use's service is a screen, called what the computer is called: its main
 display, the one with the menu bar, with everything on it, signed in as its person. You act as them, with their own
 pointer and keyboard, so do only what they asked.
 
@@ -51,7 +51,9 @@ pointer and keyboard, so do only what they asked.
 Only the computer's person, the user its server is for, and the network's owner may use it. A computer gets it with
 `install_service --app computer-use --service ComputerUse.Desktop --server <key>`. The service runs Cua Driver
 (trycua/cua) in its person's session: on a Mac a launchd agent, on Linux a systemd user unit that starts with their
-desktop (an X11 or XWayland one). Until they're signed in to it, `screens` says Cua Driver isn't running there.
+desktop (an X11 or XWayland one), on Windows a scheduled task of theirs that starts as they log on. Until they're
+signed in to it, `screens` says Cua Driver isn't running there. On Windows it runs as their limited user, as their
+server does, so it can't use a window of a program run as administrator.
 
 On a Mac it runs inside a small app, Computer Use for The One App, which macOS lets see the screen only with Screen
 Recording and use the mouse and keyboard only with Accessibility, which only the Mac's person can allow. `screens`

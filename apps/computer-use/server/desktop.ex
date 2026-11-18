@@ -1,14 +1,15 @@
 defmodule ComputerUse.Desktop do
   @moduledoc """
-  A computer's own screen, as Computer Use's: each Mac or Linux desktop whose server runs this service is a screen,
+  A computer's own screen, as Computer Use's: each Mac, Linux or Windows desktop whose server runs this service is a screen,
   called what the computer is called, which an agent sees and uses as its person would, while they watch. It's the
   computer's person's: only they, the user its server is for, or the network's owner use it.
 
   It runs Cua Driver (github.com/trycua/cua, MIT), the version pinned here, downloaded from its release and checked,
   as a service of the person's session: on a Mac a launchd agent, on Linux a systemd user unit of the graphical
-  session. Its daemon (`cua-driver serve`) listens on a socket of its own, and each action is one of its tools,
-  called there with the whole display as its target (`scope: desktop`) and the person's own pointer and keyboard
-  (`delivery_mode: foreground`), as a person uses them.
+  session, on Windows a scheduled task of theirs that starts as they log on. Its daemon (`cua-driver serve`) answers
+  MCP over HTTP on a port of the loopback of its own, with a bearer token kept in this service's folder, the same on
+  every kind of computer; each action is one of its tools, called there with the whole display as its target
+  (`scope: desktop`) and the person's own pointer and keyboard (`delivery_mode: foreground`), as a person uses them.
 
   macOS lets a program see the screen only with Screen Recording and use the mouse and keyboard only with
   Accessibility, and asks for and keeps them in the name of the program it holds responsible, which for a launchd
@@ -26,7 +27,9 @@ defmodule ComputerUse.Desktop do
   @builds %{
     "macos" => {"darwin-universal-binary.tar.gz", "2dae2548618c2223461bcd17d211c6e8c0409fef27923b7917755739f0e66a12"},
     "linux-x86_64" => {"linux-x86_64-binary.tar.gz", "fdee86c42b3f1f43916887f05e38cc6b79883668cde55c29ca862abb09db1908"},
-    "linux-aarch64" => {"linux-arm64-binary.tar.gz", "4dcb9e1cfb3cebc995b99d85ee218978682520eae7dfa552555016e2ea9afbc4"}
+    "linux-aarch64" => {"linux-arm64-binary.tar.gz", "4dcb9e1cfb3cebc995b99d85ee218978682520eae7dfa552555016e2ea9afbc4"},
+    "windows-x86_64" => {"windows-x86_64-binary.zip", "5a0cb66baaeb0dbd5ac9efb135d3a3fecbf6383796d556f25122b37cbc58e713"},
+    "windows-aarch64" => {"windows-arm64-binary.zip", "93cef9716856da3c416fe4097716e8d009e2064b16dacb7b62118944d9f60ea1"}
   }
 
   @helper "Computer Use for The One App.app"
@@ -94,7 +97,7 @@ defmodule ComputerUse.Desktop do
 
   @impl OneCore.Service
   def needs do
-    "A Mac with macOS 14 or later, or a Linux desktop on X11 (or XWayland) with AT-SPI, whose person uses it. It downloads " <>
+    "A Mac with macOS 14 or later, a Linux desktop on X11 (or XWayland) with AT-SPI, or Windows 10 or 11, whose person uses it. It downloads " <>
       "Cua Driver #{@cua} from GitHub (trycua/cua) and runs it in their session, which takes pictures of the screen and uses its " <>
       "mouse and keyboard. On a Mac it runs inside Computer Use for The One App, which the Mac's person allows in System Settings → " <>
       "Privacy & Security, under Screen & System Audio Recording and under Accessibility; macOS asks them on its screen the first " <>
@@ -272,50 +275,46 @@ defmodule ComputerUse.Desktop do
     String.trim(answer) == "true"
   end
 
-  # Calls one of Cua Driver's tools on its daemon with what of `args` that tool takes on this kind of computer, which
-  # differs between them (a Mac's `move_cursor` takes `delivery_mode`, Linux's doesn't).
+  # Calls one of Cua Driver's tools with what of `args` that tool takes on this kind of computer, which differs
+  # between them (a Mac's `move_cursor` takes `delivery_mode`, Linux's doesn't), in an MCP session of its own: the
+  # daemon scales the x and y of a session's later actions by its last screenshot's, and these are the display's own.
   defp tool(service, name, args) do
-    takes = request(service, %{method: "describe", name: name})["input_schema"]["properties"]
-    # Each call is a session of its own: the daemon scales the x and y of a session's later actions by its last
-    # screenshot's, and these are already the display's own.
-    session = Base.encode16(:crypto.strong_rand_bytes(8), case: :lower)
+    session = session(service)
+    takes = GenServer.call(service, :takes) || takes(service, session)
 
-    case request(service, %{method: "call", name: name, args: Map.take(args, Map.keys(takes)), session_id: session}) do
-      %{"isError" => true} = result -> raise text(result)
-      result -> result
+    case mcp(service, session, "tools/call", %{name: name, arguments: Map.take(args, takes[name] || [])}) do
+      {%{"isError" => true} = result, _} -> raise text(result)
+      {result, _} -> result
     end
   end
 
-  # A request to Cua Driver's daemon, over its socket: a line of JSON, answered with one.
-  defp request(service, request) do
-    socket = GenServer.call(service, :socket)
-
-    case :gen_tcp.connect({:local, String.to_charlist(socket)}, 0, [:binary, active: false], 5_000) do
-      {:ok, connection} ->
-        :ok = :gen_tcp.send(connection, [JSON.encode!(request), ?\n])
-        line = line(connection, [])
-        :gen_tcp.close(connection)
-
-        case JSON.decode!(line) do
-          %{"ok" => true, "result" => result} -> result
-          %{"error" => why} -> raise "Cua Driver: #{why}"
-        end
-
-      {:error, why} ->
-        raise "Cua Driver isn't running on this computer (#{:inet.format_error(why)}): it runs in its person's desktop session, once they're signed in"
-    end
+  # What each of its tools takes, kept until Cua Driver starts again.
+  defp takes(service, session) do
+    {%{"tools" => tools}, _} = mcp(service, session, "tools/list", %{})
+    takes = Map.new(tools, &{&1["name"], Map.keys(&1["inputSchema"]["properties"] || %{})})
+    GenServer.cast(service, {:takes, takes})
+    takes
   end
 
-  defp line(connection, got) do
-    case :gen_tcp.recv(connection, 0, 120_000) do
-      {:ok, data} ->
-        case :binary.split(data, "\n") do
-          [last, _] -> IO.iodata_to_binary(Enum.reverse([last | got]))
-          [_] -> line(connection, [data | got])
-        end
+  defp session(service) do
+    initialize = %{protocolVersion: "2025-06-18", capabilities: %{}, clientInfo: %{name: "computer-use", version: "1"}}
+    {_, session} = mcp(service, nil, "initialize", initialize)
+    session
+  end
 
-      {:error, why} ->
-        raise "Cua Driver stopped answering: #{:inet.format_error(why)}"
+  # A JSON-RPC request to Cua Driver's MCP endpoint, answered with its result and the session it's in.
+  defp mcp(service, session, method, params) do
+    %{"port" => port, "token" => token} = GenServer.call(service, :endpoint)
+    # A connection of its own, which it closes: the daemon keeps what a session's screenshot scaled by per connection.
+    headers = [authorization: "Bearer #{token}", connection: "close"] ++ if(session, do: ["mcp-session-id": session], else: [])
+    request = %{jsonrpc: "2.0", id: 1, method: method, params: params}
+
+    case Req.post("http://127.0.0.1:#{port}/mcp", json: request, headers: headers, retry: false, receive_timeout: 120_000) do
+      {:ok, %{status: 200, body: %{"result" => result}} = response} -> {result, session || List.first(response.headers["mcp-session-id"] || [])}
+      {:ok, %{body: %{"error" => %{"message" => why}}}} -> raise "Cua Driver: #{why}"
+      {:ok, %{status: status}} -> raise "Cua Driver answered #{status}"
+      {:error, %{reason: :econnrefused}} -> raise "Cua Driver isn't running on this computer: it runs in its person's desktop session, once they're signed in"
+      {:error, error} -> raise "Cua Driver didn't answer: #{Exception.message(error)}"
     end
   end
 
@@ -323,11 +322,12 @@ defmodule ComputerUse.Desktop do
 
   @impl GenServer
   def init(_) do
-    {:ok, start(%{socket: socket(), helper: nil, asked: MapSet.new()})}
+    {:ok, start(%{endpoint: nil, takes: nil, helper: nil, asked: MapSet.new()})}
   end
 
   @impl GenServer
-  def handle_call(:socket, _from, state), do: {:reply, state.socket, state}
+  def handle_call(:endpoint, _from, state), do: {:reply, state.endpoint, state}
+  def handle_call(:takes, _from, state), do: {:reply, state.takes, state}
   def handle_call(:helper, _from, state), do: {:reply, state.helper, state}
 
   # Asks macOS for `permission` the first time it's missing while this runs; after that, starts Cua Driver again, so
@@ -342,6 +342,9 @@ defmodule ComputerUse.Desktop do
     end
   end
 
+  @impl GenServer
+  def handle_cast({:takes, takes}, state), do: {:noreply, %{state | takes: takes}}
+
   # A new version of the app with another Cua Driver or another helper starts them again.
   @impl GenServer
   def code_change(_version, state, _extra), do: {:ok, start(state)}
@@ -351,20 +354,43 @@ defmodule ComputerUse.Desktop do
   defp start(state) do
     folder = OneCore.Service.folder(self())
     driver = driver(folder)
+    state = %{state | endpoint: endpoint(folder), takes: nil}
+    environment = environment(folder, state.endpoint)
 
     case :os.type() do
       {:unix, :darwin} ->
         {helper, new?} = helper(folder)
-        loaded? = launch_agent(helper, driver, state.socket, folder)
+        loaded? = launch_agent(helper, driver, environment, folder)
         if new? and not loaded?, do: launchctl(["kickstart", "-k", "#{domain()}/#{label()}"])
         %{state | helper: helper}
 
       {:unix, :linux} ->
-        systemd_unit(driver, state.socket, folder)
+        systemd_unit(driver, environment)
         state
 
-      other ->
-        raise "Computer Use runs Cua Driver on a Mac or a Linux desktop, not yet on #{inspect(other)}"
+      {:win32, _} ->
+        scheduled_task(driver, environment, folder)
+        state
+    end
+  end
+
+  # The loopback port Cua Driver's MCP endpoint listens on, one the system gave free the first time, and the token it
+  # takes, both kept in the service's folder.
+  defp endpoint(folder) do
+    file = Path.join(folder, "endpoint.json")
+
+    case File.read(file) do
+      {:ok, json} ->
+        JSON.decode!(json)
+
+      {:error, _} ->
+        {:ok, listening} = :gen_tcp.listen(0, ip: {127, 0, 0, 1})
+        {:ok, port} = :inet.port(listening)
+        :gen_tcp.close(listening)
+        endpoint = %{"port" => port, "token" => Base.encode16(:crypto.strong_rand_bytes(32), case: :lower)}
+        File.write!(file, JSON.encode!(endpoint))
+        File.chmod!(file, 0o600)
+        endpoint
     end
   end
 
@@ -373,7 +399,8 @@ defmodule ComputerUse.Desktop do
   defp driver(folder) do
     {file, sha256} = @builds[kind()] || raise "Cua Driver #{@cua} has no build for #{kind()}"
     within = Path.join(folder, "cua-driver-#{@cua}")
-    program = Path.join(within, "cua-driver")
+    name = if match?({:win32, _}, :os.type()), do: "cua-driver.exe", else: "cua-driver"
+    program = Path.join(within, name)
 
     if not File.exists?(program) do
       url = "https://github.com/trycua/cua/releases/download/cua-driver-rs-v#{@cua}/cua-driver-rs-#{@cua}-#{file}"
@@ -385,8 +412,13 @@ defmodule ComputerUse.Desktop do
       # Unpacked beside it and moved in whole, so a folder that's there has all of it.
       writing = within <> ".writing"
       File.rm_rf!(writing)
-      :ok = :erl_tar.extract({:binary, archive}, [:compressed, cwd: String.to_charlist(writing), files: [~c"cua-driver"]])
-      File.chmod!(Path.join(writing, "cua-driver"), 0o755)
+      File.mkdir_p!(writing)
+
+      if String.ends_with?(file, ".zip"),
+        do: {:ok, _} = :zip.extract(archive, cwd: String.to_charlist(writing), file_list: [String.to_charlist(name)]),
+        else: :ok = :erl_tar.extract({:binary, archive}, [:compressed, cwd: String.to_charlist(writing), files: [String.to_charlist(name)]])
+
+      File.chmod!(Path.join(writing, name), 0o755)
       File.rename!(writing, within)
     end
 
@@ -402,14 +434,18 @@ defmodule ComputerUse.Desktop do
     case :os.type() do
       {:unix, :darwin} -> "macos"
       {:unix, :linux} -> "linux-#{arch}"
+      # Windows' VM says only win32 of its architecture.
+      {:win32, _} -> if(System.get_env("PROCESSOR_ARCHITECTURE") == "ARM64", do: "windows-aarch64", else: "windows-x86_64")
       {_, os} -> "#{os}-#{arch}"
     end
   end
 
-  # Its socket, in a short path, as a socket's path is at most 104 bytes on a Mac.
+  # The daemon's own socket, or named pipe on Windows, which this doesn't use, apart from any other Cua Driver's: in a
+  # short path, as a socket's path is at most 104 bytes on a Mac.
   defp socket do
     case :os.type() do
       {:unix, :darwin} -> Path.expand("~/Library/Caches/#{label()}.sock")
+      {:win32, _} -> "\\\\.\\pipe\\one-computer-use-#{key()}"
       _ -> Path.join(System.get_env("XDG_RUNTIME_DIR") || Path.expand("~/.cache"), "one-computer-use-#{key()}.sock")
     end
   end
@@ -441,7 +477,7 @@ defmodule ComputerUse.Desktop do
 
   # The launchd agent that starts the helper, which starts Cua Driver, in the person's session, and again if it
   # stops. Loaded again when it changed, which starts it; gives whether it was.
-  defp launch_agent(helper, driver, socket, folder) do
+  defp launch_agent(helper, driver, environment, folder) do
     plist = Path.expand("~/Library/LaunchAgents/#{label()}.plist")
 
     xml = """
@@ -452,11 +488,11 @@ defmodule ComputerUse.Desktop do
       <key>Label</key><string>#{label()}</string>
       <key>ProgramArguments</key>
       <array>
-    #{Enum.map_join([Path.join([helper, "Contents", "MacOS", "helper"]), "run" | command(driver, socket)], "\n", &"    <string>#{escape(&1)}</string>")}
+    #{Enum.map_join([Path.join([helper, "Contents", "MacOS", "helper"]), "run" | command(driver)], "\n", &"    <string>#{escape(&1)}</string>")}
       </array>
       <key>EnvironmentVariables</key>
       <dict>
-    #{Enum.map_join(environment(folder), "\n", fn {name, value} -> "    <key>#{name}</key><string>#{escape(value)}</string>" end)}
+    #{Enum.map_join(environment, "\n", fn {name, value} -> "    <key>#{name}</key><string>#{escape(value)}</string>" end)}
       </dict>
       <key>LimitLoadToSessionType</key><string>Aqua</string>
       <key>ProcessType</key><string>Interactive</string>
@@ -492,7 +528,7 @@ defmodule ComputerUse.Desktop do
 
   # The systemd user unit that runs Cua Driver in the person's graphical session, started with it, and stopped with it.
   # It's started now if there's a desktop to use: the session's, or the display this server has, which it's given.
-  defp systemd_unit(driver, socket, folder) do
+  defp systemd_unit(driver, environment) do
     name = "one-computer-use-#{key()}.service"
     display = for variable <- ~w(DISPLAY WAYLAND_DISPLAY XAUTHORITY), value = System.get_env(variable), do: {variable, value}
 
@@ -503,8 +539,8 @@ defmodule ComputerUse.Desktop do
     After=graphical-session.target
 
     [Service]
-    ExecStart=#{Enum.map_join(command(driver, socket), " ", &systemd_quote/1)}
-    #{Enum.map_join(environment(folder) ++ display, "\n", fn {name, value} -> "Environment=#{systemd_quote("#{name}=#{value}")}" end)}
+    ExecStart=#{Enum.map_join(command(driver), " ", &systemd_quote/1)}
+    #{Enum.map_join(environment ++ display, "\n", fn {name, value} -> "Environment=#{systemd_quote("#{name}=#{value}")}" end)}
     Restart=on-failure
     RestartSec=5
 
@@ -527,16 +563,71 @@ defmodule ComputerUse.Desktop do
   defp systemctl(arguments), do: System.cmd("systemctl", ["--user" | arguments], stderr_to_stdout: true)
   defp systemd_quote(text), do: ~s("#{String.replace(text, ~s("), ~s(\\"))}")
 
-  defp command(driver, socket) do
-    embedded = if :os.type() == {:unix, :darwin}, do: ["--embedded", "--host-bundle-id", @id], else: []
-    [driver, "serve", "--socket", socket | embedded]
+  # The scheduled task of its person's that runs Cua Driver in their session as they log on, as their server's own
+  # does (`one serve on`), needing no administrator: Task Scheduler starts it each minute it isn't running, and
+  # restarts one that couldn't start. A task has no environment of its own, so cmd sets it, and Cua Driver is a
+  # console program, which a task would show a console window for, so it's in a console with none, conhost's
+  # headless one. It runs as the person's limited user, as their server does: it can't use the windows of a program
+  # run as administrator, which Windows keeps from theirs. Registered again when it changed, after stopping the one
+  # running; then started, which does nothing while it runs.
+  defp scheduled_task(driver, environment, folder) do
+    name = "The One App Computer Use #{key()}"
+    user = "#{System.fetch_env!("USERDOMAIN")}\\#{System.fetch_env!("USERNAME")}"
+    sets = Enum.map_join(environment, "", fn {variable, value} -> ~s(set "#{variable}=#{value}"&& ) end)
+    run = ~s(--headless cmd.exe /d /s /c "#{sets}#{Enum.map_join(command(driver), " ", &~s("#{&1}"))}")
+
+    task = """
+    <?xml version="1.0" encoding="UTF-16"?>
+    <Task version="1.4" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">
+      <RegistrationInfo><Description>Computer Use for The One App: Cua Driver, on this computer's screen.</Description></RegistrationInfo>
+      <Triggers>
+        <LogonTrigger><UserId>#{escape(user)}</UserId></LogonTrigger>
+        <TimeTrigger><StartBoundary>2000-01-01T00:00:00</StartBoundary><Repetition><Interval>PT1M</Interval></Repetition></TimeTrigger>
+      </Triggers>
+      <Principals><Principal id="Author"><UserId>#{escape(user)}</UserId><LogonType>InteractiveToken</LogonType><RunLevel>LeastPrivilege</RunLevel></Principal></Principals>
+      <Settings>
+        <MultipleInstancesPolicy>IgnoreNew</MultipleInstancesPolicy>
+        <DisallowStartIfOnBatteries>false</DisallowStartIfOnBatteries>
+        <StopIfGoingOnBatteries>false</StopIfGoingOnBatteries>
+        <ExecutionTimeLimit>PT0S</ExecutionTimeLimit>
+        <RestartOnFailure><Interval>PT1M</Interval><Count>10</Count></RestartOnFailure>
+        <Priority>5</Priority>
+      </Settings>
+      <Actions Context="Author"><Exec><Command>conhost.exe</Command><Arguments>#{escape(run)}</Arguments><WorkingDirectory>#{escape(folder)}</WorkingDirectory></Exec></Actions>
+    </Task>
+    """
+
+    registered = Path.join(folder, "task.xml")
+
+    if File.read(registered) != {:ok, task} do
+      System.cmd(driver, ["stop", "--socket", socket()], stderr_to_stdout: true)
+      schtasks(["/end", "/tn", name])
+      # Task Scheduler reads a task's XML as UTF-16.
+      writing = registered <> ".utf16"
+      File.write!(writing, :unicode.characters_to_binary(task, :utf8, {:utf16, :little}) |> then(&(<<0xFF, 0xFE>> <> &1)))
+      {output, status} = schtasks(["/create", "/tn", name, "/xml", writing, "/f"])
+      File.rm!(writing)
+      if status != 0, do: raise("Task Scheduler didn't take Computer Use's task: #{output}")
+      File.write!(registered, task)
+    end
+
+    schtasks(["/run", "/tn", name])
   end
 
-  # Its own state, apart from any other Cua Driver on the computer, and neither telemetry nor update checks: it's the
-  # version pinned here.
-  defp environment(folder) do
+  defp schtasks(arguments), do: System.cmd("schtasks", arguments, stderr_to_stdout: true)
+
+  defp command(driver) do
+    embedded = if :os.type() == {:unix, :darwin}, do: ["--embedded", "--host-bundle-id", @id], else: []
+    [driver, "serve", "--socket", socket() | embedded]
+  end
+
+  # Its MCP endpoint, its own state, apart from any other Cua Driver on the computer, and neither telemetry nor update
+  # checks: it's the version pinned here.
+  defp environment(folder, %{"port" => port, "token" => token}) do
     [
       {"CUA_DRIVER_RS_HOME", Path.join(folder, "cua-driver-home")},
+      {"CUA_DRIVER_RS_MCP_HTTP_PORT", "#{port}"},
+      {"CUA_DRIVER_RS_MCP_HTTP_TOKEN", token},
       {"CUA_DRIVER_RS_TELEMETRY_ENABLED", "0"},
       {"CUA_DRIVER_RS_UPDATE_CHECK", "0"}
     ]
