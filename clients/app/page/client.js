@@ -1852,6 +1852,8 @@ function showHomeScreen() {
   invoke("front")
 }
 byId("home-screen").addEventListener("click", showHomeScreen)
+// A Mac's Window → Home Screen is ⇧⌘H (`host.rs`), which its tooltip says, as a Mac app's toolbar buttons do.
+if (navigator.platform.startsWith("Mac")) byId("home-screen").title = "Home Screen (⇧⌘H)"
 
 dress()
 shown.subscribe(draw)
