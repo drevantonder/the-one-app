@@ -68,7 +68,7 @@ defmodule OneCore.Apps.Deploy do
       try do
         install = install?.(version)
 
-        with :ok <- Entrypoint.strict(files, version, trusted),
+        with {:ok, styling} <- Entrypoint.strict(files, version, trusted),
              :ok <- if(why = Version.waiting(name, version), do: {:error, why}, else: :ok),
              :ok <- described(name, version),
              :ok <- if(install, do: fits(owner, name, version), else: :ok),
@@ -79,7 +79,7 @@ defmodule OneCore.Apps.Deploy do
              :ok <- listed(artifact),
              {:ok, number} <- Store.keep(artifact, name, version, built, files, from, trusted, was),
              :ok <- committed(owner, name, number, version, install) do
-          warnings = Enum.join(Enum.reject([warnings | untasked(name, version, built)], &(&1 == "")), "\n")
+          warnings = Enum.join(Enum.reject([warnings, styling | untasked(name, version, built)], &(&1 == "")), "\n")
           {:ok, number, warnings}
         end
       after

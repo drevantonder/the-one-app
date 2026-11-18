@@ -23,8 +23,8 @@
 
 /** The runtime version: what the host's side of the renderer is, which a host says it has, an entrypoint names
  * (`runtime_version`), and the tables say they need. 3 made each mutation and event a direct call, 4 added
- * `intersection`. */
-export const RUNTIME_VERSION = 4
+ * `intersection`, 5 an app's own tokens (`Styles.tokens`) and the values of a dynamic style (`Dynamic`). */
+export const RUNTIME_VERSION = 5
 
 /** A node, as the host knows it. `0` is the root, which the host makes: an app's window, or its frame. */
 export type Id = number
@@ -220,7 +220,7 @@ export interface Props {
   "aria-activedescendant"?: string
   /** How it's laid out and looks: its styles (`Styles`) by id, and inline ones worked out as the page runs, the last
    * winning where two say the same property. A page written for 1 sends one `Version1Style` instead. */
-  style?: (StyleId | Inline)[] | Version1Style
+  style?: (StyleId | Inline | Dynamic)[] | Version1Style
   /** `image`: a `data:` address, or a file of the app's own by its path. */
   src?: string
   /** `image`: what it shows, its accessible name. Empty for one that's only how it looks. */
@@ -468,6 +468,11 @@ export type Token =
  * styles are. */
 export type Inline = { [P in "top" | "bottom" | "start" | "end" | "width" | "height" | "translateX" | "translateY" | "scale" | "rotate" | "opacity"]?: number }
 
+/** What a dynamic style (`styles()` with a function) was called with: its values by property, a number of pixels for
+ * a length (unitless for `opacity`, `scale`, `flexGrow`, and degrees for `rotate`), a hex colour, or a percentage or
+ * `auto`, which a host adds to the style it has by id, as its last, so they win. The properties are longhands. */
+export type Dynamic = Record<string, number | string>
+
 /** A style's id. The same style is the same id in every table, so a host may keep them all in one. */
 export type StyleId = string
 
@@ -477,6 +482,9 @@ export interface Styles {
   v: number
   styles: Record<StyleId, Style>
   root?: StyleId
+  /** An app's own tokens, and the UI library's it names new values for, for its page alone: by id as `Tokens` has
+   * them, those it names winning over `/ui/client/tokens.json`'s. */
+  tokens?: Record<TokenId, Token>
 }
 
 /** A node's state, which a style's value may depend on, as it may on a condition: `hover`, a mouse's pointer over it

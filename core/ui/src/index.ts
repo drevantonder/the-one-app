@@ -23,11 +23,12 @@
 /// `Box`, `Scroll` (a box whose content scrolls), `Text`, `Image`, `Path` (a vector shape), `EditableText` (bare text to
 /// type, which `Input` draws in a field's box) and `Video` (a screen's live video, which `LiveScreen` draws), each styled by
 /// its `style`: styles from `styles()`, beside what uses them, whose values are the design tokens (`tokens`, from
-/// core/ui/src/tokens.ts), never a raw colour, size or font, which the typecheck refuses:
+/// core/ui/src/tokens.ts), where a raw colour or length is a warning, "make it a token", and a raw font fails the check:
 /// `const look = styles({ row: { flexDirection: "row", gap: tokens.space.md, paddingInline: tokens.length.gutter,
 /// backgroundColor: { default: tokens.colour.card, hover: tokens.colour.muted }, font: tokens.type.label } })`, then
 /// `<Box style={[look.row, open() && look.open]} />`, the last to say a property winning. The build makes each
-/// `styles()` ahead of time, so what it's given is written out: literals, `tokens.…` and `negative(…)`. A component
+/// `styles()` ahead of time, so what it's given is written out: literals, `tokens.…`, `negative(…)`, an app's own tokens
+/// (`defineVars`) and functions of values (dynamic styles). A component
 /// lets a caller change only what it names: `style?: Styles<"marginTop" | "alignSelf">`. There's no element of the
 /// DOM's (`<div>`, `<span>`, `<p>`), no `class`, no stylesheet, and no `document`, `window` or other DOM API. Its JS has
 /// the language with `Intl`, and the Web APIs a Worker has (`URL`, `TextEncoder`, `crypto`, `structuredClone`,
@@ -63,5 +64,5 @@ export { toast } from "./toast.tsx"
 export { Widget } from "./widget.tsx"
 export { Box, EditableText, Image, Layer, Path, Scroll, Text, Video } from "./strict/primitives.tsx"
 export { render } from "./render.tsx"
-export { negative, styles } from "./styles.ts"
+export { createTheme, defineVars, negative, styles } from "./styles.ts"
 export { tokens } from "./tokens.ts"

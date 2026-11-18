@@ -97,14 +97,15 @@ defmodule OneCore.Entrypoint do
   @doc """
   Type checks an app's page as strict where one of the `version`'s entrypoints says its `runtime_version`, since a native
   host draws it itself and an element of the DOM's or a Web API would break it only there (`core/ui/lint-strict.js`,
-  which the UI library's build holds). `:ok`, or `{:error, why}` with the checker's own errors, a line each: file, line,
-  column and message, as a compiler's. It runs on the files as they were deployed, as `build/2` does, and in the sandbox
-  where the app isn't `trusted`.
+  which the UI library's build holds). `{:ok, warnings}`, its warnings a line each (a raw colour or length in a style,
+  which should be a token), or `{:error, why}` with the checker's own errors, a line each: file, line, column and
+  message, as a compiler's. It runs on the files as they were deployed, as `build/2` does, and in the sandbox where the
+  app isn't `trusted`.
   """
   def strict(files, version, trusted) do
     if client?(files) and Enum.any?(version.entrypoints, & &1.runtime_version),
       do: type_check(files, trusted),
-      else: :ok
+      else: {:ok, ""}
   end
 
   defp type_check(files, trusted) do
@@ -130,7 +131,7 @@ defmodule OneCore.Entrypoint do
 
   defp checked(bun, builder, source, true) do
     case System.cmd(bun, [Path.join(builder, "lint-strict.js"), source], stderr_to_stdout: true, env: runtime()) do
-      {_, 0} -> :ok
+      {said, 0} -> {:ok, String.trim(said)}
       {said, _} -> {:error, not_strict(said)}
     end
   end
@@ -141,7 +142,7 @@ defmodule OneCore.Entrypoint do
 
     case OneCore.Sandbox.run(bun, [Path.join(builder, "lint-strict.js"), source], policy) do
       {:error, why} -> {:error, why}
-      {_, 0} -> :ok
+      {said, 0} -> {:ok, String.trim(said)}
       {said, _} -> {:error, not_strict(said)}
     end
   end

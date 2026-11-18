@@ -13,7 +13,7 @@ use std::sync::RwLock;
 use serde_json::{Map, Value};
 
 use crate::Cursor;
-use crate::geometry::{Corners, Edges, Hsla};
+use crate::geometry::{Corners, Edges, Hsla, Rgba};
 use crate::text::TextStyle;
 use crate::tokens::{Conditions, Radius, Shadow, table, tokens, type_style};
 use crate::tree::{Length, Node, Style};
@@ -571,7 +571,25 @@ fn ref_length(value: &Value, conditions: Conditions) -> Option<f32> {
     Some(if negative { -px } else { px })
 }
 
+/// A colour as data has it, hex: `#f80`, `#ff8800`, `#f808` or `#ff880080` (what a dynamic style takes).
+fn hex(text: &str) -> Option<Rgba> {
+    let digits = text.strip_prefix('#')?;
+    let channel = |at: usize, width: usize| {
+        let part = digits.get(at..at + width)?;
+        let value = u8::from_str_radix(part, 16).ok()?;
+        Some(if width == 1 { f32::from(value * 17) } else { f32::from(value) } / 255.0)
+    };
+    match digits.len() {
+        3 | 4 => Some(Rgba { r: channel(0, 1)?, g: channel(1, 1)?, b: channel(2, 1)?, a: if digits.len() == 4 { channel(3, 1)? } else { 1.0 } }),
+        6 | 8 => Some(Rgba { r: channel(0, 2)?, g: channel(2, 2)?, b: channel(4, 2)?, a: if digits.len() == 8 { channel(6, 2)? } else { 1.0 } }),
+        _ => None,
+    }
+}
+
 fn ref_colour(value: &Value, conditions: Conditions) -> Option<Hsla> {
+    if let Some(text) = value.as_str() {
+        return hex(text).map(Hsla::from);
+    }
     let (token, _) = token_of(value)?;
     table().colour(token, conditions).map(Hsla::from)
 }

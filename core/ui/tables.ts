@@ -1,6 +1,8 @@
 // What the UI library's build makes of its tokens (src/tokens.ts) for each target: the web's CSS variables
 // (src/tokens.css, written here, never by hand) and a native host's token table (strict/renderer.ts's `Tokens`).
 import { createHash } from "node:crypto"
+import { existsSync, readFileSync, statSync } from "node:fs"
+import { dirname, join } from "node:path"
 import { converter, parse } from "culori"
 import { parseAst, type Plugin } from "vite"
 import { conditions, RUNTIME_VERSION, type Condition, type Rgba, type State, type Style as Entry2, type Styles as Table, type Token as Entry, type Tokens } from "./src/strict/renderer.ts"
@@ -110,45 +112,51 @@ const where: Record<Condition, (rules: string) => string> = {
   reducedMotion: (rules) => `@media (prefers-reduced-motion: reduce) {\n  :root {\n${indent(rules)}  }\n}\n`,
 }
 
-/** The tokens as CSS variables. */
-export function tokensCss(): string {
-  const rules = (condition: "default" | Condition) => all.flatMap((token) => declared(token, condition)).map(([name, value]) => `  --${name}: ${value};\n`).join("")
+/** Tokens as CSS variables, on `:root`, as they are by default and where each condition holds. */
+export function variablesCss(list: Token[], header: string): string {
+  const rules = (condition: "default" | Condition) => list.flatMap((token) => declared(token, condition)).map(([name, value]) => `  --${name}: ${value};\n`).join("")
   return [
-    "/* The design tokens as CSS variables, made from tokens.ts by the UI library's build (tables.ts). Don't edit it: edit tokens.ts. */\n",
+    header,
     `:root {\n${rules("default")}}\n`,
     ...conditions.map((condition) => (rules(condition) ? where[condition](rules(condition)) : "")),
   ].join("")
 }
 
+/** The UI library's tokens as CSS variables. */
+export const tokensCss = () => variablesCss(all, "/* The design tokens as CSS variables, made from tokens.ts by the UI library's build (tables.ts). Don't edit it: edit tokens.ts. */\n")
+
+/** A token as a native host's table has it. */
+function tokenEntry(token: Token): Entry {
+  const value = token.value as any
+  switch (token.kind) {
+    case "colour": {
+      if (!value.of) return { kind: "colour", value: each(value, rgba) as never }
+      // A colour at a part of another's opacity, as it is in each condition the other's varies by.
+      const of = varying(value.of.value)
+      return { kind: "colour", value: each(of.dark ? of : of.default, (colour: string) => { const [r, g, b, a] = rgba(colour); return [r, g, b, Math.round(a * value.alpha * 10000) / 10000] }) as never }
+    }
+    case "shadow":
+      return { kind: "shadow", value: each(value, (shadows: any[]) => shadows.map((shadow) => ({ x: { px: shadow.x }, y: { px: shadow.y }, blur: { px: shadow.blur }, spread: { px: shadow.spread }, colour: rgba(shadow.colour), ...(shadow.inset ? { inset: true } : {}) }))) as never }
+    case "type":
+      return { kind: "type", value: { font: value.font.id, size: value.size.value, lineHeight: value.lineHeight, weight: value.weight.id, tracking: value.tracking, tabular: value.tabular } }
+    default:
+      return { kind: token.kind, value } as Entry
+  }
+}
+
 /** The tokens as a native host's table. */
 export function tokensTable(): Tokens {
-  const entry = (token: Token): Entry => {
-    const value = token.value as any
-    switch (token.kind) {
-      case "colour": {
-        if (!value.of) return { kind: "colour", value: each(value, rgba) as never }
-        // A colour at a part of another's opacity, as it is in each condition the other's varies by.
-        const of = varying(value.of.value)
-        return { kind: "colour", value: each(of.dark ? of : of.default, (colour: string) => { const [r, g, b, a] = rgba(colour); return [r, g, b, Math.round(a * value.alpha * 10000) / 10000] }) as never }
-      }
-      case "shadow":
-        return { kind: "shadow", value: each(value, (shadows: any[]) => shadows.map((shadow) => ({ x: { px: shadow.x }, y: { px: shadow.y }, blur: { px: shadow.blur }, spread: { px: shadow.spread }, colour: rgba(shadow.colour), ...(shadow.inset ? { inset: true } : {}) }))) as never }
-      case "type":
-        return { kind: "type", value: { font: value.font.id, size: value.size.value, lineHeight: value.lineHeight, weight: value.weight.id, tracking: value.tracking, tabular: value.tabular } }
-      default:
-        return { kind: token.kind, value } as Entry
-    }
-  }
-  return { v: RUNTIME_VERSION, tokens: Object.fromEntries(all.map((token) => [token.id, entry(token)])) }
+  return { v: RUNTIME_VERSION, tokens: Object.fromEntries(all.map((token) => [token.id, tokenEntry(token)])) }
 }
 
 if (import.meta.main) process.stdout.write(tokensCss())
 
-// Styles (src/styles.ts): each `styles({ … })` in a module, worked out as it's built, into what it is on each target.
-
+// Styles (src/styles.ts) and an app's own tokens (`defineVars`, `createTheme`): each module's, worked out as it's built,
+// into what they are on each target.
 
 const hash = (text: string) => createHash("sha256").update(text).digest("base64url").replace(/[-_]/g, "").slice(0, 8)
 const states: State[] = ["hover", "pressed", "focused", "entering"]
+const kebab = (name: string) => name.replace(/[A-Z]/g, (letter) => `-${letter.toLowerCase()}`)
 
 /** Each shorthand, as the longhands it says. */
 const longhands: Record<string, string[]> = {
@@ -163,6 +171,11 @@ const longhands: Record<string, string[]> = {
   borderWidth: ["borderTopWidth", "borderBottomWidth", "borderStartWidth", "borderEndWidth"],
   borderRadius: ["borderTopStartRadius", "borderTopEndRadius", "borderBottomStartRadius", "borderBottomEndRadius"],
 }
+
+/** Properties whose numbers aren't pixels. */
+const numbers = ["flexGrow", "flexShrink", "opacity", "zIndex", "aspectRatio", "scale", "strokeWidth", "lineClamp"]
+/** Properties whose values are tokens, or made of several things, which a dynamic style can't take as a value. */
+const fixed = ["font", "gridTemplateColumns", "gridColumn", "boxShadow", "backdropFilter", "transitionProperty", "transition", "animationName", "animation", "lineClamp"]
 
 /** A value as a token's reference, a token's negative's, or itself. */
 function referenced(value: any): unknown {
@@ -188,7 +201,6 @@ function written(style: Record<string, any>): Entry2 {
 
 /** A token reference's CSS. */
 const variable = (ref: any) => (ref.negative ? `calc(-1 * var(--${ref.token}))` : `var(--${ref.token})`)
-const kebab = (name: string) => name.replace(/[A-Z]/g, (letter) => `-${letter.toLowerCase()}`)
 /** Each property's CSS name, where it isn't its own in kebab case. */
 const named: Record<string, string> = {
   paddingStart: "padding-inline-start", paddingEnd: "padding-inline-end", marginStart: "margin-inline-start", marginEnd: "margin-inline-end",
@@ -200,7 +212,7 @@ const named: Record<string, string> = {
 /** A property's value as CSS declarations. */
 function declarations(property: string, value: any): string {
   const ref = value && typeof value === "object" && "token" in value
-  const plain = ref ? variable(value) : typeof value === "number" && !["flexGrow", "flexShrink", "opacity", "zIndex", "aspectRatio", "scale", "strokeWidth", "lineClamp"].includes(property) ? `${value}px` : String(value)
+  const plain = ref ? variable(value) : typeof value === "number" && !numbers.includes(property) ? `${value}px` : String(value)
   switch (property) {
     case "font": {
       const type = all.find((token) => token.id === value.token)!.value as any
@@ -250,16 +262,43 @@ function rule(name: string, state: string, body: string): string {
   return `.${name}{${body}}`
 }
 
-/** What a module's styles made: each style's classes by property, and the CSS and table entries they need. */
+/** What a module's styles and tokens made: each style's classes by property, the CSS and entries they need, the app's own
+ * tokens and the ones it names new values for (`defineVars`, `createTheme`) by id, and what it warns of. */
 export interface Made {
   css: Map<string, string>
   table: Table["styles"]
+  tokens: Map<string, Token>
+  warnings: Set<string>
 }
 
-/** A style as the web and a host have it: its id, and its classes by property; its CSS and entry in `made`. */
-function compile(style: Record<string, any>, made: Made): Record<string, string> {
+export const newMade = (): Made => ({ css: new Map(), table: {}, tokens: new Map(), warnings: new Set() })
+
+/** An app's tokens as a native host's table has them, with the UI library's that are a part of one it names a new
+ * value for (a label at 60%) as they are now. */
+export function themeTokens(made: Made): Record<string, Entry> {
+  const now = new Map(made.tokens)
+  for (let more = true; more; ) {
+    more = false
+    for (const token of all) {
+      const of = (token.value as { of?: Token } | undefined)?.of
+      if (of && now.has(of.id) && !now.has(token.id)) {
+        now.set(token.id, { ...token, value: { ...(token.value as object), of: now.get(of.id) } })
+        more = true
+      }
+    }
+  }
+  return Object.fromEntries([...now].map(([id, token]) => [id, tokenEntry(token)]))
+}
+
+/** An app's style table as a native host has it: its styles, and its tokens where it has its own. */
+export const stylesTable = (made: Made): Table => ({ v: RUNTIME_VERSION, styles: made.table, ...(made.tokens.size ? { tokens: themeTokens(made) } : {}) })
+
+/** A style as the web and a host have it: its id, and its classes by property; its CSS and entry in `made`. `dynamic` is
+ * the properties it takes as values, each by its parameter: a style table's entry is what's static, and the call gives the
+ * rest. */
+function compile(style: Record<string, any>, made: Made, dynamic: Record<string, string> = {}): Record<string, string> {
   const entry = written(style)
-  const id = `s${hash(JSON.stringify(entry))}`
+  const id = `s${hash(JSON.stringify([entry, Object.keys(dynamic).sort()]))}`
   made.table[id] = entry
   const out: Record<string, string> = { $id: id }
   for (const [property, value] of Object.entries(entry)) {
@@ -274,37 +313,200 @@ function compile(style: Record<string, any>, made: Made): Record<string, string>
       })
       .join(" ")
   }
+  // What a call gives is a CSS custom property of its own, which its class reads.
+  for (const property of Object.keys(dynamic)) {
+    const custom = `var(--${id}-${property})`
+    const body = property === "rotate" ? `rotate:${custom}` : declarations(property, custom)
+    const name = `x${hash(`default|${body}`)}`
+    made.css.set(`01${name}`, rule(name, "default", body))
+    out[property] = name
+  }
   return out
 }
 
-/** Every `styles({ … })` in `code`, worked out: the code with each as what it made. `styles` is the UI library's (from
- * "ui", or ./styles.ts in the UI library), and what it's given is literals, `tokens.…` and `negative(…)`. */
+/** What a dynamic style's function is called with as it's read, to see which of what it returns is a parameter as it is. */
+class Parameter {
+  constructor(readonly name: string) {}
+}
+
+/** The names a node uses, as an identifier. */
+function names(node: any, into = new Set<string>()): Set<string> {
+  if (!node || typeof node !== "object") return into
+  if (node.type === "Identifier") into.add(node.name)
+  for (const value of Object.values(node)) if (value && typeof value === "object") Array.isArray(value) ? value.forEach((one) => names(one, into)) : names(value, into)
+  return into
+}
+
+const unwrapped = (node: any): any => (node?.type === "ParenthesizedExpression" ? unwrapped(node.expression) : node)
+const keyOf = (property: any): string | undefined => (property.computed ? undefined : property.key?.type === "Identifier" ? property.key.name : property.key?.value)
+const lang = (file: string) => (file.endsWith(".tsx") ? "tsx" : file.endsWith(".ts") ? "ts" : "jsx")
+/** A place in `code`, as a compiler says it: line and column. */
+function place(code: string, offset: number): string {
+  const before = code.slice(0, offset).split("\n")
+  return `${before.length}:${before.at(-1)!.length + 1}`
+}
+
+/** An app's token values as a token's: a colour is a hex colour, or its light and dark; a length is pixels, or by condition. */
+function valued(kind: string, value: unknown, what: string): unknown {
+  const check = (colour: unknown) => {
+    if (typeof colour !== "string" || !parse(colour)) throw new Error(`${what} isn't a colour: ${JSON.stringify(colour)}`)
+    return colour
+  }
+  if (kind === "colour") return each(value, check)
+  return each(value, (px) => {
+    if (typeof px !== "number") throw new Error(`${what} isn't a number of pixels: ${JSON.stringify(px)}`)
+    return { px }
+  })
+}
+
+const kindOf = (value: unknown): "colour" | "length" => {
+  const first = value && typeof value === "object" && "default" in value ? value.default : value
+  return typeof first === "number" ? "length" : "colour"
+}
+
+/** The tokens a module has by the names it gives them (`const brand = defineVars({ … })`), and those it imports from
+ * the modules beside it, and what to write in place of its own `defineVars` and `createTheme` calls. */
+function scopeOf(ast: any, code: string, file: string, made: Made, seen = new Set<string>()) {
+  seen.add(file)
+  const scope: Record<string, Record<string, Token>> = {}
+  const edits: [number, number, string][] = []
+  const evaluate = (text: string) => new Function("tokens", "negative", ...Object.keys(scope), `"use strict"; return (${text})`)(tokens, negative, ...Object.values(scope))
+  for (const statement of ast.body) {
+    if (statement.type === "ImportDeclaration" && /^\.\.?\//.test(statement.source.value)) {
+      const base = join(dirname(file), statement.source.value)
+      const target = [base, `${base}.ts`, `${base}.tsx`, `${base}.js`, join(base, "index.ts")].find((path) => existsSync(path) && statSync(path).isFile())
+      if (!target || seen.has(target)) continue
+      const theirs = scopeOf(parseAst(readFileSync(target, "utf8"), { lang: lang(target) }), readFileSync(target, "utf8"), target, made, seen).scope
+      for (const specifier of statement.specifiers) if (specifier.type === "ImportSpecifier" && theirs[specifier.imported.name ?? specifier.imported.value]) scope[specifier.local.name] = theirs[specifier.imported.name ?? specifier.imported.value]
+    }
+    const declaration = statement.type === "ExportNamedDeclaration" ? statement.declaration : statement
+    if (declaration?.type === "VariableDeclaration") {
+      for (const one of declaration.declarations) {
+        const call = unwrapped(one.init)
+        if (call?.type !== "CallExpression" || call.callee?.name !== "defineVars" || one.id.type !== "Identifier") continue
+        const here = `${file}:${place(code, call.start)}: defineVars()`
+        try {
+          const vars = evaluate(code.slice(call.arguments[0].start, call.arguments[0].end)) as Record<string, unknown>
+          const made_: Record<string, Token> = {}
+          for (const [key, value] of Object.entries(vars)) {
+            const kind = kindOf(value)
+            const token = { kind, id: `x${hash(`${file}|${one.id.name}`)}-${kebab(key)}`, value: valued(kind, value, `${here}: ${key}`) } as Token
+            made.tokens.set(token.id, token)
+            made_[key] = token
+          }
+          scope[one.id.name] = made_
+          edits.push([call.start, call.end, JSON.stringify(Object.fromEntries(Object.entries(made_).map(([key, token]) => [key, { kind: token.kind, id: token.id }])))])
+        } catch (error) {
+          throw new Error(`${here} takes what's written out, hex colours, numbers and { default, dark }: ${(error as Error).message}`)
+        }
+      }
+    } else if (statement.type === "ExpressionStatement" && unwrapped(statement.expression)?.type === "CallExpression" && unwrapped(statement.expression).callee?.name === "createTheme") {
+      const call = unwrapped(statement.expression)
+      const here = `${file}:${place(code, call.start)}: createTheme()`
+      try {
+        const [vars, values] = call.arguments.map((argument: any) => evaluate(code.slice(argument.start, argument.end))) as Record<string, any>[]
+        for (const [key, value] of Object.entries(values)) {
+          const target = vars[key]
+          if (!target?.kind) throw new Error(`${key} isn't one of its tokens`)
+          made.tokens.set(target.id, { ...target, value: valued(target.kind, value, `${here}: ${key}`) })
+        }
+      } catch (error) {
+        throw new Error(`${here} takes tokens and what's written out for them: ${(error as Error).message}`)
+      }
+      edits.push([call.start, call.end, "undefined"])
+    }
+  }
+  return { scope, edits }
+}
+
+/** Every `styles({ … })` in `code`, and every `defineVars({ … })` and `createTheme(…)`, worked out: the code with each as
+ * what it made. They're the UI library's (from "ui", or ./styles.ts in the UI library), and what each is given is
+ * literals, `tokens.…`, `negative(…)`, an app's own tokens, and for a style a function of its values. */
 export function styled(code: string, file: string, made: Made): string | undefined {
-  if (!/\bstyles\(\s*\{/.test(code)) return
-  const calls: [number, number, number, number][] = []
+  if (!/\b(styles|defineVars|createTheme)\(/.test(code)) return
+  const ast = parseAst(code, { lang: lang(file) })
+  const { scope, edits } = scopeOf(ast, code, file, made)
+  const calls: any[] = []
   const visit = (node: any) => {
     if (!node || typeof node !== "object") return
-    if (node.type === "CallExpression" && node.callee?.type === "Identifier" && node.callee.name === "styles" && node.arguments.length === 1) calls.push([node.start, node.end, node.arguments[0].start, node.arguments[0].end])
+    if (node.type === "CallExpression" && node.callee?.type === "Identifier" && node.callee.name === "styles" && node.arguments.length === 1) calls.push(node)
     for (const value of Object.values(node)) if (value && typeof value === "object") Array.isArray(value) ? value.forEach(visit) : visit(value)
   }
-  visit(parseAst(code, { lang: file.endsWith(".tsx") ? "tsx" : file.endsWith(".ts") ? "ts" : "jsx" }))
-  let out = code
-  for (const [start, end, from, to] of calls.reverse()) {
-    const written = code.slice(from, to)
-    let sheet: Record<string, Record<string, unknown>>
-    try {
-      sheet = new Function("tokens", "negative", `"use strict"; return (${written})`)(tokens, negative)
-    } catch (error) {
-      throw new Error(`${file}: styles() takes what's written out, literals, tokens.… and negative(…), and this isn't: ${(error as Error).message}`)
+  visit(ast)
+  const evaluate = (text: string, values: Record<string, unknown> = {}) =>
+    new Function("tokens", "negative", ...Object.keys(scope), ...Object.keys(values), `"use strict"; return (${text})`)(tokens, negative, ...Object.values(scope), ...Object.values(values))
+  for (const call of calls) {
+    const sheet = unwrapped(call.arguments[0])
+    if (sheet?.type !== "ObjectExpression") throw new Error(`${file}:${place(code, call.start)}: styles() takes an object written out`)
+    const compiled: string[] = []
+    for (const entry of sheet.properties) {
+      const key = entry.type === "Property" ? keyOf(entry) : undefined
+      const where = `${file}:${place(code, entry.start)}`
+      if (key === undefined) throw new Error(`${where}: styles() takes each style by its name, written out`)
+      const value = unwrapped(entry.value)
+      if (value.type === "ArrowFunctionExpression") {
+        const params = value.params.map((param: any) => {
+          if (param.type !== "Identifier") throw new Error(`${where}: ${key}'s parameters are plain names`)
+          return param.name as string
+        })
+        const body = unwrapped(value.body)
+        if (body.type !== "ObjectExpression") throw new Error(`${where}: ${key} is a function that returns a style, written out: (height) => ({ height })`)
+        for (const property of body.properties) {
+          const used = names(property.value, new Set())
+          const inner = unwrapped(property.value)
+          const bare = inner?.type === "Identifier" && params.includes(inner.name)
+          if (!bare && params.some((param) => used.has(param))) throw new Error(`${file}:${place(code, property.start)}: a dynamic style's value is its parameter, as it is (${keyOf(property)}: ${params.find((param) => used.has(param))}); work a value out where it's called`)
+        }
+        const shape = evaluate(code.slice(body.start, body.end), Object.fromEntries(params.map((param: string) => [param, new Parameter(param)]))) as Record<string, any>
+        const statics: Record<string, any> = {}
+        const dynamic: Record<string, string> = {}
+        for (const [property, value] of Object.entries(shape)) {
+          if (value instanceof Parameter) {
+            if (fixed.includes(property)) throw new Error(`${where}: ${key}.${property} is a token's, so it isn't a value a style takes`)
+            for (const one of longhands[property] ?? [property]) dynamic[one] = value.name
+          } else statics[property] = value
+        }
+        warn(statics, body, code, file, made)
+        const classes = compile(statics, made, dynamic)
+        const pairs = Object.entries(dynamic).map(([property, param]) => `${JSON.stringify(property)}:${param}`)
+        compiled.push(`${JSON.stringify(key)}:(${params.join(",")})=>(${JSON.stringify(classes).slice(0, -1)},"$dynamic":{${pairs.join(",")}}})`)
+      } else {
+        let style: Record<string, unknown>
+        try {
+          style = evaluate(code.slice(value.start, value.end))
+        } catch (error) {
+          throw new Error(`${where}: styles() takes what's written out, literals, tokens.…, negative(…), an app's own tokens and functions of values, and ${key} isn't: ${(error as Error).message}`)
+        }
+        warn(style, value, code, file, made)
+        compiled.push(`${JSON.stringify(key)}:${JSON.stringify(compile(style, made))}`)
+      }
     }
-    const compiled = Object.fromEntries(Object.entries(sheet).map(([key, style]) => [key, compile(style, made)]))
-    out = `${out.slice(0, start)}${JSON.stringify(compiled)}${out.slice(end)}`
+    edits.push([call.start, call.end, `{${compiled.join(",")}}`])
   }
+  let out = code
+  for (const [start, end, text] of edits.sort((a, b) => b[0] - a[0])) out = `${out.slice(0, start)}${text}${out.slice(end)}`
   return out
 }
 
-/** The CSS of what `made`, its rules in the order states win. */
-export const stylesCss = (made: Made) => [...made.css.entries()].sort(([a], [b]) => a.slice(0, 2).localeCompare(b.slice(0, 2))).map(([, rule]) => rule).join("\n")
+/** What a static style says as a raw literal, which is a warning: a token is what a style names, and what's data goes in a dynamic one. */
+function warn(style: Record<string, any>, node: any, code: string, file: string, made: Made) {
+  for (const [property, value] of Object.entries(style)) {
+    for (const one of byState(value) ? Object.values(byState(value)!) : [value]) {
+      const length = typeof one === "number" && one !== 0 && !numbers.includes(property) && property !== "rotate"
+      const colour = typeof one === "string" && one.startsWith("#")
+      if (!length && !colour) continue
+      const at = node.properties?.find((one: any) => keyOf(one) === property)?.start ?? node.start
+      made.warnings.add(`${file}(${place(code, at).replace(":", ",")}): warning: ${property}: ${JSON.stringify(one)} is a raw ${colour ? "colour" : "length"}; make it a token (defineVars for an app's own), or a dynamic style's value if it's data`)
+    }
+  }
+}
+
+/** The CSS of what `made`, its rules in the order states win, after its app's own tokens as CSS variables. */
+export const stylesCss = (made: Made) =>
+  [
+    made.tokens.size ? variablesCss([...made.tokens.values()], "/* The app's own tokens (defineVars) and those it names new values for (createTheme). */\n") : "",
+    ...[...made.css.entries()].sort(([a], [b]) => a.slice(0, 2).localeCompare(b.slice(0, 2))).map(([, rule]) => rule),
+  ].join("\n")
 
 /** Vite's plugin: each module's styles worked out as it's built, into `made`. */
 export const stylesPlugin = (made: Made): Plugin => ({

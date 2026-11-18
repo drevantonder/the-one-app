@@ -381,7 +381,8 @@ defmodule OneCore.App do
   - An entrypoint may say its `runtime_version`, the runtime version its page needs of a native host
     (`core/ui/src/strict/renderer.ts`, `runtime_version: 4`): its page is in strict mode (the UI library's skill), so a
     native host that has that version draws it itself, and an older host, or a browser, opens it as any other page. Deploying type checks it as strict
-    (`OneCore.Entrypoint.strict/3`) and refuses it with the checker's errors where it isn't.
+    (`OneCore.Entrypoint.strict/3`) and refuses it with the checker's errors where it isn't, and gives its warnings with the deploy's: a raw
+    colour or length in a style, which should be a token.
   - An app's settings are in Settings, where it adds a section, or a group in another's page, by the hook
     `settings.sections`, with the component that draws it, as Settings' skill says.
   - An app that keeps something in its people's Vaults (an account at an outside service, a Chrome profile, a key)

@@ -175,6 +175,11 @@ async fn window(started: Instant, entrypoint: &str, subject: Option<&str>, link:
             strict::load_styles(styles)?;
         }
     }
+    // Its own tokens, where its styles have them, are its window's alone.
+    let tokens_page = match &tables[..] {
+        [_, _, own] => strict::tokens::load_page(own)?,
+        _ => 0,
+    };
     let strict = Strict::get()?;
     let asked: Arc<Mutex<HashMap<String, Asked>>> = Arc::default();
     let window: Arc<OnceLock<WindowId>> = Arc::default();
@@ -275,6 +280,7 @@ async fn window(started: Instant, entrypoint: &str, subject: Option<&str>, link:
                 let insets = strict::geometry::Edges { top, right: 0.0, bottom: 0.0, left: 0.0 };
                 let mut screen = Screen::new(js, Some(asked_by_app), Size { width: options.size.width.0, height: options.size.height.0 }, insets);
                 screen.theme = theme(chosen.as_deref());
+                screen.page = tokens_page;
                 // A picture it names by an address is one of its app's files, as a web view's page loads it.
                 let next_picture = std::cell::Cell::new(0u64);
                 screen.fetch = Some(Box::new(move |src: &str| {

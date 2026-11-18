@@ -5,7 +5,7 @@
 
 export { words } from "../../words.ts"
 export { createListCollection } from "../../collection.ts"
-export { negative, styles } from "../../styles.ts"
+export { createTheme, defineVars, negative, styles } from "../../styles.ts"
 export { tokens } from "../../tokens.ts"
 
 export { Box, EditableText, Image, Layer, Path, Scroll, Text, Video } from "./primitives.tsx"

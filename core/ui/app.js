@@ -12,8 +12,7 @@ import { dirname, extname, join, relative } from "node:path"
 import { fileURLToPath } from "node:url"
 import solid from "@solidjs/vite-plugin"
 import { build, parseAst } from "vite"
-import { RUNTIME_VERSION } from "./src/strict/renderer.ts"
-import { stylesCss, stylesPlugin } from "./tables.ts"
+import { newMade, stylesCss, stylesPlugin, stylesTable } from "./tables.ts"
 
 const [source, out] = process.argv.slice(2)
 
@@ -21,7 +20,7 @@ const [source, out] = process.argv.slice(2)
 const shared = { "solid-js": "/ui/client/solid.js", "solid-js/internal": "/ui/client/internal.js", "@solidjs/web": "/ui/client/web.js", "@zag-js/solid": "/ui/client/zag.js", ui: "/ui/client/ui.js" }
 
 /** The app's styles (src/styles.ts), made as each module is built. */
-const made = { css: new Map(), table: {} }
+const made = newMade()
 
 const pages = readdirSync(source, { recursive: true }).filter((path) => path.endsWith(".html") && !path.split("/").includes("node_modules"))
 // The modules it exports, by their names: `./profile` is `profile`.
@@ -92,7 +91,7 @@ try {
 for (const page of pages) {
   const folder = join(out, dirname(page))
   writeFileSync(join(folder, "styles.css"), stylesCss(made))
-  writeFileSync(join(folder, "styles.json"), JSON.stringify({ v: RUNTIME_VERSION, styles: made.table }))
+  writeFileSync(join(folder, "styles.json"), JSON.stringify(stylesTable(made)))
 }
 
 /// A problem as the compiler says it, with where: the file as the app's source names it, its line and column, and

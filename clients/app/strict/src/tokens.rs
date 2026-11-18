@@ -5,6 +5,7 @@
 //! one in `@media (pointer: coarse)`, which a touch screen's lengths are, and `:root.dark`'s `--lighter`. This module is the only one that
 //! knows that, so the table replaces it here alone.
 
+use std::borrow::Cow;
 use std::collections::HashMap;
 use std::sync::OnceLock;
 
@@ -221,6 +222,8 @@ pub struct Conditions {
     /// its page is told as `safeAreaInsets`): the UI library's `safe-top`, `safe-right`, `safe-bottom` and `safe-left`
     /// lengths are these, as its tokens say the host sets them.
     pub insets: [u16; 4],
+    /// Whose own tokens it draws with, as `load_page` gave them: its page's, where it has any (0, where it has none).
+    pub page: u32,
 }
 
 impl Conditions {
@@ -270,6 +273,24 @@ pub struct Table {
     tokens: HashMap<String, serde_json::Value>,
 }
 
+/// Each page's own tokens, and those of the table it names new values for (`Styles.tokens`), by the number
+/// `load_page` gave it, from 1: kept apart, as each is its window's alone.
+static PAGES: std::sync::RwLock<Vec<(String, std::sync::Arc<HashMap<String, serde_json::Value>>)>> = std::sync::RwLock::new(Vec::new());
+
+/// Takes a page's own tokens, which come with its styles (`styles.json`), as its window opens. → its number, for its
+/// `Conditions`, which is 0 for a page with none; the same tokens, again, are the same page.
+pub fn load_page(json: &str) -> anyhow::Result<u32> {
+    let parsed: serde_json::Value = serde_json::from_str(json)?;
+    let Some(tokens) = parsed["tokens"].as_object().filter(|tokens| !tokens.is_empty()) else { return Ok(0) };
+    let key = serde_json::to_string(tokens)?;
+    let mut pages = PAGES.write().expect("nothing panics holding it");
+    if let Some(at) = pages.iter().position(|(known, _)| *known == key) {
+        return Ok(at as u32 + 1);
+    }
+    pages.push((key, std::sync::Arc::new(tokens.iter().map(|(id, token)| (id.clone(), token.clone())).collect())));
+    Ok(pages.len() as u32)
+}
+
 static TABLE: std::sync::RwLock<Option<std::sync::Arc<Table>>> = std::sync::RwLock::new(None);
 
 /// Takes the token table the UI library came with (`tokens.json`). → the runtime version it needs.
@@ -312,9 +333,15 @@ fn rgba_of(value: &serde_json::Value) -> Option<Rgba> {
 
 impl Table {
     /// Token `id`'s value, if it's of `kind`, as it is where `conditions` hold.
-    fn value(&self, id: &str, kind: &str, conditions: Conditions) -> Option<&serde_json::Value> {
+    fn value(&self, id: &str, kind: &str, conditions: Conditions) -> Option<Cow<'_, serde_json::Value>> {
+        if let Some(at) = conditions.page.checked_sub(1) {
+            let page = PAGES.read().expect("nothing panics holding it").get(at as usize).map(|(_, tokens)| tokens.clone());
+            if let Some(token) = page.as_ref().and_then(|tokens| tokens.get(id)) {
+                return (token["kind"] == kind).then(|| Cow::Owned(varies(&token["value"], conditions).clone()));
+            }
+        }
         let token = self.tokens.get(id).filter(|token| token["kind"] == kind)?;
-        Some(varies(&token["value"], conditions))
+        Some(Cow::Borrowed(varies(&token["value"], conditions)))
     }
 
     pub fn kind(&self, id: &str) -> Option<&str> {
@@ -322,7 +349,8 @@ impl Table {
     }
 
     pub fn colour(&self, id: &str, conditions: Conditions) -> Option<Rgba> {
-        rgba_of(self.value(id, "colour", conditions)?)
+        let value = self.value(id, "colour", conditions)?;
+        rgba_of(&value)
     }
 
     pub fn length(&self, id: &str, conditions: Conditions) -> Option<f32> {
@@ -330,19 +358,21 @@ impl Table {
         if let Some(side) = inset {
             return Some(f32::from(conditions.insets[side]));
         }
-        length_of(self.value(id, "length", conditions)?)
+        let value = self.value(id, "length", conditions)?;
+        length_of(&value)
     }
 
     pub fn radius(&self, id: &str, conditions: Conditions) -> Option<Radius> {
         let value = self.value(id, "radius", conditions)?;
         match value["percent"].as_f64() {
             Some(percent) => Some(Radius::Percent(percent as f32)),
-            None => length_of(value).map(Radius::Px),
+            None => length_of(&value).map(Radius::Px),
         }
     }
 
     pub fn shadows(&self, id: &str, conditions: Conditions) -> Vec<Shadow> {
-        let Some(shadows) = self.value(id, "shadow", conditions).and_then(serde_json::Value::as_array) else { return Vec::new() };
+        let value = self.value(id, "shadow", conditions);
+        let Some(shadows) = value.as_deref().and_then(serde_json::Value::as_array) else { return Vec::new() };
         shadows
             .iter()
             .filter_map(|shadow| {

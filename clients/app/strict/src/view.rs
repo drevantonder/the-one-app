@@ -105,6 +105,8 @@ pub struct Screen {
     pub appearance: Appearance,
     /// The person asked for less motion, as the device says.
     pub reduced_motion: bool,
+    /// Whose own tokens it draws with, as its page's styles gave them (`tokens::load_page`).
+    pub page: u32,
     /// What its window says above it, on a computer, and where its Home was drawn and whether it's pressed.
     pub breadcrumb: Option<Breadcrumb>,
     /// Its window is a panel, whose background the host draws, under its page's.
@@ -213,6 +215,7 @@ impl Screen {
             theme: None,
             appearance: Appearance::Light,
             reduced_motion: false,
+            page: 0,
             breadcrumb: None,
             panel: None,
             glass: Vec::new(),
@@ -454,7 +457,7 @@ impl Screen {
     /// The conditions its tokens' values vary by, as its window is now.
     fn conditions(&self) -> Conditions {
         let insets = [self.insets.top, self.insets.right, self.insets.bottom, self.insets.left].map(|inset| inset.round().max(0.0) as u16);
-        Conditions { dark: self.dark(), touch: self.touch, reduced_motion: self.reduced_motion, insets, ..Conditions::default() }
+        Conditions { dark: self.dark(), touch: self.touch, reduced_motion: self.reduced_motion, insets, page: self.page, ..Conditions::default() }
     }
 
     /// Its insets as MCP Apps' host context says them (`safeAreaInsets`).

@@ -78,12 +78,16 @@ fn main() -> anyhow::Result<()> {
     // The design tokens, which come with the UI library.
     strict::tokens::load(&files(&Url::parse("file:///ui/client/ui.css")?)?);
     // Version 2's tables: the UI library's tokens and styles, and the page's own styles, where it has them.
+    let mut tokens_page = 0;
     for table in ["file:///ui/client/tokens.json", "file:///ui/client/styles.json", "file:///styles.json"] {
         let Ok(text) = files(&Url::parse(table)?) else { continue };
         if table.ends_with("tokens.json") {
             strict::tokens::load_table(&text)?;
         } else {
             strict::load_styles(&text)?;
+            if table == "file:///styles.json" {
+                tokens_page = strict::tokens::load_page(&text)?;
+            }
         }
     }
 
@@ -108,6 +112,7 @@ fn main() -> anyhow::Result<()> {
         })
     });
     let mut screen = Screen::new(js, Some(asked), Size { width, height }, insets);
+    screen.page = tokens_page;
     screen.theme = Some(if dark { Appearance::Dark } else { Appearance::Light });
     screen.touch = touch;
     // Its JS runs on a thread of its own, as in a window: each step is drawn once what it set off has run.

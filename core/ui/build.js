@@ -9,8 +9,7 @@ import { cpSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { transform } from "lightningcss"
 import solid from "@solidjs/vite-plugin"
 import { build } from "vite"
-import { RUNTIME_VERSION } from "./src/strict/renderer.ts"
-import { stylesCss, stylesPlugin, tokensCss, tokensTable } from "./tables.ts"
+import { newMade, stylesCss, stylesPlugin, stylesTable, tokensCss, tokensTable } from "./tables.ts"
 import { $ } from "bun"
 
 const here = (path) => new URL(path, import.meta.url).pathname
@@ -18,7 +17,7 @@ const text = (path) => readFileSync(here(path), "utf8")
 
 rmSync(here("dist"), { recursive: true, force: true })
 // The UI library's styles (src/styles.ts), made as each module is built, for both builds alike.
-const made = { css: new Map(), table: {} }
+const made = newMade()
 await build({
   configFile: false,
   root: here("."),
@@ -67,7 +66,7 @@ await build({
 // (clients/app/tauri.conf.json), and as a native host's table.
 writeFileSync(here("src/tokens.css"), tokensCss())
 writeFileSync(here("dist/client/tokens.json"), JSON.stringify(tokensTable()))
-writeFileSync(here("dist/client/styles.json"), JSON.stringify({ v: RUNTIME_VERSION, styles: made.table }))
+writeFileSync(here("dist/client/styles.json"), JSON.stringify(stylesTable(made)))
 const css = text("src/tokens.css") + text("src/ui.css") + stylesCss(made)
 writeFileSync(here("dist/client/ui.css"), transform({ filename: "ui.css", code: Buffer.from(css), minify: true }).code)
 // The typeface, beside the stylesheet that names it (tokens.css), and what puts a page in its Colour Mode before it
