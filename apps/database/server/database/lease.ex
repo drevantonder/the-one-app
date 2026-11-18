@@ -129,7 +129,7 @@ defmodule Database.Lease do
       nil ->
         if OneCore.Server.up?() do
           Logger.info("#{data.artifact.prefix}: #{server}, which holds its lease, didn't run a call passed to it")
-          moved(take(data), [{:reply, from, :ok}])
+          moved(take(data, "unanswered"), [{:reply, from, :ok}])
         else
           {:keep_state_and_data, {:reply, from, :not_up}}
         end
@@ -345,7 +345,7 @@ defmodule Database.Lease do
 
     case List.last(entries) || Log.entry(data.artifact, snapshot) do
       nil ->
-        if OneCore.Server.up?(), do: take(data), else: {{:following, nil}, data}
+        if OneCore.Server.up?(), do: take(data, "free"), else: {{:following, nil}, data}
 
       %{server: server} when server == data.server ->
         Logger.info("#{data.artifact.prefix}: holds its lease, from snapshot #{snapshot} and the log to #{data.number}")
@@ -357,11 +357,22 @@ defmodule Database.Lease do
     end
   end
 
-  # Writing the log's next entry is taking the lease. If another server wrote it first, the lease is theirs.
-  defp take(data) do
+  # Writing the log's next entry is taking the lease. If another server wrote it first, the lease is theirs. A lease
+  # this server took is said as a number of its app's, with why: `free`, as nobody held it, or `unanswered`, as its
+  # holder didn't run a call passed to it (Telemetry's `one.database.lease.moves`).
+  defp take(data, why) do
     wrote = Log.write(data.artifact, data.number + 1, %{server: data.server})
     Logger.info("#{data.artifact.prefix}: taking its lease at #{data.number + 1}: #{wrote}")
+    if wrote == :ok, do: :telemetry.execute([:one, :database, :lease, :moves], %{count: 1}, %{app: app(data.artifact), reason: why})
     look(data)
+  end
+
+  @doc "The app whose database `artifact` is, by the name it's installed by: `permissions` of `network/own/permissions/`."
+  def app(artifact) do
+    case Regex.run(~r{(?:^|/)(?:own|apps)/([^/]+)}, artifact.prefix) do
+      [_, app] -> app
+      nil -> artifact.prefix
+    end
   end
 
   # The copy is made anew each time: one left by an earlier run may hold what was never in the bucket.

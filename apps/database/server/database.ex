@@ -11,6 +11,7 @@ defmodule Database do
   @impl true
   def requires, do: %{"core" => ">= 0.22.18"}
 
+  require Logger
   alias Database.Lease
   alias OneCore.Call
 
@@ -61,10 +62,24 @@ defmodule Database do
   # of it may be from before it came back. So one given up on at once is asked once more first. One that was waited
   # for has had what it was sent sent again by then (`@waited`). A server that isn't up takes no lease, so the call
   # fails here, for whoever asked to ask another.
+  #
+  # How long that waited is said as a number of the app's (Telemetry's `one.database.lease.wait`): `not_answered`
+  # where the holder kept it `@waited` or more without running it, as one that's stuck does, which is warned of, and
+  # `gone` where it said at once that it wouldn't.
   defp taken_over(call, lease, server) do
     began = System.monotonic_time(:millisecond)
     if server, do: Call.forward_to(call, server, @reach)
     if server && System.monotonic_time(:millisecond) - began < @waited, do: Call.forward_to(call, server, @reach)
+    waited = System.monotonic_time(:millisecond) - began
+
+    if server do
+      app = Lease.app(call.own)
+      outcome = if waited >= @waited, do: "not_answered", else: "gone"
+      :telemetry.execute([:one, :database, :lease, :wait], %{duration: waited}, %{app: app, outcome: outcome})
+
+      if outcome == "not_answered",
+        do: Logger.warning("#{app}'s database: #{OneCore.Servers.name(server) || server} holds its lease and didn't answer within #{waited} ms, so this server takes it")
+    end
 
     with :not_up <- :gen_statem.call(lease, {:take_over, server}) do
       held =
