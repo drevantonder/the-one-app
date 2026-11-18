@@ -17,7 +17,11 @@ import android.os.Build
 import android.os.Bundle
 import android.os.Handler
 import android.os.Looper
+import android.os.SystemClock
 import android.view.Display
+import android.view.InputDevice
+import android.view.KeyCharacterMap
+import android.view.KeyEvent
 import android.view.View
 import android.view.accessibility.AccessibilityEvent
 import android.view.accessibility.AccessibilityNodeInfo
@@ -26,7 +30,6 @@ import androidx.core.app.NotificationCompat
 import java.io.ByteArrayOutputStream
 import java.util.concurrent.CountDownLatch
 import java.util.concurrent.TimeUnit
-import kotlin.math.abs
 import kotlin.math.min
 import kotlin.math.roundToInt
 import kotlin.math.sqrt
@@ -56,7 +59,14 @@ class ComputerUse : AccessibilityService() {
     return super.onUnbind(intent)
   }
 
-  override fun onAccessibilityEvent(event: AccessibilityEvent?) {}
+  /** Where the focus moved last, on any screen, as Android says, and who waits to hear the screen change. */
+  @Volatile private var moved: AccessibilityNodeInfo? = null
+  @Volatile private var awaited: CountDownLatch? = null
+
+  override fun onAccessibilityEvent(event: AccessibilityEvent?) {
+    if (event?.eventType == AccessibilityEvent.TYPE_VIEW_FOCUSED) event.source?.let { moved = it }
+    awaited?.countDown()
+  }
 
   override fun onInterrupt() {}
 
@@ -181,10 +191,11 @@ class ComputerUse : AccessibilityService() {
     }
 
     /**
-     * Presses `keys`, space between, one after another. An accessibility service can't press a key, so each is what
-     * Android gives it to do in its place: Back (or Escape), Home, Recents and Notifications as the system's; Up,
-     * Down, Left and Right as a D-pad moves the focus, to what's next that way; and Return as typing's Return in a
-     * field, or anywhere else as a D-pad's centre, clicking what has the focus.
+     * Presses `keys`, space between, one after another. Back (or Escape), Home, Recents and Notifications are the
+     * system's. Up, Down, Left, Right and Return are a D-pad's: on the app's own window they're pressed as its remote
+     * presses them (`remote`); an accessibility service can't press a key on another app's, so there Up, Down, Left
+     * and Right move the focus to what's next that way, and Return is typing's Return in a field, or anywhere else a
+     * click on what has the focus.
      */
     @JvmStatic
     fun key(context: Context, keys: String): String {
@@ -196,10 +207,10 @@ class ComputerUse : AccessibilityService() {
           "home" -> { -> service.global(GLOBAL_ACTION_HOME, it) }
           "recents" -> { -> service.global(GLOBAL_ACTION_RECENTS, it) }
           "notifications" -> { -> service.global(GLOBAL_ACTION_NOTIFICATIONS, it) }
-          "up" -> { -> service.move(View.FOCUS_UP) }
-          "down" -> { -> service.move(View.FOCUS_DOWN) }
-          "left" -> { -> service.move(View.FOCUS_LEFT) }
-          "right" -> { -> service.move(View.FOCUS_RIGHT) }
+          "up" -> { -> service.move(View.FOCUS_UP, KeyEvent.KEYCODE_DPAD_UP) }
+          "down" -> { -> service.move(View.FOCUS_DOWN, KeyEvent.KEYCODE_DPAD_DOWN) }
+          "left" -> { -> service.move(View.FOCUS_LEFT, KeyEvent.KEYCODE_DPAD_LEFT) }
+          "right" -> { -> service.move(View.FOCUS_RIGHT, KeyEvent.KEYCODE_DPAD_RIGHT) }
           "return", "enter" -> service::enter
           else -> throw IllegalStateException("A ${kind(service)} has no $it key: it has Back, Home, Recents, Notifications, Up, Down, Left, Right and Return. Type text with `type`.")
         }
@@ -321,11 +332,8 @@ class ComputerUse : AccessibilityService() {
     return null
   }
 
-  /** Where this last moved the focus. */
-  private var moved: AccessibilityNodeInfo? = null
-
   /**
-   * What has the focus: where this last moved it, while it's still there; or the input focus a D-pad moves and a
+   * What has the focus: where it last moved, while it's still there; or the input focus a D-pad moves and a
    * keyboard types into, or else what TalkBack reads, or else the active window. A web view says the input focus is
    * on itself, its frame or the element at different times, of the same focus, so it's the innermost focused element.
    */
@@ -341,16 +349,60 @@ class ComputerUse : AccessibilityService() {
     return node.takeIf { it.isFocused }
   }
 
-  /** Moves the focus to what's next in `direction` from what has it, as a D-pad does, and says what that is. */
-  private fun move(direction: Int): String {
+  /**
+   * Moves the focus to what's next in `direction` from what has it, as a D-pad does, and says what that is. The app's
+   * own window has its remote's key pressed, and moves it itself.
+   */
+  private fun move(direction: Int, code: Int): String {
+    MainActivity.focused?.let { window ->
+      val was = current()
+      remote(window, code)
+      return if (until { current() != was }) named(current()) else "${named(was)}, as nothing is there to move it to"
+    }
     val from = current()
     val at = Rect().also(from::getBoundsInScreen)
-    // From an element of a web page, Android's own search gives the web view, which holds it, or itself.
-    val searched = from.focusSearch(direction)?.takeUnless { Rect().also(it::getBoundsInScreen).contains(at) }
-    val next = searched ?: nearest(from, direction) ?: throw IllegalStateException("Nothing is there to move the focus to.")
+    // From an element of another app's web page, Android's own search gives the web view, which holds it, or itself.
+    val next = from.focusSearch(direction)?.takeUnless { Rect().also(it::getBoundsInScreen).contains(at) }
+      ?: throw IllegalStateException("Nothing is there to move the focus to.")
     if (!next.performAction(AccessibilityNodeInfo.ACTION_FOCUS)) throw IllegalStateException("Android didn't move the focus.")
     moved = next
     return named(next)
+  }
+
+  /**
+   * Presses `code` on the app's own window, down and up, as its remote does. An accessibility service can't press a
+   * key, Android 14 lets no app inject one, and Android's own click doesn't reach a web page's elements in WebView
+   * 157 (no click event comes); but this service runs in the app, beside its window, which takes the key as it would
+   * the remote's: its web page moves the focus, or presses what has it, as the page has it do. A remote's first key
+   * gives the window's first view the focus where nothing has it, which Android does on the way to the window, so
+   * it's done here first: the web view is added once the window is first laid out, after Android gave the focus.
+   */
+  private fun remote(window: MainActivity, code: Int) {
+    val pressed = CountDownLatch(1)
+    mainExecutor.execute {
+      if (window.currentFocus == null) window.window.decorView.requestFocus()
+      val down = SystemClock.uptimeMillis()
+      for (action in listOf(KeyEvent.ACTION_DOWN, KeyEvent.ACTION_UP)) {
+        window.dispatchKeyEvent(KeyEvent(down, SystemClock.uptimeMillis(), action, code, 0, 0, KeyCharacterMap.VIRTUAL_KEYBOARD, 0, 0, InputDevice.SOURCE_DPAD))
+      }
+      pressed.countDown()
+    }
+    pressed.await(5, TimeUnit.SECONDS)
+  }
+
+  /**
+   * Waits until `done`, as Android tells this the screen changes, a second at most, and says whether it is. A web
+   * view says where its page's focus went only once it has drawn it again for accessibility, which just after the
+   * app starts can take it a moment, and as a change of its content, not of the focus.
+   */
+  private fun until(done: () -> Boolean): Boolean {
+    val end = SystemClock.uptimeMillis() + 1000
+    while (true) {
+      val heard = CountDownLatch(1).also { awaited = it }
+      if (done()) return true
+      val left = end - SystemClock.uptimeMillis()
+      if (left <= 0 || !heard.await(left, TimeUnit.MILLISECONDS)) return done()
+    }
   }
 
   /** What a node is, as its person would read it: its text, or what it's labelled, or else what kind of thing it is. */
@@ -364,35 +416,6 @@ class ComputerUse : AccessibilityService() {
   }
 
   /**
-   * What a D-pad moves to from `from` in `direction` where Android's `focusSearch` can't say: in a web page, whose
-   * elements its web view draws itself, as the app's pages are. Of what can take the focus in its window, the
-   * nearest that way, weighed as Android's own FocusFinder does; or, from what holds them, as the web view does, the
-   * first.
-   */
-  private fun nearest(from: AccessibilityNodeInfo, direction: Int): AccessibilityNodeInfo? {
-    val root = from.window?.root ?: return null
-    val at = Rect().also(from::getBoundsInScreen)
-    val all = mutableListOf<Pair<AccessibilityNodeInfo, Rect>>()
-    fun walk(node: AccessibilityNodeInfo) {
-      if (!node.isVisibleToUser) return
-      if (node.isFocusable && node != from) all += node to Rect().also(node::getBoundsInScreen)
-      for (i in 0 until node.childCount) node.getChild(i)?.let(::walk)
-    }
-    walk(root)
-    val inside = all.filter { at.contains(it.second) && it.second != at }
-    if (inside.isNotEmpty()) return inside.minWith(compareBy({ it.second.top }, { it.second.left })).first
-    return all.mapNotNull { (node, to) ->
-      val (major, minor) = when (direction) {
-        View.FOCUS_UP -> at.top - to.bottom to to.centerX() - at.centerX()
-        View.FOCUS_DOWN -> to.top - at.bottom to to.centerX() - at.centerX()
-        View.FOCUS_LEFT -> at.left - to.right to to.centerY() - at.centerY()
-        else -> to.left - at.right to to.centerY() - at.centerY()
-      }
-      if (major < 0) null else node to 13L * major * major + abs(minor).toLong() * abs(minor)
-    }.minByOrNull { it.second }?.first
-  }
-
-  /**
    * What the focus moves to at `x`, `y` of the screenshot, as a remote's press would be on it: the innermost thing
    * there that's pressed or takes the focus, in the frontmost window that has one there. It's focused, then pressed,
    * or held, and said.
@@ -401,8 +424,15 @@ class ComputerUse : AccessibilityService() {
     val point = at(x, y)
     val node = windows.firstNotNullOfOrNull { it.root?.let { root -> under(root, point) } }
       ?: throw IllegalStateException("Nothing at $x, $y is pressed or takes the focus.")
+    val window = MainActivity.focused?.takeIf { node.packageName == packageName && !held }
     node.performAction(AccessibilityNodeInfo.ACTION_FOCUS)
     moved = node
+    if (window != null) {
+      // The page takes the focus before the press, which come to it by different ways.
+      until { node.refresh() && node.isFocused }
+      remote(window, KeyEvent.KEYCODE_DPAD_CENTER)
+      return named(node)
+    }
     val action = if (held) AccessibilityNodeInfo.ACTION_LONG_CLICK else AccessibilityNodeInfo.ACTION_CLICK
     if (!node.performAction(action)) throw IllegalStateException("Android didn't press ${named(node)}.")
     return named(node)
@@ -434,9 +464,16 @@ class ComputerUse : AccessibilityService() {
     return "Scrolled ${named(node)} $direction $scrolled"
   }
 
-  /** Return: in a field, its keyboard's action key; anywhere else, a click on what has the focus, as a D-pad's centre. */
+  /**
+   * Return: in a field, its keyboard's action key; anywhere else, a click on what has the focus, as a D-pad's centre.
+   * On the app's own window, its remote's Enter or centre.
+   */
   private fun enter(): String {
     val at = current()
+    MainActivity.focused?.let { window ->
+      remote(window, if (at.isEditable) KeyEvent.KEYCODE_ENTER else KeyEvent.KEYCODE_DPAD_CENTER)
+      return named(at)
+    }
     val done = if (at.isEditable) {
       at.performAction(AccessibilityNodeInfo.AccessibilityAction.ACTION_IME_ENTER.id)
     } else {

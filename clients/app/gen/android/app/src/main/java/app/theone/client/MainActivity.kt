@@ -48,6 +48,18 @@ class MainActivity : TauriActivity() {
     }
   }
 
+  /** Whether a key pressed now comes here, as a remote's does: Computer Use presses keys here as one (`ComputerUse.kt`). */
+  override fun onWindowFocusChanged(hasFocus: Boolean) {
+    super.onWindowFocusChanged(hasFocus)
+    if (hasFocus) focused = this else if (focused === this) focused = null
+  }
+
+  companion object {
+    /** The app's window while keys come to it. */
+    @Volatile var focused: MainActivity? = null
+      private set
+  }
+
   /** The window isn't made again when the system's light or dark changes, so its bars follow it here. */
   override fun onConfigurationChanged(newConfig: Configuration) {
     super.onConfigurationChanged(newConfig)
