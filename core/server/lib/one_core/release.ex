@@ -645,9 +645,13 @@ defmodule OneCore.Release do
     end
   end
 
+  # What raises as it reads the build is why it's not loaded, as what raises as it swaps is (`swap/3`): the process
+  # reading what it's told mustn't end, which ends the server.
   defp loaded(build) do
     was = :code.lib_dir(:one_core) |> to_string() |> Path.join("../..") |> Path.expand()
     swap(changes(was, build), build, fn -> moved(build) end)
+  rescue
+    error -> {:error, Exception.message(error)}
   end
 
   @doc """
