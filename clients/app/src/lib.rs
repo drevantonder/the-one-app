@@ -461,10 +461,15 @@ fn opened(views: State<'_, Views>, view: String, ms: u32) {
 /// Turns the device's own back and forward gestures on, or off: an iPhone's swipe in from the edge, which follows the
 /// finger as a pop does, a Mac's two-finger swipe, and a Linux touchpad's. They go back and forward through the window's
 /// history, as its Back buttons do, and its page has them off while something is open over the app that's showing,
-/// which they'd go back behind. A web view has them off unless it's asked; Android's has none, and its back is
-/// `MainActivity`'s.
+/// which they'd go back behind, and at an app's first screen, where the swipe takes the app home (`home`): an
+/// iPhone's swipe in from the edge there is the window's own (`edge`), and a computer's is its page's. A web view has
+/// them off unless it's asked; Android's has none, and its back is `MainActivity`'s.
 #[tauri::command]
-fn navigation_gestures(window: tauri::WebviewWindow, on: bool) -> Result<(), String> {
+fn navigation_gestures(window: tauri::WebviewWindow, on: bool, home: bool) -> Result<(), String> {
+    #[cfg(target_os = "ios")]
+    edge::take(home);
+    #[cfg(not(target_os = "ios"))]
+    let _ = home;
     window
         .with_webview(move |webview| {
             // It's the window's WKWebView, which Tauri hands over on the main thread, where it's used.
@@ -592,6 +597,81 @@ mod status_bar {
             // A scroll view holds its delegate weakly, and this one lasts as long as the app.
             std::mem::forget(tap);
         })
+    }
+}
+
+/// An iPhone's swipe in from the left edge, at an app's first screen, takes it home as its Back does: the page's move
+/// follows the finger as far across the window as it's come (`grab`, `drag` and `release` in client.js), as a pop
+/// does, and let go, it carries on if it's past halfway or flicked, and otherwise springs back. It's on only where the
+/// page says the swipe takes an app home (`navigation_gestures`); deeper in an app, the web view's own swipe goes back
+/// through the app's screens.
+#[cfg(target_os = "ios")]
+mod edge {
+    use std::cell::OnceCell;
+    use std::sync::OnceLock;
+
+    use objc2::rc::Retained;
+    use objc2::runtime::{AnyObject, NSObject, NSObjectProtocol};
+    use objc2::{MainThreadMarker, MainThreadOnly, define_class, msg_send, sel};
+    use objc2_ui_kit::{UIGestureRecognizerState, UIRectEdge, UIScreenEdgePanGestureRecognizer, UIView};
+
+    static WINDOW: OnceLock<tauri::WebviewWindow> = OnceLock::new();
+    thread_local! {
+        // UIKit's, on the main thread, as long as the app.
+        static PAN: OnceCell<Retained<UIScreenEdgePanGestureRecognizer>> = const { OnceCell::new() };
+    }
+
+    define_class!(
+        #[unsafe(super(NSObject))]
+        #[thread_kind = MainThreadOnly]
+        #[name = "OneEdgeSwipe"]
+        struct Swipe;
+
+        unsafe impl NSObjectProtocol for Swipe {}
+
+        impl Swipe {
+            #[unsafe(method(panned:))]
+            fn panned(&self, pan: &UIScreenEdgePanGestureRecognizer) {
+                let (Some(window), Some(view)) = (WINDOW.get(), pan.view()) else { return };
+                let width = view.bounds().size.width.max(1.0);
+                let state: UIGestureRecognizerState = unsafe { msg_send![pan, state] };
+                let script = match state {
+                    UIGestureRecognizerState::Began => "grab()".to_owned(),
+                    UIGestureRecognizerState::Changed => format!("drag({})", pan.translationInView(Some(&*view)).x / width),
+                    UIGestureRecognizerState::Ended => format!("release({})", pan.velocityInView(Some(&*view)).x / width),
+                    // Taken away, as by a call coming in: it goes back where it was.
+                    UIGestureRecognizerState::Cancelled | UIGestureRecognizerState::Failed => "release(0, 0)".to_owned(),
+                    _ => return,
+                };
+                let _ = window.eval(script);
+            }
+        }
+    );
+
+    pub fn watch(window: &tauri::WebviewWindow) -> tauri::Result<()> {
+        let _ = WINDOW.set(window.clone());
+        window.with_webview(|webview| {
+            // Tauri hands over the window's WKWebView on the main thread.
+            let main = unsafe { MainThreadMarker::new_unchecked() };
+            let web = unsafe { &*webview.inner().cast::<UIView>() };
+            let swipe: Retained<Swipe> = unsafe { msg_send![Swipe::alloc(main), init] };
+            let target: &AnyObject = &swipe;
+            let pan = unsafe { UIScreenEdgePanGestureRecognizer::initWithTarget_action(UIScreenEdgePanGestureRecognizer::alloc(main), Some(target), Some(sel!(panned:))) };
+            pan.setEdges(UIRectEdge::Left);
+            pan.setEnabled(false);
+            web.addGestureRecognizer(&pan);
+            // A gesture recognizer holds its target weakly, and this one lasts as long as the app.
+            std::mem::forget(swipe);
+            PAN.with(|kept| drop(kept.set(pan)));
+        })
+    }
+
+    /// Whether the swipe in from the edge is the window's.
+    pub fn take(on: bool) {
+        // Tauri runs a command off the main thread, and UIKit's are the main thread's.
+        if let Some(window) = WINDOW.get() {
+            let _ = window.run_on_main_thread(move || PAN.with(|pan| pan.get().map(|pan| pan.setEnabled(on))).unwrap_or_default());
+        }
     }
 }
 
@@ -900,11 +980,13 @@ pub fn run() {
             let window = window.build()?;
             #[cfg(target_os = "ios")]
             status_bar::watch(&window)?;
+            #[cfg(target_os = "ios")]
+            edge::watch(&window)?;
             #[cfg(target_os = "linux")]
             linux_keys(&window)?;
             #[cfg(all(target_os = "linux", debug_assertions))]
             console_to_stdout(&window)?;
-            navigation_gestures(window, true)?;
+            navigation_gestures(window, true, false)?;
             eprintln!("the window was made {} ms after the app started", started.elapsed().as_millis());
             Ok(())
         })

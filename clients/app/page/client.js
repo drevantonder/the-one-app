@@ -275,8 +275,8 @@ function moves(leaving, coming, back, icon) {
 ///     show, while tracking: as while playing, the finger keeping it unless it goes somewhere else.
 ///     popped(to), drawn already by the device: still at `to`, with nothing drawn; while playing toward it, nothing.
 ///
-/// A computer's trackpad swipe sends `grab`, `drag` and `release` (`wheel`), as does Android's back gesture
-/// (`backStarted`).
+/// A computer's trackpad swipe sends `grab`, `drag` and `release` (`wheel`), as do Android's back gesture
+/// (`backStarted`) and an iPhone's swipe in from the edge (`window.grab`).
 /** @typedef {{ from: View, to: View, upper: View, parts: Animation[], p: number, target: number, velocity: number, stiffness: number }} Move */
 /** @param {Move} move */
 const toward = (move) => (move.target === 1 ? move.to : move.from)
@@ -317,7 +317,7 @@ const moveMachine = setup({
     here: ({ event }) => "to" in event && event.to === front,
     there: ({ context, event }) => "to" in event && !!context.move && event.to === toward(context.move),
     returning: ({ context, event }) => "to" in event && !!context.move && event.to === (context.move.target === 1 ? context.move.from : context.move.to),
-    backs: () => depth > 0 && front?.first === true && !front.over,
+    backs: () => home(),
   },
   actions: {
     // The frame coming is seen and takes taps from the start, over or under the one going, and its page is told
@@ -964,16 +964,20 @@ function layer(at) {
 /// the window's own (`wheel`), which takes the app home as its Back does, so the web view's, which would slide a
 /// picture of what's under it, is off there too.
 let swiping = true
+/// Whether the device's swipe takes the app that's showing home, there being one of its own: an iPhone's.
+let taking = false
 /// Whether back has anything to go back from: an app over the launcher, or something open over the app that's
 /// showing. Where it hasn't, Android shows going home as its back gesture is made (`MainActivity`).
 /** @type {boolean | undefined} */
 let backs
 function gestures() {
   const view = showing(here())
-  const on = !view?.over && (phone || !home())
-  if (on !== swiping) invoke("navigation_gestures", { on })
+  const takes = home()
+  const on = !view?.over && !takes
+  if (on !== swiping || takes !== taking) invoke("navigation_gestures", { on, home: takes })
   swiping = on
-  const back = !on || (!!view && view.entrypoint !== launcher)
+  taking = takes
+  const back = !!view?.over || (!!view && view.entrypoint !== launcher)
   if (back !== backs) globalThis.androidBack?.postMessage(String(back))
   backs = back
 }
@@ -1288,6 +1292,15 @@ listen("changed", ({ payload: view }) => {
   if (view === "client") for (const subject of listed) list(subject)
   else if (open.has(view)) post(/** @type {View} */ (open.get(view)), { method: "notifications/one/changed" })
 })
+
+/// An iPhone's swipe in from the left edge at an app's first screen (`edge` in src/lib.rs): the move follows the
+/// finger, `p` as far across the window as it's come, as a pop does, and let go at `velocity` (across the window a
+/// second), it carries on if it's past halfway or flicked, or springs back; taken away, as by a call, it goes back.
+window.grab = () => on({ type: "grab" })
+/** @param {number} p */
+window.drag = (p) => on({ type: "drag", p: Math.min(1, Math.max(0, p)) })
+/** @param {number} velocity @param {0 | 1} [end] */
+window.release = (velocity, end) => on({ type: "release", velocity, end })
 
 /// Android's back gesture, as its finger comes in from the edge (`MainActivity`): where back takes an app home, the
 /// move follows it in the shape of Android's back to home, the app drawn a little way (`BACK`) toward where it goes as

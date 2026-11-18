@@ -159,7 +159,7 @@ export interface Commands {
   /** Reports to Telemetry, as Telemetry's tool `record` takes a record, what went wrong here. */
   report(args: { record: Record<string, unknown> }): void
   /** Turns the device's own back and forward gestures on or off. */
-  navigation_gestures(args: { on: boolean }): void
+  navigation_gestures(args: { on: boolean; home: boolean }): void
   /** Shows or hides an iPhone's status bar, as the app that's showing asks; a device with none keeps what it has. */
   status_bar(args: { shown: boolean }): void
   /** Light or dark for the window's own bars, or with `null`, as the device is. */
@@ -211,6 +211,10 @@ declare global {
     backStarted: () => void
     backProgressed: (progress: number) => void
     backCancelled: () => void
+    /** An iPhone's swipe in from the edge taking the move, moving it as far as `p`, and letting it go (`client.js`). */
+    grab: () => void
+    drag: (p: number) => void
+    release: (velocity: number, end?: 0 | 1) => void
     /** A tap on an iPhone's status bar (`client.js`). */
     scrollToTop: () => void
   }

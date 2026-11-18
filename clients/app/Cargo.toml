@@ -94,6 +94,7 @@ tauri-plugin-notifications = { version = "0.4", default-features = false, featur
 # libc after 0.2.189 has no `in6_ifreq` on iOS, which netdev 0.46, through iroh, uses there.
 [target.'cfg(target_os = "ios")'.dependencies]
 libc = "=0.2.189"
-# A tap on the status bar scrolls the app that's showing to its top (`status_bar`).
+# A tap on the status bar scrolls the app that's showing to its top (`status_bar`), and a swipe in from the edge
+# takes an app home (`edge`).
 objc2-core-foundation = { version = "0.3", default-features = false, features = ["std", "CFCGTypes"], optional = true }
-objc2-ui-kit = { version = "0.3", default-features = false, features = ["std", "objc2-core-foundation", "UIInterface", "UIResponder", "UIScrollView", "UIView", "UIWindow"], optional = true }
+objc2-ui-kit = { version = "0.3", default-features = false, features = ["std", "objc2-core-foundation", "UIGeometry", "UIGestureRecognizer", "UIInterface", "UIPanGestureRecognizer", "UIResponder", "UIScreenEdgePanGestureRecognizer", "UIScrollView", "UIView", "UIWindow"], optional = true }
