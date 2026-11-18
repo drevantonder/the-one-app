@@ -34,6 +34,10 @@ Always set `ONE_HOME`: without it, `one` (yours or the installed one) is the own
 network. `ONE_AS` picks the user, since nobody signs in on a network being built; `ONE_SUBJECT=groups/<name>` or
 `ONE_SUBJECT=network` runs a call for a group or the network.
 
+`owner`, `alice` and `bob` start with their encryption set up, their keys on `<folder>/client`'s device, so the
+Vault opens at once in `one` and in the app run with that home. Anyone else is set up with `one encryption approve`
+then `one vault grant --servers <key>` (`one vault unlocked_on` lists them).
+
 ## Signing a device in
 
 A device that isn't `<folder>/client` (a phone, the simulator, another client home) needs a network with an

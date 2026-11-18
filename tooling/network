@@ -14,8 +14,9 @@
 #
 # It's a network being built, so nobody signs in, and a client says which user it is: ONE_AS=<name> before a
 # command acts as that user, and ONE_SUBJECT=groups/<name> or ONE_SUBJECT=network has it run for a group or the network.
-# Its first owner is the user `owner`. With --edge, another device signs in at its address by the code it shows,
-# which `one sign-in approve` approves as whoever ONE_AS names.
+# Its first owner is the user `owner`, and `owner`, `alice` and `bob` have their encryption set up on the client's
+# device. With --edge, another device signs in at its address by the code it shows, which `one sign-in approve`
+# approves as whoever ONE_AS names.
 #
 # --standby starts a second server, which takes over when the first stops. Each server is called after its folder,
 #   `server` and `standby`, as two machines would be called what each is.
@@ -131,6 +132,23 @@ start() {
 start server
 [[ -z $standby ]] || start standby
 
+# In a network being built, its people's encryption is set up as each one's first device sets it up: their key is
+# made on the client's device, which holds it from then on, as the app run from that home does, and their Vault is
+# opened by every server. So the Vault and what's kept encrypted open at once, with no setup screen. A user not set
+# up here is set up as a person is, in the app or with `one encryption approve`.
+ready() {
+  export ONE_AS=$1 ONE_HOME=$folder/client
+  [[ $("$one" encryption key | jq -r .check) == null ]] || return 0
+  "$one" encryption approve >/dev/null
+  # shellcheck disable=SC2046 # one server's key per word
+  "$one" vault grant --servers $("$one" vault unlocked_on | jq -r '.may[].key') >/dev/null
+}
+if [[ -z $owner ]]; then
+  users=(owner alice bob)
+  for user in "${users[@]}"; do ready "$user" & readying+=($!); done
+  for job in "${readying[@]}"; do wait "$job"; done
+fi
+
 # The program as whoever started this would type it.
 one=${one#"$PWD/"}
 [[ -z $owner ]] || cat <<SAID
@@ -156,6 +174,8 @@ A network is running in $folder. Its client's home is $folder/client:
     ONE_AS=alice $one permissions group --name work    calls one as another user
     $one --help                                      lists every tool
     $one mcp                                         is the same tools as MCP over stdio
+
+${users[*]} have their encryption set up, with their keys on this client's device.
 
     iex --sname dbg-\$\$ --cookie \$(cat $folder/cookie) --remsh $(node_name server)
                                                      attaches to the server, with :recon and :observer_cli
