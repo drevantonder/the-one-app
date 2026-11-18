@@ -14,7 +14,7 @@ defmodule ChromeProfiles do
   what it shows of itself, read from the profile as it's saved: the pages it visited last, from its History, and the
   extensions installed in it, from its Extensions and Preferences, each with its name and icon.
 
-  Which browser is on which profile is a note in the app's own artifact, `browsers/<whose>/<session>`, written as
+  Which browser is on which profile is a note in its person's own artifact of the app's, `browsers/<session>`, written as
   `open` or `update` opens it: Chrome hands a browser that's starting the note's profile, and refuses to close it
   (`chrome.closing`) until it's saved or discarded, unless the note says not to save it. An update's note says when
   it ends: the job `save_updates` saves and closes any past it, once.
@@ -108,17 +108,14 @@ defmodule ChromeProfiles do
   }
   @states @steps |> Map.values() |> Enum.uniq()
 
-  # Its data is everyone's together, each person's notes kept apart by who they're for (`browsers/<who>/`).
-  @impl true
-  def own, do: :installed
-
   @impl true
   def requires do
     %{
       "core" => ">= 0.22.18",
       "vault" => "to keep your profiles",
       "containers" => "to move a profile in and out of its browser",
-      "chrome" => "to open a browser with a profile"
+      "chrome" => "to open a browser with a profile",
+      "database" => "to save an update by itself once its time is up"
     }
   end
 
@@ -576,13 +573,13 @@ defmodule ChromeProfiles do
 
   # Which profile each of whoever this call is for's browsers is on, by its session.
   defp notes(call) do
-    prefix = "browsers/#{call.subject}/"
+    prefix = "browsers/"
     names = Artifact.list(call.own, prefix)
     for {name, {:ok, data, _tag}} <- Enum.zip(names, Artifact.read_all(call.own, names)), do: {String.replace_prefix(name, prefix, ""), JSON.decode!(data)}
   end
 
   defp note(call, session) do
-    case Artifact.read(call.own, at(call, session)) do
+    case Artifact.read(call.own, at(session)) do
       {:ok, data, _tag} -> JSON.decode!(data)
       :absent -> nil
     end
@@ -590,15 +587,15 @@ defmodule ChromeProfiles do
 
   # Changes the session's note in one step, and gives it: `change` is given it as it is now, or `nil`.
   defp note(call, session, change) do
-    JSON.decode!(Artifact.update(call.own, at(call, session), &JSON.encode!(change.(&1 && JSON.decode!(&1)))))
+    JSON.decode!(Artifact.update(call.own, at(session), &JSON.encode!(change.(&1 && JSON.decode!(&1)))))
   end
 
   # A browser's note goes as it closes, and its profile is ready again.
   defp forget(call, session) do
     note = note(call, session)
-    Artifact.remove(call.own, at(call, session))
+    Artifact.remove(call.own, at(session))
     with %{"profile" => name, "update" => until} when until != nil <- note, true <- name in profiles(call), do: vault(call).state(call, @item <> name, :ready)
     :ok
   end
-  defp at(call, session), do: "browsers/#{call.subject}/#{session}"
+  defp at(session), do: "browsers/#{session}"
 end
