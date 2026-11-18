@@ -379,7 +379,8 @@ defmodule OneCore.Release do
   own code can't be told apart from the rest of its module's, so any change to a module with macros restarts.
   """
   def compare(old, new) do
-    why = restart(old, new)
+    # Expanded, as Windows gives paths with backslashes, which `Path.wildcard/2` reads as escapes.
+    why = restart(Path.expand(old), Path.expand(new))
     say(%{"compared" => %{"update_method" => if(why, do: "restart", else: "hot_load"), "why" => why}})
     why
   end
