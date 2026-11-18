@@ -36,10 +36,9 @@ defmodule Database.Lease do
     to them. One they didn't run has this server read what was logged after the last entry it read, and take the
     lease if that's nothing; one that another server took meanwhile is followed there. `nil` is nobody: the log is
     empty, and this server isn't up to take it.
-  - `:settling`: this server has just opened the database. It answers from its copy, and writes nothing until
-    `@writes_after` has passed.
-  - `{:settling, written}`: a transaction wrote while settling. What it wrote is committed to the copy, and is
-    logged and answered once that time has passed. Everything else waits behind it.
+  - `:settling`: this server has just opened the database, and writes nothing until `@writes_after` has passed.
+    Its copy is read-only meanwhile: a transaction that only reads is answered from it at once, and one that would
+    write raises there, is rolled back, and waits until then to run again, with any that came after it that write.
   - `:holding`: each transaction's write is logged as it commits.
 
   It moves between them by reading the log (`look/1`): to `:settling` with the database opened if the log names
@@ -64,8 +63,8 @@ defmodule Database.Lease do
   @least 64
 
   # How long, in milliseconds, a server answers from its copy after it last saw the log's next entry free, and how
-  # long one that has just opened the database waits before it writes to it. The second is longer by far more than
-  # two machines' clocks drift apart in that time.
+  # long one that has just opened the database waits before it writes to it, from when it began reading the log
+  # that names it. The second is longer by far more than two machines' clocks drift apart in that time.
   @lease_ttl 4_000
   @writes_after 5_000
 
@@ -111,22 +110,12 @@ defmodule Database.Lease do
     {:ok, state, data, actions}
   end
 
-  # A write made while settling is logged once the settle time has passed, and everything else waits behind it.
+  # Once settled, its copy takes writes, and the transactions that would have written while settling run again.
   @impl true
-  def handle_event(:state_timeout, :settled, {:settling, {event, ran}}, data) do
-    case write(data, Log.changed(file(data))) do
-      {:ok, data} ->
-        {data, actions} = done(event, ran, data)
-        {:next_state, :holding, data, actions}
-
-      :lost ->
-        lost(event, data, "and the write it hadn't answered with it")
-    end
+  def handle_event(:state_timeout, :settled, :settling, data) do
+    {:ok, _} = sqlite(data.db, "pragma query_only = off")
+    {:next_state, :holding, data}
   end
-
-  def handle_event(_type, _content, {:settling, _written}, _data), do: {:keep_state_and_data, :postpone}
-
-  def handle_event(:state_timeout, :settled, :settling, data), do: {:next_state, :holding, data}
 
   # The server this one follows didn't run a call passed on to it. If the log names nobody after it, this server takes
   # the lease, and otherwise it has learnt who holds it now. Only what was logged after the last entry it read is
@@ -201,32 +190,35 @@ defmodule Database.Lease do
   @impl true
   def code_change(_vsn, state, data, _extra) do
     data = struct(__MODULE__, Map.from_struct(data))
-    {:ok, state, if(match?({sqlite, _db} when sqlite != Sqlite, data.db), do: reopened(data), else: data)}
+    {:ok, state, if(match?({sqlite, _db} when sqlite != Sqlite, data.db), do: reopened(data, state), else: data)}
   end
 
-  # Opened before it's closed, so SQLite keeps its write-ahead log, which holds what a write made while settling
-  # committed and hasn't logged yet: the last connection to close empties it into the file.
-  defp reopened(%{db: {sqlite, db}} = data) do
+  # Opened before it's closed, so SQLite keeps its write-ahead log: the last connection to close empties it into the
+  # file. One that's settling is read-only still.
+  defp reopened(%{db: {sqlite, db}} = data, state) do
     opened = connected(file(data))
+    if state == :settling, do: {:ok, _} = sqlite(opened, "pragma query_only = on")
     sqlite.close(db)
     %{data | db: opened}
   end
 
   # Runs `work` with the database in a transaction, for `event`, which is answered once what it changed is in the
-  # bucket (`done/3`): at once while holding, and once the settle time has passed while settling. One that changed
-  # nothing, raised or not, is answered from the copy, while the copy is still the database.
+  # bucket (`done/3`). One that changed nothing, raised or not, is answered from the copy, while the copy is still the
+  # database. While settling the copy is read-only, so one that raised may have raised for writing: it waits, with
+  # nothing it did kept, to run again once settled, which is the state it changes to next. The rest of what `data`
+  # changed for it is left as it was, for then.
   defp transact(event, state, data, work) do
     ran = run(data.db, work)
 
     case {Log.changed(file(data)), state} do
+      {nil, :settling} when elem(ran, 0) == :raised ->
+        {:keep_state_and_data, :postpone}
+
       {nil, _state} ->
         case proved(data) do
           {:ok, data} -> answered(event, ran, data)
           :lost -> lost(event, data, "so it didn't answer from its copy")
         end
-
-      {_changed, :settling} ->
-        {:next_state, {:settling, {event, ran}}, data, settle(data)}
 
       {changed, :holding} ->
         case write(data, changed) do
@@ -383,14 +375,17 @@ defmodule Database.Lease do
     end
   end
 
-  # It writes nothing for `@writes_after`, by when one that held the lease before and doesn't know it lost it has
-  # stopped answering from its copy (`proved/1`). The monotonic clock stops while the machine sleeps, which only
-  # makes it wait longer. A new database, whose log is only this server taking its lease, has nothing anyone could
-  # answer from, so it writes at once.
-  defp opened(data, snapshot, entries) do
+  # It writes nothing for `@writes_after` from when it began reading the log (`proved`), by when one that held the
+  # lease before and doesn't know it lost it has stopped answering from its copy (`proved/1`): that one last saw the
+  # entry naming this server free before it was written, which was before this began. Until then its copy is
+  # read-only. The monotonic clock stops while the machine sleeps, which only makes it wait longer. A new database,
+  # whose log is only this server taking its lease, has nothing anyone could answer from, so it writes at once.
+  defp opened(%{proved: {began, _system}} = data, snapshot, entries) do
     logged = Enum.sum_by(entries, &max(length(Map.get(&1, :pages, [])), 1))
     wait = if snapshot == 0 and entries == [%{server: data.server}], do: 0, else: @writes_after
-    %{data | db: connected(file(data)), logged: logged, settled: System.monotonic_time(:millisecond) + wait}
+    db = connected(file(data))
+    {:ok, _} = sqlite(db, "pragma query_only = on")
+    %{data | db: db, logged: logged, settled: began + wait}
   end
 
   # The bucket is what keeps a write, so SQLite needn't wait for the disk. Its write-ahead log is emptied here
