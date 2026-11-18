@@ -285,6 +285,19 @@ fn respond(
             },
         }))),
         "ping" => Some(Ok(json!({}))),
+        // A `one:` link opens as the device's own do, which the launcher's page opens in its app's window; a web
+        // address opens in the device's browser, outside the app, as a web view's window does.
+        "ui/open-link" => match params["url"].as_str().unwrap_or_default() {
+            url if url.starts_with("one:") => {
+                crate::computer::again(Some(url.to_owned()));
+                Some(Ok(json!({})))
+            }
+            url if url.starts_with("https://") || url.starts_with("http://") => {
+                let _ = to.send(json!({"id": "browser", "command": "open_url", "args": {"url": url}}));
+                Some(Ok(json!({})))
+            }
+            url => Some(Err(json!({"code": -32602, "message": format!("{url} isn't a link this window opens")}))),
+        },
         "one/client" => {
             let changes: Vec<&String> = params.as_object().into_iter().flat_map(|params| params.keys()).filter(|change| *change != "statusBar").collect();
             if !changes.is_empty() && !state.trusted {
