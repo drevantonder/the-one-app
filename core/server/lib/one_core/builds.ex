@@ -209,6 +209,21 @@ defmodule OneCore.Builds do
 
   def seen(_by, _device, _said), do: :ok
 
+  @doc """
+  What each of `by`'s `devices` calls itself, as it said when it last connected (`seen/3`): `%{device => name}`, with
+  none for a device that hasn't said. It's what its person has called it since, where the name it signed in under
+  isn't.
+  """
+  def names(by, devices) do
+    reads = Bucket.read_all(Enum.map(devices, &"#{by}/devices/#{&1}"))
+
+    for {device, {:ok, info, _tag}} <- Enum.zip(devices, reads),
+        name = JSON.decode!(info)["name"],
+        is_binary(name) and name != "",
+        into: %{},
+        do: {device, name}
+  end
+
   # What the edge says of a server: whether it's ready, why not, and when it was last seen if it isn't connected.
   @presence ~w(server_membership server_daemon_status server_ready server_ready_reason last_seen)
 
