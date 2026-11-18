@@ -2,9 +2,9 @@
 // a row for each owner, with where its install is for them and what to do about it: managing what's installed is
 // otherwise the App Library's. A link opens it at an app's page (`one:app-store#app=<its artifact>`), as the App
 // Library does for an app with no screen of its own.
-import { createMemo, createSignal, Errored, For, Loading, Match, refresh, Show, Switch } from "solid-js"
-import "./app.css"
-import { Button, call, changed, confirm, Empty, go, Icon, List, Menu, open, Problem, Row, Screen, Search, Skeleton, Spinner, toast } from "ui"
+import { createEffect, createMemo, createSignal, Errored, For, Loading, Match, refresh, Show, Switch } from "solid-js"
+import type { Element } from "solid-js"
+import { Box, Button, call, changed, confirm, Empty, go, Icon, Image, link, List, Menu, open, Problem, Row, Screen, Search, Section, Skeleton, Spinner, Text, toast } from "ui"
 
 /** An app the network can install, as `app-store_marketplace` lists it. */
 interface Listed {
@@ -75,8 +75,8 @@ changed(() => (refresh(market), refresh(owners)))
 type Owners = Awaited<ReturnType<typeof owners>>
 type Market = Awaited<ReturnType<typeof market>>
 
-/// Where the app is: every app, a category's every app, an app's page and its See All. Each step in is a step in the
-/// history, so the device's back goes back out. An app's page a link opened (`linked`) is where the App Store starts,
+/// Where the app is: every app, a category's every app, an app's page and its See All. Each step in is a step the Back
+/// button and the device's back take out again. An app's page a link opened (`linked`) is where the App Store starts,
 /// so it has no Back, as the Marketplace hasn't: the window's rail and the device's back leave it.
 interface View {
   category?: string
@@ -84,25 +84,10 @@ interface View {
   details?: boolean
   linked?: boolean
 }
-const [view, setView] = createSignal<View>(history.state?.apps ?? {})
-const to = (next: View) => go(() => (history.pushState({ ...history.state, apps: { ...next, linked: undefined } }, ""), setView({ ...next, linked: undefined })))
-addEventListener("popstate", () => {
-  const now: View = history.state?.apps ?? {}
-  if (JSON.stringify(now) !== JSON.stringify(view())) go(() => setView(now), { back: true })
-})
-/// A link to an app's page, `one:app-store#app=<its artifact>`, as an App Library's app with no screen of its own opens
-/// it: its page, where the App Store starts. It's followed once, and the address forgets it, so the same link is
-/// followed again.
-function linked() {
-  const app = new URLSearchParams(location.hash.slice(1)).get("app")
-  if (!app) return
-  const next: View = { app, linked: true }
-  history.replaceState({ ...history.state, apps: next }, "", location.pathname + location.search)
-  setView(next)
-}
-linked()
-addEventListener("hashchange", linked)
-
+const [view, setView] = createSignal<View>({})
+const to = (next: View) => go(() => setView({ ...next, linked: undefined }))
+/// One step out: See All to the app's page, an app's page to its category, a category to every app.
+const out = () => go(() => setView((now) => (now.details ? { category: now.category, app: now.app } : now.app ? { category: now.category } : {})), { back: true })
 /// The app a page is of: its artifact, or for one only the directory has, its source and name.
 const key = (listed: Listed) => listed.app ?? `${listed.source}#${listed.name}`
 
@@ -164,55 +149,47 @@ async function trust(market: Market, owner: Owner, done: Install) {
 }
 
 /// An app's icon and its name under it, the size it is on a Home Screen.
-function Tile(props: { listed: { title?: string; name?: string; icon: string | null }; onClick?: () => void }) {
-  const inside = () => (
-    <>
-      <Show when={props.listed.icon} fallback={<span class="blank" />}>
-        <img src={props.listed.icon!} alt="" />
-      </Show>
-      <span>{props.listed.title ?? props.listed.name}</span>
-    </>
-  )
+function Tile(props: { listed: { title?: string; name?: string; icon: string | null }; onClick?: () => void; fills?: boolean }) {
+  const name = () => props.listed.title ?? props.listed.name
   return (
-    <Show when={props.onClick} fallback={<div class="app-tile">{inside()}</div>}>
-      <button type="button" class="app-tile" onClick={() => props.onClick?.()}>
-        {inside()}
-      </button>
-    </Show>
+    <Box role={props.onClick ? "button" : undefined} aria-label={props.onClick ? name() : undefined} onClick={props.onClick} style={{ alignItems: "center", gap: 7, width: props.fills ? "100%" : 68, flexShrink: 0 }}>
+      <Show when={props.listed.icon} fallback={<Box style={{ width: 60, height: 60, borderRadius: "xl", backgroundColor: "muted" }} />}>
+        <Image src={props.listed.icon!} alt="" style={{ width: 60, height: 60, borderRadius: "xl" }} />
+      </Show>
+      <Text aria-hidden={props.onClick ? "true" : undefined} style={{ font: "caption-1", textAlign: "center", lineClamp: 1, width: "100%" }}>{name()}</Text>
+    </Box>
   )
 }
 
-/// A category's apps in one row, sideways, cut so the next shows, with See All once more are there than fit.
+/// A category's apps in one row, sideways, with See All once more are there than a phone shows.
 function Shelf(props: { category: string; apps: Listed[] }) {
-  const [more, setMore] = createSignal(false)
-  const watch = (row: HTMLElement) => new ResizeObserver(() => setMore(row.scrollWidth > row.clientWidth + 1)).observe(row)
   return (
-    <section class="shelf">
-      <header>
-        <h2>{props.category}</h2>
-        <Show when={more()}>
-          <Button variant="ghost" onClick={() => to({ category: props.category })}>
-            See All
-          </Button>
+    <Box style={{ gap: 12 }}>
+      <Box style={{ flexDirection: "row", alignItems: "baseline", justifyContent: "space-between", minHeight: "control" }}>
+        <Text role="heading" aria-level={2} style={{ font: "label" }}>{props.category}</Text>
+        <Show when={props.apps.length > 4}>
+          <Box role="button" onClick={() => to({ category: props.category })}>
+            <Text style={{ font: "footnote" }}>See All</Text>
+          </Box>
         </Show>
-      </header>
-      <div class="shelf-row" ref={watch}>
+      </Box>
+      <Box style={{ flexDirection: "row", gap: 12, overflow: "scroll" }}>
         <For each={props.apps} keyed={key}>
           {(listed) => <Tile listed={listed()} onClick={() => to({ category: view().category, app: key(listed()) })} />}
         </For>
-      </div>
-    </section>
+      </Box>
+    </Box>
   )
 }
 
 /// Apps as a grid of tiles: a category's every one, or what a search found.
 function Grid(props: { apps: Listed[] }) {
   return (
-    <div class="app-grid">
+    <Box style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(80px, 1fr))", rowGap: 24, columnGap: 12 }}>
       <For each={props.apps} keyed={key}>
-        {(listed) => <Tile listed={listed()} onClick={() => to({ category: view().category, app: key(listed()) })} />}
+        {(listed) => <Tile fills listed={listed()} onClick={() => to({ category: view().category, app: key(listed()) })} />}
       </For>
-    </div>
+    </Box>
   )
 }
 
@@ -224,28 +201,22 @@ function Marketplace(props: { market: Market }) {
   }
   const categories = () => props.market.categories.map((category) => ({ category, apps: props.market.apps.filter((listed) => listed.category === category) })).filter(({ apps }) => apps.length)
   const chosen = () => view().category
-  const choose = (category?: string) => (history.replaceState({ ...history.state, apps: { category } }, ""), setView({ category }))
+  const choose = (category?: string) => setView({ category })
   return (
     <>
       <Search placeholder="Search" aria-label="Search apps" value={query()} onInput={(event) => setQuery(event.currentTarget.value)} />
       <Show when={!query()}>
-        <nav class="chips" aria-label="Categories">
-          <Button variant={chosen() ? "secondary" : "default"} aria-pressed={String(!chosen()) as "true" | "false"} onClick={() => choose()}>
-            All
-          </Button>
+        <Box role="toolbar" aria-label="Categories" style={{ flexDirection: "row", gap: 8, overflow: "scroll" }}>
+          <Chip chosen={!chosen()} onClick={() => choose()}>All</Chip>
           <For each={categories()} keyed={({ category }) => category}>
-            {(shelf) => (
-              <Button variant={chosen() === shelf().category ? "default" : "secondary"} aria-pressed={String(chosen() === shelf().category) as "true" | "false"} onClick={() => choose(shelf().category)}>
-                {shelf().category}
-              </Button>
-            )}
+            {(shelf) => <Chip chosen={chosen() === shelf().category} onClick={() => choose(shelf().category)}>{shelf().category}</Chip>}
           </For>
-        </nav>
+        </Box>
       </Show>
       <Show
         when={query()}
         fallback={
-          <Show when={chosen()} fallback={<div class="shelves"><For each={categories()} keyed={({ category }) => category}>{(shelf) => <Shelf category={shelf().category} apps={shelf().apps} />}</For></div>}>
+          <Show when={chosen()} fallback={<Box style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(320px, 1fr))", rowGap: 28, columnGap: 40 }}><For each={categories()} keyed={({ category }) => category}>{(shelf) => <Shelf category={shelf().category} apps={shelf().apps} />}</For></Box>}>
             <Grid apps={props.market.apps.filter((listed) => listed.category === chosen())} />
           </Show>
         }
@@ -258,46 +229,62 @@ function Marketplace(props: { market: Market }) {
   )
 }
 
+/// A category to choose, a pill: the one chosen is dark.
+function Chip(props: { chosen: boolean; onClick: () => void; children: Element }) {
+  return (
+    <Box role="button" aria-pressed={props.chosen ? "true" : "false"} onClick={props.onClick} style={{ flexShrink: 0, height: "control", paddingInline: 16, alignItems: "center", justifyContent: "center", borderRadius: "full", backgroundColor: props.chosen ? "primary" : "secondary", color: props.chosen ? "primary-foreground" : "secondary-foreground" }}>
+      <Text style={{ font: "label" }}>{props.children}</Text>
+    </Box>
+  )
+}
+
 /// Get, on an app's page: it installs the app for whoever it can still be installed for, and where that's more than one
 /// owner, asks who, in a menu under it. Once there's nobody left you may install it for, it's Open where the app has
 /// a screen and is installed, as an iPhone's App Store has it: for you first, then the owners after you.
 function Get(props: { all: Owners; listed: Listed }) {
   const left = () => props.all.owners.filter((owner) => !only(props.all, owner) && !owner.installs.some((install) => install.app === props.listed.app))
   const busy = () => left().some((owner) => working() === `${owner.who}|${props.listed.app}|install`)
-  const [asking, setAsking] = createSignal(false)
-  let anchor!: HTMLSpanElement
-  const get = () => (left().length === 1 ? install(left()[0], props.listed) : setAsking(true))
   const opens = () =>
     props.listed.entrypoints.length
       ? props.all.owners.flatMap((owner) => owner.installs.filter((done) => done.app === props.listed.app && done.state === "installed").map((done) => ({ owner, done })))[0]
       : undefined
   return (
     <Show when={left().length || busy()} fallback={<Show when={opens()}>{(it) => <Button onClick={() => open(it().done.name, { subject: it().owner.subject })}>Open</Button>}</Show>}>
-      <span class="get" ref={anchor}>
-        <Button loading={busy()} onClick={get}>
-          Get
-        </Button>
-      </span>
-      <Menu.Root
-        open={asking()}
-        onOpenChange={({ open }) => !open && setAsking(false)}
-        onSelect={({ value }) => (setAsking(false), install(left().find((owner) => owner.who === value)!, props.listed))}
-        positioning={{ getAnchorRect: () => anchor.getBoundingClientRect() }}
+      <Show
+        when={left().length > 1 && !busy()}
+        fallback={
+          <Button loading={busy()} onClick={() => install(left()[0], props.listed)}>
+            Get
+          </Button>
+        }
       >
-        <Menu.Positioner>
-          <Menu.Content>
-            <Menu.ItemGroup id="get">
-              <Menu.ItemGroupLabel htmlFor="get">Install for</Menu.ItemGroupLabel>
-              <For each={left()} keyed={(owner) => owner.who}>
-                {(owner) => <Menu.Item value={owner().who}>{owner().name}</Menu.Item>}
-              </For>
-            </Menu.ItemGroup>
-          </Menu.Content>
-        </Menu.Positioner>
-      </Menu.Root>
+        <Menu.Root onSelect={({ value }) => install(left().find((owner) => owner.who === value)!, props.listed)}>
+          <Menu.Trigger variant="default">Get</Menu.Trigger>
+          <Menu.Positioner>
+            <Menu.Content>
+              <Menu.Group label="Install for">
+                <For each={left()} keyed={(owner) => owner.who}>
+                  {(owner) => <Menu.Item value={owner().who}>{owner().name}</Menu.Item>}
+                </For>
+              </Menu.Group>
+            </Menu.Content>
+          </Menu.Positioner>
+        </Menu.Root>
+      </Show>
     </Show>
   )
 }
+
+/// Words that are only so, in grey.
+const Quiet = (props: { children: Element }) => <Text style={{ color: "muted-foreground" }}>{props.children}</Text>
+
+/// What's under way, with its spinner.
+const Busy = (props: { children: Element }) => (
+  <Box style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+    <Spinner />
+    <Quiet>{props.children}</Quiet>
+  </Box>
+)
 
 /// An app's place for one owner: where its install is for them, and what to do about it.
 function Where(props: { market: Market; all: Owners; owner: Owner; listed: Listed }) {
@@ -310,20 +297,20 @@ function Where(props: { market: Market; all: Owners; owner: Owner; listed: Liste
   const end = (
     <Switch>
       <Match when={state() === "installing"}>
-        <span class="busy"><Spinner /> Installing</span>
+        <Busy>Installing</Busy>
       </Match>
       {/* Restoring is Recently Deleted's, as for everything deleted: one place, as iOS has it. */}
       <Match when={state() === "recently_deleted" && may()}>
         <Button variant="secondary" onClick={() => open("soft-delete", { subject: props.owner.subject })}>Recently Deleted</Button>
       </Match>
       <Match when={state() === "installed"}>
-        <span class="owner-end">
+        <Box style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
           <Show when={now().trusted === false}>
-            <span class="quiet">Untrusted</span>
+            <Quiet>Untrusted</Quiet>
           </Show>
-          <Switch fallback={<span class="quiet">Ready for your AI</span>}>
+          <Switch fallback={<Quiet>Ready for your AI</Quiet>}>
             <Match when={now().update?.state === "updating"}>
-              <span class="busy"><Spinner /> Updating</span>
+              <Busy>Updating</Busy>
             </Match>
             <Match when={now().update?.state === "available" && may()}>
               <Button variant="secondary" loading={busy("update")} onClick={() => update(props.owner, now())}>Update</Button>
@@ -344,7 +331,7 @@ function Where(props: { market: Market; all: Owners; owner: Owner; listed: Liste
             </Menu.Positioner>
           </Menu.Root>
           </Show>
-        </span>
+        </Box>
       </Match>
     </Switch>
   )
@@ -381,25 +368,27 @@ function Page(props: { market: Market; all: Owners; listed: Listed }) {
     ),
   ]
   return (
-    <div class="app-page">
-      <div class="head">
-        <Show when={props.listed.icon} fallback={<span class="icon blank" />}>
-          <img class="icon" src={props.listed.icon!} alt="" />
+    <Box style={{ gap: 24, maxWidth: "readable" }}>
+      <Box style={{ flexDirection: "row", gap: 16 }}>
+        <Show when={props.listed.icon} fallback={<Box style={{ width: 120, height: 120, borderRadius: "xl", backgroundColor: "muted" }} />}>
+          <Image src={props.listed.icon!} alt="" style={{ width: 120, height: 120, borderRadius: "xl" }} />
         </Show>
-        <div class="named">
-          <h2>{props.listed.title}</h2>
-          <Show when={props.listed.subtitle}>
-            <p>{props.listed.subtitle}</p>
-          </Show>
+        <Box style={{ flexGrow: 1, flexShrink: 1, minWidth: 0, justifyContent: "space-between", gap: 4 }}>
+          <Box style={{ gap: 4 }}>
+            <Text role="heading" aria-level={2} style={{ font: "title", lineClamp: 2 }}>{props.listed.title}</Text>
+            <Show when={props.listed.subtitle}>
+              <Quiet>{props.listed.subtitle!}</Quiet>
+            </Show>
+          </Box>
           <Show when={props.listed.app}>
-            <div class="action">
+            <Box style={{ flexDirection: "row" }}>
               <Get all={props.all} listed={props.listed} />
-            </div>
+            </Box>
           </Show>
-        </div>
-      </div>
-      <Show when={props.listed.app} fallback={<p class="quiet">Ask your AI to check it and install it.</p>}>
-        <List class="installs">
+        </Box>
+      </Box>
+      <Show when={props.listed.app} fallback={<Quiet>Ask your AI to check it and install it.</Quiet>}>
+        <List>
           <For each={props.all.owners} keyed={(owner) => owner.who}>
             {(owner) => <Where market={props.market} all={props.all} owner={owner()} listed={props.listed} />}
           </For>
@@ -409,69 +398,68 @@ function Page(props: { market: Market; all: Owners; listed: Listed }) {
         </For>
       </Show>
       <Show when={props.listed.about}>
-        <p>{props.listed.about}</p>
+        <Text>{props.listed.about}</Text>
       </Show>
-      <dl class="facts">
-        <Show when={props.listed.entrypoints.length}>
-          <dt>On the Home Screen</dt>
-          <dd class="entrypoints">
-            <For each={props.listed.entrypoints}>{(entrypoint) => <Tile listed={entrypoint} />}</For>
-          </dd>
-        </Show>
-        <Show when={props.listed.widgets.length}>
-          <dt>Widgets</dt>
-          <dd>{and(props.listed.widgets.map((widget) => widget.name))}</dd>
-        </Show>
-        <Show when={props.listed.requires.length}>
-          <dt>Requires</dt>
-          <dd class="requires">
-            <For each={props.listed.requires}>
-              {(requirement) => (
-                <span>
-                  {requirement.title}
-                  <Show when={requirement.why}>
-                    <span class="quiet"> {requirement.why}</span>
-                  </Show>
-                </span>
-              )}
-            </For>
-          </dd>
-        </Show>
-        <Show when={requiredBy().length}>
-          <dt>Required by</dt>
-          <dd>{and(requiredBy())}</dd>
-        </Show>
-        <Show when={props.listed.source}>
-          <dt>Source</dt>
-          <dd>{props.listed.source}</dd>
-        </Show>
-      </dl>
+      <Show when={props.listed.entrypoints.length}>
+        <Section heading="On the Home Screen">
+          <Box style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(80px, 1fr))", rowGap: 16, columnGap: 12 }}>
+            <For each={props.listed.entrypoints}>{(entrypoint) => <Tile fills listed={entrypoint} />}</For>
+          </Box>
+        </Section>
+      </Show>
+      <Show when={props.listed.widgets.length}>
+        <Section heading="Widgets">
+          <Text>{and(props.listed.widgets.map((widget) => widget.name))}</Text>
+        </Section>
+      </Show>
+      <Show when={props.listed.requires.length}>
+        <Section heading="Requires">
+          <For each={props.listed.requires}>
+            {(requirement) => (
+              <Text>
+                {requirement.title}
+                <Show when={requirement.why}>
+                  <Text style={{ color: "muted-foreground" }}> {requirement.why}</Text>
+                </Show>
+              </Text>
+            )}
+          </For>
+        </Section>
+      </Show>
+      <Show when={requiredBy().length}>
+        <Section heading="Required by">
+          <Text>{and(requiredBy())}</Text>
+        </Section>
+      </Show>
+      <Show when={props.listed.source}>
+        <Section heading="Source">
+          <Text>{props.listed.source!}</Text>
+        </Section>
+      </Show>
       <Show when={props.listed.tools.length}>
         <List>
           <Row heading="See All" onClick={() => to({ ...view(), app: key(props.listed), details: true })} end={<Icon name="caret-right" along />} />
         </List>
       </Show>
-    </div>
+    </Box>
   )
 }
 
 /// See All: everything else an app is made of.
 function Details(props: { listed: Listed }) {
   return (
-    <Screen heading={props.listed.title} back>
-      <dl class="facts">
-        <dt>Tools</dt>
-        <dd>
-          {props.listed.tools.length}
-          <span class="code">
-            <For each={props.listed.tools}>{(tool) => <span>{tool}</span>}</For>
-          </span>
-        </dd>
-        <Show when={props.listed.trusted !== null}>
-          <dt>Runs</dt>
-          <dd>{props.listed.trusted ? "Trusted, on your servers" : "Untrusted, in a sandbox"}</dd>
-        </Show>
-      </dl>
+    <Screen heading={props.listed.title} back onBack={out}>
+      <Section heading="Tools">
+        <Text>{String(props.listed.tools.length)}</Text>
+        <Box style={{ flexDirection: "row", flexWrap: "wrap", columnGap: 16, rowGap: 4 }}>
+          <For each={props.listed.tools}>{(tool) => <Text style={{ color: "muted-foreground" }}>{tool}</Text>}</For>
+        </Box>
+      </Section>
+      <Show when={props.listed.trusted !== null}>
+        <Section heading="Runs">
+          <Text>{props.listed.trusted ? "Trusted, on your servers" : "Untrusted, in a sandbox"}</Text>
+        </Section>
+      </Show>
     </Screen>
   )
 }
@@ -484,13 +472,13 @@ function AppStore(props: { market: Market; all: Owners }) {
   // a navigation stack keeps the screen before.
   return (
     <>
-      <div class="under" hidden={covered()}>
-        <Screen back={!!view().category} class="apps">
+      <Box style={{ display: covered() ? "none" : "flex", flexGrow: 1 }}>
+        <Screen back={!!view().category} onBack={out}>
           <Marketplace market={props.market} />
         </Screen>
-      </div>
+      </Box>
       <Show when={covered()}>
-        <Show when={view().details} fallback={<Screen back={!view().linked} heading={opened()!.title}><Page market={props.market} all={props.all} listed={opened()!} /></Screen>}>
+        <Show when={view().details} fallback={<Screen back={!view().linked} onBack={out} heading={opened()!.title}><Page market={props.market} all={props.all} listed={opened()!} /></Screen>}>
           <Details listed={opened()!} />
         </Show>
       </Show>
@@ -506,13 +494,16 @@ const installed = (market: Market, all: Owners, app: string) => {
 
 /// The App Store.
 export default function Store() {
+  // A link to an app's page, `one:app-store#app=<its artifact>`, as an App Library's app with no screen of its own opens
+  // it: its page, where the App Store starts.
+  createEffect(link, (fragment) => {
+    if (fragment?.startsWith("app=")) setView({ app: decodeURIComponent(fragment.slice(4)), linked: true })
+  })
   return (
-    <div class="app-store">
-      <Errored fallback={(error) => <Screen><Problem heading="Can't show apps" text={error() as Error} /></Screen>}>
-        <Loading fallback={<Screen><Skeleton rows={4} /></Screen>}>
-          <AppStore market={market()} all={owners()} />
-        </Loading>
-      </Errored>
-    </div>
+    <Errored fallback={(error) => <Screen><Problem heading="Can't show apps" text={error() as Error} /></Screen>}>
+      <Loading fallback={<Screen><Skeleton rows={4} /></Screen>}>
+        <AppStore market={market()} all={owners()} />
+      </Loading>
+    </Errored>
   )
 }

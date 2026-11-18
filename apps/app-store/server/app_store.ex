@@ -15,10 +15,10 @@ defmodule AppStore do
   def icon, do: "client/icon.svg"
 
   @impl true
-  def requires, do: %{"core" => ">= 0.24.71"}
+  def requires, do: %{"core" => ">= 0.25.13"}
 
   @impl true
-  def entrypoints, do: [%{page: "client/index.html", category: "app-store", subject: "user"}]
+  def entrypoints, do: [%{page: "client/index.html", category: "app-store", subject: "user", host: 1}]
 
   @impl true
   def tools do
