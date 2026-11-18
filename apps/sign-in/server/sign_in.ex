@@ -513,7 +513,6 @@ defmodule SignIn do
           "title" => "#{name} wants to sign in as you",
           "text" => "Open Devices to let it in.",
           "to" => who,
-          "app" => call.app,
           "page" => "client/index.html#waiting=#{request}"
         })
 

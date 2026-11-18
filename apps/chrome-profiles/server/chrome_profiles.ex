@@ -376,7 +376,7 @@ defmodule ChromeProfiles do
       until: until,
       then:
         "It's open for your person, in Vault on any device of theirs, where the profile says Updating under Chrome Profiles. " <>
-          "Ask them to open it there (notifications_send with app vault reaches their devices) and sign in to what they want, in its own address bar and tabs. " <>
+          "Ask them to open it there (notifications_send reaches their devices) and sign in to what they want, in its own address bar and tabs. " <>
           "It's saved when they tap Save, or in #{@update_minutes} minutes. Don't sign in for them, and don't use its browser while they do."
     }
   end

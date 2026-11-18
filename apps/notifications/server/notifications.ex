@@ -109,15 +109,14 @@ defmodule Notifications do
   end
 
   @doc """
-  Notifies whoever `call` runs for, as the app making the call, so a tap opens its app and its person can
-  silence it. `notification` is what `send` takes: `"title"`, and `"text"` and `"to"` if it has them. Gives what
-  `send` answers.
+  Notifies whoever `call` runs for, as the app making the call (`send` takes that from the call, never from what's
+  asked), so a tap opens its app and its person can silence it. `notification` is what `send` takes: `"title"`, and
+  `"text"` and `"to"` if it has them. Gives what `send` answers.
 
       notifications = OneCore.Call.app(call, "notifications")
       notifications.send(call, %{"title" => "Claim approved", "text" => "Lunch with Sam, $42"})
   """
-  def send(%Call{app: app} = call, notification),
-    do: Call.tool(call, "notifications", "send", Map.put(notification, "app", app))
+  def send(%Call{} = call, notification), do: Call.tool(call, "notifications", "send", notification)
 
   @impl true
   def tools do
@@ -137,13 +136,13 @@ defmodule Notifications do
             text: %{type: "string", maxLength: 1000, description: "A sentence or two under it"},
             to: %{
               type: "string",
-              description: "users/<name>, groups/<name> or network. Whoever you're asking for, if left out"
+              description:
+                "users/<name>, groups/<name> or network: you, or someone you share a group with. Whoever you're asking for, if left out"
             },
-            app: Map.put(app, :description, "The app whose app a tap opens, and that its person can silence"),
             page: %{
               type: "string",
               description:
-                "With `app`, one of its pages a tap opens instead of its first, and what follows # there: client/index.html#waiting"
+                "Where an app notifies, one of its own pages a tap opens instead of its first, and what follows # there: client/index.html#waiting"
             }
           },
           required: ["title"]
@@ -317,8 +316,8 @@ defmodule Notifications do
   @impl true
   def call("send", %{"title" => title} = inputs, call) do
     to = Map.get(inputs, "to", call.subject)
-    app = inputs["app"]
-    users = users(call, to)
+    app = app(call)
+    users = call |> users(to) |> told!(call)
     at = DateTime.to_iso8601(DateTime.utc_now(:second))
 
     {sent, quiet, devices} =
@@ -478,6 +477,51 @@ defmodule Notifications do
   defp users(call, "network"), do: Call.tool(call, "permissions", "members", %{"of" => "network"})["members"]
 
   defp users(_call, to), do: raise("#{to} isn't a user, a group or the network.")
+
+  # The app that called, by the name it's installed as, and never one that's asked for: what a notification opens is
+  # only the app that sent it. Whoever called it from outside, a person or an agent, sends it as nobody's.
+  defp app(%Call{caller: nil}), do: nil
+
+  defp app(call) do
+    Enum.find_value(OneCore.Apps.running(call.subject), fn {name, version} -> version.artifact == call.caller and name end)
+  end
+
+  # Whoever a call may notify is the user asking, whoever it runs for, the users in a group with the user it runs for
+  # or in the group it runs for, and everyone for the network's owner and for an app installed for the network, which
+  # no one is asking. Anyone else isn't theirs to tell.
+  defp told!(users, call) do
+    case known(call) do
+      :everyone ->
+        users
+
+      known ->
+        case users -- known do
+          [] -> users
+          others -> raise Call.Refused, "You can notify only yourself and people you share a group with, not #{Enum.join(others, ", ")}."
+        end
+    end
+  end
+
+  defp known(%Call{actor: nil, subject: "network"}), do: :everyone
+
+  defp known(%Call{actor: actor, subject: subject} = call) do
+    own = Enum.filter([actor, subject], &match?("users/" <> _, &1))
+    together = fn %{"members" => members} -> for "users/" <> _ = user <- members, do: user end
+
+    cond do
+      String.starts_with?(subject, "groups/") ->
+        own ++ together.(Call.tool(call, "permissions", "members", %{"of" => subject}))
+
+      own == [] ->
+        []
+
+      Call.tool(call, "permissions", "check", %{"artifact" => "network", "relation" => "owner"})["may"] ->
+        :everyone
+
+      true ->
+        for group <- Call.tool(call, "permissions", "groups", %{})["groups"], reduce: own, do: (all -> all ++ together.(group))
+    end
+  end
 
   # A person's inbox is theirs whoever the call runs for: a group or the network they asked for.
   defp person(%Call{actor: "users/" <> _ = by}), do: by
