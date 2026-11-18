@@ -381,6 +381,8 @@ defmodule OneCore.App do
   - An entrypoint may say its `runtime_version`, the runtime version its page needs of a native host
     (`core/ui/src/strict/renderer.ts`, `runtime_version: 3`): its page is in strict mode (the UI library's skill), so a
     native host that has that version draws it itself, and an older host, or a browser, opens it as any other page.
+  - An app's settings are in Settings, where it adds a section, or a group in another's page, by the hook
+    `settings.sections`, with the component that draws it, as Settings' skill says.
   - An app that keeps something in its people's Vaults (an account at an outside service, a Chrome profile, a key)
     registers its item type there, as the Vault's skill says: `vault.types`, with the section it's listed under, how
     one is added, and the component that draws one, if it has one. An account is such an item, and isn't an app:
