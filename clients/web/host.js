@@ -132,7 +132,10 @@ function answered(now) {
   const was = connection
   connected(now ? "online" : "offline")
   if (was === connection) return
-  if (now && lost) for (const view of views.keys()) refresh(view)
+  if (now && lost) {
+    tools = undefined
+    for (const view of views.keys()) refresh(view)
+  }
   if (!now) unanswered ||= performance.now()
   if (now && unanswered && performance.now() - unanswered > 3000) report({ name: "one.client.unanswered", took: performance.now() - unanswered, error: "No server is answering" })
   else if (now) sendReports()
@@ -168,13 +171,25 @@ async function read(view, method, params) {
   return response
 }
 
+/// The tools a server lists, by which a call is known to only read: asked for as soon as this browser is signed in,
+/// as nearly every app's first call waits on it, and again once something may have changed them.
+/** @type {Promise<{ name: string, annotations?: { readOnlyHint?: boolean } }[]> | undefined} */
+let tools
+const listTools = () =>
+  (tools = mcp("tools/list").then(
+    (listed) => listed.tools,
+    (error) => {
+      tools = undefined
+      throw error
+    },
+  ))
+
 /// Whether asking `method` only reads. A tool does when the server's list of tools says so.
 /** @param {string} view @param {string} method @param {Record<string, unknown>} params */
 async function reads(view, method, params) {
   if (["tools/list", "resources/list", "resources/read"].includes(method)) return true
   if (method !== "tools/call") return false
-  const { tools } = await read(view, "tools/list", {})
-  return tools.some((/** @type {{ name: string, annotations?: { readOnlyHint?: boolean } }} */ tool) => tool.name === params.name && tool.annotations?.readOnlyHint === true)
+  return (await (tools ?? listTools())).some((/** @type {{ name: string, annotations?: { readOnlyHint?: boolean } }} */ tool) => tool.name === params.name && tool.annotations?.readOnlyHint === true)
 }
 
 /// Asks again for everything `view` was answered, and tells it if any of it changed.
@@ -232,6 +247,7 @@ async function opened() {
   }
   ;({ apps, device } = await response.json())
   answered(true)
+  listTools().catch(() => {})
   return { session: { state: "signedIn" } }
 }
 /// Asks again, while it's still opening, and tells the page where it is now, if it's moved.
@@ -263,6 +279,7 @@ const commands = {
     const response = await mcp(method, params)
     // A server tells every client it's connected to that something changed. A browser isn't connected, so it asks
     // again itself, for every open app.
+    tools = undefined
     for (const view of views.keys()) refresh(view)
     return response
   },
@@ -309,9 +326,14 @@ export const invoke = (command, ...args) => {
 }
 
 /// Where an app's page is: the edge's, under where this browser's apps' files are, by what names its address
-/// (`<app>[.<subject, last part first>]`), as the app has its own address for each.
+/// (`<app>[.<subject, last part first>]`), as the app has its own address for each. It's at the version a server
+/// last listed, which the edge keeps (`core/edge/mcp/mcp.ts`), or before its subject is listed, the latest.
 /** @type {typeof import("../app/page/host.js").address} */
-export const address = (view) => `${apps}/${view.host}/${view.entrypoint}`
+export const address = (view) => {
+  const [app, ...page] = view.entrypoint.split("/")
+  const version = versions.get(view.subject)?.get(app)
+  return `${apps}/${view.host}/${version ? `${app}@${version}` : app}/${page.join("/")}`
+}
 
 /// What an app's frame may do. Its address is this page's, so it's given an origin of its own, which reaches
 /// nothing here: not this page, not another app, and not what this browser is signed in with.

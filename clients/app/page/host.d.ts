@@ -181,7 +181,7 @@ export interface Events {
 export type Listen = <Event extends keyof Events>(event: Event, handler: (event: { payload: Events[Event] }) => void) => unknown
 
 /** Where an app's page is. */
-export type Address = (view: Pick<View, "host" | "entrypoint">) => string
+export type Address = (view: Pick<View, "host" | "entrypoint" | "subject">) => string
 
 declare global {
   /** XState, which the window's page is given as its UMD build (`xstate.umd.min.js`). */

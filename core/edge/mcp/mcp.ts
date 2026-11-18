@@ -45,7 +45,7 @@ export default {
     if (url.pathname === "/llms.txt") return new Response(llms(url.origin), { headers: { "content-type": "text/markdown; charset=utf-8" } });
     if (url.pathname.startsWith("/skills/")) return skill(request, env, url);
     if (url.pathname === "/apps") return apps(request, env);
-    if (url.pathname.startsWith("/apps/")) return file(request, env, url);
+    if (url.pathname.startsWith("/apps/")) return file(request, env, url, ctx);
     // MCP's streamable HTTP: each message is a POST, answered with JSON, or a stream of its progress and then its
     // answer. There's no stream to GET.
     if (request.method !== "POST") return new Response(null, { status: 405, headers: { allow: "POST" } });
@@ -319,9 +319,15 @@ async function apps(request: Request, env: Env) {
  * latest files of `app` that a server lists for that session's person, as the app's client has them at its own
  * address for each app (`clients/app/src/lib.rs`). An app opened for a group or the network says so after its name,
  * last part first (`notes.family.groups`).
+ *
+ * `<app>@<version>` in place of the second `<app>` is that version's file, which never changes, so it's kept in
+ * Cloudflare's cache for whoever asked and answered from there, with no server asked. A page asked for by its app's
+ * name alone loads the rest by its version, as its `<base>` says: its frame's origin is its own and opaque, which
+ * browsers give no HTTP cache, so this cache is the only one its files have.
  */
-async function file(request: Request, env: Env, url: URL) {
-  const [, host, app, ...path] = url.pathname.slice("/apps/".length).split("/");
+async function file(request: Request, env: Env, url: URL, ctx: ExecutionContext) {
+  const [session, host, named, ...path] = url.pathname.slice("/apps/".length).split("/");
+  const [app, pinned] = named.split("@");
   const who = await signedIn(request, env);
   if ("refused" in who) return new Response("Sign in again", { status: 401 });
   const [, ...whose] = host.split(".");
@@ -331,22 +337,35 @@ async function file(request: Request, env: Env, url: URL) {
     if (answer.status !== 200) return null;
     return (await answer.json<{ result: Result }>()).result;
   };
-  const listed = await ask<{ resources: { uri: string }[] }>("resources/list", {});
-  const version = listed?.resources.map(({ uri }) => uri.split("/")).find(([scheme, , of]) => scheme === "ui:" && of === app)?.[3];
-  const read = version ? await ask<{ contents: { blob?: string; text?: string; mimeType: string }[] }>("resources/read", { uri: `ui://${app}/${version}/${path.join("/")}` }) : null;
-  const found = read?.contents?.[0];
-  if (!found) return new Response(`There's nothing at ${url.pathname}`, { status: 404 });
-  const body = found.blob ? Uint8Array.from(atob(found.blob), (char) => char.charCodeAt(0)) : found.text;
-  return new Response(body, {
-    headers: {
-      "content-type": found.mimeType.replace(";profile=mcp-app", ""),
-      // What an app's page may load, which is what an MCP App may by default and what the app lets one
-      // (`APP_MAY_LOAD` in `clients/app/src/lib.rs`): its own app's files and the UI library, which are all
-      // here, and nothing from anywhere else.
-      "content-security-policy": `default-src 'none'; script-src ${url.origin} 'unsafe-inline'; style-src ${url.origin} 'unsafe-inline'; img-src ${url.origin} data:; media-src ${url.origin} data:; font-src ${url.origin} data:; connect-src 'none'; frame-src 'none'; object-src 'none'; base-uri ${url.origin}`,
-      // The page's origin is its own, so what it loads from here is from elsewhere to it.
-      "access-control-allow-origin": "*",
-      "cache-control": "no-store",
-    },
-  });
+  const listed = pinned ? null : await ask<{ resources: { uri: string }[] }>("resources/list", {});
+  const version = pinned ?? listed?.resources.map(({ uri }) => uri.split("/")).find(([scheme, , of]) => scheme === "ui:" && of === app)?.[3];
+  if (!version) return new Response(`There's nothing at ${url.pathname}`, { status: 404 });
+  // Kept for whoever it was read for, as a server may answer another person otherwise.
+  const kept = new Request(`${url.origin}/apps/${who.who}/${host}/${app}@${version}/${path.join("/")}`);
+  let found = await caches.default.match(kept);
+  if (!found) {
+    const read = await ask<{ contents: { blob?: string; text?: string; mimeType: string }[] }>("resources/read", { uri: `ui://${app}/${version}/${path.join("/")}` });
+    const content = read?.contents?.[0];
+    if (!content) return new Response(`There's nothing at ${url.pathname}`, { status: 404 });
+    const body = content.blob ? Uint8Array.from(atob(content.blob), (char) => char.charCodeAt(0)) : content.text;
+    found = new Response(body, { headers: { "content-type": content.mimeType.replace(";profile=mcp-app", ""), "cache-control": "public, max-age=31536000, immutable" } });
+    ctx.waitUntil(caches.default.put(kept, found.clone()));
+  }
+  const headers = {
+    "content-type": found.headers.get("content-type") ?? "",
+    // What an app's page may load, which is what an MCP App may by default and what the app lets one
+    // (`APP_MAY_LOAD` in `clients/app/src/lib.rs`): its own app's files and the UI library, which are all
+    // here, and nothing from anywhere else.
+    "content-security-policy": `default-src 'none'; script-src ${url.origin} 'unsafe-inline'; style-src ${url.origin} 'unsafe-inline'; img-src ${url.origin} data:; media-src ${url.origin} data:; font-src ${url.origin} data:; connect-src 'none'; frame-src 'none'; object-src 'none'; base-uri ${url.origin}`,
+    // The page's origin is its own, so what it loads from here is from elsewhere to it.
+    "access-control-allow-origin": "*",
+    // Its address has its session in it, so it's this browser's alone. A page asked for by its app's name is
+    // whichever version is latest.
+    "cache-control": pinned ? "private, max-age=31536000, immutable" : "no-store",
+  };
+  if (pinned || !headers["content-type"].startsWith("text/html")) return new Response(found.body, { headers });
+  // Before anything in it that has an address, its import map too, but after its doctype, which a browser reads first.
+  const base = `<base href="${url.origin}/apps/${session}/${host}/${app}@${version}/${path.slice(0, -1).map((part) => `${part}/`).join("")}">`;
+  const page = (await found.text()).replace(/^(\s*<!doctype html>)?/i, (doctype) => doctype + base);
+  return new Response(page, { headers });
 }
