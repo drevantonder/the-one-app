@@ -39,7 +39,7 @@ defmodule Vault.Items do
 
     item =
       cond do
-        found -> Vault.Access.may!(current(call, db, found, names(call)), by)
+        found -> Vault.Access.may!(Vault.Access.prune(call, db, found, names(call)), by)
         made -> Store.create(call, db, name, made)
         true -> raise "There's no item named #{name} in the Vault."
       end
@@ -76,9 +76,9 @@ defmodule Vault.Items do
     }
   end
 
-  @doc "The item named `name`, as it's kept now, or nil."
+  @doc "The item named `name`, as it's kept now (`Vault.Access.prune/4`), or nil."
   def find(call, db, name) do
-    if found = Store.find(call, db, name), do: current(call, db, found, names(call))
+    if found = Store.find(call, db, name), do: Vault.Access.prune(call, db, found, names(call))
   end
 
   def find!(call, db, name), do: find(call, db, name) || raise("There's no item named #{name} in the Vault.")
@@ -86,48 +86,7 @@ defmodule Vault.Items do
   @doc "Every item, as each is kept now."
   def all(call, db) do
     names = names(call)
-    for item <- Store.everything(call, db), do: current(call, db, item, names)
-  end
-
-  # An item as it's kept now: upgraded, and with no access for an app that's no longer installed (`Vault.Access.prune/4`).
-  defp current(call, db, item, names), do: Vault.Access.prune(call, db, upgraded(call, db, item), names)
-
-  # A record kept before items had a kind, access and a status is kept as they are now, once: its kind is what its
-  # type and its sign-in made it, and its app the one of its type, or the first that used it. Where an app couldn't
-  # say its types just now, it's read so and kept as it was, for a call when every app can.
-  defp upgraded(_call, _db, %{"kind" => _} = item), do: item
-
-  defp upgraded(call, db, item) do
-    uses = item["uses"] || []
-    {types, whole?} = collected(call)
-    type = Enum.find(types, &(&1.artifact in uses and String.starts_with?(item["name"], &1.prefix)))
-
-    {kind, type, app} =
-      cond do
-        type -> {"app_item", %{"app" => type.artifact, "name" => type.name}, type.artifact}
-        item["oauth"] -> {"account", nil, List.first(uses)}
-        true -> {"password", nil, nil}
-      end
-
-    status =
-      case item["state"] do
-        %{"state" => "action_required"} = state -> %{state | "state" => "needs_action"}
-        state -> state
-      end
-
-    upgrade = fn record ->
-      record
-      |> Map.drop(["uses", "agents", "state"])
-      |> Map.merge(%{
-        "kind" => kind,
-        "type" => type,
-        "app" => app,
-        "access" => if(record["agents"], do: ["agents"], else: []) ++ (record["uses"] || []),
-        "status" => status
-      })
-    end
-
-    if whole?, do: Store.change!(db, item, upgrade), else: upgrade.(item)
+    for item <- Store.everything(call, db), do: Vault.Access.prune(call, db, item, names)
   end
 
   @doc "An item's fields' values, by name."
@@ -204,16 +163,12 @@ defmodule Vault.Items do
   icon, and whether it's trusted, which decides where its component is drawn. A type that doesn't say what one must
   is left out.
   """
-  def types(call), do: elem(collected(call), 0)
-
-  # The types, and whether every app that hooks into `vault.types` and runs here said its own.
-  defp collected(call) do
+  def types(call) do
     # Asked by the hook's whole name, since an app keeping an item calls this in its own call, not the Vault's.
-    {:ok, parts, failed} = OneCore.Hooks.collect("vault.types", %{}, {call.actor, call.subject})
+    {:ok, parts, _failed} = OneCore.Hooks.collect("vault.types", %{}, {call.actor, call.subject})
     running = Apps.running(call.subject)
 
-    types =
-      for {app, part} <- Enum.sort(parts),
+    for {app, part} <- Enum.sort(parts),
         version = running[app],
         version != nil,
         type <- List.wrap(JSON.decode!(JSON.encode!(part))),
@@ -232,8 +187,6 @@ defmodule Vault.Items do
         create: type["create"]
       }
     end
-
-    {types, failed == %{} and Enum.all?(Map.keys(parts), &Map.has_key?(running, &1))}
   end
 
   defp type?(%{"name" => name, "prefix" => prefix, "section" => section})
