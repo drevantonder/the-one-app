@@ -55,9 +55,10 @@ export const { render: mount, effect, memo, createComponent, createElement, crea
     if (!types.has(tag as Type)) throw new Error(`A strict page draws a box, a scroll, a text, an image, a path or an input, not a ${tag}`)
     return node(tag as Type)
   },
-  createTextNode: (value) => node("raw-text", value),
+  // Solid hands over what the page wrote, a number too (`{count()}`), which the DOM makes text of itself.
+  createTextNode: (value) => node("raw-text", String(value)),
   replaceText(text, value) {
-    queue({ op: "set", id: text.id, name: "value", value })
+    queue({ op: "set", id: text.id, name: "value", value: String(value) })
   },
   isTextNode: (node) => node.type === "raw-text",
   setProperty(node, name, value) {
