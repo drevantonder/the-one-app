@@ -221,7 +221,8 @@ export const open = (app: string, { subject, behind, from }: Subject & { behind?
 /// failed try again: each answers `{ message }`, what it did, or throws why it couldn't. `client({ statusBar: false })`
 /// hides the device's status bar while this app is showing, as an iPhone's Home Screen does while it's edited, and
 /// `true` shows it again; a device with none, or whose app can't, keeps what it has. An update shows over every app
-/// as it's under way, and the app starts again on the new build.
+/// as it's under way, and the app starts again on the new build. On Android, `client({ settings: "accessibility" })`
+/// opens its Accessibility settings, and `"app"` the app's App Info, where its person allows what only they may.
 export function client(): Promise<Client>
 export function client(change: ClientChange): Promise<{ message: string }>
 export function client(change: ClientChange = {}) {
@@ -236,6 +237,8 @@ export interface Client {
   server?: string
   /** Where a phone is with being woken by its notifications: nothing on a computer or in a browser. */
   push?: { state: "notAsked" | "denied" | "registering" | "registered" } | { state: "failed"; why: string }
+  /** Whether a phone's person turned on Computer Use in its Accessibility settings: nothing where a device has none. */
+  computerUse?: { on: boolean }
   /** What `client({ theme })` chose for every app here: `null` where it's as the device is. */
   theme: "light" | "dark" | null
 }
@@ -248,4 +251,5 @@ export interface ClientChange {
   serve?: boolean
   update?: boolean
   push?: boolean
+  settings?: "accessibility" | "app"
 }

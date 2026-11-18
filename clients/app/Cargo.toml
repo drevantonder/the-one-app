@@ -33,6 +33,7 @@ window = [
   "dep:tauri-plugin-haptics",
   "dep:encryption_client",
   "dep:notifications_client",
+  "dep:computer_use_client",
   "dep:objc2",
   "dep:objc2-core-foundation",
   "dep:objc2-ui-kit",
@@ -65,6 +66,7 @@ tauri-plugin-opener = { version = "2", optional = true }
 # (`client::files`).
 encryption_client = { path = "../../apps/encryption/client/native", optional = true }
 notifications_client = { path = "../../apps/notifications/client/native", optional = true }
+computer_use_client = { path = "../../apps/computer-use/client/native", optional = true }
 
 # The notification plugins Notifications' client-side code uses, which Tauri gives the window's page permissions of only
 # where the app names them itself (`capabilities/phone.json`).

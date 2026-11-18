@@ -1,11 +1,14 @@
 package app.theone.client
 
+import android.content.Intent
 import android.content.res.Configuration
 import android.graphics.Color
 import android.graphics.Rect
 import android.graphics.drawable.ColorDrawable
 import android.os.Build
+import android.net.Uri
 import android.os.Bundle
+import android.provider.Settings
 import android.view.HapticFeedbackConstants
 import android.webkit.WebView
 import android.window.OnBackInvokedCallback
@@ -79,6 +82,17 @@ class MainActivity : TauriActivity() {
         val scale = resources.displayMetrics.density
         val at = message.data.orEmpty().split(",").mapNotNull { it.toFloatOrNull()?.times(scale)?.toInt() }
         ViewCompat.setSystemGestureExclusionRects(webView, if (at.size == 4) listOf(Rect(at[0], at[1], at[2], at[3])) else emptyList())
+      }
+      // Android's own Settings page an app asked to open (`one/client` in client.js): Accessibility, where its person
+      // turns on Computer Use, or the app's App Info, where Android 13 and later has them allow restricted settings
+      // first for an app that didn't come from a store.
+      WebViewCompat.addWebMessageListener(webView, "androidSettings", setOf("http://tauri.localhost")) { _, message, _, _, _ ->
+        val opened = when (message.data) {
+          "accessibility" -> Intent(Settings.ACTION_ACCESSIBILITY_SETTINGS)
+          "app" -> Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, Uri.fromParts("package", packageName, null))
+          else -> return@addWebMessageListener
+        }
+        startActivity(opened)
       }
       // A haptic an app asked for, by iOS's name (`one/haptic` in client.js), played as Android's own, which follows
       // the system's Touch feedback. Flutter's choices for iOS's impacts and selection.

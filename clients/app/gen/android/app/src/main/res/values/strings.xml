@@ -1,4 +1,7 @@
 <resources>
     <string name="app_name">"The One App"</string>
     <string name="main_activity_title">"The One App"</string>
+    <!-- What Settings → Accessibility says of Computer Use, under The One App. -->
+    <string name="computer_use_summary">"Lets your AI see and use this phone when you ask it to"</string>
+    <string name="computer_use_description">"Lets your AI see this phone\'s screen and tap, swipe and type on it, when you ask it to. It sees what you see and does only what you ask, and you can watch it in Computer Use in The One App. Turn this off here whenever you like."</string>
 </resources>

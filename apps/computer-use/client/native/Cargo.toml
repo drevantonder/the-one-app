@@ -1,0 +1,19 @@
+[package]
+name = "computer_use_client"
+description = "Computer Use's client-side code that's built into the app: a phone's own screen, which its servers use through it."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+anyhow.workspace = true
+client = { path = "../../../../core/client" }
+futures-util = { version = "0.3", default-features = false }
+serde_json.workspace = true
+tokio.workspace = true
+
+# Android's accessibility service is Kotlin (`clients/app/gen/android/.../ComputerUse.kt`), which this calls.
+[target.'cfg(target_os = "android")'.dependencies]
+data-encoding = "2"
+jni = "0.21"
+ndk-context = "0.1"

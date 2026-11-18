@@ -145,7 +145,7 @@ export interface Commands {
   request(args: { view: string; method: string; params: Record<string, unknown> }): unknown
   refresh(args: { view: string }): void
   close(args: { view: string }): void
-  client(): { device: string; network?: string; build?: string; target?: string; server?: string; push?: unknown }
+  client(): { device: string; network?: string; build?: string; target?: string; server?: string; push?: unknown; computerUse?: unknown }
   upload(file: ArrayBuffer, options: { headers: { app: string } }): { upload: string }
   /** Asks the network again now, which didn't answer. */
   retry(): Promise<void>
@@ -225,6 +225,8 @@ declare global {
   var androidBack: { postMessage(message: string): void } | undefined
   /** Where Android's app plays a haptic, by its name (`MainActivity`). */
   var androidHaptic: { postMessage(message: string): void } | undefined
+  /** Where Android's app opens its own Settings page, `accessibility` or `app` (`MainActivity`). */
+  var androidSettings: { postMessage(message: string): void } | undefined
   /** Where Android's app hears where the rail's handle is, `left,top,right,bottom` in the page's pixels, or "" while
    * it's not there, which its back gesture leaves to it (`MainActivity`). */
   var androidEdge: { postMessage(message: string): void } | undefined

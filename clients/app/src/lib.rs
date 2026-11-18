@@ -218,7 +218,7 @@ async fn refresh(views: State<'_, Views>, view: String) -> Result<(), ()> {
 
 /// This device's key, as its network knows it, the network's address, if it has one, the build it's on and its kind
 /// of machine, as builds are named, its server's key, if it's a server, and whether a phone is woken by its
-/// notifications (`notifications::Push`).
+/// notifications (`notifications::Push`), and whether its person turned Computer Use on, on a phone that has it.
 #[tauri::command]
 fn client(views: State<'_, Views>) -> Value {
     json!({
@@ -228,6 +228,7 @@ fn client(views: State<'_, Views>) -> Value {
         "target": ::client::target(),
         "server": cli::serving::server(),
         "push": notifications::push(),
+        "computerUse": computer_use_client::phone(),
     })
 }
 
@@ -752,7 +753,7 @@ async fn opens(app: AppHandle) {
         )?;
         #[cfg(desktop)]
         let home = ::client::home()?;
-        Client::open(home, cli::resolvers(), Vec::new()).await
+        Client::open(home, cli::resolvers(), computer_use_client::tools()).await
     };
     let client = match opened.await {
         Ok(client) => client,

@@ -1467,6 +1467,13 @@ async function respond(view, method, params) {
     }
     // A phone whose push failed tries again.
     if (params.push) return invoke("push")
+    // A phone's own Settings page, where its person turns on what only they may: Android's Accessibility, or the
+    // app's App Info.
+    if (params.settings) {
+      if (!globalThis.androidSettings) throw new Error("This device has no Settings to open here.")
+      globalThis.androidSettings.postMessage(params.settings)
+      return { message: "" }
+    }
     // This device becomes a server of its person's, or stops being one, or takes the latest builds.
     if ("serve" in params) return { message: await invoke("serve", { on: params.serve === true }) }
     // It updates as the window shows it, over every app, where an update is ready.

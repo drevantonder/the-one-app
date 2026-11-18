@@ -99,6 +99,7 @@ dependencies = [
  "anyhow",
  "cli",
  "client",
+ "computer_use_client",
  "data-encoding",
  "embed-manifest",
  "encryption_client",
@@ -791,6 +792,20 @@ checksum = "4356eba6976435498d05a311ee9fc486da3bc81c200d3f0d7dd9703b41913f92"
 dependencies = [
  "bytes",
  "memchr",
+]
+
+[[package]]
+name = "computer_use_client"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "client",
+ "data-encoding",
+ "futures-util",
+ "jni 0.21.1",
+ "ndk-context",
+ "serde_json",
+ "tokio",
 ]
 
 [[package]]
