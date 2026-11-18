@@ -500,8 +500,11 @@ pub(crate) enum Input {
     Up(crate::geometry::Point<f32>, u8),
     /// Scrolled along and down by so many pixels (left and up negative).
     Wheel(crate::geometry::Point<f32>, crate::geometry::Point<f32>),
+    /// A key, and what an input method does: a Mac's go to the screen as AppKit asks (`mac::window`).
+    #[cfg_attr(target_os = "macos", allow(dead_code))]
     Key(crate::inspect::Key),
     /// What the input method composes or commits.
+    #[cfg_attr(target_os = "macos", allow(dead_code))]
     Ime(crate::editing::Ime),
     /// The window got the keyboard, or lost it.
     Focus(bool),

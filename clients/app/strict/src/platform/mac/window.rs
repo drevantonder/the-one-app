@@ -12,7 +12,7 @@
 // Copyright 2022 - 2025 Zed Industries, Inc. Licensed under the Apache License, Version 2.0
 // (clients/app/strict/LICENSE-APACHE); this file is changed from the original.
 
-use std::cell::{Cell, RefCell};
+use std::cell::Cell;
 use std::ffi::c_void;
 use std::ptr::NonNull;
 use std::sync::{Arc, Mutex};
@@ -35,7 +35,8 @@ use raw_window_handle as rwh;
 
 use super::events;
 use crate::Cursor;
-use crate::editing::Ime;
+use crate::editing::{self, Ime};
+use crate::inspect::Key;
 use crate::geometry::{Bounds, DevicePixels, Pixels, Point, Size};
 use crate::platform::{Input, WindowId, WindowOptions};
 
@@ -279,8 +280,9 @@ impl Display {
 
 struct ViewIvars {
     shared: Arc<Shared>,
-    /// What the input method is composing, drawn at the caret and not yet typed.
-    marked: RefCell<String>,
+    /// The input method is composing: what it marked is drawn at the caret and not yet typed, so every key is its
+    /// first, and what it inserts replaces what it marked.
+    composing: Cell<bool>,
     /// The main button went down with Control held, which a Mac takes as the secondary one, so it comes up as that.
     secondary: Cell<bool>,
 }
@@ -354,16 +356,46 @@ define_class!(
             }
             // A key with ⌘ or Control the menu bar didn't take is the page's; the input context would type Control's.
             // While composing, every key is the input method's first.
-            let composing = !self.ivars().marked.borrow().is_empty();
-            if (key.meta || key.ctrl) && !composing {
-                return shared.send(Input::Key(key));
+            if (key.meta || key.ctrl) && !self.ivars().composing.get() {
+                return self.key(key);
             }
             *shared.pending.lock().expect("nothing panics holding it") = Some(key);
             let handled = self.inputContext().is_some_and(|context| context.handleEvent(event));
             let unhandled = shared.pending.lock().expect("nothing panics holding it").take().filter(|_| !handled);
             if let Some(key) = unhandled {
-                shared.send(Input::Key(key));
+                self.key(key);
             }
+        }
+
+        // The Edit menu's, and their keys' (⌘C, ⌘X, ⌘V, ⌘A, ⌘Z, ⇧⌘Z): the page's, as those keys.
+        #[unsafe(method(copy:))]
+        fn copy(&self, _sender: Option<&AnyObject>) {
+            self.command("c", false);
+        }
+
+        #[unsafe(method(cut:))]
+        fn cut(&self, _sender: Option<&AnyObject>) {
+            self.command("x", false);
+        }
+
+        #[unsafe(method(paste:))]
+        fn paste(&self, _sender: Option<&AnyObject>) {
+            self.command("v", false);
+        }
+
+        #[unsafe(method(selectAll:))]
+        fn select_all(&self, _sender: Option<&AnyObject>) {
+            self.command("a", false);
+        }
+
+        #[unsafe(method(undo:))]
+        fn undo(&self, _sender: Option<&AnyObject>) {
+            self.command("z", false);
+        }
+
+        #[unsafe(method(redo:))]
+        fn redo(&self, _sender: Option<&AnyObject>) {
+            self.command("z", true);
         }
 
         #[unsafe(method(mouseDown:))]
@@ -442,81 +474,88 @@ define_class!(
 
     unsafe impl NSObjectProtocol for View {}
 
-    // What's typed comes through here: the input context says what a key types, or which command it is.
+    // What's typed comes through here, to the screen's input with the keyboard (`editing`): what a key types or
+    // which command it is, what an input method composes, and where.
     unsafe impl NSTextInputClient for View {
         #[unsafe(method(insertText:replacementRange:))]
-        fn insert_text(&self, string: &AnyObject, _range: NSRange) {
+        fn insert_text(&self, string: &AnyObject, replacement: NSRange) {
             let text = text_of(string);
-            let shared = &self.ivars().shared;
-            let composed = !std::mem::take(&mut *self.ivars().marked.borrow_mut()).is_empty();
-            let pending = shared.pending.lock().expect("nothing panics holding it").take();
-            // A key that types what it says is that key, as the DOM's `keydown` has it; what an input method
-            // composed, or a key typed more than one character, replaces what's composed.
+            let composed = self.ivars().composing.replace(false);
+            let pending = self.ivars().shared.pending.lock().expect("nothing panics holding it").take();
+            let replacing = range(replacement);
             match pending {
-                Some(key) if !composed && text.chars().count() == 1 => {
-                    shared.send(Input::Key(crate::inspect::Key { key: text, shift: key.shift, alt: key.alt, ctrl: false, meta: false }))
+                // A key that types what it says is that key, as the DOM's `keydown` has it.
+                Some(key) if !composed && replacing.is_none() && text.chars().count() == 1 => {
+                    self.key(Key { key: text, shift: key.shift, alt: key.alt, ctrl: false, meta: false })
                 }
-                _ => shared.send(Input::Ime(Ime::Commit(text))),
+                // What an input method composed, an accent picked for the character before, a key that typed more
+                // than one character: it replaces what's composed or the range given.
+                _ => self.tell(move |screen| {
+                    if let Some(replacing) = replacing {
+                        screen.ime(Ime::Select(replacing));
+                    }
+                    screen.ime(Ime::Commit(text));
+                }),
             }
         }
 
-        // We ignore which selector it asks us to do because the user may have bound the shortcut to something else.
+        // What it stands for is the key that asked, as the user may have bound the shortcut to something else.
         #[unsafe(method(doCommandBySelector:))]
-        fn do_command_by_selector(&self, _selector: Sel) {
-            let shared = &self.ivars().shared;
-            if let Some(key) = shared.pending.lock().expect("nothing panics holding it").take() {
-                shared.send(Input::Key(key));
+        fn do_command_by_selector(&self, selector: Sel) {
+            let pending = self.ivars().shared.pending.lock().expect("nothing panics holding it").take();
+            if let Some(key) = pending.or_else(|| events::command(selector.name().to_str().unwrap_or_default())) {
+                self.key(key);
             }
         }
 
         #[unsafe(method(setMarkedText:selectedRange:replacementRange:))]
-        fn set_marked_text(&self, string: &AnyObject, selected: NSRange, _replacement: NSRange) {
+        fn set_marked_text(&self, string: &AnyObject, selected: NSRange, replacement: NSRange) {
             // Composing: the key went into what's marked.
             self.ivars().shared.pending.lock().expect("nothing panics holding it").take();
             let text = text_of(string);
-            // Where its cursor is, from UTF-16 units to bytes.
-            let cursor = (selected.location != NSNotFound as NSUInteger).then(|| {
-                let mut units = 0;
-                text.char_indices().find(|(_, c)| {
-                    let past = units >= selected.location;
-                    units += c.len_utf16();
-                    past
-                }).map_or(text.len(), |(at, _)| at)
+            self.ivars().composing.set(!text.is_empty());
+            let (cursor, replacing) = (range(selected).map(|selected| editing::byte(&text, selected.start)), range(replacement));
+            self.tell(move |screen| {
+                if let Some(replacing) = replacing {
+                    screen.ime(Ime::Select(replacing));
+                }
+                screen.ime(Ime::Preedit(text, cursor));
             });
-            *self.ivars().marked.borrow_mut() = text.clone();
-            self.ivars().shared.send(Input::Ime(Ime::Preedit(text, cursor)));
         }
 
         // The input method is done composing: what it composed is typed.
         #[unsafe(method(unmarkText))]
         fn unmark_text(&self) {
-            let marked = std::mem::take(&mut *self.ivars().marked.borrow_mut());
-            if !marked.is_empty() {
-                self.ivars().shared.send(Input::Ime(Ime::Commit(marked)));
-            }
+            self.ivars().composing.set(false);
+            self.tell(|screen| screen.ime(Ime::Finish));
         }
 
         #[unsafe(method(selectedRange))]
         fn selected_range(&self) -> NSRange {
-            NSRange::new(self.ivars().marked.borrow().encode_utf16().count(), 0)
+            self.ask(|screen| screen.editing())
+                .flatten()
+                .map_or(NSRange::new(NSNotFound as NSUInteger, 0), |value| {
+                    let (from, to) = (value.selection.base.min(value.selection.extent), value.selection.base.max(value.selection.extent));
+                    NSRange::new(from, to - from)
+                })
         }
 
         #[unsafe(method(markedRange))]
         fn marked_range(&self) -> NSRange {
-            match self.ivars().marked.borrow().encode_utf16().count() {
-                0 => NSRange::new(NSNotFound as NSUInteger, 0),
-                length => NSRange::new(0, length),
-            }
+            self.ask(|screen| screen.editing().and_then(|value| value.composing))
+                .flatten()
+                .map_or(NSRange::new(NSNotFound as NSUInteger, 0), |composing| NSRange::new(composing.start, composing.end - composing.start))
         }
 
         #[unsafe(method(hasMarkedText))]
         fn has_marked_text(&self) -> bool {
-            !self.ivars().marked.borrow().is_empty()
+            self.ask(|screen| screen.editing().is_some_and(|value| value.composing.is_some())).unwrap_or(false)
         }
 
+        // The input's text in `range`, in UTF-16 units, as much of it as there is, which `actual` says.
         #[unsafe(method_id(attributedSubstringForProposedRange:actualRange:))]
-        fn attributed_substring_for_proposed_range(&self, _range: NSRange, _actual: NSRangePointer) -> Option<Retained<NSAttributedString>> {
-            None
+        fn attributed_substring_for_proposed_range(&self, wanted: NSRange, actual: NSRangePointer) -> Option<Retained<NSAttributedString>> {
+            self.substring(wanted, actual)
         }
 
         #[unsafe(method_id(validAttributesForMarkedText))]
@@ -527,8 +566,7 @@ define_class!(
         // Where the input method shows what it composes: at the caret, on the screen, from the bottom up.
         #[unsafe(method(firstRectForCharacterRange:actualRange:))]
         fn first_rect_for_character_range(&self, _range: NSRange, _actual: NSRangePointer) -> NSRect {
-            let caret = *self.ivars().shared.caret.lock().expect("nothing panics holding it");
-            let (Some(caret), Some(window)) = (caret, self.window()) else { return NSRect::ZERO };
+            let (Some(caret), Some(window)) = (self.ask(|screen| screen.caret_rect()).flatten(), self.window()) else { return NSRect::ZERO };
             let height = self.frame().size.height;
             let rect = NSRect::new(
                 NSPoint::new(caret.origin.x.into(), height - f64::from(caret.origin.y + caret.size.height)),
@@ -537,16 +575,60 @@ define_class!(
             window.convertRectToScreen(self.convertRect_toView(rect, None))
         }
 
+        // The character nearest a point on the screen, in UTF-16 units of the input's text.
         #[unsafe(method(characterIndexForPoint:))]
-        fn character_index_for_point(&self, _point: NSPoint) -> NSUInteger {
-            NSNotFound as NSUInteger
+        fn character_index_for_point(&self, point: NSPoint) -> NSUInteger {
+            let Some(window) = self.window() else { return NSNotFound as NSUInteger };
+            let local = self.convertPoint_fromView(window.convertPointFromScreen(point), None);
+            let at = Point { x: local.x as f32, y: (self.frame().size.height - local.y) as f32 };
+            self.ask(move |screen| screen.index_at(at)).flatten().unwrap_or(NSNotFound as NSUInteger)
         }
     }
 );
 
 impl View {
+    /// Asks this window's screen on the strict thread, and waits a little for its answer: the strict thread may be
+    /// waiting on this one (opening or closing a window), so an input method gets nothing rather than both waiting.
+    fn ask<R: Send + 'static>(&self, f: impl FnOnce(&mut crate::Screen) -> R + Send + 'static) -> Option<R> {
+        let (id, (to, from)) = (self.ivars().shared.id, std::sync::mpsc::channel());
+        crate::platform::Strict::get().ok()?.run(move |windows| drop(to.send(windows.with(id, f))));
+        from.recv_timeout(std::time::Duration::from_millis(250)).ok().flatten()
+    }
+
+    /// Tells this window's screen something on the strict thread, in order with what it's asked.
+    fn tell(&self, f: impl FnOnce(&mut crate::Screen) + Send + 'static) {
+        let id = self.ivars().shared.id;
+        if let Ok(strict) = crate::platform::Strict::get() {
+            strict.run(move |windows| {
+                let _ = windows.with(id, f);
+            });
+        }
+    }
+
+    fn key(&self, key: Key) {
+        self.tell(move |screen| {
+            let _ = screen.key(&key);
+        });
+    }
+
+    /// The input's text in `wanted`, in UTF-16 units, as much of it as there is, which `actual` says.
+    fn substring(&self, wanted: NSRange, actual: NSRangePointer) -> Option<Retained<NSAttributedString>> {
+        let (value, wanted) = (self.ask(|screen| screen.editing()).flatten()?, range(wanted)?);
+        let units: Vec<u16> = value.text.encode_utf16().collect();
+        let (start, end) = (wanted.start.min(units.len()), wanted.end.min(units.len()));
+        if !actual.is_null() {
+            unsafe { actual.write(NSRange::new(start, end - start)) };
+        }
+        Some(NSAttributedString::from_nsstring(&NSString::from_str(&String::from_utf16_lossy(&units[start..end]))))
+    }
+
+    /// ⌘ and `key`, with Shift if `shift`, as a menu's command is its key.
+    fn command(&self, key: &str, shift: bool) {
+        self.key(Key { key: key.to_owned(), shift, alt: false, ctrl: false, meta: true });
+    }
+
     fn new(main: MainThreadMarker, frame: NSRect, shared: Arc<Shared>) -> Retained<View> {
-        let this = main.alloc::<View>().set_ivars(ViewIvars { shared, marked: RefCell::default(), secondary: Cell::new(false) });
+        let this = main.alloc::<View>().set_ivars(ViewIvars { shared, composing: Cell::new(false), secondary: Cell::new(false) });
         let view: Retained<View> = unsafe { msg_send![super(this), initWithFrame: frame] };
         // Layer-backed from the start, its layer the CAMetalLayer Blade draws into (`makeBackingLayer`).
         view.setWantsLayer(true);
@@ -689,6 +771,11 @@ define_class!(
         }
     }
 );
+
+/// A range AppKit gives, in UTF-16 units, unless it's none (`NSNotFound`).
+fn range(range: NSRange) -> Option<std::ops::Range<usize>> {
+    (range.location != NSNotFound as NSUInteger).then(|| range.location..range.location + range.length)
+}
 
 /// What an NSTextInputClient is given, a string or an attributed one, as text.
 fn text_of(string: &AnyObject) -> String {

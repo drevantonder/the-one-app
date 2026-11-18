@@ -58,3 +58,37 @@ pub fn key(event: &NSEvent) -> Key {
     };
     Key { key, shift, alt, ctrl, meta }
 }
+
+/// The key one of AppKit's standard text commands (NSStandardKeyBindingResponding) stands for on a Mac, as the DOM
+/// names it, for a command that came with no key: from an input method's menu, or a binding of the person's own.
+pub fn command(selector: &str) -> Option<Key> {
+    let (key, shift, alt, meta) = match selector {
+        "deleteBackward:" | "deleteBackwardByDecomposingPreviousCharacter:" => ("Backspace", false, false, false),
+        "deleteForward:" => ("Delete", false, false, false),
+        "deleteWordBackward:" => ("Backspace", false, true, false),
+        "deleteWordForward:" => ("Delete", false, true, false),
+        "deleteToBeginningOfLine:" => ("Backspace", false, false, true),
+        "insertNewline:" | "insertLineBreak:" => ("Enter", false, false, false),
+        "insertTab:" => ("Tab", false, false, false),
+        "insertBacktab:" => ("Tab", true, false, false),
+        "cancelOperation:" => ("Escape", false, false, false),
+        "moveLeft:" => ("ArrowLeft", false, false, false),
+        "moveRight:" => ("ArrowRight", false, false, false),
+        "moveUp:" => ("ArrowUp", false, false, false),
+        "moveDown:" => ("ArrowDown", false, false, false),
+        "moveLeftAndModifySelection:" => ("ArrowLeft", true, false, false),
+        "moveRightAndModifySelection:" => ("ArrowRight", true, false, false),
+        "moveWordLeft:" => ("ArrowLeft", false, true, false),
+        "moveWordRight:" => ("ArrowRight", false, true, false),
+        "moveWordLeftAndModifySelection:" => ("ArrowLeft", true, true, false),
+        "moveWordRightAndModifySelection:" => ("ArrowRight", true, true, false),
+        "moveToBeginningOfLine:" | "moveToLeftEndOfLine:" => ("ArrowLeft", false, false, true),
+        "moveToEndOfLine:" | "moveToRightEndOfLine:" => ("ArrowRight", false, false, true),
+        "moveToBeginningOfLineAndModifySelection:" | "moveToLeftEndOfLineAndModifySelection:" => ("ArrowLeft", true, false, true),
+        "moveToEndOfLineAndModifySelection:" | "moveToRightEndOfLineAndModifySelection:" => ("ArrowRight", true, false, true),
+        "moveToBeginningOfDocument:" => ("ArrowUp", false, false, true),
+        "moveToEndOfDocument:" => ("ArrowDown", false, false, true),
+        _ => return None,
+    };
+    Some(Key { key: key.to_owned(), shift, alt, ctrl: false, meta })
+}
