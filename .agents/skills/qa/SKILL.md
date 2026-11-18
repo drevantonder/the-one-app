@@ -60,7 +60,12 @@ An emulator with the AVD `one-phone` (Android 36, x86_64, KVM) is set up here:
     adb install -r <the APK `cargo tauri android build` says it made>
     adb exec-out screencap -p > <scratch>/<name>.png
 
-How to build the APK is in `clients/app/README.md`. A phone's app needs a network with an address
+How to build the APK is in `clients/app/README.md`. In a worktree that hasn't built yet, run `tooling/copy-build --android` first
+(Cargo's Android target, Gradle's build folders and the generated project come from the worktree that built an APK last, so the
+build is about a minute, not minutes); sccache and `~/.gradle` are already shared by every worktree. A new AVD's Chrome asks to
+sign in and about notifications the first time it opens, and ignores its command-line file (`--disable-fre`) on a phone that
+isn't debuggable: tap "Use without an account" and "No thanks" once (find them with `adb shell uiautomator dump`), and the
+AVD keeps that. A phone's app needs a network with an address
 (`tooling/network <folder> --edge`, or the README's `TAURI_ONE_ADDRESS`); `adb reverse tcp:<port> tcp:<port>` makes
 the emulator's `localhost:<port>` this machine's. Stop the emulator when you're done (`adb emu kill`).
 

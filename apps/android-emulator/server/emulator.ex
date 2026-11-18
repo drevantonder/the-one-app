@@ -203,7 +203,8 @@ defmodule AndroidEmulator.Emulator do
 
   @doc """
   Makes an AVD from `spec` (its `id`, `name`, `description`, `artifact` and `by`) with Google's `avdmanager`, from
-  Android 16's system image with Google Play, installing what the SDK lacks first, and starts it.
+  Android 16's system image with Google Play, installing what the SDK lacks first, and starts it, with Chrome's first
+  run done.
   """
   def create(service, spec) do
     sdk = sdk!(service)
@@ -216,7 +217,23 @@ defmodule AndroidEmulator.Emulator do
     run!(service, avdmanager, 120)
     device = Map.merge(spec, %{"created" => System.system_time(:millisecond)})
     File.write!(Path.join(avd_home(service), id <> ".json"), JSON.encode!(device))
-    start(service, id)
+    :ok = start(service, id)
+    chrome_first_run(service, id)
+  end
+
+  # Chrome asks to sign in, then about notifications, the first time it opens, and so would every page opened in it. Its
+  # command-line file (`--disable-fre`) is read only on a phone that's debuggable, which this image isn't, so the two
+  # prompts are answered as a person would, by the text on their buttons. What it answers is kept in the phone's disk.
+  defp chrome_first_run(service, id) do
+    adb!(service, id, ["shell", "am start -a android.intent.action.VIEW -d about:blank"], 30)
+
+    for button <- ["Use without an account", "No thanks"] do
+      script = ~s|for i in $(seq 60); do uiautomator dump /sdcard/ui.xml >/dev/null 2>&1; set -- $(sed -n 's/.*text="#{button}"[^>]*bounds="\\[\\([0-9]*\\),\\([0-9]*\\)\\]\\[\\([0-9]*\\),\\([0-9]*\\)\\]".*/\\1 \\2 \\3 \\4/p' /sdcard/ui.xml); [ $# = 4 ] && exec input tap $((($1 + $3) / 2)) $((($2 + $4) / 2)); sleep 1; done; echo "no \"#{button}\" button in 60 s"; exit 1|
+      adb!(service, id, ["shell", "sh -c " <> word(script)], 90)
+    end
+
+    adb!(service, id, ["shell", "input keyevent KEYCODE_HOME"], 10)
+    :ok
   end
 
   @doc """

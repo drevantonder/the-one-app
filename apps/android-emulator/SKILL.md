@@ -12,7 +12,7 @@ An emulator is an Android phone (Android 16 with Google Play, a Pixel 8's screen
 one of the user's machines, with no window. `machines` lists the machines that run them.
 
 - `create` takes a `name` and what it's for (`description`), and starts it, which takes a minute or two (longer the
-  first time on a machine, which may install the Android SDK first). `list` shows yours and their state.
+  first time on a machine, which may install the Android SDK first), with Chrome's first-run prompts already answered. `list` shows yours and their state.
 - `install` installs an APK, uploaded (`apk`) or from a `url`, granting what it asks for. `open_url` opens a URL in
   the app for it or Chrome. `shell` runs a command in the phone (adb shell): `logcat -d -t 200` is its log.
 - A running one is a screen in Computer Use, called what the emulator is: look at it and tap on it there. A click is
