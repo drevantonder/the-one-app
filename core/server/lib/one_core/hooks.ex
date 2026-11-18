@@ -26,7 +26,8 @@ defmodule OneCore.Hooks do
   An app that can't answer, because it raised, its server couldn't be reached or it took longer than ten seconds
   (`within/3`), has refused: nothing is let through for want of an answer. So an app that breaks blocks what it
   mutates or validates, for whoever it was installed for and nobody else, until it's removed or deployed again, and
-  it has no say in either: a call that removes an app or deploys over it isn't that app's to mutate or validate.
+  it has no say in either: a call of a tool of One Core's that says `exempts_app` (`OneCore.Tools`) isn't the app
+  it removes or deploys over's to mutate or validate.
   One that can't answer what it collects is left out, and only its own part is missing.
 
   A hook may be asked more than once for one moment, as a tool may run more than once: a call passed on to
@@ -84,7 +85,10 @@ defmodule OneCore.Hooks do
   # How long a server keeps that something may be reached, in milliseconds, where nothing told it to invalidate it.
   @ttl 10_000
 
-  # Where what each of `cached/0` answered is cached.
+  # Where what each of `cached/0` answered is cached. These two are asked of the same thing again and again: whether
+  # someone may reach an artifact, at every read of one, and whose a device is, at every call from it. What the
+  # others are asked is a call's own inputs or a moment that happens once, so an answer kept would never be asked
+  # again.
   @caches %{"reach" => __MODULE__.Reach, "device" => __MODULE__.Device}
 
   @doc "Makes where which apps hook into what is kept. Whatever calls this owns it."
@@ -172,11 +176,10 @@ defmodule OneCore.Hooks do
   @doc """
   Asks each app that mutates `hook` what it changes of what it's about, for `asked`. Gives `{:ok, changes, by}`:
   what's changed by name, and the app that changed each. `{:refuse, why}` if two don't agree, or one couldn't
-  say. `apart` is an app that isn't asked, as who it was installed for and its name there.
+  say.
   """
-  def mutate(hook, about, {_actor, subject} = principal, apart \\ nil) do
-    Enum.reduce_while(hooking(hook, subject) -- [apart], {:ok, %{}, %{}}, fn {_at, app} = installed,
-                                                                             {:ok, changes, by} ->
+  def mutate(hook, about, {_actor, subject} = principal) do
+    Enum.reduce_while(asked(hook, about, subject), {:ok, %{}, %{}}, fn {_at, app} = installed, {:ok, changes, by} ->
       with {:ok, changed} <- call_hook(installed, :mutate, hook, about, principal),
            nil <- Enum.find(changed, fn {name, to} -> is_map_key(changes, name) and changes[name] != to end) do
         by = Map.merge(Map.new(changed, fn {name, _to} -> {name, app} end), by)
@@ -193,28 +196,29 @@ defmodule OneCore.Hooks do
 
   @doc """
   Asks each app that validates `hook` about it, for `asked`. Gives `:ok`, or `{:refuse, why}` from the first to
-  refuse. `apart` is an app that isn't asked, as who it was installed for and its name there. Where no app
-  validates `reach` for them, a call or a reach is the network's first owner's alone.
+  refuse. Where no app validates `reach` for them, a call or a reach is the network's first owner's alone.
   """
-  def validate(hook, about, {_actor, subject} = principal, apart \\ nil) do
-    # Who validates is whoever's apps they are, so what's cached is what they validated. A refusal never is.
-    if hook == "reach" do
-      Cache.fetch(@caches["reach"], {about, Apps.chain(subject)}, fn ->
-        with :ok <- decide(hook, about, principal, apart),
-             do: {:commit, :ok, expire: @ttl},
-             else: (refused -> {:ignore, refused})
-      end)
-    else
-      decide(hook, about, principal, apart)
+  def validate(hook, about, {_actor, subject} = principal) do
+    case @caches[hook] do
+      nil ->
+        decide(hook, about, principal)
+
+      # Who validates is whoever's apps they are, so what's cached is what they validated. A refusal never is.
+      cache ->
+        Cache.fetch(cache, {about, Apps.chain(subject)}, fn ->
+          with :ok <- decide(hook, about, principal),
+               do: {:commit, :ok, expire: @ttl},
+               else: (refused -> {:ignore, refused})
+        end)
     end
   end
 
-  defp decide(hook, about, {actor, subject} = principal, apart) do
+  defp decide(hook, about, {actor, subject} = principal) do
     # Who may do what is decided only where an app validates who reaches what.
-    undecided = hook in ["call", "reach"] and hooking("reach", subject) -- [apart] == []
+    undecided = hook in ["call", "reach"] and asked("reach", about, subject) == []
 
     with :ok <- if(undecided, do: undecided(actor), else: :ok) do
-      Enum.find_value(hooking(hook, subject) -- [apart], :ok, fn {_at, app} = installed ->
+      Enum.find_value(asked(hook, about, subject), :ok, fn {_at, app} = installed ->
         case call_hook(installed, :validate, hook, about, principal) do
           {:ok, "ok"} ->
             nil
@@ -243,6 +247,16 @@ defmodule OneCore.Hooks do
       end
     end)
   end
+
+  # The apps asked about `hook` for a moment that runs for `subject`: those that hook into it, but the one a call of a
+  # tool that says `exempts_app` removes or deploys over (`OneCore.Tools`), which has no say in it.
+  defp asked(hook, %{"app" => nil, "tool" => tool, "inputs" => inputs}, subject) do
+    if Enum.find(OneCore.Tools.tools(), &(&1.name == tool))[:exempts_app],
+      do: hooking(hook, subject) -- [{OneCore.User.owner(subject), inputs["name"]}],
+      else: hooking(hook, subject)
+  end
+
+  defp asked(hook, _about, subject), do: hooking(hook, subject)
 
   # What's decided where no app validates who may reach what.
   defp undecided(by) do

@@ -61,7 +61,7 @@ defmodule OneCore.Apps.Calls do
 
           try do
             call = %{called(at, name, versions, ask, principal, forwarded) | caller: caller, state: State.id()}
-            result = tool(found, about, principal, version, &invoked(versions, name, {:tool, tool, &1}, call))
+            result = tool(found, about, principal, Map.values(versions), &invoked(versions, name, {:tool, tool, &1}, call))
             if cached != [], do: Server.notify_servers(Enum.uniq([at | Apps.chain(subject)]), "invalidate", cached)
             {:ran, result}
           after
@@ -76,20 +76,20 @@ defmodule OneCore.Apps.Calls do
   `about` is what the call is about, and `fun` is the tool: it's given the inputs, and raises to refuse. The
   inputs are what the tool takes, the apps that mutate a call's inputs are asked and the ones that validate it,
   and the ones that observe are told how it went. Gives `{:ok, answer}`, or `{:error, why}` with what the caller is
-  told, or what `call/5` does where another server ran it. `apart` is the app the call removes or deploys over, as who it was installed for and its name there, which
-  isn't asked.
+  told, or what `call/5` does where another server ran it. What it raises is told in the names `versions` wrote,
+  the versions of apps its code is of (`OneCore.Apps.held/2`): none for One Core's own.
   """
-  def tool(tool, about, principal, version \\ nil, fun, apart \\ nil) do
+  def tool(tool, about, principal, versions, fun) do
     about = Map.put(about, "task", tool[:task_support] != nil)
 
     with :ok <- open_to(tool, about, principal),
          :ok <- refused(given(tool.takes, about["inputs"]), -32602),
-         {:ok, about} <- hooked(about, tool.takes, principal, apart) do
+         {:ok, about} <- hooked(about, tool.takes, principal) do
       # It's accepted: a caller that asked for a task is answered it now, and the tool runs.
       State.accepted(State.id(), &Tasks.made/1)
 
       observed(about, principal, fn ->
-        Apps.held(List.wrap(version), fn ->
+        Apps.held(versions, fn ->
           try do
             answered(tool, about, fun.(about["inputs"]))
           rescue
@@ -152,11 +152,11 @@ defmodule OneCore.Apps.Calls do
   end
 
   # What a call is about once the apps that mutate its inputs have, if the ones that validate it agree to it.
-  defp hooked(about, takes, principal, apart) do
-    with {:ok, changes, by} <- Hooks.mutate("inputs", about, principal, apart),
+  defp hooked(about, takes, principal) do
+    with {:ok, changes, by} <- Hooks.mutate("inputs", about, principal),
          about = Map.put(%{about | "inputs" => Map.merge(about["inputs"], changes)}, "changed", by),
          :ok <- if(changes == %{}, do: :ok, else: changed(takes, about)),
-         :ok <- Hooks.validate("call", about, principal, apart) do
+         :ok <- Hooks.validate("call", about, principal) do
       {:ok, about}
     else
       {:refuse, why} -> {:error, why}
@@ -343,14 +343,12 @@ defmodule OneCore.Apps.Calls do
             do: new_call(at, name, versions, ask, principal, false),
             else: called(at, name, versions, ask, principal, false)
 
-        try do
+        # Each is told apart from the others: what one raised is logged, and one it passed on ended there.
+        Apps.held(Map.values(versions), fn ->
           Hooks.within(name, hook, fn ->
             if observes?(call, about), do: invoked(versions, name, {:hook, hook, about}, call)
           end)
-        catch
-          :throw, {Call, _forwarded} -> :ok
-          kind, reason -> Logger.error(OneCore.Redact.format(kind, reason, __STACKTRACE__))
-        end
+        end)
       end
 
       {:ok, nil}

@@ -2,9 +2,10 @@ defmodule OneCore.Tools do
   @moduledoc """
   One Core's own tools: what installs, updates and removes apps, servers and services.
 
-  They're called as an app's tools are, through the same hooks (`OneCore.Apps.Calls.tool/6`): the apps that
+  They're called as an app's tools are, through the same hooks (`OneCore.Apps.Calls.tool/5`): the apps that
   mutate a call's inputs mutate theirs, the ones that validate a call validate theirs, and the ones that observe
-  are told. What each changes it reaches as an app reaches an artifact, so the apps that validate `reach` say
+  are told. One that says `exempts_app: true` removes or deploys over the app its input `name` names, which has no
+  say in it (`OneCore.Hooks`): that's how an app that breaks is undone. What each changes it reaches as an app reaches an artifact, so the apps that validate `reach` say
   whether whoever asked may: an `editor` of an app deploys over it, a `viewer` reads its code and installs it, and
   so does a `member` of the group or the network it's whoever's or installed for, since what's in use is open to
   everyone it's in use for. An `installer` of a user, a group or the network adds apps for them, which an `owner`
@@ -352,6 +353,7 @@ defmodule OneCore.Tools do
     },
     %{
       name: "deploy",
+      exempts_app: true,
       task_support: :optional,
       description: """
       Adds an app for you, or updates it, from its files.
@@ -520,6 +522,7 @@ defmodule OneCore.Tools do
     },
     %{
       name: "uninstall",
+      exempts_app: true,
       description: """
       Removes an app from what's installed for you. It waits in Recently Deleted with what it kept and made for
       you, as one item, for 30 days, when Recently Deleted's restore brings it back as it was (`soft-delete
@@ -539,6 +542,7 @@ defmodule OneCore.Tools do
     },
     %{
       name: "apps_update",
+      exempts_app: true,
       task_support: :optional,
       description: """
       Updates an untrusted app you have to the newer commit `apps` offers (Update), for everyone who has it, or
@@ -551,6 +555,7 @@ defmodule OneCore.Tools do
     },
     %{
       name: "apps_retry",
+      exempts_app: true,
       task_support: :optional,
       description: "Tries again what failed (Try Again): installing an app of yours, or its update.",
       inputs: @named,
@@ -558,6 +563,7 @@ defmodule OneCore.Tools do
     },
     %{
       name: "apps_trust",
+      exempts_app: true,
       task_support: :optional,
       description: """
       Makes an app trusted, running on servers of whoever has it with everything they can reach, or untrusted,
@@ -913,15 +919,12 @@ defmodule OneCore.Tools do
   # call.
   @taking Enum.map(@tools, &OneCore.Apps.Version.schemas/1)
 
-  # The tools an app has no say in for itself: how one that breaks is undone.
-  @apart ~w(deploy uninstall apps_update apps_retry apps_trust)
-
   @doc "One Core's own tools, each as an app says one of its own."
   def tools, do: @taking
 
   @doc """
   Calls one of One Core's own tools for `asked`, who asked and who for, as an app's tool is called
-  (`OneCore.Apps.Calls.tool/6`), hooks and all. `request` is how it was asked: its `mode` (`:mcp`, `:code` or
+  (`OneCore.Apps.Calls.tool/5`), hooks and all. `request` is how it was asked: its `mode` (`:mcp`, `:code` or
   `:cli`), `tools`, a function giving the tools a script has, as MCP lists them, and `call`, a function that calls
   one of them by its name and inputs as MCP would, for code mode's own. Gives what `OneCore.Apps.Calls.call/5` does,
   or `:none` if `name` isn't one.
@@ -941,10 +944,7 @@ defmodule OneCore.Tools do
         end
 
         about = %{"app" => nil, "tool" => name, "inputs" => inputs}
-        # An app has no say in its own removal, or in being deployed over: that's how one that breaks is undone.
-        apart = if name in @apart, do: {User.owner(elem(principal, 1)), inputs["name"]}
-
-        State.run(fn -> Calls.tool(tool, about, principal, nil, &run(name, &1, principal, forward, request), apart) end)
+        State.run(fn -> Calls.tool(tool, about, principal, [], &run(name, &1, principal, forward, request)) end)
     end
   end
 

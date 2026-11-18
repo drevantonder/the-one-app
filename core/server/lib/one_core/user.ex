@@ -143,7 +143,7 @@ defmodule OneCore.User do
 
   @doc """
   The network's first owner, or `nil` while it has none. One Core keeps who that is itself, in the blob
-  `network/owner`, since it's who may do anything where no app decides who may (`OneCore.Hooks.validate/4`).
+  `network/owner`, since it's who may do anything where no app decides who may (`OneCore.Hooks.validate/3`).
   """
   def first_owner do
     Servers.cached(:first_owner, fn ->
