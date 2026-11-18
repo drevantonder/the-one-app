@@ -155,7 +155,7 @@ function presses(row: HTMLElement, menu: Accessor<RowMenu | undefined>) {
   // Where the row was over the last moves, for how fast it was going as it was let go.
   let moves: { time: number; value: number }[] = []
   // When a press last swiped the row, or put it back: the click its lifting makes isn't a press on the row.
-  let moved = 0
+  let moved = -Infinity
   const toward = () => (getComputedStyle(row).direction === "rtl" ? -1 : 1)
   // How far aside the row stays to show its item: the item's words, with room either side.
   const shown = () => (row.querySelector<HTMLElement>(".swipe > span")?.offsetWidth ?? 0) + 40
