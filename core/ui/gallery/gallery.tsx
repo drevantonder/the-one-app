@@ -63,7 +63,7 @@ render(() => (
       </Box>
       <Sheet heading="Add Note" open={over() === "sheet"} onClose={() => setOver()}>
         <Text>What a sheet holds, which scrolls where it's taller than the window allows.</Text>
-        <Button>Save</Button>
+        <Button onClick={() => setOver()}>Save</Button>
       </Sheet>
       <Alert heading="Vault wants to use a key" text="Sent only to api.github.com." open={over() === "alert"} onClose={() => setOver()} action={<><Button variant="outline" onClick={() => setOver()}>Don't Allow</Button><Button onClick={() => setOver()}>Allow</Button></>} />
     </Section>
