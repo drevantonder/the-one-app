@@ -51,6 +51,8 @@ before choosing.
 - Mark with `!` (`feat(core)!: …`) a change that breaks whoever uses what the commit touches, such as a rename with
   no alias: the platform (core, the edge, the clients) or an app, each with its own version (the `release` skill).
   It tells them, in the commit and the next 0.minor; it splits nothing.
+  Before a platform `!`, name the older part it breaks; if you can't, it's no `!`. Each one moves the platform a 0.minor
+  and leaves a phone two behind unable to connect until it's rebuilt (three tonight were mistakes, 19 Nov).
 - Parts of the platform one 0.minor apart talk, and two apart refuse each other, saying why, as Kubernetes' version
   skew policy has it. So a change to what parts say to each other stays compatible for one release: the new beside
   the old, and the old removed in the next. No version gate until something needs one.
