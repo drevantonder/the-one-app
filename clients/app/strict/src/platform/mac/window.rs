@@ -4,7 +4,9 @@
 // with no title band and its traffic lights kept, its view's layer a CAMetalLayer Blade draws into (GPUI's
 // `macos-blade`), its size and Retina scale as AppKit says them, the mouse and the wheel, and keys through the view's
 // input context (NSTextInputClient), so a dead key or an input method composes at the caret and types what it
-// composed, and the window having the keyboard. AppKit is the main thread's: what's made or changed is changed there,
+// composed, and the window having the keyboard. A panel (a launcher's) is GPUI's pop-up: a non-activating NSPanel
+// that can take the keyboard, with no title band or traffic lights, over every Space and full-screen app, and under
+// its view the system's glass (NSGlassEffectView on macOS 26, NSVisualEffectView before), rounded. AppKit is the main thread's: what's made or changed is changed there,
 // and what AppKit says is queued for the strict thread, which the queue wakes. No tabs, full screen callbacks, drag
 // and drop, or window restoration.
 // Copyright 2022 - 2025 Zed Industries, Inc. Licensed under the Apache License, Version 2.0
@@ -20,7 +22,7 @@ use objc2::rc::Retained;
 use objc2::runtime::{AnyObject, NSObjectProtocol, ProtocolObject, Sel};
 use objc2::{DefinedClass, MainThreadMarker, MainThreadOnly, define_class, msg_send};
 use objc2_app_kit::{
-    NSAppearanceCustomization, NSApplication, NSBackingStoreType, NSCursor, NSEvent, NSEventModifierFlags, NSResponder, NSTextInputClient, NSTrackingArea,
+    NSAppearanceCustomization, NSApplication, NSBackingStoreType, NSCursor, NSEvent, NSEventModifierFlags, NSPanel, NSResponder, NSTextInputClient, NSTrackingArea,
     NSTrackingAreaOptions, NSView, NSViewLayerContentsRedrawPolicy, NSWindow, NSWindowDelegate, NSWindowStyleMask, NSWindowTabbingMode,
     NSWindowTitleVisibility,
 };
@@ -71,6 +73,8 @@ pub struct Display {
 
 pub struct NativeWindow {
     window: MainThreadBound<Retained<NSWindow>>,
+    /// A panel's: see-through where it isn't drawn, over its glass.
+    panel: bool,
     /// A window holds its delegate weakly.
     _delegate: MainThreadBound<Retained<Delegate>>,
     /// Its view, for Blade's surface, which lives as long as the window: an address, as AppKit's objects are the
@@ -109,6 +113,11 @@ impl NativeWindow {
 
     /// Its size, which its view keeps as AppKit changes it.
     pub fn resized(&self, _size: Size<DevicePixels>) {}
+
+    /// Whether what isn't drawn on it is see-through: a panel's glass shows where it isn't.
+    pub fn transparent(&self) -> bool {
+        self.panel
+    }
 }
 
 impl Display {
@@ -124,12 +133,24 @@ impl Display {
         run_on_main(|main| {
             let shared = Arc::new(Shared { id, queue, size: Mutex::new((Size::default(), 1.0)), pending: Mutex::default(), caret: Mutex::default() });
             let rect = NSRect::new(NSPoint::new(0.0, 0.0), NSSize::new(options.size.width.0.into(), options.size.height.0.into()));
-            let style = NSWindowStyleMask::Titled
-                | NSWindowStyleMask::Closable
-                | NSWindowStyleMask::Miniaturizable
-                | NSWindowStyleMask::Resizable
-                | NSWindowStyleMask::FullSizeContentView;
-            let window = unsafe { NSWindow::initWithContentRect_styleMask_backing_defer(main.alloc(), rect, style, NSBackingStoreType::Buffered, false) };
+            let window = match options.panel {
+                // GPUI's pop-up: titled, so it can take the keyboard, with nothing of its title band shown.
+                Some(_) => {
+                    let style = NSWindowStyleMask::Titled | NSWindowStyleMask::FullSizeContentView | NSWindowStyleMask::NonactivatingPanel;
+                    let panel: Retained<Panel> = unsafe {
+                        msg_send![main.alloc::<Panel>(), initWithContentRect: rect, styleMask: style, backing: NSBackingStoreType::Buffered, defer: false]
+                    };
+                    Retained::into_super(Retained::into_super(panel))
+                }
+                None => {
+                    let style = NSWindowStyleMask::Titled
+                        | NSWindowStyleMask::Closable
+                        | NSWindowStyleMask::Miniaturizable
+                        | NSWindowStyleMask::Resizable
+                        | NSWindowStyleMask::FullSizeContentView;
+                    unsafe { NSWindow::initWithContentRect_styleMask_backing_defer(main.alloc(), rect, style, NSBackingStoreType::Buffered, false) }
+                }
+            };
             unsafe { window.setReleasedWhenClosed(false) };
             // No title band: the app runs to the window's top, under the traffic lights, its title kept for Mission
             // Control, the Window menu and Cmd-Tab.
@@ -140,7 +161,10 @@ impl Display {
             window.setAcceptsMouseMovedEvents(true);
 
             let view = View::new(main, rect, shared.clone());
-            window.setContentView(Some(&view));
+            match options.panel {
+                Some(corner) => unsafe { panel(&window, &view, rect, corner.into()) },
+                None => window.setContentView(Some(&view)),
+            }
             window.makeFirstResponder(Some(&view));
             let delegate = Delegate::new(main, shared.clone());
             window.setDelegate(Some(ProtocolObject::from_ref(&*delegate)));
@@ -149,6 +173,7 @@ impl Display {
             window.center();
             Ok(NativeWindow {
                 view: Retained::as_ptr(&view) as usize,
+                panel: options.panel.is_some(),
                 window: MainThreadBound::new(window, main),
                 _delegate: MainThreadBound::new(delegate, main),
                 shared,
@@ -166,6 +191,42 @@ impl Display {
         window.window.get_on_main(|window| {
             window.setDelegate(None);
             window.close();
+        });
+    }
+
+    /// Shows a panel centred near the top of the screen the pointer is on, a fifth of the way down as Spotlight sits,
+    /// with the keyboard. It never activates the One App, so the app in front stays in front, and has the keyboard
+    /// back as it goes.
+    pub fn summon(&self, window: &NativeWindow) {
+        window.window.get_on_main(|window| unsafe {
+            let mouse: NSPoint = msg_send![objc2::class!(NSEvent), mouseLocation];
+            let screens: Retained<NSArray<AnyObject>> = msg_send![objc2::class!(NSScreen), screens];
+            let frame_of = |screen: &AnyObject| -> NSRect { msg_send![screen, frame] };
+            let on = screens.iter().map(|screen| frame_of(&screen)).find(|frame| {
+                mouse.x >= frame.origin.x && mouse.y >= frame.origin.y && mouse.x < frame.origin.x + frame.size.width && mouse.y < frame.origin.y + frame.size.height
+            });
+            if let Some(screen) = on.or_else(|| screens.firstObject().map(|screen| frame_of(&screen))) {
+                let size = window.frame().size;
+                let x = screen.origin.x + (screen.size.width - size.width) / 2.0;
+                let top = screen.origin.y + screen.size.height - (screen.size.height * 0.2).min((screen.size.height - size.height).max(0.0));
+                window.setFrameTopLeftPoint(NSPoint::new(x, top));
+            }
+            window.makeKeyAndOrderFront(None);
+        });
+    }
+
+    /// Puts a panel away. The One App never came in front for it, so the app that had the keyboard has it again.
+    pub fn put_away(&self, window: &NativeWindow, _give_back: bool) {
+        window.window.get_on_main(|window| window.orderOut(None));
+    }
+
+    /// Makes a window `size`, its top where it is.
+    pub fn resize(&self, window: &NativeWindow, size: Size<Pixels>) {
+        window.window.get_on_main(|window| {
+            let frame = window.frame();
+            let height = f64::from(size.height.0);
+            let to = NSRect::new(NSPoint::new(frame.origin.x, frame.origin.y + frame.size.height - height), NSSize::new(size.width.0.into(), height));
+            window.setFrame_display(to, true);
         });
     }
 
@@ -512,6 +573,85 @@ impl View {
     fn at(&self, event: &NSEvent) -> Point<f32> {
         let point = self.convertPoint_fromView(event.locationInWindow(), None);
         Point { x: point.x as f32, y: (self.frame().size.height - point.y) as f32 }
+    }
+}
+
+define_class!(
+    // SAFETY: NSPanel has no subclassing requirements, and `Panel` doesn't implement `Drop`.
+    #[unsafe(super(NSPanel, NSWindow, NSResponder, NSObject))]
+    #[thread_kind = MainThreadOnly]
+    #[name = "OneStrictPanel"]
+    struct Panel;
+
+    impl Panel {
+        // A panel with no frame takes the keyboard only if it says it can, as GPUI's `GPUIPanel` does.
+        #[unsafe(method(canBecomeKeyWindow))]
+        fn can_become_key_window(&self) -> bool {
+            true
+        }
+
+        #[unsafe(method(canBecomeMainWindow))]
+        fn can_become_main_window(&self) -> bool {
+            true
+        }
+    }
+);
+
+/// Makes `window` a panel, as a launcher's is: over other apps' windows on every Space, full-screen apps' too, out of
+/// Cmd-` and Mission Control, see-through, with a shadow, and its title band and traffic lights hidden; its content
+/// the system's glass, rounded `corner` points, with `view` over it.
+unsafe fn panel(window: &NSWindow, view: &View, rect: NSRect, corner: f64) {
+    unsafe {
+        window.setTitlebarAppearsTransparent(true);
+        window.setTitleVisibility(NSWindowTitleVisibility::Hidden);
+        for button in 0..3usize {
+            let button: *mut AnyObject = msg_send![window, standardWindowButton: button];
+            if !button.is_null() {
+                let () = msg_send![button, setHidden: true];
+            }
+        }
+        // NSWindowCollectionBehavior: canJoinAllSpaces, stationary, ignoresCycle, fullScreenAuxiliary.
+        let () = msg_send![window, setCollectionBehavior: (1usize << 0) | (1 << 4) | (1 << 6) | (1 << 8)];
+        // NSStatusWindowLevel, as Spotlight's.
+        let () = msg_send![window, setLevel: 25isize];
+        let () = msg_send![window, setMovable: false];
+        let () = msg_send![window, setHidesOnDeactivate: false];
+        window.setOpaque(false);
+        let clear: *mut AnyObject = msg_send![objc2::class!(NSColor), clearColor];
+        let () = msg_send![window, setBackgroundColor: clear];
+        window.setHasShadow(true);
+        let glass: *mut AnyObject = match objc2::runtime::AnyClass::get(c"NSGlassEffectView") {
+            Some(class) => {
+                let glass: *mut AnyObject = msg_send![class, alloc];
+                let glass: *mut AnyObject = msg_send![glass, initWithFrame: rect];
+                let () = msg_send![glass, setCornerRadius: corner];
+                glass
+            }
+            None => {
+                let glass: *mut AnyObject = msg_send![objc2::class!(NSVisualEffectView), alloc];
+                let glass: *mut AnyObject = msg_send![glass, initWithFrame: rect];
+                // HUD window material, blended behind the window, always active.
+                let () = msg_send![glass, setMaterial: 13isize];
+                let () = msg_send![glass, setBlendingMode: 0isize];
+                let () = msg_send![glass, setState: 1isize];
+                let () = msg_send![glass, setWantsLayer: true];
+                let layer: *mut AnyObject = msg_send![glass, layer];
+                let () = msg_send![layer, setCornerRadius: corner];
+                let () = msg_send![layer, setMasksToBounds: true];
+                glass
+            }
+        };
+        // Width and height follow the window's.
+        let () = msg_send![glass, setAutoresizingMask: 18usize];
+        window.setContentView(Some(&*(glass as *mut NSView)));
+        view.setAutoresizingMask(objc2_app_kit::NSAutoresizingMaskOptions::ViewWidthSizable | objc2_app_kit::NSAutoresizingMaskOptions::ViewHeightSizable);
+        let nothing: *mut AnyObject = std::ptr::null_mut();
+        // NSWindowAbove: over the glass.
+        let () = msg_send![glass, addSubview: view, positioned: 1isize, relativeTo: nothing];
+        if let Some(layer) = view.layer() {
+            layer.setCornerRadius(corner);
+            layer.setMasksToBounds(true);
+        }
     }
 }
 

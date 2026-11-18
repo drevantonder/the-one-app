@@ -32,6 +32,8 @@ use url::Url;
 /// asked, by its JSON-RPC id, or `start`.
 enum Asked {
     File(mpsc::Sender<Result<Vec<u8>, String>>),
+    /// A picture its page draws by its address, as it names it.
+    Picture(String),
     Message(Value),
     Start(tokio::sync::oneshot::Sender<Value>),
 }
@@ -40,7 +42,7 @@ enum Asked {
 /// `subject`. → whether it did; if not, it opens in a web view.
 pub(crate) async fn open(entrypoint: &str, subject: Option<&str>, link: &str) -> bool {
     let started = Instant::now();
-    match window(started, entrypoint, subject, link).await {
+    match window(started, entrypoint, subject, link, Kind::App).await {
         Ok(opened) => opened,
         Err(error) => {
             eprintln!("{entrypoint} opens in a web view: {error:#}");
@@ -73,6 +75,8 @@ fn module_script(html: &str) -> Option<String> {
 /// What a strict page is drawn with: the module it loads, whether its app is trusted, and the tables its styles
 /// come from: the UI library's tokens and styles and its app's styles (`Tokens` and `Styles` in protocol.ts).
 struct Page {
+    /// Its page's address, which what it names by a relative address is from, and the module it loads.
+    page: Url,
     module: Url,
     trusted: bool,
     tables: Vec<String>,
@@ -123,15 +127,37 @@ async fn probe(entrypoint: &str, subject: Option<&str>) -> anyhow::Result<Option
         tables.push(text);
     }
     let name = resource["name"].as_str().filter(|name| !name.is_empty()).map(str::to_owned);
-    Ok(Some(Page { module: page.join(&module)?, trusted, tables, name, icon }))
+    Ok(Some(Page { module: page.join(&module)?, page, trusted, tables, name, icon }))
 }
 
-async fn window(started: Instant, entrypoint: &str, subject: Option<&str>, link: &str) -> anyhow::Result<bool> {
-    let Some(Page { module, trusted, tables, name: listed, icon }) = probe(entrypoint, subject).await? else { return Ok(false) };
+/// Opens the launcher's page natively, if it's strict and of a version this program speaks, in a panel put away until
+/// it's summoned (`computer`). → its window, once it's open, or none for its page to be the web launcher's.
+pub(crate) async fn launcher(entrypoint: &str) -> Option<WindowId> {
+    let (opened_to, opened) = tokio::sync::oneshot::channel();
+    match window(Instant::now(), entrypoint, None, entrypoint, Kind::Launcher(Some(opened_to))).await {
+        Ok(true) => opened.await.ok().flatten(),
+        Ok(false) => None,
+        Err(error) => {
+            eprintln!("the launcher is a web view's: {error:#}");
+            None
+        }
+    }
+}
+
+/// What a strict window is: an app's own, or the launcher, a panel the system summons, which tells whoever opens it
+/// its window once it's open, or that it didn't.
+enum Kind {
+    App,
+    Launcher(Option<tokio::sync::oneshot::Sender<Option<WindowId>>>),
+}
+
+async fn window(started: Instant, entrypoint: &str, subject: Option<&str>, link: &str, mut kind: Kind) -> anyhow::Result<bool> {
+    let Some(Page { page, module, trusted, tables, name: listed, icon }) = probe(entrypoint, subject).await? else { return Ok(false) };
+    let launcher = matches!(kind, Kind::Launcher(_));
     let strict = Strict::get()?;
     let asked: Arc<Mutex<HashMap<String, Asked>>> = Arc::default();
     let window: Arc<OnceLock<WindowId>> = Arc::default();
-    let to = channel(entrypoint, subject, link, asked.clone(), strict.clone(), window.clone())?;
+    let to = channel(entrypoint, subject, link, launcher, asked.clone(), strict.clone(), window.clone())?;
     let view = format!("{}|{entrypoint}", subject.unwrap_or_default());
 
     // Where the device is with its network, as a page asks as it opens: the Colour Mode chosen on it, if one was.
@@ -143,7 +169,8 @@ async fn window(started: Instant, entrypoint: &str, subject: Option<&str>, link:
     let name = listed.or_else(|| start["name"].as_str().map(str::to_owned)).unwrap_or_else(|| entrypoint.split('/').next().unwrap_or_default().to_owned());
 
     let (files_to, files_asked) = (to.clone(), asked.clone());
-    let state = Arc::new(Mutex::new(State { chosen: chosen.clone(), trusted, entrypoint: entrypoint.to_owned(), view, next: 0 }));
+    let (pictures_to, pictures_asked) = (to.clone(), asked.clone());
+    let state = Arc::new(Mutex::new(State { chosen: chosen.clone(), trusted, entrypoint: entrypoint.to_owned(), view, next: 0, launcher }));
     let (entrypoint, subject, link) = (entrypoint.to_owned(), subject.map(str::to_owned), link.to_owned());
     let cache = ::client::home()?.join("strict").join(::client::BUILD);
     strict.run(move |windows| {
@@ -157,11 +184,16 @@ async fn window(started: Instant, entrypoint: &str, subject: Option<&str>, link:
             let file = answer.recv()?.map_err(|error| anyhow::anyhow!("{error}"))?;
             Ok(String::from_utf8(file)?)
         });
+        let (size, panel) = match launcher {
+            true => ((crate::computer::SIZE.width as f32, crate::computer::SIZE.height as f32), Some(crate::computer::CORNER)),
+            false => ((1024.0, 720.0), None),
+        };
         let options = WindowOptions {
-            title: name.clone(),
+            title: if launcher { crate::page::NAME.to_owned() } else { name.clone() },
             app_id: ::client::NAME.to_owned(),
-            size: Size { width: Pixels(1024.0), height: Pixels(720.0) },
+            size: Size { width: Pixels(size.0), height: Pixels(size.1) },
             tag: json!({"entrypoint": entrypoint, "subject": subject}),
+            panel: panel.map(|corner| corner as f32),
         };
         // The design tokens, which come with the UI library, as its pages' do.
         let tokens = module.join("/ui/client/ui.css").map_err(anyhow::Error::from).and_then(|css| files(&css));
@@ -184,8 +216,26 @@ async fn window(started: Instant, entrypoint: &str, subject: Option<&str>, link:
                     let ms = started.elapsed().as_millis() as u64;
                     let _ = to.send(json!({"id": "opened", "command": "opened", "args": {"view": app, "ms": ms}}));
                     let _ = to.send(json!({"id": "visible", "command": "visible", "args": {"onScreen": true}}));
+                    // The device hears its person's notifications once their home is on screen, as the web
+                    // launcher's page has it (`listen`).
+                    if launcher {
+                        let _ = to.send(json!({"id": "listen", "command": "listen", "args": {}}));
+                    }
+                }
+                // How long the launcher took to show as it was summoned, to its first frame.
+                Event::Shown(took) => {
+                    eprintln!("the launcher showed {:.1} ms after it was summoned", took.as_secs_f64() * 1000.0);
+                    let _ = to.send(json!({"id": "visible", "command": "visible", "args": {"onScreen": true}}));
+                }
+                Event::PutAway => {
+                    let _ = to.send(json!({"id": "visible", "command": "visible", "args": {"onScreen": false}}));
                 }
                 Event::Closed => {}
+                // The launcher whose page turns out to need what this host can't draw is the web launcher's.
+                Event::Mismatched(why) if launcher => {
+                    eprintln!("the launcher is a web view's: {why}");
+                    crate::computer::native(None);
+                }
                 Event::Mismatched(why) => {
                     eprintln!("{entrypoint} opens in a web view: {why}");
                     let (entrypoint, subject, link) = (entrypoint.clone(), subject.clone(), link.clone());
@@ -202,18 +252,34 @@ async fn window(started: Instant, entrypoint: &str, subject: Option<&str>, link:
                 let respond_asked = asked.clone();
                 let asked_by_app: strict::Asked =
                     Box::new(move |message, appearance| respond(message, appearance, &respond_state, &respond_to, &respond_asked));
-                // Its title bar, which its page keeps clear, as its host context's `safeAreaInsets` tells it.
-                let insets = strict::geometry::Edges { top: BAR.0 as f32, right: 0.0, bottom: 0.0, left: 0.0 };
+                // Its title bar, which its page keeps clear, as its host context's `safeAreaInsets` tells it. The
+                // launcher has none.
+                let top = if launcher { 0.0 } else { BAR.0 as f32 };
+                let insets = strict::geometry::Edges { top, right: 0.0, bottom: 0.0, left: 0.0 };
                 let mut screen = Screen::new(sandbox, Some(asked_by_app), Size { width: options.size.width.0, height: options.size.height.0 }, insets);
                 // What it uses that this host can't draw, seen as it starts: it opens in a web view, with no window here.
                 if let Some(why) = screen.mismatched.take() {
                     return on_event(Event::Mismatched(why));
                 }
                 screen.theme = theme(chosen.as_deref());
-                // Its way Home, as an app's window on a computer has (DESIGN.md, App windows): Home brings the launcher
-                // forward and keeps this window open, as Window → Home Screen does.
-                let ring = format!("data:image/png;base64,{}", BASE64.encode(include_bytes!("../../../icons/Logo.png")));
-                screen.breadcrumb = Some(strict::Breadcrumb { ring, icon, name: name.clone(), start: BAR.1 as f32, home: Box::new(crate::computer::summon) });
+                // A picture it names by an address is one of its app's files, as a web view's page loads it.
+                let next_picture = std::cell::Cell::new(0u64);
+                screen.fetch = Some(Box::new(move |src: &str| {
+                    let Ok(address) = page.join(src) else { return };
+                    let id = format!("i{}", next_picture.replace(next_picture.get() + 1));
+                    pictures_asked.lock().expect("nothing panics holding it").insert(id.clone(), Asked::Picture(src.to_owned()));
+                    let _ = pictures_to.send(json!({"id": id, "file": address.as_str()}));
+                }));
+                if launcher {
+                    // Its glass is the system's, under its page, where there's one; Linux has none, so it's a
+                    // popover's colour (DESIGN.md, Launcher).
+                    screen.panel = Some(strict::Panel { corner: crate::computer::CORNER as f32, fill: cfg!(target_os = "linux") });
+                } else {
+                    // Its way Home, as an app's window on a computer has (DESIGN.md, App windows): Home brings the
+                    // launcher forward and keeps this window open, as Window → Home Screen does.
+                    let ring = format!("data:image/png;base64,{}", BASE64.encode(include_bytes!("../../../icons/Logo.png")));
+                    screen.breadcrumb = Some(strict::Breadcrumb { ring, icon, name: name.clone(), start: BAR.1 as f32, home: Box::new(crate::computer::summon) });
+                }
                 windows.open(options, screen, on_event)
             }
             // Its page's own module didn't start: the window says so, as a web view's page does.
@@ -222,9 +288,22 @@ async fn window(started: Instant, entrypoint: &str, subject: Option<&str>, link:
                 windows.open_failed(options, &format!("{name} didn't open"), on_event)
             }
         };
+        // The launcher's is only its page's: one that didn't start is the web launcher's.
+        let opened = match opened {
+            Ok(id) if launcher && windows.failed(id) => {
+                windows.close(id);
+                Err(anyhow::anyhow!("its page didn't start"))
+            }
+            opened => opened,
+        };
         match opened {
             Ok(id) => drop(window.set(id)),
             Err(error) => eprintln!("{entrypoint}'s window didn't open: {error:#}"),
+        }
+        if let Kind::Launcher(told) = &mut kind
+            && let Some(told) = told.take()
+        {
+            let _ = told.send(window.get().copied());
         }
     });
     Ok(true)
@@ -242,6 +321,8 @@ const BAR: (f64, f64) = (40.0, 12.0);
 struct State {
     /// The Colour Mode chosen on this device, or none for as the device is.
     chosen: Option<String>,
+    /// It's the launcher's page, not an app's window.
+    launcher: bool,
     trusted: bool,
     entrypoint: String,
     view: String,
@@ -266,9 +347,16 @@ fn respond(
     asked: &Arc<Mutex<HashMap<String, Asked>>>,
 ) -> Option<Value> {
     let method = message["method"].as_str()?;
-    // The app asks to be left (`leave`): on a computer, where its window stays open, Home, as its breadcrumb's is.
+    let launcher = state.lock().expect("nothing panics holding it").launcher;
+    // The app asks to be left (`leave`): on a computer, where its window stays open, Home, as its breadcrumb's is; the
+    // launcher is put away, the keyboard back with the app that had it.
     if method == "ui/notifications/request-teardown" {
-        crate::computer::summon();
+        if launcher { crate::computer::hide(true) } else { crate::computer::summon() }
+        return None;
+    }
+    // The launcher is as tall as its page says it is, as Raycast's and Spotlight's panels grow and shrink.
+    if method == "ui/notifications/size-changed" && launcher {
+        crate::computer::resize(message["params"]["height"].as_f64());
         return None;
     }
     // Any other notification needs no answer, and none is heard here yet.
@@ -295,6 +383,15 @@ fn respond(
         // A `one:` link opens as the device's own do, which the launcher's page opens in its app's window; a web
         // address opens in the device's browser, outside the app, as a web view's window does.
         "ui/open-link" => match params["url"].as_str().unwrap_or_default() {
+            // The launcher opens an app in its own window, for whoever it's for, and goes, as the web launcher's
+            // page does (`go` in client.js).
+            url if url.starts_with("one:") && state.launcher => {
+                let (link, subject) = (url["one:".len()..].to_owned(), params["subject"].as_str().map(str::to_owned));
+                if params["behind"] != true {
+                    crate::spawn(go(link, subject));
+                }
+                Some(Ok(json!({})))
+            }
             url if url.starts_with("one:") => {
                 crate::computer::again(Some(url.to_owned()));
                 Some(Ok(json!({})))
@@ -315,7 +412,8 @@ fn respond(
                 let _ = to.send(json!({"id": "theme", "command": "theme", "args": {"theme": theme}}));
                 Some(Ok(json!({"theme": theme})))
             } else if changes.is_empty() {
-                Some(Ok(json!({"theme": state.chosen})))
+                // The launcher's page lays itself out as a computer's launcher (`client().launcher` in home.tsx).
+                Some(Ok(json!({"theme": state.chosen, "launcher": state.launcher, "mac": cfg!(target_os = "macos")})))
             } else {
                 Some(Err(json!({"code": -32000, "message": format!("A computer's native window can't change {} yet.", changes.iter().map(|change| change.as_str()).collect::<Vec<_>>().join(", "))})))
             }
@@ -342,6 +440,48 @@ fn respond(
     }
 }
 
+/// Opens what a `one:` link from the launcher says, `<app>[/<page>][#<fragment>]`, for `subject`, in its own window,
+/// and puts the launcher away, as the web launcher's page does (`go` in client.js): an app by its name opens its first
+/// page, as its app lists it last; the launcher's own app brings it forward.
+pub(crate) async fn go(link: String, subject: Option<String>) {
+    let (entrypoint, fragment) = link.split_once('#').map_or((link.as_str(), None), |(page, fragment)| (page, Some(fragment)));
+    let page = match entrypoint.contains('/') {
+        true => Some(entrypoint.to_owned()),
+        false => first(entrypoint, subject.as_deref()).await,
+    };
+    let Some(page) = page else { return eprintln!("there's no {entrypoint} to open") };
+    if crate::computer::is_launcher(&page) {
+        return crate::computer::summon();
+    }
+    let link = fragment.map_or_else(|| page.clone(), |fragment| format!("{page}#{fragment}"));
+    match crate::hosts::open_window(page, subject, link) {
+        Ok(()) => crate::computer::hide(false),
+        Err(error) => eprintln!("{error}"),
+    }
+}
+
+/// The page `app` opens first, for `subject`, as its apps are listed (`launcherIn` in client.js): the last one listed,
+/// or the launcher's, for its own app.
+pub(crate) async fn first(app: &str, subject: Option<&str>) -> Option<String> {
+    let listed = crate::hosts::command("strict", "apps", json!({"subject": subject})).await.ok()?;
+    let pages: Vec<(String, &Value)> = pages(&listed).collect();
+    pages
+        .iter()
+        .find(|(page, meta)| meta["category"] == "launcher" && page.split('/').next() == Some(app))
+        .or_else(|| pages.iter().rev().find(|(page, _)| page.split('/').next() == Some(app)))
+        .map(|(page, _)| page.clone())
+}
+
+/// The pages listed, each `<app>/<page>`, with its `_meta`, as an MCP App's are at ui://<app>/<version>/<page>.
+pub(crate) fn pages(listed: &Value) -> impl Iterator<Item = (String, &Value)> {
+    listed["resources"].as_array().into_iter().flatten().filter(|resource| resource["mimeType"] == "text/html;profile=mcp-app").filter_map(|resource| {
+        let mut parts = resource["uri"].as_str()?.strip_prefix("ui://")?.split('/');
+        let app = parts.next()?;
+        parts.next()?;
+        Some((format!("{app}/{}", parts.collect::<Vec<_>>().join("/")), &resource["_meta"]))
+    })
+}
+
 /// Talks with this process's own channel for the app's windows (`hosts::talk`), as a web view's window does over its
 /// socket, saying hello as it does: what it hears is done to the window on the strict thread. → where to send it a
 /// message.
@@ -349,6 +489,7 @@ fn channel(
     entrypoint: &str,
     subject: Option<&str>,
     link: &str,
+    launcher: bool,
     asked: Arc<Mutex<HashMap<String, Asked>>>,
     strict: Strict,
     window: Arc<OnceLock<WindowId>>,
@@ -369,8 +510,32 @@ fn channel(
         let _ = write.shutdown().await;
     });
     let to_window = to.clone();
+    let (entrypoint, subject, link) = (entrypoint.to_owned(), subject.map(str::to_owned), link.to_owned());
+    // Its app's host, as a server says which were loaded against what's gone (`stale`): `<app>[.<subject, last part first>]`.
+    let app_host = origin(&entrypoint, subject.as_deref()).trim_start_matches("oneapp://").trim_end_matches(".localhost/").to_owned();
     crate::spawn(async move {
         let mut lines = BufReader::new(read).lines();
+        // Reload, in its notice that its page was updated: the window opens again, on the page's new version.
+        let reload = {
+            let (strict, window) = (strict.clone(), window.clone());
+            let (entrypoint, subject, link) = (entrypoint.clone(), subject.clone(), link.clone());
+            move || {
+                // The launcher's main thread closes it and opens it again, shown again if it was (`Told::Reload`).
+                if launcher {
+                    return crate::computer::reload_native();
+                }
+                let (entrypoint, subject, link) = (entrypoint.clone(), subject.clone(), link.clone());
+                let window = window.clone();
+                strict.run(move |windows| {
+                    if let Some(id) = window.get() {
+                        windows.close(*id);
+                    }
+                    if let Err(error) = crate::hosts::reopen(entrypoint, subject, link) {
+                        eprintln!("{error}");
+                    }
+                })
+            }
+        };
         // The window this is, once the strict thread has opened it; a job runs after the one that opened it.
         let on = |job: Box<dyn FnOnce(&mut Screen) + Send>| {
             let window = window.clone();
@@ -396,6 +561,24 @@ fn channel(
                     "changed" if payload.as_str() == Some(view.as_str()) => {
                         on(Box::new(move |screen| screen.message(&json!({"jsonrpc": "2.0", "method": "notifications/one/changed"}))))
                     }
+                    // Over its page, while its network doesn't answer, as over an app on a phone (DESIGN.md).
+                    "connection" => on(Box::new(move |screen| {
+                        screen.notice = match payload.as_str() {
+                            Some("reconnecting") => Some(strict::Notice { text: "Reconnecting…".into(), action: None }),
+                            Some("offline") => Some(strict::Notice { text: "Can't reach your network".into(), action: None }),
+                            _ => screen.notice.take().filter(|notice| notice.action.is_some()),
+                        }
+                    })),
+                    // Its page, or the UI library it runs, was loaded against a version that's gone: "Updated", with
+                    // Reload, as over an app on a phone.
+                    "stale" if payload.as_array().is_some_and(|stale| stale.iter().filter_map(Value::as_str).any(|host| host.split('.').next() == Some("ui") || host == app_host)) => {
+                        let reload = reload.clone();
+                        on(Box::new(move |screen| screen.notice = Some(strict::Notice { text: "Updated".into(), action: Some(("Reload".into(), Box::new(reload))) })))
+                    }
+                    // Behind its servers, the launcher is the web launcher's, which says Update Required.
+                    "behind" if launcher => crate::computer::native(None),
+                    // The launcher, linked to, comes forward.
+                    "open" if launcher => crate::computer::summon(),
                     "open" => {
                         let window = window.clone();
                         strict.run(move |windows| {
@@ -422,6 +605,10 @@ fn channel(
                     let _ = answer.send(file);
                 }
                 Asked::Start(answer) => drop(answer.send(result.unwrap_or_default())),
+                Asked::Picture(src) => {
+                    let data = result.ok().and_then(|file| Some(format!("data:{};base64,{}", file["kind"].as_str()?, file["body"].as_str()?)));
+                    on(Box::new(move |screen| screen.fetched(&src, data)));
+                }
                 Asked::Message(id) => {
                     let answer = match result {
                         Ok(result) => json!({"jsonrpc": "2.0", "id": id, "result": result}),

@@ -6,9 +6,12 @@
 //! app window's Home. The program runs on with it put away, holding the device's one connection to its network, its
 //! notifications and its app windows, until it's quit (its menu, Cmd-Q, or Ctrl-Q on Linux).
 //!
-//! It's only a window and a web view (tao and wry), as each app's own window is: its page is the window's own
-//! (`page/`), which shows the Home Screen, and asks what it asks of the app (`hosts::command`) through the same bridge
-//! an app's window has (`host-initialization-script.js`). Put away a while, it discards its page (`discard`).
+//! Where the Home Screen's page is strict, and of a version this program speaks, the launcher is drawn natively, in a
+//! panel of this process's own (`strict::launcher`), as every strict app's window is, and it shows within a frame of
+//! being summoned. Otherwise, and while the device signs in or needs updating, which its page doesn't show, it's a
+//! window and a web view (tao and wry), as a web view's app window is: its page is the window's own (`page/`), which
+//! shows the Home Screen, and asks what it asks of the app (`hosts::command`) through the same bridge an app's window
+//! has (`host-initialization-script.js`). Put away a while, it discards its page (`discard`).
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
@@ -27,18 +30,20 @@ use crate::{hosts, notifications};
 /// The launcher's width and tallest height, in points: Raycast's panel's width, its search bar, two of a phone's pages
 /// side by side with their six rows, near a phone's size (`measure` in the Home Screen's layout.ts), and the room its
 /// footer's pills float in. It's as tall as what it shows, which its page says (`resize`).
-const SIZE: LogicalSize<f64> = LogicalSize::new(750.0, 730.0);
+pub(crate) const SIZE: LogicalSize<f64> = LogicalSize::new(750.0, 730.0);
 /// How round the launcher's corners are, in points, as Raycast's are, and the edge its page draws inside them.
-#[cfg(target_os = "macos")]
-const CORNER: f64 = 18.0;
+pub(crate) const CORNER: f64 = 18.0;
 
 /// What the program is told to do on its main thread, where its window and web view are.
 pub(crate) enum Told {
     /// Runs script in the launcher's page.
     Script(String),
-    /// Shows the launcher, or puts it away if it's showing: its shortcut, or the ring in a Mac's menu bar.
-    Toggle,
+    /// Shows the launcher, or puts it away if it's showing: its shortcut, or the ring in a Mac's menu bar, when it
+    /// was pressed.
+    Toggle(std::time::Instant),
     Summon,
+    /// The launcher is drawn natively in this window (`strict::launcher`), or with none, it's the web launcher.
+    Native(Option<strict::platform::WindowId>),
     /// Puts it away, and with `true` gives the keyboard back to the app that had it (Escape, or its page done).
     Hide(bool),
     Theme(Option<crate::Theme>),
@@ -85,9 +90,51 @@ pub(crate) fn resize(height: Option<f64>) {
     tell(Told::Resize(height))
 }
 
+/// The launcher is drawn natively in window `id`, or with none, it's the web launcher, as its page turns out to need.
+pub(crate) fn native(id: Option<strict::platform::WindowId>) {
+    tell(Told::Native(id))
+}
+
+/// The native launcher's page was updated: it opens again, on its new version.
+pub(crate) fn reload_native() {
+    tell(Told::Reload)
+}
+
+/// The Home Screen's page, as this user's apps list it (`<app>/<page>`), once the native launcher has looked.
+static LAUNCHER: Mutex<Option<String>> = Mutex::new(None);
+
+/// Whether `page` is the launcher's.
+pub(crate) fn is_launcher(page: &str) -> bool {
+    LAUNCHER.lock().expect("nothing panics holding it").as_deref() == Some(page)
+}
+
+/// Opens the launcher natively, where it can be, and tells the main thread which it is (`Told::Native`): where the
+/// device is in its network, and its Home Screen's page is strict. Signing in, it's the web launcher's.
+async fn prepare() {
+    let opened = async {
+        let started = crate::start().await.ok()?;
+        if started["session"]["state"] == "signIn" {
+            return None;
+        }
+        let listed = hosts::command("main", "apps", json!({})).await.ok()?;
+        let (page, _) = crate::strict::pages(&listed).find(|(_, meta)| meta["category"] == "launcher")?;
+        *LAUNCHER.lock().expect("nothing panics holding it") = Some(page.clone());
+        crate::strict::launcher(&page).await
+    };
+    tell(Told::Native(opened.await))
+}
+
 /// The app was started again: its icon in the Dock or taskbar, which shows the launcher, or a `one:` link it opens.
 pub(crate) fn again(link: Option<String>) {
     tell(link.and_then(|link| crate::link(&link)).map_or(Told::Summon, Told::Open))
+}
+
+/// Runs `job` on the strict windows' thread, where the native launcher is.
+fn on_strict(job: impl FnOnce(&mut strict::platform::Windows) + Send + 'static) {
+    match strict::platform::Strict::get() {
+        Ok(strict) => strict.run(job),
+        Err(error) => eprintln!("no strict window here: {error:#}"),
+    }
 }
 
 /// The runtime the app's client and its channel run on.
@@ -201,7 +248,8 @@ fn launcher(home: std::path::PathBuf, link: Option<String>, started: std::time::
     let window = window.build(&event_loop)?;
     glass(&window);
 
-    // The page, whose own pages and apps' it asks the app for, and has nothing else load.
+    // The web launcher's page, made once it's known the launcher isn't native (`Told::Native`): its own pages and
+    // apps' it asks the app for, and has nothing else load.
     let page_started = Arc::new(AtomicBool::new(false));
     #[cfg(target_os = "linux")]
     keys(&window);
@@ -209,8 +257,22 @@ fn launcher(home: std::path::PathBuf, link: Option<String>, started: std::time::
     #[cfg(any(target_os = "linux", windows))]
     let data_directory = crate::shortcuts::local_data_dir().ok();
     #[cfg(target_os = "macos")]
-    let data_directory = None;
-    let mut page = Discarding::new(&window, Page { started: page_started.clone() }, data_directory)?;
+    let data_directory: Option<std::path::PathBuf> = None;
+    let make_page = {
+        let page_started = page_started.clone();
+        move |window: &Window| match Discarding::new(window, Page { started: page_started.clone() }, data_directory.clone()) {
+            Ok(page) => Some(page),
+            Err(error) => {
+                eprintln!("the launcher's page didn't load: {error:#}");
+                None
+            }
+        }
+    };
+    let mut page: Option<Discarding<Page>> = None;
+    // The native launcher's window, once it's open, and whether it's been decided which it is.
+    let mut native: Option<strict::platform::WindowId> = None;
+    let mut decided = false;
+    crate::spawn(prepare());
 
     crate::spawn(crate::opens());
     hosts::serve(&home)?;
@@ -229,17 +291,13 @@ fn launcher(home: std::path::PathBuf, link: Option<String>, started: std::time::
     }
     eprintln!("the window was made {} ms after the app started", started.elapsed().as_millis());
 
-    // Started for an app's own window alone, or as it updated with it put away, the launcher stays put away.
+    // Started for an app's own window alone, or as it updated with it put away, the launcher stays put away. Until
+    // it's decided which launcher it is, it's shown once it is, if it's wanted then.
     let mut shown = false;
+    let mut wanted = std::env::var_os("ONE_HIDDEN").is_none();
     let mut focused = false;
-    if std::env::var_os("ONE_HIDDEN").is_none() {
-        show(&window, &mut page);
-        shown = true;
-    } else {
-        page.shown(&window, false);
-    }
     event_loop.run(move |event, _, flow| {
-        if let Event::WindowEvent { event, .. } = &event {
+        if let (Event::WindowEvent { event, .. }, Some(page)) = (&event, page.as_mut()) {
             page.heard(&window, event);
         }
         match event {
@@ -248,19 +306,16 @@ fn launcher(home: std::path::PathBuf, link: Option<String>, started: std::time::
             Event::WindowEvent { event: WindowEvent::Focused(false), .. } if shown && focused => {
                 focused = false;
                 shown = false;
-                put_away(&window, &mut page, false);
+                put_away(&window, page.as_mut(), false);
             }
             // Alt-F4, which closes nothing but puts it away.
             Event::WindowEvent { event: WindowEvent::CloseRequested, .. } => {
                 shown = false;
-                put_away(&window, &mut page, true);
+                put_away(&window, page.as_mut(), true);
             }
             // The Dock's icon clicked.
             #[cfg(target_os = "macos")]
-            Event::Reopen { .. } => {
-                show(&window, &mut page);
-                shown = true;
-            }
+            Event::Reopen { .. } => tell(Told::Summon),
             // A `one:` link opened, as a Mac tells the app that takes them.
             #[cfg(target_os = "macos")]
             Event::Opened { urls } => {
@@ -269,23 +324,68 @@ fn launcher(home: std::path::PathBuf, link: Option<String>, started: std::time::
                 }
             }
             Event::UserEvent(Told::Script(script)) => {
-                if let Some(webview) = page.webview() {
+                if let Some(webview) = page.as_ref().and_then(|page| page.webview()) {
                     drop(webview.evaluate_script(&script))
                 }
             }
-            Event::UserEvent(Told::Toggle) if shown => {
-                shown = false;
-                put_away(&window, &mut page, true);
+            // The native launcher's ready, put away, and shown now if it's wanted: the web launcher goes.
+            Event::UserEvent(Told::Native(Some(id))) => {
+                decided = true;
+                native = Some(id);
+                if shown {
+                    put_away(&window, page.as_mut(), false);
+                    shown = false;
+                }
+                page = None;
+                if std::mem::take(&mut wanted) {
+                    let asked = std::time::Instant::now();
+                    on_strict(move |windows| windows.summon(id, asked));
+                }
             }
-            Event::UserEvent(Told::Toggle | Told::Summon) => {
-                show(&window, &mut page);
+            // It's the web launcher: its page loads, and it shows if it's wanted.
+            Event::UserEvent(Told::Native(None)) => {
+                decided = true;
+                if let Some(id) = native.take() {
+                    wanted = true;
+                    on_strict(move |windows| windows.close(id));
+                }
+                if page.is_none() {
+                    page = make_page(&window);
+                    if let Some(page) = page.as_mut().filter(|_| !wanted) {
+                        page.shown(&window, false);
+                    }
+                }
+                if std::mem::take(&mut wanted) {
+                    show(&window, page.as_mut());
+                    shown = true;
+                }
+            }
+            Event::UserEvent(Told::Toggle(asked)) if native.is_some() => {
+                let id = native.expect("it's native");
+                on_strict(move |windows| if windows.showing(id) { windows.put_away(id, true) } else { windows.summon(id, asked) });
+            }
+            Event::UserEvent(Told::Summon) if native.is_some() => {
+                let (id, asked) = (native.expect("it's native"), std::time::Instant::now());
+                on_strict(move |windows| windows.summon(id, asked));
+            }
+            Event::UserEvent(Told::Toggle(_) | Told::Summon) if !decided => wanted = true,
+            Event::UserEvent(Told::Toggle(_)) if shown => {
+                shown = false;
+                put_away(&window, page.as_mut(), true);
+            }
+            Event::UserEvent(Told::Toggle(_) | Told::Summon) => {
+                show(&window, page.as_mut());
                 shown = true;
                 focused = false;
+            }
+            Event::UserEvent(Told::Hide(give_back)) if native.is_some() => {
+                let id = native.expect("it's native");
+                on_strict(move |windows| windows.put_away(id, give_back));
             }
             Event::UserEvent(Told::Hide(give_back)) => {
                 shown = false;
                 focused = false;
-                put_away(&window, &mut page, give_back);
+                put_away(&window, page.as_mut(), give_back);
             }
             Event::UserEvent(Told::Theme(theme)) => window.set_theme(theme.map(|theme| match theme {
                 crate::Theme::Light => Theme::Light,
@@ -293,7 +393,12 @@ fn launcher(home: std::path::PathBuf, link: Option<String>, started: std::time::
             })),
             // Its top stays where it is, as Raycast's and Spotlight's grow and shrink downwards.
             Event::UserEvent(Told::Resize(height)) => {
-                let size = LogicalSize::new(SIZE.width, height.unwrap_or(SIZE.height).clamp(1.0, SIZE.height));
+                let height = height.unwrap_or(SIZE.height).clamp(1.0, SIZE.height);
+                if let Some(id) = native {
+                    on_strict(move |windows| windows.resize(id, height as f32));
+                    return;
+                }
+                let size = LogicalSize::new(SIZE.width, height);
                 let at = window.outer_position();
                 #[cfg(target_os = "linux")]
                 {
@@ -305,20 +410,47 @@ fn launcher(home: std::path::PathBuf, link: Option<String>, started: std::time::
                     window.set_outer_position(at);
                 }
             }
+            // The device's session started again, or the native launcher's page was updated: which launcher it is
+            // is decided again, the native one open again where it can be.
+            Event::UserEvent(Told::Reload) if native.is_some() || !decided => {
+                if let Some(id) = native.take() {
+                    on_strict(move |windows| {
+                        if windows.showing(id) {
+                            tell(Told::Summon);
+                        }
+                        windows.close(id)
+                    });
+                }
+                if let Some(launcher) = LAUNCHER.lock().expect("nothing panics holding it").as_deref() {
+                    hosts::forget(launcher, None);
+                }
+                decided = false;
+                crate::spawn(prepare());
+            }
+            // Its page is made again, and may be native now.
             Event::UserEvent(Told::Reload) => {
                 page_started.store(false, Ordering::Relaxed);
-                if let Some(webview) = page.webview() {
-                    let _ = webview.load_url(crate::HOME);
+                page = None;
+                decided = false;
+                wanted = shown;
+                if shown {
+                    put_away(&window, None, false);
+                    shown = false;
                 }
+                crate::spawn(prepare());
             }
+            // The native launcher opens a link to an app in that app's window.
+            Event::UserEvent(Told::Open(link)) if native.is_some() => crate::spawn(crate::strict::go(link, None)),
             // The page opens it once it's there to (`start`), and if it isn't yet, once it asks where it is.
             Event::UserEvent(Told::Open(link)) => {
-                if let Some(webview) = page.webview().filter(|_| page_started.load(Ordering::Relaxed)) {
+                if let Some(webview) = page.as_ref().and_then(|page| page.webview()).filter(|_| page_started.load(Ordering::Relaxed)) {
                     let _ = webview.evaluate_script(&format!("window.__ONE_HOST__.event(\"open\", {})", Value::from(link)));
                 } else {
                     *OPENED.lock().expect("nothing panics holding it") = Some(link);
                     // Discarded, its page loads again to open it, out of sight if it's put away.
-                    page.needed(&window);
+                    if let Some(page) = page.as_mut() {
+                        page.needed(&window);
+                    }
                 }
             }
             #[cfg(target_os = "macos")]
@@ -328,15 +460,17 @@ fn launcher(home: std::path::PathBuf, link: Option<String>, started: std::time::
             _ => {}
         }
         if *flow != ControlFlow::Exit {
-            *flow = page.discard_due(&window);
+            *flow = page.as_mut().map_or(ControlFlow::Wait, |page| page.discard_due(&window));
         }
     })
 }
 
 /// Shows the launcher, centred near the top of the screen the pointer is on, with the keyboard.
-fn show(window: &Window, page: &mut Discarding<Page>) {
+fn show(window: &Window, mut page: Option<&mut Discarding<Page>>) {
     // Discarded while it was put away, its page loads again.
-    page.shown(window, true);
+    if let Some(page) = page.as_mut() {
+        page.shown(window, true);
+    }
     let pointer = window.cursor_position().ok();
     let screen = pointer
         .and_then(|at| {
@@ -361,7 +495,7 @@ fn show(window: &Window, page: &mut Discarding<Page>) {
     #[cfg(target_os = "macos")]
     activate();
     window.set_focus();
-    if let Some(webview) = page.webview() {
+    if let Some(webview) = page.and_then(|page| page.webview()) {
         let _ = webview.focus();
     }
 }
@@ -369,11 +503,13 @@ fn show(window: &Window, page: &mut Discarding<Page>) {
 /// Puts the launcher away. Given back, the keyboard goes to the app that had it before, as a Mac hides an app.
 fn put_away(
     window: &Window,
-    page: &mut Discarding<Page>,
+    page: Option<&mut Discarding<Page>>,
     #[cfg_attr(not(target_os = "macos"), expect(unused_variables))] give_back: bool,
 ) {
     window.set_visible(false);
-    page.shown(window, false);
+    if let Some(page) = page {
+        page.shown(window, false);
+    }
     #[cfg(target_os = "macos")]
     if give_back {
         unsafe {
@@ -558,7 +694,7 @@ fn shortcut(home: &std::path::Path) -> Option<global_hotkey::GlobalHotKeyManager
     };
     GlobalHotKeyEvent::set_event_handler(Some(move |pressed: GlobalHotKeyEvent| {
         if pressed.id == key.id() && pressed.state == HotKeyState::Pressed {
-            tell(Told::Toggle);
+            tell(Told::Toggle(std::time::Instant::now()));
         }
     }));
     eprintln!("the launcher's shortcut is {chosen}");
@@ -699,7 +835,7 @@ fn ring() -> Option<tray_icon::TrayIcon> {
     }));
     TrayIconEvent::set_event_handler(Some(|event: TrayIconEvent| {
         if let TrayIconEvent::Click { button: MouseButton::Left, button_state: MouseButtonState::Up, .. } = event {
-            tell(Told::Toggle);
+            tell(Told::Toggle(std::time::Instant::now()));
         }
     }));
     let ring = TrayIconBuilder::new().with_icon(icon).with_icon_as_template(cfg!(target_os = "macos")).with_menu(Box::new(menu)).with_menu_on_left_click(false).with_tooltip(crate::page::NAME).build();

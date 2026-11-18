@@ -3,8 +3,10 @@
 // strict window on the windows' thread, made with one class, each drawn by DirectComposition (so it has no GDI surface of
 // its own), per-monitor DPI aware, its keys from WM_KEYDOWN and WM_CHAR, an input method's composition and result
 // through IMM32 (events.rs's `handle_ime_composition`, `handle_ime_position`), its mouse and wheel, its cursor, and its
-// frame and caption buttons Windows' own, coloured as the page's background, light or dark as the system is. No
-// client-side title bar, drag and drop or touch yet.
+// frame and caption buttons Windows' own, coloured as the page's background, light or dark as the system is. A panel
+// (a launcher's) is a popup with no frame, topmost and out of the taskbar, over Windows 11's Acrylic with its round
+// corners, as GPUI's `WindowBackgroundAppearance::Blurred` asks DWM for a system backdrop. No client-side title bar,
+// drag and drop or touch yet.
 // Copyright 2022 - 2025 Zed Industries, Inc. Licensed under the Apache License, Version 2.0
 // (clients/app/strict/LICENSE-APACHE); this file is changed from the original.
 
@@ -54,6 +56,9 @@ pub struct NativeWindow {
     hwnd: HWND,
     size: Cell<Size<DevicePixels>>,
     state: Rc<State>,
+    /// A panel's: the window that was in front before it was summoned, to give the keyboard back to.
+    panel: bool,
+    before: Cell<HWND>,
 }
 
 /// What a window's procedure knows of it.
@@ -103,6 +108,11 @@ impl NativeWindow {
     pub fn resized(&self, size: Size<DevicePixels>) {
         self.size.set(size);
     }
+
+    /// Whether what isn't drawn on it is see-through: a panel's Acrylic shows where it isn't.
+    pub fn transparent(&self) -> bool {
+        self.panel
+    }
 }
 
 impl Display {
@@ -122,9 +132,11 @@ impl Display {
             high_surrogate: Cell::new(None),
             caret: Cell::new(Some(POINT::default())),
         });
-        let style = WS_OVERLAPPEDWINDOW;
-        // No GDI surface: DirectComposition draws the whole client area.
-        let ex_style = WS_EX_APPWINDOW | WS_EX_NOREDIRECTIONBITMAP;
+        let panel = options.panel.is_some();
+        let style = if panel { WS_POPUP } else { WS_OVERLAPPEDWINDOW };
+        // No GDI surface: DirectComposition draws the whole client area. A panel is over every other window and out
+        // of the taskbar and Alt-Tab, as a tool window is.
+        let ex_style = if panel { WS_EX_TOOLWINDOW | WS_EX_TOPMOST | WS_EX_NOREDIRECTIONBITMAP } else { WS_EX_APPWINDOW | WS_EX_NOREDIRECTIONBITMAP };
         let hwnd = unsafe {
             CreateWindowExW(
                 ex_style,
@@ -155,7 +167,11 @@ impl Display {
             let _ = AdjustWindowRectExForDpi(&mut rect, style, false, ex_style, dpi);
             let _ = SetWindowPos(hwnd, None, 0, 0, rect.right - rect.left, rect.bottom - rect.top, SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE);
         }
-        colour_frame(hwnd);
+        if panel {
+            glass(hwnd);
+        } else {
+            colour_frame(hwnd);
+        }
         let mut client = RECT::default();
         unsafe {
             let _ = GetClientRect(hwnd, &mut client);
@@ -164,7 +180,53 @@ impl Display {
             hwnd,
             size: Cell::new(Size { width: DevicePixels(client.right - client.left), height: DevicePixels(client.bottom - client.top) }),
             state,
+            panel,
+            before: Cell::new(HWND::default()),
         })
+    }
+
+    /// Shows a panel centred near the top of the monitor the pointer is on, a fifth of the way down its work area as
+    /// Spotlight sits, in front with the keyboard, keeping which window was in front.
+    pub fn summon(&self, window: &NativeWindow) {
+        use windows::Win32::Graphics::Gdi::{GetMonitorInfoW, MONITOR_DEFAULTTONEAREST, MONITORINFO, MonitorFromPoint};
+        unsafe {
+            let mut pointer = POINT::default();
+            let _ = GetCursorPos(&mut pointer);
+            let monitor = MonitorFromPoint(pointer, MONITOR_DEFAULTTONEAREST);
+            let mut info = MONITORINFO { cbSize: size_of::<MONITORINFO>() as u32, ..Default::default() };
+            let _ = GetMonitorInfoW(monitor, &mut info);
+            let work = info.rcWork;
+            let size = window.size.get();
+            let (width, height) = (work.right - work.left, work.bottom - work.top);
+            let x = work.left + (width - size.width.0) / 2;
+            let y = work.top + (height / 5).min((height - size.height.0).max(0));
+            let before = GetForegroundWindow();
+            if before != window.hwnd {
+                window.before.set(before);
+            }
+            let _ = SetWindowPos(window.hwnd, Some(HWND_TOPMOST), x, y, 0, 0, SWP_NOSIZE | SWP_SHOWWINDOW);
+            let _ = SetForegroundWindow(window.hwnd);
+        }
+    }
+
+    /// Puts a panel away, and with `give_back`, brings the window that was in front before it back.
+    pub fn put_away(&self, window: &NativeWindow, give_back: bool) {
+        unsafe {
+            let _ = ShowWindow(window.hwnd, SW_HIDE);
+            let before = window.before.replace(HWND::default());
+            if give_back && !before.is_invalid() {
+                let _ = SetForegroundWindow(before);
+            }
+        }
+    }
+
+    /// Makes a window `size`, its top left where it is.
+    pub fn resize(&self, window: &NativeWindow, size: Size<Pixels>) {
+        let scale = window.scale();
+        let (width, height) = ((size.width.0 * scale).round() as i32, (size.height.0 * scale).round() as i32);
+        unsafe {
+            let _ = SetWindowPos(window.hwnd, None, 0, 0, width, height, SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE);
+        }
     }
 
     /// Puts a window opened hidden on the screen.
@@ -282,6 +344,24 @@ fn register_window_class() {
         };
         RegisterClassW(&class);
     });
+}
+
+/// A panel's material: Windows 11's Acrylic under what its page doesn't draw (DWM's transient window backdrop, over
+/// the whole window as its frame), light or dark as the system is, with Windows 11's own round corners.
+fn glass(hwnd: HWND) {
+    use windows::Win32::Graphics::Dwm::{
+        DWMSBT_TRANSIENTWINDOW, DWMWA_SYSTEMBACKDROP_TYPE, DWMWA_WINDOW_CORNER_PREFERENCE, DWMWCP_ROUND, DwmExtendFrameIntoClientArea,
+    };
+    use windows::Win32::UI::Controls::MARGINS;
+    let dark = BOOL::from(super::appearance() == crate::Appearance::Dark);
+    let (backdrop, round) = (DWMSBT_TRANSIENTWINDOW, DWMWCP_ROUND);
+    let whole = MARGINS { cxLeftWidth: -1, cxRightWidth: -1, cyTopHeight: -1, cyBottomHeight: -1 };
+    unsafe {
+        let _ = DwmExtendFrameIntoClientArea(hwnd, &whole);
+        let _ = DwmSetWindowAttribute(hwnd, DWMWA_USE_IMMERSIVE_DARK_MODE, std::ptr::from_ref(&dark).cast(), size_of::<BOOL>() as u32);
+        let _ = DwmSetWindowAttribute(hwnd, DWMWA_SYSTEMBACKDROP_TYPE, std::ptr::from_ref(&backdrop).cast(), size_of_val(&backdrop) as u32);
+        let _ = DwmSetWindowAttribute(hwnd, DWMWA_WINDOW_CORNER_PREFERENCE, std::ptr::from_ref(&round).cast(), size_of_val(&round) as u32);
+    }
 }
 
 /// Behind the caption buttons is the page's background (`--background`), and the buttons light or dark, as the

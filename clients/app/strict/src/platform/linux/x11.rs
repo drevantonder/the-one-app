@@ -3,8 +3,9 @@
 // server for every window, each window made, titled, classed and closed as GPUI's are, its scale from Xft.dpi, its
 // keys through xkbcommon, the input method through XIM (client.rs's `enable_ime`, `reset_ime`, `update_ime_position`
 // and its event loop's XIM filter), its cursor from the cursor theme, and its surface handed to the renderer by its
-// raw handles. No client-side decorations, transparency, popups, drag and drop or XInput yet; the clipboard is
-// arboard's (`super::clipboard`).
+// raw handles. A panel (a launcher's) has no frame, stays above, out of the taskbar, and is see-through at its
+// corners where a compositor runs, as GPUI's transparent windows pick a 32-bit visual. No client-side decorations,
+// popups, drag and drop or XInput yet; the clipboard is arboard's (`super::clipboard`).
 // Copyright 2022 - 2025 Zed Industries, Inc. Licensed under the Apache License, Version 2.0
 // (clients/app/strict/LICENSE-APACHE); this file is changed from the original.
 
@@ -43,6 +44,11 @@ x11rb::atom_manager! {
         _NET_WM_NAME,
         _NET_WM_PID,
         _NET_ACTIVE_WINDOW,
+        _NET_WM_STATE,
+        _NET_WM_STATE_ABOVE,
+        _NET_WM_STATE_SKIP_TASKBAR,
+        _NET_WM_STATE_SKIP_PAGER,
+        _MOTIF_WM_HINTS,
     }
 }
 
@@ -74,6 +80,10 @@ pub struct NativeWindow {
     size: Cell<Size<DevicePixels>>,
     scale: f32,
     cursor: Cell<Cursor>,
+    /// A panel's: whether it has a 32-bit visual, see-through where it's drawn so, and the window that was active
+    /// before it was summoned, to give the keyboard back to.
+    transparent: bool,
+    before: Cell<xproto::Window>,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -117,6 +127,11 @@ impl NativeWindow {
 
     pub fn resized(&self, size: Size<DevicePixels>) {
         self.size.set(size);
+    }
+
+    /// Whether what isn't drawn on it is see-through.
+    pub fn transparent(&self) -> bool {
+        self.transparent
     }
 }
 
@@ -195,8 +210,19 @@ impl Display {
         let x_window = xcb.generate_id()?;
         let width = (options.size.width.0 * self.scale).round() as u16;
         let height = (options.size.height.0 * self.scale).round() as u16;
-        let aux = xproto::CreateWindowAux::new()
-            .background_pixel(setup.black_pixel)
+        // A panel is see-through at its rounded corners where a compositor draws windows over each other: a 32-bit
+        // visual, with a colormap of its own, as GPUI's transparent windows have.
+        let argb = options.panel.is_some().then(|| self.argb()).flatten();
+        let (depth, visual) = argb.unwrap_or((setup.root_depth, setup.root_visual));
+        let mut aux = xproto::CreateWindowAux::new();
+        if argb.is_some() {
+            let colormap = xcb.generate_id()?;
+            xcb.create_colormap(xproto::ColormapAlloc::NONE, colormap, setup.root, visual)?.check()?;
+            aux = aux.background_pixel(0).border_pixel(0).colormap(colormap);
+        } else {
+            aux = aux.background_pixel(setup.black_pixel);
+        }
+        let aux = aux
             .event_mask(
                 xproto::EventMask::EXPOSURE
                     | xproto::EventMask::STRUCTURE_NOTIFY
@@ -208,19 +234,7 @@ impl Display {
                     | xproto::EventMask::POINTER_MOTION
                     | xproto::EventMask::LEAVE_WINDOW,
             );
-        xcb.create_window(
-            setup.root_depth,
-            x_window,
-            setup.root,
-            0,
-            0,
-            width,
-            height,
-            0,
-            xproto::WindowClass::INPUT_OUTPUT,
-            setup.root_visual,
-            &aux,
-        )?
+        xcb.create_window(depth, x_window, setup.root, 0, 0, width, height, 0, xproto::WindowClass::INPUT_OUTPUT, visual, &aux)?
         .check()
         .context("X11 CreateWindow failed")?;
         xcb.change_property32(xproto::PropMode::REPLACE, x_window, self.atoms._NET_WM_PID, xproto::AtomEnum::CARDINAL, &[std::process::id()])?;
@@ -230,13 +244,22 @@ impl Display {
         let class = format!("{0}\0{0}\0", options.app_id);
         xcb.change_property8(xproto::PropMode::REPLACE, x_window, xproto::AtomEnum::WM_CLASS, xproto::AtomEnum::STRING, class.as_bytes())?;
         xcb.change_property32(xproto::PropMode::REPLACE, x_window, self.atoms.WM_PROTOCOLS, xproto::AtomEnum::ATOM, &[self.atoms.WM_DELETE_WINDOW])?;
+        if options.panel.is_some() {
+            // No frame (Motif's hints, which every window manager reads: flags say decorations, which are none),
+            // above every other window and out of the taskbar and the pager (EWMH's initial state), and the size
+            // it's given, at the place it's put (`summon`).
+            xcb.change_property32(xproto::PropMode::REPLACE, x_window, self.atoms._MOTIF_WM_HINTS, self.atoms._MOTIF_WM_HINTS, &[2, 0, 0, 0, 0])?;
+            let state = [self.atoms._NET_WM_STATE_ABOVE, self.atoms._NET_WM_STATE_SKIP_TASKBAR, self.atoms._NET_WM_STATE_SKIP_PAGER];
+            xcb.change_property32(xproto::PropMode::REPLACE, x_window, self.atoms._NET_WM_STATE, xproto::AtomEnum::ATOM, &state)?;
+            self.hint(x_window, 0, 0, width, height)?;
+        }
         xcb.flush()?;
         self.windows.borrow_mut().insert(x_window, id);
         let raw = RawWindow {
             connection: xcb.get_raw_xcb_connection(),
             screen_id: self.screen,
             window_id: x_window,
-            visual_id: setup.root_visual,
+            visual_id: visual,
         };
         Ok(NativeWindow {
             x_window,
@@ -244,7 +267,93 @@ impl Display {
             size: Cell::new(Size { width: DevicePixels(width as i32), height: DevicePixels(height as i32) }),
             scale: self.scale,
             cursor: Cell::new(Cursor::Arrow),
+            transparent: argb.is_some(),
+            before: Cell::new(x11rb::NONE),
         })
+    }
+
+    /// The screen's 32-bit TrueColor visual, where a compositor runs to blend it (`_NET_WM_CM_S<screen>` is owned).
+    fn argb(&self) -> Option<(u8, xproto::Visualid)> {
+        let compositor = self.xcb.intern_atom(false, format!("_NET_WM_CM_S{}", self.screen).as_bytes()).ok()?.reply().ok()?.atom;
+        if self.xcb.get_selection_owner(compositor).ok()?.reply().ok()?.owner == x11rb::NONE {
+            return None;
+        }
+        let setup = &self.xcb.setup().roots[self.screen];
+        setup.allowed_depths.iter().filter(|depth| depth.depth == 32).find_map(|depth| {
+            depth.visuals.iter().find(|visual| visual.class == xproto::VisualClass::TRUE_COLOR).map(|visual| (32, visual.visual_id))
+        })
+    }
+
+    /// Tells the window manager where a panel goes and that it's that size and no other (ICCCM's WM_NORMAL_HINTS).
+    fn hint(&self, x_window: xproto::Window, x: i32, y: i32, width: u16, height: u16) -> anyhow::Result<()> {
+        use x11rb::properties::{WmSizeHints, WmSizeHintsSpecification};
+        let mut hints = WmSizeHints::new();
+        hints.position = Some((WmSizeHintsSpecification::UserSpecified, x, y));
+        hints.min_size = Some((width.into(), height.into()));
+        hints.max_size = Some((width.into(), height.into()));
+        hints.set_normal_hints(&*self.xcb, x_window)?.check()?;
+        Ok(())
+    }
+
+    /// The window that's active, as the window manager says (`_NET_ACTIVE_WINDOW`).
+    fn active(&self) -> xproto::Window {
+        let root = self.xcb.setup().roots[self.screen].root;
+        let reply = self.xcb.get_property(false, root, self.atoms._NET_ACTIVE_WINDOW, xproto::AtomEnum::WINDOW, 0, 1).ok().and_then(|cookie| cookie.reply().ok());
+        reply.and_then(|reply| reply.value32()?.next()).unwrap_or(x11rb::NONE)
+    }
+
+    /// The bounds of the screen the pointer is on, in device pixels (RandR's monitors), or the whole root window's.
+    fn pointer_screen(&self) -> (i32, i32, i32, i32) {
+        use x11rb::protocol::randr::ConnectionExt as _;
+        let root = &self.xcb.setup().roots[self.screen];
+        let whole = (0, 0, i32::from(root.width_in_pixels), i32::from(root.height_in_pixels));
+        let Some(pointer) = self.xcb.query_pointer(root.root).ok().and_then(|cookie| cookie.reply().ok()) else { return whole };
+        let (x, y) = (i32::from(pointer.root_x), i32::from(pointer.root_y));
+        let monitors = self.xcb.randr_get_monitors(root.root, true).ok().and_then(|cookie| cookie.reply().ok()).map(|reply| reply.monitors).unwrap_or_default();
+        monitors
+            .iter()
+            .map(|monitor| (i32::from(monitor.x), i32::from(monitor.y), i32::from(monitor.width), i32::from(monitor.height)))
+            .find(|(left, top, width, height)| x >= *left && y >= *top && x < left + width && y < top + height)
+            .unwrap_or(whole)
+    }
+
+    /// Shows a panel centred near the top of the screen the pointer is on, a fifth of the way down as Spotlight sits,
+    /// never off the bottom of a short screen, and gives it the keyboard, keeping which window had it.
+    pub fn summon(&self, window: &NativeWindow) {
+        let size = window.size.get();
+        let (left, top, width, height) = self.pointer_screen();
+        let x = left + (width - size.width.0) / 2;
+        let y = top + (height / 5).min((height - size.height.0).max(0));
+        let before = self.active();
+        if before != window.x_window {
+            window.before.set(before);
+        }
+        let _ = self.hint(window.x_window, x, y, size.width.0 as u16, size.height.0 as u16);
+        let _ = self.xcb.configure_window(window.x_window, &xproto::ConfigureWindowAux::new().x(x).y(y));
+        let _ = self.xcb.map_window(window.x_window);
+        let _ = self.xcb.configure_window(window.x_window, &xproto::ConfigureWindowAux::new().x(x).y(y).stack_mode(xproto::StackMode::ABOVE));
+        self.activate(window);
+    }
+
+    /// Puts a panel away, and with `give_back`, makes the window that had the keyboard before it active again.
+    pub fn put_away(&self, window: &NativeWindow, give_back: bool) {
+        let _ = self.xcb.unmap_window(window.x_window);
+        let before = window.before.replace(x11rb::NONE);
+        if give_back && before != x11rb::NONE {
+            self.activate_x(before);
+        }
+        let _ = self.xcb.flush();
+    }
+
+    /// Makes a window `size`, its top left where it is.
+    pub fn resize(&self, window: &NativeWindow, size: Size<Pixels>) {
+        let (width, height) = ((size.width.0 * self.scale).round() as u16, (size.height.0 * self.scale).round() as u16);
+        if let Ok(geometry) = self.xcb.get_geometry(window.x_window).map(|cookie| cookie.reply()) {
+            let (x, y) = geometry.map(|at| (i32::from(at.x), i32::from(at.y))).unwrap_or_default();
+            let _ = self.hint(window.x_window, x, y, width, height);
+        }
+        let _ = self.xcb.configure_window(window.x_window, &xproto::ConfigureWindowAux::new().width(u32::from(width)).height(u32::from(height)));
+        let _ = self.xcb.flush();
     }
 
     /// Puts a window opened hidden on the screen.
@@ -261,9 +370,15 @@ impl Display {
     }
 
     pub fn activate(&self, window: &NativeWindow) {
+        self.activate_x(window.x_window);
+    }
+
+    /// Asks the window manager to make `x_window` active, as a pager does (source 2), which it does for whichever
+    /// app's window it is.
+    fn activate_x(&self, x_window: xproto::Window) {
         let root = self.xcb.setup().roots[self.screen].root;
-        let data = [1, xproto::Time::CURRENT_TIME.into(), 0, 0, 0];
-        let message = xproto::ClientMessageEvent::new(32, window.x_window, self.atoms._NET_ACTIVE_WINDOW, data);
+        let data = [2, xproto::Time::CURRENT_TIME.into(), 0, 0, 0];
+        let message = xproto::ClientMessageEvent::new(32, x_window, self.atoms._NET_ACTIVE_WINDOW, data);
         let _ = self.xcb.send_event(false, root, xproto::EventMask::SUBSTRUCTURE_REDIRECT | xproto::EventMask::SUBSTRUCTURE_NOTIFY, message);
         let _ = self.xcb.flush();
     }

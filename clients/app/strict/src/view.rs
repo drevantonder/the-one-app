@@ -48,6 +48,22 @@ pub struct Breadcrumb {
     pub home: Box<dyn FnMut()>,
 }
 
+/// A panel's own background, which its window has no frame for (`WindowOptions::panel`): its corners' radius, and
+/// whether the host fills it with a popover's colour, where the system has no glass to draw under it (Linux).
+#[derive(Clone, Copy, Debug)]
+pub struct Panel {
+    pub corner: f32,
+    pub fill: bool,
+}
+
+/// What the window says over its page of where the page is, as a phone's app says it over an app (DESIGN.md, App
+/// windows): its network not answering ("Reconnecting…"), or its page updated ("Updated", with Reload). A pill at its
+/// top, over the page, with its one action.
+pub struct Notice {
+    pub text: String,
+    pub action: Option<(String, Box<dyn FnMut()>)>,
+}
+
 /// The pointer's shape over what's under it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Default)]
 pub enum Cursor {
@@ -79,6 +95,14 @@ pub struct Screen {
     pub reduced_motion: bool,
     /// What its window says above it, on a computer, and where its Home was drawn and whether it's pressed.
     pub breadcrumb: Option<Breadcrumb>,
+    /// Its window is a panel, whose background the host draws, under its page's.
+    pub panel: Option<Panel>,
+    /// What the window says over its page, and where its action was drawn and whether it's pressed.
+    pub notice: Option<Notice>,
+    action: Option<Bounds<f32>>,
+    pressing_action: bool,
+    /// Whether its window is on screen, as its page is told (its host context's `visible`): a panel put away isn't.
+    visible: bool,
     home: Option<Bounds<f32>>,
     pressing_home: bool,
     /// What the window keeps for itself at each of its page's edges: a computer's title bar, its traffic lights or
@@ -129,6 +153,10 @@ pub struct Screen {
     /// What takes the keyboard, in the order Tab goes, as it was last painted.
     tab_order: Vec<Id>,
     images: HashMap<String, Option<Arc<Picture>>>,
+    /// Each picture its page names by an address rather than a `data:` one, as a `data:` address once its window has
+    /// fetched it (`fetched`), or none while it's on its way or wasn't found; and what fetches one, the window's.
+    fetched: HashMap<String, Option<String>>,
+    pub fetch: Option<Box<dyn FnMut(&str)>>,
     /// Where each node was drawn in the last frame, for the inspector, and the frame's size and scale.
     rects: Rects,
     painted: (Size<f32>, f32),
@@ -153,6 +181,11 @@ impl Screen {
             appearance: Appearance::Light,
             reduced_motion: false,
             breadcrumb: None,
+            panel: None,
+            notice: None,
+            action: None,
+            pressing_action: false,
+            visible: true,
             home: None,
             pressing_home: false,
             insets,
@@ -180,6 +213,8 @@ impl Screen {
             laid_out: HashMap::new(),
             tab_order: Vec::new(),
             images: HashMap::new(),
+            fetched: HashMap::new(),
+            fetch: None,
             rects: Rects::new(),
             painted: (Size::default(), 1.0),
             unanswered: HashMap::new(),
@@ -328,6 +363,7 @@ impl Screen {
                                 answer["result"]["hostContext"]["containerDimensions"] = json!({"width": self.room.width, "height": self.room.height});
                                 answer["result"]["hostContext"]["reducedMotion"] = json!(self.reduced_motion);
                                 answer["result"]["hostContext"]["safeAreaInsets"] = self.safe_area();
+                                answer["result"]["hostContext"]["visible"] = json!(self.visible);
                                 self.told = Some((self.room, self.reduced_motion, self.insets));
                                 answers.push(answer);
                             }
@@ -416,6 +452,8 @@ impl Screen {
             drawn: &mut self.drawn,
             caret,
             images: &mut self.images,
+            fetched: &self.fetched,
+            wanted: Vec::new(),
             rects: Rects::new(),
             time: now,
             transitions: &mut self.transitions,
@@ -428,7 +466,14 @@ impl Screen {
         // The window, as a page's body: its root's background and text, scrolling what's taller than it.
         let version2 = self.tree.nodes.values().any(|node| node.styles.is_some());
         let (body, background) = if version2 { Text::root(conditions) } else { (Text::body(conditions.dark), Some(colour("background", conditions.dark))) };
-        painter.quad(window, window, background.unwrap_or_default(), Edges::default(), Hsla::default(), Corners::default(), false, 1.0);
+        match self.panel {
+            // A panel's background is the host's: a popover's colour, or nothing over the system's glass, rounded.
+            Some(panel) => {
+                let fill = if panel.fill { colour("card", conditions.dark) } else { Hsla::default() };
+                painter.quad(window, window, fill, Edges::default(), Hsla::default(), Corners::all(panel.corner), false, 1.0)
+            }
+            None => painter.quad(window, window, background.unwrap_or_default(), Edges::default(), Hsla::default(), Corners::default(), false, 1.0),
+        }
         let root = painter.build(0, body, true);
         for fixed in std::mem::take(&mut painter.fixed) {
             let _ = painter.taffy.add_child(root, fixed);
@@ -467,7 +512,17 @@ impl Screen {
         // The window's breadcrumb, over its page.
         let hovering = |bounds: &Bounds<f32>| self.pointer.is_some_and(|at| bounds.contains(&at));
         let home = self.breadcrumb.as_ref().map(|crumb| painter.breadcrumb(crumb, self.insets.top, self.home.as_ref().is_some_and(hovering)));
-        let (placed, mut tab_order, rects, animating, modal) = (painter.placed, painter.tab_order, painter.rects, painter.animating, painter.modal);
+        self.action = self.notice.as_ref().and_then(|notice| painter.notice(notice, self.insets.top, self.action.as_ref().is_some_and(hovering)));
+        let (placed, mut tab_order, rects, animating, modal, wanted) = (painter.placed, painter.tab_order, painter.rects, painter.animating, painter.modal, painter.wanted);
+        // What it wanted to draw that's by an address is fetched by its window, once.
+        for src in wanted {
+            if !self.fetched.contains_key(&src) {
+                self.fetched.insert(src.clone(), None);
+                if let Some(fetch) = self.fetch.as_mut() {
+                    fetch(&src);
+                }
+            }
+        }
         self.home = home;
         let moving = self.transitions.finish(now);
         self.placed = placed;
@@ -530,6 +585,9 @@ impl Screen {
     pub fn cursor(&self, at: Point<f32>) -> Cursor {
         if self.home.is_some_and(|home| home.contains(&at)) {
             return Cursor::Arrow;
+        }
+        if self.action.is_some_and(|action| action.contains(&at)) {
+            return Cursor::Pointer;
         }
         for id in self.under(at) {
             let Some(placed) = self.placed(id) else { continue };
@@ -624,9 +682,13 @@ impl Screen {
     /// selection); the middle one in an input pastes the primary selection there, as on Linux; the secondary is a
     /// `contextmenu` too.
     pub fn pointer_down(&mut self, at: Point<f32>, button: u8, shift: bool) {
-        // The breadcrumb's Home is the window's, not its page's.
+        // The breadcrumb's Home is the window's, not its page's, and so is its notice's action.
         if self.home.is_some_and(|home| home.contains(&at)) {
             self.pressing_home = button == 0;
+            return;
+        }
+        if self.action.is_some_and(|action| action.contains(&at)) {
+            self.pressing_action = button == 0;
             return;
         }
         let chain = self.under(at);
@@ -673,6 +735,14 @@ impl Screen {
     /// A button came up at `at`: what it went down on is told, and with the main one a press, if it's still over
     /// what was pressed.
     pub fn pointer_up(&mut self, at: Point<f32>, button: u8) {
+        if std::mem::take(&mut self.pressing_action) {
+            if self.action.is_some_and(|action| action.contains(&at))
+                && let Some((_, action)) = self.notice.as_mut().and_then(|notice| notice.action.as_mut())
+            {
+                action();
+            }
+            return;
+        }
         if std::mem::take(&mut self.pressing_home) {
             if self.home.is_some_and(|home| home.contains(&at))
                 && let Some(crumb) = self.breadcrumb.as_mut()
@@ -821,6 +891,22 @@ impl Screen {
         if let Some(id) = self.focused.filter(|id| self.fields.contains_key(id)) {
             self.edit(id, |field| field.ime(ime));
         }
+    }
+
+    /// The picture at `src`, as its page names it, fetched by its window: as a `data:` address, or none where it wasn't
+    /// found.
+    pub fn fetched(&mut self, src: &str, data: Option<String>) {
+        self.fetched.insert(src.to_owned(), data);
+    }
+
+    /// Its window came on screen, or went, as a panel does as it's summoned and put away: its page is told, as a
+    /// browser's page is by `visibilitychange`.
+    pub fn shown(&mut self, visible: bool) {
+        if self.visible == visible {
+            return;
+        }
+        self.visible = visible;
+        self.message(&json!({"jsonrpc": "2.0", "method": "ui/notifications/host-context-changed", "params": {"visible": visible}}));
     }
 
     /// Its window got or lost the keyboard: the caret shows only while it has it, and an input losing it keeps what
@@ -1038,6 +1124,9 @@ struct Painter<'a> {
     /// The caret shows in this frame, as it blinks.
     caret: bool,
     images: &'a mut HashMap<String, Option<Arc<Picture>>>,
+    /// Pictures by address, fetched, and those this frame wanted that weren't yet.
+    fetched: &'a HashMap<String, Option<String>>,
+    wanted: Vec<String>,
     rects: Rects,
     /// The time on the screen's clock, in milliseconds, for what moves by itself (`animationName`) and what's on its
     /// way somewhere (`transitions`), and whether anything did.
@@ -1544,6 +1633,46 @@ impl Painter<'_> {
         home
     }
 
+    /// The window's notice over the top of its page (`Notice`), `top` points down: a pill of the foreground's colour
+    /// with its words in the background's, as a toast, centred, and its action after them, highlighted under the
+    /// pointer. → where its action is.
+    fn notice(&mut self, notice: &Notice, top: f32, hovered: bool) -> Option<Bounds<f32>> {
+        let conditions = self.conditions;
+        let window = self.window;
+        let colour = |id: &str| colour_token(id, conditions).unwrap_or_else(|| colour(id, conditions.dark));
+        let footnote = crate::tokens::table().type_style("type-footnote", conditions);
+        let label = crate::tokens::table().type_style("type-label", conditions);
+        let style = |weight: Option<f32>| crate::text::TextStyle {
+            size: footnote.map_or(13.0, |font| font.size),
+            weight: weight.or(footnote.map(|font| font.weight)).unwrap_or(450.0).round() as u16,
+            tracking: footnote.map_or(0.0, |font| font.tracking),
+            line_height: footnote.map_or(16.0, |font| font.size.round()),
+            tabular: false,
+        };
+        let (words_style, action_style) = (style(None), style(label.map(|font| font.weight)));
+        let words = self.text.paragraph(&notice.text, &words_style, None, Some(1));
+        let action = notice.action.as_ref().map(|(name, _)| self.text.paragraph(name, &action_style, None, Some(1)));
+        let (pad, gap, height) = (12.0, 4.0, 30.0);
+        let action_width = action.as_ref().map_or(0.0, |action| gap + pad + action.size().width.ceil() + pad - 4.0);
+        let width = pad + words.size().width.ceil() + action_width + if action.is_some() { 4.0 } else { pad };
+        let pill = Bounds { origin: point((window.size.width - width) / 2.0, top + 8.0), size: Size { width, height } };
+        self.quad(pill, window, colour("foreground"), Edges::default(), Hsla::default(), Corners::all(height / 2.0), false, 1.0);
+        let middle = pill.origin.y + height / 2.0;
+        let words_at = |paragraph: &Paragraph, x: f32| Bounds { origin: point(x, middle - paragraph.size().height / 2.0), size: paragraph.size() };
+        let text = Text { style: words_style, color: colour("background"), align: 0.0, wrap: false, underline: false };
+        self.paint_text(&words, words_at(&words, pill.origin.x + pad), words.size().width.ceil(), 1.0, text, 1.0, window);
+        let action = action?;
+        let x = pill.origin.x + pad + words.size().width.ceil() + gap;
+        let bounds = Bounds { origin: point(x, pill.origin.y + 4.0), size: Size { width: pad + action.size().width.ceil() + pad, height: height - 8.0 } };
+        if hovered {
+            let mut highlight = colour("background");
+            highlight.a *= 0.2;
+            self.quad(bounds, window, highlight, Edges::default(), Hsla::default(), Corners::all(bounds.size.height / 2.0), false, 1.0);
+        }
+        self.paint_text(&action, words_at(&action, x + pad), action.size().width.ceil(), 1.0, Text { style: action_style, ..text }, 1.0, window);
+        Some(bounds)
+    }
+
     /// A picture by its `data:` address at `bounds`, its corners rounded `radius`.
     fn picture(&mut self, src: &str, bounds: Bounds<f32>, radius: f32) {
         let device = Size { width: (bounds.size.width * self.scale).round() as u32, height: (bounds.size.height * self.scale).round() as u32 };
@@ -1584,6 +1713,13 @@ impl Painter<'_> {
     /// An image, scaled to fit its box keeping its shape, as GPUI's `img` is by default.
     fn paint_image(&mut self, node: &Node, content: Bounds<f32>, radii: Corners<f32>, opacity: f32, mask: Bounds<f32>) {
         let Some(src) = node.str("src") else { return };
+        // One by an address is drawn once its window has fetched it, as a `data:` address.
+        let src = match self.fetched.get(src) {
+            _ if src.starts_with("data:") => src,
+            Some(Some(data)) => data.as_str(),
+            Some(None) => return,
+            None => return self.wanted.push(src.to_owned()),
+        };
         let device = Size { width: (content.size.width * self.scale).round() as u32, height: (content.size.height * self.scale).round() as u32 };
         if device.width == 0 || device.height == 0 {
             return;

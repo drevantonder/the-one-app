@@ -38,6 +38,10 @@ pub enum Event {
     Closed,
     /// Its page uses what this host can't draw, so it's closed, to open in a web view: why.
     Mismatched(String),
+    /// A panel was summoned and its frame is on screen: how long after it was asked to show (`summon`).
+    Shown(std::time::Duration),
+    /// A panel put itself away, as something else was clicked or came in front.
+    PutAway,
 }
 
 pub struct WindowOptions {
@@ -47,6 +51,10 @@ pub struct WindowOptions {
     pub size: Size<Pixels>,
     /// What whoever opened it says it is, which the inspector's `windows` lists with it: its app.
     pub tag: serde_json::Value,
+    /// A panel, as a launcher's (Spotlight's, Raycast's) is: no frame, over every other window, out of the taskbar
+    /// and the window switcher, with rounded corners of this many points where the system draws them see-through.
+    /// It's opened hidden, shown only as it's summoned (`Windows::summon`), and goes as it loses the keyboard.
+    pub panel: Option<f32>,
 }
 
 /// Where to send the windows' thread a job.
@@ -118,6 +126,10 @@ struct Window {
     /// When it was opened, hidden, and whether it's shown.
     opened: std::time::Instant,
     shown: bool,
+    /// A panel's: whether it's showing, and since when it was asked to, until its frame is drawn.
+    panel: bool,
+    visible: bool,
+    summoned: Option<std::time::Instant>,
     /// What it shows: its app's screen, or why its app didn't open.
     screen: Result<Screen, String>,
     renderer: Renderer,
@@ -156,9 +168,13 @@ impl Windows {
         if let Some(clipboard) = clipboard() {
             screen.clipboard = clipboard;
         }
-        let renderer = Renderer::new(&self.context, self.atlas.clone(), &native, native.device_size(), false)?;
+        let renderer = Renderer::new(&self.context, self.atlas.clone(), &native, native.device_size(), native.transparent())?;
         let opened = std::time::Instant::now();
-        self.windows.insert(id, Window { native, opened, shown: false, screen: Ok(screen), renderer, scene: Default::default(), dirty: true, drawn: false, on_event: Box::new(on_event), tag: options.tag });
+        let panel = options.panel.is_some();
+        self.windows.insert(
+            id,
+            Window { native, opened, shown: panel, panel, visible: false, summoned: None, screen: Ok(screen), renderer, scene: Default::default(), dirty: true, drawn: false, on_event: Box::new(on_event), tag: options.tag },
+        );
         Ok(id)
     }
 
@@ -167,9 +183,13 @@ impl Windows {
         let id = self.next;
         self.next += 1;
         let native = self.display.open(id, &options)?;
-        let renderer = Renderer::new(&self.context, self.atlas.clone(), &native, native.device_size(), false)?;
+        let renderer = Renderer::new(&self.context, self.atlas.clone(), &native, native.device_size(), native.transparent())?;
         let opened = std::time::Instant::now();
-        self.windows.insert(id, Window { native, opened, shown: false, screen: Err(why.to_owned()), renderer, scene: Default::default(), dirty: true, drawn: false, on_event: Box::new(on_event), tag: options.tag });
+        let panel = options.panel.is_some();
+        self.windows.insert(
+            id,
+            Window { native, opened, shown: panel, panel, visible: false, summoned: None, screen: Err(why.to_owned()), renderer, scene: Default::default(), dirty: true, drawn: false, on_event: Box::new(on_event), tag: options.tag },
+        );
         Ok(id)
     }
 
@@ -178,6 +198,11 @@ impl Windows {
         let window = self.windows.get_mut(&id)?;
         window.dirty = true;
         window.screen.as_mut().ok().map(f)
+    }
+
+    /// Whether window `id` shows only why its app didn't open.
+    pub fn failed(&self, id: WindowId) -> bool {
+        self.windows.get(&id).is_some_and(|window| window.screen.is_err())
     }
 
     /// Every window, for the inspector's `windows`: what it says it is, its id (`window`), and its `window` op's
@@ -239,6 +264,55 @@ impl Windows {
         }
     }
 
+    /// Shows panel `id`, centred near the top of the screen the pointer is on, with the keyboard, its frame drawn as
+    /// it shows; the window that had the keyboard is kept, to give it back (`put_away`). `asked` is when it was asked
+    /// to, which its `Shown` says how long after.
+    pub fn summon(&mut self, id: WindowId, asked: std::time::Instant) {
+        let Some(window) = self.windows.get_mut(&id) else { return };
+        if window.visible {
+            return self.display.activate(&window.native);
+        }
+        window.visible = true;
+        window.dirty = true;
+        window.summoned = Some(asked);
+        if let Ok(screen) = &mut window.screen {
+            screen.shown(true);
+        }
+        self.display.summon(&window.native);
+        // Drawn now, not on the loop's next turn, so its first frame is the one it shows with.
+        self.turn();
+    }
+
+    /// Puts panel `id` away, and with `give_back`, gives the keyboard back to the window that had it before.
+    pub fn put_away(&mut self, id: WindowId, give_back: bool) {
+        let Some(window) = self.windows.get_mut(&id) else { return };
+        if !window.visible {
+            return;
+        }
+        window.visible = false;
+        window.summoned = None;
+        if let Ok(screen) = &mut window.screen {
+            screen.shown(false);
+        }
+        self.display.put_away(&window.native, give_back);
+    }
+
+    /// Whether panel `id` is showing.
+    pub fn showing(&self, id: WindowId) -> bool {
+        self.windows.get(&id).is_some_and(|window| window.visible)
+    }
+
+    /// Makes window `id` `height` points tall, its top where it is, as a launcher grows and shrinks with what it shows.
+    pub fn resize(&mut self, id: WindowId, height: f32) {
+        if let Some(window) = self.windows.get_mut(&id) {
+            let size = window.native.size();
+            if (size.height.0 - height).abs() >= 0.5 {
+                self.display.resize(&window.native, Size { width: size.width, height: Pixels(height) });
+                window.dirty = true;
+            }
+        }
+    }
+
     /// Closes window `id`.
     pub fn close(&mut self, id: WindowId) {
         if let Some(mut window) = self.windows.remove(&id) {
@@ -287,7 +361,8 @@ impl Windows {
                 window.shown = true;
                 self.display.show(&window.native);
             }
-            if !window.dirty {
+            // A panel put away draws nothing until it's summoned again.
+            if !window.dirty || (window.panel && !window.visible) {
                 continue;
             }
             window.dirty = false;
@@ -305,6 +380,9 @@ impl Windows {
             if !window.drawn {
                 window.drawn = true;
                 (window.on_event)(Event::Drawn);
+            }
+            if let Some(asked) = window.summoned.take() {
+                (window.on_event)(Event::Shown(asked.elapsed()));
             }
         }
         self.display.flush();
@@ -341,6 +419,14 @@ impl Windows {
                 screen.key(&key);
             }
             Input::Ime(ime) => screen.ime(ime),
+            // A panel goes as something else takes the keyboard, as Spotlight does.
+            Input::Focus(false) if window.panel && window.visible => {
+                screen.activate(false);
+                self.put_away(id, false);
+                if let Some(window) = self.windows.get_mut(&id) {
+                    (window.on_event)(Event::PutAway);
+                }
+            }
             Input::Focus(active) => screen.activate(active),
             Input::Close => {}
         }

@@ -143,6 +143,18 @@ pub fn open_web_view(entrypoint: String, subject: Option<String>, link: String) 
     open(entrypoint, subject, link, false)
 }
 
+/// Opens an app's strict window again, in place of the one it had, as it reloads its page.
+#[cfg(any(target_os = "linux", target_os = "macos", windows))]
+pub fn reopen(entrypoint: String, subject: Option<String>, link: String) -> Result<(), String> {
+    forget(&entrypoint, subject.as_deref());
+    open(entrypoint, subject, link, true)
+}
+
+/// Forgets the window open for `entrypoint`, as it's opened again in its place: what it said is no one's.
+pub fn forget(entrypoint: &str, subject: Option<&str>) {
+    HOSTS.open.lock().expect("no host panics").remove(&format!("{}|{entrypoint}", subject.unwrap_or_default()));
+}
+
 fn open(entrypoint: String, subject: Option<String>, link: String, strict: bool) -> Result<(), String> {
     let key = format!("{}|{entrypoint}", subject.as_deref().unwrap_or_default());
     #[cfg(target_os = "macos")]
