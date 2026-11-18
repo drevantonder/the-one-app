@@ -65,11 +65,12 @@ defmodule OneCore.Tasks do
   def start(run, tool, principal) do
     requester = self()
     trace = Trace.traceparent()
+    client = Process.get(:"$one_request", %{})[:client]
 
     {:ok, runner} =
       Task.Supervisor.start_child(OneCore.Asks, fn ->
         Trace.follow(trace)
-        id = State.begin(%{requester: requester, principal: principal, tool: tool})
+        id = State.begin(%{requester: requester, principal: principal, tool: tool, client: client})
 
         outcome =
           try do

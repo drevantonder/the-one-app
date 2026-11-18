@@ -49,6 +49,16 @@ defmodule OneCore.Call do
   @type t :: %__MODULE__{own: OneCore.Artifact.t(), folder: String.t(), server: String.t(), subject: String.t()}
 
   @doc """
+  Which client asked for what this call is part of: `%{"device" => key, "web" => web, "name" => name, "title" =>
+  title}`, the device it came from (`OneCore.User.device/2`), whose kind and name the apps that sign devices in keep;
+  whether it came in at the network's address over the web, as a browser and an assistant somewhere else do, rather
+  than over a connection of a device's own; and the name and title its MCP client says it goes by (its
+  `clientInfo`), where it says. `nil` for what no client asked, such
+  as a scheduled job. What a client says of itself is only what it says: who it acts for is `actor`.
+  """
+  def client(%__MODULE__{}), do: State.client()
+
+  @doc """
   An app this call's app requires, or that one of those requires, whose module provides functions
   (`OneCore.App`): its module, whose functions take this call and run as this call's app, for whoever it runs
   for.
@@ -434,6 +444,7 @@ defmodule OneCore.Call do
     forwarding_loop = Server.forwarding_loop()
 
     meta = %{forwarded: forwarded, actor: actor, subject: subject}
+    meta = if client = State.client(), do: Map.put(meta, :client, client), else: meta
     # A call whose caller asked for a task that isn't made yet is made one where it runs, which then answers it.
     meta = if method == "tools/call", do: Map.merge(meta, Tasks.asking()), else: meta
     params = Map.update(params, :_meta, meta, &Map.merge(&1, meta))

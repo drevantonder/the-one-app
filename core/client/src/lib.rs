@@ -1406,8 +1406,8 @@ impl Client {
                     }
                     self.resolve(&mut request).await?;
                     let reads = self.reads(&request).await?;
-                    self.say(&mut request);
                     let span = request.get("id").is_some().then(|| self.span(&mut request));
+                    self.say(&mut request);
                     (request.to_string().into_bytes().into(), request["method"] == "tools/list", reads, span)
                 }
                 _ => (message.into(), false, false, None),
@@ -1498,12 +1498,19 @@ impl Client {
 
     /// Has `request` say who it's from, in its `_meta`: the device this run is of, with its attestation for the run's key,
     /// and what the environment says, unless the request says otherwise, as one of a device's own does. It says this
-    /// build too, which a server talks with across one 0.minor, refusing one further with why (`OneCore.Mcp`).
+    /// build too, which a server talks with across one 0.minor, refusing one further with why (`OneCore.Mcp`), and
+    /// which client this is, as MCP's 2026-07-28 has each request say (`one-cli`, `one-app`), unless it's an MCP
+    /// client's own request that says which that is.
     fn say(&self, request: &mut Value) {
         for (says, value) in [("device", self.key.public().to_string()), ("attestation", self.link().attestation)] {
             request["params"]["_meta"][says] = json!(value);
         }
         request["params"]["_meta"]["version"] = json!(BUILD);
+        let info = &mut request["params"]["_meta"]["io.modelcontextprotocol/clientInfo"];
+        if info.is_null() {
+            let service = self.resource.read().expect("no report panics")["service.name"].clone();
+            *info = json!({"name": format!("one-{}", service.as_str().unwrap_or("cli")), "version": BUILD});
+        }
         for (says, value) in &self.says {
             if request["params"]["_meta"][says].is_null() {
                 request["params"]["_meta"][says] = json!(value);

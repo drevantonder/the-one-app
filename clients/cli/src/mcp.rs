@@ -1,6 +1,7 @@
 //! MCP over stdio. Servers speak MCP themselves, so each message read is passed to the server and its answer
 //! written back. With `--code`, each says it's for code mode (`OneCore.Mcp`), whose `execute` and `call` a server
-//! runs, as it does for an agent over the web.
+//! runs, as it does for an agent over the web. Each says which client asked, as the client said in `initialize`, where
+//! MCP's 2026-07-28 has every request say it.
 
 use std::sync::Arc;
 
@@ -30,10 +31,17 @@ pub async fn serve(client: Arc<Client>, code: bool) -> Result<()> {
         anyhow::Ok(())
     });
     let mut asks = JoinSet::new();
+    let mut said = Value::Null;
     while let Some(message) = messages.next_line().await? {
         let (client, lines) = (client.clone(), lines.clone());
+        let mut request: Value = serde_json::from_str(&message).unwrap_or_default();
+        if request["method"] == "initialize" {
+            said = request["params"]["clientInfo"].clone();
+        }
+        if request["method"].is_string() && said.is_object() && request["params"]["_meta"]["io.modelcontextprotocol/clientInfo"].is_null() {
+            request["params"]["_meta"]["io.modelcontextprotocol/clientInfo"] = said.clone();
+        }
         asks.spawn(async move {
-            let mut request: Value = serde_json::from_str(&message).unwrap_or_default();
             if code && request["method"].is_string() {
                 request["params"]["_meta"]["mode"] = json!("code");
             }

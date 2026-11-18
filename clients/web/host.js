@@ -50,6 +50,9 @@ const SLOW = 2000
 /** Random bytes in hex, as a trace's ids are. @param {number} bytes */
 const hex = (bytes) => Array.from(crypto.getRandomValues(new Uint8Array(bytes)), (byte) => byte.toString(16).padStart(2, "0")).join("")
 
+/** Which client this is, to a server (`OneCore.Call.client/1`). */
+const CLIENT = { name: "one-web" }
+
 /// Asks the network's servers `method`, as this browser's person. → its result. A browser that's no longer
 /// signed in goes to sign in again.
 /** @param {string} method @param {Record<string, any>} params @returns {Promise<any>} */
@@ -69,7 +72,9 @@ async function mcp(method, params = {}) {
   let response
   try {
     const headers = { "content-type": "application/json", traceparent: `00-${span.traceId}-${span.spanId}-01` }
-    response = await fetch("/mcp", { method: "POST", headers, body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params }) })
+    // It says which client it is, as MCP's 2026-07-28 has each request say, as the app's does (`say` in `core/client`).
+    const said = { ...params, _meta: { "io.modelcontextprotocol/clientInfo": CLIENT, ...params._meta } }
+    response = await fetch("/mcp", { method: "POST", headers, body: JSON.stringify({ jsonrpc: "2.0", id: 1, method, params: said }) })
   } catch {
     answered(false)
     ended("Can't reach your network")

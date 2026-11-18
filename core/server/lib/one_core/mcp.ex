@@ -107,7 +107,11 @@ defmodule OneCore.Mcp do
         params = Map.get(request, "params", %{})
         if method == "tools/call", do: OneCore.Release.called()
         # What a call it asks for is cancelled by, and where its progress is told.
-        Process.put(:"$one_request", %{request: {from, User.device(from, meta(params)), id}, ask: ask})
+        Process.put(:"$one_request", %{
+          request: {from, User.device(from, meta(params)), id},
+          ask: ask,
+          client: client(from, meta(params))
+        })
 
         version = meta(params)["io.modelcontextprotocol/protocolVersion"]
 
@@ -218,6 +222,18 @@ defmodule OneCore.Mcp do
   # What a request says of itself.
   defp meta(%{"_meta" => %{} = meta}), do: meta
   defp meta(_params), do: %{}
+
+  # Which client asked (`OneCore.Call.client/1`): the device it's from, whether it came in at the network's address
+  # over the web, and the name and title its MCP client says it goes by in each request from MCP's 2026-07-28. A
+  # server passing on what it was asked says which client asked it, which is believed as it's believed about who
+  # asked (`OneCore.User.asking/3`).
+  defp client(_from, %{"actor" => _actor, "client" => %{} = client}), do: client
+
+  defp client(from, meta) do
+    said = with %{} = info <- meta["io.modelcontextprotocol/clientInfo"], do: info, else: (_ -> %{})
+    named = fn key -> with name when is_binary(name) <- said[key], do: name, else: (_ -> nil) end
+    %{"device" => User.device(from, meta), "web" => from == nil, "name" => named.("name"), "title" => named.("title")}
+  end
 
   # Who a request is from and for, as it says. A task is only whoever started it's, so a client checking on one, or
   # answering or cancelling it, asks as themselves, whoever it runs for: that's what the task says, not the request.
@@ -589,7 +605,7 @@ defmodule OneCore.Mcp do
 
       _none ->
         asked = Process.get(:"$one_request", %{})
-        id = State.begin(Map.take(asked, [:request, :ask]))
+        id = State.begin(Map.take(asked, [:request, :ask, :client]))
 
         try do
           run.()

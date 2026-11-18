@@ -67,8 +67,9 @@ defmodule OneCore.Call.State do
   @doc """
   Begins a call's state in this process, `asked`, and gives its id. What started it says, in `about`, what others act
   on it by: `request`, the MCP request a client may cancel it by, as who sent it and its id; `ask`, the message this
-  server is answering, whose progress notifications say what it's doing; and `task`, that the caller asked for an MCP
-  task, with the process waiting to hear it was made (`OneCore.Tasks`).
+  server is answering, whose progress notifications say what it's doing; `task`, that the caller asked for an MCP
+  task, with the process waiting to hear it was made (`OneCore.Tasks`); and `client`, which client asked
+  (`OneCore.Call.client/1`).
   """
   def begin(about \\ %{}) do
     id = System.unique_integer([:positive])
@@ -148,6 +149,9 @@ defmodule OneCore.Call.State do
   def current do
     with [id | _] <- Process.get(@stack, []), %{} = row <- get(id), do: {id, row}, else: (_ -> nil)
   end
+
+  @doc "Which client asked for this process's call, or for the call it's part of (`OneCore.Call.client/1`), or `nil`."
+  def client, do: Enum.find_value(Process.get(@stack, []), &get(&1)[:client])
 
   @doc "This process's call's id, or `nil`."
   def id, do: with({id, _row} <- current(), do: id)
