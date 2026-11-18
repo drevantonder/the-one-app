@@ -137,39 +137,48 @@ const More = () => (
   </Menu.Root>
 )
 
+/** What `inbox` answers, once it has. */
+type Inbox = Awaited<ReturnType<typeof inbox>>
+
+function Inbox(props: { inbox: Inbox }) {
+  return (
+    <Screen heading="Notifications" action={<Show when={props.inbox.notifications.length}><More /></Show>}>
+      <Show when={props.inbox.push}>{(push) => <PushState push={push()} settings={props.inbox.settings} />}</Show>
+      <Section>
+        <Show when={props.inbox.notifications.length} fallback={<Empty>No notifications.</Empty>}>
+          <List>
+            <For each={props.inbox.notifications}>
+              {(notification) => (
+                <Row
+                  heading={<Text style={{ font: notification.read ? "body" : "label" }}>{notification.title}</Text>}
+                  text={[notification.from, notification.text].filter(Boolean).join(" · ")}
+                  end={ago(notification.at)}
+                  onClick={() => tapped(notification)}
+                />
+              )}
+            </For>
+          </List>
+        </Show>
+      </Section>
+      <Show when={props.inbox.apps.length}>
+        <Section heading="Allow Notifications">
+          <Box style={{ gap: "gap" }}>
+            <For each={props.inbox.apps} keyed={(app) => app.app}>
+              {(app) => <Switch label={app().name} checked={app().allowed} onChange={(event) => change("notifications_allow", { app: app().app, allow: event.currentTarget.checked })} />}
+            </For>
+          </Box>
+        </Section>
+      </Show>
+    </Screen>
+  )
+}
+
 render(
   () => (
-    <Screen heading="Notifications" action={<Show when={inbox()?.notifications.length}><More /></Show>}>
-      <Errored fallback={(error) => <Problem heading="Can't show your notifications" text={error() as Error} />}>
-        <Loading fallback={<Skeleton rows={4} />}>
-          <Show when={inbox().push}>{(push) => <PushState push={push()} settings={inbox().settings} />}</Show>
-          <Section>
-            <Show when={inbox().notifications.length} fallback={<Empty>No notifications.</Empty>}>
-              <List>
-                <For each={inbox().notifications}>
-                  {(notification) => (
-                    <Row
-                      heading={<Text style={{ font: notification.read ? "body" : "label" }}>{notification.title}</Text>}
-                      text={[notification.from, notification.text].filter(Boolean).join(" · ")}
-                      end={ago(notification.at)}
-                      onClick={() => tapped(notification)}
-                    />
-                  )}
-                </For>
-              </List>
-            </Show>
-          </Section>
-          <Show when={inbox().apps.length}>
-            <Section heading="Allow Notifications">
-              <Box style={{ gap: "gap" }}>
-                <For each={inbox().apps} keyed={(app) => app.app}>
-                  {(app) => <Switch label={app().name} checked={app().allowed} onChange={(event) => change("notifications_allow", { app: app().app, allow: event.currentTarget.checked })} />}
-                </For>
-              </Box>
-            </Section>
-          </Show>
-        </Loading>
-      </Errored>
-    </Screen>
+    <Errored fallback={(error) => <Screen heading="Notifications"><Problem heading="Can't show your notifications" text={error() as Error} /></Screen>}>
+      <Loading fallback={<Screen heading="Notifications"><Skeleton rows={4} /></Screen>}>
+        <Inbox inbox={inbox()} />
+      </Loading>
+    </Errored>
   ),
 )
