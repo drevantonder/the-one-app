@@ -3,7 +3,7 @@
 // of web.js and ui.js, internal.js is Solid's internals (`solid-js/internal`), which Solid's universal renderer reads with
 // its views, and zag.js is Zag's Solid adapter,
 // which the UI library and every app share (app.js leaves them out of an app). SKILL.md is the UI library's skill, and skills/ are Solid's, as the version apps are
-// built with has them, Emil Kowalski's, pstack's, Modern Web Guidance and our design rules. build/ is how an app is built against it: app.js, with what it needs to run, which a server
+// built with has them, Emil Kowalski's, pstack's, Modern Web Guidance and our design rules. build/ is how an app is built and checked against it: app.js and lint-strict.js, with what they need to run, which a server
 // installs and runs on an app's source.
 import { cpSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { transform } from "lightningcss"
@@ -98,7 +98,8 @@ await $`${here("node_modules/.bin/tsc")} -p . --noEmit false --declaration --emi
 // And the UI library as a strict app's tsconfig names it (tsconfig.strict.json), which is declarations already.
 cpSync(here("src/strict/types"), here("dist/types/strict/types"), { recursive: true })
 
-for (const file of ["app.js", "tables.ts", "package.json", "bun.lock", "tsconfig.json", "src/tokens.ts", "src/styles.ts", "src/strict/renderer.ts"]) cpSync(here(file), here(`dist/build/${file}`))
+for (const file of ["app.js", "lint-strict.js", "tables.ts", "package.json", "bun.lock", "tsconfig.json", "tsconfig.strict.json", "src/tokens.ts", "src/styles.ts", "src/strict/renderer.ts"]) cpSync(here(file), here(`dist/build/${file}`))
+cpSync(here("src/strict/types"), here("dist/build/src/strict/types"), { recursive: true })
 
 // Solid's own skills, unchanged, and the cheatsheet its primer points to, beside it.
 cpSync(here("node_modules/solid-js/skills"), here("dist/skills"), { recursive: true })

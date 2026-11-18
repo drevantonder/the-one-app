@@ -94,6 +94,60 @@ defmodule OneCore.Entrypoint do
     end
   end
 
+  @doc """
+  Type checks an app's page as strict where one of the `version`'s entrypoints says its `runtime_version`, since a native
+  host draws it itself and an element of the DOM's or a Web API would break it only there (`core/ui/lint-strict.js`,
+  which the UI library's build holds). `:ok`, or `{:error, why}` with the checker's own errors, a line each: file, line,
+  column and message, as a compiler's. It runs on the files as they were deployed, as `build/2` does, and in the sandbox
+  where the app isn't `trusted`.
+  """
+  def strict(files, version, trusted) do
+    if client?(files) and Enum.any?(version.entrypoints, & &1.runtime_version),
+      do: type_check(files, trusted),
+      else: :ok
+  end
+
+  defp type_check(files, trusted) do
+    folder = Path.join([Server.home(), "building", Base.encode16(:crypto.strong_rand_bytes(8), case: :lower)])
+    source = Path.join(folder, "source")
+
+    try do
+      write(source, for({path, text} <- files, String.starts_with?(path, @client), do: {String.replace_prefix(path, @client, ""), text}))
+
+      with {:ok, bun} <- bun(),
+           {:ok, builder} <- builder(bun),
+           :ok <- install(bun, source, trusted) do
+        # Against the UI library's strict types, which are beside the checker where a server holds it, and not where the
+        # app's own tsconfig.json says (its editor's, which isn't beside it here).
+        config = %{extends: Path.join(builder, "tsconfig.strict.json"), include: ["**/*"]}
+        File.write!(Path.join(source, "tsconfig.json"), JSON.encode!(config))
+        checked(bun, builder, source, trusted)
+      end
+    after
+      File.rm_rf!(folder)
+    end
+  end
+
+  defp checked(bun, builder, source, true) do
+    case System.cmd(bun, [Path.join(builder, "lint-strict.js"), source], stderr_to_stdout: true, env: runtime()) do
+      {_, 0} -> :ok
+      {said, _} -> {:error, not_strict(said)}
+    end
+  end
+
+  defp checked(bun, builder, source, false) do
+    bun = real(bun)
+    policy = %{read: [Path.dirname(bun), builder, source], write: [], env: %{"HOME" => "/tmp", "NO_COLOR" => "1"}, memory: nil}
+
+    case OneCore.Sandbox.run(bun, [Path.join(builder, "lint-strict.js"), source], policy) do
+      {:error, why} -> {:error, why}
+      {_, 0} -> :ok
+      {said, _} -> {:error, not_strict(said)}
+    end
+  end
+
+  defp not_strict(said), do: "The app's page isn't strict, as its entrypoint's runtime_version says it is:\n#{String.trim(said)}"
+
   @doc "The code of the UI library an app was built against, from the files a server keeps of its app, or `nil` for one with no app."
   def ui(settings), do: settings[@ui]
 

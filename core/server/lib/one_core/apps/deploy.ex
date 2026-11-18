@@ -68,7 +68,8 @@ defmodule OneCore.Apps.Deploy do
       try do
         install = install?.(version)
 
-        with :ok <- if(why = Version.waiting(name, version), do: {:error, why}, else: :ok),
+        with :ok <- Entrypoint.strict(files, version, trusted),
+             :ok <- if(why = Version.waiting(name, version), do: {:error, why}, else: :ok),
              :ok <- described(name, version),
              :ok <- if(install, do: fits(owner, name, version), else: :ok),
              {:ok, warnings} <- if(trusted, do: {:ok, warnings}, else: Sandbox.check(owner, version, built)),

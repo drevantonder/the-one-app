@@ -37,7 +37,7 @@
 /// `Row`'s `heading`). A press is `onClick={() => ...}`, what's typed `onInput={(event) =>
 /// setText(event.currentTarget.value)}`, Return in it `onAction={save}`, a key `onKeyDown={(event) => event.key ===
 /// "Escape" && close()}`, a switch's `onChange={(event) => set(event.currentTarget.checked)}`. `bun run lint:strict apps/<app>/client`, from the repo's
-/// root, checks a page. What a strict page may use is `core/ui/src/strict/types/ui.d.ts`: one that needs what isn't
+/// root, checks a page, as a deploy does of one whose entrypoint says its `runtime_version` and refuses it with the errors. What a strict page may use is `core/ui/src/strict/types/ui.d.ts`: one that needs what isn't
 /// there adds it there, with only what every host can draw (`strict/renderer.ts`), and core/ui's `bun run typecheck` then says
 /// whether the DOM's takes it. A page written for version 1 has one `style` object of token names instead.
 export { call, changed, client, component, connection, covers, direction, go, haptic, keydown, leave, link, open, pinShortcut, reducedMotion, safeArea, showRecoveryKey, sizeChanged, updateReady, upload, useRecoveryKey, viewport, visible } from "./bridge.ts"
