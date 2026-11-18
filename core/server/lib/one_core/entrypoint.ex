@@ -127,52 +127,8 @@ defmodule OneCore.Entrypoint do
     end
   end
 
-  @doc """
-  The Bun an app is built with, and a code mode script runs under (`OneCore.CodeMode`): an installed server's is
-  the one its release names, `{url, sha256}`, which it downloads the first time and keeps in its home, so an update
-  downloads no Bun of its own. One started with `mix network` uses the Bun on its PATH, as the rest of the repo does.
-  """
-  def bun do
-    case Application.get_env(:one_core, :bun) do
-      {url, sha256} -> fetched(url, sha256)
-      nil -> path()
-    end
-  end
-
-  defp path do
-    case System.find_executable("bun") do
-      nil ->
-        {:error,
-         "Building an app needs Bun, which this server can't find: run `mise install` in The One App's folder, or put bun on its PATH."}
-
-      bun ->
-        {:ok, bun}
-    end
-  end
-
-  defp fetched(url, sha256) do
-    folder = Path.join([Server.home(), "bun", sha256])
-    # Windows finds a program by its extension.
-    name = if match?({:win32, _}, :os.type()), do: "bun.exe", else: "bun"
-    bun = Path.join(folder, name)
-
-    with false <- File.exists?(bun),
-         {:ok, %{status: 200, body: zip}} <- Req.get(url, raw: true),
-         ^sha256 <- Base.encode16(:crypto.hash(:sha256, zip), case: :lower),
-         {:ok, files} <- :zip.extract(zip, [:memory]),
-         {_name, program} <- Enum.find(files, fn {file, _} -> Path.basename(to_string(file)) == name end) do
-      writing = folder <> "." <> Base.encode16(:crypto.strong_rand_bytes(8), case: :lower)
-      File.mkdir_p!(writing)
-      File.write!(Path.join(writing, name), program)
-      File.chmod!(Path.join(writing, name), 0o755)
-      # Another build may have fetched it meanwhile, which is as good.
-      with {:error, _} <- File.rename(writing, folder), do: File.rm_rf!(writing)
-      {:ok, bun}
-    else
-      true -> {:ok, bun}
-      _ -> {:error, "Building an app needs Bun, which this server couldn't download whole from #{url}."}
-    end
-  end
+  @doc "The Bun an app is built with, and a code mode script runs under (`OneCore.CodeMode`): `OneCore.Programs`."
+  def bun, do: OneCore.Programs.path(:bun)
 
   # An app's own packages, which it names in its package.json, and none for an app that names none.
   defp install(bun, source, trusted) do

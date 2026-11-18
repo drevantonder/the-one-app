@@ -227,6 +227,12 @@ if ((${#servers[@]})); then
   [[ -x $objcopy ]] || rustup component add llvm-tools
   (cd core/server && mix deps.get --only prod >/dev/null)
   bun_sums=$(curl -fsSL "https://github.com/oven-sh/bun/releases/download/bun-v$bun/SHASUMS256.txt")
+  # Git for a Windows server, which Linux and a Mac have of their own: Git for Windows' MinGit, made for programs to
+  # carry.
+  mingit=2.56.1
+  mingit_url=https://github.com/git-for-windows/git/releases/download/v$mingit.windows.1/MinGit-$mingit-64-bit.zip
+  mingit_sum=$(curl -fsSL "https://api.github.com/repos/git-for-windows/git/releases/tags/v$mingit.windows.1" |
+    jq -r --arg z "MinGit-$mingit-64-bit.zip" '.assets[] | select(.name == $z) | .digest | ltrimstr("sha256:")')
   wait "$nifs" || { echo "The servers' NIFs weren't built." >&2 && exit 1; }
   wait "$ui" || { echo "The UI library wasn't built." >&2 && exit 1; }
 fi
@@ -300,6 +306,7 @@ for kind in "${servers[@]}"; do
   [[ ! -e $target/nifs/$kind ]] || cp "$target/nifs/$kind" "$release/nifs"
   cp -R core/ui/dist "$release/ui"
   echo "https://github.com/oven-sh/bun/releases/download/bun-v$bun/$bunzip $(awk -v z="$bunzip" '$2 == z { print $1 }' <<<"$bun_sums")" >"$release/bun"
+  [[ $kind != windows-* ]] || echo "$mingit_url $mingit_sum" >"$release/git"
 
   # The runtime is everything but One Core's own code. What it's built from says which it is: the one published, if
   # that's the same, and otherwise a new one, this build's. That's the VM, Elixir and Bun, the deps, One Core's config
@@ -307,7 +314,7 @@ for kind in "${servers[@]}"; do
   # server on another runtime restarts for (`OneCore.Release.compare/2`); and One Core's NIFs, as each is named for
   # what it's built from (`tooling/input-hash`), which a running server loads beside the ones it has.
   runtime_inputs=$({
-    echo "$kind $otp $(elixir --version | tail -1)" && cat "$release/bun" &&
+    echo "$kind $otp $(elixir --version | tail -1)" && cat "$release/bun" && { [[ ! -e $release/git ]] || cat "$release/git"; } &&
       (cd core/server && sha256sum mix.exs mix.lock config/* rel/*) &&
       sed -n '/^for kind in "${servers\[@\]}"; do$/,/^done$/p' tooling/release
   } | sha256sum | cut -d' ' -f1)

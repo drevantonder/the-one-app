@@ -2,10 +2,10 @@ defmodule OneCore.Apps.Git do
   @moduledoc """
   An app's git source, as a server reads it to find a newer version: a copy of the repo kept in the server's folder,
   `git/<the source's hash>`, made with `git clone --mirror --filter=blob:none`, so a fetch brings only the commits and
-  the files a server reads. It's git itself that's run, signed in as the machine's user is, so a private repo is
-  fetched where that user may fetch it.
+  the files a server reads. It's git itself that's run (`OneCore.Programs`), signed in as the machine's user is, so a
+  private repo is fetched where that user may fetch it.
   """
-  alias OneCore.Server
+  alias OneCore.{Programs, Server}
 
   @doc "Fetches `source` (a URL, `owner/repo` on GitHub, or a path): `{:ok, copy}`, or `{:error, why}`."
   def fetch(source) do
@@ -76,10 +76,12 @@ defmodule OneCore.Apps.Git do
   end
 
   defp git(folder, args, trim \\ true) do
-    # An archive is its output alone; anything else is said with what git says.
-    case System.cmd("git", ["-C", folder | args], stderr_to_stdout: trim, env: [{"GIT_TERMINAL_PROMPT", "0"}]) do
-      {out, 0} -> {:ok, if(trim, do: String.trim(out), else: out)}
-      {out, _} -> {:error, "git #{hd(args)} said: #{String.trim(out)}"}
+    with {:ok, git} <- Programs.path(:git) do
+      # An archive is its output alone; anything else is said with what git says.
+      case System.cmd(git, ["-C", folder | args], stderr_to_stdout: trim, env: [{"GIT_TERMINAL_PROMPT", "0"}]) do
+        {out, 0} -> {:ok, if(trim, do: String.trim(out), else: out)}
+        {out, _} -> {:error, "git #{hd(args)} said: #{String.trim(out)}"}
+      end
     end
   end
 end

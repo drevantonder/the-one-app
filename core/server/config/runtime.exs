@@ -7,14 +7,20 @@ config :one_core,
 
 # A server installed on a machine is told where it is by the program that keeps it running (`one serve run`, in
 # `clients/cli/src/serving.rs`): its home, its network's address, and who it's for. The rest is the release's own: the
-# UI library's build, in `ui/`, and the Bun it builds apps with, which it fetches the first time (`OneCore.Entrypoint`).
+# UI library's build, in `ui/`, and the programs it fetches the first time (`OneCore.Programs`): Bun, and on Windows Git.
 # `mix network` says all of this itself. Windows gives its paths with backslashes, which `Path.wildcard/2` reads as
 # escapes, finding nothing under them: expanded, they're written with slashes, as Elixir's own paths are.
 if home = System.get_env("ONE_SERVER_HOME") do
   home = Path.expand(home)
   root = Path.expand(System.fetch_env!("RELEASE_ROOT"))
   address = System.fetch_env!("ONE_ADDRESS")
-  [url, sha256] = String.split(File.read!(Path.join(root, "bun")))
+  # A program the release names, `{url, sha256}`, or `nil` for one it doesn't, as Git but on Windows.
+  program = fn name ->
+    case File.read(Path.join(root, name)) do
+      {:ok, text} -> text |> String.split() |> List.to_tuple()
+      {:error, :enoent} -> nil
+    end
+  end
 
   config :one_core,
     home: home,
@@ -31,6 +37,7 @@ if home = System.get_env("ONE_SERVER_HOME") do
     # and it was one of those that installed this server.
     development: System.get_env("ONE_AS") != nil,
     installed: true,
-    bun: {url, sha256},
+    bun: program.("bun"),
+    git: program.("git"),
     ui: Path.join(root, "ui")
 end
