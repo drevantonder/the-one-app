@@ -16,4 +16,4 @@ app's.) Signing in is the skill `google-account`'s.
 - `create_event`, `update_event` and `delete_event` change the calendar, with Calendar's own Event fields
   (summary, start, end, ...): do them only when the person asked. A time without an offset is in the calendar's
   time zone. Guests are told only with `sendUpdates`.
-- With several accounts, each tool takes `account`. `accounts` lists them.
+- With several accounts, each tool takes `account`. `google-account_accounts` lists them.

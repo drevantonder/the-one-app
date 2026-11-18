@@ -12,13 +12,6 @@ defmodule GoogleCalendar do
   @impl true
   def icon, do: "icon.png"
 
-  @doc "What Google Calendar asks of Google, for the `google-account` app."
-  def google do
-    %{
-      scopes: ["https://www.googleapis.com/auth/calendar"]
-    }
-  end
-
   @impl true
   def requires, do: %{"core" => ">= 0.22.18", "google-account" => "to reach your calendars"}
 
@@ -27,14 +20,14 @@ defmodule GoogleCalendar do
   def hooks, do: ["google-account.scopes"]
 
   @impl true
-  def hook("google-account.scopes", _about, _call), do: google().scopes
+  def hook("google-account.scopes", _about, _call), do: ["https://www.googleapis.com/auth/calendar"]
 
   @impl true
   def tools do
     string = &%{type: "string", description: &1}
 
     account =
-      string.("Which account: its address, or a part of it only it has, as google-calendar_accounts lists them. The first if left out")
+      string.("Which account: its address, or a part of it only it has, as google-account_accounts lists them. The first if left out")
 
     with_account = fn properties, required ->
       Map.merge(%{type: "object", properties: Map.put(properties, :account, account)}, if(required, do: %{required: required}, else: %{}))
@@ -135,43 +128,6 @@ defmodule GoogleCalendar do
 
     [
       %{
-        name: "accounts",
-        read_only: true,
-        description:
-          "The Google accounts Google Calendar can use, the default first, each with ok, and why when it's false (google-calendar_sign_in with that account fixes it). Every other tool's account takes one of these.",
-        inputs: %{type: "object", properties: %{}},
-        outputs: %{
-          type: "object",
-          properties: %{
-            accounts: %{
-              type: "array",
-              description: "The default first",
-              items: %{
-                type: "object",
-                properties: %{
-                  account: string.("Its address"),
-                  ok: %{type: "boolean", description: "Whether it can be used now"},
-                  why: string.("Why not, when ok is false: sign_in with that account fixes it")
-                },
-                required: ["account", "ok"]
-              }
-            }
-          },
-          required: ["accounts"]
-        }
-      },
-      %{
-        name: "sign_in",
-        description:
-          "Starts signing a Google account in to Google Calendar, or letting it use one another Google app has: gives url, for the person to open in their browser, where Google signs them in and sends them back to finish.",
-        inputs: %{type: "object", properties: %{account: string.("The account's address, to suggest it to Google: for one that needs signing in again, as google-calendar_accounts lists it")}},
-        outputs: %{
-          type: "object",
-          properties: %{url: string.("Where the person signs in, in their browser"), then: string.("What happens next")},
-          required: ["url", "then"]
-        }
-      },
-      %{
         name: "calendars",
         read_only: true,
         description:
@@ -268,15 +224,12 @@ defmodule GoogleCalendar do
   end
 
   @impl true
-  def call(tool, inputs, call) when tool in ~w(accounts sign_in),
-    do: google(call, tool, Map.put(inputs, "scopes", google().scopes))
-
   def call(tool, inputs, call) do
     run(tool, inputs, %{call: call, account: inputs["account"]})
   end
 
   defp run("calendars", _inputs, at) do
-    calendars = api(at, "GET", "users/me/calendarList", query: [maxResults: 250])["items"] || []
+    calendars = api(at, "GET", "users/me/calendarList", query: %{maxResults: 250})["items"] || []
 
     calendars =
       for calendar <- Enum.sort_by(calendars, &{&1["primary"] != true, &1["summary"] || ""}) do
@@ -300,7 +253,7 @@ defmodule GoogleCalendar do
 
     found =
       api(at, "GET", "calendars/#{calendar(at, inputs["calendarId"])}/events",
-        query: [
+        query: %{
           timeMin: DateTime.to_iso8601(from),
           timeMax: DateTime.to_iso8601(to),
           q: inputs["q"],
@@ -308,7 +261,7 @@ defmodule GoogleCalendar do
           orderBy: "startTime",
           maxResults: min(inputs["maxResults"] || 50, 250),
           pageToken: inputs["pageToken"]
-        ],
+        },
         missing: no_calendar(inputs["calendarId"])
       )
 
@@ -330,7 +283,7 @@ defmodule GoogleCalendar do
     event =
       api(at, "POST", "calendars/#{calendar(at, inputs["calendarId"])}/events",
         json: body(at, inputs, :new),
-        query: [sendUpdates: inputs["sendUpdates"] || "none"],
+        query: %{sendUpdates: inputs["sendUpdates"] || "none"},
         missing: no_calendar(inputs["calendarId"])
       )
 
@@ -341,7 +294,7 @@ defmodule GoogleCalendar do
     event =
       api(at, "PATCH", "calendars/#{calendar(at, inputs["calendarId"])}/events/#{path(at, id)}",
         json: body(at, inputs, :change),
-        query: [sendUpdates: inputs["sendUpdates"] || "none"],
+        query: %{sendUpdates: inputs["sendUpdates"] || "none"},
         missing: no_event(id, inputs["calendarId"])
       )
 
@@ -352,7 +305,7 @@ defmodule GoogleCalendar do
     where = "calendars/#{calendar(at, inputs["calendarId"])}/events/#{path(at, id)}"
     event = api(at, "GET", where, missing: no_event(id, inputs["calendarId"]))
     if event["status"] == "cancelled", do: raise(no_event(id, inputs["calendarId"]))
-    api(at, "DELETE", where, query: [sendUpdates: inputs["sendUpdates"] || "none"], missing: no_event(id, inputs["calendarId"]))
+    api(at, "DELETE", where, query: %{sendUpdates: inputs["sendUpdates"] || "none"}, missing: no_event(id, inputs["calendarId"]))
     %{id: event["id"], summary: event["summary"], start: event["start"]}
   end
 
@@ -444,20 +397,8 @@ defmodule GoogleCalendar do
 
   # Google's API as the account `at` names, through google-account, which gives the answer's status, headers and
   # body, or raises with what went wrong.
-  defp request(at, method, url, options) do
-    given = for {option, value} <- options, value != nil, into: %{}, do: {to_string(option), value}
-    inputs = Map.merge(given, %{"method" => method, "url" => url})
-    google(at.call, "request", if(at.account, do: Map.put(inputs, "account", at.account), else: inputs))
-  end
-
-  # Google's sign-in, the accounts and Google's API are google-account's, whose tools act for this app.
-  defp google(call, tool, inputs) do
-    inputs = Map.new(inputs, &query/1)
-    OneCore.Call.tool(call, "google-account", tool, JSON.decode!(JSON.encode!(inputs)))
-  end
-
-  defp query({"query", query}), do: {"query", Map.new(query)}
-  defp query(input), do: input
+  defp request(at, method, url, options),
+    do: OneCore.Call.tool(at.call, "google-account", "request", JSON.decode!(JSON.encode!(Map.new([account: at.account, method: method, url: url] ++ options))))
 
   defp no_calendar(id), do: "No calendar #{id}: calendar ids come from google-calendar_calendars."
 
