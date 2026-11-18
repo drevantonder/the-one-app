@@ -141,16 +141,35 @@ defmodule OneCore.Builds do
     if missing == %{}, do: published(latest(builds)), else: {:send, missing}
   end
 
-  # The network's updater is told the latest server build, and takes the network's servers to it
-  # (`core/edge/updater/updater.ts`).
+  # The network's updater is told the latest of what servers take, the server build and each `one`, and takes the
+  # network's servers to it (`core/edge/updater/updater.ts`): `published`, the newest of them, and the `latest` of
+  # each name, so a new `one` alone reaches every server it runs.
   defp published(latest) do
-    case latest["server-code"] && Servers.network(%{published: latest["server-code"]["build"]}) do
+    taken = for {name, %{"build" => build}} <- latest, taken?(String.split(name, "/")), into: %{}, do: {name, build}
+    newest = taken |> Map.values() |> Enum.max_by(&count/1, fn -> nil end)
+
+    case newest && Servers.network(%{published: newest, latest: taken}) do
       {:error, why} ->
         raise "The builds are published, and the network's updater wasn't told: #{why}. Publish them again."
 
       _told ->
         {:ok, latest}
     end
+  end
+
+  defp taken?(["server-code"]), do: true
+  defp taken?([program, _target]), do: program in ["one", "one-cli"]
+  defp taken?(_name), do: false
+
+  @doc """
+  The count of commits in a build's metadata (`tooling/version`), which only grows on main: `0.22.4+3100.abcdef` is
+  3100, and one from before builds had versions 0.
+  """
+  def count(build) do
+    with %Version{build: metadata} when is_binary(metadata) <- version(build),
+         {count, _commit} <- Integer.parse(metadata),
+         do: count,
+         else: (_ -> 0)
   end
 
   defp latest(builds) do
@@ -233,10 +252,16 @@ defmodule OneCore.Builds do
     }
   end
 
-  # The network's update, as its updater says it, with the servers that take builds and aren't on its build yet.
+  # The network's update, as its updater says it, with the servers that take builds and aren't on its build and `one`
+  # yet.
   defp network(servers) do
     with {:ok, %{} = network} <- Servers.network() do
-      behind = for server <- servers, server["installed"], server["build"] != network["build"], do: server["name"]
+      behind =
+        for server <- servers,
+            server["installed"],
+            not OneCore.Release.on?(OneCore.Release.target(network, server), server),
+            do: server["name"]
+
       Map.put(network, "behind", behind)
     else
       _ -> nil

@@ -114,6 +114,9 @@ defmodule OneCore.Release do
     "update_method" => nil,
     "update_method_reason" => nil,
     "next_build" => nil,
+    "program_name" => nil,
+    "program" => nil,
+    "next_program" => nil,
     "went_back" => nil
   }
 
@@ -191,8 +194,9 @@ defmodule OneCore.Release do
 
   @doc """
   What the network's updater says, `update`, as the relay tells every server: kept for whoever asks (`network/0`), and
-  what this server is to do of it said to the program keeping it running: to prepare the latest build where it isn't
-  on it or preparing it, and to go where it has checked the build the network takes, now or once it's quiet.
+  what this server is to do of it said to the program keeping it running: to prepare the latest pair, its build and
+  `one`, where it isn't on it or preparing it, and to go where it has checked the pair the network takes, now or once
+  it's quiet.
   """
   def instructed(update) do
     if update != network() do
@@ -204,16 +208,19 @@ defmodule OneCore.Release do
       end)
     end
 
-    %{"server_update_status" => at, "next_build" => next} = status()
-    checked = at == "checked" and next == update["build"]
-    behind = (at == "up_to_date" and Builds.build() != update["build"]) or (at == "checked" and not checked)
+    status = status()
+    {build, program} = target(update, status)
+    at = status["server_update_status"]
+    next = %{"build" => status["next_build"], "program" => status["next_program"]}
+    checked = at == "checked" and on?({build, program}, next)
+    behind = (at == "up_to_date" and not on?({build, program}, Map.put(status, "build", Builds.build()))) or (at == "checked" and not checked)
 
     # Said once until the program says it began, though the updater says it again to every server as each moves on.
-    asked = :persistent_term.get({__MODULE__, :asked}, nil) == update["build"]
+    asked = :persistent_term.get({__MODULE__, :asked}, nil) == {build, program}
 
     case Application.get_env(:one_core, :installed, false) && update["servers"][Server.key()] do
       "prepare" when behind and not asked ->
-        :persistent_term.put({__MODULE__, :asked}, update["build"])
+        :persistent_term.put({__MODULE__, :asked}, {build, program})
         say("prepare")
 
       "go" when checked ->
@@ -226,6 +233,20 @@ defmodule OneCore.Release do
         :ok
     end
   end
+
+  @doc """
+  The pair the network's update, `update`, takes a server to, as the server says what it is (`status/0`, which says
+  the `program_name` of the `one` running it): `{build, program}`, the latest server build and the latest of that
+  `one`, as the updater says the latest of each name (`latest`), and `program` `nil`, any `one`, where it doesn't
+  say, as one deployed before it did.
+  """
+  def target(update, server) do
+    latest = update["latest"] || %{}
+    {latest["server-code"] || update["build"], latest[server["program_name"]]}
+  end
+
+  @doc "Whether a server on the pair `server`, its `build` and `program`, is on `target`, any `one` where either doesn't say."
+  def on?({build, program}, server), do: server["build"] == build and (program == nil or server["program"] in [nil, program])
 
   # How long Update Now waits for the network's update to finish, in milliseconds: a restart is seconds, and each server
   # restarts in turn.

@@ -437,15 +437,8 @@ defmodule OneCore.Apps.Deploy do
   # build metadata (`tooling/version`), which only grows on main. A network that has published none, as one being
   # built here, has none newer, and one from before builds had versions is older than any that has one.
   defp newest? do
-    count = fn build ->
-      with %Elixir.Version{build: metadata} when is_binary(metadata) <- Builds.version(build),
-           {count, _commit} <- Integer.parse(metadata),
-           do: count,
-           else: (_ -> 0)
-    end
-
     case Builds.latest()["server-code"] do
-      %{"build" => build} -> count.(build) <= count.(Builds.build())
+      %{"build" => build} -> Builds.count(build) <= Builds.count(Builds.build())
       nil -> true
     end
   end

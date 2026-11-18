@@ -1,9 +1,11 @@
-// The network update: one per network (`NetworkUpdater`), which takes the network's servers to the latest build
+// The network update: one per network (`NetworkUpdater`), which takes the network's servers to the latest builds
 // published to the network, by itself, as self-updating software and a small cluster that holds leases do (Tailscale,
 // CockroachDB's rolling upgrades). Nobody runs `one update`: publishing a build is all.
 //
-//     up to date ──a newer build published──► preparing
-//       every awake server downloads it, checks it and says how it would take it: loaded in place, or restarted (why)
+//     up to date ──a newer build published: the server's, or a `one` that runs servers──► preparing
+//       every awake server not on its latest pair (the server build, and the `one` that runs it) downloads it, checks
+//       it and says how it would take it: loaded in place, or restarted (why); a new `one` alone is put in place, and
+//       runs the server from its next start
 //     preparing ──all checked──► loading
 //       every server that loads it in place takes it at once
 //     loading ──► restarting
@@ -44,6 +46,10 @@ export interface Reported {
   update_method?: "hot_load" | "restart" | null;
   update_method_reason?: string | null;
   next_build?: string | null;
+  /** The builds' name of the `one` that runs it (`one-cli/linux-x86_64`), and its build, now and being taken. */
+  program_name?: string | null;
+  program?: string | null;
+  next_program?: string | null;
   went_back?: string | null;
 }
 
@@ -57,7 +63,7 @@ export interface Presence {
 
 /** What it's told. */
 export type Input =
-  | { published: string }
+  | { published: string; latest?: Record<string, string> }
   | { now: true }
   | { reported: { key: string } & Reported }
   | { seen: string }
@@ -77,8 +83,10 @@ interface Taking {
 
 interface State {
   network_update_status: NetworkUpdateStatus;
-  /** The build the network takes: the latest published. */
+  /** The build the network takes: the newest published, of a server or a `one` that runs one. */
   build?: string;
+  /** The latest build of each name a server takes, `server-code` and each `one`, as `OneCore.Builds` names them. */
+  latest?: Record<string, string>;
   /** When it was published, in ms since 1970. */
   published?: number;
   servers: Taking[];
@@ -122,8 +130,14 @@ export class NetworkUpdater extends DurableObject<UpdaterEnv> {
     let concerned = false;
 
     if ("published" in input) {
-      // Only a newer build moves it: one published again, as a release run again publishes, changes nothing.
-      if (input.published !== state.build && (!state.build || newer(input.published, state.build))) this.begin(state, input.published, presence, reported);
+      // Only a newer build moves it: one published again, as a release run again publishes, changes nothing. A server
+      // from before it said the latest of each name says only its server build.
+      const latest = input.latest ?? { "server-code": input.published };
+      const moved = Object.entries(latest).filter(([name, build]) => !state.latest?.[name] || newer(build, state.latest[name]));
+      if (moved.length || !state.build) {
+        state.latest = { ...state.latest, ...Object.fromEntries(moved) };
+        this.begin(state, state.build && !newer(input.published, state.build) ? state.build : input.published, presence, reported);
+      }
     } else if ("now" in input) {
       if (state.network_update_status === "held" || (state.network_update_status === "up_to_date" && state.build)) this.begin(state, state.build!, presence, reported);
       else state.now = true;
@@ -166,14 +180,16 @@ export class NetworkUpdater extends DurableObject<UpdaterEnv> {
     return Object.fromEntries([...kept].map(([at, said]) => [at.slice("reported ".length), said]));
   }
 
-  /** Begins taking `build`: every server that's ready and not on it prepares it, and the rest are skipped. */
+  /** Begins taking `build`: every server that's ready and not on its pair prepares it, and the rest are skipped. */
   begin(state: State, build: string, presence: Record<string, Presence | null>, reported: Record<string, Reported>) {
+    const published = state.build === build && state.published ? state.published : Date.now();
+    state.build = build;
     const known = Object.keys(reported).filter((key) => this.takes(key, presence, reported));
-    const behind = known.filter((key) => reported[key].version !== build);
+    const behind = known.filter((key) => !on(state, reported[key]));
     Object.assign(state, {
       network_update_status: "preparing",
       build,
-      published: state.build === build && state.published ? state.published : Date.now(),
+      published,
       servers: behind.filter((key) => presence[key]?.server_ready).map((key) => ({ key })),
       skipped: behind.filter((key) => !presence[key]?.server_ready),
       waiting_for: null,
@@ -201,19 +217,19 @@ export class NetworkUpdater extends DurableObject<UpdaterEnv> {
       // One that missed an update is back.
       const back =
         state.build &&
-        Object.keys(reported).some((key) => this.takes(key, presence, reported) && reported[key].version !== state.build && presence[key]?.server_ready);
+        Object.keys(reported).some((key) => this.takes(key, presence, reported) && !on(state, reported[key]) && presence[key]?.server_ready);
       if (back) this.begin(state, state.build!, presence, reported);
       return;
     }
     const at = Date.now() - state.published!;
-    const on = (key: string) => reported[key]?.version === state.build && reported[key]?.server_update_status === "up_to_date";
     for (const server of state.servers) {
       const said = reported[server.key] ?? {};
-      if (server.prepared === undefined && said.server_update_status === "checked" && said.next_build === state.build) server.prepared = at;
-      if (server.loaded === undefined && said.version === state.build) server.loaded = at;
-      if (server.ready === undefined && on(server.key) && presence[server.key]?.server_ready) server.ready = at;
-      // Back on the build it was on, saying why: it went back, or couldn't prepare.
-      if (server.begun && server.ready === undefined && said.server_update_status === "up_to_date" && said.version !== state.build && said.went_back)
+      const next = { ...said, version: said.next_build ?? undefined, program: said.next_program };
+      if (server.prepared === undefined && said.server_update_status === "checked" && on(state, next)) server.prepared = at;
+      if (server.loaded === undefined && on(state, said)) server.loaded = at;
+      if (server.ready === undefined && on(state, said) && said.server_update_status === "up_to_date" && presence[server.key]?.server_ready) server.ready = at;
+      // Back on the pair it was on, saying why: it went back, or couldn't prepare.
+      if (server.begun && server.ready === undefined && said.server_update_status === "up_to_date" && !on(state, said) && said.went_back)
         return this.hold(state, server.key, said.name, said.went_back);
     }
     // One that's gone, but for one restarting to take it, is caught up once it's back.
@@ -289,7 +305,7 @@ export class NetworkUpdater extends DurableObject<UpdaterEnv> {
       else if (state.network_update_status === "restarting" && state.waiting_for === "quiet" && reported[server.key]?.update_method === "restart")
         told[server.key] = "go_when_quiet";
       // A server that went back to the build before, or never prepared it, as one whose prepare was missed, prepares it.
-      if (reported[server.key]?.server_update_status === "up_to_date" && reported[server.key]?.version !== state.build) told[server.key] ??= "prepare";
+      if (reported[server.key]?.server_update_status === "up_to_date" && !on(state, reported[server.key])) told[server.key] ??= "prepare";
     }
     return told;
   }
@@ -305,6 +321,7 @@ export class NetworkUpdater extends DurableObject<UpdaterEnv> {
     return {
       network_update_status: state.network_update_status,
       build: state.build ?? null,
+      latest: state.latest ?? null,
       done: state.servers.filter((server) => server.ready !== undefined).length,
       of: state.servers.length,
       waiting_for: state.waiting_for ?? null,
@@ -317,6 +334,15 @@ export class NetworkUpdater extends DurableObject<UpdaterEnv> {
       },
     };
   }
+}
+
+/**
+ * Whether a server that says `said` is on the pair the network takes it to (`OneCore.Release.target/2`): the latest
+ * server build and the latest of the `one` that runs it, any `one` where it, or what's published, doesn't say.
+ */
+function on(state: State, said: Reported) {
+  const program = said.program_name ? state.latest?.[said.program_name] : undefined;
+  return said.version === (state.latest?.["server-code"] ?? state.build) && (!program || !said.program || said.program === program);
 }
 
 /** Whether the build `a` is newer than `b`: `<version>+<count>.<commit>`, by its commit's count. */

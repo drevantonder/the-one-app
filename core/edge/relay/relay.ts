@@ -112,7 +112,18 @@ const STARTING = 60_000;
 const STOPPING = 60_000;
 
 /** What a server says of its update, which the relay passes to the network's updater. */
-const UPDATE: (keyof Reported)[] = ["name", "installed", "server_update_status", "update_method", "update_method_reason", "next_build", "went_back"];
+const UPDATE: (keyof Reported)[] = [
+  "name",
+  "installed",
+  "server_update_status",
+  "update_method",
+  "update_method_reason",
+  "next_build",
+  "program_name",
+  "program",
+  "next_program",
+  "went_back",
+];
 
 /** What a server last said it is (`/relay/seen`), and when. */
 interface ServerStatus {
@@ -330,7 +341,8 @@ export default class extends WorkerEntrypoint<RelayEnv> {
   }
 
   /**
-   * A server says a build was published to the network, `{"published": <its server build>}`, or asks for Update Now,
+   * A server says builds were published to the network, `{"published": <the newest>, "latest": {<name>: <build>}}`,
+   * the server build and each `one`, or asks for Update Now,
    * `{"now": true}`, with a POST, and the network's updater's status is given; a GET, from any of the network's own,
    * gives it.
    */
@@ -343,9 +355,9 @@ export default class extends WorkerEntrypoint<RelayEnv> {
     if (request.method === "POST") {
       if (admitted.until !== undefined) return refuse(403, "Only a server says a build was published, or asks for Update Now");
       const said = JSON.parse(body || "{}");
-      if (typeof said.published === "string") input = { published: said.published };
+      if (typeof said.published === "string") input = { published: said.published, ...(said.latest && typeof said.latest === "object" && { latest: said.latest }) };
       else if (said.now === true) input = { now: true };
-      else return refuse(400, 'A server says {"published": <build>} or {"now": true}');
+      else return refuse(400, 'A server says {"published": <build>, "latest": {<name>: <build>}} or {"now": true}');
     }
     return Response.json(await this.relay((relay) => relay.updated(input)), { headers: { "one-version": this.env.VERSION } });
   }

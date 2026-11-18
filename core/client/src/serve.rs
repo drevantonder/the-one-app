@@ -87,6 +87,11 @@ pub struct Status {
     pub update_method_reason: Option<String>,
     /// The build being prepared, checked or verified.
     pub next_build: Option<String>,
+    /// The builds' name of the `one` that runs it, which it takes the latest of: `one-cli/linux-x86_64`.
+    pub program_name: Option<String>,
+    /// The build of the `one` running it, and of the one being prepared, checked or verified with `next_build`.
+    pub program: Option<String>,
+    pub next_program: Option<String>,
     /// Why the last update didn't take, which the server says until one does.
     pub went_back: Option<String>,
 }

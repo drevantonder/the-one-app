@@ -32,6 +32,7 @@
 //!     ─► checked (hot load | restart: why) ─go─► verifying:
 //!       ─hot load─► loading ─loaded─► up to date on the new pair, its `one` put in place
 //!                             └─doesn't─► the build before loaded again ─► up to date, went back
+//!       ─a new `one` alone (hot load, nothing loaded)─► up to date on the new pair, its `one` put in place
 //!       ─restart─► starting (the new `one` put in place) ─said at the edge─► up to date on the new pair
 //!                             └─doesn't─► up to date, went back
 //!     nothing newer, or a download or check that failed ─► up to date, staying on it, saying why
@@ -132,6 +133,9 @@ impl Record {
             update_method: self.update_method,
             update_method_reason: self.update_method_reason.clone(),
             next_build: self.next.as_ref().map(|next| next.build.clone()),
+            program_name: Some(format!("{PROGRAM}/{}", target())),
+            program: self.pair().map(|pair| pair.program),
+            next_program: self.next.as_ref().map(|next| next.program.clone()),
             went_back: self.went_back.clone(),
         })
     }
@@ -682,9 +686,12 @@ async fn prepared(
     let compared = take(here, record, program, builds).await?;
     let method = match compared {
         Some(compared) => compared,
+        // A new `one` alone loads nothing: it's put in place, and runs the server from its next start.
+        None if next.build == current.build => Ok(()),
         None => method(here, record, &current, &next),
     };
-    println!("Prepared {} to take by {}", next.build, method.as_ref().err().map_or("a hot load".to_owned(), |why| format!("restarting: {why}")));
+    let taking = if next.build == current.build { format!("one {}", next.program) } else { next.build.clone() };
+    println!("Prepared {taking} to take by {}", method.as_ref().err().map_or("a hot load".to_owned(), |why| format!("restarting: {why}")));
     *record = here
         .save(server, |record| {
             record.server_update_status = ServerUpdateStatus::Checked;
@@ -724,7 +731,9 @@ async fn go(
         }
         return Err(again(program));
     }
-    println!("Taking {} by a hot load", next.build);
+    if next.build != current.build {
+        println!("Taking {} by a hot load", next.build);
+    }
     *record = here
         .save(server, |record| {
             record.server_update_status = ServerUpdateStatus::Verifying;
@@ -733,7 +742,8 @@ async fn go(
         .await?;
     // Loaded is kept: its code loaded and every process it stopped started again on it (`OneCore.Release.load/1`).
     // Saying it's up to date on it says so at the network's edge, which is what the network's updater waits for.
-    if let Err(why) = load(server, said, &here.build(&next.build)).await {
+    let loaded = if next.build == current.build { Ok(()) } else { load(server, said, &here.build(&next.build)).await };
+    if let Err(why) = loaded {
         *record = here.change(|record| record.go_back(format!("{why:#}")))?;
         let back = match server.try_wait()? {
             None => load(server, said, &here.build(&current.build)).await,
@@ -751,7 +761,9 @@ async fn go(
             println!("one {} is in place, and runs the server from its next start.", next.program);
         }
         *record = here.change(|record| record.took(next.clone()))?;
-        println!("The server is on the build {} now, from {}, loaded while it ran.", next.build, current.build);
+        if next.build != current.build {
+            println!("The server is on the build {} now, from {}, loaded while it ran.", next.build, current.build);
+        }
     }
     *record = here.save(server, |record| record.server_update_status = ServerUpdateStatus::UpToDate).await?;
     Ok(())
