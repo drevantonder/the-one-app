@@ -175,7 +175,7 @@ servers=($(printf '%s\n' "${mine[@]}" | sed -n 's|^server/||p'))
 
 # The Mac builds its part from the same commit meanwhile, once it's built its NIFs in the same checkout.
 if ((${#mac[@]})); then
-  ssh mac "zsh -lc 'export PATH=\$HOME/.local/bin:\$PATH && cd ~/scratch/one-release && git fetch -q https://github.com/drevantonder/the-one-app.git $commit && git reset -q --hard $commit && tooling/release ${mac[*]}'" > >(sed 's/^/mac: /') 2>&1 &
+  ssh mac "zsh -lc 'export PATH=\$HOME/.local/bin:\$PATH && cd ~/scratch/one-release && git fetch -q https://github.com/drevantonder/the-one-app.git $commit && git reset -q --hard $commit && CARGO_BUILD_JOBS=\$((\$(sysctl -n hw.ncpu) / 2)) taskpolicy -b tooling/release ${mac[*]}'" > >(sed 's/^/mac: /') 2>&1 &
   on_mac=$!
 fi
 

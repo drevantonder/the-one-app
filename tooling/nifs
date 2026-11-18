@@ -94,7 +94,7 @@ for kind in "${kinds[@]}"; do
     ((${#mac[@]})) || continue
     [[ -z $(git status --porcelain) ]] || { echo "Commit what's changed first: the Mac builds the commit." >&2 && exit 1; }
     commit=$(git rev-parse HEAD)
-    (ssh -o ConnectTimeout=15 mac "zsh -lc 'export PATH=\$HOME/.local/bin:\$PATH && cd ~/scratch/one-release && git fetch -q https://github.com/drevantonder/the-one-app.git $commit && git reset -q --hard $commit && env ${builds[*]} tooling/nifs $kind >&2 && tar -c --no-mac-metadata --no-xattrs ${mac[*]}'" 2> >(sed 's/^/mac: /' >&2) | tar -x) &
+    (ssh -o ConnectTimeout=15 mac "zsh -lc 'export PATH=\$HOME/.local/bin:\$PATH && cd ~/scratch/one-release && git fetch -q https://github.com/drevantonder/the-one-app.git $commit && git reset -q --hard $commit && env ${builds[*]} CARGO_BUILD_JOBS=\$((\$(sysctl -n hw.ncpu) / 2)) taskpolicy -b tooling/nifs $kind >&2 && tar -c --no-mac-metadata --no-xattrs ${mac[*]}'" 2> >(sed 's/^/mac: /' >&2) | tar -x) &
     on_mac=$!
     continue
   elif [[ $kind != macos-* && $here != Linux ]]; then

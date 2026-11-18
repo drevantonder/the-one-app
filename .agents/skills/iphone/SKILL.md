@@ -3,14 +3,19 @@ name: iphone
 description: Use to build the app for iPhone or the iPhone simulator, publish it to TestFlight, or put a development build on the owner's phone, from Linux over ssh to the Mac, without the owner doing anything.
 ---
 
-Everything iPhone happens on the Mac: `ssh mac 'zsh -lc "<command>"'` (a login shell, so Homebrew, Rust and Xcode's
-tools are on its PATH). Work in a checkout of your own there under `~/scratch/`, at your commit, with the network's
-repo beside it (only its `app/` is read; copying that folder over is enough). Clone it whole, not `--depth 1`: the
-app's version and build number are `tooling/version`'s count of commits, so a shallow clone builds an app numbered 1.
-The Mac is the owner's own and shared by every agent: tonight several agents' simulators and builds took its load past
-700, so builds timed out and a server update on it went back. Before building, run `uptime` there; above about 20,
-don't add to it: tell your orchestrator. Shut down and delete a simulator you booted, and remove your `~/scratch/`
-checkout, when you're done.
+Everything iPhone happens on the Mac: `ssh mac 'zsh -lc "taskpolicy -b <command>"'` (a login shell, so Homebrew, Rust
+and Xcode's tools are on its PATH). The Mac is the owner's own laptop, in use, and shared by every agent, so what you
+run there runs at macOS's background priority, `taskpolicy -b` (low CPU and disk priority, on its efficiency cores),
+which its children inherit, and with `CARGO_BUILD_JOBS=4`, half its cores. That is how the owner's own apps come
+first: on 18 Nov, with six busy programs of his standing in, a cargo build at normal priority took 62% of their work,
+one under `nice -n 19` and a throttled disk 52%, and one under `taskpolicy -b` 37%, which is slower for you (an
+incremental `one` build took 12 minutes instead of 1 or 2). Its load average isn't a reason to wait: the owner's
+simulators and Chrome had it above 200 with CPU to spare, so don't add to what uses its memory: shut down and delete a
+simulator you booted, and remove your `~/scratch/` checkout, when you're done.
+
+Work in a checkout of your own there under `~/scratch/`, at your commit, with the network's repo beside it (only its
+`app/` is read; copying that folder over is enough). Clone it whole, not `--depth 1`: the app's version and build
+number are `tooling/version`'s count of commits, so a shallow clone builds an app numbered 1.
 
 An app is a network's: the commands that build it are in that repo's `app/README.md`, and what they need in
 `clients/app/README.md`. This is what neither says.
