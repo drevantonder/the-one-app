@@ -155,9 +155,10 @@ list of types:
   (`client/package.json`: `{"exports": {"./profile": "./profile.tsx"}}`), the module's default export, given `item`
   (the item as a person reads it), `subject` (whose Vault it is), and `open(item)` and `close()`, for once it's
   renamed or gone. Its `Summary` export, given the same, is the item's line in the list when it's ready. A trusted
-  app's component is drawn in the Vault's page and acts with what the Vault may do. An untrusted app's item
-  opens its page `client/<component>.html` in a frame of its own instead, with the item after a `#`, where it keeps
-  what its own app may do. Without a component, an item opens with its fields, as a password does.
+  app's component is drawn in the Vault's page and acts with what the Vault may do. An untrusted app's item is
+  drawn beside the list by its page `client/<component>.html` instead, with the item after a `#`, in a frame of the
+  Vault's page (the UI library's `Frame`), its own JS in a sandbox of its own, where it keeps what its own app may
+  do. Without a component, an item opens with its fields, as a password does.
 
 An item is in one of three states, which the Vault shows and the app that keeps it says, with `state` (or `state/5`):
 only that app, never another with access to it, and never for a password. The app keeps its own detailed states

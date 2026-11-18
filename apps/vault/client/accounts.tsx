@@ -6,7 +6,7 @@
 // one box atop the list, with the one thing that fixes it. A request is an alert, as a system's permission prompt is.
 // It's written in strict mode (the UI library's skill), so it runs on a native host as it does on the DOM.
 import { createEffect, createMemo, createSignal, Errored, For, Loading, Match, refresh, Show, Switch as Choose, untrack } from "solid-js"
-import { Alert, Badge, Box, Button, call, changed, Checkbox, component, confirm, createListCollection, Empty, Field, Image, Input, link, List, open as opening, Problem, render, Row, Screen, Search, Section, Select, Sheet, showRecoveryKey, Skeleton, Spinner, Split, Switch, Text, toast, useRecoveryKey } from "ui"
+import { Alert, Badge, Box, Button, call, changed, Checkbox, component, confirm, createListCollection, Empty, Field, Frame, Image, Input, link, List, open as opening, Problem, render, Row, Screen, Search, Section, Select, Sheet, showRecoveryKey, Skeleton, Spinner, Split, Switch, Text, toast, useRecoveryKey } from "ui"
 
 /** A field of an item: a secret one has no value here. */
 interface ItemField {
@@ -333,22 +333,25 @@ function Summary(props: { item: Item }) {
   )
 }
 
-/// An item of a type with a component opens beside the list, but one of an untrusted app's opens in a frame of its
-/// own, its page for it (client/<component>.html), where it keeps what an app of its own may do.
+/// An item opens beside the list.
 function choose(item: Item) {
-  const type = typeOf(item)
-  if (type?.component && !type.trusted) return opening(`${type.app}/client/${type.component}.html#${encodeURIComponent(shown(item))}`, { subject: whose() })
   setOpen(item.name)
 }
 
-/// What's open beside the list: an item of a type with a component, drawn by its trusted app's, or else its own.
+/// What's open beside the list: an item of a type with a component, drawn by its trusted app's, one of an untrusted
+/// app's by its page for it (client/<component>.html) in a frame of its own, where it keeps what an app of its own may
+/// do, or else its own.
 function Detail(props: { item: Item }) {
   const drawn = () => {
     const type = typeOf(props.item)
     return type?.component && type.trusted ? type : undefined
   }
+  const framed = () => {
+    const type = typeOf(props.item)
+    return type?.component && !type.trusted ? `${type.app}/client/${type.component}.html#${encodeURIComponent(shown(props.item))}` : undefined
+  }
   return (
-    <Show when={drawn()} keyed fallback={<ItemScreen item={props.item} />}>
+    <Show when={drawn()} keyed fallback={<Show when={framed()} keyed fallback={<ItemScreen item={props.item} />}>{(src) => <Frame src={src} subject={whose()} title={shown(props.item)} style={{ flexGrow: 1, alignSelf: "stretch" }} />}</Show>}>
       {(type) => (
         <Errored fallback={(error) => <Problem heading={`Can't show ${shown(props.item)}`} text={error() as Error} />}>
           <Loading fallback={<Skeleton rows={4} />}>
