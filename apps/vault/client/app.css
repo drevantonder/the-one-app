@@ -1,4 +1,4 @@
-/* What a request says of itself, above what's typed for it. */
+/* What a screen says of a part of it, above that part. */
 .about {
   margin: 0;
   color: var(--muted-foreground);
@@ -9,10 +9,6 @@
   width: 2rem;
   height: 2rem;
   border-radius: 22.5%;
-}
-/* Adding an item of a section's kind, under it. */
-.more {
-  padding-top: 0.75rem;
 }
 /* The state an item's app says it's in: a spinner or a dot, then what's under way or why, which wraps rather than
    be cut short on a phone. */
@@ -41,4 +37,94 @@
   height: 0.5rem;
   border-radius: 50%;
   background: var(--warning);
+}
+/* The sidebar, then what it picked: on a phone one at a time, the sidebar first, as Passwords on iPhone; on a
+   computer side by side, the sidebar a narrow column of its own, and what it picked splitting the rest into the list
+   and the item where there's room (the UI library's Split), so three columns, or two where it's narrow. */
+.vault {
+  display: grid;
+  height: 100dvh;
+}
+.vault > :is(.sidebar, .content) {
+  grid-area: 1 / 1;
+  min-width: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  background: var(--background);
+}
+.vault > .sidebar {
+  --row-current: none;
+}
+.vault > .content,
+.vault[data-place] > .sidebar {
+  visibility: hidden;
+}
+.vault[data-place] > .content {
+  visibility: visible;
+}
+@media (min-width: 40rem) {
+  .vault {
+    grid-template-columns: 15rem minmax(0, 1fr);
+  }
+  .vault > :is(.sidebar, .content),
+  .vault[data-place] > .sidebar {
+    grid-area: auto;
+    visibility: visible;
+  }
+  .vault > .sidebar {
+    --row-current: initial;
+    background: var(--sidebar);
+    border-inline-end: 1px solid var(--border);
+  }
+}
+/* How many of a kind there are, and how many requests wait: a red badge, as a waiting count is on iOS. */
+.count {
+  color: var(--muted-foreground);
+}
+.badge {
+  min-width: 1.25rem;
+  padding: 0 0.375rem;
+  border-radius: 999px;
+  background: var(--destructive);
+  color: #fff;
+  font-size: var(--text-sm);
+  font-weight: 600;
+  text-align: center;
+}
+/* An item's picture: its app's icon, or its first letter on a colour its name picks, as Passwords' tiles are. */
+.tile {
+  display: grid;
+  place-items: center;
+  width: 2rem;
+  height: 2rem;
+  border-radius: 22.5%;
+  background: oklch(0.55 0.13 calc(var(--hue) * 1deg));
+  color: #fff;
+  font-weight: 600;
+}
+/* An item's screen starts with its picture beside its name. */
+.titled {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.625rem;
+  min-width: 0;
+}
+/* A field's value at the end of its row: a secret one as dots, never shown. */
+.value {
+  overflow-wrap: anywhere;
+}
+.dots {
+  letter-spacing: 0.1em;
+  color: var(--muted-foreground);
+}
+/* A request's alert: what's picked and typed for it, then why it couldn't be allowed, if it couldn't. */
+.ui-dialog.alert.request h2 {
+  text-align: center;
+}
+.ui-dialog.alert.request .panel > p {
+  text-align: center;
+}
+.ui-dialog.alert.request .problem {
+  color: var(--destructive);
+  text-align: start;
 }

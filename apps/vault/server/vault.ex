@@ -76,7 +76,9 @@ defmodule Vault do
     "alter table sign_ins add column began text",
     "alter table sign_ins add column apps text",
     "alter table sign_ins add column ended text",
-    "alter table sign_ins add column ending text"
+    "alter table sign_ins add column ending text",
+    # The agent that asked, by its name, where an agent did.
+    "alter table requests add column by text"
   ]
 
   # Where a sign-in to an outside service is. It's `started` as the link is given, and kept by its `state` with where
@@ -216,13 +218,22 @@ defmodule Vault do
                   title: %{type: "string"},
                   fields: %{type: "array", items: %{type: "object"}},
                   hosts: %{type: "array", items: %{type: "string"}},
-                  app: %{type: ["string", "null"]},
+                  app: %{
+                    type: ["object", "null"],
+                    description: "The app it's for, `name` and `title`, or null for agents",
+                    properties: %{name: %{type: "string"}, title: %{type: "string"}}
+                  },
+                  by: %{type: ["string", "null"], description: "The agent that asked, by its name, where one did"},
                   why: %{type: ["string", "null"]}
                 },
-                required: ["id", "title", "fields", "hosts", "app", "why"]
+                required: ["id", "title", "fields", "hosts", "app", "by", "why"]
               }
             },
-            apps: %{type: "array", items: %{type: "string"}, description: "The apps that use the Vault"},
+            apps: %{
+              type: "array",
+              description: "The apps that use the Vault: `name`, which its tools start with, and `title`, as a person reads it",
+              items: %{type: "object", properties: %{name: %{type: "string"}, title: %{type: "string"}}, required: ["name", "title"]}
+            },
             types: %{
               type: "array",
               description: "The kinds of item apps keep here (`vault.types`)",
@@ -984,11 +995,8 @@ defmodule Vault do
     types = types(call)
 
     use_it =
-      Enum.sort(
-        for {name, version} <- Apps.running(call.subject),
-            is_map_key(version.requires, "vault"),
-            do: name
-      )
+      for({name, version} <- Apps.running(call.subject), is_map_key(version.requires, "vault"), do: %{name: name, title: version.title || name})
+      |> Enum.sort_by(&String.downcase(&1.title))
 
     items =
       for item <- Enum.sort_by(everything(call, db), &String.downcase(&1["name"])) do
@@ -1020,7 +1028,7 @@ defmodule Vault do
       end
 
     waiting =
-      "select id, title, fields, hosts, app, why from requests where state = 'waiting' and at > ? order by at"
+      "select id, title, fields, hosts, app, by, why from requests where state = 'waiting' and at > ? order by at"
 
     requests =
       transaction(call, db, fn d ->
@@ -1030,7 +1038,8 @@ defmodule Vault do
             title: request["title"],
             fields: JSON.decode!(request["fields"]),
             hosts: JSON.decode!(request["hosts"]),
-            app: request["app"] && named(names, request["app"]),
+            app: request["app"] && %{name: named(names, request["app"]), title: title(call, request["app"])},
+            by: request["by"],
             why: request["why"]
           }
         end
@@ -1163,13 +1172,14 @@ defmodule Vault do
     transaction(call, db, fn d ->
       query(
         d,
-        "insert into requests (id, title, fields, hosts, app, why, state, at) values (?, ?, ?, ?, ?, ?, 'waiting', ?)",
+        "insert into requests (id, title, fields, hosts, app, by, why, state, at) values (?, ?, ?, ?, ?, ?, ?, 'waiting', ?)",
         [
           id,
           title,
           JSON.encode!(fields),
           JSON.encode!(hosts!(Map.get(inputs, "hosts", []))),
           app,
+          with(%{agent: agent} <- began(call), do: agent, else: (_ -> nil)),
           inputs["why"],
           now()
         ]
