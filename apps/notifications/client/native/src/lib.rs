@@ -312,10 +312,10 @@ async fn allowed<R: Runtime>(notifications: &tauri_plugin_notifications::Notific
 /// and says which token that was.
 #[cfg(any(target_os = "android", target_os = "ios"))]
 async fn register<R: Runtime>(notifications: &tauri_plugin_notifications::Notifications<R>, client: &Client) -> Result<String, String> {
-    let (via, name) = if cfg!(target_os = "ios") { ("apns", "iPhone") } else { ("fcm", "Android phone") };
+    let via = if cfg!(target_os = "ios") { "apns" } else { "fcm" };
     let token = notifications.register_for_push_notifications().await.map_err(|error| error.to_string())?;
     let register =
-        json!({"name": "notifications_register", "arguments": {"via": via, "token": token, "name": name, "key": key(client)}});
+        json!({"name": "notifications_register", "arguments": {"via": via, "token": token, "key": key(client)}});
     let response = client.request("tools/call", register).await.map_err(|error| format!("{error:#}"))?;
     if response["isError"] == true {
         return Err(response["content"][0]["text"].as_str().unwrap_or("The network didn't take it.").to_owned());
