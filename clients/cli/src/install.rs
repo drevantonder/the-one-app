@@ -249,10 +249,13 @@ async fn built(client: &Client, of: &str, name: &str, app: &Path) -> Result<()> 
     if !app.join("server/nif").is_dir() {
         return Ok(());
     }
-    let published: Value = fs::read_to_string(app.join("server/checksums.json"))
-        .ok()
-        .and_then(|text| serde_json::from_str(&text).ok())
-        .unwrap_or_default();
+    let checksums = app.join("server/checksums.json");
+    let published: Value = match fs::read_to_string(&checksums) {
+        Ok(text) => serde_json::from_str(&text).with_context(|| format!("{} isn't JSON", checksums.display()))?,
+        // An app whose NIF nobody has published has no such file yet: only what's built here counts.
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => Value::Null,
+        Err(error) => return Err(error).with_context(|| format!("{} can't be read", checksums.display())),
+    };
     let builds: Value = serde_json::from_str(&call(client, Some(of), "builds", json!({})).await?)?;
     let mut kinds: Vec<String> = builds["servers"]
         .as_array()
