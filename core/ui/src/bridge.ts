@@ -74,6 +74,14 @@ const ask = <Result>(method: string, params: object = {}) => new Promise<Result>
 const [connected, setConnected] = createSignal<Connection>("online")
 const [updatable, setUpdatable] = createSignal(false)
 
+const [shown, setShown] = createSignal(document.visibilityState === "visible")
+document.addEventListener("visibilitychange", () => setShown(document.visibilityState === "visible"))
+
+/// `createEffect(visible, (now, was) => now && was === false && refresh(phone))`: whether this page is shown, as it
+/// changes: not while its app is in the background or its person is in another app, as Settings. For what's asked
+/// again once they're back.
+export const visible = (): boolean => shown()
+
 /// `<Button disabled={connection() === "offline"}>Send</Button>`: whether this device reaches its network now, as it
 /// changes: `"online"`, `"connecting"` as it opens, `"offline"`, or `"reconnecting"` once it has lost it. For what can't be done without it: what was answered stays
 /// shown either way, and the client says it's offline itself. A client that doesn't say is `"online"`.

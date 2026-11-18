@@ -83,6 +83,11 @@ export const call: typeof Strict.call = async (tool, inputs = {}, { subject } = 
   return text
 }
 
+export const client = (async (change: Strict.ClientChange = {}) => {
+  await greeted
+  return ask("one/client", change)
+}) as typeof Strict.client
+
 export const changed: typeof Strict.changed = (listener) => {
   listeners.add(listener)
   return () => void listeners.delete(listener)
@@ -282,6 +287,7 @@ export const Steps = later("Steps") as typeof Strict.Steps
 export const Field = later("Field") as typeof Strict.Field
 export const Checkbox = later("Checkbox") as typeof Strict.Checkbox
 export const Switch = later("Switch") as typeof Strict.Switch
+export const LiveScreen = later("LiveScreen") as typeof Strict.LiveScreen
 export const Sheet = later("Sheet") as typeof Strict.Sheet
 export const Tabs = { Root: later("Tabs"), List: later("Tabs"), Trigger: later("Tabs"), Content: later("Tabs"), Indicator: later("Tabs") } as typeof Strict.Tabs
 export const toast = later("toast") as typeof Strict.toast
@@ -293,3 +299,4 @@ export const share = later("share") as typeof Strict.share
 export const seen = later("seen") as typeof Strict.seen
 export const haptic: typeof Strict.haptic = () => {}
 export const connection: typeof Strict.connection = () => connected()
+export const visible: typeof Strict.visible = () => true

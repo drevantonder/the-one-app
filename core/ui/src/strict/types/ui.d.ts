@@ -119,6 +119,10 @@ export type ChoiceProps = {
 export declare function Checkbox(props: ChoiceProps): Element
 export declare function Switch(props: ChoiceProps): Element
 
+/** What a `LiveScreen` is told: its `action`, and what that action takes, as Computer Use's screens have them. */
+export type ScreenInputs = { action: string } & Record<string, unknown>
+export declare function LiveScreen(props: { label: string; screen?: (inputs: ScreenInputs) => Promise<unknown>; watch?: boolean; children?: Element }): Element
+
 export declare function Sheet(props: { heading?: Element; open?: boolean; onClose?: () => void; children?: Element }): Element
 
 export declare const Menu: {
@@ -154,3 +158,31 @@ export declare function share(text: string): Promise<"shared" | "copied" | undef
 export declare function seen(at: string | number | Date): string
 export declare function haptic(kind: "light" | "medium" | "heavy" | "rigid" | "soft" | "selection" | "success" | "warning" | "error"): void
 export declare function connection(): "connecting" | "online" | "offline" | "reconnecting"
+/** Whether this page is shown, as it changes: not while its person is in another app, as their device's Settings. */
+export declare function visible(): boolean
+
+/** What `client()` answers: what this device is, and what it can do that an app asks of it. */
+export type Client = {
+  device: string
+  network?: string
+  build: string
+  server?: string
+  push?: { state: "notAsked" | "denied" | "registering" | "registered" | "homeScreen" } | { state: "failed"; why: string }
+  computerUse?: { on: boolean }
+  theme: "light" | "dark" | null
+  pinsShortcuts?: boolean
+  settings?: boolean
+  launcher?: boolean
+}
+/** What `client(change)` changes. */
+export type ClientChange = {
+  theme?: "light" | "dark" | null
+  statusBar?: boolean
+  leave?: boolean
+  serve?: boolean
+  update?: boolean
+  push?: boolean
+  settings?: "accessibility" | "app"
+}
+export declare function client(): Promise<Client>
+export declare function client(change: ClientChange): Promise<{ message: string }>
