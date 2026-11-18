@@ -1,7 +1,6 @@
 // Computer Use: the screens your agents can use, and one of them as it is now, with who last used it and for what.
-import { createMemo, createSignal, Errored, For, Loading, refresh, Show } from "solid-js"
-import { render } from "@solidjs/web"
-import { Button, call, changed, client, Empty, List, LiveScreen, Problem, Row, Screen, Section, Skeleton, Split } from "ui"
+import { createEffect, createMemo, createSignal, Errored, For, Loading, refresh, Show } from "solid-js"
+import { Button, call, changed, client, Empty, List, LiveScreen, Problem, render, Row, Screen, Section, Skeleton, Split, visible } from "ui"
 
 /** A screen agents can use, as `computer-use_screens` answers it. */
 interface AgentScreen {
@@ -60,8 +59,9 @@ function Detail(props: { screen: AgentScreen }) {
 function ThisPhone() {
   const phone = createMemo(() => client().then(({ computerUse }) => computerUse))
   // Its person comes back from Settings to here.
-  const back = () => document.visibilityState === "visible" && refresh(phone)
-  document.addEventListener("visibilitychange", back)
+  createEffect(visible, (now, was) => {
+    if (now && was === false) refresh(phone)
+  })
   return (
     <Loading>
       <Show when={phone() && !phone()!.on}>
@@ -106,4 +106,4 @@ function App() {
   )
 }
 
-render(() => <App />, document.body)
+render(() => <App />)
