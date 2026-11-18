@@ -2,22 +2,36 @@
 // the key it's reached by). The server signs the same bytes in `core/server/lib/one_core/edge.ex`, and its NIF in
 // `core/server/nif/one_core_iroh/src/outside.rs`.
 
-export const hex = {
-  encode: (bytes: Uint8Array) => Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join(""),
-  decode: (text: string) => Uint8Array.from(text.match(/../g) ?? [], (byte) => parseInt(byte, 16)),
-};
+import { bytesToHex, hexToBytes } from "@noble/hashes/utils.js";
+
+export const hex = { encode: bytesToHex, decode: hexToBytes };
+
+/** The network's own prefix. A server on its list acts for the network, and reaches every user's and group's blobs. */
+export const NETWORK = "network/";
 
 export const isKey = (key: unknown): key is string => typeof key === "string" && /^[0-9a-f]{64}$/.test(key);
 
 const utf8 = new TextEncoder();
+
+/**
+ * The keys that have signed something, imported, so a key that asks again isn't imported again. A key is kept only
+ * once what it signed checked out, and the list starts again when it's long: anyone can make keys.
+ */
+const imported = new Map<string, CryptoKey>();
+const KEPT = 1000;
 
 /** Whether `signature` (hex) is `key`'s (hex) over `message` (text or bytes). */
 export async function signedBy(key: unknown, signature: unknown, message: string | Uint8Array): Promise<boolean> {
   if (!isKey(key) || typeof signature !== "string" || !/^[0-9a-f]{128}$/.test(signature)) return false;
   const bytes = typeof message === "string" ? utf8.encode(message) : message;
   try {
-    const imported = await crypto.subtle.importKey("raw", hex.decode(key), "Ed25519", false, ["verify"]);
-    return await crypto.subtle.verify("Ed25519", imported, hex.decode(signature), bytes);
+    const verifying = imported.get(key) ?? (await crypto.subtle.importKey("raw", hex.decode(key), "Ed25519", false, ["verify"]));
+    const signed = await crypto.subtle.verify("Ed25519", verifying, hex.decode(signature), bytes);
+    if (signed) {
+      if (imported.size >= KEPT) imported.clear();
+      imported.set(key, verifying);
+    }
+    return signed;
   } catch {
     // Not a point on the curve: nobody's key.
     return false;

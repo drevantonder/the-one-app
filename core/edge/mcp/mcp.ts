@@ -6,7 +6,8 @@
 // One of the network's own devices signs what it asks with its key, which is checked here. Anyone else has signed in,
 // and who they are is the app's to say that signs people in: it's bound here as WHO, by `edge.js`, and asked
 // `who(request)` (`apps/sign-in/edge/worker.ts`). With no such app, only devices signing with their key come in.
-import { verifiedKey, unsigned } from "../ask.ts";
+import { verifiedKey, unsigned, hex, NETWORK } from "../ask.ts";
+import { randomBytes } from "@noble/hashes/utils.js";
 import rules from "../../server/priv/rules.md";
 
 /** Who a request is from, as the app that signs people in says. */
@@ -31,7 +32,6 @@ type Env = McpEnv & {
 const refuse = (status: number, why: string) => Response.json({ jsonrpc: "2.0", id: null, error: { code: -32000, message: why } }, { status });
 
 /** A server on this list acts for the network, and so for everyone in it. */
-const NETWORK = "network/";
 /** A sharing link starts with whose it leads to, as their prefix: that's whose servers answer its holder. */
 const LEADS_TO = /^(?:(?:users|groups)\/[^/]+\/|network\/)/;
 /** The JSON-RPC error a server answers a device that's nobody's (`OneCore.Mcp`). */
@@ -248,15 +248,19 @@ function streamed(forwarded: Promise<{ answer: string } | null>, id: unknown, to
   const stream = writable.getWriter();
   const send = (message: string) => stream.write(new TextEncoder().encode(`event: message\ndata: ${message}\n\n`));
   const progress = () => send(JSON.stringify({ jsonrpc: "2.0", method: "notifications/progress", params: { progressToken: token, progress: ran++ } }));
+  // A stream that can't be written to has ended, and the write of the answer below says so.
   const telling = setInterval(() => progress().catch(() => clearInterval(telling)), PROGRESS);
   (async () => {
-    await progress();
-    const reached = await forwarded;
-    clearInterval(telling);
-    const none = { jsonrpc: "2.0", id, error: { code: -32000, message: "None of this network's servers answered. Try again once one is on." } };
-    await send(reached?.answer ?? JSON.stringify(none));
-    await stream.close();
-  })().catch(() => clearInterval(telling));
+    try {
+      await progress();
+      const reached = await forwarded;
+      const none = { jsonrpc: "2.0", id, error: { code: -32000, message: "None of this network's servers answered. Try again once one is on." } };
+      await send(reached?.answer ?? JSON.stringify(none));
+    } finally {
+      clearInterval(telling);
+      await stream.close();
+    }
+  })();
   return new Response(readable, { headers: { "content-type": "text/event-stream", "cache-control": "no-store", "x-accel-buffering": "no" } });
 }
 
@@ -286,7 +290,7 @@ function mismatched(headers: Headers, call: Call) {
  * (`apps/telemetry/edge/worker.ts`), and carried to the server.
  */
 function traced(parent: unknown) {
-  const random = (bytes: number) => Array.from(crypto.getRandomValues(new Uint8Array(bytes)), (byte) => byte.toString(16).padStart(2, "0")).join("");
+  const random = (bytes: number) => hex.encode(randomBytes(bytes));
   const under = typeof parent === "string" ? /^00-([0-9a-f]{32})-[0-9a-f]{16}-[0-9a-f]{2}$/.exec(parent) : null;
   const traceparent = `00-${under?.[1] ?? random(16)}-${random(8)}-01`;
   console.log(JSON.stringify({ telemetry: { traceparent, parent: under?.[0] } }));

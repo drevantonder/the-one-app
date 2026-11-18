@@ -10,7 +10,7 @@
 // given only `Network` or `Own`: nothing but an ask signed by a server's key reaches the rest.
 import { DurableObject, WorkerEntrypoint } from "cloudflare:workers";
 import { AwsClient } from "aws4fetch";
-import { verifiedKey, unsigned, isKey, signedBy } from "../ask.ts";
+import { verifiedKey, unsigned, isKey, signedBy, NETWORK } from "../ask.ts";
 
 /** How long a signed request works for, in seconds. */
 const SIGNED_FOR = 60;
@@ -24,8 +24,6 @@ const KEPT = 30_000;
  * presigner to sign the write (`sign`), which is how the presigner hears that it's changing.
  */
 const LIST = /^(?:(?:users|groups)\/[^/]+\/|network\/)servers$/;
-/** The network's own prefix. A server on its list acts for the network, and reaches every user's and group's blobs. */
-const NETWORK = "network/";
 /**
  * A server's own blobs are under its key. It reaches them, and the network's other servers read them: that's how
  * they learn where it is.
@@ -111,8 +109,8 @@ export default {
 
 /** Who the network's own are, for another piece of the edge. */
 export class Network extends WorkerEntrypoint<PresignerEnv> {
-  /** The keys of the servers that act for a user or group, or for the network, by its prefix. */
-  servers(of: string | null): Promise<string[]> {
+  /** The keys of the servers that act for a user or group, by its prefix, or for the network, with none. */
+  servers(of: string | null = NETWORK): Promise<string[]> {
     return servers(reader(this.env), of);
   }
 
@@ -375,6 +373,8 @@ async function list(env: PresignerEnv, prefix: string): Promise<string[] | null>
   return got.json();
 }
 
+/** One client for the isolate, which keeps the signing key it derives for each day. */
+let client: AwsClient | undefined;
 function bucket({ ACCESS_KEY_ID: accessKeyId, SECRET_ACCESS_KEY: secretAccessKey }: PresignerEnv) {
-  return new AwsClient({ accessKeyId, secretAccessKey, service: "s3", region: "auto" });
+  return (client ??= new AwsClient({ accessKeyId, secretAccessKey, service: "s3", region: "auto" }));
 }
