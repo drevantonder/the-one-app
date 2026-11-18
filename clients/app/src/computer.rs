@@ -788,13 +788,21 @@ fn keys(window: &Window) {
     });
 }
 
+/// What a Mac app's About says of it: the build that's running, as `one --version` says it, `0.26.90 (3810.a2b17a3b510d)`,
+/// rather than its bundle's, which an update that replaces the program alone leaves as it was.
+#[cfg(target_os = "macos")]
+pub(crate) fn about() -> muda::AboutMetadata {
+    let (version, build) = ::client::BUILD.split_once('+').unwrap_or((::client::BUILD, ""));
+    muda::AboutMetadata { short_version: Some(version.to_owned()), version: Some(build.to_owned()), ..Default::default() }
+}
+
 /// A Mac app's menu bar, which shows while the launcher has the keyboard: its app menu (About, Quit) and Edit, which
 /// a web view's copy and paste keys need.
 #[cfg(target_os = "macos")]
 fn menu() -> muda::Menu {
     use muda::{Menu, PredefinedMenuItem, Submenu};
     let menu = Menu::new();
-    let app = Submenu::with_items(crate::page::NAME, true, &[&PredefinedMenuItem::about(None, None), &PredefinedMenuItem::separator(), &PredefinedMenuItem::quit(None)]);
+    let app = Submenu::with_items(crate::page::NAME, true, &[&PredefinedMenuItem::about(None, Some(about())), &PredefinedMenuItem::separator(), &PredefinedMenuItem::quit(None)]);
     let edit = Submenu::with_items(
         "Edit",
         true,

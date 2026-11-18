@@ -567,7 +567,7 @@ fn menu(name: &str, proxy: EventLoopProxy<Told>) -> muda::Menu {
         name,
         true,
         &[
-            &PredefinedMenuItem::about(None, None),
+            &PredefinedMenuItem::about(None, Some(crate::computer::about())),
             &PredefinedMenuItem::separator(),
             &PredefinedMenuItem::hide(None),
             &PredefinedMenuItem::hide_others(None),
