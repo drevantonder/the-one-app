@@ -87,6 +87,8 @@ export const safeArea: typeof Strict.safeArea = () => insets()
 export const viewport: typeof Strict.viewport = () => size()
 /** A native host says nothing yet of which way a page's words run, so they run left to right. */
 export const direction: typeof Strict.direction = () => "ltr"
+/** A native host on a computer is pointed at by a mouse; a phone's says so once it draws natively. */
+export const touch = () => false
 export const reducedMotion: typeof Strict.reducedMotion = () => still()
 export const sizeChanged: typeof Strict.sizeChanged = async (size) => (await greeted, host?.post({ jsonrpc: "2.0", method: "ui/notifications/size-changed", params: size }))
 export const pinShortcut: typeof Strict.pinShortcut = async (entrypoint) => (await greeted, ask("one/pin-shortcut", { entrypoint }))

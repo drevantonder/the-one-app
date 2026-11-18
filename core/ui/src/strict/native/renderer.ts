@@ -50,7 +50,7 @@ function node(type: Type, value?: string): Node {
   return made
 }
 
-const types = new Set<Type>(["box", "scroll", "text", "image", "path", "input"])
+const types = new Set<Type>(["box", "scroll", "text", "image", "path", "input", "picker"])
 
 export const { render: mount, effect, memo, createComponent, createElement, createTextNode, insertNode, insert, spread, setProp, mergeProps, applyRef, ref } = createRenderer<Node>({
   createElement(tag) {

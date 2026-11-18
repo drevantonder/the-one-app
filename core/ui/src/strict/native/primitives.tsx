@@ -6,6 +6,7 @@ import { createElement, detach, insert, insertNode, render as draw, root, spread
 import { layer } from "../layer.ts"
 import type { Type } from "../protocol.ts"
 import type * as Strict from "../types/ui.d.ts"
+import type { PickerProps } from "../primitives.tsx"
 
 /** A primitive: a node of its type, with its props. */
 const primitive = (type: Exclude<Type, "raw-text">) => (props: object) => {
@@ -29,6 +30,9 @@ export const EditableText: typeof Strict.EditableText = (props) =>
       },
     }),
   )
+
+/** The device's own picker (../protocol.ts's `picker`), which the UI library's Select draws under a finger. */
+export const Picker = primitive("picker") as (props: PickerProps) => Element
 
 export const render: typeof Strict.render = (code) => draw(code as never)
 

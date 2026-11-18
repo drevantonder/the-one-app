@@ -1177,6 +1177,15 @@ body:has(> .ui-strict-box) {
   overflow-y: auto;
   scrollbar-width: none;
 }
+/* The device's own picker, see-through over what's drawn under it, at 16px so an iPhone doesn't zoom into it. */
+.ui-strict-picker {
+  appearance: none;
+  margin: 0;
+  border: 0;
+  opacity: 0;
+  font-size: 16px;
+  cursor: pointer;
+}
 /* What turns or pulses while it's drawn (a style's `animationName`). */
 @keyframes ui-spin {
   to {

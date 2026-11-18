@@ -2,7 +2,7 @@
 // plain element with the semantic props the strict protocol has (protocol.ts). A native host draws
 // the same props from the ops Solid's universal renderer sends it. A primitive's `style` is styles (../styles.ts),
 // drawn by their classes, or, on a page written for version 1, one style object, drawn as inline CSS.
-import { createEffect, omit, onCleanup, onSettled } from "solid-js"
+import { createEffect, For, omit, onCleanup, onSettled } from "solid-js"
 import { Dynamic, Portal, render as mount, type JSX } from "@solidjs/web"
 import { layer } from "./layer.ts"
 import type { Action, Props, Version1Style } from "./protocol.ts"
@@ -29,6 +29,26 @@ export function Layer(props: { modal?: boolean; children?: JSX.Element }) {
         {props.children}
       </div>
     </Portal>
+  )
+}
+
+/** A picker's props: what can be chosen, the one that is, and what's told as another is chosen. */
+export interface PickerProps {
+  options: { value: string; label: string; disabled?: boolean }[]
+  value?: string
+  disabled?: boolean
+  "aria-label"?: string
+  onInput?: (event: { currentTarget: { value: string } }) => void
+  style?: Style
+}
+
+/// The device's own picker of one of a few, as a phone's wheel or sheet is (protocol.ts's `picker`): on the DOM a
+/// `<select>`, see-through over its box, which the browser opens as its own.
+export function Picker(props: PickerProps) {
+  return (
+    <select aria-label={props["aria-label"]} disabled={props.disabled} value={props.value ?? ""} onInput={(event) => props.onInput?.({ currentTarget: { value: event.currentTarget.value } })} {...drawn("ui-strict-picker", props.style)}>
+      <For each={props.options}>{(option) => <option value={option.value} disabled={option.disabled} selected={option.value === props.value}>{option.label}</option>}</For>
+    </select>
   )
 }
 

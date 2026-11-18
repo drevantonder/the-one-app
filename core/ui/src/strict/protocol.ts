@@ -34,8 +34,11 @@ export type Id = number
  *   unless its style says otherwise, and stroked with its `stroke`; its `viewBox` is stretched to its box, its stroke
  *   as wide however it's stretched. An icon, a chart's line or area.
  * - `input`: a text field, one line, or several with `multiline`, whose text is its editing state (`Editing`).
+ * - `picker`: the device's own way of choosing one of a few (`options`), as a phone's wheel or sheet is: see-through
+ *   over its box, so what's drawn under it shows, and pressed, it opens the device's picker, which sends `input` with
+ *   the `value` chosen. A page uses it where a finger points; a host with no picker of its own may draw none.
  * A `raw-text` outside a `text` is drawn as if in one. */
-export type Type = "box" | "scroll" | "text" | "image" | "path" | "input" | "raw-text"
+export type Type = "box" | "scroll" | "text" | "image" | "path" | "input" | "picker" | "raw-text"
 
 /** JS → host: what changed since the last update, in order, as one batch. The host draws once it has the batch. */
 export interface Update {
@@ -199,13 +202,16 @@ export interface Props {
   /** What the keyboard reaches by Tab, as the DOM's: `0` for something it reaches that it otherwise wouldn't, `-1`
    * for something focused only by a press. A press, an input and what has `onClick` are reached already. */
   tabindex?: 0 | -1
-  /** `raw-text`: its words. */
+  /** `raw-text`: its words; `picker`: the option chosen. */
   value?: string
   /** `input`: its editing state, as its app last set it. What the person does to it comes back as `input` events
    * ahead of this, which the host keeps until the app sets it again. */
   editing?: Editing
   /** `input`: what its action key does. One line's is `done` unless it says otherwise, several lines' `newline`. */
   action?: Action
+  /** `picker`: what can be chosen, each its value and what it says, and whether it can be. Its `value` is the one
+   * chosen. */
+  options?: { value: string; label: string; disabled?: boolean }[]
   /** `input`: what kind of text it takes, as an `<input type>`: which keyboard a phone shows, and `password` hides it. */
   type?: "text" | "search" | "email" | "url" | "tel" | "number" | "password"
   /** `input`: which keyboard a touch screen shows for it, as `inputmode`: `numeric` is digits alone. */

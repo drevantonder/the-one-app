@@ -2,8 +2,8 @@
 // on the DOM and on a native host.
 import { createSignal, For, Show } from "solid-js"
 import type { CollectionItem, ListCollection } from "@zag-js/collection"
-import { Box, Layer, Text } from "#primitives"
-import { viewport } from "#bridge"
+import { Box, Layer, Picker, Text } from "#primitives"
+import { touch, viewport } from "#bridge"
 import type { Keyed } from "./strict/primitives.tsx"
 import type { Located, Rect } from "./strict/types/ui.d.ts"
 import { Icon } from "./button.tsx"
@@ -12,8 +12,11 @@ import { styles } from "./styles.ts"
 import { tokens } from "./tokens.ts"
 
 const look = styles({
+  // Under a finger, the device's own picker, see-through over the face, which it opens.
+  native: { position: "absolute", top: 0, bottom: 0, start: 0, end: 0, width: "100%", height: "100%" },
   select: { minWidth: 0 },
   face: {
+    position: "relative",
     flexDirection: "row",
     alignItems: "center",
     gap: tokens.grid[2],
@@ -151,7 +154,7 @@ function SelectRoot<T extends CollectionItem>(props: SelectProps<T>) {
         aria-label={props["aria-label"] ?? field?.label()}
         aria-description={field?.message()}
         aria-invalid={field?.invalid() ? "true" : undefined}
-        onClick={(event: Located) => (open() ? setOpen(false) : show(event.currentTarget.getBoundingClientRect()))}
+        onClick={(event: Located) => !touch() && (open() ? setOpen(false) : show(event.currentTarget.getBoundingClientRect()))}
         onKeyDown={keyed}
         onBlur={() => setOpen(false)}
         style={[look.face, field?.invalid() && look.wrong, off() && look.off]}
@@ -160,6 +163,19 @@ function SelectRoot<T extends CollectionItem>(props: SelectProps<T>) {
         <Box style={look.caret}>
           <Icon name="caret-up-down" />
         </Box>
+        <Show when={touch()}>
+          <Picker
+            aria-label={props["aria-label"] ?? field?.label()}
+            disabled={off()}
+            value={chosen()[0]}
+            options={items().map((item) => ({ value: value(item), label: props.collection.stringifyItem(item) ?? "", disabled: itemOff(item) }))}
+            onInput={(event) => {
+              const item = items().find((one) => value(one) === event.currentTarget.value)
+              if (item) choose(item)
+            }}
+            style={look.native}
+          />
+        </Show>
       </Box>
       <Show when={at()}>
         {(face) => (

@@ -121,6 +121,11 @@ addEventListener("resize", () => setSize({ width: innerWidth, height: innerHeigh
 /// `viewport().width`: the window's size, in CSS pixels, as it changes, for what's laid out by hand.
 export const viewport = () => size()
 /// `direction()`: which way the page's words run, as its language has them: `rtl` for Arabic or Hebrew.
+/// `touch()`: whether what points at the page is a finger, as it changes: the device's own pickers are for it.
+const coarse = matchMedia("(pointer: coarse)")
+const [fingered, setFingered] = createSignal(coarse.matches)
+coarse.addEventListener("change", () => setFingered(coarse.matches))
+export const touch = () => fingered()
 export const direction = (): "ltr" | "rtl" => (getComputedStyle(document.documentElement).direction === "rtl" ? "rtl" : "ltr")
 
 const [still, setStill] = createSignal(reduced.matches)
