@@ -122,6 +122,14 @@ impl<P: Page> Discarding<P> {
         }
         // Out of focus or behind others, it's still there to see.
         if window.is_minimized() || !window.is_visible() {
+            // A Mac's WKWebView outlives wry's web view, its page and web content process with it, so its page is
+            // closed first, which ends that process, as Safari closes a tab's (`_close`).
+            #[cfg(target_os = "macos")]
+            if let Some(loaded) = &self.loaded {
+                use wry::WebViewExtMacOS;
+                let view = loaded.webview.webview();
+                let () = unsafe { objc2::msg_send![&*view, _close] };
+            }
             self.loaded = None;
             self.page.discarded();
         }
