@@ -847,12 +847,14 @@ byId("page-problem-button").addEventListener("click", () => {
 })
 
 /// Starts an app: its page loads in a frame of its own, behind what's showing until it's shown. A `fragment` is the
-/// place in its page a link names, which the app follows (its `hashchange`), open already or not.
+/// place in its page a link names, which the app follows (its `hashchange`), open already or not. An open one is
+/// taken there in place, with no step of its own in the window's history: one there would be the step the window's
+/// Back takes, rather than the one it made to show the app.
 /** @param {string} entrypoint @param {string} [subject] @param {string} [fragment] @returns {View} */
 function load(entrypoint, subject, fragment) {
   const at = key(entrypoint, subject)
   const opened = open.get(at)
-  if (opened && fragment) opened.frame.src = `${located(opened)}#${fragment}`
+  if (opened && fragment) /** @type {Window} */ (opened.frame.contentWindow).location.replace(`${located(opened)}#${fragment}`)
   if (opened) return opened
   if (!listed.has(subject)) list(subject)
   const place = { key: at, entrypoint, subject, host: host(entrypoint, subject) }
