@@ -38,7 +38,8 @@ defmodule AppStore do
         read_only: true,
         description: """
         Lists every app the network can install, as its Marketplace shows them: each one anyone in the network
-        deployed (`app`, its artifact, which `install` takes), then each the app directory lists that isn't
+        deployed (`app`, its artifact, which `install` takes), once, as its broadest copy, the one installed for the
+        most, with who it's installed for (`installed_for`), then each the app directory lists that isn't
         among them (`app` null, `source` its git repo, which `one install` takes once the skill installing-apps
         says it's checked). Each with what a person reads of it, its `category`, one of `categories`, and what it
         `requires`, each with why.
@@ -68,9 +69,15 @@ defmodule AppStore do
                   widgets: %{type: "array", description: "Each one's name and sizes"},
                   tools: %{type: "array", items: %{type: "string"}, description: "Its tools' names"},
                   trusted: %{type: ["boolean", "null"], description: "Whether it's trusted, or runs in a sandbox"},
+                  installed_for: %{
+                    type: "array",
+                    items: %{type: "string"},
+                    description: "Who it's installed for: users, groups and the network"
+                  },
                   requires: %{type: "array", items: requirement, description: "The apps it requires, each with why"}
                 },
-                required: ~w(name app source title icon subtitle about category entrypoints widgets tools trusted requires)
+                required:
+                  ~w(name app source title icon subtitle about category entrypoints widgets tools trusted installed_for requires)
               }
             }
           },
@@ -82,14 +89,23 @@ defmodule AppStore do
 
   @impl true
   def call("marketplace", _inputs, call) do
-    deployed = for app <- Call.deployed(call), app.icon != nil, do: app
+    # Who each is installed for, as its artifact says, read for every app at once.
+    deployed =
+      Call.deployed(call)
+      |> Enum.filter(& &1.icon)
+      |> Task.async_stream(&Map.put(&1, :installed_for, OneCore.Apps.Installed.in_use_for(&1.app)), max_concurrency: 16)
+      |> Enum.map(fn {:ok, app} -> app end)
+      # Each app once: copies of the same one (`OneCore.Apps.Store.same?/2`) show as the broadest.
+      |> Enum.group_by(&{Path.basename(&1.app), &1[:repo] || &1.app})
+      |> Enum.map(fn {_app, copies} -> Enum.max_by(copies, &breadth/1) end)
+
     titles = Map.new(deployed, &{Path.basename(&1.app), &1.title})
     title = &(titles[&1] || &1)
 
     here =
       for app <- deployed do
         app
-        |> Map.take([:app, :title, :icon, :subtitle, :about, :category, :entrypoints, :widgets, :tools, :trusted])
+        |> Map.take([:app, :title, :icon, :subtitle, :about, :category, :entrypoints, :widgets, :tools, :trusted, :installed_for])
         |> Map.merge(%{
           name: Path.basename(app.app),
           source: nil,
@@ -119,6 +135,7 @@ defmodule AppStore do
           widgets: app["widgets"] || [],
           tools: [],
           trusted: nil,
+          installed_for: [],
           requires: for(name <- app["requires"] || [], do: %{name: name, title: title.(name), why: nil})
         }
       end
@@ -128,6 +145,17 @@ defmodule AppStore do
       apps: Enum.sort_by(here ++ listed, &String.downcase(&1.title))
     }
   end
+
+  # How far a copy of an app reaches: the broadest who it's installed for, then whose it is, the network before a group
+  # and a group before a user.
+  defp breadth(app) do
+    whose = OneCore.Apps.Store.whose(app.app)
+    {Enum.max(Enum.map([whose | app.installed_for], &reach/1)), reach(whose)}
+  end
+
+  defp reach("network"), do: 2
+  defp reach("groups/" <> _), do: 1
+  defp reach(_user), do: 0
 
   # The directory's apps. It's a website outside the network, which may not answer: then the Marketplace lists only
   # the network's own.
