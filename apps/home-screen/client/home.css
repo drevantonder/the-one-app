@@ -786,6 +786,10 @@ body {
   scale: calc(1.12 * var(--pages-scale));
   filter: drop-shadow(0 10px 18px oklch(0 0 0 / 0.22));
 }
+/* A widget lifts less than an icon, as an iPhone's does: it's large already. */
+.carried[data-size] {
+  scale: calc(1.05 * var(--pages-scale));
+}
 .carried .ui-widget {
   height: 100%;
 }

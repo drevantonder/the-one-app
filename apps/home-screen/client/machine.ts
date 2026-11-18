@@ -7,7 +7,7 @@
 //     step(owner): on Home only.   list ─pick─► another owner: on Home only
 //   open ─► category (App Library), as now
 //   holding (an app in the App Library) ─lift─► editing.dragging, with Home brought forward on the last owner
-//   editing.dragging: over · flip(page ±1) · flip(owner ±1) · stack · drop ─► still | asking | refused
+//   editing.dragging: over (rested a moment at a place) · flip(page ±1) · flip(owner ±1) · stack · drop ─► still | asking | refused
 //     flip: held at an edge, or a second finger's swipe, which pages as a swipe does while the first holds what's
 //     carried. stack: a second finger's tap on another app, which joins what's carried, and lands after it as it ends
 //   asking ─install─► installing ─installed─► still (placed) · ─failed─► still (back, saying why) · ─cancel─► still (back)
@@ -69,6 +69,20 @@ export function pack<T>(items: T[], spans: (item: T) => [number, number] = () =>
 
 /// The cells an item of a page takes: an app one, a widget its size.
 export const spans = (item: Item): [number, number] => (item.widget ? (SPANS[item.size!] ?? [2, 2]) : [1, 1])
+
+/// Where among a page's `items` (what's carried not among them) `item` goes, carried with its top left at `column` and
+/// `row` (from 1, in cells, between them as it moves): the place whose packing puts it nearest there, on that page.
+/// Each place keeps the rest in their order, so they keep their reading order wherever it goes, and it settles in a
+/// place that fits, as an iPhone's does.
+export function nearest(items: Item[], item: Item, column: number, row: number) {
+  let best = { index: items.length, distance: Infinity }
+  for (let index = 0; index <= items.length; index++) {
+    const placed = pack(items.toSpliced(index, 0, item), spans)[0].find((one) => one.item === item)
+    const distance = placed ? Math.hypot(placed.column - column, placed.row - row) : Infinity
+    if (distance < best.distance) best = { index, distance }
+  }
+  return best.index
+}
 
 /** A Home page as it's edited: what's on it, and whether it's hidden. */
 export interface Page {
@@ -173,7 +187,7 @@ export type Event =
   | { type: "edit"; editing: Editing }
   /** An item, or an app from the App Library with the owner's pages to edit, lifted to be moved. */
   | { type: "lift"; held: Held; editing?: Editing }
-  /** What's lifted is over a place: on the page shown, before the item at `index`, or last. */
+  /** What's lifted rested over a place: on the page shown, at `index` among the rest of its items (`nearest`). */
   | { type: "over"; page: number; index: number }
   /** What's lifted was held at the side of the screen: it goes to the page past it, on the next screenful or the
    * previous, a new one past the last. Or at its top or bottom: it goes to the previous or the next owner's pages,

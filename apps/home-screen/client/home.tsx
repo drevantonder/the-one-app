@@ -19,7 +19,7 @@ import { Button, call, changed, confirm, covers, Empty, haptic, Icon, List, Menu
 import "./home.css"
 import { give, glide, jump, settle, speed, spring, type Spring, stop } from "./pager.ts"
 import { offset, reflow } from "./reflow.ts"
-import { type At, carries, type Drop, type Editing, fitted, type Held, type Kind, machine, pack, type Page, type Placed, shown, spans } from "./machine.ts"
+import { type At, carries, COLUMNS, type Drop, type Editing, fitted, type Held, type Kind, machine, nearest, pack, type Page, type Placed, ROWS, shown, spans } from "./machine.ts"
 import type { Entrypoint, Category, Item, Listed, Pages, Size, Widget as WidgetItem } from "./types.ts"
 
 const SIZES: Record<Size, string> = { "2x2": "Small", "4x2": "Medium", "4x4": "Large" }
@@ -128,6 +128,8 @@ const [kept, setKept] = createSignal<Editing[]>([])
 // long as it takes to hold (home.css's `--hold`).
 const HOLD = 450
 const LONGER = 800
+// What's carried makes room where it rests this long, as an iPhone's does, not at every place it passes.
+const REST = 150
 
 /// A widget on a page: what its app's tool answers, drawn, and asked again each minute it's in view. Pressing it
 /// opens its app.
@@ -192,9 +194,11 @@ function holds(held: () => Held | undefined, arranges: () => boolean, menu = arr
       removeEventListener("pointerup", up)
       removeEventListener("pointercancel", clear)
     }
+    // Where it is in the window, at its own size around its middle: as it jiggles, the box around it is larger.
     const rect = () => {
-      const { x, y, width, height } = element.getBoundingClientRect()
-      return { x, y, width, height }
+      const box = element.getBoundingClientRect()
+      const [width, height] = [element.offsetWidth * scale, element.offsetHeight * scale]
+      return { x: box.x + (box.width - width) / 2, y: box.y + (box.height - height) / 2, width, height }
     }
     // `at` is where the pointer is now: a press held still a while longer lifts with no move to say so.
     const lift = (at: PointerEvent, from: PointerEvent) => {
@@ -291,11 +295,8 @@ function registered<K extends string | number>(where: Record<K, HTMLElement>, ke
 /// dropped where it isn't installed waits there, dimmed, while it's asked about, and shows its progress as it installs.
 function HomePage(props: { owner: Owner; index: number; page: number; placed: Placed<Cell>[]; small?: boolean }) {
   const editingHere = () => !props.small && editingOwner(props.index)
-  const at = (cell: Cell) => {
-    const held = state().context.held
-    return editingHere() && held?.page === props.page && held.index === cell.index
-  }
-  const lifted = (cell: Cell) => at(cell) && state().matches({ editing: "dragging" })
+  // What's carried leaves its place empty, where it'll land, wherever that is as the rest make room.
+  const lifted = (cell: Cell) => editingHere() && state().matches({ editing: "dragging" }) && carries(state().context.held, cell.item)
   // Dropped where it isn't installed, what was stacked on it waits with it.
   const waiting = (cell: Cell) => editingHere() && carries(state().context.held, cell.item) && (state().matches({ editing: "asking" }) || state().matches({ editing: "installing" }) || state().matches({ editing: "refused" }))
   const arranges = () => props.owner.arranges && !props.small
@@ -1413,7 +1414,15 @@ function HomeScreen(props: { owners: Owner[] }) {
       const item = held.item!
       const follow = (x: number, y: number) => (copy.style.translate = `${x - grab.x}px ${y - grab.y}px`)
       follow(pointer.x, pointer.y)
-      copy.innerHTML = item.widget ? `<div class="ui-widget" data-size="${item.size}"></div>` : `<span class="tile"><span class="icon"><img src="${(item as Entrypoint).icon}" alt=""></span><span>${(item as Entrypoint).name}</span></span>`
+      // It's what was lifted, as it's drawn, its widget's content and all, less its ⊖; an app from the App Library,
+      // which isn't drawn on a page yet, its icon and name.
+      const lifted = root.querySelector<HTMLElement>(".strip .cell.lifted")
+      if (lifted) {
+        copy.append(...[...lifted.childNodes].map((node) => node.cloneNode(true)))
+        copy.querySelector(".minus")?.remove()
+        if (item.size) copy.dataset.size = item.size
+        copy.style.setProperty("--tile", getComputedStyle(lifted).getPropertyValue("--tile"))
+      } else copy.innerHTML = `<span class="tile"><span class="icon"><img src="${(item as Entrypoint).icon}" alt=""></span><span>${(item as Entrypoint).name}</span></span>`
       root.append(copy)
       if (!still.matches) copy.animate([{ scale: `${scale}`, filter: "drop-shadow(0 0 0 oklch(0 0 0 / 0))" }, {}], paced("settle"))
       haptic("medium")
@@ -1451,23 +1460,39 @@ function HomeScreen(props: { owners: Owner[] }) {
           side = now
           if (side) edge = setTimeout(turn, 600)
         }
-        if (!side) over(x, y)
+        if (side) clearTimeout(resting)
+        else over(x, y)
       }
-      // Over the place under the finger, while nothing's turning the pages under it: a second finger swiping them.
+      // The place it's over, once it has rested there a moment, as an iPhone's does, rather than at every point it
+      // passes: the place where the page's own packing would put it nearest where it's drawn, so the rest keep their
+      // order and it lands only where it fits. While a second finger swipes the pages under it, it waits for them.
+      let resting: ReturnType<typeof setTimeout> | undefined
+      let wanted = ""
       const over = (x: number, y: number) => {
         if (swiping()) return
-        const under = document.elementsFromPoint(x, y) as HTMLElement[]
-        const page = under.find((element) => element.dataset?.page !== undefined)
-        if (!page) return
-        // Over where each cell sits, not where it's drawn while it glides there, or one gliding past takes the place.
-        const cell = [...page.querySelectorAll<HTMLElement>(".cell[data-index]:not(.lifted)")].find((one) => {
-          const [box, by] = [one.getBoundingClientRect(), offset(one, scale)]
-          return x >= box.left - by.x && x < box.right - by.x && y >= box.top - by.y && y < box.bottom - by.y
-        })
-        const { held } = home.getSnapshot().context
-        const index = cell ? Number(cell.dataset.index) : Number.MAX_SAFE_INTEGER
-        const at = Number(page.dataset.page)
-        if (held && (at !== held.page || (cell && index !== held.index))) home.send({ type: "over", page: at, index })
+        const page = (document.elementsFromPoint(x, y) as HTMLElement[]).find((element) => element.dataset?.page !== undefined)
+        const grid = page?.querySelector<HTMLElement>(".grid")
+        const { editing, held } = home.getSnapshot().context
+        if (!grid || !editing || !held?.item) return
+        const at = Number(page!.dataset.page)
+        const items = editing.pages[shown(editing.pages)[at]]?.items.filter((one) => !carries(held, one)) ?? []
+        // Its top left, in the page's cells, from where it's drawn: the cells are a grid's tracks and gaps, drawn as
+        // much larger as the pages are.
+        const box = grid.getBoundingClientRect()
+        const style = getComputedStyle(grid)
+        const drawn = box.width / grid.offsetWidth
+        const [across, down] = [(box.width + parseFloat(style.columnGap) * drawn) / COLUMNS, (box.height + parseFloat(style.rowGap) * drawn) / ROWS]
+        const [left, top] = [x - grab.x + rect.x, y - grab.y + rect.y]
+        const index = nearest(items, held.item, (left - box.left) / across + 1, (top - box.top) / down + 1)
+        const place = at === held.page && index === held.index ? "" : `${at} ${index}`
+        if (place === wanted) return
+        wanted = place
+        clearTimeout(resting)
+        if (!place) return
+        resting = setTimeout(() => {
+          wanted = ""
+          home.send({ type: "over", page: at, index })
+        }, REST)
       }
       // Where it was last, so it can settle there once it's let go.
       let left = held
@@ -1490,6 +1515,7 @@ function HomeScreen(props: { owners: Owner[] }) {
       addEventListener("pointercancel", drop)
       return () => {
         clearTimeout(edge)
+        clearTimeout(resting)
         carried = undefined
         settledUnder = undefined
         // A second finger still swiping lets go of the pages: they go back to where what was carried was put down.
