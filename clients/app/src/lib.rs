@@ -111,8 +111,7 @@ impl Views {
     /// The files of every app a server lists for `subject`, a group or the network, or for this client's user, as MCP
     /// lists resources.
     async fn listed(&self, subject: Option<&str>) -> anyhow::Result<Value> {
-        let request = subject.map_or(json!({}), |subject| json!({"_meta": {"subject": subject}}));
-        self.subscription("client").request("resources/list", request).await
+        self.subscription("client").request("resources/list", listing(subject)).await
     }
 
     /// One file a server listed: what kind it is, and what's in it, which is its text or, for a picture or a font,
@@ -279,6 +278,11 @@ pub(crate) fn spawn(future: impl std::future::Future<Output = ()> + Send + 'stat
     computer::runtime().spawn(future);
 }
 
+/// What asks a server for the files of `subject`'s apps, or this client's user's.
+fn listing(subject: Option<&str>) -> Value {
+    subject.map_or(json!({}), |subject| json!({"_meta": {"subject": subject}}))
+}
+
 /// The address of each file in a list of them.
 fn resources(listed: &Value) -> impl Iterator<Item = &str> {
     listed["resources"].as_array().into_iter().flatten().filter_map(|resource| resource["uri"].as_str())
@@ -311,10 +315,12 @@ async fn apps(subject: Option<String>) -> Result<Value, String> {
     if subject.is_none() {
         shortcuts::keep(shortcuts::listed(&listed));
     }
-    let keep = listed.clone();
+    // The list `listed` is answered with may be one a server gave days ago, whose files an update since has replaced,
+    // and a server keeps only the last few versions': so what's kept is what the server lists now. With no server
+    // answering, what's missing is asked for when an app loads it.
     spawn(async move {
-        for resource in resources(&keep) {
-            // With no server answering, what's missing is asked for when an app loads it.
+        let Ok(now) = views.client.fresh("resources/list", &listing(subject.as_deref())).await else { return };
+        for resource in resources(&now) {
             let _ = views.read(resource).await;
         }
     });
