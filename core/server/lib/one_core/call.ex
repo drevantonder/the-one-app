@@ -25,7 +25,7 @@ defmodule OneCore.Call do
   run it instead (`forward/2`): `forwarded` is then `:to`. That one may still hand it to the one server that holds
   what it needs (`forward_to/2`): `forwarded` is then `true`, and it goes no further.
   """
-  alias OneCore.{Artifact, Hooks, Mcp, Apps, Server, Servers, Tasks, User}
+  alias OneCore.{Artifact, Bucket, Hooks, Mcp, Apps, Server, Servers, Tasks, User}
   alias OneCore.Call.State
   alias OneCore.Apps.{Calls, Version}
 
@@ -210,10 +210,7 @@ defmodule OneCore.Call do
   @doc "Why this call may not reach the artifact `name` as `relation`, or `nil` if it may."
   def refused(%__MODULE__{subject: subject, actor: actor, app: app} = call, name, relation)
       when relation in ["viewer", "editor", "owner"] do
-    parts = String.split(name, "/")
-
-    if not Enum.all?(parts, &(&1 =~ ~r/^[^.]/)),
-      do: raise(ArgumentError, "an artifact's name is parts joined by /, none empty or starting with a dot")
+    parts = String.split(Bucket.key!(name), "/")
 
     # What's someone's sits under their prefix by what it is: what an app made for them, or an app's own.
     kind = if hd(parts) == "network", do: Enum.slice(parts, 1, 2), else: Enum.slice(parts, 2, 2)

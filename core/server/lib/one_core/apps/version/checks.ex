@@ -180,7 +180,7 @@ defmodule OneCore.Apps.Version.Checks do
     do: is_binary(requirement) and match?({:ok, _}, Elixir.Version.parse_requirement(requirement))
 
   defp requirement?({name, why}),
-    do: is_binary(name) and name =~ ~r/^[a-z][a-z0-9-]*$/ and is_binary(why) and String.trim(why) != ""
+    do: OneCore.Apps.Installed.named(name) == :ok and is_binary(why) and String.trim(why) != ""
 
   # A scheduled job calls one of the app's tools with inputs the tool takes, so one that could never run is
   # found out when it's deployed.

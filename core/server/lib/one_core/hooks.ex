@@ -263,7 +263,7 @@ defmodule OneCore.Hooks do
   def whose(device) do
     Cache.fetch(@caches["device"], device, fn ->
       with {:ok, %{"who" => who}, _by} <- mutate("device", %{"device" => device, "who" => nil}, {nil, "network"}),
-           true <- is_binary(who) and who =~ ~r/^users\/[a-z][a-z0-9-]*$/ do
+           :ok <- OneCore.User.user(who) do
         {:commit, who}
       else
         {:refuse, why} -> {:ignore, {:error, why}}

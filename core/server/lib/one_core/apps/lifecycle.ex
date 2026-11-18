@@ -95,7 +95,7 @@ defmodule OneCore.Apps.Lifecycle do
   Doing it again for the same user finishes what an earlier try left undone.
   """
   def make_first_owner(who) do
-    if is_binary(who) and who =~ ~r/^users\/[a-z][a-z0-9-]*$/ do
+    with :ok <- OneCore.User.user(who) do
       wrote = Bucket.write("network/owner", who)
       Servers.invalidate()
 
@@ -118,7 +118,7 @@ defmodule OneCore.Apps.Lifecycle do
         {:error, "The network's first owner is #{OneCore.User.first_owner()}"}
       end
     else
-      {:error, "The network's first owner is a user: users/<name>, in lowercase letters, digits and hyphens"}
+      {:error, why} -> {:error, "The network's first owner is a user. #{why}"}
     end
   end
 

@@ -167,11 +167,7 @@ defmodule OneCore.Bucket.Folder do
   end
 
   defp file(folder, key) do
-    for part <- String.split(key, "/"), part == "" or String.starts_with?(part, ".") do
-      raise ArgumentError, "a blob's key is parts joined by /, none empty or starting with a dot: #{inspect(key)}"
-    end
-
-    Path.join(folder, key)
+    Path.join(folder, OneCore.Bucket.key!(key))
   end
 
   defp written(folder, data) do

@@ -38,7 +38,7 @@ defmodule OneCore.Sandbox do
   """
   @behaviour :gen_statem
   require Logger
-  alias OneCore.{Artifact, Builds, Call, Apps, Server, User}
+  alias OneCore.{Artifact, Bucket, Builds, Call, Apps, Server, User}
   alias OneCore.Call.State
   alias OneCore.Apps.{Store, Version}
 
@@ -306,21 +306,15 @@ defmodule OneCore.Sandbox do
 
   defp named(context, artifact), do: [handle(context, artifact), Artifact.name(artifact)]
 
-  # A blob's name in an artifact, which can't step outside it: parts joined by /, none starting with a dot.
-  defp blob!(name) do
-    if is_binary(name) and name != "" and Enum.all?(String.split(name, "/"), &(&1 =~ ~r/^[^.]/)),
-      do: name,
-      else: raise(ArgumentError, "a blob's name is parts joined by /, none empty or starting with a dot")
-  end
+  # A blob's name in an artifact, which can't step outside it (`OneCore.Bucket.check_key/1`).
+  defp blob!(name), do: Bucket.key!(name)
 
+  # What a list starts with: nothing, a blob's name, or one's first parts and the / after them.
   defp listed!(""), do: ""
 
   defp listed!(starting) when is_binary(starting) do
-    parts = String.split(starting, "/")
-
-    if Enum.all?(Enum.drop(parts, -1), &(&1 =~ ~r/^[^.]/)) and not String.starts_with?(List.last(parts), "."),
-      do: starting,
-      else: raise(ArgumentError, "what's listed starts with parts joined by /, none starting with a dot")
+    Bucket.key!(String.replace_suffix(starting, "/", ""))
+    starting
   end
 
   defp artifact_name!(name) when is_binary(name), do: name

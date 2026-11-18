@@ -515,14 +515,11 @@ defmodule OneCore.Apps.Deploy do
       Installed.named(name) != :ok ->
         Installed.named(name)
 
-      not (is_map(files) and map_size(files) > 0 and
-               Enum.all?(files, fn {path, text} -> path?(path) and is_binary(text) end)) ->
-        {:error, "An app's files are text by their paths, with no path part starting with a dot"}
+      not (is_map(files) and map_size(files) > 0 and Enum.all?(Map.values(files), &is_binary/1)) ->
+        {:error, "An app's files are text by their paths"}
 
       true ->
-        :ok
+        Enum.find_value(Map.keys(files), :ok, &with(:ok <- Bucket.check_key(&1), do: nil))
     end
   end
-
-  defp path?(path), do: is_binary(path) and Enum.all?(String.split(path, "/"), &(&1 =~ ~r/^[^.]/))
 end

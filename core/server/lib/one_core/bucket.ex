@@ -29,6 +29,23 @@ defmodule OneCore.Bucket do
     defexception [:message]
   end
 
+  @doc """
+  Whether `key` is a blob's key, or a part of one, as an artifact's name or a blob's name in it: `:ok`, or `{:error,
+  why}`. It's parts joined by /, none empty or starting with a dot, so it can't step outside where it's put or name
+  what's hidden there.
+  """
+  def check_key(key) do
+    if is_binary(key) and Enum.all?(String.split(key, "/"), &(&1 =~ ~r/^[^.]/)),
+      do: :ok,
+      else: {:error, "#{inspect(key)} isn't parts joined by /, none empty or starting with a dot"}
+  end
+
+  @doc "`key`, where it's a blob's key (`check_key/1`), or else raises why not."
+  def key!(key) do
+    with {:error, why} <- check_key(key), do: raise(ArgumentError, why)
+    key
+  end
+
   @doc "A blob and its tag."
   def read(key), do: bucket(:read, [key])
 

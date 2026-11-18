@@ -69,16 +69,9 @@ defmodule OneCore.User do
   defp by(_from, %{"link" => link}) when is_binary(link), do: {:ok, link(link)}
 
   defp by(_from, %{"as" => name}) when is_binary(name) do
-    cond do
-      not Application.get_env(:one_core, :development, false) ->
-        {:error, "Acting as a user is for a network being built, and this one wasn't started as one"}
-
-      name =~ ~r/^[a-z][a-z0-9-]*$/ ->
-        {:ok, "users/" <> name}
-
-      true ->
-        {:error, "A user's name is lowercase letters, digits and hyphens, starting with a letter"}
-    end
+    if Application.get_env(:one_core, :development, false),
+      do: with(:ok <- named(name), do: {:ok, "users/" <> name}),
+      else: {:error, "Acting as a user is for a network being built, and this one wasn't started as one"}
   end
 
   defp by(from, meta) do
@@ -172,7 +165,21 @@ defmodule OneCore.User do
   end
 
   @doc "Whether `who` names a user, a group or the network: someone things belong to."
-  def owner?(who), do: is_binary(who) and who =~ ~r/^((users|groups)\/[a-z][a-z0-9-]*|network)$/
+  def owner?("network"), do: true
+  def owner?("users/" <> name), do: named(name) == :ok
+  def owner?("groups/" <> name), do: named(name) == :ok
+  def owner?(_who), do: false
+
+  @doc "Whether `who` is a user, `users/<name>`: `:ok`, or `{:error, why}`."
+  def user("users/" <> name), do: named(name)
+  def user(who), do: {:error, "#{inspect(who)} isn't a user, users/<name>"}
+
+  @doc "Whether `name` is a user's or a group's name, after `users/` or `groups/`: `:ok`, or `{:error, why}`."
+  def named(name) do
+    if is_binary(name) and name =~ ~r/^[a-z][a-z0-9-]*$/,
+      do: :ok,
+      else: {:error, "A user's name is lowercase letters, digits and hyphens, starting with a letter"}
+  end
 
   @doc """
   The who that is the holder of a sharing link. A link starts with whose it leads to, as their name: that's how
