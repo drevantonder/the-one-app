@@ -220,8 +220,14 @@ async fn join(client: &Client, here: &Here, key: &str, who: &str) -> Result<()> 
     here.change(joining(ServerMembershipStage::Installing))?;
     system::install(here, key, &env::current_exe()?, &unit_env(who.to_owned(), None).await?)?;
     here.change(joining(ServerMembershipStage::Starting))?;
-    // The system starts `one serve run`, which makes it active once it answers by its key.
-    system::start(here, key).await?;
+    // The system starts `one serve run`, which makes it active once it answers by its key. Where it didn't, its log's
+    // last lines say why, as undoing the join removes its folder, and a Mac's or Windows' log with it.
+    if let Err(error) = system::start(here, key).await {
+        let log = fs::read_to_string(here.folder.join("server.log")).unwrap_or_default();
+        let last: Vec<&str> = log.lines().rev().take(LAST).collect();
+        ensure!(last.is_empty(), "{error:#}. Its last lines: {}", last.into_iter().rev().collect::<Vec<_>>().join(" | "));
+        return Err(error);
+    }
     ensure!(here.read()?.server_membership == ServerMembership::Active, "It started, and didn't answer by its key");
     Ok(())
 }
