@@ -7,16 +7,20 @@ import { Box, Scroll, Text } from "#primitives"
 import { back as goBack, breadcrumb, covers, go, keydown, step, touch, viewport } from "#bridge"
 import { BarEnd, Button, Icon } from "./button.tsx"
 import { messages } from "./words.ts"
+import { ActionBar, type Action } from "./actions.tsx"
+import { Choose, Collect } from "./collect.ts"
 import { negative, styles } from "./styles.ts"
 import { tokens } from "./tokens.ts"
 
 const look = styles({
-  screen: { flexGrow: 1, flexShrink: 1, minHeight: 0, minWidth: 0 },
+  screen: { position: "relative", flexGrow: 1, flexShrink: 1, minHeight: 0, minWidth: 0 },
   // The bar keeps clear of what the device keeps for itself at the top.
   bar: { paddingTop: tokens.length.safeTop, paddingStart: tokens.length.safeLeft, paddingEnd: tokens.length.safeRight, userSelect: "none" },
   row: { flexDirection: "row", alignItems: "center", gap: tokens.grid[2], minHeight: tokens.length.bar, paddingInline: tokens.length.gutter },
   // A long name, which may be all the screen says of what it's about, takes two lines, as Android's bars do.
   title: { flexGrow: 1, flexShrink: 1, minWidth: 0, paddingBlock: tokens.grid[1], font: tokens.type.title, lineClamp: 2, textAlign: "start" },
+  // On a computer, Raycast's: its title beside Back, 15px, on one line.
+  computerTitle: { font: tokens.type.barTitle, lineClamp: 1 },
   // Where the window names the app above it, its first screen doesn't name it again, and keeps its place.
   unnamed: { opacity: 0 },
   // With nothing else in it, the bar keeps only the title's place under the breadcrumb.
@@ -28,6 +32,8 @@ const look = styles({
   // What's in it keeps clear of what the device keeps for itself at its other edges.
   safe: { flexGrow: 1, paddingStart: tokens.length.safeLeft, paddingEnd: tokens.length.safeRight, paddingBottom: tokens.length.safeBottom },
   parts: { flexGrow: 1, gap: tokens.length.gutter, paddingTop: tokens.grid[2], paddingInline: tokens.length.gutter, paddingBottom: tokens.length.gutter },
+  // What's last keeps clear of the footer's pills.
+  footed: { paddingBottom: tokens.length.footer },
   section: { gap: tokens.grid[1.5], minWidth: 0 },
   // Raycast's on a computer, 11px; iOS's on a phone, its footnote inset to the rows' words.
   heading: { font: tokens.type.small, color: tokens.colour.secondaryLabel, userSelect: "none" },
@@ -82,32 +88,54 @@ export function Screen(props: { heading?: JSX.Element; action?: JSX.Element; bac
   const backed = () => !!props.back && !inDetail()
   // Only an app's first screen, which has no Back, gives way to the breadcrumb.
   const named = () => !!props.back || !breadcrumb()
+  // On a computer, as Raycast's: the bar's buttons and menus' items are the screen's actions, in the footer's pills and
+  // its action panel (⌘K), after what the row chosen can do; under a finger they stay in the bar.
+  const computer = !touch()
+  const [bar, setBar] = createSignal<Action[]>([])
+  const [chosen, setChosen] = createSignal<{ row: object; actions: () => Action[] }>()
+  const collect = (action: Action) => {
+    setBar((now) => [...now, action])
+    return () => setBar((now) => now.filter((one) => one !== action))
+  }
+  const choose = {
+    set: (row: object, actions: (() => Action[]) | undefined) => setChosen(actions ? { row, actions } : undefined),
+    clear: (row: object) => chosen()?.row === row && setChosen(undefined),
+  }
+  const actions = () => [...(chosen()?.actions() ?? []).map((action) => ({ ...action, section: action.section ?? "chosen" })), ...bar()]
+  const footed = () => computer && actions().length > 0
   return (
     <Box style={look.screen}>
       <Box role="banner" style={look.bar}>
-        <Box style={[look.row, !named() && !props.action && look.bare]}>
+        <Box style={[look.row, !named() && (!props.action || computer) && look.bare]}>
           <Show when={backed()}>
             <Button variant="ghost" size="icon" aria-label={messages.back} onClick={back} style={look.back}>
               <Icon name="caret-left" along />
             </Button>
           </Show>
-          <Text role="heading" aria-level={1} aria-hidden={named() ? undefined : "true"} style={[look.title, !named() && look.unnamed]}>
+          <Text role="heading" aria-level={1} aria-hidden={named() ? undefined : "true"} style={[look.title, computer && look.computerTitle, !named() && look.unnamed]}>
             {props.heading}
           </Text>
           <Show when={props.action}>
             <BarEnd value={true}>
-              <Box style={look.action}>{props.action}</Box>
+              <Collect value={computer ? collect : null}>
+                <Box style={look.action}>{props.action}</Box>
+              </Collect>
             </BarEnd>
           </Show>
         </Box>
       </Box>
       <Scroll role="main" style={look.main}>
         <Box style={look.safe}>
-          <Box style={look.parts}>
-            <Middle value={() => false}>{props.children}</Middle>
+          <Box style={[look.parts, footed() && look.footed]}>
+            <Choose value={computer ? choose : null}>
+              <Middle value={() => false}>{props.children}</Middle>
+            </Choose>
           </Box>
         </Box>
       </Scroll>
+      <Show when={footed()}>
+        <ActionBar actions={actions()} />
+      </Show>
     </Box>
   )
 }

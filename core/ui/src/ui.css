@@ -1039,6 +1039,11 @@ button.ui-strict-box:focus-visible {
   outline: 2px solid var(--ring);
   outline-offset: 2px;
 }
+/* What the keyboard is put on but never tabs to (a dialog as it opens, a menu) draws no ring of the browser's, as a
+   native one has none. */
+.ui-strict-box[tabindex="-1"]:focus {
+  outline: none;
+}
 /* A page whose first part is drawn by the primitives is the window's height, as a native host's root is, and what's
    in it scrolls itself (a screen, a split's sides). */
 body:has(> .ui-strict-box) {

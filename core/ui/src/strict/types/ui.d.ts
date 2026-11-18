@@ -272,6 +272,8 @@ export declare function Keys(props: { keys: string[] }): Element
 export declare function ActionPanel(props: { open: boolean; onOpenChange: (open: boolean) => void; actions: Action[] }): Element
 export declare function ActionBar(props: { start?: Element; actions?: Action[] }): Element
 
+export declare const Metadata: ((props: { children?: Element }) => Element) & { Label: (props: { title: Element; text?: Element }) => Element }
+
 export declare const Menu: {
   Root: (props: { open?: boolean; onOpenChange?: (details: { open: boolean }) => void; onSelect?: (details: { value: string }) => void; children?: Element }) => Element
   Trigger: (props: { variant?: ButtonProps["variant"]; size?: "icon"; "aria-label"?: string; children?: Element }) => Element

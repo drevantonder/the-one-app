@@ -50,6 +50,7 @@ export { Checkbox, Field, Input, RadioGroup, Search, Switch, Textarea, useField 
 export { createListCollection } from "./collection.ts"
 export { Select } from "./select.tsx"
 export { List, Row } from "./list.tsx"
+export { Metadata } from "./metadata.tsx"
 export { Screen, Section, Split } from "./screen.tsx"
 export { LiveScreen } from "./live-screen.tsx"
 export { Menu } from "./menu.tsx"

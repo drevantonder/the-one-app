@@ -192,6 +192,8 @@ const roles = {
   card: colours.card,
   backgroundGradient: colour("oklch(0.962 0.004 286.32)", "oklch(0.16 0.009 274.31)"),
   selection: alpha(label, 10),
+  /** Every other row of metadata: the text at 2.5%. */
+  stripe: alpha(label, 2.5),
   /** What dims the page under a sheet or an alert. */
   overlay: colours.overlay,
   /** A panel over the window, its glass a little lighter than the window's: the action panel, an alert. */
@@ -202,6 +204,8 @@ const roles = {
   veil: alpha(colours.background, 55),
   /** A tile's tint, as an App Library category's square is. */
   tile: alpha(label, 14),
+  /** What's typed in: a field's fill, a little lighter than what it's on. */
+  field: colour("oklch(1 0 0 / 70%)", "oklch(1 0 0 / 6%)"),
   /** Nothing: what has no fill of its own where something else has one. */
   transparent: colour("oklch(0 0 0 / 0%)"),
   /** Words and icons on an accent. */
@@ -218,13 +222,15 @@ const roles = {
 }
 
 /** The 4px grid, by its steps: `grid[3]` is 12px. */
-const grid = Object.fromEntries([0.5, 1, 1.5, 2, 2.5, 3, 4, 5, 6, 8, 10, 12, 16, 20, 24].map((step) => [step, length(rem(step / 4))])) as Record<0.5 | 1 | 1.5 | 2 | 2.5 | 3 | 4 | 5 | 6 | 8 | 10 | 12 | 16 | 20 | 24, Token<"length">>
+const grid = Object.fromEntries([0.5, 1, 1.5, 2, 2.5, 3, 4, 5, 6, 7, 8, 10, 12, 16, 20, 24].map((step) => [step, length(rem(step / 4))])) as Record<0.5 | 1 | 1.5 | 2 | 2.5 | 3 | 4 | 5 | 6 | 7 | 8 | 10 | 12 | 16 | 20 | 24, Token<"length">>
 
 /** Sizes of text: large, medium and small, and a phone's large title. */
 const sizes = {
   large: length({ default: rem(1.125), phone: rem(1) }),
   medium: length({ default: rem(0.8125), touch: rem(0.9375), phone: rem(15 / 17) }),
   small: length({ default: rem(0.6875), touch: rem(0.8125), phone: rem(13 / 17) }),
+  /** A computer's bar's title: Raycast's 15px. */
+  barTitle: length(rem(0.9375)),
   /** A footer pill's and a toast's: Raycast's 12px. */
   caption: length({ default: rem(0.75), touch: rem(0.8125), phone: rem(13 / 17) }),
   largeTitle: length({ default: rem(1.25), phone: rem(34 / 17) }),
@@ -270,7 +276,7 @@ export const tokens = {
     safeBottom: length(px(0)),
     safeLeft: length(px(0)),
     safeRight: length(px(0)),
-    sheet: length(rem(28)),
+    sheet: length({ default: rem(34), touch: rem(28) }),
     alert: length(rem(18.75)),
     menu: length(rem(10)),
     /** A sheet's grabber, which says under a finger that it can be pulled down, and is nothing under a mouse. */
@@ -279,6 +285,8 @@ export const tokens = {
     /** A footer's pill, and what a window's foot keeps clear for its pills: Raycast's 36px, 10px off the edge. */
     pill: length(rem(2.25)),
     footer: length(rem(3.5)),
+    /** A form's labels on a computer, beside what they name, as Raycast's and macOS's forms have them. */
+    formLabel: length(rem(9.5)),
     /** A key's chip, as ⌘ and K are shown beside what they do. */
     key: length(rem(1.125)),
     /** The action panel's width. */
@@ -287,7 +295,7 @@ export const tokens = {
     row: length({ default: rem(2.375), touch: rem(3.25), phone: rem(52 / 17) }),
   }, (key) => key),
   size: named(sizes, (key) => `size-${key}`),
-  radius: named({ small: radius(px(6)), medium: radius(px(10)), large: radius(px(18)), full: radii.full, icon: radii.icon }, (key) => `radius-${key}`),
+  radius: named({ small: radius(px(6)), medium: radius(px(10)), large: radius(px(18)), window: radius(px(26)), full: radii.full, icon: radii.icon }, (key) => `radius-${key}`),
   shadow: named({
     /** Liquid Glass's: a hairline rim, a line of light along its top, and a soft shadow under it. */
     glass: lightDark(
@@ -308,6 +316,8 @@ export const tokens = {
       [{ x: 0, y: 0, blur: 0, spread: 0.5, colour: "oklch(0 0 0 / 12%)" }, { x: 0, y: 1, blur: 3, spread: 0, colour: "oklch(0 0 0 / 6%)" }, { x: 0, y: 0.5, blur: 0, spread: 0, colour: "oklch(1 0 0 / 90%)", inset: true }],
       [{ x: 0, y: 0, blur: 0, spread: 0.5, colour: "oklch(0 0 0 / 25%)" }, { x: 0, y: 0.5, blur: 0, spread: 0, colour: "oklch(1 0 0 / 18%)", inset: true }],
     ),
+    /** A field's edge: a half-pixel line inside. */
+    field: lightDark([{ x: 0, y: 0, blur: 0, spread: 0.5, colour: "oklch(0 0 0 / 14%)", inset: true }], [{ x: 0, y: 0, blur: 0, spread: 0.5, colour: "oklch(1 0 0 / 12%)", inset: true }]),
     /** A key's chip: an outline, as Raycast draws ⌘ and K. */
     key: lightDark([{ x: 0, y: 0, blur: 0, spread: 1, colour: "oklch(0 0 0 / 16%)", inset: true }], [{ x: 0, y: 0, blur: 0, spread: 1, colour: "oklch(1 0 0 / 20%)", inset: true }]),
     /** A raised thing's edge inside: a half-pixel line, lit along the top. */
@@ -323,6 +333,8 @@ export const tokens = {
     largeTitle: type(sizes.largeTitle, weights.title, { lineHeight: 1.2, tracking: -0.015 }),
     /** A bar's title, which runs to a second line before it's cut. */
     title: type(sizes.large, weights.title, { lineHeight: 1.3, tracking: -0.015 }),
+    /** A computer's bar's title, deeper in an app, beside its Back: Raycast's 15px. */
+    barTitle: type(sizes.barTitle, weights.label, { lineHeight: 1.3, tracking: -0.01 }),
     large: type(sizes.large, weights.label),
     medium: type(sizes.medium, weights.body, { lineHeight: 1.35 }),
     small: type(sizes.small, weights.body),

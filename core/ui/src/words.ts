@@ -18,6 +18,7 @@ export const [messages, setMessages] = createStore({
   more: "More",
   noActions: "No actions",
   ok: "OK",
+  open: "Open",
   searchActions: "Search for actions…",
   showDetails: "Show Details",
 })

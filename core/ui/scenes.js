@@ -1,5 +1,5 @@
 // Draws every scene on the DOM and on a native host, and compares the two: `bun scenes.js [<folder>…] [--out <dir>]
-// [--against <dir>] [--dark]` in core/ui, after `bun build.js` (and, for the native half, `cargo build -p strict
+// [--against <dir>] [--dark] [--size <width>x<height>]` in core/ui, after `bun build.js` (and, for the native half, `cargo build -p strict
 // --example screenshot`). `--against` compares each scene's DOM drawing with an earlier run's too, kept in that
 // `--out`: what a change did to how things look, drawn before it (on main) and after.
 //
@@ -32,8 +32,10 @@ const flag = (name) => args.includes(name)
 const option = (name) => (args.includes(name) ? args[args.indexOf(name) + 1] : undefined)
 const out = resolve(option("--out") ?? join(process.env.TMPDIR ?? "/tmp", "scenes"))
 const dark = flag("--dark")
+// Every scene in a window this size, as a computer's, where it says none of its own.
+const sized = option("--size")?.split("x").map(Number)
 const against = option("--against") && resolve(option("--against"))
-const folders = args.filter((arg, at) => !arg.startsWith("--") && !["--out", "--against"].includes(args[at - 1])).map((folder) => resolve(folder))
+const folders = args.filter((arg, at) => !arg.startsWith("--") && !["--out", "--against", "--size"].includes(args[at - 1])).map((folder) => resolve(folder))
 const targets = folders.length ? folders : [here("gallery"), ...readdirSync(join(root, "apps")).map((app) => join(root, "apps", app)).filter((app) => existsSync(join(app, "client/scenes.json")))]
 const harness = join(root, "target/debug/examples/screenshot")
 // The strict protocol the UI library speaks, and the native host: a host that speaks an older one draws nothing of a
@@ -53,14 +55,14 @@ async function scenesOf(target, built, serve) {
     const all = JSON.parse(readFileSync(join(target, "client/scenes.json"), "utf8"))
     const whole = (scene) => (scene.like ? { ...whole(all[scene.like]), taps: undefined, ...scene, answers: { ...whole(all[scene.like]).answers, ...scene.answers } } : scene)
     return Object.entries(all).map(([name, scene]) => {
-      const { page: at = "client/index.html", answers = {}, taps = [], size = [390, 844], touch = false } = whole(scene)
+      const { page: at = "client/index.html", answers = {}, taps = [], size = sized ?? [390, 844], touch = false } = whole(scene)
       const [page, link] = at.split("#")
       return { name, page, link, answers, taps, size, touch }
     })
   }
   // The gallery lists its own, drawn at `#scenes`.
   const listed = await serve.text("index.html", "scenes")
-  return JSON.parse(listed).map(({ name, taps, size = [390, 844], touch = false }) => ({ name, page: "index.html", link: name, answers: {}, taps, size, touch }))
+  return JSON.parse(listed).map(({ name, taps, size = sized ?? [390, 844], touch = false }) => ({ name, page: "index.html", link: name, answers: {}, taps, size, touch }))
 }
 
 /// A stand-in client for a page in a frame: it answers what the page asks from `answers`, as a client would.

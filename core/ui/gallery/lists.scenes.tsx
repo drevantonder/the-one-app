@@ -1,5 +1,5 @@
 import { createSignal, For } from "solid-js"
-import { Badge, Box, Button, Checkbox, Icon, List, Menu, Row, Section, Text, type Scenes } from "ui"
+import { Badge, Box, Button, Checkbox, Icon, List, Menu, Metadata, Row, Section, Text, type Scenes } from "ui"
 
 const Rows = () => {
   const [notes, setNotes] = createSignal(["First note", "Second note", "Third note"])
@@ -37,7 +37,20 @@ const Sections = () => (
   </>
 )
 
+const Details = () => (
+  <Section heading="Information">
+    <Metadata>
+      <Metadata.Label title="Username" text="drevan" />
+      <Metadata.Label title="Token" text="•••••••••••••" />
+      <Metadata.Label title="Your agents" text="Use it, never see it" />
+      <Metadata.Label title="Added" text="14 Nov at 09:12" />
+    </Metadata>
+  </Section>
+)
+
 export default {
+  "Lists/Metadata on a computer": { size: [750, 475], render: Details },
+  "Lists/Metadata under a finger": { touch: true, render: Details },
   "Lists/Sections on a computer": { size: [750, 475], render: Sections },
   "Lists/Sections under a finger": { touch: true, render: Sections },
   "Lists/Rows": () => (

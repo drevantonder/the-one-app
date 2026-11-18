@@ -4,9 +4,10 @@
 import { children, createEffect, createRoot, createSignal, onCleanup, Show } from "solid-js"
 import type { JSX } from "@solidjs/web"
 import { Box, Layer, Scroll, Text } from "#primitives"
-import { covers, viewport } from "#bridge"
+import { covers, touch, viewport } from "#bridge"
 import { Button, Icon } from "./button.tsx"
 import { messages } from "./words.ts"
+import { Collect } from "./collect.ts"
 import { negative, styles } from "./styles.ts"
 import { duration, tokens } from "./tokens.ts"
 import type { Pressed } from "./strict/types/ui.d.ts"
@@ -31,16 +32,20 @@ const look = styles({
     translateY: { default: 0, entering: "100%" }, transitionProperty: ["translateY", "opacity", "scale"], transition: tokens.motion.travel,
   },
   down: { translateY: "100%" },
-  floating: { width: "100%", maxWidth: tokens.length.sheet, borderRadius: tokens.radius.large, translateY: 0, opacity: { default: 1, entering: 0 }, scale: { default: 1, entering: 0.97 } },
+  floating: { width: "100%", maxWidth: tokens.length.sheet, borderRadius: tokens.radius.window, translateY: 0, opacity: { default: 1, entering: 0 }, scale: { default: 1, entering: 0.97 } },
+  // On a computer, a panel of glass over the window, as Raycast's.
+  glass: { backgroundColor: tokens.colour.panel, backdropFilter: tokens.material.glass },
   shrunk: { opacity: 0, scale: 0.97 },
   pulled: { transitionProperty: [] },
   grabber: { alignSelf: "center", width: tokens.grid[10], height: tokens.length.grabber, marginTop: tokens.length.grabberGap, borderRadius: tokens.radius.full, backgroundColor: tokens.colour.quaternaryLabel },
   header: { flexDirection: "row", alignItems: "center", gap: tokens.grid[2], paddingBlock: tokens.grid[2], paddingStart: tokens.length.gutter, paddingEnd: tokens.grid[2] },
   heading: { flexGrow: 1, minWidth: 0, font: tokens.type.large, fontWeight: tokens.weight.semibold, lineClamp: 2 },
+  computerHeading: { font: tokens.type.barTitle, fontWeight: tokens.weight.semibold },
+  centred: { textAlign: "center" },
   body: { gap: tokens.length.gutter, paddingTop: tokens.grid[1], paddingInline: tokens.length.gutter, paddingBottom: tokens.length.gutter },
-  alert: { width: "100%", maxWidth: tokens.length.alert, gap: tokens.grid[2], padding: tokens.grid[5], borderRadius: tokens.radius.large },
+  alert: { width: "100%", maxWidth: tokens.length.alert, gap: tokens.grid[2.5], paddingTop: tokens.grid[5], paddingInline: tokens.grid[4], paddingBottom: tokens.grid[4], borderRadius: tokens.radius.window },
   text: { color: tokens.colour.secondaryLabel },
-  footer: { flexDirection: "row", flexWrap: "wrap-reverse", gap: tokens.grid[2], marginTop: tokens.grid[3] },
+  footer: { flexDirection: "row", flexWrap: "wrap-reverse", gap: tokens.grid[2], marginTop: tokens.grid[1.5] },
   half: { flexGrow: 1, flexBasis: "45%" },
 })
 
@@ -75,7 +80,8 @@ function Over(props: { open?: boolean; onClose?: () => void; children: (leaving:
     <Show when={shown()}>
       <Layer modal>
         <Box style={[look.scrim, leaving() && look.gone]} onClick={() => props.onClose?.()} />
-        {props.children(leaving)}
+        {/* What's over the page isn't the bar's, wherever it's written. */}
+        <Collect value={null}>{props.children(leaving)}</Collect>
       </Layer>
     </Show>
   )
@@ -124,13 +130,13 @@ export function Sheet(props: { heading?: JSX.Element; open?: boolean; onClose?: 
             onPointerMove={move}
             onPointerUp={lift}
             onPointerCancel={() => setPull(undefined)}
-            style={[look.panel, wide() && look.floating, leaving() && (wide() ? look.shrunk : look.down), pull() && look.pulled, pull() && { translateY: pull()!.down }]}
+            style={[look.panel, wide() && look.floating, !touch() && look.glass, leaving() && (wide() ? look.shrunk : look.down), pull() && look.pulled, pull() && { translateY: pull()!.down }]}
           >
             <Show when={!wide()}>
               <Box aria-hidden="true" style={look.grabber} />
             </Show>
             <Box role="banner" style={look.header}>
-              <Text role="heading" aria-level={2} style={look.heading}>
+              <Text role="heading" aria-level={2} style={[look.heading, !touch() && look.computerHeading]}>
                 {props.heading}
               </Text>
               <Button variant="ghost" size="icon" aria-label={messages.close} onClick={() => props.onClose?.()}>
@@ -163,13 +169,13 @@ export function Alert(props: { heading: JSX.Element; text?: JSX.Element; open?: 
             tabindex={-1}
             aria-label={typeof props.heading === "string" ? props.heading : undefined}
             onKeyDown={(event) => event.key === "Escape" && props.onClose?.()}
-            style={[look.panel, look.floating, look.alert, leaving() && look.shrunk]}
+            style={[look.panel, look.floating, !touch() && look.glass, look.alert, leaving() && look.shrunk]}
           >
-            <Text role="heading" aria-level={2} style={look.heading}>
+            <Text role="heading" aria-level={2} style={[look.heading, !touch() && look.computerHeading, look.centred]}>
               {props.heading}
             </Text>
             <Show when={props.text}>
-              <Text style={look.text}>{props.text}</Text>
+              <Text style={[look.text, look.centred]}>{props.text}</Text>
             </Show>
             {props.children}
             <Show when={props.action}>
@@ -209,7 +215,7 @@ export function confirm(question: Question): Promise<boolean> {
         onClose={() => answered(false)}
         action={
           <>
-            <Button variant="outline" onClick={() => answered(false)}>
+            <Button variant="secondary" onClick={() => answered(false)}>
               {messages.cancel}
             </Button>
             <Button variant={asked()?.destructive ? "destructive" : "default"} onClick={() => answered(true)}>

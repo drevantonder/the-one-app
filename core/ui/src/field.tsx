@@ -3,6 +3,7 @@
 import { createContext, createSignal, For, omit, Show, useContext } from "solid-js"
 import type { JSX } from "@solidjs/web"
 import { Box, EditableText, Path, Text } from "#primitives"
+import { touch } from "#bridge"
 import type { EditableTextProps, Keyed } from "./strict/primitives.tsx"
 import { Icon } from "./button.tsx"
 import { messages } from "./words.ts"
@@ -12,6 +13,11 @@ import { tokens } from "./tokens.ts"
 const look = styles({
   field: { gap: tokens.grid[2], minWidth: 0, font: tokens.type.medium, color: tokens.colour.label },
   label: { alignSelf: "flex-start", font: tokens.type.medium, fontWeight: tokens.weight.medium, userSelect: "none" },
+  // On a computer, as Raycast's and macOS's forms: the label beside what it names, grey and right-aligned, and the
+  // hint under what it names.
+  beside: { flexDirection: "row", alignItems: "flex-start", gap: tokens.grid[3] },
+  besideLabel: { flexShrink: 0, width: tokens.length.formLabel, paddingTop: tokens.grid[2], textAlign: "end", fontWeight: tokens.weight.regular, color: tokens.colour.secondaryLabel },
+  control: { flexGrow: 1, flexShrink: 1, minWidth: 0, gap: tokens.grid[1.5] },
   dim: { opacity: 0.5 },
   message: { font: tokens.type.small, color: tokens.colour.secondaryLabel },
   wrong: { color: tokens.colour.red },
@@ -23,7 +29,8 @@ const look = styles({
     borderRadius: tokens.radius.medium,
     font: tokens.type.field,
     color: tokens.colour.label,
-    boxShadow: { default: tokens.shadow.edge, focused: tokens.shadow.focus },
+    backgroundColor: tokens.colour.field,
+    boxShadow: { default: tokens.shadow.field, focused: tokens.shadow.focus },
     transitionProperty: ["boxShadow"],
     transition: tokens.motion.quick,
   },
@@ -56,10 +63,12 @@ const look = styles({
     alignItems: "center",
     justifyContent: "center",
     borderRadius: tokens.radius.small,
-    boxShadow: { default: tokens.shadow.edge, focused: tokens.shadow.focus },
-    color: tokens.colour.background,
+    backgroundColor: tokens.colour.field,
+    boxShadow: { default: tokens.shadow.field, focused: tokens.shadow.focus },
+    color: tokens.colour.onAccent,
   },
-  ticked: { backgroundColor: tokens.colour.label, boxShadow: { default: "none", focused: tokens.shadow.focus } },
+  // Ticked, as a computer's own checkbox is: its accent with a white tick.
+  ticked: { backgroundColor: tokens.colour.blue, boxShadow: { default: "none", focused: tokens.shadow.focus } },
   tickWrong: { boxShadow: { default: tokens.shadow.wrongEdge, focused: tokens.shadow.wrongFocus } },
   mark: { width: tokens.grid[3], height: tokens.grid[3], opacity: 0, scale: 0.5, transitionProperty: ["opacity", "scale"], transition: tokens.motion.quick },
   shown: { opacity: 1, scale: 1 },
@@ -77,8 +86,9 @@ const look = styles({
     transitionProperty: ["backgroundColor"],
     transition: tokens.motion.settle,
   },
-  on: { backgroundColor: tokens.colour.label },
-  thumb: { width: tokens.grid[4], height: tokens.grid[4], borderRadius: tokens.radius.full, backgroundColor: tokens.colour.background, boxShadow: tokens.shadow.edge, transitionProperty: ["translateX"], transition: tokens.motion.settle },
+  // On, as iOS's and macOS's switches are: green, with a white thumb.
+  on: { backgroundColor: tokens.colour.green },
+  thumb: { width: tokens.grid[4], height: tokens.grid[4], borderRadius: tokens.radius.full, backgroundColor: tokens.colour.onAccent, boxShadow: tokens.shadow.edge, transitionProperty: ["translateX"], transition: tokens.motion.settle },
   thumbOn: { translateX: tokens.grid[3] },
   radios: { minWidth: 0 },
 })
@@ -121,14 +131,16 @@ export function Field(props: FieldProps) {
   }
   return (
     <Context value={field}>
-      <Box style={look.field}>
+      <Box style={[look.field, !touch() && !!props.label && look.beside]}>
         <Show when={props.label}>
-          <Text style={[look.label, props.disabled && look.dim]}>{props.label}</Text>
+          <Text style={[look.label, !touch() && look.besideLabel, props.disabled && look.dim]}>{props.label}</Text>
         </Show>
-        {props.children}
-        <Show when={props.error || props.hint}>
-          <Text style={[look.message, !!props.error && look.wrong]}>{props.error || props.hint}</Text>
-        </Show>
+        <Box style={look.control}>
+          {props.children}
+          <Show when={props.error || props.hint}>
+            <Text style={[look.message, !!props.error && look.wrong]}>{props.error || props.hint}</Text>
+          </Show>
+        </Box>
       </Box>
     </Context>
   )

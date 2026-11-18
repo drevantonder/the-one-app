@@ -20,18 +20,18 @@ const look = styles({
     gap: tokens.grid[2],
     padding: tokens.length.gutter,
   },
+  // A pill, as Raycast's toasts are: one line, its action after a hairline.
   toast: {
     flexDirection: "row",
     alignItems: "center",
-    gap: tokens.grid[3],
-    width: "100%",
-    maxWidth: tokens.length.column,
-    minHeight: tokens.grid[12],
-    paddingBlock: tokens.grid[1],
-    paddingStart: tokens.grid[4],
-    paddingEnd: tokens.grid[2],
-    borderRadius: tokens.radius.medium,
-    backgroundColor: tokens.colour.card,
+    gap: tokens.grid[2],
+    maxWidth: "100%",
+    minHeight: tokens.length.pill,
+    paddingStart: tokens.grid[3],
+    paddingEnd: tokens.grid[1],
+    borderRadius: tokens.radius.full,
+    backgroundColor: tokens.colour.panel,
+    backdropFilter: tokens.material.glass,
     color: tokens.colour.label,
     font: tokens.type.medium,
     boxShadow: tokens.shadow.window,
@@ -41,8 +41,10 @@ const look = styles({
     transitionProperty: ["opacity", "translateY"],
     transition: tokens.motion.settle,
   },
+  alone: { paddingEnd: tokens.grid[3] },
+  rule: { width: tokens.length.hairline, alignSelf: "stretch", marginBlock: tokens.grid[2], backgroundColor: tokens.colour.quaternaryLabel },
   leaving: { opacity: 0 },
-  title: { flexGrow: 1, flexShrink: 1, minWidth: 0 },
+  title: { flexShrink: 1, minWidth: 0, lineClamp: 1 },
 })
 
 /** At most this many show at once; the oldest goes for a new one. */
@@ -86,13 +88,16 @@ function Toaster() {
         <Box style={look.stack}>
           <For each={toasts()} keyed={(one) => one.id}>
             {(one) => (
-              <Box role="status" aria-live="polite" style={[look.toast, one().leaving && look.leaving]}>
+              <Box role="status" aria-live="polite" style={[look.toast, !one().action && look.alone, one().leaving && look.leaving]}>
                 <Text style={look.title}>{one().title}</Text>
                 <Show when={one().action}>
                   {(action) => (
-                    <Button variant="ghost" onClick={() => (dismiss(one().id), action().run())}>
-                      {action().label}
-                    </Button>
+                    <>
+                      <Box style={look.rule} />
+                      <Button variant="ghost" onClick={() => (dismiss(one().id), action().run())}>
+                        {action().label}
+                      </Button>
+                    </>
                   )}
                 </Show>
               </Box>

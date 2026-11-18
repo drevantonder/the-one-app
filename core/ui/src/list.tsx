@@ -1,9 +1,12 @@
 // A list and its rows: written once in strict, on the primitives, the same on the DOM and on a native host.
-import { children, createEffect, createSignal, For, onCleanup, Show } from "solid-js"
+import { children, createEffect, createSignal, For, onCleanup, Show, useContext } from "solid-js"
 import type { JSX } from "@solidjs/web"
 import { Box, Text } from "#primitives"
 import { direction, reducedMotion, touch } from "#bridge"
 import { RowMenu, type RowMenu as Menu } from "./menu.tsx"
+import { Choose } from "./collect.ts"
+import { messages } from "./words.ts"
+import type { Action } from "./actions.tsx"
 import { negative, styles } from "./styles.ts"
 import { duration, tokens } from "./tokens.ts"
 import type { Located, Pressed } from "./strict/types/ui.d.ts"
@@ -229,6 +232,19 @@ export function Row(props: {
   // What a press that was a swipe, a held press, or put the row back would otherwise do as it lifts: open the row.
   const pressed = (event: Located) => event.timeStamp - moved >= 600 && props.onClick?.()
 
+  // On a computer, what it can do is the screen's action panel's while it's chosen: under the pointer, as Raycast's
+  // rows are, or open beside the list. Open, then its menu's items.
+  const choose = useContext(Choose)
+  const actions = (): Action[] => [
+    ...(props.onClick ? [{ label: messages.open, onAction: () => props.onClick!() }] : []),
+    ...(menu()?.items() ?? []).map((item) => ({ label: item.label, destructive: item.destructive, disabled: item.disabled, onAction: () => menu()!.select(item.value) })),
+  ]
+  const chosen = () => choose?.set(actions, actions().length ? actions : undefined)
+  if (choose) {
+    createEffect(() => !!props.current, (now) => void (now && chosen()))
+    onCleanup(() => choose.clear(actions))
+  }
+
   const inside = () => (
     <>
       <Show when={props.start}>
@@ -255,6 +271,7 @@ export function Row(props: {
         onPointerUp={up}
         onPointerCancel={cancel}
         onContextMenu={(event) => menu()?.open(at(event))}
+        onPointerEnter={chosen}
         style={[look.row, !touch() && look.flatRow, !!props.action && look.wraps, props.current && look.current, !!menu() && look.held]}
       >
         <Show when={props.control}>

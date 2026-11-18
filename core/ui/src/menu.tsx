@@ -3,9 +3,10 @@
 import { children, createContext, createEffect, createSignal, onCleanup, Show, useContext } from "solid-js"
 import type { JSX } from "@solidjs/web"
 import { Box, Layer, Text } from "#primitives"
-import { direction, viewport } from "#bridge"
+import { direction, touch, viewport } from "#bridge"
 import { Button, Icon, type ButtonProps } from "./button.tsx"
 import { messages } from "./words.ts"
+import { Collect, collected } from "./collect.ts"
 import { styles } from "./styles.ts"
 import { tokens } from "./tokens.ts"
 import type { Laid, Located } from "./strict/types/ui.d.ts"
@@ -23,6 +24,8 @@ type At = { x: number; y: number; width: number; height: number }
  * a swipe shows, and what chooses an item as pressing it does. */
 export interface RowMenu {
   open: (at: At) => void
+  /** Its items, as a computer's action panel lists them for the row chosen. */
+  items: () => Entry[]
   destructive: () => { value: string; label: JSX.Element } | undefined
   select: (value: string) => void
 }
@@ -32,7 +35,7 @@ export interface RowMenu {
 export const RowMenu = createContext<((menu: RowMenu | undefined) => void) | null>(null)
 
 /** An item, as the menu's keys move through them: its value, what it says, and whether it can be chosen. */
-type Entry = { value: string; label: string; disabled: boolean }
+type Entry = { value: string; label: string; disabled: boolean; destructive: boolean }
 
 /** What a menu's parts share. */
 const Opened = createContext<{
@@ -135,9 +138,12 @@ export const Menu = {
     // In a row, the row opens it too.
     const row = useContext(RowMenu)
     if (row) {
-      row({ open: menu.open, destructive: menu.destructive, select: menu.select })
+      row({ open: menu.open, items: menu.items, destructive: menu.destructive, select: menu.select })
       onCleanup(() => row(undefined))
     }
+    // On a computer its items are the action panel's, the screen's in its bar or the row's where it's chosen, and a
+    // right-click on the row opens it: it draws no button there. Under a finger it's the ⋯ it always was.
+    if (useContext(Collect) || (row && !touch())) return null
     const inside = children(() => props.children)
     const words = () => inside.toArray().length > 0 && props.size !== "icon"
     return (
@@ -214,7 +220,9 @@ export const Menu = {
       onCleanup(() => menu.setDestructive(undefined))
     }
     const inside = children(() => props.children)
-    onCleanup(menu.add({ value: props.value, label: typeof props.children === "string" ? props.children : "", disabled: !!props.disabled }))
+    const label = () => inside.toArray().filter((part) => typeof part === "string").join(" ")
+    onCleanup(menu.add({ value: props.value, label: label(), disabled: !!props.disabled, destructive: !!props.destructive }))
+    collected(() => ({ label: label(), onAction: () => menu.select(props.value), destructive: !!props.destructive, disabled: !!props.disabled }))
     return (
       <Box
         role="menuitem"

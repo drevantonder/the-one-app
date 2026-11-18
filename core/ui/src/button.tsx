@@ -4,6 +4,7 @@ import { children, createContext, Show, useContext } from "solid-js"
 import type { JSX } from "@solidjs/web"
 import { Box, Path, Text } from "#primitives"
 import { messages } from "./words.ts"
+import { collected } from "./collect.ts"
 import { negative, styles, type Styles } from "./styles.ts"
 import { tokens } from "./tokens.ts"
 import type { Laid, Located } from "./strict/types/ui.d.ts"
@@ -89,8 +90,9 @@ const look = styles({
   },
   secondary: { backgroundColor: { default: tokens.colour.quinaryLabel, hover: tokens.colour.quaternaryLabel }, color: tokens.colour.label, opacity: { default: 1, pressed: 0.7 } },
   outline: { backgroundColor: { default: tokens.colour.background, hover: tokens.colour.quinaryLabel }, color: tokens.colour.label, boxShadow: { default: tokens.shadow.edge, focused: tokens.shadow.focus }, opacity: { default: 1, pressed: 0.7 } },
-  ghost: { backgroundColor: { hover: tokens.colour.quinaryLabel }, color: tokens.colour.label, opacity: { default: 1, pressed: 0.7 } },
-  destructive: { backgroundColor: tokens.colour.red, color: tokens.colour.onAccent },
+  ghost: { backgroundColor: { hover: tokens.colour.quinaryLabel }, color: { default: tokens.colour.secondaryLabel, hover: tokens.colour.label }, opacity: { default: 1, pressed: 0.7 } },
+  // Red words on a red tint, as Raycast's: the colour says what it does, not how much it matters.
+  destructive: { backgroundColor: { default: tokens.colour.redTint, hover: tokens.colour.redTint }, color: tokens.colour.red },
   square: { width: tokens.length.control, paddingInline: 0, flexShrink: 0 },
   pulled: { marginEnd: negative(tokens.length.iconInset) },
   disabled: { opacity: 0.5, cursor: "default" },
@@ -166,6 +168,10 @@ export function Button(props: ButtonProps) {
   // What it says, made once: words in a text, or what it's given (an icon) as it is.
   const inside = children(() => props.children)
   const end = useContext(BarEnd)
+  // In a computer's screen's bar, it's one of the screen's actions, in its footer and its action panel, and draws
+  // nothing there itself.
+  const words = () => inside.toArray().filter((part) => typeof part === "string").join(" ") || props["aria-label"] || ""
+  if (collected(() => ({ label: words(), onAction: () => props.onClick?.(undefined as never), destructive: props.variant === "destructive", disabled: off() }))) return null
   return (
     <Box
       role="button"
