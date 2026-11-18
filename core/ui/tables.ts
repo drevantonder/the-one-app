@@ -48,8 +48,10 @@ function declared(token: Token, condition: "default" | Condition): [string, stri
       const length = at(value)
       return length ? [[token.id, css(length)]] : []
     }
-    case "shadow":
-      return condition === "default" ? [[token.id, value.map((shadow: any) => `${shadow.inset ? "inset " : ""}${shadow.x}px ${shadow.y}px ${shadow.blur}px ${shadow.spread}px ${shadow.colour}`).join(", ")]] : []
+    case "shadow": {
+      const shadows = at(value) as any[] | undefined
+      return shadows ? [[token.id, shadows.map((shadow) => `${shadow.inset ? "inset " : ""}${shadow.x}px ${shadow.y}px ${shadow.blur}px ${shadow.spread}px ${shadow.colour}`).join(", ")]] : []
+    }
     case "font":
       return condition === "default" ? [[token.id, value.map((family: string) => (/^[\w-]+$/.test(family) ? family : `"${family}"`)).join(", ")]] : []
     case "weight": {
@@ -104,7 +106,7 @@ export function tokensTable(): Tokens {
         return { kind: "colour", value: each(of.dark ? of : of.default, (colour: string) => { const [r, g, b, a] = rgba(colour); return [r, g, b, Math.round(a * value.alpha * 10000) / 10000] }) as never }
       }
       case "shadow":
-        return { kind: "shadow", value: value.map((shadow: any) => ({ x: { px: shadow.x }, y: { px: shadow.y }, blur: { px: shadow.blur }, spread: { px: shadow.spread }, colour: rgba(shadow.colour), ...(shadow.inset ? { inset: true } : {}) })) }
+        return { kind: "shadow", value: each(value, (shadows: any[]) => shadows.map((shadow) => ({ x: { px: shadow.x }, y: { px: shadow.y }, blur: { px: shadow.blur }, spread: { px: shadow.spread }, colour: rgba(shadow.colour), ...(shadow.inset ? { inset: true } : {}) }))) as never }
       case "type":
         return { kind: "type", value: { font: value.font.id, size: value.size.value, lineHeight: value.lineHeight, weight: value.weight.id, tracking: value.tracking, tabular: value.tabular } }
       default:

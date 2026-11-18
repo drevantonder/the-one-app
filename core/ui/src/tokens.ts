@@ -8,7 +8,7 @@
 // CSS variables (tokens.css, which isn't edited by hand) and a native host's token table (/ui/client/tokens.json), and
 // a style names a token here by reference (`tokens.colour.mutedForeground`), never by its value.
 //
-// Colours are shadcn's neutral, light and dark. The typeface is Allo (allo.joshpuckett.me, github.com/joshpuckett/
+// Values are Raycast's, as the round-two mockup measured them beside it (DESIGN.md), light and dark. The typeface is Allo (allo.joshpuckett.me, github.com/joshpuckett/
 // allo v1.0, SIL Open Font License with no Reserved Font Name: Allo-LICENSE.txt), served beside the UI library's
 // stylesheet so nothing comes from a font host; code is in the device's own monospace, and a script Allo lacks in the
 // device's own font. Allo-Variable.woff2 is its AlloVariable.ttf with roundness pinned at 100 and only Latin kept:
@@ -37,6 +37,8 @@ const px = (px: number): Length => ({ px })
 /** A shadow: its offsets, blur and spread in pixels, its colour, and whether it's inside the edge. */
 type Shadow = { x: number; y: number; blur: number; spread: number; colour: string; inset?: boolean }
 const shadow = (...shadows: Shadow[]): Token<"shadow"> => ({ kind: "shadow", id: "", value: shadows })
+/** A shadow that's one in light and another in dark. */
+const lightDark = (light: Shadow[], dark: Shadow[]): Token<"shadow"> => ({ kind: "shadow", id: "", value: { default: light, dark } })
 const font = (...families: string[]): Token<"font"> => ({ kind: "font", id: "", value: families })
 /** A weight, a little lighter in dark: light text on dark looks heavier. */
 const weight = (weight: number): Token<"weight"> => ({ kind: "weight", id: "", value: { default: weight, dark: weight - 25 } })
@@ -46,48 +48,41 @@ const alpha = (of: Token<"colour">, percent: number): Token<"colour"> => ({ kind
 const material = (blur: number, saturate: number): Token<"material"> => ({ kind: "material", id: "", value: { blur: px(blur), saturate } })
 const motion = (duration: Varies<number>, easing: Varies<[number, number, number, number]>): Token<"motion"> => ({ kind: "motion", id: "", value: { duration, easing } })
 
+// Raycast's values as round two measured them beside it (raycast-mockups-v2): a near-black blue-grey or a near-white
+// window, one text colour, and Apple's accents but red, orange and blue, which are the mockup's. Colours CSS names
+// are written in OKLCH, which a native host reads from tokens.css for pages written for protocol 1.
+const ink = ["oklch(0.224 0.008 285.76)", "oklch(1 0 0)"] as const
+const red = ["oklch(0.614 0.204 25.56)", "oklch(0.7 0.191 23.4)"] as const
+const orange = ["oklch(0.677 0.164 57.12)", "oklch(0.782 0.171 67.22)"] as const
+const blue = ["oklch(0.573 0.199 261.84)", "oklch(0.714 0.139 249.06)"] as const
 const colours = {
-  background: colour("oklch(1 0 0)", "oklch(0.145 0 0)"),
-  foreground: colour("oklch(0.145 0 0)", "oklch(0.985 0 0)"),
+  background: colour("oklch(0.977 0.003 286.35)", "oklch(0.183 0.01 276.41)"),
+  foreground: colour(...ink),
   /** What's raised off the page: a list, a menu, a sheet. */
-  card: colour("oklch(1 0 0)", "oklch(0.205 0 0)"),
-  primary: colour("oklch(0.205 0 0)", "oklch(0.922 0 0)"),
-  primaryForeground: colour("oklch(0.985 0 0)", "oklch(0.205 0 0)"),
-  /** A quiet fill: a secondary button, what's hovered, a skeleton. */
-  muted: colour("oklch(0.97 0 0)", "oklch(0.269 0 0)"),
-  /** Grey words, and where the keyboard is. */
-  mutedForeground: colour("oklch(0.54 0 0)", "oklch(0.708 0 0)"),
-  destructive: colour("oklch(0.565 0.245 27.325)", "oklch(0.704 0.191 22.216)"),
+  card: colour("oklch(1 0 0)", "oklch(0.24 0.01 276.67)"),
+  primary: colour(...ink),
+  primaryForeground: colour("oklch(1 0 0)", "oklch(0.183 0.01 276.41)"),
+  /** A quiet fill: a secondary button, what's hovered, a skeleton: the text at 10% over the page. */
+  muted: colour("oklch(0.919 0.003 286.35)", "oklch(0.286 0.007 274.7)"),
+  /** Grey words, and where the keyboard is: the text at 60%. */
+  mutedForeground: colour("oklch(0.224 0.008 285.76 / 60%)", "oklch(1 0 0 / 60%)"),
+  destructive: colour(...red),
   /** Warn: "this needs you", but it can wait. */
-  warning: colour("oklch(0.555 0.163 48.998)", "oklch(0.828 0.189 84.429)"),
-  /** A hairline, a field's edge, and what a pressed row fills with: iOS's grey, a step darker than a hover. */
-  border: colour("oklch(0.922 0 0)", "oklch(1 0 0 / 10%)"),
-  /** What dims the page under a sheet. */
-  overlay: colour("oklch(0 0 0 / 50%)"),
-  /** A sidebar beside what it opens, a step off the page. */
-  sidebar: colour("oklch(0.985 0 0)", "oklch(0.205 0 0)"),
-  /** Code, coloured as GitHub colours it, and a diff's tints. */
-  hlKw: colour("#cf222e", "#ff7b72"),
-  hlStr: colour("#0a3069", "#a5d6ff"),
-  hlCom: colour("#6e7781", "#8b949e"),
-  hlNum: colour("#0550ae", "#79c0ff"),
-  hlFn: colour("#8250df", "#d2a8ff"),
-  hlType: colour("#953800", "#ffa657"),
-  hlTag: colour("#116329", "#7ee787"),
-  hlDel: colour("#82071e", "#ffa198"),
-  find: colour("#fae17d", "#9e6a03"),
-  diffAdd: colour("#e6ffec", "rgb(46 160 67 / 0.15)"),
-  diffDel: colour("#ffebe9", "rgb(248 81 73 / 0.15)"),
+  warning: colour(...orange),
+  /** A hairline, a field's edge, and what a pressed row fills with: the text at 10%. */
+  border: colour("oklch(0.224 0.008 285.76 / 10%)", "oklch(1 0 0 / 10%)"),
+  /** What dims the page under a sheet: a light page is washed, a dark one dimmed. */
+  overlay: colour("oklch(1 0 0 / 25%)", "oklch(0 0 0 / 40%)"),
 }
 
 /** Lengths. A computer's are rems of 16px; under a finger what's pressed is a 44px target and text a step larger, which
  * a field never shows under 16px, where an iPhone would zoom into it; an iPhone's and iPad's rem is the text size its
  * person chose (Dynamic Type), 17px unless they changed it, and its type styles are iOS's own at that size. */
 const lengths = {
-  /** Body text and what's typed. */
-  textBase: length({ default: rem(0.875), touch: rem(1) }),
-  textLg: length({ default: rem(1.0625), phone: rem(1) }),
-  textTitle: length({ default: rem(1.75), phone: rem(28 / 17) }),
+  /** Body text and what's typed: Raycast's 13px on a computer. */
+  textBase: length({ default: rem(0.8125), touch: rem(1) }),
+  textLg: length({ default: rem(0.9375), phone: rem(1) }),
+  textTitle: length({ default: rem(1.25), phone: rem(28 / 17) }),
   /** Apple's smaller text styles, the same under a finger and a mouse: subheadline, for a section's toggle;
    * footnote, for a count, code or a hint; caption 1, for an icon's name; caption 2, the smallest, for a key or a
    * small heading. */
@@ -96,9 +91,9 @@ const lengths = {
   textCaption1: length(rem(0.75)),
   textCaption2: length(rem(0.6875)),
   /** What's typed in a field: body, but never under 16px under a finger. */
-  textField: length({ default: rem(0.875), touch: rem(1) }),
+  textField: length({ default: rem(0.8125), touch: rem(1) }),
   /** How tall what's pressed or typed in is, and an icon in it. */
-  control: length({ default: rem(2.25), touch: rem(2.75), phone: rem(44 / 17) }),
+  control: length({ default: rem(2), touch: rem(2.75), phone: rem(44 / 17) }),
   icon: length({ default: rem(1), touch: rem(1.125), phone: rem(19 / 17) }),
   /** A screen's gutter and the gap between its parts, which on an iPhone stay put as its text grows; and where lists
    * and forms stop growing. */
@@ -108,20 +103,9 @@ const lengths = {
   hairline: length(px(1)),
 }
 
-/** Space between and around things, a scale of steps from 4px. */
-const space = {
-  xs: length(rem(0.25)),
-  sm: length(rem(0.5)),
-  md: length(rem(0.75)),
-  lg: length(rem(1)),
-  xl: length(rem(1.5)),
-  xxl: length(rem(2)),
-  xxxl: length(rem(3)),
-}
-
 const radii = {
   sm: radius(rem(0.375)),
-  md: radius(rem(0.5)),
+  md: radius(rem(0.5625)),
   xl: radius(rem(0.875)),
   /** A pill, or a circle. */
   full: radius(px(9999)),
@@ -141,9 +125,9 @@ const fonts = {
 
 /** Weights between Allo's named ones. */
 const weights = {
-  body: weight(450),
-  label: weight(550),
-  title: weight(650),
+  body: weight(400),
+  label: weight(500),
+  title: weight(600),
 }
 
 /** A type style (DESIGN.md: text is one of a few): body; label, for what's pressed, named or a row's heading;
@@ -175,16 +159,25 @@ const motions = {
 
 // By role.
 
-const label = colour("oklch(0.145 0 0)", "oklch(0.985 0 0)")
-const accent = (light: string, dark: string) => colour(light, dark)
+/** Raycast's window shadow, light and dark, and its edge inside, as round two measured them. */
+const windowShadow: Record<"light" | "dark", Shadow[]> = {
+  light: [{ x: 0, y: 0, blur: 0, spread: 0.5, colour: "oklch(0 0 0 / 16%)" }, { x: 0, y: 4, blur: 8, spread: 0, colour: "oklch(0 0 0 / 6%)" }, { x: 0, y: 12, blur: 32, spread: 0, colour: "oklch(0 0 0 / 14%)" }, { x: 0, y: 16, blur: 48, spread: 8, colour: "oklch(0 0 0 / 6%)" }],
+  dark: [{ x: 0, y: 0, blur: 0, spread: 0.5, colour: "oklch(0 0 0 / 75%)" }, { x: 0, y: 4, blur: 8, spread: 0, colour: "oklch(0 0 0 / 40%)" }, { x: 0, y: 12, blur: 32, spread: 0, colour: "oklch(0 0 0 / 60%)" }, { x: 0, y: 16, blur: 48, spread: 8, colour: "oklch(0 0 0 / 20%)" }],
+}
+const edge: Record<"light" | "dark", Shadow[]> = {
+  light: [{ x: 0, y: 0, blur: 0, spread: 0.5, colour: "oklch(0 0 0 / 10%)", inset: true }, { x: 0, y: 0.5, blur: 0, spread: 0, colour: "oklch(1 0 0 / 90%)", inset: true }],
+  dark: [{ x: 0, y: 0, blur: 0, spread: 0.5, colour: "oklch(1 0 0 / 14%)", inset: true }, { x: 0, y: 0.5, blur: 0, spread: 0, colour: "oklch(1 0 0 / 12%)", inset: true }],
+}
+
+const label = colour(...ink)
 const accents = {
-  red: accent("#ff3b30", "#ff453a"),
-  orange: accent("#ff9500", "#ff9f0a"),
-  yellow: accent("#ffcc00", "#ffd60a"),
-  green: accent("#34c759", "#30d158"),
-  blue: accent("#007aff", "#0a84ff"),
-  purple: accent("#af52de", "#bf5af2"),
-  magenta: accent("#ff2d55", "#ff375f"),
+  red: colour(...red),
+  orange: colour(...orange),
+  yellow: colour("#ffcc00", "#ffd60a"),
+  green: colour("#34c759", "#30d158"),
+  blue: colour(...blue),
+  purple: colour("#af52de", "#bf5af2"),
+  magenta: colour("#ff2d55", "#ff375f"),
 }
 /** Colours: one text colour at five strengths, a background and the second of its gradient, what's selected, what's
  * loading, and the accents, each with its tint. */
@@ -195,18 +188,18 @@ const roles = {
   quaternaryLabel: alpha(label, 20),
   quinaryLabel: alpha(label, 10),
   background: colours.background,
-  backgroundGradient: colour("oklch(1 0 0)", "oklch(0.145 0 0)"),
+  /** What's raised off the page: a group of rows, a menu, a problem, what's loading in place of a list. */
+  card: colours.card,
+  backgroundGradient: colour("oklch(0.962 0.004 286.32)", "oklch(0.16 0.009 274.31)"),
   selection: alpha(label, 10),
   /** What dims the page under a sheet or an alert. */
   overlay: colours.overlay,
-  /** Liquid Glass's fill: the page's background, a third see-through, over what's blurred behind it. */
-  glass: alpha(colours.background, 66),
+  /** Liquid Glass's fill, over what's blurred behind it: white, two thirds see-through in light and mostly in dark. */
+  glass: colour("oklch(1 0 0 / 66%)", "oklch(1 0 0 / 13%)"),
   /** What veils a page behind something opened over it, over what's blurred. */
   veil: alpha(colours.background, 55),
   /** A tile's tint, as an App Library category's square is. */
   tile: alpha(label, 14),
-  /** What's chosen among apps and widgets by the keyboard: a tint. */
-  highlight: alpha(label, 6),
   /** Words and icons on an accent. */
   onAccent: colour("oklch(1 0 0)"),
   loader: alpha(label, 40),
@@ -225,10 +218,10 @@ const grid = Object.fromEntries([0.5, 1, 2, 2.5, 3, 4, 5, 6, 8, 10, 12, 16, 20, 
 
 /** Sizes of text: large, medium and small, and a phone's large title. */
 const sizes = {
-  large: length(rem(1)),
-  medium: length(rem(0.875)),
-  small: length(rem(0.75)),
-  largeTitle: length({ default: rem(1.75), phone: rem(34 / 17) }),
+  large: length({ default: rem(1.125), phone: rem(1) }),
+  medium: length({ default: rem(0.8125), touch: rem(0.9375), phone: rem(15 / 17) }),
+  small: length({ default: rem(0.6875), touch: rem(0.8125), phone: rem(13 / 17) }),
+  largeTitle: length({ default: rem(1.25), phone: rem(34 / 17) }),
 }
 const weightRoles = {
   regular: weights.body,
@@ -240,7 +233,6 @@ const weightRoles = {
 export const legacy = {
   colour: named(colours, (key) => key),
   length: named(lengths, (key) => key),
-  space: named(space, (key) => `space-${key}`),
   radius: named(radii, (key) => `radius-${key}`),
   shadow: named(shadows, (key) => `shadow-${key}`),
   weight: named(weights, (key) => `${key}-weight`),
@@ -255,9 +247,9 @@ export const tokens = {
     icon: lengths.icon,
     /** How far an icon sits inside the edge of a square button of it, which a button with no edge of its own at the
      * end of a row pulls out by, so the icon lines up with what's under it: half of `control` less `icon`. */
-    iconInset: length({ default: rem(0.625), touch: rem(0.8125), phone: rem(12.5 / 17) }),
-    /** How tall a screen's bar is at least: a control's height and a little. */
-    bar: length({ default: rem(3), touch: rem(3.5), phone: rem(44 / 17 + 0.75) }),
+    iconInset: length({ default: rem(0.5), touch: rem(0.8125), phone: rem(12.5 / 17) }),
+    /** How tall a screen's bar is at least: a control's height and a little, Raycast's 52px on a computer. */
+    bar: length({ default: rem(3.25), touch: rem(3.5), phone: rem(44 / 17 + 0.75) }),
     gutter: lengths.gutter,
     readable: lengths.readable,
     hairline: lengths.hairline,
@@ -273,26 +265,38 @@ export const tokens = {
     safeLeft: length(px(0)),
     safeRight: length(px(0)),
     sheet: length(rem(28)),
-    alert: length(rem(22)),
+    alert: length(rem(18.75)),
     menu: length(rem(10)),
     /** A sheet's grabber, which says under a finger that it can be pulled down, and is nothing under a mouse. */
     grabber: length({ default: px(0), touch: rem(0.25) }),
     grabberGap: length({ default: px(0), touch: rem(0.5) }),
     /** How tall a row in a list is at least: what's pressed, and a little room. */
-    row: length({ default: rem(2.75), touch: rem(3.25), phone: rem(52 / 17) }),
+    row: length({ default: rem(2.375), touch: rem(3.25), phone: rem(52 / 17) }),
   }, (key) => key),
   size: named(sizes, (key) => `size-${key}`),
   radius: named({ small: radius(px(6)), medium: radius(px(10)), large: radius(px(18)), full: radii.full, icon: radii.icon }, (key) => `radius-${key}`),
   shadow: named({
     /** Liquid Glass's: a hairline rim, a line of light along its top, and a soft shadow under it. */
-    glass: shadow({ x: 0, y: 0, blur: 0, spread: 0.5, colour: "oklch(0.5 0 0 / 12%)", inset: true }, { x: 0, y: 1, blur: 0, spread: 0, colour: "oklch(1 0 0 / 30%)", inset: true }, { x: 0, y: 8, blur: 24, spread: -10, colour: "oklch(0 0 0 / 30%)" }),
+    glass: lightDark(
+      [{ x: 0, y: 0, blur: 0, spread: 0.5, colour: "oklch(0 0 0 / 12%)" }, { x: 0, y: 1, blur: 3, spread: 0, colour: "oklch(0 0 0 / 6%)" }, { x: 0, y: 0.5, blur: 0, spread: 0, colour: "oklch(1 0 0 / 90%)", inset: true }, { x: 0, y: 8, blur: 24, spread: 0, colour: "oklch(0 0 0 / 18%)" }],
+      [{ x: 0, y: 0, blur: 0, spread: 0.5, colour: "oklch(1 0 0 / 14%)", inset: true }, { x: 0, y: 0.5, blur: 0, spread: 0, colour: "oklch(1 0 0 / 18%)", inset: true }, { x: 0, y: 8, blur: 24, spread: 0, colour: "oklch(0 0 0 / 25%)" }],
+    ),
     /** What's carried by a finger: a soft drop shadow. */
     lifted: shadow({ x: 0, y: 12, blur: 28, spread: -6, colour: "oklch(0 0 0 / 30%)" }),
-    focus: shadow({ x: 0, y: 0, blur: 0, spread: 3, colour: "oklch(0.55 0 0 / 50%)" }), /** A window's, a sheet's or a menu's: its shadow, and its 1px edge inside. */
-    window: shadow({ x: 0, y: 10, blur: 30, spread: 0, colour: "oklch(0 0 0 / 20%)" }, { x: 0, y: 0, blur: 0, spread: 1, colour: "oklch(0.5 0 0 / 15%)", inset: true }), edge: shadow({ x: 0, y: 0, blur: 0, spread: 1, colour: "oklch(0.5 0 0 / 15%)", inset: true }),
+    /** Where the keyboard is: a blue edge and a ring of its tint. */
+    focus: lightDark(
+      [{ x: 0, y: 0, blur: 0, spread: 1, colour: "oklch(0.573 0.199 261.84)", inset: true }, { x: 0, y: 0, blur: 0, spread: 3, colour: "oklch(0.573 0.199 261.84 / 30%)" }],
+      [{ x: 0, y: 0, blur: 0, spread: 1, colour: "oklch(0.714 0.139 249.06)", inset: true }, { x: 0, y: 0, blur: 0, spread: 3, colour: "oklch(0.714 0.139 249.06 / 30%)" }],
+    ),
+    /** A window's, a sheet's or a menu's, as Raycast's: a hairline outside, three soft shadows under it, and its edge. */
+    window: lightDark([...windowShadow.light, ...edge.light], [...windowShadow.dark, ...edge.dark]),
+    /** A raised thing's edge inside: a half-pixel line, lit along the top. */
+    edge: lightDark(edge.light, edge.dark),
     /** A field's edge, and where the keyboard is in it, where what's in it is wrong. */
-    wrongEdge: shadow({ x: 0, y: 0, blur: 0, spread: 1, colour: "#ff3b30", inset: true }), wrongFocus: shadow({ x: 0, y: 0, blur: 0, spread: 3, colour: "rgb(255 59 48 / 50%)" }) }, (key) => `shadow-${key}`),
-  material: named({ glass: material(20, 1.8), thin: material(18, 1.2) }, (key) => `material-${key}`),
+    wrongEdge: lightDark([{ x: 0, y: 0, blur: 0, spread: 1, colour: red[0], inset: true }], [{ x: 0, y: 0, blur: 0, spread: 1, colour: red[1], inset: true }]),
+    wrongFocus: lightDark([{ x: 0, y: 0, blur: 0, spread: 3, colour: "oklch(0.614 0.204 25.56 / 30%)" }], [{ x: 0, y: 0, blur: 0, spread: 3, colour: "oklch(0.7 0.191 23.4 / 30%)" }]),
+  }, (key) => `shadow-${key}`),
+  material: named({ glass: material(20, 1.6), thin: material(18, 1.2) }, (key) => `material-${key}`),
   font: named(fonts, (key) => `font-${key}`),
   weight: named(weightRoles, (key) => `weight-${key}`),
   type: named({

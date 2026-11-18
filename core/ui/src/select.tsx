@@ -50,7 +50,7 @@ const look = styles({
     pointerEvents: "auto",
     padding: tokens.grid[1],
     borderRadius: tokens.radius.medium,
-    backgroundColor: tokens.colour.background,
+    backgroundColor: tokens.colour.card,
     boxShadow: tokens.shadow.window,
     opacity: { default: 1, entering: 0 },
     scale: { default: 1, entering: 0.95 },

@@ -63,7 +63,7 @@ const look = styles({
     maxWidth: tokens.length.alert,
     padding: tokens.grid[1],
     borderRadius: tokens.radius.medium,
-    backgroundColor: tokens.colour.background,
+    backgroundColor: tokens.colour.card,
     color: tokens.colour.label,
     boxShadow: tokens.shadow.window,
     font: tokens.type.medium,

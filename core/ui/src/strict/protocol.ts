@@ -268,7 +268,7 @@ export type Role =
 /** A colour, by its token: `muted-foreground` is `var(--muted-foreground)`. */
 export type Colour =
   | "background" | "foreground" | "card" | "primary" | "primary-foreground" | "muted" | "muted-foreground" | "destructive"
-  | "warning" | "border" | "overlay" | "sidebar"
+  | "warning" | "border" | "overlay"
 
 /** A type style (DESIGN.md: text is one of a few type styles), each a size, a weight and a tracking from the tokens. */
 export type Font = "body" | "label" | "title" | "figure" | "subheadline" | "footnote" | "caption-1" | "caption-2"

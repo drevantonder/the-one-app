@@ -12,7 +12,7 @@ const look = styles({
   list: {
     maxWidth: tokens.length.readable,
     borderRadius: tokens.radius.large,
-    backgroundColor: tokens.colour.background,
+    backgroundColor: tokens.colour.card,
     color: tokens.colour.label,
     boxShadow: tokens.shadow.edge,
     overflow: "hidden",
