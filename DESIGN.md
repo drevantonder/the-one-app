@@ -95,8 +95,13 @@ What users see, as the project's owner decided it. Only their decisions are here
 - Editing moves no icon (17 Nov): + and Done are in the owner pill's row, and the dots pill stays, so nothing jumps. Tapping a dot opens the page overview, and the App Library's glyph stays, dimmed and not tappable (18 Nov).
 - Big app icons on pages have their name under them (17 Nov), cut with "…" when long. The cards stay square: the icon shrinks to make room. Why: our icons aren't as well known as iOS's, so the name is needed.
 - Nothing is hidden (17 Nov): the App Library always shows everything installed, and Remove from Home Screen only takes an app off a page.
-- Settings isn't a place: its apps are ordinary apps, each in its category.
 - Widgets come in a phone's own sizes: 2×2, 4×2 and 4×4. A widget's title is low in its order.
+
+## Settings (18 Nov)
+
+- Settings is one app, in Utilities, where every app brings its settings, as Raycast's Settings has its extensions'; Andre's pick of the mockup (`design/settings-mockups.html`). Its sidebar: the search, whoever's looking with Sign In & Security under their name, the sections in three groups, then every app they have, A to Z, with an Update pill where one's ready.
+- What an app adds to another section's page (a device's) is a group headed by that app's icon and name, so it's clear which app brings what.
+- On a phone the sidebar is cards, and each section is pushed as a page, as iOS's Settings.
 
 ## Vault
 

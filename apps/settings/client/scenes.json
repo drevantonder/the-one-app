@@ -1,0 +1,427 @@
+{
+  "Settings": {
+    "answers": {
+      "settings_sections": {
+        "sections": [
+          {
+            "id": "sign-in/security",
+            "app": "sign-in",
+            "title": "Sign-In",
+            "icon": "data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A//www.w3.org/2000/svg%22%20viewBox%3D%220%200%2032%2032%22%3E%3Crect%20width%3D%2232%22%20height%3D%2232%22%20rx%3D%228%22%20fill%3D%22%23f5a623%22/%3E%3C/svg%3E",
+            "app_icon": "data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A//www.w3.org/2000/svg%22%20viewBox%3D%220%200%2032%2032%22%3E%3Crect%20width%3D%2232%22%20height%3D%2232%22%20rx%3D%228%22%20fill%3D%22%23f5a623%22/%3E%3C/svg%3E",
+            "trusted": true,
+            "component": "security",
+            "in": "settings",
+            "name": "Sign In & Security",
+            "group": "you",
+            "order": 0,
+            "count": null
+          },
+          {
+            "id": "sign-in/devices",
+            "app": "sign-in",
+            "title": "Sign-In",
+            "icon": "data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A//www.w3.org/2000/svg%22%20viewBox%3D%220%200%2032%2032%22%3E%3Crect%20width%3D%2232%22%20height%3D%2232%22%20rx%3D%228%22%20fill%3D%22%233b6cff%22/%3E%3C/svg%3E",
+            "app_icon": "data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A//www.w3.org/2000/svg%22%20viewBox%3D%220%200%2032%2032%22%3E%3Crect%20width%3D%2232%22%20height%3D%2232%22%20rx%3D%228%22%20fill%3D%22%233b6cff%22/%3E%3C/svg%3E",
+            "trusted": true,
+            "component": "devices",
+            "in": "settings",
+            "name": "Devices",
+            "group": "network",
+            "order": 1,
+            "count": 1
+          },
+          {
+            "id": "sign-in/users",
+            "app": "sign-in",
+            "title": "Sign-In",
+            "icon": "data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A//www.w3.org/2000/svg%22%20viewBox%3D%220%200%2032%2032%22%3E%3Crect%20width%3D%2232%22%20height%3D%2232%22%20rx%3D%228%22%20fill%3D%22%238a919b%22/%3E%3C/svg%3E",
+            "app_icon": "data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A//www.w3.org/2000/svg%22%20viewBox%3D%220%200%2032%2032%22%3E%3Crect%20width%3D%2232%22%20height%3D%2232%22%20rx%3D%228%22%20fill%3D%22%238a919b%22/%3E%3C/svg%3E",
+            "trusted": true,
+            "component": "users",
+            "in": "settings",
+            "name": "People & Groups",
+            "group": "network",
+            "order": 2,
+            "count": null
+          },
+          {
+            "id": "vault/accounts",
+            "app": "vault",
+            "title": "Vault",
+            "icon": "data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A//www.w3.org/2000/svg%22%20viewBox%3D%220%200%2032%2032%22%3E%3Crect%20width%3D%2232%22%20height%3D%2232%22%20rx%3D%228%22%20fill%3D%22%235f6670%22/%3E%3C/svg%3E",
+            "app_icon": "data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A//www.w3.org/2000/svg%22%20viewBox%3D%220%200%2032%2032%22%3E%3Crect%20width%3D%2232%22%20height%3D%2232%22%20rx%3D%228%22%20fill%3D%22%235f6670%22/%3E%3C/svg%3E",
+            "trusted": true,
+            "component": "accounts",
+            "in": "settings",
+            "name": "Accounts",
+            "group": "network",
+            "order": 3,
+            "count": null
+          },
+          {
+            "id": "notifications/notifications",
+            "app": "notifications",
+            "title": "Notifications",
+            "icon": "data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A//www.w3.org/2000/svg%22%20viewBox%3D%220%200%2032%2032%22%3E%3Crect%20width%3D%2232%22%20height%3D%2232%22%20rx%3D%228%22%20fill%3D%22%23ff3b30%22/%3E%3C/svg%3E",
+            "app_icon": "data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A//www.w3.org/2000/svg%22%20viewBox%3D%220%200%2032%2032%22%3E%3Crect%20width%3D%2232%22%20height%3D%2232%22%20rx%3D%228%22%20fill%3D%22%23ff3b30%22/%3E%3C/svg%3E",
+            "trusted": true,
+            "component": "notifications",
+            "in": "settings",
+            "name": "Notifications",
+            "group": "general",
+            "order": 1,
+            "count": null
+          },
+          {
+            "id": "home-screen/appearance",
+            "app": "home-screen",
+            "title": "Home Screen",
+            "icon": "data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A//www.w3.org/2000/svg%22%20viewBox%3D%220%200%2032%2032%22%3E%3Crect%20width%3D%2232%22%20height%3D%2232%22%20rx%3D%228%22%20fill%3D%22%23222%22/%3E%3C/svg%3E",
+            "app_icon": "data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A//www.w3.org/2000/svg%22%20viewBox%3D%220%200%2032%2032%22%3E%3Crect%20width%3D%2232%22%20height%3D%2232%22%20rx%3D%228%22%20fill%3D%22%23222%22/%3E%3C/svg%3E",
+            "trusted": true,
+            "component": "appearance",
+            "in": "settings",
+            "name": "Appearance",
+            "group": "general",
+            "order": 2,
+            "count": null
+          },
+          {
+            "id": "sign-in/connect",
+            "app": "sign-in",
+            "title": "Sign-In",
+            "icon": "data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A//www.w3.org/2000/svg%22%20viewBox%3D%220%200%2032%2032%22%3E%3Crect%20width%3D%2232%22%20height%3D%2232%22%20rx%3D%228%22%20fill%3D%22%23a855f7%22/%3E%3C/svg%3E",
+            "app_icon": "data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A//www.w3.org/2000/svg%22%20viewBox%3D%220%200%2032%2032%22%3E%3Crect%20width%3D%2232%22%20height%3D%2232%22%20rx%3D%228%22%20fill%3D%22%23a855f7%22/%3E%3C/svg%3E",
+            "trusted": true,
+            "component": "connect",
+            "in": "settings",
+            "name": "AI",
+            "group": "general",
+            "order": 3,
+            "count": null
+          },
+          {
+            "id": "backups/backups",
+            "app": "backups",
+            "title": "Backups",
+            "icon": "data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A//www.w3.org/2000/svg%22%20viewBox%3D%220%200%2032%2032%22%3E%3Crect%20width%3D%2232%22%20height%3D%2232%22%20rx%3D%228%22%20fill%3D%22%234fc23d%22/%3E%3C/svg%3E",
+            "app_icon": "data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A//www.w3.org/2000/svg%22%20viewBox%3D%220%200%2032%2032%22%3E%3Crect%20width%3D%2232%22%20height%3D%2232%22%20rx%3D%228%22%20fill%3D%22%234fc23d%22/%3E%3C/svg%3E",
+            "trusted": true,
+            "component": "backups",
+            "in": "settings",
+            "name": "Backups",
+            "group": "system",
+            "order": 1,
+            "count": null
+          },
+          {
+            "id": "soft-delete/deleted",
+            "app": "soft-delete",
+            "title": "Recently Deleted",
+            "icon": "data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A//www.w3.org/2000/svg%22%20viewBox%3D%220%200%2032%2032%22%3E%3Crect%20width%3D%2232%22%20height%3D%2232%22%20rx%3D%228%22%20fill%3D%22%233b82f6%22/%3E%3C/svg%3E",
+            "app_icon": "data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A//www.w3.org/2000/svg%22%20viewBox%3D%220%200%2032%2032%22%3E%3Crect%20width%3D%2232%22%20height%3D%2232%22%20rx%3D%228%22%20fill%3D%22%233b82f6%22/%3E%3C/svg%3E",
+            "trusted": true,
+            "component": "deleted",
+            "in": "settings",
+            "name": "Recently Deleted",
+            "group": "system",
+            "order": 2,
+            "count": null
+          }
+        ]
+      },
+      "settings_apps": {
+        "apps": [
+          {
+            "name": "android-emulator",
+            "app": "network/apps/android-emulator",
+            "for": "network",
+            "title": "Android Emulator",
+            "icon": "data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A//www.w3.org/2000/svg%22%20viewBox%3D%220%200%2032%2032%22%3E%3Crect%20width%3D%2232%22%20height%3D%2232%22%20rx%3D%228%22%20fill%3D%22%232fb34a%22/%3E%3C/svg%3E",
+            "category": "Utilities",
+            "removes": true
+          },
+          {
+            "name": "app-store",
+            "app": "network/apps/app-store",
+            "for": "network",
+            "title": "App Store",
+            "icon": "data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A//www.w3.org/2000/svg%22%20viewBox%3D%220%200%2032%2032%22%3E%3Crect%20width%3D%2232%22%20height%3D%2232%22%20rx%3D%228%22%20fill%3D%22%231d7cf2%22/%3E%3C/svg%3E",
+            "category": "Utilities",
+            "removes": true
+          },
+          {
+            "name": "chrome",
+            "app": "network/apps/chrome",
+            "for": "network",
+            "title": "Chrome",
+            "icon": "data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A//www.w3.org/2000/svg%22%20viewBox%3D%220%200%2032%2032%22%3E%3Crect%20width%3D%2232%22%20height%3D%2232%22%20rx%3D%228%22%20fill%3D%22%23eee%22/%3E%3C/svg%3E",
+            "category": "Utilities",
+            "removes": true
+          },
+          {
+            "name": "containers",
+            "app": "network/apps/containers",
+            "for": "network",
+            "title": "Containers",
+            "icon": "data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A//www.w3.org/2000/svg%22%20viewBox%3D%220%200%2032%2032%22%3E%3Crect%20width%3D%2232%22%20height%3D%2232%22%20rx%3D%228%22%20fill%3D%22%233b6cff%22/%3E%3C/svg%3E",
+            "category": "Utilities",
+            "removes": true
+          },
+          {
+            "name": "git-repos",
+            "app": "network/apps/git-repos",
+            "for": "network",
+            "title": "Git Repos",
+            "icon": "data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A//www.w3.org/2000/svg%22%20viewBox%3D%220%200%2032%2032%22%3E%3Crect%20width%3D%2232%22%20height%3D%2232%22%20rx%3D%228%22%20fill%3D%22%23f06a2b%22/%3E%3C/svg%3E",
+            "category": "Utilities",
+            "removes": true
+          },
+          {
+            "name": "gmail",
+            "app": "network/apps/gmail",
+            "for": "network",
+            "title": "Gmail",
+            "icon": "data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A//www.w3.org/2000/svg%22%20viewBox%3D%220%200%2032%2032%22%3E%3Crect%20width%3D%2232%22%20height%3D%2232%22%20rx%3D%228%22%20fill%3D%22%23ea4335%22/%3E%3C/svg%3E",
+            "category": "Utilities",
+            "removes": true
+          }
+        ]
+      },
+      "apps": {
+        "for": "users/sam",
+        "apps": [
+          {
+            "name": "android-emulator",
+            "for": "network",
+            "app": "network/apps/android-emulator",
+            "state": "installed",
+            "trusted": true,
+            "requires": {},
+            "required_by": [],
+            "update": null
+          },
+          {
+            "name": "app-store",
+            "for": "network",
+            "app": "network/apps/app-store",
+            "state": "installed",
+            "trusted": true,
+            "requires": {},
+            "required_by": [],
+            "update": null
+          },
+          {
+            "name": "chrome",
+            "for": "network",
+            "app": "network/apps/chrome",
+            "state": "installed",
+            "trusted": true,
+            "requires": {},
+            "required_by": [],
+            "update": null
+          },
+          {
+            "name": "containers",
+            "for": "network",
+            "app": "network/apps/containers",
+            "state": "installed",
+            "trusted": false,
+            "requires": {},
+            "required_by": [],
+            "update": {
+              "state": "available",
+              "stage": null,
+              "commit": "abc",
+              "commits": 3,
+              "why": null
+            }
+          },
+          {
+            "name": "git-repos",
+            "for": "network",
+            "app": "network/apps/git-repos",
+            "state": "installed",
+            "trusted": true,
+            "requires": {},
+            "required_by": [],
+            "update": null
+          },
+          {
+            "name": "gmail",
+            "for": "network",
+            "app": "network/apps/gmail",
+            "state": "installed",
+            "trusted": true,
+            "requires": {},
+            "required_by": [],
+            "update": null
+          }
+        ]
+      },
+      "sign-in_people": {
+        "people": [
+          {
+            "who": "users/sam",
+            "called": "Sam Rivera",
+            "email": null
+          }
+        ]
+      },
+      "notifications_apps": {
+        "apps": [
+          {
+            "app": "network/apps/containers",
+            "name": "Containers",
+            "allowed": true
+          }
+        ]
+      },
+      "builds": {
+        "network": {
+          "network_update_status": "up_to_date",
+          "build": "0.26.90+3800.abc",
+          "done": 4,
+          "of": 4,
+          "waiting_for": null,
+          "held": null
+        },
+        "devices": [
+          {
+            "device": "d1",
+            "build": "0.26.89+3790.abc",
+            "target": "linux-x86_64"
+          }
+        ],
+        "latest": {
+          "one/linux-x86_64": {
+            "build": "0.26.90+3800.abc"
+          }
+        }
+      },
+      "one/client": {
+        "device": "d1",
+        "build": "0.26.89+3790.abc",
+        "theme": null
+      }
+    },
+    "page": "client/index.html#updates",
+    "size": [
+      1100,
+      720
+    ]
+  },
+  "Settings, on a phone": {
+    "like": "Settings",
+    "page": "client/index.html",
+    "size": [
+      390,
+      844
+    ],
+    "touch": true
+  },
+  "An app": {
+    "like": "Settings",
+    "page": "client/index.html#app:network:containers"
+  },
+  "An app you can't remove": {
+    "like": "Settings",
+    "page": "client/index.html#app:network:gmail",
+    "answers": {
+      "settings_apps": {
+        "apps": [
+          {
+            "name": "android-emulator",
+            "app": "network/apps/android-emulator",
+            "for": "network",
+            "title": "Android Emulator",
+            "icon": "data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A//www.w3.org/2000/svg%22%20viewBox%3D%220%200%2032%2032%22%3E%3Crect%20width%3D%2232%22%20height%3D%2232%22%20rx%3D%228%22%20fill%3D%22%232fb34a%22/%3E%3C/svg%3E",
+            "category": "Utilities",
+            "removes": false
+          },
+          {
+            "name": "app-store",
+            "app": "network/apps/app-store",
+            "for": "network",
+            "title": "App Store",
+            "icon": "data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A//www.w3.org/2000/svg%22%20viewBox%3D%220%200%2032%2032%22%3E%3Crect%20width%3D%2232%22%20height%3D%2232%22%20rx%3D%228%22%20fill%3D%22%231d7cf2%22/%3E%3C/svg%3E",
+            "category": "Utilities",
+            "removes": false
+          },
+          {
+            "name": "chrome",
+            "app": "network/apps/chrome",
+            "for": "network",
+            "title": "Chrome",
+            "icon": "data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A//www.w3.org/2000/svg%22%20viewBox%3D%220%200%2032%2032%22%3E%3Crect%20width%3D%2232%22%20height%3D%2232%22%20rx%3D%228%22%20fill%3D%22%23eee%22/%3E%3C/svg%3E",
+            "category": "Utilities",
+            "removes": false
+          },
+          {
+            "name": "containers",
+            "app": "network/apps/containers",
+            "for": "network",
+            "title": "Containers",
+            "icon": "data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A//www.w3.org/2000/svg%22%20viewBox%3D%220%200%2032%2032%22%3E%3Crect%20width%3D%2232%22%20height%3D%2232%22%20rx%3D%228%22%20fill%3D%22%233b6cff%22/%3E%3C/svg%3E",
+            "category": "Utilities",
+            "removes": false
+          },
+          {
+            "name": "git-repos",
+            "app": "network/apps/git-repos",
+            "for": "network",
+            "title": "Git Repos",
+            "icon": "data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A//www.w3.org/2000/svg%22%20viewBox%3D%220%200%2032%2032%22%3E%3Crect%20width%3D%2232%22%20height%3D%2232%22%20rx%3D%228%22%20fill%3D%22%23f06a2b%22/%3E%3C/svg%3E",
+            "category": "Utilities",
+            "removes": false
+          },
+          {
+            "name": "gmail",
+            "app": "network/apps/gmail",
+            "for": "network",
+            "title": "Gmail",
+            "icon": "data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A//www.w3.org/2000/svg%22%20viewBox%3D%220%200%2032%2032%22%3E%3Crect%20width%3D%2232%22%20height%3D%2232%22%20rx%3D%228%22%20fill%3D%22%23ea4335%22/%3E%3C/svg%3E",
+            "category": "Utilities",
+            "removes": false
+          }
+        ]
+      }
+    }
+  },
+  "Updates, servers updating": {
+    "like": "Settings",
+    "answers": {
+      "builds": {
+        "network": {
+          "network_update_status": "loading",
+          "build": "0.26.91+3810.abc",
+          "done": 1,
+          "of": 4,
+          "waiting_for": null,
+          "held": null
+        },
+        "devices": [
+          {
+            "device": "d1",
+            "build": "0.26.89+3790.abc",
+            "target": "linux-x86_64"
+          }
+        ],
+        "latest": {
+          "one/linux-x86_64": {
+            "build": "0.26.90+3800.abc"
+          }
+        }
+      }
+    }
+  },
+  "Can't show Settings": {
+    "like": "Settings",
+    "answers": {
+      "settings_sections": {
+        "$error": "Couldn't reach your network."
+      }
+    }
+  }
+}
