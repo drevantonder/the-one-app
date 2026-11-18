@@ -461,7 +461,7 @@ fn menu(name: &str, proxy: EventLoopProxy<Told>) -> muda::Menu {
             &PredefinedMenuItem::select_all(None),
         ],
     );
-    let home = MenuItem::with_id("home-screen", "Home Screen", true, Some(Accelerator::new(Some(Modifiers::SUPER | Modifiers::SHIFT), Code::KeyH)));
+    let home = MenuItem::with_id("home-screen", "Home Screen", true, Some(Accelerator::new(Modifiers::META | Modifiers::SHIFT, Code::KeyH)));
     let proxy = Mutex::new(proxy);
     MenuEvent::set_event_handler(Some(move |event: MenuEvent| {
         if event.id == "home-screen" {
