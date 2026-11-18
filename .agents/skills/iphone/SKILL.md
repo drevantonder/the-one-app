@@ -99,3 +99,7 @@ TestFlight. To publish main:
   each signature put a password dialog on his screen. Only ssh, and only a keychain unlocked in that connection.
 - Leaving signing to `cargo tauri ios build` or Xcode's export, which fail with no account signed in.
 - Signing with the wildcard profile: the phone got no APNs token and said it isn't woken by notifications.
+- Signing a simulator build ad hoc with entitlements that name the team, such as associated domains
+  (`codesign -s - --entitlements`): the simulator killed it as it opened (`Code Signature Invalid`). Built for the
+  simulator with signing left on in `project.yml`, Xcode signs it locally, with no account, and puts its
+  entitlements in the binary (`__entitlements`), where the simulator reads them.
