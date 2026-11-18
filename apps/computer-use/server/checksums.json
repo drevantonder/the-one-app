@@ -1,0 +1,6 @@
+{
+  "server/bin/helper/macos-aarch64": {
+    "sha256": "11d72233bc1c1b9faa99f83598608ef36c08f983d71d2d22bd3cebbbf437b7e7",
+    "url": "https://github.com/drevantonder/the-one-app/releases/download/nifs-862235f428eb/helper-36ad6f95e8c01a69ab0f9df59b923cce36ee7ecfe0d1b347163b20aff5237753-macos-aarch64"
+  }
+}
