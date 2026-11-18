@@ -24,9 +24,12 @@ use wry::{RequestAsyncResponder, WebView, WebViewBuilder, WebViewId};
 use crate::discard::Discarding;
 use crate::{hosts, notifications};
 
-/// The launcher's size, in points: two of a phone's pages side by side and the dots under them, drawn smaller
-/// (`measure` in the Home Screen's home.tsx), and room around them.
-const SIZE: LogicalSize<f64> = LogicalSize::new(820.0, 600.0);
+/// The launcher's size, in points, as Raycast's panel is: its search bar, two of a phone's pages side by side, drawn
+/// smaller (`measure` in the Home Screen's home.tsx), and its footer bar.
+const SIZE: LogicalSize<f64> = LogicalSize::new(700.0, 600.0);
+/// How round the launcher's corners are, in points, as Raycast's are.
+#[cfg(target_os = "macos")]
+const CORNER: f64 = 16.0;
 
 /// What the program is told to do on its main thread, where its window and web view are.
 pub(crate) enum Told {
@@ -456,7 +459,7 @@ fn glass(window: &Window) {
             Some(glass) => {
                 let view: *mut AnyObject = objc2::msg_send![glass, alloc];
                 let view: *mut AnyObject = objc2::msg_send![view, initWithFrame: bounds];
-                let () = objc2::msg_send![view, setCornerRadius: 26.0f64];
+                let () = objc2::msg_send![view, setCornerRadius: CORNER];
                 // Width and height follow the window's.
                 let () = objc2::msg_send![view, setAutoresizingMask: 18usize];
                 let nothing: *mut AnyObject = std::ptr::null_mut();
@@ -465,7 +468,7 @@ fn glass(window: &Window) {
             }
             None => {
                 use window_vibrancy::{NSVisualEffectMaterial, NSVisualEffectState, apply_vibrancy};
-                if let Err(error) = apply_vibrancy(window, NSVisualEffectMaterial::HudWindow, Some(NSVisualEffectState::Active), Some(26.0)) {
+                if let Err(error) = apply_vibrancy(window, NSVisualEffectMaterial::HudWindow, Some(NSVisualEffectState::Active), Some(CORNER)) {
                     eprintln!("the launcher has no glass: {error}");
                 }
             }
