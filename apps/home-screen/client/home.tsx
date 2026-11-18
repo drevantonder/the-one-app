@@ -89,6 +89,10 @@ const sized = new ResizeObserver(() => {
 const rolling = (window: HTMLElement) => rolls.add(window)
 
 const still = matchMedia("(prefers-reduced-motion: reduce)")
+/// A screen with no pointer, a TV's, which its remote drives.
+const remote = matchMedia("(pointer: none)")
+/// What a remote's arrows or Tab move the focus to.
+const FOCUSABLE = "button:not([disabled], [tabindex='-1']), input:not([disabled]), a[href], [tabindex]:not([tabindex='-1'])"
 const rtl = () => (document.dir === "rtl" ? -1 : 1)
 const editing = () => state().context.editing
 const editingOwner = (owner: number) => state().matches("editing") && editing()?.owner === owner
@@ -430,7 +434,8 @@ function Library(props: { owner: Owner; places: Record<string, HTMLElement> }) {
                   </button>
                 </Show>
               </div>
-              <button type="button" class="name" onClick={opening(key)}>{category().category}</button>
+              {/* Its apps take the focus, and its small icons, which open it, so its name doesn't again: it's for a finger. */}
+              <button type="button" class="name" tabindex="-1" onClick={opening(key)}>{category().category}</button>
             </div>
           )
         }}
@@ -1280,6 +1285,26 @@ function HomeScreen(props: { owners: Owner[] }) {
     setSeen({ owner, screen: Math.round(sideways(owner).value / pitch()) })
   }
 
+  /// The owner and screenful `element` is on, if it's on one.
+  const where = (element: Element): At | undefined => {
+    const { at, screens } = home.getSnapshot().context
+    if (element.closest(".page.library")) {
+      const screen = screens[at.owner]?.indexOf("library") ?? -1
+      return screen < 0 ? undefined : { owner: at.owner, screen }
+    }
+    for (const [owner, track] of Object.entries(tracks)) {
+      const screen = [...track.children].findIndex((one) => one.contains(element))
+      if (screen >= 0) return { owner: Number(owner), screen }
+    }
+  }
+  /// Gives the focus to the first of what takes it on the screenful shown, or the last.
+  const arrive = (first: boolean) => {
+    const { at, screens } = home.getSnapshot().context
+    const shown = screens[at.owner]?.[at.screen] === "library" ? sections.querySelector(".page.library") : tracks[at.owner]?.children[at.screen]
+    const all = [...(shown?.querySelectorAll<HTMLElement>(FOCUSABLE) ?? [])]
+    ;(first ? all[0] : all.at(-1))?.focus()
+  }
+
   /// Moves the pages to `at`, as the machine says: gliding, or at once where they're only laid out again.
   const slide = (at: At, smooth: boolean) => {
     const move = smooth ? glide : jump
@@ -1654,7 +1679,22 @@ function HomeScreen(props: { owners: Owner[] }) {
     root.addEventListener("click", tapped, true)
     root.addEventListener("touchmove", touchMove, { passive: false })
 
+    // What has the focus is shown, as a phone's pages are, whole: the focus moved to another screenful by a remote's
+    // arrows, Tab or a screen reader moves the pages there, as a swipe would, and the browser scrolls nothing itself
+    // to show it (`overflow: clip`, home.css). A finger or a mouse that focuses what it presses moves nothing.
+    const focused = (event: FocusEvent) => {
+      const element = event.target as Element
+      if (!element.matches(":focus-visible") || !home.getSnapshot().matches("nothing")) return
+      const at = where(element)
+      if (at) home.send({ type: "focus", at })
+    }
+    root.addEventListener("focusin", focused)
+
     // The arrow keys move as a swipe does: up and down on a page that scrolls itself scroll it. Escape ends editing.
+    // A screen with no pointer at all, a TV's, has a remote, whose arrows move the focus: the browser's spatial
+    // navigation does, which Android's WebView has where there's no touchscreen, and the pages follow it (`focused`).
+    // Where there's nothing more that way, they step, and the focus goes to the screenful they came to: to the
+    // first there going on, and the last coming back.
     const keys = (event: KeyboardEvent) => {
       if (event.defaultPrevented || event.altKey || event.metaKey || event.ctrlKey) return
       // A key pressed in an alert or a sheet is its own: the browser closes it on Escape, and that's all Escape does.
@@ -1665,11 +1705,19 @@ function HomeScreen(props: { owners: Owner[] }) {
       if (!home.getSnapshot().matches("nothing")) return
       const to = ({ ArrowRight: { screen: rtl() }, ArrowLeft: { screen: -rtl() }, ArrowDown: { owner: 1 }, ArrowUp: { owner: -1 } } as Record<string, { screen: 1 | -1 } | { owner: 1 | -1 }>)[event.key]
       if (!to || ("owner" in to && kindOf(home.getSnapshot().context.at.owner) !== "home")) return
+      if (remote.matches) {
+        const from = document.activeElement
+        return void setTimeout(() => {
+          if (document.activeElement !== from || !document.hasFocus() || !home.getSnapshot().matches("nothing")) return
+          home.send({ type: "step", ...to })
+          arrive(("screen" in to ? to.screen * rtl() : to.owner) > 0)
+        })
+      }
       event.preventDefault()
       home.send({ type: "step", ...to })
     }
     addEventListener("keydown", keys)
-    return () => (sliding.unsubscribe(), arranging.unsubscribe(), watched.disconnect(), root.removeEventListener("wheel", wheel), removeEventListener("keydown", keys), root.removeEventListener("pointerdown", press), root.removeEventListener("pointermove", drag), root.removeEventListener("pointerup", lift), root.removeEventListener("pointercancel", lift), root.removeEventListener("click", tapped, true), root.removeEventListener("touchmove", touchMove))
+    return () => (sliding.unsubscribe(), arranging.unsubscribe(), watched.disconnect(), root.removeEventListener("focusin", focused), root.removeEventListener("wheel", wheel), removeEventListener("keydown", keys), root.removeEventListener("pointerdown", press), root.removeEventListener("pointermove", drag), root.removeEventListener("pointerup", lift), root.removeEventListener("pointercancel", lift), root.removeEventListener("click", tapped, true), root.removeEventListener("touchmove", touchMove))
   })
 
   // Editing begins with a tick, as an iPhone's does; lifting something into it plays its own.

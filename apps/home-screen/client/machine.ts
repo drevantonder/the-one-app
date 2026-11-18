@@ -168,6 +168,8 @@ export type Event =
   /** One screenful along, or one owner: a key, a wheel or a trackpad. */
   | { type: "step"; screen: 1 | -1 }
   | { type: "step"; owner: 1 | -1 }
+  /** The focus moved to what's on this screenful, which is shown, as a swipe would show it. */
+  | { type: "focus"; at: At }
   /** A screenful of this owner's, by its dot or the App Library's glyph after them. */
   | { type: "go"; screen: number }
   /** A link to one of the screenfuls (`one:home-screen#library`): there at once, whatever was open. */
@@ -299,7 +301,7 @@ export const machine = setup({
     }),
     // Where it is now, which its owner's pages remember.
     be: assign(({ context, event }) => {
-      const { at } = event as Extract<Event, { type: "settled" }>
+      const { at } = event as Extract<Event, { type: "settled" | "focus" }>
       return { at, last: context.last.with(at.owner, at.screen) }
     }),
     step: assign(({ context, event }) => {
@@ -435,6 +437,7 @@ export const machine = setup({
       on: {
         step: { guard: "moves", actions: ["step", "glide"] },
         go: { actions: ["go", "glide"] },
+        focus: { actions: ["be", "glide"] },
         list: { guard: "home", target: "listing" },
         open: { target: "category", actions: "open" },
         hold: { target: "holding", actions: "hold" },
