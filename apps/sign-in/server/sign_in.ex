@@ -28,7 +28,7 @@ defmodule SignIn do
   def sensitive, do: true
 
   require Logger
-  alias OneCore.{Artifact, Call, Edge}
+  alias OneCore.{Artifact, Builds, Call, Edge}
 
   @impl true
   def entrypoints do
@@ -425,7 +425,7 @@ defmodule SignIn do
 
   def call("add_passkey", _inputs, call), do: %{link: ask(%{ask: "passkey", who: person(call)})["link"]}
 
-  def call("devices", _inputs, call), do: ask(%{ask: "devices", who: person(call)})
+  def call("devices", _inputs, call), do: devices(person(call))
 
   def call("encrypt_for_passkeys", %{"keys" => keys}, call) do
     case JSON.decode(keys) do
@@ -541,9 +541,17 @@ defmodule SignIn do
   """
   def device_name(_call, device) do
     with "users/" <> _ = who <- OneCore.Hooks.whose(device),
-         %{"devices" => devices} <- ask(%{ask: "devices", who: who}),
+         %{"devices" => devices} <- devices(who),
          do: Enum.find_value(devices, &(&1["id"] == device && &1["name"])),
          else: (_ -> nil)
+  end
+
+  # What the edge says a person's devices are, each app under the name it says it has now: the edge names a device as
+  # it signed in, and an app says what it's called each time it connects.
+  defp devices(who) do
+    %{"devices" => devices} = list = ask(%{ask: "devices", who: who})
+    names = Builds.names(who, for(%{"kind" => "app", "id" => id} <- devices, do: id))
+    %{list | "devices" => for(device <- devices, do: Map.update!(device, "name", &Map.get(names, device["id"], &1)))}
   end
 
   defp joins(name, link), do: "users/#{name} joins at #{link} within a week. It's shown once, so pass it on now."
