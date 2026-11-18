@@ -1290,6 +1290,7 @@ dependencies = [
  "client",
  "data-encoding",
  "dirs 6.0.0",
+ "ed25519-dalek",
  "encryption_client",
  "flate2",
  "git_repos_client",

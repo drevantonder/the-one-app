@@ -10,6 +10,8 @@ anyhow.workspace = true
 client = { path = "../../core/client" }
 data-encoding = "2"
 dirs = "6"
+# Each build's signature, by the platform's key (`serving`).
+ed25519-dalek = "3"
 flate2 = "1"
 iroh.workspace = true
 reqwest = { version = "0.13", default-features = false }

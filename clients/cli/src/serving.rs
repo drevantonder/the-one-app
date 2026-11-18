@@ -70,6 +70,7 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use std::{env, fs};
 
 use anyhow::{Context, Result, bail, ensure};
+use ed25519_dalek::{Signature, VerifyingKey};
 use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value, json};
 use sha2::{Digest, Sha256};
@@ -85,6 +86,9 @@ use client::{BUILD, Client, target};
 
 /// Which build of `one` an update takes the latest of: the app, with its window, or `one` built without it.
 const PROGRAM: &str = if cfg!(feature = "window") { "one" } else { "one-cli" };
+/// The public half of the key the platform signs each build it publishes with, BUILD_SIGNING_KEY in `tooling/release`
+/// (in 1Password, "The One App build signing key").
+const KEY: &str = "3fd5f3516020dafc3690044ac56dceef578b1f162b72ec4687af2d764192d2f2";
 /// How long every start of a build has to say it's running at the network's edge, and a load to say it's loaded.
 const START: Duration = Duration::from_secs(180);
 /// How long a server is given to stop: longer than it takes to answer what it took (`OneCore.Application`).
@@ -1069,8 +1073,9 @@ async fn take_program(one: &Value, program: &Path) -> Result<()> {
 /// bundle.
 async fn fetched_program(one: &Value, program: &Path) -> Result<PathBuf> {
     let build = one["build"].as_str().context("a build says which it is")?;
+    ensure!(count(build) >= count(BUILD), "The network's build of one, {build}, is older than this one, {BUILD}.");
     let packed = program.canonicalize()?.with_extension("new.gz");
-    fetch(one, &packed).await?;
+    fetch(&format!("{PROGRAM}/{}", target()), one, &packed).await?;
     let new = packed.with_extension("");
     let unpacked =
         std::io::copy(&mut flate2::read::GzDecoder::new(fs::File::open(&packed)?), &mut fs::File::create(&new)?);
@@ -1126,8 +1131,10 @@ async fn download(client: &Client) -> Result<Map<String, Value>> {
     }
 }
 
-/// Downloads a build by its link into `file`, and checks it's the size and SHA-256 the network said.
-async fn fetch(build: &Value, file: &Path) -> Result<()> {
+/// Downloads the build of `name` the network gives, `build`, by its link into `file`, once it's checked it's the
+/// platform's, and checks it's the size and SHA-256 it said.
+async fn fetch(name: &str, build: &Value, file: &Path) -> Result<()> {
+    signed(name, build)?;
     let link = &build["link"];
     let method = reqwest::Method::from_bytes(link["method"].as_str().unwrap_or("GET").as_bytes())?;
     let mut request = client::web()?.request(method, link["url"].as_str().context("a build has a link")?);
@@ -1148,6 +1155,27 @@ async fn fetch(build: &Value, file: &Path) -> Result<()> {
         bail!("The build {} didn't download whole.", build["build"]);
     }
     Ok(())
+}
+
+/// Checks the network's `build` of `name` (`one/linux-x86_64`, `server-code`) is the platform's: its Ed25519 signature
+/// of its name, build and SHA-256, checked with the public half built in here, `KEY`, as Tauri's updater and Sparkle
+/// check theirs. So whoever publishes to the network, its owner too, can give this no program but the platform's, nor
+/// one in another's place, and as each says its build, an older one is told by it.
+fn signed(name: &str, build: &Value) -> Result<()> {
+    let which = build["build"].as_str().context("a build says which it is")?;
+    let said = format!("{name} {which} {}", build["sha256"].as_str().context("a build says its SHA-256")?);
+    let signature = build["signature"].as_str().with_context(|| format!("The build {which} of {name} isn't signed."))?;
+    let signature = data_encoding::BASE64.decode(signature.as_bytes()).ok().and_then(|sig| Signature::from_slice(&sig).ok());
+    let key = data_encoding::HEXLOWER.decode(KEY.as_bytes()).ok().and_then(|key| VerifyingKey::try_from(key.as_slice()).ok());
+    let signed = signature.is_some_and(|sig| key.expect("KEY is a public key").verify_strict(said.as_bytes(), &sig).is_ok());
+    ensure!(signed, "The build {which} of {name} isn't signed by the platform.");
+    Ok(())
+}
+
+/// The count of commits in a build's metadata (`tooling/version`), which only grows on main: `0.25.13+3670.9046435e40b3`
+/// is 3670, as `OneCore.Builds.count/1` reads it.
+fn count(build: &str) -> u64 {
+    build.split_once('+').and_then(|(_, metadata)| metadata.split('.').next()?.parse().ok()).unwrap_or(0)
 }
 
 /// Calls one of the network's tools and gives what it said, or the error it said.
@@ -1317,12 +1345,15 @@ impl Here {
         if folder.exists() {
             return Ok((name, None));
         }
+        if let Some(on) = from.and_then(Path::file_name).map(|on| on.to_string_lossy()) {
+            ensure!(count(&name) >= count(&on), "the network's server build, {name}, is older than the one it's on, {on}");
+        }
         let unpacking = self.folder.join("builds").join(format!("{name}.unpacking"));
         let _ = fs::remove_dir_all(&unpacking);
         fs::create_dir_all(&unpacking)?;
         let kept = self.runtime(&builds["server-runtime"]).await?;
         linked(&kept, &unpacking).with_context(|| format!("the build {name} couldn't be put together"))?;
-        unpack(&builds["server-code"], &unpacking).await?;
+        unpack("server-code", &builds["server-code"], &unpacking).await?;
         let mut check = command(release(&unpacking));
         check.args(["eval", "OneCore.Release.check()"]).env("ONE_SERVER_STATUS", told.to_string());
         if let Some(from) = from {
@@ -1355,18 +1386,18 @@ impl Here {
             let unpacking = folder.with_extension("unpacking");
             let _ = fs::remove_dir_all(&unpacking);
             fs::create_dir_all(&unpacking)?;
-            unpack(runtime, &unpacking).await?;
+            unpack(&format!("server-runtime/{}", target()), runtime, &unpacking).await?;
             fs::rename(&unpacking, &folder)?;
         }
         Ok(folder)
     }
 }
 
-/// Downloads a build that's an archive and unpacks it into `folder`.
-async fn unpack(build: &Value, folder: &Path) -> Result<()> {
+/// Downloads the build of `what` that's an archive, `build`, and unpacks it into `folder`.
+async fn unpack(what: &str, build: &Value, folder: &Path) -> Result<()> {
     let name = build["build"].as_str().context("a build says which it is")?;
     let archive = folder.with_extension("tar.gz");
-    fetch(build, &archive).await.with_context(|| format!("the build {name} didn't download"))?;
+    fetch(what, build, &archive).await.with_context(|| format!("the build {name} didn't download"))?;
     let unpacked = command("tar").arg("-xzf").arg(&archive).arg("-C").arg(folder).status()?;
     fs::remove_file(&archive)?;
     ensure!(unpacked.success(), "The build {name} didn't unpack.");
