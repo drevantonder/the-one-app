@@ -3,9 +3,7 @@
 // what's slowest and what AI cost, over the range picked above them, and last which alerts its owner is told. A failure opens its trace beside the list, as a waterfall; a slow tool opens how
 // long it took over time. What's fine is silent: with nothing failing, there's no Failing.
 import { createMemo, createSignal, Errored, For, Loading, refresh, Show } from "solid-js"
-import { render } from "@solidjs/web"
-import { call, changed, Empty, Icon, List, Problem, Row, Screen, Section, Skeleton, Split, Switch, Tabs, toast } from "ui"
-import "./app.css"
+import { Box, call, changed, Empty, Icon, List, Problem, render, Row, Screen, Section, Skeleton, Split, Switch, Tabs, Text, toast } from "ui"
 
 /** A slow tool, or an app slow to open, as `telemetry_overview` answers it. */
 interface Slowest {
@@ -130,6 +128,8 @@ function size(bytes: number) {
   while (n >= 1000 && unit < units.length - 1) (n /= 1000), unit++
   return `${n >= 100 || unit === 0 ? Math.round(n) : n.toFixed(1)} ${units[unit]}`
 }
+/// The host of an address, `https://host/path` as `host`.
+const host = (address: string) => address.replace(/^[a-z][a-z0-9+.-]*:\/\//i, "").replace(/[/?#].*$/, "")
 const dollars = (cost: number) => cost.toLocaleString(undefined, { style: "currency", currency: "USD", maximumFractionDigits: cost < 1 ? 4 : 2 })
 
 /// A span's name as a person reads it: its app's title, then its tool.
@@ -144,19 +144,15 @@ const slowName = (slow: Slowest) => (slow.view ? `Opening ${slow.called}` : slow
 /// A count of something, said as many or one.
 const many = (n: number, one: string, more = `${one}s`) => `${count(n)} ${n === 1 ? one : more}`
 
-/// A line of values, as the widgets' sparkline draws one, with a gap where there are none.
-function Spark(props: { values: (number | null)[] }) {
-  const height = 24
-  const points = () => {
-    const values = props.values.map((v) => v ?? 0)
-    const max = Math.max(...values, 1e-9)
-    return values.map((v, at) => `${(at / Math.max(values.length - 1, 1)) * 100},${height - 1 - (v / max) * (height - 2)}`).join(" ")
-  }
+/// A run of values, as the widgets' sparkline draws them, a bar to each, with a gap where there are none.
+function Spark(props: { values: (number | null)[]; height?: number; width?: number | "100%" }) {
+  const max = () => Math.max(...props.values.map((v) => v ?? 0), 1e-9)
   return (
-    <svg class="spark" viewBox={`0 0 100 ${height}`} preserveAspectRatio="none" aria-hidden="true">
-      <polygon points={`${points()} 100,${height} 0,${height}`} />
-      <polyline points={points()} vector-effect="non-scaling-stroke" />
-    </svg>
+    <Box aria-hidden="true" style={{ flexDirection: "row", alignItems: "flex-end", gap: 1, width: props.width ?? 72, height: props.height ?? 24 }}>
+      <For each={props.values}>
+        {(value) => <Box style={{ flexGrow: 1, flexBasis: 0, height: `${((value ?? 0) / max()) * 100}%`, minHeight: 1, backgroundColor: "foreground" }} />}
+      </For>
+    </Box>
   )
 }
 
@@ -166,20 +162,21 @@ function Calls(props: { steps: Overview["calls"] }) {
   const all = () => props.steps.reduce((sum, s) => sum + s.calls, 0)
   const failed = () => props.steps.reduce((sum, s) => sum + s.failed, 0)
   return (
-    <figure class="calls">
-      <div class="bars" role="img" aria-label={`${all()} calls, ${failed()} failed`}>
+    <Box style={{ gap: 8, maxWidth: "readable" }}>
+      <Box role="img" aria-label={`${all()} calls, ${failed()} failed`} style={{ flexDirection: "row", alignItems: "flex-end", gap: 2, height: 72 }}>
         <For each={props.steps}>
           {(step) => (
-            <i style={{ height: `${(step.calls / max()) * 100}%` }} title={`${step.calls} calls${step.failed ? `, ${step.failed} failed` : ""}`}>
-              <b style={{ height: `${step.calls ? (step.failed / step.calls) * 100 : 0}%` }} />
-            </i>
+            <Box aria-hidden="true" style={{ flexGrow: 1, flexBasis: 0, height: `${(step.calls / max()) * 100}%`, minHeight: 1, borderRadius: "sm", overflow: "hidden" }}>
+              <Box style={{ flexGrow: step.calls - step.failed, flexBasis: 0, backgroundColor: "foreground", opacity: 0.22 }} />
+              <Box style={{ flexGrow: step.failed, flexBasis: 0, backgroundColor: "destructive" }} />
+            </Box>
           )}
         </For>
-      </div>
-      <figcaption>
-        {many(all(), "call")}<Show when={failed()}> · <span class="bad">{count(failed())} failed</span></Show>
-      </figcaption>
-    </figure>
+      </Box>
+      <Text style={{ color: "muted-foreground", font: "body" }}>
+        {many(all(), "call")}<Show when={failed()}> · <Text style={{ color: "destructive" }}>{count(failed())} failed</Text></Show>
+      </Text>
+    </Box>
   )
 }
 
@@ -192,28 +189,29 @@ function Trace(props: { id: string; where: string; names: Record<string, string>
     <Screen heading={named(props.where, props.names)} back>
       <Errored fallback={(error) => <Problem heading="Can't show this trace" text={error() as Error} />}>
         <Loading fallback={<Skeleton rows={4} />}>
-          <p class="hint">
+          <Text style={{ color: "muted-foreground", font: "body", maxWidth: "readable" }}>
             {took(total())}
             <Show when={servers() > 1}> across {servers()} servers</Show>
-          </p>
-          <ol class="waterfall">
+          </Text>
+          <Box role="list" style={{ gap: 12, maxWidth: "readable" }}>
             <For each={trace().spans}>
               {(span) => (
-                <li class={{ failed: span.outcome === "error" }} style={{ "--depth": span.depth }}>
-                  <div class="what">
-                    <span class="name">{named(span.name, props.names)}</span>
-                    <span class="took">{took(span.took)}</span>
-                  </div>
-                  <div class="track">
-                    <i style={{ left: `${(span.start / total()) * 100}%`, width: `max(2px, ${(span.took / total()) * 100}%)` }} />
-                  </div>
+                <Box role="listitem" style={{ gap: 4, paddingLeft: span.depth * 12 }}>
+                  <Box style={{ flexDirection: "row", justifyContent: "space-between", gap: "gap" }}>
+                    <Text style={{ font: "body", color: span.outcome === "error" ? "destructive" : undefined }}>{named(span.name, props.names)}</Text>
+                    <Text style={{ font: "body", color: "muted-foreground", fontVariantNumeric: "tabular-nums" }}>{took(span.took)}</Text>
+                  </Box>
+                  <Box aria-hidden="true" style={{ flexDirection: "row", height: 6, borderRadius: "full", backgroundColor: "muted", overflow: "hidden" }}>
+                    <Box style={{ width: `${(span.start / total()) * 100}%` }} />
+                    <Box style={{ width: `${(span.took / total()) * 100}%`, minWidth: 2, borderRadius: "full", backgroundColor: span.outcome === "error" ? "destructive" : "foreground" }} />
+                  </Box>
                   <Show when={servers() > 1 || span.message}>
-                    <p class="about">{[servers() > 1 && span.server, span.message].filter(Boolean).join(" · ")}</p>
+                    <Text style={{ font: "footnote", color: span.outcome === "error" ? "destructive" : "muted-foreground" }}>{[servers() > 1 && span.server, span.message].filter(Boolean).join(" · ")}</Text>
                   </Show>
-                </li>
+                </Box>
               )}
             </For>
-          </ol>
+          </Box>
         </Loading>
       </Errored>
     </Screen>
@@ -224,17 +222,17 @@ function Trace(props: { id: string; where: string; names: Record<string, string>
 function Slow(props: { slow: Slowest }) {
   return (
     <Screen heading={slowName(props.slow)} back>
-      <figure class="over-time">
-        <Spark values={props.slow.over_time} />
-        <figcaption>95th percentile, over time</figcaption>
-      </figure>
+      <Box style={{ maxWidth: "readable", gap: 4 }}>
+        <Spark values={props.slow.over_time} width="100%" height={80} />
+        <Text style={{ color: "muted-foreground", font: "body" }}>95th percentile, over time</Text>
+      </Box>
       <List>
         <Row heading="Median" end={took(props.slow.p50)} />
         <Row heading="95th Percentile" end={took(props.slow.p95)} />
         <Row heading="99th Percentile" end={took(props.slow.p99)} />
         <Row heading={props.slow.view ? "Opened" : "Calls"} end={count(props.slow.count)} />
         <Show when={props.slow.failed}>
-          <Row heading="Failed" end={<span class="bad">{count(props.slow.failed)}</span>} />
+          <Row heading="Failed" end={<Text style={{ color: "destructive" }}>{count(props.slow.failed)}</Text>} />
         </Show>
       </List>
     </Screen>
@@ -308,7 +306,7 @@ function Telemetry(props: { all: Overview }) {
               <For each={alerts().alerts} keyed={(alert) => alert.id}>
                 {(alert) => (
                   <Row
-                    start={<span class={{ bad: alert().state !== "resolved" }}><Icon name={alert().state === "resolved" ? "check" : "warning-circle"} /></span>}
+                    start={<Box style={{ color: alert().state === "resolved" ? undefined : "destructive" }}><Icon name={alert().state === "resolved" ? "check" : "warning-circle"} /></Box>}
                     heading={alert().title}
                     text={alert().text ?? undefined}
                     end={alert().ended ? `Resolved ${since(alert().ended!)}` : since(alert().began)}
@@ -325,7 +323,7 @@ function Telemetry(props: { all: Overview }) {
               <For each={failing()} keyed={(failure) => `${failure.where}|${failure.message}`}>
                 {(failure) => (
                   <Row
-                    start={<span class="bad"><Icon name="warning-circle" /></span>}
+                    start={<Box style={{ color: "destructive" }}><Icon name="warning-circle" /></Box>}
                     heading={failure().span ? named(failure().where, all().names) : failure().where}
                     text={[failure().from, failure().message || "Failed", failure().took != null && failure().took! >= 1000 && `for ${took(failure().took)}`].filter(Boolean).join(" · ")}
                     end={`${failure().count > 1 ? `${many(failure().count, "time")} · ` : ""}${since(failure().at)}`}
@@ -367,22 +365,19 @@ function Telemetry(props: { all: Overview }) {
             </For>
           </List>
         </Section>
-        <p class="hint">
+        <Text style={{ color: "muted-foreground", font: "body", maxWidth: "readable" }}>
           Kept for {all().retention.days} days, up to {size(all().retention.most_bytes)}. {size(all().retention.bytes)} now.
-          <Show when={all().forwarding}>{(to) => ` A copy goes to ${new URL(to()).host}.`}</Show>
-        </p>
+          <Show when={all().forwarding}>{(to) => ` A copy goes to ${host(to())}.`}</Show>
+        </Text>
       </Screen>
     </Split>
   )
 }
 
-render(
-  () => (
-    <Errored fallback={(error) => <Screen heading="Telemetry"><Problem heading="Can't show Telemetry" text={error() as Error} /></Screen>}>
-      <Loading fallback={<Screen heading="Telemetry"><Skeleton rows={6} /></Screen>}>
-        <Telemetry all={overview()} />
-      </Loading>
-    </Errored>
-  ),
-  document.body,
-)
+render(() => (
+  <Errored fallback={(error) => <Screen heading="Telemetry"><Problem heading="Can't show Telemetry" text={error() as Error} /></Screen>}>
+    <Loading fallback={<Screen heading="Telemetry"><Skeleton rows={6} /></Screen>}>
+      <Telemetry all={overview()} />
+    </Loading>
+  </Errored>
+))

@@ -28,7 +28,7 @@ defmodule Telemetry do
   @impl true
   def requires,
     do: %{
-      "core" => ">= 0.23.48",
+      "core" => ">= 0.25.9",
       "database" => "to keep its schedule and its alerts",
       "notifications" => "to tell the network's owner what needs them"
     }
@@ -40,7 +40,7 @@ defmodule Telemetry do
   def jobs, do: [%{tool: "prune", every: 3600}, %{tool: "evaluate", every: 60}]
 
   @impl true
-  def entrypoints, do: [%{page: "client/index.html"}]
+  def entrypoints, do: [%{page: "client/index.html", host: 1}]
 
   @impl true
   def tools do
