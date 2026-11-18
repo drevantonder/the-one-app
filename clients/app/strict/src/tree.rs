@@ -309,6 +309,14 @@ impl Tree {
         if let Some(name) = name.filter(|name| !name.is_empty()) {
             out.insert("name".into(), json!(name));
         }
+        // An input's value is its text, as its app last set it, but a password's, which is never read out.
+        let secret = node.str("type") == Some("password");
+        if node.kind == Kind::Input
+            && !secret
+            && let Some(text) = node.prop("editing").and_then(|editing| editing.get("text"))
+        {
+            out.insert("value".into(), text.clone());
+        }
         for (prop, said) in [
             ("aria-description", "description"),
             ("aria-level", "level"),
@@ -318,7 +326,7 @@ impl Tree {
             ("aria-valuemax", "max"),
             ("placeholder", "placeholder"),
         ] {
-            if let Some(value) = node.prop(prop) {
+            if let Some(value) = node.prop(prop).filter(|_| !(secret && prop == "value")) {
                 out.insert(said.into(), value.clone());
             }
         }

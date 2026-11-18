@@ -55,6 +55,8 @@ serde_json.workspace = true
 sha2 = "0.11"
 taffy = "0.15"
 unicode-linebreak = "0.1"
+# Graphemes and words, which a caret steps and a double click selects by (`editing`).
+unicode-segmentation = "1"
 url = "2"
 # The typeface the UI library ships as WOFF2 (core/ui/src/Allo-Variable.woff2), which the text systems read as TTF.
 wuff = "0.2"
@@ -66,5 +68,11 @@ cosmic-text = "0.19"
 # The desktop's light or dark, from its portal, through libdbus, as tao reads the desktop.
 dbus = "0.9"
 swash = "0.2"
-x11rb = { version = "0.13", features = ["allow-unsafe-code", "xkb", "cursor", "resource_manager"] }
+x11rb = { version = "0.14", features = ["allow-unsafe-code", "xkb", "cursor", "resource_manager"] }
+# The input method (ibus, fcitx: Chinese, Japanese, Korean), through XIM over x11rb, as GPUI's X11 platform has it,
+# but xim-rs's own release, whose compound text decodes Chinese and Korean, where GPUI's fork's has only Japanese.
+xim = { version = "0.6", features = ["x11rb-xcb", "x11rb-client"] }
+# The clipboard and the primary selection, on a connection and thread of their own, as arboard serves them; GPUI's
+# X11 clipboard is adapted from it.
+arboard = { version = "3", default-features = false }
 xkbcommon = { version = "0.8", default-features = false, features = ["x11"] }

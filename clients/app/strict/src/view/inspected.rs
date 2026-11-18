@@ -5,7 +5,8 @@ use std::time::{Duration, Instant};
 use anyhow::{Context as _, bail};
 use serde_json::{Value, json};
 
-use super::{Edit, Screen};
+use super::Screen;
+use crate::editing::{self, Ime};
 use crate::inspect::{self, Key, Request};
 use crate::tree::{Id, Kind};
 
@@ -48,7 +49,16 @@ impl Screen {
                 })
             }
             "tree" => inspect::tree(&self.tree, &self.rects),
-            "query" => inspect::query(&self.tree, &self.rects, dark, request),
+            "query" => {
+                let mut found = inspect::query(&self.tree, &self.rects, dark, request);
+                // An input's editing state as the host has it, which is ahead of what its app set.
+                for node in found["nodes"].as_array_mut().into_iter().flatten() {
+                    if let Some(field) = node["node"].as_u64().and_then(|id| self.fields.get(&id)) {
+                        node["editing"] = json!(field.value());
+                    }
+                }
+                found
+            }
             "tap" => {
                 let target = if request.selects() {
                     inspect::one(&self.tree, request)?
@@ -57,7 +67,12 @@ impl Screen {
                     inspect::at(&self.tree, &self.rects, x, y).with_context(|| format!("nothing is drawn at {x}, {y}"))?
                 };
                 let tapped = self.press(target)?;
-                json!({"tapped": tapped})
+                // A point in an input puts its caret there, as a click does: `clicks` 2 selects a word, 3 its line.
+                if let Some((x, y)) = request.point().filter(|_| self.fields.contains_key(&tapped)) {
+                    let clicks = request.inputs.get("clicks").and_then(Value::as_u64).unwrap_or(1).clamp(1, 3) as u8;
+                    self.press_input(tapped, crate::geometry::point(x, y), clicks, request.bool("shift"));
+                }
+                json!({"tapped": tapped, "editing": self.fields.get(&tapped).map(editing::Field::value)})
             }
             "type" => {
                 let text = request.str("text").context("say what to type, as text")?.to_owned();
@@ -71,11 +86,21 @@ impl Screen {
                 if self.tree.nodes.get(&input).is_none_or(|node| node.kind != Kind::Input) {
                     bail!("node {input} isn't an input, so it takes no text");
                 }
-                let mut buffer = [0; 4];
-                for typed in text.chars() {
-                    self.edit(input, Edit::Type(typed.encode_utf8(&mut buffer)));
+                self.type_text(input, &text);
+                let editing = self.fields.get(&input).map(editing::Field::value);
+                json!({"typed": input, "value": editing.as_ref().map(|editing| &editing.text), "editing": editing})
+            }
+            "ime" => {
+                let input = self.focused.filter(|id| self.fields.contains_key(id)).context("no input has the keyboard: tap one first")?;
+                match (request.str("commit"), request.str("preedit")) {
+                    (Some(commit), _) => self.ime(Ime::Commit(commit.to_owned())),
+                    (None, Some(preedit)) => {
+                        let cursor = request.inputs.get("cursor").and_then(Value::as_u64).map(|units| editing::byte(preedit, units as usize));
+                        self.ime(Ime::Preedit(preedit.to_owned(), cursor))
+                    }
+                    (None, None) => bail!("say what the input method composes (`preedit`, and its `cursor`) or commits (`commit`)"),
                 }
-                json!({"typed": input, "value": self.typed.get(&input)})
+                json!({"node": input, "editing": self.fields.get(&input).map(editing::Field::value)})
             }
             "key" => {
                 let key = Key::of(request)?;
@@ -112,7 +137,7 @@ impl Screen {
                 }
                 json!({"time": clock.now(), "paused": clock.paused()})
             }
-            op => bail!("there's no op {op}: window, tree, query, snap, tap, type, key, scroll, clock and settle are"),
+            op => bail!("there's no op {op}: window, tree, query, snap, tap, type, ime, key, scroll, clock and settle are"),
         })
     }
 

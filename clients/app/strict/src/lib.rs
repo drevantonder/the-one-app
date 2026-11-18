@@ -5,6 +5,7 @@
 //! An agent or a test reads and drives it with the inspector (`inspect`).
 
 mod clone;
+pub mod editing;
 pub mod geometry;
 pub mod inspect;
 mod intl;

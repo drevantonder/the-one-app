@@ -9,6 +9,7 @@ use std::time::{Duration, Instant};
 use serde_json::{Value, json};
 use taffy::prelude::{AvailableSpace, NodeId, TaffyTree};
 
+use crate::editing::{self, Clipboard, Field, Ime};
 use crate::geometry::{Background, Bounds, ContentMask, Corners, Edges, Hsla, Pixels, Point, ScaledPixels, Size, point, px};
 use crate::inspect::{self, Key, Rect, Rects};
 use crate::js::{Posted, Sandbox};
@@ -70,8 +71,21 @@ pub struct Screen {
     asked: Option<Asked>,
     /// What has the keyboard.
     focused: Option<Id>,
-    /// An input's text as it's typed, ahead of the app setting it back as its `value`.
-    typed: HashMap<Id, String>,
+    /// Each input's editing, as it's typed, ahead of the app setting it back, and the editing state its app last
+    /// set, which replaces it only as it changes.
+    fields: HashMap<Id, Field>,
+    set: HashMap<Id, editing::Value>,
+    /// Where each input's text was last drawn, for the pointer and the moves that depend on how it wraps.
+    drawn: HashMap<Id, Drawn>,
+    /// The input the pointer's held press selects in, and the last press, to count a double or triple click.
+    selecting: Option<Id>,
+    last_press: Option<(Instant, Point<f32>, u8)>,
+    /// When the caret last moved, on the app's clock, from which it blinks.
+    blink: f64,
+    /// Its window has the keyboard, so the caret shows.
+    pub active: bool,
+    /// What copy and paste use: the computer's, which the window gives it, or one of its own.
+    pub clipboard: Box<dyn Clipboard>,
     /// How far each scrolling node (and the root, 0) has scrolled, along and down.
     scrolled: HashMap<Id, Point<f32>>,
     /// Where the pointer is, what it's over and what it pressed, for styles' states and pointer events.
@@ -119,7 +133,14 @@ impl Screen {
             told: None,
             asked,
             focused: None,
-            typed: HashMap::new(),
+            fields: HashMap::new(),
+            set: HashMap::new(),
+            drawn: HashMap::new(),
+            selecting: None,
+            last_press: None,
+            blink: 0.0,
+            active: true,
+            clipboard: Box::new(editing::Memory::default()),
             scrolled: HashMap::new(),
             states: States::default(),
             pointer: None,
@@ -194,7 +215,27 @@ impl Screen {
         let settle = self.settling.iter().map(|(until, _)| until.saturating_duration_since(now)).min();
         // What moves by itself draws again each frame.
         let frame = self.animating.then_some(Duration::from_millis(16));
-        timer.into_iter().chain(settle).chain(frame).min()
+        timer.into_iter().chain(settle).chain(frame).chain(self.blinks()).min()
+    }
+
+    /// How long until the caret blinks on or off: as GTK's does, on two thirds of each 1.2 s and off a third, until
+    /// it's been still 10 s, when it stays on. None while the app's clock is paused, or no input has the keyboard.
+    fn blinks(&self) -> Option<Duration> {
+        let clock = self.sandbox.clock();
+        let typing = self.active && self.focused.is_some_and(|id| self.fields.contains_key(&id));
+        let since = clock.now() - self.blink;
+        if !typing || clock.paused() || since >= BLINK_STOPS {
+            return None;
+        }
+        let into = since % BLINK;
+        let next = if into < BLINK * 2.0 / 3.0 { BLINK * 2.0 / 3.0 - into } else { BLINK - into };
+        Some(Duration::from_secs_f64(next / 1000.0))
+    }
+
+    /// Whether the caret shows now.
+    fn caret_shows(&self) -> bool {
+        let since = self.sandbox.clock().now() - self.blink;
+        self.active && (since >= BLINK_STOPS || since % BLINK < BLINK * 2.0 / 3.0)
     }
 
     /// Runs the app's timers that are due, and tells the `settle`s whose time has come.
@@ -260,6 +301,7 @@ impl Screen {
                     }
                     continue;
                 }
+                self.sync_fields();
                 self.tell_settled();
                 return;
             }
@@ -290,6 +332,7 @@ impl Screen {
         let window = Bounds { origin: point(0.0, 0.0), size: Size { width: size.width.0, height: size.height.0 } };
         self.states.focused = self.focused;
         let now = self.sandbox.clock().now();
+        let caret = self.caret_shows();
         let mut painter = Painter {
             tree: &self.tree,
             taffy: TaffyTree::new(),
@@ -303,7 +346,9 @@ impl Screen {
             placed: Vec::new(),
             tab_order: Vec::new(),
             scrolled: &mut self.scrolled,
-            typed: &self.typed,
+            fields: &self.fields,
+            drawn: &mut self.drawn,
+            caret,
             images: &mut self.images,
             rects: Rects::new(),
             time: now,
@@ -473,6 +518,14 @@ impl Screen {
             None => chain,
         };
         self.pointer_event(&target, "pointermove", at, 0, point(0.0, 0.0));
+        // A press held in an input selects as it's dragged.
+        if let Some(id) = self.selecting
+            && let (Some(field), Some(drawn)) = (self.fields.get_mut(&id), self.drawn.get(&id))
+        {
+            let before = field.value();
+            field.drag(drawn.index_at(at));
+            self.edited(id, before);
+        }
     }
 
     /// The pointer left the window: nothing's hovered.
@@ -492,9 +545,12 @@ impl Screen {
         chain
     }
 
-    /// A button went down at `at` (0 the main one, 2 the secondary): what's under it is told, and with the main one
-    /// what's pressed there is pressed and takes the keyboard if it can; the secondary is a `contextmenu` too.
-    pub fn pointer_down(&mut self, at: Point<f32>, button: u8) {
+    /// A button went down at `at` (0 the main one, 1 the middle, 2 the secondary), with Shift held or not: what's
+    /// under it is told, and with the main one what's pressed there is pressed and takes the keyboard if it can, an
+    /// input putting its caret there (a double click selects a word, a triple its line, and Shift extends the
+    /// selection); the middle one in an input pastes the primary selection there, as on Linux; the secondary is a
+    /// `contextmenu` too.
+    pub fn pointer_down(&mut self, at: Point<f32>, button: u8, shift: bool) {
         let chain = self.under(at);
         self.captured = chain.first().copied();
         self.pointer_event(&chain, "pointerdown", at, button, point(0.0, 0.0));
@@ -502,9 +558,38 @@ impl Screen {
             return self.pointer_event(&chain, "contextmenu", at, button, point(0.0, 0.0));
         }
         let pressed = chain.iter().copied().find(|id| self.placed(*id).is_some_and(|placed| placed.pressable));
+        let input = pressed.filter(|id| self.fields.contains_key(id));
+        if button == 1 {
+            if let Some(input) = input.filter(|id| self.fields.get(id).is_some_and(|field| !field.secure && !field.readonly)) {
+                self.states.focus_visible = false;
+                self.focus(Some(input));
+                self.press_input(input, at, 1, false);
+                if let Some(text) = self.clipboard.read(true) {
+                    self.edit(input, |field| field.insert(&text));
+                }
+            }
+            return;
+        }
         self.states.pressed = pressed;
         self.states.focus_visible = false;
         self.focus(pressed);
+        if let Some(input) = input {
+            // Presses close together in time and place count as a double or triple click, by GTK's defaults.
+            let now = Instant::now();
+            let clicks = match self.last_press {
+                Some((when, was, clicks)) if now - when < Duration::from_millis(400) && (was.x - at.x).abs() < 5.0 && (was.y - at.y).abs() < 5.0 => (clicks + 1).min(3),
+                _ => 1,
+            };
+            self.last_press = Some((now, at, clicks));
+            self.selecting = Some(input);
+            self.press_input(input, at, clicks, shift);
+        }
+    }
+
+    /// Input `id` pressed at `at`, `clicks` times in a row, or with Shift held.
+    fn press_input(&mut self, id: Id, at: Point<f32>, clicks: u8, shift: bool) {
+        let index = self.drawn.get(&id).map_or(usize::MAX, |drawn| drawn.index_at(at));
+        self.edit(id, |field| field.press(index.min(field.display().len()), clicks, shift));
     }
 
     /// A button came up at `at`: what it went down on is told, and with the main one a press, if it's still over
@@ -515,6 +600,14 @@ impl Screen {
             None => self.under(at),
         };
         self.pointer_event(&target, "pointerup", at, button, point(0.0, 0.0));
+        // What the pointer selected goes on the primary selection, as Linux's fields put it, never a password.
+        if let Some(field) = self.selecting.take().and_then(|id| self.fields.get(&id))
+            && !field.secure
+            && !field.selected().is_empty()
+        {
+            let selected = field.selected().to_owned();
+            self.clipboard.write(true, &selected);
+        }
         let Some(pressed) = self.states.pressed.take() else { return };
         let over = self.under(at).contains(&pressed);
         if over && self.placed(pressed).is_some_and(|placed| !placed.input) {
@@ -559,11 +652,16 @@ impl Screen {
         Some(id)
     }
 
-    /// Gives the keyboard to `id`, or to nothing, telling the app what had it and what has it, where they listen.
+    /// Gives the keyboard to `id`, or to nothing, telling the app what had it and what has it, where they listen. An
+    /// input that loses it keeps what was being composed in it.
     fn focus(&mut self, id: Option<Id>) {
         if self.focused == id {
             return;
         }
+        if let Some(input) = self.focused.filter(|focused| self.fields.contains_key(focused)) {
+            self.edit(input, Field::blur);
+        }
+        self.blink = self.sandbox.clock().now();
         let blurred = std::mem::replace(&mut self.focused, id);
         if let Some(blurred) = blurred.filter(|blurred| self.tree.nodes.get(blurred).is_some_and(|node| node.listens("blur"))) {
             self.event(blurred, "blur", None);
@@ -588,6 +686,10 @@ impl Screen {
                 None => order.first().copied(),
             };
             self.focus(next);
+            // An input the keyboard comes to by Tab has its text selected, as a browser's and GTK's do.
+            if let Some(next) = next.filter(|next| self.fields.contains_key(next)) {
+                self.edit(next, Field::select_all);
+            }
             return focused;
         }
         let id = focused?;
@@ -600,45 +702,127 @@ impl Screen {
                 self.pump();
             }
         }
-        let input = self.tree.nodes.get(&id).is_some_and(|node| node.kind == Kind::Input);
-        match key.key.as_str() {
-            "Enter" if input => drop(self.edit(id, Edit::Enter)),
-            "Backspace" if input => drop(self.edit(id, Edit::Backspace)),
-            "Enter" | " " if !input => {
-                if self.tree.nodes.get(&id).is_some_and(|node| node.listens("click")) {
-                    self.event(id, "click", None)
-                }
-            }
-            typed if input && typed.chars().count() == 1 && !key.ctrl && !key.meta => drop(self.edit(id, Edit::Type(typed))),
-            _ => {}
+        if self.fields.contains_key(&id) {
+            self.type_key(id, key);
+        } else if matches!(key.key.as_str(), "Enter" | " ") && self.tree.nodes.get(&id).is_some_and(|node| node.listens("click")) {
+            self.event(id, "click", None)
         }
         Some(id)
     }
 
-    /// What a key does to input `id`'s text, as it's typed, ahead of the app setting it back as its `value`, and
-    /// tells the app as an `input` event. → whether it took the key.
-    fn edit(&mut self, id: Id, key: Edit) -> bool {
-        let Some(node) = self.tree.nodes.get(&id) else { return false };
-        let mut value = self.typed.get(&id).cloned().unwrap_or_else(|| value_of(node));
-        match key {
-            Edit::Enter if !node.is("multiline") => return false,
-            Edit::Enter => value.push('\n'),
-            Edit::Backspace => drop(value.pop()),
-            Edit::Type(typed) => value.push_str(typed),
+    /// What a key does in input `id`: typing, moving, selecting, undoing and the clipboard, by the editing model
+    /// (`editing::Field::key`), then its `input` if that changed it and its `action` if it was the action key.
+    fn type_key(&mut self, id: Id, key: &Key) {
+        let Some(field) = self.fields.get_mut(&id) else { return };
+        let before = field.value();
+        let outcome = field.key(key, self.drawn.get(&id).map(|drawn| drawn as &dyn editing::Layout));
+        if let Some(copy) = outcome.copy.filter(|copy| !copy.is_empty()) {
+            self.clipboard.write(false, &copy);
         }
-        self.typed.insert(id, value.clone());
-        if self.tree.nodes.get(&id).is_some_and(|node| node.listens("input")) {
-            self.event(id, "input", Some(value));
+        if outcome.paste
+            && let Some(text) = self.clipboard.read(false)
+        {
+            field.paste(&text);
         }
-        true
+        self.edited(id, before);
+        if outcome.action && self.tree.nodes.get(&id).is_some_and(|node| node.listens("action")) {
+            let node = &self.tree.nodes[&id];
+            let action = node.str("action").unwrap_or(if node.is("multiline") { "newline" } else { "done" }).to_owned();
+            let event = json!({"v": crate::VERSION, "op": "event", "id": id, "name": "action", "action": action});
+            if let Err(error) = self.sandbox.send("event", &event) {
+                self.threw(error);
+            }
+            self.pump();
+        }
     }
-}
 
-/// A key, as it changes an input's text.
-enum Edit<'a> {
-    Enter,
-    Backspace,
-    Type(&'a str),
+    /// What the platform's input method says, to the input with the keyboard.
+    pub fn ime(&mut self, ime: Ime) {
+        if let Some(id) = self.focused.filter(|id| self.fields.contains_key(id)) {
+            self.edit(id, |field| field.ime(ime));
+        }
+    }
+
+    /// Its window got or lost the keyboard: the caret shows only while it has it, and an input losing it keeps what
+    /// was being composed in it.
+    pub fn activate(&mut self, active: bool) {
+        self.active = active;
+        self.blink = self.sandbox.clock().now();
+        if let Some(id) = self.focused.filter(|id| !active && self.fields.contains_key(id)) {
+            self.edit(id, Field::finish_composition);
+        }
+    }
+
+    /// Where the input with the keyboard has its caret, in the window, for the platform's input method to show what
+    /// it composes beside: none where it takes no typing (a password takes no input method).
+    pub fn caret_rect(&self) -> Option<Bounds<f32>> {
+        let id = self.focused?;
+        let field = self.fields.get(&id).filter(|field| !field.secure && !field.readonly)?;
+        let drawn = self.drawn.get(&id)?;
+        let (line, x) = editing::Layout::caret(drawn, field.caret());
+        let height = drawn.paragraph.line_height * drawn.grown;
+        Some(Bounds { origin: point(drawn.origin.x + x * drawn.grown, drawn.origin.y + line as f32 * height), size: Size { width: drawn.grown, height } })
+    }
+
+    /// Does `change` to input `id`'s editing, and tells its app what changed.
+    fn edit(&mut self, id: Id, change: impl FnOnce(&mut Field)) {
+        let Some(field) = self.fields.get_mut(&id) else { return };
+        let before = field.value();
+        change(field);
+        self.edited(id, before);
+    }
+
+    /// Input `id`'s editing changed from `before`, or perhaps not: its caret shows again, and its app hears its
+    /// editing state (`input`) if it's different, with its text as `value` too, which version 1 said alone.
+    fn edited(&mut self, id: Id, before: editing::Value) {
+        self.blink = self.sandbox.clock().now();
+        let Some(value) = self.fields.get(&id).map(Field::value).filter(|value| *value != before) else { return };
+        if self.tree.nodes.get(&id).is_some_and(|node| node.listens("input")) {
+            let event = json!({"v": crate::VERSION, "op": "event", "id": id, "name": "input", "editing": value, "value": value.text});
+            if let Err(error) = self.sandbox.send("event", &event) {
+                self.threw(error);
+            }
+            self.pump();
+        }
+    }
+
+    /// Types `text` into input `id`, a character at a time, each an `input`.
+    pub(crate) fn type_text(&mut self, id: Id, text: &str) {
+        let mut buffer = [0; 4];
+        for typed in text.chars() {
+            self.edit(id, |field| field.insert(typed.encode_utf8(&mut buffer)));
+        }
+    }
+
+    /// Each input's editing as its node says, after the app's ops: what it is (several lines, a password, read
+    /// only, what Return does), and its editing state where the app set a new one.
+    fn sync_fields(&mut self) {
+        let tree = &self.tree;
+        let input = |id: &Id| tree.nodes.get(id).is_some_and(|node| node.kind == Kind::Input);
+        self.fields.retain(|id, _| input(id));
+        self.set.retain(|id, _| input(id));
+        self.drawn.retain(|id, _| input(id));
+        for (id, node) in tree.nodes.iter().filter(|(_, node)| node.kind == Kind::Input) {
+            let field = self.fields.entry(*id).or_default();
+            field.multiline = node.is("multiline");
+            field.newline = field.multiline && node.str("action").is_none_or(|action| action == "newline");
+            field.secure = node.str("type") == Some("password");
+            field.readonly = node.is("readonly");
+            // Version 1 said only its text, as `value`, the caret at its end.
+            let set = match node.prop("editing") {
+                Some(editing) => serde_json::from_value::<editing::Value>(editing.clone()).ok(),
+                None => node.prop("value").map(|_| {
+                    let text = value_of(node);
+                    let end = editing::utf16(&text, text.len());
+                    editing::Value { text, selection: editing::Selection { base: end, extent: end }, composing: None }
+                }),
+            };
+            if let Some(set) = set.filter(|set| self.set.get(id) != Some(set)) {
+                field.set(&set);
+                self.set.insert(*id, set);
+            }
+        }
+    }
 }
 
 /// Paints a screen that says only `words`, in the middle, in the muted colour, as a page's empty state does.
@@ -752,7 +936,10 @@ struct Painter<'a> {
     placed: Vec<(Id, Placed)>,
     tab_order: Vec<Id>,
     scrolled: &'a mut HashMap<Id, Point<f32>>,
-    typed: &'a HashMap<Id, String>,
+    fields: &'a HashMap<Id, Field>,
+    drawn: &'a mut HashMap<Id, Drawn>,
+    /// The caret shows in this frame, as it blinks.
+    caret: bool,
     images: &'a mut HashMap<String, Option<Arc<Picture>>>,
     rects: Rects,
     /// The time on the screen's clock, in milliseconds, for what moves by itself (`animationName`) and what's on its
@@ -849,7 +1036,7 @@ impl Painter<'_> {
             Kind::Text => (Some(Measure::Text { words: tree.text(id), text, lines }), Vec::new()),
             Kind::RawText => (Some(Measure::Text { words: node.value.clone().unwrap_or_default(), text, lines: None }), Vec::new()),
             Kind::Input => {
-                let words = self.typed.get(&id).cloned().unwrap_or_else(|| value_of(node));
+                let words = self.fields.get(&id).map(Field::display).unwrap_or_default();
                 let words = if words.is_empty() { node.str("placeholder").unwrap_or_default().to_owned() } else { words };
                 (Some(Measure::Input { words: if words.is_empty() { " ".into() } else { words }, text, multiline: node.is("multiline") }), Vec::new())
             }
@@ -1044,27 +1231,7 @@ impl Painter<'_> {
                 let paragraph = self.text.paragraph(&words, &text.style, text.wrap.then_some(width), lines);
                 self.paint_text(&paragraph, content, width, transform.scale, text, opacity, mask);
             }
-            Kind::Input => {
-                let value = self.typed.get(&id).cloned().unwrap_or_else(|| value_of(node));
-                let shown_value = if node.str("type") == Some("password") { "•".repeat(value.chars().count()) } else { value.clone() };
-                let multiline = node.is("multiline");
-                let width = laid.content_box_width();
-                let placeholder = colour_token("tertiary-label", self.conditions).unwrap_or_else(|| colour("muted-foreground", self.conditions.dark));
-                let (words, color) = if shown_value.is_empty() { (node.str("placeholder").unwrap_or_default().to_owned(), placeholder) } else { (shown_value.clone(), text.color) };
-                let paragraph = self.text.paragraph(&words, &text.style, multiline.then_some(width), None);
-                // A one-line input's text in the middle of its box, as it's drawn in a row centred on its items.
-                let top = if multiline { content.origin.y } else { content.origin.y + (content.size.height - paragraph.size().height * transform.scale) / 2.0 };
-                let area = Bounds { origin: point(content.origin.x, top), size: content.size };
-                let clip = content.intersect(&mask);
-                self.paint_text(&paragraph, area, width, transform.scale, Text { color, ..text }, opacity, clip);
-                if self.states.focused == Some(id) {
-                    let (line, x) = if shown_value.is_empty() { (0, 0.0) } else { paragraph.caret(shown_value.len()) };
-                    let height = text.style.line_height * transform.scale;
-                    let caret = Bounds { origin: point(area.origin.x + x * transform.scale, area.origin.y + line as f32 * height), size: Size { width: transform.scale.max(1.0), height } };
-                    let tint = colour_token("accent", self.conditions).unwrap_or(text.color);
-                    self.quad(caret, clip, tint, Edges::default(), Hsla::default(), Corners::default(), false, opacity);
-                }
-            }
+            Kind::Input => self.paint_input(id, node, content, laid.content_box_width(), transform.scale, text, opacity, mask),
             Kind::Image => self.paint_image(node, content, radii, opacity, mask),
             Kind::Path => self.paint_path(node, content, &look, text.color, opacity, mask),
             Kind::Picker => {}
@@ -1118,6 +1285,79 @@ impl Painter<'_> {
         if pointer {
             self.placed.push((id, placed));
         }
+    }
+
+    /// An input: its text, or its placeholder while it's empty, clipped to its box; with the keyboard, what's selected
+    /// behind it, what an input method composes underlined, and the caret, as it blinks; one line scrolled along to
+    /// keep the caret in view. Where it's drawn is kept for the pointer (`Drawn`).
+    #[allow(clippy::too_many_arguments)]
+    fn paint_input(&mut self, id: Id, node: &Node, content: Bounds<f32>, width: f32, grown: f32, text: Text, opacity: f32, mask: Bounds<f32>) {
+        let field = self.fields.get(&id);
+        let shown = field.map(Field::display).unwrap_or_default();
+        let multiline = node.is("multiline");
+        let focused = self.states.focused == Some(id) && field.is_some();
+        let empty = shown.is_empty();
+        let placeholder = colour_token("tertiary-label", self.conditions).unwrap_or_else(|| colour("muted-foreground", self.conditions.dark));
+        let (words, color) = if empty { (node.str("placeholder").unwrap_or_default().to_owned(), placeholder) } else { (shown.clone(), text.color) };
+        let paragraph = self.text.paragraph(&words, &text.style, multiline.then_some(width), None);
+        let line_height = text.style.line_height;
+        // A one-line input's text in the middle of its box, as it's drawn in a row centred on its items.
+        let top = if multiline { content.origin.y } else { content.origin.y + (content.size.height - paragraph.size().height * grown) / 2.0 };
+        let aligned = |line: &crate::text::Line| (width - line.width).max(0.0) * text.align;
+        let caret = field.map_or(0, Field::caret);
+        // One line scrolls along as the caret goes past its ends, as an `<input>` does, and back to its start once
+        // it hasn't the keyboard; several scroll down and up to keep the caret's line in its box, as a `<textarea>`.
+        let mut scroll = self.drawn.get(&id).map_or(point(0.0, 0.0), |drawn| drawn.scroll);
+        let (line, x) = paragraph.caret(caret);
+        if !multiline {
+            let x = x + paragraph.lines.first().map_or(0.0, aligned);
+            scroll.x = if focused && !empty { scroll.x.max(x - width + 1.0).min(x) } else { 0.0 };
+            scroll.x = scroll.x.clamp(0.0, (paragraph.size().width + 1.0 - width).max(0.0));
+        } else {
+            let height = content.size.height / grown;
+            let top = line as f32 * line_height;
+            if focused {
+                scroll.y = scroll.y.max(top + line_height - height).min(top);
+            }
+            scroll.y = scroll.y.clamp(0.0, (paragraph.size().height - height).max(0.0));
+        }
+        let offsets: Vec<f32> = paragraph.lines.iter().map(|line| aligned(line) - scroll.x).collect();
+        let origin = point(content.origin.x, top - scroll.y * grown);
+        let clip = content.intersect(&mask);
+        let at = |line: usize, x: f32| point(origin.x + (offsets.get(line).copied().unwrap_or(0.0) + x) * grown, origin.y + line as f32 * line_height * grown);
+        if let (true, Some(field), false) = (focused, field, empty) {
+            let (start, end) = field.selection();
+            if start < end {
+                let tint = colour_token("blue", self.conditions).unwrap_or(text.color).opacity(0.3);
+                for (line, x0, x1) in paragraph.spans(start, end) {
+                    let bounds = Bounds { origin: at(line, x0), size: Size { width: (x1 - x0) * grown, height: line_height * grown } };
+                    self.quad(bounds, clip, tint, Edges::default(), Hsla::default(), Corners::default(), false, opacity);
+                }
+            }
+        }
+        let area = Bounds { origin: point(origin.x - scroll.x * grown, origin.y), size: content.size };
+        self.paint_text(&paragraph, area, width, grown, Text { color, ..text }, opacity, clip);
+        if let (true, Some(field)) = (focused, field) {
+            // What an input method is composing is underlined, as every platform's own fields draw it.
+            if let Some((start, end)) = field.composed() {
+                for (line, x0, x1) in paragraph.spans(start, end) {
+                    let below = at(line, x0);
+                    let bounds = Bounds { origin: point(below.x, below.y + (line_height - 2.0) * grown), size: Size { width: (x1 - x0) * grown, height: grown } };
+                    self.quad(bounds, clip, text.color, Edges::default(), Hsla::default(), Corners::default(), false, opacity);
+                }
+            }
+            if self.caret && !field.readonly {
+                let place = if empty {
+                    point(origin.x + width * text.align * grown, origin.y)
+                } else {
+                    let (line, x) = paragraph.caret(caret);
+                    at(line, x)
+                };
+                let bounds = Bounds { origin: place, size: Size { width: grown, height: line_height * grown } };
+                self.quad(bounds, clip, text.color, Edges::default(), Hsla::default(), Corners::default(), false, opacity);
+            }
+        }
+        self.drawn.insert(id, Drawn { paragraph, words, empty, origin, offsets, grown, scroll });
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -1215,6 +1455,71 @@ impl Painter<'_> {
         let picture = self.images.entry(key.clone()).or_insert_with(|| decode(&format!("data:image/svg+xml;base64,{}", data_encoding::BASE64.encode(svg.as_bytes())), device, &key).map(Arc::new)).clone();
         let Some(picture) = picture else { return };
         self.sprite(&picture, content, Corners::default(), opacity, mask);
+    }
+}
+
+/// A caret's blink, in milliseconds on the app's clock: on two thirds of it and off a third, as GTK's, until it's been
+/// still `BLINK_STOPS`.
+const BLINK: f64 = 1200.0;
+const BLINK_STOPS: f64 = 10_000.0;
+
+/// Where an input's text was drawn: its paragraph (of its display text, or its placeholder while it's `empty`), its
+/// first line's top left in the window, where each line starts along it, how much it's grown, and how far it has
+/// scrolled, along one line or down several.
+pub(crate) struct Drawn {
+    paragraph: Paragraph,
+    words: String,
+    empty: bool,
+    origin: Point<f32>,
+    offsets: Vec<f32>,
+    grown: f32,
+    scroll: Point<f32>,
+}
+
+impl Drawn {
+    /// The byte of its display text nearest to `at`, in the window.
+    fn index_at(&self, at: Point<f32>) -> usize {
+        if self.empty {
+            return 0;
+        }
+        let y = (at.y - self.origin.y) / self.grown;
+        let line = ((y / self.paragraph.line_height).floor().max(0.0) as usize).min(self.paragraph.lines.len().saturating_sub(1));
+        let x = (at.x - self.origin.x) / self.grown;
+        editing::Layout::index_on(self, line, x).unwrap_or(0)
+    }
+}
+
+impl editing::Layout for Drawn {
+    fn caret(&self, index: usize) -> (usize, f32) {
+        if self.empty {
+            return (0, 0.0);
+        }
+        let (line, x) = self.paragraph.caret(index);
+        (line, x + self.offsets.get(line).copied().unwrap_or(0.0))
+    }
+
+    fn index_on(&self, line: usize, x: f32) -> Option<usize> {
+        if self.empty {
+            return (line == 0).then_some(0);
+        }
+        self.paragraph.index_on(line, x - self.offsets.get(line).copied().unwrap_or(0.0))
+    }
+
+    fn line_edge(&self, index: usize, end: bool) -> usize {
+        if self.empty {
+            return 0;
+        }
+        let at = self.paragraph.line_of(index);
+        let Some(line) = self.paragraph.lines.get(at) else { return index };
+        if !end {
+            return line.start;
+        }
+        // A line that wraps ends before the space it hangs, so its end is on it.
+        let wraps = self.paragraph.lines.get(at + 1).is_some_and(|next| next.start == line.end);
+        match self.words[..line.end].chars().next_back() {
+            Some(last) if wraps && last.is_whitespace() => line.end - last.len_utf8(),
+            _ => line.end,
+        }
     }
 }
 

@@ -37,6 +37,8 @@ pub struct LineLayout {
     pub runs: Vec<ShapedRun>,
     /// The length of the line in utf-8 bytes
     pub len: usize,
+    /// It runs right to left, by its first strong character (Unicode's bidi algorithm, P2 and P3).
+    pub rtl: bool,
 }
 
 /// A run of glyphs from one face.
@@ -54,6 +56,11 @@ pub struct ShapedGlyph {
     pub position: Point<Pixels>,
     /// The index of this glyph in the original text.
     pub index: usize,
+    /// Where the characters it draws end in the text, and how far it advances.
+    pub end: usize,
+    pub advance: f32,
+    /// It's in a right-to-left run, so its first character's caret is at its right.
+    pub rtl: bool,
     pub is_emoji: bool,
 }
 
@@ -95,7 +102,7 @@ impl TextStyle {
 }
 
 /// One line of a paragraph as it's drawn: its glyphs, from its own left edge.
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 pub struct Line {
     pub glyphs: Vec<(FontId, ShapedGlyph)>,
     pub width: f32,
@@ -105,10 +112,12 @@ pub struct Line {
     /// Where it is in the paragraph's text, in bytes.
     pub start: usize,
     pub end: usize,
+    /// Its paragraph runs right to left.
+    pub rtl: bool,
 }
 
 /// Text wrapped to a width, line by line.
-#[derive(Debug, Default)]
+#[derive(Debug, Default, Clone)]
 pub struct Paragraph {
     pub lines: Vec<Line>,
     pub line_height: f32,
@@ -119,35 +128,79 @@ impl Paragraph {
         Size { width: self.lines.iter().map(|line| line.width).fold(0.0, f32::max), height: self.lines.len().max(1) as f32 * self.line_height }
     }
 
-    /// Where the caret goes before byte `index`: its line, and how far along it.
+    /// The line byte `index` is on: the last that starts at or before it, so a caret where a line wraps goes to the
+    /// start of the next.
+    pub fn line_of(&self, index: usize) -> usize {
+        self.lines.iter().rposition(|line| line.start <= index).unwrap_or(0)
+    }
+
+    /// Where the caret goes before byte `index`: its line, and how far along it, in the line's own drawing. Where
+    /// the text runs right to left the caret before a character is at its glyph's right.
     pub fn caret(&self, index: usize) -> (usize, f32) {
-        for (at, line) in self.lines.iter().enumerate() {
-            if index > line.end && at + 1 < self.lines.len() {
-                continue;
+        let at = self.line_of(index);
+        let Some(line) = self.lines.get(at) else { return (0, 0.0) };
+        let x = match line.glyphs.iter().find(|(_, glyph)| glyph.index <= index && index < glyph.end.max(glyph.index + 1)) {
+            Some((_, glyph)) if glyph.rtl => glyph.position.x.0 + glyph.advance,
+            Some((_, glyph)) => glyph.position.x.0,
+            // Past the line's last character: after the glyph that ends there, on the side its run goes.
+            None => match line.glyphs.iter().filter(|(_, glyph)| glyph.index < index).max_by_key(|(_, glyph)| glyph.index) {
+                Some((_, glyph)) if glyph.rtl => glyph.position.x.0,
+                Some((_, glyph)) => glyph.position.x.0 + glyph.advance,
+                None if line.rtl => line.width,
+                None => 0.0,
+            },
+        };
+        (at, x)
+    }
+
+    /// The byte nearest to `x` along line `at`, or `None` if it has no such line: the side of the glyph under it
+    /// nearer to `x`, which in a right-to-left run is its end on its left.
+    pub fn index_on(&self, at: usize, x: f32) -> Option<usize> {
+        let line = self.lines.get(at)?;
+        // A line that wraps ends before the spaces it hangs, so a caret at its end is still on it.
+        let last = if at + 1 < self.lines.len() { line.end.saturating_sub(1).max(line.start) } else { line.end };
+        let sides = |glyph: &ShapedGlyph| if glyph.rtl { (glyph.end, glyph.index) } else { (glyph.index, glyph.end) };
+        let mut nearest = (f32::INFINITY, if line.rtl { line.start } else { last });
+        for (_, glyph) in &line.glyphs {
+            let (left, right) = sides(glyph);
+            let (x0, x1) = (glyph.position.x.0, glyph.position.x.0 + glyph.advance);
+            if x >= x0 && x < x1 {
+                return Some((if x < (x0 + x1) / 2.0 { left } else { right }).min(last));
             }
-            let x = line
-                .glyphs
-                .iter()
-                .find(|(_, glyph)| glyph.index >= index)
-                .map_or(line.width, |(_, glyph)| glyph.position.x.0);
-            return (at, x);
+            for (edge, index) in [(x0, left), (x1, right)] {
+                if (x - edge).abs() < nearest.0 {
+                    nearest = ((x - edge).abs(), index);
+                }
+            }
         }
-        (0, 0.0)
+        Some(nearest.1.min(last))
     }
 
     /// The byte nearest to a point inside the paragraph.
     pub fn index_at(&self, point: Point<f32>) -> usize {
         let at = ((point.y / self.line_height).floor().max(0.0) as usize).min(self.lines.len().saturating_sub(1));
-        let Some(line) = self.lines.get(at) else { return 0 };
-        let mut index = line.end;
-        for (at, (_, glyph)) in line.glyphs.iter().enumerate() {
-            let next = line.glyphs.get(at + 1).map_or(line.width, |(_, next)| next.position.x.0);
-            if point.x < (glyph.position.x.0 + next) / 2.0 {
-                index = glyph.index;
-                break;
+        self.index_on(at, point.x).unwrap_or(0)
+    }
+
+    /// Where bytes `start..end` are drawn on each line: its line and the stretches along it, left to right.
+    pub fn spans(&self, start: usize, end: usize) -> Vec<(usize, f32, f32)> {
+        let mut spans: Vec<(usize, f32, f32)> = Vec::new();
+        for (at, line) in self.lines.iter().enumerate() {
+            let mut covered: Vec<(f32, f32)> = line
+                .glyphs
+                .iter()
+                .filter(|(_, glyph)| glyph.index < end && glyph.end > start)
+                .map(|(_, glyph)| (glyph.position.x.0, glyph.position.x.0 + glyph.advance))
+                .collect();
+            covered.sort_by(|a, b| a.0.total_cmp(&b.0));
+            for (x0, x1) in covered {
+                match spans.last_mut() {
+                    Some((line, _, right)) if *line == at && x0 <= *right + 0.5 => *right = right.max(x1),
+                    _ => spans.push((at, x0, x1)),
+                }
             }
         }
-        index
+        spans
     }
 }
 
@@ -331,7 +384,7 @@ fn wrap(layout: &LineLayout, text: &str, offset: usize, width: Option<f32>, line
         Line {
             glyphs: glyphs
                 .iter()
-                .map(|(font, glyph)| (*font, ShapedGlyph { position: Point { x: Pixels(glyph.position.x.0 - left), ..glyph.position }, index: glyph.index + offset, ..glyph.clone() }))
+                .map(|(font, glyph)| (*font, ShapedGlyph { position: Point { x: Pixels(glyph.position.x.0 - left), ..glyph.position }, index: glyph.index + offset, end: glyph.end + offset, ..glyph.clone() }))
                 .collect(),
             width: (ink_end - left).max(0.0),
             ascent: layout.ascent.0,
@@ -339,6 +392,7 @@ fn wrap(layout: &LineLayout, text: &str, offset: usize, width: Option<f32>, line
             font_size: layout.font_size.0,
             start: start + offset,
             end: end + offset,
+            rtl: layout.rtl,
         }
     };
     let Some(width) = width else {

@@ -1,8 +1,10 @@
 // Copied from Zed's GPUI (github.com/zed-industries/zed, crates/gpui_linux/src/linux/x11/client.rs and x11/window.rs)
 // at commit 1043f4a86ab911a381d9bfe45cf6b36d3cdcc89a, and cut down for the strict host: one connection to the X
 // server for every window, each window made, titled, classed and closed as GPUI's are, its scale from Xft.dpi, its
-// keys through xkbcommon, its cursor from the cursor theme, and its surface handed to the renderer by its raw handles.
-// No client-side decorations, transparency, popups, clipboard, drag and drop or XInput yet.
+// keys through xkbcommon, the input method through XIM (client.rs's `enable_ime`, `reset_ime`, `update_ime_position`
+// and its event loop's XIM filter), its cursor from the cursor theme, and its surface handed to the renderer by its
+// raw handles. No client-side decorations, transparency, popups, drag and drop or XInput yet; the clipboard is
+// arboard's (`super::clipboard`).
 // Copyright 2022 - 2025 Zed Industries, Inc. Licensed under the Apache License, Version 2.0
 // (clients/app/strict/LICENSE-APACHE); this file is changed from the original.
 
@@ -22,10 +24,14 @@ use x11rb::protocol::xkb::{self, ConnectionExt as _};
 use x11rb::protocol::xproto::{self, ConnectionExt as _};
 use x11rb::wrapper::ConnectionExt as _;
 use x11rb::xcb_ffi::XCBConnection;
+use xim::x11rb::X11rbClient;
+use xim::{AttributeName, Client as _, ClientCore as _, InputStyle};
 use xkbcommon::xkb as xkbc;
 
 use super::keyboard;
-use crate::geometry::{DevicePixels, Pixels, Point, Size};
+use super::xim_handler::{XimCallbackEvent, XimHandler};
+use crate::editing::Ime;
+use crate::geometry::{Bounds, DevicePixels, Pixels, Point, Size};
 use crate::platform::{Input, WindowId, WindowOptions};
 use crate::Cursor;
 
@@ -51,6 +57,11 @@ pub struct Display {
     loaded: RefCell<HashMap<Cursor, xproto::Cursor>>,
     scale: f32,
     windows: RefCell<HashMap<xproto::Window, WindowId>>,
+    /// The input method's connection, where there's an XIM server (ibus, fcitx), and what it's told.
+    xim: RefCell<Option<(X11rbClient<Rc<XCBConnection>>, XimHandler)>>,
+    /// Each window whose input with the keyboard takes typing, by where its caret is, in device pixels: its keys go
+    /// to the input method, which shows what it composes there.
+    ime: RefCell<HashMap<xproto::Window, (i16, i16)>>,
 }
 
 pub struct NativeWindow {
@@ -105,6 +116,14 @@ impl NativeWindow {
     }
 }
 
+/// Drops what the input method is composing, as GPUI's fork of xim-rs's `reset_ic` asks.
+fn reset_ic(ximc: &mut X11rbClient<Rc<XCBConnection>>, handler: &XimHandler) {
+    let reset = xim::Request::ResetIc { input_method_id: handler.im_id, input_context_id: handler.ic_id };
+    if let Err(error) = ximc.send_req(reset) {
+        log::warn!("the input method didn't drop its composition: {error}");
+    }
+}
+
 /// The connection's file, for the event loop to wake when the X server says something.
 struct Fd(Rc<XCBConnection>);
 
@@ -141,6 +160,7 @@ impl Display {
         let cursors = cursor::Handle::new(&xcb, screen, &resources)?.reply()?;
 
         let xcb = Rc::new(xcb);
+        let xim = X11rbClient::init(Rc::clone(&xcb), screen, None).ok().map(|client| (client, XimHandler::new()));
         handle
             .insert_source(calloop::generic::Generic::new(Fd(xcb.clone()), calloop::Interest::READ, calloop::Mode::Level), |_, _, _| {
                 // The loop's turn reads what's queued (`events`).
@@ -158,6 +178,8 @@ impl Display {
             loaded: RefCell::default(),
             scale,
             windows: RefCell::default(),
+            xim: RefCell::new(xim),
+            ime: RefCell::default(),
         })
     }
 
@@ -222,6 +244,7 @@ impl Display {
 
     pub fn close(&self, window: &NativeWindow) {
         self.windows.borrow_mut().remove(&window.x_window);
+        self.ime.borrow_mut().remove(&window.x_window);
         let _ = self.xcb.destroy_window(window.x_window);
         let _ = self.xcb.flush();
     }
@@ -251,13 +274,119 @@ impl Display {
         let _ = self.xcb.flush();
     }
 
-    /// What the X server has said since it was last asked, by the window it's about.
+    /// What the X server has said since it was last asked, by the window it's about. Each event goes by the input
+    /// method first, which takes what's its own, and the keys of a window whose input takes typing go to it, which
+    /// sends back what it doesn't compose.
     pub fn events(&self) -> Vec<(WindowId, Input)> {
         let mut out = Vec::new();
         while let Ok(Some(event)) = self.xcb.poll_for_event() {
-            self.event(event, &mut out);
+            let Some((mut ximc, mut handler)) = self.xim.borrow_mut().take() else {
+                self.event(event, &mut out);
+                continue;
+            };
+            let connected = handler.connected;
+            // xim-rs panics on compound text it can't decode: its connection is dropped, as on an error.
+            let filtered = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| ximc.filter_event(&event, &mut handler)))
+                .unwrap_or_else(|_| Err(xim::ClientError::InvalidReply));
+            let told = handler.last_callback_event.take();
+            *self.xim.borrow_mut() = Some((ximc, handler));
+            if let Some(told) = told {
+                self.xim_told(told, &mut out);
+            }
+            match filtered {
+                Ok(true) => {}
+                Ok(false) => match event {
+                    Event::KeyPress(key) | Event::KeyRelease(key) if connected && self.ime.borrow().contains_key(&key.event) => self.forward(key),
+                    event => self.event(event, &mut out),
+                },
+                Err(error) => {
+                    // The XIM server went (it crashed, or was quit): keys are typed without it from now on.
+                    log::error!("the input method's XIM connection failed: {error}");
+                    *self.xim.borrow_mut() = None;
+                    self.event(event, &mut out);
+                }
+            }
         }
         out
+    }
+
+    /// What the input method said: a key it didn't take, what it committed, or what it's composing.
+    fn xim_told(&self, told: XimCallbackEvent, out: &mut Vec<(WindowId, Input)>) {
+        match told {
+            XimCallbackEvent::XimXEvent(event) => self.event(event, out),
+            XimCallbackEvent::XimCommitEvent(window, text) => {
+                if let Some(id) = self.window(window) {
+                    out.push((id, Input::Ime(Ime::Commit(text))));
+                }
+            }
+            XimCallbackEvent::XimPreeditEvent(window, text, caret) => {
+                if let Some(id) = self.window(window) {
+                    let cursor = text.char_indices().nth(caret).map_or(text.len(), |(at, _)| at);
+                    out.push((id, Input::Ime(Ime::Preedit(text, Some(cursor)))));
+                }
+            }
+        }
+    }
+
+    /// Gives the input method a key, as GPUI's `xim_handle_event` does.
+    fn forward(&self, key: xproto::KeyPressEvent) {
+        let mut xim = self.xim.borrow_mut();
+        let Some((ximc, handler)) = xim.as_mut() else { return };
+        handler.window = key.event;
+        if let Err(error) = ximc.forward_event(handler.im_id, handler.ic_id, xim::ForwardEventFlag::empty(), &key) {
+            log::warn!("the input method didn't take a key: {error}");
+        }
+    }
+
+    /// The input with window `window`'s keyboard takes typing, its caret at `caret` (in the window's logical pixels),
+    /// or none does: the input method's keys and where it shows what it composes, as GPUI's `update_ime_position`.
+    /// An input that stops taking typing drops what was being composed in it, as GPUI's `reset_ime`.
+    pub fn set_ime(&self, window: &NativeWindow, caret: Option<Bounds<f32>>) {
+        let spot = caret.map(|caret| ((caret.origin.x * self.scale) as i16, ((caret.origin.y + caret.size.height) * self.scale) as i16));
+        let was = match spot {
+            Some(spot) => self.ime.borrow_mut().insert(window.x_window, spot),
+            None => self.ime.borrow_mut().remove(&window.x_window),
+        };
+        if was == spot {
+            return;
+        }
+        let mut xim = self.xim.borrow_mut();
+        let Some((ximc, handler)) = xim.as_mut().filter(|(_, handler)| handler.connected) else { return };
+        let Some((x, y)) = spot else {
+            reset_ic(ximc, handler);
+            return;
+        };
+        if handler.window != window.x_window {
+            return;
+        }
+        let attributes = ximc
+            .build_ic_attributes()
+            .push(AttributeName::InputStyle, InputStyle::PREEDIT_CALLBACKS)
+            .push(AttributeName::ClientWindow, handler.window)
+            .push(AttributeName::FocusWindow, handler.window)
+            .nested_list(AttributeName::PreeditAttributes, |b| {
+                b.push(AttributeName::SpotLocation, xim::Point { x, y });
+            })
+            .build();
+        if let Err(error) = ximc.set_ic_values(handler.im_id, handler.ic_id, attributes) {
+            log::warn!("the input method wasn't told where the caret is: {error}");
+        }
+    }
+
+    /// A window got the keyboard: the input method's input context is made for it, as GPUI's `enable_ime`.
+    fn enable_ime(&self, x_window: xproto::Window) {
+        let mut xim = self.xim.borrow_mut();
+        let Some((ximc, handler)) = xim.as_mut() else { return };
+        handler.window = x_window;
+        let attributes = ximc
+            .build_ic_attributes()
+            .push(AttributeName::InputStyle, InputStyle::PREEDIT_CALLBACKS)
+            .push(AttributeName::ClientWindow, x_window)
+            .push(AttributeName::FocusWindow, x_window)
+            .build();
+        if let Err(error) = ximc.create_ic(handler.im_id, attributes) {
+            log::warn!("the input method made no input context: {error}");
+        }
     }
 
     fn window(&self, x_window: xproto::Window) -> Option<WindowId> {
@@ -300,7 +429,7 @@ impl Display {
                 // sideways; a notch is 3 lines of 16 px.
                 let notch = |x: f32, y: f32| Input::Wheel(at, Point { x, y });
                 match event.detail {
-                    button @ 1..=3 => out.push((id, Input::Down(at, button - 1))),
+                    button @ 1..=3 => out.push((id, Input::Down(at, button - 1, event.state.contains(xproto::KeyButMask::SHIFT)))),
                     4 => out.push((id, notch(0.0, -48.0))),
                     5 => out.push((id, notch(0.0, 48.0))),
                     6 => out.push((id, notch(-48.0, 0.0))),
@@ -315,6 +444,20 @@ impl Display {
                     out.push((id, Input::Up(self.at(event.event_x, event.event_y), event.detail - 1)));
                 }
             }
+            Event::FocusIn(event) => {
+                if let Some(id) = self.window(event.event) {
+                    self.enable_ime(event.event);
+                    out.push((id, Input::Focus(true)));
+                }
+            }
+            Event::FocusOut(event) => {
+                if let Some(id) = self.window(event.event) {
+                    if let Some((ximc, handler)) = self.xim.borrow_mut().as_mut() {
+                        reset_ic(ximc, handler);
+                    }
+                    out.push((id, Input::Focus(false)));
+                }
+            }
             Event::LeaveNotify(event) => {
                 if let Some(id) = self.window(event.event) {
                     out.push((id, Input::Left));
@@ -322,7 +465,7 @@ impl Display {
             }
             Event::KeyPress(event) => {
                 let Some(id) = self.window(event.event) else { return };
-                let key = keyboard::key(&self.xkb.borrow(), event.detail.into());
+                let key = keyboard::key(&keyboard::state_of(&self.xkb.borrow(), event.state), event.detail.into());
                 out.push((id, Input::Key(key)));
             }
             Event::XkbStateNotify(event) => {

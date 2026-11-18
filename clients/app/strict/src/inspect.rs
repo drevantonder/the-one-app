@@ -18,16 +18,22 @@
 //!   why it can't draw, if it can't (its JS threw, or sent what this host doesn't speak).
 //! - `tree` → `{tree}`: the semantic tree (`Tree::semantics`), as a screen reader reads it, each node with its `rect`.
 //! - `query` (a selector) → `{nodes}`: each node that matches, with its `node`, `kind`, `role`, `name`, `rect`, the
-//!   `style` and `class` it was given, its colours and lengths `resolved` from the design tokens, and `source`, the
-//!   `file:line` of the JSX that made it, where its build says.
+//!   `style` and `class` it was given, its colours and lengths `resolved` from the design tokens, `source`, the
+//!   `file:line` of the JSX that made it, where its build says, and an input's `editing` state as the host has it.
 //! - `snap` → `{png, width, height}`: the window as drawn, a PNG in base64, at its scale.
-//! - `tap` (a selector, or a point) → `{tapped}`: presses what's there, as a click or a finger does: an input takes
-//!   the keyboard, and what listens for `click` gets one. A point presses the topmost node under it that does either.
-//! - `type` (`text`, and a selector but for `text`, or the input with the keyboard) → `{typed, value}`: the text typed
-//!   into it, a character at a time, each an `input` event.
+//! - `tap` (a selector, or a point) → `{tapped, editing}`: presses what's there, as a click or a finger does: an
+//!   input takes the keyboard, and what listens for `click` gets one. A point presses the topmost node under it that
+//!   does either, and in an input puts its caret there; `clicks` 2 selects the word there and 3 its line, and
+//!   `shift` extends the selection.
+//! - `type` (`text`, and a selector but for `text`, or the input with the keyboard) → `{typed, value, editing}`: the
+//!   text typed into it, a character at a time, each an `input` event.
+//! - `ime` (`preedit`, with its `cursor` in UTF-16 units, or `commit`) → `{node, editing}`: what an input method
+//!   composes or commits in the input with the keyboard, as a platform's input method says it.
 //! - `key` (`key`, as the DOM's `KeyboardEvent.key` names it: `Enter`, `Escape`, `Tab`, `Backspace`, `a`; and
 //!   `shift`, `alt`, `ctrl`, `meta`) → `{node}`: pressed where the keyboard is. Tab moves it, Enter and Space press
-//!   what has it, and what listens for `keydown` hears it.
+//!   what has it, what listens for `keydown` hears it, and an input edits by it as a Linux field does (Ctrl+C, X, V,
+//!   Z, Shift+Z, Y and A, Ctrl+arrows by word, Shift to select, Home and End), with a clipboard of the window's own
+//!   in the headless harness.
 //! - `scroll` (`dx`, `dy` in CSS pixels, and a selector of what's in what scrolls) → `{scrolled: {x, y}}`.
 //! - `clock` (`pause`: true or false, `step`: ms, `seek`: ms since it started) → `{time, paused}`. The app's clock
 //!   (`Date`, `performance.now`, its timers) and the host's animations run on it. Paused, nothing is due until it's

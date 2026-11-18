@@ -2,8 +2,41 @@
 
 mod keyboard;
 mod x11;
+mod xim_handler;
 
 pub use x11::{Display, NativeWindow};
+
+/// The desktop's clipboard and primary selection, as arboard serves them, one for every window on this thread.
+struct Clipboard(std::rc::Rc<std::cell::RefCell<arboard::Clipboard>>);
+
+impl crate::editing::Clipboard for Clipboard {
+    fn read(&mut self, primary: bool) -> Option<String> {
+        use arboard::GetExtLinux;
+        self.0.borrow_mut().get().clipboard(kind(primary)).text().ok()
+    }
+
+    fn write(&mut self, primary: bool, text: &str) {
+        use arboard::SetExtLinux;
+        if let Err(error) = self.0.borrow_mut().set().clipboard(kind(primary)).text(text.to_owned()) {
+            log::warn!("nothing went on the clipboard: {error}");
+        }
+    }
+}
+
+fn kind(primary: bool) -> arboard::LinuxClipboardKind {
+    if primary { arboard::LinuxClipboardKind::Primary } else { arboard::LinuxClipboardKind::Clipboard }
+}
+
+/// The desktop's clipboard, for a window's screen, where it has one.
+pub fn clipboard() -> Option<Box<dyn crate::editing::Clipboard>> {
+    thread_local! {
+        static SHARED: Option<std::rc::Rc<std::cell::RefCell<arboard::Clipboard>>> = arboard::Clipboard::new()
+            .map_err(|error| log::warn!("there's no clipboard: {error}"))
+            .ok()
+            .map(|clipboard| std::rc::Rc::new(std::cell::RefCell::new(clipboard)));
+    }
+    SHARED.with(|shared| shared.clone()).map(|shared| Box::new(Clipboard(shared)) as Box<dyn crate::editing::Clipboard>)
+}
 
 /// A setting of the desktop's appearance, as its portal says it (`org.freedesktop.appearance`), as GPUI's Linux
 /// platform reads `color-scheme`.

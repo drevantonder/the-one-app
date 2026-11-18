@@ -1,7 +1,8 @@
 // Copied from Zed's GPUI (github.com/zed-industries/zed, crates/gpui_wgpu/src/cosmic_text_system.rs) at commit
 // 1043f4a86ab911a381d9bfe45cf6b36d3cdcc89a, and cut down for the strict host: cosmic-text's shaping and swash's
 // rasterizing, on Linux. Changed: a face is loaded at the weight asked for, which a variable font draws by its `wght`
-// axis in shaping and rasterizing alike, letter spacing is cosmic-text's, and there are no user fallback chains.
+// axis in shaping and rasterizing alike, letter spacing is cosmic-text's, there are no user fallback chains, and a glyph
+// says where its characters end, how wide it is and which way it runs, for a caret in right-to-left text.
 // Copyright 2022 - 2025 Zed Industries, Inc. Licensed under the Apache License, Version 2.0
 // (clients/app/strict/LICENSE-APACHE); this file is changed from the original.
 
@@ -84,7 +85,7 @@ impl CosmicTextSystem {
         );
 
         let Some(layout) = layout_lines.first() else {
-            return LineLayout { font_size: px(style.size), len: text.len(), ..Default::default() };
+            return LineLayout { font_size: px(style.size), len: text.len(), rtl: line.rtl, ..Default::default() };
         };
 
         let mut runs: Vec<ShapedRun> = Vec::new();
@@ -102,6 +103,9 @@ impl CosmicTextSystem {
                     (glyph.y - glyph.y_offset * style.size).into(),
                 ),
                 index: glyph.start,
+                end: glyph.end,
+                advance: glyph.w,
+                rtl: glyph.level.is_rtl(),
                 is_emoji,
             };
             if let Some(last_run) = runs.last_mut().filter(|last_run| last_run.font_id == font_id) {
@@ -118,6 +122,7 @@ impl CosmicTextSystem {
             descent: layout.max_descent.into(),
             runs,
             len: text.len(),
+            rtl: line.rtl,
         }
     }
 

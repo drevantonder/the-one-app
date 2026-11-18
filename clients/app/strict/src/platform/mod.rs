@@ -15,7 +15,7 @@ use crate::Screen;
 #[cfg(target_os = "linux")]
 mod linux;
 #[cfg(target_os = "linux")]
-use linux::{Display, NativeWindow, appearance, reduced_motion};
+use linux::{Display, NativeWindow, appearance, clipboard, reduced_motion};
 
 /// A window, as the windows' thread names it.
 pub type WindowId = u64;
@@ -131,6 +131,9 @@ impl Windows {
         let native = self.display.open(id, &options)?;
         screen.appearance = appearance();
         screen.reduced_motion = reduced_motion();
+        if let Some(clipboard) = clipboard() {
+            screen.clipboard = clipboard;
+        }
         let renderer = crate::render::renderer::BladeRenderer::new(&self.context, self.atlas.clone(), &native, native.device_size(), false)?;
         self.windows.insert(id, Window { native, screen: Ok(screen), renderer, scene: Default::default(), dirty: true, drawn: false, on_event: Box::new(on_event), tag: options.tag });
         Ok(id)
@@ -259,6 +262,7 @@ impl Windows {
                 Ok(screen) => {
                     screen.paint(size, scale, &mut self.text, &self.atlas, &mut window.scene);
                     window.dirty = screen.take_again();
+                    self.display.set_ime(&window.native, screen.caret_rect());
                 }
                 Err(why) => crate::view::paint_message(why, appearance(), size, scale, &mut self.text, &self.atlas, &mut window.scene),
             }
@@ -290,7 +294,7 @@ impl Windows {
                 self.display.set_cursor(&window.native, cursor);
             }
             Input::Left => screen.pointer_left(),
-            Input::Down(at, button) => screen.pointer_down(at, button),
+            Input::Down(at, button, shift) => screen.pointer_down(at, button, shift),
             Input::Up(at, button) => screen.pointer_up(at, button),
             Input::Wheel(at, delta) => drop(screen.scroll(at, delta)),
             Input::Key(key) => {
@@ -300,6 +304,8 @@ impl Windows {
                 }
                 screen.key(&key);
             }
+            Input::Ime(ime) => screen.ime(ime),
+            Input::Focus(active) => screen.activate(active),
             Input::Close => {}
         }
     }
@@ -312,10 +318,15 @@ pub(crate) enum Input {
     Close,
     Moved(crate::geometry::Point<f32>),
     Left,
-    /// A button went down or up: 0 the main one, 1 the middle, 2 the secondary, as the DOM numbers them.
-    Down(crate::geometry::Point<f32>, u8),
+    /// A button went down, with Shift held or not, or up: 0 the main one, 1 the middle, 2 the secondary, as the DOM
+    /// numbers them.
+    Down(crate::geometry::Point<f32>, u8, bool),
     Up(crate::geometry::Point<f32>, u8),
     /// Scrolled along and down by so many pixels (left and up negative).
     Wheel(crate::geometry::Point<f32>, crate::geometry::Point<f32>),
     Key(crate::inspect::Key),
+    /// What the input method composes or commits.
+    Ime(crate::editing::Ime),
+    /// The window got the keyboard, or lost it.
+    Focus(bool),
 }

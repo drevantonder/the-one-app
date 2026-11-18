@@ -1,9 +1,11 @@
 // The key names from Zed's GPUI (github.com/zed-industries/zed, crates/gpui_linux/src/linux/platform.rs,
-// `keystroke_from_xkb`) at commit 1043f4a86ab911a381d9bfe45cf6b36d3cdcc89a, named here as the DOM's `KeyboardEvent.key`
-// names them, which the strict protocol's `keydown` and the inspector speak.
+// `keystroke_from_xkb`, and x11/client.rs, `xkb_state_for_key_event`) at commit
+// 1043f4a86ab911a381d9bfe45cf6b36d3cdcc89a, named here as the DOM's `KeyboardEvent.key` names them, which the strict
+// protocol's `keydown` and the inspector speak.
 // Copyright 2022 - 2025 Zed Industries, Inc. Licensed under the Apache License, Version 2.0
 // (clients/app/strict/LICENSE-APACHE); this file is changed from the original.
 
+use x11rb::protocol::xproto;
 use xkbcommon::xkb::{self, Keycode, Keysym, State};
 
 use crate::inspect::Key;
@@ -46,4 +48,36 @@ pub fn key(state: &State, keycode: Keycode) -> Key {
     };
     let held = |name: &str| state.mod_name_is_active(name, xkb::STATE_MODS_EFFECTIVE);
     Key { key, shift: held(xkb::MOD_NAME_SHIFT), alt: held(xkb::MOD_NAME_ALT), ctrl: held(xkb::MOD_NAME_CTRL), meta: held(xkb::MOD_NAME_LOGO) }
+}
+
+/// The keyboard's state as a key event says it was when it was pressed: its modifiers from the event, the rest from
+/// `xkb`. An input method hands a key back after its modifiers may have come up, as Shift has by the time "A" comes
+/// back.
+pub fn state_of(xkb: &State, event_state: xproto::KeyButMask) -> State {
+    let keymap = xkb.get_keymap();
+    let mut key_event_state = State::new(&keymap);
+    let latched_modifiers = xkb.serialize_mods(xkb::STATE_MODS_LATCHED);
+    let locked_modifiers = xkb.serialize_mods(xkb::STATE_MODS_LOCKED);
+    let active_modifier_mask: xkb::ModMask = u16::from(
+        event_state
+            & (xproto::KeyButMask::SHIFT
+                | xproto::KeyButMask::LOCK
+                | xproto::KeyButMask::CONTROL
+                | xproto::KeyButMask::MOD1
+                | xproto::KeyButMask::MOD2
+                | xproto::KeyButMask::MOD3
+                | xproto::KeyButMask::MOD4
+                | xproto::KeyButMask::MOD5),
+    )
+    .into();
+    let depressed_modifiers = active_modifier_mask & !(latched_modifiers | locked_modifiers);
+    key_event_state.update_mask(
+        depressed_modifiers,
+        latched_modifiers,
+        locked_modifiers,
+        xkb.serialize_layout(xkb::STATE_LAYOUT_DEPRESSED),
+        xkb.serialize_layout(xkb::STATE_LAYOUT_LATCHED),
+        xkb.serialize_layout(xkb::STATE_LAYOUT_LOCKED),
+    );
+    key_event_state
 }
