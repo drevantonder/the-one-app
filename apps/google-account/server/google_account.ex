@@ -7,7 +7,7 @@ defmodule GoogleAccount do
   Each Google account is one item of its person's Vault, "Google <address>", of this app's type (`vault.types`), and
   every Google app uses it through this one: it's switched on for this app alone, which signs it in, with what
   every Google app they have asks of Google (`scopes`), and makes each call to Google with it. So neither this
-  app nor a Google app is ever handed a token. Signing in to it again for one app adds that app's scopes
+  app nor a Google app is ever handed a token. Signing in to it again adds what a Google app installed since asks
   (Google's incremental authorization). Signing out is deleting the item, which soft delete does; one Google says needs
   signing in again is its person's to act on (`state`), with Sign In.
 
@@ -117,14 +117,8 @@ defmodule GoogleAccount do
       %{
         name: "sign_in",
         description:
-          "Starts signing a Google account in, for every Google app you have, or with `account`, signing that one in again, and gives the url to open, where Google signs you in. A Google app's code says its scopes.",
-        inputs: %{
-          type: "object",
-          properties: %{
-            scopes: %{type: "array", items: %{type: "string"}, description: "What the app asks of Google"},
-            account: string.("The account's address, to suggest it to Google")
-          }
-        },
+          "Starts signing a Google account in, for every Google app you have, or with `account`, signing that one in again, and gives the url to open, where Google signs you in.",
+        inputs: %{type: "object", properties: %{account: string.("The account's address, to suggest it to Google")}},
         outputs: %{
           type: "object",
           properties: %{url: string.("Where its person signs in"), then: string.("What happens next")},
@@ -202,16 +196,11 @@ defmodule GoogleAccount do
     %{accounts: accounts}
   end
 
-  # Signed in for a Google app, with what it asks of Google, or for its person, with what every Google app they
-  # have asks: so adding an account in the Vault lets every one in at once.
+  # Signed in with what every Google app its person has asks of Google: so adding an account lets every one in at
+  # once.
   def call("sign_in", inputs, call) do
-    {scopes, apps} =
-      if call.caller do
-        {inputs["scopes"] || raise("A Google app signs in with its scopes."), [call.caller]}
-      else
-        {:ok, parts, _failed} = OneCore.Call.run_hook(call, "scopes", %{})
-        {parts |> Map.values() |> List.flatten() |> Enum.uniq(), Map.keys(parts)}
-      end
+    {:ok, parts, _failed} = OneCore.Call.run_hook(call, "scopes", %{})
+    {scopes, apps} = {parts |> Map.values() |> List.flatten() |> Enum.uniq(), Map.keys(parts)}
 
     # The apps it's for, as people know them, which the page Google sends them back to names.
     running = OneCore.Apps.running(call.subject)
