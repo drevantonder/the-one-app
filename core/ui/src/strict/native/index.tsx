@@ -26,6 +26,7 @@ export { Empty, Problem, Skeleton, Status, Steps } from "../../states.tsx"
 export { List, Row } from "../../list.tsx"
 
 export { Menu } from "../../menu.tsx"
+export { Tabs } from "../../tabs.tsx"
 export { Alert, confirm, Sheet } from "../../sheet.tsx"
 
 /** What a strict page may use that a native host can't draw yet: each tells the host, which opens the page another
@@ -35,7 +36,6 @@ const later = (name: string) => () => {
   throw new Error(`${name} isn't drawn on a native host yet (core/ui/src/strict/native/index.tsx)`)
 }
 export const LiveScreen = later("LiveScreen") as typeof Strict.LiveScreen
-export const Tabs = { Root: later("Tabs"), List: later("Tabs"), Trigger: later("Tabs"), Content: later("Tabs"), Indicator: later("Tabs") } as typeof Strict.Tabs
 export const toast = later("toast") as typeof Strict.toast
 export const leave = later("leave") as typeof Strict.leave
 export const component = later("component") as typeof Strict.component

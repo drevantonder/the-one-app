@@ -17,8 +17,7 @@
 }
 
 /* How every component of the UI library looks, from the tokens (tokens.css). The UI library's own parts are `ui-` classes; what
-   Zag draws in Ark's shape is styled by the attribute Zag names each part with (`data-tabs-trigger`), which Ark
-   gives it too. */
+   Zag draws (a toast) is styled by the attribute Zag names each part with (`data-toast-group`). */
 
 /* The page itself, before any script has run: the theme, so nothing flashes white. */
 html {
@@ -123,7 +122,7 @@ html:has(.ui-dialog[open]) {
 }
 
 /* What every control of the UI library starts from, under what any of them says of itself. */
-:where(.ui-strict-box, .ui-dialog, .ui-toast, [data-tabs-root]) button {
+:where(.ui-strict-box, .ui-dialog, .ui-toast) button {
   margin: 0;
   padding: 0;
   border: 0;
@@ -341,59 +340,6 @@ img {
   background: none;
   color: inherit;
   overflow: visible;
-}
-
-/* Tabs: a few views of one thing. */
-[data-tabs-root] {
-  display: grid;
-  gap: var(--gutter);
-  min-width: 0;
-}
-[data-tabs-list] {
-  position: relative;
-  isolation: isolate;
-  display: inline-flex;
-  justify-self: start;
-  max-width: 100%;
-  padding: 3px;
-  border-radius: var(--radius-md);
-  background: var(--muted);
-  overflow-x: auto;
-  scrollbar-width: none;
-}
-[data-tabs-trigger] {
-  flex: 1;
-  height: calc(var(--control) - 6px);
-  padding: 0 0.75rem;
-  border: 1px solid transparent;
-  border-radius: var(--radius-md);
-  color: var(--muted-foreground);
-  font-size: var(--text-base);
-  font-weight: var(--label-weight);
-  white-space: nowrap;
-}
-[data-tabs-trigger][data-selected] {
-  color: var(--foreground);
-}
-/* What marks the chosen tab, sliding to it. Zag says where, once it has measured the tabs; until it has, the chosen
-   tab wears the mark itself. */
-[data-tabs-indicator], [data-tabs-list]:not(:has([data-tabs-indicator]:not([hidden]))) > [data-selected] {
-  border-radius: var(--radius-md);
-  background: light-dark(var(--background), color-mix(in oklab, var(--border) 60%, transparent));
-  box-shadow: var(--shadow-xs);
-}
-[data-tabs-indicator] {
-  --transition-duration: var(--move-settle);
-  --transition-timing-function: var(--ease-settle);
-  z-index: -1;
-  top: var(--top);
-  left: var(--left);
-  width: var(--width);
-  height: var(--height);
-}
-[data-tabs-content] {
-  display: grid;
-  gap: var(--gutter);
 }
 
 /* Toasts: Zag pins them to the foot of the window, a gutter in from each side. */

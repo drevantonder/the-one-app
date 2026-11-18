@@ -9,9 +9,10 @@ import fields from "./fields.scenes.tsx"
 import lists from "./lists.scenes.tsx"
 import over from "./over.scenes.tsx"
 import states from "./states.scenes.tsx"
+import tabs from "./tabs.scenes.tsx"
 import text from "./text.scenes.tsx"
 
-const scenes: Scenes = { ...text, ...buttons, ...lists, ...fields, ...states, ...over }
+const scenes: Scenes = { ...text, ...buttons, ...lists, ...fields, ...states, ...tabs, ...over }
 const draw = (scene: Scene) => (typeof scene === "function" ? scene() : scene.render())
 const named = () => {
   const to = link()
