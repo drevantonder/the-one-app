@@ -1272,10 +1272,21 @@ function HomeScreen(props: { owners: Owner[] }) {
 
   /// A finger on the pages swipes them: across between an owner's pages, and up and down between owners, unless the
   /// page scrolls itself, as the App Library does, or they're being edited. Until it has moved 10 points it may be a
-  /// tap or a hold; then it's a swipe, along the way it moved most, and the pages follow it from there. A mouse has
-  /// the wheel and the keys.
-  let swipe: { id: number; x: number; y: number; axis?: "x" | "y"; owner: number; from: number; base: number; moves: { time: number; value: number }[] } | undefined
+  /// tap or a hold; then it's a swipe, along the way it moved most, and the pages follow it from there. Across, on
+  /// anything on them that scrolls sideways itself, it's that row's, unless it's at its end that way, as iOS's scroll
+  /// views hand a swipe on. A mouse has the wheel and the keys.
+  let swipe: { id: number; x: number; y: number; axis?: "x" | "y"; row?: HTMLElement; owner: number; from: number; base: number; moves: { time: number; value: number }[] } | undefined
   let swiped = 0
+  /// The nearest of what's under a finger that scrolls sideways itself and has more than it shows, short of the pages.
+  const row = (on: Element) => {
+    for (let at: Element | null = on; at && !at.matches(".page, .sections"); at = at.parentElement)
+      if (/auto|scroll/.test(getComputedStyle(at).overflowX) && at.scrollWidth > at.clientWidth + 1) return at as HTMLElement
+  }
+  /// Whether `row` has more to scroll the way a finger moving `dx` points across takes it.
+  const scrolls = (row: HTMLElement, dx: number) => {
+    const along = Math.abs(row.scrollLeft)
+    return -dx * rtl() > 0 ? along < row.scrollWidth - row.clientWidth - 1 : along > 1
+  }
   const press = (event: PointerEvent) => {
     const on = event.target as Element
     // The pills over Home are their own: the owner's list, and the dots, which a finger slides along.
@@ -1286,7 +1297,7 @@ function HomeScreen(props: { owners: Owner[] }) {
     // A finger that lands while they move catches them.
     stop(down)
     stop(sideways(owner))
-    swipe = { id: event.pointerId, x: event.clientX, y: event.clientY, owner, from: 0, base: 0, moves: [] }
+    swipe = { id: event.pointerId, x: event.clientX, y: event.clientY, row: row(on), owner, from: 0, base: 0, moves: [] }
   }
   const drag = (event: PointerEvent) => {
     if (!swipe || event.pointerId !== swipe.id) return
@@ -1297,6 +1308,7 @@ function HomeScreen(props: { owners: Owner[] }) {
       // A hold that began has the finger, and up and down is the page's own where it scrolls, and nobody's while editing.
       const free = state().matches("nothing") || state().matches({ category: "closing" }) || state().matches({ editing: "still" })
       if (!free || (axis === "y" && (state().matches("editing") || kindOf(swipe.owner) !== "home"))) return void (swipe = undefined)
+      if (axis === "x" && swipe.row && scrolls(swipe.row, dx)) return void (swipe = undefined)
       const moving = axis === "x" ? sideways(swipe.owner) : down
       const size = axis === "x" ? pitch() : height()
       Object.assign(swipe, { axis, x: event.clientX, y: event.clientY, base: moving.value, from: Math.round(moving.value / size) })
@@ -1332,9 +1344,10 @@ function HomeScreen(props: { owners: Owner[] }) {
     }
   }
   /// The pages have the finger, not the web view the Home Screen is in: an iPhone's scrolls it up and down, bouncing,
-  /// whatever `touch-action` says, unless its touches are cancelled. Up and down on a page that scrolls is that page's.
+  /// whatever `touch-action` says, unless its touches are cancelled. Up and down on a page that scrolls is that page's,
+  /// and so is across, on a row that scrolls sideways, until the finger has said which way it's going.
   const touchMove = (event: TouchEvent) => {
-    if (swipe && !(swipe.axis !== "x" && (event.target as Element).closest?.(".page.scrolls"))) event.preventDefault()
+    if (swipe && !(swipe.axis !== "x" && (event.target as Element).closest?.(".page.scrolls")) && !(!swipe.axis && swipe.row)) event.preventDefault()
   }
   /// A finger that swiped taps nothing as it lifts.
   const tapped = (event: MouseEvent) => {
