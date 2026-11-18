@@ -57,7 +57,7 @@ const look = styles({
   // A figure is never cut: in a row, a stat keeps its own width and the others give way.
   stat: { flexShrink: 0 },
   figure: { flexDirection: "row", alignItems: "baseline", gap: tokens.grid[1] },
-  value: { font: tokens.type.largeTitle },
+  value: { font: tokens.type.figure },
   unit: { font: tokens.type.large, color: tokens.colour.secondaryLabel },
   small: { font: tokens.type.small, color: tokens.colour.secondaryLabel, lineClamp: 1 },
   // A ring, a bar and a line: their shapes fill a box of their own, in the part's colour.

@@ -83,6 +83,8 @@ const lengths = {
   textBase: length({ default: rem(0.8125), touch: rem(1) }),
   textLg: length({ default: rem(0.9375), phone: rem(1) }),
   textTitle: length({ default: rem(1.25), phone: rem(28 / 17) }),
+  /** A big number's: 34px, as iOS's widgets draw one. */
+  textFigure: length({ default: rem(2.125), phone: rem(34 / 17) }),
   /** Apple's smaller text styles, the same under a finger and a mouse: subheadline, for a section's toggle;
    * footnote, for a count, code or a hint; caption 1, for an icon's name; caption 2, the smallest, for a key or a
    * small heading. */
@@ -140,7 +142,8 @@ const types = {
   label: type(lengths.textBase, weights.label),
   headline: type(lengths.textLg, weights.title, { tracking: -0.015 }),
   title: type(lengths.textTitle, weights.title, { lineHeight: 1.2, tracking: -0.015 }),
-  figure: type(lengths.textTitle, weights.title, { lineHeight: 1.2, tracking: -0.025, tabular: true }),
+  /** A big number, as an iOS widget's and Raycast's large numbers: 34px, tracked in, its figures tabular. */
+  figure: type(lengths.textFigure, weights.title, { lineHeight: 1.1, tracking: -0.03, tabular: true }),
   subheadline: type(lengths.textSubheadline, weights.body),
   footnote: type(lengths.textFootnote, weights.body),
   caption1: type(lengths.textCaption1, weights.body),
@@ -331,6 +334,8 @@ export const tokens = {
   weight: named(weightRoles, (key) => `weight-${key}`),
   type: named({
     largeTitle: type(sizes.largeTitle, weights.title, { lineHeight: 1.2, tracking: -0.015 }),
+    /** A big number: a widget's stat. */
+    figure: types.figure,
     /** A bar's title, which runs to a second line before it's cut. */
     title: type(sizes.large, weights.title, { lineHeight: 1.3, tracking: -0.015 }),
     /** A computer's bar's title, deeper in an app, beside its Back: Raycast's 15px. */

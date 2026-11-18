@@ -104,6 +104,7 @@
   --label-weight: 500;
   --title-weight: 600;
   --large-title-tracking: -0.015em;
+  --figure-tracking: -0.03em;
   --title-tracking: -0.015em;
   --bar-title-tracking: -0.01em;
   --move-quick: 120ms;
@@ -129,6 +130,7 @@
   --text-base: 0.8125rem;
   --text-lg: 0.9375rem;
   --text-title: 1.25rem;
+  --text-figure: 2.125rem;
   --text-subheadline: 0.9375rem;
   --text-footnote: 0.8125rem;
   --text-caption-1: 0.75rem;
@@ -141,7 +143,6 @@
   --shadow-lg: 0px 10px 15px -3px oklch(0 0 0 / 10%), 0px 4px 6px -4px oklch(0 0 0 / 10%);
   --headline-tracking: -0.015em;
   --title-tracking: -0.015em;
-  --figure-tracking: -0.025em;
 }
 :root.dark {
   --shadow-glass: inset 0px 0px 0px 0.5px oklch(1 0 0 / 14%), inset 0px 0.5px 0px 0px oklch(1 0 0 / 18%), 0px 8px 24px 0px oklch(0 0 0 / 25%);
@@ -206,6 +207,7 @@
     --size-large-title: 2rem;
     --text-lg: 1rem;
     --text-title: 1.6471rem;
+    --text-figure: 2rem;
   }
 }
 @media (prefers-reduced-motion: reduce) {
