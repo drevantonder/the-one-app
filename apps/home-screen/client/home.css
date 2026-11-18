@@ -790,11 +790,12 @@ body {
     rotate: 1.4deg;
   }
 }
-/* An app dropped where it isn't installed waits dimmed, and shows its progress over its icon as it installs. */
+/* An app dropped where it isn't installed waits dimmed, and shows its progress over its icon as it installs. Only the
+   cell's own: a widget's progress bars are `.progress` too. */
 .cell.waiting .tile img {
   opacity: 0.45;
 }
-.cell .progress {
+.cell > .progress {
   position: absolute;
   top: calc(var(--tile, 3.75rem) / 2);
   left: 50%;
