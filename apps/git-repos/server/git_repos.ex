@@ -38,7 +38,7 @@ defmodule GitRepos do
   def hooks, do: ["soft-delete.moved"]
 
   @impl true
-  def entrypoints, do: [%{page: "client/index.html", host: 1}]
+  def entrypoints, do: [%{page: "client/index.html", host: 2}]
 
   @impl true
   def tools do

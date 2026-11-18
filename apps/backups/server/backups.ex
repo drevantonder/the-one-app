@@ -58,7 +58,7 @@ defmodule Backups do
   end
 
   @impl true
-  def entrypoints, do: [%{page: "client/index.html", host: 1}]
+  def entrypoints, do: [%{page: "client/index.html", host: 2}]
 
   @impl true
   def jobs, do: [%{tool: "due", every: 3600}]

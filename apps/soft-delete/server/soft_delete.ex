@@ -74,7 +74,7 @@ defmodule SoftDelete do
       %{
         page: "client/index.html",
         subject: "user",
-        host: 1
+        host: 2
       }
     ]
 
