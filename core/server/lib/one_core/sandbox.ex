@@ -553,15 +553,17 @@ defmodule OneCore.Sandbox do
     elixir = :code.lib_dir(:elixir) |> to_string() |> Path.dirname()
     child = Application.app_dir(:one_core, "priv/sandbox")
 
-    # Erlang's and Elixir's applications, and the server's libraries, but not the server's own code, which an
-    # installed server's release keeps beside them.
-    # Recon, which an app is debugged with (`debug/5`), is among them in a release, and is added where it isn't.
-    apps =
-      for ebin <- Enum.uniq(Path.wildcard(Path.join(root, "lib/*/ebin")) ++ Path.wildcard(Path.join(elixir, "*/ebin"))),
-          not String.starts_with?(Path.basename(Path.dirname(ebin)), "one_core-"),
-          do: Path.dirname(ebin)
+    # Erlang's and Elixir's applications, and the server's libraries (OpenTelemetry's API, which an app records with,
+    # and Recon, which it's debugged with, `debug/5`), but not the server's own code, which is kept beside them: in an
+    # installed server's release, all in its `lib`, and in Mix's `_build` otherwise.
+    libraries = Application.app_dir(:one_core) |> Path.dirname()
 
-    apps = Enum.uniq(apps ++ [to_string(:code.lib_dir(:recon))])
+    apps =
+      for ebin <- Enum.flat_map([root <> "/lib", elixir, libraries], &Path.wildcard(Path.join(&1, "*/ebin"))),
+          app = Path.dirname(ebin),
+          hd(String.split(Path.basename(app), "-")) != "one_core",
+          uniq: true,
+          do: app
 
     ebins = for app <- apps, do: Path.join(app, "ebin")
 
