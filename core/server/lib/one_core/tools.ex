@@ -835,7 +835,7 @@ defmodule OneCore.Tools do
       inputs: %{
         type: "object",
         properties: %{
-          target: %{type: "string", description: "The kind of machine: linux-x86_64, linux-aarch64, macos-aarch64"}
+          target: %{type: "string", description: "The kind of machine: linux-x86_64, linux-aarch64, macos-aarch64, windows-x86_64"}
         },
         required: ["target"]
       },
@@ -858,14 +858,15 @@ defmodule OneCore.Tools do
           builds: %{
             type: "array",
             description:
-              "Each build: its name (server-runtime/<target>, server-code, one/<target> or " <>
-                "one-cli/<target>), build, sha256 and size, and a runtime's inputs, the SHA-256 of what it's built from",
+              "Each build: its name, <what>/<target> for a kind of machine (server-runtime/linux-x86_64, " <>
+                "one/macos-aarch64, one-setup/windows-x86_64) or <what> for every kind (server-code), its build, " <>
+                "sha256 and size, and a runtime's inputs, the SHA-256 of what it's built from",
             items: %{
               type: "object",
               properties: %{
                 name: %{
                   type: "string",
-                  pattern: "^((server-runtime|one|one-cli)/[a-z0-9_]+-[a-z0-9_]+|server-code)$"
+                  pattern: "^[a-z0-9-]+(/[a-z0-9_]+-[a-z0-9_]+)?$"
                 },
                 build: %{type: "string"},
                 inputs: %{type: "string", pattern: "^[0-9a-f]{64}$"},
