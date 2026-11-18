@@ -21,5 +21,5 @@ installed later, is there within the minute.
 
 Each folder it writes has a `.agent-skills` file in it, saying which network's it is; it rewrites only those, and
 removes one whose app is gone. A folder without it is left alone: delete that file to take a folder over. It
-also removes the skills The One App as it was before wrote, which named tools that are gone: a folder named
+also removes the skills the One App as it was before wrote, which named tools that are gone: a folder named
 `the-one-app` or `the-one-app-<app>` with that app's mark in it, `.synced-one`.

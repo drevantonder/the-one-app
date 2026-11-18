@@ -4,8 +4,8 @@
 <plist version="1.0">
 <dict>
   <key>CFBundleIdentifier</key><string>app.theone.computer-use</string>
-  <key>CFBundleName</key><string>Computer Use for The One App</string>
-  <key>CFBundleDisplayName</key><string>Computer Use for The One App</string>
+  <key>CFBundleName</key><string>Computer Use for the One App</string>
+  <key>CFBundleDisplayName</key><string>Computer Use for the One App</string>
   <key>CFBundleExecutable</key><string>helper</string>
   <key>CFBundleIconFile</key><string>AppIcon</string>
   <key>CFBundlePackageType</key><string>APPL</string>

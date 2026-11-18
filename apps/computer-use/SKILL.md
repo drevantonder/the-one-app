@@ -79,23 +79,23 @@ desktop (an X11 or XWayland one), on Windows a scheduled task of theirs that sta
 signed in to it, `screens` says Cua Driver isn't running there. On Windows it runs as their limited user, as their
 server does, so it can't use a window of a program run as administrator.
 
-On a Mac it runs inside a small app, Computer Use for The One App, which macOS lets see the screen only with Screen
+On a Mac it runs inside a small app, Computer Use for the One App, which macOS lets see the screen only with Screen
 Recording and use the mouse and keyboard only with Accessibility, which only the Mac's person can allow. `screens`
 says in the Mac's description which is missing, asking macOS nothing. The first time an action needs one, System
 Settings opens on the Mac where it's turned on, and the action says what's missing, with the link that opens it there.
 They allow it in System Settings → Privacy & Security → Screen & System Audio Recording, and → Accessibility, by
-turning on Computer Use for The One App in each. macOS keeps that
+turning on Computer Use for the One App in each. macOS keeps that
 through the app's updates and Cua Driver's, and asks again now and then for Screen Recording, as it does of every
 app that records the screen.
 
 ## A person's own phone
 
-Each Android phone or TV whose The One App has answered is a screen, called what its person called it as they signed it in:
+Each Android phone or TV whose the One App has answered is a screen, called what its person called it as they signed it in:
 its whole screen, as its person sees it. A phone runs no server, so its app does each action, through Android's accessibility service,
-which only its person turns on: Settings → Accessibility → The One App. Until they have, `screens` says so in the
+which only its person turns on: Settings → Accessibility → the One App. Until they have, `screens` says so in the
 phone's description, and an action fails saying so while the phone tells its person how to turn it on. On Android 13
 and later, an app that didn't come from a store is a restricted setting there: its person allows it first, under ⋮ in
-The One App's App Info. Computer Use on a phone needs Android 11 or later.
+the One App's App Info. Computer Use on a phone needs Android 11 or later.
 
 - A tap is `click`, a long press is `click` with `button` `right`, and `double_click` is a double tap. A phone has no
   pointer: `move` refuses.
@@ -108,10 +108,10 @@ The One App's App Info. Computer Use on a phone needs Android 11 or later.
   presses what has the focus anywhere else. Anything else refuses.
 - An Android TV is driven as its remote drives it: move with `key` Up, Down, Left and Right, and press with Return.
   It has no touchscreen, so `click` moves the focus to what's there and presses it (`right` holds it), `scroll`
-  scrolls what's there a page at a time, and `drag` refuses. In a web view's page (The One App's own pages too), a TV's
+  scrolls what's there a page at a time, and `drag` refuses. In a web view's page (the One App's own pages too), a TV's
   WebView takes the focus but not the press: open what's focused there by asking its person to press OK.
 - A phone whose app isn't running is still listed, saying so, and is woken by a push as it's used, which takes a few
-  seconds; one that doesn't wake (off, offline, or notifications not allowed for The One App) says so. Only the
+  seconds; one that doesn't wake (off, offline, or notifications not allowed for the One App) says so. Only the
   phone's person and the network's owner use it, and you act as them, with their apps and accounts.
 
 ## Other apps' screens

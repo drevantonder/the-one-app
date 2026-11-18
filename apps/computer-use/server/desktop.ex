@@ -16,7 +16,7 @@ defmodule ComputerUse.Desktop do
 
   macOS lets a program see the screen only with Screen Recording and use the mouse and keyboard only with
   Accessibility, and asks for and keeps them in the name of the program it holds responsible, which for a launchd
-  agent is the program it starts. So on a Mac the agent starts this app's helper app, Computer Use for The One App
+  agent is the program it starts. So on a Mac the agent starts this app's helper app, Computer Use for the One App
   (`server/bin/helper`, built by `tooling/mac-helper`), which runs Cua Driver as its child in its embedded mode:
   macOS asks for both in the helper's name, with its icon, and as the helper is signed with a Developer ID, keeps
   them through its updates and Cua Driver's.
@@ -35,7 +35,7 @@ defmodule ComputerUse.Desktop do
     "windows-aarch64" => {"windows-arm64-binary.zip", "93cef9716856da3c416fe4097716e8d009e2064b16dacb7b62118944d9f60ea1"}
   }
 
-  @helper "Computer Use for The One App.app"
+  @helper "Computer Use for the One App.app"
   @id "app.theone.computer-use"
 
   # Where in System Settings → Privacy & Security each permission is turned on, the link that opens it there, and
@@ -117,13 +117,13 @@ defmodule ComputerUse.Desktop do
   defp window(_inputs), do: ""
 
   @impl OneCore.Service
-  def called, do: "Computer Use for The One App"
+  def called, do: "Computer Use for the One App"
 
   @impl OneCore.Service
   def needs do
     "A Mac with macOS 14 or later, a Linux desktop on X11 (or XWayland) with AT-SPI, or Windows 10 or 11, whose person uses it. It downloads " <>
       "Cua Driver #{@cua} from GitHub (trycua/cua) and runs it in their session, which takes pictures of the screen and uses its " <>
-      "mouse and keyboard. On a Mac it runs inside Computer Use for The One App, which the Mac's person allows in System Settings → " <>
+      "mouse and keyboard. On a Mac it runs inside Computer Use for the One App, which the Mac's person allows in System Settings → " <>
       "Privacy & Security, under Screen & System Audio Recording and under Accessibility; macOS asks them on its screen the first " <>
       "time it's used."
   end
@@ -337,11 +337,11 @@ defmodule ComputerUse.Desktop do
 
         how =
           case GenServer.call(service, {:ask, permission}) do
-            :opened -> "#{where} is open on the Mac: they turn on Computer Use for The One App there, then try again."
-            :before -> "On the Mac, they open #{where} and turn on Computer Use for The One App, then try again."
+            :opened -> "#{where} is open on the Mac: they turn on Computer Use for the One App there, then try again."
+            :before -> "On the Mac, they open #{where} and turn on Computer Use for the One App, then try again."
           end
 
-        raise "macOS doesn't let Computer Use for The One App #{@uses[permission]} yet, and only the Mac's person can allow it. " <> how
+        raise "macOS doesn't let Computer Use for the One App #{@uses[permission]} yet, and only the Mac's person can allow it. " <> how
 
       action == "type" and :os.type() == {:unix, :darwin} and secure_input?(service) ->
         raise "A password field has the focus on the Mac. Its person types passwords and codes themselves."
@@ -462,7 +462,7 @@ defmodule ComputerUse.Desktop do
 
       # Ending the task ends conhost, so Cua Driver is asked to stop first, as when its task is registered again.
       {:win32, _} ->
-        name = "The One App Computer Use #{key()}"
+        name = "the One App Computer Use #{key()}"
         driver = Path.join([OneCore.Service.folder(self()), "cua-driver-#{@cua}", "cua-driver.exe"])
         if File.exists?(driver), do: System.cmd(driver, ["stop", "--socket", socket()], stderr_to_stdout: true)
         schtasks(["/end", "/tn", name])
@@ -644,7 +644,7 @@ defmodule ComputerUse.Desktop do
       end
 
       {output, status} = launchctl(["bootstrap", domain(), plist])
-      if status != 0, do: raise("launchd didn't start Computer Use for The One App: #{output}")
+      if status != 0, do: raise("launchd didn't start Computer Use for the One App: #{output}")
       true
     end
   end
@@ -666,7 +666,7 @@ defmodule ComputerUse.Desktop do
 
     unit = """
     [Unit]
-    Description=Computer Use for The One App: Cua Driver, on this computer's screen
+    Description=Computer Use for the One App: Cua Driver, on this computer's screen
     PartOf=graphical-session.target
     After=graphical-session.target
 
@@ -705,7 +705,7 @@ defmodule ComputerUse.Desktop do
   # which Windows keeps from theirs. The task is theirs by their SID, as their server's is. Registered again when it
   # or the batch file changed, after stopping the one running; then started, which does nothing while it runs.
   defp scheduled_task(driver, environment, folder) do
-    name = "The One App Computer Use #{key()}"
+    name = "the One App Computer Use #{key()}"
     {whoami, 0} = System.cmd("whoami", ["/user", "/fo", "csv", "/nh"])
     user = whoami |> String.trim() |> String.split(",") |> List.last() |> String.trim(~s("))
     windows = &String.replace(&1, "/", "\\")
@@ -724,7 +724,7 @@ defmodule ComputerUse.Desktop do
     task = """
     <?xml version="1.0" encoding="UTF-16"?>
     <Task version="1.4" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">
-      <RegistrationInfo><Description>Computer Use for The One App: Cua Driver, on this computer's screen.</Description></RegistrationInfo>
+      <RegistrationInfo><Description>Computer Use for the One App: Cua Driver, on this computer's screen.</Description></RegistrationInfo>
       <Triggers>
         <LogonTrigger><UserId>#{escape(user)}</UserId></LogonTrigger>
         <TimeTrigger><StartBoundary>2000-01-01T00:00:00</StartBoundary><Repetition><Interval>PT1M</Interval></Repetition></TimeTrigger>

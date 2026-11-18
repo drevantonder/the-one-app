@@ -1,7 +1,7 @@
 defmodule Containers.Podman do
   @moduledoc """
   Runs containers on its machine with Podman, through its own CLI, as the user this server runs as: rootless where
-  that's how Podman is set up. Each container The One App made carries labels saying whose it is (`one.artifact`),
+  that's how Podman is set up. Each container the One App made carries labels saying whose it is (`one.artifact`),
   what it's called (`one.name`), what it's for (`one.description`), its size, its restart policy and who asked for it, and each image
   made with `commit` its own `one.artifact` and `one.name`. When a container was last used is a file's time in the
   service's folder, `used/<its name in Podman>`.
@@ -95,7 +95,7 @@ defmodule Containers.Podman do
   end
 
   @doc """
-  Every container The One App made on this machine, with its labels, state, ports and when it was last used, and for
+  Every container the One App made on this machine, with its labels, state, ports and when it was last used, and for
   one that exited, its exit code and when it did, as Podman says them.
   """
   def list(service) do
@@ -298,7 +298,7 @@ defmodule Containers.Podman do
     :ok
   end
 
-  @doc "Stops every running container The One App made here that's gone unused for `idle` ms, and gives their names."
+  @doc "Stops every running container the One App made here that's gone unused for `idle` ms, and gives their names."
   def stop_idle(service, idle) do
     now = System.system_time(:millisecond)
 
@@ -393,7 +393,7 @@ defmodule Containers.Podman do
   end
 
   @doc """
-  The running containers The One App made here that have a screen: a `DISPLAY` in their environment, as the image
+  The running containers the One App made here that have a screen: a `DISPLAY` in their environment, as the image
   desktop has. Each as `list/1` gives it, with its display's `width` and `height` as they are now.
   """
   def screens(service) do

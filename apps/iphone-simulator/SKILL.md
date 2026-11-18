@@ -23,7 +23,7 @@ no window. `machines` lists the Macs that run them.
 
 A simulator is the Mac's own processes, run as the Mac's user, not a machine apart. It shares the Mac's network,
 the Mac's 127.0.0.1 and every server on it among it, and an app in it can read what the Mac's user can: their files,
-and The One App's own on that Mac. Nothing can stop either. Install only apps the user trusts, and never one to
+and the One App's own on that Mac. Nothing can stop either. Install only apps the user trusts, and never one to
 test what an untrusted app does.
 
 A simulator costs about 2 GB of memory while it runs. Stop it when you're done; one left running and unused for two

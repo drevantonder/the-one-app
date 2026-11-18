@@ -34,7 +34,7 @@ defmodule ComputerUse.Phone do
             ", as its person sees it" <>
             cond do
               awake[device] == nil -> "; its app isn't running, and it's woken as it's used"
-              not phone["on"] -> "; its person hasn't turned on The One App in Settings → Accessibility yet"
+              not phone["on"] -> "; its person hasn't turned on the One App in Settings → Accessibility yet"
               true -> ""
             end,
         "width" => phone["width"],
@@ -116,8 +116,8 @@ defmodule ComputerUse.Phone do
 
       :unreachable ->
         {:error,
-         "The phone didn't answer, and didn't wake when asked: it's woken by a push once The One App has been opened " <>
-           "on it, so its person has it on, online, and with The One App allowed to notify them."}
+         "The phone didn't answer, and didn't wake when asked: it's woken by a push once the One App has been opened " <>
+           "on it, so its person has it on, online, and with the One App allowed to notify them."}
 
       :stopped ->
         {:error, "The phone's app went away before it said it had done that, so it may or may not have. Take a screenshot to see."}

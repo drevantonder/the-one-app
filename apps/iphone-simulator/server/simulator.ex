@@ -111,7 +111,7 @@ defmodule IphoneSimulator.Simulator do
   defp refused("running", "start"), do: "It's running already."
   defp refused("stopping", "start"), do: "It's still stopping. Start it once it's stopped.\n\n`list` says when it is."
   defp refused("removing", _), do: "It's being removed."
-  defp refused("gone", _), do: "It's gone from Xcode, deleted outside The One App. `remove` takes it off the list."
+  defp refused("gone", _), do: "It's gone from Xcode, deleted outside the One App. `remove` takes it off the list."
   defp refused(state, event), do: "It can't #{event} while it's #{state}."
 
   # Tells every app watching that a simulator's state changed, as a call to the app does once it's done.
@@ -128,7 +128,7 @@ defmodule IphoneSimulator.Simulator do
     end
   end
 
-  @doc "Every simulator The One App made here: its udid, name, whose it is, what it's for, its state and times."
+  @doc "Every simulator the One App made here: its udid, name, whose it is, what it's for, its state and times."
   def list(service) do
     states = for {udid, s} <- simulators(), into: %{}, do: {udid, s["state"]}
     kept = GenServer.call(service, :simulators)
@@ -371,7 +371,7 @@ defmodule IphoneSimulator.Simulator do
   end
 
   @doc """
-  The booted simulators The One App made here, each as `list/1` gives it, with its screen's `width` and `height` in
+  The booted simulators the One App made here, each as `list/1` gives it, with its screen's `width` and `height` in
   pixels and how many of its points one pixel is (`points`), as idb describes it.
   """
   def screens(service) do

@@ -54,7 +54,7 @@ function Detail(props: { screen: AgentScreen }) {
   )
 }
 
-/// On a phone whose person hasn't turned Computer Use on, how they do, in Android's own Settings: The One App in
+/// On a phone whose person hasn't turned Computer Use on, how they do, in Android's own Settings: the One App in
 /// Accessibility, after allowing restricted settings in its App Info on Android 13 and later, for an app that didn't
 /// come from a store. Nothing once it's on, or on a device that has none.
 function ThisPhone() {
@@ -68,7 +68,7 @@ function ThisPhone() {
         <Problem
           warn
           heading="Your AI can't use this phone yet"
-          text="Turn on The One App in Accessibility settings."
+          text="Turn on the One App in Accessibility settings."
           action={<Button onClick={() => client({ settings: "accessibility" })}>Open Settings</Button>}
         />
         <List>

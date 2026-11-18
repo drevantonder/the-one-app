@@ -127,8 +127,8 @@ unsafe fn container() -> Result<PSID> {
     let made = unsafe {
         CreateAppContainerProfile(
             name.as_ptr(),
-            wide("The One App's sandbox").as_ptr(),
-            wide("Untrusted apps, behind The One App's wall").as_ptr(),
+            wide("the One App's sandbox").as_ptr(),
+            wide("Untrusted apps, behind the One App's wall").as_ptr(),
             ptr::null(),
             0,
             &mut sid,

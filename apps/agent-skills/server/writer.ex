@@ -17,7 +17,7 @@ defmodule AgentSkills.Writer do
   @every 60_000
   @marker ".agent-skills"
 
-  # The skills The One App as it was before wrote, whose tools are gone: folders of these names that it marked with
+  # The skills the One App as it was before wrote, whose tools are gone: folders of these names that it marked with
   # this file. It removed them by the same names and mark when they were no longer offered.
   @before "the-one-app"
   @before_marker ".synced-one"
@@ -122,12 +122,12 @@ defmodule AgentSkills.Writer do
       "SKILL.md" => """
       ---
       name: #{network.name}
-      description: #{JSON.encode!("Read before using the One App network at #{network.address}, by its MCP tools (<app>_<tool>) or the `one` command, and whenever the user mentions The One App or wants something done with what they keep there: their email, messages, calendar, files, devices, keys and more. It lists a skill for each of its apps.")}
+      description: #{JSON.encode!("Read before using the network of the One App at #{network.address}, by its MCP tools (<app>_<tool>) or the `one` command, and whenever the user mentions the One App or wants something done with what they keep there: their email, messages, calendar, files, devices, keys and more. It lists a skill for each of its apps.")}
       ---
 
       # #{network.address}
 
-      This is a One App network: what one user, family or workplace keeps and makes, which you use as whoever you
+      This is a network of the One App: what one user, family or workplace keeps and makes, which you use as whoever you
       act for. Its tools are its apps', each the MCP tool `<app>_<tool>` and the command `one <app> <tool>`
       (`--help` says what it takes), and One Core's own, which add and remove apps, servers and services.
 

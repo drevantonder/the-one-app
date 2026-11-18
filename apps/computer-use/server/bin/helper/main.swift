@@ -1,4 +1,4 @@
-// Computer Use for The One App: the app macOS knows Computer Use by on a Mac. macOS allows Screen Recording and
+// Computer Use for the One App: the app macOS knows Computer Use by on a Mac. macOS allows Screen Recording and
 // Accessibility to the program it holds responsible for a process, which for a program a launchd agent starts is
 // that program: so this app runs Cua Driver's daemon (cua-driver serve --embedded) as its own child, and macOS asks
 // for and keeps both in this app's name, with its icon, through Cua Driver's updates and this app's, as it's signed
