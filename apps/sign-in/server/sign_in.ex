@@ -333,6 +333,20 @@ defmodule SignIn do
     %{removed: name}
   end
 
+  @doc """
+  What the device whose key is `device` is called where its person let it in, as `devices` lists it for them, or
+  `nil` for one that's nobody's. It's for an app that shows a person's device to whoever else may use it, by the name
+  its person knows it by, as Computer Use names a phone.
+
+      Call.app(call, "sign-in").device_name(call, device)
+  """
+  def device_name(_call, device) do
+    with "users/" <> _ = who <- OneCore.Hooks.whose(device),
+         %{"devices" => devices} <- ask(%{ask: "devices", who: who}),
+         do: Enum.find_value(devices, &(&1["id"] == device && &1["name"])),
+         else: (_ -> nil)
+  end
+
   defp joins(name, link), do: "users/#{name} joins at #{link} within a week. It's shown once, so pass it on now."
 
   # Devices are a person's, whoever a call runs for.
