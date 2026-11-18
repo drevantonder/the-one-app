@@ -366,7 +366,7 @@ function Telemetry(props: { all: Overview }) {
           </List>
         </Section>
         <Text style={{ color: "muted-foreground", font: "body", maxWidth: "readable" }}>
-          Kept for {all().retention.days} days, up to {size(all().retention.most_bytes)}. {size(all().retention.bytes)} now.
+          {`Kept for ${all().retention.days} days, up to ${size(all().retention.most_bytes)}. ${size(all().retention.bytes)} now.`}
           <Show when={all().forwarding}>{(to) => ` A copy goes to ${host(to())}.`}</Show>
         </Text>
       </Screen>
