@@ -523,7 +523,7 @@ defmodule Telemetry do
   defp read(call, hours) do
     to = System.os_time(:nanosecond)
     from = to - hours * 3_600_000_000_000
-    {Store.read(call.own, from), from, to}
+    {Store.read(call, from), from, to}
   end
 
   # Whose a call was is shown to the network's owners, and to whoever it was: to anyone else, how the network is

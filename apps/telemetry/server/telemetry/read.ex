@@ -6,15 +6,16 @@ defmodule Telemetry.Read do
   """
 
   @doc """
-  The errors among `batches`, each kind once, most recent first: failed spans by their name and message, and
-  warnings and errors that were logged (`span: false`). A span another server ran is that one's. `shown` says whether whose a
-  call was may be shown.
+  The errors among `batches`, each kind once (`kind/1`), most recent first: failed spans by their name, and
+  warnings and errors that were logged (`span: false`), whichever server logged them. A span another server ran is
+  that one's. A call refused for what it was given or who asked is the caller's mistake, not an error. `shown` says
+  whether whose a call was may be shown.
   """
   def errors(batches, shown) do
     all = Enum.flat_map(batches, & &1["spans"])
     # A client's request that a server answered with an error is that server's span, said to be from the client.
     clients = for %{"kind" => "client"} = span <- all, into: %{}, do: {span["traceId"], from(span)}
-    failed_traces = for span <- all, span["kind"] == "server", failed?(span), into: MapSet.new(), do: span["traceId"]
+    failed_traces = for span <- all, span["kind"] == "server", failed?(span) or refused?(span), into: MapSet.new(), do: span["traceId"]
 
     spans =
       for span <- all,
@@ -51,13 +52,14 @@ defmodule Telemetry.Read do
       end
 
     (spans ++ logs)
-    |> Enum.group_by(&{&1.where, first_line(&1.message)})
-    |> Enum.map(fn {{where, message}, all} ->
+    |> Enum.group_by(&{&1.span, &1.where, kind(&1.message)})
+    |> Enum.map(fn {{span, where, _kind}, all} ->
       latest = Enum.max_by(all, & &1.at)
+      servers = all |> Enum.map(& &1.server) |> Enum.reject(&is_nil/1) |> Enum.uniq() |> Enum.sort()
 
       %{
-        where: where,
-        message: message,
+        where: if(span or servers == [], do: where, else: "#{where} on #{Enum.join(servers, ", ")}"),
+        message: message(latest.message),
         count: length(all),
         at: latest.at,
         took: latest.took,
@@ -260,8 +262,33 @@ defmodule Telemetry.Read do
   # it.
   defp logged(%{"eventName" => "exception", "attributes" => %{"one.app" => app}}), do: "#{app} page"
   defp logged(%{"eventName" => name}) when is_binary(name) and name != "", do: name
-  defp logged(%{"severity" => "WARN", "server" => server}), do: "Warning on #{server}"
-  defp logged(%{"server" => server}), do: "Error on #{server}"
+  defp logged(%{"severity" => "WARN"}), do: "Warning"
+  # One kind of log line is the same on every server: which servers it was on is said once (`errors/2`).
+  defp logged(_log), do: "Error"
+
+  @doc """
+  A kind of error, by its message: its first line, as Elixir's banner says it whether or not it starts `** `, up to
+  where its stack starts, an S3 error's XML as its `Code`, and what changes from one to the next, numbers, ids and
+  processes, taken out, as `Telemetry.Alerts` takes them out. So one cause is one kind however many servers, builds and requests it was on.
+  """
+  def kind(message) do
+    message
+    |> message()
+    |> String.replace(~r/, (\([\w]+ [^)]*\) )?[^,]*\.exs?:\d+:.*$/, "")
+    |> String.replace(~r/#PID<[^>]*>/, "#PID<…>")
+    |> String.replace(~r/[0-9a-f]{8,}/i, "…")
+    |> String.replace(~r/\d+/, "#")
+    |> String.slice(0, 300)
+  end
+
+  # A message as it's shown: its first line, without the `** ` Elixir puts before a banner, and an S3 error's XML as
+  # its `Code`.
+  defp message(text) do
+    text
+    |> first_line()
+    |> String.replace_prefix("** ", "")
+    |> String.replace(~r/\\?"?<\?xml.*?<Code>([^<]+)<\/Code>.*?<\/Error>\\?"?/, "\\1")
+  end
 
   @doc """
   Which client a record is from, as a person reads it, from what the client said of itself: "App on Andre's
@@ -340,6 +367,7 @@ defmodule Telemetry.Read do
   ## Spans
 
   defp failed?(span), do: span["status"]["code"] == "error"
+  defp refused?(span), do: span["attributes"]["one.outcome"] == "refused"
   defp took(span), do: Float.round((span["end"] - span["start"]) / 1_000_000, 3)
   defp whose(span, shown), do: if(shown.(span["attributes"]["one.for"]), do: span["attributes"]["one.for"])
   defp first_line(nil), do: ""

@@ -38,10 +38,10 @@ defmodule Telemetry.Store do
   end
 
   @doc "Every export kept of an hour that started after `from`, in nanoseconds since 1970, each laid flat."
-  def read(own, from) do
+  def read(call, from) do
     since = hour(from - 3_600_000_000_000)
-    names = for name <- Artifact.list(own, "otlp/"), Path.dirname(name) > since, do: name
-    decode(own, names)
+    names = for name <- Artifact.list(call.own, "otlp/"), Path.dirname(name) > since, do: name
+    decode(call, names)
   end
 
   @doc """
@@ -49,23 +49,23 @@ defmodule Telemetry.Store do
   and the exports, as each was kept, read from the hours they're in before those are put together (`prune/1`). One
   put together meanwhile is named, and not given.
   """
-  def since(own, from, read) do
+  def since(call, from, read) do
     to = System.os_time(:nanosecond)
     hours = Enum.uniq(for(at <- from..to//3_600_000_000_000, do: hour(at)) ++ [hour(to)])
 
     names =
       for hour <- hours,
-          name <- Artifact.list(own, hour <> "/"),
+          name <- Artifact.list(call.own, hour <> "/"),
           not hour?(name),
           to_of(name) > from,
           name not in read,
           do: name
 
-    {names, decode(own, names)}
+    {names, decode(call, names)}
   end
 
   @doc "The exports kept as `names`, each by its name, as they're kept: OTLP's protobuf."
-  def raw(own, names), do: for({name, {:ok, data, _tag}} <- Enum.zip(names, Artifact.read_all(own, names)), do: {name, data})
+  def raw(call, names), do: for({name, {:ok, data, _tag}} <- Enum.zip(names, read_all(call, names)), do: {name, data})
 
   @doc "The signal an export kept as `name` is of, `traces`, `metrics` or `logs`, or `nil` for one kept before OTLP."
   def signal("otlp/" <> _ = name), do: String.trim_leading(Path.extname(name), ".")
@@ -143,8 +143,18 @@ defmodule Telemetry.Store do
   defp list(own), do: Artifact.list(own, "otlp/") ++ Artifact.list(own, "batches/")
 
   # Each kept export laid flat, by its signal. One that isn't OTLP, as a device may send anything, is passed over.
-  defp decode(own, names) do
-    for {name, {:ok, data, _tag}} <- Enum.zip(names, Artifact.read_all(own, names)), batch = export(name, data), do: batch
+  defp decode(call, names) do
+    for {name, {:ok, data, _tag}} <- Enum.zip(names, read_all(call, names)), batch = export(name, data), do: batch
+  end
+
+  # The blobs `names`, in order, as `OneCore.Artifact.read_all/2` gives them. The exports of hours not yet put
+  # together, many small ones that every look reads again, are kept between calls (`Telemetry.Exports`) for this hour
+  # and the last.
+  defp read_all(call, names) do
+    {hours, exports} = Enum.split_with(names, &hour?/1)
+    since = hour(System.os_time(:nanosecond) - 3_600_000_000_000)
+    read = Map.new(Enum.zip(hours, Artifact.read_all(call.own, hours)) ++ Enum.zip(exports, Telemetry.Exports.read(call, exports, since)))
+    Enum.map(names, &read[&1])
   end
 
   defp export(name, data) do

@@ -60,7 +60,7 @@ defmodule Telemetry.Forward do
 
   def send(call, names) do
     if to = where(call) do
-      for {name, otlp} <- Store.raw(call.own, names), signal = Store.signal(name), signal != nil do
+      for {name, otlp} <- Store.raw(call, names), signal = Store.signal(name), signal != nil do
         try do
           post(call, to, signal, otlp)
         rescue

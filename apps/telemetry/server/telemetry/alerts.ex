@@ -149,8 +149,8 @@ defmodule Telemetry.Alerts do
 
     {names, batches} =
       if looked,
-        do: Store.since(call.own, (now - @gap) * 1_000_000, read),
-        else: {[], Store.read(call.own, (now - Store.days() * 86_400_000) * 1_000_000)}
+        do: Store.since(call, (now - @gap) * 1_000_000, read),
+        else: {[], Store.read(call, (now - Store.days() * 86_400_000) * 1_000_000)}
 
     signals = signals(batches)
 

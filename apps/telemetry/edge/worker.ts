@@ -96,9 +96,11 @@ function span(item: TraceItem) {
   const error =
     record.error ||
     (thrown && `${thrown.name}: ${thrown.message}`) ||
-    // A WebSocket ends when either end leaves, which is no failure.
-    (!upgraded && item.outcome === "canceled" && "The client went away before it was answered") ||
-    (!upgraded && item.outcome !== "ok" && `It ended ${item.outcome}`) ||
+    // A WebSocket ends when either end leaves, and a request when whoever sent it hangs up, as a browser that leaves
+    // the page does: neither is a failure here, as OpenTelemetry has an HTTP server's span. A call between Workers
+    // is the edge's own, so one cancelled because its caller ended first is.
+    (!request && item.outcome === "canceled" && "The caller went away before it was answered") ||
+    (!upgraded && !(request && item.outcome === "canceled") && item.outcome !== "ok" && `It ended ${item.outcome}`) ||
     (status !== undefined && status >= 500 && `It answered ${status}`) ||
     undefined;
   // As OpenTelemetry names an HTTP server's span, and a call between Workers by the Worker and its method.

@@ -22,8 +22,11 @@ client sent a `traceparent`.
 
 - `overview` is what Telemetry's app shows: what's failing, what's slowest and what AI cost, over
   the last `hours` (24 if left out, up to 336).
-- `errors` lists each kind of error once: where (a span's name, as `<app> <tool>`, or `<method> <route>` for the edge's, or what logged it), its
-  message, how often, when it was last, how long it lasted, and the trace of the newest. Start a bug there. What a
+- `errors` lists each kind of error once: where (a span's name, as `<app> <tool>`, or `<method> <route>` for the edge's, or what logged it, with
+  the servers it was logged on), its message, how often, when it was last, how long it lasted, and the trace of the
+  newest. A kind is its message with numbers, ids and its stack left out, so one cause is one kind. A call refused
+  for what it was given or who asked is the caller's mistake, not an error: its `one.tool.duration` outcome is
+  `refused`, not `error`, and it doesn't count as a failure. Start a bug there. What a
   client reported says which (`from`: "App on Andre's iPhone", "claude-code (MCP) on linux"): its requests that
   failed or were slow, as MCP names them (`tools/call gmail_search`), whose trace runs on into the server's span;
   how long no server answered it (`one.client.unanswered`); what its window showed went wrong
