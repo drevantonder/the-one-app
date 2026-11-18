@@ -1,13 +1,15 @@
 // Who signs in to a network, and what they let act as them: Better Auth, kept in this Worker's own database. A
 // person signs in with a passkey and nothing else. An assistant becomes theirs when they answer that one question
 // for it, and a new device when they also say the code it shows matches the one they're shown, as Better Auth's
-// device authorization has it, or when a device or assistant of theirs lets it in by that code. Each is then a line
+// device authorization has it, or when a device or assistant of theirs lets it in by that code. A new device may
+// instead name whose it is (`/device/claim`): that person's devices list it as waiting, and one of them lets it in by
+// tapping the number it shows (`RequestState`). Each is then a line
 // in this app's own artifact, `devices/<device>`, saying whose it is: that's where a server reads it, so no call
 // asks anything here. What a person goes by is a line there too, `people/<name>`: the name they chose as they
 // joined, and their email where how they signed in has one, which a server tells apps of by `people`.
-import { env } from "cloudflare:workers";
+import { env, waitUntil } from "cloudflare:workers";
 import { betterAuth } from "better-auth";
-import { APIError, createAuthMiddleware, getSessionFromCtx } from "better-auth/api";
+import { APIError, createAuthEndpoint, createAuthMiddleware, getSessionFromCtx } from "better-auth/api";
 import { getMigrations } from "better-auth/db/migration";
 import { jwt } from "better-auth/plugins";
 import { cimd } from "@better-auth/cimd";
@@ -15,6 +17,7 @@ import { mcp } from "@better-auth/mcp";
 import { DEVICE_CODE_GRANT_TYPE, getIssuer, oauthDeviceAuthorization, verifyOAuthQueryParams } from "@better-auth/oauth-provider";
 import { passkey } from "@better-auth/passkey";
 import Bowser from "bowser";
+import * as z from "zod";
 import type { BetterAuthPlugin, DBAdapter, User as AuthUser } from "better-auth";
 
 declare global {
@@ -37,6 +40,7 @@ declare global {
       };
       RELAY: {
         notify(message: string): Promise<void>;
+        forward(servers: string[], message: string): Promise<{ server: string; answer: string } | null>;
         presence(keys: string[]): Promise<Record<string, { connected: boolean; last_seen?: number } | null>>;
       };
       /** The apps that use this network's passkeys and open its links (`vars` in `wrangler.jsonc`). */
@@ -62,7 +66,11 @@ interface Device {
   createdAt: Date;
 }
 
-/** A device's code, as Better Auth's device authorization keeps it, with what the device calls itself. */
+/**
+ * A device's code, as Better Auth's device authorization keeps it, with what the device calls itself, and once the
+ * device named whose it is, the request that makes (`RequestState`): who, the number it shows them, when, and roughly where
+ * it asked from.
+ */
 interface DeviceCode {
   id: string;
   deviceCode: string;
@@ -72,7 +80,27 @@ interface DeviceCode {
   status: "pending" | "approved" | "denied";
   expiresAt: Date;
   name: string;
+  person?: string | null;
+  number?: number | null;
+  named?: Date | null;
+  place?: string | null;
 }
+
+/**
+ * A request to sign in: a new device's code, once the device named whose it is. It's in one of four states, and moves
+ * only as `answer` moves it, each move with its guard:
+ *
+ *     waiting → approved   that person taps the number it shows on one of their devices (`approve` with `number`),
+ *                          or anyone signed in lets it in by its code, as before (`/device/approve`, `approve`)
+ *     waiting → denied     that person taps another number, or Not Me (`deny`), or stops it by its code
+ *     waiting → expired    `ASKS_FOR` passes with neither: its code ends, and the device asks for another
+ *     waiting → waiting    the device names someone again: a new number, and no more time than it had left
+ *
+ * Each guard is that it's waiting: Better Auth's status is still `pending`, it hasn't expired, and nobody else
+ * opened its code. Only the person it named sees it, and only its number or its code lets it in. Approved, denied and
+ * expired are ends: the device learns which as it next asks (`/device/token`), and Better Auth forgets its code.
+ */
+type RequestState = "waiting" | "approved" | "denied" | "expired";
 
 /** An invitation: the hash of its link, whose it is, and when it ends. */
 interface Invite {
@@ -97,6 +125,13 @@ const INVITED_FOR = 7 * 24 * 60 * 60 * 1000;
  * 32⁸, so this only stops guessing at speed. It's counted in the table Better Auth keeps its own limits in.
  */
 const WRONG_CODES = { max: 5, window: 15 * 60 };
+/** How long a request to sign in waits for its person once its device names them, in seconds (`RequestState`). */
+const ASKS_FOR = 5 * 60;
+/**
+ * How many times devices may name one person, and over how long, in seconds: each is a notification on all their
+ * devices. Naming anyone at all is limited by the address it's asked from too (`rateLimit` in `devices`).
+ */
+const NAMED = { max: 5, window: 15 * 60 };
 
 const hex = (bytes: ArrayBuffer | Uint8Array) => Array.from(new Uint8Array(bytes), (byte) => byte.toString(16).padStart(2, "0")).join("");
 const sha256 = async (text: string) => hex(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(text)));
@@ -217,8 +252,56 @@ const devices = () => ({
       },
     },
     invite: { fields: { userId: { type: "string", references: { model: "user", field: "id" } }, expiresAt: { type: "date" } } },
-    // What a device that asked to be let in calls itself, which its person is shown with its code.
-    deviceCode: { fields: { name: { type: "string", required: false } } },
+    // What a device that asked to be let in calls itself, which its person is shown with its code, and the request it
+    // makes once it names whose it is (`RequestState`).
+    deviceCode: {
+      fields: {
+        name: { type: "string", required: false },
+        person: { type: "string", required: false, references: { model: "user", field: "id", onDelete: "cascade" } },
+        number: { type: "number", required: false },
+        named: { type: "date", required: false },
+        place: { type: "string", required: false },
+      },
+    },
+  },
+  // Naming whoever's signing in says whether they're here, and notifies them, so one address names only so many.
+  rateLimit: [{ pathMatcher: (path: string) => path === "/device/claim", window: NAMED.window, max: 10 }],
+  endpoints: {
+    /**
+     * A new device names whose it is, by their name or an email they signed in with, from the page that shows its
+     * code (`page/`): its code is a request to sign in from then on (`RequestState`), waiting on their devices for the
+     * number it's given to show. Naming someone again names them instead, with a new number.
+     */
+    claimDevice: createAuthEndpoint(
+      "/device/claim",
+      { method: "POST", body: z.object({ userCode: z.string(), person: z.string() }) },
+      async (ctx) => {
+        const { adapter } = ctx.context;
+        const code = await adapter.findOne<DeviceCode>({ model: "deviceCode", where: [{ field: "userCode", value: plain(ctx.body.userCode) }] });
+        if (!code || state(code) !== "waiting") throw new APIError("BAD_REQUEST", { message: "This sign-in ended. It starts again in a moment." });
+        if (code.userId) throw new APIError("FORBIDDEN", { message: "Someone opened this device's link, and is letting it in there." });
+        const said = ctx.body.person.trim().toLowerCase().replace(/^users\//, "");
+        const where = said.includes("@") ? [{ field: "email", value: said }, { field: "emailVerified", value: true }] : [{ field: "name", value: said }];
+        const [user] = said ? await adapter.findMany<User>({ model: "user", where }) : [];
+        if (!user) throw new APIError("NOT_FOUND", { message: `Nobody in this network goes by ${said || "that"}.` });
+        const named = await limit(adapter, `named/${user.id}`, NAMED);
+        if (named.count >= NAMED.max) throw new APIError("TOO_MANY_REQUESTS", { message: `${said} was asked too many times. Try again in ${named.minutes} minutes.` });
+        await named.again();
+        const cf = (ctx.request as { cf?: { city?: string; region?: string; country?: string } } | undefined)?.cf;
+        const set = {
+          person: user.id,
+          number: 10 + (crypto.getRandomValues(new Uint32Array(1))[0] % 90),
+          named: new Date(),
+          place: cf?.city || cf?.region || cf?.country || null,
+          expiresAt: new Date(Math.min(new Date(code.expiresAt).getTime(), Date.now() + ASKS_FOR * 1000)),
+        };
+        const waiting = [{ field: "id", value: code.id }, { field: "status", value: "pending" }];
+        if (!(await adapter.incrementOne({ model: "deviceCode", where: waiting, increment: {}, set }))) throw new APIError("BAD_REQUEST", { message: "This sign-in ended. It starts again in a moment." });
+        // Their devices are told as it's answered: the page doesn't wait for a server to.
+        waitUntil(tell(user, code.id).catch((error) => console.error(`Couldn't notify ${user.name}: ${error}`)));
+        return ctx.json({ number: set.number });
+      },
+    ),
   },
   async onRequest(request: Request) {
     const url = new URL(request.url);
@@ -421,19 +504,64 @@ export function at(origin: string): Promise<Auth> {
 }
 
 /**
- * The codes no device showed that `user` tried to let a device in by, within `WRONG_CODES.window` of the last:
- * how many, when the last was, and `again()`, which counts one more.
+ * How many times `key` was counted within `window` seconds of the last, in the table Better Auth keeps its own limits
+ * in: how many, the minutes until it may be counted again, and `again()`, which counts one more.
  */
-async function wrong(adapter: Adapter, user: User) {
-  const key = `approve/${user.id}`;
+async function limit(adapter: Adapter, key: string, { window }: { window: number }) {
   const [row] = await adapter.findMany<{ count: number; lastRequest: number | string }>({ model: "rateLimit", where: [{ field: "key", value: key }] });
   const lastRequest = Number(row?.lastRequest ?? 0);
-  const count = row && Date.now() - lastRequest < WRONG_CODES.window * 1000 ? row.count : 0;
+  const count = row && Date.now() - lastRequest < window * 1000 ? row.count : 0;
   const again = () => {
     const data = { key, count: count + 1, lastRequest: Date.now() };
     return row ? adapter.update({ model: "rateLimit", where: [{ field: "key", value: key }], update: data }) : adapter.create({ model: "rateLimit", data });
   };
-  return { count, lastRequest, again };
+  return { count, minutes: Math.ceil((lastRequest + window * 1000 - Date.now()) / 60_000), again };
+}
+
+/** Where a request to sign in is (`RequestState`). */
+function state(code: DeviceCode): RequestState {
+  if (code.status !== "pending") return code.status;
+  return new Date(code.expiresAt) < new Date() ? "expired" : "waiting";
+}
+
+/**
+ * Moves a device's code that's waiting to `to`, as `user`'s answer, and makes the device theirs if it's approved.
+ * Only a code nobody else has opened moves, and only once: whether it did.
+ */
+async function answer(adapter: Adapter, code: DeviceCode, user: { id: string; name: string }, to: "approved" | "denied") {
+  if (state(code) !== "waiting" || (code.userId && code.userId !== user.id)) return false;
+  const where = [
+    { field: "id", value: code.id },
+    { field: "status", value: "pending" },
+    { field: "userId", operator: "eq" as const, value: code.userId ?? null },
+  ];
+  if (!(await adapter.incrementOne({ model: "deviceCode", where, increment: {}, set: { status: to, userId: user.id } }))) return false;
+  if (to === "approved") await place(adapter, code.clientId, "app", code.name, user);
+  return true;
+}
+
+/**
+ * The three numbers a request's person is shown to tap, one of them the one its device shows, in an order of its
+ * own, and the same each time it's shown.
+ */
+async function numbers(code: DeviceCode) {
+  const bytes = new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(code.id)));
+  const shown = [code.number!];
+  for (const byte of bytes) if (shown.length < 3 && !shown.includes(10 + (byte % 90))) shown.push(10 + (byte % 90));
+  const at = bytes[31] % 3;
+  [shown[0], shown[at]] = [shown[at], shown[0]];
+  return shown;
+}
+
+/**
+ * Has a server acting for `user` notify them that a device is waiting to sign in as them (`sign-in_notify`). It
+ * comes as a sharing link's holder does, since the edge is nobody, and the server checks with the edge that it is.
+ */
+async function tell(user: User, request: string) {
+  const params = { name: "sign-in_notify", arguments: { who: who(user), request }, _meta: { link: `${who(user)}/${request}` } };
+  const servers = new Set([...(await env.NETWORK.servers(`${who(user)}/`)), ...(await env.NETWORK.servers("network/"))]);
+  const reached = await env.RELAY.forward([...servers], JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/call", params }));
+  if (!reached) throw new Error("none of its servers answered");
 }
 
 /**
@@ -479,6 +607,8 @@ export interface Ask {
   called?: unknown;
   device?: string;
   code?: unknown;
+  request?: unknown;
+  number?: unknown;
   passkey?: string;
   /** Whether the network is being built, where a server acts as whoever a client says (`mix network --development`). */
   building?: boolean;
@@ -558,34 +688,44 @@ export async function asked(auth: Auth, origin: string, { ask, who: name, buildi
     await internalAdapter.deleteSession(signed_in.token);
     return { removed: browser(signed_in.userAgent), device: await browserDevice(signed_in.id) };
   }
+  // The devices waiting to sign in as this person (`RequestState`), each with the numbers they're shown to tap.
+  if (ask === "waiting") {
+    const named = await adapter.findMany<DeviceCode>({ model: "deviceCode", where: [{ field: "person", value: user.id }, { field: "status", value: "pending" }] });
+    const waiting = named.filter((code) => state(code) === "waiting").toSorted((a, b) => +new Date(b.named!) - +new Date(a.named!));
+    return {
+      waiting: await Promise.all(waiting.map(async (code) => ({ request: code.id, name: code.name, at: code.named, place: code.place ?? null, ends: code.expiresAt, numbers: await numbers(code) }))),
+    };
+  }
+  // A request answered on one of its person's devices: the number tapped lets it in if it's the one it shows, and
+  // stops it if not, as Not Me does.
+  if ((ask === "approve" && about.request) || ask === "deny") {
+    const code = await adapter.findOne<DeviceCode>({ model: "deviceCode", where: [{ field: "id", value: String(about.request) }, { field: "person", value: user.id }] });
+    if (!code || state(code) !== "waiting") return { error: "That device isn't waiting to sign in any more." };
+    const right = ask === "approve" && Number(about.number) === code.number;
+    if (!(await answer(adapter, code, user, right ? "approved" : "denied"))) return { error: "That device isn't waiting to sign in any more." };
+    if (ask === "approve" && !right) return { error: `That isn't the number ${code.name} showed, so it was blocked. If it was you, start again on it.` };
+    return right ? { approved: code.name } : { denied: code.name };
+  }
   if (ask === "approve") {
     // A person lets a device in by its code from one of their own devices or assistants, which a passkey let in.
     // Better Auth's device authorization answers a code only for a browser that's signed in, so this is what its
     // `/device` and `/device/approve` check, in one change that only a code nobody else has opened makes: it's
     // answered once. The device then learns its answer from Better Auth as it would have.
-    const missed = await wrong(adapter, user);
-    if (missed.count >= WRONG_CODES.max) {
-      const minutes = Math.ceil((missed.lastRequest + WRONG_CODES.window * 1000 - Date.now()) / 60_000);
-      return { error: `That's too many codes no device showed. Try again in ${minutes} minute${minutes === 1 ? "" : "s"}.` };
-    }
+    const missed = await limit(adapter, `approve/${user.id}`, WRONG_CODES);
+    if (missed.count >= WRONG_CODES.max)
+      return { error: `That's too many codes no device showed. Try again in ${missed.minutes} minute${missed.minutes === 1 ? "" : "s"}.` };
     const code = await adapter.findOne<DeviceCode>({ model: "deviceCode", where: [{ field: "userCode", value: plain(about.code) }] });
     // Better Auth forgets a code once its device has learned it was answered, stopped or ended.
     if (!code) {
       await missed.again();
       return { error: "That isn't a code any device is showing now." };
     }
-    if (code.expiresAt < new Date()) return { error: "That code expired. The device shows another when it's asked again." };
-    if (code.status === "denied") return { error: "That code was denied, so its device isn't approved." };
-    if (code.status !== "pending") return { error: "Already approved." };
+    const now = state(code);
+    if (now === "expired") return { error: "That code expired. The device shows another when it's asked again." };
+    if (now === "denied") return { error: "That code was denied, so its device isn't approved." };
+    if (now === "approved") return { error: "Already approved." };
     if (code.userId && code.userId !== user.id) return { error: "Someone else opened that code first, and only they can answer it." };
-    const where = [
-      { field: "id", value: code.id },
-      { field: "status", value: "pending" },
-      { field: "userId", operator: "eq" as const, value: code.userId ?? null },
-    ];
-    const updated = await adapter.incrementOne({ model: "deviceCode", where, increment: {}, set: { status: "approved", userId: user.id } });
-    if (!updated) return { error: "Already approved." };
-    await place(adapter, code.clientId, "app", code.name, user);
+    if (!(await answer(adapter, code, user, "approved"))) return { error: "Already approved." };
     return { approved: code.name };
   }
   // Someone taken out of the network: nothing acts as them from then on, they sign in nowhere, and their name is free.

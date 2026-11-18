@@ -5,10 +5,11 @@
 // This device becomes a server and stops being one; a server's services are switched on and off; and a device is
 // taken out, or this one signs out. Each server says whether it's ready, active and running, or why not, and an
 // update it's taking as it moves on (`OneCore.Release`). This device becoming a server, or stopping being one, says
-// each stage.
+// each stage. Above them all are the devices waiting to sign in as whoever's looking, each let in by tapping the
+// number it shows, of three, or blocked.
 import { createMemo, createSignal, Errored, For, Loading, refresh, Show } from "solid-js"
 import { render } from "@solidjs/web"
-import { Button, call, changed, client, confirm, Empty, List, Problem, Row, Screen, Section, seen, Skeleton, Spinner, Split, Steps, Switch, toast } from "ui"
+import { Button, call, changed, client, confirm, Empty, haptic, List, Problem, Row, Screen, Section, seen, Sheet, Skeleton, Spinner, Split, Steps, Switch, toast } from "ui"
 import { on } from "./mine.tsx"
 import "./app.css"
 
@@ -80,12 +81,22 @@ interface Thing extends ServerStatus {
   services?: (Service & { on: boolean })[]
 }
 
+/** A device waiting to sign in as whoever's looking, as `sign-in_waiting` lists it. */
+interface Waiting {
+  request: string
+  name: string
+  at: string
+  place: string | null
+  numbers: number[]
+}
+
 const json = <T,>(tool: string, inputs?: object, who?: string): Promise<T> => call(tool, inputs, { subject: who }).then(JSON.parse)
 
 /// What's known of the devices and servers, each as a row says it. Whoever owns the network sees its servers too.
 const mine = createMemo(async () => {
-  const [{ devices }, here, builds, network, services, networkServices] = await Promise.all([
+  const [{ devices }, { waiting }, here, builds, network, services, networkServices] = await Promise.all([
     json<{ devices: Omit<Thing, "here">[] }>("sign-in_devices"),
+    json<{ waiting: Waiting[] }>("sign-in_waiting"),
     client() as Promise<{ device: string; build: string; server?: Here }>,
     json<Builds>("builds"),
     json<Builds>("builds", {}, "network").catch(() => undefined),
@@ -114,7 +125,7 @@ const mine = createMemo(async () => {
     }
   }
   const update = network?.network ?? builds.network ?? undefined
-  return { devices: rows, servers: [...servers.values()].toSorted((a, b) => Number(b.here) - Number(a.here)), here, update, who: network ? "network" : undefined }
+  return { waiting, devices: rows, servers: [...servers.values()].toSorted((a, b) => Number(b.here) - Number(a.here)), here, update, who: network ? "network" : undefined }
 })
 changed(() => refresh(mine))
 
@@ -310,6 +321,50 @@ function Detail(props: { thing: Thing; all: All }) {
   )
 }
 
+/// When a device named whoever's looking, as a person says it: just now, or how long ago.
+const named = (at: string) => {
+  const minutes = Math.round((Date.now() - new Date(at).getTime()) / 60_000)
+  return minutes < 1 ? "Just now" : new Intl.RelativeTimeFormat(undefined, { numeric: "auto" }).format(-minutes, "minute")
+}
+
+/// The device waiting to sign in that's being answered, by its request: tapping its row, or a notification's link to
+/// it (`#waiting=<request>`), opens it.
+const [answering, setAnswering] = createSignal<string>()
+const linked = () => new URLSearchParams(location.hash.slice(1)).get("waiting") ?? undefined
+setAnswering(linked())
+addEventListener("hashchange", () => setAnswering(linked()))
+
+/// The person's answer to a device waiting to sign in as them: the number they tapped, which lets it in if it's the
+/// one it shows and blocks it if not, or Not Me, which blocks it.
+async function answer(device: Waiting, number?: number) {
+  setAnswering()
+  const done = await doing(() =>
+    number === undefined ? call("sign-in_deny", { request: device.request }) : call("sign-in_approve", { request: device.request, number }),
+  )
+  if (!done) return haptic("error")
+  haptic("success")
+  toast(number === undefined ? `${device.name} was blocked.` : `${device.name} is signed in as you.`)
+}
+
+/// Is this you signing in? The three numbers, one of which the device shows, and Not Me.
+function Answer(props: { device?: Waiting }) {
+  return (
+    <Sheet heading="Is this you signing in?" open={!!props.device} onClose={() => setAnswering()}>
+      <Show when={props.device}>
+        {(device) => (
+          <div class="answer">
+            <p>Tap the number showing on {device().name}.</p>
+            <div class="numbers">
+              <For each={device().numbers}>{(number) => <Button variant="secondary" onClick={() => answer(device(), number)}>{number}</Button>}</For>
+            </div>
+            <Button variant="outline" onClick={() => answer(device())}>Not Me</Button>
+          </div>
+        )}
+      </Show>
+    </Sheet>
+  )
+}
+
 function Devices(props: { all: All }) {
   const opened = () => [...props.all.devices, ...props.all.servers].find((thing) => thing.id === open())
   const row = (thing: () => Thing) => <Row heading={thing().name ?? "Server"} text={about(thing())} current={open() === thing().id} onClick={() => setOpen(thing().id)} />
@@ -317,6 +372,23 @@ function Devices(props: { all: All }) {
   return (
     <Split open={!!opened()} onClose={() => setOpen()} detail={<Show when={opened()}><Detail thing={opened()!} all={props.all} /></Show>}>
       <Screen heading="Devices">
+        <Show when={props.all.waiting.length}>
+          <Section heading="Waiting to sign in">
+            <List>
+              <For each={props.all.waiting} keyed={(device) => device.request}>
+                {(device) => (
+                  <Row
+                    heading={`${device().name} · the One App`}
+                    text={[named(device().at), device().place && `near ${device().place}`].filter(Boolean).join(" · ")}
+                    current={answering() === device().request}
+                    onClick={() => setAnswering(device().request)}
+                  />
+                )}
+              </For>
+            </List>
+          </Section>
+        </Show>
+        <Answer device={props.all.waiting.find((device) => device.request === answering())} />
         <Show when={props.all.devices.length} fallback={<Empty>No connected apps yet.</Empty>}>
           <List>
             <For each={props.all.devices} keyed={(device) => device.id}>{row}</For>

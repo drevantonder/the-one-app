@@ -13,3 +13,24 @@
   border-radius: var(--radius-xl);
   background: var(--card);
 }
+
+/* Is this you signing in? Its line, then the three numbers side by side, big as figures are, then Not Me. */
+.answer {
+  display: grid;
+  gap: var(--gap);
+}
+.answer p {
+  margin: 0;
+  color: var(--muted-foreground);
+}
+.answer .numbers {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  gap: 0.75rem;
+}
+.answer .numbers .ui-button {
+  height: 4rem;
+  font-size: var(--text-title);
+  font-weight: var(--figure-weight);
+  font-variant-numeric: tabular-nums;
+}

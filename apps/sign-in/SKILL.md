@@ -24,9 +24,14 @@ that one question for it, and a new device when they also say the code it shows 
   has one. `name` changes the name your person goes by, when they ask. `everyone` lists everyone in the network
   and everyone invited who hasn't joined yet. `remove_person` takes someone out, or ends an invitation: their
   devices, assistants and passkeys stop working, they're in no group and shared nothing, and what they made stays. Whoever invites does it.
-- A device that isn't in yet shows a code, and a link at the network's address, and waits. Its person opens the
-  link where they sign in, on the device or any device of theirs, and says whether the code there matches. Pass
-  both on as they are: the code is what keeps a stranger's device out.
+- A device that isn't in yet asks who's signing in. Once its person names themselves, it shows a number and waits:
+  `waiting` lists the devices waiting to sign in as your person, each with three numbers, one of which it shows,
+  for a few minutes. Let one in only when your person tells you the number it shows: `approve` with its `request`
+  and that `number`. A wrong number blocks it, and so does `deny`. Never guess: a device that names your person
+  could be a stranger's, and the number is what keeps it out.
+- It can show a code and a link at the network's address instead. Its person opens the link where they sign in,
+  on the device or any device of theirs, and says whether the code there matches. Pass both on as they are: the
+  code is what keeps a stranger's device out.
 - `approve` lets that device in yourself, as the person you act for, with no tap from them: when a device shows a
   code and they've asked for that device to be let in, call it with the code, and say which device it let in by
   the name it answers. Never let in a device nobody asked for, or one whose code came from anyone but your person
