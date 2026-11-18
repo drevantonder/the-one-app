@@ -26,37 +26,42 @@ you show it. Screen wording and look follow `DESIGN.md`: read the section of the
 
 ### Desktop (Linux), by WebDriver
 
-Tauri's WebDriver drives the app: `tauri-driver` (`cargo install tauri-driver --locked`) in front of WebKitGTK's
-`WebKitWebDriver` (`webkit2gtk-driver`), with any WebDriver client. Start a network (`local-network`), then:
+`tooling/window.py` gives a Selenium session on the window a `one:` link opens, the Home Screen's or an app's own,
+drawn and still. Start a network (`local-network`), then write a throwaway script:
 
-    ONE_HOME=<folder>/client ONE_AS=owner dbus-run-session -- xvfb-run -a -s "-screen 0 1024x900x24" bash -c '
-      free() { python3 -c "import socket; s = socket.socket(); s.bind((\"\", 0)); print(s.getsockname()[1])"; }
-      export WEBDRIVER=http://127.0.0.1:$(free)
-      tauri-driver --port ${WEBDRIVER##*:} --native-port $(free) >"$0/driver.log" 2>&1 & driver=$!
-      uv run -q --with selenium python3 <your script, which connects to $WEBDRIVER>
-      kill $driver' <scratch folder>
+    import sys; sys.path.insert(0, "tooling")
+    from window import opened, settled, frame
+    from selenium.webdriver.support.ui import WebDriverWait
+    named = lambda text: f"//*[text()[normalize-space()='{text}']]"
+    with opened("one:vault", log="<scratch>/window.log") as driver:  # 390×844, or size=(w, h)
+        frame(driver)
+        driver.find_element("xpath", named("All")).click()
+        WebDriverWait(driver, 10).until(lambda d: d.find_elements("xpath", named("GitHub")))
+        settled(driver)
+        driver.save_screenshot("<scratch>/vault.png")
 
-Without `dbus-run-session` GTK waits half a minute for a desktop that isn't there. Its ports are free ones, never
-`tauri-driver`'s own 4444 and 4445: other agents run WebDriver on this machine too. The session's capabilities are
-`{"browserName": "wry", "tauri:options": {"application": "<repo>/target/debug/one", "args": ["<link>"]}}`, then
-`set_window_size(390, 844)`; the app's log is `driver.log`. One app runs per desktop session: a second start,
-`target/debug/one <link>`, hands its link to it, as a desktop's link handler does.
+and run it in a desktop of its own, so nothing is shared with other agents and nothing is left running:
+
+    ONE_HOME=<folder>/client ONE_AS=owner dbus-run-session -- xvfb-run -a -s "-screen 0 1280x900x24" \
+      sh -c 'exec uv run -q --with selenium python3 "$@" 2>&1' _ <script> 2>/dev/null
+
+A picture takes about a second; an app's first open after the UI library is built again, 10 to 15 s. Without
+`dbus-run-session` GTK waits half a minute for a desktop that isn't there, and its own noise is what `2>/dev/null`
+drops.
 
 - Open the screen by its link, the same one a person's link or notification opens: `one:<app>` (its first page),
   `one:<app>/<page>` (a page by its file, `one:sign-in/client/security.html`), and a fragment the app follows,
   `one:home-screen#library`. Click only for what the change is about.
-- Wait for state, never a time: the window is ready once `body:not([aria-busy]) iframe:not([inert]):not([aria-busy])`
-  is there (the app showing has drawn), and still once what moves has ended, in the window and in the app's frame
-  (`switch_to.frame`): `Promise.all(document.getAnimations().filter(a => a.effect?.getComputedTiming().endTime !==
-  Infinity).map(a => a.finished.catch(() => {})))`, as a cancelled one rejects.
-- An app's elements are in its frame: switch to it to find, click or wait, and back to the window for the picture
-  (`save_screenshot`). An element's own screenshot inside a frame comes out black.
-- A hold is `click_and_hold(…).pause(1).release()`; WebKit's driver's right-click opens no menu.
+- Wait for state, never a time: after a click, `WebDriverWait` for what it shows, then `settled`, which waits for
+  what moves to end, in the window and in the app's frame.
+- An app's elements are in its frame (`frame`); `settled` leaves you in the window, for the picture. An element's
+  own screenshot inside a frame comes out black. The Home Screen's window is never narrower than 700 px.
+- A hold is `ActionChains(driver).click_and_hold(…).pause(1).release()`; WebKit's driver's right-click opens no menu.
 - Touch isn't WebKitGTK's: its driver sends a touch pointer as a mouse, and one finger at most. Touch and a second
   finger are Chromium's, so Android's (below) or Chrome's: CDP's `Input.dispatchTouchEvent` with a `touchPoints`
   entry per finger, or in Chrome W3C Actions with one `pointerType: "touch"` pointer per finger in one action.
-- What every page says to its console, Solid's dev warnings too, is in `driver.log` as `CONSOLE WARN …` (a debug
-  build only). WebKitGTK here has no WebDriver BiDi, so `log.entryAdded` isn't there.
+- What the app says, and every page's console, Solid's dev warnings too, is in `log`, as `CONSOLE WARN …` (a debug
+  build only), and when each window drew, as `<app> opened in … ms`. WebKitGTK here has no WebDriver BiDi.
 
 ### Android
 
@@ -98,6 +103,12 @@ The app keeps its client in its App Group, which the simulator gives it, so `mai
 steps of 50 px look like a velocity bug in any gesture.
 
 ## Mistakes already made
+
+- Driving an app's window with `tauri-driver`, or with a WebKitWebDriver session that starts the app: each window
+  is a process of its own, and only the first one takes the inspector port WebDriver gave, so the session was the
+  Home Screen's, hidden, and hung. `tooling/window.py` says how it reaches the right one.
+- Pictures in the web client (`clients/web`) in Chrome: a browser signs in with a passkey and holds nobody's key, so
+  the Vault and what's encrypted don't open there as they do in the app.
 
 - Checking again after rebasing onto other people's unrelated commits.
 - A check that read a log before the process had created it, and failed for that. Follow a log with `tail -F`, as
