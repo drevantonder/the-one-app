@@ -167,7 +167,7 @@
 
 .code {
   overflow-x: auto;
-  font: 0.8125rem/1.6 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font: var(--text-footnote) / 1.6 var(--font-mono);
 }
 
 .code ol {
@@ -222,7 +222,7 @@
 
 .markdown pre,
 .markdown code {
-  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-family: var(--font-mono);
   font-size: var(--text-sm);
   background: var(--muted);
   border-radius: var(--radius-sm);
@@ -250,7 +250,7 @@
   margin: 0;
   padding: 1rem;
   white-space: pre-wrap;
-  font: 0.8125rem/1.6 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font: var(--text-footnote) / 1.6 var(--font-mono);
 }
 
 .commit-subject {
