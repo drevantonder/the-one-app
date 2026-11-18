@@ -209,6 +209,10 @@ pub struct Conditions {
     pub touch: bool,
     pub phone: bool,
     pub reduced_motion: bool,
+    /// What the window keeps for itself at its top, right, bottom and left, in whole pixels: a computer's window its
+    /// breadcrumb's bar. The UI library's `safe-top`, `safe-right`, `safe-bottom` and `safe-left` lengths are these,
+    /// as its tokens say the host sets them.
+    pub insets: [u16; 4],
 }
 
 impl Conditions {
@@ -314,6 +318,10 @@ impl Table {
     }
 
     pub fn length(&self, id: &str, conditions: Conditions) -> Option<f32> {
+        let inset = ["safe-top", "safe-right", "safe-bottom", "safe-left"].iter().position(|safe| *safe == id);
+        if let Some(side) = inset {
+            return Some(f32::from(conditions.insets[side]));
+        }
         length_of(self.value(id, "length", conditions)?)
     }
 

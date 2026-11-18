@@ -36,8 +36,8 @@ pub enum Event {
     Drawn,
     /// It was closed: by the person, or by `close`.
     Closed,
-    /// Its app sent a version of the strict protocol this host doesn't speak, so it's closed, to open in a web view.
-    Mismatched,
+    /// Its page uses what this host can't draw, so it's closed, to open in a web view: why.
+    Mismatched(String),
 }
 
 pub struct WindowOptions {
@@ -109,8 +109,15 @@ fn start() -> anyhow::Result<Strict> {
     Ok(Strict(sender))
 }
 
+/// How long a window waits to show for its page to hear back from what it first asked, so it shows its first frame
+/// with what it asked for, or opens in a web view instead without having shown, as its page turns out to need.
+const SHOWN_WITHIN: std::time::Duration = std::time::Duration::from_millis(1000);
+
 struct Window {
     native: NativeWindow,
+    /// When it was opened, hidden, and whether it's shown.
+    opened: std::time::Instant,
+    shown: bool,
     /// What it shows: its app's screen, or why its app didn't open.
     screen: Result<Screen, String>,
     renderer: Renderer,
@@ -150,7 +157,8 @@ impl Windows {
             screen.clipboard = clipboard;
         }
         let renderer = Renderer::new(&self.context, self.atlas.clone(), &native, native.device_size(), false)?;
-        self.windows.insert(id, Window { native, screen: Ok(screen), renderer, scene: Default::default(), dirty: true, drawn: false, on_event: Box::new(on_event), tag: options.tag });
+        let opened = std::time::Instant::now();
+        self.windows.insert(id, Window { native, opened, shown: false, screen: Ok(screen), renderer, scene: Default::default(), dirty: true, drawn: false, on_event: Box::new(on_event), tag: options.tag });
         Ok(id)
     }
 
@@ -160,7 +168,8 @@ impl Windows {
         self.next += 1;
         let native = self.display.open(id, &options)?;
         let renderer = Renderer::new(&self.context, self.atlas.clone(), &native, native.device_size(), false)?;
-        self.windows.insert(id, Window { native, screen: Err(why.to_owned()), renderer, scene: Default::default(), dirty: true, drawn: false, on_event: Box::new(on_event), tag: options.tag });
+        let opened = std::time::Instant::now();
+        self.windows.insert(id, Window { native, opened, shown: false, screen: Err(why.to_owned()), renderer, scene: Default::default(), dirty: true, drawn: false, on_event: Box::new(on_event), tag: options.tag });
         Ok(id)
     }
 
@@ -239,9 +248,12 @@ impl Windows {
         }
     }
 
-    /// How long until any window's screen has something to do by itself.
+    /// How long until any window's screen has something to do by itself, or a window waiting to show has waited long
+    /// enough.
     fn due(&self) -> Option<std::time::Duration> {
-        self.windows.values().filter_map(|window| window.screen.as_ref().ok()?.due()).min()
+        let screens = self.windows.values().filter_map(|window| window.screen.as_ref().ok()?.due());
+        let showing = self.windows.values().filter(|window| !window.shown).map(|window| SHOWN_WITHIN.saturating_sub(window.opened.elapsed()));
+        screens.chain(showing).min()
     }
 
     /// After each turn of the loop: what the display said, timers that are due, then each window that changed drawn.
@@ -257,16 +269,24 @@ impl Windows {
                 window.dirty = true;
             }
         }
-        let mismatched: Vec<WindowId> =
-            self.windows.iter().filter(|(_, window)| window.screen.as_ref().is_ok_and(|screen| screen.mismatched)).map(|(id, _)| *id).collect();
-        for id in mismatched {
+        let mismatched: Vec<(WindowId, String)> =
+            self.windows.iter().filter_map(|(id, window)| Some((*id, window.screen.as_ref().ok()?.mismatched.clone()?))).collect();
+        for (id, why) in mismatched {
             if let Some(mut window) = self.windows.remove(&id) {
                 window.renderer.destroy();
                 self.display.close(&window.native);
-                (window.on_event)(Event::Mismatched);
+                (window.on_event)(Event::Mismatched(why));
             }
         }
         for window in self.windows.values_mut() {
+            // A new window shows once its page has heard back from what it asked, or has waited long enough.
+            if !window.shown {
+                if window.screen.as_ref().is_ok_and(Screen::waiting) && window.opened.elapsed() < SHOWN_WITHIN {
+                    continue;
+                }
+                window.shown = true;
+                self.display.show(&window.native);
+            }
             if !window.dirty {
                 continue;
             }

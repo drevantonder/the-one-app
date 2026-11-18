@@ -20,7 +20,7 @@ pub(crate) mod view;
 
 pub use style::{colour, load_styles};
 pub use view::inspected::Reply;
-pub use view::{Appearance, Asked, Cursor, FONT, Screen, fonts};
+pub use view::{Appearance, Asked, Breadcrumb, Cursor, FONT, Screen, fonts};
 
 /// The version of the strict protocol this host speaks. An entrypoint that names another opens in a web view.
-pub const VERSION: u32 = 1;
+pub const VERSION: u32 = 2;

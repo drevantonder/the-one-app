@@ -147,8 +147,6 @@ impl Display {
             view.measure(&window);
 
             window.center();
-            window.makeKeyAndOrderFront(None);
-            NSApplication::sharedApplication(main).activate();
             Ok(NativeWindow {
                 view: Retained::as_ptr(&view) as usize,
                 window: MainThreadBound::new(window, main),
@@ -157,6 +155,11 @@ impl Display {
                 cursor: Cell::new(Cursor::Arrow),
             })
         })
+    }
+
+    /// Puts a window opened hidden on the screen, in front.
+    pub fn show(&self, window: &NativeWindow) {
+        self.activate(window);
     }
 
     pub fn close(&self, window: &NativeWindow) {

@@ -43,6 +43,10 @@ pub enum Op {
     Drop {
         id: Id,
     },
+    /// The page uses `what`, which a native host doesn't draw yet.
+    Unsupported {
+        what: String,
+    },
 }
 
 #[derive(Deserialize, Serialize, Clone, Copy, PartialEq, Eq, Debug)]
@@ -187,13 +191,14 @@ impl Node {
     }
 }
 
-/// A batch of a version of the strict protocol this host doesn't speak, which a window opens in a web view instead.
+/// What a page uses that this host can't draw, so its window opens in a web view instead, and why: a version of the
+/// strict protocol it doesn't speak, or what it doesn't draw yet.
 #[derive(Debug)]
-pub struct Mismatch(pub u32);
+pub struct Mismatch(pub String);
 
 impl std::fmt::Display for Mismatch {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "this host speaks version {} of the strict protocol, not {}", crate::VERSION, self.0)
+        f.write_str(&self.0)
     }
 }
 
@@ -214,13 +219,15 @@ impl Tree {
         &self.nodes[&0]
     }
 
-    /// Applies one batch, in order. A batch of a version above this host's is refused whole.
+    /// Applies one batch, in order. A batch of a version above this host's is refused whole, and one that uses what
+    /// this host doesn't draw yet is refused from there (`Mismatch`).
     pub fn apply(&mut self, update: Update) -> anyhow::Result<()> {
         if update.v > crate::VERSION {
-            return Err(Mismatch(update.v).into());
+            return Err(Mismatch(format!("this host speaks version {} of the strict protocol, not {}", crate::VERSION, update.v)).into());
         }
         for op in update.ops {
             match op {
+                Op::Unsupported { what } => return Err(Mismatch(format!("it uses {what}, which a native host doesn't draw yet")).into()),
                 Op::Create { id, kind, value } => {
                     self.nodes.insert(id, Node::new(kind, value));
                 }

@@ -57,6 +57,9 @@ export type Op =
   | { op: "remove"; parent: Id; id: Id }
   /** JS no longer holds `id` (it was garbage collected), so it's never inserted again and the host frees it. */
   | { op: "drop"; id: Id }
+  /** The page uses `what`, a part of the UI library a native host doesn't draw yet, so the host opens it another way:
+   * a computer's or a phone's in a web view. */
+  | { op: "unsupported"; what: string }
 
 /** Host → JS: what the person did to a node that listens for it (its `on…` prop), one at a time. */
 export interface Event {

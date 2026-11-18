@@ -42,6 +42,11 @@ function send() {
   host?.update({ v: VERSION, ops: batch })
 }
 
+/** Tells the host the page uses `what`, which it doesn't draw yet, so it opens the page another way. */
+export function unsupported(what: string) {
+  queue({ op: "unsupported", what })
+}
+
 function node(type: Type, value?: string): Node {
   const made: Node = { id: next++, type, children: [], handlers: {} }
   nodes.set(made.id, new WeakRef(made))

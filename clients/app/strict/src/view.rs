@@ -36,6 +36,19 @@ pub enum Appearance {
 /// answer, where the host has it at once. One it answers later, or a notification, goes to `Screen::message`.
 pub type Asked = Box<dyn FnMut(Value, Appearance) -> Option<Value>>;
 
+/// What a computer's window shows above its page, in its header bar's place: Home, with the One App's ring, which
+/// brings the launcher forward and keeps the window open, a muted "/", then the app's icon and name (DESIGN.md, App
+/// windows), each picture a `data:` address. Its page keeps the bar's height clear, as its host tells it.
+pub struct Breadcrumb {
+    pub ring: String,
+    pub icon: Option<String>,
+    pub name: String,
+    /// How tall the bar it's in is, which the page keeps clear, and how far in from the window's start it begins.
+    pub bar: f32,
+    pub start: f32,
+    pub home: Box<dyn FnMut()>,
+}
+
 /// The pointer's shape over what's under it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Default)]
 pub enum Cursor {
@@ -65,6 +78,10 @@ pub struct Screen {
     pub appearance: Appearance,
     /// The person asked for less motion, as the device says.
     pub reduced_motion: bool,
+    /// What its window says above it, on a computer, and where its Home was drawn and whether it's pressed.
+    pub breadcrumb: Option<Breadcrumb>,
+    home: Option<Bounds<f32>>,
+    pressing_home: bool,
     /// The room its page has, and whether it asked for less motion, as the page was last told them (its host
     /// context's `containerDimensions` and `reducedMotion`, as a frame's host tells an MCP App).
     room: Size<f32>,
@@ -117,8 +134,8 @@ pub struct Screen {
     settling: Vec<(Instant, Box<dyn FnOnce(Value)>)>,
     /// The last error its JS threw, which is logged, as a browser's console has it, and the screen carries on.
     pub failed: Option<String>,
-    /// It sent a version of the strict protocol this host doesn't speak, so its window opens in a web view instead.
-    pub mismatched: bool,
+    /// What its page uses that this host can't draw (`tree::Mismatch`), so its window opens in a web view instead.
+    pub mismatched: Option<String>,
 }
 
 impl Screen {
@@ -130,6 +147,9 @@ impl Screen {
             theme: None,
             appearance: Appearance::Light,
             reduced_motion: false,
+            breadcrumb: None,
+            home: None,
+            pressing_home: false,
             room,
             told: None,
             asked,
@@ -159,7 +179,7 @@ impl Screen {
             unanswered: HashMap::new(),
             settling: Vec::new(),
             failed: None,
-            mismatched: false,
+            mismatched: None,
         };
         screen.pump();
         screen
@@ -176,6 +196,11 @@ impl Screen {
     /// The semantic tree, as an agent and a screen reader read it.
     pub fn semantics(&self) -> Value {
         json!(self.tree.semantics(0))
+    }
+
+    /// Whether the app is waiting to hear back from its client about something it asked.
+    pub fn waiting(&self) -> bool {
+        !self.unanswered.is_empty()
     }
 
     pub fn dark(&self) -> bool {
@@ -257,10 +282,12 @@ impl Screen {
             let appearance = self.theme.unwrap_or(self.appearance);
             for posted in self.sandbox.take() {
                 match posted {
+                    // What comes after what this host can't draw goes to the web view it opens in instead.
+                    Posted::Update(_) if self.mismatched.is_some() => {}
                     Posted::Update(update) => {
                         let applied = serde_json::from_str(&update).map_err(anyhow::Error::from).and_then(|update| self.tree.apply(update));
                         match applied {
-                            Err(error) if error.is::<crate::tree::Mismatch>() => self.mismatched = true,
+                            Err(error) if error.is::<crate::tree::Mismatch>() => self.mismatched = Some(error.to_string()),
                             Err(error) => self.threw(error),
                             Ok(()) => {}
                         }
@@ -316,7 +343,8 @@ impl Screen {
 
     /// The conditions its tokens' values vary by, as its window is now.
     fn conditions(&self) -> Conditions {
-        Conditions { dark: self.dark(), reduced_motion: self.reduced_motion, ..Conditions::default() }
+        let top = self.breadcrumb.as_ref().map_or(0, |crumb| crumb.bar.round() as u16);
+        Conditions { dark: self.dark(), reduced_motion: self.reduced_motion, insets: [top, 0, 0, 0], ..Conditions::default() }
     }
 
     /// Paints the screen into `scene`, `size` logical pixels at `scale` device pixels each.
@@ -399,7 +427,11 @@ impl Screen {
             Err(error) => log::error!("its layout failed: {error}"),
             Ok(()) => painter.paint(root, point(0.0, 0.0), Transform::NONE, window, 1.0, None, true),
         }
+        // The window's breadcrumb, over its page.
+        let hovering = |bounds: &Bounds<f32>| self.pointer.is_some_and(|at| bounds.contains(&at));
+        let home = self.breadcrumb.as_ref().map(|crumb| painter.breadcrumb(crumb, self.home.as_ref().is_some_and(hovering)));
         let (placed, mut tab_order, rects, animating, modal) = (painter.placed, painter.tab_order, painter.rects, painter.animating, painter.modal);
+        self.home = home;
         let moving = self.transitions.finish(now);
         self.placed = placed;
         // A modal dialog holds the keyboard: Tab goes only to what's in it, and it has the keyboard as it appears.
@@ -459,6 +491,9 @@ impl Screen {
 
     /// The pointer's shape at `at`: what its style says, or a hand over what's pressed and a beam over an input.
     pub fn cursor(&self, at: Point<f32>) -> Cursor {
+        if self.home.is_some_and(|home| home.contains(&at)) {
+            return Cursor::Arrow;
+        }
         for id in self.under(at) {
             let Some(placed) = self.placed(id) else { continue };
             if let Some(cursor) = placed.cursor {
@@ -552,6 +587,11 @@ impl Screen {
     /// selection); the middle one in an input pastes the primary selection there, as on Linux; the secondary is a
     /// `contextmenu` too.
     pub fn pointer_down(&mut self, at: Point<f32>, button: u8, shift: bool) {
+        // The breadcrumb's Home is the window's, not its page's.
+        if self.home.is_some_and(|home| home.contains(&at)) {
+            self.pressing_home = button == 0;
+            return;
+        }
         let chain = self.under(at);
         self.captured = chain.first().copied();
         self.pointer_event(&chain, "pointerdown", at, button, point(0.0, 0.0));
@@ -596,6 +636,14 @@ impl Screen {
     /// A button came up at `at`: what it went down on is told, and with the main one a press, if it's still over
     /// what was pressed.
     pub fn pointer_up(&mut self, at: Point<f32>, button: u8) {
+        if std::mem::take(&mut self.pressing_home) {
+            if self.home.is_some_and(|home| home.contains(&at))
+                && let Some(crumb) = self.breadcrumb.as_mut()
+            {
+                (crumb.home)();
+            }
+            return;
+        }
         let target = match self.captured.take() {
             Some(captured) => self.chain_from(captured),
             None => self.under(at),
@@ -1017,6 +1065,8 @@ impl Painter<'_> {
             None => inherited.of(&node.style, node.kind == Kind::Text, self.conditions.dark),
         };
         if root {
+            // The window, which places what's fixed, and what's absolute with nothing positioned around it.
+            layout.position = taffy::style::Position::Relative;
             layout.size = taffy::geometry::Size { width: taffy::style::Dimension::percent(1.0), height: taffy::style::Dimension::percent(1.0) };
             layout.overflow = taffy::geometry::Point { x: taffy::style::Overflow::Hidden, y: taffy::style::Overflow::Scroll };
             look.scrolls = true;
@@ -1376,6 +1426,65 @@ impl Painter<'_> {
                 let bounds = Bounds { origin: point(left, y), size: Size { width: line.width * grown, height: grown.max(1.0) } };
                 self.quad(bounds, Bounds { origin: point(mask.bounds.origin.x.0 / self.scale, mask.bounds.origin.y.0 / self.scale), size: Size { width: mask.bounds.size.width.0 / self.scale, height: mask.bounds.size.height.0 / self.scale } }, text.color, Edges::default(), Hsla::default(), Corners::default(), false, opacity);
             }
+        }
+    }
+
+    /// A window's breadcrumb over the top of its page (`Breadcrumb`), in a computer's own size, as shadcn's: Home light,
+    /// highlighted under the pointer (`hovered`); a muted /; then the app's icon and its name in semibold. → where
+    /// Home is.
+    fn breadcrumb(&mut self, crumb: &Breadcrumb, hovered: bool) -> Bounds<f32> {
+        let conditions = self.conditions;
+        let window = self.window;
+        let colour = |id: &str, otherwise: &str| colour_token(id, conditions).unwrap_or_else(|| colour(otherwise, conditions.dark));
+        let footnote = crate::tokens::table().type_style("type-footnote", conditions);
+        let label = crate::tokens::table().type_style("type-label", conditions);
+        let style = |weight: Option<f32>| crate::text::TextStyle {
+            size: footnote.map_or(13.0, |font| font.size),
+            weight: weight.or(footnote.map(|font| font.weight)).unwrap_or(450.0).round() as u16,
+            tracking: footnote.map_or(0.0, |font| font.tracking),
+            line_height: footnote.map_or(16.0, |font| font.size.round()),
+            tabular: false,
+        };
+        let (home_style, app_style) = (style(None), style(label.map(|font| font.weight)));
+        let middle = crumb.bar / 2.0;
+        let (icon, gap, pad) = (16.0, 6.0, 6.0);
+        let mut x = crumb.start;
+        // Home, with the ring.
+        let home_words = self.text.paragraph("Home", &home_style, None, None);
+        let home = Bounds { origin: point(x, middle - 11.0), size: Size { width: pad + icon + gap + home_words.size().width.ceil() + pad, height: 22.0 } };
+        if hovered {
+            let radius = crate::tokens::table().radius("radius-md", conditions).map_or(8.0, |radius| corner(radius, home.size));
+            self.quad(home, window, colour("muted", "muted"), Edges::default(), Hsla::default(), Corners::all(radius), false, 1.0);
+        }
+        self.picture(&crumb.ring, Bounds { origin: point(x + pad, middle - icon / 2.0), size: Size { width: icon, height: icon } }, 0.0);
+        let home_colour = if hovered { colour("foreground", "foreground") } else { colour("muted-foreground", "muted-foreground") };
+        let words_at = |paragraph: &Paragraph, x: f32| Bounds { origin: point(x, middle - paragraph.size().height / 2.0), size: paragraph.size() };
+        let text = Text { style: home_style, color: home_colour, align: 0.0, wrap: false, underline: false };
+        self.paint_text(&home_words, words_at(&home_words, x + pad + icon + gap), home_words.size().width.ceil(), 1.0, text, 1.0, window);
+        x = home.origin.x + home.size.width + 4.0;
+        // A muted /.
+        let slash = self.text.paragraph("/", &home_style, None, None);
+        let muted = colour("muted-foreground", "muted-foreground");
+        self.paint_text(&slash, words_at(&slash, x), slash.size().width.ceil(), 1.0, Text { color: muted, ..text }, 0.6, window);
+        x += slash.size().width.ceil() + 4.0 + pad;
+        // The app.
+        if let Some(src) = &crumb.icon {
+            self.picture(src, Bounds { origin: point(x, middle - icon / 2.0), size: Size { width: icon, height: icon } }, icon * 0.225);
+            x += icon + gap;
+        }
+        let name = self.text.paragraph(&crumb.name, &app_style, None, Some(1));
+        self.paint_text(&name, words_at(&name, x), name.size().width.ceil(), 1.0, Text { style: app_style, color: colour("foreground", "foreground"), ..text }, 1.0, window);
+        home
+    }
+
+    /// A picture by its `data:` address at `bounds`, its corners rounded `radius`.
+    fn picture(&mut self, src: &str, bounds: Bounds<f32>, radius: f32) {
+        let device = Size { width: (bounds.size.width * self.scale).round() as u32, height: (bounds.size.height * self.scale).round() as u32 };
+        let key = format!("{}x{}{src}", device.width, device.height);
+        let picture = self.images.entry(key.clone()).or_insert_with(|| decode(src, device, &key).map(Arc::new)).clone();
+        if let Some(picture) = picture {
+            let window = self.window;
+            self.sprite(&picture, bounds, Corners::all(radius), 1.0, window);
         }
     }
 

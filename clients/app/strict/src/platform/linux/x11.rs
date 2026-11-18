@@ -230,7 +230,6 @@ impl Display {
         let class = format!("{0}\0{0}\0", options.app_id);
         xcb.change_property8(xproto::PropMode::REPLACE, x_window, xproto::AtomEnum::WM_CLASS, xproto::AtomEnum::STRING, class.as_bytes())?;
         xcb.change_property32(xproto::PropMode::REPLACE, x_window, self.atoms.WM_PROTOCOLS, xproto::AtomEnum::ATOM, &[self.atoms.WM_DELETE_WINDOW])?;
-        xcb.map_window(x_window)?;
         xcb.flush()?;
         self.windows.borrow_mut().insert(x_window, id);
         let raw = RawWindow {
@@ -246,6 +245,12 @@ impl Display {
             scale: self.scale,
             cursor: Cell::new(Cursor::Arrow),
         })
+    }
+
+    /// Puts a window opened hidden on the screen.
+    pub fn show(&self, window: &NativeWindow) {
+        let _ = self.xcb.map_window(window.x_window);
+        let _ = self.xcb.flush();
     }
 
     pub fn close(&self, window: &NativeWindow) {

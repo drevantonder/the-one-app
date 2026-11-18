@@ -3,6 +3,7 @@
 // written in strict themselves. The UI library's typecheck proves each takes what a strict page gives it
 // (../check.ts). A component the strict UI library has that isn't here yet throws, naming it.
 import type * as Strict from "../types/ui.d.ts"
+import { unsupported } from "./renderer.ts"
 
 export { words } from "../../words.ts"
 export { createListCollection } from "../../collection.ts"
@@ -27,8 +28,10 @@ export { List, Row } from "../../list.tsx"
 export { Menu } from "../../menu.tsx"
 export { Alert, confirm, Sheet } from "../../sheet.tsx"
 
-/** What a strict page may use that a native host can't draw yet: each throws, naming itself, where it's used. */
+/** What a strict page may use that a native host can't draw yet: each tells the host, which opens the page another
+ * way (in a web view), and throws, naming itself, where it's used. */
 const later = (name: string) => () => {
+  unsupported(name)
   throw new Error(`${name} isn't drawn on a native host yet (core/ui/src/strict/native/index.tsx)`)
 }
 export const LiveScreen = later("LiveScreen") as typeof Strict.LiveScreen

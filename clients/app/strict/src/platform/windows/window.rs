@@ -159,13 +159,19 @@ impl Display {
         let mut client = RECT::default();
         unsafe {
             let _ = GetClientRect(hwnd, &mut client);
-            let _ = ShowWindow(hwnd, SW_SHOWNORMAL);
         }
         Ok(NativeWindow {
             hwnd,
             size: Cell::new(Size { width: DevicePixels(client.right - client.left), height: DevicePixels(client.bottom - client.top) }),
             state,
         })
+    }
+
+    /// Puts a window opened hidden on the screen.
+    pub fn show(&self, window: &NativeWindow) {
+        unsafe {
+            let _ = ShowWindow(window.hwnd, SW_SHOWNORMAL);
+        }
     }
 
     pub fn close(&self, window: &NativeWindow) {

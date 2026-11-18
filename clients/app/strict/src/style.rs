@@ -700,10 +700,13 @@ fn computed(style: &Map<String, Value>, conditions: Conditions) -> Computed {
         layout.max_size.height = height;
     }
     layout.aspect_ratio = number("aspectRatio");
-    // Fixed is placed in the window, as absolute is in its parent (`view` makes the window its parent).
+    // Fixed is placed in the window, as absolute is in its nearest parent that's relative or absolute (`view` makes
+    // the window a fixed one's parent). What says neither is static, as CSS's, Taffy's default.
     let fixed = word("position") == Some("fixed");
     if fixed || word("position") == Some("absolute") {
         layout.position = Position::Absolute;
+    } else if word("position") == Some("relative") {
+        layout.position = Position::Relative;
     }
     let inset = |name: &str| get(name).and_then(|value| to_auto(value, conditions)).unwrap_or(LengthPercentageAuto::auto());
     layout.inset = Rect { left: inset("start"), right: inset("end"), top: inset("top"), bottom: inset("bottom") };

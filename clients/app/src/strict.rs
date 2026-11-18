@@ -76,6 +76,8 @@ struct Page {
     module: Url,
     trusted: bool,
     tables: Vec<String>,
+    /// Its icon, as a `data:` address, for the window's breadcrumb.
+    icon: Option<String>,
 }
 
 /// Whether `entrypoint`'s page is strict and of a version this program speaks, its tables too, and if it is, what
@@ -93,6 +95,12 @@ async fn probe(entrypoint: &str, subject: Option<&str>) -> anyhow::Result<Option
         return Ok(None);
     }
     let trusted = resource["_meta"]["trusted"] == true;
+    // Its icon, as its app lists it, as a `data:` address, for the breadcrumb.
+    let icon = match resource["icons"][0]["src"].as_str() {
+        Some(src) if src.starts_with("data:") => Some(src.to_owned()),
+        Some(src) => crate::hosts::file(src).await.ok().and_then(|file| Some(format!("data:{};base64,{}", file["kind"].as_str()?, file["body"].as_str()?))),
+        None => None,
+    };
     let page = Url::parse(&origin(entrypoint, subject))?.join(entrypoint)?;
     let html = crate::hosts::file(page.as_str()).await.map_err(|error| anyhow::anyhow!(error))?;
     let html = BASE64.decode(html["body"].as_str().unwrap_or_default().as_bytes())?;
@@ -113,11 +121,11 @@ async fn probe(entrypoint: &str, subject: Option<&str>) -> anyhow::Result<Option
         }
         tables.push(text);
     }
-    Ok(Some(Page { module: page.join(&module)?, trusted, tables }))
+    Ok(Some(Page { module: page.join(&module)?, trusted, tables, icon }))
 }
 
 async fn window(started: Instant, entrypoint: &str, subject: Option<&str>, link: &str) -> anyhow::Result<bool> {
-    let Some(Page { module, trusted, tables }) = probe(entrypoint, subject).await? else { return Ok(false) };
+    let Some(Page { module, trusted, tables, icon }) = probe(entrypoint, subject).await? else { return Ok(false) };
     let strict = Strict::get()?;
     let asked: Arc<Mutex<HashMap<String, Asked>>> = Arc::default();
     let window: Arc<OnceLock<WindowId>> = Arc::default();
@@ -176,7 +184,8 @@ async fn window(started: Instant, entrypoint: &str, subject: Option<&str>, link:
                     let _ = to.send(json!({"id": "visible", "command": "visible", "args": {"onScreen": true}}));
                 }
                 Event::Closed => {}
-                Event::Mismatched => {
+                Event::Mismatched(why) => {
+                    eprintln!("{entrypoint} opens in a web view: {why}");
                     let (entrypoint, subject, link) = (entrypoint.clone(), subject.clone(), link.clone());
                     if let Err(error) = crate::hosts::open_web_view(entrypoint.clone(), subject, link) {
                         eprintln!("{entrypoint}: {error}");
@@ -192,7 +201,16 @@ async fn window(started: Instant, entrypoint: &str, subject: Option<&str>, link:
                 let asked_by_app: strict::Asked =
                     Box::new(move |message, appearance| respond(message, appearance, &respond_state, &respond_to, &respond_asked));
                 let mut screen = Screen::new(sandbox, Some(asked_by_app), Size { width: options.size.width.0, height: options.size.height.0 });
+                // What it uses that this host can't draw, seen as it starts: it opens in a web view, with no window here.
+                if let Some(why) = screen.mismatched.take() {
+                    return on_event(Event::Mismatched(why));
+                }
                 screen.theme = theme(chosen.as_deref());
+                // Its way Home, as an app's window on a computer has (DESIGN.md, App windows): Home brings the launcher
+                // forward and keeps this window open, as Window → Home Screen does.
+                let ring = format!("data:image/png;base64,{}", BASE64.encode(include_bytes!("../../../icons/Logo.png")));
+                let (bar, start) = (BAR.0 as f32, BAR.1 as f32);
+                screen.breadcrumb = Some(strict::Breadcrumb { ring, icon, name: name.clone(), bar, start, home: Box::new(crate::computer::summon) });
                 windows.open(options, screen, on_event)
             }
             // Its page's own module didn't start: the window says so, as a web view's page does.
@@ -208,6 +226,14 @@ async fn window(started: Instant, entrypoint: &str, subject: Option<&str>, link:
     });
     Ok(true)
 }
+
+/// The bar at a window's top that its breadcrumb is in, which its page keeps clear, and where the breadcrumb starts
+/// in it: a Mac's title bar, after its traffic lights over the page (`title_bar`); elsewhere a GNOME header bar's height,
+/// under the window's own frame.
+#[cfg(target_os = "macos")]
+const BAR: (f64, f64) = (crate::title_bar::MAC.height, crate::title_bar::MAC.start);
+#[cfg(not(target_os = "macos"))]
+const BAR: (f64, f64) = (40.0, 12.0);
 
 /// What the window keeps of where it is.
 struct State {
@@ -242,12 +268,6 @@ fn respond(
     let params = &message["params"];
     let mut state = state.lock().expect("nothing panics holding it");
     let shown = state.chosen.clone().unwrap_or_else(|| if appearance == Appearance::Dark { "dark" } else { "light" }.into());
-    // What the window's own controls are over at the page's top, which it keeps clear: a Mac's title bar, its traffic
-    // lights over the page (`title_bar`).
-    #[cfg(target_os = "macos")]
-    let top = crate::title_bar::MAC.height;
-    #[cfg(not(target_os = "macos"))]
-    let top = 0.0;
     let answered = match method {
         "ui/initialize" => Some(Ok(json!({
             "protocolVersion": "2026-01-26",
@@ -258,8 +278,8 @@ fn respond(
                 "displayMode": "fullscreen",
                 "availableDisplayModes": ["fullscreen"],
                 "deviceCapabilities": {"touch": false, "hover": true},
-                "safeAreaInsets": {"top": top, "right": 0, "bottom": 0, "left": 0},
-                "breadcrumb": false,
+                "safeAreaInsets": {"top": BAR.0, "right": 0, "bottom": 0, "left": 0},
+                "breadcrumb": true,
                 "connection": "online",
                 "updateReady": false,
             },

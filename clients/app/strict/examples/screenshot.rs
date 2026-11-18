@@ -142,6 +142,10 @@ fn main() -> anyhow::Result<()> {
     if let Some(failed) = &screen.failed {
         eprintln!("the page failed: {failed}");
     }
+    // A window would open it in a web view instead.
+    if let Some(why) = &screen.mismatched {
+        eprintln!("it opens in a web view: {why}");
+    }
     eprintln!("ran its JS in {ran:?}, first frame in {drawn:?}, {w}x{h} px");
     Ok(())
 }
