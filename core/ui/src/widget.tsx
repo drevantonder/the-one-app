@@ -90,7 +90,7 @@ function Chart(props: { part: Layout }) {
     <div class={["chart", room(props.part)]} data-tone={props.part.tone} style={{ height: points(number(props.part.height, 70)) }}>
       <Show when={props.part.kind === "line"} fallback={
         <div class="bars">
-          <For each={values()}>{(value) => <i style={{ height: `${(Math.min(value, max()) / max()) * 100}%` }} />}</For>
+          <For each={values()} keyed={false}>{(value) => <i style={{ height: `${(Math.min(value(), max()) / max()) * 100}%` }} />}</For>
         </div>
       }>
         <svg viewBox="0 0 100 100" preserveAspectRatio="none">
@@ -99,7 +99,7 @@ function Chart(props: { part: Layout }) {
       </Show>
       <Show when={Array.isArray(props.part.labels)}>
         <div class="labels">
-          <For each={props.part.labels}>{(label) => <span>{String(label ?? "")}</span>}</For>
+          <For each={props.part.labels} keyed={false}>{(label) => <span>{String(label() ?? "")}</span>}</For>
         </div>
       </Show>
     </div>
@@ -156,10 +156,12 @@ function Flip(props: { part: Layout; onCall?: OnCall }) {
   )
 }
 
-/// One part of a layout. A part the UI library doesn't have draws nothing.
+/// One part of a layout. A part the UI library doesn't have draws nothing. A widget's tool answers its whole layout
+/// anew each time it's asked, so parts are kept by where they are, not by which object answered them: each stays, and
+/// only what changed in it is drawn again.
 function Part(props: { part: Layout; onCall?: OnCall }) {
   const part = () => props.part
-  const held = () => <For each={Array.isArray(part().parts) ? part().parts! : []}>{(inside) => <Part part={inside} onCall={props.onCall} />}</For>
+  const held = () => <For each={Array.isArray(part().parts) ? part().parts! : []} keyed={false}>{(inside) => <Part part={inside()} onCall={props.onCall} />}</For>
   return (
     <Which>
       <Match when={part().part === "column" || part().part === "row"}>
