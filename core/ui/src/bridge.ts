@@ -212,6 +212,11 @@ export const leave = () => greet().then(() => notify("ui/notifications/request-t
 export const open = (app: string, { subject, behind, from }: Subject & { behind?: boolean; from?: { x: number; y: number; width: number; height: number; radius?: number } } = {}): Promise<unknown> =>
   greet().then(() => ask("ui/open-link", /^https?:/.test(app) ? { url: app } : { url: `one:${app}`, subject, behind, from }))
 
+/// `pinShortcut("notes/client/index.html")`: puts an app, by its entrypoint, on the device's own home screen, as its
+/// own apps go there, which opens it here. Android asks its person where; a device that can't, which `client()` says
+/// (`pinsShortcuts`), throws.
+export const pinShortcut = (entrypoint: string): Promise<unknown> => greet().then(() => ask("one/pin-shortcut", { entrypoint }))
+
 /// `const { device, network, build, server, push } = await client()`: this device's key, as Devices lists it, the
 /// network's address, if it has one, the build it's on, its server's key if it's a server, and on a phone, whether
 /// it's woken by its notifications. `await client({ theme: "dark" })` has every app drawn dark, or `"light"`, or with
@@ -241,6 +246,8 @@ export interface Client {
   computerUse?: { on: boolean }
   /** What `client({ theme })` chose for every app here: `null` where it's as the device is. */
   theme: "light" | "dark" | null
+  /** Whether `pinShortcut` puts an app on the device's own home screen: on Android's app. */
+  pinsShortcuts?: boolean
 }
 
 /** What `client(change)` changes. */

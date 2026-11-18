@@ -15,7 +15,7 @@
 import { createEffect, createMemo, createSignal, Errored, flush, For, Loading, onSettled, refresh, Show, untrack } from "solid-js"
 import { render, type JSX } from "@solidjs/web"
 import { createActor } from "xstate"
-import { Button, call, changed, confirm, covers, Empty, haptic, Icon, List, Menu, open, pace, Problem, Row, Search, Sheet, Spinner, toast, Widget } from "ui"
+import { Button, call, changed, client, confirm, covers, Empty, haptic, Icon, List, Menu, open, pace, pinShortcut, Problem, Row, Search, Sheet, Spinner, toast, Widget } from "ui"
 import "./home.css"
 import { give, glide, jump, settle, speed, spring, type Spring, stop } from "./pager.ts"
 import { offset, reflow } from "./reflow.ts"
@@ -95,6 +95,10 @@ const editingOwner = (owner: number) => state().matches("editing") && editing()?
 /// Opens an app for whoever its owner is, for the group whose install it is, or for its person where it's about
 /// whoever opens it. `behind` only starts it, as a finger lands on it. It grows out of its icon or widget, `from`, as
 /// an iPhone's does.
+/// Whether this device puts an app on its own home screen (`pinShortcut`): Android's app does.
+const [pins, setPins] = createSignal(false)
+client().then(({ pinsShortcuts }) => setPins(!!pinsShortcuts), () => {})
+
 const launch = (entrypoint: Entrypoint, owner: Owner, behind?: boolean, from?: Element) =>
   open(entrypoint.entrypoint, { subject: entrypoint.subject === "user" ? undefined : (entrypoint.subject ?? owner.subject), behind, from: from && place(from) })
 /// Where an icon or a widget is in the window, and how round its corners are there, as drawn: pages drawn larger on a
@@ -703,6 +707,13 @@ function Holding(props: { owner: Owner; index: number; held: Held }) {
   const library = props.held.from === "library"
   // It's added from here only where it opens, onto the pages of whoever Home was last on; elsewhere, it's carried there.
   const adds = library && !!item && !item.widget && !added && props.owner.arranges && installedFor(item as Entrypoint, props.owner)
+  // An app the device's own home screen opens by its link alone: one that opens for whoever opens it, not a group.
+  const app = item && !item.widget ? (item as Entrypoint) : undefined
+  const pinnable = pins() && !!app && (app.subject === "user" || (!app.subject && !props.owner.subject))
+  const pinning = () => {
+    dismiss()
+    pinShortcut(app!.entrypoint).catch((error) => toast(error as Error))
+  }
   return (
     <div class="holding" ref={veil} onClick={(event) => event.target === event.currentTarget && dismiss()}>
       <Show when={item ?? (props.held.listed as Item | undefined)}>
@@ -738,6 +749,12 @@ function Holding(props: { owner: Owner; index: number; held: Held }) {
           <button type="button" role="menuitem" onClick={adding}>
             <span>{props.index ? `Add to ${props.owner.name}'s Home Screen` : "Add to Home Screen"}</span>
             <svg class="ui-icon" viewBox="0 0 256 256" aria-hidden="true"><path d="M128,24A104,104,0,1,0,232,128,104.11,104.11,0,0,0,128,24Zm0,192a88,88,0,1,1,88-88A88.1,88.1,0,0,1,128,216Zm48-88a8,8,0,0,1-8,8H136v32a8,8,0,0,1-16,0V136H88a8,8,0,0,1,0-16h32V88a8,8,0,0,1,16,0v32h32A8,8,0,0,1,176,128Z" /></svg>
+          </button>
+        </Show>
+        <Show when={pinnable}>
+          <button type="button" role="menuitem" onClick={pinning}>
+            <span>Add to Android Home Screen</span>
+            <svg class="ui-icon" viewBox="0 0 256 256" aria-hidden="true"><path d="M176,16H80A24,24,0,0,0,56,40V216a24,24,0,0,0,24,24h96a24,24,0,0,0,24-24V40A24,24,0,0,0,176,16Zm8,200a8,8,0,0,1-8,8H80a8,8,0,0,1-8-8V40a8,8,0,0,1,8-8h96a8,8,0,0,1,8,8ZM168,56a8,8,0,0,1-8,8H96a8,8,0,0,1,0-16h64A8,8,0,0,1,168,56Z" /></svg>
           </button>
         </Show>
         <Show when={item || props.held.listed}>
