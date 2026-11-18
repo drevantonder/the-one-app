@@ -12,7 +12,9 @@
 /// app's own files. Menu, Select, DatePicker, NumberInput and Tabs are Ark UI's, with Ark's parts and props
 /// (ark-ui.com/llms-solid.txt); the rest are the UI library's own. An app may be TypeScript (`.tsx`, `.ts`) as well as
 /// JavaScript: the UI library's types are its `types/` (`one code --name ui`), which the app's `tsconfig.json` names
-/// as `"paths": { "ui": ["<there>/index.d.ts"] }`, and its build doesn't check them.
+/// as `"paths": { "ui": ["<there>/index.d.ts"] }`, and its build doesn't check them. A field's text is never set
+/// under 16px on a touch screen, where an iPhone zooms into it: the UI library's fields and its base styles keep every
+/// `<input>`, `<textarea>` and `<select>` at 16px or more there, and a field of another size sets `--text-field`.
 export { call, changed, client, connection, covers, haptic, leave, open, showRecoveryKey, updateReady, upload, useRecoveryKey } from "./bridge.ts"
 export { pace, seen, share, words } from "./shared.ts"
 export { Button, Icon, Spinner } from "./button.tsx"

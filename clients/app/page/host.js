@@ -5,6 +5,12 @@ export const invoke = window.__TAURI__.core.invoke
 /** @type {typeof import("./host.js").listen} */
 export const listen = window.__TAURI__.event.listen
 
+// A phone's app doesn't zoom, as its own apps don't: no pinch, and no zoom into a field it focuses, which an iPhone's
+// web view does for one under 16px unless the page says it can't scale. A browser's page (`clients/web/host.js`) keeps
+// its zoom for whoever needs it, and text follows the person's Text Size either way (tokens.css).
+const viewport = /** @type {HTMLMetaElement} */ (document.querySelector('meta[name="viewport"]'))
+viewport.content += ", maximum-scale=1"
+
 /// Where an app's page is: under its app's name, then who it's for if that isn't its user, last part first.
 /// Android's and Windows' web views load only http, so there the app's own scheme is the start of a host's name.
 /** @type {typeof import("./host.js").address} */

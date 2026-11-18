@@ -133,6 +133,13 @@ html:has(.ui-dialog[open]) {
 :where(input, textarea, select) {
   font-size: var(--text-field);
 }
+/* Under a finger no app's CSS takes a field under 16px, since an iPhone's browser zooms into one that is and stays
+   zoomed: a field of another size sets `--text-field`, which this keeps at 16px or more. */
+@media (pointer: coarse) {
+  input, textarea, select {
+    font-size: max(16px, var(--text-field)) !important;
+  }
+}
 /* A picture is part of what it's in, as in a phone's own apps: a long press on it opens no menu (iOS's Share, Copy,
    Save to Photos), selects nothing, and it isn't dragged out of the page. */
 img {
