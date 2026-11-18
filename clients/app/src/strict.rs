@@ -13,6 +13,9 @@
 //! The app's client offers the network the inspector's protocol (`strict::inspect`) for this device's strict windows,
 //! as the Inspector app's tools (`Inspector`), so an agent anywhere in the network reads and drives a strict window as
 //! it would one of its own.
+//!
+//! On Android the same window is a view over the page, on the UI thread, and any other app is a frame in the page
+//! (`hosts::open_window`); what a computer's launcher does for it, a phone does as its own (`computer`, below).
 
 use std::collections::HashMap;
 use std::sync::{Arc, Mutex, OnceLock, mpsc};
@@ -27,6 +30,11 @@ use strict::{Appearance, Screen};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::sync::mpsc::{UnboundedSender, unbounded_channel};
 use url::Url;
+
+#[cfg(desktop)]
+use crate::{computer, page::NAME};
+#[cfg(mobile)]
+use computer::NAME;
 
 /// Something asked of the app's window that it hasn't answered: a file the sandbox waits for, what the app's JS
 /// asked, by its JSON-RPC id, or `start`.
@@ -132,6 +140,7 @@ async fn probe(entrypoint: &str, subject: Option<&str>) -> anyhow::Result<Option
 
 /// Opens the launcher's page natively, if it's strict and of a version this program speaks, in a panel put away until
 /// it's summoned (`computer`). → its window, once it's open, or none for its page to be the web launcher's.
+#[cfg(desktop)]
 pub(crate) async fn launcher(entrypoint: &str) -> Option<WindowId> {
     let (opened_to, opened) = tokio::sync::oneshot::channel();
     match window(Instant::now(), entrypoint, None, entrypoint, Kind::Launcher(Some(opened_to))).await {
@@ -148,6 +157,7 @@ pub(crate) async fn launcher(entrypoint: &str) -> Option<WindowId> {
 /// its window once it's open, or that it didn't.
 enum Kind {
     App,
+    #[cfg_attr(mobile, allow(dead_code))]
     Launcher(Option<tokio::sync::oneshot::Sender<Option<WindowId>>>),
 }
 
@@ -172,7 +182,7 @@ async fn window(started: Instant, entrypoint: &str, subject: Option<&str>, link:
     let (pictures_to, pictures_asked) = (to.clone(), asked.clone());
     let state = Arc::new(Mutex::new(State { chosen: chosen.clone(), trusted, entrypoint: entrypoint.to_owned(), view, next: 0, launcher }));
     let (entrypoint, subject, link) = (entrypoint.to_owned(), subject.map(str::to_owned), link.to_owned());
-    let cache = ::client::home()?.join("strict").join(::client::BUILD);
+    let cache = crate::app().shell.home()?.join("strict").join(::client::BUILD);
     strict.run(move |windows| {
         // The page's files, which the app's window has, each asked for as the sandbox imports it, on the strict thread.
         let next = std::sync::atomic::AtomicU64::new(0);
@@ -185,11 +195,11 @@ async fn window(started: Instant, entrypoint: &str, subject: Option<&str>, link:
             Ok(String::from_utf8(file)?)
         });
         let (size, panel) = match launcher {
-            true => ((crate::computer::SIZE.width as f32, crate::computer::SIZE.height as f32), Some(crate::computer::CORNER)),
+            true => ((computer::SIZE.width as f32, computer::SIZE.height as f32), Some(computer::CORNER)),
             false => ((1024.0, 720.0), None),
         };
         let options = WindowOptions {
-            title: if launcher { crate::page::NAME.to_owned() } else { name.clone() },
+            title: if launcher { NAME.to_owned() } else { name.clone() },
             app_id: ::client::NAME.to_owned(),
             size: Size { width: Pixels(size.0), height: Pixels(size.1) },
             tag: json!({"entrypoint": entrypoint, "subject": subject}),
@@ -234,7 +244,7 @@ async fn window(started: Instant, entrypoint: &str, subject: Option<&str>, link:
                 // The launcher whose page turns out to need what this host can't draw is the web launcher's.
                 Event::Mismatched(why) if launcher => {
                     eprintln!("the launcher is a web view's: {why}");
-                    crate::computer::native(None);
+                    computer::native(None);
                 }
                 Event::Mismatched(why) => {
                     eprintln!("{entrypoint} opens in a web view: {why}");
@@ -273,12 +283,12 @@ async fn window(started: Instant, entrypoint: &str, subject: Option<&str>, link:
                 if launcher {
                     // Its glass is the system's, under its page, where there's one; Linux has none, so it's a
                     // popover's colour (DESIGN.md, Launcher).
-                    screen.panel = Some(strict::Panel { corner: crate::computer::CORNER as f32, fill: cfg!(target_os = "linux") });
-                } else {
+                    screen.panel = Some(strict::Panel { corner: computer::CORNER as f32, fill: cfg!(target_os = "linux") });
+                } else if cfg!(desktop) {
                     // Its way Home, as an app's window on a computer has (DESIGN.md, App windows): Home brings the
                     // launcher forward and keeps this window open, as Window → Home Screen does.
                     let ring = format!("data:image/png;base64,{}", BASE64.encode(include_bytes!("../../../icons/Logo.png")));
-                    screen.breadcrumb = Some(strict::Breadcrumb { ring, icon, name: name.clone(), start: BAR.1 as f32, home: Box::new(crate::computer::summon) });
+                    screen.breadcrumb = Some(strict::Breadcrumb { ring, icon, name: name.clone(), start: BAR.1 as f32, home: Box::new(computer::summon) });
                 }
                 windows.open(options, screen, on_event)
             }
@@ -314,8 +324,40 @@ async fn window(started: Instant, entrypoint: &str, subject: Option<&str>, link:
 /// under the window's own frame.
 #[cfg(target_os = "macos")]
 const BAR: (f64, f64) = (crate::title_bar::MAC.height, crate::title_bar::MAC.start);
-#[cfg(not(target_os = "macos"))]
+#[cfg(all(desktop, not(target_os = "macos")))]
 const BAR: (f64, f64) = (40.0, 12.0);
+/// A phone's window has none: the activity keeps the page clear of the system's bars (`MainActivity`).
+#[cfg(mobile)]
+const BAR: (f64, f64) = (0.0, 0.0);
+
+/// What a strict window asks of a computer's launcher (`crate::computer`), as a phone has it: its Home Screen is under
+/// every app's window, so Home closes them; a `one:` link opens in its page; and it has no launcher panel to size, put
+/// away or reload, as its launcher is its page's.
+#[cfg(mobile)]
+mod computer {
+    pub struct Size {
+        pub width: f64,
+        pub height: f64,
+    }
+    pub const SIZE: Size = Size { width: 0.0, height: 0.0 };
+    pub const CORNER: f64 = 0.0;
+    pub const NAME: &str = "";
+
+    pub fn summon() {
+        crate::hosts::close_all();
+    }
+
+    pub fn again(link: Option<String>) {
+        if let Some(opens) = link.and_then(|link| crate::link(&link)) {
+            crate::app().shell.emit("open", serde_json::json!(opens));
+        }
+    }
+
+    pub fn hide(_: bool) {}
+    pub fn resize(_: Option<f64>) {}
+    pub fn native(_: Option<strict::platform::WindowId>) {}
+    pub fn reload_native() {}
+}
 
 /// What the window keeps of where it is.
 struct State {
@@ -351,12 +393,12 @@ fn respond(
     // The app asks to be left (`leave`): on a computer, where its window stays open, Home, as its breadcrumb's is; the
     // launcher is put away, the keyboard back with the app that had it.
     if method == "ui/notifications/request-teardown" {
-        if launcher { crate::computer::hide(true) } else { crate::computer::summon() }
+        if launcher { computer::hide(true) } else { computer::summon() }
         return None;
     }
     // The launcher is as tall as its page says it is, as Raycast's and Spotlight's panels grow and shrink.
     if method == "ui/notifications/size-changed" && launcher {
-        crate::computer::resize(message["params"]["height"].as_f64());
+        computer::resize(message["params"]["height"].as_f64());
         return None;
     }
     // Any other notification needs no answer, and none is heard here yet.
@@ -373,8 +415,8 @@ fn respond(
                 "theme": shown,
                 "displayMode": "fullscreen",
                 "availableDisplayModes": ["fullscreen"],
-                "deviceCapabilities": {"touch": false, "hover": true},
-                "breadcrumb": true,
+                "deviceCapabilities": {"touch": cfg!(mobile), "hover": cfg!(desktop)},
+                "breadcrumb": cfg!(desktop),
                 "connection": "online",
                 "updateReady": false,
             },
@@ -385,6 +427,7 @@ fn respond(
         "ui/open-link" => match params["url"].as_str().unwrap_or_default() {
             // The launcher opens an app in its own window, for whoever it's for, and goes, as the web launcher's
             // page does (`go` in client.js).
+            #[cfg(desktop)]
             url if url.starts_with("one:") && state.launcher => {
                 let (link, subject) = (url["one:".len()..].to_owned(), params["subject"].as_str().map(str::to_owned));
                 if params["behind"] != true {
@@ -393,7 +436,7 @@ fn respond(
                 Some(Ok(json!({})))
             }
             url if url.starts_with("one:") => {
-                crate::computer::again(Some(url.to_owned()));
+                computer::again(Some(url.to_owned()));
                 Some(Ok(json!({})))
             }
             url if url.starts_with("https://") || url.starts_with("http://") => {
@@ -443,6 +486,7 @@ fn respond(
 /// Opens what a `one:` link from the launcher says, `<app>[/<page>][#<fragment>]`, for `subject`, in its own window,
 /// and puts the launcher away, as the web launcher's page does (`go` in client.js): an app by its name opens its first
 /// page, as its app lists it last; the launcher's own app brings it forward.
+#[cfg(desktop)]
 pub(crate) async fn go(link: String, subject: Option<String>) {
     let (entrypoint, fragment) = link.split_once('#').map_or((link.as_str(), None), |(page, fragment)| (page, Some(fragment)));
     let page = match entrypoint.contains('/') {
@@ -450,18 +494,19 @@ pub(crate) async fn go(link: String, subject: Option<String>) {
         false => first(entrypoint, subject.as_deref()).await,
     };
     let Some(page) = page else { return eprintln!("there's no {entrypoint} to open") };
-    if crate::computer::is_launcher(&page) {
-        return crate::computer::summon();
+    if computer::is_launcher(&page) {
+        return computer::summon();
     }
     let link = fragment.map_or_else(|| page.clone(), |fragment| format!("{page}#{fragment}"));
     match crate::hosts::open_window(page, subject, link) {
-        Ok(()) => crate::computer::hide(false),
+        Ok(()) => computer::hide(false),
         Err(error) => eprintln!("{error}"),
     }
 }
 
 /// The page `app` opens first, for `subject`, as its apps are listed (`launcherIn` in client.js): the last one listed,
 /// or the launcher's, for its own app.
+#[cfg(desktop)]
 pub(crate) async fn first(app: &str, subject: Option<&str>) -> Option<String> {
     let listed = crate::hosts::command("strict", "apps", json!({"subject": subject})).await.ok()?;
     let pages: Vec<(String, &Value)> = pages(&listed).collect();
@@ -473,6 +518,7 @@ pub(crate) async fn first(app: &str, subject: Option<&str>) -> Option<String> {
 }
 
 /// The pages listed, each `<app>/<page>`, with its `_meta`, as an MCP App's are at ui://<app>/<version>/<page>.
+#[cfg(desktop)]
 pub(crate) fn pages(listed: &Value) -> impl Iterator<Item = (String, &Value)> {
     listed["resources"].as_array().into_iter().flatten().filter(|resource| resource["mimeType"] == "text/html;profile=mcp-app").filter_map(|resource| {
         let mut parts = resource["uri"].as_str()?.strip_prefix("ui://")?.split('/');
@@ -522,7 +568,7 @@ fn channel(
             move || {
                 // The launcher's main thread closes it and opens it again, shown again if it was (`Told::Reload`).
                 if launcher {
-                    return crate::computer::reload_native();
+                    return computer::reload_native();
                 }
                 let (entrypoint, subject, link) = (entrypoint.clone(), subject.clone(), link.clone());
                 let window = window.clone();
@@ -576,9 +622,9 @@ fn channel(
                         on(Box::new(move |screen| screen.notice = Some(strict::Notice { text: "Updated".into(), action: Some(("Reload".into(), Box::new(reload))) })))
                     }
                     // Behind its servers, the launcher is the web launcher's, which says Update Required.
-                    "behind" if launcher => crate::computer::native(None),
+                    "behind" if launcher => computer::native(None),
                     // The launcher, linked to, comes forward.
-                    "open" if launcher => crate::computer::summon(),
+                    "open" if launcher => computer::summon(),
                     "open" => {
                         let window = window.clone();
                         strict.run(move |windows| {

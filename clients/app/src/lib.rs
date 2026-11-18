@@ -38,11 +38,11 @@ pub mod computer;
 mod discard;
 #[cfg(desktop)]
 pub mod host;
-#[cfg(desktop)]
+#[cfg(any(desktop, target_os = "android"))]
 mod hosts;
 #[cfg(desktop)]
 mod title_bar;
-#[cfg(all(desktop, any(target_os = "linux", target_os = "macos", windows)))]
+#[cfg(any(desktop, target_os = "android"))]
 mod strict;
 
 pub(crate) mod page;
@@ -490,6 +490,11 @@ async fn start() -> Result<Value, String> {
     told["testflight"] = json!(testflight());
     // A computer opens each app in a window of its own (`hosts`).
     told["windows"] = json!(cfg!(desktop));
+    // Android draws a strict app's window natively, over the page, of a version this program speaks (`strict`).
+    #[cfg(target_os = "android")]
+    {
+        told["strict"] = json!(::strict::VERSION);
+    }
     if let Some(theme) = *app.chosen.lock().expect("nothing panics holding it") {
         told["theme"] = json!(theme);
     }
@@ -626,6 +631,20 @@ fn tapped(tapped: Value) {
 
 /// Says how long a view took to open: an app from the tap on its icon to its content on screen, and the home
 /// screen from when its page began to load, which the time since the program started is beside. Telemetry is told.
+/// Opens an app's window natively over the page, where its page is strict and of a version this program speaks
+/// (`hosts::open_window`). → whether it did; if not, the page opens it in a frame.
+#[cfg(mobile)]
+#[tauri::command]
+async fn open_window(entrypoint: String, subject: Option<String>, link: String) -> bool {
+    #[cfg(target_os = "android")]
+    return hosts::open_window(entrypoint, subject, link).await;
+    #[cfg(not(target_os = "android"))]
+    {
+        let _ = (entrypoint, subject, link);
+        false
+    }
+}
+
 #[cfg_attr(mobile, tauri::command)]
 fn opened(view: String, ms: u32) -> Result<(), String> {
     let views = views()?;
@@ -967,7 +986,7 @@ async fn open(home: std::path::PathBuf) -> anyhow::Result<Arc<Client>> {
         #[allow(unused_mut)]
         let mut tools = computer_use_client::tools();
         // A strict window's inspector, which is this program's own.
-        #[cfg(all(desktop, any(target_os = "linux", target_os = "macos", windows)))]
+        #[cfg(any(desktop, target_os = "android"))]
         tools.push(Arc::new(strict::Inspector));
         let client = Client::open(home, cli::resolvers(), tools).await?;
         client.service("app");
@@ -1112,10 +1131,17 @@ impl Shell for Phone {
     }
 
     fn emit(&self, event: &str, payload: Value) {
+        // A strict app's window over the page hears what an app's own window would on a computer.
+        #[cfg(target_os = "android")]
+        if hosts::EVENTS.contains(&event) {
+            hosts::tell_all(json!({"event": event, "payload": payload}));
+        }
         drop(self.0.emit(event, payload));
     }
 
     fn reload(&self) {
+        #[cfg(target_os = "android")]
+        hosts::close_all();
         if let Some(window) = self.0.get_webview_window("main") {
             let _ = window.eval(format!("location.replace({})", Value::from(HOME)));
         }
@@ -1209,6 +1235,7 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             apps,
+            open_window,
             request,
             refresh,
             upload,

@@ -28,6 +28,7 @@ import androidx.core.view.WindowInsetsCompat
 import androidx.webkit.WebSettingsCompat
 import androidx.webkit.WebViewCompat
 import androidx.webkit.WebViewFeature
+import app.theone.strict.StrictHost
 import org.json.JSONObject
 
 /** The app's window: the web view, kept clear of the system's bars and of the keyboard, with the window showing behind them. */
@@ -47,6 +48,8 @@ class MainActivity : TauriActivity() {
       view.setPadding(clear.left, clear.top, clear.right, clear.bottom)
       WindowInsetsCompat.CONSUMED
     }
+    // A strict app's window is a view over the web view, drawn natively, which Back closes (`StrictHost`).
+    StrictHost.attach(this) { gate?.pass() }
   }
 
   /** Whether a key pressed now comes here, as a remote's does: Computer Use presses keys here as one (`ComputerUse.kt`). */
@@ -65,6 +68,7 @@ class MainActivity : TauriActivity() {
   override fun onConfigurationChanged(newConfig: Configuration) {
     super.onConfigurationChanged(newConfig)
     dress()
+    StrictHost.configurationChanged(this)
   }
 
   /**
@@ -189,7 +193,8 @@ class MainActivity : TauriActivity() {
   }
 
   /**
-   * The window's back, which reaches the app's back callbacks only while back has something to go back from.
+   * The window's back, which reaches the app's back callbacks only while back has something to go back from: an app
+   * over the launcher, something open over it, or a strict app's window.
    * Otherwise the system has it, and shows going home as the gesture is made (predictive back). AndroidX asks the
    * window for back while any of its callbacks is on, and Tauri's app plugin keeps one on always (`AppPlugin`), so
    * without this the system never would.
@@ -211,8 +216,9 @@ class MainActivity : TauriActivity() {
     }
 
     fun pass() {
-      if (passed == behind) return
-      passed = behind
+      val wanted = behind || StrictHost.isOpen()
+      if (passed == wanted) return
+      passed = wanted
       for ((callback, priority) in asked) {
         if (passed) window.registerOnBackInvokedCallback(priority, callback) else window.unregisterOnBackInvokedCallback(callback)
       }

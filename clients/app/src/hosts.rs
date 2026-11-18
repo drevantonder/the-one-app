@@ -1,6 +1,7 @@
 //! A computer's app windows: a strict app's is drawn by this process (`strict`), and any other app's is a web view in
 //! a process of its own (`host`), as an app the system lists by its own name and icon; the launcher (`computer`)
-//! starts them. They have no client of
+//! starts them. On Android a strict app's window, drawn natively over the page, talks over this channel too, in
+//! memory, and every other app is a frame in the page, as on any phone. They have no client of
 //! their own: each asks through this one, over a local channel that only this user on this machine reaches, a Unix
 //! socket (`address`), or on Windows a named pipe, so there's one connection to the network, one sign-in
 //! and one set of what's kept. What one asks is what the launcher's page asks (`invoke`), by the same commands
@@ -21,6 +22,7 @@ use serde_json::{Value, json};
 use tokio::io::{AsyncBufReadExt, AsyncRead, AsyncWrite, AsyncWriteExt, BufReader};
 use tokio::sync::mpsc::{UnboundedSender, unbounded_channel};
 
+#[cfg(desktop)]
 use crate::computer;
 
 /// The events the launcher's page hears that an app's window hears too. A `one:` link (`open`) is told only to the
@@ -46,6 +48,7 @@ struct Host {
 /// Where the channel is, named after the client's folder, so a client of each folder has its own: a Unix socket in
 /// this user's own folder for them (Linux's `XDG_RUNTIME_DIR`, a Mac's `TMPDIR`), as a socket's address is short, and
 /// on Windows a named pipe.
+#[cfg(desktop)]
 pub fn address(home: &std::path::Path) -> String {
     use std::hash::{Hash, Hasher};
     let mut hasher = std::collections::hash_map::DefaultHasher::new();
@@ -62,6 +65,7 @@ pub fn address(home: &std::path::Path) -> String {
 
 /// Tells the app already running for `home`, if there is one, that it was started again, with the `one:` link it was
 /// started with: the Dock's or taskbar's icon clicked, or a link opened. → whether it was told, so this start ends.
+#[cfg(desktop)]
 pub fn again(home: &std::path::Path, link: Option<&str>) -> bool {
     use std::io::Write;
     let line = format!("{}\n", json!({"again": {"link": link}}));
@@ -73,6 +77,7 @@ pub fn again(home: &std::path::Path, link: Option<&str>) -> bool {
 }
 
 /// Serves the channel for as long as this program runs, on its runtime.
+#[cfg(desktop)]
 pub fn serve(home: &std::path::Path) -> anyhow::Result<()> {
     let address = address(home);
     let _inside = computer::runtime().enter();
@@ -120,6 +125,7 @@ pub fn close_all() {
 }
 
 /// The apps whose windows are open, each as `open_window` opens it: its entrypoint and who it's for.
+#[cfg(desktop)]
 pub fn open_now() -> Vec<(String, Option<String>)> {
     let open = HOSTS.open.lock().expect("no host panics");
     open.keys()
@@ -132,23 +138,34 @@ pub fn open_now() -> Vec<(String, Option<String>)> {
 /// window forward there if it's open: drawn here if its page is strict and of a version this program speaks
 /// (`strict`), otherwise in a web view in a process of its own. With `ONE_WEB_VIEW` set in this program's environment,
 /// every app is a web view, as an agent wants one to compare its DOM with the native window (`tooling/window.py`).
+#[cfg(desktop)]
 pub fn open_window(entrypoint: String, subject: Option<String>, link: String) -> Result<(), String> {
     open(entrypoint, subject, link, true)
 }
 
 /// Opens an app's window again in a web view, as `open_window` does one that isn't strict, in place of its strict
 /// window: one whose app sent a version of the strict protocol this program doesn't speak.
-#[cfg_attr(not(any(target_os = "linux", target_os = "macos", windows)), allow(dead_code))]
+#[cfg(desktop)]
 pub fn open_web_view(entrypoint: String, subject: Option<String>, link: String) -> Result<(), String> {
     HOSTS.open.lock().expect("no host panics").remove(&format!("{}|{entrypoint}", subject.as_deref().unwrap_or_default()));
     open(entrypoint, subject, link, false)
 }
 
 /// Opens an app's strict window again, in place of the one it had, as it reloads its page.
-#[cfg(any(target_os = "linux", target_os = "macos", windows))]
+#[cfg(desktop)]
 pub fn reopen(entrypoint: String, subject: Option<String>, link: String) -> Result<(), String> {
     forget(&entrypoint, subject.as_deref());
     open(entrypoint, subject, link, true)
+}
+
+/// Opens an app's strict window again over the page, in place of the one it had, as it reloads its page.
+#[cfg(target_os = "android")]
+pub fn reopen(entrypoint: String, subject: Option<String>, link: String) -> Result<(), String> {
+    forget(&entrypoint, subject.as_deref());
+    crate::spawn(async move {
+        open_window(entrypoint, subject, link).await;
+    });
+    Ok(())
 }
 
 /// Forgets the window open for `entrypoint`, as it's opened again in its place: what it said is no one's.
@@ -156,6 +173,45 @@ pub fn forget(entrypoint: &str, subject: Option<&str>) {
     HOSTS.open.lock().expect("no host panics").remove(&format!("{}|{entrypoint}", subject.unwrap_or_default()));
 }
 
+/// A phone opens an app in its page, as a frame, unless its page is strict and of a version this program speaks: then
+/// its window is drawn natively over the page (`strict`), or brought forward if it's open. → whether it was.
+#[cfg(target_os = "android")]
+pub async fn open_window(entrypoint: String, subject: Option<String>, link: String) -> bool {
+    let key = format!("{}|{entrypoint}", subject.as_deref().unwrap_or_default());
+    {
+        let mut open = HOSTS.open.lock().expect("no host panics");
+        if WEB_VIEWS.lock().expect("no host panics").contains(&key) {
+            return false;
+        }
+        if let Some(Host { to: Some(to), .. }) = open.get(&key) {
+            let _ = to.send(json!({"event": "open", "payload": link}));
+            return true;
+        }
+        open.insert(key.clone(), Host { to: None, link: None });
+    }
+    let opened = crate::strict::open(&entrypoint, subject.as_deref(), &link).await;
+    if !opened {
+        HOSTS.open.lock().expect("no host panics").remove(&key);
+    }
+    opened
+}
+
+/// The apps whose strict window closed as it sent a version of the protocol this program doesn't speak, which open
+/// in the page from then on.
+#[cfg(target_os = "android")]
+static WEB_VIEWS: LazyLock<Mutex<std::collections::HashSet<String>>> = LazyLock::new(Default::default);
+
+/// Opens an app in the page, as a frame, in place of its strict window, as `open_window` does one that isn't strict.
+#[cfg(target_os = "android")]
+pub fn open_web_view(entrypoint: String, subject: Option<String>, link: String) -> Result<(), String> {
+    let key = format!("{}|{entrypoint}", subject.as_deref().unwrap_or_default());
+    HOSTS.open.lock().expect("no host panics").remove(&key);
+    WEB_VIEWS.lock().expect("no host panics").insert(key);
+    crate::app().shell.emit("open", json!(link));
+    Ok(())
+}
+
+#[cfg(desktop)]
 fn open(entrypoint: String, subject: Option<String>, link: String, strict: bool) -> Result<(), String> {
     let key = format!("{}|{entrypoint}", subject.as_deref().unwrap_or_default());
     #[cfg(target_os = "macos")]
@@ -191,6 +247,7 @@ fn open(entrypoint: String, subject: Option<String>, link: String, strict: bool)
 }
 
 /// Starts app `entrypoint`'s window in a web view, in a process of its own.
+#[cfg(desktop)]
 fn process(key: &str, entrypoint: &str, subject: Option<&str>, link: &str) -> Result<(), String> {
     let mut command = std::process::Command::new(crate::shortcuts::program(entrypoint).map_err(|error| error.to_string())?);
     // Started here, it's a web view; started by the system, it asks this program to open it (`host`).
@@ -278,6 +335,7 @@ pub(crate) async fn talk(stream: impl AsyncRead + AsyncWrite + Send + 'static) {
     let mut key = None;
     while let Ok(Some(line)) = lines.next_line().await {
         let Ok(message) = serde_json::from_str::<Value>(&line) else { continue };
+        #[cfg(desktop)]
         if let Some(again) = message.get("again") {
             computer::again(again["link"].as_str().map(str::to_owned));
             return;
@@ -347,13 +405,17 @@ pub(crate) async fn command(label: &str, command: &str, args: Value) -> Result<V
     match command {
         // Where the device is, and for an app's window the name of its app, as its shortcut has it.
         "start" => {
+            #[allow(unused_mut)]
             let mut started = start().await?;
+            // A phone's page names its apps, not its shortcuts.
+            #[cfg(desktop)]
             if !launcher {
                 started["name"] = json!(text("entrypoint").and_then(|entrypoint| crate::shortcuts::name(&entrypoint)));
             }
             Ok(started)
         }
         // An app opened from the launcher comes in front, and the launcher goes.
+        #[cfg(desktop)]
         "open_window" => {
             open_window(text("entrypoint").unwrap_or_default(), text("subject"), text("link").unwrap_or_default())?;
             if launcher {
@@ -361,11 +423,20 @@ pub(crate) async fn command(label: &str, command: &str, args: Value) -> Result<V
             }
             Ok(Value::Null)
         }
+        // On a phone, another app a strict app opens opens as a link the page follows.
+        #[cfg(target_os = "android")]
+        "open_window" => Ok(done(app().shell.emit("open", json!(text("link").unwrap_or_default())))),
         // An app's Home, or Window → Home Screen.
+        #[cfg(desktop)]
         "front" => Ok(done(computer::summon())),
+        // On a phone, the Home Screen is under every app's window.
+        #[cfg(target_os = "android")]
+        "front" => Ok(done(close_all())),
         // Escape on the launcher, or its page done with it (`leave`).
+        #[cfg(desktop)]
         "hide" => Ok(done(computer::hide(true))),
         // As tall as the launcher's content, or its tallest (`fit` in client.js).
+        #[cfg(desktop)]
         "resize" if launcher => Ok(done(computer::resize(args["height"].as_f64()))),
         "theme" if launcher => Ok(done(theme(serde_json::from_value(args["theme"].clone()).unwrap_or_default()))),
         "theme" => Ok(done(chose(serde_json::from_value(args["theme"].clone()).unwrap_or_default()))),
