@@ -328,28 +328,20 @@ function pushed(next) {
 const SYSTEMS = { ios: "iPhone", android: "Android", macos: "Mac", windows: "Windows", chromeos: "ChromeOS", linux: "Linux" }
 /// What this browser is called, as Sign-In calls it: "Chrome on Linux".
 const called = () => `${browser() ?? "Browser"} on ${SYSTEMS[os() ?? ""] ?? "this device"}`
-/// Gives the network this browser's push subscription, made with the network's VAPID key (`/notifications/key`), with
-/// its notification key, which its service worker holds (`sw.js`), as a phone gives its push token: each time it's
-/// signed in, so a network that lost it gets it again, and registering again is an upsert. A subscription made with
-/// another VAPID key is made again.
+/// Has this browser's service worker give the network its push subscription, as a phone gives its push token: each
+/// time it's signed in, so a network that lost it gets it again, and the worker does it too as the push service
+/// replaces the subscription (`sw.js`).
 async function registerPush() {
   if (push?.state !== "registered") pushed({ state: "registering" })
   try {
-    const registration = await navigator.serviceWorker.register("/sw.js")
-    const { vapid } = await (await fetch("/notifications/key")).json()
-    if (!vapid) throw new Error("This network can't wake browsers yet.")
+    await navigator.serviceWorker.register("/sw.js")
+    const { active } = await navigator.serviceWorker.ready
+    const { arguments: own } = await filled({ name: "notifications_register", arguments: {} })
     const { port1, port2 } = new MessageChannel()
-    const notificationKey = new Promise((resolve) => (port1.onmessage = ({ data }) => resolve(data)))
-    ;(await navigator.serviceWorker.ready).active?.postMessage("key", [port2])
-    let subscription = await registration.pushManager.getSubscription()
-    const made = subscription?.options.applicationServerKey
-    if (made && btoa(String.fromCharCode(...new Uint8Array(made))).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "") !== vapid) {
-      await subscription?.unsubscribe()
-      subscription = null
-    }
-    subscription ??= await registration.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: vapid })
-    const result = await mcp("tools/call", { name: "notifications_register", arguments: { via: "webpush", token: JSON.stringify(subscription), key: await notificationKey } })
-    if (result.isError) throw new Error(result.content?.[0]?.text ?? "The network didn't take it.")
+    const done = new Promise((resolve) => (port1.onmessage = ({ data }) => resolve(data)))
+    active?.postMessage({ register: own }, [port2])
+    const { error } = await done
+    if (error) throw new Error(error)
     pushed({ state: "registered" })
   } catch (error) {
     pushed({ state: "failed", why: /** @type {Error} */ (error).message })
