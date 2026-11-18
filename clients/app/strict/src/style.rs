@@ -206,6 +206,13 @@ pub fn layout(style: &Style) -> taffy::Style {
         _ => taffy::geometry::Point { x: Overflow::Visible, y: Overflow::Visible },
     };
     out.scrollbar_width = 0.0;
+    if matches!(style.position.as_deref(), Some("absolute")) {
+        out.position = Position::Absolute;
+    } else if matches!(style.position.as_deref(), Some("relative")) {
+        out.position = Position::Relative;
+    }
+    let inset = |side: Option<f32>| side.map_or(LengthPercentageAuto::auto(), LengthPercentageAuto::length);
+    out.inset = Rect { left: inset(style.left), right: inset(style.right), top: inset(style.top), bottom: inset(style.bottom) };
     let border = borders(style);
     out.border = Rect {
         left: LengthPercentage::length(border.left),
@@ -314,6 +321,11 @@ pub fn look(style: &Style, dark: bool) -> Look {
         opacity: style.opacity.unwrap_or(1.0),
         clips: matches!(style.overflow.as_deref(), Some("hidden") | Some("scroll") | Some("auto")),
         scrolls: matches!(style.overflow.as_deref(), Some("scroll") | Some("auto")),
+        translate: (Offset::Px(style.translate_x.unwrap_or(0.0)), Offset::Px(style.translate_y.unwrap_or(0.0))),
+        scale: style.scale.unwrap_or(1.0),
+        rotate: style.rotate.unwrap_or(0.0),
+        z_index: style.z_index.unwrap_or(0.0) as i32,
+        pointer_events: style.pointer_events.as_deref().map(|events| events != "none"),
         ..Look::default()
     }
 }
@@ -673,9 +685,9 @@ fn computed(style: &Map<String, Value>, conditions: Conditions) -> Computed {
     layout.margin = Rect { left: margin("marginStart"), right: margin("marginEnd"), top: margin("marginTop"), bottom: margin("marginBottom") };
     let borders = Edges {
         top: length("borderTopWidth").unwrap_or(0.0),
-        right: length("borderEndWidth").unwrap_or(0.0),
+        right: length("borderRightWidth").or_else(|| length("borderEndWidth")).unwrap_or(0.0),
         bottom: length("borderBottomWidth").unwrap_or(0.0),
-        left: length("borderStartWidth").unwrap_or(0.0),
+        left: length("borderLeftWidth").or_else(|| length("borderStartWidth")).unwrap_or(0.0),
     };
     layout.border = Rect {
         left: LengthPercentage::length(borders.left),
@@ -710,8 +722,10 @@ fn computed(style: &Map<String, Value>, conditions: Conditions) -> Computed {
     } else if word("position") == Some("relative") {
         layout.position = Position::Relative;
     }
-    let inset = |name: &str| get(name).and_then(|value| to_auto(value, conditions)).unwrap_or(LengthPercentageAuto::auto());
-    layout.inset = Rect { left: inset("start"), right: inset("end"), top: inset("top"), bottom: inset("bottom") };
+    // `left` and `right` are CSS's own, as a page's inline style says them; `start` and `end` the line's, which run
+    // left to right here (`direction`).
+    let inset = |names: &[&str]| names.iter().find_map(|name| get(name)).and_then(|value| to_auto(value, conditions)).unwrap_or(LengthPercentageAuto::auto());
+    layout.inset = Rect { left: inset(&["left", "start"]), right: inset(&["right", "end"]), top: inset(&["top"]), bottom: inset(&["bottom"]) };
     let clips = word("overflow") == Some("hidden");
     if clips {
         layout.overflow = taffy::geometry::Point { x: Overflow::Hidden, y: Overflow::Hidden };

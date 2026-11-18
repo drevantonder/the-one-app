@@ -124,6 +124,20 @@ pub struct Style {
     pub text_align: Option<String>,
     pub font_variant_numeric: Option<String>,
     pub line_clamp: Option<usize>,
+    /// `absolute` takes it out of its parent's flow, placed by `top`, `right`, `bottom` and `left` in its parent
+    /// (protocol.ts's `Style`), over what's drawn before it, or under what's drawn before it with a higher `zIndex`.
+    pub position: Option<String>,
+    pub top: Option<f32>,
+    pub right: Option<f32>,
+    pub bottom: Option<f32>,
+    pub left: Option<f32>,
+    pub z_index: Option<f32>,
+    /// Drawn moved, larger or turned from where it's laid out, around its middle, which moves nothing else.
+    pub translate_x: Option<f32>,
+    pub translate_y: Option<f32>,
+    pub scale: Option<f32>,
+    pub rotate: Option<f32>,
+    pub pointer_events: Option<String>,
 }
 
 pub struct Node {
