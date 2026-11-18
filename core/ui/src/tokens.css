@@ -14,6 +14,7 @@
   --glass: light-dark(oklch(1 0 0 / 66%), oklch(1 0 0 / 13%));
   --veil: color-mix(in oklab, var(--background) 55%, transparent);
   --tile: color-mix(in oklab, var(--label) 14%, transparent);
+  --transparent: oklch(0 0 0 / 0%);
   --on-accent: oklch(1 0 0);
   --loader: color-mix(in oklab, var(--label) 40%, transparent);
   --red: light-dark(oklch(0.614 0.204 25.56), oklch(0.7 0.191 23.4));

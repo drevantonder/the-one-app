@@ -202,6 +202,8 @@ const roles = {
   veil: alpha(colours.background, 55),
   /** A tile's tint, as an App Library category's square is. */
   tile: alpha(label, 14),
+  /** Nothing: what has no fill of its own where something else has one. */
+  transparent: colour("oklch(0 0 0 / 0%)"),
   /** Words and icons on an accent. */
   onAccent: colour("oklch(1 0 0)"),
   loader: alpha(label, 40),

@@ -2,7 +2,7 @@
 import { children, createEffect, createSignal, For, onCleanup, Show } from "solid-js"
 import type { JSX } from "@solidjs/web"
 import { Box, Text } from "#primitives"
-import { direction, reducedMotion } from "#bridge"
+import { direction, reducedMotion, touch } from "#bridge"
 import { RowMenu, type RowMenu as Menu } from "./menu.tsx"
 import { negative, styles } from "./styles.ts"
 import { duration, tokens } from "./tokens.ts"
@@ -17,11 +17,16 @@ const look = styles({
     boxShadow: tokens.shadow.edge,
     overflow: "hidden",
   },
+  // On a computer, as Raycast's: rows on the window itself, each a rounded highlight under the pointer or where it's
+  // chosen, their words lined up with the heading above them.
+  flat: { backgroundColor: tokens.colour.transparent, boxShadow: "none", overflow: "visible", marginInline: negative(tokens.grid[2]) },
   // Every row draws the line above it, and the list hides the first's.
   rows: { marginTop: negative(tokens.length.hairline) },
+  flatRows: { marginTop: 0 },
   row: { position: "relative", flexDirection: "row", alignItems: "stretch", overflow: "hidden", borderTopWidth: tokens.length.hairline, borderColor: tokens.colour.quinaryLabel },
+  flatRow: { borderTopWidth: 0, borderRadius: tokens.radius.medium },
   wraps: { flexWrap: "wrap" },
-  current: { backgroundColor: tokens.colour.quinaryLabel },
+  current: { backgroundColor: tokens.colour.selection },
   held: { userSelect: "none", touchAction: "pan-y" },
   inside: {
     flexGrow: 1,
@@ -38,12 +43,17 @@ const look = styles({
     transitionProperty: ["backgroundColor"],
     transition: tokens.motion.quick,
   },
+  flatInside: { paddingBlock: 0, paddingInline: tokens.grid[2], borderRadius: tokens.radius.medium, backgroundColor: { hover: tokens.colour.selection, pressed: tokens.colour.quaternaryLabel, focused: tokens.colour.selection } },
   pressable: { cursor: "pointer" },
   after: { paddingStart: 0 },
   settling: { transitionProperty: ["translateX", "width"], transition: tokens.motion.settle },
   words: { flexGrow: 1, flexShrink: 1, minWidth: 0 },
+  // On a computer the grey words follow the heading on its line, as Raycast's subtitle does.
+  flatWords: { flexDirection: "row", alignItems: "baseline", gap: tokens.grid[2] },
   heading: { font: tokens.type.medium, fontWeight: tokens.weight.medium, lineClamp: 1 },
+  flatHeading: { flexShrink: 0, maxWidth: "70%", fontWeight: tokens.weight.regular },
   text: { font: tokens.type.medium, color: tokens.colour.secondaryLabel, lineClamp: 2 },
+  flatText: { flexShrink: 1, minWidth: 0, lineClamp: 1 },
   start: { flexShrink: 0 },
   end: { flexShrink: 0, maxWidth: "50%", color: tokens.colour.secondaryLabel, textAlign: "end" },
   control: { flexShrink: 0, minWidth: tokens.length.control, justifyContent: "center", alignItems: "center", paddingStart: tokens.grid[1] },
@@ -114,8 +124,8 @@ export function List(props: { children?: JSX.Element }) {
   }
   return (
     <Show when={slots().length}>
-      <Box role="list" style={look.list}>
-        <Box style={look.rows}>
+      <Box role="list" style={[look.list, !touch() && look.flat]}>
+        <Box style={[look.rows, !touch() && look.flatRows]}>
           <For each={slots()}>
             {(one) => (
               <Box style={[look.slot, one.state() === "coming" && look.entering, one.state() === "going" && look.leaving, one.to() !== undefined && { height: one.to()! }]}>
@@ -224,10 +234,10 @@ export function Row(props: {
       <Show when={props.start}>
         <Box style={look.start}>{props.start}</Box>
       </Show>
-      <Box style={look.words}>
-        <Text style={look.heading}>{props.heading}</Text>
+      <Box style={[look.words, !touch() && look.flatWords]}>
+        <Text style={[look.heading, !touch() && look.flatHeading]}>{props.heading}</Text>
         <Show when={props.text}>
-          <Text style={look.text}>{props.text}</Text>
+          <Text style={[look.text, !touch() && look.flatText]}>{props.text}</Text>
         </Show>
       </Box>
       <Show when={props.end}>
@@ -245,16 +255,16 @@ export function Row(props: {
         onPointerUp={up}
         onPointerCancel={cancel}
         onContextMenu={(event) => menu()?.open(at(event))}
-        style={[look.row, !!props.action && look.wraps, props.current && look.current, !!menu() && look.held]}
+        style={[look.row, !touch() && look.flatRow, !!props.action && look.wraps, props.current && look.current, !!menu() && look.held]}
       >
         <Show when={props.control}>
           <Box style={[look.control, moving()]}>{props.control}</Box>
         </Show>
         <Show
           when={props.onClick}
-          fallback={<Box style={[look.inside, !!props.control && look.after, moving()]}>{inside()}</Box>}
+          fallback={<Box style={[look.inside, !touch() && look.flatInside, !!props.control && look.after, moving()]}>{inside()}</Box>}
         >
-          <Box role="button" aria-current={props.current ? "true" : undefined} onClick={pressed} style={[look.inside, look.pressable, !!props.control && look.after, moving()]}>
+          <Box role="button" aria-current={props.current ? "true" : undefined} onClick={pressed} style={[look.inside, !touch() && look.flatInside, look.pressable, !!props.control && look.after, moving()]}>
             {inside()}
           </Box>
         </Show>

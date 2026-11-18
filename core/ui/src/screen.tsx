@@ -4,7 +4,7 @@
 import { createContext, createEffect, createSignal, onSettled, Show, useContext } from "solid-js"
 import type { JSX } from "@solidjs/web"
 import { Box, Scroll, Text } from "#primitives"
-import { back as goBack, breadcrumb, covers, go, keydown, step, viewport } from "#bridge"
+import { back as goBack, breadcrumb, covers, go, keydown, step, touch, viewport } from "#bridge"
 import { BarEnd, Button, Icon } from "./button.tsx"
 import { messages } from "./words.ts"
 import { negative, styles } from "./styles.ts"
@@ -28,8 +28,10 @@ const look = styles({
   // What's in it keeps clear of what the device keeps for itself at its other edges.
   safe: { flexGrow: 1, paddingStart: tokens.length.safeLeft, paddingEnd: tokens.length.safeRight, paddingBottom: tokens.length.safeBottom },
   parts: { flexGrow: 1, gap: tokens.length.gutter, paddingTop: tokens.grid[2], paddingInline: tokens.length.gutter, paddingBottom: tokens.length.gutter },
-  section: { gap: tokens.grid[2], minWidth: 0 },
-  heading: { font: tokens.type.small, fontWeight: tokens.weight.medium, color: tokens.colour.secondaryLabel, userSelect: "none" },
+  section: { gap: tokens.grid[1.5], minWidth: 0 },
+  // Raycast's on a computer, 11px; iOS's on a phone, its footnote inset to the rows' words.
+  heading: { font: tokens.type.small, color: tokens.colour.secondaryLabel, userSelect: "none" },
+  touchHeading: { paddingInline: tokens.grid[4] },
   split: { flexGrow: 1, flexShrink: 1, minHeight: 0, minWidth: 0, position: "relative" },
   beside: { flexDirection: "row" },
   pane: { minHeight: 0, minWidth: 0, overflow: "hidden", backgroundColor: tokens.colour.background },
@@ -115,7 +117,7 @@ export function Section(props: { heading?: JSX.Element; children?: JSX.Element }
   return (
     <Box style={look.section}>
       <Show when={props.heading}>
-        <Text role="heading" aria-level={2} style={look.heading}>
+        <Text role="heading" aria-level={2} style={[look.heading, touch() && look.touchHeading]}>
           {props.heading}
         </Text>
       </Show>

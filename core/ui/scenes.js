@@ -128,7 +128,7 @@ async function tap(frame, name) {
 
 /// A scene drawn on the DOM: its picture and its tree.
 async function dom(browser, serve, key, scene, folder) {
-  const page = await browser.newPage({ viewport: { width: scene.size[0], height: scene.size[1] }, deviceScaleFactor: 2, hasTouch: scene.touch, isMobile: scene.touch, colorScheme: dark ? "dark" : "light" })
+  const page = await browser.newPage({ viewport: { width: scene.size[0], height: scene.size[1] }, deviceScaleFactor: 2, hasTouch: scene.touch, colorScheme: dark ? "dark" : "light" })
   const problems = []
   page.on("pageerror", (error) => problems.push(String(error)))
   // The clock a native host's harness has (clients/app/strict/src/js.rs's `Clock::fixed`): 1 January 2026, UTC.
