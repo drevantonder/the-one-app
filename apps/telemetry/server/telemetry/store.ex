@@ -1,17 +1,23 @@
 defmodule Telemetry.Store do
   @moduledoc """
-  Where what's recorded is kept: blobs of the app's own artifact for the network, by the hour they're of.
+  Where what's recorded is kept: blobs of the app's own artifact for the network, by the hour they're of, each an OTLP
+  export request in its protobuf (`Telemetry.Otlp`), which any OpenTelemetry tool takes as it is:
 
-  - `batches/<day>/<hour>/<to>-<server>-<bytes>` is one server's batch, as it handed it on: what it recorded until
-    `to`, in nanoseconds since 1970. A server that's busy writes about one a minute, and an idle one none.
-  - `batches/<day>/<hour>/hour-<bytes>` is all of an hour that's over, put together once it is (`prune/1`), with the
-    batches it holds named in it, so it's put together once even if tidying stopped partway.
+      curl --data-binary @<blob> -H 'content-type: application/x-protobuf' http://localhost:4318/v1/traces
 
-  Each is Erlang's term format, compressed, or JSON from the network's edge (`batches/<day>/<hour>/<to>-edge-<bytes>`,
-  which `edge/worker.ts` keeps), and its size is in its name, so listing them says how much is kept.
-  What's older than `days/0`, and the oldest hours past `most_bytes/0`, are let go.
+  - `otlp/<day>/<hour>/<to>-<source>-<bytes>.<signal>` is one export, as a server's SDK or a client gave it: what it
+    gathered of `traces`, `metrics` or `logs` until `to`, in nanoseconds since 1970. A busy server writes about one a
+    minute of each, and an idle one none.
+  - `otlp/<day>/<hour>/hour-<to>-<bytes>.<signal>` is all of an hour's exports of a signal, once the hour is over
+    (`prune/1`): protobuf's messages put one after the other are one message holding all of theirs, so it's still one
+    export request. It holds every export of its hour up to `to`, so one left over by a tidying that stopped partway
+    is let go, not put in again.
+
+  Its size is in its name, so listing them says how much is kept. What's older than `days/0`, and the oldest hours
+  past `most_bytes/0`, are let go. What was kept before it was OTLP, under `batches/`, is let go as it ages, and only
+  the network's edge's spans of it, in JSON, are read meanwhile.
   """
-  alias Telemetry.Read
+  alias Telemetry.Otlp
   alias OneCore.Artifact
 
   @days 14
@@ -23,30 +29,24 @@ defmodule Telemetry.Store do
   @doc "How many bytes are kept at most."
   def most_bytes, do: @most_bytes
 
-  @doc """
-  Keeps a batch a server handed on. Each of its spans and logs says which server's it was, since an hour's are put
-  together.
-  """
-  def keep(own, %{"server" => server, "to" => to} = batch) do
-    mark = &Map.put(&1, "server", batch["machine"])
-    batch = %{batch | "spans" => Enum.map(batch["spans"], mark), "logs" => Enum.map(batch["logs"], mark)}
-    data = :erlang.term_to_binary(batch, [:compressed])
-    Artifact.write(own, "#{hour(to)}/#{to}-#{String.slice(server, 0, 8)}-#{byte_size(data)}", data)
-    :ok
+  @doc "Keeps an OTLP export request of `signal` that `source`, a server or a client, gave."
+  def keep(own, source, signal, otlp) when is_binary(otlp) do
+    if signal not in Otlp.signals(), do: raise("There's no signal #{signal}: it's one of #{Enum.join(Otlp.signals(), ", ")}")
+    to = System.os_time(:nanosecond)
+    :ok = Artifact.write(own, "#{hour(to)}/#{to}-#{source}-#{byte_size(otlp)}.#{signal}", otlp)
   end
 
-  @doc "Every batch kept of an hour that started after `from`, in nanoseconds since 1970, put together by hours."
+  @doc "Every export kept of an hour that started after `from`, in nanoseconds since 1970, each laid flat."
   def read(own, from) do
     since = hour(from - 3_600_000_000_000)
-    names = for name <- Artifact.list(own, "batches/"), Path.dirname(name) > since, do: name
-
-    for {:ok, data, _tag} <- Artifact.read_all(own, names), do: decode(data)
+    names = for name <- list(own), folder(name) > since, do: name
+    decode(own, names)
   end
 
   @doc """
-  Every server's and the edge's batch that ended after `from`, in nanoseconds since 1970, that isn't among `read`, by
-  its name: the names, and the batches, as each was kept, read from the hours they're in before those are put
-  together (`prune/1`). One put together meanwhile is named, and not given.
+  Every export that ended after `from`, in nanoseconds since 1970, that isn't among `read`, by its name: the names,
+  and the exports, as each was kept, read from the hours they're in before those are put together (`prune/1`). One
+  put together meanwhile is named, and not given.
   """
   def since(own, from, read) do
     to = System.os_time(:nanosecond)
@@ -54,21 +54,22 @@ defmodule Telemetry.Store do
 
     names =
       for hour <- hours,
-          name <- Artifact.list(own, hour <> "/"),
+          prefix <- [hour, String.replace_prefix(hour, "otlp/", "batches/")],
+          name <- Artifact.list(own, prefix <> "/"),
           not hour?(name),
           to_of(name) > from,
           name not in read,
           do: name
 
-    {names, for({:ok, data, _tag} <- Artifact.read_all(own, names), do: decode(data))}
+    {names, decode(own, names)}
   end
 
   @doc "How much is kept: since when, in milliseconds since 1970, how many bytes, for how many days, and the most."
   def retention(own) do
-    names = Artifact.list(own, "batches/")
+    names = list(own)
 
     %{
-      since: Enum.find_value(names, &since/1),
+      since: names |> Enum.map(&since/1) |> Enum.min(fn -> nil end),
       bytes: Enum.sum_by(names, &bytes/1),
       days: @days,
       most_bytes: @most_bytes
@@ -76,23 +77,25 @@ defmodule Telemetry.Store do
   end
 
   @doc """
-  Puts each hour that's over into one blob, and lets go of hours older than `days/0`, and then of the oldest while
-  more than `most_bytes/0` is kept. Gives what it did.
+  Puts each hour that's over into one blob of each signal, and lets go of hours older than `days/0`, and then of the
+  oldest while more than `most_bytes/0` is kept. Gives what it did.
   """
   def prune(own) do
     now = System.os_time(:nanosecond)
-    hours = Enum.group_by(Artifact.list(own, "batches/"), &Path.dirname/1)
     oldest = hour(now - @days * 86_400_000_000_000)
 
-    # An hour is put together 10 minutes after it ends, once alerts have read its last batches one by one
+    # An hour is put together 10 minutes after it ends, once alerts have read its last exports one by one
     # (`since/3`, `Telemetry.Alerts`).
     put_together =
-      for {hour, names} <- hours, hour >= oldest, hour < hour(now - 600_000_000_000), Enum.any?(names, &(not hour?(&1))) do
-        together(own, hour, names)
+      for {hour, names} <- Enum.group_by(Artifact.list(own, "otlp/"), &Path.dirname/1),
+          hour >= oldest,
+          hour < hour(now - 600_000_000_000),
+          Enum.any?(names, &(not hour?(&1))) do
+        for {signal, names} <- Enum.group_by(names, &Path.extname/1), do: together(own, hour, signal, names)
         hour
       end
 
-    hours = Enum.group_by(Artifact.list(own, "batches/"), &Path.dirname/1)
+    hours = Enum.group_by(list(own), &folder/1)
     {old, retained} = Enum.split_with(Enum.sort(hours), fn {hour, _names} -> hour < oldest end)
     {over, _retained} = past_most(Enum.reverse(retained), 0)
     let_go = old ++ over
@@ -101,18 +104,19 @@ defmodule Telemetry.Store do
     %{put_together: length(put_together), let_go: length(let_go)}
   end
 
-  # An hour's batches as one blob, which says which batches it holds: a batch it holds already isn't added again.
-  defp together(own, hour, names) do
-    batches = for {:ok, data, _tag} <- Artifact.read_all(own, names), do: decode(data)
-    {hours, batches} = Enum.split_with(batches, &Map.has_key?(&1, "holds"))
-    held = MapSet.new(Enum.flat_map(hours, & &1["holds"]))
-    added = Enum.reject(batches, &(id(&1) in held))
+  # An hour's exports of a signal as one blob, after what it held already: an export it holds isn't added again.
+  defp together(own, hour, signal, names) do
+    {hours, exports} = Enum.split_with(names, &hour?/1)
+    held = Enum.max(Enum.map(hours, &to_of/1), fn -> 0 end)
+    {added, gone} = Enum.split_with(exports, &(to_of(&1) > held))
 
-    merged = Read.merge(hours ++ added)
-    merged = Map.put(merged, "holds", MapSet.to_list(held) ++ Enum.map(added, &id/1))
-    data = :erlang.term_to_binary(merged, [:compressed])
-    :ok = Artifact.write(own, "#{hour}/hour-#{byte_size(data)}", data)
-    for name <- names, Path.basename(name) != "hour-#{byte_size(data)}", do: Artifact.remove(own, name)
+    if added != [] do
+      data = for({:ok, data, _tag} <- Artifact.read_all(own, hours ++ added), do: data) |> IO.iodata_to_binary()
+      to = Enum.max(Enum.map(hours ++ added, &to_of/1))
+      :ok = Artifact.write(own, "#{hour}/hour-#{to}-#{byte_size(data)}#{signal}", data)
+    end
+
+    for name <- if(added == [], do: gone, else: names), do: Artifact.remove(own, name)
   end
 
   # The newest hours that fit in `most_bytes/0`, and the rest.
@@ -129,14 +133,21 @@ defmodule Telemetry.Store do
     end
   end
 
-  # A batch as a server keeps it, or as the edge does.
-  defp decode("{" <> _ = data), do: JSON.decode!(data)
-  defp decode(data), do: :erlang.binary_to_term(data, [:safe])
+  defp list(own), do: Artifact.list(own, "otlp/") ++ Artifact.list(own, "batches/")
 
-  defp id(batch), do: "#{batch["server"]}/#{batch["to"]}"
+  # Each kept export laid flat, by its name: OTLP by its signal, and of what was kept before, the edge's spans.
+  defp decode(own, names) do
+    for {name, {:ok, data, _tag}} <- Enum.zip(names, Artifact.read_all(own, names)), batch = batch(name, data), do: batch
+  end
+
+  defp batch("batches/" <> _, "{" <> _ = edge), do: Map.put(JSON.decode!(edge), "metrics", [])
+  defp batch("batches/" <> _, _term), do: nil
+  defp batch(name, data), do: Otlp.decode(String.trim_leading(Path.extname(name), "."), data)
+
+  defp folder(name), do: name |> Path.dirname() |> String.replace_prefix("batches/", "otlp/")
   defp hour?(name), do: String.starts_with?(Path.basename(name), "hour-")
-  defp to_of(name), do: name |> Path.basename() |> String.split("-") |> hd() |> String.to_integer()
-  defp bytes(name), do: name |> String.split("-") |> List.last() |> String.to_integer()
+  defp to_of(name), do: name |> Path.basename() |> String.trim_leading("hour-") |> String.split("-") |> hd() |> String.to_integer()
+  defp bytes(name), do: name |> Path.rootname() |> String.split("-") |> List.last() |> String.to_integer()
 
   # When the oldest kept is from, in milliseconds since 1970: the start of its hour.
   defp since(name) do
@@ -145,9 +156,9 @@ defmodule Telemetry.Store do
     DateTime.to_unix(at, :millisecond)
   end
 
-  # The folder of the hour a time in nanoseconds since 1970 is in: `batches/2026-11-15/07`.
+  # The folder of the hour a time in nanoseconds since 1970 is in: `otlp/2026-11-15/07`.
   defp hour(at) do
     time = DateTime.from_unix!(div(at, 1_000_000_000))
-    "batches/#{Date.to_iso8601(time)}/#{String.pad_leading(to_string(time.hour), 2, "0")}"
+    "otlp/#{Date.to_iso8601(time)}/#{String.pad_leading(to_string(time.hour), 2, "0")}"
   end
 end

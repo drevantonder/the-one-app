@@ -56,6 +56,9 @@ defmodule Database.Lease do
   @behaviour :gen_statem
   require Logger
   alias Database.Log
+  alias OpenTelemetryAPIExperimental.{Counter, Histogram}
+  require Counter
+  require Histogram
 
   # The fewest pages logged since a snapshot before the next, so that a small database isn't kept whole on every
   # other write. An entry that only takes the lease counts as a page: a server opening the database reads every
@@ -106,6 +109,7 @@ defmodule Database.Lease do
   # `folder` is where this server keeps its copy, which is nobody else's.
   @impl true
   def init({artifact, server, folder}) do
+    measures()
     {:next_state, state, data, actions} = moved(look(%__MODULE__{artifact: artifact, server: server, folder: folder}))
     {:ok, state, data, actions}
   end
@@ -363,9 +367,30 @@ defmodule Database.Lease do
   defp take(data, why) do
     wrote = Log.write(data.artifact, data.number + 1, %{server: data.server})
     Logger.info("#{data.artifact.prefix}: taking its lease at #{data.number + 1}: #{wrote}")
-    if wrote == :ok, do: :telemetry.execute([:one, :database, :lease, :moves], %{count: 1}, %{app: app(data.artifact), reason: why})
+    if wrote == :ok, do: Counter.add(:"one.database.lease.moves", 1, %{"one.app" => app(data.artifact), "one.reason" => why})
     look(data)
   end
+
+  @doc """
+  Makes what a lease is measured by, OpenTelemetry's instruments, where they aren't yet: how long a call waited on
+  another server holding it (`Database.transaction/3`), and how often it moved here.
+  """
+  def measures do
+    meter = :opentelemetry_experimental.get_meter(:opentelemetry.get_application_scope(__MODULE__))
+
+    if :otel_meter.lookup_instrument(meter, :"one.database.lease.moves") == :undefined do
+      Counter.create(:"one.database.lease.moves", %{description: "A database's lease that moved to this server, and why"})
+
+      Histogram.create(:"one.database.lease.wait", %{
+        unit: :ms,
+        description: "How long a call waited on the server holding its database's lease before this one took it",
+        advisory_params: %{explicit_bucket_boundaries: OneCore.Otlp.buckets()}
+      })
+    end
+  end
+
+  @doc "Says how long a call waited on another server holding its database's lease, in milliseconds."
+  def waited(ms, attributes), do: Histogram.record(:"one.database.lease.wait", ms, attributes)
 
   @doc "The app whose database `artifact` is, by the name it's installed by: `permissions` of `network/own/permissions/`."
   def app(artifact) do

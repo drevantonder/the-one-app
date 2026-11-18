@@ -3,18 +3,19 @@ defmodule Telemetry do
   Telemetry: what the network's servers, clients and apps did, how long it took and how it ended, kept in the
   network and read back by agents and in its app.
 
-  It observes each tool call (the hook `called`) and what a client measured (`measured`), and what apps record with
-  its tool `record`, gathers it on each server in OpenTelemetry's shapes (`Telemetry.Recorded`), and keeps a
-  server's minute as one blob of its own artifact: so a call writes nothing to the bucket, and an idle server
-  writes nothing at all. It isn't kept in a database,
-  whose log is kept whole forever and whose snapshot is the whole file: what's recorded is kept for a while and then
-  let go, which blobs by the hour are (`Telemetry.Store`). It may be lost, and holds no one's data.
+  Each server's OpenTelemetry SDK exports what it gathered, its spans, metrics and logs, as OTLP once a minute
+  (`OneCore.Otlp`), and so does each client's of itself (the hook `measured`): Telemetry keeps each export as it is,
+  one blob of its own artifact, so a call writes nothing to the bucket, and an idle server writes nothing at all.
+  What an app that runs in a VM of its own records goes through the API here (`record`, `Telemetry.Record`). It isn't
+  kept in a database, whose log is kept whole forever and whose snapshot is the whole file: what's recorded is kept
+  for a while and then let go, which blobs by the hour are (`Telemetry.Store`). It may be lost, and holds no one's
+  data.
 
   What needs a person is told to the network's first owner, as alerts (`Telemetry.Alerts`), whose state is the one
   thing it keeps in its database.
   """
   @behaviour OneCore.App
-  alias Telemetry.{Alerts, Store, Read, Recorded}
+  alias Telemetry.{Alerts, Otlp, Read, Record, Store}
   alias OneCore.Call
 
   @impl true
@@ -27,13 +28,13 @@ defmodule Telemetry do
   @impl true
   def requires,
     do: %{
-      "core" => ">= 0.23.17",
+      "core" => ">= 0.23.48",
       "database" => "to keep its schedule and its alerts",
       "notifications" => "to tell the network's owner what needs them"
     }
 
   @impl true
-  def hooks, do: ["called", "measured", "started"]
+  def hooks, do: ["exported", "measured"]
 
   @impl true
   def jobs, do: [%{tool: "prune", every: 3600}, %{tool: "evaluate", every: 60}]
@@ -403,14 +404,27 @@ defmodule Telemetry do
   end
 
   @impl true
-  # A call to `record` is what it records, not more to record.
-  def hook("called", %{"app" => app, "tool" => "record"}, %Call{app: app}), do: :ok
-  def hook("called", about, call), do: Recorded.called(call, about)
-  def hook("measured", record, call), do: Recorded.measured(call, record)
-  def hook("started", _about, call), do: Recorded.started(call)
+  # What this server's SDK exported, which is told on a server acting for the network.
+  def hook("exported", %{"signal" => signal, "otlp" => otlp}, call),
+    do: Store.keep(call.own, String.slice(call.server, 0, 8), signal, Base.decode64!(otlp))
 
-  @doc "Keeps a batch that a server recorded (`Telemetry.Recorded`), on a server acting for whoever Telemetry is installed for."
-  def keep(call, batch), do: Store.keep(call.own, batch)
+  # What a client exported of itself, as from the device and person its request proved it is, whatever it says of
+  # itself.
+  def hook("measured", %{"otlp" => exports, "device" => device, "who" => who}, call) do
+    proved = %{"one.device" => device, "one.for" => OneCore.User.owner(who || "") || "link"}
+
+    for %{"signal" => signal, "otlp" => otlp} <- exports, signal in Otlp.signals() do
+      Store.keep(call.own, String.slice(device, 0, 8), signal, Otlp.stamp(signal, Base.decode64!(otlp), proved))
+    end
+
+    :ok
+  end
+
+  # What a client before OTLP reported, as `record` takes it, through the API here.
+  def hook("measured", %{"records" => records, "device" => device, "who" => who}, _call) do
+    proved = %{"one.device" => device, "one.for" => OneCore.User.owner(who || "") || "link"}
+    Record.record(Enum.filter(records, &is_map(&1["attributes"] || %{})), proved)
+  end
 
   @impl true
   def call("overview", inputs, call) do
@@ -462,8 +476,8 @@ defmodule Telemetry do
     %{spending: Read.spending(batches)}
   end
 
-  def call("record", %{"records" => records}, call) do
-    Recorded.record(call, records)
+  def call("record", %{"records" => records}, _call) do
+    Record.record(Enum.map(records, &Map.drop(&1, ["time", "traceId", "spanId"])))
     %{recorded: length(records)}
   end
 

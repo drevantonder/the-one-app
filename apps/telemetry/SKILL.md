@@ -9,8 +9,9 @@ metadata:
 ---
 
 Telemetry keeps what the network's servers, clients and apps did: a span for each tool call, numbers such as how
-long each tool took and what AI used, and warnings, errors and crashes. It's kept in the network for 14 days, up
-to 256 MB, and nothing about it leaves. It holds no one's data: names, sizes, durations and outcomes, never what
+long each tool took and what AI used, and warnings, errors and crashes. Each part records it with OpenTelemetry's own
+SDK, and it's kept as OTLP, an hour of each signal a blob (`otlp/<day>/<hour>/` in its artifact), which any
+OpenTelemetry tool reads as it is. It's kept in the network for 14 days, up to 256 MB, and nothing about it leaves. It holds no one's data: names, sizes, durations and outcomes, never what
 anyone wrote, was given or answered. What a server recorded arrives here about a minute later.
 
 The network's edge, where assistants, browsers and sharing links come in over the web, is in it too: a span for
@@ -56,11 +57,13 @@ client sent a `traceparent`.
 - Whose a call was is shown to the network's owners, and to whoever it was: to anyone else, how the network is
   doing is open, and who did what isn't.
 
-- `record` is how an app's tool records more of its call:
+- An app that runs in the server's VM records more of its call with OpenTelemetry's API, as any Elixir library does
+  (`OpenTelemetry.Tracer`, `OpenTelemetryAPIExperimental.Histogram`, `Logger` for warnings and errors), and the
+  server's SDK exports it with the rest. An untrusted app, in a VM of its own, uses `record`:
   `OneCore.Call.tool(call, "telemetry", "record", %{"records" => records})`, where Telemetry is added
   (`OneCore.Call.apps/1`). Each record has a `name`, in OpenTelemetry's dotted lowercase and following its
   conventions where it has some (`gen_ai.client.token.usage`), and `attributes`: names, sizes and outcomes, never
-  what anyone wrote, was given or answered, and never a secret. With a `value` it's a number, summed and spread
-  over each minute by its name and attributes and read back with `metric`; with `took`, in milliseconds, it's
+  what anyone wrote, was given or answered, and never a secret. With a `value` it's a number, a histogram's by its
+  name and attributes, read back with `metric`; with `took`, in milliseconds, it's
   something that ended now, a span under the call, with an `error` if it failed; and otherwise a log line of the
   call, read in its trace, and an error if it has one.

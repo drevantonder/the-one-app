@@ -9,7 +9,7 @@ defmodule Database do
   def icon, do: "icon.svg"
 
   @impl true
-  def requires, do: %{"core" => ">= 0.22.18"}
+  def requires, do: %{"core" => ">= 0.23.48"}
 
   require Logger
   alias Database.Lease
@@ -75,7 +75,7 @@ defmodule Database do
     if server do
       app = Lease.app(call.own)
       outcome = if waited >= @waited, do: "not_answered", else: "gone"
-      :telemetry.execute([:one, :database, :lease, :wait], %{duration: waited}, %{app: app, outcome: outcome})
+      Lease.waited(waited, %{"one.app" => app, "one.outcome" => outcome})
 
       if outcome == "not_answered",
         do: Logger.warning("#{app}'s database: #{OneCore.Servers.name(server) || server} holds its lease and didn't answer within #{waited} ms, so this server takes it")

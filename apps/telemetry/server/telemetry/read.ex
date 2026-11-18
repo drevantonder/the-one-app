@@ -1,42 +1,9 @@
 defmodule Telemetry.Read do
   @moduledoc """
   What's kept, read: errors by kind, tools by how long they took, a trace whole, a metric over time and what AI
-  cost. Numbers are OpenTelemetry's exponential histograms, which add up by their buckets and give quantiles to
-  within a few percent; times out of here are milliseconds.
+  cost, from OTLP laid flat (`Telemetry.Otlp`). Numbers are OpenTelemetry's histograms, with explicit buckets, which
+  add up by their buckets and give quantiles within a bucket; times out of here are milliseconds.
   """
-
-  # The most spans an hour put together keeps: every trace that failed, then the slowest.
-  @most_spans 20_000
-  @most_logs 5_000
-
-  @doc "Batches as one: their spans, their logs, and each metric's histograms added up by its name and attributes."
-  def merge(batches) do
-    spans = Enum.flat_map(batches, & &1["spans"])
-
-    %{
-      "from" => Enum.min(Enum.map(batches, & &1["from"])),
-      "to" => Enum.max(Enum.map(batches, & &1["to"])),
-      "spans" => fewest(spans),
-      "logs" => batches |> Enum.flat_map(& &1["logs"]) |> Enum.take(-@most_logs),
-      "metrics" =>
-        batches
-        |> Enum.flat_map(& &1["metrics"])
-        |> Enum.group_by(&{&1["name"], &1["attributes"]})
-        |> Enum.map(fn {_key, points} -> added(points) end)
-    }
-  end
-
-  # As many whole traces as fit: those that failed first, then the slowest.
-  defp fewest(spans) when length(spans) <= @most_spans, do: spans
-
-  defp fewest(spans) do
-    spans
-    |> Enum.group_by(& &1["traceId"])
-    |> Enum.sort_by(fn {_id, spans} -> {not Enum.any?(spans, &failed?/1), -Enum.sum_by(spans, &took/1)} end)
-    |> Enum.reduce_while([], fn {_id, trace}, acc ->
-      if length(acc) + length(trace) > @most_spans, do: {:halt, acc}, else: {:cont, trace ++ acc}
-    end)
-  end
 
   @doc """
   The errors among `batches`, each kind once, most recent first: failed spans by their name and message, and
@@ -292,7 +259,7 @@ defmodule Telemetry.Read do
   # Where a log line is from, as a person reads it: an app's page or a client that failed, or the server that logged
   # it.
   defp logged(%{"eventName" => "exception", "attributes" => %{"one.app" => app}}), do: "#{app} page"
-  defp logged(%{"eventName" => name, "attributes" => %{"service.name" => _}}), do: name
+  defp logged(%{"eventName" => name}) when is_binary(name) and name != "", do: name
   defp logged(%{"severity" => "WARN", "server" => server}), do: "Warning on #{server}"
   defp logged(%{"server" => server}), do: "Error on #{server}"
 
@@ -300,7 +267,7 @@ defmodule Telemetry.Read do
   Which client a record is from, as a person reads it, from what the client said of itself: "App on Andre's
   iPhone", "claude-code (MCP) on linux". `nil` for a server's own.
   """
-  def from(%{"attributes" => %{"service.name" => service} = attributes}) do
+  def from(%{"attributes" => %{"service.name" => service} = attributes}) when service != "one-server" do
     on = if attributes["host.name"], do: " on #{attributes["host.name"]}", else: ""
 
     case service do
@@ -317,26 +284,25 @@ defmodule Telemetry.Read do
   ## Histograms
 
   @doc false
-  # Histograms of one metric added up: OpenTelemetry's exponential histograms of one scale add by their buckets.
+  # Histograms of one metric added up, bucket by bucket: they're counted in the same buckets (`OneCore.Otlp.buckets/0`).
+  # A sum's points add up as one with no buckets.
   def added([first | _] = points) do
-    buckets =
-      points
-      |> Enum.flat_map(& &1["buckets"])
-      |> Enum.reduce(%{}, fn [bucket, count], all -> Map.update(all, bucket, count, &(&1 + count)) end)
+    buckets = points |> Enum.map(&(&1["buckets"] || [])) |> Enum.zip_with(&Enum.sum/1)
 
-    %{
-      first
-      | "start" => Enum.min(Enum.map(points, & &1["start"])),
-        "time" => Enum.max(Enum.map(points, & &1["time"])),
-        "count" => Enum.sum_by(points, & &1["count"]),
-        "sum" => Enum.sum_by(points, & &1["sum"]),
-        "zeroCount" => Enum.sum_by(points, & &1["zeroCount"]),
-        "buckets" => Enum.sort(for {bucket, count} <- buckets, do: [bucket, count])
-    }
+    Map.merge(first, %{
+      "start" => Enum.min(Enum.map(points, & &1["start"])),
+      "time" => Enum.max(Enum.map(points, & &1["time"])),
+      "count" => Enum.sum_by(points, & &1["count"]),
+      "sum" => Enum.sum_by(points, & &1["sum"]),
+      "buckets" => buckets,
+      "min" => points |> Enum.map(& &1["min"]) |> Enum.reject(&is_nil/1) |> Enum.min(fn -> nil end),
+      "max" => points |> Enum.map(& &1["max"]) |> Enum.reject(&is_nil/1) |> Enum.max(fn -> nil end)
+    })
   end
 
   @doc false
-  # A histogram's count, sum, and its 50th, 95th and 99th percentiles, each the middle of the bucket it's in.
+  # A histogram's count, sum, and its 50th, 95th and 99th percentiles, each placed in its bucket as a straight line
+  # from the bucket's lower bound to its upper, the lowest and the highest bound being the smallest and largest seen.
   def quantiles(%{"count" => count} = histogram) do
     %{
       count: count,
@@ -348,21 +314,26 @@ defmodule Telemetry.Read do
   end
 
   defp quantile(%{"count" => 0}, _q), do: nil
+  defp quantile(%{"buckets" => []} = histogram, _q), do: Float.round(histogram["sum"] / histogram["count"], 3)
 
-  defp quantile(%{"count" => count, "zeroCount" => zero, "buckets" => buckets, "scale" => scale}, q) do
+  defp quantile(%{"count" => count, "buckets" => buckets, "bounds" => bounds} = histogram, q) do
+    low = histogram["min"] || 0
+    high = histogram["max"] || List.last(bounds) || 0
+    edges = Enum.zip([low | bounds], bounds ++ [high])
     rank = q * count
-    base = :math.pow(2, :math.pow(2, -scale))
 
-    if rank <= zero do
-      0.0
-    else
-      Enum.reduce_while(buckets, zero, fn [bucket, n], below ->
-        if below + n >= rank, do: {:halt, {:at, bucket}}, else: {:cont, below + n}
-      end)
-      |> case do
-        {:at, bucket} -> Float.round(:math.pow(base, bucket + 0.5), 3)
-        _ -> Float.round(:math.pow(base, hd(List.last(buckets)) + 0.5), 3)
+    Enum.zip(buckets, edges)
+    |> Enum.reduce_while(0, fn {n, {from, to}}, below ->
+      if n > 0 and below + n >= rank do
+        {from, to} = {max(from, low), min(to, high)}
+        {:halt, {:at, from + (to - from) * (rank - below) / n}}
+      else
+        {:cont, below + n}
       end
+    end)
+    |> case do
+      {:at, at} -> Float.round(at / 1, 3)
+      _ -> Float.round(high / 1, 3)
     end
   end
 
