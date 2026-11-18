@@ -5,6 +5,7 @@ import { createStore } from "solid-js"
 export const [messages, setMessages] = createStore({
   actions: "Actions",
   back: "Back",
+  cantShowPage: "Can't show this page",
   cancel: "Cancel",
   clear: "Clear",
   close: "Close",
@@ -21,6 +22,7 @@ export const [messages, setMessages] = createStore({
   open: "Open",
   searchActions: "Search for actions…",
   showDetails: "Show Details",
+  tryAgain: "Try Again",
 })
 
 /// What a person reads of a tool's error: its first paragraph. What follows a blank line is for an agent, as MCP's

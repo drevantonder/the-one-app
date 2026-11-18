@@ -33,7 +33,7 @@
 /// the language with `Intl`, and the Web APIs a Worker has (`URL`, `TextEncoder`, `crypto`, `structuredClone`,
 /// `AbortController`, events, streams, timers) but `fetch`, as `call()` reaches the network, so an npm package that runs
 /// in a Worker runs in it (core/ui/src/strict/types/globals.d.ts says which). `render(() => <App />)` from `ui` draws
-/// the page. Words are in a `Text`, or in a component that takes them (a
+/// the page, and a page that throws while drawing shows what failed and Try Again, as `<Errored>` would. Words are in a `Text`, or in a component that takes them (a
 /// `Row`'s `heading`). A press is `onClick={() => ...}`, what's typed `onInput={(event) =>
 /// setText(event.currentTarget.value)}`, Return in it `onAction={save}`, a key `onKeyDown={(event) => event.key ===
 /// "Escape" && close()}`, a switch's `onChange={(event) => set(event.currentTarget.checked)}`. `bun run lint:strict apps/<app>/client`, from the repo's
@@ -61,6 +61,7 @@ export { Alert, confirm, Sheet } from "./sheet.tsx"
 export { SignIn } from "./sign-in.tsx"
 export { toast } from "./toast.tsx"
 export { Widget } from "./widget.tsx"
-export { Box, EditableText, Image, Layer, Path, render, Scroll, Text, Video } from "./strict/primitives.tsx"
+export { Box, EditableText, Image, Layer, Path, Scroll, Text, Video } from "./strict/primitives.tsx"
+export { render } from "./render.tsx"
 export { negative, styles } from "./styles.ts"
 export { tokens } from "./tokens.ts"
