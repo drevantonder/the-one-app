@@ -60,7 +60,8 @@ PY
     /usr/libexec/PlistBuddy -c "Delete :keychain-access-groups" "$work/e.plist" 2>/dev/null || true
     /usr/libexec/PlistBuddy -c "Delete :com.apple.developer.associated-domains" "$work/e.plist" 2>/dev/null || true
     if [[ -n ${3:-} ]]; then
-      plutil -extract com.apple.developer.associated-domains xml1 -o "$work/domains.plist" "$3"
+      # PlistBuddy, as plutil reads the key's dots as a path.
+      /usr/libexec/PlistBuddy -x -c "Print :com.apple.developer.associated-domains" "$3" >"$work/domains.plist"
       /usr/libexec/PlistBuddy -c "Add :com.apple.developer.associated-domains array" -c "Merge $work/domains.plist :com.apple.developer.associated-domains" "$work/e.plist"
     fi
     cp "$2" "$1/embedded.mobileprovision"
