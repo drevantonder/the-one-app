@@ -9,8 +9,8 @@ defmodule HomeScreen do
   broader owner they're within (a user's has their groups' and the network's too, a group's the network's), each app
   once. An app installed since goes there, not on a page. An app about whoever opens it (`subject: "user"`, as Vault
   and Devices say) is only in a user's, and is opened for them. A background app, one with no entrypoint of its own
-  (Gmail, Database), is only ever in the App Library, where it opens its App Store page: there's nothing of it to put
-  on a page.
+  (Gmail, Database), is only ever in the App Library, where it opens the App Store at its page: there's nothing of it
+  to put on a page. The App Store is an app like any other, in its app's category.
 
   Every tool here is asked for whoever's Home Screen it is, as an app opened from it is. What draws them is this
   app's `client/`: its app in the category `launcher`, which a client shows first.
@@ -53,7 +53,7 @@ defmodule HomeScreen do
       required: ["entrypoint", "app", "name", "icon", "category"]
     }
 
-    # An app as the App Library has it: an entrypoint of its, or an app with none, which opens its App Store page.
+    # An app as the App Library has it: an entrypoint of its, or an app with none, which opens the App Store at its page.
     listed =
       entrypoint
       |> put_in([:properties, :entrypoint], %{
@@ -110,7 +110,7 @@ defmodule HomeScreen do
         description: """
         Gives your Home Screen: its pages, in order, each what's on it and whether it's hidden (`pages`), its App
         Library, every app that runs for you by category, yours, your groups' and everyone's (`library`), the widgets
-        that could be put on a page (`widgets`), the App Store, whose screen comes after the App Library (`store`), the
+        that could be put on a page (`widgets`), the App Store, which opens a background app's page (`store`), the
         apps that open on its pages (`apps`), and whether you may arrange it. Asked for a group or for the network, it's
         theirs.
         """,
@@ -153,7 +153,7 @@ defmodule HomeScreen do
             widgets: %{type: "array", items: widget, description: "The widgets that could be put on a page"},
             store: %{
               type: ["string", "null"],
-              description: "The App Store, by the name it's installed by, whose screen comes after the App Library"
+              description: "The App Store, by the name it's installed by, which opens a background app's page"
             },
             apps: %{
               type: "array",
@@ -407,8 +407,8 @@ defmodule HomeScreen do
   # listed (`OneCore.Apps.Deploy.categories/0`), Admin only for the network's owners. That's what's installed for them
   # and for each broader owner they're within: a user's has theirs, their groups' and the network's, a group's its own
   # and the network's. An app installed for more than one of them is there once, as the narrowest's. An app about
-  # whoever opens it is only in a user's. Each is there as its entrypoints, but the launcher and the App Store, whose
-  # screen is the page after it, or with none, as itself, which opens its App Store page. Each says who it's
+  # whoever opens it is only in a user's. Each is there as its entrypoints, but the launcher, or with none, as itself,
+  # which opens the App Store at its page. Each says who it's
   # `installed` for, by what name, and whether whoever asks may remove it: an owner of whoever that is.
   defp library(call) do
     entries =
@@ -438,7 +438,7 @@ defmodule HomeScreen do
     do: [%{entrypoint: nil, app: app.app, name: app.title, icon: app.icon, category: app.category}]
 
   defp shown(app),
-    do: for(entrypoint <- app.entrypoints, entrypoint.category not in ["launcher", "app-store"], do: entry(app, entrypoint))
+    do: for(entrypoint <- app.entrypoints, entrypoint.category != "launcher", do: entry(app, entrypoint))
 
   # Whoever an App Library is for, then each broader owner they're within, narrowest first.
   defp scopes(%{subject: "network"}), do: ["network"]

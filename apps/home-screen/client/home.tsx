@@ -1,19 +1,19 @@
-// The Home Screen: three sections side by side, Home, the App Library and the App Store. Home is every owner's pages:
+// The Home Screen: two sections side by side, Home and the App Library, as an iPhone's. Home is every owner's pages:
 // yours, everyone's, then each of your groups', one owner above another, each a row of screenfuls, each as many of
 // their pages side by side as fit, a phone's page drawn larger to suit the window's height on a wide one, and centred
-// where there are fewer. The App Library, every app you can reach, by category, and the App Store are one page each,
-// for everyone, a screen wide, that scroll up and down. Left and right moves a screenful, as a phone's pages do,
-// through Home's screenfuls and on to the App Library and the App Store; up and down on Home moves between owners. The
-// pages move by hand, as a phone's do (pager.ts). The bar at the bottom is the three sections' icons, a house, ⊞
-// and a store, and nothing else. On Home, a small pill at the top in the middle says whose pages they are and opens
-// a list of every owner, and another just above the bar has the owner's page dots. A page
-// never scrolls: it's a fixed grid, and what doesn't fit goes on to the next. Whoever arranges an owner's pages edits
+// where there are fewer. The App Library, every app you can reach, by category, is one page, for everyone, a screen
+// wide, that scrolls up and down. Left and right moves a screenful, as a phone's pages do, through Home's screenfuls
+// and on to the App Library; up and down on Home moves between owners. The pages move by hand, as a phone's do
+// (pager.ts). On Home, a small pill at the top in the middle says whose pages they are and opens a list of every
+// owner. At the bottom, just clear of the home indicator, the dots pill has the owner's page dots, then the App
+// Library's glyph, lit there. The App Store is an app like any other, in the App Library. A page never scrolls: it's
+// a fixed grid, and what doesn't fit goes on to the next. Whoever arranges an owner's pages edits
 // them as a phone's Home Screen is edited: touch and hold an app or a widget (press and hold it, or right-click it,
 // with a mouse), then Edit Home Screen, or hold it a while longer, or touch and hold a page's empty space. An app held
 // in the App Library is carried onto any owner's pages. Where it is, what's open over it and the editing are one state
 // machine (machine.ts), whose snapshot is one signal here.
 import { createEffect, createMemo, createSignal, Errored, flush, For, Loading, onSettled, refresh, Show, untrack } from "solid-js"
-import { Dynamic, render, type JSX } from "@solidjs/web"
+import { render, type JSX } from "@solidjs/web"
 import { createActor } from "xstate"
 import { Button, call, changed, confirm, covers, Empty, haptic, Icon, List, Menu, open, pace, Problem, Row, Search, Sheet, Spinner, toast, Widget } from "ui"
 import "./home.css"
@@ -445,7 +445,7 @@ function Library(props: { owner: Owner; places: Record<string, HTMLElement> }) {
   )
 }
 
-/// An app's icon in the App Library: a tap opens it, or for an app with no entrypoint, its App Store page, and a finger
+/// An app's icon in the App Library: a tap opens it, or for an app with no entrypoint, the App Store at its page, and a finger
 /// that holds it opens its menu; moving it carries it onto whichever owner's pages it's dropped on.
 function LibraryEntrypoint(props: { entrypoint: Listed; owner: Owner }) {
   return (
@@ -464,49 +464,19 @@ function LibraryEntrypoint(props: { entrypoint: Listed; owner: Owner }) {
 
 /// An app of an App Library as an entrypoint, which it opens, or nothing, for an app with none.
 const opens = (listed: Listed): Entrypoint | undefined => (listed.entrypoint ? (listed as Entrypoint) : undefined)
-/// Opens an app of an App Library: its entrypoint, or for an app with none, its App Store page over the Home Screen.
-const press = (listed: Listed, owner: Owner, behind?: boolean, icon?: Element) => (opens(listed) ? launch(opens(listed)!, owner, behind, icon) : !behind && setAbout(listed.app))
+/// Opens an app of an App Library: its entrypoint, or for an app with none, the App Store at its page, by a link
+/// (`one:app-store#app=…`), growing out of its icon as any app does.
+const press = (listed: Listed, owner: Owner, behind?: boolean, icon?: Element) => {
+  if (opens(listed)) return launch(opens(listed)!, owner, behind, icon)
+  const store = untrack(owners)?.[0]?.store
+  if (behind || !store) return
+  const from = icon?.getBoundingClientRect()
+  open(`${store}#app=${encodeURIComponent(listed.app)}`, { from: from && { x: from.x, y: from.y, width: from.width, height: from.height } })
+}
 
 /// Who a call about an install is for: a group or the network, or for a user's own, nobody said.
 const subjectOf = (installed: string) => (installed.startsWith("users/") ? undefined : installed)
 const and = (words: string[]) => new Intl.ListFormat("en", { type: "conjunction" }).format(words)
-
-/// The app whose App Store page is open over the Home Screen, by its artifact.
-const [about, setAbout] = createSignal<string>()
-
-/// An app's App Store page, over the Home Screen, as the App Store draws it (its `Listing` export), for an app with no
-/// entrypoint of its own: whether it's installed, its version, Update, Uninstall, what it requires and what requires
-/// it. Back, or the device's own, closes it.
-function About(props: { app: string; store: string }) {
-  const listing = createMemo(() => import(/* @vite-ignore */ new URL(`../../${props.store}/client/store.js`, document.baseURI).href).then((module) => module.Listing))
-  onSettled(() => covers(() => setAbout()))
-  return (
-    <div class="about">
-      <Errored fallback={(error) => <Problem heading="Can't show it" text={error() as Error} />}>
-        <Loading>
-          <Dynamic component={listing()} app={props.app} onBack={() => setAbout()} />
-        </Loading>
-      </Errored>
-    </div>
-  )
-}
-
-/// The App Store's screen, the page after the App Library: the App Store app's own (its `store` export), beside this
-/// page where a client serves each app's. It's loaded once it's first near: once the App Library or it is shown.
-function StorePage(props: { name: string; shown: boolean }) {
-  const store = createMemo(() => (props.shown ? import(/* @vite-ignore */ new URL(`../../${props.name}/client/store.js`, document.baseURI).href).then((module) => module.default) : undefined))
-  return (
-    <section class="page store scrolls" aria-label="App Store">
-      <Show when={props.shown}>
-        <Errored fallback={(error) => <Problem heading="Can't show the App Store" text={error() as Error} />}>
-          <Loading>
-            <Dynamic component={store()} />
-          </Loading>
-        </Errored>
-      </Show>
-    </section>
-  )
-}
 
 /// A category opened over its App Library: its name, and its apps in a panel that grows out of its place there and
 /// shrinks back into it, as an iPhone's folder does, while what's behind it blurs. Its apps open only once it has
@@ -931,25 +901,13 @@ function Overview(props: { owner: Owner; index: number }) {
   )
 }
 
-/// Each section's mark, Phosphor's house, squares-four and storefront, and the name a person hears for it.
-const SECTIONS: Record<Kind, { name: string; path: string }> = {
-  home: {
-    name: "Home",
-    path: "M219.31,108.68l-80-80a16,16,0,0,0-22.62,0l-80,80A15.87,15.87,0,0,0,32,120v96a8,8,0,0,0,8,8h64a8,8,0,0,0,8-8V160h32v56a8,8,0,0,0,8,8h64a8,8,0,0,0,8-8V120A15.87,15.87,0,0,0,219.31,108.68ZM208,208H160V152a8,8,0,0,0-8-8H104a8,8,0,0,0-8,8v56H48V120l80-80,80,80Z",
-  },
-  library: {
-    name: "App Library",
-    path: "M104,40H56A16,16,0,0,0,40,56v48a16,16,0,0,0,16,16h48a16,16,0,0,0,16-16V56A16,16,0,0,0,104,40Zm0,64H56V56h48v48Zm96-64H152a16,16,0,0,0-16,16v48a16,16,0,0,0,16,16h48a16,16,0,0,0,16-16V56A16,16,0,0,0,200,40Zm0,64H152V56h48v48Zm-96,32H56a16,16,0,0,0-16,16v48a16,16,0,0,0,16,16h48a16,16,0,0,0,16-16V152A16,16,0,0,0,104,136Zm0,64H56V152h48v48Zm96-64H152a16,16,0,0,0-16,16v48a16,16,0,0,0,16,16h48a16,16,0,0,0,16-16V152A16,16,0,0,0,200,136Zm0,64H152V152h48v48Z",
-  },
-  store: {
-    name: "App Store",
-    path: "M232,96a7.89,7.89,0,0,0-.3-2.2L217.35,43.6A16.07,16.07,0,0,0,202,32H54A16.07,16.07,0,0,0,38.65,43.6L24.31,93.8A7.89,7.89,0,0,0,24,96h0v16a40,40,0,0,0,16,32v72a8,8,0,0,0,8,8H208a8,8,0,0,0,8-8V144a40,40,0,0,0,16-32V96ZM54,48H202l11.42,40H42.61Zm50,56h48v8a24,24,0,0,1-48,0Zm-16,0v8a24,24,0,0,1-35.12,21.26,7.88,7.88,0,0,0-1.82-1.06A24,24,0,0,1,40,112v-8ZM200,208H56V151.2a40.57,40.57,0,0,0,8,.8,40,40,0,0,0,32-16,40,40,0,0,0,64,0,40,40,0,0,0,32,16,40.57,40.57,0,0,0,8-.8Zm4.93-75.8a8.08,8.08,0,0,0-1.8,1.05A24,24,0,0,1,168,112v-8h48v8A24,24,0,0,1,204.93,132.2Z",
-  },
-}
+/// The App Library's glyph at the end of the dots, a 2×2 grid, Phosphor's squares-four.
+const LIBRARY = "M104,40H56A16,16,0,0,0,40,56v48a16,16,0,0,0,16,16h48a16,16,0,0,0,16-16V56A16,16,0,0,0,104,40Zm0,64H56V56h48v48Zm96-64H152a16,16,0,0,0-16,16v48a16,16,0,0,0,16,16h48a16,16,0,0,0,16-16V56A16,16,0,0,0,200,40Zm0,64H152V56h48v48Zm-96,32H56a16,16,0,0,0-16,16v48a16,16,0,0,0,16,16h48a16,16,0,0,0,16-16V152A16,16,0,0,0,104,136Zm0,64H56V152h48v48Zm96-64H152a16,16,0,0,0-16,16v48a16,16,0,0,0,16,16h48a16,16,0,0,0,16-16V152A16,16,0,0,0,200,136Zm0,64H152V152h48v48Z"
 
-/// An owner's page dots, a row of the dots pill: one for each of their Home screenfuls, where there's more than one,
-/// the one shown lit. Tapping one goes to its screenful, and sliding a finger along them moves a screenful for every 28
-/// points with a tick at each, as a phone's dots do. While the owner's pages are edited, they open the page overview.
+/// An owner's page dots, a row of the dots pill: one for each of their Home screenfuls, even one alone, the one shown
+/// lit. Tapping one goes to its screenful, and sliding a finger along them moves a screenful for every 28 points with
+/// a tick at each, as a phone's dots do, on past the last to the App Library. While the owner's pages are edited, they
+/// open the page overview.
 function Dots(props: { owner: Owner; index: number; count: number }) {
   const current = () => (seen().owner === props.index ? seen().screen : (state().context.last[props.index] ?? 0))
   let quiet = 0
@@ -962,7 +920,7 @@ function Dots(props: { owner: Owner; index: number; count: number }) {
       if (!sliding && Math.abs(across) < 10) return
       sliding = true
       dots.setPointerCapture(down.pointerId)
-      const screen = Math.max(0, Math.min(props.count - 1, from + Math.trunc(across / 28)))
+      const screen = Math.max(0, Math.min(props.count, from + Math.trunc(across / 28)))
       if (screen === current()) return
       home.send({ type: "go", screen })
       haptic("selection")
@@ -981,7 +939,7 @@ function Dots(props: { owner: Owner; index: number; count: number }) {
   }
   return (
     <nav class="dots" ref={(nav) => sized.observe(nav)} aria-label={`${props.owner.name}'s pages`} inert={seen().owner !== props.index || undefined} onPointerDown={slide}>
-      <For each={props.count > 1 ? Array.from({ length: props.count }, (_, at) => at) : []}>
+      <For each={Array.from({ length: Math.max(1, props.count) }, (_, at) => at)}>
         {(screen) => (
           <button type="button" class="dot" aria-label={`Page ${screen + 1} of ${props.count}`} aria-current={current() === screen ? "page" : undefined} onClick={press(screen)}>
             <i />
@@ -995,7 +953,7 @@ function Dots(props: { owner: Owner; index: number; count: number }) {
 /// The caret under the owner's name, Phosphor's caret-down.
 const CARET = "M213.66,101.66l-80,80a8,8,0,0,1-11.32,0l-80-80A8,8,0,0,1,53.66,90.34L128,164.69l74.34-74.35a8,8,0,0,1,11.32,11.32Z"
 
-/// The owner pill, at the top of Home in the middle, in the bar's glass: whose pages they are, "You ⌄", which opens the
+/// The owner pill, at the top of Home in the middle, in Liquid Glass: whose pages they are, "You ⌄", which opens the
 /// list of every owner, the current one ticked. Its name rolls as the owners move. While pages are edited, + and Done
 /// are either side of it, and it opens nothing.
 function OwnerPill(props: { owners: Owner[] }) {
@@ -1031,13 +989,20 @@ function OwnerPill(props: { owners: Owner[] }) {
   )
 }
 
-/// The dots pill, just above the bar on Home, in the bar's glass, as iOS 26's page dots float above the Dock: the dots
-/// of the owner shown. It stays where it is as the owners move, its dots rolling to the next owner's, and it's gone
-/// for an owner with one page.
+/// The dots pill, at the bottom in the middle, just clear of the home indicator, in the owner pill's glass: the dots
+/// of the owner shown, then the App Library's glyph, which says there's one more page and goes there, lit while it's
+/// shown, as the dots are. It stays where it is as the owners move, and on the App Library too, its dots rolling to
+/// the next owner's and taking their number. While pages are edited the glyph stays, dimmed, and goes nowhere.
 function DotsPill(props: { owners: Owner[]; laid: Kind[][] }) {
   const count = (owner: number) => (props.laid[owner] ?? []).filter((kind) => kind === "home").length
+  const library = () => props.laid[seen().owner]?.[seen().screen] === "library"
+  const go = () => {
+    if (state().matches("editing")) return
+    const screen = props.laid[state().context.at.owner]?.indexOf("library") ?? -1
+    if (screen >= 0) home.send({ type: "go", screen })
+  }
   return (
-    <div class={["dots-pill", "pill", { alone: count(seen().owner) < 2 }]}>
+    <div class="dots-pill pill">
       <div class="roll" ref={rolling}>
         <div class="rows">
           <For each={props.owners} keyed={(owner) => owner.key}>
@@ -1045,35 +1010,12 @@ function DotsPill(props: { owners: Owner[]; laid: Kind[][] }) {
           </For>
         </div>
       </div>
+      <button type="button" class="glyph" aria-label="App Library" aria-current={library() ? "page" : undefined} aria-disabled={state().matches("editing") ? "true" : undefined} onClick={go}>
+        <svg viewBox="0 0 256 256" aria-hidden="true">
+          <path d={LIBRARY} />
+        </svg>
+      </button>
     </div>
-  )
-}
-
-/// The bar: one capsule floating at the bottom in the middle, as iOS 26's tab bars are, with the three sections'
-/// icons and no words, the one shown in a pill of its own. Each goes to the start of its section. While pages are
-/// edited the App Library and the App Store stay, dimmed, and go nowhere.
-function Toolbar(props: { laid: Kind[][] }) {
-  const at = () => state().context.at.owner
-  const section = () => props.laid[seen().owner]?.[seen().screen] ?? "home"
-  const go = (kind: Kind) => () => {
-    if (state().matches("editing")) return
-    const screen = props.laid[at()]?.indexOf(kind) ?? 0
-    if (screen >= 0) home.send({ type: "go", screen })
-  }
-  return (
-    <nav class="toolbar" aria-label="Sections">
-      <For each={["home", "library", "store"] as Kind[]}>
-        {(kind) => (
-          <Show when={kind === "home" || props.laid[at()]?.includes(kind)}>
-            <button type="button" class={["section", { active: section() === kind }]} aria-label={SECTIONS[kind].name} aria-current={section() === kind ? "page" : undefined} aria-disabled={(kind !== "home" && state().matches("editing")) || undefined} onClick={go(kind)}>
-              <svg class="ui-icon" viewBox="0 0 256 256" aria-hidden="true">
-                <path d={SECTIONS[kind].path} />
-              </svg>
-            </button>
-          </Show>
-        )}
-      </For>
-    </nav>
   )
 }
 
@@ -1205,11 +1147,10 @@ function HomeScreen(props: { owners: Owner[] }) {
     }),
   )
   /// Each owner's screenfuls: Home's, each as many of their pages side by side as fit, from which page and how many;
-  /// then the App Library and the App Store, the same for everyone, a screenful each.
+  /// then the App Library, the same for everyone, a screenful.
   const screens = createMemo(() => {
     const fit = room().fit
-    const after: { kind: Kind; from: number; count: number }[] = [{ kind: "library", from: 0, count: 1 }, ...(props.owners[0]?.store ? [{ kind: "store" as Kind, from: 0, count: 1 }] : [])]
-    return pages().map((homes) => [...Array.from({ length: Math.ceil(homes.length / fit) }, (_, at) => ({ kind: "home" as Kind, from: at * fit, count: Math.min(fit, homes.length - at * fit) })), ...after])
+    return pages().map((homes) => [...Array.from({ length: Math.ceil(homes.length / fit) }, (_, at) => ({ kind: "home" as Kind, from: at * fit, count: Math.min(fit, homes.length - at * fit) })), { kind: "library" as Kind, from: 0, count: 1 }])
   })
   /// Each owner's Home screenfuls, which their row of pages has.
   const homes = (owner: number) => screens()[owner]?.filter(({ kind }) => kind === "home") ?? []
@@ -1256,12 +1197,12 @@ function HomeScreen(props: { owners: Owner[] }) {
   /// The owner shown, nearest where the owners are as they move up and down.
   const shownOwner = () => Math.max(0, Math.min(owned().length - 1, Math.round(down.value / height())))
   /// How far apart screenfuls are, a screen's width; how many an owner's row stops at, Home's and then the App
-  /// Library's and the App Store's; and how far along its Home's last is.
+  /// Library's; and how far along its Home's last is.
   const pitch = () => root.clientWidth
   const stops = (owner: number) => untrack(screens)[owner]?.length || 1
   const homeEnd = (owner: number) => Math.max(0, untrack(() => homes(owner).length) - 1) * pitch()
-  /// The owners, up and down, and where each is across: one way along Home's screenfuls and on through the App Library
-  /// and the App Store, which the owner shown takes the sections past Home along, as the pager moves them.
+  /// The owners, up and down, and where each is across: one way along Home's screenfuls and on to the App Library,
+  /// which the owner shown takes the sections past Home along, as the pager moves them.
   const down: Spring = spring((y) => {
     main.style.translate = `0 ${-y}px`
     roll(y / height())
@@ -1280,7 +1221,7 @@ function HomeScreen(props: { owners: Owner[] }) {
   let carried: HTMLElement | undefined
   let settledUnder: (() => void) | undefined
   const rested = (one: Spring | undefined) => one && one.value === one.target && !one.velocity && settledUnder?.()
-  /// The owner and screenful nearest where they are, which the bar and the pills follow.
+  /// The owner and screenful nearest where they are, which the pills follow.
   const look = () => {
     const owner = shownOwner()
     setSeen({ owner, screen: Math.round(sideways(owner).value / pitch()) })
@@ -1663,15 +1604,9 @@ function HomeScreen(props: { owners: Owner[] }) {
 
   const opened = () => state().context.category
   const held = () => (state().matches("holding") ? state().context.held : undefined)
-  /// Once the App Library or the App Store has been shown, the App Store's screen is loaded, and stays.
-  const [near, setNear] = createSignal(false)
-  createEffect(
-    () => kindOf(seen().owner) !== "home",
-    (past) => void (past && setNear(true)),
-  )
   const owner = () => props.owners[state().context.at.owner]
   return (
-    <div class={["home", { wide: room().wide, editing: state().matches("editing"), carrying: state().matches({ editing: "dragging" }) }]} style={{ "--pages-scale": room().scale, "--pages-side": `${room().side}px`, "--pages-gap": `${room().gap}px`, "--pages": room().fit, "--pages-shown": screens()[state().context.at.owner]?.[state().context.at.screen]?.count ?? 1, "--hold": `${HOLD}ms` }} ref={root} onClick={(event) => Date.now() > quiet && state().matches({ editing: "still" }) && !(event.target as Element).closest(".cell, .top, .pill, .toolbar, .overview, .ui-dialog") && home.send({ type: "done" })}>
+    <div class={["home", { wide: room().wide, editing: state().matches("editing"), carrying: state().matches({ editing: "dragging" }) }]} style={{ "--pages-scale": room().scale, "--pages-side": `${room().side}px`, "--pages-gap": `${room().gap}px`, "--pages": room().fit, "--pages-shown": screens()[state().context.at.owner]?.[state().context.at.screen]?.count ?? 1, "--hold": `${HOLD}ms` }} ref={root} onClick={(event) => Date.now() > quiet && state().matches({ editing: "still" }) && !(event.target as Element).closest(".cell, .top, .pill, .overview, .ui-dialog") && home.send({ type: "done" })}>
       <div class="sections" ref={sections}>
         <main class="home-section" aria-label="Home">
           <div class="owners" ref={main}>
@@ -1696,12 +1631,10 @@ function HomeScreen(props: { owners: Owner[] }) {
             </For>
           </div>
           <OwnerPill owners={props.owners} />
-          <DotsPill owners={props.owners} laid={laid().screens} />
         </main>
         <Library owner={props.owners[0]} places={places} />
-        <Show when={props.owners[0].store}>{(name) => <StorePage name={name()} shown={near()} />}</Show>
       </div>
-      <Toolbar laid={laid().screens} />
+      <DotsPill owners={props.owners} laid={laid().screens} />
       <Show when={state().matches("editing")}>
         <EditBar />
       </Show>
@@ -1721,7 +1654,6 @@ function HomeScreen(props: { owners: Owner[] }) {
           </>
         )}
       </Show>
-      <Show when={about() && props.owners.find((owner) => owner.store)?.store}>{(store) => <About app={about()!} store={store()} />}</Show>
     </div>
   )
 }

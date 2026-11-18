@@ -14,7 +14,7 @@ Home Screen. Apps are installed with the App Store, whose `app-store_marketplace
 
 Its words:
 
-- **Home Screen**: every owner's pages, then the App Library and the App Store, one each for everyone you can reach.
+- **Home Screen**: every owner's pages, then the App Library, one for everyone you can reach.
   An owner is a user, a group, or the network, which a person reads as Everyone. A user sees their pages, everyone's
   and their groups', and moves between them with the owner switcher.
 - **Page**: a fixed grid of apps and widgets, four across and six down, which never scrolls: what doesn't fit goes on

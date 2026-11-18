@@ -2,8 +2,8 @@
 // Home pages, as a phone's Home Screen is edited. home.tsx keeps its snapshot as one signal and draws from it, tells it
 // what happened, and does what it says: moves the pages (`slide`), and keeps what was edited (`arrange`).
 //
-//   where it is: home { owner, screen } | library | store
-//     step(screen): Home's screenfuls, then the App Library, then the App Store
+//   where it is: home { owner, screen } | library
+//     step(screen): Home's screenfuls, then the App Library
 //     step(owner): on Home only.   list ─pick─► another owner: on Home only
 //   open ─► category (App Library), as now
 //   holding (an app in the App Library) ─lift─► editing.dragging, with Home brought forward on the last owner
@@ -18,14 +18,15 @@
 // goes on, and an install finishes where it was dropped, or goes back, as it would have in front.
 //
 // Only Home is an owner's: you, everyone and each of your groups have Home pages, one owner above another. The App
-// Library and the App Store come after Home's screenfuls, and are one each for everyone you can reach.
+// Library comes after Home's screenfuls, as an iPhone's does, and is one for everyone you can reach. The App Store is
+// an app like any other, in it.
 import { assign, emit, raise, setup } from "xstate"
 import type { Item, Listed } from "./types.ts"
 
 /// The sections, in order: Home, fixed grids of apps and widgets, as a phone's Home Screen pages, a screenful or more,
-/// as many of its pages side by side as fit (one on a phone); then the App Library and the App Store, a screenful
-/// each, which scroll up and down themselves.
-export type Kind = "home" | "library" | "store"
+/// as many of its pages side by side as fit (one on a phone); then the App Library, a screenful, which scrolls up and
+/// down itself.
+export type Kind = "home" | "library"
 
 
 /// A Home page's grid: four across and six down, as a phone's, whatever room it has.
@@ -100,9 +101,9 @@ export interface Editing {
   pages: Page[]
 }
 
-/** Where the Home Screen is: on Home, an owner and a screenful of their pages; past them, the App Library or the App
- * Store, the same for every owner, with `owner` the one Home goes back to. `screen` counts on from Home's screenfuls
- * through the App Library and the App Store, so a step is one along. */
+/** Where the Home Screen is: on Home, an owner and a screenful of their pages; past them, the App Library, the same
+ * for every owner, with `owner` the one Home goes back to. `screen` counts on from Home's screenfuls to the App
+ * Library, so a step is one along. */
 export interface At {
   owner: number
   screen: number
@@ -126,7 +127,7 @@ export interface Held {
 export type Drop = "place" | "ask" | "refuse"
 
 interface Context {
-  /** Each owner's screenfuls, each by its section, in order: Home's, then the App Library and the App Store. */
+  /** Each owner's screenfuls, each by its section, in order: Home's, then the App Library. */
   screens: Kind[][]
   /** How many Home pages a screenful has side by side. */
   fit: number
@@ -153,7 +154,7 @@ export type Event =
   /** One screenful along, or one owner: a key, a wheel or a trackpad. */
   | { type: "step"; screen: 1 | -1 }
   | { type: "step"; owner: 1 | -1 }
-  /** A screenful of this owner's, by its section's icon or dot. */
+  /** A screenful of this owner's, by its dot or the App Library's glyph after them. */
   | { type: "go"; screen: number }
   /** A link to one of the screenfuls (`one:home-screen#library`): there at once, whatever was open. */
   | { type: "link"; screen: number }
@@ -247,7 +248,7 @@ const everyone = ({ editing, drafts }: Context) => (editing ? [editing, ...draft
 export const machine = setup({
   types: {} as { context: Context; events: Event; emitted: Emitted },
   guards: {
-    // A step goes somewhere, and a vertical one only on Home: the App Library and the App Store scroll themselves.
+    // A step goes somewhere, and a vertical one only on Home: the App Library scrolls itself.
     moves: ({ context, event }) => {
       const step = event as Extract<Event, { type: "step" }>
       const to = stepped(context, step)
@@ -271,8 +272,8 @@ export const machine = setup({
     refuse: ({ event }) => (event as Extract<Event, { type: "drop" }>).to === "refuse",
   },
   actions: {
-    // Every owner keeps the screenful they were on, as far as they still have it: in the App Library or the App Store,
-    // still there, however many of Home's come before it.
+    // Every owner keeps the screenful they were on, as far as they still have it: in the App Library, still there,
+    // however many of Home's come before it.
     lay: assign(({ context, event }) => {
       const { screens, fit } = event as Extract<Event, { type: "laid" }>
       const last = screens.map((kinds, owner) => {
