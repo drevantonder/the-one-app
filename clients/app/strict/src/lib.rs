@@ -24,5 +24,5 @@ pub use view::{Appearance, Asked, Breadcrumb, Cursor, FONT, Notice, Panel, Scree
 
 /// This host's runtime version (`RUNTIME_VERSION` in core/ui/src/strict/renderer.ts). An entrypoint that needs a
 /// later one opens in a web view.
-pub const RUNTIME_VERSION: u32 = 3;
+pub const RUNTIME_VERSION: u32 = 4;
 

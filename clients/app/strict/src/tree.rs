@@ -174,6 +174,7 @@ impl Node {
             "wheel" => "onWheel",
             "scroll" => "onScroll",
             "layout" => "onLayout",
+            "intersection" => "onIntersection",
             _ => return false,
         };
         self.is(prop)

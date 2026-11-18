@@ -166,6 +166,8 @@ pub struct Screen {
     /// was last told it is.
     autofocused: std::collections::HashSet<Id>,
     laid_out: HashMap<Id, Rect>,
+    /// Whether each node listening for `intersection` was last told it's near the window.
+    intersecting: HashMap<Id, bool>,
     /// What takes the keyboard, in the order Tab goes, as it was last painted.
     tab_order: Vec<Id>,
     images: HashMap<String, Option<Arc<Picture>>>,
@@ -234,6 +236,7 @@ impl Screen {
             seen: None,
             autofocused: Default::default(),
             laid_out: HashMap::new(),
+            intersecting: HashMap::new(),
             tab_order: Vec::new(),
             images: HashMap::new(),
             fetched: HashMap::new(),
@@ -533,6 +536,8 @@ impl Screen {
             since: self.changed.take().unwrap_or(now).min(now),
             transitions: &mut self.transitions,
             animating: false,
+            intersections: Vec::new(),
+            near: Bounds { origin: point(-window.size.width / 2.0, -window.size.height / 2.0), size: Size { width: window.size.width * 2.0, height: window.size.height * 2.0 } },
             window,
             modal: None,
             turn: TransformationMatrix::unit(),
@@ -591,7 +596,7 @@ impl Screen {
         let home = self.breadcrumb.as_ref().map(|crumb| painter.breadcrumb(crumb, self.insets.top, self.home.as_ref().is_some_and(hovering)));
         self.action = self.notice.as_ref().and_then(|notice| painter.notice(notice, self.insets.top, self.action.as_ref().is_some_and(hovering)));
         self.glass = painter.glass.take().unwrap_or_default();
-        let (placed, mut tab_order, rects, animating, modal, wanted) = (painter.placed, painter.tab_order, painter.rects, painter.animating, painter.modal, painter.wanted);
+        let (placed, mut tab_order, rects, animating, modal, wanted, intersections) = (painter.placed, painter.tab_order, painter.rects, painter.animating, painter.modal, painter.wanted, painter.intersections);
         // What it wanted to draw that's by an address is fetched by its window, once.
         for src in wanted {
             if !self.fetched.contains_key(&src) {
@@ -637,6 +642,15 @@ impl Screen {
             self.laid_out.insert(id, rect);
             self.tell(id, "layout", json!({"rect": {"x": rect.x, "y": rect.y, "width": rect.width, "height": rect.height}}));
             self.again = true;
+        }
+        // Whether each node that listens for `intersection` is near the window, as it's first laid out and whenever
+        // that changes.
+        self.intersecting.retain(|id, _| self.tree.nodes.contains_key(id));
+        for (id, near) in intersections {
+            if self.intersecting.insert(id, near) != Some(near) {
+                self.tell(id, "intersection", json!({"isIntersecting": near}));
+                self.again = true;
+            }
         }
     }
 
@@ -942,6 +956,10 @@ impl Screen {
                 None => order.first().copied(),
             };
             self.focus(next);
+            // What it comes to scrolls into view, as a browser's does, so Tab goes on through a long list.
+            if let Some(next) = next {
+                self.reveal(next);
+            }
             // An input the keyboard comes to by Tab has its text selected, as a browser's and GTK's do.
             if let Some(next) = next.filter(|next| self.fields.contains_key(next)) {
                 self.edit(next, Field::select_all);
@@ -1334,6 +1352,11 @@ struct Painter<'a> {
     since: f64,
     transitions: &'a mut transition::Transitions,
     animating: bool,
+    /// Whether each node listening for `intersection` is near the window: within half the window's size of what shows
+    /// of it, as an `IntersectionObserver` with a `rootMargin` and `scrollMargin` of 50% says; and where what's painted
+    /// now is near the window, what clips it cut to it and what scrolls it grown as the window is.
+    intersections: Vec<(Id, bool)>,
+    near: Bounds<f32>,
     /// The window, where what's fixed is placed.
     window: Bounds<f32>,
     /// The topmost `aria-modal` dialog drawn, which holds the keyboard.
@@ -1597,6 +1620,12 @@ impl Painter<'_> {
         });
     }
 
+    /// `bounds` grown by half the window's size on each side, as near it as an `IntersectionObserver`'s margin of 50%.
+    fn grown(&self, bounds: Bounds<f32>) -> Bounds<f32> {
+        let (x, y) = (self.window.size.width / 2.0, self.window.size.height / 2.0);
+        Bounds { origin: point(bounds.origin.x - x, bounds.origin.y - y), size: Size { width: bounds.size.width + 2.0 * x, height: bounds.size.height + 2.0 * y } }
+    }
+
     /// The box `bounds` covers in the window once it's turned as what's painted now is: itself, where nothing's turned.
     fn turned(&self, bounds: Bounds<f32>) -> Bounds<f32> {
         if self.turn == TransformationMatrix::unit() {
@@ -1667,6 +1696,9 @@ impl Painter<'_> {
         }
         let drawn = self.turned(bounds);
         self.rects.insert(id, Rect { x: drawn.origin.x, y: drawn.origin.y, width: drawn.size.width, height: drawn.size.height });
+        if node.listens("intersection") {
+            self.intersections.push((id, drawn.intersects(&self.near)));
+        }
         let radii = Corners {
             top_left: corner(look.radii.top_left, bounds.size),
             top_right: corner(look.radii.top_right, bounds.size),
@@ -1745,13 +1777,17 @@ impl Painter<'_> {
             Kind::Box | Kind::Scroll => {
                 let mut child_mask = mask;
                 let mut child_offset = laid_out.origin;
+                let around = self.near;
+                let mut near = self.window;
                 if look.clips || look.scrolls {
                     let padding_box = transform.bounds(Bounds {
                         origin: point(laid_out.origin.x + laid.border.left, laid_out.origin.y + laid.border.top),
                         size: Size { width: laid.size.width - laid.border.left - laid.border.right, height: laid.size.height - laid.border.top - laid.border.bottom },
                     });
                     child_mask = self.turned(padding_box).intersect(&mask);
+                    near = self.turned(padding_box);
                     if look.scrolls {
+                        near = self.grown(near);
                         let inner = Size { width: laid.size.width - laid.border.left - laid.border.right, height: laid.size.height - laid.border.top - laid.border.bottom };
                         let most = point((laid.scrollable_overflow_rect.right - inner.width).max(0.0), (laid.scrollable_overflow_rect.bottom - inner.height).max(0.0));
                         let now = self.scrolled.entry(id).or_insert(point(0.0, 0.0));
@@ -1777,14 +1813,18 @@ impl Painter<'_> {
                     })
                     .collect();
                 children.sort_by_key(|(at, _, z, positioned)| (*z, *positioned, *at));
+                let inside = if look.clips || look.scrolls { around.intersect(&near) } else { around };
                 for (_, child, _, _) in children {
                     if self.layout.leaf(child).fixed {
                         let window = self.window;
+                        self.near = self.grown(window);
                         self.paint(child, point(0.0, 0.0), Transform::NONE, window, 1.0, Some(id), pointer);
                     } else {
+                        self.near = inside;
                         self.paint(child, child_offset, transform, child_mask, opacity, Some(id), pointer);
                     }
                 }
+                self.near = around;
                 return;
             }
         }
