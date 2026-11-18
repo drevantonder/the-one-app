@@ -25,6 +25,8 @@ serde_urlencoded = "0.7"
 sha2 = "0.11"
 # Names the key file without replacing one that's there, on every system, a phone included.
 tempfile = "3"
+# A random part of each wait before it asks its network again, so devices that lost it together don't all ask at once.
+fastrand = "2"
 tokio.workspace = true
 
 [build-dependencies]

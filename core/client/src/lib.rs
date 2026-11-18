@@ -1067,12 +1067,20 @@ impl Client {
         })
     }
 
+    /// Has a client whose network didn't answer ask it again now, as the device says it's back online or its app is
+    /// in front again, rather than when it next would (`reconnecting`). One that's answered asks nothing.
+    pub fn reconnect(&self) {
+        if *self.connection.borrow() == Connection::Offline {
+            self.again.notify_one();
+        }
+    }
+
     /// Asks its network again now, as its person does by trying again: where it didn't answer, and where a server
     /// refused it for being behind (`behind`), which it's no longer taken to be until a server refuses it again, as
     /// one updated or rolled back since may talk with it. What it asks is the list of its files, as itself, which a
     /// server refuses while it's behind: it answers once it has, failing with why where it wasn't answered.
     pub async fn retry(&self) -> Result<()> {
-        self.again.notify_one();
+        self.reconnect();
         self.behind.send_replace(None);
         self.fresh("resources/list", &json!({})).await.map(drop)
     }
@@ -1899,27 +1907,30 @@ async fn sessions(client: std::sync::Weak<Client>) {
     }
 }
 
-/// While a client's network doesn't answer, it tries again by itself, sooner at first and then less often, and at
-/// once when its person tries again (`retry`), as the device or its network may be back any time: what's outside a
+/// While a client's network doesn't answer, it tries again by itself, after 1 s, then 2 s, then every 3 s at most,
+/// each wait a random time from half of it to all of it, and at once when its person tries again (`retry`) or the
+/// device is back online or in front (`reconnect`), as the device or its network may be back any time: what's outside a
 /// device comes and goes, and no person should have to ask for what was going to come back anyway. A device that's
 /// opening asks its network's address to let it in, and one that's in and watching asks a server. Once its network
 /// answers again, it says again that it's watching, to every server, since one that was starting may not have heard.
 async fn reconnecting(client: std::sync::Weak<Client>) {
+    const FIRST: Duration = Duration::from_secs(1);
+    const MOST: Duration = Duration::from_secs(3);
     let Some((mut connection, tried)) = client.upgrade().map(|client| (client.connection(), client.again.clone())) else {
         return;
     };
     // Where it was when it last looked: answered after `Offline` or `Reconnecting`, it's back.
-    let (mut again, mut was) = (Duration::from_secs(1), *connection.borrow());
+    let (mut again, mut was) = (FIRST, *connection.borrow());
     loop {
         let now = *connection.borrow_and_update();
         let before = std::mem::replace(&mut was, now);
         if now == Connection::Offline {
             tokio::select! {
-                _ = sleep(again) => {}
+                _ = sleep(again.mul_f64(0.5 + fastrand::f64() / 2.0)) => {}
                 _ = tried.notified() => {}
                 changed = connection.changed() => if changed.is_err() { return } else { continue },
             }
-            again = (again * 2).min(Duration::from_secs(30));
+            again = (again * 2).min(MOST);
             let Some(client) = client.upgrade() else { return };
             let session = client.session.borrow().clone();
             match session {
@@ -1936,7 +1947,7 @@ async fn reconnecting(client: std::sync::Weak<Client>) {
             continue;
         }
         if now == Connection::Online && matches!(before, Connection::Offline | Connection::Reconnecting) {
-            again = Duration::from_secs(1);
+            again = FIRST;
             let Some(client) = client.upgrade() else { return };
             if client.watching.load(Ordering::Relaxed) {
                 client.watch(true).await;

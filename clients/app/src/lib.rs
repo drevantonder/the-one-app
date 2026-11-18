@@ -312,6 +312,13 @@ async fn retry(app: AppHandle) -> Result<(), String> {
     app.state::<Views>().client.retry().await.map_err(|error| error.to_string())
 }
 
+/// The device is back online or the window in front again, so a client whose network didn't answer asks it again
+/// now (`Client::reconnect`).
+#[tauri::command]
+fn reconnect(views: State<'_, Views>) {
+    views.client.reconnect();
+}
+
 /// Signs this device out once its person has removed it from their devices (Devices' Sign Out): what it kept of
 /// theirs goes, and the window follows it to the sign-in page.
 #[tauri::command]
@@ -930,6 +937,7 @@ pub fn run() {
             visible,
             close,
             retry,
+            reconnect,
             sign_out,
             start,
             push,

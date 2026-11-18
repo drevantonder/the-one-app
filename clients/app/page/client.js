@@ -1315,6 +1315,9 @@ addEventListener("popstate", (event) => {
 })
 
 listen("connection", ({ payload }) => on({ type: "connection", connection: payload }))
+// Back online, or back in front, its network is tried again now if it didn't answer.
+for (const [target, event] of /** @type {const} */ ([[window, "online"], [document, "visibilitychange"]]))
+  target.addEventListener(event, () => document.visibilityState === "visible" && invoke("reconnect").catch(() => {}))
 // Its network is tried again now, rather than when it next would be.
 for (const retry of ["reconnect", "banner-retry"]) byId(retry).addEventListener("click", () => invoke("retry").catch(() => {}))
 for (const retry of ["problem-button", "try-again-button"]) byId(retry).addEventListener("click", () => on({ type: "retry" }))
