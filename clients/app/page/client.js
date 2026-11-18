@@ -1090,8 +1090,10 @@ const showing = (at) => open.get(at ?? "") ?? open.get(key(shown.getSnapshot().m
 /// finger or the pointer stays there. Where the window is wide, a computer's or a tablet's turned sideways, it's
 /// a thin sidebar on the window's left, always there, as Teams', Slack's and Discord's are, with whichever is in front
 /// outlined, Home too, and the apps and the Home Screen beside it. Elsewhere it's a handle on the window's right edge,
-/// which a finger swipes the rail in from as a panel, or taps, and drags up or down out of the app's way, where it's
-/// kept: it's there only while an app is in front, as the Home Screen is where it goes back to.
+/// over the Home Screen and every app alike, which a finger swipes the rail in from as a panel, or taps, and drags up
+/// or down out of the way, where it's kept. It keeps out of the way while something of theirs is open over them (a
+/// sheet, a menu, Home pages being edited), as the device's back does, and as iOS's chrome does while its icons are
+/// rearranged.
 /// Home goes back there as the device's back does, and an app opens as one does from another (`go`).
 const RECENT = 8
 /// The apps used lately on this device, by their keys, newest first.
@@ -1195,22 +1197,24 @@ function pick(entrypoint, subject) {
 }
 
 /// Whether the rail shows, and over what: while the window shows its apps and has a Home Screen to go back to
-/// (`data-rail`), the Home Screen (`home`) or an app (`app`). The sidebar is there over both, and the handle over an app
-/// alone. Android is told where the handle is, which its back gesture leaves to it.
+/// (`data-rail`), the Home Screen (`home`) or an app (`app`). The sidebar is there over both, and so is the handle,
+/// unless something is open over what's showing (`data-away`). Android is told where the handle is, which its back
+/// gesture leaves to it.
 /** @type {string | undefined} */
 let excluded
 function rail() {
   const now = shown.getSnapshot()
   const homed = Boolean(launcher) && now.hasTag("pages") && !now.matches("app_store")
-  const showing = homed && here() !== null
-  if (homed) document.body.dataset.rail = showing ? "app" : "home"
+  const handled = homed && !showing(here())?.over
+  if (homed) document.body.dataset.rail = here() === null ? "home" : "app"
   else delete document.body.dataset.rail
   sidebar.inert = !homed
-  handle.inert = !showing
+  handle.inert = !handled
+  handle.toggleAttribute("data-away", !handled)
   if (homed && wide.matches) fill(byId("rail-list"), false)
-  if (panel.open && (!showing || wide.matches)) panel.close()
+  if (panel.open && (!handled || wide.matches)) panel.close()
   placeHandle()
-  const at = showing && !wide.matches ? handle.getBoundingClientRect() : undefined
+  const at = handled && !wide.matches ? handle.getBoundingClientRect() : undefined
   const edge = at ? [at.left, at.top, at.right, at.bottom].map(Math.round).join(",") : ""
   if (edge !== excluded) globalThis.androidEdge?.postMessage(edge)
   excluded = edge

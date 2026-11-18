@@ -1677,9 +1677,10 @@ function HomeScreen(props: { owners: Owner[] }) {
     (now) => void (now && home.getSnapshot().matches({ editing: "still" }) && haptic("selection")),
     { defer: true },
   )
-  // While pages are edited, the device's own back ends editing, as Done does.
+  // While pages are edited, the device's own back ends editing, as Done does, and the window's rail keeps out of the
+  // way, as iOS's chrome does while its icons are rearranged: something of the Home Screen's own is open over it.
   createEffect(
-    createMemo(() => state().matches({ editing: "still" })),
+    createMemo(() => state().matches("editing")),
     (now) => (now ? covers(() => home.send({ type: "done" })) : undefined),
   )
 

@@ -35,7 +35,7 @@ An app's own words are defined in that app's `SKILL.md`.
   `launcher`, and Home Screen is it.
 - **Rail**: what's above every app, its way back to the Home Screen and over to the apps used lately on the device.
   On a wide window it's a thin sidebar on the left, always there, as Teams', Slack's and Discord's app rails are;
-  elsewhere it's a handle on the right edge, over an app only, that a finger brings it in from as a panel, as
+  elsewhere it's a handle on the right edge, always there too, that a finger brings it in from as a panel, as
   Samsung's Edge panels are.
 - **App Store**: the app that installs and removes apps, in the category `app-store`, which a client opens itself
   where there's no launcher yet to open it from.

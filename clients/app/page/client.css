@@ -287,8 +287,8 @@ iframe[data-move] {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-/* The handle comes in with an app and goes with it: slid in from its side, or for whoever asked for less motion,
-   faded. */
+/* The handle goes while something is open over what's showing, and comes back after: slid out to its side and in, or
+   for whoever asked for less motion, faded. */
 #handle {
   transition:
     translate var(--move-travel) var(--ease-travel),
@@ -372,7 +372,8 @@ iframe[data-move] {
 #handle:is(:hover, :focus-visible, [aria-expanded="true"])::before {
   width: 0.4375rem;
 }
-body:not([data-rail="app"]) #handle {
+body:not([data-rail]) #handle,
+#handle[data-away] {
   translate: 100% 0;
   opacity: 0;
   visibility: hidden;

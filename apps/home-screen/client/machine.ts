@@ -494,6 +494,8 @@ export const machine = setup({
         dragging: {
           exit: "land",
           on: {
+            // The device's back, with a finger still carrying something, waits for it to land.
+            done: {},
             stack: { guard: "stacks", actions: "stack" },
             over: { actions: "over" },
             flip: [
