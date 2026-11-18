@@ -38,7 +38,8 @@ STILL = """new Promise(drawn => requestAnimationFrame(() => requestAnimationFram
 @contextlib.contextmanager
 def opened(link, size=(390, 844), log=os.devnull, timeout=60):
     """A WebDriver session on the window `link` opens (`one:<app>`, `one:<app>/<page>`, `one:home-screen#library`),
-    `size` in CSS pixels, drawn and still (`settled`). What the app says, its pages' console too, goes to `log`."""
+    `size` in CSS pixels, drawn (the page has rendered what it first asked for, as the app says in `<app> opened in …`, not
+    its skeleton) and still (`settled`). What the app says, its pages' console too, goes to `log`."""
     app = link.removeprefix("one:").split("/")[0].split("#")[0]
     held = socket.create_server(("127.0.0.1", 0))
     port = held.getsockname()[1]

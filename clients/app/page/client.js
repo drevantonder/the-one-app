@@ -147,7 +147,10 @@ const { assign, createActor, enqueueActions, fromCallback, fromPromise, sendPare
 /// Reload", and loads again only once its person presses Reload: nothing is reloaded under them. One that's showing an
 /// error loads again at once, as its old version meeting what's new is likely why, and there's nothing of theirs under
 /// it. A page that doesn't draw in 15 s on screen has failed, with Try Again, until it draws after all, as a page
-/// loaded again behind another app may only once it's shown, when it's current. Only time it's on screen counts: while
+/// loaded again behind another app may only once it's shown, when it's current. A page has drawn as a browser's Largest
+/// Contentful Paint says a page is shown: once it has rendered and what it first asked for is answered (`render` in the
+/// UI library tells, `notifications/one/drawn`), not at its first answered request, so a page that stays blank or on its
+/// skeleton hasn't, and one that shows its problem as a read failed has. Only time it's on screen counts: while
 /// it's off screen, the 15 s wait (`away`), and go on from where they were once it's in front again (`seen`). It tells
 /// the window as it draws and as it fails, and the window follows each of its moves (`syncSnapshot`), which it says
 /// what the page needs of its person by. One that hasn't drawn loads again as it's tried again (`retry`), as once its
@@ -1520,6 +1523,11 @@ addEventListener("message", async ({ source, data }) => {
       asked = params.height
       fit()
     }
+    // Its page has drawn: what it first asked for has settled (`render`), a problem shown as it failed included.
+    if (method === "notifications/one/drawn") {
+      page(view, { type: "drawn" })
+      if (!view.frame.inert) opened(view)
+    }
     // Something is open over its page, or nothing is any more, and whether it's on its first screen.
     if (method === "notifications/one/over") {
       view.over = params.over === true
@@ -1539,12 +1547,6 @@ addEventListener("message", async ({ source, data }) => {
     const { code, message } = /** @type {{ code?: number, message?: string }} */ (error)
     post(view, { id, error: { code: code ?? -32000, message: message ?? String(error) } })
   }
-  // It has what it draws from once the client has answered it something: a tool, or its client's own answer (`client()`),
-  // which is all a page that calls no tool asks for (Connect Your AI), so it isn't left waiting to draw.
-  if (method.startsWith("ui/") || (method.startsWith("one/") && method !== "one/client")) return
-  if (pageOf(view)?.matches("current")) return
-  page(view, { type: "drawn" })
-  if (!view.frame.inert) opened(view)
 })
 
 /// Shows an app over whatever's showing, by what a `one:` link says after its scheme: `<app>[/<page>][#<fragment>]`,
