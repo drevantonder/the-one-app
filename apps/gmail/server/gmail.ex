@@ -14,13 +14,6 @@ defmodule Gmail do
   @impl true
   def icon, do: "icon.png"
 
-  @doc "What Gmail asks of Google, for the `google-account` app."
-  def google do
-    %{
-      scopes: ["https://www.googleapis.com/auth/gmail.modify"]
-    }
-  end
-
   @impl true
   def requires, do: %{"core" => ">= 0.22.18", "google-account" => "to reach your mail"}
 
@@ -29,13 +22,13 @@ defmodule Gmail do
   def hooks, do: ["google-account.scopes"]
 
   @impl true
-  def hook("google-account.scopes", _about, _call), do: google().scopes
+  def hook("google-account.scopes", _about, _call), do: ["https://www.googleapis.com/auth/gmail.modify"]
 
   @impl true
   def tools do
     account = %{
       type: "string",
-      description: "Which account: its address, or a part of it only it has, as gmail_accounts lists them. The first if left out"
+      description: "Which account: its address, or a part of it only it has, as google-account_accounts lists them. The first if left out"
     }
 
     with_account = fn properties, required ->
@@ -74,43 +67,6 @@ defmodule Gmail do
     }
 
     [
-      %{
-        name: "accounts",
-        read_only: true,
-        description:
-          "The Google accounts Gmail can use, the default first, each with ok, and why when it's false (gmail_sign_in with that account fixes it). Every other tool's account takes one of these.",
-        inputs: %{type: "object", properties: %{}},
-        outputs: %{
-          type: "object",
-          properties: %{
-            accounts: %{
-              type: "array",
-              description: "The default first",
-              items: %{
-                type: "object",
-                properties: %{
-                  account: string.("Its address"),
-                  ok: %{type: "boolean", description: "Whether it can be used now"},
-                  why: string.("Why not, when ok is false: sign_in with that account fixes it")
-                },
-                required: ["account", "ok"]
-              }
-            }
-          },
-          required: ["accounts"]
-        }
-      },
-      %{
-        name: "sign_in",
-        description:
-          "Starts signing a Google account in to Gmail, or letting Gmail use one another Google app has: gives url, for the person to open in their browser, where Google signs them in and sends them back to finish.",
-        inputs: %{type: "object", properties: %{account: string.("The account's address, like someone@gmail.com, to suggest it to Google: for one that needs signing in again, as gmail_accounts lists it")}},
-        outputs: %{
-          type: "object",
-          properties: %{url: string.("Where the person signs in, in their browser"), then: string.("What happens next")},
-          required: ["url", "then"]
-        }
-      },
       %{
         name: "profile",
         read_only: true,
@@ -318,9 +274,6 @@ defmodule Gmail do
   end
 
   @impl true
-  def call(tool, inputs, call) when tool in ~w(accounts sign_in),
-    do: google(call, tool, Map.put(inputs, "scopes", google().scopes))
-
   def call(tool, inputs, call), do: run(tool, inputs, %{call: call, account: inputs["account"]})
 
   defp run("profile", _inputs, at) do
@@ -330,12 +283,12 @@ defmodule Gmail do
   defp run("search", inputs, at) do
     found =
       api(at, "GET", "messages",
-        query: [
+        query: %{
           maxResults: most(inputs["maxResults"]),
           q: inputs["q"],
           labelIds: list(inputs["labelIds"]),
           pageToken: inputs["pageToken"]
-        ]
+        }
       )
 
     messages =
@@ -350,20 +303,20 @@ defmodule Gmail do
   end
 
   defp run("read", %{"id" => id}, at) do
-    message = api(at, "GET", "messages/#{path(at, id)}", query: [format: "full"], missing: no_message(id))
+    message = api(at, "GET", "messages/#{path(at, id)}", query: %{format: "full"}, missing: no_message(id))
     Message.message(message, label_names(at))
   end
 
   defp run("thread", %{"id" => id}, at) do
     thread =
       try do
-        api(at, "GET", "threads/#{path(at, id)}", query: [format: "full"], missing: no_message(id))
+        api(at, "GET", "threads/#{path(at, id)}", query: %{format: "full"}, missing: no_message(id))
       rescue
         error ->
           # Or a message's id, whose thread this is.
-          message = api(at, "GET", "messages/#{path(at, id)}", query: [format: "minimal"], missing: no_message(id))
+          message = api(at, "GET", "messages/#{path(at, id)}", query: %{format: "minimal"}, missing: no_message(id))
           if message["threadId"] == id, do: reraise(error, __STACKTRACE__)
-          api(at, "GET", "threads/#{path(at, message["threadId"])}", query: [format: "full"])
+          api(at, "GET", "threads/#{path(at, message["threadId"])}", query: %{format: "full"})
       end
 
     names = label_names(at)
@@ -371,7 +324,7 @@ defmodule Gmail do
   end
 
   defp run("attachment", %{"id" => id} = inputs, at) do
-    message = api(at, "GET", "messages/#{path(at, id)}", query: [format: "full"], missing: no_message(id))
+    message = api(at, "GET", "messages/#{path(at, id)}", query: %{format: "full"}, missing: no_message(id))
     all = Message.attachments(message["payload"])
     if all == [], do: raise("Message #{id} has no attachments.")
 
@@ -453,7 +406,7 @@ defmodule Gmail do
   end
 
   defp run("drafts", inputs, at) do
-    found = api(at, "GET", "drafts", query: [maxResults: most(inputs["maxResults"]), pageToken: inputs["pageToken"]])
+    found = api(at, "GET", "drafts", query: %{maxResults: most(inputs["maxResults"]), pageToken: inputs["pageToken"]})
 
     drafts = found["drafts"] || []
 
@@ -522,7 +475,7 @@ defmodule Gmail do
       id when is_binary(id) and id != "" ->
         original =
           api(at, "GET", "messages/#{path(at, id)}",
-            query: [format: "metadata", metadataHeaders: ["From", "Reply-To", "Subject", "Message-ID", "References"]],
+            query: %{format: "metadata", metadataHeaders: ["From", "Reply-To", "Subject", "Message-ID", "References"]},
             missing: no_message(id)
           )
 
@@ -591,7 +544,7 @@ defmodule Gmail do
         "--#{boundary}\r\nContent-Type: message/rfc822\r\n\r\n#{Mime.rfc822(mail)}\r\n--#{boundary}--\r\n"
 
     request(at, method, @upload <> path,
-      query: [uploadType: "multipart"],
+      query: %{uploadType: "multipart"},
       body: body,
       type: "multipart/related; boundary=#{boundary}",
       missing: missing
@@ -602,7 +555,7 @@ defmodule Gmail do
   defp metadata(at, messages) do
     messages
     |> Task.async_stream(
-      &api(at, "GET", "messages/#{path(at, &1["id"])}", query: [format: "metadata", metadataHeaders: ["From", "To", "Subject", "Date"]]),
+      &api(at, "GET", "messages/#{path(at, &1["id"])}", query: %{format: "metadata", metadataHeaders: ["From", "To", "Subject", "Date"]}),
       max_concurrency: 10,
       timeout: 60_000
     )
@@ -618,20 +571,8 @@ defmodule Gmail do
 
   # Google's API as the account `at` names, through google-account, which gives the answer's status, headers and
   # body, or raises with what went wrong.
-  defp request(at, method, url, options) do
-    given = for {option, value} <- options, value != nil, into: %{}, do: {to_string(option), value}
-    inputs = Map.merge(given, %{"method" => method, "url" => url})
-    google(at.call, "request", if(at.account, do: Map.put(inputs, "account", at.account), else: inputs))
-  end
-
-  # Google's sign-in, the accounts and Google's API are google-account's, whose tools act for this app.
-  defp google(call, tool, inputs) do
-    inputs = Map.new(inputs, &query/1)
-    OneCore.Call.tool(call, "google-account", tool, JSON.decode!(JSON.encode!(inputs)))
-  end
-
-  defp query({"query", query}), do: {"query", Map.new(query)}
-  defp query(input), do: input
+  defp request(at, method, url, options),
+    do: OneCore.Call.tool(at.call, "google-account", "request", JSON.decode!(JSON.encode!(Map.new([account: at.account, method: method, url: url] ++ options))))
 
   defp most(nil), do: 20
   defp most(given), do: min(given, 100)
