@@ -3,7 +3,9 @@
 # Cargo, Mix and bun build into (`target/`, `_build/`, `deps/`, `node_modules/`). On a file system that shares a
 # copy's blocks, as btrfs does here, it's copied at once and takes no room. Each tool then builds only what differs,
 # in seconds, rather than every package it uses, in minutes. Where it can't be copied that way, nothing is.
-# `tooling/network` runs it in a worktree with no `target/`; run it yourself before a first `cargo build` or `mix`.
+# `tooling/network` and `mix compile` (`core/server/mix.exs`) run it in a worktree with no `target/`; run it yourself
+# before a first `cargo build`. Of the worktrees beside it, one that builds from the same Cargo manifests is copied
+# first, as only its own crates differ, and then the one that built last.
 #
 # It isn't a post-checkout hook, which it was: a worktree is made at the commit of the checkout it's made from, which
 # on a machine whose main checkout nobody moves is older than the hook, and a `git reset` to origin/main after it runs
@@ -18,13 +20,18 @@ cd "$here"
 # copied. Same means the same in both working trees, uncommitted changes too.
 differs() { git -C "$1" diff --no-renames --name-only -z HEAD && git -C "$1" ls-files -oz --exclude-standard; }
 
+head=$(git rev-parse HEAD)
 git worktree list --porcelain | sed -n 's/^worktree //p' | while read -r there; do
-  [[ $there == "$here" ]] || stat -c "%Y $there" "$there/target/debug/one" 2>/dev/null || true
-done | sort -rn | cut -d' ' -f2- | while read -r there; do
+  [[ $there != "$here" ]] && built=$(stat -c %Y "$there/target/debug/one" 2>/dev/null) || continue
+  same=0 && git -C "$there" diff --quiet "$head" -- Cargo.lock ':(glob)**/Cargo.toml' && same=1
+  echo "$same $built $there"
+done | sort -k1,1nr -k2,2nr | cut -d' ' -f3- | while read -r there; do
   # Cargo holds this lock while it builds there, and a copy taken meanwhile could be half of a build.
   lock=$there/target/debug/.cargo-build-lock
   [[ -e $lock ]] || continue
-  folders=$(git -C "$there" ls-files -oi --exclude-standard --directory | grep -E '(^|/)(target|_build|deps|node_modules)/$' || true)
+  # What's here already, as `mix deps.get` fetches `deps/`, stays.
+  folders=$(git -C "$there" ls-files -oi --exclude-standard --directory | grep -E '(^|/)(target|_build|deps|node_modules)/$' |
+    while read -r folder; do [[ -e $folder ]] || echo "$folder"; done || true)
   # shellcheck disable=SC2086 # one folder per word
   if flock -n -s "$lock" sh -c 'from=$1 && shift && for folder; do
        mkdir -p "$(dirname "$folder")" && cp -a --reflink=always "$from/$folder" "$folder" || exit 1
@@ -32,6 +39,12 @@ done | sort -rn | cut -d' ' -f2- | while read -r there; do
     changed=$( { differs "$here"; git -C "$there" diff --no-renames --name-only -z "$(git rev-parse HEAD)"; } | tr '\0' '\n' | sort -u)
     git ls-files | grep -vxF -e "$changed" | while read -r file; do touch -h -r "$there/$file" "$file"; done
     [[ -z $changed ]] || echo "$changed" | xargs -d '\n' touch -c --
+    # A build script that watches a file of that worktree or its git (`core/client`'s, the commit; the app's, Tauri's
+    # config) is run again here, by forgetting that it ran: Cargo would otherwise run it only when that file changed
+    # there, and build again everything after it then, in the middle of whatever this worktree is doing.
+    common=$(git rev-parse --path-format=absolute --git-common-dir)
+    grep -lsF -e "rerun-if-changed=$there/" -e "rerun-if-changed=$common/" target/{,*/}*/build/*/output |
+      while read -r output; do build=${output%/output} && rm -rf "${build%/build/*}/.fingerprint/${build##*/}"; done || true
     echo "Copied the build of $there"
     exit 0
   fi

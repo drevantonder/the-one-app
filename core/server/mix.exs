@@ -52,19 +52,21 @@ defmodule OneCore.MixProject do
   defp elixirc_paths(:dev), do: elixirc_paths(:prod) ++ [Path.expand("../../tooling/network.ex", __DIR__)]
   defp elixirc_paths(_env), do: ["lib", "priv/sandbox/manifest.ex", "priv/sandbox/redact.ex", "priv/sandbox/nif.ex"]
 
-  # The NIFs, built for this machine with the rest of the Rust workspace, as `tooling/network` runs it: built as one, it
-  # has one set of features, so nothing in it is built twice or again for nothing. It's the debug build, as a
-  # developer's is (`Cargo.toml`). Each is named for its build, as
+  # The NIFs, built for this machine with the rest of the Rust workspace, as `tooling/network` and its code reloader
+  # run it: built as one, it has one set of features, so nothing in it is built twice or again for nothing. It's the
+  # debug build, as a developer's is (`Cargo.toml`). Each is named for its build, as
   # `tooling/nifs` names it (`OneCore.Nif`). One Core's go where the server loads them (`priv/native`), and those of this
   # repo's apps beside their source, where an app brings them (`OneCore.App`): here, its
   # folder is what's deployed. `tooling/release` and `tooling/nifs` build them for every kind of machine, as a server
   # built for one is. A crash in a Rust NIF ends the VM: Rust panics are caught, and what's left is rare. Each is
-  # removed before it's put there again, since a server running from this checkout has it loaded.
-  defp nifs(_args) do
+  # removed before it's put there again, since a server running from this checkout has it loaded. A worktree's first
+  # build starts from a copy of the build beside it (`tooling/copy-build`).
+  def nifs(_args) do
     root = Path.expand("../..", __DIR__)
+    target = System.get_env("CARGO_TARGET_DIR", "#{root}/target")
+    if not File.exists?(target), do: System.cmd("#{root}/tooling/copy-build", [], into: IO.stream())
     {rustc, 0} = System.cmd("rustc", ["-vV"])
     [host] = Regex.run(~r/^host: (.+)$/m, rustc, capture: :all_but_first)
-    target = System.get_env("CARGO_TARGET_DIR", "#{root}/target")
     # The kind of machine this is, as builds are named (`OneCore.Builds.target/0`).
     [arch | _] = String.split(to_string(:erlang.system_info(:system_architecture)), "-")
     {os, extension} = if :os.type() == {:unix, :darwin}, do: {"macos", "dylib"}, else: {"linux", "so"}
@@ -86,7 +88,8 @@ defmodule OneCore.MixProject do
         {"NIF_BUILD_" <> String.upcase(Path.basename(crate)), String.trim(hash)}
       end
 
-    {_, 0} = System.cmd("cargo", ["build"], cd: root, env: builds)
+    with {_, status} when status != 0 <- System.cmd("cargo", ["build"], cd: root, env: builds),
+         do: Mix.raise("cargo build failed (#{status}), saying why above")
 
     for {crate, put} <- built ++ bundled do
       File.rm(put)
