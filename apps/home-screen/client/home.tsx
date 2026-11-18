@@ -43,6 +43,25 @@ const owners = createMemo(async () => {
 })
 changed(() => refresh(owners))
 
+/// The red count on an app's icon, by who it's for and its badge tool (`badge`): what its app says waits for whoever's
+/// looking, asked again with everything else as anything changes. One that couldn't be asked has none.
+const [badges, setBadges] = createSignal<Record<string, number>>({})
+/// Who an app is opened for, as `launch` opens it, and so who its badge is asked for.
+const opensFor = (entrypoint: Entrypoint, owner: Owner) => (entrypoint.subject === "user" ? undefined : (entrypoint.subject ?? owner.subject))
+const badgeOf = (entrypoint: Entrypoint, owner: Owner) => (entrypoint.badge ? badges()[`${opensFor(entrypoint, owner) ?? ""} ${entrypoint.badge}`] : undefined)
+createEffect(owners, (all) => {
+  const asked = new Map<string, Promise<number>>()
+  for (const owner of all)
+    for (const item of [...owner.pages.flatMap((page) => page.items), ...owner.library.flatMap((category) => category.entrypoints)]) {
+      const entrypoint = item as Entrypoint
+      if (!entrypoint.badge) continue
+      const subject = opensFor(entrypoint, owner)
+      const key = `${subject ?? ""} ${entrypoint.badge}`
+      if (!asked.has(key)) asked.set(key, json<{ count?: number }>(entrypoint.badge, {}, subject).then(({ count }) => count ?? 0, () => 0))
+    }
+  Promise.all([...asked].map(async ([key, count]) => [key, await count] as const)).then((counted) => setBadges(Object.fromEntries(counted)))
+})
+
 /// The one machine, and its snapshot as one signal.
 const home = createActor(machine)
 const [state, setState] = createSignal(home.getSnapshot())
@@ -181,14 +200,24 @@ function Card(props: { item: WidgetItem; owner: Owner; still?: boolean }) {
 
 /// An icon with its name under it. The app starts as a finger lands on it, and shows as the finger lifts, unless the
 /// finger held it.
-function Tile(props: { name: string; onPress?: (behind?: boolean, icon?: Element) => void; children: JSX.Element }) {
+function Tile(props: { name: string; badge?: number; onPress?: (behind?: boolean, icon?: Element) => void; children: JSX.Element }) {
   return (
-    <button type="button" class="tile" onPointerDown={(event) => event.button === 0 && props.onPress?.(true)} onClick={(event) => props.onPress?.(false, event.currentTarget.querySelector("img") ?? undefined)}>
-      <span class="icon">{props.children}</span>
+    <button type="button" class="tile" aria-description={props.badge ? `${props.badge} waiting` : undefined} onPointerDown={(event) => event.button === 0 && props.onPress?.(true)} onClick={(event) => props.onPress?.(false, event.currentTarget.querySelector("img") ?? undefined)}>
+      <span class="icon">
+        {props.children}
+        <Badge count={props.badge} />
+      </span>
       <span>{props.name}</span>
     </button>
   )
 }
+
+/// What waits in an app, as its app counts it (`badge`): a red count at its icon's corner, as an iPhone's.
+const Badge = (props: { count?: number }) => (
+  <Show when={props.count}>
+    <b class="badge" aria-hidden="true">{props.count}</b>
+  </Show>
+)
 
 /// Taking an item off a Home page asks first, as an iPhone's does: an app stays in the App Library, and a widget's app
 /// and data stay.
@@ -343,7 +372,7 @@ function HomePage(props: { owner: Owner; index: number; page: number; placed: Pl
                 <Show when={placed().item.item}>
                   {(item) => (
                     <>
-                      <Show when={item().widget} fallback={<Tile name={(item() as Entrypoint).name} onPress={(behind, icon) => state().matches("nothing") && launch(item() as Entrypoint, props.owner, behind, icon)}><img src={src((item() as Entrypoint).icon)} alt="" /></Tile>}>
+                      <Show when={item().widget} fallback={<Tile name={(item() as Entrypoint).name} badge={badgeOf(item() as Entrypoint, props.owner)} onPress={(behind, icon) => state().matches("nothing") && launch(item() as Entrypoint, props.owner, behind, icon)}><img src={src((item() as Entrypoint).icon)} alt="" /></Tile>}>
                         <Card item={item() as WidgetItem} owner={props.owner} still={props.small || editingHere()} />
                       </Show>
                       <Show when={waiting(placed().item) && state().matches({ editing: "installing" })}>
@@ -491,10 +520,12 @@ function Library(props: { owner: Owner; places: Record<string, HTMLElement> }) {
 /// that holds it opens its menu; moving it carries it onto whichever owner's pages it's dropped on. Among what the
 /// launcher's search found, it's an option the arrow keys choose (`selected`).
 function LibraryEntrypoint(props: { entrypoint: Listed; owner: Owner; id?: string; selected?: boolean }) {
+  const badge = () => (opens(props.entrypoint) ? badgeOf(opens(props.entrypoint)!, props.owner) : undefined)
   return (
     <button
       type="button"
       class="app"
+      aria-description={badge() ? `${badge()} waiting` : undefined}
       id={props.id}
       role={props.selected === undefined ? undefined : "option"}
       aria-selected={props.selected === undefined ? undefined : props.selected ? "true" : "false"}
@@ -504,6 +535,7 @@ function LibraryEntrypoint(props: { entrypoint: Listed; owner: Owner; id?: strin
     >
       <img src={src(props.entrypoint.icon)} alt="" />
       <span>{props.entrypoint.name}</span>
+      <Badge count={badge()} />
     </button>
   )
 }
@@ -582,7 +614,7 @@ function OpenCategory(props: { owner: Owner; opened: string; places: Record<stri
           <For each={category()?.entrypoints ?? []} keyed={(entrypoint) => entrypoint.entrypoint ?? entrypoint.app}>
             {(entrypoint) => (
               <div class="cell">
-                <Tile name={entrypoint().name} onPress={(behind, icon) => phase() === "open" && press(entrypoint(), props.owner, behind, icon)}>
+                <Tile name={entrypoint().name} badge={badgeOf(entrypoint() as Entrypoint, props.owner)} onPress={(behind, icon) => phase() === "open" && press(entrypoint(), props.owner, behind, icon)}>
                   <img src={src(entrypoint().icon)} alt="" />
                 </Tile>
               </div>

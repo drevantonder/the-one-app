@@ -1,6 +1,6 @@
 // What the Home Screen's tools answer, which every screen here reads.
 
-/** An app: its page's address, name, icon, app and category, and its `subject`: `"user"` if it's opened for whoever
+/** An app: its page's address, name, icon, app and category, its `badge`, and its `subject`: `"user"` if it's opened for whoever
  * opens it, or the group it's opened for, where a group's install is in a user's App Library. */
 export interface Entrypoint {
   entrypoint: string
@@ -9,6 +9,8 @@ export interface Entrypoint {
   app: string
   category: string
   subject?: "user" | `groups/${string}`
+  /** The tool whose answer's `count` is the red count on its icon, while it's more than 0. */
+  badge?: string
 }
 
 /** A widget on a page, or one that could go on one: its tool, the sizes it comes in, and the app pressing it opens. */

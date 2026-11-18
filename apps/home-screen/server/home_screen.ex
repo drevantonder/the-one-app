@@ -52,7 +52,8 @@ defmodule HomeScreen do
         name: %{type: "string"},
         icon: %{type: "string", description: "Where a client reads it, named for what's in it: ui://icons/<sha256>/icon.svg"},
         category: %{type: "string", description: "Its category in the App Library: its own, or else its app's"},
-        subject: %{type: "string", description: "`user` for an app opened for whoever opens it"}
+        subject: %{type: "string", description: "`user` for an app opened for whoever opens it"},
+        badge: %{type: "string", description: "The tool whose answer's `count` is the red count on its icon"}
       },
       required: ["entrypoint", "app", "name", "icon", "category"]
     }
@@ -393,6 +394,7 @@ defmodule HomeScreen do
   # app's.
   defp entry(app, entrypoint) do
     about = if entrypoint[:subject], do: %{subject: entrypoint[:subject]}, else: %{}
+    about = if entrypoint[:badge], do: Map.put(about, :badge, "#{app.name}_#{entrypoint[:badge]}"), else: about
     category = if entrypoint.category in OneCore.Apps.Deploy.categories(), do: entrypoint.category, else: app.category
 
     Map.merge(
