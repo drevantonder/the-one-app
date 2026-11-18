@@ -7,7 +7,7 @@ description: Use to run a whole network of your own on this machine, to try a ch
 
 Its header says what each flag does. It builds what isn't built (the UI library, then the server's `mix compile` as it
 starts, which builds the Rust workspace's debug build with `cargo build`), starts the server, and prints how to use it once it's
-running. A new worktree starts from a copy of the build of the worktree beside it that built last (`.githooks/post-checkout`), so
+running. A worktree's first network starts from a copy of the build of the worktree beside it that built last (`tooling/copy-build`), so
 its first network builds only the workspace's own crates and One Core, and starts in about 20 s; after that, in about 12 s.
 Run it in the background and let your harness tell you when it ends; put the folder in your scratch folder.
 

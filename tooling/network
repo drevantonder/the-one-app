@@ -60,6 +60,7 @@ trap 'for job in "${started[@]}"; do kill -- "-$job" 2>/dev/null || true; done; 
 trap exit TERM INT HUP
 one=$root/target/debug/one
 
+[[ -e $root/target ]] || "$root/tooling/copy-build"
 (cd "$root/core/ui" && bun install --frozen-lockfile && bun build.js)
 # Each server compiles what changed as it starts (`mix network`), the Rust workspace too: `one`, and the NIFs
 # (`core/server/mix.exs`).

@@ -8,7 +8,7 @@ There are no pull requests: every change goes straight to `main`, from your own 
 - Work in a git worktree of your own (`git worktree add <path> -b <branch> origin/main`), never in a checkout another
   thread uses.
 - Once per clone, `sh .githooks/install`: the hooks in `.githooks` refuse what's gone wrong here before, each saying
-  why, and start a new worktree from a copy of the build beside it.
+  why.
 - Commit each change once it works, then push it at once. Don't batch: the longer a commit waits, the more it
   conflicts.
 - Immediately before every push, and nothing in between:

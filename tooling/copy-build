@@ -1,0 +1,40 @@
+#!/usr/bin/env bash
+# Starts a worktree that hasn't built yet from a copy of the build of the worktree beside it that built last: what
+# Cargo, Mix and bun build into (`target/`, `_build/`, `deps/`, `node_modules/`). On a file system that shares a
+# copy's blocks, as btrfs does here, it's copied at once and takes no room. Each tool then builds only what differs,
+# in seconds, rather than every package it uses, in minutes. Where it can't be copied that way, nothing is.
+# `tooling/network` runs it in a worktree with no `target/`; run it yourself before a first `cargo build` or `mix`.
+#
+# It isn't a post-checkout hook, which it was: a worktree is made at the commit of the checkout it's made from, which
+# on a machine whose main checkout nobody moves is older than the hook, and a `git reset` to origin/main after it runs
+# no hook (18 Nov: three first networks of 10–12 minutes).
+set -euo pipefail
+here=$(git rev-parse --show-toplevel)
+cd "$here"
+[[ ! -e target ]] || { echo "$here has a build already." >&2 && exit 1; }
+
+# Cargo and Mix build again what's newer than its build, and a checkout's files are all newer than a build taken from
+# elsewhere. So each file that's the same there takes the time it has there, and the rest are newer than anything
+# copied. Same means the same in both working trees, uncommitted changes too.
+differs() { git -C "$1" diff --no-renames --name-only -z HEAD && git -C "$1" ls-files -oz --exclude-standard; }
+
+git worktree list --porcelain | sed -n 's/^worktree //p' | while read -r there; do
+  [[ $there == "$here" ]] || stat -c "%Y $there" "$there/target/debug/one" 2>/dev/null || true
+done | sort -rn | cut -d' ' -f2- | while read -r there; do
+  # Cargo holds this lock while it builds there, and a copy taken meanwhile could be half of a build.
+  lock=$there/target/debug/.cargo-build-lock
+  [[ -e $lock ]] || continue
+  folders=$(git -C "$there" ls-files -oi --exclude-standard --directory | grep -E '(^|/)(target|_build|deps|node_modules)/$' || true)
+  # shellcheck disable=SC2086 # one folder per word
+  if flock -n -s "$lock" sh -c 'from=$1 && shift && for folder; do
+       mkdir -p "$(dirname "$folder")" && cp -a --reflink=always "$from/$folder" "$folder" || exit 1
+     done' sh "$there" $folders; then
+    changed=$( { differs "$here"; git -C "$there" diff --no-renames --name-only -z "$(git rev-parse HEAD)"; } | tr '\0' '\n' | sort -u)
+    git ls-files | grep -vxF -e "$changed" | while read -r file; do touch -h -r "$there/$file" "$file"; done
+    [[ -z $changed ]] || echo "$changed" | xargs -d '\n' touch -c --
+    echo "Copied the build of $there"
+    exit 0
+  fi
+  # shellcheck disable=SC2086
+  for folder in $folders; do rm -rf "./$folder"; done
+done
