@@ -1282,7 +1282,14 @@ impl Painter<'_> {
                 let paragraph = self.text.paragraph(&words, &text.style, text.wrap.then_some(width), lines);
                 self.paint_text(&paragraph, content, width, transform.scale, text, opacity, mask);
             }
-            Kind::Input => self.paint_input(id, node, content, laid.content_box_width(), transform.scale, text, opacity, mask),
+            Kind::Input => {
+                let padding = transform.bounds(Bounds {
+                    origin: point(laid_out.origin.x + laid.border.left, laid_out.origin.y + laid.border.top),
+                    size: Size { width: laid.size.width - laid.border.left - laid.border.right, height: laid.size.height - laid.border.top - laid.border.bottom },
+                });
+                // Several lines scroll by the wheel and a trackpad too, as a `<textarea>` does.
+                placed.scroll = self.paint_input(id, node, content, padding, laid.content_box_width(), transform.scale, text, opacity, mask).map(|most| (most, 0.0, false));
+            }
             Kind::Image => self.paint_image(node, content, radii, opacity, mask),
             Kind::Path => self.paint_path(node, content, &look, text.color, opacity, mask),
             Kind::Picker => {}
@@ -1339,10 +1346,10 @@ impl Painter<'_> {
     }
 
     /// An input: its text, or its placeholder while it's empty, clipped to its box; with the keyboard, what's selected
-    /// behind it, what an input method composes underlined, and the caret, as it blinks; one line scrolled along to
-    /// keep the caret in view. Where it's drawn is kept for the pointer (`Drawn`).
+    /// behind it, what an input method composes underlined, and the caret, as it blinks; scrolled to keep the caret
+    /// in view as it moves. Where it's drawn is kept for the pointer (`Drawn`). → how far several lines can scroll.
     #[allow(clippy::too_many_arguments)]
-    fn paint_input(&mut self, id: Id, node: &Node, content: Bounds<f32>, width: f32, grown: f32, text: Text, opacity: f32, mask: Bounds<f32>) {
+    fn paint_input(&mut self, id: Id, node: &Node, content: Bounds<f32>, padding: Bounds<f32>, width: f32, grown: f32, text: Text, opacity: f32, mask: Bounds<f32>) -> Option<f32> {
         let field = self.fields.get(&id);
         let shown = field.map(Field::display).unwrap_or_default();
         let multiline = node.is("multiline");
@@ -1370,21 +1377,30 @@ impl Painter<'_> {
             }
         };
         // One line scrolls along as the caret goes past its ends, as an `<input>` does, and back to its start once
-        // it hasn't the keyboard; several scroll down and up to keep the caret's line in its box, as a `<textarea>`.
+        // it hasn't the keyboard; several scroll down and up to keep the caret's line in its box as it moves, as a
+        // `<textarea>`, and by the wheel (`Screen::scroll`, which keeps how far in `scrolled`) without its moving.
         let mut scroll = self.drawn.get(&id).map_or(point(0.0, 0.0), |drawn| drawn.scroll);
+        let seen = (focused, field.map_or(0, Field::caret), shown.len());
+        let moved = self.drawn.get(&id).is_none_or(|drawn| drawn.seen != seen);
+        let mut most = None;
         if !multiline {
             scroll.x = if focused && !empty { scroll.x.max(caret_x - width + 1.0).min(caret_x) } else { 0.0 };
             scroll.x = scroll.x.clamp(0.0, (paragraph.size().width + 1.0 - width).max(0.0));
         } else {
             let height = content.size.height / grown;
             let top = caret_line as f32 * line_height;
-            if focused {
+            scroll.y = self.scrolled.get(&id).map_or(0.0, |scrolled| scrolled.y);
+            if focused && moved {
                 scroll.y = scroll.y.max(top + line_height - height).min(top);
             }
-            scroll.y = scroll.y.clamp(0.0, (paragraph.size().height - height).max(0.0));
+            let can = (paragraph.size().height - height).max(0.0);
+            scroll.y = scroll.y.clamp(0.0, can);
+            self.scrolled.insert(id, point(0.0, scroll.y));
+            most = Some(can);
         }
         let origin = point(content.origin.x, top - scroll.y * grown);
-        let clip = content.intersect(&mask);
+        // Several lines scrolled run on into its padding, as a `<textarea>`'s do; one line stops at its content.
+        let clip = if multiline { padding } else { content }.intersect(&mask);
         // A point along line `line`, `x` from where its paragraph starts, in the window.
         let at = |line: usize, x: f32| point(origin.x + (x - scroll.x) * grown, origin.y + line as f32 * line_height * grown);
         if let (true, Some(field), false) = (focused, field, empty) {
@@ -1414,7 +1430,8 @@ impl Painter<'_> {
                 self.quad(bounds, clip, text.color, Edges::default(), Hsla::default(), Corners::default(), false, opacity);
             }
         }
-        self.drawn.insert(id, Drawn { paragraph, words, empty, origin, offsets, grown, scroll });
+        self.drawn.insert(id, Drawn { paragraph, words, empty, origin, offsets, grown, scroll, seen });
+        most
     }
 
     #[allow(clippy::too_many_arguments)]
@@ -1590,6 +1607,9 @@ pub(crate) struct Drawn {
     offsets: Vec<f32>,
     grown: f32,
     scroll: Point<f32>,
+    /// Whether it had the keyboard, where its caret was and how long its text was, to scroll to the caret only as
+    /// it moves.
+    seen: (bool, usize, usize),
 }
 
 impl Drawn {
