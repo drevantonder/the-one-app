@@ -4,6 +4,7 @@
 // drawn by their classes, or, on a page written for version 1, one style object, drawn as inline CSS.
 import { createEffect, For, omit, onCleanup, onSettled } from "solid-js"
 import { Dynamic, Portal, render as mount, type JSX } from "@solidjs/web"
+import { tellDrawn } from "../bridge.ts"
 import { layer } from "./layer.ts"
 import type { Action, Props, Version1Style } from "./protocol.ts"
 import type { Laid, Located, Pressed, Wheeled } from "./types/ui.d.ts"
@@ -53,8 +54,9 @@ export function Picker(props: PickerProps) {
 }
 
 /// `render(() => <App />)`: draws an app's first screen, where its page is: the page itself on the web, the app's
-/// window on a native host. → what takes it away again.
-export const render = (code: () => JSX.Element): (() => void) => mount(code, document.body)
+/// window on a native host. → what takes it away again. Its client is told once the page has drawn: once what it first
+/// asked for has settled, under its `<Loading>`s.
+export const render = (code: () => JSX.Element): (() => void) => mount(() => (onSettled(() => void tellDrawn()), code()), document.body)
 
 /** A primitive's `style`: styles, or version 1's one object. */
 type Style = Styles | Version1Style

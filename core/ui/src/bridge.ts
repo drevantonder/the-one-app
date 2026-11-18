@@ -63,15 +63,24 @@ configureClientErrors({
   },
 })
 
-const ask = <Result>(method: string, params: object = {}) => new Promise<Result>((resolve, refused) => {
-  const id = ++requests
-  waiting.set(id, ({ result, error }) => {
-    waiting.delete(id)
-    if (error) refused(new Error(error.message))
-    else resolve(result as Result)
+/// What the page has asked its client that isn't answered yet.
+const asked = new Set<Promise<unknown>>()
+
+const ask = <Result>(method: string, params: object = {}) => {
+  const answer = new Promise<Result>((resolve, refused) => {
+    const id = ++requests
+    waiting.set(id, ({ result, error }) => {
+      waiting.delete(id)
+      if (error) refused(new Error(error.message))
+      else resolve(result as Result)
+    })
+    parent.postMessage({ jsonrpc: "2.0", id, method, params }, "*")
   })
-  parent.postMessage({ jsonrpc: "2.0", id, method, params }, "*")
-})
+  const answered = () => asked.delete(answer)
+  asked.add(answer)
+  answer.then(answered, answered)
+  return answer
+}
 
 const [connected, setConnected] = createSignal<Connection>("online")
 const [updatable, setUpdatable] = createSignal(false)
@@ -217,6 +226,16 @@ const greet = () => greeted ??= ask<{ hostContext?: HostContext }>("ui/initializ
   appInfo: { name: document.title, version: "1" },
   appCapabilities: {},
 }).then(({ hostContext }) => (dress(hostContext), notify("ui/notifications/initialized"), said()))
+
+/// Tells the client the page has drawn, as a browser's Largest Contentful Paint marks a page as shown, and not before:
+/// `render` calls it once the page has rendered and everything it asked for has been answered, an error as well, which
+/// the page's `<Errored>` shows, and what they drew is in the page. A page still on its skeleton, or blank, hasn't.
+export async function tellDrawn() {
+  await greet()
+  do await Promise.allSettled(asked)
+  while (await new Promise((later) => setTimeout(() => later(asked.size))))
+  notify("notifications/one/drawn")
+}
 
 /// What's open over the page, the last opened last, each as the function that shuts it: a sheet, an alert, a
 /// menu, a select's list, a calendar. A device's own back shuts the last of them before it goes anywhere, so the
