@@ -137,7 +137,8 @@ export default {
     for (const item of items) span(item);
     const spans = exported.getFinishedSpans();
     exported.reset();
-    const otlp = spans.length ? ProtobufTraceSerializer.serializeRequest(spans) : undefined;
+    // The serializer's bytes are a view of a buffer it uses again, so what's sent on is a copy of them.
+    const otlp = spans.length ? ProtobufTraceSerializer.serializeRequest(spans)?.slice() : undefined;
     if (otlp) await env.BATCH.get(env.BATCH.idFromName("edge")).add(otlp);
   },
 } satisfies ExportedHandler;
@@ -150,7 +151,7 @@ export class Batch extends DurableObject {
   }
 
   async alarm() {
-    const exports = [...(await this.ctx.storage.list<Uint8Array>({ prefix: "otlp/" })).values()];
+    const exports = [...(await this.ctx.storage.list<Uint8Array>({ prefix: "otlp/" })).values()].map((otlp) => new Uint8Array(otlp));
     let bytes = 0;
     const kept = exports.reverse().filter((otlp) => (bytes += otlp.length) <= MOST).reverse();
     const data = new Uint8Array(kept.reduce((sum, otlp) => sum + otlp.length, 0));
