@@ -238,11 +238,18 @@ function FieldSheet() {
 }
 
 /// A request for an item: who asks, what they'd get and where it goes, then one of this person's items that has
-/// what it needs, or new values to type. Allow is the only way to say yes.
+/// what it needs, or new values to type. Allow is the only way to say yes. Only plain items are offered, as a
+/// password manager offers logins: an item an app keeps (a Chrome profile) is that app's. The one named as the request
+/// is, comes first and is chosen, so Allow is one tap; with none, New Item is.
 function RequestSheet() {
   const request = () => { const open = sheet(); return open?.kind === "request" ? open.request : undefined }
-  const [picked, setPicked] = createSignal("")
-  const fits = () => contents().items.filter((item) => request()!.fields.every((wanted) => item.fields.some((field) => field.name === wanted.name)))
+  const named = (item: Item) => item.name.toLowerCase() === request()!.title.toLowerCase()
+  const fits = () =>
+    contents()
+      .items.filter((item) => !item.type && request()!.fields.every((wanted) => item.fields.some((field) => field.name === wanted.name)))
+      .sort((a, b) => Number(named(b)) - Number(named(a)))
+  const [chosen, setPicked] = createSignal<string>()
+  const picked = () => chosen() ?? (fits().find(named)?.name ?? "")
   const who = () => request()!.app ?? "Your agents"
   const allow = async (event: SubmitEvent) => {
     event.preventDefault()
@@ -257,8 +264,7 @@ function RequestSheet() {
         <form onSubmit={allow}>
           <p class="about">
             {request()!.why ? `${request()!.why!.trim().replace(/[^.!?]$/, "$&.")} ` : ""}
-            {who()} can use {picked() || request()!.title}
-            {request()!.hosts.length ? `, sent ${picked() ? "to its sites and" : "only"} to ${listed(request()!.hosts)}` : ""}. Nobody is shown what you type.
+            {request()!.hosts.length ? `Sent ${picked() ? "to its sites and" : "only to"} ${listed(request()!.hosts)}, unseen.` : "Nobody is shown it."}
           </p>
           <Show when={fits().length}>
             <Field label="Use">
