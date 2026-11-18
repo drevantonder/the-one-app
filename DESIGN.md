@@ -49,7 +49,7 @@ What users see, as the project's owner decided it. Only their decisions are here
 - Uninstalling is in the App Library (17 Nov): touch and hold an app, then Remove App, which asks in an alert naming what goes with it ("Remove Sign-In? Devices, Users & Groups and Connect Your AI are part of it and will be removed too.") and puts it in Recently Deleted. Where you may not, Remove App is greyed, with why under it: "This is Family's, and you're not one of its owners."
 - Whoever may arrange an owner's pages edits them; anyone else gets only the app's own menu on touch and hold, with no Edit Home Screen. An owner's pages are one layout: editing everyone's or a group's changes them for everyone who sees them.
 - Home Screen behaviour copies iOS's unless there's a reason not to (17 Nov): paging, long press into edit mode, the hold menu, drag with the other icons reflowing, haptics, and an alert before removing.
-- An app opened from its icon grows out of it and closes back into it, as iOS's (17 Nov); one opened any other way slides in. For whoever asked for reduced motion, either fades in place.
+- An app opened from its icon grows out of it and closes back into it, as iOS's (17 Nov), and one opened from its widget out of the widget (18 Nov); one opened any other way slides in. For whoever asked for reduced motion, either fades in place.
 - The page dots are all one size, the current one brighter, as iOS's (17 Nov).
 - Tapping a dot goes to its screenful, and the App Library's glyph to the App Library (18 Nov).
 - Editing moves no icon (17 Nov): + and Done are in the owner pill's row, and the dots pill stays, so nothing jumps. Tapping a dot opens the page overview, and the App Library's glyph stays, dimmed and not tappable (18 Nov).

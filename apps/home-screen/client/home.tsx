@@ -93,11 +93,17 @@ const editing = () => state().context.editing
 const editingOwner = (owner: number) => state().matches("editing") && editing()?.owner === owner
 
 /// Opens an app for whoever its owner is, for the group whose install it is, or for its person where it's about
-/// whoever opens it. `behind` only starts it, as a finger lands on it. It grows out of its icon, `from`, as an
-/// iPhone's does.
-const launch = (entrypoint: Entrypoint, owner: Owner, behind?: boolean, from?: Element) => {
-  const icon = from?.getBoundingClientRect()
-  open(entrypoint.entrypoint, { subject: entrypoint.subject === "user" ? undefined : (entrypoint.subject ?? owner.subject), behind, from: icon && { x: icon.x, y: icon.y, width: icon.width, height: icon.height } })
+/// whoever opens it. `behind` only starts it, as a finger lands on it. It grows out of its icon or widget, `from`, as
+/// an iPhone's does.
+const launch = (entrypoint: Entrypoint, owner: Owner, behind?: boolean, from?: Element) =>
+  open(entrypoint.entrypoint, { subject: entrypoint.subject === "user" ? undefined : (entrypoint.subject ?? owner.subject), behind, from: from && place(from) })
+/// Where an icon or a widget is in the window, and how round its corners are there, as drawn: pages drawn larger on a
+/// wide window have larger ones.
+const place = (from: Element) => {
+  const { x, y, width, height } = from.getBoundingClientRect()
+  const corner = getComputedStyle(from).borderTopLeftRadius
+  const radius = corner.endsWith("%") ? (parseFloat(corner) / 100) * width : parseFloat(corner) * (width / ((from as HTMLElement).offsetWidth || width))
+  return { x, y, width, height, radius }
 }
 /// The UI library's pace of that name, from its tokens.
 const paced = (name: "quick" | "settle" | "travel") => pace(document.documentElement, name)
@@ -128,7 +134,7 @@ function Card(props: { item: WidgetItem; owner: Owner; still?: boolean }) {
     await call(`${props.item.widget.split("/")[0]}_${name}`, inputs, { subject: props.owner.subject }).catch(() => {})
     refresh(layout)
   }
-  const opens = () => !props.still && state().matches("nothing") && props.item.opens && launch(props.item.opens, props.owner)
+  const opens = (card: HTMLElement) => !props.still && state().matches("nothing") && props.item.opens && launch(props.item.opens, props.owner, false, card)
   return (
     <Errored fallback={(error) => <Widget name={props.item.name} size={props.item.size} problem={String((error() as Error).message ?? error())} />}>
       <Loading fallback={<Widget name={props.item.name} size={props.item.size} />}>
@@ -470,8 +476,7 @@ const press = (listed: Listed, owner: Owner, behind?: boolean, icon?: Element) =
   if (opens(listed)) return launch(opens(listed)!, owner, behind, icon)
   const store = untrack(owners)?.[0]?.store
   if (behind || !store) return
-  const from = icon?.getBoundingClientRect()
-  open(`${store}#app=${encodeURIComponent(listed.app)}`, { from: from && { x: from.x, y: from.y, width: from.width, height: from.height } })
+  open(`${store}#app=${encodeURIComponent(listed.app)}`, { from: icon && place(icon) })
 }
 
 /// Who a call about an install is for: a group or the network, or for a user's own, nobody said.
