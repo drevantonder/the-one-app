@@ -1,0 +1,351 @@
+{
+  "Marketplace": {
+    "answers": {
+      "app-store_marketplace": {
+        "categories": [
+          "Productivity",
+          "Lifestyle",
+          "Finance"
+        ],
+        "apps": [
+          {
+            "name": "notes",
+            "app": "users/sam/own/notes",
+            "source": null,
+            "title": "Notes",
+            "icon": null,
+            "subtitle": "Write things down",
+            "about": "Quick notes that sync to every device.",
+            "category": "Productivity",
+            "entrypoints": [
+              {
+                "name": "Notes",
+                "icon": null
+              }
+            ],
+            "widgets": [
+              {
+                "name": "Recent Notes",
+                "sizes": [
+                  "2x2"
+                ]
+              }
+            ],
+            "tools": [
+              "notes_list",
+              "notes_add"
+            ],
+            "trusted": true,
+            "requires": []
+          },
+          {
+            "name": "tasks",
+            "app": "users/sam/own/tasks",
+            "source": null,
+            "title": "Tasks",
+            "icon": null,
+            "subtitle": "Lists that get done",
+            "about": "A simple to-do list.",
+            "category": "Productivity",
+            "entrypoints": [
+              {
+                "name": "Tasks",
+                "icon": null
+              }
+            ],
+            "widgets": [],
+            "tools": [
+              "tasks_list",
+              "tasks_add"
+            ],
+            "trusted": true,
+            "requires": []
+          },
+          {
+            "name": "calendar-sync",
+            "app": "users/sam/own/calendar-sync",
+            "source": null,
+            "title": "Calendar Sync",
+            "icon": null,
+            "subtitle": "Keep calendars together",
+            "about": null,
+            "category": "Productivity",
+            "entrypoints": [
+              {
+                "name": "Calendar Sync",
+                "icon": null
+              }
+            ],
+            "widgets": [],
+            "tools": [
+              "calendar-sync_list",
+              "calendar-sync_add"
+            ],
+            "trusted": true,
+            "requires": []
+          },
+          {
+            "name": "recipes",
+            "app": "users/sam/own/recipes",
+            "source": null,
+            "title": "Recipes",
+            "icon": null,
+            "subtitle": "Cook from what you have",
+            "about": "Save recipes and plan meals.",
+            "category": "Lifestyle",
+            "entrypoints": [
+              {
+                "name": "Recipes",
+                "icon": null
+              }
+            ],
+            "widgets": [],
+            "tools": [
+              "recipes_list",
+              "recipes_add"
+            ],
+            "trusted": true,
+            "requires": [
+              {
+                "name": "photos",
+                "title": "Photos",
+                "why": "to keep pictures of dishes."
+              }
+            ]
+          },
+          {
+            "name": "photos",
+            "app": "users/sam/own/photos",
+            "source": null,
+            "title": "Photos",
+            "icon": null,
+            "subtitle": "Every picture, kept",
+            "about": "Your photos, backed up.",
+            "category": "Lifestyle",
+            "entrypoints": [
+              {
+                "name": "Photos",
+                "icon": null
+              }
+            ],
+            "widgets": [],
+            "tools": [
+              "photos_list",
+              "photos_add"
+            ],
+            "trusted": true,
+            "requires": []
+          },
+          {
+            "name": "budget",
+            "app": "users/sam/own/budget",
+            "source": null,
+            "title": "Budget",
+            "icon": null,
+            "subtitle": "Where the money goes",
+            "about": "Track spending by month.",
+            "category": "Finance",
+            "entrypoints": [
+              {
+                "name": "Budget",
+                "icon": null
+              }
+            ],
+            "widgets": [],
+            "tools": [
+              "budget_list",
+              "budget_add"
+            ],
+            "trusted": false,
+            "requires": []
+          },
+          {
+            "name": "readlist",
+            "app": "users/sam/own/readlist",
+            "source": null,
+            "title": "Read List",
+            "icon": null,
+            "subtitle": "Save it for later",
+            "about": "Articles to read later.",
+            "category": "Lifestyle",
+            "entrypoints": [
+              {
+                "name": "Read List",
+                "icon": null
+              }
+            ],
+            "widgets": [],
+            "tools": [
+              "readlist_list",
+              "readlist_add"
+            ],
+            "trusted": true,
+            "requires": []
+          },
+          {
+            "name": "timer",
+            "app": "users/sam/own/timer",
+            "source": null,
+            "title": "Timer",
+            "icon": null,
+            "subtitle": "Count down",
+            "about": "Simple timers.",
+            "category": "Productivity",
+            "entrypoints": [
+              {
+                "name": "Timer",
+                "icon": null
+              }
+            ],
+            "widgets": [],
+            "tools": [
+              "timer_list",
+              "timer_add"
+            ],
+            "trusted": true,
+            "requires": []
+          }
+        ]
+      },
+      "permissions_groups": {
+        "groups": []
+      },
+      "sign-in_everyone": {
+        "people": [
+          {
+            "who": "users/sam",
+            "called": "Sam"
+          }
+        ]
+      },
+      "permissions_users": {
+        "users": [
+          "users/sam"
+        ]
+      },
+      "apps": {
+        "for": "users/sam",
+        "apps": [
+          {
+            "name": "notes",
+            "for": "users/sam",
+            "app": "users/sam/own/notes",
+            "state": "installed",
+            "stage": null,
+            "why": null,
+            "deleted": null,
+            "trusted": true,
+            "version": 3,
+            "update": null,
+            "requires": {},
+            "required_by": []
+          },
+          {
+            "name": "recipes",
+            "for": "users/sam",
+            "app": "users/sam/own/recipes",
+            "state": "installed",
+            "stage": null,
+            "why": null,
+            "deleted": null,
+            "trusted": true,
+            "version": 3,
+            "update": {
+              "state": "available",
+              "why": null
+            },
+            "requires": {
+              "photos": "to keep pictures of dishes."
+            },
+            "required_by": []
+          },
+          {
+            "name": "photos",
+            "for": "users/sam",
+            "app": "users/sam/own/photos",
+            "state": "installed",
+            "stage": null,
+            "why": null,
+            "deleted": null,
+            "trusted": true,
+            "version": 3,
+            "update": null,
+            "requires": {},
+            "required_by": [
+              "recipes"
+            ]
+          }
+        ]
+      }
+    }
+  },
+  "Category": {
+    "like": "Marketplace",
+    "taps": [
+      {
+        "role": "button",
+        "name": "Productivity"
+      }
+    ]
+  },
+  "Installed App Page": {
+    "like": "Category",
+    "taps": [
+      "Notes"
+    ]
+  },
+  "Not Installed App Page": {
+    "like": "Category",
+    "taps": [
+      "Calendar Sync"
+    ]
+  },
+  "Install Failed": {
+    "like": "Category",
+    "taps": [
+      "Tasks"
+    ],
+    "answers": {
+      "apps": {
+        "for": "users/sam",
+        "apps": [
+          {
+            "name": "tasks",
+            "for": "users/sam",
+            "app": "users/sam/own/tasks",
+            "state": "not_installed",
+            "stage": null,
+            "why": "Its files couldn't be fetched from example.com.",
+            "deleted": null,
+            "trusted": true,
+            "version": null,
+            "update": null,
+            "requires": {},
+            "required_by": []
+          },
+          {
+            "name": "notes",
+            "for": "users/sam",
+            "app": "users/sam/own/notes",
+            "state": "installed",
+            "stage": null,
+            "why": null,
+            "deleted": null,
+            "trusted": true,
+            "version": 3,
+            "update": null,
+            "requires": {},
+            "required_by": []
+          }
+        ]
+      }
+    }
+  },
+  "Can't Show Apps": {
+    "answers": {
+      "app-store_marketplace": {
+        "$error": "Couldn't reach the network"
+      }
+    }
+  }
+}

@@ -63,23 +63,16 @@
     }
   },
   "Inbox, couldn't load": {
+    "like": "Inbox, empty",
     "answers": {
       "notifications_inbox": {
         "$error": "The server didn't answer."
-      },
-      "notifications_apps": {
-        "apps": []
       }
     }
   },
   "Inbox, a phone not woken": {
+    "like": "Inbox, empty",
     "answers": {
-      "notifications_inbox": {
-        "notifications": []
-      },
-      "notifications_apps": {
-        "apps": []
-      },
       "one/client": {
         "device": "iPhone",
         "build": "0.26.0",

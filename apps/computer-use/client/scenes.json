@@ -1,0 +1,103 @@
+{
+  "Screens": {
+    "answers": {
+      "computer-use_screens": {
+        "screens": [
+          {
+            "app": "linux-desktop",
+            "name": "Studio desktop",
+            "description": "A Linux desktop with a browser",
+            "width": 1280,
+            "height": 800,
+            "used": {
+              "doing": "Filled in a form",
+              "by": "users/mira/agents/claude",
+              "at": 1767225300000
+            }
+          },
+          {
+            "app": "linux-desktop",
+            "name": "Build box",
+            "description": "A terminal on the build machine",
+            "width": 1920,
+            "height": 1080,
+            "used": {
+              "doing": "Ran the tests",
+              "by": "users/sam/agents/codex",
+              "at": 1767214800000
+            }
+          },
+          {
+            "app": "linux-desktop",
+            "name": "Spare laptop",
+            "description": "A laptop screen",
+            "width": 1440,
+            "height": 900
+          }
+        ]
+      },
+      "one/client": {
+        "device": "iPhone",
+        "build": "0.26.0",
+        "theme": null,
+        "settings": true,
+        "computerUse": {
+          "on": true
+        }
+      }
+    }
+  },
+  "Screens, a phone not allowed yet": {
+    "answers": {
+      "computer-use_screens": {
+        "screens": []
+      },
+      "one/client": {
+        "device": "Android",
+        "build": "0.26.0",
+        "theme": null,
+        "settings": true,
+        "computerUse": {
+          "on": false
+        }
+      }
+    }
+  },
+  "No screens": {
+    "like": "Screens",
+    "answers": {
+      "computer-use_screens": {
+        "screens": []
+      }
+    }
+  },
+  "Couldn't list screens": {
+    "answers": {
+      "computer-use_screens": {
+        "$error": "The server isn't answering"
+      },
+      "one/client": {
+        "device": "iPhone",
+        "build": "0.26.0",
+        "theme": null,
+        "settings": true
+      }
+    }
+  },
+  "A screen opened (live picture left out)": {
+    "like": "Screens",
+    "taps": [
+      "Studio desktop"
+    ]
+  },
+  "A screen opened, wide": {
+    "like": "Screens",
+    "taps": [
+      "Studio desktop"
+    ],
+    "size": [
+      900,
+      600
+    ]
+  }
+}

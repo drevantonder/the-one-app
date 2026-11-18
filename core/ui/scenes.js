@@ -8,7 +8,8 @@
 // scenes are what each screen shows, by name, and what it's given to show it, as the tools' answers a client would
 // give (record.js's answers): `{ "Inbox": { "answers": { "notifications_inbox": { … } } } }`, with any of `page` (its
 // page, `client/index.html` unless said, and a link after `#`), `taps` (what's pressed first, by what each is named or
-// says), and `size` (`[390, 844]`, a phone's, unless said). An answer `{ "$error": "Couldn't reach it" }` is a tool's
+// says), `size` (`[390, 844]`, a phone's, unless said), and `like` (another scene's name, as Storybook's args are a
+// component's: this is that scene, with its own taps, and its answers in place of that one's, tool by tool). An answer `{ "$error": "Couldn't reach it" }` is a tool's
 // refusal. A method of the client's (`ui/initialize`, `one/client`) is answered as it's named too. It's 1 January 2026,
 // 00:00 UTC, as a native host's harness has it, so a fixture's times are said from then.
 //
@@ -49,9 +50,12 @@ const outlined = Bun.spawnSync(["bun", here("record.js"), "--dom"]).stdout.toStr
 /// A target's scenes, each its name, page, link, answers, taps and size.
 async function scenesOf(target, built, serve) {
   if (existsSync(join(target, "client/scenes.json"))) {
-    return Object.entries(JSON.parse(readFileSync(join(target, "client/scenes.json"), "utf8"))).map(([name, scene]) => {
-      const [page, link] = (scene.page ?? "client/index.html").split("#")
-      return { name, page, link, answers: scene.answers ?? {}, taps: scene.taps ?? [], size: scene.size ?? [390, 844] }
+    const all = JSON.parse(readFileSync(join(target, "client/scenes.json"), "utf8"))
+    const whole = (scene) => (scene.like ? { ...whole(all[scene.like]), taps: undefined, ...scene, answers: { ...whole(all[scene.like]).answers, ...scene.answers } } : scene)
+    return Object.entries(all).map(([name, scene]) => {
+      const { page: at = "client/index.html", answers = {}, taps = [], size = [390, 844] } = whole(scene)
+      const [page, link] = at.split("#")
+      return { name, page, link, answers, taps, size }
     })
   }
   // The gallery lists its own, drawn at `#scenes`.
@@ -79,8 +83,8 @@ addEventListener("message", ({ data, source }) => {
 })
 </script>`
 
-/// Serves a built page, the UI library, and the stand-in client around it.
-function server(built) {
+/// Serves a built page, what its build leaves as it is (a picture) as a server serves an app's files, the UI library, and the stand-in client around it.
+function server(built, target) {
   const pages = new Map()
   const listener = Bun.serve({
     port: 0,
@@ -88,8 +92,8 @@ function server(built) {
       const url = new URL(request.url)
       if (url.pathname === "/host.html") return new Response(pages.get(url.searchParams.get("scene")), { headers: { "content-type": "text/html" } })
       const path = decodeURIComponent(url.pathname)
-      const file = path.startsWith("/ui/client/") ? Bun.file(here("dist/client") + path.slice("/ui/client".length)) : Bun.file(join(built, path))
-      return file.size ? new Response(file) : new Response("Not found", { status: 404 })
+      const file = path.startsWith("/ui/client/") ? Bun.file(here("dist/client") + path.slice("/ui/client".length)) : [join(built, path), join(target, path)].map((one) => Bun.file(one)).find((one) => one.size)
+      return file?.size ? new Response(file) : new Response("Not found", { status: 404 })
     },
   })
   return {
@@ -204,7 +208,7 @@ for (const target of targets) {
     report.push(`${name}: didn't build\n${make.stderr.toString().trim()}`)
     continue
   }
-  const serve = server(built)
+  const serve = server(built, target)
   serve.text = async (page, link) => {
     const tab = await browser.newPage()
     serve.host("list", { page, link, answers: {}, size: [390, 844] })

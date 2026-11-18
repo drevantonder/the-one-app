@@ -1,0 +1,98 @@
+{
+  "Simulators": {
+    "answers": {
+      "iphone-simulator_list": {
+        "simulators": [
+          {
+            "name": "iphone-1",
+            "description": "iPhone 16, iOS 18.2",
+            "state": "running",
+            "machine": "build-mac",
+            "last_used": 1767218400000
+          },
+          {
+            "name": "iphone-2",
+            "description": "iPhone SE, iOS 17.5",
+            "state": "stopped",
+            "machine": "studio-mac",
+            "last_used": 1767218400000
+          },
+          {
+            "name": "iphone-3",
+            "description": "iPhone 16, iOS 18.2",
+            "state": "starting",
+            "machine": "build-mac",
+            "last_used": 1767218400000,
+            "step": "connecting"
+          },
+          {
+            "name": "iphone-4",
+            "description": "iPhone SE, iOS 17.5",
+            "state": "stopped",
+            "machine": "studio-mac",
+            "last_used": 0,
+            "why": "Not enough disk space to start it."
+          },
+          {
+            "name": "iphone-5",
+            "description": "iPhone 15, iOS 17.0",
+            "state": "gone",
+            "machine": "build-mac",
+            "last_used": 1767218400000
+          }
+        ]
+      },
+      "one/client": {
+        "device": "iPhone",
+        "build": "0.26.0",
+        "theme": null,
+        "settings": true
+      }
+    }
+  },
+  "No simulators": {
+    "like": "Simulators",
+    "answers": {
+      "iphone-simulator_list": {
+        "simulators": []
+      }
+    }
+  },
+  "Couldn't list simulators": {
+    "answers": {
+      "iphone-simulator_list": {
+        "$error": "The server isn't answering"
+      }
+    }
+  },
+  "A running simulator (live picture left out)": {
+    "like": "Simulators",
+    "taps": [
+      "iphone-1"
+    ]
+  },
+  "A starting simulator": {
+    "like": "Simulators",
+    "taps": [
+      "iphone-3"
+    ]
+  },
+  "A simulator that couldn't start": {
+    "like": "Simulators",
+    "taps": [
+      "iphone-4"
+    ]
+  },
+  "A stopped simulator": {
+    "like": "Simulators",
+    "taps": [
+      "iphone-2"
+    ]
+  },
+  "A simulator gone from Xcode": {
+    "like": "Simulators",
+    "taps": [
+      "iphone-5"
+    ]
+  }
+}

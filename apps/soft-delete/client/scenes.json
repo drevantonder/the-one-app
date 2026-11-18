@@ -1,0 +1,103 @@
+{
+  "Recently Deleted": {
+    "answers": {
+      "soft-delete_list": {
+        "deleted": [
+          {
+            "item": "notes/groceries",
+            "state": "deleted",
+            "artifacts": [
+              "users/sam/made/notes/groceries"
+            ],
+            "app": null,
+            "title": "Notes",
+            "installed": true,
+            "owner": "users/sam",
+            "names": null,
+            "purges": 1769731200000,
+            "why": null
+          },
+          {
+            "item": "tasks",
+            "state": "deleted",
+            "artifacts": [
+              "users/sam/made/tasks/inbox",
+              "users/sam/made/tasks/work",
+              "users/sam/made/tasks/home",
+              "users/sam/made/tasks/later"
+            ],
+            "app": "users/sam/own/tasks",
+            "title": "Tasks",
+            "installed": false,
+            "owner": "users/sam",
+            "names": null,
+            "purges": 1769040000000,
+            "why": null
+          },
+          {
+            "item": "photos/trip.jpg",
+            "state": "deleted",
+            "artifacts": [
+              "users/sam/made/photos/trip.jpg"
+            ],
+            "app": null,
+            "title": "Photos",
+            "installed": false,
+            "owner": "users/sam",
+            "names": null,
+            "purges": 1768262400000,
+            "why": null
+          },
+          {
+            "item": "recipes/pasta",
+            "state": "purging",
+            "artifacts": [
+              "users/sam/made/recipes/pasta"
+            ],
+            "app": null,
+            "title": "Recipes",
+            "installed": true,
+            "owner": "users/sam",
+            "names": null,
+            "purges": 1767657600000,
+            "why": null
+          },
+          {
+            "item": "budget/2025",
+            "state": "deleted",
+            "artifacts": [
+              "users/sam/made/budget/2025"
+            ],
+            "app": null,
+            "title": "Budget",
+            "installed": true,
+            "owner": "users/sam",
+            "names": null,
+            "purges": 1767398400000,
+            "why": "The storage was busy."
+          }
+        ]
+      }
+    }
+  },
+  "Menu Open": {
+    "like": "Recently Deleted",
+    "taps": [
+      "More for groceries"
+    ]
+  },
+  "Nothing Deleted": {
+    "answers": {
+      "soft-delete_list": {
+        "deleted": []
+      }
+    }
+  },
+  "Can't Show": {
+    "answers": {
+      "soft-delete_list": {
+        "$error": "Couldn't reach the network"
+      }
+    }
+  }
+}

@@ -1,0 +1,85 @@
+{
+  "Emulators": {
+    "answers": {
+      "android-emulator_list": {
+        "emulators": [
+          {
+            "name": "pixel-1",
+            "description": "Pixel 8, Android 15",
+            "state": "running",
+            "machine": "build-mac",
+            "last_used": 1767218400000
+          },
+          {
+            "name": "pixel-2",
+            "description": "Pixel Tablet, Android 14",
+            "state": "stopped",
+            "machine": "studio-mac",
+            "last_used": 1767218400000
+          },
+          {
+            "name": "pixel-3",
+            "description": "Pixel 8, Android 15",
+            "state": "starting",
+            "machine": "build-mac",
+            "last_used": 1767218400000,
+            "step": "preparing"
+          },
+          {
+            "name": "pixel-4",
+            "description": "Pixel Tablet, Android 14",
+            "state": "stopped",
+            "machine": "studio-mac",
+            "last_used": 0,
+            "why": "Not enough disk space to start it."
+          }
+        ]
+      },
+      "one/client": {
+        "device": "iPhone",
+        "build": "0.26.0",
+        "theme": null,
+        "settings": true
+      }
+    }
+  },
+  "No emulators": {
+    "like": "Emulators",
+    "answers": {
+      "android-emulator_list": {
+        "emulators": []
+      }
+    }
+  },
+  "Couldn't list emulators": {
+    "answers": {
+      "android-emulator_list": {
+        "$error": "The server isn't answering"
+      }
+    }
+  },
+  "A running emulator (live picture left out)": {
+    "like": "Emulators",
+    "taps": [
+      "pixel-1"
+    ]
+  },
+  "A starting emulator": {
+    "like": "Emulators",
+    "taps": [
+      "pixel-3"
+    ]
+  },
+  "An emulator that couldn't start": {
+    "like": "Emulators",
+    "taps": [
+      "pixel-4"
+    ]
+  },
+  "A stopped emulator": {
+    "like": "Emulators",
+    "taps": [
+      "pixel-2"
+    ]
+  }
+}

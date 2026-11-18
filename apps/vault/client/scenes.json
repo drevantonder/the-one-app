@@ -1,0 +1,433 @@
+{
+  "Sidebar": {
+    "answers": {
+      "vault_security": {
+        "readiness": "ready",
+        "owner": "users/alex",
+        "holds": true,
+        "device": "d1",
+        "devices": [
+          {
+            "device": "d1",
+            "name": "Alex's Laptop"
+          }
+        ],
+        "asking": [],
+        "servers": [
+          "s1"
+        ],
+        "may": [
+          {
+            "key": "s1",
+            "name": "Home Server"
+          }
+        ]
+      },
+      "vault_list": {
+        "items": [
+          {
+            "name": "GitHub",
+            "artifact": "vault/github",
+            "kind": "password",
+            "type": null,
+            "status": null,
+            "fields": [
+              {
+                "name": "token",
+                "secret": true
+              }
+            ],
+            "hosts": [
+              "api.github.com"
+            ],
+            "access": [
+              "agents"
+            ]
+          },
+          {
+            "name": "Example Mail",
+            "artifact": "vault/example-mail",
+            "kind": "account",
+            "type": null,
+            "status": null,
+            "fields": [
+              {
+                "name": "username",
+                "secret": false,
+                "value": "sam@example.com"
+              },
+              {
+                "name": "password",
+                "secret": true
+              }
+            ],
+            "hosts": [
+              "mail.example.com"
+            ],
+            "access": [],
+            "sign_in": true
+          }
+        ],
+        "requests": [
+          {
+            "id": "r1",
+            "title": "Example API",
+            "state": "waiting",
+            "app": null,
+            "by": "Claude on Alex's Laptop",
+            "why": "To read the build status",
+            "hosts": [
+              "api.example.com"
+            ],
+            "fields": [
+              {
+                "name": "api_key"
+              }
+            ]
+          }
+        ],
+        "apps": [
+          {
+            "name": "backups",
+            "title": "Backups"
+          }
+        ],
+        "types": []
+      },
+      "sign-in_people": {
+        "people": [
+          {
+            "who": "users/alex",
+            "name": "Alex"
+          }
+        ]
+      },
+      "permissions_groups": {
+        "groups": []
+      },
+      "permissions_check": {
+        "may": false
+      }
+    }
+  },
+  "All items": {
+    "like": "Sidebar",
+    "taps": [
+      {
+        "role": "button",
+        "name": "All 3"
+      }
+    ],
+    "answers": {
+      "vault_list": {
+        "items": [
+          {
+            "name": "GitHub",
+            "artifact": "vault/github",
+            "kind": "password",
+            "type": null,
+            "status": null,
+            "fields": [
+              {
+                "name": "token",
+                "secret": true
+              }
+            ],
+            "hosts": [
+              "api.github.com"
+            ],
+            "access": [
+              "agents"
+            ]
+          },
+          {
+            "name": "Example Mail",
+            "artifact": "vault/example-mail",
+            "kind": "account",
+            "type": null,
+            "status": null,
+            "fields": [
+              {
+                "name": "username",
+                "secret": false,
+                "value": "sam@example.com"
+              },
+              {
+                "name": "password",
+                "secret": true
+              }
+            ],
+            "hosts": [
+              "mail.example.com"
+            ],
+            "access": [],
+            "sign_in": true
+          },
+          {
+            "name": "Cloud Console",
+            "artifact": "vault/cloud-console",
+            "kind": "password",
+            "type": null,
+            "status": null,
+            "fields": [
+              {
+                "name": "key",
+                "secret": true
+              }
+            ],
+            "hosts": [],
+            "access": [],
+            "added": {
+              "by": "Alex's Laptop",
+              "from": "console.example.com",
+              "at": 1767225000
+            }
+          }
+        ],
+        "requests": [],
+        "apps": [
+          {
+            "name": "backups",
+            "title": "Backups"
+          }
+        ],
+        "types": []
+      }
+    }
+  },
+  "Empty": {
+    "like": "Sidebar",
+    "taps": [
+      {
+        "role": "button",
+        "name": "All 0"
+      }
+    ],
+    "answers": {
+      "vault_list": {
+        "items": [],
+        "requests": [],
+        "apps": [],
+        "types": []
+      }
+    }
+  },
+  "Item": {
+    "like": "Empty",
+    "taps": [
+      {
+        "role": "button",
+        "name": "All 1"
+      },
+      {
+        "role": "button",
+        "name": "GitHub api.github.com and github.com"
+      }
+    ],
+    "answers": {
+      "vault_list": {
+        "items": [
+          {
+            "name": "GitHub",
+            "artifact": "vault/github",
+            "kind": "password",
+            "type": null,
+            "status": null,
+            "fields": [
+              {
+                "name": "username",
+                "secret": false,
+                "value": "sam-example"
+              },
+              {
+                "name": "token",
+                "secret": true
+              }
+            ],
+            "hosts": [
+              "api.github.com",
+              "github.com"
+            ],
+            "access": [
+              "agents",
+              "backups"
+            ]
+          }
+        ],
+        "requests": [],
+        "apps": [
+          {
+            "name": "backups",
+            "title": "Backups"
+          },
+          {
+            "name": "git-repos",
+            "title": "Git Repos"
+          }
+        ],
+        "types": []
+      }
+    }
+  },
+  "Add item": {
+    "like": "Empty",
+    "taps": [
+      {
+        "role": "button",
+        "name": "All 0"
+      },
+      "Add"
+    ]
+  },
+  "Request": {
+    "like": "Item",
+    "taps": [
+      {
+        "role": "button",
+        "name": "Requests 1 waiting"
+      },
+      {
+        "role": "button",
+        "name": "Claude on Alex's Laptop wants Example API To read the build status"
+      }
+    ],
+    "answers": {
+      "vault_list": {
+        "items": [
+          {
+            "name": "Example API",
+            "artifact": "vault/example-api",
+            "kind": "password",
+            "type": null,
+            "status": null,
+            "fields": [
+              {
+                "name": "api_key",
+                "secret": true
+              }
+            ],
+            "hosts": [
+              "api.example.com"
+            ],
+            "access": []
+          }
+        ],
+        "requests": [
+          {
+            "id": "r1",
+            "title": "Example API",
+            "state": "waiting",
+            "app": null,
+            "by": "Claude on Alex's Laptop",
+            "why": "To read the build status",
+            "hosts": [
+              "api.example.com"
+            ],
+            "fields": [
+              {
+                "name": "api_key"
+              }
+            ]
+          }
+        ],
+        "apps": [],
+        "types": []
+      },
+      "sign-in_encrypt_for_passkeys": {}
+    }
+  },
+  "Security": {
+    "like": "Empty",
+    "taps": [
+      "Security"
+    ],
+    "answers": {
+      "vault_security": {
+        "readiness": "ready",
+        "owner": "users/alex",
+        "holds": true,
+        "device": "d1",
+        "devices": [
+          {
+            "device": "d1",
+            "name": "Alex's Laptop"
+          },
+          {
+            "device": "d2",
+            "name": "Alex's Phone"
+          }
+        ],
+        "asking": [
+          {
+            "device": "d3",
+            "name": "Sam's Tablet"
+          }
+        ],
+        "servers": [
+          "s1"
+        ],
+        "may": [
+          {
+            "key": "s1",
+            "name": "Home Server"
+          },
+          {
+            "key": "s2",
+            "name": "Cloud Server"
+          }
+        ]
+      },
+      "sign-in_encrypt_for_passkeys": {}
+    }
+  },
+  "Not set up": {
+    "taps": [
+      {
+        "role": "button",
+        "name": "All 0"
+      }
+    ],
+    "answers": {
+      "vault_security": {
+        "readiness": "not_set_up",
+        "owner": "users/alex",
+        "holds": false,
+        "device": "d1",
+        "devices": [],
+        "asking": [],
+        "servers": [],
+        "may": []
+      },
+      "sign-in_people": {
+        "people": [
+          {
+            "who": "users/alex",
+            "name": "Alex"
+          }
+        ]
+      },
+      "permissions_groups": {
+        "groups": []
+      },
+      "permissions_check": {
+        "may": false
+      }
+    }
+  },
+  "Error": {
+    "answers": {
+      "vault_security": {
+        "$error": "Couldn't reach the server"
+      }
+    }
+  },
+  "Requests": {
+    "like": "Request",
+    "taps": [
+      {
+        "role": "button",
+        "name": "Requests 1 waiting"
+      }
+    ]
+  }
+}

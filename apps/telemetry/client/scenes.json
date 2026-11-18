@@ -1,0 +1,307 @@
+{
+  "Overview": {
+    "answers": {
+      "telemetry_overview": {
+        "calls": [
+          {
+            "calls": 40,
+            "failed": 0
+          },
+          {
+            "calls": 55,
+            "failed": 1
+          },
+          {
+            "calls": 80,
+            "failed": 2
+          },
+          {
+            "calls": 120,
+            "failed": 0
+          },
+          {
+            "calls": 95,
+            "failed": 3
+          },
+          {
+            "calls": 60,
+            "failed": 0
+          },
+          {
+            "calls": 70,
+            "failed": 1
+          },
+          {
+            "calls": 110,
+            "failed": 6
+          },
+          {
+            "calls": 90,
+            "failed": 2
+          },
+          {
+            "calls": 50,
+            "failed": 0
+          },
+          {
+            "calls": 45,
+            "failed": 0
+          },
+          {
+            "calls": 65,
+            "failed": 1
+          }
+        ],
+        "failing": [
+          {
+            "where": "gmail search",
+            "message": "Google Account isn't signed in",
+            "span": true,
+            "count": 6,
+            "at": 1767224400000,
+            "trace": "t1",
+            "took": 340
+          },
+          {
+            "where": "Open Notes",
+            "message": "Couldn't load",
+            "count": 1,
+            "at": 1767214800000,
+            "from": "App on Sam's iPhone"
+          }
+        ],
+        "slowest": [
+          {
+            "app": "git-repos",
+            "tool": "clone",
+            "called": "Git Repos",
+            "p50": 900,
+            "p95": 4200,
+            "p99": 7800,
+            "count": 38,
+            "failed": 2,
+            "should_be_task": true,
+            "over_time": [
+              2,
+              3,
+              2,
+              5,
+              4,
+              6,
+              3,
+              8,
+              5,
+              4,
+              7,
+              6
+            ]
+          },
+          {
+            "app": "one",
+            "tool": "apps",
+            "called": "One",
+            "p50": 12,
+            "p95": 85,
+            "p99": 140,
+            "count": 900,
+            "over_time": [
+              1,
+              1,
+              2,
+              1,
+              1,
+              2,
+              1,
+              1,
+              1,
+              2,
+              1,
+              1
+            ]
+          }
+        ],
+        "spending": [
+          {
+            "model": "example-large",
+            "input": 1200000,
+            "output": 180000,
+            "cost": 4.82
+          },
+          {
+            "model": "example-large",
+            "input": 900000,
+            "output": 120000,
+            "cost": 3.1
+          },
+          {
+            "model": "example-small",
+            "input": 300000,
+            "output": 50000,
+            "cost": null
+          }
+        ],
+        "names": {
+          "gmail": "Gmail",
+          "git-repos": "Git Repos"
+        },
+        "retention": {
+          "days": 14,
+          "bytes": 212000000,
+          "most_bytes": 1000000000
+        },
+        "forwarding": "https://logs.example.com/ingest"
+      },
+      "telemetry_alerts": {
+        "alerts": [
+          {
+            "id": 1,
+            "kind": "failing",
+            "state": "firing",
+            "title": "Gmail is failing",
+            "text": "6 calls failed in the last hour.",
+            "began": 1767224400000
+          },
+          {
+            "id": 2,
+            "kind": "disk",
+            "state": "resolved",
+            "title": "Disk was nearly full",
+            "began": 1767189600000,
+            "ended": 1767204000000
+          }
+        ],
+        "kinds": [
+          {
+            "kind": "failing",
+            "about": "A tool keeps failing",
+            "muted": false
+          },
+          {
+            "kind": "disk",
+            "about": "A disk is nearly full",
+            "muted": false
+          },
+          {
+            "kind": "slow",
+            "about": "A tool is slow",
+            "muted": true
+          }
+        ]
+      },
+      "telemetry_trace": {
+        "spans": [
+          {
+            "name": "gmail search",
+            "server": "studio",
+            "start": 0,
+            "took": 340,
+            "depth": 0,
+            "outcome": "error",
+            "message": "Google Account isn't signed in"
+          },
+          {
+            "name": "google-account token",
+            "server": "studio",
+            "start": 10,
+            "took": 200,
+            "depth": 1,
+            "outcome": "error",
+            "message": "No account"
+          },
+          {
+            "name": "one authorize",
+            "server": "studio",
+            "start": 5,
+            "took": 4,
+            "depth": 1
+          }
+        ]
+      }
+    }
+  },
+  "Failure Trace": {
+    "like": "Overview",
+    "taps": [
+      "Gmail › search"
+    ]
+  },
+  "Slow Tool": {
+    "like": "Overview",
+    "taps": [
+      "Git Repos › clone"
+    ]
+  },
+  "All Quiet": {
+    "answers": {
+      "telemetry_overview": {
+        "calls": [
+          {
+            "calls": 40,
+            "failed": 0
+          },
+          {
+            "calls": 55,
+            "failed": 1
+          },
+          {
+            "calls": 80,
+            "failed": 2
+          },
+          {
+            "calls": 120,
+            "failed": 0
+          },
+          {
+            "calls": 95,
+            "failed": 3
+          },
+          {
+            "calls": 60,
+            "failed": 0
+          }
+        ],
+        "failing": [],
+        "slowest": [],
+        "spending": [],
+        "names": {},
+        "retention": {
+          "days": 14,
+          "bytes": 5000000,
+          "most_bytes": 1000000000
+        },
+        "forwarding": null
+      },
+      "telemetry_alerts": {
+        "alerts": [],
+        "kinds": [
+          {
+            "kind": "failing",
+            "about": "A tool keeps failing",
+            "muted": false
+          },
+          {
+            "kind": "disk",
+            "about": "A disk is nearly full",
+            "muted": false
+          },
+          {
+            "kind": "slow",
+            "about": "A tool is slow",
+            "muted": true
+          }
+        ]
+      }
+    }
+  },
+  "Can't Show Telemetry": {
+    "answers": {
+      "telemetry_overview": {
+        "$error": "Couldn't reach the network"
+      },
+      "telemetry_alerts": {
+        "kinds": [],
+        "alerts": []
+      }
+    }
+  }
+}

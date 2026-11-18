@@ -1,0 +1,214 @@
+{
+  "Repos": {
+    "answers": {
+      "git-repos_list": {
+        "repos": [
+          {
+            "repo": "users/sam/made/git-repos/notes",
+            "whose": "users/sam",
+            "pushed": 1767218400000
+          },
+          {
+            "repo": "groups/family/made/git-repos/recipes",
+            "whose": "groups/family",
+            "pushed": 1766966400000
+          },
+          {
+            "repo": "users/sam/made/git-repos/scratch",
+            "whose": "users/sam"
+          }
+        ]
+      },
+      "git-repos_branches": {
+        "head": "main",
+        "clone": "https://git.example.com/sam/notes.git",
+        "whose": "users/sam",
+        "owns": true,
+        "pushes": true,
+        "branches": [
+          {
+            "branch": "main"
+          },
+          {
+            "branch": "draft"
+          }
+        ]
+      },
+      "git-repos_tree": {
+        "commit": {
+          "sha": "a1b2c3d4e5f6",
+          "subject": "Add packing list",
+          "author": "Sam",
+          "at": 1767218400000
+        },
+        "commits": 14,
+        "entries": [
+          {
+            "name": "trips",
+            "type": "tree"
+          },
+          {
+            "name": "README.md",
+            "type": "blob",
+            "size": 420
+          },
+          {
+            "name": "todo.txt",
+            "type": "blob",
+            "size": 1280
+          }
+        ],
+        "readme": {
+          "name": "README.md",
+          "text": "# Notes\n\nSam's plain notes.\n\n- Trips\n- Todo lists\n"
+        }
+      },
+      "git-repos_log": {
+        "commits": [
+          {
+            "sha": "a1b2c3d4e5f6",
+            "subject": "Add packing list",
+            "author": "Sam",
+            "at": 1767218400000
+          },
+          {
+            "sha": "b2c3d4e5f6a1",
+            "subject": "Fix typo in README",
+            "author": "Alex",
+            "at": 1767139200000
+          },
+          {
+            "sha": "c3d4e5f6a1b2",
+            "subject": "Start trips folder",
+            "author": "Sam",
+            "at": 1766793600000
+          }
+        ],
+        "more": false
+      },
+      "git-repos_pull_requests": {
+        "pull_requests": [
+          {
+            "name": "1",
+            "title": "Add camping checklist",
+            "state": "open",
+            "by": "users/alex",
+            "into": "main",
+            "commits": [
+              1,
+              2
+            ],
+            "at": 1767207600000
+          },
+          {
+            "name": "2",
+            "title": "Reorganise trips",
+            "state": "merged",
+            "by": "users/sam",
+            "into": "main",
+            "commits": [
+              1
+            ],
+            "at": 1766880000000
+          },
+          {
+            "name": "3",
+            "title": "Try a new layout",
+            "state": "closed",
+            "by": "users/alex",
+            "into": "main",
+            "commits": [
+              1,
+              2,
+              3
+            ],
+            "at": 1766448000000
+          }
+        ]
+      },
+      "git-repos_commit": {
+        "sha": "a1b2c3d4e5f6",
+        "subject": "Add packing list",
+        "author": "Sam",
+        "at": 1767218400000,
+        "message": "Add packing list\n\nFor the June trip.",
+        "diff": "diff --git a/todo.txt b/todo.txt\nindex 111..222 100644\n--- a/todo.txt\n+++ b/todo.txt\n@@ -1,2 +1,3 @@\n tent\n-stove\n+gas stove\n+torch\n"
+      },
+      "git-repos_file": {
+        "text": "tent\ngas stove\ntorch\n",
+        "size": 1280
+      },
+      "permissions_groups": {
+        "groups": [
+          {
+            "group": "groups/family",
+            "called": "Family"
+          }
+        ]
+      },
+      "sign-in_people": {
+        "people": [
+          {
+            "who": "users/sam"
+          }
+        ]
+      }
+    }
+  },
+  "No repos": {
+    "like": "Repos",
+    "answers": {
+      "git-repos_list": {
+        "repos": []
+      }
+    }
+  },
+  "Code": {
+    "like": "Repos",
+    "taps": [
+      "notes"
+    ]
+  },
+  "History": {
+    "like": "Code",
+    "taps": [
+      "notes",
+      "History"
+    ]
+  },
+  "Pull requests": {
+    "like": "Code",
+    "taps": [
+      "notes",
+      "Pull Requests"
+    ]
+  },
+  "Commit": {
+    "like": "Code",
+    "taps": [
+      "notes",
+      "History",
+      "Add packing list"
+    ]
+  },
+  "File": {
+    "like": "Code",
+    "taps": [
+      "notes",
+      "todo.txt"
+    ]
+  },
+  "New repo": {
+    "like": "Code",
+    "taps": [
+      "New"
+    ]
+  },
+  "Error": {
+    "answers": {
+      "git-repos_list": {
+        "$error": "Couldn't reach the server"
+      }
+    }
+  }
+}

@@ -1,0 +1,163 @@
+{
+  "Destinations": {
+    "answers": {
+      "backups_destinations": {
+        "destinations": [
+          {
+            "name": "Home Disk",
+            "kind": "folder",
+            "where": "/mnt/disk/backups",
+            "machine": "Studio",
+            "size": 18400000000,
+            "last": {
+              "at": 1767218400000
+            },
+            "state": "backed_up",
+            "backups": [
+              {
+                "name": "b3",
+                "at": 1767218400000,
+                "bytes": 2400000000,
+                "sent_bytes": 200000000,
+                "took": 95000
+              },
+              {
+                "name": "b2",
+                "at": 1767132000000,
+                "bytes": 2400000000,
+                "sent_bytes": 200000000,
+                "took": 95000
+              },
+              {
+                "name": "b1",
+                "at": 1767045600000,
+                "bytes": 2400000000,
+                "sent_bytes": 200000000,
+                "took": 95000
+              }
+            ]
+          },
+          {
+            "name": "example-backups",
+            "kind": "s3",
+            "where": "https://example.r2.cloudflarestorage.com/example-backups",
+            "item": "Backups Storage",
+            "size": 17900000000,
+            "last": {
+              "at": 1767117600000
+            },
+            "state": "failed",
+            "problem": {
+              "kind": "unreachable",
+              "text": "The bucket didn't answer."
+            },
+            "backups": [
+              {
+                "name": "b2",
+                "at": 1767117600000,
+                "bytes": 2400000000,
+                "sent_bytes": 200000000,
+                "took": 95000
+              },
+              {
+                "name": "b1",
+                "at": 1767031200000,
+                "bytes": 2400000000,
+                "sent_bytes": 200000000,
+                "took": 95000
+              }
+            ]
+          }
+        ],
+        "every": "day",
+        "retention": "Keeps hourly backups for a day, daily for a month and weekly for a year.",
+        "machines": [
+          {
+            "key": "m1abcdef",
+            "name": "Studio"
+          }
+        ]
+      }
+    }
+  },
+  "Destination Open": {
+    "like": "Destinations",
+    "taps": [
+      "Home Disk"
+    ]
+  },
+  "Failed Destination": {
+    "like": "Destinations",
+    "taps": [
+      "example-backups"
+    ]
+  },
+  "Restore Sheet": {
+    "like": "Destinations",
+    "taps": [
+      "Home Disk",
+      "Restore"
+    ],
+    "answers": {
+      "sign-in_everyone": {
+        "people": [
+          {
+            "who": "users/sam",
+            "called": "Sam",
+            "joined": true
+          },
+          {
+            "who": "users/alex",
+            "called": "Alex",
+            "joined": true
+          }
+        ]
+      },
+      "permissions_groups": {
+        "groups": [
+          {
+            "group": "groups/family",
+            "called": "Family"
+          }
+        ]
+      },
+      "app-store_marketplace": {
+        "apps": [
+          {
+            "app": "users/sam/own/notes",
+            "name": "notes",
+            "title": "Notes"
+          }
+        ]
+      }
+    }
+  },
+  "Add Destination": {
+    "like": "Destinations",
+    "taps": [
+      "Add Destination"
+    ]
+  },
+  "Nothing Backed Up": {
+    "answers": {
+      "backups_destinations": {
+        "destinations": [],
+        "every": "never",
+        "retention": "Keeps hourly backups for a day, daily for a month and weekly for a year.",
+        "machines": [
+          {
+            "key": "m1abcdef",
+            "name": "Studio"
+          }
+        ]
+      }
+    }
+  },
+  "Can't Show Backups": {
+    "answers": {
+      "backups_destinations": {
+        "$error": "Couldn't reach the network"
+      }
+    }
+  }
+}
