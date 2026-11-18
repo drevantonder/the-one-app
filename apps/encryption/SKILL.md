@@ -18,13 +18,25 @@ Its words:
 
 - Someone's key is made on a device of theirs, and stays on their devices: `approve`, on a device, makes it the
   first time, and after that lets in another device, by the key `key` lists it under. A device that isn't in yet
-  asks with `ask`, and a device that is lets it in. No server ever holds the key, and signing in gives none.
+  asks with `ask`, and a device that is lets it in. No server ever holds the key.
 - A server opens something encrypted only once its owner chose it, from a device that holds their key: the
   app that keeps it has a tool for that, as the Vault's `grant`. Choosing writes a relation tuple naming the
   server as an `editor` of the artifact, and hands the server that artifact's keys. Taking a server off removes
   both, and what's written after is under a key it was never handed. What it read before, it read.
 - The network's owner can write that tuple for any server, and it opens nothing: only a device that holds the
   key hands one over. Nobody asks for a user here but the user: not their groups, not the owner.
+- A passkey that has WebAuthn's PRF lets a new device in too, with no other device: Unlock with Passkey. Its PRF
+  output, which only the device it's used on ever has, derives a key that a device that holds their key encrypts the
+  key to, and the network's sign-in page opens it where the passkey's used and encrypts it to the new device, as
+  `approve` does. Signing in with one on a new device lets it in at once. `sign-in`'s `encrypt_for_passkeys` and
+  `unlock_with_passkey` do it from a device. A passkey without PRF says so in Sign-In & Security, and the other ways
+  stay.
+- What that trusts: whoever can use your passkey can open your key, the same as whoever can sign in as you. The PRF
+  output and the key it opens stay on the device, in the sign-in page; what's kept, with the passkey, is the key it
+  derives and your key encrypted to it, which no server opens. Removing the passkey removes both. The PRF is asked
+  with a salt of the network's own, so a passkey gives each network a different key. The page comes from the
+  network's edge, so whoever can change the edge's code could take what a passkey opens there, as they could change
+  the page you sign in on.
 - When every device that held the key is gone, its person lets a new one in with their recovery key, which the
   first device showed them: in the app, or as `approve`'s `key`. Without it, or a device that's in, nobody is
   let in again. A recovery key is a secret: never ask for one in a chat, and never repeat one.

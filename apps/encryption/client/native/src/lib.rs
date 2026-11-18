@@ -12,6 +12,8 @@
 //!   device's copy of its owner's key. A server that was listed and no longer is starts a new epoch.
 //! - `owner-key`: the owner's key for the device in the input `device`: a new one if they have none, and otherwise
 //!   this device's copy, or the recovery key given.
+//! - `passkey-keys`: the owner's key, encrypted to each of their passkeys that the app's tool named by `passkeys` lists
+//!   with a key from its PRF output and that can't unlock it yet.
 //!
 //! An owner's key is for a device, which One Core fills in first (`device`).
 //!
