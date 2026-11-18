@@ -15,10 +15,6 @@
 import { createEffect, createMemo, createSignal, Errored, flush, For, Loading, onSettled, refresh, Show, untrack } from "solid-js"
 import { createActor } from "xstate"
 import {
-  ActionBar,
-  createListbox,
-  Section,
-  type Action,
   Badge,
   Box,
   negative,
@@ -67,7 +63,7 @@ import {
   Widget,
 } from "ui"
 import { give, glide, jump, settle, speed, spring, type Spring, stop } from "./pager.ts"
-import { at as gridAt, BAR, type Box as Place, cell as cellOf, DOTS, grid, gridHeight, LAUNCHER_BAR, LAUNCHER_FOOT, LAUNCHER_HEADING, LAUNCHER_SIDE, lefts, measure, page as pageOf, type Page as Laid, type Room, TOP_ROW } from "./layout.ts"
+import { at as gridAt, BAR, type Box as Place, cell as cellOf, DOTS, GAP, grid, halfHeight, INSET, launcherRoom, lefts, LIBRARY, MARGIN, measure, PAGE, page as pageOf, type Page as Laid, panelSize, PILLS, type Room, SEARCH, SEARCH_HEIGHT, TOP_ROW } from "./layout.ts"
 import { type At, carries, type Drop, type Editing, fitted, type Held, type Kind, machine, nearest, pack, type Page, type Placed, shown, spans } from "./machine.ts"
 import type { Entrypoint, Category, Item, Listed, Pages, Size, Widget as WidgetItem } from "./types.ts"
 import { src } from "./types.ts"
@@ -93,16 +89,27 @@ const looks = styles({
   // An icon sinks under the finger, dimmed at once, for as long as it takes to hold, and comes back quickly.
   icon: { position: "relative", scale: { default: 1, pressed: 0.94 }, opacity: { default: 1, pressed: 0.85 }, transitionProperty: ["scale"], transition: tokens.motion.hold },
   tint: { position: "absolute", top: 0, bottom: 0, start: 0, end: 0, borderRadius: tokens.radius.large, backgroundColor: tokens.colour.tile },
-  // The launcher's bar is its search, as Raycast's is: bare words, with no box, magnifier or ring.
+  round: { borderRadius: tokens.radius.window },
+  // The launcher's search is bare words, with no box, magnifier or ring, as Raycast's is.
   bare: { flexGrow: 1, height: tokens.length.control, font: tokens.type.large, color: tokens.colour.label },
+  // The launcher's search and its card, each a surface of the system's glass floating over the desktop, with a
+  // window's shadow and edge.
+  surface: { position: "absolute", overflow: "hidden", borderRadius: tokens.radius.window, backgroundColor: tokens.colour.veil, backdropFilter: tokens.material.window, boxShadow: tokens.shadow.window },
+  // The card changes size by a spring, which a change on the way turns, and what's in it is carried with it.
+  card: { transitionProperty: ["width", "height", "translateX"], transition: tokens.motion.snappy },
+  // Home, the App Library and what was found cross-fade in the card; an owner's pages roll up and down, and turn along.
+  fading: { transitionProperty: ["opacity", "scale", "translateY"], transition: tokens.motion.smooth },
+  rolling: { transitionProperty: ["opacity", "translateY", "translateX"], transition: tokens.motion.snappy },
+  search: { flexDirection: "row", alignItems: "center", zIndex: 6 },
+  owner: { position: "absolute", overflow: "hidden" },
+  track: { position: "absolute", top: 0, start: 0, flexDirection: "row" },
+  layer: { position: "absolute", alignItems: "center" },
+  row: { position: "absolute", start: 0, end: 0, alignItems: "center", justifyContent: "center" },
+  inert: { pointerEvents: "none" },
   // What a finger carries floats over the pages on a soft shadow, which fades as it settles.
   lifted: { position: "absolute", boxShadow: tokens.shadow.lifted, opacity: 1, transitionProperty: ["opacity"], transition: tokens.motion.settle },
   liftedIcon: { borderRadius: tokens.radius.icon },
   liftedWidget: { borderRadius: tokens.radius.large },
-  // The launcher's panel's edge inside, lit along its top, as Raycast's window has, over everything in it.
-  edge: { position: "absolute", top: 0, bottom: 0, start: 0, end: 0, zIndex: 20, boxShadow: tokens.shadow.edge, pointerEvents: "none" },
-  round: { borderRadius: tokens.radius.large },
-  heading: { position: "absolute", start: 0, end: 0, paddingTop: tokens.grid[3], paddingInline: tokens.grid[4] },
   chosen: { position: "absolute", top: negative(tokens.grid[1]), bottom: negative(tokens.grid[1]), start: negative(tokens.grid[1]), end: negative(tokens.grid[1]), borderRadius: tokens.radius.large, backgroundColor: tokens.colour.selection },
 })
 
@@ -164,18 +171,18 @@ const editingOwner = (owner: number) => state().matches("editing") && editing()?
 /// Whether this device puts an app on its own home screen (`pinShortcut`): Android's app does.
 const [pins, setPins] = createSignal(false)
 /// Whether this Home Screen is a computer's launcher (`client().launcher`): a panel the system summons over whatever's
-/// in front, as Spotlight and Raycast are, which goes once an app opens from it. It's Raycast's chrome around Home's
-/// pages: one search bar across its top, with the keyboard as it opens, and two pills floating over its foot, with the page dots and the
-/// App Library's glyph, and what Return and ⌘K do. The arrow keys move a highlight over Home's apps and widgets, and
-/// typing turns it into a list of the apps found (`leave` puts it away).
+/// in front, as Spotlight and Raycast are, which goes once an app opens from it: its search floating on its own, with
+/// the keyboard as it opens, and under it a card of Home's pages, two at a time, with the owner switcher at its top and
+/// the page dots at its foot, which changes size for the App Library and for what's found as it's typed (`Pair`).
+/// The arrow keys move a highlight over Home's apps and widgets (`leave` puts it away).
 const [launcher, setLauncher] = createSignal(false)
-/// A Mac's keys are ⌘, and a PC's Ctrl.
-const [mac, setMac] = createSignal(false)
-client().then(({ pinsShortcuts, launcher, mac }) => (setPins(!!pinsShortcuts), setLauncher(!!launcher), setMac(!!mac)), () => {})
-/// What's typed in the launcher's search, and its results, a listbox: which of the apps it finds is chosen, which
-/// Return opens.
+/// Whether the launcher's panel is see-through where nothing's drawn, so its search and its card float on the desktop
+/// on the system's glass (a Mac's); else they're in one panel, as large as what they show.
+const [transparent, setTransparent] = createSignal(false)
+client().then(({ pinsShortcuts, launcher, transparent }) => (setPins(!!pinsShortcuts), setLauncher(!!launcher), setTransparent(!!transparent)), () => {})
+/// What's typed in the launcher's search, and which of what it found is chosen, which Return opens.
 const [query, setQuery] = createSignal("")
-const results = createListbox()
+const [chosenResult, setChosenResult] = createSignal(0)
 /// What the launcher's arrow keys have chosen on Home: an app or a widget of an owner, by which of their pages shown
 /// it's on and where on it.
 type Selected = { owner: number; page: number; index: number }
@@ -201,8 +208,11 @@ type From = Rect & { radius: number }
 const launch = (entrypoint: Entrypoint, owner: Owner, behind?: boolean, from?: From) =>
   open(entrypoint.entrypoint, { subject: entrypoint.subject === "user" ? undefined : (entrypoint.subject ?? owner.subject), behind, from })
 
+/// Where the launcher's card's top is, under its search.
+const CARD_TOP = MARGIN + SEARCH_HEIGHT + GAP
+
 /// The room the pages have and how they're laid out in it, a phone's until it's known.
-const [room, setRoom] = createSignal<Room>(measure(390, 844, false, { top: 0, right: 0, bottom: 0, left: 0 }))
+const [room, setRoom] = createSignal<Room>(measure(390, 844, { top: 0, right: 0, bottom: 0, left: 0 }))
 /// A page of the room, laid out.
 const laidPage = createMemo(() => pageOf(room()))
 
@@ -657,13 +667,13 @@ function shelf(width: number) {
 /// search shows the apps whose names match, A to Z, in place of the categories, and the background apps that match
 /// under Background Apps, open. Touching and holding an app gives its menu, and moving one with a screen carries it
 /// onto Home's pages.
-function Library(props: { owner: Owner }) {
+function Library(props: { owner: Owner; size?: { width: number; height: number } }) {
   const [query, setQuery] = createSignal("")
   // Tapped while a search shows it open, Background Apps closes only for that search.
   const [shut, setShut] = createSignal(false)
   const searching = () => !!query().trim()
-  const inline = () => (room().wide ? room().side : 20)
-  const width = () => Math.min(1440, room().width - 2 * inline())
+  const inline = () => (props.size ? 0 : room().wide ? room().side : 20)
+  const width = () => props.size?.width ?? Math.min(1440, room().width - 2 * inline())
   const laid = createMemo(() => shelf(width()))
   // Tapped again as it shrinks back into its place, it turns and grows again.
   const opening = (key: () => string) => (event: Located) => {
@@ -734,7 +744,7 @@ function Library(props: { owner: Owner }) {
     </Box>
   )
   return (
-    <Box role="region" aria-label="App Library" style={{ width: room().width, height: room().height, flexShrink: 0 }}>
+    <Box role="region" aria-label="App Library" style={{ width: props.size?.width ?? room().width, height: props.size?.height ?? room().height, flexShrink: 0 }}>
       <Show when={!launcher()}>
         <Box style={{ paddingTop: room().safe.top + (TOP_ROW - BAR) / 2, paddingBottom: (TOP_ROW - BAR) / 2 - 12, alignItems: "center" }}>
           <Box style={{ width: Math.min(room().width - 2 * BAR - 16, 384) }}>
@@ -742,7 +752,7 @@ function Library(props: { owner: Owner }) {
           </Box>
         </Box>
       </Show>
-      <Box style={{ flexGrow: 1, flexBasis: 0, overflow: "scroll", paddingInline: inline(), paddingTop: launcher() ? 16 : 12, paddingBottom: 96 + room().safe.bottom }}>
+      <Box style={{ flexGrow: 1, flexBasis: 0, overflow: "scroll", paddingInline: inline(), paddingTop: props.size ? 0 : 12, paddingBottom: props.size ? 0 : 96 + room().safe.bottom }}>
         <Box style={{ gap: 20, width: width(), marginInline: "auto" }}>
           <Show when={searching() ? found(false).length || found(true).length : props.owner.library.length} fallback={<Empty>{searching() ? "No apps match." : "No apps yet."}</Empty>}>
             <Show when={searching()} fallback={<Show when={apps().length}><Categories list={apps()} prefix="" /></Show>}>
@@ -861,7 +871,7 @@ function tween(duration: number, done: (at: number) => void) {
 /// shape becoming the panel's, and shrinks back into it, as an iPhone's folder does, while what's behind it is dimmed. Its apps open only once it has
 /// grown. Tapping beside the panel, Escape or the device's own back closes it, even as it grows: it turns back from
 /// where it got to. For whoever asked for less motion, it fades in and out where it is.
-function OpenCategory(props: { owner: Owner; opened: string }) {
+function OpenCategory(props: { owner: Owner; opened: string; within?: Rect }) {
   const category = () => openedCategory(props.owner.library, props.opened)
   const phase = () => (state().matches({ category: "opening" }) ? "opening" : state().matches({ category: "open" }) ? "open" : "closing")
   const close = () => !state().matches({ category: "closing" }) && home.send({ type: "close" })
@@ -875,12 +885,14 @@ function OpenCategory(props: { owner: Owner; opened: string }) {
     return () => (shut(), keys(), zoom.stop())
   })
   // The panel, in the middle of the window: three across, as many rows as it has apps for.
+  // In the launcher, in the middle of its card, which it veils.
+  const area = () => props.within ?? { x: 0, y: 0, width: room().width, height: viewport().height }
   const panel = () => {
-    const width = Math.min(352, room().width - 56)
+    const width = Math.min(352, area().width - 56)
     const rows = Math.max(1, Math.ceil((category()?.entrypoints.length ?? 0) / 3))
     const height = 24 + rows * 88 + (rows - 1) * 16 + 16
-    const top = (viewport().height - (height + 20 + 34)) / 2 + 54
-    return { x: (room().width - width) / 2, y: top, width, height }
+    const top = area().y + (area().height - (height + 20 + 34)) / 2 + 54
+    return { x: area().x + (area().width - width) / 2, y: top, width, height }
   }
   const t = () => zoom.value()
   const moving = () => !reducedMotion() && !!places[props.opened]
@@ -899,8 +911,8 @@ function OpenCategory(props: { owner: Owner; opened: string }) {
       style={{ position: "absolute", top: 0, left: 0, width: room().width, height: viewport().height, zIndex: 10, pointerEvents: phase() === "closing" ? "none" : "auto" }}
     >
       {/* What's behind blurs through a veil. */}
-      <Box aria-hidden="true" onClick={close} style={[looks.cover, looks.frosted, { opacity: t() }]} />
-      <Text role="heading" aria-level={2} style={{ position: "absolute", left: 0, right: 0, top: panel().y - 54, font: "title", textAlign: "center", opacity: t(), translateY: moving() ? 12 * (1 - t()) : 0 }}>
+      <Box aria-hidden="true" onClick={close} style={[looks.cover, looks.frosted, props.within && looks.round, props.within ? { start: area().x, top: area().y, width: area().width, height: area().height, opacity: t() } : { opacity: t() }]} />
+      <Text role="heading" aria-level={2} style={{ position: "absolute", left: area().x, width: area().width, top: panel().y - 54, font: "title", textAlign: "center", opacity: t(), translateY: moving() ? 12 * (1 - t()) : 0 }}>
         {category()?.category}
       </Text>
       <Box style={[looks.panel, { start: shape().x, top: shape().y, width: shape().width, height: shape().height, opacity: moving() ? 1 : t() }]}>
@@ -1325,6 +1337,8 @@ function Overview(props: { owner: Owner; index: number; going?: boolean }) {
 /// it, fading as they roll away, as a picker's do.
 function Roll(props: { count: number; height: number; row: (index: number) => Element }) {
   const nearest = () => Math.max(0, Math.min(props.count - 1, Math.round(rolled())))
+  // In the launcher each row goes where it's going by a spring, as the owners' pages roll.
+  const rolling = () => launcher() && looks.rolling
   return (
     <Box style={{ position: "relative", height: props.height, overflow: "hidden", alignItems: "center" }}>
       <Box aria-hidden="true" style={{ height: props.height, opacity: 0, justifyContent: "center" }}>
@@ -1332,7 +1346,7 @@ function Roll(props: { count: number; height: number; row: (index: number) => El
       </Box>
       <For each={Array.from({ length: props.count }, (_, index) => index)}>
         {(index) => (
-          <Box style={{ position: "absolute", left: 0, right: 0, top: (index - rolled()) * props.height, height: props.height, alignItems: "center", justifyContent: "center", opacity: Math.max(0, 1 - Math.abs(index - rolled()) * 1.5) }}>
+          <Box style={[looks.row, rolling(), { top: 0, translateY: (index - rolled()) * props.height, height: props.height, opacity: Math.max(0, 1 - Math.abs(index - rolled()) * 1.5) }]}>
             {props.row(index)}
           </Box>
         )}
@@ -1344,8 +1358,11 @@ function Roll(props: { count: number; height: number; row: (index: number) => El
 /// An owner's page dots, a dot a screenful, the one shown brighter; tapping one goes there, and sliding along them
 /// moves a screenful every 28 points, as an iPhone's do. While their pages are edited, a tap opens the page overview.
 /// Only the owner shown's take a finger.
-function Dots(props: { owner: Owner; index: number; count: number; size: number }) {
+function Dots(props: { owner: Owner; index: number; count: number; size: number; shows?: number }) {
   const current = () => (seen().owner === props.index ? seen().screen : (state().context.last[props.index] ?? 0))
+  // A dot a page, the pages shown lit: a screenful's in the launcher, which shows `shows` from its first.
+  const lit = (screen: number) => screen >= current() && screen < current() + (props.shows ?? 1)
+  const last = () => props.count - (props.shows ?? 1)
   let slid: { x: number; from: number; sliding: boolean; id: number } | undefined
   let quietDots = 0
   const slide = {
@@ -1372,14 +1389,14 @@ function Dots(props: { owner: Owner; index: number; count: number; size: number 
   const press = (screen: number) => () => {
     if (seen().owner !== props.index) return
     if (editingOwner(props.index)) return home.send({ type: "overview" })
-    if (Date.now() > quietDots) home.send({ type: "go", screen })
+    if (Date.now() > quietDots) home.send({ type: "go", screen: Math.max(0, Math.min(screen, last())) })
   }
   return (
     <Box role="navigation" aria-label={`${props.owner.name}'s pages`} aria-hidden={seen().owner !== props.index ? "true" : undefined} {...slide} style={{ flexDirection: "row", alignItems: "center", height: "100%" }}>
       <For each={Array.from({ length: Math.max(1, props.count) }, (_, at) => at)}>
         {(screen) => (
-          <Box role="button" aria-label={`Page ${screen + 1} of ${props.count}`} aria-current={current() === screen ? "true" : undefined} onClick={press(screen)} style={{ height: "100%", justifyContent: "center", paddingInline: 1 }}>
-            <Box style={{ width: props.size, height: props.size, marginInline: props.size * 0.64, borderRadius: "full", backgroundColor: current() === screen ? "foreground" : "muted-foreground", opacity: current() === screen ? 1 : 0.4 }} />
+          <Box role="button" aria-label={`Page ${screen + 1} of ${props.count}`} aria-current={lit(screen) ? "true" : undefined} onClick={press(screen)} style={{ height: "100%", justifyContent: "center", paddingInline: 1 }}>
+            <Box style={{ width: props.size, height: props.size, marginInline: props.size * 0.64, borderRadius: "full", backgroundColor: lit(screen) ? "foreground" : "muted-foreground", opacity: lit(screen) ? 1 : 0.4 }} />
           </Box>
         )}
       </For>
@@ -1387,12 +1404,10 @@ function Dots(props: { owner: Owner; index: number; count: number; size: number 
   )
 }
 
-/// The owner pill, at the top of Home in the middle: whose pages they are, "You ⌄", which opens the list of every
-/// owner, the current one ticked. Its name rolls as the owners move. While pages are edited, + and Done are either side
-/// of it, and it opens nothing. In the launcher it's at the end of its search bar.
-/// Whose pages these are, and the menu that chooses whose: in a pill, or in the launcher's bar a small chip, as
-/// Raycast's is.
-function OwnerPill(props: { owners: Owner[]; chip?: boolean }) {
+/// The owner pill, at the top of Home in the middle, and of the launcher's card: whose pages they are, "You ⌄", which
+/// opens the list of every owner, the current one ticked. Its name rolls as the owners move. While pages are edited, +
+/// and Done are either side of it, and it opens nothing.
+function OwnerPill(props: { owners: Owner[] }) {
   const at = () => state().context.at.owner
   return (
     <Menu.Root
@@ -1400,12 +1415,9 @@ function OwnerPill(props: { owners: Owner[]; chip?: boolean }) {
       onOpenChange={({ open }) => (open ? state().matches("nothing") && home.send({ type: "list" }) : state().matches("listing") && home.send({ type: "dismiss" }))}
       onSelect={({ value }) => home.send({ type: "pick", owner: Number(value) })}
     >
-      <Menu.Trigger variant={props.chip ? "ghost" : "secondary"} aria-label={props.owners[at()]?.name}>
-        <Box style={{ flexDirection: "row", alignItems: "center", gap: props.chip ? 8 : 5, color: props.chip ? "muted-foreground" : undefined }}>
-          <Show when={props.chip}>
-            <Image src="home.svg" alt="" style={{ width: 16, height: 16, borderRadius: "sm" }} />
-          </Show>
-          <Roll count={props.owners.length} height={BAR - 8} row={(index) => <Text style={{ font: props.chip ? "footnote" : "label", lineClamp: 1, maxWidth: 144 }}>{props.owners[index]?.name}</Text>} />
+      <Menu.Trigger variant="secondary" aria-label={props.owners[at()]?.name}>
+        <Box style={{ flexDirection: "row", alignItems: "center", gap: 5 }}>
+          <Roll count={props.owners.length} height={BAR - 8} row={(index) => <Text style={{ font: "label", lineClamp: 1, maxWidth: 144 }}>{props.owners[index]?.name}</Text>} />
           <Box style={{ color: "muted-foreground", scale: 0.75 }}>
             <Icon name="caret-down" />
           </Box>
@@ -1431,127 +1443,138 @@ function OwnerPill(props: { owners: Owner[]; chip?: boolean }) {
   )
 }
 
-/// The launcher's search bar, across its top, as Raycast's is: the search, bare and large, which keeps the keyboard,
-/// and the owner chip. With nothing typed, the arrow keys move the highlight over Home (`move`), Tab goes to the App
-/// Library and back, Return opens what's highlighted and Escape puts the launcher away; with something typed, up and
-/// down choose among the results (`Results`), Return opens the one chosen, and Escape empties it. ⌘K, or Ctrl+K on a
-/// PC, opens Actions either way.
-function LauncherBar(props: { owners: Owner[]; found: () => Listed[]; move: (key: string) => boolean; open: () => void; tab: () => void; library: boolean }) {
-  const keys = (event: Keyed) => {
-    if (event.altKey || event.metaKey || event.ctrlKey) return
-    const typed = !!query().trim()
-    if (event.key === "Enter") {
-      event.preventDefault()
-      props.open()
-    } else if (event.key === "Escape") {
-      // With something typed, the field empties itself.
-      if (!query()) void leave()
-    } else if (!typed && event.key === "Tab") {
-      event.preventDefault()
-      props.tab()
-    } else if (!typed) {
-      if (props.move(event.key)) event.preventDefault()
-    } else results.keys(event)
+/// The launcher's keys, wherever in it the keyboard is: with nothing typed, the arrow keys move the highlight over Home
+/// (`move`), Tab goes to the App Library and back, Return opens what's highlighted, and Escape goes back from the App
+/// Library, then puts the launcher away; with something typed, the arrow keys choose among what's found, Return opens
+/// the one chosen, and Escape empties the search.
+const launcherKeys = (props: { move: (key: string) => boolean; open: () => void; tab: () => void; library: () => boolean; found: () => number }) => (event: Keyed) => {
+  if (event.altKey || event.metaKey || event.ctrlKey) return
+  const typed = !!query().trim()
+  // What's open over it (a category, a held app's menu, the owners' list) has Escape and the arrows itself.
+  if (!state().matches("nothing")) return
+  if (event.key === "Enter") {
+    event.preventDefault()
+    props.open()
+  } else if (event.key === "Escape") {
+    // With something typed, the field empties itself.
+    if (query()) return
+    if (props.library()) props.tab()
+    else void leave()
+  } else if (!typed && event.key === "Tab") {
+    event.preventDefault()
+    props.tab()
+  } else if (!typed) {
+    if (props.move(event.key)) event.preventDefault()
+  } else {
+    const by = ({ ArrowRight: 1, ArrowDown: 1, ArrowLeft: -1, ArrowUp: -1 } as Record<string, number>)[event.key]
+    if (!by) return
+    event.preventDefault()
+    setChosenResult((now) => Math.max(0, Math.min(props.found() - 1, now + by)))
   }
-  // The search has the keyboard as the launcher's summoned: it's drawn again each time it's shown.
+}
+
+/// The launcher's search, floating over its card: bare and large, with the keyboard as the launcher's summoned.
+function LauncherSearch() {
   return (
-    <Box style={{ position: "absolute", top: 0, left: 0, right: 0, height: LAUNCHER_BAR, zIndex: 6, flexDirection: "row", alignItems: "center", gap: 12, paddingInline: 16 }}>
-      <Box style={{ flexGrow: 1 }}>
-        <Show when={visible()}>
-          <EditableText type="search" action="search" placeholder="Search apps…" aria-label="Search apps" autofocus value={query()} {...(query().trim() ? results.field() : {})} onKeyDown={keys} onInput={(event) => (setQuery(event.currentTarget.value), results.choose(0))} style={looks.bare} />
-        </Show>
-      </Box>
-      <Show when={!query().trim() && !props.library}>
-        <OwnerPill owners={props.owners} chip />
+    <Box style={{ flexGrow: 1, flexDirection: "row", alignItems: "center", paddingInline: 18 }}>
+      <Show when={visible()}>
+        <EditableText type="search" action="search" placeholder="Search apps…" aria-label="Search apps" autofocus value={query()} onInput={(event) => (setQuery(event.currentTarget.value), setChosenResult(0))} style={looks.bare} />
       </Show>
     </Box>
   )
 }
 
-/// What the launcher's search found, in place of Home's pages, as Raycast's root search lists it: under Results, a
-/// row for each, its icon, its name, the app it's part of where that's another name, and what it is at its end; the
-/// first chosen for Return. The pointer chooses one too, and a click opens it.
-function Results(props: { owner: Owner; found: () => Listed[] }) {
-  const from = (event: Located): From => {
-    const at = event.currentTarget.getBoundingClientRect()
-    return { x: at.x + 8, y: at.y + (at.height - 22) / 2, width: 22, height: 22, radius: 5 }
-  }
+/// What the launcher's search found, in its card, as the Home Screen draws apps and widgets: under Apps, the widget of
+/// the app found first, where it has one, and beside it every app found, chosen for Return in turn; then, under
+/// Widgets, the other widgets whose name or app has what's typed. The pointer opens any of them.
+function Results(props: { owner: Owner; found: Listed[]; words: string }) {
+  const tile = 60
+  const lead = () => leadOf(props.owner, props.found)
+  const widgets = () => widgetsOf(props.owner, props.found, props.words)
+  const Heading = (inner: { children: string }) => <Text style={{ font: "footnote", color: "muted-foreground", paddingInline: 4, height: HEADING }}>{inner.children}</Text>
   return (
-    <Box style={{ position: "absolute", top: LAUNCHER_BAR, left: 0, right: 0, bottom: LAUNCHER_FOOT, zIndex: 5, overflow: "scroll", paddingInline: LAUNCHER_SIDE }}>
-      <Show when={props.found().length} fallback={<Box style={{ marginBlock: 32 }}><Empty>No apps match.</Empty></Box>}>
-        <Section heading="Results">
-          <List listbox={results} label="Results">
-            <For each={props.found()} keyed={(listed) => listed.entrypoint ?? listed.app}>
-              {(listed) => (
-                <Row
-                  start={<Image src={src(listed().icon)} alt="" style={{ width: 22, height: 22, borderRadius: "sm" }} />}
-                  heading={listed().name}
-                  text={listed().title !== listed().name ? listed().title : undefined}
-                  end={<Text>App</Text>}
-                  onClick={(event) => press(listed(), props.owner, false, event && from(event))}
-                />
+    <Box style={{ gap: 12 }}>
+      <Show when={props.found.length || widgets().length} fallback={<Box style={{ paddingBlock: 24 }}><Empty>No apps match.</Empty></Box>}>
+        <Show when={props.found.length}>
+          <Heading>Apps</Heading>
+          <Box style={{ flexDirection: "row", gap: 12, alignItems: "flex-start" }}>
+            <Show when={lead()}>
+              {(lead) => (
+                <Box style={{ width: 2 * 76 + 8, height: 2 * 88 - 8, flexShrink: 0, display: "grid" }}>
+                  <Card item={{ ...lead(), size: "2x2" }} owner={props.owner} />
+                </Box>
+              )}
+            </Show>
+            <Box style={{ flexGrow: 1, flexDirection: "row", flexWrap: "wrap", rowGap: 12 }}>
+              <For each={props.found} keyed={(listed) => listed.entrypoint ?? listed.app}>
+                {(listed, at) => (
+                  <Box onPointerMove={() => setChosenResult(at())} style={{ position: "relative", width: 76, height: 88, paddingTop: 6 }}>
+                    <Show when={chosenResult() === at()}>
+                      <Box aria-hidden="true" style={looks.chosen} />
+                    </Show>
+                    <Tile name={listed().name} icon={listed().icon} size={tile} scale={1} badge={opens(listed()) ? badgeOf(opens(listed())!, props.owner) : undefined} onPress={(behind, from) => press(listed(), props.owner, behind, from)} />
+                  </Box>
+                )}
+              </For>
+            </Box>
+          </Box>
+        </Show>
+        <Show when={widgets().length}>
+          <Heading>Widgets</Heading>
+          <Box style={{ flexDirection: "row", flexWrap: "wrap", gap: 12 }}>
+            <For each={widgets()} keyed={(one) => one.widget}>
+              {(one) => (
+                <Box style={{ width: 2 * 76 + 8, height: 2 * 88 - 8, display: "grid" }}>
+                  <Card item={{ ...one(), size: "2x2" }} owner={props.owner} />
+                </Box>
               )}
             </For>
-          </List>
-        </Section>
+          </Box>
+        </Show>
       </Show>
     </Box>
   )
 }
 
-/// What the launcher's Return opens, and its Actions are for: an app it found, or what's chosen on Home, with where it
-/// is on Home, if it's there, and where it's drawn.
-type Target = { item?: Item; listed?: Listed; place?: { page: number; index: number }; from?: From }
-/// The name a target's opened by: an app's, or for a widget, its app's.
-const targetName = (target: Target) => target.listed?.name ?? (target.item && (opener(target.item)?.name ?? target.item.name))
-/// The launcher's footer, the UI library's action bar, as Raycast's is: two pills floating over its foot. On the left,
-/// the Home Screen's icon and name, and on Home its page dots and the App Library's glyph; on the right, what Return
-/// does, and Actions, ⌘K, the action panel of what can be done with it: Open, Add to or Remove from Home Screen, Show
-/// in App Library and its App Store Page.
-function LauncherFoot(props: { owners: Owner[]; laid: Kind[][]; target: () => Target | undefined; open: () => void; act: (action: string) => void }) {
-  const owner = () => props.owners[state().context.at.owner]
-  const store = () => props.owners[0]?.store
-  const app = () => {
-    const target = props.target()
-    return target?.listed?.app ?? (target?.item && opener(target.item)?.app)
-  }
-  const item = () => props.target()?.item ?? (props.target()?.listed && opens(props.target()!.listed!))
-  const actions = (): Action[] => {
-    const target = props.target()
-    if (!target) return []
-    return [
-      { label: query().trim() ? "Open App" : `Open ${targetName(target)}`, onAction: props.open },
-      ...(!target.place && item() && addable(item()!, owner()) ? [{ label: state().context.at.owner ? `Add to ${owner().name}'s Home Screen` : "Add to Home Screen", keys: ["mod", "d"], onAction: () => props.act("add") }] : []),
-      ...(item() && opener(item()!) ? [{ label: "Show in App Library", onAction: () => props.act("library") }] : []),
-      ...(store() && app() ? [{ label: "App Store Page", onAction: () => props.act("store") }] : []),
-      ...(target.place && owner()?.arranges ? [{ label: "Remove from Home Screen", destructive: true, section: "remove", onAction: () => props.act("remove") }] : []),
-    ]
-  }
-  return (
-    <Show when={!state().matches("editing")}>
-      <ActionBar
-        start={
-          <>
-            <Image src="home.svg" alt="" style={{ width: 18, height: 18, borderRadius: "sm" }} />
-            <Text>Home Screen</Text>
-            <Show when={!query().trim()}>
-              <DotsPill owners={props.owners} laid={props.laid} flat />
-            </Show>
-          </>
-        }
-        actions={actions()}
-      />
-    </Show>
-  )
+/// The widget of the app a search found first, where it has one, which leads what it found; and the other widgets whose
+/// name or app has what's typed.
+const leadOf = (owner: Owner | undefined, found: Listed[]) => owner?.widgets.find((one) => one.opens?.app === found[0]?.app && one.sizes.includes("2x2"))
+const widgetsOf = (owner: Owner | undefined, found: Listed[], words: string) => {
+  const typed = words.trim().toLowerCase()
+  const lead = leadOf(owner, found)
+  return (owner?.widgets ?? []).filter((one) => one !== lead && `${one.name} ${one.opens?.name ?? ""}`.toLowerCase().includes(typed))
 }
+/// How tall what a search found is, as `Results` lays it out: each section's heading, then under Apps the widget
+/// leading as many rows of apps as there are beside it, and under Widgets three to a row.
+const HEADING = 20
+const resultsHeight = (owner: Owner | undefined, found: Listed[], words: string) => {
+  const [tile, widget] = [88, 2 * 88 - 8]
+  const lead = leadOf(owner, found)
+  const beside = Math.max(1, Math.floor((2 * PAGE - (lead ? 2 * 76 + 8 + 12 : 0)) / 76))
+  const rows = Math.ceil(found.length / beside)
+  const apps = found.length ? HEADING + 12 + Math.max(lead ? widget : 0, rows * tile + (rows - 1) * 12) : 0
+  const others = widgetsOf(owner, found, words).length
+  const widgets = others ? HEADING + 12 + Math.ceil(others / 3) * (widget + 12) - 12 : 0
+  return apps && widgets ? apps + 12 + widgets : apps || widgets || 80
+}
+/// How tall a launcher's App Library is, as `shelf` lays it out across it: its rows of categories, each a square with
+/// its name under it, and Background Apps under them.
+const shelfHeight = (library: Category[]) => {
+  const laid = shelf(LIBRARY)
+  const rows = Math.ceil(sorted(library, false).length / laid.across)
+  return rows ? rows * (laid.category + 6 + 20) + (rows - 1) * 20 + (sorted(library, true).length ? 20 + 28 : 0) : 80
+}
+
+/// What the launcher's Return opens: an app it found, or what's chosen on Home, with where it is on Home, if it's there.
+type Target = { item?: Item; listed?: Listed; place?: { page: number; index: number } }
 
 /// The dots pill, at the bottom in the middle, just clear of the home indicator: the dots of the owner shown, then the
 /// App Library's glyph, which says there's one more page and goes there, lit while it's shown, as the dots are. It
 /// stays where it is as the owners move, and on the App Library too, its dots rolling to the next owner's and taking
 /// their number. While pages are edited the glyph stays, dimmed, and goes nowhere. In the launcher's footer it's
 /// `flat`: no pill of its own.
-function DotsPill(props: { owners: Owner[]; laid: Kind[][]; flat?: boolean }) {
-  const count = (owner: number) => (props.laid[owner] ?? []).filter((kind) => kind === "home").length
+function DotsPill(props: { owners: Owner[]; laid: Kind[][]; pages?: (owner: number) => number; flat?: boolean }) {
+  const count = (owner: number) => props.pages?.(owner) ?? (props.laid[owner] ?? []).filter((kind) => kind === "home").length
   const library = () => props.laid[seen().owner]?.[seen().screen] === "library"
   const go = () => {
     if (state().matches("editing")) return
@@ -1563,7 +1586,7 @@ function DotsPill(props: { owners: Owner[]; laid: Kind[][]; flat?: boolean }) {
     // iOS 26's Liquid Glass, the pages blurred through it with a rim of light and a soft shadow, but in the launcher's
     // footer, which is flat.
     <Box style={[looks.pill, !props.flat && looks.glass, { height: height() }]}>
-      <Roll count={props.owners.length} height={height()} row={(index) => <Dots owner={props.owners[index]} index={index} count={count(index)} size={props.flat ? 5 : 7} />} />
+      <Roll count={props.owners.length} height={height()} row={(index) => <Dots owner={props.owners[index]} index={index} count={count(index)} size={props.flat ? 5 : 7} shows={props.pages ? 2 : 1} />} />
       <Box
         role="button"
         aria-label="App Library"
@@ -1663,17 +1686,19 @@ function Refused(props: { owner: Owner; held: Held }) {
 /// While pages are edited, + and Done float at the top, either side of the owner pill, over the pages, which stay
 /// where they are, as on a phone; in the launcher, in its footer's place, each in Liquid Glass. They fade in, and out
 /// as editing ends.
-function EditBar(props: { going?: boolean }) {
+function EditBar(props: { going?: boolean; within?: Rect }) {
   const fade = tween(200, () => {})
   createEffect(
     () => !!props.going,
     (going) => fade.to(going ? 0 : 1),
   )
-  const top = () => (launcher() ? viewport().height - LAUNCHER_FOOT : room().safe.top)
-  const height = () => (launcher() ? LAUNCHER_FOOT : TOP_ROW)
-  const width = () => (room().wide && !launcher() ? Math.min(room().width - 2 * room().side, room().fit * (laidPage().width * room().scale + room().gap) - room().gap) : room().width)
+  // In the launcher, in the owner switcher's row at the top of its card.
+  const top = () => props.within?.y ?? room().safe.top
+  const height = () => (props.within ? PILLS : TOP_ROW)
+  const width = () => props.within?.width ?? (room().wide ? Math.min(room().width - 2 * room().side, room().fit * (laidPage().width * room().scale + room().gap) - room().gap) : room().width)
+  const left = () => props.within?.x ?? (room().width - width()) / 2
   return (
-    <Box style={{ position: "absolute", zIndex: 7, top: top(), left: (room().width - width()) / 2, width: width(), height: height(), flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingInline: launcher() ? 10 : 16, opacity: fade.value(), pointerEvents: "none" }}>
+    <Box style={{ position: "absolute", zIndex: 7, top: top(), left: left(), width: width(), height: height(), flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingInline: props.within ? 10 : 16, opacity: fade.value(), pointerEvents: "none" }}>
       <Box style={[looks.pill, looks.glass]}>
         <Button variant="ghost" size="icon" aria-label="Add Widget" onClick={() => state().matches({ editing: "still" }) && home.send({ type: "gallery" })}>
           <Icon name="plus" />
@@ -1707,12 +1732,11 @@ function HomeScreen(props: { owners: Owner[] }) {
   // + and Done, and the pages' overview, fade out as they go, at the settle pace.
   const [editBar, editBarGoing] = lingering(() => state().matches("editing"), 200)
   const [overview, overviewGoing] = lingering(() => state().matches({ editing: "overview" }) && editing(), 200)
-  // The room the pages have: the window, less the launcher's bars.
+  // The room the pages have: the window, or in the launcher, a page in its card.
   createEffect(
     () => ({ size: viewport(), safe: safeArea(), launcher: launcher() }),
-    ({ size, safe, launcher }) => void setRoom(measure(size.width, size.height - (launcher ? LAUNCHER_BAR + LAUNCHER_HEADING + LAUNCHER_FOOT : 0), launcher, safe)),
+    ({ size, safe, launcher }) => void setRoom(launcher ? launcherRoom(safe) : measure(size.width, size.height, safe)),
   )
-  const sectionsTop = () => (launcher() ? LAUNCHER_BAR + LAUNCHER_HEADING : 0)
 
   /// Each owner's Home pages as they're drawn: the ones they keep shown, or while they're edited, as they're edited,
   /// each placed on its grid. A page kept with more than fits goes on over the next ones.
@@ -1730,6 +1754,13 @@ function HomeScreen(props: { owners: Owner[] }) {
   /// then the App Library, the same for everyone, a screenful.
   const screens = createMemo(() => {
     const fit = room().fit
+    // The launcher shows two pages side by side and turns them one at a time: a screenful from each page but the last,
+    // which while they're edited has its own, with room beside it for another.
+    if (launcher())
+      return pages().map((homes, owner) => [
+        ...Array.from({ length: Math.max(1, homes.length - (editingOwner(owner) ? 0 : 1)) }, (_, at) => ({ kind: "home" as Kind, from: at, count: Math.min(2, homes.length - at) })),
+        { kind: "library" as Kind, from: 0, count: 1 },
+      ])
     return pages().map((homes) => [...Array.from({ length: Math.ceil(homes.length / fit) }, (_, at) => ({ kind: "home" as Kind, from: at * fit, count: Math.min(fit, homes.length - at * fit) })), { kind: "library" as Kind, from: 0, count: 1 }])
   })
   /// Each owner's Home screenfuls, which their row of pages has.
@@ -1752,6 +1783,7 @@ function HomeScreen(props: { owners: Owner[] }) {
     },
   )
 
+  const library = () => kindOf(state().context.at.owner) === "library"
   /// The section of the screenful an owner is on: the one shown, for whoever's shown.
   const kindOf = (owner: number) => {
     const { last, screens } = state().context
@@ -1796,13 +1828,64 @@ function HomeScreen(props: { owners: Owner[] }) {
     return Math.max(0, xOf(owner)[0]() - Math.max(0, homes(owner).length - 1) * room().width)
   }
 
+  /// The launcher's card: what it shows, Home, the App Library or what was found, and how large it is for that, under
+  /// the search, its middle the panel's. Home's is as tall as the owner's pages; an owner with one page shows its top
+  /// half beside its bottom half, unless it's edited or something on it spans both halves.
+  const showing = () => (query().trim() ? "search" : library() ? "library" : "home")
+  const halves = (owner: number) => {
+    const all = pages()[owner] ?? []
+    return all.length === 1 && !editingOwner(owner) && !all[0].some((placed) => placed.row <= 3 && placed.row + placed.height > 4)
+  }
+  /// How many pages across an owner's pages are: two, or one for a single page whose bottom half is empty, or that
+  /// shows whole.
+  const pagesAcross = (owner: number) => ((pages()[owner]?.length ?? 1) > 1 || editingOwner(owner) || (halves(owner) && pages()[owner][0].some((placed) => placed.row > 3)) ? 2 : 1)
+  const tallest = () => PILLS + room().height + PILLS
+  const card = createMemo(
+    () => {
+      if (showing() === "library") return { width: LIBRARY + 2 * INSET, height: Math.ceil(Math.min(tallest(), INSET + shelfHeight(props.owners[0]?.library ?? []) + PILLS)) }
+      if (showing() === "search") return { width: 2 * PAGE + 2 * INSET, height: Math.ceil(Math.min(tallest(), 2 * INSET + resultsHeight(props.owners[0], found(), query()))) }
+      const owner = state().context.at.owner
+      return { width: pagesAcross(owner) * PAGE + 2 * INSET, height: Math.ceil(PILLS + (halves(owner) ? halfHeight(room()) : room().height) + PILLS) }
+    },
+    { equals: (a, b) => a.width === b.width && a.height === b.height },
+  )
+  const cardLeft = () => (viewport().width - card().width) / 2
+  /// The first page an owner's screenful shows, as it's drawn.
+  const shownFrom = (owner: number) => {
+    const { at, last } = state().context
+    return screens()[owner]?.[owner === at.owner ? at.screen : (last[owner] ?? 0)]?.from ?? 0
+  }
+  /// What was typed, kept a moment as it's emptied, while what it found fades.
+  const [words] = lingering(() => query().trim() && query(), 400)
+  const cardRect = () => ({ x: cardLeft(), y: CARD_TOP, width: card().width, height: card().height })
+  /// The first page an owner's screenful shows: where it is, or for another owner, where they were left.
+  const firstShown = (owner: number) => {
+    const { at, last } = home.getSnapshot().context
+    return untrack(screens)[owner]?.[owner === at.owner ? at.screen : (last[owner] ?? 0)]?.from ?? 0
+  }
+  // The launcher's panel: on a see-through one, as large as its card ever is, which it never changes; else just around
+  // what it shows, growing at once, and shrinking once its card has.
+  let told = { width: 0, height: 0 }
+  let shrinking: ReturnType<typeof setTimeout> | undefined
+  createEffect(
+    () => launcher() && panelSize(transparent() ? { width: LIBRARY + 2 * INSET, height: tallest() } : card()),
+    (size) => {
+      if (!size) return
+      clearTimeout(shrinking)
+      const now = { width: Math.ceil(Math.max(size.width, told.width)), height: Math.ceil(Math.max(size.height, told.height)) }
+      if (now.width !== told.width || now.height !== told.height) sizeChanged((told = now))
+      if (Math.ceil(size.width) < now.width || Math.ceil(size.height) < now.height) shrinking = setTimeout(() => sizeChanged((told = { width: Math.ceil(size.width), height: Math.ceil(size.height) })), 600)
+    },
+  )
+
   /// Where a page of an owner is drawn in the window: its left and top, and how much larger it's drawn.
   const pageAt = (owner: number, page: number) => {
+    if (untrack(launcher)) return { x: untrack(cardLeft) + INSET + (page - firstShown(owner)) * PAGE, y: CARD_TOP + PILLS, scale: untrack(room).scale }
     const fit = untrack(room).fit
     const screen = Math.floor(page / fit)
     const count = untrack(screens)[owner]?.[screen]?.count ?? 1
     const left = lefts(untrack(room), untrack(laidPage), count)[page - screen * fit] ?? 0
-    return { x: screen * pitch() - Math.min(sideways(owner).value, homeEnd(owner)) + left, y: sectionsTop() + owner * height() - down.value, scale: untrack(room).scale }
+    return { x: screen * pitch() - Math.min(sideways(owner).value, homeEnd(owner)) + left, y: owner * height() - down.value, scale: untrack(room).scale }
   }
   /// Which page of the owner Home is on a point is over, if it's over one, and where on it, as it's laid out.
   const pageUnder = (x: number, y: number) => {
@@ -1855,7 +1938,7 @@ function HomeScreen(props: { owners: Owner[] }) {
     (hidden) => {
       if (!hidden) return
       setQuery("")
-      results.choose(0)
+      setChosenResult(0)
       if (home.getSnapshot().matches("nothing") && home.getSnapshot().context.at.screen !== 0) home.send({ type: "go", screen: 0 })
       choose(first(ordered(home.getSnapshot().context.at)))
     },
@@ -1863,35 +1946,11 @@ function HomeScreen(props: { owners: Owner[] }) {
   )
   /// What the launcher's search found: the apps of your App Library, whose names have what's typed in them.
   const found = createMemo(() => findIn(props.owners[0]?.library ?? [], query(), false))
-  /// How tall the launcher's content is, as Raycast's and Spotlight's panels are: its bars, and between them the rows
-  /// the Home pages shown use, or what its search found; the App Library and Home while it's edited, six rows' worth.
-  /// Its client makes its window that tall (`sizeChanged`), as an MCP App's host fits its frame to what it says.
-  const tall = () => {
-    const bars = LAUNCHER_BAR + LAUNCHER_HEADING + LAUNCHER_FOOT
-    if (query().trim()) return bars + (found().length ? found().length * 38 : 82)
-    const { at } = state().context
-    const laid = laidPage()
-    const full = kindOf(at.owner) === "library" || state().matches("editing")
-    if (full) return bars + (laid.top + gridHeight(laid) + laid.bottom) * room().scale
-    const screen = screens()[at.owner]?.[at.screen]
-    const shown = screen ? pages()[at.owner]?.slice(screen.from, screen.from + screen.count) ?? [] : []
-    const bottom = Math.max(0, ...shown.flatMap((page) => page.map((placed) => cellOf(laid, placed)).map((box) => box.y + box.height)))
-    return bars + ((bottom || laid.top + 120) + laid.bottom) * room().scale
-  }
-  let told = 0
-  createEffect(
-    // Never shorter than Actions' menu needs over the footer, as Raycast's panel has room for it.
-    () => launcher() && Math.ceil(Math.max(tall(), LAUNCHER_BAR + 300)),
-    (height) => {
-      if (height && height !== told) sizeChanged({ height: (told = height) })
-    },
-  )
   /// What the launcher's Return opens and its Actions are for: the app its search chose, or what's highlighted on Home.
   const target = createMemo((): Target | undefined => {
     if (query().trim()) {
-      const listed = found()[results.chosen()]
-      const item = listed && opens(listed)
-      return listed && { listed, item, place: item && placeOf(props.owners[state().context.at.owner], item) }
+      const listed = found()[chosenResult()]
+      return listed && { listed, item: opens(listed) }
     }
     const now = selected()
     const { at, screens } = state().context
@@ -1905,7 +1964,10 @@ function HomeScreen(props: { owners: Owner[] }) {
     if (!placed) return
     const laid = untrack(laidPage)
     const at = pageAt(chosen.owner, chosen.page)
-    const box = cellOf(laid, placed)
+    // In the launcher, an owner's one page's bottom half is beside its top half.
+    const lower = untrack(launcher) && halves(chosen.owner) && placed.row > 3
+    const box = cellOf(laid, lower ? { ...placed, row: placed.row - 3 } : placed)
+    if (lower) at.x += PAGE
     if (placed.item.item.widget) return { x: at.x + box.x * at.scale, y: at.y + box.y * at.scale, width: box.width * at.scale, height: box.height * at.scale, radius: 22 * at.scale }
     const size = laid.tile * at.scale
     return { x: at.x + box.x * at.scale + (box.width * at.scale - size) / 2, y: at.y + box.y * at.scale, width: size, height: size, radius: size * 0.225 }
@@ -1918,26 +1980,6 @@ function HomeScreen(props: { owners: Owner[] }) {
     const chosen = untrack(selected)
     if (opened) launch(opened, owned()[home.getSnapshot().context.at.owner], false, chosen && fromChosen(chosen))
   }
-  /// Does what was picked from the launcher's Actions.
-  const act = (action: string) => {
-    const now = untrack(target)
-    const { at, screens } = home.getSnapshot().context
-    const [who, item] = [owned()[at.owner], now?.item]
-    const app = item && opener(item)
-    if (!now) return
-    if (action === "open") openTarget()
-    else if (action === "remove" && now.place && item) void removeFromHome(who, at.owner, now.place.page, now.place.index, item)
-    else if (action === "add" && item) addToHome(who, at.owner, item)
-    else if (action === "store" && app && owned()[0]?.store) open(`${owned()[0].store}#app=${encodeURIComponent(app.app)}`)
-    else if (action === "library" && app && home.getSnapshot().matches("nothing")) {
-      // The App Library, with the app's category open over it.
-      const library = screens[at.owner]?.indexOf("library") ?? -1
-      setQuery("")
-      if (at.screen !== library) before = at.screen
-      home.send({ type: "go", screen: library })
-      if (sorted(owned()[0]?.library ?? [], false).some((category) => category.category === app.category)) home.send({ type: "open", category: app.category })
-    }
-  }
   /// The launcher's arrow keys, with nothing typed: left and right move the highlight along what's on the pages shown,
   /// and at either end turn the page, on to the App Library past the last; up and down move it up and down a page,
   /// and past its top or bottom to the owner above or below.
@@ -1948,10 +1990,13 @@ function HomeScreen(props: { owners: Owner[] }) {
     const { at, screens } = snapshot.context
     // Each move goes somewhere, or nowhere, as the step does.
     const step = (to: { screen: 1 | -1 } | { owner: 1 | -1 }, last: boolean) => {
+      const before = new Set(ordered(at).map((cell) => cell.page))
       home.send({ type: "step", ...to })
       const now = home.getSnapshot().context.at
       if (now.owner === at.owner && now.screen === at.screen) return
-      const cells = ordered(now)
+      // Along an owner's pages, onto the page that's just come into view, as the launcher's turn one at a time.
+      const all = ordered(now)
+      const cells = now.owner === at.owner && all.some((cell) => !before.has(cell.page)) ? all.filter((cell) => !before.has(cell.page)) : all
       choose(last ? cells.at(-1) : cells[0])
     }
     if (screens[at.owner]?.[at.screen] === "library") {
@@ -1994,7 +2039,8 @@ function HomeScreen(props: { owners: Owner[] }) {
 
   /// Moves the pages to `at`, as the machine says: gliding, or at once where they're only laid out again.
   const slide = (at: At, smooth: boolean) => {
-    const move = smooth ? glide : jump
+    // The launcher's are drawn where they're going, and its host's springs take them there.
+    const move = smooth && !untrack(launcher) ? glide : jump
     move(down, at.owner * height())
     move(sideways(at.owner), at.screen * pitch())
   }
@@ -2161,8 +2207,9 @@ function HomeScreen(props: { owners: Owner[] }) {
         moves.push({ time: event.timeStamp, x: event.clientX, y: event.clientY })
         if (moves.length > 32) moves.shift()
         const [x, y] = [event.clientX, event.clientY]
-        const top = sectionsTop()
-        const now = x < 28 ? "left" : x > pitch() - 28 ? "right" : y < top + 36 ? "up" : y > top + height() - 36 ? "down" : ""
+        // The pages' edges: the window's, or the launcher's card's, inside its pills.
+        const area = untrack(launcher) ? { left: cardLeft(), right: cardLeft() + card().width, top: CARD_TOP + PILLS, bottom: CARD_TOP + card().height - PILLS } : { left: 0, right: pitch(), top: 0, bottom: height() }
+        const now = x < area.left + 28 ? "left" : x > area.right - 28 ? "right" : y < area.top + 36 ? "up" : y > area.bottom - 36 ? "down" : ""
         if (now !== side) {
           clearTimeout(edge)
           side = now
@@ -2299,53 +2346,54 @@ function HomeScreen(props: { owners: Owner[] }) {
   const opened = () => state().context.category
   const held = () => (state().matches("holding") ? state().context.held : undefined)
   const owner = () => props.owners[state().context.at.owner]
-  const library = () => kindOf(state().context.at.owner) === "library"
   return (
-    <Box style={{ position: "relative", width: room().width, height: viewport().height, overflow: "hidden", color: "foreground" }}>
-      <Box
-        {...swipes}
-        onWheel={wheel}
-        style={{ position: "absolute", top: sectionsTop(), left: 0, width: room().width * 2, height: room().height, flexDirection: "row", translateX: -sectionsX(), opacity: launcher() && query().trim() ? 0 : 1 }}
-      >
-        <Box role="main" aria-label="Home" style={{ position: "relative", width: room().width, height: room().height, overflow: "hidden", flexShrink: 0 }}>
-          <Box style={{ position: "absolute", top: 0, left: 0, width: room().width, translateY: -downY() }}>
-            <For each={props.owners} keyed={(owner) => owner.key}>
-              {(owner, index) => (
-                <Box role="region" aria-label={owner().name} style={{ position: "relative", width: room().width, height: room().height, overflow: "hidden" }}>
-                  <Box style={{ position: "absolute", top: 0, left: 0, flexDirection: "row", translateX: -Math.min(xOf(index())[0](), Math.max(0, homes(index()).length - 1) * room().width) }}>
-                    <For each={homes(index())} keyed={false}>
-                      {(screen) => (
-                        <Box style={{ position: "relative", width: room().width, height: room().height }}>
-                          <For each={(pages()[index()] ?? []).slice(screen().from, screen().from + screen().count)} keyed={false}>
-                            {(placed, at) => (
-                              <Box
-                                style={{
-                                  position: "absolute",
-                                  top: (laidPage().height * (room().scale - 1)) / 2,
-                                  left: lefts(room(), laidPage(), screen().count)[at] + (laidPage().width * (room().scale - 1)) / 2,
-                                  scale: room().scale,
-                                  ...(launcher() && at ? ({ borderLeftWidth: 1, borderColor: "border" } satisfies Style) : {}),
-                                }}
-                              >
-                                <HomePage owner={owner()} index={index()} page={screen().from + at} placed={placed()} laid={laidPage()} scale={room().scale} />
-                              </Box>
-                            )}
-                          </For>
-                        </Box>
-                      )}
-                    </For>
-                  </Box>
-                </Box>
-              )}
-            </For>
-          </Box>
-        </Box>
-        <Library owner={props.owners[0]} />
-      </Box>
+    <Box
+      onKeyDown={launcher() ? launcherKeys({ move, open: openTarget, tab, library, found: () => found().length }) : undefined}
+      style={{ position: "relative", width: launcher() ? viewport().width : room().width, height: viewport().height, overflow: "hidden", color: "foreground" }}
+    >
       <Show
         when={launcher()}
         fallback={
           <>
+        <Box
+          {...swipes}
+          onWheel={wheel}
+          style={{ position: "absolute", top: 0, left: 0, width: room().width * 2, height: room().height, flexDirection: "row", translateX: -sectionsX() }}
+        >
+          <Box role="main" aria-label="Home" style={{ position: "relative", width: room().width, height: room().height, overflow: "hidden", flexShrink: 0 }}>
+            <Box style={{ position: "absolute", top: 0, left: 0, width: room().width, translateY: -downY() }}>
+              <For each={props.owners} keyed={(owner) => owner.key}>
+                {(owner, index) => (
+                  <Box role="region" aria-label={owner().name} style={{ position: "relative", width: room().width, height: room().height, overflow: "hidden" }}>
+                    <Box style={{ position: "absolute", top: 0, left: 0, flexDirection: "row", translateX: -Math.min(xOf(index())[0](), Math.max(0, homes(index()).length - 1) * room().width) }}>
+                      <For each={homes(index())} keyed={false}>
+                        {(screen) => (
+                          <Box style={{ position: "relative", width: room().width, height: room().height }}>
+                            <For each={(pages()[index()] ?? []).slice(screen().from, screen().from + screen().count)} keyed={false}>
+                              {(placed, at) => (
+                                <Box
+                                  style={{
+                                    position: "absolute",
+                                    top: (laidPage().height * (room().scale - 1)) / 2,
+                                    left: lefts(room(), laidPage(), screen().count)[at] + (laidPage().width * (room().scale - 1)) / 2,
+                                    scale: room().scale,
+                                  }}
+                                >
+                                  <HomePage owner={owner()} index={index()} page={screen().from + at} placed={placed()} laid={laidPage()} scale={room().scale} />
+                                </Box>
+                              )}
+                            </For>
+                          </Box>
+                        )}
+                      </For>
+                    </Box>
+                  </Box>
+                )}
+              </For>
+            </Box>
+          </Box>
+          <Library owner={props.owners[0]} />
+        </Box>
             <Show when={!library()}>
               <Box style={{ position: "absolute", zIndex: 6, top: room().safe.top, left: 0, right: 0, height: TOP_ROW, alignItems: "center", justifyContent: "center", pointerEvents: "none" }}>
                 <Box style={{ pointerEvents: "auto", opacity: state().matches("editing") ? 0.6 : 1 }}>
@@ -2361,22 +2409,67 @@ function HomeScreen(props: { owners: Owner[] }) {
           </>
         }
       >
-        <LauncherBar owners={props.owners} found={found} move={move} open={openTarget} tab={tab} library={library()} />
-        <Show when={!query().trim()}>
-          <Box aria-hidden="true" style={[looks.heading, { top: LAUNCHER_BAR, height: LAUNCHER_HEADING }]}>
-            <Text style={{ font: "caption-2", color: "muted-foreground" }}>{library() ? "App Library" : "Home"}</Text>
+        {/* A click beside the search and the card puts the launcher away, as one on another app's window would. */}
+        <Box aria-hidden="true" onClick={() => state().matches("nothing") && void leave()} style={looks.cover} />
+        <Box style={[looks.surface, looks.search, { top: MARGIN, start: (viewport().width - SEARCH) / 2, width: SEARCH, height: SEARCH_HEIGHT }]}>
+          <LauncherSearch />
+        </Box>
+        <Box onWheel={wheel} style={[looks.surface, looks.card, { top: CARD_TOP, start: 0, width: card().width, height: card().height, translateX: cardLeft() }]}>
+          {/* Home: each owner's pages, the owner shown's in place, the others rolled above and below it, faded. */}
+          <Box role="main" aria-label="Home" aria-hidden={showing() === "home" ? undefined : "true"} style={[looks.fading, looks.cover, showing() !== "home" && looks.inert, { opacity: showing() === "home" ? 1 : 0, scale: showing() === "home" ? 1 : 1.03 }]}>
+            <For each={props.owners} keyed={(owner) => owner.key}>
+              {(owner, index) => {
+                const shown = () => index() === state().context.at.owner
+                const Page = (inner: { page: number; placed: Placed<Cell>[] }) => (
+                  <Box style={{ position: "relative", width: PAGE, height: room().height, flexShrink: 0 }}>
+                    <Box style={{ position: "absolute", top: (laidPage().height * (room().scale - 1)) / 2, left: (laidPage().width * (room().scale - 1)) / 2, scale: room().scale }}>
+                      <HomePage owner={owner()} index={index()} page={inner.page} placed={inner.placed} laid={laidPage()} scale={room().scale} />
+                    </Box>
+                  </Box>
+                )
+                return (
+                  <Box
+                    role="region"
+                    aria-label={owner().name}
+                    aria-hidden={shown() ? undefined : "true"}
+                    style={[looks.owner, looks.rolling, !shown() && looks.inert, { top: PILLS, start: INSET, width: pagesAcross(index()) * PAGE, height: halves(index()) ? halfHeight(room()) : room().height, translateY: (index() - state().context.at.owner) * 40, opacity: shown() ? 1 : 0 }]}
+                  >
+                    <Box style={[looks.track, looks.rolling, { translateX: -shownFrom(index()) * PAGE }]}>
+                      <For each={pages()[index()] ?? []} keyed={false}>
+                        {(placed, at) => (
+                          <Show when={halves(index())} fallback={<Page page={at} placed={placed()} />}>
+                            <Page page={at} placed={placed().filter((one) => one.row <= 3)} />
+                            <Show when={pagesAcross(index()) > 1}>
+                              <Page page={at} placed={placed().flatMap((one) => (one.row > 3 ? [{ ...one, row: one.row - 3 }] : []))} />
+                            </Show>
+                          </Show>
+                        )}
+                      </For>
+                    </Box>
+                  </Box>
+                )
+              }}
+            </For>
           </Box>
-        </Show>
-        <Show when={query().trim()}>
-          <Results owner={props.owners[0]} found={found} />
-        </Show>
-        <LauncherFoot owners={props.owners} laid={laid().screens} target={target} open={openTarget} act={act} />
-      </Show>
-      <Show when={launcher()}>
-        <Box aria-hidden="true" style={[looks.edge, mac() && looks.round]} />
+          {/* The App Library, in the same card, which grows to it as it cross-fades in. */}
+          <Box aria-hidden={showing() === "library" ? undefined : "true"} style={[looks.layer, looks.fading, showing() !== "library" && looks.inert, { top: INSET, start: 0, end: 0, opacity: showing() === "library" ? 1 : 0, scale: showing() === "library" ? 1 : 0.965 }]}>
+            <Library owner={props.owners[0]} size={{ width: LIBRARY, height: tallest() - INSET - PILLS }} />
+          </Box>
+          {/* What was typed found, as it's typed, and as it goes, what it last found. */}
+          <Box aria-hidden={showing() === "search" ? undefined : "true"} style={[looks.owner, looks.fading, showing() !== "search" && looks.inert, { top: INSET, start: INSET, end: INSET, opacity: showing() === "search" ? 1 : 0, translateY: showing() === "search" ? 0 : -8 }]}>
+            <Show when={words()}>{(typed) => <Results owner={props.owners[0]} found={findIn(props.owners[0]?.library ?? [], typed(), false)} words={typed()} />}</Show>
+          </Box>
+          {/* Whose pages they are at the top, as a phone has it, and their dots at the foot, with the App Library's glyph. */}
+          <Box style={[looks.row, looks.fading, showing() !== "home" && looks.inert, { top: 0, height: PILLS, opacity: showing() === "home" ? (state().matches("editing") ? 0.6 : 1) : 0 }]}>
+            <OwnerPill owners={props.owners} />
+          </Box>
+          <Box style={[looks.row, looks.fading, showing() === "search" && looks.inert, { bottom: 0, height: PILLS, opacity: showing() === "search" ? 0 : 1 }]}>
+            <DotsPill owners={props.owners} laid={laid().screens} pages={(owner) => pages()[owner]?.length ?? 1} />
+          </Box>
+        </Box>
       </Show>
       <Show when={editBar()}>
-        <EditBar going={editBarGoing()} />
+        <EditBar going={editBarGoing()} within={launcher() ? cardRect() : undefined} />
       </Show>
       <Show when={copy()}>
         {(now) => {
@@ -2417,7 +2510,7 @@ function HomeScreen(props: { owners: Owner[] }) {
           )
         }}
       </Show>
-      <Show when={opened()}>{(opened) => <OpenCategory owner={props.owners[0]} opened={opened()} />}</Show>
+      <Show when={opened()}>{(opened) => <OpenCategory owner={props.owners[0]} opened={opened()} within={launcher() ? cardRect() : undefined} />}</Show>
       <Show when={held()}>{(held) => <Holding owner={owner()} index={state().context.at.owner} held={held()} />}</Show>
       <Show when={overview()}>
         {(edited) => <Overview owner={props.owners[edited().owner]} index={edited().owner} going={overviewGoing()} />}

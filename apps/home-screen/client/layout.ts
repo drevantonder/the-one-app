@@ -12,13 +12,21 @@ export const TOP_ROW = BAR + 16
 export const DOTS = 32
 /** A phone's page, which a wide window draws larger, as many side by side as fit. */
 export const PHONE = 390
-/** The launcher's search bar across its top, as Raycast's is; the room its footer's pills float in, over its foot;
- * and its section's heading ("Home", "Results"), as Raycast's are. */
-export const LAUNCHER_BAR = 64
-export const LAUNCHER_FOOT = 56
-export const LAUNCHER_HEADING = 30
-/** How far in from the launcher's sides the pages and rows are, as Raycast's list is. */
-export const LAUNCHER_SIDE = 8
+/** A computer's launcher (DESIGN.md, Launcher): its search, a bar floating on its own at its top, `SEARCH` wide and
+ * `SEARCH_HEIGHT` tall, and `GAP` under it the card, Home's pages, the App Library or what was found, each a surface of
+ * glass, `MARGIN` in from the panel's edges, which leaves room for their shadows. A phone's page is drawn `PAGE` wide in
+ * the card, `INSET` in from its sides, under the owner switcher and over the page dots, each in `PILLS` of it. The App
+ * Library is `LIBRARY` wide, five categories across. */
+export const SEARCH = 600
+export const SEARCH_HEIGHT = 52
+export const MARGIN = 24
+export const GAP = 14
+export const PAGE = 316
+export const INSET = 16
+export const PILLS = 52
+export const LIBRARY = 840
+/** What's under a page in the launcher, past its sixth row, and the shadow's room under the card. */
+const SHADOW = 56
 /** A grid's gaps, across and down, and the tallest a row is. */
 const COLUMN_GAP = 12
 const ROW_GAP = 16
@@ -46,15 +54,32 @@ export interface Room {
 }
 
 /// The pages' room, `width` by `height`: on a wide window, a phone's pages drawn larger to suit its height, twice at
-/// most, so a bigger screen shows more pages rather than larger icons, as many whole ones side by side as fit; a
-/// launcher's two across its panel, as near a phone's size as fit, with a hairline between them.
-export function measure(width: number, height: number, launcher: boolean, safe: Insets): Room {
+/// most, so a bigger screen shows more pages rather than larger icons, as many whole ones side by side as fit.
+export function measure(width: number, height: number, safe: Insets): Room {
   const wide = width >= 544
-  const scale = !wide ? 1 : launcher ? Math.min(1, (width - 2 * LAUNCHER_SIDE) / (2 * PHONE)) : Math.max(1, Math.min(2, height / 900))
-  const [side, gap] = launcher ? [LAUNCHER_SIDE, 0] : [32 * scale, 48 * Math.min(scale, 1.6)]
-  const fit = launcher && wide ? 2 : wide ? Math.max(1, Math.floor((width - 2 * side + gap) / (PHONE * scale + gap))) : 1
-  return { width, height, wide, fit, scale, side, gap, launcher, safe }
+  const scale = wide ? Math.max(1, Math.min(2, height / 900)) : 1
+  const [side, gap] = [32 * scale, 48 * Math.min(scale, 1.6)]
+  const fit = wide ? Math.max(1, Math.floor((width - 2 * side + gap) / (PHONE * scale + gap))) : 1
+  return { width, height, wide, fit, scale, side, gap, launcher: false, safe }
 }
+
+/// A launcher's room: a page's, a phone's page drawn `PAGE` wide, as tall as its six rows, which are a phone's
+/// tallest. Two of them are side by side in its card, which pages by one.
+export function launcherRoom(safe: Insets): Room {
+  const scale = PAGE / PHONE
+  return { width: PAGE, height: (ROWS * ROW + (ROWS - 1) * ROW_GAP) * scale + 8, wide: true, fit: 1, scale, side: 0, gap: 0, launcher: true, safe }
+}
+
+/// How tall a page of `room` is drawn when only its top three rows show: a launcher's owner with one page shows its top
+/// half beside its bottom half.
+export const halfHeight = (room: Room) => (3 * ROW + 2 * ROW_GAP) * room.scale + 8
+
+/// How large a launcher's panel is, for a card `card` wide and tall: on a see-through one, as large as the card ever
+/// is, which it never changes; else just around what it shows.
+export const panelSize = (card: { width: number; height: number }) => ({
+  width: Math.max(SEARCH, card.width) + 2 * MARGIN,
+  height: MARGIN + SEARCH_HEIGHT + GAP + card.height + SHADOW,
+})
 
 /** A page as it's laid out, before it's drawn larger: its size, what's kept clear inside it, and its grid's tracks. */
 export interface Page {

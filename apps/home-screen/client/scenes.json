@@ -712,8 +712,8 @@
   "Launcher on a computer": {
     "like": "Home, two pages",
     "size": [
-      750,
-      475
+      920,
+      751
     ],
     "answers": {
       "one/client": {
@@ -721,15 +721,51 @@
         "build": "0.26.0",
         "theme": null,
         "launcher": true,
-        "mac": true
+        "mac": true,
+        "transparent": true
+      }
+    }
+  },
+  "Launcher, one page": {
+    "like": "Home, one page of apps",
+    "size": [
+      920,
+      751
+    ],
+    "answers": {
+      "one/client": {
+        "device": "Mac",
+        "build": "0.26.0",
+        "theme": null,
+        "launcher": true,
+        "mac": true,
+        "transparent": true
+      }
+    }
+  },
+  "Launcher, App Library": {
+    "like": "Home, two pages",
+    "page": "client/index.html#library",
+    "size": [
+      920,
+      751
+    ],
+    "answers": {
+      "one/client": {
+        "device": "Mac",
+        "build": "0.26.0",
+        "theme": null,
+        "launcher": true,
+        "mac": true,
+        "transparent": true
       }
     }
   },
   "Launcher, nothing installed": {
     "like": "Home, nothing installed",
     "size": [
-      750,
-      475
+      920,
+      751
     ],
     "answers": {
       "one/client": {
@@ -737,7 +773,8 @@
         "build": "0.26.0",
         "theme": null,
         "launcher": true,
-        "mac": true
+        "mac": true,
+        "transparent": true
       }
     }
   },
