@@ -36,7 +36,7 @@ network. `ONE_AS` picks the user, since nobody signs in on a network being built
 
 `owner`, `alice` and `bob` start with their encryption set up, their keys on `<folder>/client`'s device, so the
 Vault opens at once in `one` and in the app run with that home. Anyone else is set up with `one encryption approve`
-then `one vault grant --servers <key>` (`one vault unlocked_on` lists them).
+then `one vault grant --servers <key>` (`one vault security` lists them).
 
 ## Signing a device in
 

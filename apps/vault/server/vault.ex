@@ -87,6 +87,17 @@ defmodule Vault do
   # and Try Again on one that didn't sign in starts another as it began.
   @sign_in_moves %{"started" => ~w(ok cancelled failed), "ok" => [], "cancelled" => [], "failed" => []}
 
+  # How ready someone's Vault is, which `security` says and its screen shows, worked out each time from their key and
+  # the servers they chose, never kept. Each state is the first thing missing, in the order they're done:
+  #
+  #   not_set_up --Set Up (a device makes the key)--> no_server --a server is chosen--> device_lacks_key
+  #   device_lacks_key --this device is approved--> ready
+  #
+  # and back as they're undone: the last server switched off is no_server again, this device's key revoked is
+  # device_lacks_key. A device that lacks the key still adds and uses items (a secret is encrypted for the servers,
+  # not with the key); only choosing servers and approving devices need it.
+  @readiness ~w(not_set_up no_server device_lacks_key ready)
+
   # How long a request waits for its person, and a sign-in for its browser, in seconds.
   @request_waits 7 * 86_400
   @sign_in_waits 600
@@ -137,7 +148,13 @@ defmodule Vault do
       description: "The sites its secrets are sent to, like api.example.com"
     }
 
-    secret = %{type: "string", format: "secret", unlocked_on: "unlocked_on"}
+    secret = %{type: "string", format: "secret", unlocked_on: "security"}
+
+    named_device = %{
+      type: "object",
+      properties: %{device: %{type: "string"}, name: %{type: "string"}},
+      required: ["device", "name"]
+    }
 
     [
       %{
@@ -585,12 +602,12 @@ defmodule Vault do
             servers: %{
               type: "array",
               items: %{type: "string"},
-              description: "The servers' keys, as `unlocked_on` lists them"
+              description: "The servers' keys, as `security` lists them"
             },
             keys: %{
               type: "string",
               format: "artifact-keys",
-              unlocked_on: "unlocked_on",
+              unlocked_on: "security",
               description: "Your device fills this in"
             }
           },
@@ -650,6 +667,44 @@ defmodule Vault do
             }
           },
           required: ["artifact", "epoch", "servers", "may"]
+        }
+      },
+      %{
+        name: "security",
+        read_only: true,
+        description: """
+        Says everything about the key that keeps your Vault, in one answer: how ready it is, the devices that hold
+        the key and those asking to, and which servers open the Vault and which may be chosen to. `readiness` is
+        not_set_up (there's no key yet), no_server (no server opens it, so it keeps nothing), device_lacks_key (it
+        works, but this device can't choose servers or approve devices) or ready.
+        """,
+        inputs: %{
+          type: "object",
+          properties: %{device: %{type: "string", format: "device", description: "Your device fills this in"}}
+        },
+        outputs: %{
+          type: "object",
+          properties: %{
+            readiness: %{type: "string", enum: @readiness},
+            owner: %{type: "string", description: "Whose Vault: a user, a group or the network"},
+            holds: %{type: "boolean", description: "Whether this device holds the key"},
+            device: %{type: ["string", "null"]},
+            devices: %{type: "array", items: named_device, description: "The devices that hold the key"},
+            asking: %{type: "array", items: named_device, description: "The devices asking to"},
+            artifact: %{type: "string"},
+            epoch: %{type: "integer"},
+            servers: %{type: "array", items: %{type: "string"}, description: "The servers that open it"},
+            may: %{
+              type: "array",
+              description: "The servers that may be chosen to",
+              items: %{
+                type: "object",
+                properties: %{key: %{type: "string"}, name: %{type: ["string", "null"]}},
+                required: ["key", "name"]
+              }
+            }
+          },
+          required: ~w(readiness owner holds device devices asking artifact epoch servers may)
         }
       },
       %{
@@ -905,6 +960,12 @@ defmodule Vault do
     db = own(call)
     rows = transaction(call, db, &query(&1, "select id, name from artifacts"))
     %{names: for(%{"id" => id, "name" => name} <- rows, artifact(db, id) in artifacts, do: %{artifact: artifact(db, id), name: name})}
+  end
+
+  def call("security", inputs, call) do
+    opened = encryption(call).unlocked_on(call, items_artifact(call))
+    key = Call.tool(call, "encryption", "key", Map.take(inputs, ["device"]))
+    Map.merge(opened, %{readiness: readiness(key, opened.servers), owner: key["owner"], holds: key["slot"] != nil, device: key["device"], devices: key["devices"], asking: key["asking"]})
   end
 
   def call("unlocked_on", _inputs, call), do: encryption(call).unlocked_on(call, items_artifact(call))
@@ -1641,6 +1702,16 @@ defmodule Vault do
 
       _ ->
         raise "An item is ready, busy with a message, or action_required with why and an action."
+    end
+  end
+
+  # The first thing someone's Vault lacks (`@readiness`), from their key and the servers that open it.
+  defp readiness(key, servers) do
+    cond do
+      key["check"] == nil -> "not_set_up"
+      servers == [] -> "no_server"
+      key["slot"] == nil -> "device_lacks_key"
+      true -> "ready"
     end
   end
 

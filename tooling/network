@@ -145,7 +145,7 @@ ready() {
   [[ $("$one" encryption key | jq -r .check) == null ]] || return 0
   "$one" encryption approve >/dev/null
   # shellcheck disable=SC2046 # one server's key per word
-  "$one" vault grant --servers $("$one" vault unlocked_on | jq -r '.may[].key') >/dev/null
+  "$one" vault grant --servers $("$one" vault security | jq -r '.may[].key') >/dev/null
 }
 if [[ -z $owner ]]; then
   users=(owner alice bob)

@@ -89,11 +89,24 @@ type Sheet = { kind: "field"; item?: Item; field?: ItemField } | { kind: "reques
 const [whose, setWhose] = createSignal<string>()
 const ask = <T,>(tool: string, inputs?: object): Promise<T> => call(tool, inputs, { subject: whose() }).then(JSON.parse)
 
-/// Which servers open the Vault and which may, what this device holds of its owner's key, and the items.
-const opened = createMemo(() => ask<{ servers: string[]; may: { key: string; name?: string }[] }>("vault_unlocked_on"))
-const key = createMemo(() => ask<{ owner: string; slot?: unknown; check?: unknown; device: string; devices: Device[]; asking: Device[] }>("encryption_key"))
+/// How ready the Vault is, the devices that hold its owner's key, and the servers that open it, as the server says in
+/// one answer (`vault_security`); then its items, once a server opens it.
+type Readiness = "not_set_up" | "no_server" | "device_lacks_key" | "ready"
+interface Security {
+  readiness: Readiness
+  owner: string
+  holds: boolean
+  device: string | null
+  devices: Device[]
+  asking: Device[]
+  servers: string[]
+  may: { key: string; name?: string }[]
+}
+const security = createMemo(() => ask<Security>("vault_security"))
+const opened = () => security()
+const key = () => security()
 const contents = createMemo(() => (opened().servers.length ? ask<{ items: Item[]; requests: Request[]; apps: string[]; types: ItemType[] }>("vault_list") : { items: [], requests: [], apps: [], types: [] }))
-const again = () => [opened, key, contents].forEach(refresh)
+const again = () => [security, contents].forEach(refresh)
 changed(again)
 
 /// Whose Vaults its person can open here: theirs, each group they own, and the network if they own it.
@@ -179,7 +192,7 @@ function follow() {
 }
 follow()
 addEventListener("hashchange", follow)
-const holds = () => !!key().slot
+const holds = () => key().holds
 
 /// A field of an item to type: a new item's first, a new one of an item's, or one that's there to change.
 function FieldSheet() {
@@ -384,7 +397,7 @@ function OpenedBy() {
           {(server) => (
             <Row
               heading={server.name ?? "A server"}
-              text={`Holds ${whom()} Vault's key`}
+              text={opened().servers.includes(server.key) ? `Opens ${whom()} Vault` : undefined}
               end={<Switch aria-label={server.name ?? "A server"} checked={opened().servers.includes(server.key)} disabled={!holds()} onChange={(event) => choose(server.key, event.currentTarget.checked)} />}
             />
           )}
@@ -653,7 +666,7 @@ function Vault() {
         }
       >
         <Whose />
-        <Show when={key().check} fallback={<Empty action={<Button onClick={setUp}>Set Up</Button>}>Keys and sign-ins are kept here, encrypted. Set up {whom()} key first.</Empty>}>
+        <Show when={security().readiness !== "not_set_up"} fallback={<Empty action={<Button onClick={setUp}>Set Up</Button>}>Keys and sign-ins are kept here, encrypted. Set up {whom()} key first.</Empty>}>
           <Show when={!opened().servers.length}>
             <Problem warn heading={`No server opens ${whom()} Vault`} text={holds() ? "Choose one below. Until then it keeps nothing." : "Choose one from a trusted device. Until then it keeps nothing."} />
           </Show>
