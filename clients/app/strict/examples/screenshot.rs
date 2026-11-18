@@ -1,14 +1,17 @@
 //! A strict page drawn offscreen, the same on every run: a PNG of it and its semantic tree as JSON.
 //!
 //!     cargo run -p strict --features headless --example screenshot -- <page's built folder> <out.png> <out.json> \
-//!       [--ui core/ui/dist/client] [--answers answers.json] [--size 480x360] [--scale 2] [--dark] [--click <id>]...
+//!       [--ui core/ui/dist/client] [--answers answers.json] [--size 480x360] [--scale 2] [--dark] [--requests <file>|-]
 //!
 //! It runs the module the folder's `index.html` loads, as `bun app.js` built it, with the UI library a native host
 //! loads from `--ui` (`bun run build` in core/ui), and answers what the page asks its client from `--answers`, as
 //! core/ui's `record.js` does: `{ "<tool>": <its answer>, "<method>": <its result> }`. It draws with GPUI's own headless
 //! context: its test platform, Allo alone as the typeface, the sandbox's fixed clock and randomness, and wgpu's
 //! offscreen renderer on whatever adapter wgpu finds (`VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/lvp_icd.json` picks
-//! Mesa's software Vulkan, lavapipe, where there's no GPU). `--click` clicks a node first, by its id in the tree.
+//! Mesa's software Vulkan, lavapipe, where there's no GPU). `--requests` gives it the inspector's requests first, one a
+//! line (`strict::inspect`), as a strict window takes them on its socket, from a file or stdin (`-`), each answered on
+//! stdout, a frame drawn before each: `{"v":1,"id":1,"op":"tap","text":"Backups"}`. Its clock is paused: `clock`'s
+//! `step` moves it.
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -30,7 +33,11 @@ fn main() -> anyhow::Result<()> {
         .unwrap_or((480.0, 360.0));
     let scale: f32 = flag("--scale").and_then(|scale| scale.parse().ok()).unwrap_or(2.0);
     let dark = args.iter().any(|arg| arg == "--dark");
-    let clicks: Vec<u64> = args.windows(2).filter(|pair| pair[0] == "--click").filter_map(|pair| pair[1].parse().ok()).collect();
+    let requests = match flag("--requests").as_deref() {
+        Some("-") => std::io::read_to_string(std::io::stdin())?,
+        Some(file) => std::fs::read_to_string(file)?,
+        None => String::new(),
+    };
     let answers: Value = match flag("--answers") {
         Some(answers) => serde_json::from_str(&std::fs::read_to_string(answers)?)?,
         None => json!({}),
@@ -87,13 +94,39 @@ fn main() -> anyhow::Result<()> {
     })?;
     cx.simulate_window_scale_factor_change(window.into(), scale);
     cx.run_until_parked();
-    for id in clicks {
+    for line in requests.lines().filter(|line| !line.trim().is_empty()) {
+        cx.update_window(window.into(), |_, window, cx| drop(window.draw(cx)))?;
+        let request = match strict::inspect::Request::parse(line) {
+            Ok(request) => request,
+            Err(refused) => {
+                println!("{refused}");
+                continue;
+            }
+        };
+        if request.op == "snap" {
+            let image = cx.capture_screenshot(window.into())?;
+            let mut png = Vec::new();
+            image.write_to(&mut std::io::Cursor::new(&mut png), image::ImageFormat::Png)?;
+            let snapped = json!({"png": data_encoding::BASE64.encode(&png), "width": image.width(), "height": image.height()});
+            println!("{}", strict::inspect::answer(&request.id, Ok(snapped)));
+            continue;
+        }
+        let answered = std::rc::Rc::new(std::cell::RefCell::new(None));
+        let to = answered.clone();
+        let deadline = request.f64("deadline").unwrap_or(5000.0);
         cx.update_window(window.into(), |_, window, cx| {
             if let Some(Some(screen)) = window.root::<Screen>() {
-                screen.update(cx, |screen, cx| screen.event(id, "click", None, window, cx));
+                screen.update(cx, |screen, cx| screen.inspect(request, Box::new(move |answer| *to.borrow_mut() = Some(answer)), window, cx));
             }
         })?;
         cx.run_until_parked();
+        // A `settle` not settled at once is told so at its deadline, on GPUI's test clock here.
+        if answered.borrow().is_none() {
+            cx.advance_clock(std::time::Duration::from_secs_f64(deadline / 1000.0));
+            cx.run_until_parked();
+        }
+        let answer = answered.borrow_mut().take();
+        println!("{}", answer.unwrap_or_else(|| json!({"error": "it didn't answer"})));
     }
     cx.update_window(window.into(), |_, window, cx| drop(window.draw(cx)))?;
     let drawn = started.elapsed();

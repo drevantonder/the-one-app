@@ -4,7 +4,7 @@
 use std::collections::HashMap;
 
 use anyhow::{Context as _, bail};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use serde_json::{Map, Value, json};
 
 /// A node, as the app names it. `0` is the root, which the window makes.
@@ -45,7 +45,7 @@ pub enum Op {
     },
 }
 
-#[derive(Deserialize, Clone, Copy, PartialEq, Eq, Debug)]
+#[derive(Deserialize, Serialize, Clone, Copy, PartialEq, Eq, Debug)]
 #[serde(rename_all = "kebab-case")]
 pub enum Kind {
     Box,
@@ -56,7 +56,7 @@ pub enum Kind {
 }
 
 /// A length: pixels or a word (`gap`, `auto`, `50%`, `control`).
-#[derive(Deserialize, Clone, Debug)]
+#[derive(Deserialize, Serialize, Clone, Debug)]
 #[serde(untagged)]
 pub enum Length {
     Px(f32),
@@ -64,7 +64,7 @@ pub enum Length {
 }
 
 /// The strict style subset, as the protocol has it.
-#[derive(Deserialize, Default, Clone, Debug)]
+#[derive(Deserialize, Serialize, Default, Clone, Debug)]
 #[serde(rename_all = "camelCase", default)]
 pub struct Style {
     pub display: Option<String>,

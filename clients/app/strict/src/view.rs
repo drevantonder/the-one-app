@@ -1,20 +1,25 @@
 //! An app's screen as a GPUI view: its tree drawn as GPUI's elements with the design tokens, and what the person does
 //! sent back to its JS as events.
 
+use std::cell::RefCell;
 use std::collections::HashMap;
+use std::rc::Rc;
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use gpui::prelude::*;
 use gpui::{
-    AnyElement, Context, ElementId, FocusHandle, ImageFormat, KeyDownEvent, Subscription, Task, Window, WindowAppearance,
-    actions, div, img, px, relative,
+    AnyElement, Bounds, Context, Div, ElementId, FocusHandle, ImageFormat, KeyDownEvent, Pixels, ScrollHandle, Subscription,
+    Task, Window, WindowAppearance, actions, div, img, px, relative,
 };
 use serde_json::{Value, json};
 
+use crate::inspect::{self, Rect, Rects};
 use crate::js::{Posted, Sandbox};
 use crate::style::{colour, layout, text_style};
 use crate::tree::{Id, Kind, Node, Style, Tree};
+
+pub(crate) mod inspected;
 
 actions!(strict, [FocusNext, FocusPrevious]);
 
@@ -39,6 +44,15 @@ pub struct Screen {
     timer: Option<Task<()>>,
     /// Why it can't draw, if it can't: the app's JS failed, or sent what this host doesn't speak.
     pub failed: Option<String>,
+    /// Where each node was drawn in the last frame, for the inspector, and in the frame being laid out.
+    rects: Rc<RefCell<Rects>>,
+    placed: Rc<RefCell<Rects>>,
+    /// What the app asked its client that hasn't been answered, by its JSON-RPC id, for the inspector's `settle`.
+    unanswered: HashMap<String, inspect::Asked>,
+    /// The inspector's `settle`s waiting: until when, and what to tell when it's settled or that time comes.
+    settling: Vec<(Instant, Box<dyn FnOnce(Value)>)>,
+    /// How far the window has scrolled.
+    scroll: ScrollHandle,
 }
 
 impl Screen {
@@ -53,6 +67,11 @@ impl Screen {
             typed: HashMap::new(),
             timer: None,
             failed: None,
+            rects: Rc::default(),
+            placed: Rc::default(),
+            unanswered: HashMap::new(),
+            settling: Vec::new(),
+            scroll: ScrollHandle::new(),
         };
         screen.pump(window, cx);
         screen
@@ -82,6 +101,9 @@ impl Screen {
 
     /// Tells the app a message from its client: an answer to what it asked (`Asked`), or a notification.
     pub fn message(&mut self, message: &Value, window: &mut Window, cx: &mut Context<Screen>) {
+        if message.get("method").is_none() {
+            self.unanswered.remove(&message["id"].to_string());
+        }
         if let Err(error) = self.sandbox.send("message", message) {
             self.failed = Some(format!("{error:#}"));
         }
@@ -101,7 +123,15 @@ impl Screen {
                 }
                 Posted::Message(message) => {
                     let (Ok(message), Some(asked)) = (serde_json::from_str::<Value>(&message), self.asked.as_mut()) else { continue };
-                    answers.extend(asked(message, window, cx));
+                    let (id, method, tool) = (message.get("id").map(Value::to_string), message["method"].as_str().map(str::to_owned), message["params"]["name"].as_str().map(str::to_owned));
+                    match asked(message, window, cx) {
+                        Some(answer) => answers.push(answer),
+                        None => {
+                            if let (Some(id), Some(method)) = (id, method) {
+                                self.unanswered.insert(id, inspect::Asked { method, tool, since: Instant::now() });
+                            }
+                        }
+                    }
                 }
             }
         }
@@ -113,20 +143,45 @@ impl Screen {
             }
             return self.pump(window, cx);
         }
-        self.timer = self.sandbox.due().map(|due| {
-            let due = Duration::from_secs_f64(due.max(0.0) / 1000.0);
+        // A timer due now runs now, the clock paused or not; one due later runs then, unless the clock's paused, when
+        // it runs as the clock is stepped (`inspected`).
+        let due = self.sandbox.due();
+        if due.is_some_and(|due| due <= 0.0) {
+            return self.fire(window, cx);
+        }
+        self.timer = due.filter(|_| !self.sandbox.clock().paused()).map(|due| {
+            let due = Duration::from_secs_f64(due / 1000.0);
             cx.spawn_in(window, async move |this, cx| {
                 cx.background_executor().timer(due).await;
-                let _ = this.update_in(cx, |this, window, cx| {
-                    this.sandbox.clock().advance(due.as_secs_f64() * 1000.0);
-                    if let Err(error) = this.sandbox.fire() {
-                        this.failed = Some(format!("{error:#}"));
-                    }
-                    this.pump(window, cx);
-                });
+                let _ = this.update_in(cx, |this, window, cx| this.fire(window, cx));
             })
         });
+        self.tell_settled();
         cx.notify();
+    }
+
+    /// Runs the app's timers that are due, and what they changed.
+    fn fire(&mut self, window: &mut Window, cx: &mut Context<Screen>) {
+        if let Err(error) = self.sandbox.fire() {
+            self.failed = Some(format!("{error:#}"));
+        }
+        self.pump(window, cx);
+    }
+
+    /// A div that notes where its children, `ids`, are drawn, as each frame lays them out, for the inspector. The
+    /// root's are noted last in a frame, after everything in it, so it's then that the frame's are the window's.
+    fn placing(&self, element: Div, ids: Vec<Id>, root: bool) -> Div {
+        let (placed, rects) = (self.placed.clone(), self.rects.clone());
+        element.on_children_prepainted(move |bounds: Vec<Bounds<Pixels>>, _, _| {
+            let mut placed = placed.borrow_mut();
+            for (id, bounds) in ids.iter().zip(bounds) {
+                let (origin, size) = (bounds.origin, bounds.size);
+                placed.insert(*id, Rect { x: origin.x.into(), y: origin.y.into(), width: size.width.into(), height: size.height.into() });
+            }
+            if root {
+                *rects.borrow_mut() = std::mem::take(&mut *placed);
+            }
+        })
     }
 
     fn dark(&self, window: &Window) -> bool {
@@ -185,7 +240,10 @@ impl Screen {
             Kind::Input => self.input(id, dark, semantics, window, cx),
             Kind::Box => {
                 let children: Vec<Id> = node.children.clone();
-                let mut element = div().id(ElementId::Integer(id));
+                let drawn: Vec<(Id, AnyElement)> =
+                    children.into_iter().filter_map(|child| Some((child, self.element(child, dark, window, cx)?))).collect();
+                let (ids, children): (Vec<Id>, Vec<AnyElement>) = drawn.into_iter().unzip();
+                let mut element = self.placing(div(), ids, false).id(ElementId::Integer(id));
                 if pressable {
                     let handle = self.focus_handle(id, window, cx);
                     element = element
@@ -200,12 +258,30 @@ impl Screen {
                         }));
                 }
                 let element = text_style(semantics.apply(layout(element, &style)), &style, dark, false);
-                let children: Vec<AnyElement> =
-                    children.into_iter().filter_map(|child| self.element(child, dark, window, cx)).collect();
                 element.children(children).into_any_element()
             }
         };
         Some(element)
+    }
+
+    /// What a key does to input `id`'s text, as it's typed, ahead of the app setting it back as its `value`, and
+    /// tells the app as an `input` event. → whether it took the key.
+    fn edit(&mut self, id: Id, key: Edit, window: &mut Window, cx: &mut Context<Screen>) -> bool {
+        let Some(node) = self.tree.nodes.get(&id) else { return false };
+        let mut value = self.typed.get(&id).cloned().unwrap_or_else(|| node.str("value").unwrap_or_default().to_owned());
+        match key {
+            Edit::Enter if !node.is("multiline") => return false,
+            Edit::Enter => value.push('\n'),
+            Edit::Backspace => drop(value.pop()),
+            Edit::Type(typed) => value.push_str(typed),
+        }
+        self.typed.insert(id, value.clone());
+        if self.tree.nodes.get(&id).is_some_and(|node| node.listens("input")) {
+            self.event(id, "input", Some(value), window, cx);
+        } else {
+            cx.notify();
+        }
+        true
     }
 
     /// An `input`: its text, or its placeholder while it's empty, which takes what's typed while it has the keyboard.
@@ -213,7 +289,6 @@ impl Screen {
         let handle = self.focus_handle(id, window, cx);
         let node = &self.tree.nodes[&id];
         let style = node.style.clone();
-        let multiline = node.is("multiline");
         let value = self.typed.get(&id).cloned().unwrap_or_else(|| match node.prop("value") {
             Some(Value::String(value)) => value.clone(),
             Some(value) => value.to_string(),
@@ -236,34 +311,18 @@ impl Screen {
                 }
             }))
             .on_key_down(cx.listener(move |this, event: &KeyDownEvent, window, cx| {
-                let Some(node) = this.tree.nodes.get(&id) else { return };
-                let mut value = this.typed.get(&id).cloned().unwrap_or_else(|| node.str("value").unwrap_or_default().to_owned());
                 let keystroke = &event.keystroke;
-                let name = match keystroke.key.as_str() {
-                    "enter" if !multiline => return,
-                    "enter" => {
-                        value.push('\n');
-                        "input"
-                    }
-                    "backspace" => {
-                        value.pop();
-                        "input"
-                    }
+                let key = match keystroke.key.as_str() {
+                    "enter" => Edit::Enter,
+                    "backspace" => Edit::Backspace,
                     _ if keystroke.modifiers.platform || keystroke.modifiers.control => return,
                     _ => match &keystroke.key_char {
-                        Some(typed) => {
-                            value.push_str(typed);
-                            "input"
-                        }
+                        Some(typed) => Edit::Type(typed),
                         None => return,
                     },
                 };
-                cx.stop_propagation();
-                this.typed.insert(id, value.clone());
-                if this.tree.nodes.get(&id).is_some_and(|node| node.listens(name)) {
-                    this.event(id, name, Some(value), window, cx);
-                } else {
-                    cx.notify();
+                if this.edit(id, key, window, cx) {
+                    cx.stop_propagation();
                 }
             }));
         let element = text_style(semantics.apply(layout(element, &style)), &style, dark, false);
@@ -279,8 +338,14 @@ impl Screen {
 impl Render for Screen {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         let dark = self.dark(window);
-        let root = div()
+        let children: Vec<Id> = self.tree.root().children.clone();
+        let drawn: Vec<(Id, AnyElement)> =
+            children.into_iter().filter_map(|child| Some((child, self.element(child, dark, window, cx)?))).collect();
+        let (ids, children): (Vec<Id>, Vec<AnyElement>) = drawn.into_iter().unzip();
+        let root = self
+            .placing(div(), ids, true)
             .id("strict")
+            .track_scroll(&self.scroll)
             .key_context("strict")
             .on_action(cx.listener(|_, _: &FocusNext, window, cx| window.focus_next(cx)))
             .on_action(cx.listener(|_, _: &FocusPrevious, window, cx| window.focus_prev(cx)))
@@ -294,8 +359,6 @@ impl Render for Screen {
             return root.p(px(16.0)).child(failed.clone()).into_any_element();
         }
         let style = self.tree.root().style.clone();
-        let children: Vec<Id> = self.tree.root().children.clone();
-        let children: Vec<AnyElement> = children.into_iter().filter_map(|child| self.element(child, dark, window, cx)).collect();
         layout(root, &style).children(children).into_any_element()
     }
 }
@@ -314,6 +377,13 @@ pub fn add_fonts(text_system: &gpui::TextSystem) -> anyhow::Result<()> {
     text_system.add_fonts(vec![ttf.into()])
 }
 
+
+/// A key, as it changes an input's text.
+enum Edit<'a> {
+    Enter,
+    Backspace,
+    Type(&'a str),
+}
 
 /// A node's semantics as AccessKit has them, on its element.
 struct Semantics {

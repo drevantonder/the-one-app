@@ -5,7 +5,7 @@
 //! imports are read by `Files`, and each runs as QuickJS's bytecode, compiled once and kept (`cache`), as QuickJS's
 //! own `qjsc` compiles a program ahead of time.
 
-use std::cell::RefCell;
+use std::cell::{Cell, RefCell};
 use std::path::PathBuf;
 use std::rc::Rc;
 
@@ -37,10 +37,10 @@ globalThis.setInterval = (callback, delay = 0, ...args) => {
   const id = nextTimer++
   const every = Math.max(1, delay)
   const run = () => {
-    timers.set(id, { due: __now() + every, run })
+    timers.set(id, { due: __now() + every, every, run })
     callback(...args)
   }
-  timers.set(id, { due: __now() + every, run })
+  timers.set(id, { due: __now() + every, every, run })
   return id
 }
 globalThis.clearInterval = globalThis.clearTimeout
@@ -64,9 +64,10 @@ if (FIXED !== null) {
     return ((t ^ (t >>> 14)) >>> 0) / 4294967296
   }
 }
-// The host's own: when the next timer is due, and running those that are.
+// The host's own: when the next timer is due, each timer, and running those that are.
 ;({
   due: () => Math.min(...[...timers.values()].map((timer) => timer.due)),
+  timers: () => JSON.stringify([...timers.values()].map((timer) => ({ in: timer.due - __now(), every: timer.every }))),
   fire: () => {
     const now = __now()
     for (const [id, timer] of [...timers]) {
@@ -82,34 +83,57 @@ if (FIXED !== null) {
 const MEMORY: usize = 64 << 20;
 const STACK: usize = 1 << 20;
 
-/// What the sandbox reads its clock from: the real one, or, for output that's the same every time, one that starts
-/// at a fixed time and moves only as it's told (`Clock::advance`).
+/// What the sandbox reads its clock from, in ms since it started: the real time, or, for output that's the same every
+/// time, one that starts at a fixed time and moves only as it's told. Either is paused, stepped and sought by the
+/// inspector (`crate::inspect`): paused, it moves only as it's told (`advance`).
 #[derive(Clone)]
-pub enum Clock {
-    Real(std::time::Instant),
-    Fixed { epoch_ms: f64, elapsed: Rc<RefCell<f64>> },
+pub struct Clock(Rc<Ticking>);
+
+struct Ticking {
+    /// What `Date` says at its start, in ms since 1970, for a fixed clock; the real date otherwise.
+    epoch_ms: Option<f64>,
+    started: std::time::Instant,
+    /// How far it's been moved on, beyond the real time since it started.
+    ahead: Cell<f64>,
+    /// Where it stopped, while it's paused.
+    paused: Cell<Option<f64>>,
 }
 
 impl Clock {
     pub fn real() -> Clock {
-        Clock::Real(std::time::Instant::now())
+        Clock(Rc::new(Ticking { epoch_ms: None, started: std::time::Instant::now(), ahead: Cell::new(0.0), paused: Cell::new(None) }))
     }
 
-    /// 1 January 2026, 00:00 UTC.
+    /// 1 January 2026, 00:00 UTC, paused.
     pub fn fixed() -> Clock {
-        Clock::Fixed { epoch_ms: 1_767_225_600_000.0, elapsed: Rc::default() }
+        Clock(Rc::new(Ticking { epoch_ms: Some(1_767_225_600_000.0), started: std::time::Instant::now(), ahead: Cell::new(0.0), paused: Cell::new(Some(0.0)) }))
     }
 
-    fn now(&self) -> f64 {
-        match self {
-            Clock::Real(started) => started.elapsed().as_secs_f64() * 1000.0,
-            Clock::Fixed { elapsed, .. } => *elapsed.borrow(),
+    pub fn now(&self) -> f64 {
+        self.0.paused.get().unwrap_or_else(|| self.0.started.elapsed().as_secs_f64() * 1000.0 + self.0.ahead.get())
+    }
+
+    pub fn paused(&self) -> bool {
+        self.0.paused.get().is_some()
+    }
+
+    pub fn pause(&self) {
+        if !self.paused() {
+            self.0.paused.set(Some(self.now()));
         }
     }
 
+    pub fn resume(&self) {
+        if let Some(at) = self.0.paused.take() {
+            self.0.ahead.set(at - self.0.started.elapsed().as_secs_f64() * 1000.0);
+        }
+    }
+
+    /// Moves it on by `ms`.
     pub fn advance(&self, ms: f64) {
-        if let Clock::Fixed { elapsed, .. } = self {
-            *elapsed.borrow_mut() += ms;
+        match self.0.paused.get() {
+            Some(at) => self.0.paused.set(Some(at + ms)),
+            None => self.0.ahead.set(self.0.ahead.get() + ms),
         }
     }
 }
@@ -156,10 +180,7 @@ impl Sandbox {
             let now = clock.clone();
             globals.set("__now", Function::new(ctx.clone(), move || now.now())?)?;
             globals.set("__log", Function::new(ctx.clone(), move |level: String, line: String| eprintln!("{app} {level}: {line}"))?)?;
-            let fixed = match &clock {
-                Clock::Fixed { epoch_ms, .. } => epoch_ms.to_string(),
-                Clock::Real(_) => "null".into(),
-            };
+            let fixed = clock.0.epoch_ms.map_or_else(|| "null".into(), |epoch_ms| epoch_ms.to_string());
             let timers: rquickjs::Object = run(&ctx, ctx.eval(format!("const FIXED = {fixed};\n{PRELUDE}")))?;
             let started = run(&ctx, Module::import(&ctx, page.as_str()))?;
             while ctx.execute_pending_job() {}
@@ -192,6 +213,18 @@ impl Sandbox {
             timers.get::<_, Function>("due")?.call(())
         }).ok()?;
         due.is_finite().then_some(due - self.clock.now())
+    }
+
+    /// Each of its timers: when it's due, in ms from now (`in`), and how often an interval runs (`every`).
+    pub fn timers(&self) -> Vec<serde_json::Value> {
+        self.context
+            .with(|ctx| -> rquickjs::Result<String> {
+                let timers = self.timers.clone().restore(&ctx)?;
+                timers.get::<_, Function>("timers")?.call(())
+            })
+            .ok()
+            .and_then(|timers| serde_json::from_str(&timers).ok())
+            .unwrap_or_default()
     }
 
     /// Runs the timers that are due.
