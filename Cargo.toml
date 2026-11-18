@@ -3,6 +3,8 @@
 [workspace]
 resolver = "3"
 members = ["core/client", "core/server/nif/*", "clients/cli", "clients/app", "apps/*/server/nif/*", "apps/*/server/bin/*", "apps/*/client/native"]
+# Programs of apps' that aren't Rust: Computer Use's helper app for a Mac is Swift (`tooling/mac-helper`).
+exclude = ["apps/computer-use/server/bin/helper"]
 
 [workspace.package]
 version = "0.1.0"

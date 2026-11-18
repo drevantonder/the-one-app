@@ -1,13 +1,17 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<!-- What macOS shows where it asks for a permission, and in Privacy & Security, under the helper's name. -->
+<!-- What macOS shows where it asks for a permission, and in Privacy & Security: the helper's name and icon. -->
 <plist version="1.0">
 <dict>
   <key>CFBundleIdentifier</key><string>app.theone.computer-use</string>
   <key>CFBundleName</key><string>Computer Use for The One App</string>
+  <key>CFBundleDisplayName</key><string>Computer Use for The One App</string>
   <key>CFBundleExecutable</key><string>helper</string>
+  <key>CFBundleIconFile</key><string>AppIcon</string>
   <key>CFBundlePackageType</key><string>APPL</string>
   <key>CFBundleShortVersionString</key><string>1.0</string>
-  <key>LSBackgroundOnly</key><true/>
+  <key>CFBundleVersion</key><string>1</string>
+  <key>LSMinimumSystemVersion</key><string>14.0</string>
+  <key>LSUIElement</key><true/>
 </dict>
 </plist>

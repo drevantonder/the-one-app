@@ -1,0 +1,79 @@
+#!/usr/bin/env bash
+# Builds and publishes an app's helper app for a Mac: a small macOS app of the app's own, whose source is a folder of
+# its `server/bin/` (`main.swift` and its `Info.plist`, which names it), that its service runs there so macOS asks
+# its person for a permission in the helper's name and keeps what they allow it (Computer Use's). It's built on the
+# Mac `ssh mac` reaches, with the app's icon made a helper's (`tooling/helper-icon`), and signed with the owner's
+# Developer ID, so macOS keeps what's allowed through every build of it: an app that isn't signed by a developer is
+# known by its build, and asked for again with each. The keychain holding the identity, `ptc-build`, is unlocked
+# and locked again in the same connection, its password read there.
+#
+# The build is the app bundle as a .tar.gz, at `server/bin/<name>/macos-aarch64`, which a deploy from this checkout
+# brings. Then, as `tooling/publish-nifs` does for a NIF, it's uploaded as a file of the GitHub Release
+# `nifs-<commit>` and the app's `server/checksums.json` names it, so a server installing or updating the app from git
+# has it (`OneCore.Apps.Precompiled`); that's committed and pushed to main. Run it on Linux, from a commit on main,
+# once the helper's source or the app's icon changed there:
+#
+#     tooling/mac-helper apps/<app>/server/bin/<name>
+set -euo pipefail
+
+root=$(cd "$(dirname "$0")/.." && pwd)
+cd "$root"
+source=${1%/}
+app=${source#apps/} && app=${app%%/*}
+name=$(basename "$source")
+
+[[ -z $(git status --porcelain) ]] || { echo "Commit what's changed first: what's published is a commit's." >&2 && exit 1; }
+git fetch -q origin main
+commit=$(git rev-parse HEAD)
+git merge-base --is-ancestor "$commit" origin/main || { echo "Push $commit to main first." >&2 && exit 1; }
+
+work=$(mktemp -d)
+trap 'rm -r "$work"' EXIT
+mkdir "$work/helper"
+git ls-files -z -- "$source" | xargs -0 cp -t "$work/helper"
+tooling/helper-icon "apps/$app/client/icon.svg" "$work/AppIcon.iconset"
+# What it's built from: its source, the app's icon and the ring.
+hash=$(cat "$work/helper"/* "apps/$app/client/icon.svg" icons/ring.png tooling/helper-icon | sha256sum | cut -c1-64)
+
+cat >"$work/build" <<'BUILD'
+set -euo pipefail
+cd "$1"
+name=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleName' helper/Info.plist)
+program=$(/usr/libexec/PlistBuddy -c 'Print :CFBundleExecutable' helper/Info.plist)
+bundle="out/$name.app"
+mkdir -p "$bundle/Contents/MacOS" "$bundle/Contents/Resources"
+cp helper/Info.plist "$bundle/Contents/"
+swiftc -O -o "$bundle/Contents/MacOS/$program" helper/*.swift >&2
+iconutil -c icns AppIcon.iconset -o "$bundle/Contents/Resources/AppIcon.icns"
+keychain=$HOME/Library/Keychains/ptc-build.keychain-db
+trap 'security lock-keychain "$keychain"' EXIT
+# The password goes to security on its standard input, never in a command line, where ps and logs see it.
+printf 'unlock-keychain -p "%s" "%s"\n' "$(cat ~/.config/ptc/build-keychain-pw)" "$keychain" | security -i >/dev/null
+codesign --force --options runtime --timestamp --keychain "$keychain" --sign "Developer ID Application" "$bundle" >&2
+codesign --verify --strict "$bundle" >&2
+tar -czf - --no-mac-metadata --no-xattrs -C out "$name.app"
+BUILD
+
+build=$source/macos-aarch64
+tar -c -C "$work" helper AppIcon.iconset build |
+  ssh -o ConnectTimeout=15 mac 'd=$(mktemp -d) && trap "rm -r \"$d\"" EXIT && tar -x -C "$d" && bash "$d/build" "$d"' >"$build"
+tar -tzf "$build" >/dev/null
+
+repo=$(gh repo view --json nameWithOwner -q .nameWithOwner)
+release=nifs-${commit:0:12}
+file=$name-$hash-macos-aarch64
+gh release view "$release" >/dev/null 2>&1 ||
+  gh release create "$release" --target "$commit" --prerelease --title "NIFs at ${commit:0:12}" \
+    --notes "Builds of apps' NIFs and programs at $commit, which each app's server/checksums.json names."
+cp "$build" "$work/$file"
+gh release upload "$release" --clobber "$work/$file"
+
+checksums=apps/$app/server/checksums.json
+[[ -e $checksums ]] || echo '{}' >"$checksums"
+jq -S --arg path "server/bin/$name/macos-aarch64" --arg url "https://github.com/$repo/releases/download/$release/$file" \
+  --arg sha256 "$(sha256sum "$build" | cut -d' ' -f1)" '.[$path] = {url: $url, sha256: $sha256}' "$checksums" >"$checksums.new"
+mv "$checksums.new" "$checksums"
+git add "$checksums"
+git commit -qm "chore($app): publish its helper app for a Mac at ${commit:0:12}, in the Release $release"
+git fetch -q && git rebase -q origin/main && git push -q origin HEAD:main
+echo "Published $file to https://github.com/$repo/releases/tag/$release, and pushed $(git rev-parse --short HEAD)."

@@ -1,0 +1,36 @@
+#!/usr/bin/env bash
+# The icon of a helper app: a small app of an app's own, which macOS shows a person by its name and icon where it
+# asks for a permission and in System Settings → Privacy & Security (Computer Use's, say). It's the app's own icon,
+# large, on macOS's icon grid, with The One App's ring small in its corner, so it reads as that app's, of The One
+# App. Written as an iconset, the folder of PNGs at the sizes an .icns holds, which `iconutil -c icns` on a Mac
+# makes the helper's AppIcon.icns from:
+#
+#     tooling/helper-icon apps/<name>/client/icon.svg <folder>/AppIcon.iconset
+#
+# The app's icon is an SVG or a PNG, square, filling its square as its own background, as every app's does.
+set -euo pipefail
+
+icon=$1 iconset=$2
+root=$(cd "$(dirname "$0")/.." && pwd)
+work=$(mktemp -d)
+trap 'rm -r "$work"' EXIT
+
+# macOS's grid for an app icon of 1024: a body 824 square, rounded by 185, with a shadow below it.
+convert -background none -density 1200 "$icon" -resize 824x824! "$work/body.png"
+convert -size 824x824 xc:none -fill white -draw 'roundrectangle 0,0,823,823,185,185' "$work/mask.png"
+convert "$work/body.png" "$work/mask.png" -compose DstIn -composite "$work/rounded.png"
+# A shadow of sigma 10, 10 down, adds 20 on the left and 10 above the body, so it's put 80, 90 from the corner.
+convert "$work/rounded.png" \( +clone -background black -shadow 30x10+0+10 \) +swap -background none -layers merge +repage \
+  "$work/shadowed.png"
+# The ring, about two fifths of the body across (340 of 824), in its bottom right corner, over it with a shadow of its own so it
+# reads on any colour.
+convert "$root/icons/ring.png" -resize 340x340 \( +clone -background black -shadow 45x14+0+8 \) +swap -background none \
+  -layers merge +repage "$work/ring.png"
+convert -size 1024x1024 xc:none "$work/shadowed.png" -geometry +80+90 -composite \
+  "$work/ring.png" -gravity southeast -geometry +38+30 -composite "$work/1024.png"
+
+mkdir -p "$iconset"
+for size in 16 32 128 256 512; do
+  convert "$work/1024.png" -resize "${size}x${size}" "$iconset/icon_${size}x${size}.png"
+  convert "$work/1024.png" -resize "$((size * 2))x$((size * 2))" "$iconset/icon_${size}x${size}@2x.png"
+done
