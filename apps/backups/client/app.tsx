@@ -2,9 +2,7 @@
 // what's wrong; how often they're made and which are kept. A destination opens beside the list with its backups,
 // Restore, Check and Stop Backing Up Here. Backups are the network's, so every call is for the network.
 import { createMemo, createSignal, Errored, For, Loading, Match, refresh, Show, Switch } from "solid-js"
-import { render } from "@solidjs/web"
-import { Button, call, changed, confirm, createListCollection, Empty, Field, Input, List, Problem, RadioGroup, Row, Screen, Section, Select, Sheet, Skeleton, Split, Status, toast } from "ui"
-import "./app.css"
+import { Box, Button, call, changed, confirm, createListCollection, Empty, Field, Input, List, Problem, RadioGroup, render, Row, Screen, Section, Select, Sheet, Skeleton, Split, Status, Text, toast } from "ui"
 
 /** A backup made to a destination. */
 interface Backup {
@@ -160,13 +158,13 @@ function Opened(props: { destination: Destination }) {
           </List>
         </Section>
       </Show>
-      <div class="actions">
+      <Box style={{ flexDirection: "row", flexWrap: "wrap", gap: "gap", maxWidth: "readable" }}>
         <Show when={destination().backups.length}>
           <Button variant="secondary" onClick={() => setRestoring(destination())}>Restore</Button>
           <Button variant="outline" loading={working() === "check"} onClick={check}>Check</Button>
         </Show>
         <Button variant="destructive" onClick={stop}>Stop Backing Up Here</Button>
-      </div>
+      </Box>
     </Screen>
   )
 }
@@ -175,47 +173,55 @@ function Opened(props: { destination: Destination }) {
 /// whose keys are an item in Everyone's Vault. It's tried before it's added, so a typo shows here.
 function AddSheet(props: { machines: All["machines"] }) {
   const [kind, setKind] = createSignal("folder")
+  const [machine, setMachine] = createSignal<string>()
+  const [typed, setTyped] = createSignal<Record<string, string>>({})
+  const [missing, setMissing] = createSignal<string[]>([])
   const machines = () => createListCollection({ items: props.machines.map((machine) => ({ value: machine.key, label: machine.name ?? machine.key.slice(0, 8) })) })
-  const add = async (event: SubmitEvent & { currentTarget: HTMLFormElement }) => {
-    event.preventDefault()
-    const typed = Object.fromEntries([...new FormData(event.target as HTMLFormElement)].filter(([name, value]) => value !== "" && name !== "kind"))
+  const type = (name: string) => (event: { currentTarget: { value: string } }) => (setTyped({ ...typed(), [name]: event.currentTarget.value }), setMissing(missing().filter((one) => one !== name)))
+  const required = () => (kind() === "folder" ? (props.machines.length ? ["folder"] : []) : ["endpoint", "bucket", "item"])
+  const add = async () => {
+    const empty = required().filter((name) => !typed()[name]?.trim())
+    setMissing(empty)
+    if (empty.length) return
+    const sent = Object.fromEntries(
+      [...(kind() === "folder" ? [["machine", machine() ?? props.machines[0]?.key]] : []), ...required().map((name) => [name, typed()[name]]), ["name", typed().name]].filter(([, value]) => value),
+    )
     setWorking("add")
-    if (await doing(() => call("backups_add", { ...typed }, network))) setAdding(false)
+    if (await doing(() => call("backups_add", sent, network))) (setAdding(false), setTyped({}))
     setWorking()
   }
+  const error = (name: string) => (missing().includes(name) ? "Fill in this field." : undefined)
   return (
     <Sheet heading="Add Destination" open={adding()} onClose={() => setAdding(false)}>
-      <form onSubmit={add}>
-        <RadioGroup name="kind" value={kind()} onChange={setKind} options={[{ value: "folder", label: "A Disk" }, { value: "s3", label: "S3-Compatible Storage" }]} />
-        <Show when={kind() === "folder"}>
-          <Show
-            when={props.machines.length}
-            fallback={<Problem warn heading="No machine can hold backups yet" text="Switch on Backups.Disk for the machine the disk is plugged into, in Devices." />}
-          >
-            <Field label="Machine">
-              <Select.Root name="machine" collection={machines()} />
-            </Field>
-            <Field label="Folder" hint="Its whole path on that machine.">
-              <Input name="folder" placeholder="/mnt/disk/backups" autocapitalize="none" spellcheck={false} required />
-            </Field>
-          </Show>
-        </Show>
-        <Show when={kind() === "s3"}>
-          <Field label="Endpoint">
-            <Input name="endpoint" type="url" placeholder="https://<account>.r2.cloudflarestorage.com" autocapitalize="none" spellcheck={false} required />
+      <RadioGroup name="kind" value={kind()} onChange={setKind} options={[{ value: "folder", label: "A Disk" }, { value: "s3", label: "S3-Compatible Storage" }]} />
+      <Show when={kind() === "folder"}>
+        <Show
+          when={props.machines.length}
+          fallback={<Problem warn heading="No machine can hold backups yet" text="Switch on Backups.Disk for the machine the disk is plugged into, in Devices." />}
+        >
+          <Field label="Machine">
+            <Select.Root collection={machines()} value={[machine() ?? props.machines[0].key]} onValueChange={({ value: [key] }) => setMachine(key)} />
           </Field>
-          <Field label="Bucket">
-            <Input name="bucket" placeholder="backups" autocapitalize="none" spellcheck={false} required />
-          </Field>
-          <Field label="Keys" hint="An item in Everyone's Vault with access_key_id and secret_access_key, switched on for Backups.">
-            <Input name="item" placeholder="Backups Storage" required />
+          <Field label="Folder" hint="Its whole path on that machine." error={error("folder")}>
+            <Input placeholder="/mnt/disk/backups" value={typed().folder} onInput={type("folder")} required />
           </Field>
         </Show>
-        <Field label="Name" hint="What to call it. The folder's or the bucket's name if left empty.">
-          <Input name="name" />
+      </Show>
+      <Show when={kind() === "s3"}>
+        <Field label="Endpoint" error={error("endpoint")}>
+          <Input type="url" placeholder="https://<account>.r2.cloudflarestorage.com" value={typed().endpoint} onInput={type("endpoint")} required />
         </Field>
-        <Button type="submit" loading={working() === "add"} disabled={kind() === "folder" && !props.machines.length}>Add</Button>
-      </form>
+        <Field label="Bucket" error={error("bucket")}>
+          <Input placeholder="backups" value={typed().bucket} onInput={type("bucket")} required />
+        </Field>
+        <Field label="Keys" hint="An item in Everyone's Vault with access_key_id and secret_access_key, switched on for Backups." error={error("item")}>
+          <Input placeholder="Backups Storage" value={typed().item} onInput={type("item")} required />
+        </Field>
+      </Show>
+      <Field label="Name" hint="What to call it. The folder's or the bucket's name if left empty.">
+        <Input value={typed().name} onInput={type("name")} />
+      </Field>
+      <Button loading={working() === "add"} disabled={kind() === "folder" && !props.machines.length} onClick={add}>Add</Button>
     </Sheet>
   )
 }
@@ -223,33 +229,46 @@ function AddSheet(props: { machines: All["machines"] }) {
 /// Brings back what a backup holds that's gone: someone's data, what one app keeps for them, or one file. What's
 /// there now stays as it is.
 function RestoreSheet() {
-  const destination = () => restoring()
+  return (
+    <Sheet heading="Restore" open={!!restoring()} onClose={() => setRestoring()}>
+      <Show when={restoring()}>{(destination) => <Restore destination={destination()} />}</Show>
+    </Sheet>
+  )
+}
+
+function Restore(props: { destination: Destination }) {
   const [what, setWhat] = createSignal("whose")
+  const [backup, setBackup] = createSignal<string>()
+  const [whose, setWhose] = createSignal<string>()
+  const [app, setApp] = createSignal<string>()
+  const [file, setFile] = createSignal("")
+  const [missing, setMissing] = createSignal(false)
   const choices = createMemo(async () => {
-    if (!destination()) return { whose: createListCollection<{ value: string; label: string }>({ items: [] }), apps: createListCollection<{ value: string; label: string }>({ items: [] }) }
     const listed = <T,>(tool: string, key: string) => call(tool).then((text): T[] => JSON.parse(text)[key], (): T[] => [])
     const [people, groups, marketplace] = await Promise.all([
       listed<{ who: string; called?: string; joined?: boolean }>("sign-in_everyone", "people"),
       listed<{ group: string; called: string }>("permissions_groups", "groups"),
       listed<{ app: string | null; name: string; title: string }>("app-store_marketplace", "apps"),
     ])
-    const whose = [
+    const owners = [
       ...people.filter((one) => one.joined).map((one) => ({ value: one.who, label: one.called ?? short(one.who) })),
       ...groups.map((group) => ({ value: group.group, label: group.called })),
       { value: "network", label: "Everyone" },
     ]
     const apps = [...new Map(marketplace.filter((app) => app.app).map((app) => [app.name, app.title])).entries()].map(([value, label]) => ({ value, label }))
-    return { whose: createListCollection({ items: whose }), apps: createListCollection({ items: apps }) }
+    return { owners: createListCollection({ items: owners }), apps: createListCollection({ items: apps }) }
   })
-  const backupsOf = () => createListCollection({ items: destination()!.backups.map((backup) => ({ value: backup.name, label: when(backup.at) })) })
-  const restore = async (event: SubmitEvent) => {
-    event.preventDefault()
-    const typed = Object.fromEntries(new FormData(event.target as HTMLFormElement)) as Record<string, string>
-    const blobs = what() === "file" ? [typed.file.trim()] : what() === "app" ? [`${typed.whose}/own/${typed.app}/`, `${typed.whose}/made/${typed.app}/`] : [`${typed.whose}/`]
+  const backupsOf = () => createListCollection({ items: props.destination.backups.map((backup) => ({ value: backup.name, label: when(backup.at) })) })
+  const restore = async () => {
+    // What a select has chosen until someone picks another is its first.
+    const owner = whose() ?? choices().owners.firstValue
+    const which = app() ?? choices().apps.firstValue
+    if (what() === "file" ? !file().trim() : false) return setMissing(true)
+    const blobs = what() === "file" ? [file().trim()] : what() === "app" ? [`${owner}/own/${which}/`, `${owner}/made/${which}/`] : [`${owner}/`]
     setWorking("restore")
     const result = await doing(async () => {
       let restored = 0
-      for (const one of blobs) restored += JSON.parse(await call("backups_restore", { destination: destination()!.name, backup: typed.backup, blobs: one }, network)).restored.length
+      for (const one of blobs) restored += JSON.parse(await call("backups_restore", { destination: props.destination.name, backup: backup() ?? props.destination.backups[0]?.name, blobs: one }, network)).restored.length
       return restored ? `Brought back ${restored === 1 ? "1 file" : `${restored} files`}.` : "Nothing was gone, so nothing changed."
     })
     setWorking()
@@ -259,37 +278,33 @@ function RestoreSheet() {
     }
   }
   return (
-    <Sheet heading="Restore" open={!!destination()} onClose={() => setRestoring()}>
-      <Show when={destination()}>
-        <form onSubmit={restore}>
-          <Field label="From">
-            <Select.Root name="backup" collection={backupsOf()} defaultValue={[destination()!.backups[0]?.name]} />
+    <>
+      <Field label="From">
+        <Select.Root collection={backupsOf()} value={[backup() ?? props.destination.backups[0]?.name]} onValueChange={({ value: [name] }) => setBackup(name)} />
+      </Field>
+      <Field label="What">
+        <RadioGroup value={what()} onChange={setWhat} options={[{ value: "whose", label: "Someone's Data" }, { value: "app", label: "One App's Data" }, { value: "file", label: "One File" }]} />
+      </Field>
+      <Loading fallback={<Skeleton rows={1} />}>
+        <Show when={what() !== "file"}>
+          <Field label="Owner">
+            <Select.Root collection={choices().owners} value={[whose() ?? choices().owners.firstValue!]} onValueChange={({ value: [one] }) => setWhose(one)} />
           </Field>
-          <Field label="What">
-            <RadioGroup value={what()} onChange={setWhat} options={[{ value: "whose", label: "Someone's Data" }, { value: "app", label: "One App's Data" }, { value: "file", label: "One File" }]} />
+        </Show>
+        <Show when={what() === "app"}>
+          <Field label="App">
+            <Select.Root collection={choices().apps} value={[app() ?? choices().apps.firstValue!]} onValueChange={({ value: [one] }) => setApp(one)} />
           </Field>
-          <Loading fallback={<Skeleton rows={1} />}>
-            <Show when={what() !== "file"}>
-              <Field label="Owner">
-                <Select.Root name="whose" collection={choices().whose} required />
-              </Field>
-            </Show>
-            <Show when={what() === "app"}>
-              <Field label="App">
-                <Select.Root name="app" collection={choices().apps} required />
-              </Field>
-            </Show>
-          </Loading>
-          <Show when={what() === "file"}>
-            <Field label="File" hint="Its whole name in the network, as users/alice/made/notes/7/photo.jpg.">
-              <Input name="file" autocapitalize="none" spellcheck={false} required />
-            </Field>
-          </Show>
-          <p class="hint">Only what's gone comes back. Nothing that's there now changes.</p>
-          <Button type="submit" loading={working() === "restore"}>Restore</Button>
-        </form>
+        </Show>
+      </Loading>
+      <Show when={what() === "file"}>
+        <Field label="File" hint="Its whole name in the network, as users/alice/made/notes/7/photo.jpg." error={missing() && !file().trim() ? "Fill in this field." : undefined}>
+          <Input value={file()} onInput={(event) => setFile(event.currentTarget.value)} required />
+        </Field>
       </Show>
-    </Sheet>
+      <Text style={{ color: "muted-foreground", font: "body" }}>Only what's gone comes back. Nothing that's there now changes.</Text>
+      <Button loading={working() === "restore"} onClick={restore}>Restore</Button>
+    </>
   )
 }
 
@@ -306,7 +321,7 @@ function Backups(props: { all: All }) {
           <Show when={destinations().length} fallback={<Empty action={<Button onClick={() => setAdding(true)}>Add Destination</Button>}>Nothing is backed up yet.</Empty>}>
             <List>
               <For each={destinations()} keyed={(destination) => destination.name}>
-                {(destination) => <Row heading={destination().name} text={<span class={{ warn: warns(destination()) }}>{about(destination())}</span>} current={open() === destination().name} onClick={() => setOpen(destination().name)} />}
+                {(destination) => <Row heading={destination().name} text={<Text style={{ color: warns(destination()) ? "destructive" : undefined }}>{about(destination())}</Text>} current={open() === destination().name} onClick={() => setOpen(destination().name)} />}
               </For>
               <Row heading="Add Destination" onClick={() => setAdding(true)} />
             </List>
@@ -324,13 +339,10 @@ function Backups(props: { all: All }) {
   )
 }
 
-render(
-  () => (
-    <Errored fallback={(error) => <Screen heading="Backups"><Problem heading="Can't show backups" text={error() as Error} /></Screen>}>
-      <Loading fallback={<Screen heading="Backups"><Skeleton rows={3} /></Screen>}>
-        <Backups all={backups()} />
-      </Loading>
-    </Errored>
-  ),
-  document.body,
-)
+render(() => (
+  <Errored fallback={(error) => <Screen heading="Backups"><Problem heading="Can't show backups" text={error() as Error} /></Screen>}>
+    <Loading fallback={<Screen heading="Backups"><Skeleton rows={3} /></Screen>}>
+      <Backups all={backups()} />
+    </Loading>
+  </Errored>
+))
