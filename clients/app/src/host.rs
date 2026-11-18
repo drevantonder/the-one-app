@@ -37,6 +37,12 @@ enum Told {
     Theme(Option<Theme>),
     /// Turns the web view's back and forward swipes on or off.
     Gestures(bool),
+    /// Moves with the pointer, held down on the page's top, where a Mac's window has no title band.
+    Drag,
+    /// Does what a double-click on the title bar does (`hosts::double_clicked`).
+    DoubleClick,
+    /// Brings the Home Screen forward, its window kept open (the page's Home and Window → Home Screen).
+    Home,
     Quit,
 }
 
@@ -91,11 +97,20 @@ fn window(opened: Opened, class: &str) -> anyhow::Result<ExitCode> {
 
     let name = opened.entrypoint.split('/').next().unwrap_or_default().to_owned();
     #[cfg(target_os = "macos")]
-    let menu = menu(&name);
-    let window = WindowBuilder::new().with_title(&name).with_inner_size(tao::dpi::LogicalSize::new(1024.0, 720.0)).build(&event_loop)?;
+    let menu = menu(&name, proxy.clone());
+    let window = WindowBuilder::new().with_title(&name).with_inner_size(tao::dpi::LogicalSize::new(1024.0, 720.0));
+    // No title band, as the Home Screen's window has none (`titleBar`), the traffic lights kept.
+    #[cfg(target_os = "macos")]
+    let window = {
+        use tao::platform::macos::WindowBuilderExtMacOS;
+        window.with_title_hidden(true).with_titlebar_transparent(true).with_fullsize_content_view(true)
+    };
+    let window = window.build(&event_loop)?;
 
     // The page's own files, which are this program's, as the app's window serves them.
     let context: &'static tauri::Context<tauri::Wry> = Box::leak(Box::new(crate::context()));
+    #[cfg(target_os = "macos")]
+    let home_screen = context.config().identifier.clone();
     let csp = context.config().app.security.csp.as_ref().map(ToString::to_string).unwrap_or_default();
     let assets = context.assets();
     let own = move |_: WebViewId, request: Request<Vec<u8>>| {
@@ -134,6 +149,9 @@ fn window(opened: Opened, class: &str) -> anyhow::Result<ExitCode> {
                 _ => None,
             })),
             "navigation_gestures" => Some(Told::Gestures(args["on"].as_bool() == Some(true))),
+            "plugin:window|start_dragging" => Some(Told::Drag),
+            "title_bar_double_click" => Some(Told::DoubleClick),
+            "front" => Some(Told::Home),
             // A phone's status bar and haptics, which a computer has neither of.
             "status_bar" => Some(Told::Run(String::new())),
             command if command.starts_with("plugin:") => Some(Told::Run(String::new())),
@@ -221,6 +239,18 @@ fn window(opened: Opened, class: &str) -> anyhow::Result<ExitCode> {
             }
             Event::UserEvent(Told::Theme(theme)) => window.set_theme(theme),
             Event::UserEvent(Told::Gestures(on)) => gestures(&webview, on),
+            Event::UserEvent(Told::Drag) => drop(window.drag_window()),
+            #[cfg(target_os = "macos")]
+            Event::UserEvent(Told::DoubleClick) => {
+                use tao::platform::macos::WindowExtMacOS;
+                crate::hosts::double_clicked(window.ns_window())
+            }
+            Event::UserEvent(Told::Home) => {
+                // The Home Screen is The One App's, which comes in front only where this app lets it.
+                #[cfg(target_os = "macos")]
+                crate::hosts::yield_activation(&home_screen);
+                let _ = to.send(json!({"id": "front", "command": "front"}));
+            }
             _ => {}
         }
     })
@@ -399,10 +429,11 @@ fn gestures(webview: &wry::WebView, on: bool) {
 }
 
 /// A Mac app's menu bar, named after the app: its app menu (About, Hide, Quit), Edit, which a web view's copy and
-/// paste keys need, and Window.
+/// paste keys need, and Window, which has Home Screen too, at ⇧⌘H, as Finder's and Safari's Home are.
 #[cfg(target_os = "macos")]
-fn menu(name: &str) -> muda::Menu {
-    use muda::{Menu, PredefinedMenuItem, Submenu};
+fn menu(name: &str, proxy: EventLoopProxy<Told>) -> muda::Menu {
+    use muda::accelerator::{Accelerator, Code, Modifiers};
+    use muda::{Menu, MenuEvent, MenuItem, PredefinedMenuItem, Submenu};
     let menu = Menu::new();
     let app = Submenu::with_items(
         name,
@@ -430,7 +461,18 @@ fn menu(name: &str) -> muda::Menu {
             &PredefinedMenuItem::select_all(None),
         ],
     );
-    let window = Submenu::with_items("Window", true, &[&PredefinedMenuItem::minimize(None), &PredefinedMenuItem::close_window(None)]);
+    let home = MenuItem::with_id("home-screen", "Home Screen", true, Some(Accelerator::new(Some(Modifiers::SUPER | Modifiers::SHIFT), Code::KeyH)));
+    let proxy = Mutex::new(proxy);
+    MenuEvent::set_event_handler(Some(move |event: MenuEvent| {
+        if event.id == "home-screen" {
+            let _ = proxy.lock().expect("nothing panics holding it").send_event(Told::Home);
+        }
+    }));
+    let window = Submenu::with_items(
+        "Window",
+        true,
+        &[&PredefinedMenuItem::minimize(None), &PredefinedMenuItem::close_window(None), &PredefinedMenuItem::separator(), &home],
+    );
     if let (Ok(app), Ok(edit), Ok(window)) = (app, edit, window) {
         let _ = menu.append_items(&[&app, &edit, &window]);
         menu.init_for_nsapp();

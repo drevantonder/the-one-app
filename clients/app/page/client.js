@@ -365,9 +365,6 @@ const stiffness = (ms) => (27 * 400 / ms) ** 2
 ///     show, while tracking: as while playing, the finger keeping it unless it goes somewhere else.
 ///     popped(to), drawn already by the device: still at `to`, with nothing drawn; while playing toward it, nothing.
 ///
-/// The sidebar's Home and its apps (`rail`) are links (`go`): Home goes back through the history, as back does, and
-/// an app is `show`n, as one opened from another is.
-///
 /// A computer's trackpad swipe sends `grab`, `drag` and `release` (`wheel`), as do Android's back gesture
 /// (`backStarted`), an iPhone's swipe in from the edge (`window.grab`), and a finger pulling the rail's line, whose
 /// `grab` says `home`: from any of an app's screens, it goes back to the Home Screen's entry, past the app's own.
@@ -845,6 +842,7 @@ async function list(subject) {
       }
       launcher = launcherIn(resources) || launcher
       if (own) document.title = names.get(own.entrypoint) || document.title
+      crumb()
       shortcuts()
       if (launcher || own) on({ type: "listed" })
       else if (shown.getSnapshot().context.connection === "online") on((await behind().catch(() => false)) ? { type: "tooOld" } : { type: "none", only: await only() })
@@ -1155,15 +1153,13 @@ addEventListener("message", ({ data }) => {
 /** @param {string | null} at */
 const showing = (at) => open.get(at ?? "") ?? open.get(shown.getSnapshot().matches("app_store") ? key(appStore) : baseKey())
 
-/// The rail: every app's way back to the Home Screen, and on a computer over to another, above every app. Where the
-/// window is wide, a computer's or a tablet's turned sideways, it's a thin sidebar on the window's left, always there,
-/// as Teams', Slack's and Discord's app rails are: Home, then the apps used lately on this device (`recent`), the open
-/// ones first, each newest opened first, so what's under the pointer stays there, with whichever is in front
-/// outlined, Home too, and the apps and the Home Screen beside it. Home goes back there as the device's back does, and
-/// an app opens as one does from another (`go`). Elsewhere, a phone's or a tablet's held upright, it's a home line on
-/// the window's right edge over every app, iOS's home indicator on its side, which a finger pulls in to go home
-/// (`pull`). It keeps out of the way while something of the app's is open over it (a sheet, a menu), as the device's
-/// back does.
+/// The rail: every app's way back to the Home Screen, above every app on a phone or a tablet: a home line on the
+/// window's right edge, iOS's home indicator on its side, which a finger pulls in to go home (`pull`). It keeps out of
+/// the way while something of the app's is open over it (a sheet, a menu), as the device's back does. A computer has
+/// none: each app is a window of its own there, which the computer's own Dock or taskbar goes between, and whose title
+/// bar's breadcrumb goes home (`titleBar`).
+///
+/// The apps used lately on this device (`recent`) are what a long press on Android's app icon lists (`shortcuts`).
 const RECENT = 8
 /// The apps used lately on this device, by their keys, newest first.
 /** @type {string[]} */
@@ -1179,18 +1175,13 @@ const fronted = new WeakSet()
 function used(view) {
   if (view.entrypoint === launcher || fronted.has(view)) return
   fronted.add(view)
-  usedKey(view.key)
-}
-/// An app by its key is the newest used, as one opened in a window of its own is.
-/** @param {string} at */
-function usedKey(at) {
-  recent = [at, ...recent.filter((was) => was !== at)].slice(0, RECENT)
+  recent = [view.key, ...recent.filter((was) => was !== view.key)].slice(0, RECENT)
   try {
     localStorage.setItem("recent", JSON.stringify(recent))
   } catch {}
   shortcuts()
 }
-/// What the rail lists after Home: the apps used lately that are still this user's, the open ones first.
+/// The apps used lately that are still this user's, the open ones first.
 function recents() {
   const listed = recent
     .map((at) => ({ key: at, subject: at.slice(0, at.indexOf("|")) || undefined, entrypoint: at.slice(at.indexOf("|") + 1) }))
@@ -1226,42 +1217,11 @@ async function shortcut(entrypoint) {
   return { id: entrypoint, name: names.get(entrypoint) || entrypoint, icon: canvas.toDataURL("image/png").slice("data:image/png;base64,".length) }
 }
 
-const sidebar = byId("rail")
 const line = byId("line")
-/// Where the window is wide enough for the sidebar, as a computer's is, and a tablet's turned sideways.
-const wide = matchMedia("(min-width: 56rem) and (orientation: landscape)")
-
-const HOUSE = "M219.31,108.68l-80-80a16,16,0,0,0-22.62,0l-80,80A15.87,15.87,0,0,0,32,120v96a8,8,0,0,0,8,8h64a8,8,0,0,0,8-8V160h32v56a8,8,0,0,0,8,8h64a8,8,0,0,0,8-8V120A15.87,15.87,0,0,0,219.31,108.68ZM208,208H160V152a8,8,0,0,0-8-8H104a8,8,0,0,0-8,8v56H48V120l80-80,80,80Z"
-/// Lists Home and the recent apps in the sidebar, each a button with its name as its tooltip.
-function fill() {
-  const list = byId("rail-list")
-  const apps = recents()
-  const now = [here(), ...apps.map(({ key }) => key), names.size].join("\n")
-  if (list.dataset.listed === now) return
-  list.dataset.listed = now
-  const item = (/** @type {string} */ label, /** @type {boolean} */ current, /** @type {Element} */ picture, /** @type {() => void} */ pressed) => {
-    const button = Object.assign(document.createElement("button"), { className: "rail-item press ring", type: "button", ariaLabel: label })
-    if (current) button.setAttribute("aria-current", "page")
-    const tile = Object.assign(document.createElement("span"), { className: "tile" })
-    tile.append(picture)
-    button.append(tile)
-    button.dataset.name = label
-    button.addEventListener("click", pressed)
-    const entry = document.createElement("li")
-    entry.append(button)
-    return entry
-  }
-  const house = icon(HOUSE)
-  house.classList.add("home")
-  list.replaceChildren(
-    item("Home", here() === null, house, () => go(launcher)),
-    ...apps.map(({ key, entrypoint, subject }) => item(names.get(entrypoint) || entrypoint, key === here(), Object.assign(document.createElement("img"), { src: icons.get(entrypoint) ?? "", alt: "" }), () => go(entrypoint, subject))),
-  )
-}
 
 /// Whether the rail shows, and over what: while the window shows its apps and has a Home Screen to go back to
-/// (`data-rail`), the Home Screen (`home`) or an app (`app`). The sidebar is there over both; the line only over an
-/// app, unless something is open over it (`data-away`). Android is told where the line is, which its back gesture
+/// (`data-rail`), the Home Screen (`home`) or an app (`app`): the line is there only over an app, unless something is
+/// open over it (`data-away`). Android is told where the line is, which its back gesture
 /// leaves to it.
 /** @type {string | undefined} */
 let excluded
@@ -1270,22 +1230,19 @@ let excluded
 let pull
 function rail() {
   const now = shown.getSnapshot()
-  // An app's own window has none: the computer's own Dock or taskbar goes between its windows.
-  const homed = Boolean(launcher) && !own && now.hasTag("pages") && !now.matches("app_store")
+  // A computer's windows have none: its own Dock or taskbar goes between them.
+  const homed = Boolean(launcher) && !windows && now.hasTag("pages") && !now.matches("app_store")
   const lined = homed && here() !== null && !showing(here())?.over
   if (homed) document.body.dataset.rail = here() === null ? "home" : "app"
   else delete document.body.dataset.rail
-  sidebar.inert = !homed
   line.toggleAttribute("data-away", !lined)
   // A line that went home under a finger comes back with its app.
   if (lined && !pull) line.toggleAttribute("data-pulled", false)
-  if (homed && wide.matches) fill()
-  const at = lined && !wide.matches ? line.getBoundingClientRect() : undefined
+  const at = lined ? line.getBoundingClientRect() : undefined
   const edge = at ? [at.left, at.top, at.right, at.bottom].map(Math.round).join(",") : ""
   if (edge !== excluded) globalThis.androidEdge?.postMessage(edge)
   excluded = edge
 }
-wide.addEventListener("change", rail)
 addEventListener("resize", rail)
 
 /// How far in, as a share of the window's width, past which a finger let go of the line goes home.
@@ -1333,32 +1290,6 @@ function letGo(event) {
 }
 line.addEventListener("pointerup", letGo)
 line.addEventListener("pointercancel", letGo)
-
-/// The sidebar's tooltip: the name of the app under the pointer, or with the keyboard's focus, beside it. Pressed, it
-/// goes until the pointer leaves the rail.
-const tip = byId("rail-tip")
-let pressed = false
-/** @param {EventTarget | null} target */
-function tipFor(target) {
-  const item = target instanceof Element ? target.closest(".rail-item") : null
-  tip.hidden = !item
-  if (!(item instanceof HTMLElement)) return
-  tip.textContent = item.dataset.name ?? ""
-  const at = item.getBoundingClientRect()
-  tip.style.left = `${sidebar.getBoundingClientRect().right + 6}px`
-  tip.style.top = `${at.top + at.height / 2 - tip.offsetHeight / 2}px`
-}
-sidebar.addEventListener("pointerover", ({ target, pointerType }) => pointerType === "mouse" && !pressed && tipFor(target))
-sidebar.addEventListener("pointerleave", () => {
-  pressed = false
-  tipFor(null)
-})
-sidebar.addEventListener("focusin", ({ target }) => target instanceof Element && target.matches(":focus-visible") && tipFor(target))
-sidebar.addEventListener("focusout", () => tipFor(null))
-sidebar.addEventListener("click", () => {
-  pressed = true
-  tipFor(null)
-})
 
 /// When the window last came on screen.
 let onScreenSince = 0
@@ -1570,7 +1501,6 @@ function go(link, subject, behind, from) {
       return true
     }
     invoke("open_window", { entrypoint: page, subject, link: fragment ? `${page}#${fragment}` : page })
-    usedKey(key(page, subject))
     rail()
     return true
   }
@@ -1772,6 +1702,49 @@ function hear(told) {
   on({ type: "session", told })
 }
 
+/// A window whose title bar is over the page (`titleBar`), as a Mac's with no title band is: the page keeps its
+/// height clear at its top (`--safe-top`), as every app is told, under the window's own controls (a Mac's traffic
+/// lights). Held there, it drags the window, and double-clicked, it does what a title bar does (on a Mac, as it's set:
+/// zoom). An app's own window has its breadcrumb there, just after the window's controls: Home, which brings the Home
+/// Screen forward and keeps this window open, as Window → Home Screen does (`host.rs`), then the app (`crumb`).
+const titleBar = byId("title-bar")
+/** @param {{ height: number, start: number }} at */
+function titled({ height, start }) {
+  document.documentElement.style.setProperty("--title-bar-height", `${height}px`)
+  document.documentElement.style.setProperty("--title-bar-start", `${start}px`)
+  document.documentElement.toggleAttribute("data-title-bar", true)
+  titleBar.hidden = false
+  byId("title-bar-nav").hidden = !own
+  crumb()
+}
+/// The breadcrumb's last: this window's app, by its icon and name, once its apps are listed.
+function crumb() {
+  if (!own) return
+  const [picture, name] = byId("title-bar-app").children
+  const src = icons.get(own.entrypoint)
+  if (src) /** @type {HTMLImageElement} */ (picture).src = src
+  picture.toggleAttribute("hidden", !src)
+  name.textContent = names.get(own.entrypoint) || own.name || ""
+}
+/// Where a double-click's second press was: moved from before it's let go, it's a drag, as on a Mac's title bar.
+let pressedAt = ""
+titleBar.addEventListener("mousedown", (event) => {
+  if (event.button !== 0 || event.target !== titleBar) return
+  event.preventDefault()
+  if (event.detail === 2) pressedAt = `${event.clientX},${event.clientY}`
+  else if (event.detail === 1) invoke("plugin:window|start_dragging")
+})
+titleBar.addEventListener("mouseup", (event) => {
+  if (event.button === 0 && event.detail === 2 && event.target === titleBar && pressedAt === `${event.clientX},${event.clientY}`) invoke("title_bar_double_click")
+  pressedAt = ""
+})
+/// Goes to the Home Screen from an app's own window, keeping it open: the breadcrumb's Home, as Window → Home Screen
+/// does (`host.rs`).
+function showHomeScreen() {
+  invoke("front")
+}
+byId("home-screen").addEventListener("click", showHomeScreen)
+
 dress()
 shown.subscribe(draw)
 shown.start()
@@ -1779,12 +1752,13 @@ await listen("session", ({ payload }) => hear(payload))
 // Where the window starts: where its device is with its network, as the client says it (`Session`), and whether its
 // network answers (`Connection`), which it follows from then on. A phone's app hears a tap on a notification through
 // its push plugin.
-const { taps, testflight: fromTestflight, connection, open: link, windows: inWindows, window: ownWindow, theme: kept, ...told } = await invoke("start")
+const { taps, testflight: fromTestflight, connection, open: link, windows: inWindows, window: ownWindow, titleBar: overTitleBar, theme: kept, ...told } = await invoke("start")
 phone = Boolean(taps)
 testflight = Boolean(fromTestflight)
 windows = Boolean(inWindows)
 own = ownWindow ?? undefined
 if (own?.name) document.title = own.name
+if (overTitleBar) titled(overTitleBar)
 heardTheme(kept)
 on({ type: "connection", connection })
 if (link) on({ type: "link", link })

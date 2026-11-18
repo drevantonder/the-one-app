@@ -33,14 +33,14 @@ An app's own words are defined in that app's `SKILL.md`.
   get one for having accounts.
 - **Launcher**: the app every client opens first, which draws the rest. A network has exactly one, in the category
   `launcher`, and Home Screen is it.
-- **Rail**: what's above every app, its way back to the Home Screen. On a wide window it's a thin sidebar on the left,
-  always there, with the apps used lately on the device, as Teams', Slack's and Discord's app rails are; on a phone,
-  or a tablet held upright, it's a home line on the right edge over an app, iOS's home indicator on its side, which a
-  finger pulls in to go home.
+- **Rail**: on a phone or a tablet, what's above every app, its way back to the Home Screen: a home line on the right
+  edge over an app, iOS's home indicator on its side, which a finger pulls in to go home. A computer has none: an app
+  window's breadcrumb goes home instead.
 - **App window**: on a computer (Mac, Windows, Linux), an app open in a window of its own, in a process of its own,
   which the system lists as that app: its own name and icon in the Dock or taskbar, in Cmd-Tab or Alt-Tab, and on a
   Mac its own menu bar, as Safari's web apps are. It asks the network through the app's window, which keeps the Home
-  Screen, and each app's shortcut (`shortcuts`) opens it. In code, its process is the host (`host.rs`).
+  Screen, and each app's shortcut (`shortcuts`) opens it. Its title bar has a breadcrumb, whose Home goes to the Home
+  Screen. In code, its process is the host (`host.rs`).
 - **App Store**: the app that installs and removes apps, in the category `app-store`, which a client opens itself
   where there's no launcher yet to open it from.
 - **Trusted**, **Untrusted**: the state of an installed app, apart from where it is in its lifecycle, and either

@@ -166,25 +166,70 @@ pub fn open_window(app: AppHandle, entrypoint: String, subject: Option<String>, 
     Ok(())
 }
 
-/// Lets the app `id` come in front, as a person opened it here: since macOS 14 an app comes in front only where the
-/// one in front lets it (cooperative activation), so an app's window would otherwise open behind this one. AppKit's,
-/// on the main thread.
+/// Lets the app `id` come in front, as a person opened it here (`yield_activation`).
 fn yield_to(app: &AppHandle, id: String) {
     #[cfg(target_os = "macos")]
-    let _ = app.run_on_main_thread(move || unsafe {
-        use objc2::runtime::{AnyClass, AnyObject};
-        let (Some(application), Some(string), Ok(id)) = (AnyClass::get(c"NSApplication"), AnyClass::get(c"NSString"), std::ffi::CString::new(id)) else {
-            return;
-        };
+    let _ = app.run_on_main_thread(move || yield_activation(&id));
+    #[cfg(not(target_os = "macos"))]
+    let _ = (app, id);
+}
+
+/// Lets the app `id` come in front of this one, as a person opened it from here: since macOS 14 an app comes in front
+/// only where the one in front lets it (cooperative activation), so an app's window would otherwise open behind the
+/// Home Screen's, and the Home Screen's behind an app's. AppKit's, on the main thread.
+#[cfg(target_os = "macos")]
+pub(crate) fn yield_activation(id: &str) {
+    use objc2::runtime::{AnyClass, AnyObject};
+    let (Some(application), Some(id)) = (AnyClass::get(c"NSApplication"), ns_string(id)) else { return };
+    unsafe {
         let shared: *mut AnyObject = objc2::msg_send![application, sharedApplication];
-        let id: *mut AnyObject = objc2::msg_send![string, stringWithUTF8String: id.as_ptr()];
         let yields: bool = objc2::msg_send![shared, respondsToSelector: objc2::sel!(yieldActivationToApplicationWithBundleIdentifier:)];
         if yields {
             let () = objc2::msg_send![shared, yieldActivationToApplicationWithBundleIdentifier: id];
         }
+    }
+}
+
+/// The window's title bar was double-clicked: does what that does on a Mac, as its person set it in System Settings (Desktop & Dock,
+/// "Double-click a window's title bar to"): zoom, which is what's set until they change it, minimize, or nothing. A
+/// window with no title band is double-clicked at its page's top (`title_bar_double_click`). AppKit's, on the main
+/// thread.
+#[cfg(target_os = "macos")]
+pub(crate) fn double_clicked(window: *mut std::ffi::c_void) {
+    use objc2::runtime::{AnyClass, AnyObject};
+    let (Some(defaults), Some(key)) = (AnyClass::get(c"NSUserDefaults"), ns_string("AppleActionOnDoubleClick")) else { return };
+    let window = window.cast::<AnyObject>();
+    let nothing: *mut AnyObject = std::ptr::null_mut();
+    unsafe {
+        let defaults: *mut AnyObject = objc2::msg_send![defaults, standardUserDefaults];
+        let action: *mut AnyObject = objc2::msg_send![defaults, stringForKey: key];
+        let action: *const std::ffi::c_char = if action.is_null() { std::ptr::null() } else { objc2::msg_send![action, UTF8String] };
+        match (!action.is_null()).then(|| std::ffi::CStr::from_ptr(action).to_bytes()) {
+            Some(b"Minimize") => objc2::msg_send![window, performMiniaturize: nothing],
+            Some(b"None") => {}
+            _ => objc2::msg_send![window, performZoom: nothing],
+        }
+    }
+}
+
+/// `text` as an `NSString`.
+#[cfg(target_os = "macos")]
+fn ns_string(text: &str) -> Option<*mut objc2::runtime::AnyObject> {
+    let (string, text) = (objc2::runtime::AnyClass::get(c"NSString")?, std::ffi::CString::new(text).ok()?);
+    Some(unsafe { objc2::msg_send![string, stringWithUTF8String: text.as_ptr()] })
+}
+
+/// Does what a double-click on the window's title bar does (`double_clicked`): a Mac's Home Screen window has
+/// no title band, so its page's top is double-clicked instead.
+#[cfg(target_os = "macos")]
+#[tauri::command]
+pub fn title_bar_double_click(window: tauri::WebviewWindow) {
+    let at = window.clone();
+    let _ = window.run_on_main_thread(move || {
+        if let Ok(window) = at.ns_window() {
+            double_clicked(window)
+        }
     });
-    #[cfg(not(target_os = "macos"))]
-    let _ = (app, id);
 }
 
 /// Talks with one app's window until it ends.

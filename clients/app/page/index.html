@@ -19,11 +19,21 @@
   <!-- While its network doesn't answer, a thin banner over the launcher, as a mail or chat app has one: it says so, and
        that it's reconnecting as it tries again. -->
   <p id="banner" role="status" hidden><span id="banner-spinner" class="ui-spinner" aria-hidden="true"><svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/></svg></span><span id="banner-text"></span><button id="banner-retry" class="ui-button press ring" data-variant="ghost">Try Again</button></p>
-  <!-- The rail, above every app (client.js's `rail`). Where the window is wide, a sidebar on its left of Home and the
-       apps used lately, each app's name as its tooltip; elsewhere a home line on its right edge over an app, which a
-       finger pulls in to go home, and which says nothing to a screen reader, as iOS's home indicator doesn't. -->
-  <nav id="rail" aria-label="Home and recent apps" inert><ul id="rail-list" role="list"></ul></nav>
-  <p id="rail-tip" aria-hidden="true" hidden></p>
+  <!-- Where the window's title bar is over the page (a Mac's, with no title band), its top: under the window's own
+       controls, it drags the window (client.js's `titleBar`). In an app's own window, just after the controls, its
+       breadcrumb (`title-bar-nav`): Home, which brings the Home Screen forward, then the app. -->
+  <div id="title-bar" hidden>
+    <nav id="title-bar-nav" aria-label="Breadcrumb" hidden>
+      <ol>
+        <li><button id="home-screen" class="press ring" type="button" title="Home Screen"><img src="Logo.png" alt="">Home</button></li>
+        <li class="separator" role="presentation" aria-hidden="true">/</li>
+        <li><span id="title-bar-app" aria-current="page"><img alt="" hidden><span></span></span></li>
+      </ol>
+    </nav>
+  </div>
+  <!-- The rail, above every app on a phone or a tablet (client.js's `rail`): a home line on the window's right edge over
+       an app, which a finger pulls in to go home, and which says nothing to a screen reader, as iOS's home indicator
+       doesn't. -->
   <div id="line" aria-hidden="true" data-away></div>
   <!-- What the window shows of itself, in its middle, over the frames, as the UI library's Steps, Status, Empty and
        Problem draw it (core/ui/src/states.tsx): its mark from its first paint and the steps it takes as it opens, until

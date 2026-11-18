@@ -17,8 +17,6 @@ body {
   box-sizing: border-box;
   display: grid;
   grid-template-rows: auto minmax(0, 1fr);
-  /* The rail's column, where the window is wide and has a Home Screen to go back to, and the apps' beside it. */
-  grid-template-columns: var(--rail-width, 0px) minmax(0, 1fr);
   margin: 0;
   background: var(--background);
   color: var(--foreground);
@@ -35,7 +33,7 @@ body {
    draws each state (`.ui-state.middle`). */
 #state {
   z-index: 3;
-  grid-area: 2 / 1 / 3 / -1;
+  grid-area: 2 / 1;
   box-sizing: border-box;
   background: var(--background);
 }
@@ -70,7 +68,7 @@ body {
 /* An app's page that didn't open: its problem fills the app's place, over its frame. */
 #page-problem {
   z-index: 1;
-  grid-area: 2 / 2;
+  grid-area: 2 / 1;
   box-sizing: border-box;
   background: var(--background);
 }
@@ -81,7 +79,7 @@ body {
    and covers none of it, as a mail or chat app's does. A moment's gap says nothing: it comes in only once it has
    lasted a few seconds, behind what the device keeps for itself at the top, which it reaches into. */
 #banner {
-  grid-area: 1 / 1 / 2 / -1;
+  grid-area: 1 / 1;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -112,7 +110,7 @@ body {
    covers little and moves nothing. */
 #passing {
   z-index: 2;
-  grid-area: 2 / 2;
+  grid-area: 2 / 1;
   justify-self: center;
   align-self: end;
   display: grid;
@@ -136,12 +134,89 @@ body {
 }
 /* The frames lie one over another, under what the window shows of itself. */
 iframe {
-  grid-area: 2 / 2;
+  grid-area: 2 / 1;
   box-sizing: border-box;
   width: 100%;
   height: 100%;
   border: 0;
   background: var(--background);
+}
+/* A window whose title bar is over the page, as a Mac's with no title band is (client.js's `titleBar`): what's drawn
+   runs to its top, under the window's own controls, and keeps the title bar's height clear there, as it does what a
+   phone keeps for itself. */
+:root[data-title-bar] {
+  --safe-top: max(env(safe-area-inset-top), var(--title-bar-height));
+}
+#title-bar {
+  position: fixed;
+  z-index: 5;
+  inset: 0 0 auto;
+  height: var(--safe-top);
+}
+/* What's just after the window's own controls, level with them, in an app's own window. */
+#title-bar-nav {
+  position: absolute;
+  top: 50%;
+  left: var(--title-bar-start);
+  display: flex;
+  align-items: center;
+  translate: 0 -50%;
+}
+/* Its breadcrumb, as shadcn's: Home, light, with The One App's ring, highlighted under the pointer; a muted /; then the
+   app, its icon and its name, in semibold, which isn't pressed. In a computer's own size. */
+#title-bar-nav ol {
+  display: flex;
+  align-items: center;
+  gap: 0.25rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+  font-size: var(--text-sm);
+  line-height: 1;
+  white-space: nowrap;
+}
+#title-bar-nav li {
+  display: flex;
+  align-items: center;
+}
+#home-screen,
+#title-bar-app {
+  display: flex;
+  align-items: center;
+  gap: 0.375rem;
+  height: 22px;
+  padding: 0 0.375rem;
+}
+#home-screen {
+  border: 0;
+  border-radius: var(--radius-md);
+  background: none;
+  color: var(--muted-foreground);
+  font: inherit;
+  font-weight: var(--body-weight);
+  cursor: default;
+}
+@media (hover: hover) and (pointer: fine) {
+  #home-screen:hover {
+    background: var(--accent);
+    color: var(--accent-foreground);
+  }
+}
+#title-bar-nav .separator {
+  color: var(--muted-foreground);
+  opacity: 0.6;
+}
+#title-bar-app {
+  color: var(--foreground);
+  font-weight: 600;
+}
+#title-bar-nav img {
+  width: 16px;
+  height: 16px;
+  object-fit: contain;
+}
+#title-bar-app img {
+  border-radius: 22.5%;
 }
 /* What the device keeps for itself, measured (client.js's `insets`). */
 #safe-area {
@@ -218,107 +293,7 @@ iframe[data-move] {
   display: none;
 }
 
-/* The rail (client.js's `rail`). Where the window is wide, Home, then the apps used lately, the one in front outlined.
-   Each is its icon, Home a house on a plain tile; under a pointer as small as a computer's own controls, under a
-   finger a fingertip. */
-:root {
-  --rail: 3rem;
-  --rail-icon: 2rem;
-}
-@media (pointer: coarse) {
-  :root {
-    --rail: 3.5rem;
-    --rail-icon: 2.75rem;
-  }
-}
-#rail-list {
-  display: grid;
-  gap: 0.25rem;
-  margin: 0;
-  padding: 0;
-  list-style: none;
-}
-/* Home stands apart from the apps, as Teams' and Discord's does. */
-#rail-list > li:first-child {
-  padding-bottom: 0.25rem;
-  border-bottom: 1px solid var(--border);
-}
-.rail-item {
-  display: grid;
-  justify-items: center;
-  width: 100%;
-  padding: 0.25rem 0;
-  border: 0;
-  border-radius: var(--radius-lg);
-  background: none;
-  color: var(--foreground);
-  font: inherit;
-  cursor: pointer;
-}
-.rail-item .tile {
-  display: grid;
-  place-items: center;
-  width: var(--rail-icon);
-  height: var(--rail-icon);
-  border-radius: 22.5%;
-  overflow: hidden;
-  background: var(--secondary);
-  color: var(--secondary-foreground);
-}
-.rail-item img {
-  width: 100%;
-  height: 100%;
-}
-.rail-item .home {
-  width: 55%;
-  height: 55%;
-}
-.rail-item[aria-current] .tile {
-  outline: 2px solid var(--foreground);
-  outline-offset: 2px;
-}
-
-/* A thin sidebar on the window's left, always, beside the Home Screen or the app in front. */
-#rail {
-  display: none;
-}
-@media (min-width: 56rem) and (orientation: landscape) {
-  body[data-rail] {
-    --rail-width: calc(var(--rail) + var(--safe-left));
-  }
-  /* Only where the window has one: an app's own window on a computer has none. */
-  body[data-rail] #rail {
-    z-index: 2;
-    grid-area: 2 / 1;
-    display: block;
-    box-sizing: border-box;
-    padding: calc(0.5rem + var(--safe-top)) 0.25rem calc(0.5rem + var(--safe-bottom)) calc(0.25rem + var(--safe-left));
-    overflow-y: auto;
-    scrollbar-width: none;
-    border-right: 1px solid var(--sidebar-border);
-    background: var(--sidebar);
-    color: var(--sidebar-foreground);
-  }
-  #line {
-    display: none;
-  }
-}
-/* Its tooltip, beside it, as shadcn's. */
-#rail-tip {
-  position: fixed;
-  z-index: 4;
-  margin: 0;
-  padding: 0.375rem 0.625rem;
-  border-radius: var(--radius-md);
-  background: var(--primary);
-  color: var(--primary-foreground);
-  font-size: var(--text-sm);
-  line-height: 1.2;
-  white-space: nowrap;
-  pointer-events: none;
-}
-
-/* Elsewhere, over an app, a home line in the middle of the window's right edge: iOS's home indicator on its side, 4 by
+/* The rail (client.js's `rail`): over an app, a home line in the middle of the window's right edge: iOS's home indicator on its side, 4 by
    64 points, black over white and white over black, as iOS's is: white, less what's under it. A finger takes it from a fingertip's width in from the edge, and Android's most it lets
    an app keep from its back gesture, 200 dp, is far taller. */
 #line {

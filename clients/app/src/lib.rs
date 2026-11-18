@@ -377,6 +377,12 @@ async fn start(app: AppHandle) -> Result<Value, ()> {
     told["testflight"] = json!(testflight());
     // A computer opens each app in a window of its own (`hosts`).
     told["windows"] = json!(cfg!(desktop));
+    // A Mac's windows have no title band (`TitleBarStyle::Overlay`): the page keeps a title bar's height clear at its
+    // top, under the traffic lights, and an app's own window has Home just after them.
+    #[cfg(target_os = "macos")]
+    {
+        told["titleBar"] = json!({"height": 28, "start": 78});
+    }
     if let Some(theme) = *app.state::<Chosen>().0.lock().expect("nothing panics holding it") {
         told["theme"] = json!(theme);
     }
@@ -1141,7 +1147,9 @@ pub fn run() {
             #[cfg(desktop)]
             hosts::open_window,
             #[cfg(desktop)]
-            hosts::front
+            hosts::front,
+            #[cfg(target_os = "macos")]
+            hosts::title_bar_double_click
         ])
         .build(context())
         .expect("the app starts")
@@ -1179,6 +1187,10 @@ fn window(app: &AppHandle) -> Result<tauri::WebviewWindow, Box<dyn std::error::E
     let window = WebviewWindowBuilder::new(app, "main", WebviewUrl::External(page)).on_navigation(move |to| stays(&goes, to));
     #[cfg(any(target_os = "macos", target_os = "linux"))]
     let window = window.initialization_script_for_all_frames(INITIALIZATION_SCRIPT);
+    // A Mac's window has no title band, as a Mac's own apps have none, and keeps its traffic lights, over the page's
+    // top, which keeps clear of them (`titleBar`). Its title stays, for the Window menu, Mission Control and Cmd-Tab.
+    #[cfg(target_os = "macos")]
+    let window = window.title_bar_style(tauri::TitleBarStyle::Overlay).hidden_title(true);
     #[cfg(desktop)]
     let window = window.title(app.package_info().name.clone()).inner_size(1024.0, 720.0).center().build()?;
     #[cfg(desktop)]

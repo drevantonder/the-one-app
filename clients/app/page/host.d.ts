@@ -139,8 +139,8 @@ export type Moved =
 
 /** Each command the page invokes: what it's given, and what it answers. */
 export interface Commands {
-  /** Where the device is with its network as the window opens, whether its network answers, whether a phone hears taps on notifications, whether each app opens in a window of its own (a computer's), which app this window is if it's an app's own, and the Colour Mode chosen on the device, if one has been. */
-  start(): Told & { connection: Connection; taps?: boolean; open?: string | null; windows?: boolean; window?: { entrypoint: string; subject?: string; name?: string | null } | null; theme?: "light" | "dark" | null }
+  /** Where the device is with its network as the window opens, whether its network answers, whether a phone hears taps on notifications, whether each app opens in a window of its own (a computer's), which app this window is if it's an app's own, where the window's title bar is over the page, which keeps it clear (a Mac's, with no title band: its height, and where Home goes after the window's own controls, in CSS pixels), and the Colour Mode chosen on the device, if one has been. */
+  start(): Told & { connection: Connection; taps?: boolean; open?: string | null; windows?: boolean; window?: { entrypoint: string; subject?: string; name?: string | null } | null; titleBar?: { height: number; start: number }; theme?: "light" | "dark" | null }
   /** The files a server lists for `subject`, and the apps whose open apps are out of date. */
   apps(args: { subject: string | undefined }): { resources: Resource[]; outdated: string[] }
   request(args: { view: string; method: string; params: Record<string, unknown> }): unknown
@@ -173,6 +173,10 @@ export interface Commands {
   open_window(args: { entrypoint: string; subject: string | undefined; link: string }): void
   /** Brings the Home Screen's window forward. */
   front(): void
+  /** Moves the window with the pointer, held down where it has no title bar of its own to hold. */
+  "plugin:window|start_dragging"(): void
+  /** Does what a double-click on a Mac's title bar does, as the Mac is set: zoom, minimize or nothing. */
+  title_bar_double_click(): void
   tapped(args: { tapped: unknown }): void
   "plugin:notifications|set_click_listener_active"(args: { active: boolean }): void
   "plugin:haptics|impact_feedback"(args: { style: string }): void
