@@ -6,8 +6,10 @@
 //! everything it names at the commits it names: that's how a network is made again from its repo. The network
 //! itself looks for newer commits once a day, and offers them as updates (`one apps check`, `one apps update`).
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, HashSet};
+use std::future::Future;
 use std::path::{Path, PathBuf};
+use std::pin::Pin;
 use std::process::{Command, ExitCode};
 use std::time::Duration;
 use std::{env, fs};
@@ -186,19 +188,57 @@ fn write_lock(file: &Path, locked: &BTreeMap<String, Locked>) -> Result<()> {
     Ok(fs::write(file, text + "\n")?)
 }
 
-/// Calls a tool for `of` (a user, a group or the network), as `ONE_SUBJECT` would have it, and gives its text.
-async fn call(client: &Client, of: Option<&str>, tool: &str, arguments: Value) -> Result<String> {
+/// Calls a tool for `of` (a user, a group or the network), as `ONE_SUBJECT` would have it, and gives its MCP result.
+async fn call_raw(client: &Client, of: Option<&str>, tool: &str, arguments: Value) -> Result<Value> {
     let mut params = json!({"name": tool, "arguments": arguments});
     if let Some(of) = of {
         params["_meta"]["subject"] = json!(of);
     }
-    let result = client.request("tools/call", params).await?;
-    let text: Vec<&str> =
-        result["content"].as_array().into_iter().flatten().filter_map(|part| part["text"].as_str()).collect();
+    client.request("tools/call", params).await
+}
+
+fn result_text(result: &Value) -> String {
+    result["content"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|part| part["text"].as_str())
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+/// Calls a tool for `of` (a user, a group or the network), as `ONE_SUBJECT` would have it, and gives its text.
+async fn call(client: &Client, of: Option<&str>, tool: &str, arguments: Value) -> Result<String> {
+    let result = call_raw(client, of, tool, arguments).await?;
+    let text = result_text(&result);
     if result["isError"] == true {
-        bail!("{}", text.join("\n"));
+        bail!("{text}");
     }
-    Ok(text.join("\n"))
+    Ok(text)
+}
+
+/// A requirement the server said an app lacks when `deploy` refused it.
+struct Missing {
+    name: String,
+    why: String,
+    app: Option<String>,
+    deleted: bool,
+}
+
+fn missing(result: &Value) -> Vec<Missing> {
+    result["structuredContent"]["missing"]
+        .as_array()
+        .into_iter()
+        .flatten()
+        .filter_map(|item| {
+            Some(Missing {
+                name: item["name"].as_str()?.to_owned(),
+                why: item["why"].as_str().unwrap_or_default().to_owned(),
+                app: item["app"].as_str().map(str::to_owned),
+                deleted: item["deleted"].as_bool().unwrap_or(false),
+            })
+        })
+        .collect()
 }
 
 /// What's installed for `of` and the network, as the tool `apps` lists it, and who `of` is.
@@ -303,12 +343,9 @@ async fn built(client: &Client, of: &str, name: &str, app: &Path) -> Result<()> 
     Ok(())
 }
 
-/// Deploys the app `name` from a repo's copy, checked out at `commit`, as `of`'s own, and gives it as locked.
-/// `trusted` says whether it's trusted, or untrusted and runs in a sandbox; left out, it's as the version before was,
-/// or for a new one as where it came from says. With `new` it's made where one by that name is installed for someone
-/// else `of` is in, as `deploy`'s `new` says.
+/// Checks `name` can be deployed from `folder` for `of`, reads its files, and builds the `deploy` tool's arguments.
 #[expect(clippy::too_many_arguments, reason = "each says something of the one deploy")]
-async fn deploy(
+async fn prepare_deploy(
     client: &Client,
     of: &str,
     name: &str,
@@ -317,7 +354,7 @@ async fn deploy(
     commit: &str,
     trusted: Option<bool>,
     new: bool,
-) -> Result<Locked> {
+) -> Result<Value> {
     let app = folder.join("apps").join(name);
     // Deployed over someone else's app, it would be changed for everyone who has it, not copied.
     let (_, apps) = installed(client, Some(of)).await?;
@@ -347,7 +384,19 @@ async fn deploy(
     if new {
         deployed["new"] = json!(true);
     }
-    let mut deployed: Value = serde_json::from_str(&call(client, Some(of), "deploy", deployed).await?)?;
+    Ok(deployed)
+}
+
+/// Prints a successful `deploy`'s answer, reports it to the directory, and gives it as locked.
+async fn finish_deploy(
+    client: &Client,
+    of: &str,
+    name: &str,
+    from: &Source,
+    commit: &str,
+    answer: &str,
+) -> Result<Locked> {
+    let mut deployed: Value = serde_json::from_str(answer)?;
     // What a person reads of it goes to the directory, not the terminal: its icons are long.
     let listing = deployed.as_object_mut().and_then(|it| it.remove("listing")).unwrap_or_default();
     println!("{deployed}");
@@ -368,6 +417,177 @@ async fn deploy(
         of: of.to_owned(),
         requires,
     })
+}
+
+/// Deploys the app `name` from a repo's copy, checked out at `commit`, as `of`'s own, and gives it as locked.
+/// `trusted` says whether it's trusted, or untrusted and runs in a sandbox; left out, it's as the version before was,
+/// or for a new one as where it came from says. With `new` it's made where one by that name is installed for someone
+/// else `of` is in, as `deploy`'s `new` says.
+#[expect(clippy::too_many_arguments, reason = "each says something of the one deploy")]
+async fn deploy(
+    client: &Client,
+    of: &str,
+    name: &str,
+    folder: &Path,
+    from: &Source,
+    commit: &str,
+    trusted: Option<bool>,
+    new: bool,
+) -> Result<Locked> {
+    let payload = prepare_deploy(client, of, name, folder, from, commit, trusted, new).await?;
+    let answer = call(client, Some(of), "deploy", payload).await?;
+    finish_deploy(client, of, name, from, commit, &answer).await
+}
+
+/// Installs apps from a checked-out repo, resolving each app's missing `requires` transitively from the server's
+/// refusal and installing them first (from the repo where it has them, or from what's already deployed in the network).
+struct Installer<'a> {
+    client: &'a Client,
+    of: &'a str,
+    folder: &'a Path,
+    source: &'a Source,
+    commit: &'a str,
+    trusted: Option<bool>,
+    lock: Option<&'a Path>,
+    locked: &'a mut BTreeMap<String, Locked>,
+    visiting: Vec<String>,
+    done: HashSet<String>,
+}
+
+impl<'a> Installer<'a> {
+    fn in_repo(&self, name: &str) -> bool {
+        !name.is_empty()
+            && !name.contains(['/', '\\'])
+            && name != "."
+            && name != ".."
+            && self.folder.join("apps").join(name).join("SKILL.md").exists()
+    }
+
+    fn install_app<'b>(&'b mut self, name: &'b str, new: bool) -> Pin<Box<dyn Future<Output = Result<()>> + 'b>> {
+        Box::pin(async move {
+            if self.done.contains(name) {
+                return Ok(());
+            }
+            self.visiting.push(name.to_owned());
+            let outcome = self.deploy_with_requires(name, new).await;
+            self.visiting.pop();
+            outcome
+        })
+    }
+
+    async fn deploy_with_requires(&mut self, name: &str, new: bool) -> Result<()> {
+        let payload =
+            prepare_deploy(self.client, self.of, name, self.folder, self.source, self.commit, self.trusted, new)
+                .await?;
+        loop {
+            let result = call_raw(self.client, Some(self.of), "deploy", payload.clone()).await?;
+            let text = result_text(&result);
+            if result["isError"] != true {
+                let it = finish_deploy(self.client, self.of, name, self.source, self.commit, &text).await?;
+                if let Some(file) = self.lock {
+                    self.locked.insert(name.to_owned(), it);
+                    write_lock(file, self.locked)?;
+                }
+                self.done.insert(name.to_owned());
+                return Ok(());
+            }
+            let lacking = missing(&result);
+            if lacking.is_empty() {
+                bail!("{text}");
+            }
+            self.check_missing(name, &lacking, &text)?;
+            let mut installed_from_network = false;
+            for req in lacking {
+                if self.done.contains(&req.name) {
+                    continue;
+                }
+                if installed_from_network {
+                    let (_, apps) = installed(self.client, Some(self.of)).await?;
+                    if apps.iter().any(|it| it["name"] == req.name && it["state"] == "installed") {
+                        self.done.insert(req.name);
+                        continue;
+                    }
+                }
+                let why = if req.why.is_empty() { String::new() } else { format!(" ({})", req.why) };
+                if self.in_repo(&req.name) {
+                    println!(
+                        "{name} requires {}{why}, which isn't installed for {} or the network, so it's installed from \
+                         {} too.",
+                        req.name, self.of, self.source.spec
+                    );
+                    self.install_app(&req.name, false).await?;
+                } else if let Some(artifact) = req.app {
+                    println!(
+                        "{name} requires {}{why}, which isn't installed for {} or the network, so {artifact} is \
+                         installed for {} too.",
+                        req.name, self.of, self.of
+                    );
+                    let answer: Value = serde_json::from_str(
+                        &call(self.client, Some(self.of), "install", json!({"app": artifact, "name": req.name}))
+                            .await?,
+                    )?;
+                    if let Some(also) = answer["also"].as_array() {
+                        for line in also.iter().filter_map(Value::as_str) {
+                            println!("{line}");
+                        }
+                    }
+                    self.done.insert(req.name);
+                    installed_from_network = true;
+                }
+            }
+        }
+    }
+
+    fn check_missing(&self, name: &str, lacking: &[Missing], fallback: &str) -> Result<()> {
+        for req in lacking {
+            if let Some(at) = self.visiting.iter().position(|it| it == &req.name) {
+                if self.visiting.len() - at == 1 {
+                    bail!("{name} requires itself, so it can't be installed");
+                }
+                let mut cycle: Vec<&str> = self.visiting[at..].iter().map(String::as_str).collect();
+                cycle.push(&req.name);
+                bail!("{} require each other, so none can be installed first", cycle.join(" -> "));
+            }
+        }
+        for req in lacking {
+            if req.deleted {
+                let why = if req.why.is_empty() { String::new() } else { format!(" ({})", req.why) };
+                bail!(
+                    "{name} requires {}{why}, which is in Recently Deleted for {}: restore it there (`one soft-delete \
+                     restore`) first.",
+                    req.name, self.of
+                );
+            }
+        }
+        let unfound: Vec<&Missing> =
+            lacking.iter().filter(|req| !self.in_repo(&req.name) && req.app.is_none()).collect();
+        if !unfound.is_empty() {
+            let describe = |req: &Missing| {
+                if req.why.is_empty() { req.name.clone() } else { format!("{} ({})", req.name, req.why) }
+            };
+            if let [one] = unfound.as_slice() {
+                bail!(
+                    "{name} requires {}, which isn't installed for {} or the network, isn't in {}, and isn't deployed \
+                     in this network.",
+                    describe(one),
+                    self.of,
+                    self.source.spec
+                );
+            }
+            let list = unfound.iter().map(|req| describe(req)).collect::<Vec<_>>().join(", ");
+            bail!(
+                "{name} requires {list}, which aren't installed for {} or the network, aren't in {}, and aren't \
+                 deployed in this network.",
+                self.of,
+                self.source.spec
+            );
+        }
+        // If we already installed one of these in this run and the server still says it's missing, stop instead of looping.
+        if lacking.iter().any(|req| self.done.contains(&req.name)) {
+            bail!("{fallback}");
+        }
+        Ok(())
+    }
 }
 
 /// Tells the directory of apps that an app was installed, with what a person reads of it there (`listing`, as
@@ -428,7 +648,8 @@ pub async fn install(client: &Client, args: &[String]) -> Result<ExitCode> {
         return Ok(ExitCode::SUCCESS);
     }
     let (of, _) = installed(client, None).await?;
-    // An app whose requirements aren't installed is refused by the server, which says which to install first.
+    // Each requested app must exist in the repo; missing requirements are resolved transitively from the server's
+    // refusal and installed first.
     let mut order: Vec<&String> = Vec::new();
     for name in &names {
         if !folder.join("apps").join(name).join("SKILL.md").exists() {
@@ -443,12 +664,20 @@ pub async fn install(client: &Client, args: &[String]) -> Result<ExitCode> {
         Some(file) => read_lock(file)?,
         None => BTreeMap::new(),
     };
+    let mut installer = Installer {
+        client,
+        of: &of,
+        folder: &folder,
+        source: &source,
+        commit: &commit,
+        trusted,
+        lock: lock.as_deref(),
+        locked: &mut locked,
+        visiting: Vec::new(),
+        done: HashSet::new(),
+    };
     for name in order {
-        let it = deploy(client, &of, name, &folder, &source, &commit, trusted, new).await?;
-        if let Some(file) = &lock {
-            locked.insert(name.clone(), it);
-            write_lock(file, &locked)?;
-        }
+        installer.install_app(name, new).await?;
     }
     match lock {
         Some(file) => println!("Recorded in {}.", file.display()),
