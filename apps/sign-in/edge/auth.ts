@@ -497,9 +497,19 @@ async function createAuth(origin: string) {
 export type Auth = Awaited<ReturnType<typeof createAuth>>;
 
 const auths = new Map<string, Promise<Auth>>();
-/** Better Auth for the network at `origin`, made once for as long as this Worker stays loaded. */
+/**
+ * Better Auth for the network at `origin`, made once for as long as this Worker stays loaded. The request that asks
+ * first is often gone before it's made, as a page's are when it's left, and a promise made in a request that has ended
+ * can never settle: every other request waiting on it, and each after, would fail. So it's made for as long as it
+ * takes, whether that request stays or not (`waitUntil`).
+ */
 export function at(origin: string): Promise<Auth> {
-  if (!auths.has(origin)) auths.set(origin, createAuth(origin).catch((error) => (auths.delete(origin), Promise.reject(error))));
+  if (!auths.has(origin)) {
+    const made = createAuth(origin).catch((error) => (auths.delete(origin), Promise.reject(error)));
+    // Whoever asked for it hears how it went; this only keeps the request it was made in until then.
+    waitUntil(made.then(() => {}, () => {}));
+    auths.set(origin, made);
+  }
   return auths.get(origin)!;
 }
 
