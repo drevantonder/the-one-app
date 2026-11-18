@@ -1,7 +1,7 @@
 // Computer Use: the screens your agents can use, and one of them as it is now, with who last used it and for what.
 import { createMemo, createSignal, Errored, For, Loading, refresh, Show } from "solid-js"
 import { render } from "@solidjs/web"
-import { Button, call, changed, Empty, List, LiveScreen, Problem, Row, Screen, Section, Skeleton, Split } from "ui"
+import { Button, call, changed, client, Empty, List, LiveScreen, Problem, Row, Screen, Section, Skeleton, Split } from "ui"
 
 /** A screen agents can use, as `computer-use_screens` answers it. */
 interface AgentScreen {
@@ -54,6 +54,34 @@ function Detail(props: { screen: AgentScreen }) {
   )
 }
 
+/// On a phone whose person hasn't turned Computer Use on, how they do, in Android's own Settings: The One App in
+/// Accessibility, after allowing restricted settings in its App Info on Android 13 and later, for an app that didn't
+/// come from a store. Nothing once it's on, or on a device that has none.
+function ThisPhone() {
+  const phone = createMemo(() => client().then(({ computerUse }) => computerUse))
+  // Its person comes back from Settings to here.
+  const back = () => document.visibilityState === "visible" && refresh(phone)
+  document.addEventListener("visibilitychange", back)
+  return (
+    <Loading>
+      <Show when={phone() && !phone()!.on}>
+        <Problem
+          warn
+          heading="Your AI can't use this phone yet"
+          text="Turn on The One App in Accessibility settings."
+          action={<Button onClick={() => client({ settings: "accessibility" })}>Open Settings</Button>}
+        />
+        <List>
+          <Row
+            text="Restricted setting? Allow it under ⋮ in App Info."
+            action={<Button variant="ghost" onClick={() => client({ settings: "app" })}>App Info</Button>}
+          />
+        </List>
+      </Show>
+    </Loading>
+  )
+}
+
 function App() {
   const screens = createMemo(() => call("computer-use_screens").then((text): AgentScreen[] => JSON.parse(text).screens))
   changed(() => refresh(screens))
@@ -63,6 +91,7 @@ function App() {
       <Loading fallback={<Skeleton rows={3} />}>
         <Split open={!!opened()} onClose={() => setOpen()} detail={<Show when={opened()} fallback={<Show when={screens().length}><Empty>Pick a screen to watch it.</Empty></Show>}><Detail screen={opened()!} /></Show>}>
           <Screen heading="Computer Use">
+            <ThisPhone />
             <Show when={screens().length} fallback={<Empty>No screens. Your agents' desktops show here once they make one.</Empty>}>
               <List>
                 <For each={screens()} keyed={address}>

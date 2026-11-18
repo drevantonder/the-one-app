@@ -2,7 +2,8 @@ defmodule ComputerUse do
   @moduledoc """
   Computer Use: an agent looks at a screen and acts on it, and its person watches.
 
-  Its own screens are computers' own (`ComputerUse.Desktop`, its service on a Mac or a Linux desktop). Other apps bring theirs: it offers the hook `screens`, which an app with screens hooks into
+  Its own screens are computers' own (`ComputerUse.Desktop`, its service on a Mac, Linux or Windows desktop), and
+  Android phones' own, which their app answers for (`ComputerUse.Phone`). Other apps bring theirs: it offers the hook `screens`, which an app with screens hooks into
   (`computer-use.screens`): a hook that collects, answered with the app's list of the screens the caller may
   use, so lists from many apps sit side by side, and one app that can't answer takes away only its own. Each screen there says
   which of that app's tools acts on it and with what inputs; acting is a call of that tool, as the same caller,
@@ -12,7 +13,7 @@ defmodule ComputerUse do
   """
   @behaviour OneCore.App
   alias OneCore.{Artifact, Call}
-  alias ComputerUse.Desktop
+  alias ComputerUse.{Desktop, Phone}
 
   @actions ~w(screenshot click double_click move drag scroll type key)
   # How often what a screen was last used for is written again while it's the same: the app says "2 min ago".
@@ -49,7 +50,7 @@ defmodule ComputerUse do
   def icon, do: "client/icon.svg"
 
   @impl true
-  def requires, do: %{"core" => ">= 0.22.18"}
+  def requires, do: %{"core" => ">= 0.23.8"}
 
   @impl true
   def offers do
@@ -217,6 +218,7 @@ defmodule ComputerUse do
   def call("stream", inputs, call) do
     s = screen(call, inputs["screen"])
     if s["desktop"], do: Desktop.use(call, s["desktop"], "stream", inputs)
+    if s["phone"], do: Phone.use(call, s["phone"], "stream", inputs)
     Call.tool(call, s["app"], s["tool"], inputs |> Map.delete("screen") |> Map.merge(s["inputs"]) |> Map.put("action", "stream"))
   end
 
@@ -225,19 +227,21 @@ defmodule ComputerUse do
     if action != "screenshot" or inputs["doing"], do: note(call, s, inputs["doing"])
     inputs = Map.drop(inputs, ~w(screen doing))
 
-    if s["desktop"],
-      do: Desktop.use(call, s["desktop"], action, inputs),
-      else: Call.tool(call, s["app"], s["tool"], inputs |> Map.merge(s["inputs"]) |> Map.put("action", action))
+    cond do
+      s["desktop"] -> Desktop.use(call, s["desktop"], action, inputs)
+      s["phone"] -> Phone.use(call, s["phone"], action, inputs)
+      true -> Call.tool(call, s["app"], s["tool"], inputs |> Map.merge(s["inputs"]) |> Map.put("action", action))
+    end
   end
 
-  # Every screen the caller may use, each with the app it's from, its own Macs' first, and why each app that
-  # couldn't say its own couldn't.
+  # Every screen the caller may use, each with the app it's from, its own computers' and phones' first, and why each
+  # app that couldn't say its own couldn't.
   defp screens(call) do
     {:ok, lists, failed} = Call.run_hook(call, "screens", %{})
     theirs = for {app, list} <- lists, s <- List.wrap(list), do: Map.put(s, "app", app)
 
     try do
-      {Enum.map(Desktop.screens(call), &Map.put(&1, "app", "computer-use")) ++ theirs, failed}
+      {Enum.map(Desktop.screens(call) ++ Phone.screens(call), &Map.put(&1, "app", "computer-use")) ++ theirs, failed}
     rescue
       problem -> {theirs, Map.put(failed, "computer-use", Exception.message(problem))}
     end

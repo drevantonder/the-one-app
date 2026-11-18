@@ -1,6 +1,6 @@
 ---
 name: computer-use
-description: Read before looking at or acting on a screen (a desktop, an app, a person's own Mac, Linux or Windows desktop, anything that isn't only a web page), by screenshot, click, type, scroll and keys, or when a Mac's screen says macOS doesn't allow Screen Recording or Accessibility.
+description: Read before looking at or acting on a screen (a desktop, an app, a person's own Mac, Linux or Windows desktop or Android phone, anything that isn't only a web page), by screenshot, click, type, scroll and keys, or when a Mac's or a phone's screen says Accessibility isn't on.
 metadata:
   title: "Computer Use"
   subtitle: "Your AI uses a screen"
@@ -12,7 +12,7 @@ Computer Use is how you see a screen and act on it like a person: take a screens
 press keys at what you see. Its person watches in the Computer Use app.
 
 - `screens` lists the screens you can use: each one's name, what it is, its size, and what it was last used for.
-  A person's own computer is one (below), and other apps bring more: a container made from the image `desktop` is one
+  A person's own computer is one (below), so is their Android phone (below), and other apps bring more: a container made from the image `desktop` is one
   (Containers' `create`). If you have none, make one first. Two of the same name, from two apps, are named `app/name`. An app that
   couldn't list its screens (its machine is asleep, say) is in `failed`, with why, and the rest are still listed.
 - `screenshot` shows the screen. x and y in every other tool are pixels of that picture, from its top left.
@@ -62,6 +62,26 @@ them on the Mac and the action says what's missing. They allow it in System Sett
 System Audio Recording, and → Accessibility, by turning on Computer Use for The One App in each. macOS keeps that
 through the app's updates and Cua Driver's, and asks again now and then for Screen Recording, as it does of every
 app that records the screen.
+
+## A person's own phone
+
+Each Android phone whose The One App is running is a screen, called what the phone is called: its whole screen, as
+its person sees it. A phone runs no server, so its app does each action, through Android's accessibility service,
+which only its person turns on: Settings → Accessibility → The One App. Until they have, `screens` says so in the
+phone's description, and an action fails saying so while the phone tells its person how to turn it on. On Android 13
+and later, an app that didn't come from a store is a restricted setting there: its person allows it first, under ⋮ in
+The One App's App Info. Computer Use on a phone needs Android 11 or later.
+
+- A tap is `click`, a long press is `click` with `button` `right`, and `double_click` is a double tap. A phone has no
+  pointer: `move` refuses.
+- `drag` is a finger down at its first point, through the rest, and up at the last: a swipe. `scroll` swipes the other
+  way from where it scrolls, and stops where it ends.
+- `type` puts text into the field that has the focus, where its selection is: tap the field first. It refuses a
+  password field: ask the person to type it.
+- `key` has only what Android gives: `Back` (or `Escape`), `Home`, `Recents`, `Notifications`, and `Return` in the
+  field that has the focus. Anything else refuses.
+- The phone answers only while The One App runs on it, in front or not: one whose app isn't running isn't listed.
+  Only the phone's person and the network's owner use it, and you act as them, with their apps and accounts.
 
 ## Other apps' screens
 
