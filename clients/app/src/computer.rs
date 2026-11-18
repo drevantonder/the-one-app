@@ -24,13 +24,13 @@ use wry::{RequestAsyncResponder, WebView, WebViewBuilder, WebViewId};
 use crate::discard::Discarding;
 use crate::{hosts, notifications};
 
-/// The launcher's width and tallest height, in points, as Raycast's panel is: its search bar, two of a phone's pages
-/// side by side with their six rows, drawn smaller (`measure` in the Home Screen's home.tsx), and its footer bar. It's
-/// as tall as what it shows, which its page says (`resize`).
-const SIZE: LogicalSize<f64> = LogicalSize::new(700.0, 610.0);
-/// How round the launcher's corners are, in points, as Raycast's are.
+/// The launcher's width and tallest height, in points: Raycast's panel's width, its search bar, two of a phone's pages
+/// side by side with their six rows, near a phone's size (`measure` in the Home Screen's layout.ts), and the room its
+/// footer's pills float in. It's as tall as what it shows, which its page says (`resize`).
+const SIZE: LogicalSize<f64> = LogicalSize::new(750.0, 730.0);
+/// How round the launcher's corners are, in points, as Raycast's are, and the edge its page draws inside them.
 #[cfg(target_os = "macos")]
-const CORNER: f64 = 16.0;
+const CORNER: f64 = 18.0;
 
 /// What the program is told to do on its main thread, where its window and web view are.
 pub(crate) enum Told {
