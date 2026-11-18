@@ -252,6 +252,8 @@ export interface Client {
   theme: "light" | "dark" | null
   /** Whether `pinShortcut` puts an app on the device's own home screen: on Android's app. */
   pinsShortcuts?: boolean
+  /** Whether the page is a computer's launcher, the panel its Home Screen is shown in, which goes once an app opens. */
+  launcher?: boolean
 }
 
 /** What `client(change)` changes. */

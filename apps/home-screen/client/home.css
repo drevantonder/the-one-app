@@ -227,11 +227,13 @@ body {
   max-width: none;
   margin: calc(var(--safe-top, 0px) + (var(--top-row) - var(--bar)) / 2) auto calc((var(--top-row) - var(--bar)) / 2 - var(--gap, 1.25rem) + 0.5rem);
 }
+.ui-search.launcher-search > .ui-box,
 .page .ui-search > .ui-box {
   height: var(--bar);
   font-size: var(--text-sm);
 }
 /* Its magnifier is over the glass. */
+.launcher-search > .ui-icon,
 .page .ui-search > .ui-icon {
   z-index: 1;
 }
@@ -295,13 +297,13 @@ body {
   rotate: -90deg;
 }
 /* Searched, the apps that match, as a Home page has them. */
-.library .found {
+.found {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(4.75rem, 1fr));
   gap: 1rem 0.75rem;
   --icon: 3.75rem;
 }
-.library .found .app {
+.found .app {
   display: grid;
   justify-items: center;
   gap: 0.375rem;
@@ -313,12 +315,12 @@ body {
   font: inherit;
   cursor: pointer;
 }
-.library .found .app img {
+.found .app img {
   width: var(--icon);
   height: var(--icon);
   border-radius: 22.5%;
 }
-.library .found .app span {
+.found .app span {
   max-width: 100%;
   overflow: hidden;
   font-size: 0.75rem;
@@ -464,6 +466,7 @@ body {
    through it, with a rim of light. */
 .pill,
 .top .edit-bar > .ui-button,
+.launcher-search > .ui-box,
 .page .ui-search > .ui-box {
   border: 0;
   border-radius: 999px;
@@ -491,6 +494,38 @@ body {
 }
 .top-row > * {
   pointer-events: auto;
+}
+/* A computer's launcher shows the glass of the panel it's in under its pages, and has its search in Home's top row too, before the owner pill, which goes while something is
+   typed; what it finds is over Home's pages in place of them, and the dots pill goes with them. The chosen app is
+   ringed, as a focused one is. */
+html.launcher,
+html.launcher body {
+  background: transparent;
+}
+.launcher .top-row {
+  gap: 0.5rem;
+}
+/* Its pages are drawn smaller than a phone's, and the row over them isn't, so they start clear of it. */
+.home.launcher.wide .screen > .page {
+  padding-top: calc((var(--top-row) + 0.75rem) / var(--pages-scale));
+}
+.top-row .launcher-search {
+  width: min(22rem, 100% - 12rem);
+  max-width: none;
+}
+.home.searching :is(.owners, .dots-pill) {
+  visibility: hidden;
+}
+.results {
+  position: absolute;
+  inset: calc(var(--safe-top, 0px) + var(--top-row)) 0 0;
+  padding: 0.5rem calc(var(--pages-side) + 1rem) 2rem;
+  overflow-y: auto;
+  scrollbar-width: none;
+}
+.found .app[aria-selected="true"] img {
+  outline: 2px solid var(--ring);
+  outline-offset: 3px;
 }
 /* The owner pill: the owner's name and a caret, "You ⌄". A long name is cut short. */
 .owner-pill {

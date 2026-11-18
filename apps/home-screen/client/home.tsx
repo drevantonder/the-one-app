@@ -15,7 +15,7 @@
 import { createEffect, createMemo, createSignal, Errored, flush, For, Loading, onSettled, refresh, Show, untrack } from "solid-js"
 import { render, type JSX } from "@solidjs/web"
 import { createActor } from "xstate"
-import { Button, call, changed, client, confirm, covers, Empty, haptic, Icon, List, Menu, open, pace, pinShortcut, Problem, Row, Search, Sheet, Spinner, toast, Widget } from "ui"
+import { Button, call, changed, client, confirm, covers, Empty, haptic, Icon, leave, List, Menu, open, pace, pinShortcut, Problem, Row, Search, Sheet, Spinner, toast, Widget } from "ui"
 import "./home.css"
 import { give, glide, jump, settle, speed, spring, type Spring, stop } from "./pager.ts"
 import { offset, reflow } from "./reflow.ts"
@@ -102,7 +102,22 @@ const editingOwner = (owner: number) => state().matches("editing") && editing()?
 /// an iPhone's does.
 /// Whether this device puts an app on its own home screen (`pinShortcut`): Android's app does.
 const [pins, setPins] = createSignal(false)
-client().then(({ pinsShortcuts }) => setPins(!!pinsShortcuts), () => {})
+/// Whether this Home Screen is a computer's launcher (`client().launcher`): a panel the system summons over whatever's
+/// in front, as Spotlight and Raycast are, which goes once an app opens from it. Its search is in Home's top row too,
+/// beside the owner pill, and has the keyboard as it opens: typing finds an app, the arrow keys choose one and Return
+/// opens it, and Escape empties the search, then puts the launcher away (`leave`).
+const [launcher, setLauncher] = createSignal(false)
+client().then(({ pinsShortcuts, launcher }) => (setPins(!!pinsShortcuts), setLauncher(!!launcher)), () => {})
+/// What's typed in the launcher's search on Home, and which of the apps it finds is chosen, which Return opens.
+const [query, setQuery] = createSignal("")
+const [chosen, setChosen] = createSignal(0)
+let searchField: HTMLInputElement | undefined
+/// The apps of an App Library whose names have `words` in them, A to Z: with a screen of their own, or `background`.
+const findIn = (library: Category[], words: string, background: boolean) =>
+  library
+    .flatMap((category) => category.entrypoints)
+    .filter((listed) => !listed.entrypoint === background && listed.name.toLowerCase().includes(words.trim().toLowerCase()))
+    .sort((a, b) => a.name.localeCompare(b.name))
 
 const launch = (entrypoint: Entrypoint, owner: Owner, behind?: boolean, from?: Element) =>
   open(entrypoint.entrypoint, { subject: entrypoint.subject === "user" ? undefined : (entrypoint.subject ?? owner.subject), behind, from: from && place(from) })
@@ -405,11 +420,7 @@ function Library(props: { owner: Owner; places: Record<string, HTMLElement> }) {
     const back = state().matches({ category: "closing" }) && state().context.category === key()
     if (state().matches("nothing") || back) home.send({ type: "open", category: key() })
   }
-  const found = (background: boolean) => {
-    const words = query().trim().toLowerCase()
-    const all = props.owner.library.flatMap((category) => category.entrypoints).filter((listed) => !listed.entrypoint === background)
-    return all.filter((listed) => listed.name.toLowerCase().includes(words)).sort((a, b) => a.name.localeCompare(b.name))
-  }
+  const found = (background: boolean) => findIn(props.owner.library, query(), background)
   const apps = () => sorted(props.owner.library, false)
   const background = () => sorted(props.owner.library, true)
   const open = () => (searching() ? !shut() : unfolded())
@@ -477,12 +488,16 @@ function Library(props: { owner: Owner; places: Record<string, HTMLElement> }) {
 }
 
 /// An app's icon in the App Library: a tap opens it, or for an app with no entrypoint, the App Store at its page, and a finger
-/// that holds it opens its menu; moving it carries it onto whichever owner's pages it's dropped on.
-function LibraryEntrypoint(props: { entrypoint: Listed; owner: Owner }) {
+/// that holds it opens its menu; moving it carries it onto whichever owner's pages it's dropped on. Among what the
+/// launcher's search found, it's an option the arrow keys choose (`selected`).
+function LibraryEntrypoint(props: { entrypoint: Listed; owner: Owner; id?: string; selected?: boolean }) {
   return (
     <button
       type="button"
       class="app"
+      id={props.id}
+      role={props.selected === undefined ? undefined : "option"}
+      aria-selected={props.selected === undefined ? undefined : props.selected ? "true" : "false"}
       ref={holds(() => ({ item: opens(props.entrypoint), listed: props.entrypoint, page: 0, index: -1, from: "library" }), () => true)}
       onPointerDown={() => state().matches("nothing") && opens(props.entrypoint) && launch(opens(props.entrypoint)!, props.owner, true)}
       onClick={(event) => (event.stopPropagation(), state().matches("nothing") && press(props.entrypoint, props.owner, false, event.currentTarget.querySelector("img") ?? undefined))}
@@ -1008,7 +1023,10 @@ function OwnerPill(props: { owners: Owner[] }) {
   let button!: HTMLButtonElement
   return (
     <div class="top-row">
-      <button type="button" class="owner-pill pill" ref={button} aria-label={props.owners[at()]?.name} aria-haspopup="menu" aria-expanded={state().matches("listing") ? "true" : "false"} aria-disabled={state().matches("editing") ? "true" : undefined} onClick={() => home.send({ type: state().matches("listing") ? "dismiss" : "list" })}>
+      <Show when={launcher()}>
+        <LauncherSearch owner={props.owners[0]} />
+      </Show>
+      <button type="button" class="owner-pill pill" hidden={!!query().trim()} ref={button} aria-label={props.owners[at()]?.name} aria-haspopup="menu" aria-expanded={state().matches("listing") ? "true" : "false"} aria-disabled={state().matches("editing") ? "true" : undefined} onClick={() => home.send({ type: state().matches("listing") ? "dismiss" : "list" })}>
         <span class="roll" aria-hidden="true" ref={rolling}>
           <span class="names">
             <For each={props.owners}>{(owner) => <span ref={(name) => sized.observe(name)}>{owner.name}</span>}</For>
@@ -1032,6 +1050,74 @@ function OwnerPill(props: { owners: Owner[] }) {
           </Menu.Content>
         </Menu.Positioner>
       </Menu.Root>
+    </div>
+  )
+}
+
+/// The launcher's search, in Home's top row before the owner pill. With the search empty, the arrow keys move between
+/// pages and owners as they do anywhere on Home, and Escape puts the launcher away; with something typed, they choose
+/// among the apps it found (`Found`), as many across as its rows have, Return opens the one chosen, and Escape empties
+/// it. It's a combobox whose options are what it found.
+function LauncherSearch(props: { owner: Owner }) {
+  const keys = (event: KeyboardEvent) => {
+    if (event.isComposing || event.altKey || event.metaKey || event.ctrlKey) return
+    const typed = !!query().trim()
+    if (!typed) {
+      const to = ({ ArrowRight: { screen: rtl() }, ArrowLeft: { screen: -rtl() }, ArrowDown: { owner: 1 }, ArrowUp: { owner: -1 } } as Record<string, { screen: 1 | -1 } | { owner: 1 | -1 }>)[event.key]
+      if (to && home.getSnapshot().matches("nothing")) {
+        event.preventDefault()
+        home.send({ type: "step", ...to })
+      }
+      // Escape with nothing typed is the launcher's: it's put away. With something typed the field empties itself.
+      if (event.key === "Escape") void leave()
+      return
+    }
+    const apps = [...document.querySelectorAll<HTMLElement>("#launcher-found .app")]
+    if (event.key === "Enter") {
+      event.preventDefault()
+      apps[chosen()]?.click()
+      return
+    }
+    const across = apps.filter((app) => app.offsetTop === apps[0]?.offsetTop).length || 1
+    const by = ({ ArrowRight: rtl(), ArrowLeft: -rtl(), ArrowDown: across, ArrowUp: -across } as Record<string, number>)[event.key]
+    if (!by) return
+    event.preventDefault()
+    const next = Math.max(0, Math.min(apps.length - 1, chosen() + by))
+    setChosen(next)
+    apps[next]?.scrollIntoView({ block: "nearest" })
+  }
+  const listed = () => findIn(props.owner.library, query(), false)
+  return (
+    <Search
+      class="launcher-search"
+      placeholder="Search"
+      aria-label="Search apps"
+      role="combobox"
+      aria-expanded={query().trim() ? "true" : "false"}
+      aria-controls="launcher-found"
+      aria-activedescendant={query().trim() && listed().length ? `found-${chosen()}` : undefined}
+      autocomplete="off"
+      spellcheck={false}
+      value={query()}
+      ref={(field: HTMLInputElement) => ((searchField = field), field.addEventListener("keydown", keys))}
+      onInput={(event) => (setQuery(event.currentTarget.value), setChosen(0))}
+    />
+  )
+}
+
+/// What the launcher's search found, over Home's pages in place of them: the apps whose names have what's typed in
+/// them, A to Z, as the App Library's search finds them, the chosen one ringed.
+function Found(props: { owner: Owner }) {
+  const listed = () => findIn(props.owner.library, query(), false)
+  return (
+    <div class="results scrolls">
+      <Show when={listed().length} fallback={<Empty>No apps match.</Empty>}>
+        <div class="found" id="launcher-found" role="listbox" aria-label="Apps">
+          <For each={listed()} keyed={(entrypoint) => entrypoint.entrypoint ?? entrypoint.app}>
+            {(entrypoint, at) => <LibraryEntrypoint entrypoint={entrypoint()} owner={props.owner} id={`found-${at()}`} selected={at() === chosen()} />}
+          </For>
+        </div>
+      </Show>
     </div>
   )
 }
@@ -1165,7 +1251,8 @@ function EditBar() {
 function measure(width: number, height: number) {
   const rem = parseFloat(getComputedStyle(document.documentElement).fontSize) || 16
   const wide = width >= 34 * rem
-  scale = wide ? Math.max(1, Math.min(2, height / 900)) : 1
+  // A launcher is a panel shorter than a phone, so its pages are drawn smaller, to fit their six rows and the dots.
+  scale = !wide ? 1 : untrack(launcher) ? Math.min(1, height / 760) : Math.max(1, Math.min(2, height / 900))
   const [side, gap] = [2 * rem * scale, 3 * rem * Math.min(scale, 1.6)]
   const fit = wide ? Math.max(1, Math.floor((width - 2 * side + gap) / (390 * scale + gap))) : 1
   return { wide, fit, scale, side, gap }
@@ -1181,6 +1268,34 @@ function HomeScreen(props: { owners: Owner[] }) {
   const owned = () => untrack(() => props.owners)
   // A phone's until the Home Screen has been measured, which it is before it's first drawn.
   const [room, setRoom] = createSignal({ wide: false, fit: 1, scale: 1, side: 0, gap: 0 })
+  // Laid out again once it's known to be a launcher, whose pages are drawn smaller, over the panel's glass.
+  let resize = () => {}
+  createEffect(
+    launcher,
+    (on) => {
+      document.documentElement.classList.toggle("launcher", on)
+      resize()
+      if (on && !document.hidden) requestAnimationFrame(() => searchField?.focus())
+    },
+    { defer: true },
+  )
+  // Put away, the launcher forgets what was typed, and comes back to Home, where its search is, which has the keyboard
+  // once it's summoned again.
+  onSettled(() => {
+    // Each time it's put away or comes back, as a web view may say it's hidden only once it's back (WebKitGTK).
+    const summoned = (event: Event) => {
+      if (!untrack(launcher)) return
+      if (event.type === "visibilitychange") {
+        setQuery("")
+        setChosen(0)
+        if (home.getSnapshot().matches("nothing") && home.getSnapshot().context.at.screen !== 0) home.send({ type: "go", screen: 0 })
+      }
+      if (!document.hidden && (event.type === "visibilitychange" || !document.activeElement || document.activeElement === document.body)) searchField?.focus()
+    }
+    document.addEventListener("visibilitychange", summoned)
+    addEventListener("focus", summoned)
+    return () => (document.removeEventListener("visibilitychange", summoned), removeEventListener("focus", summoned))
+  })
 
 
   /// Each owner's Home pages as they're drawn: the ones they keep shown, or while they're edited, as they're edited,
@@ -1639,6 +1754,7 @@ function HomeScreen(props: { owners: Owner[] }) {
     }
     const watched = new ResizeObserver(resized)
     watched.observe(root)
+    resize = resized
 
     // A trackpad or a wheel: one gesture is one screenful or one owner at most, however hard it's flicked, as macOS's
     // Launchpad and an iPad with a trackpad page. A browser says nothing of where a gesture starts or ends, nor tells
@@ -1737,7 +1853,7 @@ function HomeScreen(props: { owners: Owner[] }) {
   const held = () => (state().matches("holding") ? state().context.held : undefined)
   const owner = () => props.owners[state().context.at.owner]
   return (
-    <div class={["home", { wide: room().wide, editing: state().matches("editing"), carrying: state().matches({ editing: "dragging" }) }]} style={{ "--pages-scale": room().scale, "--pages-side": `${room().side}px`, "--pages-gap": `${room().gap}px`, "--pages": room().fit, "--pages-shown": screens()[state().context.at.owner]?.[state().context.at.screen]?.count ?? 1, "--hold": `${HOLD}ms` }} ref={root} onClick={(event) => Date.now() > quiet && state().matches({ editing: "still" }) && !(event.target as Element).closest(".cell, .top, .pill, .overview, .ui-dialog") && home.send({ type: "done" })}>
+    <div class={["home", { wide: room().wide, launcher: launcher(), searching: launcher() && !!query().trim(), editing: state().matches("editing"), carrying: state().matches({ editing: "dragging" }) }]} style={{ "--pages-scale": room().scale, "--pages-side": `${room().side}px`, "--pages-gap": `${room().gap}px`, "--pages": room().fit, "--pages-shown": screens()[state().context.at.owner]?.[state().context.at.screen]?.count ?? 1, "--hold": `${HOLD}ms` }} ref={root} onClick={(event) => Date.now() > quiet && state().matches({ editing: "still" }) && !(event.target as Element).closest(".cell, .top, .pill, .overview, .ui-dialog") && home.send({ type: "done" })}>
       <div class="sections" ref={sections}>
         <main class="home-section" aria-label="Home">
           <div class="owners" ref={main}>
@@ -1762,6 +1878,9 @@ function HomeScreen(props: { owners: Owner[] }) {
             </For>
           </div>
           <OwnerPill owners={props.owners} />
+          <Show when={launcher() && query().trim()}>
+            <Found owner={props.owners[0]} />
+          </Show>
         </main>
         <Library owner={props.owners[0]} places={places} />
       </div>
