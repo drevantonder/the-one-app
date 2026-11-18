@@ -40,17 +40,24 @@ const listeners = new Set<() => void>()
 let requests = 0
 
 addEventListener("message", ({ source, data }) => {
-  if (source !== parent) return
+  if (source !== host) return
   if (data?.method === "notifications/one/changed") for (const listener of listeners) listener()
   else if (data?.method === "ui/notifications/host-context-changed") dress(data.params)
   // The device's own back, where a device has one and something is open over the page: the last opened shuts.
   else if (data?.method === "notifications/one/back") over.at(-1)?.()
   // A tap on an iPhone's status bar: what scrolls goes back to its top.
   else if (data?.method === "notifications/one/scroll-to-top") toTop()
+  // How tall a page in one of this page's frames says its content is.
+  else if (data?.method === "notifications/one/framed") sized.get(data.params?.frame)?.(data.params?.height)
   else waiting.get(data?.id)?.(data)
 })
 
-const notify = (method: string, params: object = {}) => parent.postMessage({ jsonrpc: "2.0", method, params }, "*")
+/// Where this page's client is: its parent, or, for a page in another app's frame (`Frame`), the window that page is
+/// in, which knows it by the number in its address (`frame`), as its own app's.
+const framed = new URLSearchParams(location.search).get("frame")
+const host: Window = (framed && parent !== top && top) || parent
+const say = (message: object) => host.postMessage({ jsonrpc: "2.0", ...message, ...(framed && host !== parent && { frame: framed }) }, "*")
+const notify = (method: string, params: object = {}) => say({ method, params })
 
 /// A page's errors are logged to its client, as an MCP App logs to its host (MCP's `notifications/message`), which
 /// tells Telemetry: the message, and the file and line. Those an `<Errored>` boundary caught and shows are too, once
@@ -77,7 +84,7 @@ const ask = <Result>(method: string, params: object = {}) => {
       if (error) refused(new Error(error.message))
       else resolve(result as Result)
     })
-    parent.postMessage({ jsonrpc: "2.0", id, method, params }, "*")
+    say({ id, method, params })
   })
   const answered = () => asked.delete(answer)
   asked.add(answer)
@@ -393,6 +400,16 @@ function follow() {
 /// here with what they're given.
 export const component = (app: string, name: string): Promise<Record<string, (props: Record<string, unknown>) => JSX.Element>> =>
   import(/* @vite-ignore */ new URL(`../../${app}/client/${name}.js`, document.baseURI).href)
+
+/// `const { url, sandbox } = await frame("chrome-profiles/client/profile.html#work")`: where another app's page is, as
+/// its own app's, for `subject`, which `Frame` draws in an iframe: its client answers it as that app's, as it does
+/// this page as its own. Only a trusted app's page may.
+/// A frame's page that's gone, by its number, which its client forgets.
+export const unframe = (frame: string) => greet().then(() => ask("one/frame", { forget: frame }))
+
+/// Each frame's (`frame`) way to be told how tall its page says its content is, by its number.
+export const sized = new Map<string, (height: number) => void>()
+export const frame = (src: string, subject?: string) => greet().then(() => ask<{ url: string; sandbox: string; frame: string }>("one/frame", { src, subject }))
 
 /// `sizeChanged({ height: 420 })`: tells the client how large the page's content is, in CSS pixels, as an MCP App tells
 /// its host (`ui/notifications/size-changed`). A window sized by what it shows, a computer's launcher, takes it; one

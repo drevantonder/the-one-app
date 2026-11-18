@@ -54,7 +54,7 @@ impl Screen {
                     "failed": self.failed,
                 })
             }
-            "tree" => inspect::tree(&self.tree, &self.rects),
+            "tree" => self.inspected_tree(),
             "query" => {
                 let mut found = inspect::query(&self.tree, &self.rects, self.conditions(), request);
                 // An input's editing state as the host has it, which is ahead of what its app set.
@@ -86,7 +86,11 @@ impl Screen {
                         crate::geometry::point(x, y)
                     }
                 };
-                let tapped = self.pressed_in(&self.under(at)).with_context(|| format!("nothing at {}, {} takes a press", at.x, at.y))?;
+                // In a frame, what its page has there takes it, which the frame passes on.
+                let tapped = match self.frame_at(at) {
+                    Some((frame, _)) => frame,
+                    None => self.pressed_in(&self.under(at)).with_context(|| format!("nothing at {}, {} takes a press", at.x, at.y))?,
+                };
                 self.pointer_moved(at);
                 self.pointer_down(at, 0, request.bool("shift"));
                 self.pointer_up(at, 0);
@@ -104,7 +108,16 @@ impl Screen {
                         let id = inspect::one(&self.tree, request)?;
                         self.press(id)?
                     }
-                    false => self.focused.context("nothing has the keyboard: say which input, by a selector")?,
+                    false => {
+                        // An input in a frame's page with the keyboard takes it there.
+                        if let Some(child) = self.focused_frame() {
+                            let input = child.focused.filter(|id| child.fields.contains_key(id)).context("nothing in the frame with the keyboard takes text")?;
+                            child.type_text(input, &text);
+                            let editing = child.fields.get(&input).map(editing::Field::value);
+                            return Ok(json!({"typed": input, "value": editing.as_ref().map(|editing| &editing.text), "editing": editing}));
+                        }
+                        self.focused.context("nothing has the keyboard: say which input, by a selector")?
+                    }
                 };
                 if self.tree.nodes.get(&input).is_none_or(|node| node.kind != Kind::Input) {
                     bail!("node {input} isn't an input, so it takes no text");
@@ -208,7 +221,11 @@ impl Screen {
         if self.settling.is_empty() {
             return;
         }
-        let pending = inspect::pending(&self.unanswered, &self.js.timers(), self.transitions.len(), self.changed.is_some(), self.js.busy());
+        let mut pending = inspect::pending(&self.unanswered, &self.js.timers(), self.transitions.len(), self.changed.is_some(), self.busy());
+        // What a frame's page asked and hasn't heard back is this one's to wait for too.
+        for child in self.frames.values() {
+            pending.extend(inspect::pending(&child.screen.unanswered, &[], 0, false, false));
+        }
         let settled = inspect::settled(&pending, self.js.clock().paused());
         let now = Instant::now();
         let (told, waiting): (Vec<_>, Vec<_>) = std::mem::take(&mut self.settling).into_iter().partition(|(until, _)| settled || *until <= now);

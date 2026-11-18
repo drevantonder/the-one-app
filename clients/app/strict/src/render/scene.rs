@@ -70,6 +70,56 @@ impl Scene {
         }
     }
 
+    /// Draws what `other` holds in this scene, in the order it was drawn there, moved `by` and cut to `mask`, as a
+    /// frame's page is drawn in its box: it's the frame's, drawn where the frame comes in this scene's order.
+    pub fn splice(&mut self, other: &Scene, by: [f32; 2], mask: Bounds<ScaledPixels>) {
+        let moved = |bounds: &Bounds<ScaledPixels>| {
+            Bounds::new(crate::geometry::Point { x: ScaledPixels(bounds.origin.x.0 + by[0]), y: ScaledPixels(bounds.origin.y.0 + by[1]) }, bounds.size)
+        };
+        let masked = |content: &ContentMask<ScaledPixels>| ContentMask { bounds: moved(&content.bounds).intersect(&mask) };
+        // What was turned about a point there is turned about that point here: T(p - by) + by.
+        let turned = |matrix: &TransformationMatrix| {
+            let [[a, b], [c, d]] = matrix.rotation_scale;
+            let [x, y] = matrix.translation;
+            TransformationMatrix { rotation_scale: matrix.rotation_scale, translation: [x + by[0] - (a * by[0] + b * by[1]), y + by[1] - (c * by[0] + d * by[1])] }
+        };
+        let mut all: Vec<(DrawOrder, Primitive)> = Vec::new();
+        all.extend(other.shadows.iter().map(|shadow| {
+            let mut shadow = shadow.clone();
+            (shadow.bounds, shadow.outer, shadow.content_mask, shadow.transformation) = (moved(&shadow.bounds), moved(&shadow.outer), masked(&shadow.content_mask), turned(&shadow.transformation));
+            (shadow.order, shadow.into())
+        }));
+        all.extend(other.quads.iter().map(|quad| {
+            let mut quad = quad.clone();
+            (quad.bounds, quad.content_mask, quad.transformation) = (moved(&quad.bounds), masked(&quad.content_mask), turned(&quad.transformation));
+            (quad.order, quad.into())
+        }));
+        all.extend(other.underlines.iter().map(|underline| {
+            let mut underline = underline.clone();
+            (underline.bounds, underline.content_mask) = (moved(&underline.bounds), masked(&underline.content_mask));
+            (underline.order, underline.into())
+        }));
+        all.extend(other.monochrome_sprites.iter().map(|sprite| {
+            let mut sprite = sprite.clone();
+            (sprite.bounds, sprite.content_mask, sprite.transformation) = (moved(&sprite.bounds), masked(&sprite.content_mask), turned(&sprite.transformation));
+            (sprite.order, sprite.into())
+        }));
+        all.extend(other.polychrome_sprites.iter().map(|sprite| {
+            let mut sprite = sprite.clone();
+            (sprite.bounds, sprite.content_mask, sprite.transformation) = (moved(&sprite.bounds), masked(&sprite.content_mask), turned(&sprite.transformation));
+            (sprite.order, sprite.into())
+        }));
+        all.extend(other.backdrops.iter().map(|backdrop| {
+            let mut backdrop = backdrop.clone();
+            (backdrop.bounds, backdrop.content_mask) = (moved(&backdrop.bounds), masked(&backdrop.content_mask));
+            (backdrop.order, backdrop.into())
+        }));
+        all.sort_by_key(|(order, _)| *order);
+        for (_, primitive) in all {
+            self.insert_primitive(primitive);
+        }
+    }
+
     pub fn finish(&mut self) {
         self.shadows.sort_by_key(|shadow| shadow.order);
         self.quads.sort_by_key(|quad| quad.order);

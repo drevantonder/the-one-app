@@ -21,7 +21,8 @@
 /// `../../../core/ui/tsconfig.strict.json`) and its entrypoint says so, with the runtime version it needs:
 /// `%{page: "client/index.html", runtime_version: 4}`. It's written with the UI library alone: its components and the primitives,
 /// `Box`, `Scroll` (a box whose content scrolls), `Text`, `Image`, `Path` (a vector shape), `EditableText` (bare text to
-/// type, which `Input` draws in a field's box) and `Video` (a screen's live video, which `LiveScreen` draws), each styled by
+/// type, which `Input` draws in a field's box), `Video` (a screen's live video, which `LiveScreen` draws) and `Frame`
+/// (another app's page, in a sandbox of its own, as an iframe is, which only a trusted app's page shows), each styled by
 /// its `style`: styles from `styles()`, beside what uses them, whose values are the design tokens (`tokens`, from
 /// core/ui/src/tokens.ts), where a raw colour or length is a warning, "make it a token", and a raw font fails the check:
 /// `const look = styles({ row: { flexDirection: "row", gap: tokens.space.md, paddingInline: tokens.length.gutter,
@@ -62,7 +63,7 @@ export { Alert, confirm, Sheet } from "./sheet.tsx"
 export { SignIn } from "./sign-in.tsx"
 export { toast } from "./toast.tsx"
 export { Widget } from "./widget.tsx"
-export { Box, EditableText, Image, Layer, Path, Scroll, Text, Video } from "./strict/primitives.tsx"
+export { Box, EditableText, Frame, Image, Layer, Path, Scroll, Text, Video } from "./strict/primitives.tsx"
 export { render } from "./render.tsx"
 export { createTheme, defineVars, negative, styles } from "./styles.ts"
 export { tokens } from "./tokens.ts"

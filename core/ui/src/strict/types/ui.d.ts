@@ -148,6 +148,17 @@ export type VideoProps = {
 }
 export declare function Video(props: VideoProps): Element
 
+/** Another app's page, in a box of this one's, as an iframe is (renderer.ts's `frame`): `src` as a `one:` link names
+ * it after its scheme, for `subject`, or whoever this page is for. Only a trusted app's page shows one. */
+export type FrameProps = {
+  src: string
+  subject?: string
+  /** What it is, its accessible name. */
+  title?: string
+  style?: Style
+}
+export declare function Frame(props: FrameProps): Element
+
 /** What's drawn over the whole window, over the page: a sheet, a menu. A `modal` one makes everything else inert. */
 export declare function Layer(props: { modal?: boolean; children?: Element }): Element
 

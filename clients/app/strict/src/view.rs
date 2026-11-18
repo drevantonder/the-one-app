@@ -23,6 +23,8 @@ use crate::tree::{Id, Kind, Node, Tree};
 
 mod bridge;
 pub use bridge::TextInputConnection;
+mod frames;
+pub use frames::Make as MakeFrame;
 pub(crate) mod inspected;
 mod transition;
 
@@ -115,6 +117,18 @@ pub struct Screen {
     started: Option<Result<(), String>>,
     /// The inspector's answers to what it did, each told once the app's JS has run what that did.
     replies: Vec<(Value, inspected::Reply)>,
+    /// What wakes its window as its JS, or a frame's, posts what this hasn't applied.
+    wake: Option<Arc<dyn Fn() + Send + Sync>>,
+    /// Each frame's page, by the frame's node, and the pages asked for that haven't come (`frames`); what makes one,
+    /// its host's; and whether this is a frame's page itself, and Tab took the keyboard out of it, back or on.
+    frames: HashMap<Id, frames::Child>,
+    asking: HashSet<(Id, String)>,
+    pub make_frame: Option<frames::Make>,
+    nested: bool,
+    left: Option<bool>,
+    /// The frame the pointer's over, and the one a press it holds went down in.
+    pointing: Option<Id>,
+    captured_frame: Option<Id>,
     /// As Colour Mode says, or as the device is (`None`).
     pub theme: Option<Appearance>,
     /// As the device is, which the window says.
@@ -217,6 +231,8 @@ pub struct Screen {
     unanswered: HashMap<String, inspect::Asked>,
     /// The inspector's `settle`s waiting: until when, and what to tell when it's settled or that time comes.
     settling: Vec<(Instant, Box<dyn FnOnce(Value)>)>,
+    /// How tall its page says its content is (`ui/notifications/size-changed`), which a frame showing it is drawn as.
+    content_height: Option<f32>,
     /// The last error its JS threw, which is logged, as a browser's console has it, and the screen carries on.
     pub failed: Option<String>,
     /// What its page uses that this host can't draw (`tree::Mismatch`), so its window opens in a web view instead.
@@ -232,6 +248,14 @@ impl Screen {
             js,
             started: None,
             replies: Vec::new(),
+            wake: None,
+            frames: HashMap::new(),
+            asking: HashSet::new(),
+            make_frame: None,
+            nested: false,
+            left: None,
+            pointing: None,
+            captured_frame: None,
             theme: None,
             appearance: Appearance::Light,
             reduced_motion: false,
@@ -285,6 +309,7 @@ impl Screen {
             painted: (Size::default(), 1.0),
             unanswered: HashMap::new(),
             settling: Vec::new(),
+            content_height: None,
             failed: None,
             mismatched: None,
         };
@@ -296,9 +321,19 @@ impl Screen {
         &self.tree
     }
 
-    /// Calls `wake` on its app's JS thread as that posts what this hasn't applied (`pump`).
-    pub fn on_post(&self, wake: impl Fn() + Send + 'static) {
-        self.js.on_post(wake);
+    /// Calls `wake` as its app's JS thread, or a frame's, posts what this hasn't applied (`pump`).
+    pub fn on_post(&mut self, wake: Arc<dyn Fn() + Send + Sync>) {
+        let calls = wake.clone();
+        self.js.on_post(move || calls());
+        for child in self.frames.values_mut() {
+            child.screen.on_post(wake.clone());
+        }
+        self.wake = Some(wake);
+    }
+
+    /// Whether its app's JS, or a frame's, has something it was sent to run yet, or hasn't started.
+    fn busy(&self) -> bool {
+        self.js.busy() || self.frames.values().any(|child| child.screen.busy())
     }
 
     /// Why its app's module didn't run, once it's known it didn't.
@@ -311,16 +346,19 @@ impl Screen {
     pub fn idle(&mut self) {
         loop {
             self.js.wait();
+            for child in self.frames.values_mut() {
+                child.screen.idle();
+            }
             self.pump();
-            if !self.js.busy() {
+            if !self.busy() {
                 return;
             }
         }
     }
 
-    /// The semantic tree, as an agent and a screen reader read it.
+    /// The semantic tree, as an agent and a screen reader read it, each frame's page's in its place.
     pub fn semantics(&self) -> Value {
-        json!(self.tree.semantics(0))
+        json!(self.grafted(self.tree.semantics(0)))
     }
 
     /// Whether the app hasn't started yet, or is waiting to hear back from its client about something it asked.
@@ -376,7 +414,8 @@ impl Screen {
         let settle = self.settling.iter().map(|(until, _)| until.saturating_duration_since(now)).min();
         // What moves by itself draws again each frame.
         let frame = self.animating.then_some(Duration::from_millis(16));
-        settle.into_iter().chain(frame).chain(self.blinks()).min()
+        let frames = self.frames.values().filter_map(|child| child.screen.due());
+        settle.into_iter().chain(frame).chain(self.blinks()).chain(frames).min()
     }
 
     /// How long until the caret blinks on or off: as GTK's does, on two thirds of each 1.2 s and off a third, until
@@ -401,6 +440,9 @@ impl Screen {
 
     /// Applies what the app's JS has posted, and tells the `settle`s whose time has come.
     pub fn fire(&mut self) {
+        for child in self.frames.values_mut() {
+            child.screen.fire();
+        }
         self.pump();
         self.tell_settled();
     }
@@ -409,7 +451,18 @@ impl Screen {
     /// answers what it asked that the host answers at once. → whether anything came.
     pub fn pump(&mut self) -> bool {
         let posted = self.js.take();
-        let came = !posted.is_empty() || self.started.is_none();
+        let mut came = !posted.is_empty() || self.started.is_none();
+        let mut cant = None;
+        for child in self.frames.values_mut() {
+            came |= child.screen.pump();
+            // A frame's page that can't be drawn here takes the page it's in to where it can, as one of its own would.
+            if let Some(why) = child.screen.mismatched.clone().or_else(|| child.screen.didnt_start().map(str::to_owned)) {
+                cant = Some(format!("its frame's page, {}, can't be drawn natively: {why}", child.src));
+            }
+        }
+        if let Some(why) = cant {
+            self.mismatched.get_or_insert(why);
+        }
         if self.started.is_none() {
             self.started = self.js.started();
         }
@@ -425,7 +478,12 @@ impl Screen {
                     Ok(()) => self.changed(),
                 },
                 Posted::Message(message) => {
-                    let (Ok(message), Some(asked)) = (serde_json::from_str::<Value>(&message), self.asked.as_mut()) else { continue };
+                    let Ok(message) = serde_json::from_str::<Value>(&message) else { continue };
+                    // How tall its content is, as an MCP App tells its host, which a frame's page is drawn as.
+                    if message["method"] == "ui/notifications/size-changed" {
+                        self.content_height = message["params"]["height"].as_f64().map(|height| height as f32);
+                    }
+                    let Some(asked) = self.asked.as_mut() else { continue };
                     let (id, method, tool) = (message.get("id").map(Value::to_string), message["method"].as_str().map(str::to_owned), message["params"]["name"].as_str().map(str::to_owned));
                     // What it copies, or shares, which a computer with no share sheet copies (`done`: "copied"), goes on
                     // the clipboard.
@@ -464,9 +522,10 @@ impl Screen {
                 self.focus(Some(id));
             }
             self.sync_fields();
+            self.sync_frames();
         }
         // The inspector's answers wait for what they did to have run.
-        if !self.replies.is_empty() && !self.js.busy() {
+        if !self.replies.is_empty() && !self.busy() {
             for (answer, reply) in std::mem::take(&mut self.replies) {
                 reply(answer);
             }
@@ -506,6 +565,21 @@ impl Screen {
             });
             self.message(&json!({"jsonrpc": "2.0", "method": "ui/notifications/host-context-changed", "params": context}));
         }
+        // Each frame's page first, in the room its frame had, as this one looks, which this frame splices in.
+        for (id, child) in &mut self.frames {
+            let screen = &mut child.screen;
+            (screen.theme, screen.appearance, screen.reduced_motion, screen.touch) = (self.theme, self.appearance, self.reduced_motion, self.touch);
+            screen.active = self.active && self.focused == Some(*id);
+            // A page that says it's another height has its frame laid out again.
+            if child.height != screen.content_height {
+                child.height = screen.content_height;
+                self.layout.conditions = None;
+            }
+            if child.rect.size.width > 0.0 && child.rect.size.height > 0.0 {
+                screen.paint(Size { width: Pixels(child.rect.size.width), height: Pixels(child.rect.size.height) }, scale, text, atlas, &mut child.scene);
+                self.again |= screen.take_again();
+            }
+        }
         let conditions = self.conditions();
         let window = Bounds { origin: point(0.0, 0.0), size: Size { width: size.width.0, height: size.height.0 } };
         self.states.focused = self.focused;
@@ -527,6 +601,7 @@ impl Screen {
             breadcrumb: self.breadcrumb.as_ref().map(|crumb| (crumb.name.clone(), crumb.start)),
             panel: self.panel.map(|panel| (panel.corner, panel.fill)),
             fetched: self.fetched.values().filter(|fetched| fetched.is_some()).count(),
+            frames: self.frames.iter().map(|(id, child)| (*id, child.screen.frame)).collect(),
         };
         if !self.animating && self.tree.unchanged() && self.seen.as_ref() == Some(&seen) {
             return;
@@ -586,6 +661,8 @@ impl Screen {
             modal: None,
             turn: TransformationMatrix::unit(),
             glass: self.panel.filter(|panel| !panel.fill).map(|_| Vec::new()),
+            frames: &self.frames,
+            framed: Vec::new(),
         };
         // The window, as a page's body: its root's background and text, scrolling what's taller than it.
         let version2 = self.tree.styled();
@@ -625,6 +702,7 @@ impl Screen {
                     let paragraph = text.paragraph(words, &style.style, &[], multiline.then_some(width).flatten(), None);
                     Size { width: if *multiline { paragraph.size().width } else { 0.0 }, height: paragraph.size().height }
                 }
+                Measure::Frame { height } => Size { width: width.unwrap_or(300.0), height: height.unwrap_or(150.0) },
             };
             taffy::LayoutOutput::from_outer_size(taffy::geometry::Size {
                 width: input.known_dimensions.width.unwrap_or(size.width.ceil()),
@@ -647,7 +725,15 @@ impl Screen {
         }
         self.action = self.notice.as_ref().and_then(|notice| painter.notice(notice, self.insets.top, self.action.as_ref().is_some_and(hovering)));
         self.glass = painter.glass.take().unwrap_or_default();
-        let (placed, mut tab_order, rects, animating, modal, wanted, intersections) = (painter.placed, painter.tab_order, painter.rects, painter.animating, painter.modal, painter.wanted, painter.intersections);
+        let (placed, mut tab_order, rects, animating, modal, wanted, intersections, framed) =
+            (painter.placed, painter.tab_order, painter.rects, painter.animating, painter.modal, painter.wanted, painter.intersections, painter.framed);
+        // Each frame's page is drawn in the room it had now from the next frame, if that's changed.
+        for (id, rect) in framed {
+            if let Some(child) = self.frames.get_mut(&id) {
+                self.again |= child.rect.size != rect.size;
+                child.rect = rect;
+            }
+        }
         // What it wanted to draw that's by an address is fetched by its window, once.
         for src in wanted {
             if !self.fetched.contains_key(&src) {
@@ -733,6 +819,9 @@ impl Screen {
 
     /// The pointer's shape at `at`: what its style says, or a hand over what's pressed and a beam over an input.
     pub fn cursor(&self, at: Point<f32>) -> Cursor {
+        if let Some(cursor) = self.frame_cursor(at) {
+            return cursor;
+        }
         if self.home.is_some_and(|home| home.contains(&at)) {
             return Cursor::Arrow;
         }
@@ -798,6 +887,7 @@ impl Screen {
     /// The pointer moved to `at`: what it's over is hovered, told as it comes and goes, and a press it holds is told
     /// it moved.
     pub fn pointer_moved(&mut self, at: Point<f32>) {
+        self.frame_moved(at);
         self.pointer = Some(at);
         let chain = self.hover(at);
         let target = match self.captured {
@@ -817,6 +907,7 @@ impl Screen {
 
     /// The pointer left the window: nothing's hovered.
     pub fn pointer_left(&mut self) {
+        self.frame_left();
         let at = self.pointer.take().unwrap_or(point(0.0, 0.0));
         for id in std::mem::take(&mut self.states.hovered).into_iter().rev() {
             self.pointer_event(&[id], "pointerleave", at, 0, point(0.0, 0.0));
@@ -857,6 +948,9 @@ impl Screen {
         }
         if self.action.is_some_and(|action| action.contains(&at)) {
             self.pressing_action = button == 0;
+            return;
+        }
+        if self.frame_down(at, button, shift) {
             return;
         }
         let chain = self.under(at);
@@ -920,6 +1014,9 @@ impl Screen {
             }
             return;
         }
+        if self.frame_up(at, button) {
+            return;
+        }
         let target = match self.captured.take() {
             Some(captured) => self.chain_from(captured),
             None => self.under(at),
@@ -944,6 +1041,10 @@ impl Screen {
     /// (`wheel`), and the innermost thing there that can still scroll that way does, telling its app if it listens.
     /// → what scrolled.
     pub fn scroll(&mut self, at: Point<f32>, delta: Point<f32>) -> Option<Id> {
+        // A frame's page scrolls first, and what it can't, this one does, as a browser chains them.
+        if let Some(frame) = self.frame_scroll(at, delta, true) {
+            return Some(frame);
+        }
         let chain = self.under(at);
         self.pointer_event(&chain, "wheel", at, 0, delta);
         self.pan(at, delta)
@@ -952,6 +1053,9 @@ impl Screen {
     /// A finger (or a screen reader) moved what's at `at` by `delta` pixels (down and right positive): the innermost
     /// thing there that can still scroll that way does, telling its app if it listens. → what scrolled.
     pub fn pan(&mut self, at: Point<f32>, delta: Point<f32>) -> Option<Id> {
+        if let Some(frame) = self.frame_scroll(at, delta, false) {
+            return Some(frame);
+        }
         let chain = self.under(at);
         let target = chain.iter().copied().find_map(|id| {
             let (most_y, most_x, along) = self.placed(id)?.scroll?;
@@ -1007,6 +1111,10 @@ impl Screen {
                 return focused;
             }
         }
+        // A frame with the keyboard: its page has the key, and Tab off its page's end goes on from the frame here.
+        if let Some(None) = self.frame_key(key) {
+            return focused;
+        }
         // Tab is told to what has the keyboard and what it's in, as any key is, then moves the keyboard, as a
         // browser's does unless the page stops it, which a native host can't hear in time.
         if key.key == "Tab" && !key.ctrl && !key.meta && !key.alt {
@@ -1018,13 +1126,32 @@ impl Screen {
                 }
             }
             self.states.focus_visible = true;
-            let order = &self.tab_order;
-            let next = match focused.and_then(|focused| order.iter().position(|id| *id == focused)) {
-                Some(at) if key.shift => order.get((at + order.len() - 1) % order.len()).copied(),
-                Some(at) => order.get((at + 1) % order.len()).copied(),
-                None if key.shift => order.last().copied(),
-                None => order.first().copied(),
-            };
+            // It goes round, but out of a frame's page at its ends, back to the page the frame's in; into a frame's
+            // page, to its first stop or its last, and past a frame whose page has none.
+            let order = self.tab_order.clone();
+            let count = order.len();
+            let mut index = focused.and_then(|focused| order.iter().position(|id| *id == focused));
+            let mut next = None;
+            for _ in 0..count {
+                let step = match index {
+                    Some(at) if key.shift => at.checked_sub(1).or((!self.nested).then(|| count - 1)),
+                    Some(at) => (at + 1 < count).then_some(at + 1).or((!self.nested).then_some(0)),
+                    None if key.shift => count.checked_sub(1),
+                    None => (count > 0).then_some(0),
+                };
+                let Some(step) = step else { break };
+                index = Some(step);
+                if self.frames.contains_key(&order[step]) && !self.enter_frame(order[step], key.shift) {
+                    continue;
+                }
+                next = Some(order[step]);
+                break;
+            }
+            if next.is_none() && self.nested {
+                self.left = Some(key.shift);
+                self.focus(None);
+                return focused;
+            }
             self.focus(next);
             // What it comes to scrolls into view, as a browser's does, so Tab goes on through a long list.
             if let Some(next) = next {
@@ -1083,6 +1210,9 @@ impl Screen {
 
     /// What the platform's input method says, to the input with the keyboard.
     pub fn ime(&mut self, ime: Ime) {
+        if self.frame_ime(ime.clone()) {
+            return;
+        }
         if let Some(id) = self.focused.filter(|id| self.fields.contains_key(id)) {
             self.edit(id, |field| field.ime(ime));
         }
@@ -1101,6 +1231,9 @@ impl Screen {
             return;
         }
         self.visible = visible;
+        for child in self.frames.values_mut() {
+            child.screen.shown(visible);
+        }
         // Shown again, it has the keyboard where it says `autofocus`, as a page opened does, from its first key on;
         // put away, nothing keeps it, so nothing left with it is pressed as it comes back.
         self.autofocused.clear();
@@ -1129,11 +1262,14 @@ impl Screen {
 
     /// Whether an input holds something its person typed that its app hasn't taken (`Field::typed`).
     pub fn typed(&self) -> bool {
-        self.fields.values().any(Field::typed)
+        self.fields.values().any(Field::typed) || self.frames.values().any(|child| child.screen.typed())
     }
 
     /// The editing state of the input with the keyboard, for a platform's keyboard bridge (`editing`).
     pub fn editing(&self) -> Option<editing::Value> {
+        if let Some(child) = self.focused.and_then(|id| self.frames.get(&id)) {
+            return child.screen.editing();
+        }
         self.focused.and_then(|id| self.fields.get(&id)).map(Field::value)
     }
 
@@ -1141,6 +1277,9 @@ impl Screen {
     /// `editing` text, as AppKit's `characterIndexForPoint:` asks.
     pub fn index_at(&self, at: Point<f32>) -> Option<usize> {
         let id = self.focused?;
+        if let Some(child) = self.frames.get(&id) {
+            return child.screen.index_at(point(at.x - child.rect.origin.x, at.y - child.rect.origin.y));
+        }
         let (field, drawn) = (self.fields.get(&id)?, self.drawn.get(&id)?);
         let index = drawn.index_at(at);
         // What's drawn is its editing text, what's composed in it too, but for a password's dots.
@@ -1150,6 +1289,9 @@ impl Screen {
     /// Where the input with the keyboard has its caret, in the window, for the platform's input method to show what
     /// it composes beside: none where it takes no typing (a password takes no input method).
     pub fn caret_rect(&self) -> Option<Bounds<f32>> {
+        if let Some(caret) = self.frame_caret() {
+            return caret;
+        }
         let id = self.focused?;
         let field = self.fields.get(&id).filter(|field| !field.secure && !field.readonly)?;
         let drawn = self.drawn.get(&id)?;
@@ -1270,6 +1412,8 @@ enum Measure {
     /// A text's words, and its runs where texts in it set some of them another way.
     Text { words: String, runs: Vec<TextRun>, text: Text, lines: Option<usize> },
     Input { words: String, text: Text, multiline: bool },
+    /// A frame, as tall as its page says its content is (`Screen::content_height`), or an iframe's 150 pixels.
+    Frame { height: Option<f32> },
 }
 
 /// A tree node as laid out: which node, the text it inherits, how it looks, and what it measures; and a text's words
@@ -1483,6 +1627,9 @@ struct Painter<'a> {
     /// Where the system's own material goes under the page, as a panel's glass on a Mac, if the host has one: what has
     /// a material that's the system's is drawn on it rather than blurring what the page drew (`Glass`).
     glass: Option<Vec<crate::platform::Glass>>,
+    /// Each frame's page, as it last drew itself, and where each frame was drawn now, in the window.
+    frames: &'a HashMap<Id, frames::Child>,
+    framed: Vec<(Id, Bounds<f32>)>,
 }
 
 /// Everything outside the tree that a frame shows: its size and scale, the conditions, each node's state, how far
@@ -1501,6 +1648,8 @@ struct Seen {
     breadcrumb: Option<(String, f32)>,
     panel: Option<(f32, bool)>,
     fetched: usize,
+    /// Each frame's page's frame, as it was drawn.
+    frames: std::collections::BTreeMap<Id, u64>,
 }
 
 /// What a node's state is, for its styles: where the pointer is, what's pressed and what has the keyboard.
@@ -1664,6 +1813,7 @@ impl Painter<'_> {
                 let words = if words.is_empty() { node.str("placeholder").unwrap_or_default().to_owned() } else { words };
                 Some(Measure::Input { words: if words.is_empty() { " ".into() } else { words }, text, multiline: node.is("multiline") })
             }
+            Kind::Frame => Some(Measure::Frame { height: self.frames.get(&id).and_then(|child| child.screen.content_height) }),
             Kind::Image | Kind::Path | Kind::Picker | Kind::Box | Kind::Scroll => None,
         };
         let positioned = layout.position == taffy::style::Position::Absolute;
@@ -1913,7 +2063,8 @@ impl Painter<'_> {
         let tabindex = node.prop("tabindex").and_then(|index| index.as_i64().or_else(|| index.as_str()?.parse().ok()));
         // A text is never a `<button>` on the DOM, whatever its role: it's reached only by its `tabindex`.
         let button = node.kind != Kind::Text && node.listens("click") && node.str("role").is_some_and(|role| BUTTON_ROLES.contains(&role));
-        if pressable && tabindex.is_none_or(|index| index >= 0) && (node.kind == Kind::Input || button || tabindex.is_some()) {
+        // And a frame, where it goes into the frame's page.
+        if (pressable && tabindex.is_none_or(|index| index >= 0) && (node.kind == Kind::Input || button || tabindex.is_some())) || node.kind == Kind::Frame {
             self.tab_order.push(id);
         }
         let mut placed = Placed { parent, shown, pointer, cursor: look.cursor, pressable, input: node.kind == Kind::Input, scroll: None };
@@ -1960,6 +2111,13 @@ impl Painter<'_> {
             Kind::Image => self.paint_image(node, content, radii, opacity, mask),
             Kind::Path => self.paint_path(node, content, &look, text.color, opacity, mask),
             Kind::Picker => {}
+            // A frame's page, drawn as it last drew itself, in its box, where the frame comes in this scene's order.
+            Kind::Frame => {
+                self.framed.push((id, content));
+                if let Some(child) = self.frames.get(&id) {
+                    self.scene.splice(&child.scene, [content.origin.x * self.scale, content.origin.y * self.scale], shown.intersect(&content).scale_to(self.scale));
+                }
+            }
             Kind::Box | Kind::Scroll => {
                 let mut child_mask = mask;
                 let mut child_offset = laid_out.origin;

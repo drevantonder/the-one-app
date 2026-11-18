@@ -36,6 +36,8 @@ static HOSTS: LazyLock<Hosts> = LazyLock::new(Hosts::default);
 #[derive(Default)]
 struct Hosts {
     open: Mutex<HashMap<String, Host>>,
+    /// Each page drawn in another's frame (`strict`), by its channel's label: told what every window is, but none's.
+    frames: Mutex<HashMap<String, UnboundedSender<Value>>>,
     next: AtomicU64,
 }
 
@@ -116,6 +118,9 @@ pub fn tell_all(message: Value) {
         if let Some(to) = &host.to {
             let _ = to.send(message.clone());
         }
+    }
+    for to in HOSTS.frames.lock().expect("no host panics").values() {
+        let _ = to.send(message.clone());
     }
 }
 
@@ -352,6 +357,11 @@ pub(crate) async fn talk(stream: impl AsyncRead + AsyncWrite + Send + 'static) {
             computer::again(again["link"].as_str().map(str::to_owned));
             return;
         }
+        // A page in another's frame is no app's window: it's opened as its frame is, never by a link.
+        if message["hello"]["frame"] == true {
+            HOSTS.frames.lock().expect("no host panics").insert(label.clone(), to.clone());
+            continue;
+        }
         if let Some(hello) = message.get("hello") {
             let entrypoint = hello["entrypoint"].as_str().unwrap_or_default();
             let subject = hello["subject"].as_str();
@@ -390,6 +400,7 @@ pub(crate) async fn talk(stream: impl AsyncRead + AsyncWrite + Send + 'static) {
             });
         });
     }
+    HOSTS.frames.lock().expect("no host panics").remove(&label);
     // It's forgotten, unless another window has taken its place (`open_web_view`).
     if let Some(key) = key {
         let mut open = HOSTS.open.lock().expect("no host panics");

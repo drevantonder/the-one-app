@@ -49,10 +49,12 @@ pub(crate) mod page;
 mod updater;
 
 /// What an app's page may load, which is what an MCP App may by default: its own app's files and the files of
-/// the apps it uses, which are all at its own address, and nothing from anywhere else.
+/// the apps it uses, which are all at its own address, and nothing from anywhere else; and in a frame, another app's
+/// page at that app's own address (`oneapp://<app>.localhost`, or `http://oneapp.<app>.localhost` where a web view
+/// has no scheme of its own), which the window answers as that app's (the UI library's `Frame`).
 pub(crate) const APP_MAY_LOAD: &str = "default-src 'none'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; \
                             img-src 'self' data:; media-src 'self' data:; font-src 'self' data:; connect-src 'none'; \
-                            frame-src 'none'; object-src 'none'; base-uri 'self'";
+                            frame-src oneapp: http://*.localhost; object-src 'none'; base-uri 'self'";
 
 /// The views in the window, by name: the window's own page (`client`) and each app that's open.
 struct Views {

@@ -366,8 +366,8 @@ async function file(request: Request, env: Env, url: URL, ctx: ExecutionContext)
     "content-type": found.headers.get("content-type") ?? "",
     // What an app's page may load, which is what an MCP App may by default and what the app lets one
     // (`APP_MAY_LOAD` in `clients/app/src/lib.rs`): its own app's files and the UI library, which are all
-    // here, and nothing from anywhere else.
-    "content-security-policy": `default-src 'none'; script-src ${url.origin} 'unsafe-inline'; style-src ${url.origin} 'unsafe-inline'; img-src ${url.origin} data:; media-src ${url.origin} data:; font-src ${url.origin} data:; connect-src 'none'; frame-src 'none'; object-src 'none'; base-uri ${url.origin}`,
+    // here, and nothing from anywhere else; and in a frame, another app's page, which is here too (`Frame`).
+    "content-security-policy": `default-src 'none'; script-src ${url.origin} 'unsafe-inline'; style-src ${url.origin} 'unsafe-inline'; img-src ${url.origin} data:; media-src ${url.origin} data:; font-src ${url.origin} data:; connect-src 'none'; frame-src ${url.origin}; object-src 'none'; base-uri ${url.origin}`,
     // The page's origin is its own, so what it loads from here is from elsewhere to it.
     "access-control-allow-origin": "*",
     // Its address has its session in it, so it's this browser's alone. A page asked for by its app's name is

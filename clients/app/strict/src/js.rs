@@ -566,6 +566,8 @@ fn mutations<'js>(ctx: &Ctx<'js>, posted: &Rc<RefCell<Vec<Posted>>>) -> rquickjs
     mutations.set("drop", Function::new(ctx.clone(), move |id: Id| to.borrow_mut().push(Posted::Mutation(Mutation::Drop { id })))?)?;
     let to = posted.clone();
     mutations.set("unsupported", Function::new(ctx.clone(), move |what: String| to.borrow_mut().push(Posted::Mutation(Mutation::Unsupported { what })))?)?;
+    // It draws a `frame`, another app's page in a sandbox of its own (`view::frames`).
+    mutations.set("frame", true)?;
     Ok(mutations)
 }
 

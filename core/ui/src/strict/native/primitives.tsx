@@ -43,6 +43,14 @@ export const Video: typeof Strict.Video = (props) => {
   throw new Error("Video isn't drawn by this native host (core/ui/src/strict/renderer.ts's `video`)")
 }
 
+/** Another app's page, in a sandbox of its own (../renderer.ts's `frame`), where the host draws one (`Mutations.frame`).
+ * Where it doesn't, it's told so, which opens the page another way, and it throws, as `Video` does. */
+export const Frame: typeof Strict.Frame = (props) => {
+  if ((globalThis as { mutations?: Mutations }).mutations?.frame) return primitive("frame")(props)
+  unsupported("Frame")
+  throw new Error("Frame isn't drawn by this native host (core/ui/src/strict/renderer.ts's `frame`)")
+}
+
 export const render: typeof Strict.render = (code) => draw(code as never)
 
 /** A layer: a box over the whole window, at the root, after the page, so it's drawn over it. A modal one says so

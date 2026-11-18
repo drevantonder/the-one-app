@@ -61,6 +61,11 @@ const baseKey = () => key(base(), own?.subject)
 const open = new Map()
 /** @param {string} entrypoint @param {string} [subject] */
 const key = (entrypoint, subject) => `${subject ?? ""}|${entrypoint}`
+/// The pages in an app's frames (the UI library's `Frame`), each another app's, answered as its own app's page is,
+/// by the number its address has (`frame`): known by its window once it has said it from a frame of the page it's in.
+/// (`framed`, below, is something else: Android's apps drawn in this page's frames rather than natively.)
+/** @type {Map<string, View & { in: View, window?: Window }>} */
+const nested = new Map()
 /// Each app's first app, by the app's name, among this user's: what a notification from it, or a `one:` link to it, opens.
 /** @type {Map<string, string>} */
 let first = new Map()
@@ -1416,8 +1421,19 @@ function recoveryKey(typed, subject) {
   })
 }
 
-/** @param {View} view @param {Record<string, unknown>} message */
-const post = (view, message) => view.frame.contentWindow?.postMessage({ jsonrpc: "2.0", ...message }, "*")
+/** @param {View & { window?: Window }} view @param {Record<string, unknown>} message */
+const post = (view, message) => (view.window ?? view.frame.contentWindow)?.postMessage({ jsonrpc: "2.0", ...message }, "*")
+
+/// The page in an app's frame a message came from: one known by its window, or one saying its number from a frame of
+/// the page it was made for, which it's known by from then on.
+/** @param {MessageEventSource | null} source @param {any} data */
+function frameOf(source, data) {
+  for (const [frame, view] of nested) {
+    if (view.window === source) return view
+    const from = /** @type {Window | null} */ (source)
+    if (!view.window && from && data?.frame === frame && from.parent === view.in.frame.contentWindow) return Object.assign(view, { window: from })
+  }
+}
 
 /// The haptics an app may ask for, by iOS's names.
 /** @type {unknown[]} */
@@ -1433,6 +1449,8 @@ async function respond(view, method, params) {
   /** Who the page asks for: whoever it says, if its app is trusted. @param {string} [said] */
   const whom = async (said) => (said && (await trusts()) ? said : view.subject)
   if (method === "ui/initialize") {
+    // A page in a frame of another's has none of the window's edges to keep clear, and nothing names it above it.
+    const inFrame = [...nested.values()].includes(/** @type {any} */ (view))
     return {
       protocolVersion: "2026-01-26",
       hostInfo: { name: "one", version: "0.1.0" },
@@ -1445,10 +1463,10 @@ async function respond(view, method, params) {
         locale: navigator.language,
         timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
         deviceCapabilities: { touch: matchMedia("(pointer: coarse)").matches, hover: matchMedia("(hover: hover)").matches },
-        safeAreaInsets: insets(view.frame),
-        ...titleRow(),
+        safeAreaInsets: inFrame ? { top: 0, right: 0, bottom: 0, left: 0 } : insets(view.frame),
+        ...(!inFrame && titleRow()),
         // Whether the window names it above it, in its title bar's breadcrumb (`titled`), so its first screen doesn't.
-        breadcrumb: Boolean(own) && !titleBar.hidden,
+        breadcrumb: Boolean(own) && !titleBar.hidden && !inFrame,
         // Whether its network answers, and whether an update for this device is ready, which the window keeps it
         // told of: the launcher shows Update while one is.
         connection: shown.getSnapshot().context.connection,
@@ -1457,6 +1475,25 @@ async function respond(view, method, params) {
     }
   }
   if (method === "ping") return {}
+  // Another app's page, in a frame of this one's, which this page answers as that app's (`framed`): only a trusted
+  // app's page shows one, as it may do anything its person may.
+  // A frame of its own that's gone: its page is forgotten.
+  if (method === "one/frame" && typeof params.forget === "string") {
+    if (nested.get(params.forget)?.in === view) nested.delete(params.forget)
+    return {}
+  }
+  if (method === "one/frame") {
+    if (!(await trusts())) throw new Error(`${names.get(view.entrypoint) || app} is installed untrusted, so it shows no other app's page.`)
+    const [entrypoint, fragment] = String(params.src).split("#", 2)
+    const subject = await whom(params.subject)
+    if (subject && !listed.has(subject)) list(subject)
+    const place = { key: key(entrypoint, subject), entrypoint, subject, host: host(entrypoint, subject) }
+    const frame = crypto.randomUUID()
+    nested.set(frame, { ...place, frame: view.frame, in: view })
+    const url = new URL(located(place), location.href)
+    url.searchParams.set("frame", frame)
+    return { url: `${url}${fragment ? `#${fragment}` : ""}`, sandbox, frame }
+  }
   if (method === "ui/request-display-mode") return { mode: "fullscreen" }
   // A file too large to go in a call: the client sends it where the network keeps it, for a tool of that app.
   if (method === "one/upload") return invoke("upload", await params.file.arrayBuffer(), { headers: { app } })
@@ -1537,9 +1574,17 @@ async function respond(view, method, params) {
 }
 
 addEventListener("message", async ({ source, data }) => {
-  const view = [...open.values()].find(({ frame }) => frame.contentWindow === source)
+  const view = [...open.values()].find(({ frame }) => frame.contentWindow === source) ?? frameOf(source, data)
   if (!view || typeof data?.method !== "string") return
   const { id, method, params = {} } = data
+  // A page in a frame is its frame's page's: it says how tall it is to that page, and logs its errors as its app's.
+  const child = [...nested].find(([, one]) => one === view)
+  if (id === undefined && child) {
+    const [frame, { in: hosting }] = child
+    if (method === "ui/notifications/size-changed" && typeof params.height === "number") post(hosting, { method: "notifications/one/framed", params: { frame, height: params.height } })
+    if (method === "notifications/message" && params.level === "error") exception(params.data?.message, params.data?.file, params.data?.line, view.entrypoint.split("/")[0])
+    return
+  }
   if (id === undefined) {
     // The app's user went back out of it. The app stays open behind the launcher.
     if (method === "ui/notifications/request-teardown" && !view.frame.inert && depth) history.back()
@@ -1657,6 +1702,7 @@ listen("stale", ({ payload: hosts }) => {
 listen("changed", ({ payload: view }) => {
   if (view === "client") for (const subject of listed) list(subject)
   else if (open.has(view)) post(/** @type {View} */ (open.get(view)), { method: "notifications/one/changed" })
+  for (const one of nested.values()) if (one.key === view) post(one, { method: "notifications/one/changed" })
 })
 
 /// An iPhone's swipe in from the left edge (`edge` in src/lib.rs), which is the window's own: WebKit's swipe between

@@ -8,7 +8,7 @@ export { createListCollection } from "../../collection.ts"
 export { createTheme, defineVars, negative, styles } from "../../styles.ts"
 export { tokens } from "../../tokens.ts"
 
-export { Box, EditableText, Image, Layer, Path, Scroll, Text, Video } from "./primitives.tsx"
+export { Box, EditableText, Frame, Image, Layer, Path, Scroll, Text, Video } from "./primitives.tsx"
 export { render } from "../../render.tsx"
 export { Checkbox, Field, Input, RadioGroup, Search, Switch, Textarea } from "../../field.tsx"
 export { Select } from "../../select.tsx"

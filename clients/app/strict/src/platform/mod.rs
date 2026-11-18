@@ -205,7 +205,8 @@ impl Windows {
             screen.clipboard = clipboard;
         }
         if let Some(strict) = Strict::started() {
-            screen.on_post(move || strict.run(move |windows| windows.posted(id)));
+            let strict = std::sync::Mutex::new(strict);
+            screen.on_post(Arc::new(move || strict.lock().unwrap_or_else(std::sync::PoisonError::into_inner).run(move |windows| windows.posted(id))));
         }
         let renderer = self.renderer(&native)?;
         let opened = std::time::Instant::now();

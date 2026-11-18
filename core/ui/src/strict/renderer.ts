@@ -58,8 +58,12 @@ export type Id = number
  *   them), and what's typed or pasted, which takes a field of its own so a phone's keyboard comes up as it's pressed,
  *   or as its `autofocus` is set. The device's full screen keys (F11, ⌃⌘F) aren't sent: they go on as `keydown` to the node it's in. A host that
  *   doesn't draw it says so (`Mutations.video`), and the page that uses it is opened another way.
+ * - `frame`: another app's page (`src`, `<app>/<page>[#<fragment>]`, for `subject`), drawn in its box as an iframe's
+ *   is: its own JS in a sandbox of its own, asking its client as its own app, as tall as it says its content is
+ *   (`ui/notifications/size-changed`) where its style says no height, and taking the pointer, the keyboard and Tab
+ *   as any box does. Only a trusted app's page shows one. A host that doesn't draw it says so (`Mutations.frame`).
  * A `raw-text` outside a `text` is drawn as if in one. */
-export type Type = "box" | "scroll" | "text" | "image" | "path" | "input" | "picker" | "video" | "raw-text"
+export type Type = "box" | "scroll" | "text" | "image" | "path" | "input" | "picker" | "video" | "frame" | "raw-text"
 
 /** What a native host gives an app's sandbox, as `globalThis.mutations`, before it loads the app's page: a function for
  * each mutation of its tree, called as Solid's renderer makes it, in order. The host applies what a turn of the
@@ -83,6 +87,8 @@ export interface Mutations {
   /** Whether it draws `video`. A page that uses one where it doesn't tells it `unsupported`, so it's opened another
    * way. */
   video?: boolean
+  /** Whether it draws a `frame`, as `video`. */
+  frame?: boolean
 }
 
 /** What the UI library gives the host, as `globalThis.ui` (with calls.ts's `Sandbox`), once it's loaded. */
@@ -221,8 +227,11 @@ export interface Props {
   /** How it's laid out and looks: its styles (`Styles`) by id, each dynamic one's values (`Dynamic`) after it, the last
    * winning where two say the same property. A page written for 1 sends one `Version1Style` instead. */
   style?: (StyleId | Dynamic)[] | Version1Style
-  /** `image`: a `data:` address, or a file of the app's own by its path. */
+  /** `image`: a `data:` address, or a file of the app's own by its path. `frame`: the page it shows, as a `one:` link
+   * names it after its scheme. */
   src?: string
+  /** `frame`: who its page is for, as a `one:` link's is, or whoever this page is for. */
+  subject?: string
   /** `image`: what it shows, its accessible name. Empty for one that's only how it looks. */
   alt?: string
   /** `path`: its shape, as SVG's path data. */

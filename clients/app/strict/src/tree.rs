@@ -37,6 +37,9 @@ pub enum Kind {
     Picker,
     Input,
     RawText,
+    /// Another app's page (`src`), for `subject`, drawn in its box by a sandbox of its own, as an iframe is (`Screen`'s
+    /// frames): its own JS, calling as its own app.
+    Frame,
 }
 
 /// A length: pixels or a word (`gap`, `auto`, `50%`, `control`).
@@ -413,6 +416,10 @@ impl Tree {
         // and that text side by side, as the DOM's spans are read.
         if node.kind == Kind::Text && node.str("role").is_none() && node.str("aria-label").is_none() && !node.listens("click") && self.speaks(id) {
             return node.children.iter().flat_map(|child| self.read(*child, held)).collect();
+        }
+        // What's in a frame is its own page's, which the screen puts in its place (`Screen::semantics`).
+        if node.kind == Kind::Frame {
+            return vec![json!({"frame": id})];
         }
         let text = matches!(node.kind, Kind::Text | Kind::RawText);
         let children: Vec<Value> =

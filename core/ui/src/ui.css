@@ -745,6 +745,12 @@ textarea.ui-strict-input {
   /* As tall as what's typed, where the browser can. */
   field-sizing: content;
 }
+/* Another app's page, in a box of this one's, with no frame of its own drawn around it. */
+.ui-strict-frame {
+  display: block;
+  min-width: 0;
+  border: 0;
+}
 .ui-strict-image {
   display: block;
   min-width: 0;

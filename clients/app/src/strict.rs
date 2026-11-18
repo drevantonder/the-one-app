@@ -96,7 +96,7 @@ struct Page {
 
 /// Whether `entrypoint`'s page is strict and needs a runtime version this program has, its tables too, and if it is, what
 /// it's drawn with.
-async fn probe(entrypoint: &str, subject: Option<&str>) -> anyhow::Result<Option<Page>> {
+async fn probe(entrypoint: &str, subject: Option<&str>, framed: bool) -> anyhow::Result<Option<Page>> {
     let listed = crate::hosts::command("strict", "apps", json!({"subject": subject})).await.map_err(|error| anyhow::anyhow!(error))?;
     let (app, path) = entrypoint.split_once('/').unwrap_or((entrypoint, ""));
     let Some(resource) = listed["resources"].as_array().into_iter().flatten().find(|resource| {
@@ -105,7 +105,10 @@ async fn probe(entrypoint: &str, subject: Option<&str>) -> anyhow::Result<Option
     }) else {
         return Ok(None);
     };
-    if !resource["_meta"]["runtimeVersion"].as_u64().is_some_and(|needed| needed <= u64::from(strict::RUNTIME_VERSION)) {
+    // A page in a frame that names no runtime version (a component's, which no entrypoint names) is tried: one that
+    // isn't strict doesn't start, and the page the frame's in opens in a web view instead.
+    let needed = resource["_meta"]["runtimeVersion"].as_u64();
+    if !needed.map_or(framed, |needed| needed <= u64::from(strict::RUNTIME_VERSION)) {
         return Ok(None);
     }
     let trusted = resource["_meta"]["trusted"] == true;
@@ -165,25 +168,13 @@ enum Kind {
 }
 
 async fn window(started: Instant, entrypoint: &str, subject: Option<&str>, link: &str, mut kind: Kind) -> anyhow::Result<bool> {
-    let Some(Page { page, module, trusted, css, tables, name: listed, icon }) = probe(entrypoint, subject).await? else { return Ok(false) };
+    let Some(Page { page, module, trusted, css, tables, name: listed, icon }) = probe(entrypoint, subject, false).await? else { return Ok(false) };
     let launcher = matches!(kind, Kind::Launcher(_));
-    // The design tokens and styles, which come with the UI library, as its pages' do, and its app's styles.
-    strict::tokens::load(&css);
-    if let [tokens, styles @ ..] = &tables[..] {
-        strict::tokens::load_table(tokens)?;
-        for styles in styles {
-            strict::load_styles(styles)?;
-        }
-    }
-    // Its own tokens, where its styles have them, are its window's alone.
-    let tokens_page = match &tables[..] {
-        [_, _, own] => strict::tokens::load_page(own)?,
-        _ => 0,
-    };
+    let tokens_page = load(&css, &tables)?;
     let strict = Strict::get()?;
-    let asked: Arc<Mutex<HashMap<String, Asked>>> = Arc::default();
     let window: Arc<OnceLock<WindowId>> = Arc::default();
-    let to = channel(entrypoint, subject, link, launcher, asked.clone(), strict.clone(), window.clone())?;
+    let begun = start(entrypoint, subject, link, launcher, Place::Window(window.clone()), &module, page)?;
+    let (to, asked) = (begun.to.clone(), begun.asked.clone());
     let view = format!("{}|{entrypoint}", subject.unwrap_or_default());
 
     // Where the device is with its network, as a page asks as it opens: the Colour Mode chosen on it, if one was.
@@ -194,23 +185,9 @@ async fn window(started: Instant, entrypoint: &str, subject: Option<&str>, link:
     let chosen = start["theme"].as_str().map(str::to_owned);
     let name = listed.or_else(|| start["name"].as_str().map(str::to_owned)).unwrap_or_else(|| entrypoint.split('/').next().unwrap_or_default().to_owned());
 
-    let (files_to, files_asked) = (to.clone(), asked.clone());
-    let (pictures_to, pictures_asked) = (to.clone(), asked.clone());
-    let state = Arc::new(Mutex::new(State { chosen: chosen.clone(), trusted, entrypoint: entrypoint.to_owned(), view, next: 0, launcher }));
+    let fragment = link.split_once('#').map(|(_, fragment)| fragment.to_owned());
+    let state = State { chosen: chosen.clone(), trusted, entrypoint: entrypoint.to_owned(), view, next: 0, launcher, framed: false, fragment };
     let (entrypoint, subject, link) = (entrypoint.to_owned(), subject.map(str::to_owned), link.to_owned());
-    let cache = crate::app().shell.home()?.join("strict").join(::client::BUILD);
-    // The page's files, which the app's window has, each asked for as the sandbox imports it, on its JS thread, which
-    // starts now, as its window opens.
-    let next = std::sync::atomic::AtomicU64::new(0);
-    let files: Files = Box::new(move |url: &Url| {
-        let id = format!("f{}", next.fetch_add(1, std::sync::atomic::Ordering::Relaxed));
-        let (answer_to, answer) = mpsc::channel();
-        files_asked.lock().expect("nothing panics holding it").insert(id.clone(), Asked::File(answer_to));
-        let _ = files_to.send(json!({"id": id, "file": url.as_str()}));
-        let file = answer.recv()?.map_err(|error| anyhow::anyhow!("{error}"))?;
-        Ok(String::from_utf8(file)?)
-    });
-    let js = Thread::start(&module, files, Some(cache), Clock::real());
     strict.run(move |windows| {
         let (size, panel) = match launcher {
             true => ((computer::SIZE.width as f32, computer::SIZE.height as f32), Some(computer::CORNER)),
@@ -267,28 +244,33 @@ async fn window(started: Instant, entrypoint: &str, subject: Option<&str>, link:
                 }
             }
         };
-        let opened = match js {
-            Ok(js) => {
-                let respond_state = state.clone();
-                let respond_to = to.clone();
-                let respond_asked = asked.clone();
-                let asked_by_app: strict::Asked =
-                    Box::new(move |message, appearance| respond(message, appearance, &respond_state, &respond_to, &respond_asked));
-                // Its title bar, which its page keeps clear, as its host context's `safeAreaInsets` tells it. The
-                // launcher has none.
-                let top = if launcher { 0.0 } else { BAR.0 as f32 };
-                let insets = strict::geometry::Edges { top, right: 0.0, bottom: 0.0, left: 0.0 };
-                let mut screen = Screen::new(js, Some(asked_by_app), Size { width: options.size.width.0, height: options.size.height.0 }, insets);
+        // Its title bar, which its page keeps clear, as its host context's `safeAreaInsets` tells it. The launcher has
+        // none.
+        let top = if launcher { 0.0 } else { BAR.0 as f32 };
+        let insets = strict::geometry::Edges { top, right: 0.0, bottom: 0.0, left: 0.0 };
+        let opened = match begun.screen(state, Size { width: options.size.width.0, height: options.size.height.0 }, insets) {
+            Ok(mut screen) => {
                 screen.theme = theme(chosen.as_deref());
                 screen.page = tokens_page;
-                // A picture it names by an address is one of its app's files, as a web view's page loads it.
-                let next_picture = std::cell::Cell::new(0u64);
-                screen.fetch = Some(Box::new(move |src: &str| {
-                    let Ok(address) = page.join(src) else { return };
-                    let id = format!("i{}", next_picture.replace(next_picture.get() + 1));
-                    pictures_asked.lock().expect("nothing panics holding it").insert(id.clone(), Asked::Picture(src.to_owned()));
-                    let _ = pictures_to.send(json!({"id": id, "file": address.as_str()}));
-                }));
+                // What its frames show, each another app's page in a sandbox of its own (`frame`): only a trusted
+                // app's page shows one, as on the DOM (`one/frame` in page/client.js).
+                let frames = window.clone();
+                screen.make_frame = trusted.then(|| -> strict::MakeFrame { Box::new(move |node, src, subject| {
+                    let (frames, src, subject) = (frames.clone(), src.to_owned(), subject.map(str::to_owned));
+                    crate::spawn(async move {
+                        if let Err(error) = frame(frames.clone(), node, &src, subject.as_deref()).await {
+                            eprintln!("{src} isn't drawn in its frame: {error:#}");
+                            // The page it's in can't be drawn here without it: it opens in a web view instead.
+                            if let Ok(strict) = Strict::get() {
+                                strict.run(move |windows| {
+                                    if let Some(id) = frames.get() {
+                                        windows.with(*id, |screen| screen.mismatched = Some(format!("its frame's page, {src}, isn't drawn natively: {error:#}")));
+                                    }
+                                })
+                            }
+                        }
+                    });
+                }) });
                 if launcher {
                     // Its glass is the system's, under its page, where there's one; Linux has none, so it's a
                     // popover's colour (DESIGN.md, Launcher).
@@ -314,6 +296,106 @@ async fn window(started: Instant, entrypoint: &str, subject: Option<&str>, link:
         }
     });
     Ok(true)
+}
+
+/// Loads the design tokens and styles, which come with the UI library, as its pages' do, and a page's app's styles.
+/// → the number of its page's own tokens, where its styles have them, which are its screen's alone
+/// (`tokens::load_page`).
+fn load(css: &str, tables: &[String]) -> anyhow::Result<u32> {
+    strict::tokens::load(css);
+    if let [tokens, styles @ ..] = tables {
+        strict::tokens::load_table(tokens)?;
+        for styles in styles {
+            strict::load_styles(styles)?;
+        }
+    }
+    Ok(match tables {
+        [_, _, own] => strict::tokens::load_page(own)?,
+        _ => 0,
+    })
+}
+
+/// Where a page is drawn: in its own window, or in a frame, by its node, of a window's page.
+#[derive(Clone)]
+enum Place {
+    Window(Arc<OnceLock<WindowId>>),
+    Frame(Arc<OnceLock<WindowId>>, strict::tree::Id),
+}
+
+/// A page whose JS has started, on its thread, and its channel to its app's window, with what it's asked over it.
+struct Started {
+    js: anyhow::Result<Thread>,
+    to: UnboundedSender<Value>,
+    asked: Arc<Mutex<HashMap<String, Asked>>>,
+    page: Url,
+}
+
+/// Starts `entrypoint`'s page, its `module`, at `link`, for `subject`, drawn at `place`: its channel to its app's
+/// window, and its JS on a thread of its own, its files each asked for over that as the sandbox imports it.
+fn start(entrypoint: &str, subject: Option<&str>, link: &str, launcher: bool, place: Place, module: &Url, page: Url) -> anyhow::Result<Started> {
+    let strict = Strict::get()?;
+    let asked: Arc<Mutex<HashMap<String, Asked>>> = Arc::default();
+    let to = channel(entrypoint, subject, link, launcher, asked.clone(), strict, place)?;
+    let cache = crate::app().shell.home()?.join("strict").join(::client::BUILD);
+    let (files_to, files_asked) = (to.clone(), asked.clone());
+    let next = std::sync::atomic::AtomicU64::new(0);
+    let files: Files = Box::new(move |url: &Url| {
+        let id = format!("f{}", next.fetch_add(1, std::sync::atomic::Ordering::Relaxed));
+        let (answer_to, answer) = mpsc::channel();
+        files_asked.lock().expect("nothing panics holding it").insert(id.clone(), Asked::File(answer_to));
+        let _ = files_to.send(json!({"id": id, "file": url.as_str()}));
+        let file = answer.recv()?.map_err(|error| anyhow::anyhow!("{error}"))?;
+        Ok(String::from_utf8(file)?)
+    });
+    let js = Thread::start(module, files, Some(cache), Clock::real());
+    Ok(Started { js, to, asked, page })
+}
+
+impl Started {
+    /// Its screen, on the strict thread: what its page asks answered as `state` says, and a picture it names by an
+    /// address fetched as one of its app's files, as a web view's page loads it.
+    fn screen(self, state: State, room: Size<f32>, insets: strict::geometry::Edges<f32>) -> anyhow::Result<Screen> {
+        let Started { js, to, asked, page } = self;
+        let state = Arc::new(Mutex::new(state));
+        let (respond_to, respond_asked) = (to.clone(), asked.clone());
+        let asked_by_app: strict::Asked = Box::new(move |message, appearance| respond(message, appearance, &state, &respond_to, &respond_asked));
+        let mut screen = Screen::new(js?, Some(asked_by_app), room, insets);
+        let next_picture = std::cell::Cell::new(0u64);
+        screen.fetch = Some(Box::new(move |src: &str| {
+            let Ok(address) = page.join(src) else { return };
+            let id = format!("i{}", next_picture.replace(next_picture.get() + 1));
+            asked.lock().expect("nothing panics holding it").insert(id.clone(), Asked::Picture(src.to_owned()));
+            let _ = to.send(json!({"id": id, "file": address.as_str()}));
+        }));
+        Ok(screen)
+    }
+}
+
+/// Starts the page that frame `node` of `window`'s page shows, `src` (`<app>/<page>[#<fragment>]`), for `subject`, and
+/// hands it to that page's screen: its own app's, in a sandbox of its own, calling with that app's permissions, as its
+/// own window's page would, and drawn in the frame's box.
+async fn frame(window: Arc<OnceLock<WindowId>>, node: strict::tree::Id, src: &str, subject: Option<&str>) -> anyhow::Result<()> {
+    let entrypoint = src.split_once('#').map_or(src, |(page, _)| page);
+    let Some(Page { page, module, trusted, css, tables, .. }) = probe(entrypoint, subject, true).await? else {
+        anyhow::bail!("it's no page of an app's this host draws")
+    };
+    let tokens_page = load(&css, &tables)?;
+    let started = start(entrypoint, subject, src, false, Place::Frame(window.clone(), node), &module, page)?;
+    let view = format!("{}|{entrypoint}", subject.unwrap_or_default());
+    let fragment = src.split_once('#').map(|(_, fragment)| fragment.to_owned());
+    let state = State { chosen: None, trusted, entrypoint: entrypoint.to_owned(), view, next: 0, launcher: false, framed: true, fragment };
+    let src = src.to_owned();
+    Strict::get()?.run(move |windows| {
+        let Some(id) = window.get() else { return };
+        windows.with(*id, |parent| match started.screen(state, Size { width: 0.0, height: 0.0 }, Default::default()) {
+            Ok(mut screen) => {
+                screen.page = tokens_page;
+                parent.framed(node, &src, screen)
+            }
+            Err(error) => parent.mismatched = Some(format!("its frame's page, {src}, didn't start: {error:#}")),
+        });
+    });
+    Ok(())
 }
 
 /// The row at a window's top that its breadcrumb is in, with its page's top bar after it (a unified toolbar), and where
@@ -360,8 +442,11 @@ mod computer {
 struct State {
     /// The Colour Mode chosen on this device, or none for as the device is.
     chosen: Option<String>,
-    /// It's the launcher's page, not an app's window.
+    /// It's the launcher's page, not an app's window, or a page in another's frame.
     launcher: bool,
+    framed: bool,
+    /// The place in its page the link it was opened at names: what follows its `#`.
+    fragment: Option<String>,
     trusted: bool,
     entrypoint: String,
     view: String,
@@ -389,7 +474,9 @@ fn respond(
     let launcher = state.lock().expect("nothing panics holding it").launcher;
     // The app asks to be left (`leave`): on a computer, where its window stays open, Home, as its breadcrumb's is; the
     // launcher is put away, the keyboard back with the app that had it.
-    if method == "ui/notifications/request-teardown" {
+    let framed = state.lock().expect("nothing panics holding it").framed;
+    // A page in a frame is its frame's page's, which stays: it leaves nothing.
+    if method == "ui/notifications/request-teardown" && !framed {
         if launcher { computer::hide(true) } else { computer::summon() }
         return None;
     }
@@ -413,7 +500,10 @@ fn respond(
                 "displayMode": "fullscreen",
                 "availableDisplayModes": ["fullscreen"],
                 "deviceCapabilities": {"touch": cfg!(mobile), "hover": cfg!(desktop)},
-                "breadcrumb": cfg!(desktop),
+                // A page in a frame is named by nothing above it: its first screen says its heading.
+                "breadcrumb": cfg!(desktop) && !state.framed,
+                // The place its link names, as its address's `#` says on the DOM (`link()`).
+                "link": state.fragment,
                 "connection": "online",
                 "updateReady": false,
             },
@@ -537,13 +627,17 @@ fn channel(
     launcher: bool,
     asked: Arc<Mutex<HashMap<String, Asked>>>,
     strict: Strict,
-    window: Arc<OnceLock<WindowId>>,
+    place: Place,
 ) -> anyhow::Result<UnboundedSender<Value>> {
     let view = format!("{}|{entrypoint}", subject.unwrap_or_default());
+    let (window, framed) = match &place {
+        Place::Window(window) => (window.clone(), None),
+        Place::Frame(window, node) => (window.clone(), Some(*node)),
+    };
     let (ours, theirs) = tokio::io::duplex(1 << 16);
     crate::spawn(crate::hosts::talk(theirs));
     let (to, mut out) = unbounded_channel::<Value>();
-    let _ = to.send(json!({"hello": {"entrypoint": entrypoint, "subject": subject, "link": link}}));
+    let _ = to.send(json!({"hello": {"entrypoint": entrypoint, "subject": subject, "link": link, "frame": framed.is_some()}}));
     let (read, mut write) = tokio::io::split(ours);
     crate::spawn(async move {
         while let Some(message) = out.recv().await {
@@ -569,6 +663,15 @@ fn channel(
                 if launcher {
                     return computer::reload_native();
                 }
+                // A frame's page starts again in it.
+                if let Some(node) = framed {
+                    let window = window.clone();
+                    return strict.run(move |windows| {
+                        if let Some(id) = window.get() {
+                            windows.with(*id, |screen| screen.reload_frame(node));
+                        }
+                    });
+                }
                 let (entrypoint, subject, link) = (entrypoint.clone(), subject.clone(), link.clone());
                 let window = window.clone();
                 strict.run(move |windows| {
@@ -581,12 +684,16 @@ fn channel(
                 })
             }
         };
-        // The window this is, once the strict thread has opened it; a job runs after the one that opened it.
+        // The window this is, once the strict thread has opened it, a job running after the one that opened it; or the
+        // page in its frame, once it's there.
         let on = |job: Box<dyn FnOnce(&mut Screen) + Send>| {
             let window = window.clone();
             strict.run(move |windows| {
                 if let Some(id) = window.get() {
-                    windows.with(*id, job);
+                    windows.with(*id, |screen| match framed {
+                        Some(node) => drop(screen.frame_mut(node).map(job)),
+                        None => job(screen),
+                    });
                 }
             })
         };
@@ -607,7 +714,7 @@ fn channel(
                         on(Box::new(move |screen| screen.message(&json!({"jsonrpc": "2.0", "method": "notifications/one/changed"}))))
                     }
                     // Over its page, while its network doesn't answer, as over an app on a phone (DESIGN.md).
-                    "connection" => on(Box::new(move |screen| {
+                    "connection" if framed.is_none() => on(Box::new(move |screen| {
                         screen.notice = match payload.as_str() {
                             Some("reconnecting") => Some(strict::Notice { text: "Reconnecting…".into(), action: None }),
                             Some("offline") => Some(strict::Notice { text: "Can't reach your network".into(), action: None }),
@@ -624,11 +731,16 @@ fn channel(
                     "behind" if launcher => computer::native(None),
                     // The launcher, linked to, comes forward.
                     "open" if launcher => computer::summon(),
-                    "open" => {
+                    // Its window comes forward, and its page is told the place the link names, as a page's `hashchange`.
+                    "open" if framed.is_none() => {
                         let window = window.clone();
+                        let fragment = payload.as_str().and_then(|link| link.split_once('#')).map(|(_, fragment)| fragment.to_owned());
                         strict.run(move |windows| {
                             if let Some(id) = window.get() {
                                 windows.activate(*id);
+                                if let Some(fragment) = fragment {
+                                    windows.with(*id, |screen| screen.message(&json!({"jsonrpc": "2.0", "method": "ui/notifications/host-context-changed", "params": {"link": fragment}})));
+                                }
                             }
                         });
                     }
@@ -663,7 +775,10 @@ fn channel(
                 }
             }
         }
-        // Told to end, or the One App is: the window closes.
+        // Told to end, or the One App is: the window closes, which a frame's page leaves to the window it's in.
+        if framed.is_some() {
+            return;
+        }
         let window = window.clone();
         strict.run(move |windows| {
             if let Some(id) = window.get() {

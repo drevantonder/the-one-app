@@ -2,9 +2,9 @@
 // plain element with the semantic props a native host's renderer has (renderer.ts). A native host draws
 // the same props from the mutations Solid's universal renderer tells it. A primitive's `style` is styles (../styles.ts),
 // drawn by their classes, or, on a page written for version 1, one style object, drawn as inline CSS.
-import { createEffect, For, omit, onCleanup, onSettled, Show } from "solid-js"
+import { createEffect, createSignal, For, omit, onCleanup, onSettled, Show } from "solid-js"
 import { Dynamic, Portal, render as mount, type JSX } from "@solidjs/web"
-import { tellDrawn } from "../bridge.ts"
+import { frame, sized, tellDrawn, unframe } from "../bridge.ts"
 import { layer } from "./layer.ts"
 import type { Ice, Props, TextInputAction, Version1Style } from "./renderer.ts"
 import { fullScreen, mods, named, type Input } from "./input.ts"
@@ -446,6 +446,47 @@ export interface ImageProps extends Pick<Semantics, "aria-hidden"> {
 /// own files, named by `alt`, scaled to fit its box.
 export function Image(props: ImageProps) {
   return <img src={props.src} alt={props.alt} aria-hidden={props["aria-hidden"]} {...drawn("ui-strict-image", props.style)} />
+}
+
+/** A frame's props: the page it shows, as a `one:` link names it after its scheme, for whoever it says. */
+export interface FrameProps {
+  src: string
+  subject?: string
+  title?: string
+  style?: Style
+}
+
+/// `<Frame src="chrome-profiles/client/profile.html#work" title="Work" style={look.fill} />`: another app's page, in
+/// an iframe at its own app's address, which the client answers as that app's, as tall as its page says its content
+/// is where its style says no height. Only a trusted app's page shows one.
+export function Frame(props: FrameProps) {
+  const [shown, setShown] = createSignal<{ url: string; sandbox: string; frame: string }>()
+  const [height, setHeight] = createSignal<number>()
+  createEffect(
+    () => [props.src, props.subject] as const,
+    ([src, subject]) => {
+      let gone = false
+      frame(src, subject).then((at) => {
+        if (gone) return
+        sized.set(at.frame, setHeight)
+        setShown(at)
+      })
+      return () => {
+        gone = true
+        const was = shown()
+        if (!was) return
+        sized.delete(was.frame)
+        unframe(was.frame)
+      }
+    },
+  )
+  const look = () => drawn("ui-strict-frame", props.style)
+  const style = () => ({ ...(look().style as Record<string, string | number> | undefined), ...(height() !== undefined && { "min-height": `${height()}px` }) })
+  return (
+    <Show when={shown()}>
+      {(at) => <iframe src={at().url} sandbox={at().sandbox} title={props.title} allow="clipboard-write" class={look().class} style={style()} />}
+    </Show>
+  )
 }
 
 /** A path's props. */
