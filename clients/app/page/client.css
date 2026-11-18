@@ -143,10 +143,6 @@ iframe {
   border: 0;
   background: var(--background);
 }
-/* The launcher is under the rail too, which is there only over an app. */
-iframe.launcher {
-  grid-area: 2 / 1 / 3 / -1;
-}
 /* What the device keeps for itself, measured (client.js's `insets`). */
 #safe-area {
   position: fixed;
@@ -291,8 +287,8 @@ iframe[data-move] {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-/* It comes in with an app and goes with it: slid in from its side, or for whoever asked for less motion, faded. */
-#rail,
+/* The handle comes in with an app and goes with it: slid in from its side, or for whoever asked for less motion,
+   faded. */
 #handle {
   transition:
     translate var(--move-travel) var(--ease-travel),
@@ -300,13 +296,12 @@ iframe[data-move] {
     visibility var(--move-travel) allow-discrete;
 }
 @media (prefers-reduced-motion: reduce) {
-  #rail,
   #handle {
     translate: none !important;
   }
 }
 
-/* Where the window is wide, a thin sidebar on its left, beside the app. */
+/* Where the window is wide, a thin sidebar on its left, always, beside the Home Screen or the app in front. */
 #rail {
   display: none;
 }
@@ -325,11 +320,6 @@ iframe[data-move] {
     border-right: 1px solid var(--sidebar-border);
     background: var(--sidebar);
     color: var(--sidebar-foreground);
-  }
-  body[data-rail="hidden"] #rail {
-    translate: -100% 0;
-    opacity: 0;
-    visibility: hidden;
   }
   #handle {
     display: none;
@@ -382,7 +372,7 @@ iframe[data-move] {
 #handle:is(:hover, :focus-visible, [aria-expanded="true"])::before {
   width: 0.4375rem;
 }
-body:not([data-rail="shown"]) #handle {
+body:not([data-rail="app"]) #handle {
   translate: 100% 0;
   opacity: 0;
   visibility: hidden;

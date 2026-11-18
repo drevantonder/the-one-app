@@ -890,7 +890,6 @@ function load(entrypoint, subject, fragment) {
   /** @type {View} */
   const view = { ...place, frame }
   view.frame.setAttribute("sandbox", sandbox)
-  if (entrypoint === launcher) view.frame.className = "launcher"
   // An app hands a link to the device's share sheet, or copies it, as its person presses Share (the UI library's `share`),
   // and shows a part of itself full screen (a live screen's Full Screen).
   view.frame.allow = "clipboard-write; web-share; fullscreen"
@@ -1088,9 +1087,10 @@ const showing = (at) => open.get(at ?? "") ?? open.get(key(shown.getSnapshot().m
 /// and a computer's app rail (Teams', Slack's) are. It's Home, then the apps used lately on this device (`recent`),
 /// the open ones first, each newest opened first: going from one open app to another moves none, so what's under a
 /// finger or the pointer stays there. Where the window is wide, a computer's or a tablet's turned sideways, it's
-/// a thin sidebar on the window's left, the app in front outlined, and the apps beside it. Elsewhere it's a handle on
-/// the window's right edge, which a finger swipes the rail in from as a panel, or taps, and drags up or down out of
-/// the app's way, where it's kept. It's there only while an app is in front: the Home Screen is where it goes back to.
+/// a thin sidebar on the window's left, always there, as Teams', Slack's and Discord's are, with whichever is in front
+/// outlined, Home too, and the apps and the Home Screen beside it. Elsewhere it's a handle on the window's right edge,
+/// which a finger swipes the rail in from as a panel, or taps, and drags up or down out of the app's way, where it's
+/// kept: it's there only while an app is in front, as the Home Screen is where it goes back to.
 /// Home goes back there as the device's back does, and an app opens as one does from another (`go`).
 const RECENT = 8
 /// The apps used lately on this device, by their keys, newest first.
@@ -1164,17 +1164,20 @@ function pick(entrypoint, subject) {
   go(entrypoint, subject)
 }
 
-/// Whether the rail shows, and as what: there's a Home Screen to go back to (`data-rail`), and an app in front of it
-/// (`shown`), while the window shows its apps. Android is told where the handle is, which its back gesture leaves to it.
+/// Whether the rail shows, and over what: while the window shows its apps and has a Home Screen to go back to
+/// (`data-rail`), the Home Screen (`home`) or an app (`app`). The sidebar is there over both, and the handle over an app
+/// alone. Android is told where the handle is, which its back gesture leaves to it.
 /** @type {string | undefined} */
 let excluded
 function rail() {
   const now = shown.getSnapshot()
-  const showing = Boolean(launcher) && here() !== null && now.hasTag("pages") && !now.matches("app_store")
-  if (launcher) document.body.dataset.rail = showing ? "shown" : "hidden"
+  const homed = Boolean(launcher) && now.hasTag("pages") && !now.matches("app_store")
+  const showing = homed && here() !== null
+  if (homed) document.body.dataset.rail = showing ? "app" : "home"
   else delete document.body.dataset.rail
-  sidebar.inert = handle.inert = !showing
-  if (showing && wide.matches) fill(byId("rail-list"), false)
+  sidebar.inert = !homed
+  handle.inert = !showing
+  if (homed && wide.matches) fill(byId("rail-list"), false)
   if (panel.open && (!showing || wide.matches)) panel.close()
   placeHandle()
   const at = showing && !wide.matches ? handle.getBoundingClientRect() : undefined
