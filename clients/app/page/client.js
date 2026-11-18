@@ -394,8 +394,8 @@ const moveMachine = setup({
     begin: assign(({ event }) => {
       const pulled = event.type === "grab" && event.home === true
       // Pulled home, it goes into the icon it came out of only where it came from the Home Screen.
-      const grabbed = pulled ? { to: showing(null), icon: depth === 1 ? stack[1].from : undefined } : { to: showing(stack[depth - 1].key), icon: stack[depth].from }
-      const show = /** @type {Extract<Shown, { type: "show" }>} */ (event.type === "grab" ? { ...grabbed, back: true, tapped: performance.now() } : event)
+      const grabbed = () => (pulled ? { to: showing(null), icon: depth === 1 ? stack[1].from : undefined } : { to: showing(stack[depth - 1].key), icon: stack[depth].from })
+      const show = /** @type {Extract<Shown, { type: "show" }>} */ (event.type === "grab" ? { ...grabbed(), back: true, tapped: performance.now() } : event)
       const from = /** @type {View} */ (front)
       const { upper, ms, parts } = moves(from, show.to, show.back, show.icon, pulled)
       show.to.frame.inert = false
