@@ -771,11 +771,10 @@ export async function asked(auth: Auth, origin: string, { ask, who: name, buildi
     };
   }
   // A request answered on one of its person's devices: the number tapped lets it in if it's the one it shows, and
-  // stops it if not, as Not Me does. A `device` that its person's key is handed to must be the request's.
+  // stops it if not, as Not Me does.
   if ((ask === "approve" && about.request) || ask === "deny") {
     const code = await adapter.findOne<DeviceCode>({ model: "deviceCode", where: [{ field: "id", value: String(about.request) }, { field: "person", value: user.id }] });
     if (!code || state(code) !== "waiting") return { error: "That device isn't waiting to sign in any more." };
-    if (about.device && about.device !== code.clientId) return { error: "Your key is handed only to the device that's waiting." };
     const right = ask === "approve" && Number(about.number) === code.number;
     if (!(await answer(adapter, code, user, right ? "approved" : "denied"))) return { error: "That device isn't waiting to sign in any more." };
     if (ask === "approve" && !right) return { error: `That isn't the number ${code.name} showed, so it was blocked. If it was you, start again on it.` };

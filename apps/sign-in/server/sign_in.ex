@@ -272,7 +272,7 @@ defmodule SignIn do
                 type: "object",
                 properties: %{
                   request: %{type: "string", description: "What approve and deny take"},
-                  device: %{type: "string", description: "Its key, which approve takes to hand it yours"},
+                  device: %{type: "string", description: "Its key, which `encryption_approve` takes to hand it yours"},
                   name: %{type: "string", description: "What the device calls itself"},
                   at: %{type: "string", description: "When it named you, ISO 8601"},
                   place: %{type: ["string", "null"], description: "Roughly where it asked from: a city"},
@@ -289,28 +289,19 @@ defmodule SignIn do
       %{
         name: "approve",
         description:
-          "Approves a device as yours: by the code it shows, or one that's waiting by the number it shows. A wrong number blocks it. A device that holds your key hands it to one it approves by its number",
+          "Approves a device as yours: by the code it shows, or one that's waiting by the number it shows. A wrong number blocks it",
         inputs: %{
           type: "object",
           properties: %{
             code: %{type: "string", description: "The code the device shows, as WDJB-MJHT"},
             request: %{type: "string", description: "A device waiting to sign in as you, as `waiting` lists it"},
-            number: %{type: "integer", description: "With `request`: the number the device shows"},
-            device: %{type: "string", description: "With `request`: its key, as `waiting` lists it"},
-            key: %{
-              type: "string",
-              format: "owner-key",
-              description: "Your key, encrypted to `device`: a device that holds it fills this in"
-            }
+            number: %{type: "integer", description: "With `request`: the number the device shows"}
           }
         },
         outputs: %{
           type: "object",
-          properties: %{
-            approved: %{type: "string", description: "The device's name, which is yours now"},
-            unlocked: %{type: "boolean", description: "Whether it holds your key now"}
-          },
-          required: ["approved", "unlocked"]
+          properties: %{approved: %{type: "string", description: "The device's name, which is yours now"}},
+          required: ["approved"]
         }
       },
       %{
@@ -484,23 +475,15 @@ defmodule SignIn do
     %{count: length(waiting), waiting: waiting}
   end
 
-  # A device that holds its person's key filled in `key`, encrypted to `device`: the edge approves the request only
-  # if it's that device's, and then it's handed the key as a device that holds it approves one
-  # (`encryption_approve`), so it comes in holding it. A device that doesn't hold the key, or a browser, fills in none.
-  def call("approve", %{"request" => request, "number" => number} = inputs, call) do
-    device = if inputs["key"], do: inputs["device"]
-    %{"approved" => name} = ask(%{ask: "approve", who: person(call), request: request, number: number, device: device})
-
-    if device,
-      do: Call.tool(call, "encryption", "approve", %{"device" => device, "name" => name, "key" => inputs["key"]})
-
+  def call("approve", %{"request" => request, "number" => number}, call) do
+    %{"approved" => name} = ask(%{ask: "approve", who: person(call), request: request, number: number})
     Call.changed(call)
-    %{approved: name, unlocked: device != nil}
+    %{approved: name}
   end
 
   def call("approve", %{"code" => code}, call) do
     %{"approved" => name} = ask(%{ask: "approve", who: person(call), code: code})
-    %{approved: name, unlocked: false}
+    %{approved: name}
   end
 
   def call("approve", _inputs, _call), do: raise("Say the code the device shows, or the request and the number it shows.")

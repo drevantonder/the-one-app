@@ -336,13 +336,17 @@ setAnswering(linked())
 addEventListener("hashchange", () => setAnswering(linked()))
 
 /// The person's answer to a device waiting to sign in as them: the number they tapped, which lets it in if it's the
-/// one it shows and blocks it if not, or Not Me, which blocks it. This device hands it its person's key if it holds it.
+/// one it shows and blocks it if not, or Not Me, which blocks it. Once it's in, this device hands it its person's key if
+/// it holds it, as `encryption_approve` does, which a device without it, and a browser, leave.
 async function answer(device: Waiting, number?: number) {
   setAnswering()
   let unlocked = false
   const done = await doing(async () => {
     if (number === undefined) return call("sign-in_deny", { request: device.request })
-    unlocked = JSON.parse(await call("sign-in_approve", { request: device.request, device: device.device, number })).unlocked
+    await call("sign-in_approve", { request: device.request, number })
+    if (JSON.parse(await call("encryption_key")).slot == null) return
+    await call("encryption_approve", { device: device.device, name: device.name })
+    unlocked = true
   })
   if (!done) return haptic("error")
   haptic("success")

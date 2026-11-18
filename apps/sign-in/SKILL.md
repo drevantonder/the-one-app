@@ -33,8 +33,9 @@ that one question for it, and a new device when they also say the code it shows 
   `waiting` lists the devices waiting to sign in as your person, each with three numbers, one of which it shows,
   for a few minutes. Let one in only when your person tells you the number it shows: `approve` with its `request`
   and that `number`. A wrong number blocks it, and so does `deny`. Never guess: a device that names your person
-  could be a stranger's, and the number is what keeps it out. Approved from a device that holds your person's key
-  (`one` on it, or the app there), it's handed the key too, as `encryption_approve` hands it, and comes in holding it.
+  could be a stranger's, and the number is what keeps it out. The app on a device that holds your person's key then
+  hands it the key too, as `encryption_approve` does; with `one` on such a device, call `encryption_approve` with
+  its `device` (as `waiting` lists it) and `name` afterwards.
 - It can show a code and a link at the network's address instead. Its person opens the link where they sign in,
   on the device or any device of theirs, and says whether the code there matches. Pass both on as they are: the
   code is what keeps a stranger's device out.
