@@ -693,17 +693,12 @@ defmodule Chrome do
 
   defp shell(word), do: "'" <> String.replace(word, "'", ~S('\'')) <> "'"
 
-  # Runs one of the hooks Chrome offers, and gives what's changed: nothing on a server from before apps could
-  # offer hooks (One Core 7929556e6), where no app can join one.
+  # Runs one of the hooks Chrome offers, and gives what's changed.
   defp run_hook(call, hook, about) do
-    if function_exported?(Call, :run_hook, 3) do
-      case apply(Call, :run_hook, [call, hook, about]) do
-        {:ok, changes, _by} -> changes
-        {:refuse, why} -> raise why
-        :ok -> %{}
-      end
-    else
-      %{}
+    case Call.run_hook(call, hook, about) do
+      {:ok, changes, _by} -> changes
+      {:refuse, why} -> raise why
+      :ok -> %{}
     end
   end
 
