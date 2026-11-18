@@ -34,8 +34,27 @@ buy, send or delete there without them asking for it.
 ## A person's own computer
 
 Each Mac, Linux or Windows desktop running Computer Use's service is a screen, called what the computer is called: its main
-display, the one with the menu bar, with everything on it, signed in as its person. You act as them, with their own
-pointer and keyboard, so do only what they asked.
+display, the one with the menu bar, with everything on it, signed in as its person. You act as them, so do only what
+they asked.
+
+Its person is likely using it as you work, so work in the background, on one app's window, and leave their screen,
+pointer and keyboard to them. Use the whole display (the tools without `pid`, `window_id` or `element_token`, with their
+own pointer and keyboard) only when a task truly needs it or they're away. These tools are Cua Driver's, by its names:
+
+- `windows` lists windows (`app` or `pid` narrows it): each one's `window_id`, `pid`, `app_name`, `title`, `bounds`.
+  Open the app you need in the background yourself rather than bringing one forward.
+- `elements` (`pid`, `window_id`) reads a window's elements through accessibility, as rows `[N]`; the element's
+  `element_token` is `<snapshot_id>:N`. `query` narrows a large window. A new read of the window replaces its tokens.
+- `screenshot` with `pid` and `window_id` is a picture of that window alone, as it is behind whatever is in front.
+- `click`, `double_click`, `scroll`, `type` and `key` with an `element_token`, or with `pid` and `window_id` (x and y
+  then in that window's own screenshot), act in the background: the window stays behind, and the person's pointer
+  doesn't move. `set_value` sets a field, slider or pop-up menu's value by its `element_token`. Prefer an element to a
+  point; a point is for what has no element (a canvas, a video).
+- What an action did shows on the next `elements` or window `screenshot`: check it there. Some surfaces (Chromium and
+  Electron web content) don't take every background input, which the action says; only then use the whole display.
+
+Never act on a window the person didn't ask you to use. On Linux, background work needs X11 (or XWayland): on Wayland
+itself one window can't be aimed at.
 
 - Never type a password or a code (a one-time code, a passkey's PIN). Ask the person to type it themselves. On a Mac
   `type` refuses while a password field has the focus.
@@ -47,6 +66,7 @@ pointer and keyboard, so do only what they asked.
   `ctrl+t`), and with anything else ⌃ (`ctrl+Tab`). `super`, `cmd` and `meta` are ⌘, `alt` is ⌥, and `control` is
   always ⌃ (`control+c` in Terminal).
 - It has no live video yet: `stream` refuses.
+- Windows and elements are a computer's own screen's only: another screen is used whole.
 
 Only the computer's person, the user its server is for, and the network's owner may use it. A computer gets it with
 `install_service --app computer-use --service ComputerUse.Desktop --server <key>`. The service runs Cua Driver

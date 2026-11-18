@@ -8,8 +8,11 @@ defmodule ComputerUse.Desktop do
   as a service of the person's session: on a Mac a launchd agent, on Linux a systemd user unit of the graphical
   session, on Windows a scheduled task of theirs that starts as they log on. Its daemon (`cua-driver serve`) answers
   MCP over HTTP on a port of the loopback of its own, with a bearer token kept in this service's folder, the same on
-  every kind of computer; each action is one of its tools, called there with the whole display as its target
-  (`scope: desktop`) and the person's own pointer and keyboard (`delivery_mode: foreground`), as a person uses them.
+  every kind of computer. Each action is one of its tools, called there either with the whole display as its target
+  (`scope: desktop`) and the person's own pointer and keyboard (`delivery_mode: foreground`), as a person uses them,
+  or aimed at one window (`pid`, `window_id`) or one of its elements (`element_token`), which Cua Driver does in the
+  background: the window stays where it is, behind whatever the person has in front, and their pointer and keyboard
+  stay theirs.
 
   macOS lets a program see the screen only with Screen Recording and use the mouse and keyboard only with
   Accessibility, and asks for and keeps them in the name of the program it holds responsible, which for a launchd
@@ -43,7 +46,7 @@ defmodule ComputerUse.Desktop do
     "Accessibility" => "x-apple.systempreferences:com.apple.preference.security?Privacy_Accessibility"
   }
   @uses %{"Screen Recording" => "see this Mac's screen", "Accessibility" => "use this Mac's mouse and keyboard"}
-  @needed %{"screenshot" => "Screen Recording"}
+  @needed %{"screenshot" => "Screen Recording", "windows" => "Screen Recording"}
 
   @doc "The caller's computers that are on, each a screen as Computer Use lists them, with its server's key as `desktop`."
   def screens(call) do
@@ -63,7 +66,10 @@ defmodule ComputerUse.Desktop do
     end
   end
 
-  @doc "Does a Computer Use action on `desktop`'s screen: a screenshot as a blob, anything else answered with what it did."
+  @doc """
+  Does a Computer Use action on `desktop`'s screen: a screenshot as a blob, `windows` and `elements` as Cua Driver
+  answers them, anything else answered with what it did.
+  """
   def use(_call, _desktop, "stream", _inputs), do: raise("A computer's own screen has no live video yet: it's shown a picture at a time.")
 
   def use(call, desktop, action, inputs) do
@@ -71,7 +77,13 @@ defmodule ComputerUse.Desktop do
 
     case action do
       "screenshot" ->
-        {:blob, "image/png", Base.decode64!(OneCore.Service.call(call, __MODULE__, :screenshot, [], desktop))}
+        {:blob, "image/png", Base.decode64!(OneCore.Service.call(call, __MODULE__, :screenshot, [inputs], desktop))}
+
+      "windows" ->
+        OneCore.Service.call(call, __MODULE__, :windows, [inputs], desktop)
+
+      "elements" ->
+        OneCore.Service.call(call, __MODULE__, :elements, [inputs], desktop)
 
       _ ->
         done = did(action, inputs)
@@ -88,14 +100,22 @@ defmodule ComputerUse.Desktop do
     (String.starts_with?(person || "", "users/") and call.subject == person) or OneCore.Call.owns?(%{call | subject: "network"})
   end
 
-  defp did("click", %{"x" => x, "y" => y} = inputs), do: "Clicked #{inputs["button"] || "left"} at #{x}, #{y}"
-  defp did("double_click", %{"x" => x, "y" => y}), do: "Double-clicked at #{x}, #{y}"
+  defp did("click", %{"element_token" => token} = inputs), do: "Clicked #{inputs["button"] || "left"} on #{token}"
+  defp did("click", %{"x" => x, "y" => y} = inputs), do: "Clicked #{inputs["button"] || "left"} at #{x}, #{y}#{window(inputs)}"
+  defp did("double_click", %{"element_token" => token}), do: "Double-clicked on #{token}"
+  defp did("double_click", %{"x" => x, "y" => y} = inputs), do: "Double-clicked at #{x}, #{y}#{window(inputs)}"
   defp did("move", %{"x" => x, "y" => y}), do: "Moved to #{x}, #{y}"
-  defp did("drag", %{"path" => path}), do: "Dragged through #{length(path)} points"
-  defp did("scroll", %{"direction" => direction} = inputs), do: "Scrolled #{direction} #{inputs["amount"] || 5}"
-  defp did("type", %{"text" => text}), do: "Typed #{String.length(text)} characters"
-  defp did("key", %{"keys" => keys}), do: "Pressed #{keys}"
+  defp did("drag", %{"path" => path} = inputs), do: "Dragged through #{length(path)} points#{window(inputs)}"
+  defp did("scroll", %{"direction" => direction} = inputs), do: "Scrolled #{direction} #{inputs["amount"] || 5}#{window(inputs)}"
+  defp did("type", %{"text" => text} = inputs), do: "Typed #{String.length(text)} characters#{window(inputs)}"
+  defp did("key", %{"keys" => keys} = inputs), do: "Pressed #{keys}#{window(inputs)}"
+  defp did("set_value", %{"element_token" => token, "value" => _}), do: "Set the value of #{token}"
   defp did(action, _inputs), do: raise("#{action} needs more: Computer Use's tools say what each action takes")
+
+  defp window(%{"element_token" => token}), do: " into #{token}"
+  defp window(%{"window_id" => id}), do: " in window #{id}"
+  defp window(%{"pid" => pid}), do: " in #{pid}'s window"
+  defp window(_inputs), do: ""
 
   @impl OneCore.Service
   def called, do: "Computer Use for The One App"
@@ -124,56 +144,100 @@ defmodule ComputerUse.Desktop do
     end
   end
 
-  @doc "A PNG of the screen, in base64, scaled down to what a model sees whole."
-  def screenshot(service) do
+  @doc """
+  A PNG of the screen, or of one window of it (`pid` and `window_id`), in base64, scaled down to what a model sees
+  whole. A window's is taken in the background, as it is behind whatever is in front of it, and its pixels are what
+  actions aimed at it count.
+  """
+  def screenshot(service, inputs) do
     allowed!(service, "screenshot")
-    {width, height} = picture(frame(service))
-    result = tool(service, "get_desktop_state", %{"max_image_dimension" => max(width, height)})
+
+    result =
+      if Map.has_key?(inputs, "pid") or Map.has_key?(inputs, "window_id") do
+        # No more than about 1.15 megapixels whatever the window's shape, as `picture/1` does for the display.
+        window(service, "get_window_state", Map.merge(inputs, %{"include_accessibility_tree" => false, "max_image_dimension" => 1072}))
+      else
+        {width, height} = picture(frame(service))
+        tool(service, "get_desktop_state", %{"max_image_dimension" => max(width, height)})
+      end
+
     Enum.find_value(result["content"], &(&1["type"] == "image" && &1["data"])) || raise "Cua Driver gave no picture of the screen"
+  end
+
+  @doc "The computer's top-level windows, as Cua Driver's `list_windows` gives them: of one app (`app`, `pid`) or all."
+  def windows(service, inputs) do
+    allowed!(service, "windows")
+    tool(service, "list_windows", inputs)["structuredContent"]
+  end
+
+  @doc """
+  One window's elements, read through accessibility in the background, as Cua Driver's `get_window_state` gives
+  them: a tree of rows, each `[N]` an element whose `element_token` is `<snapshot_id>:N`, for actions aimed at it.
+  """
+  def elements(service, inputs) do
+    allowed!(service, "elements")
+    window(service, "get_window_state", Map.put(inputs, "include_screenshot", false))["structuredContent"]
   end
 
   @doc "Does a Computer Use action other than a screenshot: `inputs` as Computer Use gives them."
   def act(service, action, inputs) do
     allowed!(service, action)
-    frame = frame(service)
-    picture = picture(frame)
-    at = &at(&1, frame, picture)
-    # As a person does it: anywhere on the display, with their own pointer and keyboard.
-    desktop = %{"scope" => "desktop", "delivery_mode" => "foreground"}
+    desktop? = not Enum.any?(~w(pid window_id element_token), &Map.has_key?(inputs, &1))
+
+    {send, target, at} =
+      if desktop? do
+        # As a person does it: anywhere on the display, with their own pointer and keyboard.
+        frame = frame(service)
+        picture = picture(frame)
+        {&tool(service, &1, &2), %{"scope" => "desktop", "delivery_mode" => "foreground"}, &at(&1, frame, picture)}
+      else
+        # Aimed at a window or an element, in the background: x and y are pixels of that window's own screenshot,
+        # which Cua Driver counts itself.
+        {&window(service, &1, &2), Map.take(inputs, ~w(pid window_id element_token)), &Map.take(&1, ~w(x y))}
+      end
 
     case action do
       "click" ->
-        tool(service, "click", Map.merge(desktop, %{"button" => inputs["button"] || "left"}) |> Map.merge(at.(inputs)))
+        send.("click", Map.merge(target, %{"button" => inputs["button"] || "left"}) |> Map.merge(at.(inputs)))
+
+      # Cua Driver's own double-click is aimed at a window or an element; on the display it's a click of two.
+      "double_click" when desktop? ->
+        send.("click", Map.merge(target, %{"count" => 2}) |> Map.merge(at.(inputs)))
 
       "double_click" ->
-        tool(service, "click", Map.merge(desktop, %{"count" => 2}) |> Map.merge(at.(inputs)))
+        send.("double_click", Map.merge(target, at.(inputs)))
 
       "move" ->
-        tool(service, "move_cursor", Map.merge(desktop, at.(inputs)))
+        if not desktop?, do: raise("`move` moves the person's own pointer, which actions aimed at a window leave alone: it takes no window")
+        send.("move_cursor", Map.merge(target, at.(inputs)))
 
       "drag" ->
         # Cua Driver drags in a straight line, from a point to a point.
         case Enum.map(inputs["path"] || [], at) do
           [from, to] ->
-            tool(service, "drag", Map.merge(desktop, %{"from_x" => from["x"], "from_y" => from["y"], "to_x" => to["x"], "to_y" => to["y"]}))
+            send.("drag", Map.merge(target, %{"from_x" => from["x"], "from_y" => from["y"], "to_x" => to["x"], "to_y" => to["y"]}))
 
           _ ->
             raise "On a computer's own screen a drag is a straight line: give its path as two points, where it starts and where it ends"
         end
 
       "scroll" ->
-        tool(service, "scroll", Map.merge(desktop, %{"direction" => inputs["direction"], "amount" => inputs["amount"] || 5}) |> Map.merge(at.(inputs)))
+        send.("scroll", Map.merge(target, %{"direction" => inputs["direction"], "amount" => inputs["amount"] || 5}) |> Map.merge(at.(inputs)))
 
       "type" ->
-        tool(service, "type_text", Map.put(desktop, "text", inputs["text"] || ""))
+        send.("type_text", Map.put(target, "text", inputs["text"] || ""))
 
       "key" ->
         for combo <- String.split(inputs["keys"] || "", " ", trim: true) do
           case keys(combo) do
-            [key] -> tool(service, "press_key", Map.put(desktop, "key", key))
-            keys -> tool(service, "hotkey", Map.put(desktop, "keys", keys))
+            [key] -> send.("press_key", Map.put(target, "key", key))
+            keys -> send.("hotkey", Map.put(target, "keys", keys))
           end
         end
+
+      "set_value" ->
+        if not Map.has_key?(target, "element_token"), do: raise("set_value sets an element's value: give its element_token, from `elements`")
+        send.("set_value", Map.put(target, "value", inputs["value"] || ""))
 
       _ ->
         raise "There's no action #{action}"
@@ -284,41 +348,50 @@ defmodule ComputerUse.Desktop do
     String.trim(answer) == "true"
   end
 
-  # Calls one of Cua Driver's tools with what of `args` that tool takes on this kind of computer, which differs
-  # between them (a Mac's `move_cursor` takes `delivery_mode`, Linux's doesn't), in an MCP session of its own: the
-  # daemon scales the x and y of a session's later actions by its last screenshot's, and these are the display's own.
-  defp tool(service, name, args) do
-    session = session(service)
-    takes = GenServer.call(service, :takes) || takes(service, session)
+  # Calls one of Cua Driver's tools on the whole display, on a connection of its own, which it closes: the daemon
+  # scales the x and y of a connection's later actions by its last screenshot's, and these are the display's own.
+  defp tool(service, name, args), do: call(service, [headers: [connection: "close"]], name, args)
 
-    case mcp(service, session, "tools/call", %{name: name, arguments: Map.take(args, takes[name] || [])}) do
+  # Calls one of Cua Driver's tools aimed at a window or an element, on the one connection kept open for them, Req's
+  # pool of one: the daemon keeps a window's elements and its last screenshot, which element_tokens and x and y count
+  # from, for as long as the connection they were read on.
+  defp window(service, name, args), do: call(service, [finch: [size: 1, count: 1, pool_timeout: 120_000]], name, args)
+
+  # Calls one of Cua Driver's tools with what of `args` that tool takes on this kind of computer, which differs
+  # between them (a Mac's `move_cursor` takes `delivery_mode`, Linux's doesn't), in an MCP session of its own, on
+  # `connection` (Req's options for it).
+  defp call(service, connection, name, args) do
+    session = session(service, connection)
+    takes = GenServer.call(service, :takes) || takes(service, connection, session)
+
+    case mcp(service, connection, session, "tools/call", %{name: name, arguments: Map.take(args, takes[name] || [])}) do
       {%{"isError" => true} = result, _} -> raise text(result)
       {result, _} -> result
     end
   end
 
   # What each of its tools takes, kept until Cua Driver starts again.
-  defp takes(service, session) do
-    {%{"tools" => tools}, _} = mcp(service, session, "tools/list", %{})
+  defp takes(service, connection, session) do
+    {%{"tools" => tools}, _} = mcp(service, connection, session, "tools/list", %{})
     takes = Map.new(tools, &{&1["name"], Map.keys(&1["inputSchema"]["properties"] || %{})})
     GenServer.cast(service, {:takes, takes})
     takes
   end
 
-  defp session(service) do
+  defp session(service, connection) do
     initialize = %{protocolVersion: "2025-06-18", capabilities: %{}, clientInfo: %{name: "computer-use", version: "1"}}
-    {_, session} = mcp(service, nil, "initialize", initialize)
+    {_, session} = mcp(service, connection, nil, "initialize", initialize)
     session
   end
 
   # A JSON-RPC request to Cua Driver's MCP endpoint, answered with its result and the session it's in.
-  defp mcp(service, session, method, params) do
+  defp mcp(service, connection, session, method, params) do
     %{"port" => port, "token" => token} = GenServer.call(service, :endpoint)
-    # A connection of its own, which it closes: the daemon keeps what a session's screenshot scaled by per connection.
-    headers = [authorization: "Bearer #{token}", connection: "close"] ++ if(session, do: ["mcp-session-id": session], else: [])
+    headers = [authorization: "Bearer #{token}"] ++ if(session, do: ["mcp-session-id": session], else: [])
     request = %{jsonrpc: "2.0", id: 1, method: method, params: params}
+    req = Req.new(url: "http://127.0.0.1:#{port}/mcp", json: request, headers: headers, retry: false, receive_timeout: 120_000)
 
-    case Req.post("http://127.0.0.1:#{port}/mcp", json: request, headers: headers, retry: false, receive_timeout: 120_000) do
+    case Req.post(Req.merge(req, connection)) do
       {:ok, %{status: 200, body: %{"result" => result}} = response} -> {result, session || List.first(response.headers["mcp-session-id"] || [])}
       {:ok, %{body: %{"error" => %{"message" => why}}}} -> raise "Cua Driver: #{why}"
       {:ok, %{status: status}} -> raise "Cua Driver answered #{status}"
@@ -676,7 +749,9 @@ defmodule ComputerUse.Desktop do
 
   defp command(driver) do
     embedded = if :os.type() == {:unix, :darwin}, do: ["--embedded", "--host-bundle-id", @id], else: []
-    [driver, "serve", "--socket", socket() | embedded]
+    # Nothing of its own on the person's screen: no cursor of the agent's drawn over it, and no question from macOS
+    # to let it script an app (Finder, as set_value renames a file), which it refuses instead.
+    [driver, "serve", "--socket", socket(), "--no-overlay", "--no-automation-prompts" | embedded]
   end
 
   # Its MCP endpoint, its own state, apart from any other Cua Driver on the computer, and neither telemetry nor update

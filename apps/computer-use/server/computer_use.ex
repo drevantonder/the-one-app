@@ -15,7 +15,11 @@ defmodule ComputerUse do
   alias OneCore.{Artifact, Call}
   alias ComputerUse.{Desktop, Phone}
 
-  @actions ~w(screenshot click double_click move drag scroll type key)
+  @actions ~w(screenshot windows elements click double_click move drag scroll type key set_value)
+  # What only looks, which isn't noted as a use of the screen unless it says what it's for.
+  @looks ~w(screenshot windows elements)
+  # What aims an action at one window or element of a computer's own screen, as Cua Driver names it.
+  @aimed ~w(pid window_id element_token)
   # How often what a screen was last used for is written again while it's the same: the app says "2 min ago".
   @written_every 60_000
 
@@ -40,6 +44,16 @@ defmodule ComputerUse do
   @at %{
     x: %{type: "integer", minimum: 0, description: "pixels from the left of the screenshot"},
     y: %{type: "integer", minimum: 0, description: "pixels from the top of the screenshot"}
+  }
+
+  # A window of a computer's own screen, from `windows`, or an element of one, from `elements`, which an action aimed
+  # at it reaches in the background; x and y are then pixels of that window's own screenshot.
+  @window %{
+    pid: %{type: "integer", description: "a computer's own screen: the process whose window it is, from `windows`"},
+    window_id: %{type: "integer", description: "a computer's own screen: the window, from `windows`, acted on in the background"}
+  }
+  @element %{
+    element_token: %{type: "string", description: "a computer's own screen: an element of a window, `<snapshot_id>:N` from `elements`, acted on in the background"}
   }
 
   # Its data is everyone's together: which screen was last used by whom, kept by who used it.
@@ -120,17 +134,61 @@ defmodule ComputerUse do
       %{
         name: "screenshot",
         read_only: true,
-        description: "A picture of the screen as it is now. Its pixels are what the other tools' x and y count.",
-        inputs: act(),
+        description:
+          "A picture of the screen as it is now, or with `pid` and `window_id` of one window of a computer's own screen, taken in the background as it is, behind whatever is in front. Its pixels are what the other tools' x and y count.",
+        inputs: act(@window),
         outputs: @screenshot
       },
       %{
+        name: "windows",
+        read_only: true,
+        description:
+          "A computer's own screen's windows, as Cua Driver's `list_windows` gives them: each one's `window_id`, `pid`, `app_name`, `title`, `bounds` and `z_index` (the highest is in front). Give `app` or `pid`: without either it lists every window on the computer.",
+        inputs:
+          act(%{
+            app: %{type: "string", description: "only the windows of apps whose name has this in it"},
+            pid: %{type: "integer", description: "only this process's windows"},
+            on_screen_only: %{type: "boolean", description: "only windows on the screen now"}
+          }),
+        outputs: %{type: "object", properties: %{windows: %{type: "array", items: %{type: "object"}}}, required: ["windows"]}
+      },
+      %{
+        name: "elements",
+        read_only: true,
+        description:
+          "One window's elements, read through accessibility in the background, as Cua Driver's `get_window_state` gives them: `tree_markdown`, a row `[N]` for each element you can act on, whose `element_token` is `<snapshot_id>:N`. A new read of the window replaces the last, and its tokens. Narrow a large window with `query`.",
+        inputs:
+          act(
+            Map.merge(@window, %{
+              query: %{type: "string", description: "only rows with this in them, and what they're in; `a|b` for either"},
+              max_elements: %{type: "integer", minimum: 1, description: "how many elements to read at most; default 250"}
+            }),
+            ["pid", "window_id"]
+          ),
+        outputs: %{
+          type: "object",
+          properties: %{snapshot_id: %{type: "string"}, tree_markdown: %{type: "string"}, truncated: %{type: "boolean"}},
+          required: ["snapshot_id"]
+        }
+      },
+      %{
         name: "click",
-        description: "Click at a point.",
-        inputs: act(Map.put(@at, :button, %{type: "string", enum: ~w(left right middle), description: "default left"}), ["x", "y"]),
+        description: "Click at a point, or on an element of a window (`element_token`) in the background.",
+        inputs:
+          act(
+            @at
+            |> Map.merge(@window)
+            |> Map.merge(@element)
+            |> Map.put(:button, %{type: "string", enum: ~w(left right middle), description: "default left"})
+          ),
         outputs: @done
       },
-      %{name: "double_click", description: "Double-click at a point.", inputs: act(@at, ["x", "y"]), outputs: @done},
+      %{
+        name: "double_click",
+        description: "Double-click at a point, or on an element of a window (`element_token`) in the background.",
+        inputs: act(@at |> Map.merge(@window) |> Map.merge(@element)),
+        outputs: @done
+      },
       %{name: "move", description: "Move the pointer to a point, as hovering does.", inputs: act(@at, ["x", "y"]), outputs: @done},
       %{
         name: "drag",
@@ -144,7 +202,8 @@ defmodule ComputerUse do
                 items: %{type: "object", required: ["x", "y"], properties: @at},
                 description: "the points, at least two"
               }
-            },
+            }
+            |> Map.merge(@window),
             ["path"]
           ),
         outputs: @done
@@ -154,19 +213,35 @@ defmodule ComputerUse do
         description: "Scroll at a point.",
         inputs:
           act(
-            Map.merge(@at, %{
+            @at
+            |> Map.merge(@window)
+            |> Map.merge(@element)
+            |> Map.merge(%{
               direction: %{type: "string", enum: ~w(up down left right)},
               amount: %{type: "integer", minimum: 1, maximum: 50, description: "steps of the wheel; default 5"}
             }),
-            ["x", "y", "direction"]
+            ["direction"]
           ),
         outputs: @done
       },
-      %{name: "type", description: "Type text where the focus is.", inputs: act(%{text: %{type: "string"}}, ["text"]), outputs: @done},
+      %{
+        name: "type",
+        description: "Type text where the focus is, or into a window or an element of it (`element_token`) in the background.",
+        inputs: act(%{text: %{type: "string"}} |> Map.merge(@window) |> Map.merge(@element), ["text"]),
+        outputs: @done
+      },
       %{
         name: "key",
-        description: "Press keys: ctrl+l, Return, ctrl+shift+t, BackSpace; several, space between, one after another.",
-        inputs: act(%{keys: %{type: "string", description: "the keys, as xdotool names them"}}, ["keys"]),
+        description:
+          "Press keys: ctrl+l, Return, ctrl+shift+t, BackSpace; several, space between, one after another. Where the focus is, or to a window or an element of it (`element_token`) in the background.",
+        inputs: act(%{keys: %{type: "string", description: "the keys, as xdotool names them"}} |> Map.merge(@window) |> Map.merge(@element), ["keys"]),
+        outputs: @done
+      },
+      %{
+        name: "set_value",
+        description:
+          "Set an element's value in the background, as Cua Driver's `set_value` does: a text field's text, a slider's or a date's value, or the option of a pop-up menu whose title is `value`.",
+        inputs: act(Map.merge(@element, %{value: %{type: "string"}}), ["element_token", "value"]),
         outputs: @done
       },
       %{
@@ -190,7 +265,7 @@ defmodule ComputerUse do
     ]
   end
 
-  defp act(properties \\ %{}, required \\ []) do
+  defp act(properties, required \\ []) do
     %{
       type: "object",
       required: ["screen" | required],
@@ -224,11 +299,13 @@ defmodule ComputerUse do
 
   def call(action, inputs, call) when action in @actions do
     s = screen(call, inputs["screen"])
-    if action != "screenshot" or inputs["doing"], do: note(call, s, inputs["doing"])
+    if action not in @looks or inputs["doing"], do: note(call, s, inputs["doing"])
     inputs = Map.drop(inputs, ~w(screen doing))
 
     cond do
       s["desktop"] -> Desktop.use(call, s["desktop"], action, inputs)
+      action in ~w(windows elements set_value) or Enum.any?(@aimed, &Map.has_key?(inputs, &1)) -> raise "Only a computer's own screen has windows and elements to aim at: #{s["name"]} is used whole"
+      action in ~w(click double_click scroll) and not (Map.has_key?(inputs, "x") and Map.has_key?(inputs, "y")) -> raise "Give x and y: on #{s["name"]} it's at a point"
       s["phone"] -> Phone.use(call, s["phone"], action, inputs)
       true -> Call.tool(call, s["app"], s["tool"], inputs |> Map.merge(s["inputs"]) |> Map.put("action", action))
     end
