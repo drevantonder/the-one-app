@@ -229,6 +229,31 @@ impl Tree {
         self.nodes.get(&id)?.parent
     }
 
+    /// The outermost text `id` is inside, where it's inside one, which draws it as a run of its own.
+    pub fn outer_text(&self, id: Id) -> Option<Id> {
+        let mut outer = None;
+        let mut at = self.parent(id);
+        while let Some(parent) = at.filter(|parent| self.nodes.get(parent).is_some_and(|node| node.kind == Kind::Text)) {
+            outer = Some(parent);
+            at = self.parent(parent);
+        }
+        outer
+    }
+
+    /// Whether a text in text `id` (not displayed: not) says something of its own to a screen reader: a role, a
+    /// name, or that it's pressed, as an inline link does.
+    fn speaks(&self, id: Id) -> bool {
+        self.nodes.get(&id).is_some_and(|node| {
+            node.children.iter().any(|child| {
+                self.nodes.get(child).is_some_and(|inner| {
+                    inner.kind == Kind::Text
+                        && !inner.hidden()
+                        && (inner.str("role").is_some() || inner.str("aria-label").is_some() || inner.listens("click") || self.speaks(*child))
+                })
+            })
+        })
+    }
+
     /// Whether `id` is inert, or in what is (`inert`, as the DOM's).
     pub fn inert(&self, id: Id) -> bool {
         let mut at = Some(id);
@@ -384,6 +409,11 @@ impl Tree {
             Some(_) => return Vec::new(),
             None => None,
         };
+        // A text that's only words, with a text in it that says something of its own (an inline link), is its words
+        // and that text side by side, as the DOM's spans are read.
+        if node.kind == Kind::Text && node.str("role").is_none() && node.str("aria-label").is_none() && !node.listens("click") && self.speaks(id) {
+            return node.children.iter().flat_map(|child| self.read(*child, held)).collect();
+        }
         let text = matches!(node.kind, Kind::Text | Kind::RawText);
         let children: Vec<Value> =
             if text { Vec::new() } else { node.children.iter().flat_map(|child| self.read(*child, held)).collect() };

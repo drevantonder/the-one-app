@@ -17,7 +17,7 @@ use crate::render::Atlas;
 use crate::render::atlas::AtlasKey;
 use crate::render::scene::{Backdrop, BorderStyle, PolychromeSprite, Quad, Scene, Shadow, TransformationMatrix};
 use crate::style::{self, Look, Paint, State, Text, colour};
-use crate::text::{Paragraph, TextSystem};
+use crate::text::{Paragraph, TextRun, TextSystem};
 use crate::tokens::{Conditions, Radius};
 use crate::tree::{Id, Kind, Node, Tree};
 
@@ -515,11 +515,13 @@ impl Screen {
         // changed state, with what's around it, so the rest is kept as it was laid out.
         let everything = self.layout.conditions != Some(conditions);
         self.layout.conditions = Some(conditions);
-        let changed = self.tree.take_changed();
+        let mut changed = self.tree.take_changed();
         let moving = self.transitions.moving();
         let mut below = HashSet::new();
         let states = self.states.changed(&self.styled);
         self.styled = self.states.clone();
+        // A text inside a text is drawn as a run of the one it's in, which is styled again as its state changes.
+        changed.extend(states.iter().filter_map(|id| self.tree.outer_text(*id)));
         for id in changed.iter().chain(&moving).chain(&states).copied().chain(self.tree.inputs()) {
             let mut at = Some(id);
             while let Some(id) = at.filter(|id| below.insert(*id)) {
@@ -596,9 +598,9 @@ impl Screen {
                 AvailableSpace::MaxContent => None,
             });
             let size = match measure {
-                Measure::Text { words, text: style, lines } => text.paragraph(words, &style.style, width.filter(|_| style.wrap), *lines).size(),
+                Measure::Text { words, runs, text: style, lines } => text.paragraph(words, &style.style, runs, width.filter(|_| style.wrap), *lines).size(),
                 Measure::Input { words, text: style, multiline } => {
-                    let paragraph = text.paragraph(words, &style.style, multiline.then_some(width).flatten(), None);
+                    let paragraph = text.paragraph(words, &style.style, &[], multiline.then_some(width).flatten(), None);
                     Size { width: if *multiline { paragraph.size().width } else { 0.0 }, height: paragraph.size().height }
                 }
             };
@@ -1204,9 +1206,10 @@ pub(crate) fn paint_message(words: &str, appearance: Appearance, size: Size<Pixe
     });
     let body = Text::body(dark);
     let width = (window.size.width - 32.0).max(1.0);
-    let paragraph = text.paragraph(words, &body.style, Some(width), None);
+    let paragraph = text.paragraph(words, &body.style, &[], Some(width), None);
     let top = (window.size.height - paragraph.size().height) / 2.0;
-    let _ = text.paint(&paragraph, point(px(16.0), px(top)), width, 0.5, colour("muted-foreground", dark), scale, mask, TransformationMatrix::unit(), atlas, scene);
+    let muted = colour("muted-foreground", dark);
+    let _ = text.paint(&paragraph, point(px(16.0), px(top)), width, 0.5, &|_| muted, scale, mask, TransformationMatrix::unit(), atlas, scene);
     scene.finish();
 }
 
@@ -1221,7 +1224,8 @@ fn value_of(node: &Node) -> String {
 /// What a leaf measures for layout.
 #[derive(PartialEq)]
 enum Measure {
-    Text { words: String, text: Text, lines: Option<usize> },
+    /// A text's words, and its runs where texts in it set some of them another way.
+    Text { words: String, runs: Vec<TextRun>, text: Text, lines: Option<usize> },
     Input { words: String, text: Text, multiline: bool },
 }
 
@@ -1238,6 +1242,19 @@ struct Leaf {
     fixed: bool,
     measure: Option<Measure>,
     paragraph: Option<(Option<f32>, Arc<Paragraph>)>,
+    /// Where each text and raw text inside a text is in its words, to be pressed, hovered, reached and read there.
+    spans: Vec<Span>,
+}
+
+/// A text or raw text inside a text, by where its words are in the text's (bytes `start..end`), with its pointer's
+/// shape and whether it takes the pointer, as its style says.
+#[derive(Clone)]
+struct Span {
+    id: Id,
+    start: usize,
+    end: usize,
+    cursor: Option<Cursor>,
+    pointer: Option<bool>,
 }
 
 /// An image, decoded, in the atlas's byte order (BGRA).
@@ -1575,9 +1592,18 @@ impl Painter<'_> {
         }
         layout.scrollbar_width = 0.0;
         let lines = computed.line_clamp.or(node.style.line_clamp);
+        let mut spans = Vec::new();
         let measure = match node.kind {
-            Kind::Text => Some(Measure::Text { words: tree.text(id), text, lines }),
-            Kind::RawText => Some(Measure::Text { words: node.value.clone().unwrap_or_default(), text, lines: None }),
+            Kind::Text => {
+                let (mut words, mut runs) = (String::new(), Vec::new());
+                self.runs(id, text, None, &mut words, &mut runs, &mut spans);
+                // One run is the text's own style, which needs none.
+                if runs.len() == 1 && runs[0].style == text.style && runs[0].color == text.color && runs[0].background_color.is_none() && runs[0].underline == text.underline {
+                    runs.clear();
+                }
+                Some(Measure::Text { words, runs, text, lines })
+            }
+            Kind::RawText => Some(Measure::Text { words: node.value.clone().unwrap_or_default(), runs: Vec::new(), text, lines: None }),
             Kind::Input => {
                 let words = self.fields.get(&id).map(Field::display).unwrap_or_default();
                 let words = if words.is_empty() { node.str("placeholder").unwrap_or_default().to_owned() } else { words };
@@ -1586,7 +1612,7 @@ impl Painter<'_> {
             Kind::Image | Kind::Path | Kind::Picker | Kind::Box | Kind::Scroll => None,
         };
         let positioned = layout.position == taffy::style::Position::Absolute;
-        let leaf = Leaf { id, text, look, line_clamp: lines, positioned, fixed: computed.fixed, measure, paragraph: None };
+        let leaf = Leaf { id, text, look, line_clamp: lines, positioned, fixed: computed.fixed, measure, paragraph: None, spans };
         let taffy = &mut self.layout.taffy;
         match self.layout.kept.get_mut(&id) {
             Some(kept) => {
@@ -1613,6 +1639,41 @@ impl Painter<'_> {
             self.layout.fixed.remove(&id);
         }
         text
+    }
+
+    /// What's in text `id`, set as each text in it says, as CSS inherits text properties into an inline: its words, its
+    /// runs, and its texts' and raw texts' spans (outer before inner), with `behind` what's behind its words.
+    fn runs(&self, id: Id, text: Text, behind: Option<Hsla>, words: &mut String, runs: &mut Vec<TextRun>, spans: &mut Vec<Span>) {
+        let tree = self.tree;
+        let Some(node) = tree.nodes.get(&id) else { return };
+        for child in &node.children {
+            let Some(inner) = tree.nodes.get(child).filter(|inner| !inner.hidden()) else { continue };
+            let start = words.len();
+            match inner.kind {
+                Kind::RawText => {
+                    words.push_str(inner.value.as_deref().unwrap_or_default());
+                    let run = TextRun { len: words.len() - start, style: text.style, color: text.color, background_color: behind, underline: text.underline };
+                    match runs.last_mut() {
+                        Some(last) if TextRun { len: last.len, ..run } == *last => last.len += run.len,
+                        _ if run.len > 0 => runs.push(run),
+                        _ => {}
+                    }
+                    spans.push(Span { id: *child, start, end: words.len(), cursor: None, pointer: None });
+                }
+                Kind::Text => {
+                    let computed = style::of(inner, self.states.of(*child, false), self.conditions);
+                    let set = match &inner.styles {
+                        Some(_) => text.with(&computed),
+                        None => text.of(&inner.style, false, self.conditions.dark),
+                    };
+                    let at = spans.len();
+                    spans.push(Span { id: *child, start, end: start, cursor: computed.look.cursor, pointer: computed.look.pointer_events });
+                    self.runs(*child, set, computed.look.background.or(behind), words, runs, spans);
+                    spans[at].end = words.len();
+                }
+                _ => self.runs(*child, text, behind, words, runs, spans),
+            }
+        }
     }
 
     /// A quad, its bounds and mask in the window.
@@ -1795,7 +1856,8 @@ impl Painter<'_> {
         // Tab reaches what the DOM's does: an input, what's pressed as a button is (a role the DOM draws as a
         // `<button>`, core/ui's strict/primitives.tsx `pressed`), and what says its `tabindex`.
         let tabindex = node.prop("tabindex").and_then(|index| index.as_i64().or_else(|| index.as_str()?.parse().ok()));
-        let button = node.listens("click") && node.str("role").is_some_and(|role| BUTTON_ROLES.contains(&role));
+        // A text is never a `<button>` on the DOM, whatever its role: it's reached only by its `tabindex`.
+        let button = node.kind != Kind::Text && node.listens("click") && node.str("role").is_some_and(|role| BUTTON_ROLES.contains(&role));
         if pressable && tabindex.is_none_or(|index| index >= 0) && (node.kind == Kind::Input || button || tabindex.is_some()) {
             self.tab_order.push(id);
         }
@@ -1805,9 +1867,16 @@ impl Painter<'_> {
                 let width = laid.content_box_width().max(1.0);
                 let wrap = text.wrap.then_some(width);
                 let kept = self.layout.leaf(taffy_node).paragraph.as_ref().filter(|(wrapped, _)| *wrapped == wrap).map(|(_, paragraph)| paragraph.clone());
+                let (runs, spans) = match &self.layout.leaf(taffy_node).measure {
+                    Some(Measure::Text { runs, .. }) => (runs.clone(), self.layout.leaf(taffy_node).spans.clone()),
+                    _ => (Vec::new(), Vec::new()),
+                };
                 let paragraph = kept.unwrap_or_else(|| {
-                    let words = if node.kind == Kind::Text { tree.text(id) } else { node.value.clone().unwrap_or_default() };
-                    let paragraph = Arc::new(self.text.paragraph(&words, &text.style, wrap, lines));
+                    let words = match &self.layout.leaf(taffy_node).measure {
+                        Some(Measure::Text { words, .. }) => words.clone(),
+                        _ => String::new(),
+                    };
+                    let paragraph = Arc::new(self.text.paragraph(&words, &text.style, &runs, wrap, lines));
                     if let Some(leaf) = self.layout.taffy.get_node_context_mut(taffy_node) {
                         leaf.paragraph = Some((wrap, paragraph.clone()));
                     }
@@ -1817,7 +1886,12 @@ impl Painter<'_> {
                 let size = paragraph.size();
                 let covers = Bounds { origin: content.origin, size: Size { width: size.width.max(width) * transform.scale, height: size.height * transform.scale } };
                 if self.turned(covers).intersects(&mask) {
-                    self.paint_text(&paragraph, content, width, transform.scale, text, opacity, mask);
+                    self.paint_text(&paragraph, &runs, content, width, transform.scale, text, opacity, mask);
+                }
+                if !spans.is_empty() {
+                    self.placed.push((id, placed));
+                    self.place_spans(id, &spans, &paragraph, content, width, transform.scale, text.align, mask, pointer);
+                    return;
                 }
             }
             Kind::Input => {
@@ -1906,7 +1980,7 @@ impl Painter<'_> {
         let empty = shown.is_empty();
         let placeholder = colour_token("tertiary-label", self.conditions).unwrap_or_else(|| colour("muted-foreground", self.conditions.dark));
         let (words, color) = if empty { (node.str("placeholder").unwrap_or_default().to_owned(), placeholder) } else { (shown.clone(), text.color) };
-        let paragraph = self.text.paragraph(&words, &text.style, multiline.then_some(width), None);
+        let paragraph = self.text.paragraph(&words, &text.style, &[], multiline.then_some(width), None);
         let line_height = text.style.line_height;
         // A one-line input's text in the middle of its box, as it's drawn in a row centred on its items.
         let top = if multiline { content.origin.y } else { content.origin.y + (content.size.height - paragraph.size().height * grown) / 2.0 };
@@ -1963,7 +2037,7 @@ impl Painter<'_> {
             }
         }
         let area = Bounds { origin: point(origin.x - scroll.x * grown, origin.y), size: content.size };
-        self.paint_text(&paragraph, area, width, grown, Text { color, ..text }, opacity, clip);
+        self.paint_text(&paragraph, &[], area, width, grown, Text { color, ..text }, opacity, clip);
         if let (true, Some(field)) = (focused, field) {
             // What an input method is composing is underlined, as every platform's own fields draw it.
             if let Some((start, end)) = field.composed() {
@@ -1983,20 +2057,91 @@ impl Painter<'_> {
         most
     }
 
+    /// A paragraph's words, set in `text`, or as `runs` say where it's given them: what's behind each run first, then
+    /// its glyphs, then each underline, along each line at its baseline's foot.
     #[allow(clippy::too_many_arguments)]
-    fn paint_text(&mut self, paragraph: &Paragraph, content: Bounds<f32>, width: f32, grown: f32, text: Text, opacity: f32, mask: Bounds<f32>) {
-        let mask = ContentMask { bounds: mask.scale_to(self.scale) };
+    fn paint_text(&mut self, paragraph: &Paragraph, runs: &[TextRun], content: Bounds<f32>, width: f32, grown: f32, text: Text, opacity: f32, mask: Bounds<f32>) {
+        let own = [TextRun { len: usize::MAX, style: text.style, color: text.color, background_color: None, underline: text.underline }];
+        let runs = if runs.is_empty() { &own[..] } else { runs };
+        let mut at = 0usize;
+        let ranges: Vec<(usize, usize, &TextRun)> = runs
+            .iter()
+            .map(|run| {
+                let start = at;
+                at = at.saturating_add(run.len);
+                (start, at, run)
+            })
+            .collect();
+        let line_height = paragraph.line_height;
+        let left = |line: usize| content.origin.x + paragraph.lines.get(line).map_or(0.0, |drawn| (width - drawn.width).max(0.0) * text.align) * grown;
+        for (start, end, run) in &ranges {
+            let Some(behind) = run.background_color else { continue };
+            for (line, x0, x1) in paragraph.inked(*start, *end) {
+                // As CSS draws an inline's background: over its content area, its font's ascent and descent.
+                let (ascent, descent) = paragraph.lines.get(line).map_or((line_height, 0.0), |drawn| (drawn.ascent, drawn.descent));
+                let top = content.origin.y + (line as f32 * line_height + (line_height - ascent - descent) / 2.0) * grown;
+                let bounds = Bounds { origin: point(left(line) + x0 * grown, top), size: Size { width: (x1 - x0) * grown, height: (ascent + descent) * grown } };
+                self.quad(bounds, mask, behind, Edges::default(), Hsla::default(), Corners::default(), false, opacity);
+            }
+        }
+        let scaled_mask = ContentMask { bounds: mask.scale_to(self.scale) };
         // Glyphs grown with their box are rasterized at that size, so they stay sharp.
         let origin = point(px(content.origin.x / grown), px(content.origin.y / grown));
-        if let Err(error) = self.text.paint(paragraph, origin, width, text.align, text.color.opacity(opacity), self.scale * grown, mask, self.turn.scaled(self.scale), self.atlas, self.scene) {
+        let color = |index: usize| ranges.iter().find(|(start, end, _)| (*start..*end).contains(&index)).map_or(text.color, |(_, _, run)| run.color).opacity(opacity);
+        if let Err(error) = self.text.paint(paragraph, origin, width, text.align, &color, self.scale * grown, scaled_mask, self.turn.scaled(self.scale), self.atlas, self.scene) {
             log::warn!("text didn't draw: {error:#}");
         }
-        if text.underline {
-            for (at, line) in paragraph.lines.iter().enumerate() {
-                let y = content.origin.y + (at as f32 + 1.0) * paragraph.line_height * grown - paragraph.line_height * grown * 0.18;
-                let left = content.origin.x + (width - line.width).max(0.0) * text.align * grown;
-                let bounds = Bounds { origin: point(left, y), size: Size { width: line.width * grown, height: grown.max(1.0) } };
-                self.quad(bounds, Bounds { origin: point(mask.bounds.origin.x.0 / self.scale, mask.bounds.origin.y.0 / self.scale), size: Size { width: mask.bounds.size.width.0 / self.scale, height: mask.bounds.size.height.0 / self.scale } }, text.color, Edges::default(), Hsla::default(), Corners::default(), false, opacity);
+        for (start, end, run) in &ranges {
+            if !run.underline {
+                continue;
+            }
+            for (line, x0, x1) in paragraph.inked(*start, *end) {
+                let y = content.origin.y + (line as f32 + 1.0) * line_height * grown - line_height * grown * 0.18;
+                let bounds = Bounds { origin: point(left(line) + x0 * grown, y), size: Size { width: (x1 - x0) * grown, height: grown.max(1.0) } };
+                self.quad(bounds, mask, run.color, Edges::default(), Hsla::default(), Corners::default(), false, opacity);
+            }
+        }
+    }
+
+    /// The texts and raw texts inside text `id` where their words are drawn: each text placed for the pointer over each
+    /// stretch of its words, after what it's in, so a press, hover and cursor find the innermost; each reached by Tab
+    /// where the DOM's would be, a span with its `tabindex`; and each where an agent or a screen reader finds it.
+    #[allow(clippy::too_many_arguments)]
+    fn place_spans(&mut self, id: Id, spans: &[Span], paragraph: &Paragraph, content: Bounds<f32>, width: f32, grown: f32, align: f32, mask: Bounds<f32>, pointer: bool) {
+        let tree = self.tree;
+        let line_height = paragraph.line_height;
+        let mut pointers: HashMap<Id, bool> = HashMap::from([(id, pointer)]);
+        for span in spans {
+            let Some(node) = tree.nodes.get(&span.id) else { continue };
+            let parent = tree.parent(span.id).unwrap_or(id);
+            let pointer = pointers.get(&parent).copied().unwrap_or(pointer) && span.pointer.unwrap_or(true) && !node.is("inert");
+            pointers.insert(span.id, pointer);
+            let mut drawn: Option<Bounds<f32>> = None;
+            let rects: Vec<Bounds<f32>> = paragraph
+                .inked(span.start, span.end)
+                .into_iter()
+                .map(|(line, x0, x1)| {
+                    let left = content.origin.x + paragraph.lines.get(line).map_or(0.0, |drawn| (width - drawn.width).max(0.0) * align) * grown;
+                    self.turned(Bounds { origin: point(left + x0 * grown, content.origin.y + line as f32 * line_height * grown), size: Size { width: (x1 - x0) * grown, height: line_height * grown } })
+                })
+                .collect();
+            for rect in &rects {
+                drawn = Some(drawn.map_or(*rect, |all| all.union(rect)));
+            }
+            if let Some(all) = drawn {
+                self.rects.insert(span.id, Rect { x: all.origin.x, y: all.origin.y, width: all.size.width, height: all.size.height });
+            }
+            if node.kind != Kind::Text {
+                continue;
+            }
+            let pressable = node.listens("click") && !node.is("disabled") && !node.is("aria-disabled");
+            let tabindex = node.prop("tabindex").and_then(|index| index.as_i64().or_else(|| index.as_str()?.parse().ok()));
+            if pressable && tabindex.is_some_and(|index| index >= 0) {
+                self.tab_order.push(span.id);
+            }
+            for rect in rects {
+                let placed = Placed { parent: Some(parent), shown: rect.intersect(&mask), pointer, cursor: span.cursor, pressable, input: false, scroll: None };
+                self.placed.push((span.id, placed));
             }
         }
     }
@@ -2022,7 +2167,7 @@ impl Painter<'_> {
         let (icon, gap, pad) = (16.0, 6.0, 6.0);
         let mut x = crumb.start;
         // Home, with the ring.
-        let home_words = self.text.paragraph("Home", &home_style, None, None);
+        let home_words = self.text.paragraph("Home", &home_style, &[], None, None);
         let home = Bounds { origin: point(x, middle - 11.0), size: Size { width: pad + icon + gap + home_words.size().width.ceil() + pad, height: 22.0 } };
         if hovered {
             let radius = crate::tokens::table().radius("radius-md", conditions).map_or(8.0, |radius| corner(radius, home.size));
@@ -2032,20 +2177,20 @@ impl Painter<'_> {
         let home_colour = if hovered { colour("foreground", "foreground") } else { colour("muted-foreground", "muted-foreground") };
         let words_at = |paragraph: &Paragraph, x: f32| Bounds { origin: point(x, middle - paragraph.size().height / 2.0), size: paragraph.size() };
         let text = Text { style: home_style, color: home_colour, align: 0.0, wrap: false, underline: false };
-        self.paint_text(&home_words, words_at(&home_words, x + pad + icon + gap), home_words.size().width.ceil(), 1.0, text, 1.0, window);
+        self.paint_text(&home_words, &[], words_at(&home_words, x + pad + icon + gap), home_words.size().width.ceil(), 1.0, text, 1.0, window);
         x = home.origin.x + home.size.width + 4.0;
         // A muted /.
-        let slash = self.text.paragraph("/", &home_style, None, None);
+        let slash = self.text.paragraph("/", &home_style, &[], None, None);
         let muted = colour("muted-foreground", "muted-foreground");
-        self.paint_text(&slash, words_at(&slash, x), slash.size().width.ceil(), 1.0, Text { color: muted, ..text }, 0.6, window);
+        self.paint_text(&slash, &[], words_at(&slash, x), slash.size().width.ceil(), 1.0, Text { color: muted, ..text }, 0.6, window);
         x += slash.size().width.ceil() + 4.0 + pad;
         // The app.
         if let Some(src) = &crumb.icon {
             self.picture(src, Bounds { origin: point(x, middle - icon / 2.0), size: Size { width: icon, height: icon } }, icon * 0.225);
             x += icon + gap;
         }
-        let name = self.text.paragraph(&crumb.name, &app_style, None, Some(1));
-        self.paint_text(&name, words_at(&name, x), name.size().width.ceil(), 1.0, Text { style: app_style, color: colour("foreground", "foreground"), ..text }, 1.0, window);
+        let name = self.text.paragraph(&crumb.name, &app_style, &[], None, Some(1));
+        self.paint_text(&name, &[], words_at(&name, x), name.size().width.ceil(), 1.0, Text { style: app_style, color: colour("foreground", "foreground"), ..text }, 1.0, window);
         home
     }
 
@@ -2066,8 +2211,8 @@ impl Painter<'_> {
             tabular: false,
         };
         let (words_style, action_style) = (style(None), style(label.map(|font| font.weight)));
-        let words = self.text.paragraph(&notice.text, &words_style, None, Some(1));
-        let action = notice.action.as_ref().map(|(name, _)| self.text.paragraph(name, &action_style, None, Some(1)));
+        let words = self.text.paragraph(&notice.text, &words_style, &[], None, Some(1));
+        let action = notice.action.as_ref().map(|(name, _)| self.text.paragraph(name, &action_style, &[], None, Some(1)));
         let (pad, gap, height) = (12.0, 4.0, 30.0);
         let action_width = action.as_ref().map_or(0.0, |action| gap + pad + action.size().width.ceil() + pad - 4.0);
         let width = pad + words.size().width.ceil() + action_width + if action.is_some() { 4.0 } else { pad };
@@ -2076,7 +2221,7 @@ impl Painter<'_> {
         let middle = pill.origin.y + height / 2.0;
         let words_at = |paragraph: &Paragraph, x: f32| Bounds { origin: point(x, middle - paragraph.size().height / 2.0), size: paragraph.size() };
         let text = Text { style: words_style, color: colour("background"), align: 0.0, wrap: false, underline: false };
-        self.paint_text(&words, words_at(&words, pill.origin.x + pad), words.size().width.ceil(), 1.0, text, 1.0, window);
+        self.paint_text(&words, &[], words_at(&words, pill.origin.x + pad), words.size().width.ceil(), 1.0, text, 1.0, window);
         let action = action?;
         let x = pill.origin.x + pad + words.size().width.ceil() + gap;
         let bounds = Bounds { origin: point(x, pill.origin.y + 4.0), size: Size { width: pad + action.size().width.ceil() + pad, height: height - 8.0 } };
@@ -2085,7 +2230,7 @@ impl Painter<'_> {
             highlight.a *= 0.2;
             self.quad(bounds, window, highlight, Edges::default(), Hsla::default(), Corners::all(bounds.size.height / 2.0), false, 1.0);
         }
-        self.paint_text(&action, words_at(&action, x + pad), action.size().width.ceil(), 1.0, Text { style: action_style, ..text }, 1.0, window);
+        self.paint_text(&action, &[], words_at(&action, x + pad), action.size().width.ceil(), 1.0, Text { style: action_style, ..text }, 1.0, window);
         Some(bounds)
     }
 
@@ -2258,7 +2403,7 @@ impl editing::Layout for Drawn {
     }
 
     fn bidi(&self) -> bool {
-        !self.empty && self.paragraph.lines.iter().any(|line| line.rtl || line.glyphs.iter().any(|(_, glyph)| glyph.rtl))
+        !self.empty && self.paragraph.lines.iter().any(|line| line.rtl || line.glyphs.iter().any(|(_, _, glyph)| glyph.rtl))
     }
 
     fn rtl(&self, line: usize) -> bool {
@@ -2271,7 +2416,7 @@ impl editing::Layout for Drawn {
         drawn
             .glyphs
             .iter()
-            .flat_map(|(_, glyph)| {
+            .flat_map(|(_, _, glyph)| {
                 let (left, right) = if glyph.rtl { (glyph.end, glyph.index) } else { (glyph.index, glyph.end) };
                 let x = offset + glyph.position.x.0;
                 [editing::Stop { x, index: left, right: false }, editing::Stop { x: x + glyph.advance, index: right, right: true }]

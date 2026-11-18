@@ -4,6 +4,7 @@
 //! platform text systems speak them.
 
 use std::collections::HashMap;
+use std::ops::Range;
 use std::sync::Arc;
 
 use anyhow::Result;
@@ -112,14 +113,24 @@ impl TextStyle {
     }
 }
 
-/// One line of a paragraph as it's drawn: its glyphs, from its own left edge.
+/// A run of a paragraph's text set one way, as GPUI's `TextRun` (crates/gpui/src/text_system.rs): how many bytes it
+/// is, its type style, its colour, what's behind it and whether it's underlined, as a text inside a text sets them.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct TextRun {
+    pub len: usize,
+    pub style: TextStyle,
+    pub color: Hsla,
+    pub background_color: Option<Hsla>,
+    pub underline: bool,
+}
+
+/// One line of a paragraph as it's drawn: its glyphs, each with its face and size, from its own left edge.
 #[derive(Debug, Default, Clone)]
 pub struct Line {
-    pub glyphs: Vec<(FontId, ShapedGlyph)>,
+    pub glyphs: Vec<(FontId, f32, ShapedGlyph)>,
     pub width: f32,
     pub ascent: f32,
     pub descent: f32,
-    pub font_size: f32,
     /// Where it is in the paragraph's text, in bytes.
     pub start: usize,
     pub end: usize,
@@ -150,13 +161,13 @@ impl Paragraph {
     pub fn caret(&self, index: usize) -> (usize, f32) {
         let at = self.line_of(index);
         let Some(line) = self.lines.get(at) else { return (0, 0.0) };
-        let x = match line.glyphs.iter().find(|(_, glyph)| glyph.index <= index && index < glyph.end.max(glyph.index + 1)) {
-            Some((_, glyph)) if glyph.rtl => glyph.position.x.0 + glyph.advance,
-            Some((_, glyph)) => glyph.position.x.0,
+        let x = match line.glyphs.iter().find(|(_, _, glyph)| glyph.index <= index && index < glyph.end.max(glyph.index + 1)) {
+            Some((_, _, glyph)) if glyph.rtl => glyph.position.x.0 + glyph.advance,
+            Some((_, _, glyph)) => glyph.position.x.0,
             // Past the line's last character: after the glyph that ends there, on the side its run goes.
-            None => match line.glyphs.iter().filter(|(_, glyph)| glyph.index < index).max_by_key(|(_, glyph)| glyph.index) {
-                Some((_, glyph)) if glyph.rtl => glyph.position.x.0,
-                Some((_, glyph)) => glyph.position.x.0 + glyph.advance,
+            None => match line.glyphs.iter().filter(|(_, _, glyph)| glyph.index < index).max_by_key(|(_, _, glyph)| glyph.index) {
+                Some((_, _, glyph)) if glyph.rtl => glyph.position.x.0,
+                Some((_, _, glyph)) => glyph.position.x.0 + glyph.advance,
                 None if line.rtl => line.width,
                 None => 0.0,
             },
@@ -172,7 +183,7 @@ impl Paragraph {
         let last = if at + 1 < self.lines.len() { line.end.saturating_sub(1).max(line.start) } else { line.end };
         let sides = |glyph: &ShapedGlyph| if glyph.rtl { (glyph.end, glyph.index) } else { (glyph.index, glyph.end) };
         let mut nearest = (f32::INFINITY, if line.rtl { line.start } else { last });
-        for (_, glyph) in &line.glyphs {
+        for (_, _, glyph) in &line.glyphs {
             let (left, right) = sides(glyph);
             let (x0, x1) = (glyph.position.x.0, glyph.position.x.0 + glyph.advance);
             if x >= x0 && x < x1 {
@@ -193,6 +204,19 @@ impl Paragraph {
         self.index_on(at, point.x).unwrap_or(0)
     }
 
+    /// Where bytes `start..end` are drawn on each line, as `spans` says, without the spaces a line hangs past its
+    /// end, as CSS draws an inline's background, underline and where it's pressed.
+    pub fn inked(&self, start: usize, end: usize) -> Vec<(usize, f32, f32)> {
+        self.spans(start, end)
+            .into_iter()
+            .filter_map(|(at, x0, x1)| {
+                let line = &self.lines[at];
+                let x1 = if line.rtl { x1 } else { x1.min(line.width) };
+                (x1 > x0).then_some((at, x0, x1))
+            })
+            .collect()
+    }
+
     /// Where bytes `start..end` are drawn on each line: its line and the stretches along it, left to right.
     pub fn spans(&self, start: usize, end: usize) -> Vec<(usize, f32, f32)> {
         let mut spans: Vec<(usize, f32, f32)> = Vec::new();
@@ -200,8 +224,8 @@ impl Paragraph {
             let mut covered: Vec<(f32, f32)> = line
                 .glyphs
                 .iter()
-                .filter(|(_, glyph)| glyph.index < end && glyph.end > start)
-                .map(|(_, glyph)| (glyph.position.x.0, glyph.position.x.0 + glyph.advance))
+                .filter(|(_, _, glyph)| glyph.index < end && glyph.end > start)
+                .map(|(_, _, glyph)| (glyph.position.x.0, glyph.position.x.0 + glyph.advance))
                 .collect();
             covered.sort_by(|a, b| a.0.total_cmp(&b.0));
             for (x0, x1) in covered {
@@ -240,51 +264,75 @@ impl TextSystem {
         layout
     }
 
-    /// `text` set in `style`, wrapped to `width` (none: as wide as it is) and cut short with an ellipsis after
-    /// `max_lines`. A line ends at a newline, or where Unicode's line breaking (UAX #14) allows before it'd be wider
-    /// than `width`; a word wider than `width` alone overflows it.
-    pub fn paragraph(&mut self, text: &str, style: &TextStyle, width: Option<f32>, max_lines: Option<usize>) -> Paragraph {
+    /// `text` set in `style`, or in `runs` where it's given them (a text with texts in it), wrapped to `width` (none:
+    /// as wide as it is) and cut short with an ellipsis after `max_lines`. A line ends at a newline, or where Unicode's
+    /// line breaking (UAX #14) allows before it'd be wider than `width`; a word wider than `width` alone overflows it.
+    /// Its lines are as tall as its tallest run's, and each run is shaped on its own where its type style changes, as
+    /// a browser shapes an inline's text apart from what's beside it once its font differs.
+    pub fn paragraph(&mut self, text: &str, style: &TextStyle, runs: &[TextRun], width: Option<f32>, max_lines: Option<usize>) -> Paragraph {
+        let fonts = fonts(text, style, runs);
+        // A run's line is as tall for its size as the text's is for its own, as an inline inherits CSS's unitless
+        // `line-height`: a larger run makes its lines taller.
+        let line_height = fonts.iter().map(|(_, run)| run.size * style.line_height / style.size).fold(style.line_height, f32::max);
         let mut lines = Vec::new();
         let mut offset = 0;
         for hard in text.split('\n') {
-            let layout = self.layout_line(hard, style);
-            if layout.runs.iter().flat_map(|run| &run.glyphs).any(|glyph| glyph.rtl) {
+            let shaped = self.shape(text, offset..offset + hard.len(), &fonts);
+            if shaped.glyphs.iter().any(|(_, _, glyph)| glyph.rtl) {
                 // Text that runs right to left in it is broken by cosmic-text, which reorders each line once it's
                 // broken, as Unicode's bidi algorithm says; ours breaks it as it's drawn, which is only right where
-                // it runs one way.
+                // it runs one way. It's set in the type style it starts in.
+                let style = style_at(&fonts, offset).unwrap_or(*style);
                 let mut start = 0;
-                for line in self.platform.layout_lines(hard, style, width) {
+                for line in self.platform.layout_lines(hard, &style, width) {
                     let mut end = Vec::new();
-                    wrap(&line, hard, offset, None, &mut end);
+                    wrap(&Shaped::of(&line), hard, offset, None, &mut end);
                     lines.extend(end.into_iter().map(|drawn| Line { start: start + offset, end: line.len + offset, ..drawn }));
                     start = line.len;
                 }
             } else {
-                wrap(&layout, hard, offset, width, &mut lines);
+                wrap(&shaped, hard, offset, width, &mut lines);
             }
             offset += hard.len() + 1;
         }
         if let Some(max) = max_lines.filter(|max| *max > 0 && lines.len() > *max) {
             lines.truncate(max);
             let last = lines.pop().expect("max > 0");
-            let rest = &text[last.start..text[last.start..].find('\n').map_or(text.len(), |end| last.start + end)];
-            let ellipsis = self.layout_line("…", style).width.0;
-            let room = width.unwrap_or(f32::INFINITY) - ellipsis;
-            let full = self.layout_line(rest, style);
+            let end = text[last.start..].find('\n').map_or(text.len(), |end| last.start + end);
+            let tail = style_at(&fonts, end.saturating_sub(1).max(last.start)).unwrap_or(*style);
+            let ellipsis = self.layout_line("…", &tail);
+            let room = width.unwrap_or(f32::INFINITY) - ellipsis.width.0;
+            let full = self.shape(text, last.start..end, &fonts);
             let cut = full
-                .runs
+                .glyphs
                 .iter()
-                .flat_map(|run| &run.glyphs)
-                .zip(full.runs.iter().flat_map(|run| &run.glyphs).skip(1).map(|next| next.position.x.0).chain([full.width.0]))
+                .zip(full.glyphs.iter().skip(1).map(|(_, _, next)| next.position.x.0).chain([full.width]))
                 .find(|(_, next)| *next > room)
-                .map_or(rest.len(), |(glyph, _)| glyph.index);
-            let cut_text = format!("{}…", rest[..cut].trim_end());
-            let layout = self.layout_line(&cut_text, style);
+                .map_or(end - last.start, |((_, _, glyph), _)| glyph.index);
+            let kept = text[last.start..last.start + cut].trim_end().len();
+            let mut shaped = self.shape(text, last.start..last.start + kept, &fonts);
+            let tail = style_at(&fonts, (last.start + kept).saturating_sub(1).max(last.start)).unwrap_or(*style);
+            shaped.append(&self.layout_line("…", &tail), tail.size, kept);
+            let cut_text = format!("{}…", &text[last.start..last.start + kept]);
             let mut end = Vec::new();
-            wrap(&layout, &cut_text, last.start, None, &mut end);
+            wrap(&shaped, &cut_text, last.start, None, &mut end);
             lines.extend(end);
         }
-        Paragraph { lines, line_height: style.line_height }
+        Paragraph { lines, line_height }
+    }
+
+    /// Bytes `range` of `text` shaped as one line, each of `fonts` that's in it apart, one after another; its glyphs'
+    /// indices are from `range`'s start.
+    fn shape(&mut self, text: &str, range: Range<usize>, fonts: &[(Range<usize>, TextStyle)]) -> Shaped {
+        let mut shaped = Shaped::default();
+        for (run, style) in fonts {
+            let (start, end) = (run.start.max(range.start), run.end.min(range.end));
+            if start < end {
+                let layout = self.layout_line(&text[start..end], style);
+                shaped.append(&layout, style.size, start - range.start);
+            }
+        }
+        shaped
     }
 
     /// Paints `paragraph` with its top left at `origin`, each line placed along `width` by `align` (0 start, 0.5
@@ -297,7 +345,7 @@ impl TextSystem {
         origin: Point<Pixels>,
         width: f32,
         align: f32,
-        color: Hsla,
+        color: &dyn Fn(usize) -> Hsla,
         scale_factor: f32,
         content_mask: ContentMask<ScaledPixels>,
         transformation: TransformationMatrix,
@@ -309,9 +357,9 @@ impl TextSystem {
             let leading = paragraph.line_height - (line.ascent + line.descent);
             let baseline = origin.y.0 + at as f32 * paragraph.line_height + leading / 2.0 + line.ascent;
             let left = origin.x.0 + (width - line.width).max(0.0) * align;
-            for (font_id, glyph) in &line.glyphs {
+            for (font_id, size, glyph) in &line.glyphs {
                 let point = Point { x: Pixels(left + glyph.position.x.0), y: Pixels(baseline + glyph.position.y.0) };
-                self.paint_glyph(point, *font_id, line.font_size, glyph, color, scale_factor, content_mask, transformation, atlas, scene)?;
+                self.paint_glyph(point, *font_id, *size, glyph, color(glyph.index), scale_factor, content_mask, transformation, atlas, scene)?;
             }
         }
         Ok(())
@@ -394,51 +442,105 @@ impl TextSystem {
     }
 }
 
+/// A hard line shaped, perhaps a run at a time: its glyphs, each with its face and size, placed one after another.
+#[derive(Default)]
+struct Shaped {
+    glyphs: Vec<(FontId, f32, ShapedGlyph)>,
+    width: f32,
+    ascent: f32,
+    descent: f32,
+    rtl: bool,
+}
+
+impl Shaped {
+    fn of(layout: &LineLayout) -> Shaped {
+        let mut shaped = Shaped::default();
+        shaped.append(layout, layout.font_size.0, 0);
+        shaped
+    }
+
+    /// `layout`, set at `size`, after what's here, its glyphs' indices moved on by `from`.
+    fn append(&mut self, layout: &LineLayout, size: f32, from: usize) {
+        if self.glyphs.is_empty() {
+            self.rtl = layout.rtl;
+        }
+        let x = self.width;
+        for run in &layout.runs {
+            self.glyphs.extend(run.glyphs.iter().map(|glyph| {
+                let position = Point { x: Pixels(glyph.position.x.0 + x), ..glyph.position };
+                (run.font_id, size, ShapedGlyph { position, index: glyph.index + from, end: glyph.end + from, ..glyph.clone() })
+            }));
+        }
+        self.width += layout.width.0;
+        self.ascent = self.ascent.max(layout.ascent.0);
+        self.descent = self.descent.max(layout.descent.0);
+    }
+}
+
+/// `text`'s type styles, run by run: `style` where it has no runs, and runs side by side in the same one as one.
+fn fonts(text: &str, style: &TextStyle, runs: &[TextRun]) -> Vec<(Range<usize>, TextStyle)> {
+    let mut fonts: Vec<(Range<usize>, TextStyle)> = Vec::new();
+    let mut at = 0;
+    for run in runs.iter().chain([&TextRun { len: text.len().saturating_sub(runs.iter().map(|run| run.len).sum()), style: *style, color: Hsla::default(), background_color: None, underline: false }]) {
+        let end = (at + run.len).min(text.len());
+        match fonts.last_mut() {
+            Some((last, was)) if *was == run.style => last.end = end,
+            _ if at < end => fonts.push((at..end, run.style)),
+            _ => {}
+        }
+        at = end;
+    }
+    fonts
+}
+
+/// The type style byte `index` is set in.
+fn style_at(fonts: &[(Range<usize>, TextStyle)], index: usize) -> Option<TextStyle> {
+    fonts.iter().find(|(range, _)| range.contains(&index)).or(fonts.last()).map(|(_, style)| *style)
+}
+
 /// Breaks one hard line's layout into lines no wider than `width`, appending them to `lines`.
-fn wrap(layout: &LineLayout, text: &str, offset: usize, width: Option<f32>, lines: &mut Vec<Line>) {
-    let glyphs: Vec<(FontId, ShapedGlyph)> =
-        layout.runs.iter().flat_map(|run| run.glyphs.iter().map(|glyph| (run.font_id, glyph.clone()))).collect();
-    let line = |glyphs: &[(FontId, ShapedGlyph)], start: usize, end: usize, next_x: f32| {
-        let left = glyphs.first().map_or(0.0, |(_, glyph)| glyph.position.x.0);
+fn wrap(layout: &Shaped, text: &str, offset: usize, width: Option<f32>, lines: &mut Vec<Line>) {
+    let glyphs = &layout.glyphs;
+    let line = |glyphs: &[(FontId, f32, ShapedGlyph)], start: usize, end: usize, next_x: f32| {
+        let left = glyphs.first().map_or(0.0, |(_, _, glyph)| glyph.position.x.0);
         // A line's width leaves out the spaces it ends with, as CSS hangs them.
         let ink_end = glyphs
             .iter()
-            .rposition(|(_, glyph)| !text[glyph.index..].starts_with(char::is_whitespace))
-            .map_or(left, |at| glyphs.get(at + 1).map_or(next_x, |(_, next)| next.position.x.0));
+            .rposition(|(_, _, glyph)| !text[glyph.index..].starts_with(char::is_whitespace))
+            .map_or(left, |at| glyphs.get(at + 1).map_or(next_x, |(_, _, next)| next.position.x.0));
         Line {
             glyphs: glyphs
                 .iter()
-                .map(|(font, glyph)| (*font, ShapedGlyph { position: Point { x: Pixels(glyph.position.x.0 - left), ..glyph.position }, index: glyph.index + offset, end: glyph.end + offset, ..glyph.clone() }))
+                .map(|(font, size, glyph)| (*font, *size, ShapedGlyph { position: Point { x: Pixels(glyph.position.x.0 - left), ..glyph.position }, index: glyph.index + offset, end: glyph.end + offset, ..glyph.clone() }))
                 .collect(),
             width: (ink_end - left).max(0.0),
-            ascent: layout.ascent.0,
-            descent: layout.descent.0,
-            font_size: layout.font_size.0,
+            ascent: layout.ascent,
+            descent: layout.descent,
             start: start + offset,
             end: end + offset,
             rtl: layout.rtl,
         }
     };
     let Some(width) = width else {
-        lines.push(line(&glyphs, 0, text.len(), layout.width.0));
+        lines.push(line(glyphs, 0, text.len(), layout.width));
         return;
     };
     // Where a line may begin: after a break opportunity, at a glyph (shaping can join characters across one).
     let breaks: Vec<usize> = unicode_linebreak::linebreaks(text).map(|(at, _)| at).filter(|at| *at < text.len()).collect();
-    let x_of = |at: usize| glyphs.get(at).map_or(layout.width.0, |(_, glyph)| glyph.position.x.0);
+    let x_of = |at: usize| glyphs.get(at).map_or(layout.width, |(_, _, glyph)| glyph.position.x.0);
     let mut start = 0;
     let mut at = 1;
     while at <= glyphs.len() {
         let end_x = x_of(at);
-        let ink = !text[glyphs[at - 1].1.index..].starts_with(char::is_whitespace);
+        let ink = !text[glyphs[at - 1].2.index..].starts_with(char::is_whitespace);
         if ink && end_x - x_of(start) > width && at - 1 > start {
             // Back to the last break opportunity on this line. A word alone wider than the line runs on past it,
             // as CSS's `overflow-wrap: normal` has it, and breaks at the next opportunity.
-            let Some(cut) = (start + 1..at).rev().find(|&cut| breaks.binary_search(&glyphs[cut].1.index).is_ok()) else {
+            let Some(cut) = (start + 1..at).rev().find(|&cut| breaks.binary_search(&glyphs[cut].2.index).is_ok()) else {
                 at += 1;
                 continue;
             };
-            let (begin, end) = (glyphs[start].1.index, glyphs[cut].1.index);
+            let (begin, end) = (glyphs[start].2.index, glyphs[cut].2.index);
             lines.push(line(&glyphs[start..cut], begin, end, x_of(cut)));
             start = cut;
             at = cut + 1;
@@ -446,6 +548,6 @@ fn wrap(layout: &LineLayout, text: &str, offset: usize, width: Option<f32>, line
         }
         at += 1;
     }
-    let begin = glyphs.get(start).map_or(0, |(_, glyph)| glyph.index);
-    lines.push(line(&glyphs[start..], begin, text.len(), layout.width.0));
+    let begin = glyphs.get(start).map_or(0, |(_, _, glyph)| glyph.index);
+    lines.push(line(&glyphs[start..], begin, text.len(), layout.width));
 }
