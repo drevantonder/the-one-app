@@ -21,6 +21,7 @@ use crate::text::{Paragraph, TextSystem};
 use crate::tokens::{Conditions, Radius};
 use crate::tree::{Id, Kind, Node, Tree};
 
+mod bridge;
 pub(crate) mod inspected;
 mod transition;
 
@@ -137,6 +138,8 @@ pub struct Screen {
     /// Where the pointer is, what it's over and what it pressed, for styles' states and pointer events.
     states: States,
     pointer: Option<Point<f32>>,
+    /// The pointer is a finger, as a phone's is, which pointer events say (`pointerType`).
+    pub touch: bool,
     /// The node a pointer's press went down on, which its moves and its end go to, wherever it goes.
     captured: Option<Id>,
     /// What takes the pointer, as it was last painted, in the order painted, the topmost last.
@@ -204,6 +207,7 @@ impl Screen {
             scrolled: HashMap::new(),
             states: States::default(),
             pointer: None,
+            touch: false,
             captured: None,
             placed: Vec::new(),
             animating: false,
@@ -614,7 +618,7 @@ impl Screen {
             let rect = self.rects.get(id).copied().unwrap_or(Rect { x: 0.0, y: 0.0, width: 0.0, height: 0.0 });
             let mut event = json!({
                 "v": crate::VERSION, "op": "event", "id": id, "name": name, "timeStamp": time,
-                "clientX": at.x, "clientY": at.y, "pointerId": 1, "pointerType": "mouse", "button": button,
+                "clientX": at.x, "clientY": at.y, "pointerId": 1, "pointerType": if self.touch { "touch" } else { "mouse" }, "button": button,
                 "rect": {"x": rect.x, "y": rect.y, "width": rect.width, "height": rect.height},
             });
             if name == "wheel" {
@@ -777,6 +781,13 @@ impl Screen {
     pub fn scroll(&mut self, at: Point<f32>, delta: Point<f32>) -> Option<Id> {
         let chain = self.under(at);
         self.pointer_event(&chain, "wheel", at, 0, delta);
+        self.pan(at, delta)
+    }
+
+    /// A finger (or a screen reader) moved what's at `at` by `delta` pixels (down and right positive): the innermost
+    /// thing there that can still scroll that way does, telling its app if it listens. → what scrolled.
+    pub fn pan(&mut self, at: Point<f32>, delta: Point<f32>) -> Option<Id> {
+        let chain = self.under(at);
         let target = chain.iter().copied().find_map(|id| {
             let (most_y, most_x, along) = self.placed(id)?.scroll?;
             let now = self.scrolled.get(&id).copied().unwrap_or(point(0.0, 0.0));

@@ -112,6 +112,11 @@ impl rwh::HasDisplayHandle for NativeWindow {
 }
 
 impl NativeWindow {
+    /// An X11 window has its surface from the start.
+    pub fn has_surface(&self) -> bool {
+        true
+    }
+
     pub fn device_size(&self) -> Size<DevicePixels> {
         self.size.get()
     }

@@ -1,6 +1,6 @@
-//! Text: a platform's text system shapes a line and rasterizes its glyphs (`linux`, cosmic-text; `windows`,
-//! DirectWrite; `mac`, Core Text), and this module, the same everywhere, wraps the line to a width, clamps it with an ellipsis, measures
-//! it for layout and paints its glyphs from the atlas. The types are GPUI's (crates/gpui/src/text_system/line_layout.rs and platform.rs), as its
+//! Text: a platform's text system shapes a line and rasterizes its glyphs (`cosmic_text_system`, cosmic-text, on Linux
+//! and Android; `windows`, DirectWrite; `mac`, Core Text), and this module, the same everywhere, wraps the line to a
+//! width, clamps it with an ellipsis, measures it for layout and paints its glyphs from the atlas. The types are GPUI's (crates/gpui/src/text_system/line_layout.rs and platform.rs), as its
 //! platform text systems speak them.
 
 use std::collections::HashMap;
@@ -13,10 +13,12 @@ use crate::render::Atlas;
 use crate::render::atlas::AtlasKey;
 use crate::render::scene::{MonochromeSprite, PolychromeSprite, Scene, TransformationMatrix};
 
-#[cfg(target_os = "linux")]
-mod linux;
-#[cfg(target_os = "linux")]
-pub use linux::CosmicTextSystem as PlatformTextSystem;
+#[cfg(any(target_os = "linux", target_os = "android"))]
+mod colr;
+#[cfg(any(target_os = "linux", target_os = "android"))]
+mod cosmic_text_system;
+#[cfg(any(target_os = "linux", target_os = "android"))]
+pub use cosmic_text_system::CosmicTextSystem as PlatformTextSystem;
 #[cfg(target_os = "windows")]
 mod windows;
 #[cfg(target_os = "windows")]
@@ -27,7 +29,7 @@ mod mac;
 pub use mac::CoreTextSystem as PlatformTextSystem;
 
 pub(crate) const SUBPIXEL_VARIANTS_X: u8 = 4;
-pub(crate) const SUBPIXEL_VARIANTS_Y: u8 = if cfg!(target_os = "windows") || cfg!(target_os = "linux") { 1 } else { SUBPIXEL_VARIANTS_X };
+pub(crate) const SUBPIXEL_VARIANTS_Y: u8 = if cfg!(target_os = "windows") || cfg!(target_os = "linux") || cfg!(target_os = "android") { 1 } else { SUBPIXEL_VARIANTS_X };
 
 /// A face at a weight, as the platform text system loaded it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Default)]

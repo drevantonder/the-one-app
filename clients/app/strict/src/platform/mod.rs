@@ -1,7 +1,8 @@
-//! Every strict app's window on a computer, drawn by one thread of one process: one connection to the display, one GPU
-//! context, one glyph atlas and one font set, and a QuickJS sandbox per app (its `Screen`), so another open app costs
-//! a few MB, as Zed's and Raycast's windows do. What the rest of the program asks of them (open one, tell one's app
-//! something) is a job run on that thread (`Strict::run`), as GPUI's foreground executor runs its work.
+//! Every strict app's window, drawn by one thread of one process: one connection to the display, one GPU context, one
+//! glyph atlas and one font set, and a QuickJS sandbox per app (its `Screen`), so another open app costs a few MB, as
+//! Zed's and Raycast's windows do. What the rest of the program asks of them (open one, tell one's app something) is a
+//! job run on that thread (`Strict::run`), as GPUI's foreground executor runs its work: on a computer a thread of its
+//! own, and on Android the app's UI thread, where its views are (`android`).
 
 use std::collections::HashMap;
 use std::sync::{Arc, OnceLock};
@@ -23,6 +24,10 @@ use windows::{Display, NativeWindow, appearance, clipboard, reduced_motion};
 mod mac;
 #[cfg(target_os = "macos")]
 use mac::{Display, NativeWindow, appearance, clipboard, reduced_motion};
+#[cfg(target_os = "android")]
+mod android;
+#[cfg(target_os = "android")]
+use android::{Display, NativeWindow, appearance, clipboard, reduced_motion};
 
 /// A window, as the windows' thread names it.
 pub type WindowId = u64;
@@ -65,6 +70,8 @@ pub struct Strict(Sender);
 type Sender = calloop::channel::Sender<Job>;
 #[cfg(target_os = "windows")]
 type Sender = windows::Sender;
+#[cfg(target_os = "android")]
+type Sender = android::Sender;
 
 impl Strict {
     /// The windows' thread, started the first time it's asked for.
@@ -81,6 +88,8 @@ impl Strict {
 
 #[cfg(target_os = "windows")]
 use windows::start;
+#[cfg(target_os = "android")]
+use android::start;
 
 #[cfg(any(target_os = "linux", target_os = "macos"))]
 fn start() -> anyhow::Result<Strict> {
@@ -132,7 +141,8 @@ struct Window {
     summoned: Option<std::time::Instant>,
     /// What it shows: its app's screen, or why its app didn't open.
     screen: Result<Screen, String>,
-    renderer: Renderer,
+    /// What draws it, once it has a surface: at once on a computer, as its view's is made on Android.
+    renderer: Option<Renderer>,
     scene: crate::render::scene::Scene,
     dirty: bool,
     drawn: bool,
@@ -168,7 +178,7 @@ impl Windows {
         if let Some(clipboard) = clipboard() {
             screen.clipboard = clipboard;
         }
-        let renderer = Renderer::new(&self.context, self.atlas.clone(), &native, native.device_size(), native.transparent())?;
+        let renderer = self.renderer(&native)?;
         let opened = std::time::Instant::now();
         let panel = options.panel.is_some();
         self.windows.insert(
@@ -183,7 +193,7 @@ impl Windows {
         let id = self.next;
         self.next += 1;
         let native = self.display.open(id, &options)?;
-        let renderer = Renderer::new(&self.context, self.atlas.clone(), &native, native.device_size(), native.transparent())?;
+        let renderer = self.renderer(&native)?;
         let opened = std::time::Instant::now();
         let panel = options.panel.is_some();
         self.windows.insert(
@@ -191,6 +201,14 @@ impl Windows {
             Window { native, opened, shown: panel, panel, visible: false, summoned: None, screen: Err(why.to_owned()), renderer, scene: Default::default(), dirty: true, drawn: false, on_event: Box::new(on_event), tag: options.tag },
         );
         Ok(id)
+    }
+
+    /// What draws `native`, where it has a surface to draw on yet.
+    fn renderer(&self, native: &NativeWindow) -> anyhow::Result<Option<Renderer>> {
+        if !native.has_surface() {
+            return Ok(None);
+        }
+        Renderer::new(&self.context, self.atlas.clone(), native, native.device_size(), native.transparent()).map(Some)
     }
 
     /// Does `f` to window `id`'s screen, if it's open, and draws what it changed.
@@ -316,7 +334,9 @@ impl Windows {
     /// Closes window `id`.
     pub fn close(&mut self, id: WindowId) {
         if let Some(mut window) = self.windows.remove(&id) {
-            window.renderer.destroy();
+            if let Some(mut renderer) = window.renderer.take() {
+                renderer.destroy();
+            }
             self.display.close(&window.native);
             (window.on_event)(Event::Closed);
         }
@@ -347,7 +367,9 @@ impl Windows {
             self.windows.iter().filter_map(|(id, window)| Some((*id, window.screen.as_ref().ok()?.mismatched.clone()?))).collect();
         for (id, why) in mismatched {
             if let Some(mut window) = self.windows.remove(&id) {
-                window.renderer.destroy();
+                if let Some(mut renderer) = window.renderer.take() {
+                    renderer.destroy();
+                }
                 self.display.close(&window.native);
                 (window.on_event)(Event::Mismatched(why));
             }
@@ -361,13 +383,15 @@ impl Windows {
                 window.shown = true;
                 self.display.show(&window.native);
             }
-            // A panel put away draws nothing until it's summoned again.
-            if !window.dirty || (window.panel && !window.visible) {
+            // A panel put away draws nothing until it's summoned again, and a window with no surface yet (Android's view,
+            // until it's laid out) is drawn once it has one.
+            if window.panel && !window.visible {
                 continue;
             }
+            let Some(renderer) = window.renderer.as_mut().filter(|_| window.dirty) else { continue };
             window.dirty = false;
             let (size, scale) = (window.native.size(), window.native.scale());
-            window.renderer.update_drawable_size(window.native.device_size());
+            renderer.update_drawable_size(window.native.device_size());
             match &mut window.screen {
                 Ok(screen) => {
                     screen.paint(size, scale, &mut self.text, &self.atlas, &mut window.scene);
@@ -376,7 +400,7 @@ impl Windows {
                 }
                 Err(why) => crate::view::paint_message(why, appearance(), size, scale, &mut self.text, &self.atlas, &mut window.scene),
             }
-            window.renderer.draw(&window.scene);
+            renderer.draw(&window.scene);
             if !window.drawn {
                 window.drawn = true;
                 (window.on_event)(Event::Drawn);
@@ -394,12 +418,32 @@ impl Windows {
         }
         let Some(window) = self.windows.get_mut(&id) else { return };
         window.dirty = true;
-        if let Input::Resized(size) = input {
-            return window.native.resized(size);
+        match input {
+            Input::Resized(size) => return window.native.resized(size),
+            // Its surface came, or a new one did: drawn on from now, a renderer for one that's gone let go first.
+            Input::Surface => {
+                if let Some(mut renderer) = window.renderer.take() {
+                    renderer.destroy();
+                }
+                if window.native.has_surface() {
+                    match Renderer::new(&self.context, self.atlas.clone(), &window.native, window.native.device_size(), window.native.transparent()) {
+                        Ok(renderer) => window.renderer = Some(renderer),
+                        Err(error) => log::error!("strict window {id} can't draw: {error:#}"),
+                    }
+                }
+                return;
+            }
+            Input::SurfaceLost => {
+                if let Some(mut renderer) = window.renderer.take() {
+                    renderer.destroy();
+                }
+                return;
+            }
+            _ => {}
         }
         let Ok(screen) = &mut window.screen else { return };
         match input {
-            Input::Resized(_) => {}
+            Input::Resized(_) | Input::Surface | Input::SurfaceLost => {}
             Input::Expose => {}
             Input::Appearance(appearance) => screen.appearance = appearance,
             Input::Moved(at) => {
@@ -434,8 +478,15 @@ impl Windows {
 }
 
 /// What the display says happened to a window.
+#[cfg_attr(target_os = "android", allow(dead_code))]
 pub(crate) enum Input {
     Resized(Size<crate::geometry::DevicePixels>),
+    /// It has a surface to draw on, or a new one (Android's view's).
+    #[cfg_attr(not(target_os = "android"), allow(dead_code))]
+    Surface,
+    /// Its surface is going, as its view is hidden or gone: nothing draws on it.
+    #[cfg_attr(not(target_os = "android"), allow(dead_code))]
+    SurfaceLost,
     Expose,
     /// The system went light or dark.
     #[cfg_attr(target_os = "linux", allow(dead_code))]

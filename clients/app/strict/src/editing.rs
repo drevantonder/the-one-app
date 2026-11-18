@@ -37,6 +37,8 @@
 //! `attributedSubstringForProposedRange:` read the `Value`; `firstRectForCharacterRange:` is the caret's rect;
 //! `characterIndexForPoint:` is `index_at`; and `doCommandBySelector:` is the key it stands for (`deleteBackward:`
 //! Backspace, `insertNewline:` Enter, `moveLeft:` ArrowLeft, `moveWordLeft:` ArrowLeft with `alt`, and so on).
+//! Android's `InputConnection` keeps the whole editing state itself, as Flutter's `TextInputPlugin` does: its bridge
+//! says each change as the whole `Value` (`Screen::set_editing`), and is told the input's when its app changes it.
 
 use std::collections::VecDeque;
 
@@ -267,6 +269,28 @@ impl Field {
         self.history = History::default();
         self.column = None;
         self.place = None;
+    }
+
+    /// The whole editing state a keyboard that keeps its own says (Android's `InputConnection`, as Flutter's
+    /// `updateEditingState` has it): its text, selection, and what it composes, which is in that text, taken as it is.
+    /// The keyboard undoes its own, so nothing is recorded to undo.
+    pub fn keyboard(&mut self, value: &Value) {
+        let at = |units: usize| byte(&value.text, units);
+        match value.composing.filter(|composing| composing.start < composing.end) {
+            Some(composing) => {
+                let (start, end) = (at(composing.start), at(composing.end));
+                let cursor = at(value.selection.extent).clamp(start, end) - start;
+                self.preedit = Some((value.text[start..end].to_owned(), cursor));
+                self.text = format!("{}{}", &value.text[..start], &value.text[end..]);
+                (self.anchor, self.focus) = (start, start);
+            }
+            None => {
+                self.preedit = None;
+                self.text = value.text.clone();
+                (self.anchor, self.focus) = (at(value.selection.base), at(value.selection.extent));
+            }
+        }
+        self.column = None;
     }
 
     /// The selection as ordered byte offsets.

@@ -17,6 +17,9 @@ log = "0.4"
 parking_lot = "0.12"
 raw-window-handle = "0.6"
 resvg = { version = "0.47", default-features = false }
+# A COLRv1 emoji (Android's emoji font, and Linux's Noto Color Emoji), which swash doesn't draw: skrifa walks its paint
+# graph and tiny-skia (resvg's) rasterizes it, as Chrome's Skia does (`text::colr`); swash's own version of skrifa.
+skrifa = "0.44"
 # QuickJS, with its module loader: a page's module imports the UI library's. Its async runtime runs what the Web APIs
 # below answer with a promise.
 rquickjs = { version = "0.14", features = ["loader", "futures"] }
@@ -126,3 +129,21 @@ objc2-foundation = { version = "0.3", default-features = false, features = ["std
 objc2-quartz-core = { version = "0.3", default-features = false, features = ["std", "objc2-core-foundation", "CALayer", "CAMetalLayer"] }
 # Which way a line runs, by its first strong character, as on Windows.
 unicode-bidi = "0.3"
+
+# Android: a strict screen is a SurfaceView over the app's web view (`platform/android`), on the UI thread, whose
+# keyboard bridge (Flutter's) and accessibility delegate (AccessKit's) are Java that calls in through JNI.
+[target.'cfg(target_os = "android")'.dependencies]
+# Its Java delegate, prebuilt, loaded from memory: the app needs no Java of AccessKit's.
+accesskit = "0.25"
+accesskit_android = { version = "0.9.1", features = ["embedded-dex"] }
+android_logger = "0.15"
+cosmic-text = "0.19"
+jni = "0.21"
+libc = "0.2"
+ndk = { version = "0.9", features = ["rwh_06"] }
+ndk-sys = "0.6"
+swash = "0.2"
+# The scripts Android's fallback fonts are chosen by, cosmic-text's own (`Fallback::script_fallback`).
+unicode-script = "0.5"
+# Android has no prebuilt bindings in rquickjs-sys, so bindgen makes them against the NDK's headers.
+rquickjs = { version = "0.14", features = ["bindgen"] }

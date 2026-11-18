@@ -98,6 +98,11 @@ impl rwh::HasDisplayHandle for NativeWindow {
 }
 
 impl NativeWindow {
+    /// A computer's window has its surface from the start.
+    pub fn has_surface(&self) -> bool {
+        true
+    }
+
     pub fn device_size(&self) -> Size<DevicePixels> {
         self.shared.size.lock().expect("nothing panics holding it").0
     }

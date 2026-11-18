@@ -1,9 +1,10 @@
 // Copied from Zed's GPUI (github.com/zed-industries/zed, crates/gpui_wgpu/src/cosmic_text_system.rs) at commit
 // 1043f4a86ab911a381d9bfe45cf6b36d3cdcc89a, and cut down for the strict host: cosmic-text's shaping and swash's
-// rasterizing, on Linux. Changed: a face is loaded at the weight asked for, which a variable font draws by its `wght`
-// axis in shaping and rasterizing alike, letter spacing is cosmic-text's, there are no user fallback chains, a glyph
-// says where its characters end, how wide it is and which way it runs, for a caret in right-to-left text, and a line's
-// glyphs are placed left to right from its own left edge, which cosmic-text breaks text into where it asks.
+// rasterizing, on Linux and Android. Changed: a face is loaded at the weight asked for, which a variable font draws by
+// its `wght` axis in shaping and rasterizing alike, letter spacing is cosmic-text's, there are no user fallback chains,
+// a glyph says where its characters end, how wide it is and which way it runs, for a caret in right-to-left text, a
+// line's glyphs are placed left to right from its own left edge, which cosmic-text breaks text into where it asks,
+// Android's own fonts are the fallback there, and a COLRv1 emoji is drawn by skrifa (`colr`).
 // Copyright 2022 - 2025 Zed Industries, Inc. Licensed under the Apache License, Version 2.0
 // (clients/app/strict/LICENSE-APACHE); this file is changed from the original.
 
@@ -36,11 +37,20 @@ impl CosmicTextSystem {
         let mut db = fontdb::Database::new();
         if system_fonts {
             db.load_system_fonts();
+            // fontdb reads no system fonts on Android: those it falls back on for what Allo hasn't, memory-mapped, as
+            // Android's own fonts.xml names them for every script it has a font for.
+            #[cfg(target_os = "android")]
+            for file in ANDROID_FONTS {
+                let _ = db.load_font_file(format!("/system/fonts/{file}"));
+            }
         }
         for font in fonts {
             db.load_font_data(font);
         }
+        #[cfg(not(target_os = "android"))]
         let font_system = FontSystem::new_with_locale_and_db("en-US".into(), db);
+        #[cfg(target_os = "android")]
+        let font_system = FontSystem::new_with_locale_and_db_and_fallback("en-US".into(), db, Android);
         CosmicTextSystem {
             font_system,
             swash_scale_context: ScaleContext::new(),
@@ -178,6 +188,19 @@ impl CosmicTextSystem {
     fn render_glyph_image(&mut self, params: &RenderGlyphParams) -> Result<swash::scale::image::Image> {
         let (id, weight, _) = self.faces[params.font_id.0];
         let font = self.font_system.get_font(id, weight).context("the font went")?;
+        if params.is_emoji {
+            let index = self.font_system.db().face(id).map_or(0, |face| face.index);
+            let colr = skrifa::FontRef::from_index(font.data(), index)
+                .ok()
+                .and_then(|face| super::colr::render(&face, params.glyph_id.0.try_into().ok()?, params.font_size() * params.scale_factor(), &[]));
+            if let Some((left, top, width, height, rgba)) = colr {
+                let mut image = swash::scale::image::Image::new();
+                image.content = swash::scale::image::Content::Color;
+                image.placement = swash::zeno::Placement { left, top, width, height };
+                image.data = rgba;
+                return Ok(image);
+            }
+        }
         let font_ref = font.as_swash();
         let scale_factor = params.scale_factor();
         let subpixel_offset = Vector::new(
@@ -202,5 +225,62 @@ impl CosmicTextSystem {
         renderer.format(Format::Alpha).offset(subpixel_offset);
         let glyph_id: u16 = params.glyph_id.0.try_into()?;
         renderer.render(&mut scaler, glyph_id).with_context(|| format!("unable to render glyph via swash for {params:?}"))
+    }
+}
+
+/// The fonts Android falls back on for what Allo hasn't, by their files in /system/fonts, as its fonts.xml lists
+/// them: Roboto for Latin, Greek and Cyrillic, the emoji, CJK, and the scripts most read.
+#[cfg(target_os = "android")]
+const ANDROID_FONTS: &[&str] = &[
+    "Roboto-Regular.ttf",
+    "NotoColorEmoji.ttf",
+    "NotoSansCJK-Regular.ttc",
+    "NotoNaskhArabic-Regular.ttf",
+    "NotoSansHebrew-Regular.ttf",
+    "NotoSansDevanagari-VF.ttf",
+    "NotoSansThai-Regular.ttf",
+    "NotoSansBengali-VF.ttf",
+    "NotoSansTamil-VF.ttf",
+    "NotoSansArmenian-VF.ttf",
+    "NotoSansGeorgian-VF.ttf",
+    "NotoSansEthiopic-VF.ttf",
+    "NotoSansSymbols-Regular-Subsetted.ttf",
+    "NotoSansSymbols-Regular-Subsetted2.ttf",
+];
+
+/// Android's fallbacks, by script, as its fonts.xml orders them for the fonts read here.
+#[cfg(target_os = "android")]
+struct Android;
+
+#[cfg(target_os = "android")]
+impl cosmic_text::Fallback for Android {
+    fn common_fallback(&self) -> &[&'static str] {
+        &["Roboto", "Noto Color Emoji", "Noto Sans Symbols"]
+    }
+
+    fn forbidden_fallback(&self) -> &[&'static str] {
+        &[]
+    }
+
+    fn script_fallback(&self, script: unicode_script::Script, locale: &str) -> &[&'static str] {
+        use unicode_script::Script;
+        match script {
+            Script::Hangul => &["Noto Sans CJK KR"],
+            Script::Hiragana | Script::Katakana => &["Noto Sans CJK JP"],
+            Script::Han if locale.starts_with("zh-TW") || locale.starts_with("zh-HK") => &["Noto Sans CJK TC"],
+            Script::Han if locale.starts_with("zh") => &["Noto Sans CJK SC"],
+            Script::Han if locale.starts_with("ko") => &["Noto Sans CJK KR"],
+            Script::Han => &["Noto Sans CJK JP"],
+            Script::Arabic => &["Noto Naskh Arabic"],
+            Script::Hebrew => &["Noto Sans Hebrew"],
+            Script::Devanagari => &["Noto Sans Devanagari"],
+            Script::Thai => &["Noto Sans Thai"],
+            Script::Bengali => &["Noto Sans Bengali"],
+            Script::Tamil => &["Noto Sans Tamil"],
+            Script::Armenian => &["Noto Sans Armenian"],
+            Script::Georgian => &["Noto Sans Georgian"],
+            Script::Ethiopic => &["Noto Sans Ethiopic"],
+            _ => &[],
+        }
     }
 }
