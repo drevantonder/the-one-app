@@ -41,6 +41,9 @@ let windows = false
 let own
 /// The page under every other in this window: the launcher's, or in an app's own window, that app's.
 const base = () => own?.entrypoint ?? launcher
+/// A computer's launcher (`computer.rs`): this page in a panel the system summons, whose app is the launcher alone.
+/// It's put away as an app opens from it, on Escape, and once the launcher is done with it (`leave`).
+const panel = () => windows && !own
 const baseKey = () => key(base(), own?.subject)
 /// The apps that are open, by who each is for and what it is: `{ key, entrypoint, subject, host, frame, tapped, drawn, over }`.
 /// An app stays open behind the one that's showing once it's been opened, as on a phone, so going back to it shows
@@ -1144,8 +1147,10 @@ function lift() {
 }
 addEventListener("message", ({ data }) => {
   if (data?.method === "notifications/one/wheel") wheel(data.params)
-  // Escape on a computer, at an app's first screen with nothing open over it, takes it home as its Back does.
+  // Escape on a computer, at an app's first screen with nothing open over it, takes it home as its Back does, and on
+  // the launcher puts it away.
   if (data?.method === "notifications/one/escape" && home()) history.back()
+  else if (data?.method === "notifications/one/escape" && panel() && !depth && !open.get(baseKey())?.over) invoke("hide")
 })
 
 /// The app that's open as `at`, or with none there, the one under every other: the launcher, or while there's none,
@@ -1444,7 +1449,7 @@ async function respond(view, method, params) {
       else localStorage.removeItem("theme")
       dress()
     }
-    return { ...(await invoke("client")), theme: chosen(), pinsShortcuts: !!globalThis.androidPin }
+    return { ...(await invoke("client")), theme: chosen(), pinsShortcuts: !!globalThis.androidPin, launcher: panel() }
   }
   if (method.startsWith("ui/")) throw Object.assign(new Error(`This client has no ${method}`), { code: -32601 })
   // An app opened from a group's page is answered for the group.
@@ -1460,6 +1465,7 @@ addEventListener("message", async ({ source, data }) => {
   if (id === undefined) {
     // The app's user went back out of it. The app stays open behind the launcher.
     if (method === "ui/notifications/request-teardown" && !view.frame.inert && depth) history.back()
+    else if (method === "ui/notifications/request-teardown" && panel() && view.key === baseKey()) invoke("hide")
     // Something is open over its page, or nothing is any more, and whether it's on its first screen.
     if (method === "notifications/one/over") {
       view.over = params.over === true
@@ -1668,6 +1674,8 @@ function returned() {
   invoke("visible", { onScreen: !document.hidden })
   // Put away, the window's pages are off screen (`away`), where its stale ones load their new versions.
   if (document.hidden) return
+  // Summoned, the launcher has the keyboard, in its search (the Home Screen's).
+  if (panel()) open.get(baseKey())?.frame.focus()
   for (const subject of listed) list(subject)
   invoke("refresh", { view: baseKey() })
   const view = here()

@@ -1,0 +1,649 @@
+//! The app on a computer (a Mac, Windows or Linux): a launcher, as Spotlight and Raycast are. Its window is the Home
+//! Screen in a panel the system summons over whatever's in front, near the top of the screen the pointer is on, which
+//! goes again once an app opens from it, on Escape, or once something else is clicked. Every app opens in a window of
+//! its own (`hosts`, `host`), so starting them is all the launcher does. It's summoned by its shortcut (`shortcut`), the
+//! app's own icon in the Dock or taskbar (a second start, `hosts::again`), a Mac's menu bar, where the ring is, and an
+//! app window's Home. The program runs on with it put away, holding the device's one connection to its network, its
+//! notifications and its app windows, until it's quit (its menu, Cmd-Q, or Ctrl-Q on Linux).
+//!
+//! It's only a window and a web view (tao and wry), as each app's own window is: its page is the window's own
+//! (`page/`), which shows the Home Screen, and asks what it asks of the app (`hosts::command`) through the same bridge
+//! an app's window has (`host-initialization-script.js`).
+
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex, OnceLock};
+
+use serde_json::{Value, json};
+use tao::dpi::{LogicalSize, PhysicalPosition};
+use tao::event::{Event, WindowEvent};
+use tao::event_loop::{ControlFlow, EventLoopBuilder, EventLoopProxy};
+use tao::window::{Theme, Window, WindowBuilder};
+use wry::http::Request;
+use wry::{RequestAsyncResponder, WebView, WebViewBuilder, WebViewId};
+
+use crate::{hosts, notifications};
+
+/// The launcher's size, in points: two of a phone's pages side by side and the dots under them, drawn smaller
+/// (`measure` in the Home Screen's home.tsx), and room around them.
+const SIZE: LogicalSize<f64> = LogicalSize::new(820.0, 600.0);
+
+/// What the program is told to do on its main thread, where its window and web view are.
+pub(crate) enum Told {
+    /// Runs script in the launcher's page.
+    Script(String),
+    /// Shows the launcher, or puts it away if it's showing: its shortcut, or the ring in a Mac's menu bar.
+    Toggle,
+    Summon,
+    /// Puts it away, and with `true` gives the keyboard back to the app that had it (Escape, or its page done).
+    Hide(bool),
+    Theme(Option<crate::Theme>),
+    /// Loads its page again, as the device's session starts again.
+    Reload,
+    /// Opens a `one:` link.
+    Open(String),
+    /// Runs on the main thread, as AppKit's calls must.
+    #[cfg(target_os = "macos")]
+    Main(Box<dyn FnOnce() + Send>),
+    Restart,
+    Quit,
+}
+
+static PROXY: OnceLock<Mutex<EventLoopProxy<Told>>> = OnceLock::new();
+
+/// Tells the main thread `told`.
+fn tell(told: Told) {
+    if let Some(proxy) = PROXY.get() {
+        let _ = proxy.lock().expect("nothing panics holding it").send_event(told);
+    }
+}
+
+/// Runs `run` on the main thread.
+#[cfg(target_os = "macos")]
+pub(crate) fn on_main(run: impl FnOnce() + Send + 'static) {
+    tell(Told::Main(Box::new(run)))
+}
+
+/// Shows the launcher, as an app window's Home does.
+pub(crate) fn summon() {
+    tell(Told::Summon)
+}
+
+/// Puts the launcher away, as an app opens from it, or with `give_back`, as it's dismissed.
+pub(crate) fn hide(give_back: bool) {
+    tell(Told::Hide(give_back))
+}
+
+/// The app was started again: its icon in the Dock or taskbar, which shows the launcher, or a `one:` link it opens.
+pub(crate) fn again(link: Option<String>) {
+    tell(link.and_then(|link| crate::link(&link)).map_or(Told::Summon, Told::Open))
+}
+
+/// The runtime the app's client and its channel run on.
+pub(crate) fn runtime() -> &'static tokio::runtime::Runtime {
+    static RUNTIME: OnceLock<tokio::runtime::Runtime> = OnceLock::new();
+    RUNTIME.get_or_init(|| tokio::runtime::Builder::new_multi_thread().enable_all().build().expect("a runtime starts"))
+}
+
+/// A `one:` link for the page to open once it asks where it is: what the app was started with, or one that came
+/// while its page was loading.
+static OPENED: Mutex<Option<String>> = Mutex::new(None);
+
+/// A computer's window, as what's here tells and asks it (`Shell`).
+struct Computer;
+
+impl crate::Shell for Computer {
+    fn home(&self) -> anyhow::Result<std::path::PathBuf> {
+        ::client::home()
+    }
+
+    fn emit(&self, event: &str, payload: Value) {
+        if event == "open" {
+            return tell(Told::Open(payload.as_str().unwrap_or_default().to_owned()));
+        }
+        tell(Told::Script(format!("window.__ONE_HOST__.event({}, {payload})", Value::from(event))));
+        if hosts::EVENTS.contains(&event) {
+            hosts::tell_all(json!({"event": event, "payload": payload}));
+        }
+    }
+
+    fn reload(&self) {
+        hosts::close_all();
+        tell(Told::Reload);
+    }
+
+    fn open_url(&self, url: &str) -> Result<(), String> {
+        open::that_detached(url).map_err(|error| error.to_string())
+    }
+
+    fn restart(&self) {
+        tell(Told::Restart)
+    }
+
+    fn opened_at(&self) -> Option<String> {
+        OPENED.lock().expect("nothing panics holding it").take()
+    }
+
+    /// A tap on one opens its app, as a `one:` link to it does.
+    fn listen(&self, client: Arc<::client::Client>) {
+        crate::spawn(notifications::listen(client, ::client::NAME, |app| crate::app().shell.emit("open", json!(app))));
+    }
+
+    fn theme(&self, theme: Option<crate::Theme>) {
+        tell(Told::Theme(theme))
+    }
+}
+
+/// Starts the app, unless it's running already, which it then tells it was started again (`hosts::again`), and runs
+/// until it's quit.
+pub fn run() {
+    let started = std::time::Instant::now();
+    // Linux and Windows open a `one:` link with this program, by giving it as the only argument; a Mac tells the
+    // program running (`Event::Opened`).
+    let link = std::env::args().nth(1).filter(|arg| arg.starts_with("one:"));
+    let home = match ::client::home() {
+        Ok(home) => home,
+        Err(error) => return eprintln!("{error:#}"),
+    };
+    // Started again by itself as it updates (`Told::Restart`), it doesn't hand over to the one that's ending.
+    if std::env::var_os("ONE_RESTARTED").is_none() && hosts::again(&home, link.as_deref()) {
+        return;
+    }
+    if let Err(error) = launcher(home, link.and_then(|link| crate::link(&link)), started) {
+        eprintln!("{error:#}");
+    }
+}
+
+fn launcher(home: std::path::PathBuf, link: Option<String>, started: std::time::Instant) -> anyhow::Result<()> {
+    #[cfg(target_os = "linux")]
+    gtk::glib::set_prgname(Some(::client::NAME));
+    let event_loop = EventLoopBuilder::<Told>::with_user_event().build();
+    #[cfg(target_os = "linux")]
+    gtk::gdk::set_program_class(::client::NAME);
+    let _ = PROXY.set(Mutex::new(event_loop.create_proxy()));
+    *OPENED.lock().expect("nothing panics holding it") = link;
+    crate::begin(Computer, started);
+
+    #[cfg(target_os = "macos")]
+    let _menu = menu();
+    #[cfg(any(target_os = "macos", windows))]
+    let _ring = ring();
+
+    let window = WindowBuilder::new().with_title(crate::page::NAME).with_inner_size(SIZE).with_decorations(false).with_resizable(false).with_visible(false).with_always_on_top(true);
+    #[cfg(not(target_os = "linux"))]
+    let window = window.with_transparent(true);
+    #[cfg(target_os = "macos")]
+    let window = window.with_visible_on_all_workspaces(true);
+    #[cfg(target_os = "linux")]
+    let window = {
+        use tao::platform::unix::WindowBuilderExtUnix;
+        window.with_skip_taskbar(true)
+    };
+    #[cfg(windows)]
+    let window = {
+        use tao::platform::windows::WindowBuilderExtWindows;
+        window.with_skip_taskbar(true).with_undecorated_shadow(true)
+    };
+    let window = window.build(&event_loop)?;
+    glass(&window);
+
+    // The page, whose own pages and apps' it asks the app for, and has nothing else load.
+    let page_started = Arc::new(AtomicBool::new(false));
+    let webview = page(&window, page_started.clone())?;
+
+    crate::spawn(crate::opens());
+    hosts::serve(&home)?;
+    #[cfg(all(any(windows, target_os = "linux"), not(debug_assertions)))]
+    if let Err(error) = links() {
+        eprintln!("this device's one: links don't open this app: {error:#}");
+    }
+    let _shortcut = shortcut(&home);
+    // Started again as it updated, the app windows that were open open again.
+    if let Some(reopen) = std::env::var("ONE_REOPEN").ok().and_then(|reopen| serde_json::from_str::<Vec<(String, Option<String>)>>(&reopen).ok()) {
+        for (entrypoint, subject) in reopen {
+            if let Err(error) = hosts::open_window(entrypoint.clone(), subject, entrypoint) {
+                eprintln!("{error}");
+            }
+        }
+    }
+    eprintln!("the window was made {} ms after the app started", started.elapsed().as_millis());
+
+    // Started for an app's own window alone, or as it updated with it put away, the launcher stays put away.
+    let mut shown = false;
+    let mut focused = false;
+    if std::env::var_os("ONE_HIDDEN").is_none() {
+        show(&window, &webview);
+        shown = true;
+    }
+    event_loop.run(move |event, _, flow| {
+        *flow = ControlFlow::Wait;
+        match event {
+            Event::WindowEvent { event: WindowEvent::Focused(true), .. } => focused = true,
+            // Something else was clicked, or came in front: it goes, as Spotlight does.
+            Event::WindowEvent { event: WindowEvent::Focused(false), .. } if shown && focused => {
+                focused = false;
+                shown = false;
+                put_away(&window, false);
+            }
+            // Alt-F4, which closes nothing but puts it away.
+            Event::WindowEvent { event: WindowEvent::CloseRequested, .. } => {
+                shown = false;
+                put_away(&window, true);
+            }
+            // The Dock's icon clicked.
+            #[cfg(target_os = "macos")]
+            Event::Reopen { .. } => {
+                show(&window, &webview);
+                shown = true;
+            }
+            // A `one:` link opened, as a Mac tells the app that takes them.
+            #[cfg(target_os = "macos")]
+            Event::Opened { urls } => {
+                for link in urls.iter().filter_map(|url| crate::link(url.as_str())) {
+                    tell(Told::Open(link));
+                }
+            }
+            Event::UserEvent(Told::Script(script)) => drop(webview.evaluate_script(&script)),
+            Event::UserEvent(Told::Toggle) if shown => {
+                shown = false;
+                put_away(&window, true);
+            }
+            Event::UserEvent(Told::Toggle | Told::Summon) => {
+                show(&window, &webview);
+                shown = true;
+                focused = false;
+            }
+            Event::UserEvent(Told::Hide(give_back)) => {
+                shown = false;
+                focused = false;
+                put_away(&window, give_back);
+            }
+            Event::UserEvent(Told::Theme(theme)) => window.set_theme(theme.map(|theme| match theme {
+                crate::Theme::Light => Theme::Light,
+                crate::Theme::Dark => Theme::Dark,
+            })),
+            Event::UserEvent(Told::Reload) => {
+                page_started.store(false, Ordering::Relaxed);
+                let _ = webview.load_url(crate::HOME);
+            }
+            // The page opens it once it's there to (`start`), and if it isn't yet, once it asks where it is.
+            Event::UserEvent(Told::Open(link)) => {
+                if page_started.load(Ordering::Relaxed) {
+                    let _ = webview.evaluate_script(&format!("window.__ONE_HOST__.event(\"open\", {})", Value::from(link)));
+                } else {
+                    *OPENED.lock().expect("nothing panics holding it") = Some(link);
+                }
+            }
+            #[cfg(target_os = "macos")]
+            Event::UserEvent(Told::Main(run)) => run(),
+            Event::UserEvent(Told::Restart) => restart(&home, shown),
+            Event::UserEvent(Told::Quit) => *flow = ControlFlow::Exit,
+            _ => {}
+        }
+    })
+}
+
+/// Shows the launcher, centred near the top of the screen the pointer is on, with the keyboard.
+fn show(window: &Window, webview: &WebView) {
+    let pointer = window.cursor_position().ok();
+    let screen = pointer
+        .and_then(|at| {
+            window.available_monitors().find(|monitor| {
+                let (corner, size) = (monitor.position(), monitor.size());
+                at.x >= corner.x as f64 && at.y >= corner.y as f64 && at.x < (corner.x + size.width as i32) as f64 && at.y < (corner.y + size.height as i32) as f64
+            })
+        })
+        .or_else(|| window.current_monitor())
+        .or_else(|| window.primary_monitor());
+    if let Some(screen) = screen {
+        let scale = screen.scale_factor();
+        let (corner, size) = (screen.position(), screen.size());
+        let panel = SIZE.to_physical::<f64>(scale);
+        let x = corner.x as f64 + (size.width as f64 - panel.width) / 2.0;
+        // A fifth of the way down, as Spotlight sits, and never off the bottom of a short screen.
+        let y = corner.y as f64 + (size.height as f64 * 0.2).min((size.height as f64 - panel.height).max(0.0));
+        window.set_outer_position(PhysicalPosition::new(x, y));
+    }
+    window.set_visible(true);
+    // A Mac's app comes in front with it, so an app opened from it comes in front in turn (`hosts::open_window`).
+    #[cfg(target_os = "macos")]
+    activate();
+    window.set_focus();
+    let _ = webview.focus();
+}
+
+/// Puts the launcher away. Given back, the keyboard goes to the app that had it before, as a Mac hides an app.
+fn put_away(window: &Window, give_back: bool) {
+    window.set_visible(false);
+    #[cfg(target_os = "macos")]
+    if give_back {
+        unsafe {
+            use objc2::runtime::AnyObject;
+            let application: *mut AnyObject = objc2::msg_send![objc2::class!(NSApplication), sharedApplication];
+            let nothing: *mut AnyObject = std::ptr::null_mut();
+            let () = objc2::msg_send![application, hide: nothing];
+        }
+    }
+    let _ = give_back;
+}
+
+/// The page's web view: its own files and its apps', what it asks (`hosts::command`), and the device's own browser for
+/// anywhere else, as an app's own window has them (`host`).
+fn page(window: &Window, started: Arc<AtomicBool>) -> anyhow::Result<WebView> {
+    let key = format!("{:016x}{:016x}", crate::host::random(), crate::host::random());
+    let own = |_: WebViewId, request: Request<Vec<u8>>| crate::page::respond(request.uri().path());
+    let apps_file = |_: WebViewId, request: Request<Vec<u8>>, responder: RequestAsyncResponder| {
+        let address = request.uri().to_string();
+        crate::spawn(async move {
+            let file = match crate::views() {
+                Ok(views) => views.file(&address).await.map_err(|error| format!("{error:#}")),
+                Err(error) => Err(error),
+            };
+            responder.respond(crate::host::app_file(file));
+        });
+    };
+    let page_key = key.clone();
+    let ipc = move |request: Request<String>| {
+        let Ok(message) = serde_json::from_str::<Value>(request.body()) else { return };
+        if message["key"] != page_key.as_str() {
+            return;
+        }
+        let (id, command, args) = (message["id"].clone(), message["command"].as_str().unwrap_or_default().to_owned(), message["args"].clone());
+        if command == "start" {
+            started.store(true, Ordering::Relaxed);
+        }
+        crate::spawn(async move {
+            let answer = hosts::command("main", &command, args).await;
+            tell(Told::Script(crate::host::answer(&id, answer.map_err(Value::from))));
+        });
+    };
+    #[cfg(target_os = "linux")]
+    let builder = {
+        // WebDriver drives it as it did Tauri's windows, which tauri-driver says by this.
+        let mut context = wry::WebContext::new(crate::shortcuts::local_data_dir().ok());
+        context.set_allows_automation(std::env::var("TAURI_WEBVIEW_AUTOMATION").as_deref() == Ok("true"));
+        WebViewBuilder::new_with_web_context(Box::leak(Box::new(context)))
+    };
+    // Windows' WebView2 keeps its data where Tauri's did, which each app's window shares.
+    #[cfg(windows)]
+    let builder = WebViewBuilder::new_with_web_context(Box::leak(Box::new(wry::WebContext::new(crate::shortcuts::local_data_dir().ok()))));
+    #[cfg(target_os = "macos")]
+    let builder = WebViewBuilder::new();
+    let builder = builder
+        .with_custom_protocol("tauri".into(), own)
+        .with_asynchronous_custom_protocol("oneapp".into(), apps_file)
+        .with_ipc_handler(ipc)
+        .with_initialization_script_for_main_only(crate::host::BRIDGE.replace("__KEY__", &key), true)
+        // The page draws the launcher's own glass where the window has none (`data-launcher` in client.css).
+        .with_initialization_script_for_main_only(format!("document.documentElement.dataset.launcher = {:?}", if cfg!(target_os = "linux") { "solid" } else { "glass" }), true)
+        .with_navigation_handler(|to| crate::stays(&to))
+        .with_new_window_req_handler(|_, _| wry::NewWindowResponse::Deny)
+        .with_transparent(!cfg!(target_os = "linux"))
+        .with_devtools(cfg!(debug_assertions))
+        .with_url(crate::HOME);
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
+    let builder = builder.with_initialization_script_for_main_only(crate::INITIALIZATION_SCRIPT, false);
+    #[cfg(not(target_os = "linux"))]
+    let webview = builder.build(window)?;
+    #[cfg(target_os = "linux")]
+    let webview = {
+        use tao::platform::unix::WindowExtUnix;
+        use wry::WebViewBuilderExtUnix;
+        keys(window);
+        let webview = builder.build_gtk(window.default_vbox().expect("tao gives a window a box"))?;
+        // A developer's build writes what its pages say to their console to its stdout, as WebKitGTK offers: its web
+        // view has no other console to read without a window of its own.
+        #[cfg(debug_assertions)]
+        {
+            use webkit2gtk::{SettingsExt, WebViewExt};
+            use wry::WebViewExtUnix;
+            if let Some(settings) = webview.webview().settings() {
+                settings.set_enable_write_console_messages_to_stdout(true);
+            }
+        }
+        webview
+    };
+    Ok(webview)
+}
+
+/// The launcher's glass, the system's own material under its page, rounded: a Mac's Liquid Glass where it has it
+/// (macOS 26), and its window vibrancy before that, and Windows' Acrylic. Linux has none, so the page draws its own
+/// (`data-launcher`).
+fn glass(window: &Window) {
+    #[cfg(target_os = "macos")]
+    unsafe {
+        use objc2::runtime::{AnyClass, AnyObject};
+        use objc2_foundation::NSRect;
+        use tao::platform::macos::WindowExtMacOS;
+        let panel = window.ns_window().cast::<AnyObject>();
+        // On every Space, over a full-screen app's too, and out of Cmd-` and Mission Control, as a menu bar app's
+        // panel is (`NSWindowCollectionBehavior`: canJoinAllSpaces, stationary, ignoresCycle, fullScreenAuxiliary).
+        let behaviour: usize = (1 << 0) | (1 << 4) | (1 << 6) | (1 << 8);
+        let () = objc2::msg_send![panel, setCollectionBehavior: behaviour];
+        // NSStatusWindowLevel: over other apps' windows, as Spotlight is.
+        let () = objc2::msg_send![panel, setLevel: 25isize];
+        let () = objc2::msg_send![panel, setHasShadow: true];
+        let content: *mut AnyObject = objc2::msg_send![panel, contentView];
+        let bounds: NSRect = objc2::msg_send![content, bounds];
+        match AnyClass::get(c"NSGlassEffectView") {
+            Some(glass) => {
+                let view: *mut AnyObject = objc2::msg_send![glass, alloc];
+                let view: *mut AnyObject = objc2::msg_send![view, initWithFrame: bounds];
+                let () = objc2::msg_send![view, setCornerRadius: 26.0f64];
+                // Width and height follow the window's.
+                let () = objc2::msg_send![view, setAutoresizingMask: 18usize];
+                let nothing: *mut AnyObject = std::ptr::null_mut();
+                // NSWindowBelow: under the web view.
+                let () = objc2::msg_send![content, addSubview: view, positioned: -1isize, relativeTo: nothing];
+            }
+            None => {
+                use window_vibrancy::{NSVisualEffectMaterial, NSVisualEffectState, apply_vibrancy};
+                if let Err(error) = apply_vibrancy(window, NSVisualEffectMaterial::HudWindow, Some(NSVisualEffectState::Active), Some(26.0)) {
+                    eprintln!("the launcher has no glass: {error}");
+                }
+            }
+        }
+    }
+    #[cfg(windows)]
+    {
+        if let Err(error) = window_vibrancy::apply_acrylic(window, None) {
+            eprintln!("the launcher has no glass: {error}");
+        }
+        // Windows 11's own round corners, which a window with no frame doesn't have unless it asks.
+        use tao::platform::windows::WindowExtWindows;
+        use windows::Win32::Graphics::Dwm::{DWMWA_WINDOW_CORNER_PREFERENCE, DWMWCP_ROUND, DwmSetWindowAttribute};
+        let round = DWMWCP_ROUND;
+        let window = windows::Win32::Foundation::HWND(window.hwnd() as _);
+        let _ = unsafe { DwmSetWindowAttribute(window, DWMWA_WINDOW_CORNER_PREFERENCE, std::ptr::from_ref(&round).cast(), size_of_val(&round) as u32) };
+    }
+    #[cfg(target_os = "linux")]
+    let _ = window;
+}
+
+/// A Mac's app comes in front, as a person summoned it.
+#[cfg(target_os = "macos")]
+fn activate() {
+    unsafe {
+        use objc2::runtime::AnyObject;
+        let application: *mut AnyObject = objc2::msg_send![objc2::class!(NSApplication), sharedApplication];
+        let () = objc2::msg_send![application, activateIgnoringOtherApps: true];
+    }
+}
+
+/// The launcher's shortcut, which shows it from anywhere, or puts it away. It's ⌥Space on a Mac, as Raycast suggests,
+/// which macOS leaves free (Spotlight is ⌘Space, the input source ⌃Space); on Windows and Linux Alt+Space is the
+/// window menu's, and Super+Space the input source's, so it's Super+Alt+Space there. A file `shortcut` in the client's
+/// folder says another, as `alt+Space` (global-hotkey's words), or nothing for none; Linux's is X11's, and a Wayland
+/// session has none. → what keeps it, for as long as the app runs.
+fn shortcut(home: &std::path::Path) -> Option<global_hotkey::GlobalHotKeyManager> {
+    use global_hotkey::hotkey::HotKey;
+    use global_hotkey::{GlobalHotKeyEvent, GlobalHotKeyManager, HotKeyState};
+    let default = if cfg!(target_os = "macos") { "alt+Space" } else { "super+alt+Space" };
+    let chosen = std::fs::read_to_string(home.join("shortcut")).map(|chosen| chosen.trim().to_owned()).unwrap_or_else(|_| default.to_owned());
+    if chosen.is_empty() {
+        return None;
+    }
+    let key: HotKey = match chosen.parse() {
+        Ok(key) => key,
+        Err(error) => {
+            eprintln!("the launcher's shortcut isn't one ({chosen}): {error}");
+            return None;
+        }
+    };
+    let keeper = GlobalHotKeyManager::new().and_then(|keeper| keeper.register(key).map(|()| keeper));
+    let keeper = match keeper {
+        Ok(keeper) => keeper,
+        Err(error) => {
+            eprintln!("the launcher has no shortcut ({chosen}): {error}");
+            return None;
+        }
+    };
+    GlobalHotKeyEvent::set_event_handler(Some(move |pressed: GlobalHotKeyEvent| {
+        if pressed.id == key.id() && pressed.state == HotKeyState::Pressed {
+            tell(Told::Toggle);
+        }
+    }));
+    eprintln!("the launcher's shortcut is {chosen}");
+    Some(keeper)
+}
+
+/// Starts the app again on the build it was just updated to: the app windows that are open open again in it, and the
+/// launcher shows again if it was showing. Each app's window ends with this program's channel.
+fn restart(home: &std::path::Path, shown: bool) {
+    let reopen = serde_json::to_string(&hosts::open_now()).unwrap_or_default();
+    // The new program serves the channel at the same address.
+    #[cfg(unix)]
+    let _ = std::fs::remove_file(hosts::address(home));
+    let _ = home;
+    // Linux names a program whose file was replaced while it ran `<its path> (deleted)`, and it's the new file that's
+    // started.
+    let program = std::env::var_os("ONE_PROGRAM").map(std::path::PathBuf::from).map_or_else(std::env::current_exe, Ok).map(|program| {
+        let named = program.to_string_lossy();
+        named.strip_suffix(" (deleted)").map(std::path::PathBuf::from).unwrap_or(program)
+    });
+    let mut command = match program {
+        Ok(program) => std::process::Command::new(program),
+        Err(error) => return eprintln!("couldn't start again: {error}"),
+    };
+    command.env("ONE_RESTARTED", "1").env("ONE_REOPEN", reopen).stdin(std::process::Stdio::null());
+    if shown {
+        command.env_remove("ONE_HIDDEN");
+    } else {
+        command.env("ONE_HIDDEN", "1");
+    }
+    match command.spawn() {
+        Ok(_) => std::process::exit(0),
+        Err(error) => eprintln!("couldn't start again: {error}"),
+    }
+}
+
+/// Has the device open `one:` links with this program, as Tauri's deep links did: Linux by a desktop entry that takes
+/// them (`one-handler.desktop`), and Windows by its classes in the registry. A Mac's are its bundle's, in its
+/// `Info.plist`.
+#[cfg(all(any(windows, target_os = "linux"), not(debug_assertions)))]
+fn links() -> anyhow::Result<()> {
+    let program = std::env::current_exe()?;
+    #[cfg(target_os = "linux")]
+    {
+        let entries = dirs::data_dir().ok_or_else(|| anyhow::anyhow!("this user has no data folder"))?.join("applications");
+        std::fs::create_dir_all(&entries)?;
+        let entry = format!(
+            "[Desktop Entry]\nType=Application\nName={}\nExec=\"{}\" %u\nMimeType=x-scheme-handler/one;\nNoDisplay=true\nTerminal=false\n",
+            crate::page::NAME,
+            program.display()
+        );
+        let file = entries.join("one-handler.desktop");
+        if std::fs::read_to_string(&file).ok().as_deref() != Some(entry.as_str()) {
+            std::fs::write(&file, entry)?;
+            std::process::Command::new("xdg-mime").args(["default", "one-handler.desktop", "x-scheme-handler/one"]).status()?;
+        }
+    }
+    #[cfg(windows)]
+    unsafe {
+        use windows::Win32::System::Registry::{HKEY_CURRENT_USER, REG_SZ, RegSetKeyValueW};
+        use windows::core::HSTRING;
+        let set = |key: &str, name: &str, value: &str| {
+            let value: Vec<u16> = value.encode_utf16().chain([0]).collect();
+            RegSetKeyValueW(HKEY_CURRENT_USER, &HSTRING::from(key), &HSTRING::from(name), REG_SZ.0, Some(value.as_ptr().cast()), (value.len() * 2) as u32).ok()
+        };
+        let program = program.display().to_string();
+        set(r"Software\Classes\one", "", &format!("URL:{} protocol", ::client::NAME))?;
+        set(r"Software\Classes\one", "URL Protocol", "")?;
+        set(r"Software\Classes\one\DefaultIcon", "", &format!("{program},0"))?;
+        set(r"Software\Classes\one\shell\open\command", "", &format!("\"{program}\" \"%1\""))?;
+    }
+    Ok(())
+}
+
+/// Ctrl-Q quits the app, as it does a Linux app.
+#[cfg(target_os = "linux")]
+fn keys(window: &Window) {
+    use gtk::gdk::{ModifierType, keys::constants as key};
+    use gtk::glib::Propagation;
+    use gtk::prelude::*;
+    use tao::platform::unix::WindowExtUnix;
+    window.gtk_window().connect_key_press_event(move |_, pressed| {
+        let held = pressed.state() & (ModifierType::CONTROL_MASK | ModifierType::SHIFT_MASK | ModifierType::MOD1_MASK | ModifierType::SUPER_MASK);
+        if held != ModifierType::CONTROL_MASK || pressed.keyval().to_lower() != key::q {
+            return Propagation::Proceed;
+        }
+        tell(Told::Quit);
+        Propagation::Stop
+    });
+}
+
+/// A Mac app's menu bar, which shows while the launcher has the keyboard: its app menu (About, Quit) and Edit, which
+/// a web view's copy and paste keys need.
+#[cfg(target_os = "macos")]
+fn menu() -> muda::Menu {
+    use muda::{Menu, PredefinedMenuItem, Submenu};
+    let menu = Menu::new();
+    let app = Submenu::with_items(crate::page::NAME, true, &[&PredefinedMenuItem::about(None, None), &PredefinedMenuItem::separator(), &PredefinedMenuItem::quit(None)]);
+    let edit = Submenu::with_items(
+        "Edit",
+        true,
+        &[
+            &PredefinedMenuItem::undo(None),
+            &PredefinedMenuItem::redo(None),
+            &PredefinedMenuItem::separator(),
+            &PredefinedMenuItem::cut(None),
+            &PredefinedMenuItem::copy(None),
+            &PredefinedMenuItem::paste(None),
+            &PredefinedMenuItem::select_all(None),
+        ],
+    );
+    if let (Ok(app), Ok(edit)) = (app, edit) {
+        let _ = menu.append_items(&[&app, &edit]);
+        menu.init_for_nsapp();
+    }
+    menu
+}
+
+/// The ring in a Mac's menu bar, as Raycast's is there, and in Windows' notification area, as a running app that has
+/// no window of its own is there: clicked, it shows the launcher or puts it away, and its menu (a right-click, or
+/// Control-click) has Open and Quit. A Mac's is a template, drawn as the menu bar's other icons are.
+#[cfg(any(target_os = "macos", windows))]
+fn ring() -> Option<tray_icon::TrayIcon> {
+    use tray_icon::menu::{Menu, MenuEvent, MenuItem, PredefinedMenuItem};
+    use tray_icon::{Icon, MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
+    #[cfg(target_os = "macos")]
+    let picture = include_bytes!("../../../icons/MenuBarIcon@2x.png");
+    #[cfg(windows)]
+    let picture = include_bytes!("../../../icons/AppIcon@2x.png");
+    let picture = resvg::tiny_skia::Pixmap::decode_png(picture).ok()?;
+    let icon = Icon::from_rgba(picture.data().to_vec(), picture.width(), picture.height()).ok()?;
+    let open = MenuItem::with_id("open", format!("Open {}", crate::page::NAME), true, None);
+    let quit = MenuItem::with_id("quit", format!("Quit {}", crate::page::NAME), true, None);
+    let menu = Menu::with_items(&[&open, &PredefinedMenuItem::separator(), &quit]).ok()?;
+    MenuEvent::set_event_handler(Some(|event: MenuEvent| match event.id.0.as_str() {
+        "open" => tell(Told::Summon),
+        "quit" => tell(Told::Quit),
+        _ => {}
+    }));
+    TrayIconEvent::set_event_handler(Some(|event: TrayIconEvent| {
+        if let TrayIconEvent::Click { button: MouseButton::Left, button_state: MouseButtonState::Up, .. } = event {
+            tell(Told::Toggle);
+        }
+    }));
+    let ring = TrayIconBuilder::new().with_icon(icon).with_icon_as_template(cfg!(target_os = "macos")).with_menu(Box::new(menu)).with_menu_on_left_click(false).with_tooltip(crate::page::NAME).build();
+    ring.map_err(|error| eprintln!("the menu bar has no ring: {error}")).ok()
+}

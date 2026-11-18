@@ -6,22 +6,26 @@
 //! reaches nothing here but the bridge the window's page gives it: what an app asks comes to `ask`. The launcher
 //! is an app too, the one a network lists in the category `launcher`, which the window shows first and under every other.
 
+//!
+//! The window is Tauri's on a phone, and on a computer a window and a web view alone (`computer`), as each app's own
+//! is (`host`). Either is a `Shell`, which what's here tells and asks of it; what the page asks (`invoke`) is answered
+//! by the same commands on both.
+
 #![cfg(feature = "window")]
 // What an app's own window asks is answered by the futures the Home Screen's commands are, a deep nest of them (`hosts`).
 #![recursion_limit = "256"]
 
 use std::collections::{HashMap, HashSet};
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Instant;
 
 use ::client::{Client, Connection, Session, Subscription};
 use data_encoding::BASE64;
 use serde_json::{Value, json};
-use tauri::http::{Response, StatusCode, Uri, header};
-use tauri::ipc::{InvokeBody, Request};
-use tauri::{AppHandle, Emitter, Manager, State, Url, WebviewUrl, WebviewWindowBuilder};
-use tauri_plugin_opener::OpenerExt;
+use url::Url;
+#[cfg(mobile)]
+use tauri::{AppHandle, Emitter, Manager, WebviewUrl, WebviewWindowBuilder};
 
 /// Notifications' native code, which shows them on this device.
 use notifications_client as notifications;
@@ -29,11 +33,46 @@ use notifications_client as notifications;
 pub mod phone;
 mod shortcuts;
 #[cfg(desktop)]
+pub mod computer;
+#[cfg(desktop)]
 pub mod host;
 #[cfg(desktop)]
 mod hosts;
 #[cfg(desktop)]
 mod title_bar;
+
+/// A computer's window's page, which is this program's own files (`build.rs`), and the app's name.
+#[cfg(desktop)]
+pub(crate) mod page {
+    include!(concat!(env!("OUT_DIR"), "/page.rs"));
+
+    /// One of the page's files, by the path it's served at.
+    pub fn file(path: &str) -> Option<&'static [u8]> {
+        FILES.iter().find(|(served, _)| *served == path).map(|(_, file)| *file)
+    }
+
+    /// One of the page's files as the web view's answer for it, with what it may load.
+    pub fn respond(path: &str) -> wry::http::Response<std::borrow::Cow<'static, [u8]>> {
+        use wry::http::{Response, StatusCode, header};
+        let response = match file(path) {
+            Some(file) => Response::builder().header(header::CONTENT_TYPE, kind(path)).header(header::CONTENT_SECURITY_POLICY, CSP).body(file.into()),
+            None => Response::builder().status(StatusCode::NOT_FOUND).body(Vec::new().into()),
+        };
+        response.expect("these headers are valid")
+    }
+
+    /// What kind of file one of the page's own is.
+    fn kind(path: &str) -> &'static str {
+        match path.rsplit('.').next() {
+            Some("html") => "text/html",
+            Some("js") => "text/javascript",
+            Some("css") => "text/css",
+            Some("png") => "image/png",
+            Some("woff2") => "font/woff2",
+            _ => "text/plain",
+        }
+    }
+}
 
 /// What an app's page may load, which is what an MCP App may by default: its own app's files and the files of
 /// the apps it uses, which are all at its own address, and nothing from anywhere else.
@@ -44,7 +83,6 @@ pub(crate) const APP_MAY_LOAD: &str = "default-src 'none'; script-src 'self' 'un
 /// The views in the window, by name: the window's own page (`client`) and each app that's open.
 struct Views {
     client: Arc<Client>,
-    app: AppHandle,
     subscriptions: Mutex<HashMap<String, Arc<Subscription>>>,
     /// The files each open app's page has loaded, by the app's name.
     loaded: Mutex<HashMap<String, HashSet<String>>>,
@@ -63,9 +101,8 @@ impl Views {
     fn subscription(&self, view: &str) -> Arc<Subscription> {
         let mut shown = self.subscriptions.lock().expect("no view panics");
         let new = || {
-            let (app, view) = (self.app.clone(), view.to_owned());
-            // The window going away is the only way this fails, and its views with it.
-            Subscription::new(self.client.clone(), move || drop(app.emit("changed", &view)))
+            let view = view.to_owned();
+            Subscription::new(self.client.clone(), move || app().shell.emit("changed", json!(view)))
         };
         shown.entry(view.to_owned()).or_insert_with(new).clone()
     }
@@ -128,7 +165,8 @@ impl Views {
     /// `app` this client knows of. An app opened for a group or the network says so after its name, last part
     /// first (`notes.family.groups.localhost`), and its files are the ones listed for them. One a server didn't
     /// list, as a page loads none of them (a sourcemap), is read by name from the same version.
-    async fn file(&self, address: &Uri) -> anyhow::Result<(String, Vec<u8>)> {
+    async fn file(&self, address: &str) -> anyhow::Result<(String, Vec<u8>)> {
+        let address = Url::parse(address)?;
         let file = address.path().trim_start_matches('/');
         // A large file a tool answered with, which the client keeps, at the address the answer gave an app for it.
         if let Some(path) = file.strip_prefix(".file/") {
@@ -141,7 +179,7 @@ impl Views {
         if let Some((name, code)) = name.split_once('@') {
             return self.read(&format!("ui://{name}/{code}/{path}")).await;
         }
-        let app = address.host().and_then(|host| host.strip_suffix(".localhost")).unwrap_or_default();
+        let app = address.host_str().and_then(|host| host.strip_suffix(".localhost")).unwrap_or_default();
         // Android's and Windows' web views name the app after the scheme, in a host's name.
         let app = app.strip_prefix("oneapp.").unwrap_or(app);
         let subject: Vec<&str> = app.split('.').skip(1).collect();
@@ -198,6 +236,78 @@ impl Views {
     }
 }
 
+/// What's the window's own, which differs by device: Tauri's on a phone (`Phone`), and on a computer the launcher's
+/// (`computer`). What's here tells it and asks it only this.
+pub(crate) trait Shell: Send + Sync + 'static {
+    /// The folder the client is kept in.
+    fn home(&self) -> anyhow::Result<std::path::PathBuf>;
+    /// Tells the window's pages `event`, as Tauri's events: on a computer the launcher's, and each app's own window's
+    /// those it hears too (`hosts`).
+    fn emit(&self, event: &str, payload: Value);
+    /// Opens the window again at its own page (`home`), and on a computer closes each app's own window.
+    fn reload(&self);
+    /// Opens `url` in the device's own browser.
+    fn open_url(&self, url: &str) -> Result<(), String>;
+    /// Starts the app again, on the build it was just updated to.
+    fn restart(&self);
+    /// The `one:` link the window opens once its page asks where it is (`start`): what the app was started with.
+    fn opened_at(&self) -> Option<String>;
+    /// Has the device hear its person's notifications (`listen`).
+    fn listen(&self, client: Arc<Client>);
+    /// Light or dark, or as the device is, for what's the window's own and not its page (`theme`).
+    fn theme(&self, theme: Option<Theme>);
+}
+
+/// Light or dark, as Colour Mode has it.
+#[derive(Clone, Copy, Debug, PartialEq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub(crate) enum Theme {
+    Light,
+    Dark,
+}
+
+/// The app as it runs: its window (`Shell`), where the device is with its network (`start`), the Colour Mode chosen
+/// on it (`chosen`), when it started, and its views once its client has opened.
+pub(crate) struct App {
+    shell: Box<dyn Shell>,
+    /// Where this device is with its network, as the window follows it (`follows`), with how many moves it has
+    /// made: nothing until the client has opened, and a client that couldn't open at all is still opening.
+    start: tokio::sync::watch::Sender<Option<(u64, Session)>>,
+    /// The Colour Mode chosen on this device, as the last page to choose it said, for each page that opens after
+    /// (`start`), and told to every page that's open.
+    chosen: Mutex<Option<Option<Theme>>>,
+    started: Instant,
+    views: OnceLock<Views>,
+}
+
+static APP: OnceLock<App> = OnceLock::new();
+
+/// The app, once it has started (`begin`).
+pub(crate) fn app() -> &'static App {
+    APP.get().expect("the app has started")
+}
+
+/// Starts the app in `shell`, as it began at `started`.
+pub(crate) fn begin(shell: impl Shell, started: Instant) {
+    let app = App { shell: Box::new(shell), start: tokio::sync::watch::Sender::new(None), chosen: Mutex::default(), started, views: OnceLock::new() };
+    if APP.set(app).is_err() {
+        panic!("the app starts once");
+    }
+}
+
+/// The app's views, once its client has opened.
+fn views() -> Result<&'static Views, String> {
+    app().views.get().ok_or_else(|| "the app hasn't opened".to_owned())
+}
+
+/// Runs `future` on the app's runtime: Tauri's on a phone, and on a computer its own (`computer`).
+pub(crate) fn spawn(future: impl std::future::Future<Output = ()> + Send + 'static) {
+    #[cfg(mobile)]
+    tauri::async_runtime::spawn(future);
+    #[cfg(desktop)]
+    computer::runtime().spawn(future);
+}
+
 /// The address of each file in a list of them.
 fn resources(listed: &Value) -> impl Iterator<Item = &str> {
     listed["resources"].as_array().into_iter().flatten().filter_map(|resource| resource["uri"].as_str())
@@ -221,43 +331,45 @@ fn parts(resource: &str) -> Option<(&str, &str, &str)> {
 /// apps that are `outdated` and load again, each as its address names it. Every file listed is kept behind this, so
 /// with no server up an app opens whole, even one that was never opened, or whose apps have changed since. The user's
 /// apps with a screen are where the device lists its own apps too (`shortcuts`).
-#[tauri::command]
-async fn apps(app: AppHandle, views: State<'_, Views>, subject: Option<String>) -> Result<Value, String> {
+#[cfg_attr(mobile, tauri::command)]
+async fn apps(subject: Option<String>) -> Result<Value, String> {
+    let views = views()?;
     // A person is told what went wrong, and not what was behind it.
     let mut listed = views.listed(subject.as_deref()).await.map_err(|error| error.to_string())?;
     listed["outdated"] = views.outdated(subject.as_deref(), &listed).into();
     if subject.is_none() {
-        shortcuts::keep(&app, shortcuts::listed(&listed));
+        shortcuts::keep(shortcuts::listed(&listed));
     }
     let keep = listed.clone();
-    tauri::async_runtime::spawn(async move {
+    spawn(async move {
         for resource in resources(&keep) {
             // With no server answering, what's missing is asked for when an app loads it.
-            let _ = app.state::<Views>().read(resource).await;
+            let _ = views.read(resource).await;
         }
     });
     Ok(listed)
 }
 
 /// Answers what a view asks, in MCP's words: the result of `method`.
-#[tauri::command]
-async fn request(views: State<'_, Views>, view: String, method: String, params: Value) -> Result<Value, String> {
-    views.subscription(&view).request(&method, params).await.map_err(|error| error.to_string())
+#[cfg_attr(mobile, tauri::command)]
+async fn request(view: String, method: String, params: Value) -> Result<Value, String> {
+    views()?.subscription(&view).request(&method, params).await.map_err(|error| error.to_string())
 }
 
 /// Asks again for what a view was answered: its user returned to it.
-#[tauri::command]
-async fn refresh(views: State<'_, Views>, view: String) -> Result<(), ()> {
-    views.subscription(&view).refresh().await;
+#[cfg_attr(mobile, tauri::command)]
+async fn refresh(view: String) -> Result<(), String> {
+    views()?.subscription(&view).refresh().await;
     Ok(())
 }
 
 /// This device's key, as its network knows it, the network's address, if it has one, the build it's on and its kind
 /// of machine, as builds are named, its server's key, if it's a server, and whether a phone is woken by its
 /// notifications (`notifications::Push`), and whether its person turned Computer Use on, on a phone that has it.
-#[tauri::command]
-fn client(views: State<'_, Views>) -> Value {
-    json!({
+#[cfg_attr(mobile, tauri::command)]
+fn client() -> Result<Value, String> {
+    let views = views()?;
+    Ok(json!({
         "device": views.client.key(),
         "network": views.client.address(),
         "build": ::client::BUILD,
@@ -265,13 +377,14 @@ fn client(views: State<'_, Views>) -> Value {
         "server": cli::serving::server(),
         "push": notifications::push(),
         "computerUse": computer_use_client::phone(),
-    })
+    }))
 }
 
 /// Makes this device a server of its person's, or with `on` false, no longer one, as `one serve on` and `one serve
 /// off` do. Gives what they say.
-#[tauri::command]
-async fn serve(views: State<'_, Views>, on: bool) -> Result<String, String> {
+#[cfg_attr(mobile, tauri::command)]
+async fn serve(on: bool) -> Result<String, String> {
+    let views = views()?;
     let done = if on { cli::serving::on(&views.client).await } else { cli::serving::off(&views.client).await };
     done.map_err(|error| format!("{error:#}"))
 }
@@ -281,32 +394,36 @@ async fn serve(views: State<'_, Views>, on: bool) -> Result<String, String> {
 /// the window then asks its network whether it's still behind. On a device that's also a server, the program keeping its server running
 /// takes them, this program's among them, and says where that is in `builds`: this starts again once its file is a
 /// newer build than it runs. An iPhone's app from TestFlight (`testflight`) opens TestFlight instead, which updates it.
-#[tauri::command]
-async fn update(app: AppHandle, views: State<'_, Views>) -> Result<String, String> {
+#[cfg_attr(mobile, tauri::command)]
+async fn update() -> Result<String, String> {
     if testflight() {
-        app.opener().open_url("itms-beta://", None::<&str>).map_err(|error| error.to_string())?;
+        app().shell.open_url("itms-beta://")?;
         return Ok(String::new());
     }
-    let message = cli::serving::update(&views.client).await.map_err(|error| format!("{error:#}"))?;
+    let message = cli::serving::update(&views()?.client).await.map_err(|error| format!("{error:#}"))?;
     if cli::serving::server().is_none() || cli::serving::replaced() {
-        app.restart()
+        app().shell.restart()
     }
     Ok(message)
 }
 
-/// Says whether the window is on screen. While one is, its views ask again when something changed, and as one's back,
-/// if something changed while none was.
+/// Says whether the Home Screen's window is on screen. While one is, its views ask again when something changed, and
+/// as one's back, if something changed while none was.
+#[cfg(mobile)]
 #[tauri::command]
-async fn visible(window: tauri::Window, views: State<'_, Views>, on_screen: bool) -> Result<(), ()> {
-    views.shown(window.label(), on_screen);
+async fn visible(on_screen: bool) -> Result<(), String> {
+    let views = views()?;
+    views.shown("main", on_screen);
     views.caught_up().await;
     Ok(())
 }
 
 /// Sends a file an app's page chose, which is the request's body, to where the network keeps it, for a tool of
 /// the app's app. Gives the name that tool takes for it.
+#[cfg(mobile)]
 #[tauri::command]
-async fn upload(views: State<'_, Views>, request: Request<'_>) -> Result<Value, String> {
+async fn upload(request: tauri::ipc::Request<'_>) -> Result<Value, String> {
+    use tauri::ipc::InvokeBody;
     let app = request.headers().get("app").and_then(|app| app.to_str().ok()).unwrap_or_default().to_owned();
     let file = match request.body() {
         InvokeBody::Raw(file) => file.clone(),
@@ -314,87 +431,87 @@ async fn upload(views: State<'_, Views>, request: Request<'_>) -> Result<Value, 
         InvokeBody::Json(Value::Array(bytes)) => bytes.iter().filter_map(|byte| Some(byte.as_u64()? as u8)).collect(),
         InvokeBody::Json(_) => return Err("An upload is a file".into()),
     };
-    let sent = views.client.upload(&app, file).await;
+    upload_file(&app, file).await
+}
+
+/// Sends `file` where the network keeps it, for a tool of `app`'s (`upload`).
+async fn upload_file(app: &str, file: Vec<u8>) -> Result<Value, String> {
+    let sent = views()?.client.upload(app, file).await;
     sent.map(|upload| json!({"upload": upload})).map_err(|error| error.to_string())
 }
 
 /// The recovery key of this device's person, or of a group or the network an app was opened for (`subject`), for the
 /// client's own page to show them. It's that page that shows it, so no app's page is handed one.
-#[tauri::command]
-async fn recovery_key(views: State<'_, Views>, subject: Option<String>) -> Result<String, String> {
-    encryption_client::recovery_key(&views.client, subject.as_deref()).await.map_err(|error| error.to_string())
+#[cfg_attr(mobile, tauri::command)]
+async fn recovery_key(subject: Option<String>) -> Result<String, String> {
+    encryption_client::recovery_key(&views()?.client, subject.as_deref()).await.map_err(|error| error.to_string())
 }
 
 /// Lets this device hold its person's key, or `subject`'s, with the recovery key they typed on the client's own page,
 /// and has every view ask again.
-#[tauri::command]
-async fn recover(views: State<'_, Views>, key: String, subject: Option<String>) -> Result<(), String> {
+#[cfg_attr(mobile, tauri::command)]
+async fn recover(key: String, subject: Option<String>) -> Result<(), String> {
+    let views = views()?;
     encryption_client::recover(&views.client, &key, subject.as_deref()).await.map_err(|error| error.to_string())?;
     views.refresh().await;
     Ok(())
 }
 
 /// Forgets what a view was answered: its page is gone, or loading again.
-#[tauri::command]
-fn close(views: State<'_, Views>, view: String) {
-    views.subscriptions.lock().expect("no view panics").remove(&view);
+#[cfg_attr(mobile, tauri::command)]
+fn close(view: String) -> Result<(), String> {
+    views()?.subscriptions.lock().expect("no view panics").remove(&view);
+    Ok(())
 }
 
 /// Asks the network again now, which didn't answer or refused this client for being behind it, as its person does
 /// with Try Again (`Client::retry`), and answers once it has, failing where it still isn't answered. A client that
 /// couldn't open at all is opened again.
-#[tauri::command]
-async fn retry(app: AppHandle) -> Result<(), String> {
-    if app.try_state::<Views>().is_none() {
-        tauri::async_runtime::spawn(opens(app));
+#[cfg_attr(mobile, tauri::command)]
+async fn retry() -> Result<(), String> {
+    let Ok(views) = views() else {
+        spawn(opens());
         return Ok(());
-    }
-    app.state::<Views>().client.retry().await.map_err(|error| error.to_string())
+    };
+    views.client.retry().await.map_err(|error| error.to_string())
 }
 
 /// The device is back online or the window in front again, so a client whose network didn't answer asks it again
 /// now (`Client::reconnect`).
-#[tauri::command]
-fn reconnect(views: State<'_, Views>) {
-    views.client.reconnect();
+#[cfg_attr(mobile, tauri::command)]
+fn reconnect() -> Result<(), String> {
+    views()?.client.reconnect();
+    Ok(())
 }
 
 /// Signs this device out once its person has removed it from their devices (Devices' Sign Out): what it kept of
 /// theirs goes, and the window follows it to the sign-in page.
-#[tauri::command]
-async fn sign_out(views: State<'_, Views>) -> Result<(), String> {
-    views.client.sign_out().await.map_err(|error| format!("{error:#}"))
+#[cfg_attr(mobile, tauri::command)]
+async fn sign_out() -> Result<(), String> {
+    views()?.client.sign_out().await.map_err(|error| format!("{error:#}"))
 }
 
 /// Where this device is with its network, as the window's page asks once it has opened (`told`), which waits for
 /// the client to open, whether its network answers, and whether a phone hears a tap on a notification, through its
 /// push plugin, which the page listens to. The page follows the session and the connection from there (`session`,
 /// `connection`). A client that couldn't open at all has reached nothing.
-#[tauri::command]
-async fn start(app: AppHandle) -> Result<Value, ()> {
-    let mut session = app.state::<Start>().0.subscribe();
-    let (seq, session) = session.wait_for(Option::is_some).await.map_err(drop)?.clone().expect("it waited for one");
+#[cfg_attr(mobile, tauri::command)]
+async fn start() -> Result<Value, String> {
+    let app = app();
+    let mut session = app.start.subscribe();
+    let waited = session.wait_for(Option::is_some).await.map_err(|_| "the app has ended".to_owned())?;
+    let (seq, session) = waited.clone().expect("it waited for one");
     let mut told = told(seq, &session);
     told["taps"] = json!(cfg!(mobile));
     told["testflight"] = json!(testflight());
     // A computer opens each app in a window of its own (`hosts`).
     told["windows"] = json!(cfg!(desktop));
-    // A Mac's windows have no title band (`TitleBarStyle::Overlay`): the page keeps a title bar's height clear at its
-    // top, under the traffic lights, and an app's own window has Home just after them.
-    #[cfg(target_os = "macos")]
-    {
-        told["titleBar"] = json!({"height": 28, "start": 78});
-    }
-    if let Some(theme) = *app.state::<Chosen>().0.lock().expect("nothing panics holding it") {
+    if let Some(theme) = *app.chosen.lock().expect("nothing panics holding it") {
         told["theme"] = json!(theme);
     }
-    let connection = app.try_state::<Views>().map(|views| *views.client.connection().borrow());
+    let connection = views().ok().map(|views| *views.client.connection().borrow());
     told["connection"] = json!(connection.unwrap_or(Connection::Offline));
-    {
-        use tauri_plugin_deep_link::DeepLinkExt;
-        let started = app.deep_link().get_current().ok().flatten().unwrap_or_default();
-        told["open"] = json!(started.iter().find_map(link));
-    }
+    told["open"] = json!(app.shell.opened_at());
     Ok(told)
 }
 
@@ -419,24 +536,20 @@ fn testflight() -> bool {
 
 /// What a `one:` link opens, as the window's page opens it (`go`): `<app>[/<page>][#<fragment>]`, an app, or a page
 /// of one, and the place in it its fragment names, which the app follows (`one:home-screen#library`).
-fn link(url: &Url) -> Option<String> {
-    (url.scheme() == "one").then(|| url.as_str()["one:".len()..].to_owned())
+pub(crate) fn link(url: &str) -> Option<String> {
+    url.strip_prefix("one:").map(str::to_owned)
 }
 
 /// Opens what each `one:` link the device hands the app links to, over whatever's showing, as a tap on a notification
 /// does, and brings the window forward. The link the app was started with is the page's to ask for (`start`). A
 /// computer's program that isn't a developer's build takes the device's `one:` links: Linux and Windows have a
 /// program say so itself (a Mac's and an iPhone's say so in their bundles, and Android's in its manifest).
+#[cfg(mobile)]
 fn links(app: &tauri::App) -> tauri::Result<()> {
     use tauri_plugin_deep_link::DeepLinkExt;
-    #[cfg(all(any(windows, target_os = "linux"), not(debug_assertions)))]
-    if let Err(error) = app.deep_link().register_all() {
-        eprintln!("this device's one: links don't open this app: {error}");
-    }
-    let handle = app.handle().clone();
     app.deep_link().on_open_url(move |event| {
-        for opens in event.urls().iter().filter_map(link) {
-            drop(handle.emit("open", opens));
+        for opens in event.urls().iter().filter_map(|url| link(url.as_str())) {
+            crate::app().shell.emit("open", json!(opens));
         }
     });
     Ok(())
@@ -461,24 +574,28 @@ fn told(seq: u64, session: &Session) -> Value {
 
 /// Has a phone whose push failed try again now (`notifications::Push`), as its person does in Notifications, and
 /// says where it is once that try has ended.
-#[tauri::command]
-async fn push() -> Result<Value, ()> {
+#[cfg_attr(mobile, tauri::command)]
+async fn push() -> Result<Value, String> {
     Ok(json!({"message": format!("{:?}", notifications::retry().await)}))
 }
 
 /// Has this device hear its person's notifications, once their home is on screen: a phone asks them then whether
 /// it may show any, over what they came for and not over signing in. Each time after, as its home is back in front,
 /// a phone looks again at whether it may (`notifications::Push`), as its person may have allowed them in its Settings.
-#[tauri::command]
-fn listen(app: AppHandle, views: State<'_, Views>) {
+#[cfg_attr(mobile, tauri::command)]
+fn listen() -> Result<(), String> {
+    let views = views()?;
     if views.hearing.swap(true, Ordering::Relaxed) {
-        return notifications::look_again();
+        notifications::look_again();
+        return Ok(());
     }
-    tauri::async_runtime::spawn(notifications::listen(app, views.client.clone()));
+    app().shell.listen(views.client.clone());
+    Ok(())
 }
 
 /// A phone's push service gave it a push token, as its push plugin said to the window's page (`push-token`), which
 /// it registers if it isn't the one it registered.
+#[cfg(mobile)]
 #[tauri::command]
 fn push_token(token: String) {
     notifications::token(token);
@@ -486,19 +603,22 @@ fn push_token(token: String) {
 
 /// A notification was tapped on a phone, which its push plugin said to the window's page (`notificationClicked`), so
 /// the window opens the app it's from, as a tap on a computer's does.
+#[cfg(mobile)]
 #[tauri::command]
-fn tapped(app: AppHandle, tapped: Value) {
+fn tapped(tapped: Value) {
     if let Some(name) = notifications::opens(&tapped) {
-        drop(app.emit("open", name));
+        app().shell.emit("open", json!(name));
     }
 }
 
 /// Says how long a view took to open: an app from the tap on its icon to its content on screen, and the home
 /// screen from when its page began to load, which the time since the program started is beside. Telemetry is told.
-#[tauri::command]
-fn opened(views: State<'_, Views>, view: String, ms: u32) {
+#[cfg_attr(mobile, tauri::command)]
+fn opened(view: String, ms: u32) -> Result<(), String> {
+    let views = views()?;
     eprintln!("{view} opened in {ms} ms, {} ms after the app started", views.started.elapsed().as_millis());
     views.client.report(json!({"name": "one.client.open.duration", "value": ms, "attributes": {"one.view": view}}));
+    Ok(())
 }
 
 /// Turns the device's own back and forward gestures on, or off: an iPhone's swipe in from the left edge, a Mac's
@@ -507,6 +627,7 @@ fn opened(views: State<'_, Views>, view: String, ms: u32) {
 /// at an app's first screen, where the swipe takes the app home (`home`), which a computer's page does itself. An
 /// iPhone's is always the window's own (`edge`): WebKit's would go forward from the right edge too, where the rail's
 /// line is. A web view has them off unless it's asked; Android's has none, and its back is `MainActivity`'s.
+#[cfg(mobile)]
 #[tauri::command]
 fn navigation_gestures(window: tauri::WebviewWindow, on: bool, home: bool) -> Result<(), String> {
     #[cfg(target_os = "ios")]
@@ -520,20 +641,7 @@ fn navigation_gestures(window: tauri::WebviewWindow, on: bool, home: bool) -> Re
         let _ = home;
         window
             .with_webview(move |webview| {
-                // It's the window's WKWebView, which Tauri hands over on the main thread, where it's used.
-                #[cfg(target_os = "macos")]
-                unsafe {
-                    let view = &*webview.inner().cast::<objc2::runtime::AnyObject>();
-                    let () = objc2::msg_send![view, setAllowsBackForwardNavigationGestures: on];
-                }
-                #[cfg(target_os = "linux")]
-                {
-                    use webkit2gtk::{SettingsExt, WebViewExt};
-                    if let Some(settings) = webview.inner().settings() {
-                        settings.set_enable_back_forward_navigation_gestures(on)
-                    }
-                }
-                #[cfg(any(windows, target_os = "android"))]
+                // Android's back is `MainActivity`'s.
                 let _ = (webview, on);
             })
             .map_err(|error| error.to_string())
@@ -543,6 +651,7 @@ fn navigation_gestures(window: tauri::WebviewWindow, on: bool, home: bool) -> Re
 /// Shows or hides an iPhone's status bar, as the app that's showing asks: its Home Screen hides it while it's edited, as
 /// iOS's own does, and puts + and Done where it was. Tao's view controller says whether it's hidden, and has iOS ask
 /// again as it changes. A computer has none, and Android's window is already clear of its bars.
+#[cfg(mobile)]
 #[tauri::command]
 fn status_bar(window: tauri::WebviewWindow, shown: bool) -> Result<(), String> {
     window
@@ -561,43 +670,19 @@ fn status_bar(window: tauri::WebviewWindow, shown: bool) -> Result<(), String> {
 
 /// Light or dark, as Colour Mode has it on this device, or as the device is with neither: what's the window's own and
 /// not its page follows it too, a computer's title bar and an iPhone's status bar, which would otherwise follow the
-/// device and show dark on dark. Android's bars are `MainActivity`'s (`androidTheme` in host.js). Every page is told
-/// (`chose`), as each of a computer's app windows has a page of its own.
-#[tauri::command]
-fn theme(app: AppHandle, window: tauri::WebviewWindow, theme: Option<tauri::Theme>) -> Result<(), String> {
-    chose(&app, theme);
-    #[cfg(desktop)]
-    return window.set_theme(theme).map_err(|error| error.to_string());
-    #[cfg(target_os = "ios")]
-    return window
-        .with_webview(move |webview| {
-            use objc2_ui_kit::{UIUserInterfaceStyle, UIView};
-            // Tauri hands over the window's WKWebView on the main thread.
-            let web = unsafe { &*webview.inner().cast::<UIView>() };
-            let style = match theme {
-                Some(tauri::Theme::Light) => UIUserInterfaceStyle::Light,
-                Some(tauri::Theme::Dark) => UIUserInterfaceStyle::Dark,
-                _ => UIUserInterfaceStyle::Unspecified,
-            };
-            if let Some(window) = web.window() {
-                window.setOverrideUserInterfaceStyle(style);
-            }
-        })
-        .map_err(|error| error.to_string());
-    #[cfg(target_os = "android")]
-    {
-        let _ = (window, theme);
-        Ok(())
-    }
+/// device and show dark on dark (`Shell::theme`). Android's bars are `MainActivity`'s (`androidTheme` in host.js).
+/// Every page is told (`chose`), as each of a computer's app windows has a page of its own.
+#[cfg_attr(mobile, tauri::command)]
+fn theme(theme: Option<Theme>) {
+    chose(theme);
+    app().shell.theme(theme);
 }
 
-/// The Colour Mode chosen on this device, as the last page to choose it said, for each page that opens after
-/// (`start`), and told to every page that's open.
-struct Chosen(Mutex<Option<Option<tauri::Theme>>>);
-
-fn chose(app: &AppHandle, theme: Option<tauri::Theme>) {
-    *app.state::<Chosen>().0.lock().expect("nothing panics holding it") = Some(theme);
-    drop(app.emit("theme", theme));
+/// Keeps the Colour Mode chosen on this device for each page that opens after (`start`), and tells every page that's
+/// open.
+fn chose(theme: Option<Theme>) {
+    *app().chosen.lock().expect("nothing panics holding it") = Some(theme);
+    app().shell.emit("theme", json!(theme));
 }
 
 /// A tap on an iPhone's status bar scrolls the app that's showing to its top, as it does in every iPhone app. iOS
@@ -734,43 +819,6 @@ mod edge {
     }
 }
 
-/// A developer's build writes what its pages say to their console, warnings and errors among them, to its stdout,
-/// every frame's, as WebKitGTK offers: its web view has no other console to read without a window of its own.
-#[cfg(all(target_os = "linux", debug_assertions))]
-fn console_to_stdout(window: &tauri::WebviewWindow) -> tauri::Result<()> {
-    use webkit2gtk::{SettingsExt, WebViewExt};
-    window.with_webview(|webview| {
-        if let Some(settings) = webview.inner().settings() {
-            settings.set_enable_write_console_messages_to_stdout(true);
-        }
-    })
-}
-
-/// Ctrl-Q quits and Ctrl-W closes the window, as they do in a Linux app's, before the page hears them. A Mac's
-/// Cmd-Q and Cmd-W are its menu's, and Windows' Alt-F4 the system's.
-#[cfg(target_os = "linux")]
-fn linux_keys(window: &tauri::WebviewWindow) -> tauri::Result<()> {
-    use gtk::gdk::{ModifierType, keys::constants as key};
-    use gtk::glib::Propagation;
-    use gtk::prelude::*;
-    let closes = window.clone();
-    window.gtk_window()?.connect_key_press_event(move |_, pressed| {
-        let held = pressed.state() & (ModifierType::CONTROL_MASK | ModifierType::SHIFT_MASK | ModifierType::MOD1_MASK | ModifierType::SUPER_MASK);
-        if held != ModifierType::CONTROL_MASK {
-            return Propagation::Proceed;
-        }
-        match pressed.keyval().to_lower() {
-            key::q => closes.app_handle().exit(0),
-            key::w => {
-                let _ = closes.close();
-            }
-            _ => return Propagation::Proceed,
-        }
-        Propagation::Stop
-    });
-    Ok(())
-}
-
 /// What a computer's app does in every page of its window, which Mac's and Linux's web views leave to it: a browser
 /// window's keys and mouse buttons for back and forward, and no menu of the web view's own on a right-click but for
 /// text.
@@ -779,47 +827,30 @@ pub(crate) const INITIALIZATION_SCRIPT: &str = include_str!("initialization-scri
 
 /// Reports what the window's page saw go wrong (`Client::report`): what it showed its person, a page's error, an
 /// app that never drew.
-#[tauri::command]
-fn report(views: State<'_, Views>, record: Value) {
-    views.client.report(record);
+#[cfg_attr(mobile, tauri::command)]
+fn report(record: Value) -> Result<(), String> {
+    views()?.client.report(record);
+    Ok(())
 }
-
-/// Where this device is with its network, as the window follows it (`follows`), with how many moves it has made:
-/// nothing until the client has opened, and a client that couldn't open at all is still opening.
-struct Start(tokio::sync::watch::Sender<Option<(u64, Session)>>);
 
 /// Opens the client, gives the window its views, and has the window follow the client's session and connection from
 /// then on (`follows`). A client that couldn't open at all, as one whose home can't be read, is said as one still
 /// opening that reaches nothing (`start`), which trying again opens again.
-async fn opens(app: AppHandle) {
-    // A phone gives each app a folder of its own, which only the app is told. An iPhone's app keeps its client in
-    // the folder it shares with its notification extension instead, its App Group, which `main.mm` says as ONE_HOME
-    // when iOS gives it one, as it does only to an app signed with it, and otherwise in its own (`phone::home`).
-    let opened = async {
-        #[cfg(target_os = "android")]
-        let home = app.path().app_data_dir()?;
-        #[cfg(target_os = "ios")]
-        let home = phone::home(
-            &app.path().app_data_dir()?,
-            std::env::var_os("ONE_HOME").as_deref().map(std::path::Path::new),
-        )?;
-        #[cfg(desktop)]
-        let home = ::client::home()?;
-        open(home).await
-    };
-    let client = match opened.await {
+async fn opens() {
+    let app = app();
+    let client = match async { open(app.shell.home()?).await }.await {
         Ok(client) => client,
         Err(error) => {
             eprintln!("{error:#}");
-            app.state::<Start>().0.send_modify(|now| *now = Some((now.as_ref().map_or(0, |(seq, _)| seq + 1), Session::Opening)));
-            return home(&app);
+            app.start.send_modify(|now| *now = Some((now.as_ref().map_or(0, |(seq, _)| seq + 1), Session::Opening)));
+            return app.shell.reload();
         }
     };
-    eprintln!("the client opened {} ms after the app started", app.state::<Instant>().elapsed().as_millis());
+    eprintln!("the client opened {} ms after the app started", app.started.elapsed().as_millis());
     // A move into or out of being a server that the machine went off during is settled as the app opens, whether or
     // not the system still has the server to start (`cli::serving::settle`).
     #[cfg(desktop)]
-    tauri::async_runtime::spawn({
+    spawn({
         let client = client.clone();
         async move {
             if let Err(error) = cli::serving::settle(&client).await {
@@ -827,52 +858,54 @@ async fn opens(app: AppHandle) {
             }
         }
     });
-    app.manage(Views {
+    let views = Views {
         client: client.clone(),
-        app: app.clone(),
         subscriptions: Mutex::default(),
         loaded: Mutex::default(),
-        started: *app.state::<Instant>(),
+        started: app.started,
         on_screen: Mutex::new(HashSet::from(["main".to_owned()])),
         missed: AtomicBool::new(false),
         hearing: AtomicBool::new(false),
-    });
+    };
+    if app.views.set(views).is_err() {
+        return;
+    }
+    let views = app.views.get().expect("it was just set");
 
     // The window follows whether its network answers, which is what the last thing asked found, and once it answers
     // again, every view asks again, so it picks up what it missed where it was.
-    let (handle, mut connection) = (app.clone(), client.connection());
-    tauri::async_runtime::spawn(async move {
+    let mut connection = client.connection();
+    spawn(async move {
         while connection.changed().await.is_ok() {
             let now = *connection.borrow_and_update();
             eprintln!("this client's connection: {now:?}");
-            drop(handle.emit("connection", now));
+            app.shell.emit("connection", json!(now));
             if now == Connection::Online {
-                handle.state::<Views>().refresh().await
+                views.refresh().await
             }
         }
     });
 
     // Where a phone is with its push is what this device says of itself (`client`), so its views ask again as it
     // moves, as Notifications shows it.
-    let (handle, mut push) = (app.clone(), notifications::pushes());
-    tauri::async_runtime::spawn(async move {
+    let mut push = notifications::pushes();
+    spawn(async move {
         while push.changed().await.is_ok() {
-            let views = handle.state::<Views>();
             let shown: Vec<_> = views.subscriptions.lock().expect("no view panics").keys().cloned().collect();
             for view in shown.iter().filter(|view| *view != "client") {
-                drop(handle.emit("changed", view));
+                app.shell.emit("changed", json!(view));
             }
         }
     });
 
     // A server refused this client for being behind it: the window says only that it needs updating, as an app that
     // requires an update does.
-    let (handle, mut behind) = (app.clone(), client.behind());
-    tauri::async_runtime::spawn(async move {
+    let mut behind = client.behind();
+    spawn(async move {
         while behind.changed().await.is_ok() {
             if let Some(why) = behind.borrow_and_update().clone() {
                 eprintln!("this client is behind its servers: {why}");
-                drop(handle.emit("behind", why));
+                app.shell.emit("behind", json!(why));
             }
         }
     });
@@ -880,18 +913,16 @@ async fn opens(app: AppHandle) {
     // A server said something changed, so every view on screen asks again, and the window is told which open apps
     // were loaded against a version it says is gone (`stale`). Servers tell this client for as long as it runs, so a
     // notification reaches it with its window hidden.
-    let handle = app.clone();
     let mut notifications = client.notifications();
-    tauri::async_runtime::spawn(async move {
+    spawn(async move {
         while let Ok(message) = notifications.recv().await {
-            let views = handle.state::<Views>();
             if message["method"] != "notifications/one/changed" {
                 continue;
             }
             let stale = views.stale(&message["params"]);
             if !stale.is_empty() {
                 eprintln!("a server said {stale:?} were loaded against what's gone");
-                drop(handle.emit("stale", &stale));
+                app.shell.emit("stale", json!(stale));
             }
             if views.on_screen() {
                 eprintln!("a server said something changed");
@@ -902,7 +933,7 @@ async fn opens(app: AppHandle) {
         }
     });
     client.watch(true).await;
-    follows(app, client).await
+    follows(client).await
 }
 
 /// The app's client, opened once for its process, kept in `home`: by its window as it opens, or before that by a push
@@ -971,13 +1002,14 @@ pub extern "system" fn Java_app_theone_client_Notifications_wake<'local>(
 /// is brought back to its own page once the device has moved on, which asks where it is then. A device that leaves
 /// its network, or is found to be out of it, starts the window again at its own page, as a web app goes back to its
 /// start once its person is signed out, which opens from there.
-async fn follows(app: AppHandle, client: Arc<Client>) {
+async fn follows(client: Arc<Client>) {
+    let app = app();
     let mut session = client.session();
     loop {
         let now = session.borrow_and_update().clone();
-        let seq = app.state::<Start>().0.borrow().as_ref().map_or(0, |(seq, _)| seq + 1);
+        let seq = app.start.borrow().as_ref().map_or(0, |(seq, _)| seq + 1);
         eprintln!("this device's session: {now:?}");
-        let was = app.state::<Start>().0.send_replace(Some((seq, now.clone())));
+        let was = app.start.send_replace(Some((seq, now.clone())));
         let starts_again = match (&was, &now) {
             (Some((_, Session::SignIn { .. })), _) => true,
             (Some((_, Session::SignedIn)), Session::Opening) => true,
@@ -986,12 +1018,12 @@ async fn follows(app: AppHandle, client: Arc<Client>) {
         };
         // A device that isn't in its network lists none of its apps.
         if matches!(now, Session::SignIn { .. }) {
-            shortcuts::keep(&app, Vec::new());
+            shortcuts::keep(Vec::new());
         }
         if starts_again {
-            home(&app);
+            app.shell.reload();
         } else {
-            drop(app.emit("session", told(seq, &now)));
+            app.shell.emit("session", told(seq, &now));
         }
         if session.changed().await.is_err() {
             return;
@@ -1005,25 +1037,13 @@ pub(crate) const HOME: &str = "http://tauri.localhost/index.html";
 #[cfg(not(any(windows, target_os = "android")))]
 pub(crate) const HOME: &str = "tauri://localhost/index.html";
 
-/// Opens the window again at its own page, which asks where the device is now, in place of where it was: what it
-/// leaves (a code that's been answered) is gone, so the device's own back doesn't lead there. Each app's own window
-/// closes, as what it showed was the session's that's gone.
-fn home(app: &AppHandle) {
-    #[cfg(desktop)]
-    if let Some(hosts) = app.try_state::<hosts::Hosts>() {
-        hosts.close_all();
-    }
-    if let Some(window) = app.get_webview_window("main") {
-        let _ = window.eval(format!("location.replace({})", Value::from(HOME)));
-    }
-}
-
 /// Whether the window goes where it's sent: to its own pages and its apps', and to the sign-in page it starts on.
 /// Anywhere else is the device's own browser's to open, as the sign-in page's button asks.
-fn stays(app: &AppHandle, to: &Url) -> bool {
+pub(crate) fn stays(to: &str) -> bool {
+    let Ok(to) = Url::parse(to) else { return false };
     let own = ["tauri", "oneapp", "about", "data", "blob"].contains(&to.scheme())
         || to.host_str().is_some_and(|host| host.ends_with(".localhost"));
-    let start = match &*app.state::<Start>().0.borrow() {
+    let start = match &*app().start.borrow() {
         Some((_, Session::SignIn { code, .. })) => {
             code.link.parse::<Url>().is_ok_and(|start| (start.origin(), start.path()) == (to.origin(), to.path()))
         }
@@ -1031,9 +1051,9 @@ fn stays(app: &AppHandle, to: &Url) -> bool {
     };
     if !own && !start {
         // A phone opens it from its own thread, which is the one asking here, so it's asked from another.
-        let (app, to) = (app.clone(), to.to_string());
+        let to = to.to_string();
         std::thread::spawn(move || {
-            if let Err(error) = app.opener().open_url(&to, None::<&str>) {
+            if let Err(error) = app().shell.open_url(&to) {
                 eprintln!("couldn't open {to} in the device's browser: {error}");
             }
         });
@@ -1041,82 +1061,115 @@ fn stays(app: &AppHandle, to: &Url) -> bool {
     own || start
 }
 
-/// What of the window is kept for the next time the app opens.
+/// The app on a computer: the launcher and its client (`computer`).
 #[cfg(desktop)]
-const WINDOW_STATE: tauri_plugin_window_state::StateFlags = tauri_plugin_window_state::StateFlags::SIZE
-    .union(tauri_plugin_window_state::StateFlags::POSITION)
-    .union(tauri_plugin_window_state::StateFlags::MAXIMIZED)
-    .union(tauri_plugin_window_state::StateFlags::FULLSCREEN);
-
-/// Opens the window as it was when the app last quit, on the display it was on. If where it was is on no display now
-/// (one that's been unplugged), it opens in the middle of one, at the size it was: the app leaves a position it
-/// can't show where it is, so the window is centred at its own size between the two.
-#[cfg(desktop)]
-fn opens_as_it_was(window: &tauri::WebviewWindow) -> tauri::Result<()> {
-    use tauri_plugin_window_state::{StateFlags, WindowExt};
-    window.restore_state(StateFlags::SIZE | StateFlags::POSITION)?;
-    window.center()?;
-    window.restore_state(WINDOW_STATE)
+pub fn run() {
+    computer::run()
 }
 
-#[cfg_attr(mobile, tauri::mobile_entry_point)]
+/// A phone's window, Tauri's: what's here tells it and asks it (`Shell`).
+#[cfg(mobile)]
+struct Phone(AppHandle);
+
+#[cfg(mobile)]
+impl Shell for Phone {
+    /// A phone gives each app a folder of its own, which only the app is told. An iPhone's app keeps its client in
+    /// the folder it shares with its notification extension instead, its App Group, which `main.mm` says as ONE_HOME
+    /// when iOS gives it one, as it does only to an app signed with it, and otherwise in its own (`phone::home`).
+    fn home(&self) -> anyhow::Result<std::path::PathBuf> {
+        #[cfg(target_os = "android")]
+        return Ok(self.0.path().app_data_dir()?);
+        #[cfg(target_os = "ios")]
+        return phone::home(&self.0.path().app_data_dir()?, std::env::var_os("ONE_HOME").as_deref().map(std::path::Path::new));
+    }
+
+    fn emit(&self, event: &str, payload: Value) {
+        drop(self.0.emit(event, payload));
+    }
+
+    fn reload(&self) {
+        if let Some(window) = self.0.get_webview_window("main") {
+            let _ = window.eval(format!("location.replace({})", Value::from(HOME)));
+        }
+    }
+
+    fn open_url(&self, url: &str) -> Result<(), String> {
+        use tauri_plugin_opener::OpenerExt;
+        self.0.opener().open_url(url, None::<&str>).map_err(|error| error.to_string())
+    }
+
+    fn restart(&self) {
+        self.0.restart()
+    }
+
+    fn opened_at(&self) -> Option<String> {
+        use tauri_plugin_deep_link::DeepLinkExt;
+        let started = self.0.deep_link().get_current().ok().flatten().unwrap_or_default();
+        started.iter().find_map(|url| link(url.as_str()))
+    }
+
+    fn listen(&self, client: Arc<Client>) {
+        spawn(notifications::listen(self.0.clone(), client));
+    }
+
+    /// An iPhone's status bar, which would otherwise follow the device and show dark on dark. Android's bars are
+    /// `MainActivity`'s (`androidTheme` in host.js).
+    fn theme(&self, theme: Option<Theme>) {
+        #[cfg(target_os = "ios")]
+        if let Some(window) = self.0.get_webview_window("main") {
+            let _ = window.with_webview(move |webview| {
+                use objc2_ui_kit::{UIUserInterfaceStyle, UIView};
+                // Tauri hands over the window's WKWebView on the main thread.
+                let web = unsafe { &*webview.inner().cast::<UIView>() };
+                let style = match theme {
+                    Some(Theme::Light) => UIUserInterfaceStyle::Light,
+                    Some(Theme::Dark) => UIUserInterfaceStyle::Dark,
+                    None => UIUserInterfaceStyle::Unspecified,
+                };
+                if let Some(window) = web.window() {
+                    window.setOverrideUserInterfaceStyle(style);
+                }
+            });
+        }
+        let _ = theme;
+    }
+}
+
+#[cfg(mobile)]
+#[tauri::mobile_entry_point]
 pub fn run() {
+    use tauri::http::{Response, StatusCode, header};
     let started = Instant::now();
     let builder = tauri::Builder::default().plugin(tauri_plugin_opener::init()).plugin(notifications::plugin());
-    // The window keeps where it is, how large, and whether it's maximized or full screen, for the next time the app
-    // opens (`opens_as_it_was`).
-    // One app at a time: a second start, with a link (`links`) or without, brings the first forward.
-    #[cfg(desktop)]
-    let builder = builder
-        .plugin(tauri_plugin_single_instance::init(|app, _, _| front(app)));
     let builder = builder.plugin(tauri_plugin_deep_link::init());
-    #[cfg(desktop)]
-    let builder = builder
-        .plugin(tauri_plugin_window_state::Builder::new().with_state_flags(WINDOW_STATE).skip_initial_state("main").build());
-    #[cfg(not(target_os = "android"))]
+    #[cfg(target_os = "ios")]
     let builder = builder.plugin(tauri_plugin_haptics::init());
     builder
         .setup(move |app| {
-            app.manage(Start(tokio::sync::watch::Sender::new(None)));
-            app.manage(Chosen(Mutex::default()));
-            app.manage(started);
-            // Windows groups this app's windows under its identifier, and each app's here under its own
-            // (`shortcuts::app_id`), which a start from that app's shortcut would otherwise give it.
-            #[cfg(windows)]
-            unsafe { windows::Win32::UI::Shell::SetCurrentProcessExplicitAppUserModelID(&windows::core::HSTRING::from(&app.config().identifier)) }?;
+            begin(Phone(app.handle().clone()), started);
             // The window opens at its own page at once, which draws the mark until the client has opened behind it,
             // and then follows where the device is: a device that isn't in its network to the page that signs it
             // in. A phone opens the window again at the same address as it's made again (a change of text size),
             // so that's home too, which asks where the device is now.
-            tauri::async_runtime::spawn(opens(app.handle().clone()));
-            // Each app's own window asks through this one (`hosts`).
-            #[cfg(desktop)]
-            hosts::serve(app.handle(), &::client::home()?)?;
+            spawn(opens());
             links(app)?;
-            // Started for an app's own window alone, the Home Screen is there but put away, until it's asked for
-            // (`front`).
-            let window = window(app.handle())?;
-            #[cfg(desktop)]
-            if std::env::var_os("ONE_HIDDEN").is_some() {
-                window.hide()?;
-            }
-            #[cfg(mobile)]
-            let _ = window;
+            window(app.handle())?;
             eprintln!("the window was made {} ms after the app started", started.elapsed().as_millis());
             Ok(())
         })
-        .register_asynchronous_uri_scheme_protocol("oneapp", |context, request, responder| {
-            let app = context.app_handle().clone();
-            tauri::async_runtime::spawn(async move {
-                let response = match app.state::<Views>().file(request.uri()).await {
+        .register_asynchronous_uri_scheme_protocol("oneapp", |_, request, responder| {
+            spawn(async move {
+                let file = match views() {
+                    Ok(views) => views.file(&request.uri().to_string()).await.map_err(|error| format!("{error:#}")),
+                    Err(error) => Err(error),
+                };
+                let response = match file {
                     Ok((kind, file)) => Response::builder()
                         .header(header::CONTENT_TYPE, kind)
                         .header(header::CONTENT_SECURITY_POLICY, APP_MAY_LOAD)
                         .header(header::CACHE_CONTROL, "no-store")
                         .body(file),
-                    Err(error) => {
-                        Response::builder().status(StatusCode::NOT_FOUND).body(format!("{error:#}").into_bytes())
-                    }
+                    Err(error) => Response::builder().status(StatusCode::NOT_FOUND).body(error.into_bytes()),
                 };
                 responder.respond(response.expect("these headers are valid"))
             });
@@ -1146,77 +1199,24 @@ pub fn run() {
             status_bar,
             theme,
             report,
-            #[cfg(desktop)]
-            hosts::open_window,
-            #[cfg(desktop)]
-            hosts::front,
-            #[cfg(target_os = "macos")]
-            hosts::title_bar_double_click
         ])
-        .build(context())
-        .expect("the app starts")
-        .run(|app, event| match event {
-            // The Home Screen closed while an app's own window is open is put away, as it routes links and
-            // notifications to them, and comes back as the app is opened again (`front`).
-            #[cfg(desktop)]
-            tauri::RunEvent::WindowEvent { label, event: tauri::WindowEvent::CloseRequested { api, .. }, .. }
-                if label == "main" && app.state::<hosts::Hosts>().any() =>
-            {
-                api.prevent_close();
-                if let Some(window) = app.get_webview_window("main") {
-                    let _ = window.hide();
-                }
-            }
-            // The Dock's icon clicked with no window of the app's own showing.
-            #[cfg(target_os = "macos")]
-            tauri::RunEvent::Reopen { has_visible_windows: false, .. } => front(app),
-            _ => {}
-        });
-}
-
-/// The app's own files and settings, which its page and each app's own window's are served from.
-pub(crate) fn context() -> tauri::Context<tauri::Wry> {
-    tauri::generate_context!()
+        .run(tauri::generate_context!())
+        .expect("the app starts");
 }
 
 /// The Home Screen's window, made at its own page, which draws the mark until the client has opened behind it, and
 /// then follows where the device is: a device that isn't in its network to the page that signs it in. A phone opens
 /// the window again at the same address as it's made again (a change of text size), so that's home too, which asks
 /// where the device is now.
+#[cfg(mobile)]
 fn window(app: &AppHandle) -> Result<tauri::WebviewWindow, Box<dyn std::error::Error>> {
-    let goes = app.clone();
     let page = HOME.parse().expect("the home screen has an address");
-    let window = WebviewWindowBuilder::new(app, "main", WebviewUrl::External(page)).on_navigation(move |to| stays(&goes, to));
-    #[cfg(any(target_os = "macos", target_os = "linux"))]
-    let window = window.initialization_script_for_all_frames(INITIALIZATION_SCRIPT);
-    // A Mac's window has no title band, as a Mac's own apps have none, and keeps its traffic lights, over the page's
-    // top, which keeps clear of them (`titleBar`). Its title stays, for the Window menu, Mission Control and Cmd-Tab.
-    #[cfg(target_os = "macos")]
-    let window = window.title_bar_style(tauri::TitleBarStyle::Overlay).hidden_title(true);
-    #[cfg(desktop)]
-    let window = window.title(app.package_info().name.clone()).inner_size(1024.0, 720.0).center().build()?;
-    #[cfg(desktop)]
-    opens_as_it_was(&window)?;
-    #[cfg(mobile)]
+    let window = WebviewWindowBuilder::new(app, "main", WebviewUrl::External(page)).on_navigation(|to| stays(to.as_str()));
     let window = window.build()?;
     #[cfg(target_os = "ios")]
     status_bar::watch(&window)?;
     #[cfg(target_os = "ios")]
     edge::watch(&window)?;
-    #[cfg(target_os = "linux")]
-    linux_keys(&window)?;
-    #[cfg(all(target_os = "linux", debug_assertions))]
-    console_to_stdout(&window)?;
     navigation_gestures(window.clone(), true, false)?;
     Ok(window)
-}
-
-/// Brings the Home Screen forward.
-#[cfg(desktop)]
-fn front(app: &AppHandle) {
-    if let Some(window) = app.get_webview_window("main") {
-        let _ = window.unminimize();
-        let _ = window.show();
-        let _ = window.set_focus();
-    }
 }

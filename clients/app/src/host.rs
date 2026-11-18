@@ -25,7 +25,7 @@ use wry::{RequestAsyncResponder, WebViewBuilder, WebViewId};
 
 /// What the window's page reaches of Tauri's in an app's own window, where there's no Tauri (`invoke` and `listen`),
 /// by a key no app's frame knows, which replaces `__KEY__`.
-const BRIDGE: &str = include_str!("host-initialization-script.js");
+pub(crate) const BRIDGE: &str = include_str!("host-initialization-script.js");
 
 /// What the window is told to do on its own thread, where its window and web view are.
 enum Told {
@@ -113,23 +113,10 @@ fn window(opened: Opened, class: &str) -> anyhow::Result<ExitCode> {
     };
     let window = window.build(&event_loop)?;
 
-    // The page's own files, which are this program's, as the app's window serves them.
-    let context: &'static tauri::Context<tauri::Wry> = Box::leak(Box::new(crate::context()));
+    // The page's own files, which are this program's, as the launcher serves them.
     #[cfg(target_os = "macos")]
-    let home_screen = context.config().identifier.clone();
-    let csp = context.config().app.security.csp.as_ref().map(ToString::to_string).unwrap_or_default();
-    let assets = context.assets();
-    let own = move |_: WebViewId, request: Request<Vec<u8>>| {
-        let path = request.uri().path().to_owned();
-        let response = match assets.get(&path.as_str().into()) {
-            Some(file) => Response::builder()
-                .header(header::CONTENT_TYPE, kind(&path))
-                .header(header::CONTENT_SECURITY_POLICY, &csp)
-                .body(file.into_owned().into()),
-            None => Response::builder().status(StatusCode::NOT_FOUND).body(Vec::new().into()),
-        };
-        response.expect("these headers are valid")
-    };
+    let home_screen = ::client::NAME;
+    let own = |_: WebViewId, request: Request<Vec<u8>>| crate::page::respond(request.uri().path());
 
     // An app's files, which the app's window has (`Views::file`).
     let (files, files_to, next) = (asked.clone(), to.clone(), Arc::new(AtomicU64::new(0)));
@@ -187,7 +174,7 @@ fn window(opened: Opened, class: &str) -> anyhow::Result<ExitCode> {
     let browser = to.clone();
     let stays = move |to: String| {
         let own = ["tauri:", "oneapp:", "about:", "data:", "blob:"].iter().any(|scheme| to.starts_with(scheme))
-            || tauri::Url::parse(&to).is_ok_and(|to| to.host_str().is_some_and(|host| host.ends_with(".localhost")));
+            || url::Url::parse(&to).is_ok_and(|to| to.host_str().is_some_and(|host| host.ends_with(".localhost")));
         if !own {
             let _ = browser.send(json!({"id": "browser", "command": "open_url", "args": {"url": to}}));
         }
@@ -281,7 +268,7 @@ fn window(opened: Opened, class: &str) -> anyhow::Result<ExitCode> {
             Event::UserEvent(Told::Home) => {
                 // The Home Screen is The One App's, which comes in front only where this app lets it.
                 #[cfg(target_os = "macos")]
-                crate::hosts::yield_activation(&home_screen);
+                crate::hosts::yield_activation(home_screen);
                 let _ = to.send(json!({"id": "front", "command": "front"}));
             }
             _ => {}
@@ -350,18 +337,13 @@ fn channel(
                         });
                         let _ = proxy.send_event(Told::Run(answer(&id, result)));
                     }
-                    Asked::File(responder) => responder.respond(match result {
-                        Ok(file) => Response::builder()
-                            .header(header::CONTENT_TYPE, file["kind"].as_str().unwrap_or_default())
-                            .header(header::CONTENT_SECURITY_POLICY, crate::APP_MAY_LOAD)
-                            .header(header::CACHE_CONTROL, "no-store")
-                            .body(std::borrow::Cow::Owned(BASE64.decode(file["body"].as_str().unwrap_or_default().as_bytes()).unwrap_or_default()))
-                            .expect("these headers are valid"),
-                        Err(error) => Response::builder()
-                            .status(StatusCode::NOT_FOUND)
-                            .body(std::borrow::Cow::Owned(error.as_str().unwrap_or_default().as_bytes().to_vec()))
-                            .expect("a 404 is valid"),
-                    }),
+                    Asked::File(responder) => responder.respond(app_file(match result {
+                        Ok(file) => Ok((
+                            file["kind"].as_str().unwrap_or_default().to_owned(),
+                            BASE64.decode(file["body"].as_str().unwrap_or_default().as_bytes()).unwrap_or_default(),
+                        )),
+                        Err(error) => Err(error.as_str().unwrap_or_default().to_owned()),
+                    })),
                 }
             }
         });
@@ -405,8 +387,21 @@ async fn open(address: &str) -> std::io::Result<tokio::net::windows::named_pipe:
     tokio::net::windows::named_pipe::ClientOptions::new().open(address)
 }
 
+/// An app's file, or why there isn't one, as the web view's answer for it, with what an app's page may load.
+pub(crate) fn app_file(file: Result<(String, Vec<u8>), String>) -> Response<std::borrow::Cow<'static, [u8]>> {
+    let response = match file {
+        Ok((kind, file)) => Response::builder()
+            .header(header::CONTENT_TYPE, kind)
+            .header(header::CONTENT_SECURITY_POLICY, crate::APP_MAY_LOAD)
+            .header(header::CACHE_CONTROL, "no-store")
+            .body(file.into()),
+        Err(error) => Response::builder().status(StatusCode::NOT_FOUND).body(error.into_bytes().into()),
+    };
+    response.expect("these headers are valid")
+}
+
 /// The script that answers the page's ask `id`.
-fn answer(id: &Value, result: Result<Value, Value>) -> String {
+pub(crate) fn answer(id: &Value, result: Result<Value, Value>) -> String {
     let (ok, value) = match result {
         Ok(value) => (true, value),
         Err(value) => (false, value),
@@ -415,21 +410,9 @@ fn answer(id: &Value, result: Result<Value, Value>) -> String {
 }
 
 /// A random number, from the hasher the standard library seeds randomly.
-fn random() -> u64 {
+pub(crate) fn random() -> u64 {
     use std::hash::{BuildHasher, Hasher};
     std::collections::hash_map::RandomState::new().build_hasher().finish()
-}
-
-/// What kind of file one of the page's own is.
-fn kind(path: &str) -> &'static str {
-    match path.rsplit('.').next() {
-        Some("html") => "text/html",
-        Some("js") => "text/javascript",
-        Some("css") => "text/css",
-        Some("png") => "image/png",
-        Some("woff2") => "font/woff2",
-        _ => "text/plain",
-    }
 }
 
 /// Ctrl-W closes the window and Ctrl-Q quits, as they do in a Linux app's (`linux_keys`), both ending the app's own

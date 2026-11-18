@@ -29,6 +29,16 @@ body {
   /* Sideways is the device's: a trackpad's two-finger swipe goes back. */
   overscroll-behavior-y: none;
 }
+/* A computer's launcher (`data-launcher`, computer.rs): on a Mac and Windows the window's own glass is under the page,
+   which has no background of its own; Linux has none, so the page has the colour a popover has. */
+html[data-launcher="glass"],
+html[data-launcher="glass"] body,
+html[data-launcher="glass"] :is(#state, #page-problem) {
+  background: transparent;
+}
+html[data-launcher="solid"] body {
+  background: var(--popover);
+}
 /* What the window shows of itself fills its middle, over the frames, with the background behind it: the UI library
    draws each state (`.ui-state.middle`). */
 #state {

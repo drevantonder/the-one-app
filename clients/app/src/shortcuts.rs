@@ -14,7 +14,6 @@
 use std::sync::Mutex;
 
 use serde_json::Value;
-use tauri::AppHandle;
 
 /// An app's screen: its entrypoint (`<app>/<page>`), which `one:<entrypoint>` opens, its name, and its icon as a
 /// `data:` address.
@@ -52,14 +51,13 @@ static KEPT: Mutex<Option<Vec<Shortcut>>> = Mutex::new(None);
 
 /// Has the device list `shortcuts`, and none else of this app's, unless they're what it has. Each icon is drawn
 /// first, so it's done off the thread that asks.
-pub fn keep(app: &AppHandle, shortcuts: Vec<Shortcut>) {
-    let app = app.clone();
+pub fn keep(shortcuts: Vec<Shortcut>) {
     std::thread::spawn(move || {
         let mut kept = KEPT.lock().expect("no keep panics");
         if kept.as_ref() == Some(&shortcuts) {
             return;
         }
-        match device::keep(&app, &shortcuts) {
+        match device::keep(&shortcuts) {
             Ok(()) => *kept = Some(shortcuts),
             Err(error) => eprintln!("this device's shortcuts to its apps aren't up to date: {error:#}"),
         }
@@ -96,7 +94,7 @@ fn png(icon: &str, side: u32) -> anyhow::Result<Vec<u8>> {
 /// `side` pixels across: on macOS's icon grid, its body 824 of 1024 across in the middle, rounded by 185, with a shadow
 /// below it, and The One App's ring small in the bottom right corner, so it reads as that app's, of The One App. It's
 /// drawn from the same numbers as `tooling/helper-icon`'s helpers. Inside The One App an icon stays plain.
-#[cfg(not(target_os = "android"))]
+#[cfg(any(windows, target_os = "linux", target_os = "ios"))]
 fn badged(icon: &str, side: u32) -> anyhow::Result<Vec<u8>> {
     Ok(scaled(&badged_pixmap(icon)?, side)?.encode_png()?)
 }
@@ -196,7 +194,7 @@ fn shadow(layer: &resvg::tiny_skia::Pixmap, sigma: f32, opacity: f32) -> resvg::
 mod device {
     use super::Shortcut;
 
-    pub fn keep(_app: &tauri::AppHandle, shortcuts: &[Shortcut]) -> anyhow::Result<()> {
+    pub fn keep(shortcuts: &[Shortcut]) -> anyhow::Result<()> {
         use data_encoding::BASE64;
         use objc2::runtime::AnyClass;
         let listed: Vec<_> = shortcuts
@@ -231,7 +229,6 @@ mod device {
 mod device {
     use std::path::Path;
 
-    use tauri::Manager;
     use windows::Win32::Storage::EnhancedStorage::PKEY_AppUserModel_ID;
     use windows::Win32::System::Com::StructuredStorage::{
         PROPVARIANT, PROPVARIANT_0, PROPVARIANT_0_0, PROPVARIANT_0_0_0, PropVariantClear,
@@ -246,9 +243,9 @@ mod device {
 
     use super::Shortcut;
 
-    pub fn keep(app: &tauri::AppHandle, shortcuts: &[Shortcut]) -> anyhow::Result<()> {
-        let start = app.path().data_dir()?.join("Microsoft/Windows/Start Menu/Programs").join(&app.package_info().name);
-        let icons = app.path().app_local_data_dir()?.join("shortcuts");
+    pub fn keep(shortcuts: &[Shortcut]) -> anyhow::Result<()> {
+        let start = super::data_dir()?.join("Microsoft/Windows/Start Menu/Programs").join(crate::page::NAME);
+        let icons = super::local_data_dir()?.join("shortcuts");
         std::fs::create_dir_all(&start)?;
         std::fs::create_dir_all(&icons)?;
         let program = std::env::current_exe()?;
@@ -361,15 +358,13 @@ mod device {
 mod device {
     use std::path::{Path, PathBuf};
 
-    use tauri::Manager;
-
     use super::Shortcut;
 
-    pub fn keep(app: &tauri::AppHandle, shortcuts: &[Shortcut]) -> anyhow::Result<()> {
+    pub fn keep(shortcuts: &[Shortcut]) -> anyhow::Result<()> {
         if cfg!(debug_assertions) {
             return Ok(());
         }
-        let folder = folder(app)?;
+        let folder = folder()?;
         std::fs::create_dir_all(&folder)?;
         let program = std::env::current_exe()?;
         let mut made = Vec::new();
@@ -402,8 +397,9 @@ mod device {
     }
 
     /// The folder this app's apps are in.
-    pub fn folder(app: &tauri::AppHandle) -> anyhow::Result<PathBuf> {
-        Ok(app.path().home_dir()?.join("Applications").join(&app.package_info().name))
+    pub fn folder() -> anyhow::Result<PathBuf> {
+        let home = dirs::home_dir().ok_or_else(|| anyhow::anyhow!("this user has no home folder"))?;
+        Ok(home.join("Applications").join(crate::page::NAME))
     }
 
     fn make(bundle: &Path, shortcut: &Shortcut, program: &Path) -> anyhow::Result<()> {
@@ -485,16 +481,14 @@ mod device {
 /// its icon beside this app's data.
 #[cfg(target_os = "linux")]
 mod device {
-    use tauri::Manager;
-
     use super::Shortcut;
 
-    pub fn keep(app: &tauri::AppHandle, shortcuts: &[Shortcut]) -> anyhow::Result<()> {
+    pub fn keep(shortcuts: &[Shortcut]) -> anyhow::Result<()> {
         if cfg!(debug_assertions) {
             return Ok(());
         }
-        let entries = app.path().data_dir()?.join("applications");
-        let icons = app.path().app_local_data_dir()?.join("shortcuts");
+        let entries = super::data_dir()?.join("applications");
+        let icons = super::local_data_dir()?.join("shortcuts");
         std::fs::create_dir_all(&entries)?;
         std::fs::create_dir_all(&icons)?;
         let program = std::env::current_exe()?;
@@ -540,7 +534,7 @@ mod device {
 /// Android lists its apps itself (`shortcuts` in page/client.js).
 #[cfg(target_os = "android")]
 mod device {
-    pub fn keep(_app: &tauri::AppHandle, _shortcuts: &[super::Shortcut]) -> anyhow::Result<()> {
+    pub fn keep(_shortcuts: &[super::Shortcut]) -> anyhow::Result<()> {
         Ok(())
     }
 }
@@ -549,6 +543,7 @@ mod device {
 /// windows by in the taskbar, a Mac bundle's identifier, and a Linux window's class. It's this app's identifier, then
 /// the app's name, its page's if it isn't the app's first, and who it's for, if not its user, last part first:
 /// `app.theone.client.notes`, `app.theone.client.sign-in.users`, `app.theone.client.notes.family.groups`.
+#[cfg(desktop)]
 pub fn app_id(entrypoint: &str, subject: Option<&str>) -> String {
     let mut parts = entrypoint.split('/');
     let mut id = parts.next().unwrap_or_default().to_owned();
@@ -574,17 +569,29 @@ pub fn name(entrypoint: &str) -> Option<String> {
 /// The program an app's window runs (`hosts`): on a Mac its bundle's, so macOS knows it as that app, and otherwise
 /// this one.
 #[cfg(desktop)]
-pub fn program(app: &AppHandle, entrypoint: &str) -> anyhow::Result<std::path::PathBuf> {
+pub fn program(entrypoint: &str) -> anyhow::Result<std::path::PathBuf> {
     #[cfg(target_os = "macos")]
     {
         let kept = KEPT.lock().expect("no keep panics").clone().unwrap_or_default();
         if let Some(shortcut) = kept.iter().find(|shortcut| shortcut.entrypoint == entrypoint) {
-            let program = device::bundle(&device::folder(app)?, &shortcut.name).join("Contents/MacOS/one");
+            let program = device::bundle(&device::folder()?, &shortcut.name).join("Contents/MacOS/one");
             if program.exists() {
                 return Ok(program);
             }
         }
     }
-    let _ = (app, entrypoint);
+    let _ = entrypoint;
     Ok(std::env::current_exe()?)
+}
+
+/// Where this user's data is (Linux's `~/.local/share`, Windows' roaming AppData), as Tauri said it.
+#[cfg(any(windows, target_os = "linux"))]
+fn data_dir() -> anyhow::Result<std::path::PathBuf> {
+    dirs::data_dir().ok_or_else(|| anyhow::anyhow!("this user has no data folder"))
+}
+
+/// This app's own data on this machine, as Tauri said it: its identifier's folder in the user's local data.
+#[cfg(any(windows, target_os = "linux"))]
+pub(crate) fn local_data_dir() -> anyhow::Result<std::path::PathBuf> {
+    Ok(dirs::data_local_dir().ok_or_else(|| anyhow::anyhow!("this user has no data folder"))?.join(::client::NAME))
 }

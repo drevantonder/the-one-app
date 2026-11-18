@@ -11,16 +11,16 @@ client = { path = "../../../../core/client" }
 encryption_client = { path = "../../../encryption/client/native" }
 serde = { version = "1", features = ["derive"] }
 serde_json.workspace = true
-tauri = "2"
 tokio.workspace = true
 
-# A computer shows a notification while the app runs, as the system's own, and hears it tapped.
+# A computer shows a notification while the app runs, as the system's own, and on Linux hears it tapped.
 [target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
-tauri-plugin-notification = "2.8"
+notify-rust = "4.19"
 
-# A phone is woken by its push service, Apple's or Google's, which it gives the network its token for. Tauri's own
-# notification plugin has no push; this one does.
+# A phone is woken by its push service, Apple's or Google's, which it gives the network its token for, through its
+# app's Tauri: Tauri's own notification plugin has no push; this one does.
 [target.'cfg(any(target_os = "android", target_os = "ios"))'.dependencies]
+tauri = "2"
 tauri-plugin-notifications = { version = "0.4", default-features = false, features = ["push-notifications"] }
 
 # Android's messaging service asks the app's Rust to open each notification.

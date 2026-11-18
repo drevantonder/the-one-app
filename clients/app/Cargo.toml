@@ -14,7 +14,8 @@ name = "one"
 path = "src/main.rs"
 
 # The window, which is all of the program but its CLI and MCP. A Linux machine with no screen has a build without
-# it (`cargo build --no-default-features`), which needs none of GTK or WebKitGTK there.
+# it (`cargo build --no-default-features`), which needs none of GTK or WebKitGTK there. A phone's window is Tauri's;
+# a computer's is a window and a web view alone (tao and wry, which Tauri is built on), as each app's own is (`computer`).
 [features]
 default = ["window"]
 window = [
@@ -25,17 +26,22 @@ window = [
   "dep:tokio",
   "dep:tauri",
   "dep:tauri-plugin-opener",
-  "dep:tauri-plugin-notification",
   "dep:tauri-plugin-notifications",
-  "dep:tauri-plugin-window-state",
   "dep:tauri-plugin-deep-link",
-  "dep:tauri-plugin-single-instance",
   "dep:tauri-plugin-haptics",
+  "dep:serde",
+  "dep:url",
+  "dep:open",
+  "dep:dirs",
+  "dep:global-hotkey",
+  "dep:tray-icon",
+  "dep:window-vibrancy",
   "dep:encryption_client",
   "dep:notifications_client",
   "dep:computer_use_client",
   "dep:objc2",
   "dep:objc2-core-foundation",
+  "dep:objc2-foundation",
   "dep:objc2-ui-kit",
   "dep:webkit2gtk",
   "dep:gtk",
@@ -49,7 +55,10 @@ window = [
 ]
 
 [build-dependencies]
+# A phone's app is Tauri's, which its build script makes ready (a computer's builds it, and doesn't run it).
 tauri-build = { version = "2", features = [], optional = true }
+# A computer's window's page is served from its own files (`page`), which `tauri.conf.json` lists.
+serde_json.workspace = true
 # The manifest of `one` without its window on Windows (`build.rs`).
 embed-manifest = "1"
 
@@ -59,15 +68,11 @@ cli = { path = "../cli" }
 client = { path = "../../core/client" }
 data-encoding = { version = "2", optional = true }
 serde_json = { workspace = true, optional = true }
-# `net`: the local channel each app's own window asks through (`hosts`).
-tokio = { workspace = true, features = ["net"], optional = true }
-# `custom-protocol` builds the app with its page inside it, however it's built.
-tauri = { version = "2", features = ["custom-protocol"], optional = true }
-# Opens the sign-in page in the device's own browser, where a passkey works.
-tauri-plugin-opener = { version = "2", optional = true }
-# A `one:` link opens the app at what it links to (`links`): on a computer one app, the only one, which a second start
-# with a link hands it to, and on a phone what Spotlight, an App Shortcut or an Android shortcut opens.
-tauri-plugin-deep-link = { version = "2.6", optional = true }
+serde = { version = "1", features = ["derive"], optional = true }
+url = { version = "2", optional = true }
+# `net`: the local channel each app's own window asks through (`hosts`). `rt-multi-thread`: a computer's app runs its
+# client on a runtime of its own (`computer`).
+tokio = { workspace = true, features = ["net", "rt-multi-thread"], optional = true }
 
 # The native code of the apps it ships with that only the window uses, beside the CLI's, which is never deployed
 # (`client::files`).
@@ -75,23 +80,21 @@ encryption_client = { path = "../../apps/encryption/client/native", optional = t
 notifications_client = { path = "../../apps/notifications/client/native", optional = true }
 computer_use_client = { path = "../../apps/computer-use/client/native", optional = true }
 
-# The notification plugins Notifications' client-side code uses, which Tauri gives the window's page permissions of only
-# where the app names them itself (`capabilities/phone.json`).
+# A computer's windows, the launcher's and each app's own (`computer`, `host`): a window and a web view alone, Tauri's
+# own libraries, at the versions Tauri uses.
 [target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
-tauri-plugin-notification = { version = "2.8", optional = true }
-# An app's own window on a computer (`host`): a window and a web view alone, Tauri's own libraries, at the versions
-# Tauri uses.
 wry = { version = "0.57", optional = true }
 tao = { version = "0.37", optional = true }
-# The window opens where and as large as it was last, as a computer's apps do.
-tauri-plugin-window-state = { version = "2.5", optional = true }
-tauri-plugin-single-instance = { version = "2.5", features = ["deep-link"], optional = true }
+# Opens a web address in the device's own browser, where a passkey works.
+open = { version = "5", optional = true }
+# Where a computer keeps a user's data and apps (`shortcuts`).
+dirs = { version = "6", optional = true }
+# The launcher's shortcut, ⌥Space on a Mac (`computer::shortcut`).
+global-hotkey = { version = "0.7", optional = true }
+# The launcher's glass, as the system's own (NSVisualEffectView on a Mac, Acrylic on Windows).
+window-vibrancy = { version = "0.8", optional = true }
 
-# The web view's own back and forward gestures, which Tauri doesn't switch on (`navigation_gestures`).
-# An app's haptics (`one/haptic` in client.js): an iPhone's, and on a computer nothing. Android's plays them through
-# the web view instead (`MainActivity`), as this plugin's Vibrator there doesn't follow the system's Touch feedback.
 [target.'cfg(not(target_os = "android"))'.dependencies]
-tauri-plugin-haptics = { version = "2.4", optional = true }
 # Each app's icon where the device lists it (`shortcuts`), which is an SVG or a PNG, drawn as a PNG of the size it
 # wants there.
 resvg = { version = "0.47", default-features = false, optional = true }
@@ -100,14 +103,19 @@ resvg = { version = "0.47", default-features = false, optional = true }
 # and its icon file; and a window's title bar, with Windows' own caption buttons over the page (`title_bar`).
 [target.'cfg(windows)'.dependencies]
 ico = { version = "0.6", optional = true }
-windows = { version = "0.62", features = ["Win32_System_Com", "Win32_System_Com_StructuredStorage", "Win32_System_Variant", "Win32_Storage_EnhancedStorage", "Win32_UI_Shell", "Win32_UI_Shell_PropertiesSystem", "Win32_Graphics_Dwm", "Win32_Graphics_Gdi", "Win32_UI_Controls", "Win32_UI_HiDpi", "Win32_UI_WindowsAndMessaging"], optional = true }
+windows = { version = "0.62", features = ["Win32_Foundation", "Win32_Graphics_Dwm", "Win32_Graphics_Gdi", "Win32_System_Com", "Win32_System_Com_StructuredStorage", "Win32_System_Registry", "Win32_System_Variant", "Win32_Storage_EnhancedStorage", "Win32_UI_Controls", "Win32_UI_HiDpi", "Win32_UI_Shell", "Win32_UI_Shell_PropertiesSystem", "Win32_UI_WindowsAndMessaging"], optional = true }
+
+# The ring in a Mac's menu bar and Windows' notification area that summons the launcher (`computer::ring`).
+[target.'cfg(any(target_os = "macos", windows))'.dependencies]
+tray-icon = { version = "0.25", optional = true }
 
 [target.'cfg(target_vendor = "apple")'.dependencies]
 objc2 = { version = "0.6", optional = true }
 
-# A Mac app's menu bar, for an app's own window (`host`).
+# A Mac app's menu bar (`host`, `computer`).
 [target.'cfg(target_os = "macos")'.dependencies]
 muda = { version = "0.20", optional = true }
+objc2-foundation = { version = "0.3", default-features = false, features = ["std", "objc2-core-foundation", "NSGeometry"], optional = true }
 
 [target.'cfg(target_os = "linux")'.dependencies]
 webkit2gtk = { version = "=2.0.2", features = ["v2_38"], optional = true }
@@ -118,8 +126,20 @@ gtk = { version = "0.18", optional = true }
 [target.'cfg(target_os = "android")'.dependencies]
 jni = "0.21"
 
+# A phone's app is Tauri's: `custom-protocol` builds it with its page inside it, however it's built. A `one:` link
+# opens it at what it links to (`links`): what Spotlight, an App Shortcut or an Android shortcut opens. The opener
+# opens the sign-in page in the device's own browser, where a passkey works. An app's haptics (`one/haptic` in
+# client.js) are an iPhone's; Android's plays them through the web view instead (`MainActivity`), as the plugin's
+# Vibrator there doesn't follow the system's Touch feedback.
 [target.'cfg(any(target_os = "android", target_os = "ios"))'.dependencies]
+tauri = { version = "2", features = ["custom-protocol"], optional = true }
+tauri-plugin-opener = { version = "2", optional = true }
+tauri-plugin-deep-link = { version = "2.6", optional = true }
 tauri-plugin-notifications = { version = "0.4", default-features = false, features = ["push-notifications"], optional = true }
+
+[target.'cfg(target_os = "ios")'.dependencies.tauri-plugin-haptics]
+version = "2.4"
+optional = true
 
 # libc after 0.2.189 has no `in6_ifreq` on iOS, which netdev 0.46, through iroh, uses there.
 [target.'cfg(target_os = "ios")'.dependencies]

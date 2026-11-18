@@ -16,6 +16,7 @@ use client::Client;
 use encryption_client::cipher;
 use serde::Serialize;
 use serde_json::{Value, json};
+#[cfg(any(target_os = "android", target_os = "ios"))]
 use tauri::{AppHandle, Runtime};
 use tokio::sync::{Notify, watch};
 
@@ -135,47 +136,22 @@ async fn inbox(client: &Client, after: i64) -> anyhow::Result<Vec<Value>> {
     Ok(inbox["notifications"].as_array().cloned().unwrap_or_default())
 }
 
-#[cfg(not(any(target_os = "android", target_os = "ios")))]
-pub fn plugin<R: Runtime>() -> tauri::plugin::TauriPlugin<R> {
-    tauri_plugin_notification::init()
-}
-
 #[cfg(any(target_os = "android", target_os = "ios"))]
 pub fn plugin<R: Runtime>() -> tauri::plugin::TauriPlugin<R> {
     tauri_plugin_notifications::init()
 }
 
 /// Shows each notification that reaches the inbox after the app started, as a server says something changed. One
-/// already read, on another device, isn't shown. A tap on one brings the window up on the app it's from.
+/// already read, on another device, isn't shown. A tap on one opens the app it's from (`tapped`, with its app's name),
+/// where the system says so: a Linux desktop's notifications do, through their default action. `identifier` is the
+/// app's, which a Mac shows its notifications as.
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
-pub async fn listen(app: AppHandle, client: Arc<Client>) {
-    use std::collections::HashMap;
-    use std::sync::Mutex;
-
-    use tauri::{Emitter, Manager};
-    use tauri_plugin_notification::NotificationExt;
-
-    // What each notification shown opens, by its id.
-    let opens = Arc::new(Mutex::new(HashMap::<i32, String>::new()));
-    let (tapped, handle) = (opens.clone(), app.clone());
-    let listener = app.notification().on_action(move |action| {
-        let Some(id) = action.notification().map(|shown| shown.id()) else { return };
-        if action.action_id() != "tap" {
-            return;
-        }
-        if let Some(window) = handle.get_webview_window("main") {
-            let _ = window.unminimize();
-            let _ = window.show();
-            let _ = window.set_focus();
-        }
-        if let Some(app) = tapped.lock().expect("no tap panics").get(&id) {
-            drop(handle.emit("open", app));
-        }
-    });
-    if let Err(error) = listener {
-        eprintln!("a tap on a notification opens nothing here: {error}");
+pub async fn listen(client: Arc<Client>, identifier: &str, tapped: impl Fn(String) + Clone + Send + 'static) {
+    #[cfg(target_os = "macos")]
+    if let Err(error) = notify_rust::set_application(identifier) {
+        eprintln!("this Mac shows notifications as another app's: {error}");
     }
-
+    let _ = identifier;
     let mut notifications = client.notifications();
     // The newest notification there was, once the inbox has answered: what's after it is new.
     let mut latest = None;
@@ -195,22 +171,15 @@ pub async fn listen(app: AppHandle, client: Arc<Client>) {
                     if notification["read"] == true {
                         continue;
                     }
-                    let title = notification["title"].as_str().unwrap_or_default();
-                    let mut shown = app.notification().builder().id(id as i32).title(title);
+                    let title = notification["title"].as_str().unwrap_or_default().to_owned();
                     // What it's from goes first, as the system shows no app of ours but the one.
                     let from = notification["from"].as_str();
                     let text = notification["text"].as_str();
                     let body = [from, text].into_iter().flatten().collect::<Vec<_>>().join(" · ");
-                    if !body.is_empty() {
-                        shown = shown.body(body);
-                    }
-                    if let Some(app) = notification["app"].as_str() {
-                        opens.lock().expect("no tap panics").insert(id as i32, app.to_owned());
-                    }
-                    match shown.show() {
-                        Ok(()) => eprintln!("showed a notification: {title}"),
-                        Err(error) => eprintln!("couldn't show a notification: {error}"),
-                    }
+                    let opens = notification["app"].as_str().map(str::to_owned);
+                    let tapped = tapped.clone();
+                    // The system's call waits on its notification service, and on Linux for the tap.
+                    tokio::task::spawn_blocking(move || show(&title, &body, opens, tapped));
                 }
             }
         }
@@ -229,6 +198,29 @@ pub async fn listen(app: AppHandle, client: Arc<Client>) {
             }
         }
     }
+}
+
+/// Shows one notification, as the system's own, and hears it tapped where the system says (Linux's default action).
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
+fn show(title: &str, body: &str, opens: Option<String>, tapped: impl Fn(String)) {
+    let mut shown = notify_rust::Notification::new();
+    shown.summary(title).body(body);
+    #[cfg(target_os = "linux")]
+    shown.action("default", "Open");
+    match shown.show() {
+        Ok(_handle) => {
+            eprintln!("showed a notification: {title}");
+            #[cfg(target_os = "linux")]
+            _handle.wait_for_action(|action| {
+                if let ("default", Some(app)) = (action, opens) {
+                    tapped(app)
+                }
+            });
+        }
+        Err(error) => eprintln!("couldn't show a notification: {error}"),
+    }
+    #[cfg(not(target_os = "linux"))]
+    let _ = (opens, tapped);
 }
 
 /// The app a notification tapped on a phone opens, by its app's name, as its push plugin says of the tap

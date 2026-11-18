@@ -1,33 +1,37 @@
 //! A computer's app windows: each app opens in a window of its own, in a process of its own (`host`), as an app
-//! the system lists by its own name and icon, and the app's own window keeps its Home Screen. They have no client of
+//! the system lists by its own name and icon, and the launcher (`computer`) starts them. They have no client of
 //! their own: each asks through this one, over a local channel that only this user on this machine reaches, a Unix
 //! socket (`address`), or on Windows a named pipe, so there's one connection to the network, one sign-in
-//! and one set of what's kept. What one asks is what the Home Screen's page asks (`invoke`), by the same commands, and
-//! it hears the same events.
+//! and one set of what's kept. What one asks is what the launcher's page asks (`invoke`), by the same commands
+//! (`command`), and it hears the same events.
 //!
 //! Each line on the channel is a JSON message. An app's window says first which app it is (`hello`), then asks (`id`,
 //! `command`, `args`) and loads files (`id`, `file`); this side answers each (`id`, `result` or `error`), and tells it
 //! what's said (`event`, `payload`). One app has one window: a second start of it brings the first forward and ends.
+//! A second start of the app itself says only `again`, with the `one:` link it was started with, if any, and ends.
 //! Ending this program ends the channel, and every app's window with it.
 
 use std::collections::HashMap;
-use std::sync::Mutex;
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{LazyLock, Mutex};
 
 use data_encoding::BASE64;
 use serde_json::{Value, json};
-use tauri::{AppHandle, Listener, Manager};
 use tokio::io::{AsyncBufReadExt, AsyncRead, AsyncWrite, AsyncWriteExt, BufReader};
 use tokio::sync::mpsc::{UnboundedSender, unbounded_channel};
 
-/// The events the Home Screen's page hears that an app's window hears too. A `one:` link (`open`) is told only to the
-/// window of the app it opens.
-const EVENTS: [&str; 6] = ["changed", "connection", "behind", "stale", "session", "theme"];
+use crate::computer;
 
-/// The app windows that are open or starting, by the app they show (`key`), as the Home Screen's page names an open
+/// The events the launcher's page hears that an app's window hears too. A `one:` link (`open`) is told only to the
+/// launcher, which opens the app's window.
+pub const EVENTS: [&str; 6] = ["changed", "connection", "behind", "stale", "session", "theme"];
+
+/// The app windows that are open or starting, by the app they show (`key`), as the launcher's page names an open
 /// app: `<subject>|<entrypoint>`.
+static HOSTS: LazyLock<Hosts> = LazyLock::new(Hosts::default);
+
 #[derive(Default)]
-pub struct Hosts {
+struct Hosts {
     open: Mutex<HashMap<String, Host>>,
     next: AtomicU64,
 }
@@ -55,20 +59,22 @@ pub fn address(home: &std::path::Path) -> String {
     format!(r"\\.\pipe\{name}")
 }
 
-/// Serves the channel for as long as this program runs, and tells every app window what the Home Screen hears.
-pub fn serve(app: &AppHandle, home: &std::path::Path) -> anyhow::Result<()> {
-    app.manage(Hosts::default());
-    for event in EVENTS {
-        let handle = app.clone();
-        app.listen_any(event, move |heard| {
-            let payload: Value = serde_json::from_str(heard.payload()).unwrap_or(Value::Null);
-            handle.state::<Hosts>().tell_all(json!({"event": event, "payload": payload}));
-        });
-    }
+/// Tells the app already running for `home`, if there is one, that it was started again, with the `one:` link it was
+/// started with: the Dock's or taskbar's icon clicked, or a link opened. → whether it was told, so this start ends.
+pub fn again(home: &std::path::Path, link: Option<&str>) -> bool {
+    use std::io::Write;
+    let line = format!("{}\n", json!({"again": {"link": link}}));
+    #[cfg(unix)]
+    let connected = std::os::unix::net::UnixStream::connect(address(home));
+    #[cfg(windows)]
+    let connected = std::fs::OpenOptions::new().read(true).write(true).open(address(home));
+    connected.and_then(|mut running| running.write_all(line.as_bytes())).is_ok()
+}
+
+/// Serves the channel for as long as this program runs, on its runtime.
+pub fn serve(home: &std::path::Path) -> anyhow::Result<()> {
     let address = address(home);
-    // Its listener is Tauri's runtime's, which setup runs outside of.
-    let runtime = tauri::async_runtime::handle();
-    let _inside = runtime.inner().enter();
+    let _inside = computer::runtime().enter();
     #[cfg(unix)]
     {
         // A socket left by a program that ended without removing it is in the way of a new one.
@@ -76,10 +82,9 @@ pub fn serve(app: &AppHandle, home: &std::path::Path) -> anyhow::Result<()> {
         let listener = tokio::net::UnixListener::bind(&address)?;
         // Only this user reaches it.
         std::fs::set_permissions(&address, std::os::unix::fs::PermissionsExt::from_mode(0o600))?;
-        let app = app.clone();
-        tauri::async_runtime::spawn(async move {
+        crate::spawn(async move {
             while let Ok((stream, _)) = listener.accept().await {
-                tauri::async_runtime::spawn(talk(app.clone(), stream));
+                crate::spawn(talk(stream));
             }
         });
     }
@@ -89,51 +94,49 @@ pub fn serve(app: &AppHandle, home: &std::path::Path) -> anyhow::Result<()> {
         // A named pipe takes one client per instance, so another waits for the next as each connects. Its default
         // security lets only this user, the system and administrators write to it, and no other machine reaches it.
         let mut server = ServerOptions::new().first_pipe_instance(true).reject_remote_clients(true).create(&address)?;
-        let app = app.clone();
-        tauri::async_runtime::spawn(async move {
+        crate::spawn(async move {
             while server.connect().await.is_ok() {
                 let Ok(next) = ServerOptions::new().reject_remote_clients(true).create(&address) else { return };
-                tauri::async_runtime::spawn(talk(app.clone(), std::mem::replace(&mut server, next)));
+                crate::spawn(talk(std::mem::replace(&mut server, next)));
             }
         });
     }
     Ok(())
 }
 
-impl Hosts {
-    fn tell_all(&self, message: Value) {
-        for host in self.open.lock().expect("no host panics").values() {
-            if let Some(to) = &host.to {
-                let _ = to.send(message.clone());
-            }
+/// Tells every app's window `message`.
+pub fn tell_all(message: Value) {
+    for host in HOSTS.open.lock().expect("no host panics").values() {
+        if let Some(to) = &host.to {
+            let _ = to.send(message.clone());
         }
-    }
-
-    /// Whether any app's window is open.
-    pub fn any(&self) -> bool {
-        !self.open.lock().expect("no host panics").is_empty()
-    }
-
-    /// Has every app's window end, as the device's session starts again.
-    pub fn close_all(&self) {
-        self.tell_all(json!({"quit": true}));
     }
 }
 
-/// Brings the Home Screen forward, as a link to it from an app's window does.
-#[tauri::command]
-pub fn front(app: AppHandle) {
-    crate::front(&app)
+/// Has every app's window end, as the device's session starts again, or the app does.
+pub fn close_all() {
+    tell_all(json!({"quit": true}));
+}
+
+/// The apps whose windows are open, each as `open_window` opens it: its entrypoint and who it's for.
+pub fn open_now() -> Vec<(String, Option<String>)> {
+    let open = HOSTS.open.lock().expect("no host panics");
+    open.keys()
+        .filter_map(|key| key.split_once('|'))
+        .map(|(subject, entrypoint)| (entrypoint.to_owned(), (!subject.is_empty()).then(|| subject.to_owned())))
+        .collect()
 }
 
 /// Opens an app in its own window, at `link` (`<app>/<page>[#<fragment>]`, as a `one:` link says it), or brings its
 /// window forward there if it's open.
-#[tauri::command]
-pub fn open_window(app: AppHandle, entrypoint: String, subject: Option<String>, link: String) -> Result<(), String> {
-    let hosts = app.state::<Hosts>();
+pub fn open_window(entrypoint: String, subject: Option<String>, link: String) -> Result<(), String> {
     let key = format!("{}|{entrypoint}", subject.as_deref().unwrap_or_default());
-    yield_to(&app, crate::shortcuts::app_id(&entrypoint, subject.as_deref()));
-    let mut open = hosts.open.lock().expect("no host panics");
+    #[cfg(target_os = "macos")]
+    {
+        let id = crate::shortcuts::app_id(&entrypoint, subject.as_deref());
+        computer::on_main(move || yield_activation(&id));
+    }
+    let mut open = HOSTS.open.lock().expect("no host panics");
     if let Some(host) = open.get_mut(&key) {
         match &host.to {
             Some(to) => drop(to.send(json!({"event": "open", "payload": link}))),
@@ -141,7 +144,7 @@ pub fn open_window(app: AppHandle, entrypoint: String, subject: Option<String>, 
         }
         return Ok(());
     }
-    let mut command = std::process::Command::new(crate::shortcuts::program(&app, &entrypoint).map_err(|error| error.to_string())?);
+    let mut command = std::process::Command::new(crate::shortcuts::program(&entrypoint).map_err(|error| error.to_string())?);
     command.env("ONE_APP", &entrypoint).env("ONE_OPEN", &link).stdin(std::process::Stdio::null());
     // A window of its own, and no console's.
     #[cfg(windows)]
@@ -154,24 +157,14 @@ pub fn open_window(app: AppHandle, entrypoint: String, subject: Option<String>, 
     open.insert(key.clone(), Host { to: None, link: None });
     drop(open);
     // It's waited for, so it's gone once it ends; one that never said hello is forgotten then.
-    let handle = app.clone();
     std::thread::spawn(move || {
         let _ = child.wait();
-        let hosts = handle.state::<Hosts>();
-        let mut open = hosts.open.lock().expect("no host panics");
+        let mut open = HOSTS.open.lock().expect("no host panics");
         if open.get(&key).is_some_and(|host| host.to.is_none()) {
             open.remove(&key);
         }
     });
     Ok(())
-}
-
-/// Lets the app `id` come in front, as a person opened it here (`yield_activation`).
-fn yield_to(app: &AppHandle, id: String) {
-    #[cfg(target_os = "macos")]
-    let _ = app.run_on_main_thread(move || yield_activation(&id));
-    #[cfg(not(target_os = "macos"))]
-    let _ = (app, id);
 }
 
 /// Lets the app `id` come in front of this one, as a person opened it from here: since macOS 14 an app comes in front
@@ -219,25 +212,12 @@ fn ns_string(text: &str) -> Option<*mut objc2::runtime::AnyObject> {
     Some(unsafe { objc2::msg_send![string, stringWithUTF8String: text.as_ptr()] })
 }
 
-/// Does what a double-click on the window's title bar does (`double_clicked`): a Mac's Home Screen window has
-/// no title band, so its page's top is double-clicked instead.
-#[cfg(target_os = "macos")]
-#[tauri::command]
-pub fn title_bar_double_click(window: tauri::WebviewWindow) {
-    let at = window.clone();
-    let _ = window.run_on_main_thread(move || {
-        if let Ok(window) = at.ns_window() {
-            double_clicked(window)
-        }
-    });
-}
-
-/// Talks with one app's window until it ends.
-async fn talk(app: AppHandle, stream: impl AsyncRead + AsyncWrite + Send + 'static) {
+/// Talks with one app's window until it ends, or with a second start of the app (`again`).
+async fn talk(stream: impl AsyncRead + AsyncWrite + Send + 'static) {
     let (read, mut write) = tokio::io::split(stream);
     let mut lines = BufReader::new(read).lines();
     let (to, mut out) = unbounded_channel::<Value>();
-    tauri::async_runtime::spawn(async move {
+    crate::spawn(async move {
         while let Some(message) = out.recv().await {
             let mut line = message.to_string();
             line.push('\n');
@@ -246,16 +226,19 @@ async fn talk(app: AppHandle, stream: impl AsyncRead + AsyncWrite + Send + 'stat
             }
         }
     });
-    let hosts = app.state::<Hosts>();
-    let label = format!("host-{}", hosts.next.fetch_add(1, Ordering::Relaxed));
+    let label = format!("host-{}", HOSTS.next.fetch_add(1, Ordering::Relaxed));
     let mut key = None;
     while let Ok(Some(line)) = lines.next_line().await {
         let Ok(message) = serde_json::from_str::<Value>(&line) else { continue };
+        if let Some(again) = message.get("again") {
+            computer::again(again["link"].as_str().map(str::to_owned));
+            return;
+        }
         if let Some(hello) = message.get("hello") {
             let entrypoint = hello["entrypoint"].as_str().unwrap_or_default();
             let subject = hello["subject"].as_str();
             let at = format!("{}|{entrypoint}", subject.unwrap_or_default());
-            let mut open = hosts.open.lock().expect("no host panics");
+            let mut open = HOSTS.open.lock().expect("no host panics");
             match open.get_mut(&at) {
                 // Its window is open already, as when its app was opened from the system while it was: that one comes
                 // forward, at the link this one was opened at.
@@ -277,11 +260,11 @@ async fn talk(app: AppHandle, stream: impl AsyncRead + AsyncWrite + Send + 'stat
             continue;
         }
         let Some(id) = message.get("id").cloned() else { continue };
-        let (app, to, label) = (app.clone(), to.clone(), label.clone());
-        tauri::async_runtime::spawn(async move {
+        let (to, label) = (to.clone(), label.clone());
+        crate::spawn(async move {
             let answer = match message.get("file").and_then(Value::as_str) {
-                Some(address) => file(&app, address).await,
-                None => command(&app, &label, message["command"].as_str().unwrap_or_default(), message["args"].clone()).await,
+                Some(address) => file(address).await,
+                None => command(&label, message["command"].as_str().unwrap_or_default(), message["args"].clone()).await,
             };
             let _ = to.send(match answer {
                 Ok(result) => json!({"id": id, "result": result}),
@@ -290,66 +273,61 @@ async fn talk(app: AppHandle, stream: impl AsyncRead + AsyncWrite + Send + 'stat
         });
     }
     if let Some(key) = key {
-        hosts.open.lock().expect("no host panics").remove(&key);
+        HOSTS.open.lock().expect("no host panics").remove(&key);
     }
-    if let Some(views) = app.try_state::<crate::Views>() {
+    if let Some(views) = crate::app().views.get() {
         views.shown(&label, false);
-    }
-    // The last of the app's windows gone, with its Home Screen put away, the app ends.
-    if !hosts.any() && !app.get_webview_window("main").is_some_and(|window| window.is_visible().unwrap_or(false)) {
-        app.exit(0)
     }
 }
 
-/// One file of an app's, for an app's window, as the Home Screen's page loads one (`Views::file`).
-async fn file(app: &AppHandle, address: &str) -> Result<Value, String> {
-    let views = app.try_state::<crate::Views>().ok_or("the app hasn't opened")?;
-    let address: tauri::http::Uri = address.parse().map_err(|_| "that isn't an address")?;
-    let (kind, file) = views.file(&address).await.map_err(|error| format!("{error:#}"))?;
+/// One file of an app's, for an app's window, as the launcher's page loads one (`Views::file`).
+async fn file(address: &str) -> Result<Value, String> {
+    let (kind, file) = crate::views()?.file(address).await.map_err(|error| format!("{error:#}"))?;
     Ok(json!({"kind": kind, "body": BASE64.encode(&file)}))
 }
 
-/// What an app's window asks, by the Home Screen page's commands (`invoke`), answered as they are.
-async fn command(app: &AppHandle, label: &str, command: &str, args: Value) -> Result<Value, String> {
+/// What the launcher's page (`main`) or an app's window (`label`) asks, by the page's commands (`invoke`).
+pub(crate) async fn command(label: &str, command: &str, args: Value) -> Result<Value, String> {
     use crate::*;
     let text = |name: &str| args[name].as_str().map(str::to_owned);
-    // Where the device is, and the name of the app the window asking is, as its shortcut has it.
-    if command == "start" {
-        let mut started = start(app.clone()).await.map_err(|()| "the app hasn't opened".to_owned())?;
-        started["name"] = json!(text("entrypoint").and_then(|entrypoint| crate::shortcuts::name(&entrypoint)));
-        return Ok(started);
-    }
-    if command == "retry" {
-        return retry(app.clone()).await.map(|()| Value::Null);
-    }
-    if command == "open_window" {
-        return open_window(app.clone(), text("entrypoint").unwrap_or_default(), text("subject"), text("link").unwrap_or_default()).map(|()| Value::Null);
-    }
-    if command == "front" {
-        crate::front(app);
-        return Ok(Value::Null);
-    }
-    if command == "theme" {
-        crate::chose(app, serde_json::from_value(args["theme"].clone()).unwrap_or_default());
-        return Ok(Value::Null);
-    }
-    if command == "open_url" {
-        use tauri_plugin_opener::OpenerExt;
-        let url = text("url").filter(|url| url.starts_with("https://") || url.starts_with("http://")).ok_or("that isn't a web address")?;
-        return app.opener().open_url(url, None::<&str>).map(|()| Value::Null).map_err(|error| error.to_string());
-    }
-    let views = app.try_state::<Views>().ok_or("the app hasn't opened")?;
+    let launcher = label == "main";
     let done = |()| Value::Null;
     match command {
-        "apps" => apps(app.clone(), views, text("subject")).await,
-        "request" => {
-            request(views, text("view").unwrap_or_default(), text("method").unwrap_or_default(), args["params"].clone()).await
+        // Where the device is, and for an app's window the name of its app, as its shortcut has it.
+        "start" => {
+            let mut started = start().await?;
+            if !launcher {
+                started["name"] = json!(text("entrypoint").and_then(|entrypoint| crate::shortcuts::name(&entrypoint)));
+            }
+            Ok(started)
         }
-        "refresh" => refresh(views, text("view").unwrap_or_default()).await.map(done).map_err(|()| String::new()),
-        "client" => Ok(client(views)),
-        "serve" => serve(views, args["on"].as_bool() == Some(true)).await.map(Value::from),
-        "update" => update(app.clone(), views).await.map(Value::from),
+        // An app opened from the launcher comes in front, and the launcher goes.
+        "open_window" => {
+            open_window(text("entrypoint").unwrap_or_default(), text("subject"), text("link").unwrap_or_default())?;
+            if launcher {
+                computer::hide(false);
+            }
+            Ok(Value::Null)
+        }
+        // An app's Home, or Window → Home Screen.
+        "front" => Ok(done(computer::summon())),
+        // Escape on the launcher, or its page done with it (`leave`).
+        "hide" => Ok(done(computer::hide(true))),
+        "theme" if launcher => Ok(done(theme(serde_json::from_value(args["theme"].clone()).unwrap_or_default()))),
+        "theme" => Ok(done(chose(serde_json::from_value(args["theme"].clone()).unwrap_or_default()))),
+        "open_url" => {
+            let url = text("url").filter(|url| url.starts_with("https://") || url.starts_with("http://")).ok_or("that isn't a web address")?;
+            app().shell.open_url(&url).map(done)
+        }
+        "retry" => retry().await.map(done),
+        "apps" => apps(text("subject")).await,
+        "request" => request(text("view").unwrap_or_default(), text("method").unwrap_or_default(), args["params"].clone()).await,
+        "refresh" => refresh(text("view").unwrap_or_default()).await.map(done),
+        "client" => client(),
+        "serve" => serve(args["on"].as_bool() == Some(true)).await.map(Value::from),
+        "update" => update().await.map(Value::from),
         "visible" => {
+            let views = views()?;
             views.shown(label, args["onScreen"].as_bool() == Some(true));
             if args["onScreen"].as_bool() == Some(true) {
                 views.caught_up().await
@@ -358,18 +336,20 @@ async fn command(app: &AppHandle, label: &str, command: &str, args: Value) -> Re
         }
         "upload" => {
             let body = BASE64.decode(args["body"].as_str().unwrap_or_default().as_bytes()).map_err(|error| error.to_string())?;
-            let upload = views.client.upload(args["app"].as_str().unwrap_or_default(), body).await;
-            upload.map(|upload| json!({"upload": upload})).map_err(|error| error.to_string())
+            upload_file(args["app"].as_str().unwrap_or_default(), body).await
         }
-        "recovery_key" => recovery_key(views, text("subject")).await.map(Value::from),
-        "recover" => recover(views, text("key").unwrap_or_default(), text("subject")).await.map(done),
-        "close" => Ok(done(close(views, text("view").unwrap_or_default()))),
-        "reconnect" => Ok(done(reconnect(views))),
-        "sign_out" => sign_out(views).await.map(done),
-        "push" => push().await.map_err(|()| String::new()),
-        "listen" => Ok(done(listen(app.clone(), views))),
-        "opened" => Ok(done(opened(views, text("view").unwrap_or_default(), args["ms"].as_u64().unwrap_or_default() as u32))),
-        "report" => Ok(done(report(views, args["record"].clone()))),
-        _ => Err(format!("An app's window has no {command}")),
+        "recovery_key" => recovery_key(text("subject")).await.map(Value::from),
+        "recover" => recover(text("key").unwrap_or_default(), text("subject")).await.map(done),
+        "close" => close(text("view").unwrap_or_default()).map(done),
+        "reconnect" => reconnect().map(done),
+        "sign_out" => sign_out().await.map(done),
+        "push" => push().await,
+        "listen" => listen().map(done),
+        "opened" => opened(text("view").unwrap_or_default(), args["ms"].as_u64().unwrap_or_default() as u32).map(done),
+        "report" => report(args["record"].clone()).map(done),
+        // A phone's status bar and haptics, and the web view's own back and forward, which the launcher has none of.
+        "status_bar" | "navigation_gestures" => Ok(Value::Null),
+        command if command.starts_with("plugin:") => Ok(Value::Null),
+        _ => Err(format!("The app has no {command}")),
     }
 }
