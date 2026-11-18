@@ -1006,8 +1006,8 @@ pub struct Client {
     telemetry: Arc<std::sync::OnceLock<telemetry::Telemetry>>,
     /// Telling a server what was recorded, one at a time.
     sending: Mutex<()>,
-    /// Since when no server has answered, if none has.
-    unanswered: std::sync::Mutex<Option<Instant>>,
+    /// Since when no server has answered, if none has, and whether this device was offline then (`offline`).
+    unanswered: std::sync::Mutex<Option<(Instant, bool)>>,
     me: std::sync::Weak<Client>,
     /// The runtime the client was opened on, which telling a server runs on, since a record may come from a thread
     /// with none, as a window's commands do.
@@ -1306,16 +1306,16 @@ impl Client {
         });
         let mut since = self.unanswered.lock().expect("no ask panics");
         match next {
-            Connection::Offline if moved => drop(since.get_or_insert_with(Instant::now)),
+            Connection::Offline if moved => drop(since.get_or_insert_with(|| (Instant::now(), self.offline()))),
             Connection::Online if moved => {
                 // Back, it asks its servers afresh whether they talk with it, as one may have been updated meanwhile.
                 self.behind.send_replace(None);
-                if let Some(since) = since.take().filter(|since| since.elapsed() > UNNOTICED) {
-                    self.report(json!({
-                        "name": "one.client.unanswered",
-                        "took": since.elapsed().as_secs_f64() * 1000.0,
-                        "error": "No server is answering",
-                    }))
+                if let Some((since, offline)) = since.take().filter(|(since, _)| since.elapsed() > UNNOTICED) {
+                    let took = since.elapsed().as_secs_f64() * 1000.0;
+                    self.report(match offline {
+                        true => json!({"name": "one.client.unanswered", "took": took, "attributes": {"one.outcome": "offline"}}),
+                        false => json!({"name": "one.client.unanswered", "took": took, "error": "No server is answering"}),
+                    })
                 }
             }
             _ => {}
@@ -1492,8 +1492,12 @@ impl Client {
                 Ok(response) => refused(response),
             };
             span.set_attribute(opentelemetry::KeyValue::new("one.reached", *reached.lock().expect("no ask panics")));
-            if let Some(refused) = refused {
-                span.set_status(Status::error(refused));
+            match refused {
+                Some(_) if response.is_err() && self.offline() => {
+                    span.set_attribute(opentelemetry::KeyValue::new("one.outcome", "offline"))
+                }
+                Some(refused) => span.set_status(Status::error(refused)),
+                None => {}
             }
             span.end();
         }
@@ -1715,6 +1719,16 @@ impl Client {
             open.connection().close(0u32.into(), b"done");
             let _ = timeout(Duration::from_millis(100), self.link().endpoint.close()).await;
         }
+    }
+
+    /// Whether this device is offline, as far as it can tell: its network has a relay at its address, and it isn't
+    /// connected to it, as a phone with no signal or an app iOS held in the background isn't. Nothing could have
+    /// answered it then, so what wasn't answered meanwhile is the device's being offline, not a failure of its
+    /// network's. A network being built has no relay, so there it can't tell.
+    fn offline(&self) -> bool {
+        use iroh::Watcher;
+        let link = self.link();
+        link.network.is_some() && !link.endpoint.home_relay_status().get().iter().any(|relay| relay.is_connected())
     }
 
     /// The connection to a server, made when there's none open: to whichever of the servers acting for this client's
