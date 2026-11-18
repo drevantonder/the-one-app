@@ -82,11 +82,18 @@ defmodule OneCore.Bucket do
   # as one call: the fuse hears only how the last try went (`fused/1`).
   @tries 3
 
+  # R2 answers 503 ServiceUnavailable for a while when it's busy, and asks for such a request to be sent again after
+  # a wait that grows each time, by a random part of it so that servers that failed together don't all try again
+  # together (exponential backoff with full jitter). So the wait before try `n` is up to `@backoff` times 2^(n-2) ms.
+  @backoff 1_000
+
   defp sent(tried \\ 1, send) do
     send.(tried)
   rescue
     unreachable in Edge.Unreachable ->
-      if tried == @tries, do: reraise(unreachable, __STACKTRACE__), else: sent(tried + 1, send)
+      if tried == @tries, do: reraise(unreachable, __STACKTRACE__)
+      Process.sleep(:rand.uniform(@backoff * 2 ** (tried - 1)))
+      sent(tried + 1, send)
   end
 
   defp conditionally(function, [key, data | _] = arguments, tried) do

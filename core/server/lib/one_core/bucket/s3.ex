@@ -204,5 +204,18 @@ defmodule OneCore.Bucket.S3 do
 
   defp tag(got), do: got |> Req.Response.get_header("etag") |> hd()
 
-  defp refusal(%{status: status, body: body}), do: "The bucket answered #{status}: #{inspect(body)}"
+  # What's raised for an answer that isn't what was asked: `OneCore.Edge.Unreachable` for a bucket or presigner that
+  # failed itself (a 5xx, as R2's `ServiceUnavailable` while it's busy), which `OneCore.Bucket` sends again, and the
+  # bucket's own word for anything else. An S3 error's body is XML, of which its `Code` says what it was.
+  defp refusal(%{status: status, body: body}) when status >= 500,
+    do: %OneCore.Edge.Unreachable{message: "#{answered(status, body)}, so this server couldn't do what was asked. Try again in a moment."}
+
+  defp refusal(%{status: status, body: body}), do: %RuntimeError{message: answered(status, body)}
+
+  defp answered(status, body) do
+    case is_binary(body) && Regex.run(~r{<Code>([^<]+)</Code>}, body, capture: :all_but_first) do
+      [code] -> "The bucket answered #{status} #{code}"
+      _ -> "The bucket answered #{status}: #{inspect(body)}"
+    end
+  end
 end
