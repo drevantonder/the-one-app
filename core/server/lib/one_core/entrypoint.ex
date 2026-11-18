@@ -48,6 +48,9 @@ defmodule OneCore.Entrypoint do
       match?({:ok, %{"exports" => %{}}}, JSON.decode(files["client/package.json"] || ""))
   end
 
+  # What Bun reads to install from somewhere else than the registry's own, named by a package.json.
+  @own_registry [".npmrc", "bunfig.toml", "bun.lock", "bun.lockb"]
+
   @doc """
   The files of an app with an app as a server keeps them, from the files deployed, built against this server's UI
   library. `{:error, why}` says why it didn't build: the compiler's own words, a problem to a line, with its file and
@@ -64,7 +67,11 @@ defmodule OneCore.Entrypoint do
     out = Path.join(folder, "out")
 
     try do
-      write(source, for({path, text} <- app, do: {String.replace_prefix(path, @client, ""), text}))
+      files = for {path, text} <- app, do: {String.replace_prefix(path, @client, ""), text}
+      # An untrusted app's packages come from the registry as its package.json names them: a registry, a lockfile or a
+      # URL of its own would have this server fetch whatever the app says, as an internal address.
+      files = if trusted, do: files, else: Enum.reject(files, fn {path, _} -> path in @own_registry end)
+      write(source, files)
 
       with {:ok, bun} <- bun(),
            {:ok, builder} <- builder(bun),
@@ -134,12 +141,29 @@ defmodule OneCore.Entrypoint do
   defp install(bun, source, trusted) do
     with {:ok, text} <- File.read(Path.join(source, "package.json")),
          {:ok, about} <- JSON.decode(text),
-         named when map_size(named) > 0 <- Map.merge(about["dependencies"] || %{}, about["devDependencies"] || %{}) do
+         named when map_size(named) > 0 <- Map.merge(about["dependencies"] || %{}, about["devDependencies"] || %{}),
+         :ok <- if(trusted, do: :ok, else: from_registry(about)) do
       scripts = if trusted, do: [], else: ["--ignore-scripts"]
       run(bun, ["install" | scripts], "The app's packages didn't install", source)
     else
       {:error, %JSON.DecodeError{}} -> {:error, "client/package.json isn't JSON."}
+      {:error, why} when is_binary(why) -> {:error, why}
       _ -> :ok
+    end
+  end
+
+  # What an untrusted app asks of the registry: a version, a range, a tag or `npm:` another package, and nothing that
+  # names a URL, a git repo or a file (`https:`, `github:`, `file:`), which this server would fetch or read.
+  defp from_registry(about) do
+    wanted =
+      for field <- ~w(dependencies devDependencies optionalDependencies peerDependencies overrides resolutions),
+          {name, spec} <- if(is_map(about[field]), do: about[field], else: %{}),
+          not (is_binary(spec) and spec =~ ~r/^(?:npm:[@\w.\/^~<>=*| +-]*|[\w.^~<>=*| +-]*)$/),
+          do: "#{name}: #{inspect(spec)}"
+
+    case wanted do
+      [] -> :ok
+      _ -> {:error, "An untrusted app's packages come from the registry only, as a version, a range or a tag. These don't: #{Enum.join(wanted, ", ")}."}
     end
   end
 
