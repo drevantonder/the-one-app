@@ -30,12 +30,12 @@ interface App {
 type Push = { state: "notAsked" | "denied" | "registering" | "registered" | "homeScreen" } | { state: "failed"; why: string }
 
 const inbox = createMemo(async () => {
-  const [{ notifications }, apps, { push }]: [{ notifications: Received[] }, App[], { push?: Push }] = await Promise.all([
+  const [{ notifications }, apps, { push, settings }]: [{ notifications: Received[] }, App[], { push?: Push; settings?: boolean }] = await Promise.all([
     call("notifications_inbox").then(JSON.parse),
     call("notifications_apps").then((text) => JSON.parse(text).apps),
     client(),
   ])
-  return { notifications, apps, push }
+  return { notifications, apps, push, settings: settings === true }
 })
 changed(() => refresh(inbox))
 
@@ -58,8 +58,8 @@ async function change(tool: string, input = {}) {
   refresh(inbox)
 }
 
-/// Has this phone try again to be woken by its notifications, or this browser turn them on, as its person taps to
-/// (a browser asks them only then), and shows where that left it.
+/// Has this phone ask its person now, or try again, to be woken by its notifications, or this browser turn them on, as
+/// its person taps to (a browser asks them only then), and shows where that left it.
 async function tryPush() {
   try {
     await client({ push: true })
@@ -69,10 +69,20 @@ async function tryPush() {
   refresh(inbox)
 }
 
+/// Opens this app's page in its phone's Settings, where its person turns notifications back on once they said no: a
+/// phone asks only once.
+async function openSettings() {
+  try {
+    await client({ settings: "app" })
+  } catch (error) {
+    toast(error as Error)
+  }
+}
+
 /// Where this phone or browser is with being woken by its notifications, said only where it isn't: fine is silent,
 /// and so is a computer, which shows them while the app runs. A phone asks its person by itself; a browser waits for
 /// them to turn them on, and an iPhone's only from its Home Screen, as Safari has it.
-function PushState(props: { push: Push }) {
+function PushState(props: { push: Push; settings: boolean }) {
   return (
     <>
       <Show when={props.push.state === "registering"}>
@@ -92,7 +102,12 @@ function PushState(props: { push: Push }) {
         </List>
       </Show>
       <Show when={props.push.state === "denied"}>
-        <Problem warn heading="Notifications are off here" text="Turn them on in Settings for this app, or for this site in your browser." />
+        <Problem
+          warn
+          heading="Notifications are off here"
+          text="Turn them on in Settings for this app or site."
+          action={props.settings ? <Button variant="outline" onClick={openSettings}>Open Settings</Button> : undefined}
+        />
       </Show>
       <Show when={props.push.state === "failed"}>
         <Problem warn heading="This device isn't woken by notifications" text={"why" in props.push ? props.push.why : undefined} action={<Button variant="outline" onClick={tryPush}>Try Again</Button>} />
@@ -129,7 +144,7 @@ render(
     <Screen heading="Notifications" action={<Show when={inbox()?.notifications.length}><More /></Show>}>
       <Errored fallback={(error) => <Problem heading="Can't show your notifications" text={error() as Error} />}>
         <Loading fallback={<Skeleton rows={4} />}>
-          <Show when={inbox().push}>{(push) => <PushState push={push()} />}</Show>
+          <Show when={inbox().push}>{(push) => <PushState push={push()} settings={inbox().settings} />}</Show>
           <Section>
             <Show when={inbox().notifications.length} fallback={<Empty>No notifications.</Empty>}>
               <List class="inbox">

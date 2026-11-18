@@ -105,11 +105,11 @@ pub fn token(token: String) {
     TOKEN.send_replace(Some(token));
 }
 
-/// Has a phone whose push failed try again now, as its person does with Try Again, and gives where it is once that
-/// try has ended, or a minute on.
+/// Has a phone whose push failed try again now, as its person does with Try Again, or one that hasn't asked its person
+/// yet ask them now, as Turn On does, and gives where it is once that has ended, or a minute on.
 pub async fn retry() -> Option<Push> {
     let mut push = PUSH.subscribe();
-    if matches!(*push.borrow_and_update(), Push::Failed { .. }) {
+    if matches!(*push.borrow_and_update(), Push::NotAsked | Push::Failed { .. }) {
         AGAIN.notify_one();
         let tried = async {
             while push.changed().await.is_ok() {

@@ -342,7 +342,8 @@ async fn refresh(view: String) -> Result<(), String> {
 
 /// This device's key, as its network knows it, the network's address, if it has one, the build it's on and its kind
 /// of machine, as builds are named, its server's key, if it's a server, and whether a phone is woken by its
-/// notifications (`notifications::Push`), and whether its person turned Computer Use on, on a phone that has it.
+/// notifications (`notifications::Push`), whether it opens its own Settings page for the app (`settings`, an iPhone's;
+/// Android's is opened by its activity), and whether its person turned Computer Use on, on a phone that has it.
 #[cfg_attr(mobile, tauri::command)]
 fn client() -> Result<Value, String> {
     let views = views()?;
@@ -353,6 +354,7 @@ fn client() -> Result<Value, String> {
         "target": ::client::target(),
         "server": cli::serving::server(),
         "push": notifications::push(),
+        "settings": cfg!(target_os = "ios"),
         "computerUse": computer_use_client::phone(),
     }))
 }
@@ -575,6 +577,14 @@ fn told(seq: u64, session: &Session) -> Value {
 #[cfg_attr(mobile, tauri::command)]
 async fn push() -> Result<Value, String> {
     Ok(json!({"message": format!("{:?}", notifications::retry().await)}))
+}
+
+/// Opens this app's page in a phone's Settings, where its person allows what only they may, as an iPhone has it
+/// (`client({ settings: "app" })`: Android's is opened by its activity).
+#[cfg(mobile)]
+#[tauri::command]
+fn settings() -> Result<(), String> {
+    app().shell.open_url("app-settings:")
 }
 
 /// Has this device hear its person's notifications, once their home is on screen: a phone asks them then whether
@@ -1204,6 +1214,7 @@ pub fn run() {
             sign_out,
             start,
             push,
+            settings,
             listen,
             push_token,
             tapped,

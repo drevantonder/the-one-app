@@ -1429,10 +1429,11 @@ async function respond(view, method, params) {
     // A phone whose push failed tries again.
     if (params.push) return invoke("push")
     // A phone's own Settings page, where its person turns on what only they may: Android's Accessibility, or the
-    // app's App Info.
+    // app's App Info, and an iPhone's page for the app.
     if (params.settings) {
-      if (!globalThis.androidSettings) throw new Error("This device has no Settings to open here.")
-      globalThis.androidSettings.postMessage(params.settings)
+      if (globalThis.androidSettings) globalThis.androidSettings.postMessage(params.settings)
+      else if (params.settings === "app") await invoke("settings")
+      else throw new Error("This device has no Settings to open here.")
       return { message: "" }
     }
     // This device becomes a server of its person's, or stops being one, or takes the latest builds.
@@ -1449,7 +1450,8 @@ async function respond(view, method, params) {
       else localStorage.removeItem("theme")
       dress()
     }
-    return { ...(await invoke("client")), theme: chosen(), pinsShortcuts: !!globalThis.androidPin, launcher: panel() }
+    const client = await invoke("client")
+    return { ...client, theme: chosen(), pinsShortcuts: !!globalThis.androidPin, settings: !!globalThis.androidSettings || client.settings === true, launcher: panel() }
   }
   if (method.startsWith("ui/")) throw Object.assign(new Error(`This client has no ${method}`), { code: -32601 })
   // An app opened from a group's page is answered for the group.

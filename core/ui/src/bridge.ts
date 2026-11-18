@@ -231,7 +231,8 @@ export const pinShortcut = (entrypoint: string): Promise<unknown> => greet().the
 /// hides the device's status bar while this app is showing, as an iPhone's Home Screen does while it's edited, and
 /// `true` shows it again; a device with none, or whose app can't, keeps what it has. An update shows over every app
 /// as it's under way, and the app starts again on the new build. On Android, `client({ settings: "accessibility" })`
-/// opens its Accessibility settings, and `"app"` the app's App Info, where its person allows what only they may.
+/// opens its Accessibility settings, and `"app"` the app's App Info, on an iPhone its page in Settings, where its
+/// person allows what only they may.
 export function client(): Promise<Client>
 export function client(change: ClientChange): Promise<{ message: string }>
 export function client(change: ClientChange = {}) {
@@ -252,6 +253,8 @@ export interface Client {
   theme: "light" | "dark" | null
   /** Whether `pinShortcut` puts an app on the device's own home screen: on Android's app. */
   pinsShortcuts?: boolean
+  /** Whether `client({ settings: "app" })` opens this device's Settings for the app: on a phone's app. */
+  settings?: boolean
   /** Whether the page is a computer's launcher, the panel its Home Screen is shown in, which goes once an app opens. */
   launcher?: boolean
 }

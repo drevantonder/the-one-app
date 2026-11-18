@@ -149,7 +149,7 @@ export interface Commands {
   request(args: { view: string; method: string; params: Record<string, unknown> }): unknown
   refresh(args: { view: string }): void
   close(args: { view: string }): void
-  client(): { device: string; network?: string; build?: string; target?: string; server?: string; push?: Push; computerUse?: unknown }
+  client(): { device: string; network?: string; build?: string; target?: string; server?: string; push?: Push; settings?: boolean; computerUse?: unknown }
   upload(file: ArrayBuffer, options: { headers: { app: string } }): { upload: string }
   /** Asks the network again now, which didn't answer. */
   retry(): Promise<void>
