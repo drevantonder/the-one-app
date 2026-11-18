@@ -24,8 +24,11 @@ cheaper still.
   say. `evaluate` runs JavaScript in the page and gives what it returns: the cheapest way to pull out data.
 - A secret a site shows you (an OAuth client's secret, an API key) or downloads (a key file) goes into your person's
   Vault with `vault_save_from_browser` and the session, the moment it shows: never `evaluate` it, read it or
-  screenshot it. `snapshot` shows what password fields hold, and what was saved, as ••••••. Chrome saves a download
-  by its name, which `vault_save_from_browser` takes.
+  screenshot it. `snapshot` shows what password fields hold, and what was saved, as ••••••, and every tool that
+  answers with the page's text does the same for anything shaped like a token or key (a GitHub, Stripe or Google
+  client secret, in a name, a value or text). That's Gitleaks' rules, so a secret of a shape they don't know shows
+  as it is: save every one the moment it appears, however its snapshot looks, and never screenshot one, which shows
+  all of it. Chrome saves a download by its name, which `vault_save_from_browser` takes.
 - `take_screenshot` is for what only a picture shows. A snapshot costs far less: a few KB for a simple page, though
   a long article's can be 200 KB, so give `snapshot` a `target` or `depth`, or `evaluate` for the text you need.
 - `close` closes it and removes its container. `list` shows yours.

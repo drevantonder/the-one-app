@@ -31,7 +31,8 @@ defmodule Chrome do
   what each element holds is written to a file in the container by Playwright's `browser_evaluate` (its `filename`),
   so it's never in the server's answer, gathered into one JSON file there, and sent sealed by Containers' `upload`. The
   file goes once it's sent, and the download once it's taken from. `snapshot` blots out what password fields and the
-  elements taken hold, so an agent doesn't read them back.
+  elements taken hold, so an agent doesn't read them back, and every tool that answers with the page's text what's
+  shaped like a secret, by Gitleaks' rules (`Chrome.Secrets`).
   """
   @behaviour OneCore.App
   alias OneCore.{Artifact, Call}
@@ -570,7 +571,8 @@ defmodule Chrome do
     end
   end
 
-  # The page as its accessibility tree, with what password fields and the elements taken hold blotted out.
+  # The page as its accessibility tree, with what password fields and the elements taken hold blotted out, and what's
+  # shaped like a secret (`Chrome.Secrets`).
   def call("snapshot", %{"session" => session} = inputs, call) do
     hidden = mcp(call, session, "browser_evaluate", %{"function" => @hidden})
 
@@ -583,11 +585,15 @@ defmodule Chrome do
       end
 
     snapshot = mcp(call, session, "browser_snapshot", Map.delete(inputs, "session"))
-    %{snapshot | text: Enum.reduce(hidden, snapshot.text, &String.replace(&2, &1, "••••••"))}
+    %{snapshot | text: Chrome.Secrets.mask(Enum.reduce(hidden, snapshot.text, &String.replace(&2, &1, "••••••")))}
   end
 
+  # Every other tool's answer that's text, as the page's, has what's shaped like a secret hidden too.
   def call(tool, %{"session" => session} = inputs, call) do
-    mcp(call, session, "browser_" <> tool, Map.delete(inputs, "session"))
+    case mcp(call, session, "browser_" <> tool, Map.delete(inputs, "session")) do
+      %{text: text} -> %{text: Chrome.Secrets.mask(text)}
+      blob -> blob
+    end
   end
 
   # Creates a new browser's container, with its display and no Chrome yet, puts in the user data dir an app hands
