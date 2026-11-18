@@ -14,6 +14,7 @@ import dotsThree from "@phosphor-icons/core/assets/regular/dots-three.svg?raw"
 import warningCircle from "@phosphor-icons/core/assets/fill/warning-circle-fill.svg?raw"
 
 export { words } from "../../words.ts"
+export { createListCollection } from "../../collection.ts"
 
 /** A primitive: a node of its type, with its props. */
 const primitive = (type: "box" | "text" | "image" | "input") => (props: object) => {
@@ -288,6 +289,8 @@ export const Field = later("Field") as typeof Strict.Field
 export const Checkbox = later("Checkbox") as typeof Strict.Checkbox
 export const Switch = later("Switch") as typeof Strict.Switch
 export const LiveScreen = later("LiveScreen") as typeof Strict.LiveScreen
+export const RadioGroup = later("RadioGroup") as typeof Strict.RadioGroup
+export const Select = { Root: later("Select") } as typeof Strict.Select
 export const Sheet = later("Sheet") as typeof Strict.Sheet
 export const Tabs = { Root: later("Tabs"), List: later("Tabs"), Trigger: later("Tabs"), Content: later("Tabs"), Indicator: later("Tabs") } as typeof Strict.Tabs
 export const toast = later("toast") as typeof Strict.toast

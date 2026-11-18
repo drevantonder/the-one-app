@@ -4,6 +4,7 @@
 // so a strict app runs unchanged on the DOM. A component an app needs that isn't here yet is added here, with only
 // the props every host can draw, and the check says whether the DOM's takes them.
 import type { Element } from "solid-js"
+import type { ListCollection } from "@zag-js/collection"
 import type { Props, Style } from "../protocol.ts"
 
 export type { Element, Style }
@@ -118,6 +119,30 @@ export type ChoiceProps = {
 }
 export declare function Checkbox(props: ChoiceProps): Element
 export declare function Switch(props: ChoiceProps): Element
+export declare function RadioGroup(props: {
+  name?: string
+  value?: string
+  options: { value: string; label: Element; disabled?: boolean }[]
+  required?: boolean
+  disabled?: boolean
+  onChange?: (value: string) => void
+}): Element
+
+/** What a select chooses from, and what it's told of what's chosen, as Ark UI's select has them. */
+export type Choice = { value: string; label: string; disabled?: boolean }
+export type Choices = ListCollection<Choice>
+export declare function createListCollection(options: { items: Choice[] }): Choices
+export declare const Select: {
+  Root: (props: {
+    name?: string
+    collection: Choices
+    value?: string[]
+    defaultValue?: string[]
+    placeholder?: string
+    disabled?: boolean
+    onValueChange?: (details: { value: string[] }) => void
+  }) => Element
+}
 
 /** What a `LiveScreen` is told: its `action`, and what that action takes, as Computer Use's screens have them. */
 export type ScreenInputs = { action: string } & Record<string, unknown>
