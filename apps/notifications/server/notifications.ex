@@ -78,10 +78,14 @@ defmodule Notifications do
   end
 
   @impl true
-  def hooks, do: ["sign-in.device_removed", "wake"]
+  def hooks, do: ["sign-in.device_removed", "wake", "settings.sections"]
+
+  # Which apps may notify you, and whether this device is woken, are Settings' Notifications; the inbox stays the app.
+  @impl true
+  def hook("settings.sections", _about, _call),
+    do: [%{in: "settings", name: "Notifications", component: "settings", icon: "client/icon.svg", group: "general", order: 1}]
 
   # A removed device is nobody's, so nothing is sent where its push service reaches it.
-  @impl true
   def hook("sign-in.device_removed", %{"device" => device, "who" => who}, call) do
     transaction(call, &query(&1, "delete from devices where device = ? and user = ?", [device, who]))
     :ok
