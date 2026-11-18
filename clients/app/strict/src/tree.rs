@@ -150,6 +150,15 @@ impl Node {
         matches!(self.prop(name), Some(Value::Bool(true))) || self.str(name) == Some("true")
     }
 
+    /// Whether it isn't displayed (`display: none`), by its version 1 style object or its version 2 styles, so
+    /// neither it nor what's in it is drawn or read.
+    pub fn hidden(&self) -> bool {
+        match &self.styles {
+            Some(styles) => crate::style::resolve(styles, crate::style::State::default()).get("display").and_then(Value::as_str) == Some("none"),
+            None => self.style.display.as_deref() == Some("none"),
+        }
+    }
+
     /// Whether it listens for `event`, by its prop as JSX names it (`keydown` is `onKeyDown`, as the DOM's).
     pub fn listens(&self, event: &str) -> bool {
         let prop = match event {
@@ -265,7 +274,7 @@ impl Tree {
     /// generic containers are, and so is what's `aria-hidden`.
     pub fn semantics(&self, id: Id) -> Vec<Value> {
         let Some(node) = self.nodes.get(&id) else { return Vec::new() };
-        if node.style.display.as_deref() == Some("none") || node.str("aria-hidden") == Some("true") {
+        if node.hidden() || node.str("aria-hidden") == Some("true") {
             return Vec::new();
         }
         let text = matches!(node.kind, Kind::Text | Kind::RawText);
