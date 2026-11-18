@@ -628,6 +628,9 @@ impl Display {
                     out.push((id, Input::Up(self.at(event.event_x, event.event_y), event.detail - 1)));
                 }
             }
+            // A keyboard grab, as a global shortcut's key press makes, moves no focus: as GTK and GPUI, the focus
+            // events of its start and end are ignored, or a panel summoned by its shortcut would go at once.
+            Event::FocusIn(event) | Event::FocusOut(event) if matches!(event.mode, xproto::NotifyMode::GRAB | xproto::NotifyMode::UNGRAB) => {}
             Event::FocusIn(event) => {
                 if let Some(id) = self.window(event.event) {
                     self.enable_ime(event.event);
