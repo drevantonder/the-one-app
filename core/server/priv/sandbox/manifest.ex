@@ -245,6 +245,12 @@ defmodule OneCore.App.Manifest do
      """
      A server was let act for someone. It's about the `server`'s key, who it's `for`, and `by`, the key of the
      server that installed it.
+     """},
+    {"started", :observe,
+     """
+     This server started: its apps are running and it answers. It's observed by the apps installed for the network,
+     and it's about the `server`'s key. An app that watches every server from its start, as Telemetry hears its
+     warnings, begins here.
      """}
   ]
 

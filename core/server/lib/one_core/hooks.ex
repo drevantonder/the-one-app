@@ -72,7 +72,10 @@ defmodule OneCore.Hooks do
     case Task.yield(task, @timeout) || Task.shutdown(task, :brutal_kill) do
       {:ok, {:returned, result}} -> result
       {:ok, {kind, reason, stacktrace}} -> :erlang.raise(kind, reason, stacktrace)
-      _ -> raise "#{app} didn't answer #{hook} within #{div(@timeout, 1000)} seconds"
+      _ ->
+        # Said as a number too, by its app, whose not answering is the symptom (Telemetry's `unanswered` alert).
+        :telemetry.execute([:one, :hook, :timeouts], %{count: 1}, %{app: to_string(app), hook: to_string(hook)})
+        raise "#{app} didn't answer #{hook} within #{div(@timeout, 1000)} seconds"
     end
   end
 
