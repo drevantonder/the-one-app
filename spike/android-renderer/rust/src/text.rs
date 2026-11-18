@@ -8,6 +8,54 @@ use crate::atlas::{AtlasKey, Kind};
 use crate::renderer::Renderer;
 use crate::scene::{Bounds, Hsla, MonochromeSprite, PolychromeSprite, Scene, TransformationMatrix, Corners};
 
+/// The fonts every screen sets text in, read once per process: Allo, the UI library's typeface, as sans-serif, then
+/// Android's own fonts for what Allo hasn't (CJK, emoji, other scripts), memory-mapped, so only what's drawn is read.
+pub fn fonts() -> anyhow::Result<&'static cosmic_text::fontdb::Database> {
+    static FONTS: std::sync::Mutex<Option<&'static cosmic_text::fontdb::Database>> = std::sync::Mutex::new(None);
+    let mut fonts = FONTS.lock().unwrap();
+    if let Some(db) = *fonts {
+        return Ok(db);
+    }
+    let started = std::time::Instant::now();
+    let ttf = wuff::decompress_woff2(include_bytes!("../../../../core/ui/src/Allo-Variable.woff2"))
+        .map_err(|error| anyhow::anyhow!("Allo didn't decode: {error:?}"))?;
+    let mut db = cosmic_text::fontdb::Database::new();
+    db.load_font_source(cosmic_text::fontdb::Source::Binary(std::sync::Arc::new(ttf)));
+    let family = db.faces().next().and_then(|face| face.families.first()).map(|(name, _)| name.clone()).unwrap_or_default();
+    db.set_sans_serif_family(family);
+    for file in ["NotoSansCJK-Regular.ttc", "NotoColorEmoji.ttf", "Roboto-Regular.ttf"] {
+        let _ = db.load_font_file(format!("/system/fonts/{file}"));
+    }
+    log::info!("fonts read in {:?}: {} faces", started.elapsed(), db.len());
+    let db: &'static _ = Box::leak(Box::new(db));
+    *fonts = Some(db);
+    Ok(db)
+}
+
+/// Android's fallback fonts, by script, as its fonts.xml has them for the fonts read here.
+struct Android;
+
+impl cosmic_text::Fallback for Android {
+    fn common_fallback(&self) -> &[&'static str] {
+        &["Roboto", "Noto Color Emoji"]
+    }
+
+    fn forbidden_fallback(&self) -> &[&'static str] {
+        &[]
+    }
+
+    fn script_fallback(&self, script: unicode_script::Script, locale: &str) -> &[&'static str] {
+        use unicode_script::Script;
+        match script {
+            Script::Hangul => &["Noto Sans CJK KR"],
+            Script::Hiragana | Script::Katakana => &["Noto Sans CJK JP"],
+            Script::Han if locale.starts_with("zh") => &["Noto Sans CJK SC"],
+            Script::Han => &["Noto Sans CJK JP"],
+            _ => &[],
+        }
+    }
+}
+
 pub struct Text {
     pub fonts: FontSystem,
     swash: SwashCache,
@@ -24,21 +72,7 @@ pub struct Font {
 
 impl Text {
     pub fn new() -> anyhow::Result<Text> {
-        // Allo, decoded once per process.
-        static TTF: std::sync::OnceLock<std::sync::Arc<Vec<u8>>> = std::sync::OnceLock::new();
-        let ttf = match TTF.get() {
-            Some(ttf) => ttf.clone(),
-            None => {
-                let ttf = wuff::decompress_woff2(include_bytes!("../../../../core/ui/src/Allo-Variable.woff2"))
-                    .map_err(|error| anyhow::anyhow!("Allo didn't decode: {error:?}"))?;
-                TTF.get_or_init(|| std::sync::Arc::new(ttf)).clone()
-            }
-        };
-        let mut db = cosmic_text::fontdb::Database::new();
-        db.load_font_source(cosmic_text::fontdb::Source::Binary(ttf));
-        let family = db.faces().next().and_then(|face| face.families.first()).map(|(name, _)| name.clone()).unwrap_or_default();
-        db.set_sans_serif_family(family);
-        Ok(Text { fonts: FontSystem::new_with_locale_and_db("en-US".into(), db), swash: SwashCache::new() })
+        Ok(Text { fonts: FontSystem::new_with_locale_and_db_and_fallback("en-US".into(), fonts()?.clone(), Android), swash: SwashCache::new() })
     }
 
     /// A buffer laid out `width` wide (or as wide as its text), keeping `lines` lines at most, the last ending in an

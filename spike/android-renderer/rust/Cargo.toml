@@ -27,6 +27,9 @@ bytemuck = { version = "1", features = ["derive"] }
 cosmic-text = { version = "0.19", default-features = false, features = ["std", "swash"] }
 data-encoding = "2"
 etagere = "0.2"
+# Android's own fonts, memory-mapped, as the fallback for what Allo hasn't (CJK, emoji): cosmic-text's own fontdb.
+fontdb = { version = "0.23", default-features = false, features = ["std", "fs", "memmap"] }
+unicode-script = "0.5"
 # The desktop host's tokens.rs names its colour `gpui::Rgba`; this is that type alone (`gpui/`).
 gpui = { path = "gpui" }
 image = { version = "0.25", default-features = false, features = ["png"] }

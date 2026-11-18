@@ -20,9 +20,16 @@ public class StrictActivity extends Activity {
             reportFullyDrawn();
         });
         setContentView(view);
+        // Checks drive the focused field as an input method would (StrictView.ime).
+        registerReceiver(ime, new android.content.IntentFilter("app.theone.strictspike.IME"), RECEIVER_EXPORTED);
     }
 
+    private final android.content.BroadcastReceiver ime = new android.content.BroadcastReceiver() {
+        @Override public void onReceive(android.content.Context context, android.content.Intent intent) { view.ime(intent); }
+    };
+
     @Override protected void onDestroy() {
+        unregisterReceiver(ime);
         view.destroy();
         super.onDestroy();
     }

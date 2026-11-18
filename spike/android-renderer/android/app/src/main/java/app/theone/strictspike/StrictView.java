@@ -55,6 +55,24 @@ public class StrictView extends SurfaceView implements SurfaceHolder.Callback, T
         nativeAccessibility(handle, this);
     }
 
+    /** For checks: does to the focused field what an input method would, through the same InputConnection
+     * (`adb shell am broadcast -a app.theone.strictspike.IME --es op compose --es text 日本`). */
+    public void ime(android.content.Intent intent) {
+        InputConnection c = input.getLastInputConnection();
+        if (c == null) return;
+        String text = intent.getStringExtra("text");
+        int a = intent.getIntExtra("a", 0), b = intent.getIntExtra("b", 0);
+        switch (String.valueOf(intent.getStringExtra("op"))) {
+            case "compose": c.setComposingText(text, 1); break;
+            case "commit": c.commitText(text, 1); break;
+            case "region": c.setComposingRegion(a, b); break;
+            case "finish": c.finishComposingText(); break;
+            case "delete": c.deleteSurroundingText(a, b); break;
+            case "select": c.setSelection(a, b); break;
+            case "paste": c.performContextMenuAction(android.R.id.paste); break;
+        }
+    }
+
     public void destroy() {
         nativeDestroy(handle);
     }

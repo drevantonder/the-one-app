@@ -152,6 +152,9 @@ fn pipelines(gpu: &gpu::Context, info: gpu::SurfaceInfo) -> Arc<Pipelines> {
 /// screen's JS starts and its window is laid out, so the first frame only waits for its surface.
 pub fn warm() {
     std::thread::spawn(|| {
+        let _ = crate::text::fonts();
+    });
+    std::thread::spawn(|| {
         if let Ok(gpu) = context() {
             pipelines(&gpu, gpu::SurfaceInfo { format: gpu::TextureFormat::Rgba8Unorm, alpha: gpu::AlphaMode::Ignored });
         }

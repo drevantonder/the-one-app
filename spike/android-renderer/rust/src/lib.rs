@@ -90,7 +90,9 @@ impl App {
     }
 
     fn event(&mut self, id: Id, name: &str, extra: Value) {
-        if !self.view.tree.nodes.get(&id).is_some_and(|node| node.listens(name)) {
+        // The shared tree's `listens` makes `keydown`'s prop `onKeydown`; JSX's (and the protocol's props') is `onKeyDown`.
+        let listens = |node: &tree::Node| if name == "keydown" { node.is("onKeyDown") } else { node.listens(name) };
+        if !self.view.tree.nodes.get(&id).is_some_and(listens) {
             return;
         }
         let mut event = json!({ "v": VERSION, "op": "event", "id": id, "name": name });
