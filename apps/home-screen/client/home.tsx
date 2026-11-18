@@ -197,28 +197,47 @@ const LONGER = 800
 // What's carried makes room where it rests this long, as an iPhone's does, not at every place it passes.
 const REST = 150
 
-/// A widget on a page: what its app's tool answers, drawn, and asked again each minute it's in view. Pressing it
+/// A widget on a page: what its app's tool answers, drawn, and asked again as its app says something changed. A widget
+/// whose layout says `refresh` (seconds), as one that shows what only time changes does, is also asked again that
+/// often while it's in view. A control that failed says so on the widget, and pressing it asks again; else pressing it
 /// opens its app.
 function Card(props: { item: WidgetItem; owner: Owner; still?: boolean }) {
   const tool = () => props.item.widget.replace("/", "_")
-  const layout = createMemo(() => json<NonNullable<Parameters<typeof Widget>[0]["layout"]>>(tool(), { size: props.item.size }, props.owner.subject))
-  onSettled(() => {
-    const stop = changed(() => refresh(layout))
-    const every = setInterval(() => document.visibilityState === "visible" && refresh(layout), 60_000)
-    return () => (stop(), clearInterval(every))
-  })
+  const layout = createMemo(() => json<NonNullable<Parameters<typeof Widget>[0]["layout"]> & { refresh?: number }>(tool(), { size: props.item.size }, props.owner.subject))
+  const [problem, setProblem] = createSignal<string>()
+  const again = () => refresh(layout)
+  onSettled(() => changed(again))
   const act = async (name: string | undefined, inputs: Record<string, unknown>) => {
-    await call(`${props.item.widget.split("/")[0]}_${name}`, inputs, { subject: props.owner.subject }).catch(() => {})
-    refresh(layout)
+    try {
+      await call(`${props.item.widget.split("/")[0]}_${name}`, inputs, { subject: props.owner.subject })
+    } catch (error) {
+      return setProblem(`${(error as Error).message ?? error} Tap to try again.`)
+    }
+    again()
   }
+  const retry = () => !props.still && (setProblem(undefined), again())
   const opens = (card: HTMLElement) => !props.still && state().matches("nothing") && props.item.opens && launch(props.item.opens, props.owner, false, card)
   return (
     <Errored fallback={(error) => <Widget name={props.item.name} size={props.item.size} problem={String((error() as Error).message ?? error())} />}>
       <Loading fallback={<Widget name={props.item.name} size={props.item.size} />}>
-        <Widget name={props.item.name} size={props.item.size} layout={layout()} onCall={props.still ? undefined : act} onOpen={props.item.opens ? opens : undefined} />
+        <Widget name={props.item.name} size={props.item.size} layout={layout()} problem={problem()} onCall={props.still ? undefined : act} onOpen={problem() ? retry : props.item.opens ? opens : undefined} />
+        <Refresh every={layout().refresh} then={again} />
       </Loading>
     </Errored>
   )
+}
+
+/// Runs `then` every `every` seconds, while the window is showing.
+function Refresh(props: { every?: number; then: () => void }) {
+  createEffect(
+    () => props.every,
+    (every) => {
+      if (!every) return
+      const timer = setInterval(() => document.visibilityState === "visible" && props.then(), every * 1000)
+      return () => clearInterval(timer)
+    },
+  )
+  return null
 }
 
 /// An icon with its name under it. The app starts as a finger lands on it, and shows as the finger lifts, unless the
@@ -1390,7 +1409,7 @@ function Refused(props: { owner: Owner; held: Held }) {
   const who = createMemo(async () => {
     const [{ users }, { people }] = await Promise.all([
       json<{ users: string[] }>("permissions_users", { artifact: props.owner.subject, relation: "owner" }),
-      json<{ people: { who: string; called?: string }[] }>("sign-in_everyone").catch(() => ({ people: [] as { who: string; called?: string }[] })),
+      json<{ people: { who: string; called?: string }[] }>("sign-in_everyone"),
     ])
     const called = (who: string) => people.find((person) => person.who === who)?.called ?? who.replace(/^users\//, "")
     return new Intl.ListFormat("en", { type: "disjunction" }).format(users.map(called))
@@ -1399,7 +1418,7 @@ function Refused(props: { owner: Owner; held: Held }) {
   return (
     <Sheet heading={`You can't add apps for ${props.owner.name}`} open={state().matches({ editing: "refused" })} onClose={dismiss}>
       <div class="asking">
-        <Errored fallback={<p>Ask one of its owners to add {title()}.</p>}>
+        <Errored fallback={(error) => <Problem heading="Can't show who can" text={error() as Error} />}>
           <Loading fallback={<p>&nbsp;</p>}>
             <p>{who() ? `Only ${who()} can. Ask them to add ${title()}.` : `Ask one of its owners to add ${title()}.`}</p>
           </Loading>
