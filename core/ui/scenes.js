@@ -162,8 +162,9 @@ function native(built, scene, folder) {
   if (existsSync(join(built, dirname(scene.page), "styles.json"))) cpSync(join(built, dirname(scene.page), "styles.json"), join(at, "styles.json"))
   const answers = { ...scene.answers, "ui/initialize": scene.answers["ui/initialize"] ?? { hostContext: { link: scene.link, containerDimensions: { width: scene.size[0], height: scene.size[1] }, deviceCapabilities: { touch: scene.touch, hover: !scene.touch } } } }
   writeFileSync(join(folder, "answers.json"), JSON.stringify(answers))
-  // The harness's clock stands still, so what moves after each tap is moved on to where it settles, as the DOM's is.
-  const requests = scene.taps.flatMap((tap) => [{ op: "tap", ...(typeof tap === "object" ? tap : { name: tap }) }, { op: "clock", step: 1000 }]).map((request, at) => JSON.stringify({ v: 1, id: at + 1, ...request })).join("\n")
+  // The harness's clock stands still, so what moves as the page opens and after each tap is moved on to where it
+  // settles, as the DOM's is, and what's laid out once it's drawn (onLayout) is drawn again.
+  const requests = [{ op: "clock", step: 1000 }, ...scene.taps.flatMap((tap) => [{ op: "tap", ...(typeof tap === "object" ? tap : { name: tap }) }, { op: "clock", step: 1000 }])].map((request, at) => JSON.stringify({ v: 1, id: at + 1, ...request })).join("\n")
   const run = Bun.spawnSync(
     [harness, at, join(folder, "native.png"), join(folder, "native.json"), "--ui", here("dist/client"), "--answers", join(folder, "answers.json"), "--size", `${scene.size[0]}x${scene.size[1]}`, "--scale", "2", ...(dark ? ["--dark"] : []), ...(requests ? ["--requests", "-"] : [])],
     { stdin: requests ? new TextEncoder().encode(requests) : undefined, env: { ...process.env, VK_ICD_FILENAMES: process.env.VK_ICD_FILENAMES ?? "/usr/share/vulkan/icd.d/lvp_icd.json" } },
