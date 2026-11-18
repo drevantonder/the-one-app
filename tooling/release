@@ -62,6 +62,13 @@ for arg in "$@"; do
 done
 ((${#wanted[@]})) || wanted=(server client)
 
+# Every build is published with the platform's Ed25519 signature of its name, build and SHA-256, by BUILD_SIGNING_KEY,
+# a PKCS#8 DER in base64 (in 1Password, "The One App build signing key"), whose public half, `key`, is built into `one`,
+# which takes no build without it (`clients/cli/src/serving.rs`), as Tauri's updater and Sparkle take theirs.
+key=3fd5f3516020dafc3690044ac56dceef578b1f162b72ec4687af2d764192d2f2
+[[ -n $dry ]] || [[ $(base64 -d <<<"${BUILD_SIGNING_KEY:-}" 2>/dev/null | openssl pkey -inform DER -pubout -outform DER 2>/dev/null |
+  tail -c 32 | xxd -p -c 64) == "$key" ]] || { echo "BUILD_SIGNING_KEY isn't the platform's build signing key." >&2 && exit 1; }
+
 # Servers and clients share nothing but the network they publish to, so each is its own release, with its own lock and
 # checkout (below), and one that asks for both runs the two at once.
 want_servers=() want_clients=()
@@ -121,7 +128,7 @@ triple() {
 # files its window shows from outside the crate (Tauri's `frontendDist`). Its own build isn't in it: that's the version
 # `one --version` says, so a client built for an earlier build still says what it is.
 client_inputs() {
-  { tooling/input-hash clients/app "$(triple "$1")" && jq -r '.build.frontendDist[]' clients/app/tauri.conf.json | (cd clients/app && xargs sha256sum); } |
+  { echo "$key" && tooling/input-hash clients/app "$(triple "$1")" && jq -r '.build.frontendDist[]' clients/app/tauri.conf.json | (cd clients/app && xargs sha256sum); } |
     sha256sum | cut -d' ' -f1
 }
 
@@ -397,7 +404,7 @@ SIGN
   # server on another runtime restarts for (`OneCore.Release.compare/2`); and One Core's NIFs, as each is named for
   # what it's built from (`tooling/input-hash`), which a running server loads beside the ones it has.
   runtime_inputs=$({
-    echo "$kind $otp $(elixir --version | tail -1)" && cat "$release/bun" && { [[ ! -e $release/git ]] || cat "$release/git"; } &&
+    echo "$kind $otp $(elixir --version | tail -1) $key" && cat "$release/bun" && { [[ ! -e $release/git ]] || cat "$release/git"; } &&
       (cd core/server && sha256sum mix.exs mix.lock config/* rel/*) &&
       sed -n '/^for kind in "${servers\[@\]}"; do$/,/^done$/p' tooling/release
   } | sha256sum | cut -d' ' -f1)
@@ -430,15 +437,20 @@ for client in "${clients[@]}"; do wait "$client" || { echo "A client wasn't buil
 if ((${#mine[@]})); then
   echo "Publishing to the network"
   ONE=$(command -v one) OUT=$out BUILD=$build bun -e '
-    const { ONE, OUT, BUILD } = process.env;
+    const { ONE, OUT, BUILD, BUILD_SIGNING_KEY } = process.env;
     const { readdirSync } = require("node:fs");
+    const { createPrivateKey, sign } = require("node:crypto");
+    const key = createPrivateKey({ key: Buffer.from(BUILD_SIGNING_KEY, "base64"), format: "der", type: "pkcs8" });
     const builds = await Promise.all(readdirSync(OUT).filter((file) => /\.(gz|exe)$/.test(file)).map(async (file) => {
       const bytes = await Bun.file(`${OUT}/${file}`).bytes();
       const [, what, kind] = file.match(/^(server-runtime|server-code|server|one-setup|one-cli|one)-?(.*?)(\.tar\.gz|\.gz|\.exe)$/);
       // A runtime and a client are told by what they were built from, which the network keeps with them.
       const from = Bun.file(`${OUT}/${file.replace(/(\.tar\.gz|\.gz|\.exe)$/, ".inputs")}`);
       const inputs = (await from.exists()) ? { inputs: (await from.text()).trim() } : {};
-      return { file, name: kind ? `${what}/${kind}` : what, build: BUILD, ...inputs, sha256: new Bun.CryptoHasher("sha256").update(bytes).digest("hex"), size: bytes.length };
+      const name = kind ? `${what}/${kind}` : what;
+      const sha256 = new Bun.CryptoHasher("sha256").update(bytes).digest("hex");
+      const signature = sign(null, Buffer.from(`${name} ${BUILD} ${sha256}`), key).toString("base64");
+      return { file, name, build: BUILD, ...inputs, sha256, signature, size: bytes.length };
     }));
     const publish = () => {
       const published = Bun.spawnSync([ONE, "publish", "--builds", JSON.stringify(builds.map(({ file, ...build }) => build))], { stderr: "inherit" });
