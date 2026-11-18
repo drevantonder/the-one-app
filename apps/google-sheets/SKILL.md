@@ -15,4 +15,4 @@ Google Sheets is the person's spreadsheets. Signing in is the skill `google-acco
 - `append` adds rows after a table, `update` writes over a range and `create` makes a spreadsheet: change only
   what the person asked. Values are read as if typed, so =SUM(A1:A3) is a formula.
 - A spreadsheet is given as `spreadsheetId`, its id or its address. `google-drive_files_list` finds one.
-- With several accounts, each tool takes `account`. `accounts` lists them.
+- With several accounts, each tool takes `account`. `google-account_accounts` lists them.
