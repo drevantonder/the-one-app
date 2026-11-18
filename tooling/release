@@ -148,17 +148,17 @@ for want in "${wanted[@]}"; do
 done
 names=($(printf '%s\n' "${names[@]}" | sort -u))
 
-# A breaking release only once every server and the edge are on the one before, since parts two apart don't talk
-# (`OneCore.Builds.talk?/2`). Devices aren't waited for: their people update them, which works whatever they're on.
+# A release only while every server and the edge talks with it, so is at most one breaking release from it
+# (`OneCore.Builds.talk?/2`): servers can catch up with an edge ahead of them, and a breaking release waits for
+# whichever is two behind. Devices aren't waited for: their people update them, which works whatever they're on.
 behind=$(jq -r --arg build "$build" '
-  def series: (split(".") | map(tonumber? // 0)) as [$major, $minor] | if $major == 0 then "0.\($minor)" else "\($major)" end;
-  select(.network.build)
-  | (.network.build | series) as $now
-  | select(($build | series) != $now)
-  | [(.servers[] | select((.build // "0.15.0" | series) != $now) | "\(.name) on \(.build)"),
-     (select((.edge // "0.15.0" | series) != $now) | "the edge on \(.edge)")]
+  def series: split(".") | map(tonumber? // 0) | if .[0] == 0 then .[0:2] else .[0:1] end;
+  def apart($a; $b): if ($a | length) == ($b | length) then ($a[-1] - $b[-1]) | fabs else infinite end;
+  ($build | series) as $mine
+  | [(.servers[] | select(apart(.build // "0.15.0" | series; $mine) > 1) | "\(.name) on \(.build)"),
+     (select(apart(.edge // "0.15.0" | series; $mine) > 1) | "the edge on \(.edge)")]
   | join(", ")' <<<"$builds")
-[[ -z $behind ]] || { echo "$build is a breaking release, and $behind isn't on the network's $(jq -r .network.build <<<"$builds") yet: release it once they are." >&2 && exit 1; }
+[[ -z $behind ]] || { echo "$build is a breaking release from $behind, which wouldn't talk with it: release the one between to them first." >&2 && exit 1; }
 
 
 # Whether a build is this commit's, or a newer one's on main, which has its changes.
