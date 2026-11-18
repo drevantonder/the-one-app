@@ -601,8 +601,9 @@ html.launcher body {
 .home.launcher .screen > .page + .page {
   box-shadow: inset calc(0.5px / var(--pages-scale)) 0 0 var(--hairline);
 }
+/* Its rows are a phone's tallest, whatever the panel's height, which follows them (home.tsx's `tall`). */
 .home.launcher .page .grid {
-  --row: calc((100cqh - 5rem) / 6);
+  --row: 5.5rem;
 }
 /* One layer of glass: a widget is a tint of the panel, as Raycast's are. */
 .home.launcher .ui-widget {
@@ -692,7 +693,7 @@ html.launcher body {
   white-space: nowrap;
 }
 .results > .ui-state {
-  margin-top: 2rem;
+  margin-block: 2rem;
 }
 .launcher-foot {
   position: absolute;

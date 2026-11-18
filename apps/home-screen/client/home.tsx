@@ -15,7 +15,7 @@
 import { createEffect, createMemo, createSignal, Errored, flush, For, Loading, onSettled, refresh, Show, untrack } from "solid-js"
 import { render, type JSX } from "@solidjs/web"
 import { createActor } from "xstate"
-import { Button, call, changed, client, confirm, covers, Empty, haptic, Icon, leave, List, Menu, open, pace, pinShortcut, Problem, Row, Search, Sheet, Spinner, toast, Widget } from "ui"
+import { Button, call, changed, client, confirm, covers, Empty, haptic, Icon, leave, List, Menu, open, pace, pinShortcut, Problem, Row, Search, Sheet, sizeChanged, Spinner, toast, Widget } from "ui"
 import "./home.css"
 import { give, glide, jump, settle, speed, spring, type Spring, stop } from "./pager.ts"
 import { offset, reflow } from "./reflow.ts"
@@ -1449,13 +1449,16 @@ function EditBar() {
 /// Whether the Home Screen is wide, how much larger its pages are drawn (`scale`), the gaps beside and between them,
 /// and how many whole pages fit side by side at a phone's width, in the room its pages are given, `width` by `height`. Its
 /// pages are laid out by CSS from these; the pager needs how many fit, to know where each stop is.
+/// How much smaller the launcher draws a phone's pages: two side by side across its panel, six rows under 600 points.
+const LAUNCHER_SCALE = 0.8
+
 function measure(width: number, height: number) {
   const rem = parseFloat(getComputedStyle(document.documentElement).fontSize) || 16
   const wide = width >= 34 * rem
-  // A launcher is a panel shorter than a phone, so its pages are drawn smaller, to fit their six rows between its bars,
-  // and side by side with a hairline between them, as Raycast's grid has.
+  // A launcher is a panel shorter than a phone, so its pages are drawn smaller, side by side with a hairline between
+  // them, as Raycast's grid has, and the panel is as tall as what's on them (`tall`).
   const panel = untrack(launcher)
-  scale = !wide ? 1 : panel ? Math.min(1, height / 640) : Math.max(1, Math.min(2, height / 900))
+  scale = !wide ? 1 : panel ? LAUNCHER_SCALE : Math.max(1, Math.min(2, height / 900))
   const [side, gap] = panel ? [rem, 0] : [2 * rem * scale, 3 * rem * Math.min(scale, 1.6)]
   const fit = wide ? Math.max(1, Math.floor((width - 2 * side + gap) / (390 * scale + gap))) : 1
   return { wide, fit, scale, side, gap }
@@ -1653,6 +1656,36 @@ function HomeScreen(props: { owners: Owner[] }) {
   )
   /// What the launcher's search found: the apps of your App Library, whose names have what's typed in them.
   const found = createMemo(() => findIn(props.owners[0]?.library ?? [], query(), false))
+  /// How tall the launcher's content is, as Raycast's and Spotlight's panels are: its bars, and between them the rows
+  /// the Home pages shown use, or what its search found; the App Library and Home while it's edited, six rows' worth.
+  /// Its client makes its window that tall (`sizeChanged`), as an MCP App's host fits its frame to what it says.
+  const tall = () => {
+    const bars = root.querySelector<HTMLElement>(".launcher-bar")!.offsetHeight + root.querySelector<HTMLElement>(".launcher-foot")!.offsetHeight
+    const results = root.querySelector<HTMLElement>(".results")
+    if (results) {
+      const last = results.lastElementChild as HTMLElement
+      return bars + last.offsetTop + last.offsetHeight + parseFloat(getComputedStyle(last).marginBottom) + parseFloat(getComputedStyle(results).paddingBottom)
+    }
+    const { at } = home.getSnapshot().context
+    const full = kindOf(at.owner) === "library" || home.getSnapshot().matches("editing")
+    const shown = full ? [...root.querySelectorAll<HTMLElement>(".strip .page")].filter((page) => page.querySelector(".grid")).slice(0, 1) : [...(tracks[at.owner]?.children[at.screen]?.children ?? [])]
+    if (!shown.length) return bars
+    const top = shown[0].getBoundingClientRect().top
+    const drawn = shown.flatMap((page) => [...page.querySelectorAll(full ? ".grid" : ".cell, .ui-state")])
+    const bottom = Math.max(...drawn.map((element) => element.getBoundingClientRect().bottom - top))
+    return bars + bottom + parseFloat(getComputedStyle(shown[0]).paddingBottom) * room().scale
+  }
+  let told = 0
+  createEffect(
+    () => launcher() && [query(), found().length, state().context.at, kindOf(state().context.at.owner), state().matches("editing"), pages(), room()],
+    (watched) => {
+      if (!watched) return
+      requestAnimationFrame(() => {
+        const height = Math.ceil(tall())
+        if (height !== told) sizeChanged({ height: (told = height) })
+      })
+    },
+  )
   /// What the launcher's Return opens and its Actions are for: the app its search chose, or what's highlighted on Home.
   const target = createMemo((): Target | undefined => {
     if (query().trim()) {
