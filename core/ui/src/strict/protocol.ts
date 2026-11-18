@@ -75,6 +75,29 @@ export interface Event {
   /** How far a `scroll` has scrolled, in CSS pixels, with `scroll`. */
   scrollTop?: number
   scrollLeft?: number
+  /** When it happened, in milliseconds on the host's own clock, which `requestAnimationFrame` is on too. */
+  timeStamp?: number
+  /** A pointer's, `contextmenu`'s and `click`'s: where it is in the window, in CSS pixels. */
+  clientX?: number
+  clientY?: number
+  /** A pointer's: which pointer, as each finger is its own, what it is, and which button, `0` the main one, `2` the
+   * secondary. */
+  pointerId?: number
+  pointerType?: "mouse" | "touch" | "pen"
+  button?: number
+  /** A pointer's, `contextmenu`'s and `click`'s: where the node is in the window, as it's drawn, transforms and all. */
+  rect?: Rect
+  /** `wheel`'s: how far a trackpad or a wheel moved, in CSS pixels. */
+  deltaX?: number
+  deltaY?: number
+}
+
+/** Where a node is drawn in the window, in CSS pixels. */
+export interface Rect {
+  x: number
+  y: number
+  width: number
+  height: number
 }
 
 /** What a native host gives an app's sandbox, as `globalThis.host`, before it loads the app's page: the module its
@@ -105,7 +128,15 @@ export interface Sandbox {
  * action key is pressed (a keyboard's Enter, or a phone's Done, Go, Next, Search or Send). A host offers them as
  * accessibility actions too: `click` is AccessKit's `Click`, `input` its `SetValue`, `focus` and `blur` its `Focus`
  * and `Blur`, `scroll` its `ScrollIntoView` and `ScrollDown`. */
-export type EventName = "click" | "input" | "action" | "focus" | "blur" | "keydown" | "pointerenter" | "pointerleave" | "scroll"
+export type EventName = "click" | "input" | "action" | "focus" | "blur" | "keydown" | "pointerenter" | "pointerleave" | "scroll" | Moved
+
+/** What a page that's moved by hand listens for, as the Home Screen's pages are, a finger's or a mouse's, as the DOM
+ * names them: a pointer's (`pointerdown` to `pointercancel`) go to the node under it and to each node it's in that
+ * listens, the innermost first, as the DOM's bubble, and once a pointer is down on a node, its moves and its end go
+ * to that node, wherever it goes, as a touch's do; `contextmenu` is a right-click, or a touch held (AccessKit's
+ * `ShowContextMenu`); `wheel` a trackpad's or a wheel's scroll over it. No host draws these yet, so a page that uses
+ * them names no `host`, and a web view draws it. */
+export type Moved = "pointerdown" | "pointermove" | "pointerup" | "pointercancel" | "contextmenu" | "wheel"
 
 /** An input's editing state, as Flutter's `TextEditingValue`: its text, what's selected, and what an input method is
  * still composing. Every platform's keyboard bridge and the DOM say it in this one shape. Offsets are into `text`, in
@@ -200,6 +231,12 @@ export interface Props {
   onPointerEnter?: true
   onPointerLeave?: true
   onScroll?: true
+  onPointerDown?: true
+  onPointerMove?: true
+  onPointerUp?: true
+  onPointerCancel?: true
+  onContextMenu?: true
+  onWheel?: true
 }
 
 /** A state that's so or not, as ARIA writes it. */
@@ -284,6 +321,26 @@ export interface Version1Style {
   fontVariantNumeric?: "normal" | "tabular-nums"
   /** At most so many lines, the last cut with "…". */
   lineClamp?: number
+  /** `absolute` takes it out of its parent's flow, placed by `top`, `right`, `bottom` and `left` in its nearest
+   * parent that's `relative` or `absolute`, over what's drawn before it, or under what's drawn before it with a
+   * higher `zIndex`. */
+  position?: "relative" | "absolute"
+  top?: number
+  right?: number
+  bottom?: number
+  left?: number
+  zIndex?: number
+  /** Drawn moved, larger or turned from where it's laid out, around its middle, which moves nothing else: CSS's
+   * `translate`, `scale` and `rotate` (degrees), React Native's `transform`. What a page moves by hand, a frame at a
+   * time (`requestAnimationFrame`), it moves with these. Version 2's classes have these too (`absolute`, `inset-…`,
+   * `z-…`, `translate-…`, `scale-…`); version 1's here are what a page moved by hand needs, which no host draws yet
+   * (`Moved`). */
+  translateX?: number
+  translateY?: number
+  scale?: number
+  rotate?: number
+  /** `none` lets what's under it have the pointer, as a picture of something carried over the screen does. */
+  pointerEvents?: "auto" | "none"
 }
 
 // The tables. The UI library's build makes both from its own TypeScript (core/ui/src/tokens.ts, and each component's

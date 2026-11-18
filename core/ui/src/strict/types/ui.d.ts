@@ -5,22 +5,48 @@
 // the props every host can draw, and the check says whether the DOM's takes them.
 import type { Element } from "solid-js"
 import type { ListCollection } from "@zag-js/collection"
-import type { Props, Version1Style as Style } from "../protocol.ts"
+import type { Props, Rect, Version1Style as Style } from "../protocol.ts"
 
-export type { Element, Style }
+export type { Element, Rect, Style }
 
 /** What a node says it is, and its states, as ARIA has them. */
 export type Semantics = Pick<Props, Extract<keyof Props, "role" | `aria-${string}`>>
 
 // The primitives.
 
-/** What a key pressed is told, as the DOM's `KeyboardEvent`. */
+// What a page moved by hand is told (protocol.ts's `Moved`), each a part of the DOM's event of that name, which is
+// what it's given on the DOM.
+
+/** Where it happened, in the window, and where the node is drawn there (`getBoundingClientRect()`): a click's, a
+ * `contextmenu`'s. */
+export type Located = {
+  clientX: number
+  clientY: number
+  timeStamp: number
+  currentTarget: { getBoundingClientRect(): Rect }
+}
+/** A pointer's, a finger's or a mouse's: which one, what it is, and which button, `0` the main one. */
+export type Pressed = Located & {
+  pointerId: number
+  pointerType: "mouse" | "touch" | "pen"
+  button: number
+}
+/** A trackpad's or a wheel's scroll, in CSS pixels. */
+export type Wheeled = {
+  deltaX: number
+  deltaY: number
+  timeStamp: number
+}
+
+/** What a key pressed is told, as the DOM's `KeyboardEvent`: `preventDefault()` keeps what the key does by itself
+ * in a field (a caret moved, the focus moved on by Tab) from happening, on the DOM. */
 export type Keyed = {
   key: string
   shiftKey: boolean
   altKey: boolean
   ctrlKey: boolean
   metaKey: boolean
+  preventDefault(): void
 }
 
 /** What a `Scroll` scrolling is told: how far it's scrolled. */
@@ -31,12 +57,20 @@ export type Scrolled = {
 export type BoxProps = Semantics & {
   style?: Style
   tabindex?: 0 | -1
-  onClick?: () => void
+  onClick?: (event: Located) => void
   onFocus?: () => void
   onBlur?: () => void
   onKeyDown?: (event: Keyed) => void
   onPointerEnter?: () => void
   onPointerLeave?: () => void
+  /** Once a pointer is down on it, its moves and its end come here, wherever it goes, as a touch's do. */
+  onPointerDown?: (event: Pressed) => void
+  onPointerMove?: (event: Pressed) => void
+  onPointerUp?: (event: Pressed) => void
+  onPointerCancel?: (event: Pressed) => void
+  /** A right-click, or a touch held, as the device has it, in place of the device's own menu. */
+  onContextMenu?: (event: Located) => void
+  onWheel?: (event: Wheeled) => void
   children?: Element
 }
 export declare function Box(props: BoxProps): Element
@@ -113,9 +147,9 @@ export declare function Row(props: {
 }): Element
 
 export type IconName =
-  | "calendar-blank" | "caret-left" | "caret-right" | "caret-up-down" | "check" | "copy" | "corners-in" | "corners-out"
-  | "dots-three" | "file" | "gear-six" | "magnifying-glass" | "paperclip" | "pencil-simple" | "plus" | "trash"
-  | "warning-circle" | "x"
+  | "calendar-blank" | "caret-down" | "caret-left" | "caret-right" | "caret-up-down" | "check" | "copy" | "corners-in"
+  | "corners-out" | "device-mobile" | "dots-three" | "file" | "gear-six" | "magnifying-glass" | "minus" | "minus-circle"
+  | "paperclip" | "pencil-simple" | "plus" | "plus-circle" | "squares-four" | "trash" | "warning-circle" | "x"
 export declare function Icon(props: { name: IconName; along?: boolean }): Element
 export declare function Spinner(): Element
 
@@ -187,7 +221,7 @@ export declare function Alert(props: { heading: Element; text?: Element; open?: 
 export declare function Sheet(props: { heading?: Element; open?: boolean; onClose?: () => void; children?: Element }): Element
 
 export declare const Menu: {
-  Root: (props: { onSelect?: (details: { value: string }) => void; children?: Element }) => Element
+  Root: (props: { open?: boolean; onOpenChange?: (details: { open: boolean }) => void; onSelect?: (details: { value: string }) => void; children?: Element }) => Element
   Trigger: (props: { variant?: ButtonProps["variant"]; size?: "icon"; "aria-label"?: string; children?: Element }) => Element
   Positioner: (props: { children?: Element }) => Element
   Content: (props: { children?: Element }) => Element
@@ -205,6 +239,18 @@ export declare const Tabs: {
   Indicator: (props: {}) => Element
 }
 
+/** A widget's layout, as its tool answers it (the skill `building-apps` lists its parts). */
+export type Layout = { [part: string]: unknown }
+export declare function Widget(props: {
+  name?: string
+  size?: "2x2" | "4x2" | "4x4"
+  layout?: Layout
+  problem?: string
+  onCall?: (tool: string | undefined, inputs: Record<string, unknown>) => unknown
+  /** Pressed, with where the card is drawn, which the app it opens grows out of. */
+  onOpen?: (card: { getBoundingClientRect(): Rect }) => void
+}): Element
+
 // What an app asks for in passing.
 
 export type Subject = {
@@ -214,7 +260,9 @@ export declare function call(tool: string, inputs?: object, options?: Subject): 
 export declare function changed(listener: () => void): () => void
 export declare function toast(text: string | Error, options?: { action?: { label: string; run: () => void } }): Promise<void>
 export declare function confirm(question: { heading: string; text?: string; action?: string; destructive?: boolean }): Promise<boolean>
-export declare function open(app: string, options?: Subject): Promise<unknown>
+/** `behind` only starts it, as a finger lands on its icon; `from` is where its icon or widget is drawn, with its corners'
+ * `radius`, which it grows out of. */
+export declare function open(app: string, options?: Subject & { behind?: boolean; from?: Rect & { radius?: number } }): Promise<unknown>
 export declare function leave(): Promise<void>
 export declare function link(): string | undefined
 export declare function component(app: string, name: string): Promise<Record<string, (props: Record<string, unknown>) => Element>>
@@ -240,6 +288,8 @@ export type Client = {
   pinsShortcuts?: boolean
   settings?: boolean
   launcher?: boolean
+  /** Whether it's a Mac (or an iPhone or iPad), whose keys are ⌘ where a PC's are Ctrl. */
+  mac?: boolean
 }
 /** What `client(change)` changes. */
 export type ClientChange = {
@@ -253,3 +303,20 @@ export type ClientChange = {
 }
 export declare function client(): Promise<Client>
 export declare function client(change: ClientChange): Promise<{ message: string }>
+/** Something of the page's own is open over it, which `shut` shuts: the device's own back calls it first. → what to
+ * call once it has shut. */
+export declare function covers(shut: () => void): () => void
+/** How large the page's content is, for a window sized by what it shows (a computer's launcher). */
+export declare function sizeChanged(size: { width?: number; height?: number }): Promise<void>
+/** Puts an app, by its entrypoint, on the device's own home screen, where `client()` says it can (`pinsShortcuts`). */
+export declare function pinShortcut(entrypoint: string): Promise<unknown>
+/** The window's size, in CSS pixels, as it changes. */
+export declare function viewport(): { width: number; height: number }
+/** What the device keeps for itself at each edge of the window (a status bar, a notch, a home indicator), as it
+ * changes: the CSS's `env(safe-area-inset-*)`. */
+export declare function safeArea(): { top: number; right: number; bottom: number; left: number }
+/** Whether whoever's looking asked for less motion, as it changes. */
+export declare function reducedMotion(): boolean
+/** Calls `listener` with each key pressed that isn't something's own: not in a field, a menu or a dialog, which take
+ * their keys themselves. → what stops it. */
+export declare function keydown(listener: (event: Keyed) => void): () => void

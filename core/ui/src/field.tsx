@@ -122,7 +122,15 @@ export function Search(props: JSX.InputHTMLAttributes<HTMLInputElement>) {
         enterkeyhint="search"
         {...omit(props, "class", "ref")}
         class="ui-box ring"
-        ref={[(element: HTMLInputElement) => ((control = element), element.addEventListener("input", () => setText(element.value))), props.ref]}
+        ref={[
+          (element: HTMLInputElement) => {
+            control = element
+            element.addEventListener("input", () => setText(element.value))
+            // A page in a frame of another origin, as an app's is, isn't given `autofocus`: it's focused as it's drawn.
+            if (props.autofocus) requestAnimationFrame(() => element.focus({ preventScroll: true }))
+          },
+          props.ref,
+        ]}
         onKeyDown={(event) => {
           // Escape empties a field with text in it, and only then does what it does elsewhere (closes the sheet).
           if (event.key !== "Escape" || !control.value) return

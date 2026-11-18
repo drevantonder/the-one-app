@@ -4,6 +4,7 @@
 import { omit } from "solid-js"
 import { Dynamic, render as mount, type JSX } from "@solidjs/web"
 import type { Props, Version1Style as Style } from "./protocol.ts"
+import type { Located, Pressed, Wheeled } from "./types/ui.d.ts"
 
 /// `render(() => <App />)`: draws an app's first screen, where its page is: the page itself on the web, the app's
 /// window on a native host. → what takes it away again.
@@ -12,13 +13,15 @@ export const render = (code: () => JSX.Element): (() => void) => mount(code, doc
 /** What a primitive takes of the protocol's props: its role and states, with what it listens for. */
 type Semantics = Pick<Props, Extract<keyof Props, "role" | `aria-${string}`>>
 
-/** What a key pressed is told, as the DOM's `KeyboardEvent`. */
+/** What a key pressed is told, as the DOM's `KeyboardEvent`: `preventDefault()` keeps what the key does by itself
+ * in a field (a caret moved, the focus moved on by Tab) from happening, on the DOM. */
 export interface Keyed {
   key: string
   shiftKey: boolean
   altKey: boolean
   ctrlKey: boolean
   metaKey: boolean
+  preventDefault(): void
 }
 
 /** What a `Scroll` scrolling is told: how far it's scrolled. */
@@ -30,12 +33,18 @@ export interface Scrolled {
 interface Listens extends Semantics {
   style?: Style
   tabindex?: 0 | -1
-  onClick?: () => void
+  onClick?: (event: Located) => void
   onFocus?: () => void
   onBlur?: () => void
   onKeyDown?: (event: Keyed) => void
   onPointerEnter?: () => void
   onPointerLeave?: () => void
+  onPointerDown?: (event: Pressed) => void
+  onPointerMove?: (event: Pressed) => void
+  onPointerUp?: (event: Pressed) => void
+  onPointerCancel?: (event: Pressed) => void
+  onContextMenu?: (event: Located) => void
+  onWheel?: (event: Wheeled) => void
 }
 
 /** A box's props. */
@@ -43,15 +52,29 @@ export interface BoxProps extends Listens {
   children?: JSX.Element
 }
 
+/** The roles of what's pressed, which the DOM draws as a button, so the keyboard reaches it too. */
+const pressed = new Set(["button", "menuitem", "tab", "checkbox", "radio", "switch", "option", "link"])
+
 /// `<Box style={{ flexDirection: "row", gap: "gutter", padding: 12, backgroundColor: "muted", borderRadius: "lg" }}>...</Box>`:
 /// a strict app's own layout, around anything else: a flex column unless its `style` says otherwise, as React Native's
-/// View, styled from the design tokens only. With `role="button"` and `onClick` it's something to press, which the
-/// keyboard reaches too; any other `role` and `aria-…` say what it is to a screen reader and to an agent, as ARIA has
-/// them.
+/// View, styled from the design tokens only. With `onClick` and a role of what's pressed (`button`, `menuitem`,
+/// `option`, …) it's something to press, which the keyboard reaches too; any other `role` and `aria-…` say what it is
+/// to a screen reader and to an agent, as ARIA has them. A page moved by hand listens to its pointers too (`follows`).
 export function Box(props: BoxProps) {
-  const own = omit(props, "style", "children")
+  const own = omit(props, "style", "children", ...moved)
+  const moves = movable(props)
+  const button = () => !!props.role && pressed.has(props.role) && !!props.onClick
   return (
-    <Dynamic component={props.role === "button" ? "button" : "div"} type={props.role === "button" ? "button" : undefined} {...own} class="ui-strict-box" data-font={props.style?.font} style={css(props.style)}>
+    <Dynamic
+      component={button() ? "button" : "div"}
+      type={button() ? "button" : undefined}
+      {...own}
+      {...moves}
+      class="ui-strict-box"
+      data-font={props.style?.font}
+      data-scrolls={props.style?.overflow === "scroll" ? "" : undefined}
+      style={css(props.style)}
+    >
       {props.children}
     </Dynamic>
   )
@@ -66,12 +89,72 @@ export interface ScrollProps extends BoxProps {
 /// along its `flexDirection`, down in a column and sideways in a row, with no scrollbar beside it, as on a phone.
 /// `onScroll` is told how far it's scrolled.
 export function Scroll(props: ScrollProps) {
-  const own = omit(props, "style", "children")
+  const own = omit(props, "style", "children", ...moved)
+  const moves = movable(props)
   return (
-    <div {...own} class="ui-strict-box ui-strict-scroll" data-font={props.style?.font} style={css(props.style)}>
+    <div {...own} {...moves} class="ui-strict-box ui-strict-scroll" data-scrolls="" data-font={props.style?.font} style={css(props.style)}>
       {props.children}
     </div>
   )
+}
+
+/** What a page moved by hand listens for (protocol.ts's `Moved`), which `movable` draws. */
+const moved = ["onPointerDown", "onPointerMove", "onPointerUp", "onPointerCancel", "onContextMenu", "onWheel"] as const
+
+/// A box's or a scroll's `ref` and `onContextMenu` for what it moves by hand: its pointers (`follows`), and a
+/// right-click or a touch held, in place of the device's own menu.
+const movable = (props: BoxProps) => ({
+  ref: (box: HTMLElement) => (props.onPointerDown || props.onPointerMove || props.onPointerUp || props.onPointerCancel || props.onWheel) && follows(box, props),
+  onContextMenu: (event: MouseEvent) => props.onContextMenu && (event.preventDefault(), event.stopPropagation(), props.onContextMenu(event as unknown as Located)),
+})
+
+/// A box's pointers, as the protocol has them: a pointer's moves over it, a mouse's too, and once one is down on it,
+/// its moves and its end wherever it goes, as a touch's are, each told where the box is (`currentTarget`). While a
+/// finger that's down on it moves, the browser scrolls nothing for it, unless it's in something in the box that
+/// scrolls (an iPhone's web view would bounce the page). A wheel over it is its own, unless it's up and down over
+/// something in it that scrolls, whose that is.
+function follows(box: HTMLElement, props: BoxProps) {
+  const down = new Set<number>()
+  const told = (event: PointerEvent): Pressed => ({ clientX: event.clientX, clientY: event.clientY, timeStamp: event.timeStamp, pointerId: event.pointerId, pointerType: event.pointerType as Pressed["pointerType"], button: event.button, currentTarget: box })
+  const move = (event: PointerEvent) => down.has(event.pointerId) && props.onPointerMove?.(told(event))
+  const end = (event: PointerEvent) => {
+    if (!down.delete(event.pointerId)) return
+    if (event.type === "pointerup") props.onPointerUp?.(told(event))
+    else props.onPointerCancel?.(told(event))
+    if (down.size) return
+    removeEventListener("pointermove", move, true)
+    removeEventListener("pointerup", end, true)
+    removeEventListener("pointercancel", end, true)
+  }
+  box.addEventListener("pointerdown", (event) => {
+    if (!down.size) {
+      addEventListener("pointermove", move, true)
+      addEventListener("pointerup", end, true)
+      addEventListener("pointercancel", end, true)
+    }
+    down.add(event.pointerId)
+    props.onPointerDown?.(told(event))
+  })
+  box.addEventListener("pointermove", (event) => !down.has(event.pointerId) && props.onPointerMove?.(told(event)))
+  box.addEventListener("dragstart", (event) => event.preventDefault())
+  box.dataset.follows = ""
+  box.addEventListener("touchmove", (event) => down.size && !scrolls(event.target, box) && event.cancelable && event.preventDefault(), { passive: false })
+  box.addEventListener(
+    "wheel",
+    (event) => {
+      if (Math.abs(event.deltaY) > Math.abs(event.deltaX) && scrolls(event.target, box)) return
+      event.preventDefault()
+      const lines = event.deltaMode === WheelEvent.DOM_DELTA_LINE ? 16 : event.deltaMode === WheelEvent.DOM_DELTA_PAGE ? box.clientHeight : 1
+      props.onWheel?.({ deltaX: event.deltaX * lines, deltaY: event.deltaY * lines, timeStamp: event.timeStamp })
+    },
+    { passive: false },
+  )
+}
+
+/** Whether `target` is in something in `box` that scrolls. */
+const scrolls = (target: EventTarget | null, box: HTMLElement) => {
+  const scroller = (target as Element | null)?.closest?.("[data-scrolls]")
+  return !!scroller && scroller !== box && box.contains(scroller)
 }
 
 /** A text's props. */
@@ -130,6 +213,7 @@ export function Path(props: PathProps) {
 }
 
 const colours = new Set(["backgroundColor", "color", "borderColor"])
+const offsets = new Set(["top", "right", "bottom", "left"])
 const spaces = new Set(["gap", "rowGap", "columnGap", "padding", "paddingInline", "paddingBlock", "paddingTop", "paddingRight", "paddingBottom", "paddingLeft", "margin", "marginInline", "marginBlock"])
 const sizes = new Set(["flexBasis", "width", "height", "minWidth", "minHeight", "maxWidth", "maxHeight"])
 const tokens: Record<string, string> = { gutter: "var(--gutter)", control: "var(--control)", icon: "var(--icon)", readable: "var(--readable)" }
@@ -142,6 +226,9 @@ export function css(style: Style | undefined): JSX.CSSProperties | undefined {
   for (const [name, value] of Object.entries(style) as [keyof Style, string | number][]) {
     const property = name.replace(/[A-Z]/g, (letter) => `-${letter.toLowerCase()}`)
     if (name === "font" || value === undefined) continue
+    else if (name === "translateX" || name === "translateY") out.translate = `${style.translateX ?? 0}px ${style.translateY ?? 0}px`
+    else if (name === "rotate") out.rotate = `${value}deg`
+    else if (offsets.has(name)) out[property] = `${value}px`
     else if (colours.has(name)) out[property] = `var(--${value})`
     else if (name === "borderRadius") out[property] = value === "full" ? "9999px" : value ? `var(--radius-${value})` : 0
     else if (name.startsWith("border")) out[property] = `${value}px`

@@ -2266,6 +2266,21 @@ html:has(.ui-sign-in) {
   font: inherit;
   text-align: inherit;
 }
+/* What follows a pointer itself, a finger held on it, selects no text and opens no picture's menu (iOS's Share, Copy). */
+.ui-strict-box[data-follows] {
+  -webkit-user-select: none;
+  user-select: none;
+  -webkit-touch-callout: none;
+}
+/* A page drawn over a computer's launcher's panel, the system's glass, lets it show through. */
+html[data-launcher],
+html[data-launcher] body {
+  background: transparent;
+}
+button.ui-strict-box:focus-visible {
+  outline: 2px solid var(--ring);
+  outline-offset: 2px;
+}
 .ui-strict-text {
   margin: 0;
 }

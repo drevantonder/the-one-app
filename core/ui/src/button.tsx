@@ -18,11 +18,18 @@ import pencilSimple from "@phosphor-icons/core/assets/regular/pencil-simple.svg?
 import plus from "@phosphor-icons/core/assets/regular/plus.svg?raw"
 import trash from "@phosphor-icons/core/assets/regular/trash.svg?raw"
 import warningCircle from "@phosphor-icons/core/assets/fill/warning-circle-fill.svg?raw"
+import caretDown from "@phosphor-icons/core/assets/regular/caret-down.svg?raw"
+import deviceMobile from "@phosphor-icons/core/assets/regular/device-mobile.svg?raw"
+import minus from "@phosphor-icons/core/assets/regular/minus.svg?raw"
+import minusCircle from "@phosphor-icons/core/assets/regular/minus-circle.svg?raw"
+import plusCircle from "@phosphor-icons/core/assets/regular/plus-circle.svg?raw"
+import squaresFour from "@phosphor-icons/core/assets/regular/squares-four.svg?raw"
 import x from "@phosphor-icons/core/assets/regular/x.svg?raw"
 
 // The Phosphor icons the UI library draws with, by Phosphor's own names, as what's inside each one's <svg>.
 const svgs = {
   "calendar-blank": calendarBlank,
+  "caret-down": caretDown,
   "caret-left": caretLeft,
   "caret-right": caretRight,
   "caret-up-down": caretUpDown,
@@ -30,13 +37,18 @@ const svgs = {
   copy,
   "corners-in": cornersIn,
   "corners-out": cornersOut,
+  "device-mobile": deviceMobile,
   "dots-three": dotsThree,
   file,
   "gear-six": gearSix,
   "magnifying-glass": magnifyingGlass,
+  minus,
+  "minus-circle": minusCircle,
   paperclip,
   "pencil-simple": pencilSimple,
   plus,
+  "plus-circle": plusCircle,
+  "squares-four": squaresFour,
   trash,
   "warning-circle": warningCircle,
   x,

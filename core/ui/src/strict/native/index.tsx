@@ -63,13 +63,27 @@ function ask<T>(method: string, params: object): Promise<T> {
 }
 
 /** What the client says of where the page is shown, as the DOM's bridge reads it: whether the window names the app
- * above it (a computer's app window, whose breadcrumb a first screen's title gives way to) and whether its network
- * answers. */
+ * above it (a computer's app window, whose breadcrumb a first screen's title gives way to), whether its network
+ * answers, what the device keeps for itself at each edge, the window's size and whether its person asked for less
+ * motion. */
 const [breadcrumb, setBreadcrumb] = createSignal(false)
 const [connected, setConnected] = createSignal<ReturnType<typeof Strict.connection>>("online")
-function dress(context?: { breadcrumb?: boolean; connection?: ReturnType<typeof Strict.connection> }) {
+const [insets, setInsets] = createSignal({ top: 0, right: 0, bottom: 0, left: 0 })
+const [size, setSize] = createSignal({ width: 0, height: 0 })
+const [still, setStill] = createSignal(false)
+interface Context {
+  breadcrumb?: boolean
+  connection?: ReturnType<typeof Strict.connection>
+  safeAreaInsets?: ReturnType<typeof Strict.safeArea>
+  containerDimensions?: { width: number; height: number }
+  reducedMotion?: boolean
+}
+function dress(context?: Context) {
   if (context && "breadcrumb" in context) setBreadcrumb(context.breadcrumb === true)
   if (context?.connection) setConnected(context.connection)
+  if (context?.safeAreaInsets) setInsets(context.safeAreaInsets)
+  if (context?.containerDimensions) setSize(context.containerDimensions)
+  if (context && "reducedMotion" in context) setStill(context.reducedMotion === true)
 }
 
 /** A client answers a page once it has said what it is, which it does as it loads. */
@@ -90,6 +104,12 @@ export const client = (async (change: Strict.ClientChange = {}) => {
   await greeted
   return ask("one/client", change)
 }) as typeof Strict.client
+export const safeArea: typeof Strict.safeArea = () => insets()
+export const viewport: typeof Strict.viewport = () => size()
+export const reducedMotion: typeof Strict.reducedMotion = () => still()
+export const sizeChanged: typeof Strict.sizeChanged = async (size) => (await greeted, host?.post({ jsonrpc: "2.0", method: "ui/notifications/size-changed", params: size }))
+export const pinShortcut: typeof Strict.pinShortcut = async (entrypoint) => (await greeted, ask("one/pin-shortcut", { entrypoint }))
+export const open: typeof Strict.open = async (app, { subject, behind, from } = {}) => (await greeted, ask("ui/open-link", /^https?:/.test(app) ? { url: app } : { url: `one:${app}`, subject, behind, from }))
 
 export const changed: typeof Strict.changed = (listener) => {
   listeners.add(listener)
@@ -248,7 +268,9 @@ const Opened = createContext<{ open: () => boolean; setOpen: (open: boolean) => 
 
 export const Menu: typeof Strict.Menu = {
   Root: (props) => {
-    const [open, setOpen] = createSignal(false)
+    const [own, setOwn] = createSignal(false)
+    const open = () => props.open ?? own()
+    const setOpen = (now: boolean) => (setOwn(now), props.onOpenChange?.({ open: now }))
     return <Opened value={{ open, setOpen, select: (value) => (setOpen(false), props.onSelect?.({ value })) }}>{props.children}</Opened>
   },
   Trigger: (props) => {
@@ -304,7 +326,6 @@ export const Alert = later("Alert") as typeof Strict.Alert
 export const Tabs = { Root: later("Tabs"), List: later("Tabs"), Trigger: later("Tabs"), Content: later("Tabs"), Indicator: later("Tabs") } as typeof Strict.Tabs
 export const toast = later("toast") as typeof Strict.toast
 export const confirm = later("confirm") as typeof Strict.confirm
-export const open = later("open") as typeof Strict.open
 export const leave = later("leave") as typeof Strict.leave
 /** A native host doesn't open an app to a link yet. */
 export const link: typeof Strict.link = () => undefined
@@ -315,5 +336,8 @@ export const go: typeof Strict.go = (change) => change()
 export const share = later("share") as typeof Strict.share
 export const seen = later("seen") as typeof Strict.seen
 export const haptic: typeof Strict.haptic = () => {}
+export const Widget = later("Widget") as typeof Strict.Widget
+export const covers: typeof Strict.covers = () => () => {}
+export const keydown = later("keydown") as typeof Strict.keydown
 export const connection: typeof Strict.connection = () => connected()
 export const visible: typeof Strict.visible = () => true

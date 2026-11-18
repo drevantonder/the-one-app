@@ -102,10 +102,35 @@ function dress(context: HostContext | undefined) {
   if (context && "updateReady" in context) setUpdatable(context.updateReady === true)
   const root = document.documentElement
   if (context?.safeAreaInsets) for (const [edge, inset] of Object.entries(context.safeAreaInsets)) root.style.setProperty(`--safe-${edge}`, `${inset}px`)
+  if (context?.safeAreaInsets) setInsets(context.safeAreaInsets)
   if (context && "breadcrumb" in context) root.toggleAttribute("data-breadcrumb", context.breadcrumb === true)
   if (!context || !("theme" in context)) return
   root.style.colorScheme = context.theme ?? ""
   for (const name of ["light", "dark"]) root.classList.toggle(name, context.theme === name)
+}
+
+const [insets, setInsets] = createSignal({ top: 0, right: 0, bottom: 0, left: 0 })
+/// `<Box style={{ paddingTop: safeArea().top }}>`: what the device keeps for itself at each edge of the window (a
+/// status bar, a notch, a home indicator), in CSS pixels, as it changes: CSS's `--safe-top` and the rest, as numbers,
+/// for what's laid out by hand.
+export const safeArea = () => (greet(), insets())
+
+const [size, setSize] = createSignal({ width: innerWidth, height: innerHeight })
+addEventListener("resize", () => setSize({ width: innerWidth, height: innerHeight }))
+/// `viewport().width`: the window's size, in CSS pixels, as it changes, for what's laid out by hand.
+export const viewport = () => size()
+
+const [still, setStill] = createSignal(reduced.matches)
+reduced.addEventListener("change", () => setStill(reduced.matches))
+/// `reducedMotion()`: whether whoever's looking asked for less motion, as it changes, for what moves by hand.
+export const reducedMotion = () => still()
+
+/// `keydown((event) => event.key === "Escape" && close())`: each key pressed that isn't something's own, not in a
+/// field, a menu or a dialog, which take their keys themselves. → what stops it.
+export function keydown(listener: (event: KeyboardEvent) => void): () => void {
+  const heard = (event: KeyboardEvent) => !event.defaultPrevented && !(event.target as Element).closest?.("input, textarea, select, dialog, [role=menu], [role=dialog]") && listener(event)
+  addEventListener("keydown", heard)
+  return () => removeEventListener("keydown", heard)
 }
 
 // A field the page has the keyboard in stays in sight as the page is made smaller for the keyboard.
@@ -276,8 +301,16 @@ export const pinShortcut = (entrypoint: string): Promise<unknown> => greet().the
 /// person allows what only they may.
 export function client(): Promise<Client>
 export function client(change: ClientChange): Promise<{ message: string }>
-export function client(change: ClientChange = {}) {
-  return greet().then(() => ask("one/client", change))
+export function client(change: ClientChange = {}): Promise<Client | { message: string }> {
+  const mac = /Mac|iPhone|iPad/.test(navigator.platform)
+  return greet()
+    .then(() => ask<Client & { message: string }>("one/client", change))
+    .then((answer) => {
+      if (Object.keys(change).length) return answer
+      // A page shown in a computer's launcher is drawn over its panel, the system's glass (ui.css).
+      document.documentElement.toggleAttribute("data-launcher", answer.launcher === true)
+      return { ...answer, mac }
+    })
 }
 
 /** What `client()` answers. */
@@ -298,6 +331,8 @@ export interface Client {
   settings?: boolean
   /** Whether the page is a computer's launcher, the panel its Home Screen is shown in, which goes once an app opens. */
   launcher?: boolean
+  /** Whether it's a Mac (or an iPhone or iPad), whose keys are ⌘ where a PC's are Ctrl. */
+  mac?: boolean
 }
 
 /** What `client(change)` changes. */

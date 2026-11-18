@@ -88,12 +88,14 @@ export const { render: mount, effect, memo, createComponent, createElement, crea
 
 /** What the person did, from the host, to the handler it's for: `click` to `onClick`, `keydown` to `onKeyDown`, with
  * what the DOM's event would say of it: an `input`'s editing state as `editing`, and its text as
- * `currentTarget.value`; its action key's `action`; a key as `key` with its modifiers; and how far a `scroll` has
- * scrolled as `currentTarget.scrollTop`. */
-export function event({ id, name, editing, action, key, shiftKey, altKey, ctrlKey, metaKey, scrollTop, scrollLeft }: Event) {
+ * `currentTarget.value`; its action key's `action`; a key as `key` with its modifiers; how far a `scroll` has
+ * scrolled as `currentTarget.scrollTop`; and a pointer where it is and where the node is drawn
+ * (`currentTarget.getBoundingClientRect()`). What a host does with a key by itself isn't the page's, so
+ * `preventDefault()` does nothing here. */
+export function event({ id, name, editing, action, key, shiftKey, altKey, ctrlKey, metaKey, scrollTop, scrollLeft, rect, ...told }: Event) {
   const handler = nodes.get(id)?.deref()?.handlers[name]
-  const target = { value: editing?.text ?? "", scrollTop: scrollTop ?? 0, scrollLeft: scrollLeft ?? 0 }
-  handler?.({ currentTarget: target, target, editing, action, key: key ?? "", shiftKey: !!shiftKey, altKey: !!altKey, ctrlKey: !!ctrlKey, metaKey: !!metaKey })
+  const target = { value: editing?.text ?? "", scrollTop: scrollTop ?? 0, scrollLeft: scrollLeft ?? 0, getBoundingClientRect: () => rect ?? { x: 0, y: 0, width: 0, height: 0 } }
+  handler?.({ ...told, currentTarget: target, target, editing, action, key: key ?? "", shiftKey: !!shiftKey, altKey: !!altKey, ctrlKey: !!ctrlKey, metaKey: !!metaKey, preventDefault() {} })
 }
 
 /** Draws a page at the root. */

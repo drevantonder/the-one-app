@@ -31,7 +31,7 @@
 /// root, checks a page. What a strict page may use is `core/ui/src/strict/types/ui.d.ts`: one that needs what isn't
 /// there (a component, a prop, a style) adds it there, with only what every host can draw (`protocol.ts`), and
 /// core/ui's `bun run typecheck` then says whether the DOM's component takes it.
-export { call, changed, client, component, connection, covers, haptic, leave, link, open, pinShortcut, showRecoveryKey, sizeChanged, updateReady, upload, useRecoveryKey, visible } from "./bridge.ts"
+export { call, changed, client, component, connection, covers, haptic, keydown, leave, link, open, pinShortcut, reducedMotion, safeArea, showRecoveryKey, sizeChanged, updateReady, upload, useRecoveryKey, viewport, visible } from "./bridge.ts"
 export { pace, seen, share } from "./shared.ts"
 export { words } from "./words.ts"
 export { Button, Icon, Spinner } from "./button.tsx"
