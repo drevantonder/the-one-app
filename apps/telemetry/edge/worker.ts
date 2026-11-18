@@ -103,8 +103,9 @@ function span(item: TraceItem) {
     undefined;
   // As OpenTelemetry names an HTTP server's span, and a call between Workers by the Worker and its method.
   const name =
-    record.name ?? (request ? `${request.method} ${path}` : event?.rpcMethod ? [worker, event.rpcMethod].filter(Boolean).join(" ") : null);
-  const routine = !record.name && (item.executionModel === "durableObject" || (path ? ROUTINE.test(path) : event?.rpcMethod !== "forward"));
+    record.name ?? (request ? `${request.method} ${path}` : event?.rpcMethod ? [worker, event.rpcMethod].filter(Boolean).join(" ") : record.traceparent ? worker : null);
+  // What carried a trace on to a server, as the relay's Durable Object does as it passes a call on, is that trace's.
+  const routine = !record.name && !record.traceparent && (item.executionModel === "durableObject" || (path ? ROUTINE.test(path) : event?.rpcMethod !== "forward"));
   if (!name || (!error && routine)) return;
 
   // Its own ids are those it carried on, and it's under the span it came in with where that's of the same trace.
