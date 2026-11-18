@@ -470,6 +470,19 @@ function Drawn(props: { type: ItemType; item: Item }) {
 function ItemScreen(props: { item: Item }) {
   const item = () => props.item
   // Deleting it is soft delete's, as for anything an app made: it's in Recently Deleted for 30 days.
+  // Access that wouldn't switch is said under the list, and the switch stays as it is stored.
+  const [problem, setProblem] = createSignal<{ heading: string; text: Error }>()
+  const switchAccess = async (who: string, title: string, input: HTMLInputElement) => {
+    const on = input.checked
+    setProblem()
+    try {
+      await call("vault_access", { item: item().name, who, on }, { subject: whose() })
+      again()
+    } catch (error) {
+      input.checked = !on
+      setProblem({ heading: `Couldn't switch ${title} ${on ? "on" : "off"}`, text: error as Error })
+    }
+  }
   const remove = async () => {
     if (!(await confirm({ heading: `Delete ${shown(item())}?`, text: "Whatever uses it stops working. It's in Recently Deleted for 30 days.", action: "Delete", destructive: true }))) return
     if (await does("soft-delete_delete", { artifact: item().artifact })) setOpen()
@@ -515,17 +528,18 @@ function ItemScreen(props: { item: Item }) {
           <Row
             heading="Your agents"
             text="Use it, never see it"
-            end={<Switch aria-label="Your agents" checked={item().access.includes("agents")} onChange={(event) => does("vault_access", { item: item().name, who: "agents", on: event.currentTarget.checked })} />}
+            end={<Switch aria-label="Your agents" checked={item().access.includes("agents")} onChange={(event) => switchAccess("agents", "Your agents", event.currentTarget)} />}
           />
           <For each={contents().apps}>
             {(app) => (
               <Row
                 heading={app.title}
-                end={<Switch aria-label={app.title} checked={item().access.includes(app.name)} onChange={(event) => does("vault_access", { item: item().name, who: app.name, on: event.currentTarget.checked })} />}
+                end={<Switch aria-label={app.title} checked={item().access.includes(app.name)} onChange={(event) => switchAccess(app.name, app.title, event.currentTarget)} />}
               />
             )}
           </For>
         </List>
+        <Show when={problem()}>{(problem) => <Problem heading={problem().heading} text={problem().text} />}</Show>
       </Section>
       <Section>
         <Button variant="destructive" onClick={remove}>
