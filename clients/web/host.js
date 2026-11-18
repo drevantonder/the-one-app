@@ -348,7 +348,7 @@ async function registerPush() {
       subscription = null
     }
     subscription ??= await registration.pushManager.subscribe({ userVisibleOnly: true, applicationServerKey: vapid })
-    const result = await mcp("tools/call", { name: "notifications_register", arguments: { via: "webpush", token: JSON.stringify(subscription), name: called(), key: await notificationKey } })
+    const result = await mcp("tools/call", { name: "notifications_register", arguments: { via: "webpush", token: JSON.stringify(subscription), key: await notificationKey } })
     if (result.isError) throw new Error(result.content?.[0]?.text ?? "The network didn't take it.")
     pushed({ state: "registered" })
   } catch (error) {
