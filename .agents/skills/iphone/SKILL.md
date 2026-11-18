@@ -1,6 +1,6 @@
 ---
 name: iphone
-description: Use to build the app for iPhone or the iPhone simulator and put it on the owner's phone, from Linux over ssh to the Mac, without the owner doing anything.
+description: Use to build the app for iPhone or the iPhone simulator, publish it to TestFlight, or put a development build on the owner's phone, from Linux over ssh to the Mac, without the owner doing anything.
 ---
 
 Everything iPhone happens on the Mac: `ssh mac 'zsh -lc "<command>"'` (a login shell, so Homebrew, Rust and Xcode's
@@ -19,22 +19,27 @@ An app is a network's: the commands that build it are in that repo's `app/README
 
 - No Apple account is signed in to Xcode, so `xcodebuild -allowProvisioningUpdates` and `cargo tauri ios build`'s
   own signing and export fail (`errSecInternalComponent`).
-- Signing uses the Apple Development identity in a keychain of its own, not the login keychain, and a development
-  profile of the app's own App ID, in `~/Library/Developer/Xcode/UserData/Provisioning Profiles/` (named by UUID:
-  `security cms -D -i <file>` shows each one's `Name`, App ID and entitlements). The App IDs (the app's identifier,
-  and its `.notifications`) have Push Notifications and App Groups on. The wildcard profile ("iOS Team Provisioning
-  Profile: *") carries neither, so a build signed with it isn't woken by notifications.
-- The team's App Store Connect API key (Admin) makes App IDs and profiles with the API itself: `POST /v1/bundleIds`,
-  `/v1/bundleIdCapabilities` and `/v1/profiles` (`IOS_APP_DEVELOPMENT`, the team's `DEVELOPMENT` certificate and the
-  phone from `/v1/devices`), whose `profileContent` is the profile. A profile is made again when its App ID changes,
-  which leaves it invalid. The key's item is in Agent Memory.
-- That key can't make an App Group or put one on an App ID: the API has nothing for it, and Xcode's own developer
-  services, which `xcodebuild -allowProvisioningUpdates -authenticationKeyPath ...` uses, refuse it (401). The group
-  (`group.` and the app's identifier) is made and ticked on both App IDs on the developer website; until it is, a
-  profile's `com.apple.security.application-groups` is empty, the app keeps its client in its own folder, and the
-  notification extension can't be signed.
-- A development profile's `aps-environment` is `development`, so the phone's APNs token is the sandbox's, which the
-  network's edge reaches only with `APNS_SANDBOX=1` (`apps/notifications/edge/README.md`).
+- The team is X96JC3HCV7, the owner's own (Individual), which signs The One App (`app.theone.client`) and The PTC
+  App. Its identities are in a keychain of their own, `ptc-build`, not the login keychain: Apple Development, and
+  Apple Distribution for TestFlight. Its password is the 1Password item "Mac build keychain (ptc-build)" in the
+  `ptc-nosudo` vault, and on the Mac in `~/.config/ptc/build-keychain-pw`.
+- The team's App Store Connect API key (Admin, `R49QVKSHMK`; its item is in Agent Memory) makes App IDs
+  (`/v1/bundleIds`, `/v1/bundleIdCapabilities`) and profiles (`POST /v1/profiles` with the App ID and the team's
+  certificate: `IOS_APP_DEVELOPMENT`, its `DEVELOPMENT` certificate and the phone from `/v1/devices`, or
+  `IOS_APP_STORE` and its `DISTRIBUTION` one), whose `profileContent` is the profile. Profiles are kept on the Mac in
+  `~/Library/Developer/Xcode/UserData/Provisioning Profiles/`, named by UUID (`security cms -D -i <file>` shows each
+  one's `Name`, App ID and entitlements): "The One App Development", "The One App App Store" and "The One App
+  Notifications App Store". A profile is made again when its App ID changes, which leaves it invalid. The wildcard
+  profile ("iOS Team Provisioning Profile: *") carries no push, so a build signed with it isn't woken by
+  notifications.
+- That key can't make an App Store Connect app, an App Group, or put a group on an App ID: the API has nothing for
+  them, and Xcode's own developer services, which `xcodebuild -allowProvisioningUpdates -authenticationKeyPath ...`
+  uses, refuse it (401). The owner does them on the website. Until the group (`group.` and the app's identifier) is
+  ticked on both App IDs and their profiles are made again, a profile's `com.apple.security.application-groups` is
+  empty, the app keeps its client in its own folder, and its notification extension can't read its key.
+- A development profile's `aps-environment` is `development` and an App Store one's `production`. The network's edge
+  sends to one of APNs's two, the sandbox with `APNS_SANDBOX=1` (`apps/notifications/edge/README.md`), so a phone is
+  woken only where its build matches it.
 - The phone is paired with the Mac: `xcrun devicectl list devices` names it.
 
 ## Building and signing
@@ -56,12 +61,29 @@ An app is a network's: the commands that build it are in that repo's `app/README
    password goes on stdin, never in a command line, where `ps` and logs see it. The key's partition list must
    already allow `codesign` (`security set-key-partition-list -S apple-tool:,apple:`); if it doesn't, a dialog
    appears on the owner's screen. `security lock-keychain <it>` at the end of that same connection.
-4. `xcrun devicectl device install app --device <id> <app>` installs over the app there, keeping its data, locked
-   phone or not; `xcrun devicectl device info apps --device <id> --bundle-id <the app's identifier>` shows its build.
-   Then `xcrun devicectl device process launch --device <id> <the app's identifier>`, which a locked phone refuses
-   (`Locked`). `one builds` shows the phone's new build only once the app has opened.
 
-The keychain's password is the 1Password item "Mac build keychain (ptc-build)" in the `ptc-nosudo` vault.
+For the simulator, or to try a change on the phone before it's released, sign with the development profile and
+`xcrun devicectl device install app --device <id> <app>`, which installs over the app there, keeping its data, locked
+phone or not. It replaces TestFlight's build, so the phone takes no more updates until it's installed from TestFlight
+again. `xcrun devicectl device process launch --device <id> <the app's identifier>` opens it, which a locked phone
+refuses (`Locked`). `one builds` shows the phone's new build only once the app has opened.
+
+## TestFlight
+
+The owner's phone takes The One App from TestFlight, which updates it by itself; its Update Required's Update opens
+TestFlight. To publish main:
+
+1. Build it as above with `--export-method app-store-connect`, at main with nothing of your own on it, since its
+   build number is main's count of commits.
+2. Sign it as above with the App Store profiles and Apple Distribution: their entitlements are `production`, with
+   `beta-reports-active`.
+3. `mkdir Payload && cp -R <app> Payload/ && zip -qry app.ipa Payload`, then
+   `xcrun altool --upload-app -f app.ipa -t ios --apiKey R49QVKSHMK --apiIssuer <issuer>`, with the key at
+   `~/.appstoreconnect/private_keys/AuthKey_R49QVKSHMK.p8` for that command only. The app's `Info.plist` already
+   answers export compliance.
+4. Once Apple has processed it (`/v1/builds?filter[app]=<id>`, `processingState` `VALID`), the internal group "The
+   One App" has every build (`hasAccessToAllBuilds`), and the owner, an internal tester in it, takes it
+   automatically.
 
 ## Mistakes already made
 
