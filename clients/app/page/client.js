@@ -9,7 +9,7 @@
 // `launcher`, which a network has exactly one of. It's the one this page shows first, under every other, and it
 // opens the rest (`one/open`).
 import { address, haptic, invoke, listen, openLink, sandbox, setTheme } from "./host.js"
-/** @import { Context, Moved, Paged, Rect, Told, View } from "./host.js" */
+/** @import { Context, Moved, Paged, Rect, Shown, Told, View } from "./host.js" */
 
 /// Reports what went wrong here to Telemetry, through the client, which keeps it until a server can be told: what
 /// this page showed its person, an error of its own or of an app's page, an app that never drew. Names, files and
@@ -106,7 +106,7 @@ function keyboard() {
 }
 visualViewport?.addEventListener("resize", keyboard)
 
-const { assign, createActor, enqueueActions, fromPromise, sendParent, sendTo, setup, spawnChild } = XState
+const { assign, createActor, enqueueActions, fromCallback, fromPromise, sendParent, sendTo, setup, spawnChild } = XState
 
 /// Each open app's page, one state at a time, as its person's owner signed it off, a child of the window's
 /// (`machine`), which starts it as the app opens and tells it whether it's in front of its person: loading, then
@@ -208,6 +208,200 @@ const pageMachine = setup({
   },
 })
 
+/// What each of a move's two frames does over it, as keyframes from its start to its end, and how long it takes: an
+/// app opened from its icon (`icon`) grows out of it as an iPhone's does, cut to the icon's square and corners and
+/// showing itself over it in its first moments, as the launcher sinks back under it; going back, it shrinks back into
+/// it as the launcher comes forward, and is gone in its last moments. With no icon, it slides in over what was there
+/// from the end of the line, which moves back a quarter, and going back, back out. For whoever asked for less motion,
+/// what comes fades in over what was there. The one drawn over the other is `upper`.
+/** @param {View} leaving @param {View} coming @param {boolean} back @param {Rect} [icon] @returns {{ upper: View, ms: number, parts: [View, Keyframe[]][] }} */
+function moves(leaving, coming, back, icon) {
+  const style = getComputedStyle(document.documentElement)
+  if (matchMedia("(prefers-reduced-motion: reduce)").matches) return { upper: coming, ms: parseFloat(style.getPropertyValue("--move-settle")), parts: [[coming, [{ opacity: 0 }, { opacity: 1 }]]] }
+  const [app, under] = back ? [leaving, coming] : [coming, leaving]
+  if (icon) {
+    // The app's middle on the icon's, as small as the icon is wide, and its corners the icon's.
+    const { x, y, width, height } = app.frame.getBoundingClientRect()
+    const scale = icon.width / width
+    const small = {
+      translate: `${icon.x + icon.width / 2 - (x + width / 2)}px ${icon.y + icon.height / 2 - (y + height / 2)}px`,
+      scale: `${scale}`,
+      clipPath: `inset(${Math.max(0, (height - width) / 2)}px ${Math.max(0, (width - height) / 2)}px round ${(icon.width * 0.225) / scale}px)`,
+    }
+    const whole = { translate: "0px 0px", scale: "1", clipPath: "inset(0px 0px round 0px)" }
+    const sunk = { scale: "0.92" }
+    const up = { scale: "1" }
+    return {
+      upper: app,
+      ms: 400,
+      parts: back
+        ? [[app, [whole, small]], [app, [{ opacity: 1 }, { opacity: 1, offset: 0.97 }, { opacity: 0 }]], [under, [sunk, up]]]
+        : [[app, [small, whole]], [app, [{ opacity: 0 }, { opacity: 1, offset: 0.85 }, { opacity: 1 }]], [under, [up, sunk]]],
+    }
+  }
+  const end = style.direction === "rtl" ? -1 : 1
+  const at = (/** @type {number} */ share) => ({ translate: `${share * end}% 0px` })
+  return {
+    upper: app,
+    ms: parseFloat(style.getPropertyValue("--move-travel")),
+    parts: back ? [[app, [at(0), at(100)]], [under, [at(-25), at(0)]]] : [[app, [at(100), at(0)]], [under, [at(0), at(-25)]]],
+  }
+}
+
+/// The window's moves between its launcher and its apps, and from app to app, one at a time: a child of the window's
+/// (`machine`), which tells it where to go only while it shows apps (tagged `pages`), and to stop where it was going
+/// (`freeze`) as it covers them all. The Home Screen is never told: it's a frame like any other here.
+///
+/// The launcher and every open app are live frames, so a move animates the two frames themselves (Web Animations),
+/// both live and taking taps all the while: a tap on either is never lost. Its animations (`moves`) are paused, and
+/// one progress `p`, 0 where it came from and 1 where it goes, sets where they are; a spring takes `p` to where it's
+/// going, so turning back, or a finger letting go, carries on from where it is, as fast as it was going.
+///
+///                     show(to): its history entry is there already
+///     ┌───────┐ ─────────────────────────────────► ┌───────────┐ ─┐ show(where it came from): turns back, p → 0
+///     │ still │                                    │  playing  │ ◄┘ show(where it goes): nothing new
+///     └───────┘ ◄── settled: layer(where p is) ─── │ from → to │ ─┐ show(anything else): ends where it was going,
+///         │         and notes()                    └───────────┘ ◄┘   then moves from there to it
+///         │                                         │       ▲
+///         │                                   grab: │       │ release: p → 1 if far or flicked, else → 0,
+///         │                                  caught │       │ and the window's history follows it
+///         │                              where p is ▼       │
+///         │   grab [back leads somewhere,      ┌───────────┐
+///         └──────── nothing over the app] ───► │ tracking  │  drag(p): drawn there
+///                                              └───────────┘
+///
+///     freeze, from any: still, where it was going, which is always where the window's history is.
+///     show, while tracking: as while playing, the finger keeping it unless it goes somewhere else.
+///     popped(to), drawn already by the device: still at `to`, with nothing drawn; while playing toward it, nothing.
+///
+/// Gestures will send `grab`, `drag` and `release`; nothing does yet.
+/** @typedef {{ from: View, to: View, upper: View, parts: Animation[], p: number, target: number, velocity: number, stiffness: number }} Move */
+/** @param {Move} move */
+const toward = (move) => (move.target === 1 ? move.to : move.from)
+/** @param {Move} move @param {number} p */
+function seek(move, p) {
+  move.p = p
+  for (const part of move.parts) part.currentTime = p * 1000
+}
+const moveMachine = setup({
+  types: /** @type {{ context: { move?: Move }, events: Shown }} */ ({}),
+  actors: {
+    // A critically damped spring, as the Home Screen's pages have (apps/home-screen/client/pager.ts), stiff enough
+    // that from still it lands as the ease it replaces did, in the move's time: within 3 % of it all the way.
+    spring: fromCallback(/** @param {{ input: Move, sendBack: (event: Shown) => void }} spring */ ({ input: move, sendBack }) => {
+      let last = performance.now()
+      /** @param {number} now */
+      const step = (now) => {
+        // A frame late, as when the window was hidden, is taken as one, so nothing jumps.
+        const dt = Math.max(0, Math.min(1 / 30, (now - last) / 1000))
+        last = now
+        let { p, velocity } = move
+        for (let at = 0; at < dt; at += 1 / 240) {
+          const slice = Math.min(1 / 240, dt - at)
+          velocity += (-move.stiffness * (p - move.target) - 2 * Math.sqrt(move.stiffness) * velocity) * slice
+          p += velocity * slice
+        }
+        const still = Math.abs(p - move.target) < 0.001 && Math.abs(velocity) < 0.05
+        move.velocity = still ? 0 : velocity
+        seek(move, still ? move.target : p)
+        if (still) sendBack({ type: "settled" })
+        else frame = requestAnimationFrame(step)
+      }
+      let frame = requestAnimationFrame(step)
+      return () => cancelAnimationFrame(frame)
+    }),
+  },
+  guards: {
+    here: ({ event }) => "to" in event && event.to === front,
+    there: ({ context, event }) => "to" in event && !!context.move && event.to === toward(context.move),
+    returning: ({ context, event }) => "to" in event && !!context.move && event.to === (context.move.target === 1 ? context.move.from : context.move.to),
+    backs: () => depth > 0 && !front?.over,
+  },
+  actions: {
+    // The frame coming is seen and takes taps from the start, over or under the one going, and its page is told
+    // it's opened.
+    begin: assign(({ event }) => {
+      const show = /** @type {Extract<Shown, { type: "show" }>} */ (event.type === "grab" ? { to: showing(stack[depth - 1].key), back: true, icon: stack[depth].from, tapped: performance.now() } : event)
+      const from = /** @type {View} */ (front)
+      const { upper, ms, parts } = moves(from, show.to, show.back, show.icon)
+      show.to.frame.inert = false
+      upper.frame.dataset.move = ""
+      const animations = parts.map(([view, keyframes]) => {
+        const part = view.frame.animate(keyframes, { duration: 1000, fill: "both" })
+        part.pause()
+        return part
+      })
+      reveal(show.to, show.tapped)
+      /** @type {Move} */
+      // It goes where the window's history is: a finger that takes it from still hasn't gone anywhere yet.
+      const move = { from, to: show.to, upper, parts: animations, p: 0, target: event.type === "grab" ? 0 : 1, velocity: 0, stiffness: (27 * 400 / ms) ** 2 }
+      seek(move, 0)
+      return { move }
+    }),
+    turn: ({ context }) => {
+      const move = /** @type {Move} */ (context.move)
+      move.target = 1 - move.target
+    },
+    // Ends where it was going, or with `popped`, where the device went.
+    end: assign(({ context, event }) => {
+      const move = context.move
+      const to = event.type === "popped" ? event.to : move && toward(move)
+      for (const part of move?.parts ?? []) part.cancel()
+      if (move) delete move.upper.frame.dataset.move
+      if (to) layer(to.key)
+      notes()
+      return { move: undefined }
+    }),
+    // Shown without a move: where it is already, or drawn by the device.
+    place: ({ event }) => {
+      if (!("to" in event)) return
+      layer(event.to.key)
+      reveal(event.to, event.tapped)
+      notes()
+    },
+    // Let go far enough or fast enough, it carries on, and otherwise goes back; the window's history follows it.
+    release: ({ context, event }) => {
+      const move = /** @type {Move} */ (context.move)
+      const { velocity } = /** @type {Extract<Shown, { type: "release" }>} */ (event)
+      move.target = Math.abs(velocity) > 1 ? (velocity > 0 ? 1 : 0) : Math.round(move.p)
+      move.velocity = velocity
+      const to = toward(move)
+      for (const step of [-1, 1]) if (stack[depth + step] && showing(stack[depth + step].key) === to) history.go(step)
+    },
+  },
+}).createMachine({
+  id: "move",
+  initial: "still",
+  context: {},
+  on: { freeze: { target: ".still", actions: "end" } },
+  states: {
+    still: {
+      on: {
+        show: [{ guard: "here", actions: "place" }, { target: "playing", actions: "begin" }],
+        popped: { actions: "place" },
+        grab: { guard: "backs", target: "tracking", actions: "begin" },
+      },
+    },
+    playing: {
+      invoke: { src: "spring", input: ({ context }) => /** @type {Move} */ (context.move) },
+      on: {
+        show: [{ guard: "there" }, { guard: "returning", actions: "turn" }, { target: "playing", reenter: true, actions: ["end", "begin"] }],
+        popped: [{ guard: "there" }, { target: "still", actions: "end" }],
+        settled: { target: "still", actions: "end" },
+        grab: "tracking",
+      },
+    },
+    tracking: {
+      on: {
+        show: [{ guard: "there" }, { guard: "returning", actions: "turn" }, { target: "playing", actions: ["end", "begin"] }],
+        drag: { actions: ({ context, event }) => seek(/** @type {Move} */ (context.move), event.p) },
+        release: { target: "playing", actions: "release" },
+        popped: { target: "still", actions: "end" },
+      },
+    },
+  },
+})
+
 /// What the window shows, one state at a time: while it opens, until it can start the launcher; the launcher, once
 /// it has drawn; signing in, where the device isn't in its network; why there's no launcher to show, with Apps to
 /// install one; and an update, which is all it shows once a server has refused this client for being behind it
@@ -239,6 +433,7 @@ const machine = setup({
   types: /** @type {{ context: Context, events: Moved }} */ ({}),
   actors: {
     page: pageMachine,
+    move: moveMachine,
     // A computer's app takes the latest builds and starts again on them; one that's also a server says what it did.
     update: fromPromise(() => invoke("update")),
     // Asks its network again, as itself, which a server refuses where this client is still behind it.
@@ -284,6 +479,11 @@ const machine = setup({
     away: enqueueActions(({ enqueue, self }) => {
       for (const child of pages(self)) enqueue.sendTo(child, { type: "away" })
     }),
+    // A move goes on only while the window shows apps: otherwise what it shows covers them, and the move stops where
+    // it was going, and what's shown changes at once.
+    move: sendTo("move", ({ event }) => event),
+    place: sendTo("move", ({ event }) => ({ type: "popped", to: /** @type {Extract<Moved, { type: "show" }>} */ (event).to, tapped: /** @type {Extract<Moved, { type: "show" }>} */ (event).tapped })),
+    freeze: sendTo("move", { type: "freeze" }),
     // Talked with again, every page that couldn't load meanwhile loads again.
     retry: enqueueActions(({ enqueue, self }) => {
       for (const child of pages(self)) enqueue.sendTo(child, { type: "retry" })
@@ -296,7 +496,10 @@ const machine = setup({
   id: "window",
   initial: "opening",
   context: { connection: "connecting", lost: false, starting: false, updateReady: false },
+  entry: spawnChild("move", { id: "move" }),
   on: {
+    show: { actions: "place" },
+    popped: { actions: "move" },
     session: { actions: "told" },
     connection: { actions: "connection" },
     updateReady: { actions: "updateReady" },
@@ -314,6 +517,7 @@ const machine = setup({
       tags: "pages",
       entry: [assign({ starting: false }), "list", "seen"],
       on: {
+        show: { actions: "move" },
         session: [{ guard: "signIn", target: "sign_in", actions: "told" }, { actions: ["told", "list"] }],
         connection: [{ guard: "online", actions: ["connection", "list"] }, { actions: "connection" }],
         listed: { guard: "waiting", actions: [assign({ starting: true }), "start"] },
@@ -325,33 +529,33 @@ const machine = setup({
     },
     // The network's own sign-in page, which the client brings the window back from once its person has approved
     // it, where it opens again (`follows` in `src/lib.rs`).
-    sign_in: { entry: ["signIn", "away"] },
+    sign_in: { entry: ["signIn", "away", "freeze"] },
     launcher: {
       tags: "pages",
       entry: ["listen", "follow", "seen"],
-      on: { update: { guard: "updateReady", target: "updating" }, tooOld: "needs_updating", link: { actions: ["link", "follow"] } },
+      on: { show: { actions: "move" }, update: { guard: "updateReady", target: "updating" }, tooOld: "needs_updating", link: { actions: ["link", "follow"] } },
     },
     // A launcher installed meanwhile, as by an agent, is listed as its network says something changed.
     no_launcher: {
-      entry: "away",
+      entry: ["away", "freeze"],
       on: { openAppStore: { guard: "appStore", target: "app_store" }, listed: "opening", tooOld: "needs_updating" },
     },
     // The App Store, shown with no launcher under it, until a launcher is installed: it's the page in front.
     app_store: {
       tags: "pages",
       entry: ["openAppStore", "seen"],
-      on: { listed: "opening", tooOld: "needs_updating" },
+      on: { show: { actions: "move" }, listed: "opening", tooOld: "needs_updating" },
     },
     // A launcher that draws after all is shown, as an app's page that does is (`pageMachine`).
     launcher_failed: {
       tags: "pages",
       entry: "seen",
-      on: { retry: "opening", drawn: { guard: "launcher", target: "launcher" }, tooOld: "needs_updating" },
+      on: { show: { actions: "move" }, retry: "opening", drawn: { guard: "launcher", target: "launcher" }, tooOld: "needs_updating" },
     },
     // Update Required: Update on a computer, and everywhere, Try Again, as the window comes back on screen, and
     // as its network answers again.
     needs_updating: {
-      entry: [assign({ behind: true }), "away"],
+      entry: [assign({ behind: true }), "away", "freeze"],
       on: {
         update: { guard: "updates", target: "updating" },
         retry: "checking",
@@ -362,7 +566,7 @@ const machine = setup({
     // Asks its network again: where it talks with this client, the window opens again; refused, it needs updating.
     // Not answered, it opens again where it wasn't behind, and says why there (`steps`).
     checking: {
-      entry: "away",
+      entry: ["away", "freeze"],
       invoke: {
         src: "retry",
         onDone: { target: "opening", actions: [assign({ behind: false }), "retry"] },
@@ -374,7 +578,7 @@ const machine = setup({
     // program keeping its server running has taken it, which says so meanwhile. One that takes its build without
     // starting again, or whose update was under way already, carries on here, asked again whether it's behind.
     updating: {
-      entry: [assign({ message: undefined }), "away"],
+      entry: [assign({ message: undefined }), "away", "freeze"],
       invoke: {
         src: "update",
         onDone: { target: "checking", actions: assign({ message: ({ event }) => event.output }) },
@@ -384,7 +588,7 @@ const machine = setup({
     // Try Again asks its network afresh, as `checking` does, never repeating what an update said before: where
     // it talks with this app now, it opens; where it doesn't, Update Required, with Update.
     update_failed: {
-      entry: "away",
+      entry: ["away", "freeze"],
       on: { retry: "checking" },
     },
   },
@@ -693,10 +897,6 @@ function bar() {
   invoke("status_bar", { shown })
 }
 
-/// Whether the device has itself just shown the user going back (an iPhone's swipe in from the edge): the page
-/// mustn't show it a second time.
-let shownByDevice = false
-
 /// Where `rect`, a place in a frame's page, is in the window: an icon an app is opened from.
 /** @param {HTMLIFrameElement} frame @param {Rect} [rect] @returns {Rect | undefined} */
 function within(frame, rect) {
@@ -705,38 +905,21 @@ function within(frame, rect) {
   return { x: x + rect.x, y: y + rect.y, width: rect.width, height: rect.height }
 }
 
-/// Changes between the launcher and an app as a move, as the UI library moves between an app's screens
-/// (core/ui/src/screen.tsx): the browser slides the app in over the launcher, or with `back`, back out from over
-/// them. An app opened from its icon (`from`) grows out of it instead, as an iPhone's does, and goes back into it.
-/// For whoever asked for less motion, one fades into the other, and where the browser can't, it's a plain swap.
-/** @param {() => void} change @param {Rect} [from] */
-function move(change, back = false, from) {
-  if (!globalThis.ViewTransition || !("types" in ViewTransition.prototype) || shownByDevice) return void change()
-  if (matchMedia("(prefers-reduced-motion: reduce)").matches) return void document.startViewTransition({ update: change, types: ["fade"] })
-  if (!from) return void document.startViewTransition({ update: change, types: [back ? "back" : "forward"] })
-  // The app, drawn as small as the icon is wide, its middle on the icon's, and cut to a square of it with the icon's
-  // corners (client.css's `grow`): the window's size is the app's, and the icon's is a share of its width.
-  const [width, height] = [innerWidth, innerHeight]
-  const scale = from.width / width
-  const root = document.documentElement.style
-  root.setProperty("--icon-x", `${from.x + from.width / 2 - width / 2}px`)
-  root.setProperty("--icon-y", `${from.y + from.height / 2 - height / 2}px`)
-  root.setProperty("--icon-scale", String(scale))
-  root.setProperty("--icon-inset", `${Math.max(0, (height - width) / 2)}px ${Math.max(0, (width - height) / 2)}px`)
-  root.setProperty("--icon-radius", `${(from.width * 0.225) / scale}px`)
-  document.startViewTransition({ update: change, types: [back ? "close" : "open"] })
-}
-
-/// Shows the app that's open as `at` over the rest, or with none there, the launcher. `tapped` is when its icon
-/// was tapped.
+/// The app that's open as `at` shows, or with none there, the launcher, at once.
 /** @param {string | null} at @param {number} tapped */
 function show(at, tapped) {
   const view = layer(at)
   if (!view) return
-  view.tapped = tapped
-  // Opened again, a stale page loads its new version as it opens.
-  page(view, { type: "opened" })
+  reveal(view, tapped)
   notes()
+}
+
+/// An app coming on screen: `tapped` is when its icon was tapped. Opened again, a stale page loads its new version as
+/// it opens, and a current one asks again what it shows.
+/** @param {View} view @param {number} tapped */
+function reveal(view, tapped) {
+  view.tapped = tapped
+  page(view, { type: "opened" })
   if (!pageOf(view)?.matches("current")) return
   // Its user returned to it.
   invoke("refresh", { view: view.key })
@@ -974,16 +1157,15 @@ function go(link, subject, behind, from) {
     if (depth) history.go(Math.min(-depth, stack[0].at - stack[depth].at))
     return true
   }
-  const showing = here() === next.key
-  move(() => show(next.key, tapped), false, from)
   // The way back out of an app is an entry in this window's history, made as it's opened, so the device's back
   // leads out of the app however soon it's pressed.
-  if (!showing) {
+  if (here() !== next.key) {
     depth += 1
     history.pushState(depth, "")
     // It goes back into the icon it came out of, or slides out if it came from none.
     stack.splice(depth, Infinity, { key: next.key, at: history.length - 1, from })
   }
+  on({ type: "show", to: next, back: false, icon: from, tapped })
   return true
 }
 
@@ -1028,14 +1210,15 @@ window.scrollToTop = () => {
 // The device's own way back, and this page's, both end here.
 addEventListener("popstate", (event) => {
   const tapped = performance.now()
-  shownByDevice = Boolean(event.hasUAVisualTransition)
   const to = typeof event.state === "number" ? event.state : 0
   const back = to < depth
-  // Going back, the app that was showing goes back into the icon it came out of, if it came out of one.
-  const into = back ? stack[depth]?.from : undefined
+  // Going back, the app that was showing goes back into the icon it came out of, if it came out of one; forward, it
+  // comes out of it again.
+  const icon = stack[back ? depth : to]?.from
   depth = to
-  move(() => show(here(), tapped), back, into)
-  shownByDevice = false
+  const view = /** @type {View} */ (showing(here()))
+  // The device has drawn the move itself (an iPhone's swipe in from the edge): it isn't drawn a second time.
+  on(event.hasUAVisualTransition ? { type: "popped", to: view, tapped } : { type: "show", to: view, back, icon, tapped })
 })
 
 listen("connection", ({ payload }) => on({ type: "connection", connection: payload }))

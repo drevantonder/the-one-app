@@ -99,8 +99,22 @@ export interface Context {
   behind?: boolean
 }
 
+/** What moves the window's move between its launcher and its apps (`client.js`'s `moveMachine`): an app to show,
+ * coming back or going on, and the icon it comes out of or goes back into; one the device has already drawn the move
+ * to; the spring at rest; the window covering every app; and a finger taking the move, moving it and letting go, at
+ * `velocity`, in moves a second. */
+export type Shown =
+  | { type: "show"; to: View; back: boolean; icon?: Rect; tapped: number }
+  | { type: "popped"; to: View; tapped: number }
+  | { type: "settled" }
+  | { type: "freeze" }
+  | { type: "grab" }
+  | { type: "drag"; p: number }
+  | { type: "release"; velocity: number }
+
 /** What moves the window (`client.js`). */
 export type Moved =
+  | Extract<Shown, { type: "show" | "popped" }>
   | { type: "session"; told: Told }
   | { type: "connection"; connection: Connection }
   | { type: "listed" }
