@@ -11,8 +11,8 @@ FROM docker.io/library/node:22-bookworm-slim
 RUN apt-get update \
  && apt-get install -y --no-install-recommends tigervnc-standalone-server x11-xserver-utils openbox xdotool imagemagick x11-utils sqlite3 \
     fonts-dejavu-core fonts-noto-color-emoji fonts-wqy-microhei ca-certificates curl procps \
-    gstreamer1.0-x gstreamer1.0-apps-base gstreamer1.0-apps-good gstreamer1.0-apps-bad gstreamer1.0-apps-ugly \
-    gstreamer1.0-nice python3-gst-1.0 gir1.2-gst-apps-bad-1.0 python3-xlib \
+    gstreamer1.0-x gstreamer1.0-plugins-base gstreamer1.0-plugins-good gstreamer1.0-plugins-bad gstreamer1.0-plugins-ugly \
+    gstreamer1.0-nice python3-gst-1.0 gir1.2-gst-plugins-bad-1.0 python3-xlib \
  && curl -fsSLo /tmp/chrome.deb https://dl.google.com/linux/direct/google-chrome-stable_current_$(dpkg --print-architecture).deb \
  && apt-get install -y --no-install-recommends /tmp/chrome.deb \
  && rm -rf /tmp/chrome.deb /var/lib/apt/lists/* /etc/apt/sources.list.d/google-chrome.list \
