@@ -2,6 +2,7 @@
 name: google-account
 description: Read before signing a Google account in to Gmail, Google Calendar, Drive, Docs or Sheets, or out of one, and when one of those apps says an account needs signing in.
 metadata:
+  title: "Google Account"
   subtitle: "Sign in to Google once"
   about: "Signs your Google accounts in to Gmail, Google Calendar, Drive, Docs and Sheets, and out again. Each account you add is yours alone."
   category: Connectors

@@ -20,7 +20,7 @@ defmodule ServerDebug do
   def icon, do: "icon.svg"
 
   @impl true
-  def title, do: "Server Debug"
+  def requires, do: %{"core" => ">= 0.22.18"}
 
   @impl true
   def tools do

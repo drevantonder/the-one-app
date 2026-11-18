@@ -2,6 +2,7 @@
 name: google-calendar
 description: Read before reading the person's Google calendars, or adding, changing or deleting an event in one.
 metadata:
+  title: "Google Calendar"
   subtitle: "Your Google calendars"
   about: "Your AI sees what's on across your Google calendars, and adds, moves or cancels events when you ask."
   category: Connectors

@@ -2,6 +2,7 @@
 name: iphone-simulator
 description: Read before running an iPhone app for the user in Xcode's iOS Simulator, to install a simulator build, try a site in Safari on iOS, or look at and tap on an iPhone screen.
 metadata:
+  title: "iPhone Simulator"
   subtitle: "iPhones on your Mac"
   about: "Runs iPhones in Xcode's Simulator on your Mac, to try apps and sites on. Watch and use one live from any device, and let your AI tap through it."
   category: Agent tools

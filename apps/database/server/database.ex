@@ -6,10 +6,10 @@ defmodule Database do
   @behaviour OneCore.App
 
   @impl true
-  def title, do: "Database"
+  def icon, do: "icon.svg"
 
   @impl true
-  def icon, do: "icon.svg"
+  def requires, do: %{"core" => ">= 0.22.18"}
 
   alias Database.Lease
   alias OneCore.Call

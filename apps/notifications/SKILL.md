@@ -2,6 +2,7 @@
 name: notifications
 description: Read before telling a person something when they aren't looking, or when asked about their notifications, their inbox, or which apps are allowed to notify them.
 metadata:
+  title: "Notifications"
   subtitle: "Alerts on all your devices"
   about: "Notifications from your apps and your AI, on every device you use, kept in your inbox until you clear them. Choose which apps may notify you."
   category: Utilities

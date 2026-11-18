@@ -2,6 +2,7 @@
 name: google-sheets
 description: Read before reading the person's Google Sheets, or adding rows, changing cells or making a spreadsheet.
 metadata:
+  title: "Google Sheets"
   subtitle: "Your Google Sheets"
   about: "Your AI reads your spreadsheets, adds rows, changes cells and makes new ones."
   category: Connectors

@@ -19,13 +19,10 @@ defmodule WebRTC do
   @ttl 4 * 3600
 
   @impl true
-  def title, do: "WebRTC"
-
-  @impl true
   def icon, do: "icon.svg"
 
   @impl true
-  def requires, do: %{"vault" => "to use your Cloudflare TURN key"}
+  def requires, do: %{"core" => ">= 0.22.18", "vault" => "to use your Cloudflare TURN key"}
 
   @impl true
   def tools do

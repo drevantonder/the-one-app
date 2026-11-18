@@ -9,5 +9,5 @@ defmodule AgentSkills do
   def icon, do: "icon.svg"
 
   @impl true
-  def title, do: "Agent Skills"
+  def requires, do: %{"core" => ">= 0.22.18"}
 end

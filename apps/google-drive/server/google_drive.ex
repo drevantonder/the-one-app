@@ -16,23 +16,19 @@ defmodule GoogleDrive do
   @fields_hint "fields is Drive's field list, like id,name,mimeType,parents,modifiedTime,webViewLink"
   @no_folder "No folder among its parents: folder ids come from google-drive_files_list (root is My Drive)."
 
-  # It has no app, so it names and draws itself, in the App Store.
-  @impl true
-  def title, do: google().title
-
+  # It has no app, so it draws itself, in the App Store.
   @impl true
   def icon, do: "icon.png"
 
   @doc "What Google Drive asks of Google, for the `google-account` app."
   def google do
     %{
-      title: "Google Drive",
       scopes: ["https://www.googleapis.com/auth/drive"]
     }
   end
 
   @impl true
-  def requires, do: %{"google-account" => "to reach your files"}
+  def requires, do: %{"core" => ">= 0.22.18", "google-account" => "to reach your files"}
 
   # Its person's Google accounts are google-account's, which signs one in with what each Google app asks of Google.
   @impl true
@@ -328,7 +324,7 @@ defmodule GoogleDrive do
 
   # Google's sign-in, the accounts and Google's API are google-account's, whose tools act for this app.
   defp google(call, tool, inputs) do
-    inputs = Map.new(Map.put(inputs, "title", google().title), &query/1)
+    inputs = Map.new(inputs, &query/1)
     OneCore.Call.tool(call, "google-account", tool, JSON.decode!(JSON.encode!(inputs)))
   end
 

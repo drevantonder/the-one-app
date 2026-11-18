@@ -2,6 +2,7 @@
 name: app-store
 description: Read before showing a person which apps they could install, or answering what's in the network's marketplace.
 metadata:
+  title: "App Store"
   subtitle: "Find, install and manage apps"
   about: "Every app your network can install, by what it's for, and what's installed for you, everyone and your groups: install, update, uninstall and bring back."
   category: Utilities

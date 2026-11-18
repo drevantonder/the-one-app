@@ -2,6 +2,7 @@
 name: chrome
 description: Read before opening, reading or acting on a web page in a browser of your own, to open a page, read it, click, fill in a form or run JavaScript.
 metadata:
+  title: "Chrome"
   subtitle: "A browser for your AI"
   about: "Gives your AI a Chrome of its own on your machine, signed in to nothing, to open pages, click and fill in forms. You can watch it as it goes."
   category: Agent tools

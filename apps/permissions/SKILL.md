@@ -2,6 +2,7 @@
 name: permissions
 description: Read before sharing something, making a group or a sharing link, or when a call is refused for who may reach what, and before an app reaches what it didn't make.
 metadata:
+  title: "Permissions"
   subtitle: "Who can see and change what"
   about: "Share what you make with people, groups or a link, and choose who can see or change it. Make groups for your family or team."
   category: Admin

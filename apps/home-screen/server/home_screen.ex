@@ -21,12 +21,15 @@ defmodule HomeScreen do
   @impl true
   def icon, do: "client/home.svg"
 
+  @impl true
+  def requires, do: %{"core" => ">= 0.22.18"}
+
   alias OneCore.{Artifact, Call}
 
   @impl true
   def entrypoints do
     [
-      %{name: "Home Screen", page: "client/index.html", category: "launcher"},
+      %{page: "client/index.html", category: "launcher"},
       %{
         name: "Colour Mode",
         page: "client/colour-mode.html",

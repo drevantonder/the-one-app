@@ -37,7 +37,7 @@ defmodule AndroidEmulator do
   @impl true
   def requires do
     %{
-      "core" => ">= 0.20.0",
+      "core" => ">= 0.22.18",
       "database" => "to keep your emulators",
       "webrtc" => "to show an emulator's screen live"
     }
@@ -53,7 +53,6 @@ defmodule AndroidEmulator do
   def entrypoints,
     do: [
       %{
-        name: "Android Emulator",
         page: "client/index.html",
         subject: "user"
       }

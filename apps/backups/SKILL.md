@@ -2,6 +2,7 @@
 name: backups
 description: Read when someone asks about backups, wants their network backed up to a disk or to S3-compatible storage, wants something they lost brought back, or has lost the network's bucket.
 metadata:
+  title: "Backups"
   subtitle: "Copies of everything, kept safe"
   about: "Backs up your whole network, everyone's, to a disk on one of your machines or to cloud storage. Bring back anything you lost, or everything at once."
   category: Admin

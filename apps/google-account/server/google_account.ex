@@ -2,7 +2,7 @@ defmodule GoogleAccount do
   @moduledoc """
   What the Google apps (gmail, google-calendar, google-drive, google-docs and google-sheets) share: their person's
   Google accounts and Google's sign-in, and their calls to Google's APIs. A Google app calls this one's tools, which
-  act for the app that called them (its `caller`), with that app's `title`.
+  act for the app that called them (its `caller`), which they name by its title.
 
   Each Google account is one item of its person's Vault, "Google <address>", of this app's type (`vault.types`), and
   every Google app uses it through this one: it's switched on for this app alone, which signs it in, with what
@@ -29,12 +29,9 @@ defmodule GoogleAccount do
   @userinfo "https://openidconnect.googleapis.com/v1/userinfo"
 
   @impl true
-  def requires, do: %{"vault" => "to keep your Google sign-ins"}
+  def requires, do: %{"core" => ">= 0.22.18", "vault" => "to keep your Google sign-ins"}
 
-  # It has no app, and its Google accounts are listed in the Vault, so it names and draws itself.
-  @impl true
-  def title, do: "Google Account"
-
+  # It has no app, and its Google accounts are listed in the Vault, so it draws itself.
   @impl true
   def icon, do: "icon.png"
 
@@ -62,9 +59,8 @@ defmodule GoogleAccount do
   @impl true
   def tools do
     string = &%{type: "string", description: &1}
-    title = string.("The calling app's name, as a person reads it, like Gmail")
     account = string.("Which account: its address, or a part of it only it has. The first if left out")
-    titled = &%{type: "object", properties: Map.put(&1, :title, title), required: ["title" | &2]}
+    object = &%{type: "object", properties: &1, required: &2}
 
     [
       %{
@@ -96,7 +92,7 @@ defmodule GoogleAccount do
         read_only: true,
         description:
           "For a Google app's code: the Google accounts signed in for the app that calls this, each with ok, and why when it's false.",
-        inputs: titled.(%{}, []),
+        inputs: object.(%{}, []),
         outputs: %{
           type: "object",
           properties: %{
@@ -119,11 +115,10 @@ defmodule GoogleAccount do
       %{
         name: "sign_in",
         description:
-          "Starts signing a Google account in, for every Google app you have, or with `account`, signing that one in again, and gives the url to open, where Google signs you in. A Google app's code says its title and scopes.",
+          "Starts signing a Google account in, for every Google app you have, or with `account`, signing that one in again, and gives the url to open, where Google signs you in. A Google app's code says its scopes.",
         inputs: %{
           type: "object",
           properties: %{
-            title: title,
             scopes: %{type: "array", items: %{type: "string"}, description: "What the app asks of Google"},
             account: string.("The account's address, to suggest it to Google")
           }
@@ -142,7 +137,7 @@ defmodule GoogleAccount do
         saying what went wrong for whoever reads it.
         """,
         inputs:
-          titled.(
+          object.(
             %{
               account: account,
               method: string.("GET if left out"),
@@ -186,7 +181,7 @@ defmodule GoogleAccount do
   def call(tool, _inputs, %OneCore.Call{caller: nil}) when tool in ~w(accounts request),
     do: raise("google-account_#{tool} is for the Google apps' code. Each has its own tools.")
 
-  def call("accounts", %{"title" => title}, call) do
+  def call("accounts", _inputs, call) do
     accounts =
       for email <- emails(call) do
         case vault(call, "fetch", Map.put(get(@userinfo), "item", item(email))) do
@@ -195,7 +190,7 @@ defmodule GoogleAccount do
             %{account: email, ok: true}
 
           response ->
-            why = trouble(call, title, email, response)
+            why = trouble(call, email, response)
             again(call, email, response)
             %{account: email, ok: false, why: why}
         end
@@ -226,7 +221,7 @@ defmodule GoogleAccount do
     }
   end
 
-  def call("request", %{"url" => url, "title" => title} = inputs, call) do
+  def call("request", %{"url" => url} = inputs, call) do
     email = account(call, inputs["account"])
 
     {body, type} =
@@ -256,7 +251,7 @@ defmodule GoogleAccount do
 
     if response["status"] not in 200..299 do
       again(call, email, response)
-      raise trouble(call, title, email, response, Map.take(inputs, ["missing", "hint"]))
+      raise trouble(call, email, response, Map.take(inputs, ["missing", "hint"]))
     end
 
     %{status: response["status"], headers: response["headers"], body: decoded(response["body"])}
@@ -307,7 +302,8 @@ defmodule GoogleAccount do
   end
 
   # What went wrong with a call, said for whoever's reading.
-  defp trouble(call, title, email, response, hints \\ %{}) do
+  defp trouble(call, email, response, hints \\ %{}) do
+    title = title(call)
     status = response["status"]
     message = message(response["body"]) || "#{status}"
     again = "#{email} needs signing in again, to let #{title} in: #{app(call)}_sign_in with account #{email}."
@@ -364,6 +360,13 @@ defmodule GoogleAccount do
 
   # The app that called, by the name its tools start with.
   defp app(call), do: Path.basename(call.caller)
+
+  # What a person calls the app that called.
+  defp title(call) do
+    Enum.find_value(OneCore.Apps.running(call.subject), fn {_name, version} ->
+      version.artifact == call.caller && version.title
+    end)
+  end
 
   defp item(email), do: "Google #{email}"
   defp get(url), do: %{"url" => url, "headers" => %{"authorization" => "Bearer {{access_token}}"}}

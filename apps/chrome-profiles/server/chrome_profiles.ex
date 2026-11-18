@@ -110,7 +110,7 @@ defmodule ChromeProfiles do
   @impl true
   def requires do
     %{
-      "core" => ">= 0.20.0",
+      "core" => ">= 0.22.18",
       "vault" => "to keep your profiles",
       "containers" => "to move a profile in and out of its browser",
       "chrome" => "to open a browser with a profile"
@@ -124,10 +124,7 @@ defmodule ChromeProfiles do
   def jobs, do: [%{tool: "save_updates", every: 60}]
 
   # It has no app: its profiles are items of a type of the Vault's, which lists them and draws one with this app's
-  # component (`vault.types`), so it names and draws itself.
-  @impl true
-  def title, do: "Chrome Profiles"
-
+  # component (`vault.types`), so it draws itself.
   @impl true
   def icon, do: "client/icon.svg"
 

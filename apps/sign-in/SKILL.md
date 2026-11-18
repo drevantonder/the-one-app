@@ -2,6 +2,7 @@
 name: sign-in
 description: Read before inviting someone to a network or taking someone out, when a device or an assistant says it isn't in yet or shows a code, or to list or remove someone's devices, assistants and passkeys.
 metadata:
+  title: "Sign-In"
   subtitle: "People, devices and passkeys"
   about: "Invite people to your network, who sign in with a passkey and no password. See and remove your devices and the AI assistants you let in."
   category: "Privacy & Security"

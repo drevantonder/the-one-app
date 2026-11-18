@@ -8,23 +8,19 @@ defmodule GoogleCalendar do
   @api "https://www.googleapis.com/calendar/v3/"
   @day 86_400
 
-  # It has no app, so it names and draws itself, in the App Store.
-  @impl true
-  def title, do: google().title
-
+  # It has no app, so it draws itself, in the App Store.
   @impl true
   def icon, do: "icon.png"
 
   @doc "What Google Calendar asks of Google, for the `google-account` app."
   def google do
     %{
-      title: "Google Calendar",
       scopes: ["https://www.googleapis.com/auth/calendar"]
     }
   end
 
   @impl true
-  def requires, do: %{"google-account" => "to reach your calendars"}
+  def requires, do: %{"core" => ">= 0.22.18", "google-account" => "to reach your calendars"}
 
   # Its person's Google accounts are google-account's, which signs one in with what each Google app asks of Google.
   @impl true
@@ -456,7 +452,7 @@ defmodule GoogleCalendar do
 
   # Google's sign-in, the accounts and Google's API are google-account's, whose tools act for this app.
   defp google(call, tool, inputs) do
-    inputs = Map.new(Map.put(inputs, "title", google().title), &query/1)
+    inputs = Map.new(inputs, &query/1)
     OneCore.Call.tool(call, "google-account", tool, JSON.decode!(JSON.encode!(inputs)))
   end
 

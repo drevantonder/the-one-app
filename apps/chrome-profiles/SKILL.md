@@ -2,6 +2,7 @@
 name: chrome-profiles
 description: Read before using a website as your person, signed in as them (their Personal or Work profile), or when a site in a Chrome browser asks you to sign in.
 metadata:
+  title: "Chrome Profiles"
   subtitle: "Websites, signed in as you"
   about: "Lets your AI use websites as you, in Chrome profiles of yours such as Personal and Work. Sign in once, and it stays signed in."
   category: Agent tools

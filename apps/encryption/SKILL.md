@@ -2,6 +2,7 @@
 name: encryption
 description: Read before an app keeps something that whoever stores the network's data mustn't read, and when a call says something is encrypted and no server may open it, or that a device doesn't hold someone's key.
 metadata:
+  title: "Encryption"
   subtitle: "Data only you can read"
   about: "Encrypts what your apps keep, so whoever stores your network's data can't read it. Your Vault is kept this way."
   category: Admin

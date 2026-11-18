@@ -48,6 +48,9 @@ defmodule ComputerUse do
   def icon, do: "client/icon.svg"
 
   @impl true
+  def requires, do: %{"core" => ">= 0.22.18"}
+
+  @impl true
   def offers do
     [
       %{
@@ -63,7 +66,6 @@ defmodule ComputerUse do
   def entrypoints,
     do: [
       %{
-        name: "Computer Use",
         page: "client/index.html",
         subject: "user"
       }

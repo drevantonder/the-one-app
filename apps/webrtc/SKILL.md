@@ -2,6 +2,7 @@
 name: webrtc
 description: Read before making an app stream a screen or other live video to a person's app over WebRTC, or when a live view says it couldn't connect.
 metadata:
+  title: "WebRTC"
   subtitle: "Live video of your screens"
   about: "Shows the screens your apps open, like a browser you sign in on or your AI's desktop, as smooth live video you can click and type on, through Cloudflare's relays."
   category: Admin

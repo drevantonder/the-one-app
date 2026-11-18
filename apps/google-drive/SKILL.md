@@ -2,6 +2,7 @@
 name: google-drive
 description: Read before finding, uploading, renaming, moving or trashing files in the person's Google Drive.
 metadata:
+  title: "Google Drive"
   subtitle: "Your Drive files"
   about: "Your AI finds, uploads, renames, moves and trashes files in your Google Drive."
   category: Connectors

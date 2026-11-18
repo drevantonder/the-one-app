@@ -22,7 +22,7 @@ defmodule Telemetry do
   def own, do: :installed
 
   @impl true
-  def requires, do: %{"core" => ">= 0.20.0", "database" => "to keep its schedule"}
+  def requires, do: %{"core" => ">= 0.22.18", "database" => "to keep its schedule"}
 
   @impl true
   def hooks, do: ["called", "measured"]
@@ -31,7 +31,7 @@ defmodule Telemetry do
   def jobs, do: [%{tool: "prune", every: 3600}]
 
   @impl true
-  def entrypoints, do: [%{name: "Telemetry", page: "client/index.html"}]
+  def entrypoints, do: [%{page: "client/index.html"}]
 
   @impl true
   def tools do
@@ -398,8 +398,6 @@ defmodule Telemetry do
     fn whose -> owner or whose == OneCore.User.owner(actor || "") end
   end
 
-  # What a person calls each app: its first app's name, where it has one.
-  defp names(call) do
-    for %{name: name, entrypoints: [%{name: entrypoint} | _]} <- Call.apps(call), into: %{}, do: {name, entrypoint}
-  end
+  # What a person calls each app, its title, by its name.
+  defp names(call), do: Map.new(Call.apps(call), &{&1.name, &1.title})
 end

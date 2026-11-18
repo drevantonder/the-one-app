@@ -32,10 +32,13 @@ defmodule GitRepos do
   def icon, do: "client/icon.svg"
 
   @impl true
+  def requires, do: %{"core" => ">= 0.22.18"}
+
+  @impl true
   def hooks, do: ["soft-delete.moved"]
 
   @impl true
-  def entrypoints, do: [%{name: "Git Repos", page: "client/index.html"}]
+  def entrypoints, do: [%{page: "client/index.html"}]
 
   @impl true
   def tools do

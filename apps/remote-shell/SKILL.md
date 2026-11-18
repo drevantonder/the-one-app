@@ -2,6 +2,7 @@
 name: remote-shell
 description: Read before running a command on one of the user's own devices with remote-shell_run.
 metadata:
+  title: "Remote Shell"
   subtitle: "Run commands on your devices"
   about: "Lets your AI run a command on one of your own devices, from anywhere. Every command is logged on the device it ran on."
   category: Devices

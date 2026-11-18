@@ -2,6 +2,7 @@
 name: vault
 description: Read whenever someone mentions or pastes a key, token or password, before asking for one or using one, and before an app signs in to an outside service or uses an account there.
 metadata:
+  title: "Vault"
   subtitle: "Passwords and keys, kept safe"
   about: "Keeps your passwords, keys and sign-ins, and lets your apps and your AI use them without ever seeing them. You choose who may use each one."
   category: "Privacy & Security"

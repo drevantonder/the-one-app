@@ -62,7 +62,7 @@ defmodule SoftDelete do
   def own, do: :installed
 
   @impl true
-  def requires, do: %{"core" => ">= 0.22.4", "database" => "to keep what you deleted for 30 days"}
+  def requires, do: %{"core" => ">= 0.22.18", "database" => "to keep what you deleted for 30 days"}
 
   @impl true
   def hooks, do: ["uninstalled"]
@@ -71,7 +71,6 @@ defmodule SoftDelete do
   def entrypoints,
     do: [
       %{
-        name: "Recently Deleted",
         page: "client/index.html",
         subject: "user"
       }

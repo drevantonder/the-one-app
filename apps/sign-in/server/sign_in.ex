@@ -20,15 +20,15 @@ defmodule SignIn do
   @impl true
   def icon, do: "client/security.svg"
 
+  @impl true
+  def requires, do: %{"core" => ">= 0.22.18"}
+
   # Nothing looks into it as it runs (`server-debug`): what it's given and keeps are what people sign in with.
   @impl true
   def sensitive, do: true
 
   require Logger
   alias OneCore.{Artifact, Call, Edge}
-
-  @impl true
-  def title, do: "Sign-In"
 
   @impl true
   def entrypoints do

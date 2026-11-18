@@ -83,7 +83,7 @@ defmodule Vault do
   @impl true
   def requires do
     %{
-      "core" => ">= 0.20.0",
+      "core" => ">= 0.22.18",
       "encryption" => "to keep your secrets from whoever runs the bucket",
       "database" => "to keep your items"
     }
@@ -111,7 +111,7 @@ defmodule Vault do
   end
 
   @impl true
-  def entrypoints, do: [%{name: "Vault", page: "client/index.html", subject: "user"}]
+  def entrypoints, do: [%{page: "client/index.html", subject: "user"}]
 
   @impl true
   def tools do

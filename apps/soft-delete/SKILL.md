@@ -2,6 +2,7 @@
 name: soft-delete
 description: Read when someone wants back something they deleted, asks what they deleted, or before an app deletes something a person made.
 metadata:
+  title: "Recently Deleted"
   subtitle: "Restore what you deleted"
   about: "Keeps what's deleted for 30 days, then deletes it for good. Restore anything before then, even an app you uninstalled, with what it kept."
   category: Utilities

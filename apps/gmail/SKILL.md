@@ -2,6 +2,7 @@
 name: gmail
 description: Read before searching, reading, labelling, drafting or sending email in the person's Gmail accounts.
 metadata:
+  title: "Gmail"
   subtitle: "Your Gmail, for you and your AI"
   about: "Your AI searches, reads, labels and drafts email in all your Gmail accounts. It sends one only when you ask."
   category: Connectors

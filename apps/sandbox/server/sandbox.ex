@@ -18,10 +18,10 @@ defmodule Sandbox do
   # Without it no untrusted app runs, and a network's members with no server of their own can run only untrusted
   # apps.
   @impl true
-  def title, do: "Sandbox"
+  def icon, do: "icon.svg"
 
   @impl true
-  def icon, do: "icon.svg"
+  def requires, do: %{"core" => ">= 0.22.18"}
 
   @doc """
   Starts `program` with `arguments` behind this machine's sandbox, and gives its standard input and output as a port

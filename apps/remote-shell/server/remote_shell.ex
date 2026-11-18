@@ -7,10 +7,10 @@ defmodule RemoteShell do
   alias RemoteShell.Runner
 
   @impl true
-  def title, do: "Remote Shell"
+  def icon, do: "icon.svg"
 
   @impl true
-  def icon, do: "icon.svg"
+  def requires, do: %{"core" => ">= 0.22.18"}
 
   @impl true
   def tools do

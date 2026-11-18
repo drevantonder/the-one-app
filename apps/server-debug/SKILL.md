@@ -2,6 +2,7 @@
 name: server-debug
 description: Read when an app you deploy misbehaves on a live server and Telemetry's warnings and errors don't say why, to read its debug logs, see its processes or trace a function as it runs.
 metadata:
+  title: "Server Debug"
   subtitle: "Look inside a running app"
   about: "For developers: read an app's debug logs, see what it's running and trace it live on your servers, when it goes wrong and the error doesn't say why."
   category: Developer tools

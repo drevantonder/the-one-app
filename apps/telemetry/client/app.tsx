@@ -104,7 +104,7 @@ function size(bytes: number) {
 }
 const dollars = (cost: number) => cost.toLocaleString(undefined, { style: "currency", currency: "USD", maximumFractionDigits: cost < 1 ? 4 : 2 })
 
-/// A span's name as a person reads it: the app's entrypoint's name, then its tool.
+/// A span's name as a person reads it: its app's title, then its tool.
 /// One Core's own tools are named by themselves.
 function named(where: string, names: Record<string, string>) {
   const [app, ...rest] = where.split(" ")

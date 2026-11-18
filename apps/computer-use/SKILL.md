@@ -2,6 +2,7 @@
 name: computer-use
 description: Read before looking at or acting on a screen (a desktop, an app, anything that isn't only a web page), by screenshot, click, type, scroll and keys.
 metadata:
+  title: "Computer Use"
   subtitle: "Your AI uses a screen"
   about: "Lets your AI see a screen and use it with clicks, typing and keys, for any app, not only web pages. You can watch what it does."
   category: Agent tools

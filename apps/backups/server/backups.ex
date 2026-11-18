@@ -51,14 +51,14 @@ defmodule Backups do
   @impl true
   def requires do
     %{
-      "core" => ">= 0.20.0",
+      "core" => ">= 0.22.18",
       "database" => "to keep where and when you back up",
       "vault" => "to keep your storage's keys"
     }
   end
 
   @impl true
-  def entrypoints, do: [%{name: "Backups", page: "client/index.html"}]
+  def entrypoints, do: [%{page: "client/index.html"}]
 
   @impl true
   def jobs, do: [%{tool: "due", every: 3600}]

@@ -2,6 +2,7 @@
 name: git-repos
 description: Read before making, cloning, pushing to or reading a git repo in the network, or opening a pull request on a repo you can't push to.
 metadata:
+  title: "Git Repos"
   subtitle: "Code, kept in your network"
   about: "Git hosting of your own: repos for you, your groups or everyone, with branches, history and pull requests, on every device you use."
   category: Developer tools

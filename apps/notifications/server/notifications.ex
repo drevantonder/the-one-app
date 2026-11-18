@@ -55,7 +55,7 @@ defmodule Notifications do
   @impl true
   def requires do
     %{
-      "core" => ">= 0.20.0",
+      "core" => ">= 0.22.18",
       "database" => "to keep your inbox",
       "encryption" => "to encrypt what's sent to your devices"
     }
@@ -64,7 +64,7 @@ defmodule Notifications do
   @impl true
   def entrypoints do
     [
-      %{name: "Notifications", page: "client/index.html", subject: "user"}
+      %{page: "client/index.html", subject: "user"}
     ]
   end
 
@@ -412,13 +412,8 @@ defmodule Notifications do
     end)
   end
 
-  # What a person sees each app's entrypoint called, by the app's name, of the ones installed for them. One with no app
-  # is called by its name.
-  defp names(user) do
-    Map.new(OneCore.Apps.running(user), fn {app, version} ->
-      {app, Enum.find_value(version.entrypoints || [], app, & &1[:name])}
-    end)
-  end
+  # What a person calls each app installed for them, its title, by its name.
+  defp names(user), do: Map.new(OneCore.Apps.running(user), fn {app, version} -> {app, version.title} end)
 
   # Who a notification goes to: a user, or the users in a group or the network, whom permissions says.
   defp users(_call, "users/" <> _ = user), do: [user]

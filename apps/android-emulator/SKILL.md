@@ -2,6 +2,7 @@
 name: android-emulator
 description: Read before running an Android app or an Android phone for the user, to install an APK, try a site on Android's Chrome, or look at and tap on an Android screen.
 metadata:
+  title: "Android Emulator"
   subtitle: "Android phones on your own machines"
   about: "Runs Android phones in Google's emulator on your own computers, to try apps and sites on. Watch and use one live from any device, and let your AI tap through it."
   category: Agent tools

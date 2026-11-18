@@ -2,6 +2,7 @@
 name: home-screen
 description: Read before putting an app or a widget on a Home Screen page, arranging one, answering what's on someone's, or giving an app's entrypoint a category or the user it's about.
 metadata:
+  title: "Home Screen"
   subtitle: "Your pages of apps"
   about: "Your Home Screen, everyone's and your groups': pages of apps and widgets, arranged your way, and an App Library of every app you can reach, by category."
   category: Utilities
