@@ -51,8 +51,9 @@ An app is a network's: the commands that build it are in that repo's `app/README
 
 1. Turn signing off in your checkout: `CODE_SIGNING_ALLOWED: NO` in `gen/apple/project.yml`'s settings for both
    targets, `app_iOS` and `Notifications`, then `gen/apple/generate` with the network's config.
-   An `.xcconfig` doesn't do it: `cargo tauri ios build` takes none. Then the network's iPhone build command: its
-   archive succeeds and its export fails (`errSecInternalComponent`), and the app is
+   An `.xcconfig` doesn't do it: `cargo tauri ios build` takes none. Then the network's iPhone build command, with its
+   `app/tauri.conf.json` given to both `generate` and the build (its README does), since that's what writes
+   `applinks:` and `webcredentials:` into `gen/apple/app_iOS/app_iOS.entitlements`: its archive succeeds and its export fails (`errSecInternalComponent`), and the app is
    `gen/apple/build/app_iOS.xcarchive/Products/Applications/<name>.app`. Or build for the simulator with
    `--target aarch64-sim --debug`, which needs no signing.
 2. Put each target's profile in it as `embedded.mobileprovision`, and sign it with that profile's own entitlements
