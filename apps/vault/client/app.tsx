@@ -22,12 +22,14 @@ interface ItemField {
 interface Item {
   name: string
   artifact: string
+  /** What it is, as it was made: a password, an account (a sign-in, or what an app keeps for itself), or an app's. */
+  kind: "password" | "account" | "app_item"
   type: string | null
-  state: State | null
+  status: Status | null
   fields: ItemField[]
   hosts: string[]
-  apps: string[]
-  agents: boolean
+  /** Who may use it: "agents", and the apps switched on for it, by name. */
+  access: string[]
   sign_in?: boolean
   /** If a save from a browser made it: the device of the agent that saved it, the site, and when. */
   added?: { by: string | null; from: string; at: number } | null
@@ -43,9 +45,9 @@ interface Action {
   name?: boolean
 }
 
-/** Which state an item is in, other than ready, which is none. `by` is the app that said it. */
-interface State {
-  state: "busy" | "action_required"
+/** How an item is, other than ready, which is none, as the app that keeps it says. `by` is that app. */
+interface Status {
+  state: "busy" | "needs_action"
   message: string
   action?: Action
   by: string
@@ -69,6 +71,7 @@ interface ItemType {
 interface Request {
   id: string
   title: string
+  state: "waiting" | "allowed" | "declined" | "expired"
   app: { name: string; title: string } | null
   by: string | null
   why: string | null
@@ -162,9 +165,11 @@ const shown = (item: Item) => item.name.slice(typeOf(item)?.prefix.length ?? 0)
 /// The place in the sidebar an item is in: a section an app's type names, Accounts for a sign-in, or Passwords & Keys.
 function placeOf(item: Item): Place {
   const type = typeOf(item)
-  if (type) return type.section === "Accounts" ? "accounts" : `section:${type.section}`
-  return item.sign_in ? "accounts" : "passwords"
+  if (item.kind === "app_item" && type) return type.section === "Accounts" ? "accounts" : `section:${type.section}`
+  return item.kind === "password" ? "passwords" : "accounts"
 }
+/// The requests still waiting for their person.
+const waiting = () => contents().requests.filter((request) => request.state === "waiting")
 /// The sections apps' types are listed under, other than Accounts, which has its own place: "Chrome Profiles".
 const sections = () => [...new Set(contents().types.map((type) => type.section))].filter((section) => section !== "Accounts").sort()
 /// The types an app makes one of from here, in a place.
@@ -285,8 +290,8 @@ function Sidebar() {
       <Whose />
       <List>
         <For each={kinds()}>{(kind) => <Row heading={kind.label} end={<span class="count">{count(kind.to)}</span>} current={at(kind.to)} onClick={() => enter(kind.to)} />}</For>
-        <Show when={contents().requests.length}>
-          <Row heading="Requests" end={<span class="badge" aria-label={`${contents().requests.length} waiting`}>{contents().requests.length}</span>} current={at("requests")} onClick={() => enter("requests")} />
+        <Show when={waiting().length}>
+          <Row heading="Requests" end={<span class="badge" aria-label={`${waiting().length} waiting`}>{waiting().length}</span>} current={at("requests")} onClick={() => enter("requests")} />
         </Show>
       </List>
       <List>
@@ -352,7 +357,7 @@ function Items(props: { place: Place }) {
                   <Row
                     start={<Tile item={item()} />}
                     heading={shown(item())}
-                    text={item().state ? <Line state={item().state!} /> : <Summary item={item()} />}
+                    text={item().status ? <Line status={item().status!} /> : <Summary item={item()} />}
                     current={item().name === open()}
                     onClick={() => choose(item())}
                     action={fixable(item()) ? <Fix item={item()} /> : undefined}
@@ -442,10 +447,10 @@ function ItemScreen(props: { item: Item }) {
       }
       back
     >
-      <Show when={item().state}>
-        {(state) => (
+      <Show when={item().status}>
+        {(status) => (
           <div class="atop">
-            <Line state={state()} />
+            <Line status={status()} />
             <Fix item={item()} />
           </div>
         )}
@@ -473,13 +478,13 @@ function ItemScreen(props: { item: Item }) {
           <Row
             heading="Your agents"
             text="Use it, never see it"
-            end={<Switch aria-label="Your agents" checked={item().agents} onChange={(event) => does("vault_agents", { item: item().name, on: event.currentTarget.checked })} />}
+            end={<Switch aria-label="Your agents" checked={item().access.includes("agents")} onChange={(event) => does("vault_access", { item: item().name, who: "agents", on: event.currentTarget.checked })} />}
           />
           <For each={contents().apps}>
             {(app) => (
               <Row
                 heading={app.title}
-                end={<Switch aria-label={app.title} checked={item().apps.includes(app.name)} onChange={(event) => does("vault_use", { item: item().name, app: app.name, on: event.currentTarget.checked })} />}
+                end={<Switch aria-label={app.title} checked={item().access.includes(app.name)} onChange={(event) => does("vault_access", { item: item().name, who: app.name, on: event.currentTarget.checked })} />}
               />
             )}
           </For>
@@ -519,7 +524,7 @@ function FieldSheet() {
   const remove = async () => {
     const { item, field } = at() as { item: Item; field: ItemField }
     if (!(await confirm({ heading: `Delete ${label(field.name)}?`, text: "It can't be brought back.", action: "Delete", destructive: true }))) return
-    if (await does("vault_remove", { item: item.name, field: field.name })) shut()
+    if (await does("vault_remove_field", { item: item.name, field: field.name })) shut()
   }
   const hidden = () => (at()!.field ? at()!.field!.secret : secret())
   return (
@@ -620,9 +625,9 @@ const wanted = (request: Request) => (request.fields.some((field) => field.secre
 function Requests() {
   return (
     <Screen heading="Requests" back={!beside()} onBack={leave}>
-      <Show when={contents().requests.length} fallback={<Empty>Nothing's waiting.</Empty>}>
+      <Show when={waiting().length} fallback={<Empty>Nothing's waiting.</Empty>}>
         <List>
-          <For each={contents().requests}>{(request) => <Row heading={`${asker(request)} wants ${request.title}`} text={request.why ?? undefined} onClick={() => setAsking(request)} />}</For>
+          <For each={waiting()}>{(request) => <Row heading={`${asker(request)} wants ${request.title}`} text={request.why ?? undefined} onClick={() => setAsking(request)} />}</For>
         </List>
       </Show>
     </Screen>
@@ -785,13 +790,13 @@ function SecurityScreen() {
 
 /// What its app says an item is in, in a row's grey line or atop its screen: a spinner and what's under way, or a
 /// dot and why. Ready is nothing: fine is silent.
-function Line(props: { state: State }) {
+function Line(props: { status: Status }) {
   return (
     <span class="state">
-      <Show when={props.state.state === "busy"} fallback={<span class="dot" aria-hidden="true" />}>
+      <Show when={props.status.state === "busy"} fallback={<span class="dot" aria-hidden="true" />}>
         <Spinner />
       </Show>
-      <span class="message">{props.state.message}</span>
+      <span class="message">{props.status.message}</span>
     </span>
   )
 }
@@ -799,10 +804,10 @@ function Line(props: { state: State }) {
 /// The one action that fixes what its app says an item needs, if it says one.
 function Fix(props: { item: Item }) {
   const [busy, setBusy] = createSignal(false)
-  const action = () => (props.item.state?.state === "action_required" ? props.item.state.action : undefined)
+  const action = () => (props.item.status?.state === "needs_action" ? props.item.status.action : undefined)
   const run = async () => {
     setBusy(true)
-    await act(action()!, props.item.state!.by)
+    await act(action()!, props.item.status!.by)
     setBusy(false)
   }
   return (
@@ -814,11 +819,11 @@ function Fix(props: { item: Item }) {
   )
 }
 /// Whether an item has an action that fixes it.
-const fixable = (item: Item) => item.state?.state === "action_required" && !!item.state.action
+const fixable = (item: Item) => item.status?.state === "needs_action" && !!item.status.action
 
 function Vault() {
   createEffect(
-    () => linked() && contents().requests.find(({ id }) => id === linked()),
+    () => linked() && waiting().find(({ id }) => id === linked()),
     (request) => {
       if (!untrack(linked)) return
       setLinked()

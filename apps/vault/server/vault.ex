@@ -1,28 +1,15 @@
 defmodule Vault do
   @moduledoc """
   The Vault: the one place for everything someone has given access to, used without being seen: keys, passwords,
-  sign-ins, accounts and Chrome profiles. Each is an item with fields, some of them secret, the sites its secrets are
-  sent to, what may use it (the apps its person switched on for it, and their agents if they said so), and which of
-  three states its app says it's in. Other apps register the kinds of item they keep (`vault.types`).
+  sign-ins, accounts and Chrome profiles. Each is an item (`Vault.Items`), kept as an artifact of its own encrypted
+  with their Vault's keys (`Vault.Store`), so only the servers they chose open it, and deleted, restored and purged by
+  soft delete as anything an app made is. Who may use each is one list on it (`Vault.Access`); what's asked of its
+  person waits in `Vault.Requests`; a sign-in to an outside service is `Vault.SignIns`; and a secret leaves only inside
+  a web request to one of its item's websites (`Vault.Fetch`), or to the code of an app with access. No tool here
+  answers with a secret, and nothing a tool raises says one (`Vault.Store.quietly/2`).
 
-  Each item is an artifact of its own, `<owner>/made/vault/<id>`, encrypted with their Vault's keys (`Encryption`), so
-  only the servers they chose open it, and deleted, restored and purged by soft delete as anything an app made is:
-  the Vault stores and encrypts, and keeps no lifecycle of its own. Their Vault's database (`Database`), encrypted the
-  same, says which item each name is, and keeps what's been asked for and the sign-ins under way. A secret gets here
-  encrypted on its person's device for those servers, or sealed from a browser of theirs (`save_from_browser`), and leaves only inside a request to one of its item's sites, or
-  to the code of an app switched on for it. No tool here answers with one, and nothing a tool raises says one: what
-  handles them raises only words of its own (`quietly/2`).
-
-  An app uses an account through the Vault's tools, which act for the app that calls them (its `caller`), so
-  no secret reaches its code: `fetch` makes a web request with an item's fields filled in, `sign_in` starts an
-  OAuth sign-in whose tokens become an item (`Vault.OAuth`), which `fetch` then keeps fresh, `items` lists what it
-  may use, `state` says which state one is in, and `stop_using` switches one off for it. The rest of the tools are its
-  person's, and refuse an app.
-
-  An app trusted with secrets themselves, whose service hands one to a program, calls the functions: `value/3`
-  gives one field, `keep/4` keeps secrets the app made itself, `state/5` says an item's state, `remove/2` deletes
-  one through soft delete, `items/1` lists what it may use, and `write_contents/4` and `read_contents/4` keep and read
-  what's too large for a field.
+  This module is the app: its tools, which act for its person, or for the app that calls them (its `caller`), and
+  the functions an app trusted with secrets calls (`value/3`, `keep/4`, `state/5` and the rest).
   """
   @behaviour OneCore.App
 
@@ -34,60 +21,8 @@ defmodule Vault do
   @impl true
   def sensitive, do: true
 
-  alias OneCore.{Artifact, Call, Apps, Server, User}
-  alias OneCore.Apps.Calls
-  alias Vault.OAuth
-
-  @schema [
-    """
-    create table items (
-      id text primary key, name text not null unique, hosts text not null, agents integer not null default 0,
-      oauth text, changed integer not null
-    ) without rowid
-    """,
-    "create table fields (item text not null, name text not null, value text not null, secret integer not null, unique (item, name))",
-    "create table uses (item text not null, plugin text not null, primary key (item, plugin)) without rowid",
-    """
-    create table requests (
-      id text primary key, title text not null, fields text not null, hosts text not null, plugin text, why text,
-      state text not null, at integer not null
-    ) without rowid
-    """,
-    """
-    create table sign_ins (
-      state text primary key, verifier text not null, service text not null, plugin text not null,
-      item text not null, at integer not null
-    ) without rowid
-    """,
-    """
-    create table contents (
-      item text not null, name text not null, blob text not null, key text not null, size integer not null,
-      at integer not null, primary key (item, name)
-    ) without rowid
-    """,
-    # Which item each name is, now that each item is an artifact of its own. The tables before it are what was kept
-    # before that, which each item was copied from (`moved/2`).
-    "create table artifacts (id text primary key, name text not null)",
-    # What was a plugin is an app.
-    "alter table uses rename column plugin to app",
-    "alter table requests rename column plugin to app",
-    "alter table sign_ins rename column plugin to app",
-    # Where each sign-in began, the apps it's for, and how it ended, which its page says (`@sign_in_moves`).
-    "alter table sign_ins add column began text",
-    "alter table sign_ins add column apps text",
-    "alter table sign_ins add column ended text",
-    "alter table sign_ins add column ending text",
-    # The agent that asked, by its name, where an agent did.
-    "alter table requests add column by text"
-  ]
-
-  # Where a sign-in to an outside service is. It's `started` as the link is given, and kept by its `state` with where
-  # it began (`began/1`): an app's screen, an agent, or `one` in a terminal. Its service sends its person's browser
-  # back, which ends it, once: `ok`, its tokens kept; `cancelled`, they said no there; or `failed`, saying why. It
-  # stays ended, so its page shows the same ending however often it's opened, until it's gone with the rest that
-  # waited too long. What the page then shows is the ending for where it began (`apps/vault/edge/page/page.tsx`),
-  # and Try Again on one that didn't sign in starts another as it began.
-  @sign_in_moves %{"started" => ~w(ok cancelled failed), "ok" => [], "cancelled" => [], "failed" => []}
+  alias OneCore.{Artifact, Call}
+  alias Vault.{Access, Fetch, Items, Requests, SignIns, Store}
 
   # How ready someone's Vault is, which `security` says and its screen shows, worked out each time from their key and
   # the servers they chose, never kept. Each state is the first thing missing, in the order they're done:
@@ -100,9 +35,6 @@ defmodule Vault do
   # not with the key); only choosing servers and approving devices need it.
   @readiness ~w(not_set_up no_server device_lacks_key ready)
 
-  # How long a request waits for its person, and a sign-in for its browser, in seconds.
-  @request_waits 7 * 86_400
-  @sign_in_waits 600
   # The most of an answer's body that a tool answers with, in bytes.
   @most 256 * 1024
 
@@ -136,6 +68,10 @@ defmodule Vault do
       }
     ]
   end
+
+  # Requests that waited too long are kept expired, and what ended long ago is let go (`Vault.Requests`).
+  @impl true
+  def jobs, do: [%{tool: "expire", every: 3600}]
 
   @impl true
   def entrypoints, do: [%{page: "client/index.html", subject: "user"}]
@@ -178,10 +114,11 @@ defmodule Vault do
                 properties: %{
                   name: %{type: "string"},
                   artifact: %{type: "string", description: "The artifact it is, which soft delete deletes and restores it by"},
-                  type: %{type: ["string", "null"], description: "Its type's id, as `types` lists them, if it's of one"},
-                  state: %{
+                  kind: %{type: "string", enum: Items.kinds(), description: "password, account (a sign-in, or what an app keeps for itself) or app_item (of an app's type)"},
+                  type: %{type: ["string", "null"], description: "Its type's id, as `types` lists them, if it's an app_item"},
+                  status: %{
                     type: ["object", "null"],
-                    description: "Null when it's ready; else busy with a message, or action_required with why and an action, as its app says"
+                    description: "Null when it's ready; else busy with a message, or needs_action with why and an action, as its app says"
                   },
                   fields: %{
                     type: "array",
@@ -196,8 +133,7 @@ defmodule Vault do
                     }
                   },
                   hosts: %{type: "array", items: %{type: "string"}, description: "The sites its secrets are sent to"},
-                  apps: %{type: "array", items: %{type: "string"}, description: "The apps switched on for it"},
-                  agents: %{type: "boolean", description: "Whether agents may use it, with fetch"},
+                  access: %{type: "array", items: %{type: "string"}, description: "Who may use it: agents (with fetch), and the apps switched on for it"},
                   sign_in: %{type: "boolean", description: "Whether a sign-in made it"},
                   added: %{
                     type: ["object", "null"],
@@ -205,17 +141,18 @@ defmodule Vault do
                   },
                   changed: %{type: ["integer", "null"], description: "When it last changed, in milliseconds since 1970"}
                 },
-                required: ["name", "artifact", "type", "state", "fields", "hosts", "apps", "agents", "sign_in"]
+                required: ["name", "artifact", "kind", "type", "status", "fields", "hosts", "access", "sign_in"]
               }
             },
             requests: %{
               type: "array",
-              description: "The requests still waiting for their person",
+              description: "The requests kept: those waiting for their person, and those that ended in the last month",
               items: %{
                 type: "object",
                 properties: %{
                   id: %{type: "string"},
                   title: %{type: "string"},
+                  state: %{type: "string", enum: Requests.states()},
                   fields: %{type: "array", items: %{type: "object"}},
                   hosts: %{type: "array", items: %{type: "string"}},
                   app: %{
@@ -226,7 +163,7 @@ defmodule Vault do
                   by: %{type: ["string", "null"], description: "The agent that asked, by its name, where one did"},
                   why: %{type: ["string", "null"]}
                 },
-                required: ["id", "title", "fields", "hosts", "app", "by", "why"]
+                required: ["id", "title", "state", "fields", "hosts", "app", "by", "why"]
               }
             },
             apps: %{
@@ -415,7 +352,7 @@ defmodule Vault do
       %{
         name: "status",
         read_only: true,
-        description: "Says how a request went: waiting, set, declined or expired. Never a value.",
+        description: "Says how a request went: waiting, allowed, declined or expired. Never a value. `list` says it too.",
         inputs: %{
           type: "object",
           properties: %{id: %{type: "string", description: "The request's id"}},
@@ -423,7 +360,7 @@ defmodule Vault do
         },
         outputs: %{
           type: "object",
-          properties: %{title: %{type: "string"}, state: %{type: "string", enum: ~w(waiting set declined expired)}},
+          properties: %{title: %{type: "string"}, state: %{type: "string", enum: Requests.states()}},
           required: ["title", "state"]
         }
       },
@@ -443,7 +380,7 @@ defmodule Vault do
           },
           required: ["id"]
         },
-        outputs: %{type: "object", properties: %{state: %{type: "string", enum: ~w(set declined)}}, required: ["state"]}
+        outputs: %{type: "object", properties: %{state: %{type: "string", enum: ~w(allowed declined)}}, required: ["state"]}
       },
       %{
         name: "fetch",
@@ -501,7 +438,7 @@ defmodule Vault do
                   name: %{type: "string"},
                   sign_in: %{type: ["string", "null"], description: "The service whose sign-in made it, if one did"},
                   artifact: %{type: "string", description: "The artifact it is, as soft delete knows it"},
-                  state: %{type: ["object", "null"], description: "Null when it's ready, else what `state` last said of it"}
+                  state: %{type: ["object", "null"], description: "Null when it's ready, else what `state` last said of it: busy or needs_action"}
                 },
                 required: ["name", "sign_in", "artifact", "state"]
               }
@@ -578,11 +515,11 @@ defmodule Vault do
           type: "object",
           properties: %{
             item: item,
-            state: %{type: "string", enum: ~w(ready busy action_required)},
+            state: %{type: "string", enum: ~w(ready busy needs_action action_required), description: "action_required is what needs_action was called"},
             message: %{type: "string", description: "What's under way, or why its person has to act"},
             action: %{
               type: "object",
-              description: "For action_required: {label, tool, inputs} or {label, page}",
+              description: "For needs_action: {label, tool, inputs} or {label, page}",
               properties: %{
                 label: %{type: "string", description: "The button's words, like Sign In"},
                 tool: %{type: "string", description: "A tool of the app's, like sign_in"},
@@ -681,6 +618,47 @@ defmodule Vault do
         }
       },
       %{
+        name: "access",
+        description: """
+        Gives an app or your agents access to an item, or with `on` false takes it away. An app with access uses the
+        item through the Vault's tools without seeing it, or, one with a service, is handed the secret itself, which
+        trusts its code with it. Whether agents may use one is its person's to decide, in the Vault's app or by allowing
+        a request: an agent asks with `request`, and doesn't give itself access. Called by an app's code, it takes the
+        app's own access away, as signing out does, and only that.
+        """,
+        inputs: %{
+          type: "object",
+          properties: %{
+            item: item,
+            who: %{type: "string", description: "An app, by its name, like gmail; or agents"},
+            on: %{type: "boolean", description: "False takes it away"}
+          },
+          required: ["item", "who"]
+        },
+        outputs: %{
+          type: "object",
+          properties: %{item: item, who: %{type: "string"}, on: %{type: "boolean"}},
+          required: ["item", "who", "on"]
+        }
+      },
+      %{
+        name: "remove_field",
+        description:
+          "Removes a field from an item. Deleting a whole item is soft delete's, as for anything an app made: `soft-delete_delete` with the item's artifact, as `list` gives it, so it can be restored for 30 days.",
+        inputs: %{
+          type: "object",
+          properties: %{item: item, field: %{type: "string", description: "The field to remove"}},
+          required: ["item", "field"]
+        },
+        outputs: %{type: "object", properties: %{item: item, field: %{type: "string"}}, required: ["item", "field"]}
+      },
+      %{
+        name: "expire",
+        description: "Marks requests that waited a week as expired, and lets go of those that ended a month ago. The clock calls it each hour",
+        inputs: %{type: "object", properties: %{}},
+        outputs: %{type: "object", properties: %{expired: %{type: "integer"}}, required: ["expired"]}
+      },
+      %{
         name: "security",
         read_only: true,
         description: """
@@ -737,7 +715,7 @@ defmodule Vault do
           type: "object",
           properties: %{
             service: %{type: "string"},
-            status: %{type: "string", enum: Map.keys(@sign_in_moves)},
+            status: %{type: "string", enum: SignIns.states()},
             began: %{
               type: "object",
               description: "Where: `{screen: <app>}`, `{agent: <its name>}` or `{cli: true}`",
@@ -756,113 +734,98 @@ defmodule Vault do
   end
 
   @doc """
-  One field of an item, for the app that calls this, which its person switched on for the item: to hand to a
-  program a service brings. What's given is the secret itself, so it goes nowhere a person or an agent reads.
+  One field of an item, for the app that calls this, which has access to it: to hand to a program a service brings.
+  What's given is the secret itself, so it goes nowhere a person or an agent reads.
   """
   def value(%Call{} = call, item, field) do
-    db = reached(call)
+    db = Store.reached(call)
 
-    quietly("Reading #{field}", fn ->
-      found = allowed!(find!(call, db, item), {:app, call.who})
-      fields(found)[field] || raise "#{found["name"]} has no field named #{field}."
+    Store.quietly("Reading #{field}", fn ->
+      found = Access.may!(Items.find!(call, db, item), {:app, call.who})
+      Items.fields(found)[field] || raise "#{found["name"]} has no field named #{field}."
     end)
+  end
+
+  @doc """
+  The fields of the item `item`, by their names, for the app that calls this, which has access to it: as `value/3`
+  gives each.
+  """
+  def values(%Call{} = call, item) do
+    db = Store.reached(call)
+    Store.quietly("Reading #{item}", fn -> Items.fields(Access.may!(Items.find!(call, db, item), {:app, call.who})) end)
   end
 
   @doc """
   Keeps `fields`, by their names, in the item `item`, for the app that calls this: secrets it made itself or an
   outside service handed it, such as the key a session it holds is encrypted with. Each is secret. An item there's
-  none of is made, switched on for the app, with `hosts` its sites; one that's there is changed only if it's
-  switched on for the app.
+  none of is made, of the app's type where its name is of one (`vault.types`), else an account of the app's, with
+  access for it and `hosts` its websites; one that's there is changed only if the app has access to it.
   """
   def keep(%Call{} = call, item, fields, hosts \\ []) when is_map(fields) do
-    # The app reaches the Vault as an editor of it from here on, as a sign-in has it.
-    share(call, "share", theirs(call), call.who)
-    db = reached(call)
+    Access.reach(call)
+    db = Store.reached(call)
 
-    quietly("Keeping #{item}", fn ->
-      found =
-        case find(call, db, item) do
-          nil -> create(call, db, item, hosts, %{"uses" => [call.who]})
-          found -> allowed!(found, {:app, call.who})
-        end
-
-      change!(db, found, fn record -> Enum.reduce(fields, record, fn {name, value}, record -> put_field(record, name, value, true) end) end)
-      :ok
-    end)
-  end
-
-  @doc """
-  Deletes the item `item`, for the app that calls this, which its person switched on for it or which it made with
-  `keep/4`, as anything an app made is deleted: by soft delete, which keeps it, contents and all, for 30 days, so it
-  can be restored as it was. One that isn't there is nothing to delete.
-  """
-  def remove(%Call{} = call, item) do
-    db = reached(call)
-
-    quietly("Deleting #{item}", fn ->
-      if found = find(call, db, item), do: delete!(call, db, allowed!(found, {:app, call.who}))
-      :ok
-    end)
-  end
-
-  @doc """
-  Renames the item `item` to `to`, for the app that calls this, which it's switched on for. Its fields, its
-  contents and whatever it's switched on for go with it.
-  """
-  def rename(%Call{} = call, item, to) do
-    db = reached(call)
-
-    quietly("Renaming #{item}", fn ->
-      found = allowed!(find!(call, db, item), {:app, call.who})
-      if String.trim(to) == "", do: raise("An item has a name.")
-
-      transaction(call, db, fn d ->
-        if taken(d, db, to, found["id"]) != [], do: raise("There's an item named #{to} already.")
-        query(d, "update artifacts set name = ? where id = ?", [to, found["id"]])
+    Store.quietly("Keeping #{item}", fn ->
+      Items.write!(call, db, item, Items.kept_by(call, call.who, item, hosts), {:app, call.who}, fn record ->
+        Enum.reduce(fields, record, fn {name, value}, record -> Items.put_field(record, name, value, true) end)
       end)
 
-      change!(db, found, &Map.put(&1, "name", to))
       :ok
     end)
   end
 
   @doc """
-  The fields of the item `item`, by their names, for the app that calls this, which it's switched on for: as
-  `value/3` gives each.
+  Deletes the item `item`, for the app that calls this, which has access to it, as anything an app made is deleted:
+  by soft delete, which keeps it, contents and all, for 30 days, so it can be restored as it was. One that isn't there
+  is nothing to delete.
   """
-  def values(%Call{} = call, item) do
-    db = reached(call)
-    quietly("Reading #{item}", fn -> fields(allowed!(find!(call, db, item), {:app, call.who})) end)
+  def remove(%Call{} = call, item) do
+    db = Store.reached(call)
+
+    Store.quietly("Deleting #{item}", fn ->
+      if found = Items.find(call, db, item), do: delete!(call, db, Access.may!(found, {:app, call.who}))
+      :ok
+    end)
   end
 
   @doc """
-  Says which of three states the item `item` is in, for the app that calls this, which it's switched on for, so
-  its person sees it in the Vault: `:ready`, usable, which shows nothing; `:busy`, something's under way, said in
-  `message` ("Saving…"), which shows a spinner and it; or `:action_required`, its person has to act, `message` saying
-  why ("Signed out on your phone") and `action` the one thing that fixes it, which shows a dot, why and a button. The
-  app keeps its own detailed states and says only which of these it's in. `action` is the app's own:
-  `%{label: "Sign In", tool: "sign_in", inputs: %{account: "+614..."}}`, a tool of the app's, called as its person,
-  whose `url`, if it gives one, opens in their browser; or `%{label: "Sign In", page: "client/sign-in.html#+614..."}`,
-  a page of the app's, opened over the Vault. Whether its person is notified too is the app's to choose, with
-  `notifications`.
+  Renames the item `item` to `to`, for the app that calls this, which has access to it. Its fields, its contents and
+  its access go with it.
+  """
+  def rename(%Call{} = call, item, to) do
+    db = Store.reached(call)
+
+    Store.quietly("Renaming #{item}", fn ->
+      Store.rename(call, db, Access.may!(Items.find!(call, db, item), {:app, call.who}), to)
+      :ok
+    end)
+  end
+
+  @doc """
+  Says how the item `item` is, for the app that calls this, which keeps it, so its person sees it in the Vault:
+  `:ready`, usable, which shows nothing; `:busy`, something's under way, said in `message` ("Saving…"), which shows a
+  spinner and it; or `:needs_action`, its person has to act, `message` saying why ("Signed out on your phone") and
+  `action` the one thing that fixes it, which shows a dot, why and a button. The app keeps its own detailed states and
+  says only which of these it's in (`Vault.Items`' status). `action` is the app's own: `%{label: "Sign In", tool:
+  "sign_in", inputs: %{account: "+614..."}}`, a tool of the app's, called as its person, whose `url`, if it gives one,
+  opens in their browser; or `%{label: "Sign In", page: "client/sign-in.html#+614..."}`, a page of the app's, opened
+  over the Vault. Whether its person is notified too is the app's to choose, with `notifications`.
   """
   def state(%Call{} = call, item, state, message \\ nil, action \\ nil) do
-    db = reached(call)
-    said = said!(state, message, action, app_name(call, call.who))
+    db = Store.reached(call)
 
-    quietly("Changing #{item}", fn ->
-      found = allowed!(find!(call, db, item), {:app, call.who})
-      if found["state"] != said, do: change!(db, found, &Map.put(&1, "state", said))
+    Store.quietly("Changing #{item}", fn ->
+      Items.status!(call, db, Items.find!(call, db, item), call.who, state, message, action)
       Call.changed(call)
       :ok
     end)
   end
 
   @doc """
-  Keeps the contents `name` of the item `item`, for the app that calls this, which it's switched on for: what's
-  too large for a field, like a Chrome profile's hundreds of MB, kept as 1Password keeps a file. They're a blob of the
-  item's, beside its record, sealed under a key made for that blob alone, which only the item holds, so soft delete
-  deletes and restores them with it.
+  Keeps the contents `name` of the item `item`, for the app that calls this, which has access to it: what's too large
+  for a field, like a Chrome profile's hundreds of MB, kept as 1Password keeps a file. They're a blob of the item's,
+  beside its record, sealed under a key made for that blob alone, which only the item holds, so soft delete deletes
+  and restores them with it.
 
   `send` is given where they go, `%{"link" => link, "key" => key}`: a short-lived link that writes one blob, and the
   key, base64. It hands them to whatever holds the bytes, which seals them a chunk at a time and sends them, as
@@ -871,66 +834,64 @@ defmodule Vault do
   leaves the last one whole. Gives the size.
   """
   def write_contents(%Call{} = call, item, name, send) when is_function(send, 1) do
-    db = reached(call)
+    db = Store.reached(call)
     {blob, key} = {Base.encode16(:crypto.strong_rand_bytes(16), case: :lower), Base.encode64(:crypto.strong_rand_bytes(32))}
 
-    quietly("Keeping #{name} of #{item}", fn ->
-      found = allowed!(find!(call, db, item), {:app, call.who})
+    Store.quietly("Keeping #{name} of #{item}", fn ->
+      found = Access.may!(Items.find!(call, db, item), {:app, call.who})
       path = "#{found["id"]}/contents/#{blob}"
-      size = send.(%{"link" => link(db, path, :write), "key" => key})
-      kept = %{"blob" => path, "key" => key, "size" => size, "at" => now()}
-      change!(db, found, &Map.update(&1, "contents", %{name => kept}, fn contents -> Map.put(contents, name, kept) end))
+      size = send.(%{"link" => Store.link(db, path, :write), "key" => key})
+      kept = %{"blob" => path, "key" => key, "size" => size, "at" => Store.now()}
+      Store.change!(db, found, &Map.update(&1, "contents", %{name => kept}, fn contents -> Map.put(contents, name, kept) end))
       was = found["contents"][name]
-      if was && was["blob"] != path, do: Artifact.remove(root(db), was["blob"])
+      if was && was["blob"] != path, do: Artifact.remove(Store.root(db), was["blob"])
       size
     end)
   end
 
   @doc """
-  Reads the contents `name` of the item `item`, for the app that calls this, which it's switched on for:
-  `receive` is given where they are, `%{"link" => link, "key" => key, "size" => size}`, a short-lived link that reads
-  the blob and its key, to hand to whatever takes the bytes, which fetches and opens them a chunk at a time, as
-  Containers' `download` does. Gives what `receive` gives, or `nil` where the item has no such contents yet.
+  Reads the contents `name` of the item `item`, for the app that calls this, which has access to it: `receive` is
+  given where they are, `%{"link" => link, "key" => key, "size" => size}`, a short-lived link that reads the blob and
+  its key, to hand to whatever takes the bytes, which fetches and opens them a chunk at a time, as Containers'
+  `download` does. Gives what `receive` gives, or `nil` where the item has no such contents yet.
   """
   def read_contents(%Call{} = call, item, name, receive) when is_function(receive, 1) do
-    db = reached(call)
+    db = Store.reached(call)
 
-    quietly("Reading #{name} of #{item}", fn ->
-      found = allowed!(find!(call, db, item), {:app, call.who})
+    Store.quietly("Reading #{name} of #{item}", fn ->
+      found = Access.may!(Items.find!(call, db, item), {:app, call.who})
 
       if kept = found["contents"][name],
-        do: receive.(%{"link" => link(db, kept["blob"], :read), "key" => kept["key"], "size" => kept["size"]})
+        do: receive.(%{"link" => Store.link(db, kept["blob"], :read), "key" => kept["key"], "size" => kept["size"]})
     end)
   end
 
   @doc """
-  The items switched on for the app that calls this, by name, each with the service whose sign-in made it, if one
-  did, its artifact, which soft delete knows it by, and its state, as `state/5` last said it:
+  The items the app that calls this has access to, by name, each with the service whose sign-in made it, if one did,
+  its artifact, which soft delete knows it by, and its status, as `state/5` last said it:
   `[%{name: "Google a@example.com", sign_in: "Google", artifact: "users/a/made/vault/x1", state: nil}]`. None before
   anything is.
   """
   def items(%Call{} = call) do
-    if Call.reaches?(call, theirs(call), "editor") do
-      db = reached(call)
-      used_by(db, everything(call, db), call.who)
+    if Call.reaches?(call, Store.theirs(call), "editor") do
+      db = Store.reached(call)
+      used_by(db, Items.all(call, db), call.who)
     else
       []
     end
   end
 
   defp used_by(db, items, app) do
-    for item <- Enum.sort_by(items, &String.downcase(&1["name"])), app in item["uses"] do
-      %{
-        name: item["name"],
-        sign_in: item["oauth"] && item["oauth"]["name"],
-        artifact: artifact(db, item["id"]),
-        state: item["state"]
-      }
+    for item <- Enum.sort_by(items, &String.downcase(&1["name"])), app in item["access"] do
+      %{name: item["name"], sign_in: item["oauth"] && item["oauth"]["name"], artifact: Store.artifact(db, item["id"]), state: item["status"]}
     end
   end
 
+  # Deletes an item as anything an app made is deleted: by soft delete, which keeps it for 30 days.
+  defp delete!(call, db, item), do: Call.tool(call, "soft-delete", "delete", %{"artifact" => Store.artifact(db, item["id"])})
+
   # The tools an app's code calls, which act for it. The rest are its person's.
-  @apps ~w(fetch items sign_in stop_using state)
+  @apps ~w(fetch items sign_in stop_using state access)
 
   @impl true
   def call(tool, _inputs, %Call{caller: caller}) when caller != nil and tool not in @apps,
@@ -940,124 +901,75 @@ defmodule Vault do
     do: raise("vault_#{tool} is for an app's code, and acts for the app that calls it.")
 
   def call("items", _inputs, call) do
-    db = own(call)
-    %{items: used_by(db, everything(call, db), call.caller)}
+    db = Store.own(call)
+    %{items: used_by(db, Items.all(call, db), call.caller)}
   end
 
   def call("stop_using", %{"item" => name}, call) do
-    db = own(call)
-    change!(db, find!(call, db, name), &Map.update!(&1, "uses", fn uses -> uses -- [call.caller] end))
+    call("access", %{"item" => name, "who" => "itself", "on" => false}, call)
     %{item: name}
   end
 
   def call("state", %{"item" => name, "state" => state} = inputs, call) do
-    db = own(call)
-    said = said!(state, inputs["message"], inputs["action"], app_name(call, call.caller))
-    found = allowed!(find!(call, db, name), {:app, call.caller})
-    if found["state"] != said, do: change!(db, found, &Map.put(&1, "state", said))
+    db = Store.own(call)
+    Items.status!(call, db, Items.find!(call, db, name), call.caller, state, inputs["message"], inputs["action"])
     Call.changed(call)
     %{item: name, state: state}
   end
 
   def call("sign_in", %{"service" => given} = inputs, call) do
-    db = own(call)
-    service = service(given)
-    apps = inputs["apps"] || [title(call, call.caller)]
-    %{url: started(call, db, service, call.caller, inputs["item"] || service.name, began(call), apps)}
+    db = Store.own(call)
+    service = SignIns.service(given)
+    apps = inputs["apps"] || [Items.title(call, call.caller)]
+    %{url: SignIns.start(call, db, service, call.caller, inputs["item"] || service.name, SignIns.began(call), apps)}
   end
 
   # From the database, which keeps each item's name while soft delete has it aside.
   def call("names", %{"artifacts" => artifacts}, call) do
-    db = own(call)
-    rows = transaction(call, db, &query(&1, "select id, name from artifacts"))
-    %{names: for(%{"id" => id, "name" => name} <- rows, artifact(db, id) in artifacts, do: %{artifact: artifact(db, id), name: name})}
+    names = Store.names(call, Store.own(call))
+    %{names: for({artifact, name} <- names, artifact in artifacts, do: %{artifact: artifact, name: name})}
   end
 
+  def call("unlocked_on", _inputs, call), do: Store.encryption(call).unlocked_on(call, Store.items_artifact(call))
+
   def call("security", inputs, call) do
-    opened = encryption(call).unlocked_on(call, items_artifact(call))
+    opened = Store.encryption(call).unlocked_on(call, Store.items_artifact(call))
     key = Call.tool(call, "encryption", "key", Map.take(inputs, ["device"]))
     Map.merge(opened, %{readiness: readiness(key, opened.servers), owner: key["owner"], holds: key["slot"] != nil, device: key["device"], devices: key["devices"], asking: key["asking"]})
   end
-
-  def call("unlocked_on", _inputs, call), do: encryption(call).unlocked_on(call, items_artifact(call))
 
   def call("grant", %{"servers" => _servers} = inputs, call) do
     keys =
       inputs["keys"] ||
         raise "Which servers open your Vault is chosen in the Vault's app on a trusted device.\n\nOr with `one vault grant` on it."
 
-    %{servers: encryption(call).choose(call, items_artifact(call), keys)}
+    %{servers: Store.encryption(call).choose(call, Store.items_artifact(call), keys)}
   end
 
   def call("list", _inputs, call) do
-    db = own(call)
-    names = names(call)
-    types = types(call)
+    db = Store.own(call)
+    names = Items.names(call)
+    types = Items.types(call)
 
     use_it =
-      for({name, version} <- Apps.running(call.subject), is_map_key(version.requires, "vault"), do: %{name: name, title: version.title || name})
+      for({name, version} <- OneCore.Apps.running(call.subject), is_map_key(version.requires, "vault"), do: %{name: name, title: version.title || name})
       |> Enum.sort_by(&String.downcase(&1.title))
 
-    items =
-      for item <- Enum.sort_by(everything(call, db), &String.downcase(&1["name"])) do
-        fields =
-          for field <- item["fields"] do
-            if field["secret"],
-              do: %{name: field["name"], secret: true},
-              else: %{name: field["name"], secret: false, value: field["value"]}
-          end
-
-        apps = for app <- item["uses"], do: named(names, app)
-
-        # An item is of an app's type when it's switched on for that app and named as the type says.
-        type = Enum.find(types, &(&1.app in apps and String.starts_with?(item["name"], &1.prefix)))
-
-        %{
-          name: item["name"],
-          artifact: artifact(db, item["id"]),
-          type: type && type.id,
-          state: item["state"],
-          fields: fields,
-          hosts: item["hosts"],
-          apps: Enum.sort(apps),
-          agents: item["agents"],
-          sign_in: item["oauth"] != nil,
-          added: item["added"],
-          changed: item["changed"]
-        }
-      end
-
-    waiting =
-      "select id, title, fields, hosts, app, by, why from requests where state = 'waiting' and at > ? order by at"
-
-    requests =
-      transaction(call, db, fn d ->
-        for request <- query(d, waiting, [now() - @request_waits]) do
-          %{
-            id: request["id"],
-            title: request["title"],
-            fields: JSON.decode!(request["fields"]),
-            hosts: JSON.decode!(request["hosts"]),
-            app: request["app"] && %{name: named(names, request["app"]), title: title(call, request["app"])},
-            by: request["by"],
-            why: request["why"]
-          }
-        end
-      end)
-
-    %{items: items, requests: requests, apps: use_it, types: types}
+    items = for item <- Enum.sort_by(Items.all(call, db), &String.downcase(&1["name"])), do: Items.listed(item, db, names, types)
+    %{items: items, requests: Requests.all(call, db, names), apps: use_it, types: Enum.map(types, &Map.delete(&1, :artifact))}
   end
 
+  # A person's own write of a field: into the item, or a new password where there's none. Websites given are added to
+  # its own, never put in their place.
   def call("set", %{"item" => name, "field" => field, "value" => value} = inputs, call) do
-    db = own(call)
+    db = Store.own(call)
 
-    quietly("Keeping #{field}", fn ->
-      value = encryption(call).secret(call, value)
-      found = find(call, db, name) || create(call, db, name, Map.get(inputs, "hosts", []))
+    Store.quietly("Keeping #{field}", fn ->
+      value = Store.encryption(call).secret(call, value)
+      hosts = Map.get(inputs, "hosts", [])
 
-      change!(db, found, fn record ->
-        record = if hosts = inputs["hosts"], do: Map.put(record, "hosts", hosts!(hosts)), else: record
-        put_field(record, field, value, Map.get(inputs, "secret", true))
+      Items.write!(call, db, name, Items.password(hosts), :person, fn record ->
+        record |> Items.add_hosts(hosts) |> Items.put_field(field, value, Map.get(inputs, "secret", true))
       end)
 
       %{item: name, field: field}
@@ -1066,190 +978,117 @@ defmodule Vault do
 
   # A secret from a browser of theirs, which Chrome sends sealed under a key made here for it alone (its `upload`), so
   # it never passes through a tool's result. It goes only into a new item, or one a save from a browser made, which
-  # its person sees was added, by whom and from where, and undoes by deleting it.
+  # its person sees was added, by whom and from where, and deletes as any item.
   def call("save_from_browser", %{"session" => session, "item" => name, "fields" => fields} = inputs, call) do
-    db = own(call)
-    secret = Map.new(fields, fn {field, about} -> {field!(field), Map.get(about, "secret", true)} end)
+    db = Store.own(call)
+    secret = Map.new(fields, fn {field, about} -> {Items.field!(field), Map.get(about, "secret", true)} end)
 
-    quietly("Saving from the browser", fn ->
-      found = find(call, db, name)
+    Store.quietly("Saving from the browser", fn ->
+      found = Items.find(call, db, name)
 
       if found && found["added"] == nil,
         do: raise("#{found["name"]} is in the Vault already, made by its person. Save to a new item, or ask them, with request.")
 
-      {blob, key} = {"saving/#{random(12)}", :crypto.strong_rand_bytes(32)}
+      {blob, key} = {"saving/#{Store.random(12)}", :crypto.strong_rand_bytes(32)}
       taken = Map.new(fields, fn {field, about} -> {field, Map.take(about, ~w(target json))} end)
-      upload = %{"session" => session, "link" => link(db, blob, :write), "key" => Base.encode64(key), "fields" => taken}
+      upload = %{"session" => session, "link" => Store.link(db, blob, :write), "key" => Base.encode64(key), "fields" => taken}
       upload = if download = inputs["download"], do: Map.put(upload, "download", download), else: upload
 
       %{"site" => site, "values" => values} =
         try do
           Call.tool(call, "chrome", "upload", upload)
-          {:ok, sealed, _tag} = Artifact.read(%{root(db) | codec: nil}, blob)
+          {:ok, sealed, _tag} = Artifact.read(%{Store.root(db) | codec: nil}, blob)
           JSON.decode!(opened(sealed, key))
         after
-          Artifact.remove(root(db), blob)
+          Artifact.remove(Store.root(db), blob)
         end
 
       if Enum.sort(Map.keys(values)) != Enum.sort(Map.keys(secret)), do: raise("The browser sent other fields than were asked for.")
-      added = %{"by" => inputs["by"], "from" => site, "at" => now()}
-      found = found || create(call, db, name, Map.get(inputs, "hosts", []))
+      added = %{"by" => inputs["by"], "from" => site, "at" => Store.now()}
+      hosts = Map.get(inputs, "hosts", [])
 
-      change!(db, found, fn record ->
-        record = if hosts = inputs["hosts"], do: Map.put(record, "hosts", hosts!(hosts)), else: record
-        Enum.reduce(values, Map.put(record, "added", added), fn {field, value}, record -> put_field(record, field, value, secret[field]) end)
-      end)
+      saved =
+        Items.write!(call, db, name, Items.password(hosts), :person, fn record ->
+          record = record |> Items.add_hosts(hosts) |> Map.put("added", added)
+          Enum.reduce(values, record, fn {field, value}, record -> Items.put_field(record, field, value, secret[field]) end)
+        end)
 
       Call.changed(call)
       on = if inputs["by"], do: " on #{inputs["by"]}", else: ""
 
       Call.app(call, "notifications").send(call, %{
-        "title" => "An agent#{on} saved #{found["name"]} to your Vault",
-        "text" => "From #{site}. Undo it in Vault if you didn't want it."
+        "title" => "An agent#{on} saved #{saved["name"]} to your Vault",
+        "text" => "From #{site}. Delete it in Vault if you didn't want it."
       })
 
-      saved =
+      kept =
         for {field, value} <- Enum.sort(values) do
           sha256 = :sha256 |> :crypto.hash(value) |> Base.encode16(case: :lower) |> binary_part(0, 8)
           %{name: field, secret: secret[field], length: String.length(value), sha256: sha256}
         end
 
-      %{item: found["name"], site: site, fields: saved}
+      %{item: saved["name"], site: site, fields: kept}
     end)
   end
 
-  # Deleting an item is soft delete's, as for anything an app made: this takes out one of its fields.
-  def call("remove", %{"item" => name, "field" => field}, call) do
-    db = own(call)
-    found = find!(call, db, name)
-    if fields(found)[field] == nil, do: raise("#{name} has no field named #{field}.")
-    change!(db, found, &Map.update!(&1, "fields", fn fields -> Enum.reject(fields, fn kept -> kept["name"] == field end) end))
+  def call(remove, %{"item" => name, "field" => field}, call) when remove in ["remove", "remove_field"] do
+    db = Store.own(call)
+    found = Items.find!(call, db, name)
+    if Items.fields(found)[field] == nil, do: raise("#{name} has no field named #{field}.")
+    Store.change!(db, found, &Map.update!(&1, "fields", fn fields -> Enum.reject(fields, fn kept -> kept["name"] == field end) end))
     %{item: name, field: field}
   end
 
-  # An app switched on for an item is an editor of the Vault's artifact too, which is what lets its code reach it
-  # at all, and goes when no item is switched on for it.
+  # An app's own code may only take its own access away.
+  def call("access", %{"item" => name} = inputs, %Call{caller: caller} = call) when caller != nil do
+    if Map.get(inputs, "on", true), do: raise("An app is given access by its person, in the Vault, not by itself.")
+    db = Store.own(call)
+    Access.switch(call, db, Items.find!(call, db, name), caller, false)
+    %{item: name, who: Items.app_name(call, caller), on: false}
+  end
+
+  def call("access", %{"item" => name, "who" => who} = inputs, call) do
+    db = Store.own(call)
+    on = Map.get(inputs, "on", true)
+    Access.switch(call, db, Items.find!(call, db, name), Access.who!(call, who), on)
+    %{item: name, who: who, on: on}
+  end
+
   def call("use", %{"item" => name, "app" => app} = inputs, call) do
-    db = own(call)
-
-    who =
-      Apps.app(call.subject, app) || Apps.app("network", app) ||
-        raise "There's no app named #{app}."
-
-    found = find!(call, db, name)
-
-    if Map.get(inputs, "on", true) do
-      change!(db, found, &Map.update!(&1, "uses", fn uses -> Enum.uniq(uses ++ [who]) end))
-      share(call, "share", Artifact.name(db), who)
-      %{item: name, app: app, on: true}
-    else
-      change!(db, found, &Map.update!(&1, "uses", fn uses -> uses -- [who] end))
-      if not Enum.any?(everything(call, db), &(who in &1["uses"])), do: share(call, "unshare", Artifact.name(db), who)
-      %{item: name, app: app, on: false}
-    end
+    call("access", %{"item" => name, "who" => app, "on" => Map.get(inputs, "on", true)}, call)
+    %{item: name, app: app, on: Map.get(inputs, "on", true)}
   end
 
   def call("agents", %{"item" => name} = inputs, call) do
-    on = Map.get(inputs, "on", true)
-    db = own(call)
-    change!(db, find!(call, db, name), &Map.put(&1, "agents", on))
-    %{item: name, on: on}
+    call("access", %{"item" => name, "who" => "agents", "on" => Map.get(inputs, "on", true)}, call)
+    %{item: name, on: Map.get(inputs, "on", true)}
   end
 
   def call("request", %{"title" => title, "fields" => fields} = inputs, call) do
-    db = own(call)
-
-    app =
-      if name = inputs["app"],
-        do:
-          Apps.app(call.subject, name) || Apps.app("network", name) ||
-            raise("There's no app named #{name}.")
-
-    if fields == %{}, do: raise("A request names the fields it needs.")
-    fields = for {name, about} <- fields, do: %{name: field!(name), secret: Map.get(about, "secret", true)}
-    id = random(9)
-
-    transaction(call, db, fn d ->
-      query(
-        d,
-        "insert into requests (id, title, fields, hosts, app, by, why, state, at) values (?, ?, ?, ?, ?, ?, ?, 'waiting', ?)",
-        [
-          id,
-          title,
-          JSON.encode!(fields),
-          JSON.encode!(hosts!(Map.get(inputs, "hosts", []))),
-          app,
-          with(%{agent: agent} <- began(call), do: agent, else: (_ -> nil)),
-          inputs["why"],
-          now()
-        ]
-      )
-    end)
-
+    db = Store.own(call)
+    app = if name = inputs["app"], do: Access.who!(call, name)
+    by = with %{agent: agent} <- SignIns.began(call), do: agent, else: (_ -> nil)
+    id = Requests.create(call, db, title, fields, Map.get(inputs, "hosts", []), app, by, inputs["why"])
     link = if address = Application.get_env(:one_core, :address), do: "#{address}/vault/request?id=#{id}"
     where = if link, do: "Give them this link: #{link}. It", else: "Ask them to open Vault on a device of theirs: it"
-
-    %{
-      id: id,
-      link: link,
-      message: "#{where} shows the request, to answer on their own device. You never see what they type."
-    }
+    %{id: id, link: link, message: "#{where} shows the request, to answer on their own device. You never see what they type."}
   end
 
-  def call("status", %{"id" => id}, call) do
-    transaction(call, own(call), fn d ->
-      case query(d, "select title, state, at from requests where id = ?", [id]) do
-        [%{"title" => title, "state" => "waiting", "at" => at}] ->
-          %{title: title, state: if(at > now() - @request_waits, do: "waiting", else: "expired")}
-
-        [%{"title" => title, "state" => state}] ->
-          %{title: title, state: state}
-
-        [] ->
-          raise "There's no request #{id}."
-      end
-    end)
-  end
+  def call("status", %{"id" => id}, call), do: Requests.status(call, Store.own(call), id)
 
   def call("answer", %{"id" => id} = inputs, call) do
-    db = own(call)
+    db = Store.own(call)
 
-    quietly("Answering the request", fn ->
-      values = if given = inputs["values"], do: JSON.decode!(encryption(call).secret(call, given))
-
-      request =
-        transaction(call, db, fn d ->
-          case query(d, "select * from requests where id = ? and state = 'waiting' and at > ?", [id, now() - @request_waits]) do
-            [request] -> request
-            [] -> raise "That request isn't waiting any more."
-          end
-        end)
-
-      answered =
-        cond do
-          inputs["decline"] == true ->
-            nil
-
-          name = inputs["item"] ->
-            allow!(db, request, find!(call, db, name))
-
-          is_map(values) ->
-            wanted = JSON.decode!(request["fields"])
-            missing = for %{"name" => name} <- wanted, values[name] in [nil, ""], do: name
-            if missing != [], do: raise("It needs #{Enum.join(missing, ", ")} too.")
-            found = find(call, db, request["title"]) || create(call, db, request["title"], JSON.decode!(request["hosts"]))
-            filled = change!(db, found, fn record -> Enum.reduce(wanted, record, &put_field(&2, &1["name"], values[&1["name"]], &1["secret"])) end)
-            allow!(db, request, filled)
-
-          true ->
-            raise "Answer with one of your items, with values, or by declining."
-        end
-
-      state = if inputs["decline"] == true, do: "declined", else: "set"
-      transaction(call, db, &query(&1, "update requests set state = ? where id = ?", [state, id]))
-      if answered && request["app"], do: share(call, "share", Artifact.name(db), request["app"])
-      %{state: state}
+    Store.quietly("Answering the request", fn ->
+      values = if given = inputs["values"], do: JSON.decode!(Store.encryption(call).secret(call, given))
+      Requests.answer(call, db, id, Map.put(inputs, "values", values))
     end)
+  end
+
+  def call("expire", _inputs, call) do
+    expired = Requests.expire(call, Store.own(call))
+    if expired > 0, do: Call.changed(call)
+    %{expired: expired}
   end
 
   def call("fetch", %{"item" => item, "url" => url} = inputs, call) do
@@ -1263,7 +1102,7 @@ defmodule Vault do
     }
 
     by = if call.caller, do: {:app, call.caller}, else: :agents
-    response = fetched(call, own(call), item, request, by)
+    response = fetched(call, Store.own(call), item, request, by)
 
     # What an agent reads is cut short, and what an app's code reads is whole.
     {body, cut} =
@@ -1276,443 +1115,22 @@ defmodule Vault do
     Map.merge(%{status: response.status, headers: response.headers, cut: cut}, body)
   end
 
-  # Whoever the service sent back is nobody the network knows: what says whose sign-in this finishes is its
-  # `state`, which only the browser that began it was given, and which starts with whose it is.
-  # A server that passed this on has checked that, and asks for whoever's it is, by nobody.
-  def call("oauth_callback", %{"state" => state} = inputs, %Call{actor: actor} = call) do
-    with [whose, _random] <- String.split(state, "."),
-         {:ok, owner} <- Base.url_decode64(whose, padding: false),
-         true <- User.owner?(owner),
-         true <- actor == User.link("#{owner}/#{state}") or (actor == nil and call.subject == owner) do
-      call = %{call | subject: owner, actor: nil}
-      db = own(call)
+  def call("oauth_callback", inputs, call), do: SignIns.callback(call, inputs)
 
-      sign_in =
-        transaction(call, db, fn d ->
-          case query(d, "select * from sign_ins where state = ? and at > ?", [state, now() - @sign_in_waits]) do
-            [sign_in] -> sign_in
-            [] -> raise "This sign-in isn't waiting any more. Start it again."
-          end
-        end)
-
-      cond do
-        inputs["again"] -> again(call, db, sign_in)
-        sign_in["ending"] -> ending(sign_in, JSON.decode!(sign_in["ending"]))
-        true -> returned(call, db, sign_in, inputs)
-      end
-    else
-      _ -> raise "This sign-in isn't one this network began."
-    end
-  end
-
-  # What a sign-in is to start with, from what an app gave, or what was kept of that.
-  defp service(given) do
-    %{
-      name: given["name"],
-      authorize: given["authorize"],
-      token: given["token"],
-      scopes: given["scopes"],
-      hosts: hosts!(given["hosts"]),
-      client: given["client"],
-      params: given["params"] || %{}
-    }
-  end
-
-  # Starts a sign-in for `app`, `started`, and gives the link its person opens.
-  defp started(call, db, service, app, item, began, apps) do
-    address = address()
-
-    quietly("Starting the sign-in", fn ->
-      {state, verifier} = {"#{Base.url_encode64(call.subject, padding: false)}.#{random(24)}", random(48)}
-      found = find!(call, db, service.client)
-      client = fields(found)
-
-      client["client_id"] ||
-        raise "#{service.client} has no client_id. Keep the one #{service.name} gave you there."
-
-      # Its client_secret goes to the token address, as any secret goes only to one of its item's sites.
-      if client["client_secret"] && not OAuth.to?(service.token, found["hosts"]),
-        do:
-          raise(
-            "#{service.client}'s secrets go only to its sites, and #{service.name}'s token address isn't one. Its person adds it, in the Vault."
-          )
-
-      transaction(call, db, fn d ->
-        query(d, "delete from sign_ins where at < ?", [now() - @sign_in_waits])
-
-        query(
-          d,
-          "insert into sign_ins (state, verifier, service, app, item, at, began, apps) values (?, ?, ?, ?, ?, ?, ?, ?)",
-          [state, verifier, JSON.encode!(service), app, item, now(), JSON.encode!(began), JSON.encode!(apps)]
-        )
-      end)
-
-      OAuth.link(service, client["client_id"], address <> "/vault/callback", state, verifier)
-    end)
-  end
-
-  # Where a sign-in began, which says how its page ends: on an agent, named as its person let it in (an assistant
-  # somewhere else, which comes in over the web, among their devices as `sign-in` lists them) or as it says it's
-  # called (an MCP client on a device of theirs, through `one mcp`); in a terminal, by `one`; or on an app's screen,
-  # the Vault's, where sign-ins are listed.
-  defp began(call) do
-    client = Call.client(call) || %{}
-    said = client["title"] || client["name"]
-
-    cond do
-      client["name"] == "one-cli" -> %{cli: true}
-      client["name"] in ["one-app", "one-web"] -> %{screen: "vault"}
-      name = client["web"] && assistant(call, client["device"]) -> %{agent: name}
-      said -> %{agent: said}
-      true -> %{screen: "vault"}
-    end
-  end
-
-  defp assistant(call, device) do
-    %{"devices" => devices} = Call.tool(call, "sign-in", "devices", %{})
-    Enum.find_value(devices, &(&1["kind"] == "assistant" and &1["id"] == device and &1["name"]))
-  end
-
-  # The service sent its person back: it ends, as only one return can end it.
-  defp returned(call, db, sign_in, inputs) do
-    service = JSON.decode!(sign_in["service"])
-
-    ending =
-      try do
-        quietly("Finishing the sign-in", fn ->
-          cond do
-            # RFC 6749 4.1.2.1: they said no.
-            inputs["error"] == "access_denied" -> %{"status" => "cancelled"}
-            why = inputs["error"] -> raise "#{service["name"]} didn't sign you in: #{why}."
-            true -> signed!(call, db, sign_in, service, inputs["code"])
-          end
-        end)
-      rescue
-        error in RuntimeError -> %{"status" => "failed", "problem" => error.message}
-      end
-
-    move!(call, db, sign_in, ending)
-  end
-
-  # Swaps the code for tokens and keeps them, once: a second return of the same browser finds it ended.
-  defp signed!(call, db, sign_in, service, code) do
-    code || raise "#{service["name"]} sent no code back."
-    client = fields(find!(call, db, service["client"]))
-    tokens = OAuth.exchange(service, client, code, sign_in["verifier"], address() <> "/vault/callback")
-    name = signed_in(sign_in["item"], service, tokens)
-    claimed = transaction(call, db, &query(&1, "update sign_ins set ended = 'ok' where state = ? and ended is null returning state", [sign_in["state"]]))
-
-    if claimed != [] do
-      found = find(call, db, name) || create(call, db, name, service["hosts"])
-
-      # Signed in, it's ready: whatever it needed of its person is done.
-      change!(db, found, fn record ->
-        record
-        |> kept_tokens(service, tokens)
-        |> Map.update!("uses", &Enum.uniq(&1 ++ [sign_in["app"]]))
-        |> Map.put("state", nil)
-      end)
-
-      Call.changed(call)
-    end
-
-    account = OAuth.claims(tokens["id_token"])["email"]
-    Map.merge(%{"status" => "ok", "item" => name}, if(is_binary(account), do: %{"account" => account}, else: %{}))
-  end
-
-  # Ends a sign-in as `ending` says, which only one that's started may (`@sign_in_moves`), and answers it.
-  defp move!(call, db, sign_in, %{"status" => to} = ending) do
-    if to not in @sign_in_moves["started"], do: raise("A sign-in doesn't end #{to}.")
-
-    transaction(call, db, fn d ->
-      query(d, "update sign_ins set ended = ?, ending = ? where state = ? and (ended is null or ended = ?)", [
-        to,
-        JSON.encode!(ending),
-        sign_in["state"],
-        to
-      ])
-    end)
-
-    ending(sign_in, ending)
-  end
-
-  # What its page shows: how it ended, and where it began.
-  defp ending(sign_in, ending) do
-    %{
-      service: JSON.decode!(sign_in["service"])["name"],
-      began: JSON.decode!(sign_in["began"]),
-      apps: JSON.decode!(sign_in["apps"])
-    }
-    |> Map.merge(Map.new(ending, fn {key, value} -> {String.to_existing_atom(key), value} end))
-  end
-
-  # Try Again: one that ended without signing in starts another, as it began, for the same app and item.
-  defp again(call, db, %{"ended" => ended} = sign_in) when ended in ["cancelled", "failed"] do
-    service = service(JSON.decode!(sign_in["service"]))
-    began = JSON.decode!(sign_in["began"])
-    apps = JSON.decode!(sign_in["apps"])
-    url = started(call, db, service, sign_in["app"], sign_in["item"], began, apps)
-    %{service: service.name, status: "started", began: began, apps: apps, url: url}
-  end
-
-  defp again(_call, _db, _sign_in), do: raise("Only a sign-in that didn't sign you in starts again.")
-
-  # The item a sign-in's tokens become: its name, with any {{<claim>}} filled in from who the service says signed in.
-  defp signed_in(name, service, tokens) do
-    claims = OAuth.claims(tokens["id_token"])
-
-    Regex.replace(~r/\{\{([A-Za-z0-9_]+)\}\}/, name, fn _all, claim ->
-      case claims[claim] do
-        value when is_binary(value) and value != "" -> value
-        _ -> raise "#{service["name"]} didn't say who signed in. Sign in again."
-      end
-    end)
-  end
-
-  # An item's fields filled into a request, for what may use it. Its tokens are renewed first if they've ended,
+  # An item's fields filled into a request, for whoever may use it. Its tokens are renewed first if they've ended,
   # and once more if the site says they have.
   defp fetched(call, db, name, request, by) do
-    quietly("The request", fn ->
-      item = allowed!(find!(call, db, name), by)
+    Store.quietly("The request", fn ->
+      item = Access.may!(Items.find!(call, db, name), by)
       secret = for %{"name" => field, "secret" => true} <- item["fields"], do: field
       oauth = item["oauth"]
-      fields = if oauth && oauth["expires"] <= now() + 60, do: renewed(call, db, item, fields(item)), else: fields(item)
-      response = OAuth.request(request, fields, secret, item["hosts"])
+      fields = if oauth && oauth["expires"] <= Store.now() + 60, do: SignIns.renewed(call, db, item, Items.fields(item)), else: Items.fields(item)
+      response = Fetch.request(request, fields, secret, item["hosts"])
 
       if oauth && response.status == 401,
-        do: OAuth.request(request, renewed(call, db, item, fields), secret, item["hosts"]),
+        do: Fetch.request(request, SignIns.renewed(call, db, item, fields), secret, item["hosts"]),
         else: response
     end)
-  end
-
-  # An item's fields with its tokens renewed, unless another call renewed them meanwhile: one renewal at a time.
-  defp renewed(call, db, item, had) do
-    :global.trans({{__MODULE__, artifact(db, item["id"])}, self()}, fn ->
-      latest = record(db, item["id"]) || raise "There's no item named #{item["name"]} in the Vault."
-
-      if fields(latest)["access_token"] != had["access_token"] do
-        fields(latest)
-      else
-        oauth = latest["oauth"]
-        client = fields(find!(call, db, oauth["client"]))
-
-        tokens =
-          OAuth.renew(
-            oauth,
-            client,
-            fields(latest)["refresh_token"] || raise("#{item["name"]} has no way to renew its sign-in. Sign in again.")
-          )
-
-        fields(change!(db, latest, &kept_tokens(&1, oauth, tokens)))
-      end
-    end)
-  end
-
-  defp kept_tokens(record, service, tokens) do
-    record =
-      Enum.reduce(~w(access_token refresh_token), record, fn field, record ->
-        if value = tokens[field], do: put_field(record, field, value, true), else: record
-      end)
-
-    oauth = %{
-      "name" => service["name"],
-      "token" => service["token"],
-      "client" => service["client"],
-      "expires" => now() + (tokens["expires_in"] || 3600)
-    }
-
-    Map.put(record, "oauth", oauth)
-  end
-
-  # A request allowed with an item: switched on for whichever app asked, or for agents if no app did.
-  # Allowing a request switches the item on for whoever asked, and lets its secrets go to the sites it named too.
-  defp allow!(db, request, item) do
-    change!(db, item, fn record ->
-      record = Map.update!(record, "hosts", &Enum.uniq(&1 ++ JSON.decode!(request["hosts"])))
-
-      if app = request["app"],
-        do: Map.update!(record, "uses", &Enum.uniq(&1 ++ [app])),
-        else: Map.put(record, "agents", true)
-    end)
-  end
-
-  # The item, if `by` may use it: an app switched on for it, or agents its person let.
-  defp allowed!(item, by) do
-    case by do
-      :agents ->
-        if item["agents"] != true,
-          do: raise("#{item["name"]} isn't one agents may use. Ask its person, with vault_request.")
-
-      {:app, app} ->
-        if app not in item["uses"],
-          do: raise("#{item["name"]} isn't switched on for #{Path.basename(app)}. Its person switches it on, in the Vault.")
-    end
-
-    item
-  end
-
-  # Someone's items, each an artifact of its own, `<owner>/made/vault/<id>`, so soft delete deletes, restores and
-  # purges one as it does anything an app made, and the Vault keeps no lifecycle of its own: it stores and
-  # encrypts. An item's record is the blob `<id>/item`, encrypted with the Vault's keys, as its database is, and
-  # changed in one step; its contents are blobs beside it, `<id>/contents/<blob>`, each sealed under a key the record
-  # holds. The database says which id each name is (`artifacts`), so finding one by name is one read, and one that
-  # soft delete took aside isn't there to read until it's restored.
-
-  # Where someone's items are: their Vault's database, with its keys and its reach, at the folder it's in.
-  defp root(%Artifact{} = db), do: %Artifact{db | prefix: String.replace_suffix(db.prefix, "items/", "")}
-
-  # An item's artifact, by its name, as soft delete knows it.
-  defp artifact(db, id), do: root(db).prefix <> id
-
-  defp record(db, id) do
-    case Artifact.read(root(db), "#{id}/item") do
-      {:ok, data, _tag} -> JSON.decode!(data)
-      :absent -> nil
-    end
-  end
-
-  # Changes an item's record in one step: `change` is given it as it is, and gives what it's to be.
-  defp change!(db, item, change) do
-    changed =
-      Artifact.update(root(db), "#{item["id"]}/item", fn
-        nil -> nil
-        data -> data |> JSON.decode!() |> change.() |> Map.put("changed", now()) |> JSON.encode!()
-      end)
-
-    if changed, do: JSON.decode!(changed), else: raise("There's no item named #{item["name"]} in the Vault.")
-  end
-
-  # The item named `name`, any case: the first whose record is there.
-  defp find(call, db, name) do
-    ids =
-      transaction(call, db, fn d ->
-        moved(d, db)
-        for %{"id" => id} <- query(d, "select id from artifacts where name = ? collate nocase", [name]), do: id
-      end)
-
-    Enum.find_value(ids, &record(db, &1))
-  end
-
-  defp find!(call, db, name), do: find(call, db, name) || raise("There's no item named #{name} in the Vault.")
-
-  # Every item that's there.
-  defp everything(call, db) do
-    ids =
-      transaction(call, db, fn d ->
-        moved(d, db)
-        for %{"id" => id} <- query(d, "select id from artifacts"), do: id
-      end)
-
-    for {:ok, data, _tag} <- Artifact.read_all(root(db), Enum.map(ids, &"#{&1}/item")), do: JSON.decode!(data)
-  end
-
-  # The ids of the items there are by the name `name`, other than `id`.
-  defp taken(d, db, name, id \\ nil) do
-    for %{"id" => other} <- query(d, "select id from artifacts where name = ? collate nocase", [name]),
-        other != id,
-        record(db, other),
-        do: other
-  end
-
-  # A new item, made once its name is free: its record, with `record`'s parts.
-  defp create(call, db, name, hosts, record \\ %{}) do
-    if String.trim(name) == "", do: raise("An item has a name.")
-    id = random(9)
-
-    transaction(call, db, fn d ->
-      if taken(d, db, name) != [], do: raise("There's an item named #{name} already.")
-      query(d, "insert into artifacts (id, name) values (?, ?)", [id, name])
-    end)
-
-    item =
-      Map.merge(
-        %{
-          "id" => id,
-          "name" => name,
-          "hosts" => hosts!(hosts),
-          "agents" => false,
-          "oauth" => nil,
-          "fields" => [],
-          "uses" => [],
-          "contents" => %{},
-          "state" => nil,
-          "changed" => now()
-        },
-        record
-      )
-
-    :ok = Artifact.write(root(db), "#{id}/item", JSON.encode!(item))
-    item
-  end
-
-  # The items the database held before each was an artifact of its own are copied into one, each once, under its
-  # id, with what was kept of it, and listed once the copy is written; the database's copy stays as it was.
-  defp moved(d, db) do
-    for old <- query(d, "select * from items where id not in (select id from artifacts)") do
-      fields =
-        for field <- query(d, "select name, value, secret from fields where item = ? order by rowid", [old["id"]]),
-            do: %{"name" => field["name"], "value" => field["value"], "secret" => field["secret"] == 1}
-
-      contents =
-        for kept <- query(d, "select * from contents where item = ?", [old["id"]]), into: %{} do
-          {kept["name"], %{"blob" => "contents/#{kept["blob"]}", "key" => kept["key"], "size" => kept["size"], "at" => kept["at"]}}
-        end
-
-      record = %{
-        "id" => old["id"],
-        "name" => old["name"],
-        "hosts" => JSON.decode!(old["hosts"]),
-        "agents" => old["agents"] == 1,
-        "oauth" => old["oauth"] && JSON.decode!(old["oauth"]),
-        "fields" => fields,
-        "uses" => for(%{"app" => app} <- query(d, "select app from uses where item = ?", [old["id"]]), do: app),
-        "contents" => contents,
-        "state" => nil,
-        "changed" => old["changed"]
-      }
-
-      :ok = Artifact.write(root(db), "#{old["id"]}/item", JSON.encode!(record))
-      query(d, "insert into artifacts (id, name) values (?, ?)", [old["id"], old["name"]])
-    end
-
-    :ok
-  end
-
-  # Deletes an item as anything an app made is deleted: by soft delete, which keeps it for 30 days.
-  defp delete!(call, db, item), do: Call.tool(call, "soft-delete", "delete", %{"artifact" => artifact(db, item["id"])})
-
-  defp fields(item), do: Map.new(item["fields"], &{&1["name"], &1["value"]})
-
-  defp put_field(item, name, value, secret) do
-    field = %{"name" => field!(name), "value" => value, "secret" => secret == true}
-
-    Map.update!(item, "fields", fn fields ->
-      if Enum.any?(fields, &(&1["name"] == name)),
-        do: Enum.map(fields, &if(&1["name"] == name, do: field, else: &1)),
-        else: fields ++ [field]
-    end)
-  end
-
-  # What an app said of its item's state, checked, as an item keeps it: nothing for `ready`, since fine is silent.
-  defp said!(state, message, action, app) do
-    case to_string(state) do
-      "ready" ->
-        nil
-
-      "busy" when is_binary(message) ->
-        %{"state" => "busy", "message" => message, "by" => app}
-
-      "action_required" when is_binary(message) and is_map(action) ->
-        action = JSON.decode!(JSON.encode!(action))
-
-        if not is_binary(action["label"]) or not (is_binary(action["tool"]) or is_binary(action["page"])),
-          do: raise("An action has a label, and either a tool of the app's or a page of its client's.")
-
-        %{"state" => "action_required", "message" => message, "action" => action, "by" => app}
-
-      _ ->
-        raise "An item is ready, busy with a message, or action_required with why and an action."
-    end
   end
 
   # The first thing someone's Vault lacks (`@readiness`), from their key and the servers that open it.
@@ -1738,132 +1156,4 @@ defmodule Vault do
   end
 
   defp opened(_sealed, _key), do: raise("What the browser sent isn't whole.")
-
-  # A short-lived link to one blob of an item's, as what's handed on takes it: JSON's keys.
-  defp link(db, blob, mode), do: %{root(db) | codec: nil} |> Artifact.link(blob, mode) |> JSON.encode!() |> JSON.decode!()
-
-  defp field!(name) do
-    if is_binary(name) and name =~ ~r/^[A-Za-z0-9_]+$/,
-      do: name,
-      else: raise("A field's name is letters, digits and _.")
-  end
-
-  # A site is a host's name, with its port if it has one: never a path, so a secret goes to all of it or none.
-  defp hosts!(hosts) do
-    for host <- hosts do
-      if is_binary(host) and host =~ ~r/^[a-z0-9.-]+(:\d+)?$/,
-        do: host,
-        else: raise("A site is a host's name, like api.example.com.")
-    end
-  end
-
-  # The item types of the apps whoever this runs for has (`vault.types`), each as `list` gives it, with its
-  # app's name, title and icon, and whether its app is trusted, which decides where its component is drawn. A
-  # type that doesn't say what one must is left out.
-  defp types(call) do
-    {:ok, parts, _failed} = Call.run_hook(call, "types", %{})
-    running = Apps.running(call.subject)
-
-    for {app, part} <- Enum.sort(parts),
-        version = running[app],
-        version != nil,
-        type <- List.wrap(JSON.decode!(JSON.encode!(part))),
-        type?(type) do
-      %{
-        id: "#{app}/#{type["name"]}",
-        app: app,
-        title: version.title,
-        icon: version.icon,
-        trusted: Map.get(version, :trusted, true),
-        name: type["name"],
-        prefix: type["prefix"],
-        section: type["section"],
-        component: type["component"],
-        create: type["create"]
-      }
-    end
-  end
-
-  defp type?(%{"name" => name, "prefix" => prefix, "section" => section})
-       when is_binary(name) and is_binary(prefix) and prefix != "" and is_binary(section),
-       do: true
-
-  defp type?(_type), do: false
-
-  # The apps' names as whoever this runs for finds them, by their artifacts.
-  defp names(call), do: Map.new(Apps.running(call.subject), fn {name, version} -> {version.artifact, name} end)
-  defp named(names, app), do: Map.get(names, app, Path.basename(app))
-  defp app_name(call, app), do: named(names(call), app)
-
-  defp title(call, app),
-    do: Enum.find_value(Apps.running(call.subject), Path.basename(app), fn {_name, version} -> version.artifact == app && version.title end)
-
-  defp address do
-    Application.get_env(:one_core, :address) ||
-      raise "A sign-in to an outside service finishes at the network's address, and this network has none."
-  end
-
-  defp random(bytes), do: Base.url_encode64(:crypto.strong_rand_bytes(bytes), padding: false)
-  defp now, do: System.os_time(:second)
-
-  # A relation tuple is the permissions app's to write, as whoever asked.
-  defp share(call, tool, artifact, who) do
-    inputs = %{"artifact" => artifact, "relation" => "editor", "who" => who}
-
-    case Calls.call("permissions", tool, inputs, {call.actor, call.subject}) do
-      {:ok, _said} ->
-        :ok
-
-      {:forwarded, %{"isError" => true, "content" => [%{"text" => why} | _]}} ->
-        if(tool == "share", do: raise(why), else: :ok)
-
-      {:forwarded, _result} ->
-        :ok
-
-      {:error, why} ->
-        if(tool == "share", do: raise(why), else: :ok)
-    end
-  end
-
-  # Someone's Vault is theirs alone: no relation tuple has anyone else ask for a user, the network's owner included.
-  defp mine!(%Call{subject: subject, actor: actor} = call) do
-    if String.starts_with?(subject, "users/") and actor not in [subject, nil],
-      do: raise("#{subject}'s Vault is theirs alone.")
-
-    call
-  end
-
-  # The artifact of the database of whoever a call of the Vault's own tools is for: which item each name is, what's
-  # been asked for, and the sign-ins under way.
-  defp items_artifact(call), do: Call.make(mine!(call), "items")
-
-  # Their Vault, opened: on a server they chose, which this call ends up on.
-  defp own(call), do: encryption(call).encrypted(call, items_artifact(call))
-
-  # The same artifact by its name, for an app that uses the Vault, which finds it added as `vault`.
-  defp theirs(call), do: "#{mine!(call).subject}/made/vault/items"
-
-  # It reaches the Vault as an editor, which a tuple says once anything of the Vault's is switched on for it.
-  defp reached(call), do: encryption(call).encrypted(call, Call.reach(call, theirs(call), "editor"))
-
-  defp encryption(call), do: Call.app(call, "encryption")
-
-  # A transaction on someone's Vault's database. It's theirs, so this server's copy of it is kept by its name.
-  defp transaction(call, artifact, fun) do
-    database = Call.app(call, "database")
-    call = %{call | own: artifact, folder: Path.join(Server.home(), Artifact.name(artifact))}
-    database.transaction(call, @schema, &fun.({database, &1}))
-  end
-
-  defp query({database, db}, sql, values \\ []), do: database.query(db, sql, values)
-
-  @doc false
-  # Runs what handles secrets, so that nothing it raises says one: only what this app raised in its own words
-  # is passed on, and anything else is said as what was being done. A call that another server ran ends as it does.
-  def quietly(what, fun) do
-    fun.()
-  rescue
-    error in RuntimeError -> reraise error, __STACKTRACE__
-    error -> raise "#{what} didn't work (#{inspect(error.__struct__)})."
-  end
 end
