@@ -7,8 +7,7 @@ use std::collections::HashMap;
 use std::sync::{Arc, OnceLock};
 
 use crate::geometry::{Pixels, Size};
-use crate::render::atlas::BladeAtlas;
-use crate::render::context::BladeContext;
+use crate::render::{Atlas, Context, Renderer};
 use crate::text::{PlatformTextSystem, TextSystem};
 use crate::Screen;
 
@@ -16,6 +15,10 @@ use crate::Screen;
 mod linux;
 #[cfg(target_os = "linux")]
 use linux::{Display, NativeWindow, appearance, clipboard, reduced_motion};
+#[cfg(target_os = "windows")]
+mod windows;
+#[cfg(target_os = "windows")]
+use windows::{Display, NativeWindow, appearance, clipboard, reduced_motion};
 
 /// A window, as the windows' thread names it.
 pub type WindowId = u64;
@@ -44,7 +47,12 @@ pub struct WindowOptions {
 
 /// Where to send the windows' thread a job.
 #[derive(Clone)]
-pub struct Strict(calloop::channel::Sender<Job>);
+pub struct Strict(Sender);
+
+#[cfg(target_os = "linux")]
+type Sender = calloop::channel::Sender<Job>;
+#[cfg(target_os = "windows")]
+type Sender = windows::Sender;
 
 impl Strict {
     /// The windows' thread, started the first time it's asked for.
@@ -59,6 +67,10 @@ impl Strict {
     }
 }
 
+#[cfg(target_os = "windows")]
+use windows::start;
+
+#[cfg(target_os = "linux")]
 fn start() -> anyhow::Result<Strict> {
     let (sender, channel) = calloop::channel::channel::<Job>();
     let (ready_to, ready) = std::sync::mpsc::channel();
@@ -67,7 +79,7 @@ fn start() -> anyhow::Result<Strict> {
             Ok(event_loop) => event_loop,
             Err(error) => return drop(ready_to.send(Err(anyhow::anyhow!("{error}")))),
         };
-        let windows = Windows::new(&event_loop.handle());
+        let windows = Display::connect(&event_loop.handle()).and_then(Windows::new);
         let mut windows = match windows {
             Ok(windows) => windows,
             Err(error) => return drop(ready_to.send(Err(error))),
@@ -97,7 +109,7 @@ struct Window {
     native: NativeWindow,
     /// What it shows: its app's screen, or why its app didn't open.
     screen: Result<Screen, String>,
-    renderer: crate::render::renderer::BladeRenderer,
+    renderer: Renderer,
     scene: crate::render::scene::Scene,
     dirty: bool,
     drawn: bool,
@@ -108,18 +120,17 @@ struct Window {
 /// Every strict window, on the windows' thread.
 pub struct Windows {
     display: Display,
-    context: BladeContext,
-    atlas: Arc<BladeAtlas>,
+    context: Context,
+    atlas: Arc<Atlas>,
     text: TextSystem,
     windows: HashMap<WindowId, Window>,
     next: WindowId,
 }
 
 impl Windows {
-    fn new(handle: &calloop::LoopHandle<'static, Windows>) -> anyhow::Result<Windows> {
-        let display = Display::connect(handle)?;
-        let context = BladeContext::new(true)?;
-        let atlas = Arc::new(BladeAtlas::new(&context));
+    fn new(display: Display) -> anyhow::Result<Windows> {
+        let context = Context::new(true)?;
+        let atlas = Arc::new(Atlas::new(&context));
         let text = TextSystem::new(PlatformTextSystem::new(crate::FONT, crate::fonts()?, true));
         Ok(Windows { display, context, atlas, text, windows: HashMap::new(), next: 1 })
     }
@@ -134,7 +145,7 @@ impl Windows {
         if let Some(clipboard) = clipboard() {
             screen.clipboard = clipboard;
         }
-        let renderer = crate::render::renderer::BladeRenderer::new(&self.context, self.atlas.clone(), &native, native.device_size(), false)?;
+        let renderer = Renderer::new(&self.context, self.atlas.clone(), &native, native.device_size(), false)?;
         self.windows.insert(id, Window { native, screen: Ok(screen), renderer, scene: Default::default(), dirty: true, drawn: false, on_event: Box::new(on_event), tag: options.tag });
         Ok(id)
     }
@@ -144,7 +155,7 @@ impl Windows {
         let id = self.next;
         self.next += 1;
         let native = self.display.open(id, &options)?;
-        let renderer = crate::render::renderer::BladeRenderer::new(&self.context, self.atlas.clone(), &native, native.device_size(), false)?;
+        let renderer = Renderer::new(&self.context, self.atlas.clone(), &native, native.device_size(), false)?;
         self.windows.insert(id, Window { native, screen: Err(why.to_owned()), renderer, scene: Default::default(), dirty: true, drawn: false, on_event: Box::new(on_event), tag: options.tag });
         Ok(id)
     }
@@ -193,7 +204,7 @@ impl Windows {
         if request.op != "snap" {
             return screen.inspect(request, reply);
         }
-        let mut renderer = crate::render::renderer::BladeRenderer::offscreen(&self.context, self.atlas.clone(), window.native.device_size());
+        let mut renderer = Renderer::offscreen(&self.context, self.atlas.clone(), window.native.device_size());
         let mut scene = crate::render::scene::Scene::default();
         screen.paint(window.native.size(), window.native.scale(), &mut self.text, &self.atlas, &mut scene);
         renderer.draw(&scene);
@@ -288,6 +299,7 @@ impl Windows {
         match input {
             Input::Resized(_) => {}
             Input::Expose => {}
+            Input::Appearance(appearance) => screen.appearance = appearance,
             Input::Moved(at) => {
                 screen.pointer_moved(at);
                 let cursor = screen.cursor(at);
@@ -315,6 +327,9 @@ impl Windows {
 pub(crate) enum Input {
     Resized(Size<crate::geometry::DevicePixels>),
     Expose,
+    /// The system went light or dark.
+    #[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+    Appearance(crate::Appearance),
     Close,
     Moved(crate::geometry::Point<f32>),
     Left,

@@ -137,7 +137,7 @@ pub fn open_window(entrypoint: String, subject: Option<String>, link: String) ->
 
 /// Opens an app's window again in a web view, as `open_window` does one that isn't strict, in place of its strict
 /// window: one whose app sent a version of the strict protocol this program doesn't speak.
-#[cfg_attr(not(target_os = "linux"), allow(dead_code))]
+#[cfg_attr(not(any(target_os = "linux", windows)), allow(dead_code))]
 pub fn open_web_view(entrypoint: String, subject: Option<String>, link: String) -> Result<(), String> {
     HOSTS.open.lock().expect("no host panics").remove(&format!("{}|{entrypoint}", subject.as_deref().unwrap_or_default()));
     open(entrypoint, subject, link, false)
@@ -160,7 +160,7 @@ fn open(entrypoint: String, subject: Option<String>, link: String, strict: bool)
     }
     open.insert(key.clone(), Host { to: None, link: None });
     drop(open);
-    #[cfg(target_os = "linux")]
+    #[cfg(any(target_os = "linux", windows))]
     if strict {
         crate::spawn(async move {
             if !crate::strict::open(&entrypoint, subject.as_deref(), &link).await
@@ -172,7 +172,7 @@ fn open(entrypoint: String, subject: Option<String>, link: String, strict: bool)
         });
         return Ok(());
     }
-    #[cfg(not(target_os = "linux"))]
+    #[cfg(not(any(target_os = "linux", windows)))]
     let _ = strict;
     process(&key, &entrypoint, subject.as_deref(), &link).inspect_err(|_| drop(HOSTS.open.lock().expect("no host panics").remove(&key)))
 }

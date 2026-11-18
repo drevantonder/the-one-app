@@ -1,0 +1,484 @@
+// Copied from Zed's GPUI (github.com/zed-industries/zed, crates/gpui/src/platform/windows/window.rs and events.rs) at
+// commit 69e2130295c2649963eb639fc70b4f2ee8ea1624 (gpui 0.2.2 on crates.io), and cut down for the strict host: every
+// strict window on the windows' thread, made with one class, each drawn by DirectComposition (so it has no GDI surface of
+// its own), per-monitor DPI aware, its keys from WM_KEYDOWN and WM_CHAR, an input method's composition and result
+// through IMM32 (events.rs's `handle_ime_composition`, `handle_ime_position`), its mouse and wheel, its cursor, and its
+// frame and caption buttons Windows' own, coloured as the page's background, light or dark as the system is. No
+// client-side title bar, drag and drop or touch yet.
+// Copyright 2022 - 2025 Zed Industries, Inc. Licensed under the Apache License, Version 2.0
+// (clients/app/strict/LICENSE-APACHE); this file is changed from the original.
+
+use std::cell::{Cell, RefCell};
+use std::collections::HashMap;
+use std::num::NonZeroIsize;
+use std::rc::Rc;
+use std::sync::Once;
+
+use anyhow::Context as _;
+use raw_window_handle as rwh;
+use windows::Win32::Foundation::{COLORREF, HWND, LPARAM, LRESULT, POINT, RECT, WPARAM};
+use windows::Win32::Graphics::Dwm::{DWMWA_CAPTION_COLOR, DWMWA_USE_IMMERSIVE_DARK_MODE, DwmSetWindowAttribute};
+use windows::Win32::Graphics::Gdi::{ScreenToClient, ValidateRect};
+use windows::Win32::System::LibraryLoader::GetModuleHandleW;
+use windows::Win32::UI::HiDpi::{
+    AdjustWindowRectExForDpi, DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2, GetDpiForWindow, SetThreadDpiAwarenessContext,
+};
+use windows::Win32::UI::Input::Ime::{
+    CANDIDATEFORM, CFS_CANDIDATEPOS, CFS_POINT, COMPOSITIONFORM, GCS_COMPSTR, GCS_CURSORPOS, GCS_RESULTSTR, HIMC, IACE_DEFAULT,
+    IME_COMPOSITION_STRING, ImmAssociateContextEx, ImmGetCompositionStringW, ImmGetContext, ImmReleaseContext, ImmSetCandidateWindow,
+    ImmSetCompositionWindow,
+};
+use windows::Win32::System::SystemServices::MK_SHIFT;
+use windows::Win32::UI::Input::KeyboardAndMouse::{ReleaseCapture, SetCapture, TME_LEAVE, TRACKMOUSEEVENT, TrackMouseEvent, VIRTUAL_KEY};
+use windows::Win32::UI::Controls::WM_MOUSELEAVE;
+use windows::Win32::UI::WindowsAndMessaging::*;
+use windows::core::{BOOL, HSTRING, PCWSTR, w};
+
+use super::keyboard;
+use crate::Cursor;
+use crate::editing::Ime;
+use crate::geometry::{Bounds, DevicePixels, Pixels, Point, Size};
+use crate::platform::{Input, WindowId, WindowOptions};
+
+const WINDOW_CLASS_NAME: PCWSTR = w!("One::Strict");
+
+/// What every strict window's messages are turned into, by the window they're about, until `events` takes them.
+type Queue = Rc<RefCell<Vec<(WindowId, Input)>>>;
+
+pub struct Display {
+    queue: Queue,
+    cursors: RefCell<HashMap<Cursor, HCURSOR>>,
+}
+
+pub struct NativeWindow {
+    hwnd: HWND,
+    size: Cell<Size<DevicePixels>>,
+    state: Rc<State>,
+}
+
+/// What a window's procedure knows of it.
+struct State {
+    id: WindowId,
+    queue: Queue,
+    cursor: Cell<HCURSOR>,
+    /// Whether Windows tells it when the pointer leaves (`TrackMouseEvent`), until it does.
+    tracking: Cell<bool>,
+    /// The first half of a character WM_CHAR sends in two.
+    high_surrogate: Cell<Option<u16>>,
+    /// Where the caret of the input that takes typing is, in device pixels, which the input method shows what it
+    /// composes at, or none when no input does, and the input method is off.
+    caret: Cell<Option<POINT>>,
+}
+
+impl rwh::HasWindowHandle for NativeWindow {
+    fn window_handle(&self) -> Result<rwh::WindowHandle<'_>, rwh::HandleError> {
+        let hwnd = NonZeroIsize::new(self.hwnd.0 as isize).ok_or(rwh::HandleError::Unavailable)?;
+        let mut handle = rwh::Win32WindowHandle::new(hwnd);
+        handle.hinstance = unsafe { GetModuleHandleW(None) }.ok().and_then(|module| NonZeroIsize::new(module.0 as isize));
+        Ok(unsafe { rwh::WindowHandle::borrow_raw(handle.into()) })
+    }
+}
+
+impl rwh::HasDisplayHandle for NativeWindow {
+    fn display_handle(&self) -> Result<rwh::DisplayHandle<'_>, rwh::HandleError> {
+        Ok(rwh::DisplayHandle::windows())
+    }
+}
+
+impl NativeWindow {
+    pub fn device_size(&self) -> Size<DevicePixels> {
+        self.size.get()
+    }
+
+    pub fn size(&self) -> Size<Pixels> {
+        let (size, scale) = (self.size.get(), self.scale());
+        Size { width: Pixels(size.width.0 as f32 / scale), height: Pixels(size.height.0 as f32 / scale) }
+    }
+
+    /// Its monitor's scale, as Windows says it now.
+    pub fn scale(&self) -> f32 {
+        unsafe { GetDpiForWindow(self.hwnd) as f32 / USER_DEFAULT_SCREEN_DPI as f32 }
+    }
+
+    pub fn resized(&self, size: Size<DevicePixels>) {
+        self.size.set(size);
+    }
+}
+
+impl Display {
+    pub fn connect() -> anyhow::Result<Display> {
+        // Every window this thread makes is drawn at its monitor's DPI, whatever the process's manifest says.
+        unsafe { SetThreadDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2) };
+        register_window_class();
+        Ok(Display { queue: Queue::default(), cursors: RefCell::default() })
+    }
+
+    pub fn open(&self, id: WindowId, options: &WindowOptions) -> anyhow::Result<NativeWindow> {
+        let state = Rc::new(State {
+            id,
+            queue: self.queue.clone(),
+            cursor: Cell::new(self.cursor(Cursor::Arrow)),
+            tracking: Cell::new(false),
+            high_surrogate: Cell::new(None),
+            caret: Cell::new(Some(POINT::default())),
+        });
+        let style = WS_OVERLAPPEDWINDOW;
+        // No GDI surface: DirectComposition draws the whole client area.
+        let ex_style = WS_EX_APPWINDOW | WS_EX_NOREDIRECTIONBITMAP;
+        let hwnd = unsafe {
+            CreateWindowExW(
+                ex_style,
+                WINDOW_CLASS_NAME,
+                &HSTRING::from(options.title.as_str()),
+                style,
+                CW_USEDEFAULT,
+                CW_USEDEFAULT,
+                CW_USEDEFAULT,
+                CW_USEDEFAULT,
+                None,
+                None,
+                GetModuleHandleW(None).ok().map(Into::into),
+                Some(Rc::as_ptr(&state) as *const _),
+            )
+        }
+        .context("CreateWindowExW failed")?;
+        // Its size at the DPI of the monitor it's on, with its frame around it.
+        let dpi = unsafe { GetDpiForWindow(hwnd) };
+        let scale = dpi as f32 / USER_DEFAULT_SCREEN_DPI as f32;
+        let mut rect = RECT {
+            left: 0,
+            top: 0,
+            right: (options.size.width.0 * scale).round() as i32,
+            bottom: (options.size.height.0 * scale).round() as i32,
+        };
+        unsafe {
+            let _ = AdjustWindowRectExForDpi(&mut rect, style, false, ex_style, dpi);
+            let _ = SetWindowPos(hwnd, None, 0, 0, rect.right - rect.left, rect.bottom - rect.top, SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE);
+        }
+        colour_frame(hwnd);
+        let mut client = RECT::default();
+        unsafe {
+            let _ = GetClientRect(hwnd, &mut client);
+            let _ = ShowWindow(hwnd, SW_SHOWNORMAL);
+        }
+        Ok(NativeWindow {
+            hwnd,
+            size: Cell::new(Size { width: DevicePixels(client.right - client.left), height: DevicePixels(client.bottom - client.top) }),
+            state,
+        })
+    }
+
+    pub fn close(&self, window: &NativeWindow) {
+        unsafe {
+            SetWindowLongPtrW(window.hwnd, GWLP_USERDATA, 0);
+            let _ = DestroyWindow(window.hwnd);
+        }
+    }
+
+    pub fn activate(&self, window: &NativeWindow) {
+        unsafe {
+            if IsIconic(window.hwnd).as_bool() {
+                let _ = ShowWindow(window.hwnd, SW_RESTORE);
+            }
+            let _ = SetForegroundWindow(window.hwnd);
+        }
+    }
+
+    pub fn set_cursor(&self, window: &NativeWindow, cursor: Cursor) {
+        let cursor = self.cursor(cursor);
+        if window.state.cursor.replace(cursor) != cursor {
+            unsafe { SetCursor(Some(cursor)) };
+        }
+    }
+
+    fn cursor(&self, cursor: Cursor) -> HCURSOR {
+        *self.cursors.borrow_mut().entry(cursor).or_insert_with(|| {
+            let name = match cursor {
+                Cursor::Arrow => IDC_ARROW,
+                Cursor::Pointer => IDC_HAND,
+                Cursor::Text => IDC_IBEAM,
+            };
+            unsafe { LoadCursorW(None, name) }.unwrap_or_default()
+        })
+    }
+
+    /// The input with window `window`'s keyboard takes typing, its caret at `caret` (in the window's logical pixels),
+    /// or none does: the input method is on there, and shows what it composes under the caret, or it's off.
+    pub fn set_ime(&self, window: &NativeWindow, caret: Option<Bounds<f32>>) {
+        let scale = window.scale();
+        let spot = caret.map(|caret| POINT { x: (caret.origin.x * scale) as i32, y: ((caret.origin.y + caret.size.height) * scale) as i32 });
+        let was = window.state.caret.replace(spot);
+        if was == spot {
+            return;
+        }
+        unsafe {
+            if spot.is_some() != was.is_some() {
+                // On, as the window's default; off, with no context of its own.
+                let _ = ImmAssociateContextEx(window.hwnd, HIMC::default(), if spot.is_some() { IACE_DEFAULT } else { 0 });
+            }
+            place_ime(window.hwnd, spot);
+        }
+    }
+
+    pub fn flush(&self) {}
+
+    /// What Windows has said since it was last asked, by the window it's about: every message waiting for this
+    /// thread dispatched to its window's procedure, which turns it into input.
+    pub fn events(&self) -> Vec<(WindowId, Input)> {
+        let mut msg = MSG::default();
+        while unsafe { PeekMessageW(&mut msg, None, 0, 0, PM_REMOVE) }.as_bool() {
+            unsafe {
+                let _ = TranslateMessage(&msg);
+                DispatchMessageW(&msg);
+            }
+        }
+        std::mem::take(&mut *self.queue.borrow_mut())
+    }
+}
+
+/// Where the input method shows what it composes and its candidates: under the caret.
+unsafe fn place_ime(hwnd: HWND, spot: Option<POINT>) {
+    let Some(spot) = spot else { return };
+    unsafe {
+        let context = ImmGetContext(hwnd);
+        let _ = ImmSetCompositionWindow(context, &COMPOSITIONFORM { dwStyle: CFS_POINT, ptCurrentPos: spot, ..Default::default() });
+        let _ = ImmSetCandidateWindow(context, &CANDIDATEFORM { dwStyle: CFS_CANDIDATEPOS, ptCurrentPos: spot, ..Default::default() });
+        let _ = ImmReleaseContext(hwnd, context);
+    }
+}
+
+/// The input method's composition string of `kind`, as it is now.
+unsafe fn composition(context: HIMC, kind: IME_COMPOSITION_STRING) -> Option<String> {
+    unsafe {
+        let length = ImmGetCompositionStringW(context, kind, None, 0);
+        if length < 0 {
+            return None;
+        }
+        let mut buffer = vec![0u16; length as usize / 2];
+        ImmGetCompositionStringW(context, kind, Some(buffer.as_mut_ptr().cast()), length as u32);
+        Some(String::from_utf16_lossy(&buffer))
+    }
+}
+
+fn register_window_class() {
+    static ONCE: Once = Once::new();
+    ONCE.call_once(|| unsafe {
+        let module = GetModuleHandleW(None).unwrap_or_default();
+        // The program's own icon, its first, as Explorer shows it.
+        let icon = LoadIconW(Some(module.into()), PCWSTR(1 as _)).unwrap_or_default();
+        let class = WNDCLASSW {
+            lpfnWndProc: Some(window_procedure),
+            hIcon: icon,
+            lpszClassName: WINDOW_CLASS_NAME,
+            style: CS_HREDRAW | CS_VREDRAW,
+            hInstance: module.into(),
+            ..Default::default()
+        };
+        RegisterClassW(&class);
+    });
+}
+
+/// Behind the caption buttons is the page's background (`--background`), and the buttons light or dark, as the
+/// system is, as an app window's web view has them (`title_bar` in the app's client).
+fn colour_frame(hwnd: HWND) {
+    let dark = super::appearance() == crate::Appearance::Dark;
+    let (immersive, colour) = (BOOL::from(dark), COLORREF(if dark { 0x000a_0a0a } else { 0x00ff_ffff }));
+    unsafe {
+        let _ = DwmSetWindowAttribute(hwnd, DWMWA_USE_IMMERSIVE_DARK_MODE, (&raw const immersive).cast(), size_of::<BOOL>() as u32);
+        let _ = DwmSetWindowAttribute(hwnd, DWMWA_CAPTION_COLOR, (&raw const colour).cast(), size_of::<COLORREF>() as u32);
+    }
+}
+
+unsafe extern "system" fn window_procedure(hwnd: HWND, msg: u32, wparam: WPARAM, lparam: LPARAM) -> LRESULT {
+    unsafe {
+        if msg == WM_NCCREATE {
+            let create = &*(lparam.0 as *const CREATESTRUCTW);
+            SetWindowLongPtrW(hwnd, GWLP_USERDATA, create.lpCreateParams as isize);
+            return DefWindowProcW(hwnd, msg, wparam, lparam);
+        }
+        let state = GetWindowLongPtrW(hwnd, GWLP_USERDATA) as *const State;
+        if state.is_null() {
+            return DefWindowProcW(hwnd, msg, wparam, lparam);
+        }
+        handle_msg(hwnd, &*state, msg, wparam, lparam).map_or_else(|| DefWindowProcW(hwnd, msg, wparam, lparam), LRESULT)
+    }
+}
+
+fn loword(value: isize) -> i32 {
+    (value & 0xffff) as i16 as i32
+}
+
+fn hiword(value: isize) -> i32 {
+    ((value >> 16) & 0xffff) as i16 as i32
+}
+
+/// What a message is as input, sent to the queue; → what the procedure answers, or `None` for Windows' own answer.
+fn handle_msg(hwnd: HWND, state: &State, msg: u32, wparam: WPARAM, lparam: LPARAM) -> Option<isize> {
+    let push = |input: Input| state.queue.borrow_mut().push((state.id, input));
+    let scale = || unsafe { GetDpiForWindow(hwnd) } as f32 / USER_DEFAULT_SCREEN_DPI as f32;
+    let at = |x: i32, y: i32| Point { x: x as f32 / scale(), y: y as f32 / scale() };
+    match msg {
+        WM_SIZE => {
+            if wparam.0 as u32 != SIZE_MINIMIZED {
+                push(Input::Resized(Size { width: DevicePixels(loword(lparam.0)), height: DevicePixels(hiword(lparam.0)) }));
+            }
+            Some(0)
+        }
+        WM_DPICHANGED => {
+            // Where Windows suggests, at the new DPI, which sends WM_SIZE.
+            let rect = unsafe { &*(lparam.0 as *const RECT) };
+            unsafe {
+                let _ = SetWindowPos(hwnd, None, rect.left, rect.top, rect.right - rect.left, rect.bottom - rect.top, SWP_NOZORDER | SWP_NOACTIVATE);
+            }
+            push(Input::Expose);
+            Some(0)
+        }
+        WM_PAINT => {
+            unsafe {
+                let _ = ValidateRect(Some(hwnd), None);
+            }
+            push(Input::Expose);
+            Some(0)
+        }
+        WM_ERASEBKGND => Some(1),
+        WM_CLOSE => {
+            push(Input::Close);
+            Some(0)
+        }
+        WM_MOUSEMOVE => {
+            if !state.tracking.replace(true) {
+                let mut track = TRACKMOUSEEVENT { cbSize: size_of::<TRACKMOUSEEVENT>() as u32, dwFlags: TME_LEAVE, hwndTrack: hwnd, dwHoverTime: 0 };
+                unsafe {
+                    let _ = TrackMouseEvent(&mut track);
+                }
+            }
+            push(Input::Moved(at(loword(lparam.0), hiword(lparam.0))));
+            Some(0)
+        }
+        WM_MOUSELEAVE => {
+            state.tracking.set(false);
+            push(Input::Left);
+            Some(0)
+        }
+        WM_LBUTTONDOWN | WM_MBUTTONDOWN | WM_RBUTTONDOWN => {
+            unsafe { SetCapture(hwnd) };
+            let button = match msg {
+                WM_LBUTTONDOWN => 0,
+                WM_MBUTTONDOWN => 1,
+                _ => 2,
+            };
+            let shift = wparam.0 as u32 & MK_SHIFT.0 != 0;
+            push(Input::Down(at(loword(lparam.0), hiword(lparam.0)), button, shift));
+            Some(0)
+        }
+        WM_LBUTTONUP | WM_MBUTTONUP | WM_RBUTTONUP => {
+            unsafe {
+                let _ = ReleaseCapture();
+            }
+            let button = match msg {
+                WM_LBUTTONUP => 0,
+                WM_MBUTTONUP => 1,
+                _ => 2,
+            };
+            push(Input::Up(at(loword(lparam.0), hiword(lparam.0)), button));
+            Some(0)
+        }
+        WM_MOUSEWHEEL | WM_MOUSEHWHEEL => {
+            // A notch is as many lines as Windows is set to scroll (3 unless changed), of 16 px; down and right
+            // positive, as the DOM's are. A precision touchpad sends fractions of a notch.
+            let mut lines = 3u32;
+            unsafe {
+                let _ = SystemParametersInfoW(SPI_GETWHEELSCROLLLINES, 0, Some((&raw mut lines).cast()), SYSTEM_PARAMETERS_INFO_UPDATE_FLAGS(0));
+            }
+            let notches = hiword(wparam.0 as isize) as f32 / WHEEL_DELTA as f32;
+            let distance = notches * lines as f32 * 16.0;
+            let delta = if msg == WM_MOUSEWHEEL { Point { x: 0.0, y: -distance } } else { Point { x: distance, y: 0.0 } };
+            let mut point = POINT { x: loword(lparam.0), y: hiword(lparam.0) };
+            unsafe {
+                let _ = ScreenToClient(hwnd, &mut point);
+            }
+            push(Input::Wheel(at(point.x, point.y), delta));
+            Some(0)
+        }
+        WM_KEYDOWN | WM_SYSKEYDOWN => {
+            if let Some(key) = keyboard::key(VIRTUAL_KEY(wparam.0 as u16)) {
+                push(Input::Key(key));
+            }
+            // Alt's own keys (Alt-F4, Alt-Space's window menu) stay Windows'.
+            if msg == WM_SYSKEYDOWN { None } else { Some(0) }
+        }
+        WM_CHAR => {
+            let unit = wparam.0 as u16;
+            if (0xD800..0xDC00).contains(&unit) {
+                state.high_surrogate.set(Some(unit));
+                return Some(0);
+            }
+            let units: Vec<u16> = state.high_surrogate.take().into_iter().chain([unit]).collect();
+            let typed = String::from_utf16_lossy(&units);
+            // What types a control character (Enter, Tab, Backspace, Escape, Ctrl and a letter) was its key, above.
+            if !typed.chars().any(char::is_control) {
+                push(Input::Key(keyboard::typed(typed)));
+            }
+            Some(0)
+        }
+        WM_SETFOCUS | WM_KILLFOCUS => {
+            push(Input::Focus(msg == WM_SETFOCUS));
+            Some(0)
+        }
+        WM_IME_STARTCOMPOSITION => {
+            unsafe { place_ime(hwnd, state.caret.get()) };
+            None
+        }
+        WM_IME_COMPOSITION => {
+            let context = unsafe { ImmGetContext(hwnd) };
+            let flags = lparam.0 as u32;
+            let mut handled = false;
+            unsafe {
+                // Japanese IME may send this message with lparam = 0, which indicates that
+                // there is no composition string.
+                if flags == 0 {
+                    push(Input::Ime(Ime::Preedit(String::new(), None)));
+                    handled = true;
+                }
+                if flags & GCS_RESULTSTR.0 != 0
+                    && let Some(result) = composition(context, GCS_RESULTSTR)
+                {
+                    push(Input::Ime(Ime::Commit(result)));
+                    handled = true;
+                }
+                if flags & GCS_COMPSTR.0 != 0
+                    && let Some(composed) = composition(context, GCS_COMPSTR)
+                {
+                    // Where its cursor is, in UTF-16 units, as bytes of the text.
+                    let cursor = (flags & GCS_CURSORPOS.0 != 0)
+                        .then(|| ImmGetCompositionStringW(context, GCS_CURSORPOS, None, 0))
+                        .filter(|at| *at >= 0)
+                        .map(|at| String::from_utf16_lossy(&composed.encode_utf16().take(at as usize).collect::<Vec<_>>()).len());
+                    push(Input::Ime(Ime::Preedit(composed, cursor)));
+                    handled = true;
+                }
+                let _ = ImmReleaseContext(hwnd, context);
+            }
+            // What's handled here doesn't come again as WM_IME_CHAR and WM_CHAR.
+            handled.then_some(0)
+        }
+        WM_IME_ENDCOMPOSITION => {
+            push(Input::Ime(Ime::Preedit(String::new(), None)));
+            None
+        }
+        WM_SETCURSOR if loword(lparam.0) == HTCLIENT as i32 => {
+            unsafe { SetCursor(Some(state.cursor.get())) };
+            Some(1)
+        }
+        WM_SETTINGCHANGE => {
+            // The system went light or dark.
+            let area = if lparam.0 == 0 { None } else { Some(unsafe { PCWSTR(lparam.0 as *const u16).to_string() }.unwrap_or_default()) };
+            if area.as_deref() == Some("ImmersiveColorSet") {
+                colour_frame(hwnd);
+                push(Input::Appearance(super::appearance()));
+            }
+            None
+        }
+        _ => None,
+    }
+}

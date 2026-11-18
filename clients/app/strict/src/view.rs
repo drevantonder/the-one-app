@@ -13,7 +13,8 @@ use crate::editing::{self, Clipboard, Field, Ime};
 use crate::geometry::{Background, Bounds, ContentMask, Corners, Edges, Hsla, Pixels, Point, ScaledPixels, Size, point, px};
 use crate::inspect::{self, Key, Rect, Rects};
 use crate::js::{Posted, Sandbox};
-use crate::render::atlas::{AtlasKey, BladeAtlas};
+use crate::render::Atlas;
+use crate::render::atlas::AtlasKey;
 use crate::render::scene::{Backdrop, BorderStyle, PolychromeSprite, Quad, Scene, Shadow, TransformationMatrix};
 use crate::style::{self, Look, Paint, State, Text, colour};
 use crate::text::{Paragraph, TextSystem};
@@ -319,7 +320,7 @@ impl Screen {
     }
 
     /// Paints the screen into `scene`, `size` logical pixels at `scale` device pixels each.
-    pub fn paint(&mut self, size: Size<Pixels>, scale: f32, text: &mut TextSystem, atlas: &BladeAtlas, scene: &mut Scene) {
+    pub fn paint(&mut self, size: Size<Pixels>, scale: f32, text: &mut TextSystem, atlas: &Atlas, scene: &mut Scene) {
         scene.clear();
         // The page is told when its room or its motion changes, as a frame's host tells an MCP App.
         self.room = Size { width: size.width.0, height: size.height.0 };
@@ -826,7 +827,7 @@ impl Screen {
 }
 
 /// Paints a screen that says only `words`, in the middle, in the muted colour, as a page's empty state does.
-pub(crate) fn paint_message(words: &str, appearance: Appearance, size: Size<Pixels>, scale: f32, text: &mut TextSystem, atlas: &BladeAtlas, scene: &mut Scene) {
+pub(crate) fn paint_message(words: &str, appearance: Appearance, size: Size<Pixels>, scale: f32, text: &mut TextSystem, atlas: &Atlas, scene: &mut Scene) {
     scene.clear();
     let dark = appearance == Appearance::Dark;
     let window = Bounds { origin: point(0.0, 0.0), size: Size { width: size.width.0, height: size.height.0 } };
@@ -928,7 +929,7 @@ struct Painter<'a> {
     taffy: TaffyTree<()>,
     nodes: HashMap<NodeId, Leaf>,
     text: &'a mut TextSystem,
-    atlas: &'a BladeAtlas,
+    atlas: &'a Atlas,
     scene: &'a mut Scene,
     scale: f32,
     conditions: Conditions,

@@ -8,7 +8,7 @@
 // Doing `if let` gives you nice scoping with passes/encoders
 #![allow(irrefutable_let_patterns)]
 
-use super::atlas::BladeAtlas;
+use super::blade_atlas::BladeAtlas;
 use super::context::BladeContext;
 use super::scene::{Backdrop, MonochromeSprite, PolychromeSprite, PrimitiveBatch, Quad, Scene, Shadow, Underline};
 use crate::geometry::{DevicePixels, Size};

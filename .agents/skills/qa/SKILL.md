@@ -83,7 +83,7 @@ drops.
 
 ### Strict windows
 
-A strict app's window (its entrypoint's `host`) is drawn natively on Linux by the launcher's process, not in a web
+A strict app's window (its entrypoint's `host`) is drawn natively on Linux and Windows by the launcher's process, not in a web
 view, so WebDriver doesn't reach it: drive it with the inspector, which every strict window answers (`clients/app/strict/src/inspect.rs` is its
 protocol). Find nodes by role and text, tap, type, `settle`, then `snap`, never a sleep:
 
@@ -91,6 +91,14 @@ protocol). Find nodes by role and text, tap, type, `settle`, then `snap`, never 
   (after `bun build.js`), then `cargo run -p strict --example screenshot -- <out> <png> <json>
   --ui core/ui/dist/client --answers <answers.json> --requests <requests.jsonl>`, its header says how. Its clock is
   paused: `clock` `step` moves it.
+- On Windows (the Surface, `ssh surface`): build with `cargo xwin build --target x86_64-pc-windows-msvc` (the
+  harness as `--example screenshot`, the app as `-p app`) and copy it to a folder of your own in `%TEMP%`; the harness
+  runs over ssh as it is (Direct3D 11 draws offscreen without a desktop). The app's windows need the logged-in
+  session: start it there with a scheduled task (`schtasks /Create … /IT`, `conhost.exe --headless <a .cmd setting
+  ONE_HOME>`), and a second `one.exe one:<app>` with the same `ONE_HOME`, even over ssh, hands it the link. A local
+  network's edge is on this machine's localhost: `ssh -N -R <port>:localhost:<port> surface` puts it at the same
+  address there. Its screen is often locked: `computer-use screenshot` with the window's `pid` and `window_id`
+  still pictures it. Delete the folder, the tasks and the debug build's `%LOCALAPPDATA%\app.theone.client.dev` after.
 - In the app on a local network: open the window (`one:<app>`) as in Desktop above, with `ONE_HOME` and `ONE_AS` set
   and the app's launcher running, then call the Inspector app's tools as that user, `one inspector windows`, `one
   inspector tap --text …`, `one inspector snap`: they reach the window through the launcher, as an agent on another
