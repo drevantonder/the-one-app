@@ -532,7 +532,7 @@ impl Screen {
         self.placed = placed;
         // A modal dialog holds the keyboard: Tab goes only to what's in it, and it has the keyboard as it appears.
         if let Some(modal) = modal {
-            tab_order.retain(|id| self.chain_from(*id).contains(&modal));
+            tab_order.retain(|id| self.within(*id, modal));
         }
         self.tab_order = tab_order;
         self.rects = rects;
@@ -541,7 +541,7 @@ impl Screen {
         self.tell_settled();
         scene.finish();
         if let Some(modal) = modal
-            && !self.focused.is_some_and(|focused| self.chain_from(focused).contains(&modal))
+            && !self.focused.is_some_and(|focused| self.within(focused, modal))
         {
             self.focus(Some(modal));
             self.again = true;
@@ -672,6 +672,18 @@ impl Screen {
     }
 
     /// `id` and what it's in, the innermost first, as last painted.
+    /// Whether node `id` is `outer` or in it, as the page's tree has them, whatever's laid out between.
+    fn within(&self, id: Id, outer: Id) -> bool {
+        let mut at = Some(id);
+        while let Some(node) = at {
+            if node == outer {
+                return true;
+            }
+            at = crate::inspect::parent(&self.tree, node).filter(|parent| *parent != 0);
+        }
+        false
+    }
+
     fn chain_from(&self, id: Id) -> Vec<Id> {
         let mut chain = vec![id];
         while let Some(parent) = chain.last().and_then(|id| self.placed(*id)).and_then(|placed| placed.parent) {
