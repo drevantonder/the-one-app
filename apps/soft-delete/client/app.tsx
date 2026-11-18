@@ -1,9 +1,7 @@
 // Recently Deleted: what you deleted in the last 30 days, the latest first, each with how long until it's deleted for
 // good. Restore or Delete Now from a row's menu, and Delete All for everything.
 import { createMemo, Errored, For, Loading, refresh, Show } from "solid-js"
-import { render } from "@solidjs/web"
-import { Button, call, changed, confirm, Empty, List, Menu, Problem, Row, Screen, Skeleton, Spinner, toast } from "ui"
-import "./app.css"
+import { Button, call, changed, confirm, Empty, List, Menu, Problem, render, Row, Screen, Skeleton, Spinner, Text, toast } from "ui"
 
 /** A deleted item, as `soft-delete_list` answers it. */
 interface Item {
@@ -99,13 +97,13 @@ function Deleted(props: { items: Item[] }) {
   return (
     <Screen heading="Recently Deleted" action={<Show when={deleted().length}><Button variant="destructive" onClick={purgeAll}>Delete All</Button></Show>}>
       <Show when={props.items.length} fallback={<Empty>Nothing was deleted in the last 30 days.</Empty>}>
-        <p class="hint">Deleted for good after 30 days.</p>
+        <Text style={{ color: "muted-foreground", maxWidth: "readable" }}>Deleted for good after 30 days.</Text>
         <List>
           <For each={props.items} keyed={(item) => item.item}>
             {(item) => (
               <Row
                 heading={heading(item())}
-                text={<span class={{ warn: !!item().why }}>{about(item())}</span>}
+                text={<Text style={item().why ? { color: "destructive" } : undefined}>{about(item())}</Text>}
                 end={
                   <Show when={item().state === "deleted"} fallback={<Spinner />}>
                     <Menu.Root onSelect={({ value }) => (value === "restore" ? restore(item()) : purge(item()))}>
@@ -137,5 +135,4 @@ render(
       </Loading>
     </Errored>
   ),
-  document.body,
 )
