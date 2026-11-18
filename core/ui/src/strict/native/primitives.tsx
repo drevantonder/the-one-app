@@ -8,10 +8,13 @@ import type { Host, Type } from "../protocol.ts"
 import type * as Strict from "../types/ui.d.ts"
 import type { PickerProps } from "../primitives.tsx"
 
-/** A primitive: a node of its type, with its props. */
+/** A primitive: a node of its type, with its props, and its children inserted by their own getter: Solid's universal
+ * `spread` loses the children of props merged from a spread (`<Box {...handlers}>…</Box>`). */
 const primitive = (type: Exclude<Type, "raw-text">) => (props: object) => {
   const node = createElement(type)
-  spread(node, props)
+  const own = props as { children?: unknown }
+  spread(node, omit(own, "children"), true)
+  insert(node, () => own.children)
   return node as unknown as Element
 }
 
