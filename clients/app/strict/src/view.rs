@@ -14,7 +14,7 @@ use crate::geometry::{Background, Bounds, ContentMask, Corners, Edges, Hsla, Pix
 use crate::inspect::{self, Key, Rect, Rects};
 use crate::js::{Posted, Thread};
 use crate::render::Atlas;
-use crate::render::atlas::AtlasKey;
+use crate::render::atlas::{AtlasKey, AtlasTile};
 use crate::render::scene::{Backdrop, BorderStyle, PolychromeSprite, Quad, Scene, Shadow, TransformationMatrix};
 use crate::style::{self, Look, Paint, State, Text, colour};
 use crate::text::{Paragraph, TextRun, TextSystem};
@@ -185,7 +185,8 @@ pub struct Screen {
     intersecting: HashMap<Id, bool>,
     /// What takes the keyboard, in the order Tab goes, as it was last painted.
     tab_order: Vec<Id>,
-    images: HashMap<String, Option<Arc<Picture>>>,
+    /// Each picture drawn, by its key in the atlas, and its size there, or none where it didn't decode.
+    images: HashMap<u64, Option<Picture>>,
     /// Each picture its page names by an address rather than a `data:` one, as a `data:` address once its window has
     /// fetched it (`fetched`), or none while it's on its way or wasn't found; and what fetches one, the window's.
     fetched: HashMap<String, Option<String>>,
@@ -1258,11 +1259,16 @@ struct Span {
     pointer: Option<bool>,
 }
 
-/// An image, decoded, in the atlas's byte order (BGRA).
+/// A picture's size in device pixels, as the atlas holds it: its pixels are the atlas's alone once it has them.
+#[derive(Clone, Copy)]
 struct Picture {
-    key: u64,
     width: u32,
     height: u32,
+}
+
+/// A picture, decoded, in the atlas's byte order (BGRA).
+struct Decoded {
+    picture: Picture,
     bgra: Vec<u8>,
 }
 
@@ -1410,7 +1416,7 @@ struct Painter<'a> {
     drawn: &'a mut HashMap<Id, Drawn>,
     /// The caret shows in this frame, as it blinks.
     caret: bool,
-    images: &'a mut HashMap<String, Option<Arc<Picture>>>,
+    images: &'a mut HashMap<u64, Option<Picture>>,
     /// Pictures by address, fetched, and those this frame wanted that weren't yet.
     fetched: &'a HashMap<String, Option<String>>,
     wanted: Vec<String>,
@@ -2245,21 +2251,40 @@ impl Painter<'_> {
     /// A picture by its `data:` address at `bounds`, its corners rounded `radius`.
     fn picture(&mut self, src: &str, bounds: Bounds<f32>, radius: f32) {
         let device = Size { width: (bounds.size.width * self.scale).round() as u32, height: (bounds.size.height * self.scale).round() as u32 };
-        let key = format!("{}x{}{src}", device.width, device.height);
-        let picture = self.images.entry(key.clone()).or_insert_with(|| decode(src, device, &key).map(Arc::new)).clone();
-        if let Some(picture) = picture {
+        if let Some((_, tile)) = self.image(&format!("{}x{}{src}", device.width, device.height), || decode(src, device)) {
             let window = self.window;
-            self.sprite(&picture, bounds, Corners::all(radius), 1.0, window);
+            self.sprite(tile, bounds, Corners::all(radius), 1.0, window);
         }
+    }
+
+    /// The picture `key` names and its tile in the atlas, decoded by `decode` the first time it's drawn and put in the
+    /// atlas, which alone keeps its pixels: they're decoded again only where it hasn't them.
+    fn image(&mut self, key: &str, decode: impl Fn() -> Option<Decoded>) -> Option<(Picture, AtlasTile)> {
+        use std::hash::{Hash, Hasher};
+        let mut hasher = std::collections::hash_map::DefaultHasher::new();
+        key.hash(&mut hasher);
+        let id = hasher.finish();
+        let mut decoded = None;
+        let picture = match self.images.get(&id) {
+            Some(picture) => (*picture)?,
+            None => {
+                decoded = decode();
+                let picture = decoded.as_ref().map(|decoded| decoded.picture);
+                self.images.insert(id, picture);
+                picture?
+            }
+        };
+        let tile = self.atlas.get_or_insert_with(&AtlasKey::Image(id), &mut || {
+            Ok(decoded.take().or_else(&decode).map(|decoded| {
+                (Size { width: decoded.picture.width.into(), height: decoded.picture.height.into() }, std::borrow::Cow::Owned(decoded.bgra))
+            }))
+        });
+        Some((picture, tile.ok()??))
     }
 
     /// A picture's sprite, `width`×`height` device pixels, at `bounds` in the window.
     #[allow(clippy::too_many_arguments)]
-    fn sprite(&mut self, picture: &Picture, bounds: Bounds<f32>, radii: Corners<f32>, opacity: f32, mask: Bounds<f32>) {
-        let tile = self.atlas.get_or_insert_with(&AtlasKey::Image(picture.key), &mut || {
-            Ok(Some((Size { width: picture.width.into(), height: picture.height.into() }, std::borrow::Cow::Borrowed(picture.bgra.as_slice()))))
-        });
-        let Ok(Some(tile)) = tile else { return };
+    fn sprite(&mut self, tile: AtlasTile, bounds: Bounds<f32>, radii: Corners<f32>, opacity: f32, mask: Bounds<f32>) {
         let scale = self.scale;
         self.scene.insert_primitive(PolychromeSprite {
             order: 0,
@@ -2293,9 +2318,7 @@ impl Painter<'_> {
         if device.width == 0 || device.height == 0 {
             return;
         }
-        let key = if src.starts_with("data:image/svg+xml") { format!("{}x{}{src}", device.width, device.height) } else { src.to_owned() };
-        let picture = self.images.entry(key.clone()).or_insert_with(|| decode(src, device, &key).map(Arc::new)).clone();
-        let Some(picture) = picture else { return };
+        let Some((picture, tile)) = self.image(&format!("{}x{}{src}", device.width, device.height), || decode(src, device)) else { return };
         let fit = (content.size.width / picture.width as f32).min(content.size.height / picture.height as f32);
         let size = Size { width: picture.width as f32 * fit, height: picture.height as f32 * fit };
         let bounds = Bounds {
@@ -2303,7 +2326,7 @@ impl Painter<'_> {
             size,
         };
         let radii = Corners { top_left: radii.top_left.min(size.width / 2.0), top_right: radii.top_right.min(size.width / 2.0), bottom_right: radii.bottom_right.min(size.width / 2.0), bottom_left: radii.bottom_left.min(size.width / 2.0) };
-        self.sprite(&picture, bounds, radii, opacity, mask);
+        self.sprite(tile, bounds, radii, opacity, mask);
     }
 
     /// A path, SVG's: its `d` in its `viewBox`, stretched to its box, filled and stroked as its style says, drawn by
@@ -2333,10 +2356,8 @@ impl Painter<'_> {
             stroke = css(paint(look.stroke)),
             width = look.stroke_width * self.scale,
         );
-        let key = format!("path{svg}");
-        let picture = self.images.entry(key.clone()).or_insert_with(|| decode(&format!("data:image/svg+xml;base64,{}", data_encoding::BASE64.encode(svg.as_bytes())), device, &key).map(Arc::new)).clone();
-        let Some(picture) = picture else { return };
-        self.sprite(&picture, content, Corners::default(), opacity, mask);
+        let Some((_, tile)) = self.image(&format!("path{svg}"), || decode(&format!("data:image/svg+xml;base64,{}", data_encoding::BASE64.encode(svg.as_bytes())), device)) else { return };
+        self.sprite(tile, content, Corners::default(), opacity, mask);
     }
 }
 
@@ -2435,8 +2456,11 @@ fn colour_token(id: &str, conditions: Conditions) -> Option<Hsla> {
     crate::tokens::table().colour(id, conditions).map(Hsla::from)
 }
 
-/// A `data:` address's image, decoded; an SVG drawn at `device` pixels.
-fn decode(src: &str, device: Size<u32>, key: &str) -> Option<Picture> {
+/// A `data:` address's image, decoded for a box of `device` pixels: an SVG drawn at that size, and any other at the
+/// smallest of its size halved again and again that still covers what of the box it fills, as a mipmap's levels are, so its pixels
+/// beyond what the box shows aren't kept, and a box that grows and shrinks (a window resized) decodes it at a few
+/// sizes, not one for each.
+fn decode(src: &str, device: Size<u32>) -> Option<Decoded> {
     let (head, body) = src.strip_prefix("data:")?.split_once(',')?;
     let bytes = if head.ends_with(";base64") {
         data_encoding::BASE64.decode(body.as_bytes()).ok()?
@@ -2461,14 +2485,22 @@ fn decode(src: &str, device: Size<u32>, key: &str) -> Option<Picture> {
         }
         (device.width, device.height, data)
     } else {
-        let image = image::load_from_memory(&bytes).ok()?.into_rgba8();
+        let mut image = image::load_from_memory(&bytes).ok()?;
+        let (mut width, mut height) = (image.width(), image.height());
+        // What it's drawn at, fitted in its box keeping its shape (`paint_image`).
+        let fit = (device.width as f32 / width as f32).min(device.height as f32 / height as f32);
+        let shown = (width as f32 * fit, height as f32 * fit);
+        while (width / 2) as f32 >= shown.0 && (height / 2) as f32 >= shown.1 {
+            (width, height) = (width / 2, height / 2);
+        }
+        if width < image.width() {
+            image = image.thumbnail_exact(width, height);
+        }
+        let image = image.into_rgba8();
         (image.width(), image.height(), image.into_raw())
     };
     for pixel in rgba.chunks_exact_mut(4) {
         pixel.swap(0, 2);
     }
-    use std::hash::{Hash, Hasher};
-    let mut hasher = std::collections::hash_map::DefaultHasher::new();
-    key.hash(&mut hasher);
-    Some(Picture { key: hasher.finish(), width, height, bgra: rgba })
+    Some(Decoded { picture: Picture { width, height }, bgra: rgba })
 }
