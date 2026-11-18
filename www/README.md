@@ -1,6 +1,6 @@
 # www
 
-The One App's own website, at <https://one.drevan.me>: three Workers on Cloudflare, each deployable on its own.
+the One App's own website, at <https://one.drevan.me>: three Workers on Cloudflare, each deployable on its own.
 
 - `gateway/` answers one.drevan.me (a custom domain) and sends `/apps` and everything under it to the app
   directory, and the rest to the marketing site, by service binding.

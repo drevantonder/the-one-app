@@ -127,7 +127,7 @@ const installs = (n: number) => `${number(n)} ${n === 1 ? "install" : "installs"
 const TRUST = `<p class="trust">An app's server code runs on your own machine, with full access to it. Nothing here is reviewed by us: have your agent read an app before you install it. Apps are listed and ranked by anonymous install counts; installing with <code>DO_NOT_TRACK=1</code> sends none.</p>`;
 
 const ORIGIN = "https://one.drevan.me";
-const CARD = { url: `${ORIGIN}/social-card.png`, alt: "The One App: make using AI to its full potential easy." };
+const CARD = { url: `${ORIGIN}/social-card.png`, alt: "the One App: make using AI to its full potential easy." };
 
 /** The tags that make a link to a page a card in a chat or on social media, and its canonical address. */
 const tags = (title: string, description: string, path: string) => {
@@ -139,7 +139,7 @@ const tags = (title: string, description: string, path: string) => {
 <meta name="theme-color" content="#0a0a0a" media="(prefers-color-scheme: dark)">
 <meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)">
 <meta property="og:type" content="website">
-<meta property="og:site_name" content="The One App">
+<meta property="og:site_name" content="the One App">
 <meta property="og:title" content="${escape(title)}">
 <meta property="og:description" content="${text}">
 <meta property="og:url" content="${escape(url)}">
@@ -168,7 +168,7 @@ const page = (title: string, body: string, meta?: [description: string, path: st
 ${meta ? tags(title, ...meta) : '<meta name="robots" content="noindex">\n<link rel="icon" href="/ring.png">\n'}<link rel="stylesheet" href="/apps/style.css">
 </head>
 <body>
-<header><a href="/">The One App</a></header>
+<header><a href="/">the One App</a></header>
 <main>
 ${body}
 ${TRUST}
@@ -204,9 +204,9 @@ function list(apps: App[], period: Period, category: string | null) {
     )
     .join("\n");
   return page(
-    "Apps · The One App",
+    "Apps · the One App",
     `<h1>Apps</h1>
-<p class="lead">Apps for The One App, from any git repo, ranked by installs.</p>
+<p class="lead">Apps for the One App, from any git repo, ranked by installs.</p>
 <div class="controls">
   <input type="search" placeholder="Search" aria-label="Search apps" autocomplete="off">
   <nav class="tabs">${tab("all", "All Time")}${tab("week", "This Week")}</nav>
@@ -225,7 +225,7 @@ ${rows}
     document.querySelector(".empty").hidden = rows.some((row) => !row.hidden);
   });
 </script>`,
-    ["Apps for The One App, from any git repo, ranked by installs.", link(period, category)],
+    ["Apps for the One App, from any git repo, ranked by installs.", link(period, category)],
   );
 }
 
@@ -233,7 +233,7 @@ function app(p: App) {
   const entrypoints = p.entrypoints.map((entrypoint) => `<li>${image(entrypoint.icon, " small")}<span>${escape(entrypoint.name)}</span></li>`).join("");
   const widgets = p.widgets.map((widget) => `<li><span>${escape(widget.name)}</span> <span class="source">${escape(widget.sizes.join(", "))}</span></li>`).join("");
   return page(
-    `${p.title} · Apps · The One App`,
+    `${p.title} · Apps · the One App`,
     `<p class="back"><a href="/apps">Apps</a></p>
 <div class="heading">${image(p.icon, " large")}<div><h1>${escape(p.title)}</h1>
 ${p.subtitle ? `<p class="subtitle">${escape(p.subtitle)}</p>` : ""}</div></div>
@@ -277,7 +277,7 @@ export default {
     const [owner, repo, name, extra] = path.split("/").slice(2);
     const found = extra === undefined && (await ranked(env, "all")).find((p) => p.owner === owner?.toLowerCase() && p.repo === repo?.toLowerCase() && p.name === name);
     if (found) return app(found);
-    return new Response(page("Not found · Apps · The One App", `<p class="back"><a href="/apps">Apps</a></p><p class="empty">No app is here.</p>`).body, {
+    return new Response(page("Not found · Apps · the One App", `<p class="back"><a href="/apps">Apps</a></p><p class="empty">No app is here.</p>`).body, {
       status: 404,
       headers: { "content-type": "text/html; charset=utf-8" },
     });
