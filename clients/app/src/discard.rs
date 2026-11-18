@@ -1,4 +1,5 @@
-//! A computer's window of web content discards its page once it's been minimised or hidden a while, as a browser
+//! A computer's window of web content (on Windows and Linux, `DISCARDS`) discards its page once it's been minimised or
+//! hidden a while, as a browser
 //! discards a tab and a phone ends an app in the background: its web view goes, and with it its web content process,
 //! and the page loads again as the window comes back. Each app's own window has one (`host`), and the launcher
 //! (`computer`).
@@ -11,6 +12,11 @@ use tao::window::Window;
 
 /// How long a window is minimised or hidden before its page is discarded.
 pub(crate) const DISCARD_AFTER: Duration = Duration::from_secs(60);
+
+/// Whether a page is discarded at all: not on a Mac, where wry's web view leaves its WKWebView alive as it goes, with
+/// its page, its web content process and its layers in the GPU process, so each page loaded again would hold more than
+/// the one it replaced.
+const DISCARDS: bool = !cfg!(target_os = "macos");
 
 /// A window's page, made again each time it's loaded.
 pub(crate) trait Page {
@@ -116,20 +122,12 @@ impl<P: Page> Discarding<P> {
     /// Discards the page once the window's been minimised or hidden long enough. → How the event loop waits: until
     /// then, if it may be.
     pub(crate) fn discard_due(&mut self, window: &Window) -> ControlFlow {
-        let Some(since) = self.away.filter(|_| self.loaded.is_some()) else { return ControlFlow::Wait };
+        let Some(since) = self.away.filter(|_| DISCARDS && self.loaded.is_some()) else { return ControlFlow::Wait };
         if since.elapsed() < DISCARD_AFTER {
             return ControlFlow::WaitUntil(since + DISCARD_AFTER);
         }
         // Out of focus or behind others, it's still there to see.
         if window.is_minimized() || !window.is_visible() {
-            // A Mac's WKWebView outlives wry's web view, its page and web content process with it, so its page is
-            // closed first, which ends that process, as Safari closes a tab's (`_close`).
-            #[cfg(target_os = "macos")]
-            if let Some(loaded) = &self.loaded {
-                use wry::WebViewExtMacOS;
-                let view = loaded.webview.webview();
-                let () = unsafe { objc2::msg_send![&*view, _close] };
-            }
             self.loaded = None;
             self.page.discarded();
         }
