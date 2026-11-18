@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
-# memory <Web|Lynx>: total PSS (KB) of the app's process and, for a WebView, its renderer process, with the app's own
+# memory <Web|Strict>: total PSS (KB) of the app's process and, for a WebView, its renderer process, with the app's own
 # screen open, then 1 and 5 screens open on top of it.
 set -euo pipefail
 adb=$HOME/Android/Sdk/platform-tools/adb
-pkg=app.theone.lynxspike
+pkg=app.theone.strictspike
 pss() {
   local total=0 pid kb
   for pid in $("$adb" shell pidof $pkg) $("$adb" shell ps -A -o PID,NAME | awk '/webview:sandboxed_process/ {print $1}'); do

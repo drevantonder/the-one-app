@@ -1,0 +1,12 @@
+#!/usr/bin/env bash
+# tap-paint <Web|Strict> <taps>: from a finger lifting on an inbox row to that tap's change painted, as each host logs
+# it ("tap to painted"): rows are marked read, one a tap, down the screen.
+set -euo pipefail
+adb=$HOME/Android/Sdk/platform-tools/adb
+"$adb" shell am force-stop app.theone.strictspike
+"$adb" logcat -c
+"$adb" shell am start -n app.theone.strictspike/.${1}Activity >/dev/null
+timeout 20 "$adb" logcat -m 1 -e "Fully drawn" >/dev/null
+sleep 1
+for i in $(seq "$2"); do "$adb" shell input tap 500 $((600 + (i % 6) * 220)); sleep 0.5; done
+"$adb" logcat -d | grep -o "tap to painted [0-9]* ms" | awk '{print $4}' | tr '\n' ' '; echo

@@ -1,11 +1,13 @@
 // From Zed's GPUI (Apache-2.0, LICENSE-APACHE beside this file), crates/gpui/src/platform/blade/blade_renderer.rs and
 // blade_context.rs at zed-industries/zed 8249ef56187b966c33f6667d0d3a35d88d8f2dc0.
 // Changed: for Blade 3d86d53's API (a belt's target, a shader's prebuilt module, an encoder's barriers, a wait's
-// error); only the pipelines a strict screen uses (quads, underlines, monochrome and polychrome sprites); the scene is
+// error); the pipelines, atlas and sampler are made once per process and shared by every screen; only the pipelines a strict screen uses (quads, underlines, monochrome and polychrome sprites); the scene is
 // this crate's (scene.rs); no paths, shadows, subpixel sprites or video surfaces; the rendering parameters are GPUI's
 // defaults, not read from the environment; the GPU context is made once per process and shared by every screen.
 
-use std::sync::{Arc, OnceLock};
+use std::cell::RefCell;
+use std::rc::Rc;
+use std::sync::{Arc, Mutex};
 
 use blade_graphics as gpu;
 use blade_util::{BufferBelt, BufferBeltDescriptor};
@@ -65,6 +67,7 @@ impl Pipelines {
     fn new(gpu: &gpu::Context, surface_info: gpu::SurfaceInfo) -> Self {
         use gpu::ShaderData as _;
 
+        let started = std::time::Instant::now();
         let shader = gpu.create_shader(gpu::ShaderDesc { source: include_str!("shaders.wgsl"), naga_module: None });
         shader.check_struct_size::<GlobalParams>();
         shader.check_struct_size::<Quad>();
@@ -95,14 +98,18 @@ impl Pipelines {
                 multisample_state: gpu::MultisampleState::default(),
             })
         };
-        Self {
+        log::info!("shader compiled in {:?}", started.elapsed());
+        let pipelines = Self {
             quads: pipeline("quads", &ShaderQuadsData::layout(), "vs_quad", "fs_quad"),
             underlines: pipeline("underlines", &ShaderUnderlinesData::layout(), "vs_underline", "fs_underline"),
             mono_sprites: pipeline("mono-sprites", &ShaderMonoSpritesData::layout(), "vs_mono_sprite", "fs_mono_sprite"),
             poly_sprites: pipeline("poly-sprites", &ShaderPolySpritesData::layout(), "vs_poly_sprite", "fs_poly_sprite"),
-        }
+        };
+        log::info!("shader and pipelines made in {:?}", started.elapsed());
+        pipelines
     }
 
+    #[allow(dead_code)]
     fn destroy(&mut self, gpu: &gpu::Context) {
         gpu.destroy_render_pipeline(&mut self.quads);
         gpu.destroy_render_pipeline(&mut self.underlines);
@@ -111,17 +118,54 @@ impl Pipelines {
     }
 }
 
-/// The GPU, opened once per process (GPUI's BladeContext).
+/// The GPU, opened once per process (GPUI's BladeContext). The lock makes a second asker wait for the first.
 pub fn context() -> anyhow::Result<Arc<gpu::Context>> {
-    static GPU: OnceLock<Arc<gpu::Context>> = OnceLock::new();
-    if let Some(gpu) = GPU.get() {
+    static GPU: Mutex<Option<Arc<gpu::Context>>> = Mutex::new(None);
+    let mut gpu = GPU.lock().unwrap();
+    if let Some(gpu) = gpu.as_ref() {
         return Ok(gpu.clone());
     }
-    let gpu = Arc::new(
+    let started = std::time::Instant::now();
+    let made = Arc::new(
         unsafe { gpu::Context::init(gpu::ContextDesc { presentation: true, validation: false, ..Default::default() }) }
             .map_err(|e| anyhow::anyhow!("{e:?}"))?,
     );
-    Ok(GPU.get_or_init(|| gpu).clone())
+    log::info!("GPU opened in {:?}", started.elapsed());
+    *gpu = Some(made.clone());
+    Ok(made)
+}
+
+/// The pipelines for a surface's format, made once per process; a second asker waits for the first.
+fn pipelines(gpu: &gpu::Context, info: gpu::SurfaceInfo) -> Arc<Pipelines> {
+    static PIPELINES: Mutex<Vec<((gpu::TextureFormat, bool), Arc<Pipelines>)>> = Mutex::new(Vec::new());
+    let key = (info.format, matches!(info.alpha, gpu::AlphaMode::PreMultiplied));
+    let mut made = PIPELINES.lock().unwrap();
+    if let Some((_, pipelines)) = made.iter().find(|(k, _)| *k == key) {
+        return pipelines.clone();
+    }
+    let pipelines = Arc::new(Pipelines::new(gpu, info));
+    made.push((key, pipelines.clone()));
+    pipelines
+}
+
+/// Opens the GPU and makes the pipelines for an Android surface (RGBA, opaque) on a thread of their own, while the
+/// screen's JS starts and its window is laid out, so the first frame only waits for its surface.
+pub fn warm() {
+    std::thread::spawn(|| {
+        if let Ok(gpu) = context() {
+            pipelines(&gpu, gpu::SurfaceInfo { format: gpu::TextureFormat::Rgba8Unorm, alpha: gpu::AlphaMode::Ignored });
+        }
+    });
+}
+
+/// What every screen in the process shares, on the UI thread: the atlas and its sampler.
+struct Shared {
+    atlas: Rc<RefCell<Atlas>>,
+    atlas_sampler: gpu::Sampler,
+}
+
+thread_local! {
+    static SHARED: RefCell<Option<Shared>> = const { RefCell::new(None) };
 }
 
 pub struct Renderer {
@@ -130,9 +174,9 @@ pub struct Renderer {
     surface_config: gpu::SurfaceConfig,
     command_encoder: gpu::CommandEncoder,
     last_sync_point: Option<gpu::SyncPoint>,
-    pipelines: Pipelines,
+    pipelines: Arc<Pipelines>,
     instance_belt: BufferBelt,
-    pub atlas: Atlas,
+    pub atlas: Rc<RefCell<Atlas>>,
     atlas_sampler: gpu::Sampler,
     gamma_ratios: [f32; 4],
 }
@@ -153,19 +197,26 @@ impl Renderer {
         };
         let surface = gpu.create_surface_configured(window, surface_config).map_err(|err| anyhow::anyhow!("Failed to create surface: {err:?}"))?;
         let command_encoder = gpu.create_command_encoder(gpu::CommandEncoderDesc { name: "", buffer_count: 2, manual_barriers: false });
-        let pipelines = Pipelines::new(&gpu, surface.info());
+        let info = surface.info();
+        log::info!("surface {info:?}");
+        let pipelines = pipelines(&gpu, info);
+        let (atlas, atlas_sampler) = SHARED.with_borrow_mut(|shared| {
+            let shared = shared.get_or_insert_with(|| Shared {
+                atlas: Rc::new(RefCell::new(Atlas::new(&gpu))),
+                atlas_sampler: gpu.create_sampler(gpu::SamplerDesc {
+                    name: "",
+                    mag_filter: gpu::FilterMode::Linear,
+                    min_filter: gpu::FilterMode::Linear,
+                    ..Default::default()
+                }),
+            });
+            (shared.atlas.clone(), shared.atlas_sampler)
+        });
         let instance_belt = BufferBelt::new(BufferBeltDescriptor {
             memory: gpu::Memory::Shared,
             min_chunk_size: 0x1000,
             alignment: 0x40, // Vulkan `minStorageBufferOffsetAlignment` on Intel Xe
             target: gpu::BufferTarget::Data,
-        });
-        let atlas = Atlas::new(&gpu);
-        let atlas_sampler = gpu.create_sampler(gpu::SamplerDesc {
-            name: "",
-            mag_filter: gpu::FilterMode::Linear,
-            min_filter: gpu::FilterMode::Linear,
-            ..Default::default()
         });
         Ok(Self {
             gpu,
@@ -199,10 +250,18 @@ impl Renderer {
     }
 
     pub fn draw(&mut self, scene: &Scene) {
+        let w0 = std::time::Instant::now();
+        let waited_for = self.last_sync_point.is_some();
+        self.wait_for_gpu();
+        if waited_for {
+            log::info!("waited for the last frame {:?}", w0.elapsed());
+        }
         self.command_encoder.start();
-        self.atlas.before_frame(&mut self.command_encoder);
+        self.atlas.borrow_mut().before_frame(&mut self.command_encoder);
 
+        let t0 = std::time::Instant::now();
         let frame = self.surface.acquire_frame();
+        let acquired = t0.elapsed();
         self.command_encoder.init_texture(frame.texture());
 
         let globals = GlobalParams {
@@ -219,7 +278,7 @@ impl Renderer {
             gpu::RenderTargetSet {
                 colors: &[gpu::RenderTarget {
                     view: frame.texture_view(),
-                    init_op: gpu::InitOp::Clear(gpu::TextureColor::TransparentBlack),
+                    init_op: gpu::InitOp::Clear(if scene.dark { gpu::TextureColor::OpaqueBlack } else { gpu::TextureColor::White }),
                     finish_op: gpu::FinishOp::Store,
                 }],
                 depth_stencil: None,
@@ -252,7 +311,7 @@ impl Renderer {
                             globals,
                             gamma_ratios: self.gamma_ratios,
                             grayscale_enhanced_contrast: 1.0,
-                            t_sprite: self.atlas.view(*texture_id),
+                            t_sprite: self.atlas.borrow().view(*texture_id),
                             s_sprite: self.atlas_sampler,
                             b_mono_sprites: instance_buf,
                         },
@@ -265,7 +324,7 @@ impl Renderer {
                     let mut encoder = pass.with(&self.pipelines.poly_sprites);
                     encoder.bind(
                         0,
-                        &ShaderPolySpritesData { globals, t_sprite: self.atlas.view(*texture_id), s_sprite: self.atlas_sampler, b_poly_sprites: instance_buf },
+                        &ShaderPolySpritesData { globals, t_sprite: self.atlas.borrow().view(*texture_id), s_sprite: self.atlas_sampler, b_poly_sprites: instance_buf },
                     );
                     encoder.draw(0, 4, 0, sprites.len() as u32);
                 }
@@ -273,23 +332,22 @@ impl Renderer {
         }
         drop(pass);
 
+        let encoded = t0.elapsed();
         self.command_encoder.present(frame);
         let sync_point = self.gpu.submit(&mut self.command_encoder);
+        let submitted = t0.elapsed();
 
         self.instance_belt.flush(&sync_point);
-        self.atlas.after_frame(&sync_point);
+        self.atlas.borrow_mut().after_frame(&sync_point);
 
-        self.wait_for_gpu();
         self.last_sync_point = Some(sync_point);
+        log::info!("frame: acquired {acquired:?}, encoded {encoded:?}, submitted {submitted:?}, done {:?}", t0.elapsed());
     }
 
     pub fn destroy(&mut self) {
         self.wait_for_gpu();
-        self.atlas.destroy();
-        self.gpu.destroy_sampler(self.atlas_sampler);
         self.instance_belt.destroy(&self.gpu);
         self.gpu.destroy_command_encoder(&mut self.command_encoder);
-        self.pipelines.destroy(&self.gpu);
         self.gpu.destroy_surface(&mut self.surface);
     }
 }

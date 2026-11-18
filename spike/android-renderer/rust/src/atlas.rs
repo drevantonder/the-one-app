@@ -1,7 +1,7 @@
 // From Zed's GPUI (Apache-2.0, LICENSE-APACHE beside this file), crates/gpui/src/platform/blade/blade_atlas.rs at
 // zed-industries/zed 8249ef56187b966c33f6667d0d3a35d88d8f2dc0.
 // Changed: keyed by what a strict screen draws (a glyph, as cosmic-text keys it, or an image by its address); one
-// owner, so no lock; tiles are never removed (a screen's glyphs and icons fit one texture each); no subpixel textures.
+// owner, so no lock; one per process, never freed; tiles are never removed (a screen's glyphs and icons fit one texture each); no subpixel textures.
 
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -162,14 +162,6 @@ impl Atlas {
 
     pub fn after_frame(&mut self, sync_point: &gpu::SyncPoint) {
         self.upload_belt.flush(sync_point);
-    }
-
-    pub fn destroy(&mut self) {
-        for texture in self.monochrome.drain(..).chain(self.polychrome.drain(..)) {
-            self.gpu.destroy_texture(texture.raw);
-            self.gpu.destroy_texture_view(texture.raw_view);
-        }
-        self.upload_belt.destroy(&self.gpu);
     }
 }
 

@@ -97,20 +97,29 @@ impl App {
         if let (Value::Object(event), Value::Object(extra)) = (&mut event, extra) {
             event.extend(extra);
         }
+        let started = Instant::now();
         if let Err(error) = self.sandbox.send("event", &event) {
             log::error!("event: {error:#}");
         }
+        let js = started.elapsed();
         self.pump();
+        log::info!("{name}: js {js:?}, ops and layout {:?}", started.elapsed() - js);
     }
 
     fn draw(&mut self) {
         let Some((renderer, _)) = self.renderer.as_mut() else { return };
         let started = Instant::now();
-        if self.view.dirty || true {
-            self.view.paint(renderer);
-        }
+        self.view.paint(renderer);
+        self.view.scene.dark = self.view.dark;
+        let scene = started.elapsed();
         renderer.draw(&self.view.scene);
-        log::debug!("drew in {:?}", started.elapsed());
+        log::info!(
+            "drew: scene {scene:?} ({} quads, {} glyphs, {} images), gpu {:?}",
+            self.view.scene.quads.len(),
+            self.view.scene.monochrome_sprites.len(),
+            self.view.scene.polychrome_sprites.len(),
+            started.elapsed() - scene
+        );
         if let Some(a11y) = self.a11y.as_mut() {
             a11y.update(&self.view);
         }
@@ -234,6 +243,7 @@ pub extern "system" fn Java_app_theone_strictspike_StrictView_nativeCreate(
     dark: jboolean,
 ) -> jlong {
     android_logger::init_once(android_logger::Config::default().with_max_level(log::LevelFilter::Info).with_tag("StrictSpike"));
+    renderer::warm();
     let started = Instant::now();
     let page = string(&mut env, &page);
     let cache = string(&mut env, &cache);
@@ -390,6 +400,7 @@ pub extern "system" fn Java_app_theone_strictspike_StrictView_nativeEditingState
     let id = id as Id;
     let secure = app.view.edits.get(&id).is_some_and(|e| e.secure);
     let edit = Edit::from_utf16(text, base, extent, composing_start, composing_end, secure);
+    log::info!("editing state: selection {base}..{extent}, composing {composing_start}..{composing_end}, {} chars", edit.text.chars().count());
     let changed = app.view.edits.get(&id).is_none_or(|old| old.text != edit.text);
     let value = edit.text.clone();
     app.view.edits.insert(id, edit);

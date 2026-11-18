@@ -203,6 +203,8 @@ pub enum Batch {
 
 #[derive(Default)]
 pub struct Scene {
+    /// Cleared to black, else white: the design's background token is pure white in light and near-black in dark.
+    pub dark: bool,
     pub quads: Vec<Quad>,
     pub underlines: Vec<Underline>,
     pub monochrome_sprites: Vec<MonochromeSprite>,

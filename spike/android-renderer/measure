@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
-# measure <Web|Lynx> <runs> [am start extras]: open-to-fully-drawn of the screen, by Android's own "Fully drawn" (reportFullyDrawn),
+# measure <Web|Strict> <runs> [am start extras]: open-to-fully-drawn of the screen, by Android's own "Fully drawn" (reportFullyDrawn),
 # cold (process killed first) and warm (process and engine already up, as an app screen opens inside the One App).
 set -euo pipefail
 adb=$HOME/Android/Sdk/platform-tools/adb
-pkg=app.theone.lynxspike
+pkg=app.theone.strictspike
 activity=$pkg/.${1}Activity
 drawn() { timeout 20 "$adb" logcat -m 1 -e "Fully drawn $activity" | grep -o '+[0-9]*s*[0-9]*ms' | tr -d '+'; }
 for mode in cold warm; do

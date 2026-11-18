@@ -253,9 +253,12 @@ impl View {
                         let font = fonts[&id];
                         let lines = node.style.line_clamp;
                         let entry = buffers.entry(id).or_insert_with(|| (String::new(), font, None, None, text.buffer("", font, None, None)));
-                        if entry.0 != content || entry.1 != font || entry.2 != width || entry.3 != lines {
+                        if entry.0 != content || entry.1 != font {
                             text.set(&mut entry.4, &content, font, width, lines);
                             (entry.0, entry.1, entry.2, entry.3) = (content, font, width, lines);
+                        } else if entry.2 != width || entry.3 != lines {
+                            text.wrap(&mut entry.4, width, lines);
+                            (entry.2, entry.3) = (width, lines);
                         }
                         let (w, h) = Text::size(&entry.4);
                         Size { width: known.width.unwrap_or(w.ceil()), height: known.height.unwrap_or(h.ceil()) }
@@ -275,17 +278,8 @@ impl View {
         self.scene.clear();
         self.hits.clear();
         let screen = Bounds::new(0.0, 0.0, self.size.0, self.size.1);
-        let background = self.colour("background");
-        self.scene.quad(Quad {
-            order: 0,
-            border_style: 0,
-            bounds: screen,
-            content_mask: screen,
-            background: Background::solid(background),
-            border_color: Hsla::default(),
-            corner_radii: Corners::default(),
-            border_widths: Edges::default(),
-        });
+        // The screen's background is the frame's clear colour (renderer.rs), not a quad: a full-screen quad through
+        // GPUI's quad shader is most of a frame's GPU time on a software GPU.
         let children = self.tree.root().children.clone();
         let origin = [0.0, 0.0];
         let fg = self.colour("foreground");
@@ -334,10 +328,10 @@ impl View {
             Kind::Text | Kind::RawText => {
                 if let Some((_, font, width, lines, _)) = self.buffers.get(&id).map(|(a, b, c, d, _)| (a.clone(), *b, *c, *d, ())) {
                     let content_width = layout.size.width - layout.padding.left - layout.padding.right;
+                    let _ = font;
                     if width != Some(content_width) {
-                        let content = self.tree.text(id);
                         let entry = self.buffers.get_mut(&id).expect("there");
-                        self.text.set(&mut entry.4, &content, font, Some(content_width), lines);
+                        self.text.wrap(&mut entry.4, Some(content_width), lines);
                         entry.2 = Some(content_width);
                     }
                     let buffer = &self.buffers[&id].4;
@@ -350,7 +344,7 @@ impl View {
                     let (w, h) = (bounds.size[0].round() as u32, bounds.size[1].round() as u32);
                     let images = &mut self.images;
                     let key = crate::atlas::AtlasKey::Image(format!("{src}@{w}x{h}"));
-                    let tile = renderer.atlas.get_or_insert_with(&key, crate::atlas::Kind::Polychrome, || {
+                    let tile = renderer.atlas.borrow_mut().get_or_insert_with(&key, crate::atlas::Kind::Polychrome, || {
                         let png = images(&src)?;
                         let image = image::load_from_memory(&png).ok()?.resize_exact(w.max(1), h.max(1), image::imageops::FilterType::Lanczos3);
                         Some(([w as i32, h as i32], crate::text::rgba_to_bgra(image.to_rgba8().into_raw())))

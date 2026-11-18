@@ -1,10 +1,10 @@
 #!/usr/bin/env bash
-# a11y-tree <Web|Lynx> <out.xml>: what an accessibility service sees of the screen (uiautomator's dump), as a list.
+# a11y-tree <Web|Strict> <out.xml>: what an accessibility service sees of the screen (uiautomator's dump), as a list.
 set -euo pipefail
 adb=$HOME/Android/Sdk/platform-tools/adb
-"$adb" shell am force-stop app.theone.lynxspike
+"$adb" shell am force-stop app.theone.strictspike
 "$adb" logcat -c
-"$adb" shell am start -n app.theone.lynxspike/.${1}Activity >/dev/null
+"$adb" shell am start -n app.theone.strictspike/.${1}Activity >/dev/null
 timeout 20 "$adb" logcat -m 1 -e "Fully drawn" >/dev/null
 "$adb" shell uiautomator dump /sdcard/tree.xml >/dev/null
 "$adb" pull -q /sdcard/tree.xml "$2"

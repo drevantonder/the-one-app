@@ -24,10 +24,18 @@ pub struct Font {
 
 impl Text {
     pub fn new() -> anyhow::Result<Text> {
-        let ttf = wuff::decompress_woff2(include_bytes!("../../../../core/ui/src/Allo-Variable.woff2"))
-            .map_err(|error| anyhow::anyhow!("Allo didn't decode: {error:?}"))?;
+        // Allo, decoded once per process.
+        static TTF: std::sync::OnceLock<std::sync::Arc<Vec<u8>>> = std::sync::OnceLock::new();
+        let ttf = match TTF.get() {
+            Some(ttf) => ttf.clone(),
+            None => {
+                let ttf = wuff::decompress_woff2(include_bytes!("../../../../core/ui/src/Allo-Variable.woff2"))
+                    .map_err(|error| anyhow::anyhow!("Allo didn't decode: {error:?}"))?;
+                TTF.get_or_init(|| std::sync::Arc::new(ttf)).clone()
+            }
+        };
         let mut db = cosmic_text::fontdb::Database::new();
-        db.load_font_data(ttf);
+        db.load_font_source(cosmic_text::fontdb::Source::Binary(ttf));
         let family = db.faces().next().and_then(|face| face.families.first()).map(|(name, _)| name.clone()).unwrap_or_default();
         db.set_sans_serif_family(family);
         Ok(Text { fonts: FontSystem::new_with_locale_and_db("en-US".into(), db), swash: SwashCache::new() })
@@ -43,8 +51,6 @@ impl Text {
 
     pub fn set(&mut self, buffer: &mut Buffer, text: &str, font: Font, width: Option<f32>, lines: Option<usize>) {
         buffer.set_metrics(Metrics::new(font.size, font.line_height));
-        buffer.set_ellipsize(cosmic_text::Ellipsize::None);
-        buffer.set_size(width, None);
         let mut attrs = Attrs::new().family(Family::SansSerif).weight(Weight(font.weight.round() as u16));
         if font.tabular {
             let mut features = cosmic_text::FontFeatures::new();
@@ -52,6 +58,13 @@ impl Text {
             attrs = attrs.font_features(features);
         }
         buffer.set_text(text, &attrs, Shaping::Advanced, None);
+        self.wrap(buffer, width, lines);
+    }
+
+    /// Lays a buffer's shaped text out again at another width, without shaping it again.
+    pub fn wrap(&mut self, buffer: &mut Buffer, width: Option<f32>, lines: Option<usize>) {
+        buffer.set_ellipsize(cosmic_text::Ellipsize::None);
+        buffer.set_size(width, None);
         buffer.shape_until_scroll(&mut self.fonts, false);
         // Ellipsized only where it has more lines than it may show.
         if let Some(lines) = lines.filter(|lines| buffer.layout_runs().count() > *lines) {
@@ -96,7 +109,7 @@ impl Text {
                 let Some(image) = image else { continue };
                 let placement = placement.expect("set with the image");
                 let kind = if colour { Kind::Polychrome } else { Kind::Monochrome };
-                let tile = renderer.atlas.get_or_insert_with(&AtlasKey::Glyph(key), kind, || {
+                let tile = renderer.atlas.borrow_mut().get_or_insert_with(&AtlasKey::Glyph(key), kind, || {
                     let size = [placement.width as i32, placement.height as i32];
                     Some(match image.content {
                         SwashContent::Mask => (size, image.data),
