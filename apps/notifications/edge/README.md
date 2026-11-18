@@ -14,4 +14,10 @@ each send to it, and the app's `send` says so.
   key's 65 bytes, the private key's 32), and `VAPID_SUBJECT`, a `mailto:` or `https:` address the push services
   can reach whoever runs the network at. `bunx web-push generate-vapid-keys` makes a pair.
 
+A key kept in its owner's Vault goes in without anyone seeing it: once they let agents send it to
+`api.cloudflare.com`, `vault_fetch` puts it with Cloudflare's API, `PUT
+/accounts/<account>/workers/scripts/network-notifications/secrets` with the body
+`{"name": "FCM_ACCOUNT", "text": "{{key}}", "type": "secret_text"}` and `content-type: application/json`. A deploy
+keeps the secrets that are there.
+
 It is TypeScript, which wrangler builds without checking; `bun run typecheck` here checks it.
