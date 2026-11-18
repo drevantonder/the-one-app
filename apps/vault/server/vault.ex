@@ -9,7 +9,7 @@ defmodule Vault do
   only the servers they chose open it, and deleted, restored and purged by soft delete as anything an app made is:
   the Vault stores and encrypts, and keeps no lifecycle of its own. Their Vault's database (`Database`), encrypted the
   same, says which item each name is, and keeps what's been asked for and the sign-ins under way. A secret gets here
-  encrypted on its person's device for those servers, and leaves only inside a request to one of its item's sites, or
+  encrypted on its person's device for those servers, or sealed from a browser of theirs (`save_from_browser`), and leaves only inside a request to one of its item's sites, or
   to the code of an app switched on for it. No tool here answers with one, and nothing a tool raises says one: what
   handles them raises only words of its own (`quietly/2`).
 
@@ -85,7 +85,8 @@ defmodule Vault do
     %{
       "core" => ">= 0.22.18",
       "encryption" => "to keep your secrets from whoever runs the bucket",
-      "database" => "to keep your items"
+      "database" => "to keep your items",
+      "notifications" => "to tell you when an agent saves something to your Vault"
     }
   end
 
@@ -166,6 +167,10 @@ defmodule Vault do
                   apps: %{type: "array", items: %{type: "string"}, description: "The apps switched on for it"},
                   agents: %{type: "boolean", description: "Whether agents may use it, with fetch"},
                   sign_in: %{type: "boolean", description: "Whether a sign-in made it"},
+                  added: %{
+                    type: ["object", "null"],
+                    description: "If a save from a browser made it: `by`, the device of the agent that saved it, `from`, the site, and `at`, when"
+                  },
                   changed: %{type: ["integer", "null"], description: "When it last changed, in milliseconds since 1970"}
                 },
                 required: ["name", "artifact", "type", "state", "fields", "hosts", "apps", "agents", "sign_in"]
@@ -277,6 +282,62 @@ defmodule Vault do
           required: ["item"]
         },
         outputs: %{type: "object", properties: %{item: item, on: %{type: "boolean"}}, required: ["item", "on"]}
+      },
+      %{
+        name: "save_from_browser",
+        description: """
+        Saves a secret from a browser of yours (Chrome's or Chrome Profiles' `session`) into the Vault without you
+        seeing it, as a password manager's Save does: what elements on the page hold, or what's in a file the browser
+        downloaded, the whole of it or a value in its JSON. Into a new item, or one a save from a browser made. The
+        person is notified, and sees who added it from where, with Undo. Answers each field's length and the first 8
+        hex of its SHA-256, never its value. The download is deleted from the browser.
+        """,
+        inputs: %{
+          type: "object",
+          properties: %{
+            session: %{type: "string", description: "The browser, by the session it was opened with"},
+            item: item,
+            fields: %{
+              type: "object",
+              description:
+                "What each field is taken from, by its name: {\"client_secret\": {\"target\": \"e12\"}}, or with `download`, {\"client_id\": {\"json\": \"web.client_id\", \"secret\": false}, \"client_secret\": {\"json\": \"web.client_secret\"}}",
+              minProperties: 1,
+              additionalProperties: %{
+                type: "object",
+                properties: %{
+                  target: %{type: "string", description: "The element that holds it: its ref from the snapshot, like e12, or a unique selector"},
+                  json: %{type: "string", description: "With `download`, where it is in the file's JSON, like web.client_secret. The whole file if left out"},
+                  secret: %{type: "boolean", description: "Never shown again. True if left out: say false for a client_id"}
+                }
+              }
+            },
+            download: %{type: "string", description: "A file the browser downloaded, by its name as Chrome saved it, to take the fields from"},
+            hosts: hosts,
+            by: %{type: "string", format: "device-name", description: "Your device fills this in"}
+          },
+          required: ["session", "item", "fields"]
+        },
+        outputs: %{
+          type: "object",
+          properties: %{
+            item: item,
+            site: %{type: "string", description: "The site it was saved from"},
+            fields: %{
+              type: "array",
+              items: %{
+                type: "object",
+                properties: %{
+                  name: %{type: "string"},
+                  secret: %{type: "boolean"},
+                  length: %{type: "integer", description: "How many characters it is"},
+                  sha256: %{type: "string", description: "The first 8 hex of its SHA-256, to check it against"}
+                },
+                required: ["name", "secret", "length", "sha256"]
+              }
+            }
+          },
+          required: ["item", "site", "fields"]
+        }
       },
       %{
         name: "request",
@@ -896,6 +957,7 @@ defmodule Vault do
           apps: Enum.sort(apps),
           agents: item["agents"],
           sign_in: item["oauth"] != nil,
+          added: item["added"],
           changed: item["changed"]
         }
       end
@@ -933,6 +995,60 @@ defmodule Vault do
       end)
 
       %{item: name, field: field}
+    end)
+  end
+
+  # A secret from a browser of theirs, which Chrome sends sealed under a key made here for it alone (its `upload`), so
+  # it never passes through a tool's result. It goes only into a new item, or one a save from a browser made, which
+  # its person sees was added, by whom and from where, and undoes by deleting it.
+  def call("save_from_browser", %{"session" => session, "item" => name, "fields" => fields} = inputs, call) do
+    db = own(call)
+    secret = Map.new(fields, fn {field, about} -> {field!(field), Map.get(about, "secret", true)} end)
+
+    quietly("Saving from the browser", fn ->
+      found = find(call, db, name)
+
+      if found && found["added"] == nil,
+        do: raise("#{found["name"]} is in the Vault already, made by its person. Save to a new item, or ask them, with request.")
+
+      {blob, key} = {"saving/#{random(12)}", :crypto.strong_rand_bytes(32)}
+      taken = Map.new(fields, fn {field, about} -> {field, Map.take(about, ~w(target json))} end)
+      upload = %{"session" => session, "link" => link(db, blob, :write), "key" => Base.encode64(key), "fields" => taken}
+      upload = if download = inputs["download"], do: Map.put(upload, "download", download), else: upload
+
+      %{"site" => site, "values" => values} =
+        try do
+          Call.tool(call, "chrome", "upload", upload)
+          {:ok, sealed, _tag} = Artifact.read(%{root(db) | codec: nil}, blob)
+          JSON.decode!(opened(sealed, key))
+        after
+          Artifact.remove(root(db), blob)
+        end
+
+      if Enum.sort(Map.keys(values)) != Enum.sort(Map.keys(secret)), do: raise("The browser sent other fields than were asked for.")
+      added = %{"by" => inputs["by"], "from" => site, "at" => now()}
+      found = found || create(call, db, name, Map.get(inputs, "hosts", []))
+
+      change!(db, found, fn record ->
+        record = if hosts = inputs["hosts"], do: Map.put(record, "hosts", hosts!(hosts)), else: record
+        Enum.reduce(values, Map.put(record, "added", added), fn {field, value}, record -> put_field(record, field, value, secret[field]) end)
+      end)
+
+      Call.changed(call)
+      on = if inputs["by"], do: " on #{inputs["by"]}", else: ""
+
+      Call.app(call, "notifications").send(call, %{
+        "title" => "An agent#{on} saved #{found["name"]} to your Vault",
+        "text" => "From #{site}. Undo it in Vault if you didn't want it."
+      })
+
+      saved =
+        for {field, value} <- Enum.sort(values) do
+          sha256 = :sha256 |> :crypto.hash(value) |> Base.encode16(case: :lower) |> binary_part(0, 8)
+          %{name: field, secret: secret[field], length: String.length(value), sha256: sha256}
+        end
+
+      %{item: found["name"], site: site, fields: saved}
     end)
   end
 
@@ -1392,6 +1508,20 @@ defmodule Vault do
         raise "An item is ready, busy with a message, or action_required with why and an action."
     end
   end
+
+  # What Chrome's `upload` sent, sealed as Containers seals a file (`Containers.Sealed`): a version byte, 1, then, a
+  # secret being far less than its chunk of 1 MiB, one chunk sealed with AES-256-GCM under the nonce 0, as the last,
+  # with its tag after it.
+  defp opened(<<1, sealed::binary>>, key) when byte_size(sealed) >= 16 do
+    {text, tag} = :erlang.split_binary(sealed, byte_size(sealed) - 16)
+
+    case :crypto.crypto_one_time_aead(:aes_256_gcm, key, <<0::96>>, text, "last", tag, false) do
+      :error -> raise "What the browser sent doesn't open with its key."
+      plain -> plain
+    end
+  end
+
+  defp opened(_sealed, _key), do: raise("What the browser sent isn't whole.")
 
   # A short-lived link to one blob of an item's, as what's handed on takes it: JSON's keys.
   defp link(db, blob, mode), do: %{root(db) | codec: nil} |> Artifact.link(blob, mode) |> JSON.encode!() |> JSON.decode!()

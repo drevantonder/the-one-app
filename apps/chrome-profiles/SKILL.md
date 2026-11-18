@@ -25,6 +25,8 @@ already signed in as them; then use Chrome's tools with its session, as with any
   site's sign-in page), and you tell them: open Vault on any of their devices, tap the profile under Chrome
   Profiles, sign in there, and tap Save. `notifications_send` with `app: "vault"` reaches their devices. It's saved by
   itself after 15 minutes. Don't use that browser while they do; once it's saved, `open` the profile again.
+- A secret a site shows you, or a key file it downloads, goes into your person's Vault with
+  `vault_save_from_browser` and the browser's session, never through you, as Chrome's skill says.
 - `save` and `discard` finish an update for them when they ask: with and without saving. A save that fails keeps
   the browser as it is, and saving again tries again.
 - `create`, `rename` and `remove` are for when your person asks. Removing one deletes it: it's in Recently Deleted

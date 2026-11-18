@@ -23,5 +23,8 @@ accounts through this one. `apps` lists the ones the person has.
 
 The first sign-in needs the item "Google client" in the person's Vault: `client_id` (not secret) and
 `client_secret` of a Google Cloud OAuth client of the Web application kind, whose authorized redirect URI is the
-network's address followed by `/vault/callback`, with `oauth2.googleapis.com` its site, where its secret goes. Ask
-for it with `vault_request` (`hosts: ["oauth2.googleapis.com"]`); never ask for it in the chat.
+network's address followed by `/vault/callback`, with `oauth2.googleapis.com` its site, where its secret goes. When
+you make the client in a browser of yours, save it straight from there with `vault_save_from_browser` (the client's
+JSON download, `client_id` from `web.client_id` with `secret: false` and `client_secret` from `web.client_secret`,
+`hosts: ["oauth2.googleapis.com"]`), never reading it. When the person has it, ask for it with `vault_request`;
+never ask for it in the chat.

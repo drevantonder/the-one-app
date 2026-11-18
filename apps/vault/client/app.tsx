@@ -29,6 +29,8 @@ interface Item {
   apps: string[]
   agents: boolean
   sign_in?: boolean
+  /** If a save from a browser made it: the device of the agent that saved it, the site, and when. */
+  added?: { by: string | null; from: string; at: number } | null
 }
 
 /** What an app says its item needs of its person, as it says it, or what adds one of a type: a tool of the
@@ -132,6 +134,10 @@ const listed = (things: string[]) => new Intl.ListFormat("en", { type: "conjunct
 const sites = (typed: unknown) => String(typed ?? "").split(/[\s,]+/).filter(Boolean)
 /// What may use an item, in its grey line.
 const users = (item: Item) => [...item.apps, ...(item.agents ? ["your agents"] : [])]
+/// Where an item a save from a browser made came from: "On Andre's Mac, from console.cloud.google.com".
+const whence = (added: NonNullable<Item["added"]>) => `${added.by ? `On ${added.by}, from` : "From"} ${added.from}`
+/// Who saved it, and from where: "Added by an agent on Andre's Mac from console.cloud.google.com".
+const added = (item: Item) => item.added && `Added by an agent${item.added.by ? ` on ${item.added.by}` : ""} from ${item.added.from}`
 /// An item's type, if it's of one, and its name as a person reads it: "Personal", not "Chrome profile: Personal".
 const typeOf = (item: Item) => contents().types.find((type) => type.id === item.type)
 const shown = (item: Item) => item.name.slice(typeOf(item)?.prefix.length ?? 0)
@@ -275,8 +281,29 @@ function ItemScreen(props: { item: Item }) {
     if (!(await confirm({ heading: `Delete ${shown(item())}?`, text: "Whatever uses it stops working. It's in Recently Deleted for 30 days.", action: "Delete", destructive: true }))) return
     if (await does("soft-delete_delete", { artifact: item().artifact })) setOpen()
   }
+  // What an agent saved from a browser is undone as it's deleted, and is in Recently Deleted for 30 days.
+  const undo = async () => {
+    if (await does("soft-delete_delete", { artifact: item().artifact })) setOpen()
+  }
   return (
     <Screen heading={shown(item())} back>
+      <Show when={item().added}>
+        {(added) => (
+          <Section>
+            <List>
+              <Row
+                heading="Added by an agent"
+                text={whence(added())}
+                end={
+                  <Button variant="secondary" onClick={undo}>
+                    Undo
+                  </Button>
+                }
+              />
+            </List>
+          </Section>
+        )}
+      </Show>
       <Show when={item().state}>
         {(state) => (
           <div class="atop">
@@ -623,7 +650,7 @@ function Vault() {
                     {(item) => (
                       <Row
                         heading={item().name}
-                        text={item().state ? <Line state={item().state!} /> : users(item()).length ? `Used by ${listed(users(item()))}` : "Nothing uses it"}
+                        text={item().state ? <Line state={item().state!} /> : users(item()).length ? `Used by ${listed(users(item()))}` : (added(item()) ?? "Nothing uses it")}
                         current={item().name === open()}
                         onClick={() => setOpen(item().name)}
                         action={fixable(item()) ? <Fix item={item()} /> : undefined}

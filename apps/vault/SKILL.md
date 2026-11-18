@@ -14,8 +14,8 @@ anyone), the sites its secrets are sent to, the apps switched on for it, and whe
 can have contents too large for a field, kept sealed.
 
 Never ask for a password, key or token in the chat, and never paste one. `request` gives the person a link to
-their own device, where they pick or type it; `fetch` makes a web request with an item they let agents use, and
-you never see the secret. If someone pastes one anyway, don't repeat it: in code mode, or over the web, ask for it
+their own device, where they pick or type it; `save_from_browser` saves one a website shows a browser of yours;
+`fetch` makes a web request with an item they let agents use, and you never see the secret. If someone pastes one anyway, don't repeat it: in code mode, or over the web, ask for it
 with `request`; only as a plain tool on a device (`one mcp`, `one vault set`) keep it with `set`.
 
 - `list` shows what's there: each item's fields, a secret one without its value, its sites, the apps switched
@@ -25,6 +25,16 @@ with `request`; only as a plain tool on a device (`one mcp`, `one vault set`) ke
   Give the person the link it answers with. Today the link's page tells them to open Vault on a device of
   theirs, where the request waits at the top; `status` says when they've answered. Allowing it switches the
   item on for whoever asked.
+- `save_from_browser` is how a secret you set up on a website gets in, as a password manager's Save does: an
+  OAuth client's secret, an API key, a key file. It takes it from a Chrome or Chrome Profiles `session` of yours,
+  straight from the browser, so it never reaches you: from elements on the page (`fields`, each with its `target`,
+  as `snapshot` gives it, or a selector), or from a file the browser downloaded (`download`, by its name, the whole
+  file or a `json` value in it, such as `web.client_secret`), which is deleted once it's saved. Save it the moment
+  it shows, before you snapshot or screenshot anything. Give the item's `hosts`, and `secret: false` for what may
+  be shown, as a client_id. It makes a new item, or adds to one a save from a browser made, never another; its
+  person is notified and sees "Added by an agent from <site>", with Undo. It answers each field's length and the
+  first 8 hex of its SHA-256, to check against what the site says. Using it is still the person's to allow: an app
+  that needs it, or `fetch`, still asks with `request`, which they answer with the item.
 - `fetch` fills `{{<field>}}` into a request's url, headers or body, for an item agents may use, and answers
   the status, headers and body. It goes only to one of the item's sites, and a secret the site says back is
   blotted out.
