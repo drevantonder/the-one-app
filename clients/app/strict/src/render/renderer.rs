@@ -1,7 +1,7 @@
 // Copied from Zed's GPUI (github.com/zed-industries/zed, crates/gpui/src/platform/blade/blade_renderer.rs) at commit
 // 69e2130295c2649963eb639fc70b4f2ee8ea1624 (gpui 0.2.2 on crates.io), and cut down for the strict host: it draws a
 // scene's quads, shadows, underlines and sprites into a window's surface, or into an offscreen texture it reads back
-// for a picture; no paths, video surfaces or MSAA.
+// for a picture; no paths, video surfaces or MSAA. Backdrops, what's behind a node blurred, are ours.
 // Copyright 2022 - 2025 Zed Industries, Inc. Licensed under the Apache License, Version 2.0
 // (clients/app/strict/LICENSE-APACHE); this file is changed from the original.
 
@@ -10,7 +10,7 @@
 
 use super::atlas::BladeAtlas;
 use super::context::BladeContext;
-use super::scene::{MonochromeSprite, PolychromeSprite, PrimitiveBatch, Quad, Scene, Shadow, Underline};
+use super::scene::{Backdrop, MonochromeSprite, PolychromeSprite, PrimitiveBatch, Quad, Scene, Shadow, Underline};
 use crate::geometry::{DevicePixels, Size};
 use blade_graphics as gpu;
 use blade_util::{BufferBelt, BufferBeltDescriptor};
@@ -63,8 +63,33 @@ struct ShaderPolySpritesData {
     b_poly_sprites: gpu::BufferPiece,
 }
 
+#[repr(C)]
+#[derive(Clone, Copy, Pod, Zeroable)]
+struct BlurParams {
+    step: [f32; 2],
+    sigma: f32,
+    pad: f32,
+}
+
+#[derive(blade_macros::ShaderData)]
+struct ShaderBlurData {
+    blur: BlurParams,
+    t_sprite: gpu::TextureView,
+    s_sprite: gpu::Sampler,
+}
+
+#[derive(blade_macros::ShaderData)]
+struct ShaderBackdropsData {
+    globals: GlobalParams,
+    t_sprite: gpu::TextureView,
+    s_sprite: gpu::Sampler,
+    b_backdrops: gpu::BufferPiece,
+}
+
 pub(crate) struct BladePipelines {
     quads: gpu::RenderPipeline,
+    blur: gpu::RenderPipeline,
+    backdrops: gpu::RenderPipeline,
     shadows: gpu::RenderPipeline,
     underlines: gpu::RenderPipeline,
     mono_sprites: gpu::RenderPipeline,
@@ -82,6 +107,8 @@ impl BladePipelines {
         shader.check_struct_size::<Underline>();
         shader.check_struct_size::<MonochromeSprite>();
         shader.check_struct_size::<PolychromeSprite>();
+        shader.check_struct_size::<Backdrop>();
+        shader.check_struct_size::<BlurParams>();
 
         // See https://apoorvaj.io/alpha-compositing-opengl-blending-and-premultiplied-alpha/
         let blend_mode = match surface_info.alpha {
@@ -94,9 +121,9 @@ impl BladePipelines {
             blend: Some(blend_mode),
             write_mask: gpu::ColorWrites::default(),
         }];
-        let pipeline = |name: &str, layout: &gpu::ShaderDataLayout, vertex: &str, fragment: &str| {
+        let pipeline = |layout: &gpu::ShaderDataLayout, vertex: &str, fragment: &str| {
             gpu.create_render_pipeline(gpu::RenderPipelineDesc {
-                name,
+                name: "",
                 data_layouts: &[layout],
                 vertex: shader.at(vertex),
                 vertex_fetches: &[],
@@ -109,11 +136,24 @@ impl BladePipelines {
         };
 
         Self {
-            quads: pipeline("quads", &ShaderQuadsData::layout(), "vs_quad", "fs_quad"),
-            shadows: pipeline("shadows", &ShaderShadowsData::layout(), "vs_shadow", "fs_shadow"),
-            underlines: pipeline("underlines", &ShaderUnderlinesData::layout(), "vs_underline", "fs_underline"),
-            mono_sprites: pipeline("mono-sprites", &ShaderMonoSpritesData::layout(), "vs_mono_sprite", "fs_mono_sprite"),
-            poly_sprites: pipeline("poly-sprites", &ShaderPolySpritesData::layout(), "vs_poly_sprite", "fs_poly_sprite"),
+            quads: pipeline(&ShaderQuadsData::layout(), "vs_quad", "fs_quad"),
+            shadows: pipeline(&ShaderShadowsData::layout(), "vs_shadow", "fs_shadow"),
+            underlines: pipeline(&ShaderUnderlinesData::layout(), "vs_underline", "fs_underline"),
+            mono_sprites: pipeline(&ShaderMonoSpritesData::layout(), "vs_mono_sprite", "fs_mono_sprite"),
+            poly_sprites: pipeline(&ShaderPolySpritesData::layout(), "vs_poly_sprite", "fs_poly_sprite"),
+            backdrops: pipeline(&ShaderBackdropsData::layout(), "vs_backdrop", "fs_backdrop"),
+            // Each pass of a blur replaces what's in its target.
+            blur: gpu.create_render_pipeline(gpu::RenderPipelineDesc {
+                name: "",
+                data_layouts: &[&ShaderBlurData::layout()],
+                vertex: shader.at("vs_blur"),
+                vertex_fetches: &[],
+                primitive: gpu::PrimitiveState { topology: gpu::PrimitiveTopology::TriangleStrip, ..Default::default() },
+                depth_stencil: None,
+                fragment: Some(shader.at("fs_blur")),
+                color_targets: &[gpu::ColorTargetState { format: surface_info.format, blend: None, write_mask: gpu::ColorWrites::default() }],
+                multisample_state: gpu::MultisampleState::default(),
+            }),
         }
     }
 
@@ -144,10 +184,23 @@ pub struct BladeRenderer {
     command_encoder: gpu::CommandEncoder,
     last_sync_point: Option<gpu::SyncPoint>,
     pipelines: Arc<BladePipelines>,
+    /// The format of the target, which the pipelines and a backdrop's textures are for.
+    pipelines_format: gpu::TextureFormat,
     instance_belt: BufferBelt,
     atlas: Arc<BladeAtlas>,
     atlas_sampler: gpu::Sampler,
     rendering_parameters: RenderingParameters,
+    /// What a backdrop blurs: the frame as drawn so far, then blurred one way and the other, at half its size.
+    backdrop: Option<BackdropTextures>,
+}
+
+/// The textures a backdrop's blur is drawn through, for frames of `size`.
+struct BackdropTextures {
+    size: gpu::Extent,
+    format: gpu::TextureFormat,
+    source: (gpu::Texture, gpu::TextureView),
+    across: (gpu::Texture, gpu::TextureView),
+    down: (gpu::Texture, gpu::TextureView),
 }
 
 impl BladeRenderer {
@@ -161,7 +214,8 @@ impl BladeRenderer {
     ) -> anyhow::Result<Self> {
         let config = gpu::SurfaceConfig {
             size: extent(size),
-            usage: gpu::TextureUsage::TARGET,
+            // A backdrop copies what's drawn so far (`blur_behind`).
+            usage: gpu::TextureUsage::TARGET | gpu::TextureUsage::COPY,
             display_sync: gpu::DisplaySync::Recent,
             color_space: gpu::ColorSpace::Srgb,
             allow_exclusive_full_screen: false,
@@ -179,7 +233,7 @@ impl BladeRenderer {
     pub fn offscreen(context: &BladeContext, atlas: Arc<BladeAtlas>, size: Size<DevicePixels>) -> Self {
         let size = extent(size);
         let texture = context.gpu.create_texture(gpu::TextureDesc {
-            name: "offscreen",
+            name: "",
             format: OFFSCREEN_FORMAT,
             size,
             array_layer_count: 1,
@@ -191,10 +245,10 @@ impl BladeRenderer {
         });
         let view = context.gpu.create_texture_view(
             texture,
-            gpu::TextureViewDesc { name: "offscreen", format: OFFSCREEN_FORMAT, dimension: gpu::ViewDimension::D2, subresources: &Default::default() },
+            gpu::TextureViewDesc { name: "", format: OFFSCREEN_FORMAT, dimension: gpu::ViewDimension::D2, subresources: &Default::default() },
         );
         let readback = context.gpu.create_buffer(gpu::BufferDesc {
-            name: "readback",
+            name: "",
             size: u64::from(size.width) * u64::from(size.height) * 4,
             memory: gpu::Memory::Shared,
         });
@@ -204,7 +258,7 @@ impl BladeRenderer {
 
     /// A renderer drawing into `target`, from `atlas`, which every renderer on the context shares.
     fn with_target(context: &BladeContext, atlas: Arc<BladeAtlas>, target: Target, info: gpu::SurfaceInfo) -> Self {
-        let command_encoder = context.gpu.create_command_encoder(gpu::CommandEncoderDesc { name: "main", buffer_count: 2, manual_barriers: false });
+        let command_encoder = context.gpu.create_command_encoder(gpu::CommandEncoderDesc { name: "", buffer_count: 2, manual_barriers: false });
         let rendering_parameters = RenderingParameters::from_env();
         let pipelines = BladePipelines::shared(context, info);
         let instance_belt = BufferBelt::new(BufferBeltDescriptor {
@@ -214,7 +268,7 @@ impl BladeRenderer {
             target: gpu::BufferTarget::Data,
         });
         let atlas_sampler = context.gpu.create_sampler(gpu::SamplerDesc {
-            name: "atlas sampler",
+            name: "",
             mag_filter: gpu::FilterMode::Linear,
             min_filter: gpu::FilterMode::Linear,
             ..Default::default()
@@ -225,10 +279,12 @@ impl BladeRenderer {
             command_encoder,
             last_sync_point: None,
             pipelines,
+            pipelines_format: info.format,
             instance_belt,
             atlas,
             atlas_sampler,
             rendering_parameters,
+            backdrop: None,
         }
     }
 
@@ -273,6 +329,12 @@ impl BladeRenderer {
     pub fn destroy(&mut self) {
         self.wait_for_gpu();
         self.gpu.destroy_sampler(self.atlas_sampler);
+        if let Some(backdrop) = self.backdrop.take() {
+            for (texture, view) in [backdrop.source, backdrop.across, backdrop.down] {
+                self.gpu.destroy_texture_view(view);
+                self.gpu.destroy_texture(texture);
+            }
+        }
         self.instance_belt.destroy(&self.gpu);
         self.gpu.destroy_command_encoder(&mut self.command_encoder);
         match &mut self.target {
@@ -318,83 +380,33 @@ impl BladeRenderer {
             pad: 0,
         };
 
-        // Each batch's instances first, as the pass borrows the encoder.
-        let mut batches = Vec::new();
+        // The frame is drawn in runs of batches, one pass each, broken at each backdrop, which blurs what's drawn
+        // before it.
+        let target = match &self.target {
+            Target::Surface { .. } => frame.as_ref().map(|frame| frame.texture()),
+            Target::Offscreen { texture, .. } => Some(*texture),
+        };
+        let mut init = gpu::InitOp::Clear(gpu::TextureColor::TransparentBlack);
+        let mut run: Vec<PrimitiveBatch<'_>> = Vec::new();
         for batch in scene.batches() {
-            let instances = match &batch {
-                PrimitiveBatch::Quads(quads) => self.instances(quads),
-                PrimitiveBatch::Shadows(shadows) => self.instances(shadows),
-                PrimitiveBatch::Underlines(underlines) => self.instances(underlines),
-                PrimitiveBatch::MonochromeSprites { sprites, .. } => self.instances(sprites),
-                PrimitiveBatch::PolychromeSprites { sprites, .. } => self.instances(sprites),
+            let PrimitiveBatch::Backdrops(backdrops) = batch else {
+                run.push(batch);
+                continue;
             };
-            batches.push((batch, instances));
-        }
-
-        if let mut pass = self.command_encoder.render(
-            "main",
-            gpu::RenderTargetSet {
-                colors: &[gpu::RenderTarget {
-                    view,
-                    init_op: gpu::InitOp::Clear(gpu::TextureColor::TransparentBlack),
-                    finish_op: gpu::FinishOp::Store,
-                }],
-                depth_stencil: None,
-            },
-        ) {
-            for (batch, instances) in batches {
-                match batch {
-                    PrimitiveBatch::Quads(quads) => {
-                        let mut encoder = pass.with(&self.pipelines.quads);
-                        encoder.bind(0, &ShaderQuadsData { globals, b_quads: instances });
-                        encoder.draw(0, 4, 0, quads.len() as u32);
-                    }
-                    PrimitiveBatch::Shadows(shadows) => {
-                        let mut encoder = pass.with(&self.pipelines.shadows);
-                        encoder.bind(0, &ShaderShadowsData { globals, b_shadows: instances });
-                        encoder.draw(0, 4, 0, shadows.len() as u32);
-                    }
-                    PrimitiveBatch::Underlines(underlines) => {
-                        let mut encoder = pass.with(&self.pipelines.underlines);
-                        encoder.bind(0, &ShaderUnderlinesData { globals, b_underlines: instances });
-                        encoder.draw(0, 4, 0, underlines.len() as u32);
-                    }
-                    PrimitiveBatch::MonochromeSprites { texture_id, sprites } => {
-                        let tex_info = self.atlas.get_texture_info(texture_id);
-                        let mut encoder = pass.with(&self.pipelines.mono_sprites);
-                        encoder.bind(
-                            0,
-                            &ShaderMonoSpritesData {
-                                globals,
-                                gamma_ratios: self.rendering_parameters.gamma_ratios,
-                                grayscale_enhanced_contrast: self.rendering_parameters.grayscale_enhanced_contrast,
-                                t_sprite: tex_info.raw_view,
-                                s_sprite: self.atlas_sampler,
-                                b_mono_sprites: instances,
-                            },
-                        );
-                        encoder.draw(0, 4, 0, sprites.len() as u32);
-                    }
-                    PrimitiveBatch::PolychromeSprites { texture_id, sprites } => {
-                        let tex_info = self.atlas.get_texture_info(texture_id);
-                        let mut encoder = pass.with(&self.pipelines.poly_sprites);
-                        encoder.bind(
-                            0,
-                            &ShaderPolySpritesData {
-                                globals,
-                                t_sprite: tex_info.raw_view,
-                                s_sprite: self.atlas_sampler,
-                                b_poly_sprites: instances,
-                            },
-                        );
-                        encoder.draw(0, 4, 0, sprites.len() as u32);
-                    }
+            self.draw_run(view, init, globals, &run);
+            run.clear();
+            init = gpu::InitOp::Load;
+            for at in 0..backdrops.len() {
+                if let Some(target) = target {
+                    self.blur_behind(target, size, backdrops[at].blur.0);
                 }
+                self.draw_run(view, gpu::InitOp::Load, globals, &[PrimitiveBatch::Backdrops(&backdrops[at..at + 1])]);
             }
         }
+        self.draw_run(view, init, globals, &run);
 
         if let Target::Offscreen { texture, readback, size, .. } = &self.target {
-            let mut transfer = self.command_encoder.transfer("readback");
+            let mut transfer = self.command_encoder.transfer("");
             transfer.copy_texture_to_buffer(
                 gpu::TexturePiece { texture: *texture, mip_level: 0, array_layer: 0, origin: [0, 0, 0] },
                 readback.at(0),
@@ -412,6 +424,146 @@ impl BladeRenderer {
 
         self.wait_for_gpu();
         self.last_sync_point = Some(sync_point);
+    }
+
+    /// Draws `run`'s batches into `view` in one pass.
+    fn draw_run(&mut self, view: gpu::TextureView, init: gpu::InitOp, globals: GlobalParams, run: &[PrimitiveBatch<'_>]) {
+        if run.is_empty() && !matches!(init, gpu::InitOp::Clear(_)) {
+            return;
+        }
+        // Each batch's instances first, as the pass borrows the encoder.
+        let instances: Vec<gpu::BufferPiece> = run
+            .iter()
+            .map(|batch| match batch {
+                PrimitiveBatch::Quads(quads) => self.instances(quads),
+                PrimitiveBatch::Shadows(shadows) => self.instances(shadows),
+                PrimitiveBatch::Underlines(underlines) => self.instances(underlines),
+                PrimitiveBatch::MonochromeSprites { sprites, .. } => self.instances(sprites),
+                PrimitiveBatch::PolychromeSprites { sprites, .. } => self.instances(sprites),
+                PrimitiveBatch::Backdrops(backdrops) => self.instances(backdrops),
+            })
+            .collect();
+        let blurred = self.backdrop.as_ref().map(|backdrop| backdrop.down.1);
+        if let mut pass = self.command_encoder.render(
+            "",
+            gpu::RenderTargetSet { colors: &[gpu::RenderTarget { view, init_op: init, finish_op: gpu::FinishOp::Store }], depth_stencil: None },
+        ) {
+            for (batch, instances) in run.iter().zip(instances) {
+                match batch {
+                    PrimitiveBatch::Quads(quads) => {
+                        let mut encoder = pass.with(&self.pipelines.quads);
+                        encoder.bind(0, &ShaderQuadsData { globals, b_quads: instances });
+                        encoder.draw(0, 4, 0, quads.len() as u32);
+                    }
+                    PrimitiveBatch::Shadows(shadows) => {
+                        let mut encoder = pass.with(&self.pipelines.shadows);
+                        encoder.bind(0, &ShaderShadowsData { globals, b_shadows: instances });
+                        encoder.draw(0, 4, 0, shadows.len() as u32);
+                    }
+                    PrimitiveBatch::Underlines(underlines) => {
+                        let mut encoder = pass.with(&self.pipelines.underlines);
+                        encoder.bind(0, &ShaderUnderlinesData { globals, b_underlines: instances });
+                        encoder.draw(0, 4, 0, underlines.len() as u32);
+                    }
+                    PrimitiveBatch::MonochromeSprites { texture_id, sprites } => {
+                        let tex_info = self.atlas.get_texture_info(*texture_id);
+                        let mut encoder = pass.with(&self.pipelines.mono_sprites);
+                        encoder.bind(
+                            0,
+                            &ShaderMonoSpritesData {
+                                globals,
+                                gamma_ratios: self.rendering_parameters.gamma_ratios,
+                                grayscale_enhanced_contrast: self.rendering_parameters.grayscale_enhanced_contrast,
+                                t_sprite: tex_info.raw_view,
+                                s_sprite: self.atlas_sampler,
+                                b_mono_sprites: instances,
+                            },
+                        );
+                        encoder.draw(0, 4, 0, sprites.len() as u32);
+                    }
+                    PrimitiveBatch::PolychromeSprites { texture_id, sprites } => {
+                        let tex_info = self.atlas.get_texture_info(*texture_id);
+                        let mut encoder = pass.with(&self.pipelines.poly_sprites);
+                        encoder.bind(
+                            0,
+                            &ShaderPolySpritesData { globals, t_sprite: tex_info.raw_view, s_sprite: self.atlas_sampler, b_poly_sprites: instances },
+                        );
+                        encoder.draw(0, 4, 0, sprites.len() as u32);
+                    }
+                    PrimitiveBatch::Backdrops(backdrops) => {
+                        let Some(blurred) = blurred else { continue };
+                        let mut encoder = pass.with(&self.pipelines.backdrops);
+                        encoder.bind(0, &ShaderBackdropsData { globals, t_sprite: blurred, s_sprite: self.atlas_sampler, b_backdrops: instances });
+                        encoder.draw(0, 4, 0, backdrops.len() as u32);
+                    }
+                }
+            }
+        }
+    }
+
+    /// Blurs what's drawn into `target` so far, `sigma` device pixels, into the backdrop's textures: copied, then
+    /// blurred across into one at half its size and down into another, each a separable Gaussian's pass.
+    fn blur_behind(&mut self, target: gpu::Texture, size: gpu::Extent, sigma: f32) {
+        let format = self.pipelines_format;
+        if self.backdrop.as_ref().is_none_or(|backdrop| backdrop.size != size || backdrop.format != format) {
+            if let Some(backdrop) = self.backdrop.take() {
+                for (texture, view) in [backdrop.source, backdrop.across, backdrop.down] {
+                    self.gpu.destroy_texture_view(view);
+                    self.gpu.destroy_texture(texture);
+                }
+            }
+            let half = gpu::Extent { width: size.width.div_ceil(2).max(1), height: size.height.div_ceil(2).max(1), depth: 1 };
+            let make = |extent: gpu::Extent| {
+                let texture = self.gpu.create_texture(gpu::TextureDesc {
+                    name: "",
+                    format,
+                    size: extent,
+                    array_layer_count: 1,
+                    mip_level_count: 1,
+                    sample_count: 1,
+                    dimension: gpu::TextureDimension::D2,
+                    usage: gpu::TextureUsage::COPY | gpu::TextureUsage::RESOURCE | gpu::TextureUsage::TARGET,
+                    external: None,
+                });
+                let view = self.gpu.create_texture_view(texture, gpu::TextureViewDesc { name: "", format, dimension: gpu::ViewDimension::D2, subresources: &Default::default() });
+                (texture, view)
+            };
+            self.backdrop = Some(BackdropTextures { size, format, source: make(size), across: make(half), down: make(half) });
+            let backdrop = self.backdrop.as_ref().expect("just made");
+            for texture in [backdrop.source.0, backdrop.across.0, backdrop.down.0] {
+                self.command_encoder.init_texture(texture);
+            }
+        }
+        let backdrop = self.backdrop.as_ref().expect("made above");
+        let (source, across, down) = (backdrop.source, backdrop.across, backdrop.down);
+        let half = gpu::Extent { width: size.width.div_ceil(2).max(1), height: size.height.div_ceil(2).max(1), depth: 1 };
+        {
+            let mut transfer = self.command_encoder.transfer("");
+            transfer.copy_texture_to_texture(
+                gpu::TexturePiece { texture: target, mip_level: 0, array_layer: 0, origin: [0, 0, 0] },
+                gpu::TexturePiece { texture: source.0, mip_level: 0, array_layer: 0, origin: [0, 0, 0] },
+                size,
+            );
+        }
+        // Each pass reaches 3 sigma in at most 48 samples, so a wide blur takes samples further apart.
+        let passes = [(source.1, across.1, [1.0 / size.width as f32, 0.0], sigma), (across.1, down.1, [0.0, 1.0 / half.height as f32], sigma / 2.0)];
+        for (from, into, unit, sigma) in passes {
+            let step = (sigma / 16.0).max(1.0);
+            if let mut pass = self.command_encoder.render(
+                "",
+                gpu::RenderTargetSet {
+                    colors: &[gpu::RenderTarget { view: into, init_op: gpu::InitOp::DontCare, finish_op: gpu::FinishOp::Store }],
+                    depth_stencil: None,
+                },
+            ) {
+                let mut encoder = pass.with(&self.pipelines.blur);
+                encoder.bind(
+                    0,
+                    &ShaderBlurData { blur: BlurParams { step: [unit[0] * step, unit[1] * step], sigma: sigma / step, pad: 0.0 }, t_sprite: from, s_sprite: self.atlas_sampler },
+                );
+                encoder.draw(0, 4, 0, 1);
+            }
+        }
     }
 
     /// The last frame drawn offscreen, as RGBA rows, top first.

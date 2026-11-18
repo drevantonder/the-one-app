@@ -272,8 +272,17 @@ pub fn query(tree: &Tree, rects: &Rects, dark: bool, request: &Request) -> Value
             if let Value::Object(style) = &mut style {
                 style.retain(|_, value| !value.is_null());
             }
-            out.insert("resolved".into(), resolved(&style, dark));
-            out.insert("style".into(), style);
+            match &node.styles {
+                // A version 2 node's styles by id, and what they come to, merged, as it's drawn with nothing hovered.
+                Some(ids) => {
+                    out.insert("style".into(), json!(ids));
+                    out.insert("resolved".into(), Value::Object(crate::style::resolve(ids, crate::style::State::default())));
+                }
+                None => {
+                    out.insert("resolved".into(), resolved(&style, dark));
+                    out.insert("style".into(), style);
+                }
+            }
             for prop in ["class", "id"] {
                 if let Some(value) = node.prop(prop) {
                     out.insert(if prop == "id" { "key".into() } else { prop.into() }, value.clone());

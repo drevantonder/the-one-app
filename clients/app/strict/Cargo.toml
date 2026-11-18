@@ -7,10 +7,12 @@ license.workspace = true
 
 [dependencies]
 anyhow.workspace = true
-# The GPU, as GPUI drew with it before it moved to wgpu: Vulkan on Linux and Windows, Metal on a Mac.
-blade-graphics = "0.9"
-blade-macros = "0.3"
-blade-util = "0.5"
+# The GPU, as GPUI drew with it before it moved to wgpu: Vulkan on Linux, Windows and Android, Metal on a Mac. From its
+# repo at a commit: crates.io's 0.9 refuses a GPU without VK_EXT_inline_uniform_block (many phones' and some laptops'),
+# where this falls back to uniform buffers.
+blade-graphics = { git = "https://github.com/kvark/blade", rev = "3d86d537fe100a06a091850253f692e7ca8bceaf" }
+blade-macros = { git = "https://github.com/kvark/blade", rev = "3d86d537fe100a06a091850253f692e7ca8bceaf" }
+blade-util = { git = "https://github.com/kvark/blade", rev = "3d86d537fe100a06a091850253f692e7ca8bceaf" }
 bytemuck = { version = "1", features = ["derive"] }
 data-encoding = "2"
 # Where glyphs and images are packed into the atlas's textures.

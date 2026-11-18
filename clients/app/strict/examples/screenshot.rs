@@ -64,6 +64,15 @@ fn main() -> anyhow::Result<()> {
     let page = Url::parse("file:///index.html")?.join(module)?;
     // The design tokens, which come with the UI library.
     strict::tokens::load(&files(&Url::parse("file:///ui/client/ui.css")?)?);
+    // Version 2's tables: the UI library's tokens and styles, and the page's own styles, where it has them.
+    for table in ["file:///ui/client/tokens.json", "file:///ui/client/styles.json", "file:///styles.json"] {
+        let Ok(text) = files(&Url::parse(table)?) else { continue };
+        if table.ends_with("tokens.json") {
+            strict::tokens::load_table(&text)?;
+        } else {
+            strict::load_styles(&text)?;
+        }
+    }
 
     let started = std::time::Instant::now();
     let mut text = TextSystem::new(PlatformTextSystem::new(strict::FONT, strict::fonts()?, false));

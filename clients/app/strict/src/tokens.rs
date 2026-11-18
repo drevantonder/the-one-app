@@ -198,3 +198,178 @@ pub fn type_style(font: &str, dark: bool) -> TypeStyle {
     };
     TypeStyle { size, weight, tracking, line_height, tabular }
 }
+
+// Version 2's token table (`Tokens` in core/ui/src/strict/protocol.ts), which comes with the UI library as
+// /ui/client/tokens.json. A host knows each kind of token and the conditions a value varies by, never a token's name.
+
+/// What a token's value may depend on, as the window is now, in the order they win.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct Conditions {
+    pub dark: bool,
+    pub touch: bool,
+    pub phone: bool,
+    pub reduced_motion: bool,
+}
+
+impl Conditions {
+    fn holds(&self, condition: &str) -> bool {
+        match condition {
+            "dark" => self.dark,
+            "touch" => self.touch,
+            "phone" => self.phone,
+            "reducedMotion" => self.reduced_motion,
+            _ => false,
+        }
+    }
+}
+
+/// A corner's radius: pixels, or a part of its box's side.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum Radius {
+    Px(f32),
+    Percent(f32),
+}
+
+/// One shadow of a `shadow` token, in pixels.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Shadow {
+    pub x: f32,
+    pub y: f32,
+    pub blur: f32,
+    pub spread: f32,
+    pub colour: Rgba,
+    pub inset: bool,
+}
+
+/// A `type` token resolved: its size and line height in pixels, its weight, tracking in em, and whether its figures
+/// line up.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Type {
+    pub size: f32,
+    pub line_height: f32,
+    pub weight: f32,
+    pub tracking: f32,
+    pub tabular: bool,
+}
+
+/// The token table: each token's JSON, by id.
+#[derive(Default)]
+pub struct Table {
+    tokens: HashMap<String, serde_json::Value>,
+}
+
+static TABLE: std::sync::RwLock<Option<std::sync::Arc<Table>>> = std::sync::RwLock::new(None);
+
+/// Takes the token table the UI library came with (`tokens.json`). → the version of the protocol it needs.
+pub fn load_table(json: &str) -> anyhow::Result<u32> {
+    let parsed: serde_json::Value = serde_json::from_str(json)?;
+    let v = parsed["v"].as_u64().unwrap_or(0) as u32;
+    let tokens = parsed["tokens"].as_object().map(|tokens| tokens.iter().map(|(id, token)| (id.clone(), token.clone())).collect()).unwrap_or_default();
+    *TABLE.write().expect("nothing panics holding it") = Some(std::sync::Arc::new(Table { tokens }));
+    Ok(v)
+}
+
+/// The token table loaded, or an empty one.
+pub fn table() -> std::sync::Arc<Table> {
+    TABLE.read().expect("nothing panics holding it").clone().unwrap_or_default()
+}
+
+/// A value, or a value by condition: `default`, then each condition that holds, in order, the later winning.
+fn varies<'a>(value: &'a serde_json::Value, conditions: Conditions) -> &'a serde_json::Value {
+    let Some(by) = value.as_object().filter(|by| by.contains_key("default")) else { return value };
+    let mut out = &by["default"];
+    for condition in ["dark", "touch", "phone", "reducedMotion"] {
+        if conditions.holds(condition)
+            && let Some(value) = by.get(condition)
+        {
+            out = value;
+        }
+    }
+    out
+}
+
+/// A `Length` (`{px}` or `{rem}`), in pixels.
+fn length_of(value: &serde_json::Value) -> Option<f32> {
+    value["px"].as_f64().or_else(|| value["rem"].as_f64().map(|rem| rem * f64::from(REM))).map(|px| px as f32)
+}
+
+fn rgba_of(value: &serde_json::Value) -> Option<Rgba> {
+    let channel = |at: usize| value.get(at).and_then(serde_json::Value::as_f64).map(|channel| channel as f32);
+    Some(Rgba { r: channel(0)?, g: channel(1)?, b: channel(2)?, a: channel(3).unwrap_or(1.0) })
+}
+
+impl Table {
+    /// Token `id`'s value, if it's of `kind`, as it is where `conditions` hold.
+    fn value(&self, id: &str, kind: &str, conditions: Conditions) -> Option<&serde_json::Value> {
+        let token = self.tokens.get(id).filter(|token| token["kind"] == kind)?;
+        Some(varies(&token["value"], conditions))
+    }
+
+    pub fn kind(&self, id: &str) -> Option<&str> {
+        self.tokens.get(id)?["kind"].as_str()
+    }
+
+    pub fn colour(&self, id: &str, conditions: Conditions) -> Option<Rgba> {
+        rgba_of(self.value(id, "colour", conditions)?)
+    }
+
+    pub fn length(&self, id: &str, conditions: Conditions) -> Option<f32> {
+        length_of(self.value(id, "length", conditions)?)
+    }
+
+    pub fn radius(&self, id: &str, conditions: Conditions) -> Option<Radius> {
+        let value = self.value(id, "radius", conditions)?;
+        match value["percent"].as_f64() {
+            Some(percent) => Some(Radius::Percent(percent as f32)),
+            None => length_of(value).map(Radius::Px),
+        }
+    }
+
+    pub fn shadows(&self, id: &str, conditions: Conditions) -> Vec<Shadow> {
+        let Some(shadows) = self.value(id, "shadow", conditions).and_then(serde_json::Value::as_array) else { return Vec::new() };
+        shadows
+            .iter()
+            .filter_map(|shadow| {
+                Some(Shadow {
+                    x: length_of(&shadow["x"]).unwrap_or(0.0),
+                    y: length_of(&shadow["y"]).unwrap_or(0.0),
+                    blur: length_of(&shadow["blur"]).unwrap_or(0.0),
+                    spread: length_of(&shadow["spread"]).unwrap_or(0.0),
+                    colour: rgba_of(&shadow["colour"])?,
+                    inset: shadow["inset"] == true,
+                })
+            })
+            .collect()
+    }
+
+    /// A material: how far what's behind is blurred, in pixels, and how saturated it is.
+    pub fn material(&self, id: &str, conditions: Conditions) -> Option<(f32, f32)> {
+        let value = self.value(id, "material", conditions)?;
+        Some((length_of(&value["blur"])?, value["saturate"].as_f64().unwrap_or(1.0) as f32))
+    }
+
+    pub fn weight(&self, id: &str, conditions: Conditions) -> Option<f32> {
+        self.value(id, "weight", conditions)?.as_f64().map(|weight| weight as f32)
+    }
+
+    pub fn type_style(&self, id: &str, conditions: Conditions) -> Option<Type> {
+        let value = self.value(id, "type", conditions)?;
+        let size = length_of(varies(&value["size"], conditions))?;
+        Some(Type {
+            size,
+            line_height: size * value["lineHeight"].as_f64().unwrap_or(1.5) as f32,
+            weight: value["weight"].as_str().and_then(|weight| self.weight(weight, conditions)).unwrap_or(400.0),
+            tracking: value["tracking"].as_f64().unwrap_or(0.0) as f32,
+            tabular: value["tabular"] == true,
+        })
+    }
+
+    /// A motion: how long it takes, in milliseconds, and its easing, a cubic Bézier's two points.
+    pub fn motion(&self, id: &str, conditions: Conditions) -> Option<(f32, [f32; 4])> {
+        let value = self.value(id, "motion", conditions)?;
+        let duration = varies(&value["duration"], conditions).as_f64()? as f32;
+        let easing = varies(&value["easing"], conditions);
+        let point = |at: usize| easing.get(at).and_then(serde_json::Value::as_f64).unwrap_or(0.0) as f32;
+        Some((duration, [point(0), point(1), point(2), point(3)]))
+    }
+}

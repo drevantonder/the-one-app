@@ -6,7 +6,8 @@ use anyhow::Context as _;
 use blade_graphics as gpu;
 use std::sync::Arc;
 
-/// The GPU, shared by what draws: a window's surface, or an offscreen texture (`presentation: false`), with the
+/// The GPU, shared by what draws (its objects unnamed: some Vulkan drivers, as Android's emulator's, crash naming them
+/// with VK_EXT_debug_utils, which Blade skips for an empty name): a window's surface, or an offscreen texture (`presentation: false`), with the
 /// pipelines each format of target draws with, compiled once for every window.
 pub struct BladeContext {
     pub(crate) gpu: Arc<gpu::Context>,

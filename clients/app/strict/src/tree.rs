@@ -49,8 +49,12 @@ pub enum Op {
 #[serde(rename_all = "kebab-case")]
 pub enum Kind {
     Box,
+    /// A box whose content scrolls along its `flexDirection`.
+    Scroll,
     Text,
     Image,
+    /// A vector shape, SVG's `<path>`: its `d` in its `viewBox`.
+    Path,
     Input,
     RawText,
 }
@@ -121,13 +125,16 @@ pub struct Node {
     pub value: Option<String>,
     /// Every prop but `style`, as it was set.
     pub props: Map<String, Value>,
+    /// A version 1 page's style object.
     pub style: Style,
+    /// A version 2 page's styles, each by id or an object of its own, merged in order (`style::resolve`).
+    pub styles: Option<Vec<Value>>,
     pub children: Vec<Id>,
 }
 
 impl Node {
     fn new(kind: Kind, value: Option<String>) -> Node {
-        Node { kind, value, props: Map::new(), style: Style::default(), children: Vec::new() }
+        Node { kind, value, props: Map::new(), style: Style::default(), styles: None, children: Vec::new() }
     }
 
     pub fn prop(&self, name: &str) -> Option<&Value> {
@@ -143,11 +150,28 @@ impl Node {
         matches!(self.prop(name), Some(Value::Bool(true))) || self.str(name) == Some("true")
     }
 
+    /// Whether it listens for `event`, by its prop as JSX names it (`keydown` is `onKeyDown`, as the DOM's).
     pub fn listens(&self, event: &str) -> bool {
-        let mut on = String::from("on");
-        on.push_str(&event[..1].to_uppercase());
-        on.push_str(&event[1..]);
-        self.is(&on)
+        let prop = match event {
+            "click" => "onClick",
+            "input" => "onInput",
+            "action" => "onAction",
+            "focus" => "onFocus",
+            "blur" => "onBlur",
+            "keydown" => "onKeyDown",
+            "pointerenter" => "onPointerEnter",
+            "pointerleave" => "onPointerLeave",
+            "pointerdown" => "onPointerDown",
+            "pointermove" => "onPointerMove",
+            "pointerup" => "onPointerUp",
+            "pointercancel" => "onPointerCancel",
+            "contextmenu" => "onContextMenu",
+            "wheel" => "onWheel",
+            "scroll" => "onScroll",
+            "layout" => "onLayout",
+            _ => return false,
+        };
+        self.is(prop)
     }
 }
 
@@ -178,9 +202,9 @@ impl Tree {
         &self.nodes[&0]
     }
 
-    /// Applies one batch, in order. A batch of a version this host doesn't speak is refused whole.
+    /// Applies one batch, in order. A batch of a version above this host's is refused whole.
     pub fn apply(&mut self, update: Update) -> anyhow::Result<()> {
-        if update.v != crate::VERSION {
+        if update.v > crate::VERSION {
             return Err(Mismatch(update.v).into());
         }
         for op in update.ops {
@@ -191,7 +215,11 @@ impl Tree {
                 Op::Set { id, name, value } => {
                     let node = self.nodes.get_mut(&id).with_context(|| format!("there's no node {id}"))?;
                     match name.as_str() {
-                        "style" => node.style = if value.is_null() { Style::default() } else { serde_json::from_value(value)? },
+                        "style" => match value {
+                            Value::Array(styles) => node.styles = Some(styles),
+                            Value::Null => (node.style, node.styles) = (Style::default(), None),
+                            value => node.style = serde_json::from_value(value)?,
+                        },
                         "value" if node.kind == Kind::RawText => node.value = value.as_str().map(str::to_owned),
                         _ => drop(node.props.insert(name, value)),
                     }

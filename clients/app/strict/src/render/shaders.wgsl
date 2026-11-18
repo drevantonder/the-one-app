@@ -1150,3 +1150,92 @@ fn fs_poly_sprite(input: PolySpriteVarying) -> @location(0) vec4<f32> {
     return blend_color(color, sprite.opacity * saturate(0.5 - distance));
 }
 
+
+// --- backdrops (ours: what's behind a node, blurred and saturated, as Apple's materials draw it) --- //
+
+struct Backdrop {
+    order: u32,
+    pad: u32,
+    blur: f32,
+    saturation: f32,
+    bounds: Bounds,
+    content_mask: Bounds,
+    corner_radii: Corners,
+}
+var<storage, read> b_backdrops: array<Backdrop>;
+
+struct BlurParams {
+    // One texel along the way this pass blurs, in the source's coordinates (0 to 1).
+    step: vec2<f32>,
+    // The Gaussian's sigma, in the source's texels.
+    sigma: f32,
+    pad: f32,
+}
+var<uniform> blur: BlurParams;
+
+struct BlurVarying {
+    @builtin(position) position: vec4<f32>,
+    @location(0) uv: vec2<f32>,
+}
+
+// A triangle strip over the whole target.
+@vertex
+fn vs_blur(@builtin(vertex_index) vertex_id: u32) -> BlurVarying {
+    let unit_vertex = vec2<f32>(f32(vertex_id & 1u), 0.5 * f32(vertex_id & 2u));
+    var out = BlurVarying();
+    out.position = vec4<f32>(unit_vertex.x * 2.0 - 1.0, 1.0 - unit_vertex.y * 2.0, 0.0, 1.0);
+    out.uv = unit_vertex;
+    return out;
+}
+
+// One way of a separable Gaussian: two taps a sample, between texels, for linear filtering to weigh.
+@fragment
+fn fs_blur(input: BlurVarying) -> @location(0) vec4<f32> {
+    let sigma = max(blur.sigma, 0.5);
+    let reach = min(i32(ceil(sigma * 3.0)), 48);
+    var sum = textureSample(t_sprite, s_sprite, input.uv);
+    var total = 1.0;
+    for (var i = 1; i <= reach; i += 2) {
+        let a = f32(i);
+        let b = a + 1.0;
+        let wa = exp(-0.5 * a * a / (sigma * sigma));
+        let wb = exp(-0.5 * b * b / (sigma * sigma));
+        let w = wa + wb;
+        let offset = (a * wa + b * wb) / w;
+        sum += (textureSample(t_sprite, s_sprite, input.uv + blur.step * offset) + textureSample(t_sprite, s_sprite, input.uv - blur.step * offset)) * w;
+        total += 2.0 * w;
+    }
+    return sum / total;
+}
+
+struct BackdropVarying {
+    @builtin(position) position: vec4<f32>,
+    @location(0) @interpolate(flat) backdrop_id: u32,
+    @location(1) clip_distances: vec4<f32>,
+}
+
+@vertex
+fn vs_backdrop(@builtin(vertex_index) vertex_id: u32, @builtin(instance_index) instance_id: u32) -> BackdropVarying {
+    let unit_vertex = vec2<f32>(f32(vertex_id & 1u), 0.5 * f32(vertex_id & 2u));
+    let backdrop = b_backdrops[instance_id];
+    var out = BackdropVarying();
+    out.position = to_device_position(unit_vertex, backdrop.bounds);
+    out.backdrop_id = instance_id;
+    out.clip_distances = distance_from_clip_rect(unit_vertex, backdrop.bounds, backdrop.content_mask);
+    return out;
+}
+
+@fragment
+fn fs_backdrop(input: BackdropVarying) -> @location(0) vec4<f32> {
+    let uv = input.position.xy / globals.viewport_size;
+    let sample = textureSample(t_sprite, s_sprite, uv);
+    if (any(input.clip_distances < vec4<f32>(0.0))) {
+        return vec4<f32>(0.0);
+    }
+    let backdrop = b_backdrops[input.backdrop_id];
+    let distance = quad_sdf(input.position.xy, backdrop.bounds, backdrop.corner_radii);
+    // Saturated as CSS's `saturate()`: away from its luminance, by the factor.
+    let luminance = dot(sample.rgb, GRAYSCALE_FACTORS);
+    let color = vec4<f32>(clamp(mix(vec3<f32>(luminance), sample.rgb, backdrop.saturation), vec3<f32>(0.0), vec3<f32>(1.0)), 1.0);
+    return blend_color(color, saturate(0.5 - distance));
+}

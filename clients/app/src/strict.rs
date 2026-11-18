@@ -70,9 +70,17 @@ fn module_script(html: &str) -> Option<String> {
     })
 }
 
-/// Whether `entrypoint`'s page is strict and of a version this program speaks, and if it is, the module it loads
-/// and whether its app is trusted.
-async fn probe(entrypoint: &str, subject: Option<&str>) -> anyhow::Result<Option<(Url, bool)>> {
+/// What a strict page is drawn with: the module it loads, whether its app is trusted, and the tables its styles
+/// come from: the UI library's tokens and styles and its app's styles (`Tokens` and `Styles` in protocol.ts).
+struct Page {
+    module: Url,
+    trusted: bool,
+    tables: Vec<String>,
+}
+
+/// Whether `entrypoint`'s page is strict and of a version this program speaks, its tables too, and if it is, what
+/// it's drawn with.
+async fn probe(entrypoint: &str, subject: Option<&str>) -> anyhow::Result<Option<Page>> {
     let listed = crate::hosts::command("strict", "apps", json!({"subject": subject})).await.map_err(|error| anyhow::anyhow!(error))?;
     let (app, path) = entrypoint.split_once('/').unwrap_or((entrypoint, ""));
     let Some(resource) = listed["resources"].as_array().into_iter().flatten().find(|resource| {
@@ -89,11 +97,27 @@ async fn probe(entrypoint: &str, subject: Option<&str>) -> anyhow::Result<Option
     let html = crate::hosts::file(page.as_str()).await.map_err(|error| anyhow::anyhow!(error))?;
     let html = BASE64.decode(html["body"].as_str().unwrap_or_default().as_bytes())?;
     let module = module_script(&String::from_utf8_lossy(&html)).ok_or_else(|| anyhow::anyhow!("its page loads no module"))?;
-    Ok(Some((page.join(&module)?, trusted)))
+    // Its tables, each of a version this program speaks, or it's a web view's. An app with no styles of its own has
+    // no table of them.
+    let mut tables = Vec::new();
+    for (table, needed) in [(page.join("/ui/client/tokens.json")?, true), (page.join("/ui/client/styles.json")?, true), (page.join("styles.json")?, false)] {
+        let file = match crate::hosts::file(table.as_str()).await {
+            Ok(file) => BASE64.decode(file["body"].as_str().unwrap_or_default().as_bytes())?,
+            Err(_) if !needed => continue,
+            Err(error) => anyhow::bail!("{table} didn't load: {error}"),
+        };
+        let text = String::from_utf8(file)?;
+        let v = serde_json::from_str::<Value>(&text).map(|table| table["v"].as_u64().unwrap_or(0)).unwrap_or(0);
+        if v > u64::from(strict::VERSION) {
+            return Ok(None);
+        }
+        tables.push(text);
+    }
+    Ok(Some(Page { module: page.join(&module)?, trusted, tables }))
 }
 
 async fn window(started: Instant, entrypoint: &str, subject: Option<&str>, link: &str) -> anyhow::Result<bool> {
-    let Some((module, trusted)) = probe(entrypoint, subject).await? else { return Ok(false) };
+    let Some(Page { module, trusted, tables }) = probe(entrypoint, subject).await? else { return Ok(false) };
     let strict = Strict::get()?;
     let asked: Arc<Mutex<HashMap<String, Asked>>> = Arc::default();
     let window: Arc<OnceLock<WindowId>> = Arc::default();
@@ -133,6 +157,12 @@ async fn window(started: Instant, entrypoint: &str, subject: Option<&str>, link:
         let tokens = module.join("/ui/client/ui.css").map_err(anyhow::Error::from).and_then(|css| files(&css));
         let sandbox = tokens.and_then(|css| {
             strict::tokens::load(&css);
+            if let [tokens, styles @ ..] = &tables[..] {
+                strict::tokens::load_table(tokens)?;
+                for styles in styles {
+                    strict::load_styles(styles)?;
+                }
+            }
             Sandbox::start(&module, files, Some(cache), Clock::real())
         });
         let app = entrypoint.split('/').next().unwrap_or_default().to_owned();

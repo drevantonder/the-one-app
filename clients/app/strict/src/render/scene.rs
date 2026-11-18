@@ -1,6 +1,7 @@
 // Copied from Zed's GPUI (github.com/zed-industries/zed, crates/gpui/src/scene.rs) at commit
 // 69e2130295c2649963eb639fc70b4f2ee8ea1624 (gpui 0.2.2 on crates.io), and cut down for the strict host: the scene a
-// frame draws, of quads, shadows, underlines and sprites, without paths, surfaces or layers.
+// frame draws, of quads, shadows, underlines and sprites, without paths, surfaces or layers, and with backdrops, what's
+// behind a node blurred, which are ours.
 // Copyright 2022 - 2025 Zed Industries, Inc. Licensed under the Apache License, Version 2.0
 // (clients/app/strict/LICENSE-APACHE); this file is changed from the original.
 
@@ -20,6 +21,7 @@ pub struct Scene {
     pub(crate) underlines: Vec<Underline>,
     pub(crate) monochrome_sprites: Vec<MonochromeSprite>,
     pub(crate) polychrome_sprites: Vec<PolychromeSprite>,
+    pub(crate) backdrops: Vec<Backdrop>,
 }
 
 impl Scene {
@@ -30,6 +32,7 @@ impl Scene {
         self.underlines.clear();
         self.monochrome_sprites.clear();
         self.polychrome_sprites.clear();
+        self.backdrops.clear();
     }
 
     pub(crate) fn insert_primitive(&mut self, primitive: impl Into<Primitive>) {
@@ -60,6 +63,10 @@ impl Scene {
                 sprite.order = order;
                 self.polychrome_sprites.push(sprite.clone());
             }
+            Primitive::Backdrop(backdrop) => {
+                backdrop.order = order;
+                self.backdrops.push(backdrop.clone());
+            }
         }
     }
 
@@ -69,6 +76,7 @@ impl Scene {
         self.underlines.sort_by_key(|underline| underline.order);
         self.monochrome_sprites.sort_by_key(|sprite| (sprite.order, sprite.tile.tile_id));
         self.polychrome_sprites.sort_by_key(|sprite| (sprite.order, sprite.tile.tile_id));
+        self.backdrops.sort_by_key(|backdrop| backdrop.order);
     }
 
     pub(crate) fn batches(&self) -> impl Iterator<Item = PrimitiveBatch<'_>> {
@@ -88,6 +96,9 @@ impl Scene {
             polychrome_sprites: &self.polychrome_sprites,
             polychrome_sprites_start: 0,
             polychrome_sprites_iter: self.polychrome_sprites.iter().peekable(),
+            backdrops: &self.backdrops,
+            backdrops_start: 0,
+            backdrops_iter: self.backdrops.iter().peekable(),
         }
     }
 }
@@ -100,6 +111,7 @@ pub(crate) enum PrimitiveKind {
     Underline,
     MonochromeSprite,
     PolychromeSprite,
+    Backdrop,
 }
 
 #[derive(Clone)]
@@ -109,6 +121,7 @@ pub(crate) enum Primitive {
     Underline(Underline),
     MonochromeSprite(MonochromeSprite),
     PolychromeSprite(PolychromeSprite),
+    Backdrop(Backdrop),
 }
 
 impl Primitive {
@@ -119,6 +132,7 @@ impl Primitive {
             Primitive::Underline(underline) => &underline.bounds,
             Primitive::MonochromeSprite(sprite) => &sprite.bounds,
             Primitive::PolychromeSprite(sprite) => &sprite.bounds,
+            Primitive::Backdrop(backdrop) => &backdrop.bounds,
         }
     }
 
@@ -129,6 +143,7 @@ impl Primitive {
             Primitive::Underline(underline) => &underline.content_mask,
             Primitive::MonochromeSprite(sprite) => &sprite.content_mask,
             Primitive::PolychromeSprite(sprite) => &sprite.content_mask,
+            Primitive::Backdrop(backdrop) => &backdrop.content_mask,
         }
     }
 }
@@ -149,6 +164,9 @@ struct BatchIterator<'a> {
     polychrome_sprites: &'a [PolychromeSprite],
     polychrome_sprites_start: usize,
     polychrome_sprites_iter: Peekable<slice::Iter<'a, PolychromeSprite>>,
+    backdrops: &'a [Backdrop],
+    backdrops_start: usize,
+    backdrops_iter: Peekable<slice::Iter<'a, Backdrop>>,
 }
 
 /// The run of one kind from `start` while each is drawn before `max`, as GPUI batches them.
@@ -175,6 +193,7 @@ impl<'a> Iterator for BatchIterator<'a> {
             (self.underlines_iter.peek().map(|u| u.order), PrimitiveKind::Underline),
             (self.monochrome_sprites_iter.peek().map(|s| s.order), PrimitiveKind::MonochromeSprite),
             (self.polychrome_sprites_iter.peek().map(|s| s.order), PrimitiveKind::PolychromeSprite),
+            (self.backdrops_iter.peek().map(|b| b.order), PrimitiveKind::Backdrop),
         ];
         orders_and_kinds.sort_by_key(|(order, kind)| (order.unwrap_or(u32::MAX), *kind));
 
@@ -185,6 +204,7 @@ impl<'a> Iterator for BatchIterator<'a> {
         match batch_kind {
             PrimitiveKind::Shadow => Some(PrimitiveBatch::Shadows(batch!(self, shadows_iter, shadows_start, shadows, batch_kind, max))),
             PrimitiveKind::Quad => Some(PrimitiveBatch::Quads(batch!(self, quads_iter, quads_start, quads, batch_kind, max))),
+            PrimitiveKind::Backdrop => Some(PrimitiveBatch::Backdrops(batch!(self, backdrops_iter, backdrops_start, backdrops, batch_kind, max))),
             PrimitiveKind::Underline => {
                 Some(PrimitiveBatch::Underlines(batch!(self, underlines_iter, underlines_start, underlines, batch_kind, max)))
             }
@@ -229,6 +249,7 @@ pub(crate) enum PrimitiveBatch<'a> {
     Underlines(&'a [Underline]),
     MonochromeSprites { texture_id: AtlasTextureId, sprites: &'a [MonochromeSprite] },
     PolychromeSprites { texture_id: AtlasTextureId, sprites: &'a [PolychromeSprite] },
+    Backdrops(&'a [Backdrop]),
 }
 
 #[derive(Default, Debug, Clone)]
@@ -343,5 +364,25 @@ pub(crate) struct PolychromeSprite {
 impl From<PolychromeSprite> for Primitive {
     fn from(sprite: PolychromeSprite) -> Self {
         Primitive::PolychromeSprite(sprite)
+    }
+}
+
+/// What's behind a node, blurred `blur` device pixels (the Gaussian's sigma) and saturated so much, inside its
+/// corners, drawn under its background (`backdropFilter`).
+#[derive(Clone, Debug)]
+#[repr(C)]
+pub(crate) struct Backdrop {
+    pub order: DrawOrder,
+    pub pad: u32,
+    pub blur: ScaledPixels,
+    pub saturation: f32,
+    pub bounds: Bounds<ScaledPixels>,
+    pub content_mask: ContentMask<ScaledPixels>,
+    pub corner_radii: Corners<ScaledPixels>,
+}
+
+impl From<Backdrop> for Primitive {
+    fn from(backdrop: Backdrop) -> Self {
+        Primitive::Backdrop(backdrop)
     }
 }

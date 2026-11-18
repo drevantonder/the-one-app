@@ -255,7 +255,10 @@ impl Windows {
             let (size, scale) = (window.native.size(), window.native.scale());
             window.renderer.update_drawable_size(window.native.device_size());
             match &mut window.screen {
-                Ok(screen) => screen.paint(size, scale, &mut self.text, &self.atlas, &mut window.scene),
+                Ok(screen) => {
+                    screen.paint(size, scale, &mut self.text, &self.atlas, &mut window.scene);
+                    window.dirty = screen.take_again();
+                }
                 Err(why) => crate::view::paint_message(why, appearance(), size, scale, &mut self.text, &self.atlas, &mut window.scene),
             }
             window.renderer.draw(&window.scene);
@@ -281,13 +284,14 @@ impl Windows {
             Input::Resized(_) => {}
             Input::Expose => {}
             Input::Moved(at) => {
+                screen.pointer_moved(at);
                 let cursor = screen.cursor(at);
                 self.display.set_cursor(&window.native, cursor);
-                window.dirty = false;
             }
-            Input::Down(at) => screen.pointer_down(at),
-            Input::Up(at) => screen.pointer_up(at),
-            Input::Wheel(at, dy) => drop(screen.scroll(at, dy)),
+            Input::Left => screen.pointer_left(),
+            Input::Down(at, button) => screen.pointer_down(at, button),
+            Input::Up(at, button) => screen.pointer_up(at, button),
+            Input::Wheel(at, delta) => drop(screen.scroll(at, delta)),
             Input::Key(key) => {
                 // Ctrl-W and Ctrl-Q close the window, as a Linux app's do.
                 if key.ctrl && !key.alt && matches!(key.key.as_str(), "w" | "q") {
@@ -306,9 +310,11 @@ pub(crate) enum Input {
     Expose,
     Close,
     Moved(crate::geometry::Point<f32>),
-    Down(crate::geometry::Point<f32>),
-    Up(crate::geometry::Point<f32>),
-    /// Scrolled down by so many pixels (up is negative).
-    Wheel(crate::geometry::Point<f32>, f32),
+    Left,
+    /// A button went down or up: 0 the main one, 1 the middle, 2 the secondary, as the DOM numbers them.
+    Down(crate::geometry::Point<f32>, u8),
+    Up(crate::geometry::Point<f32>, u8),
+    /// Scrolled along and down by so many pixels (left and up negative).
+    Wheel(crate::geometry::Point<f32>, crate::geometry::Point<f32>),
     Key(crate::inspect::Key),
 }

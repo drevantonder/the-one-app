@@ -296,19 +296,28 @@ impl Display {
             Event::ButtonPress(event) => {
                 let Some(id) = self.window(event.event) else { return };
                 let at = self.at(event.event_x, event.event_y);
-                // Buttons 4 and 5 are the wheel's turns, up and down, 6 and 7 sideways; a notch is 3 lines of 16 px.
+                // Buttons 1 to 3 are the main, middle and secondary; 4 and 5 the wheel's turns, up and down, 6 and 7
+                // sideways; a notch is 3 lines of 16 px.
+                let notch = |x: f32, y: f32| Input::Wheel(at, Point { x, y });
                 match event.detail {
-                    1 => out.push((id, Input::Down(at))),
-                    4 => out.push((id, Input::Wheel(at, -48.0))),
-                    5 => out.push((id, Input::Wheel(at, 48.0))),
+                    button @ 1..=3 => out.push((id, Input::Down(at, button - 1))),
+                    4 => out.push((id, notch(0.0, -48.0))),
+                    5 => out.push((id, notch(0.0, 48.0))),
+                    6 => out.push((id, notch(-48.0, 0.0))),
+                    7 => out.push((id, notch(48.0, 0.0))),
                     _ => {}
                 }
             }
             Event::ButtonRelease(event) => {
-                if event.detail == 1
+                if (1..=3).contains(&event.detail)
                     && let Some(id) = self.window(event.event)
                 {
-                    out.push((id, Input::Up(self.at(event.event_x, event.event_y))));
+                    out.push((id, Input::Up(self.at(event.event_x, event.event_y), event.detail - 1)));
+                }
+            }
+            Event::LeaveNotify(event) => {
+                if let Some(id) = self.window(event.event) {
+                    out.push((id, Input::Left));
                 }
             }
             Event::KeyPress(event) => {

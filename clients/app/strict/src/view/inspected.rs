@@ -83,12 +83,12 @@ impl Screen {
                 json!({"node": node})
             }
             "scroll" => {
-                let dy = request.f32("dy").unwrap_or(0.0);
+                let (dx, dy) = (request.f32("dx").unwrap_or(0.0), request.f32("dy").unwrap_or(0.0));
                 // What scrolls around the node selected, or the window.
                 let at = if request.selects() { self.rects.get(&inspect::one(&self.tree, request)?).map(|rect| rect.centre()) } else { None };
                 let (x, y) = at.unwrap_or((0.0, 0.0));
-                let id = self.scroll(crate::geometry::point(x, y), dy);
-                json!({"scrolled": {"x": 0.0, "y": id.map_or(0.0, |id| self.scrolled.get(&id).copied().unwrap_or(0.0))}})
+                let scrolled = self.scroll(crate::geometry::point(x, y), crate::geometry::point(dx, dy)).and_then(|id| self.scrolled.get(&id).copied()).unwrap_or_default();
+                json!({"scrolled": {"x": scrolled.x, "y": scrolled.y}})
             }
             "clock" => {
                 let clock = self.sandbox.clock().clone();

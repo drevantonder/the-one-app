@@ -387,6 +387,26 @@ impl From<Rgba> for Hsla {
     }
 }
 
+impl From<Hsla> for Rgba {
+    fn from(color: Hsla) -> Rgba {
+        let h = color.h * 6.0;
+        let s = color.s;
+        let l = color.l;
+        let c = (1.0 - (2.0 * l - 1.0).abs()) * s;
+        let x = c * (1.0 - ((h % 2.0) - 1.0).abs());
+        let m = l - c / 2.0;
+        let (r, g, b) = match h as u32 {
+            0 => (c, x, 0.0),
+            1 => (x, c, 0.0),
+            2 => (0.0, c, x),
+            3 => (0.0, x, c),
+            4 => (x, 0.0, c),
+            _ => (c, 0.0, x),
+        };
+        Rgba { r: r + m, g: g + m, b: b + m, a: color.a }
+    }
+}
+
 #[derive(Clone, Copy, Default, Debug, PartialEq)]
 #[repr(C)]
 pub struct LinearColorStop {
