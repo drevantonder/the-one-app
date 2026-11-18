@@ -111,8 +111,8 @@ defmodule Chrome do
         task_support: :optional,
         description:
           "Open a browser: a Google Chrome of yours in a container, signed in to nothing. Opening one that's open " <>
-            "already, or that was stopped after going unused, carries on with it. The first on a machine builds its " <>
-            "image, a few minutes; after that it's a few seconds.",
+            "already, or that was stopped after going unused, carries on with it. It takes a few seconds, or about a " <>
+            "minute in the minute after Containers starts on a machine, which builds its image then.",
         inputs:
           object(%{description: %{type: "string", description: "what it's for, in a few words"}, url: %{type: "string", description: "the page to open"}}, [
             "description"

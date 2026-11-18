@@ -29,8 +29,8 @@ cheaper still.
   Computer Use's tools act on it by pixels, for what only a picture shows, the browser's own address bar and tabs
   too. Its screen is 1280×800 until a person's view resizes it to fit, and a screenshot says its size.
 
-The first browser on a machine builds its image (about 1.5 GB, a few minutes); after that `open` takes a few
-seconds. Each
+Each machine builds the browsers' image (about 1.7 GB, about a minute) as Containers starts there, so `open` takes a
+few seconds. Each
 browser holds up to 2 CPUs and 4 GB of the user's machine while it runs, so close it when you're done. One left
 unused stops after Containers' `idle_hours`, and `open` with its session starts it again, afresh. A
 browser is whoever opened it's: nobody else sees or uses it but the network's owner.
