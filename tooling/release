@@ -225,27 +225,19 @@ signed() {
 }
 out=$target/builds/$build
 rm -rf "$out" && mkdir -p "$out"
-clients=()
-for name in "${mine[@]}"; do
+# Builds the client `$1`. Windows shows a program by its version resource and icon, as in Windows Firewall's prompt:
+# one's are the One App's. It's named there as its file is, one.exe. The app comes with its installer, made with NSIS,
+# the One App's by the same, and each is signed once it's what it ships as.
+client() {
+  local name=$1 file cargo program exe setup
   file=$(tr / - <<<"$name")
-  if [[ $name == one/macos-* && $here != macos-* ]]; then
-    (run=$(gh workflow run mac-client.yml --ref main -f commit="$commit" -f rust="$(rustc -V | cut -d' ' -f2)" 2>&1 | grep -o 'https://github.com/.*/actions/runs/[0-9]*') &&
-      echo "Building $name on GitHub's macOS runner: $run" && gh run watch "${run##*/}" --exit-status >/dev/null &&
-      gh run download "${run##*/}" -n "$file" -D "$out" && client_inputs "${name#*/}" >"$out/$file.inputs" ||
-      { echo "$name wasn't built on GitHub: gh run view ${run##*/} --log-failed" >&2 && exit 1; }) &
-    clients+=($!) && continue
-  fi
   case $name in
     one-cli/windows-*) cargo=(xwin build --target x86_64-pc-windows-msvc --no-default-features) program=x86_64-pc-windows-msvc/release/one.exe ;;
     one/windows-*) cargo=(xwin build --target x86_64-pc-windows-msvc) program=x86_64-pc-windows-msvc/release/one.exe ;;
     one-cli/*) cargo=(build --no-default-features) program=release/one ;;
     one/*) cargo=(build) program=release/one ;;
-    *) continue ;;
   esac
-  # Windows shows a program by its version resource and icon, as in Windows Firewall's prompt: one's are the One App's.
-  # It's named there as its file is, one.exe. The app comes with its installer, made with NSIS, the One App's by the
-  # same, and each is signed once it's what it ships as.
-  (echo "Building $name" && CARGO_TARGET_DIR=$target/clients/$file cargo "${cargo[@]}" --release -p app &&
+  echo "Building $name" && CARGO_TARGET_DIR=$target/clients/$file cargo "${cargo[@]}" --release -p app &&
     mkdir "$out/$file.d" && cp "$target/clients/$file/$program" "$out/$file.d/" && exe=$out/$file.d/$(basename "$program") &&
     { [[ $name != *windows-* ]] || { VERSION=${build%%+*} tooling/windows-name "$exe" && signed "$exe"; }; } &&
     { [[ $name != one/windows-* ]] || {
@@ -253,9 +245,26 @@ for name in "${mine[@]}"; do
         makensis -V2 -DVERSION="${build%%+*}" -DPROGRAM="$exe" -DOUTFILE="$setup" -DCOPYRIGHT="$(grep -m1 '^Copyright' LICENSE)" clients/app/installer.nsi &&
         signed "$setup" && client_inputs "${name#*/}" >"${setup%.exe}.inputs"
     }; } &&
-    gzip -9 -c "$exe" >"$out/$file.gz" && rm -r "$out/$file.d" && client_inputs "${name#*/}" >"$out/$file.inputs") &
-  clients+=($!)
+    gzip -9 -c "$exe" >"$out/$file.gz" && rm -r "$out/$file.d" && client_inputs "${name#*/}" >"$out/$file.inputs"
+}
+clients=() windows=()
+for name in "${mine[@]}"; do
+  file=$(tr / - <<<"$name")
+  if [[ $name == one/macos-* && $here != macos-* ]]; then
+    (run=$(gh workflow run mac-client.yml --ref main -f commit="$commit" -f rust="$(rustc -V | cut -d' ' -f2)" 2>&1 | grep -o 'https://github.com/.*/actions/runs/[0-9]*') &&
+      echo "Building $name on GitHub's macOS runner: $run" && gh run watch "${run##*/}" --exit-status >/dev/null &&
+      gh run download "${run##*/}" -n "$file" -D "$out" && client_inputs "${name#*/}" >"$out/$file.inputs" ||
+      { echo "$name wasn't built on GitHub: gh run view ${run##*/} --log-failed" >&2 && exit 1; }) &
+    clients+=($!)
+  elif [[ $name == *windows-* ]]; then
+    windows+=("$name")
+  elif [[ $name == one/* || $name == one-cli/* ]]; then
+    client "$name" &
+    clients+=($!)
+  fi
 done
+# Windows' one after the other: cargo-xwin links its clang-cl again each time it starts, which two at once fail at.
+((${#windows[@]})) && { (for name in "${windows[@]}"; do client "$name" || exit 1; done) & clients+=($!); }
 
 cache=$target/release-cache
 mkdir -p "$cache"
