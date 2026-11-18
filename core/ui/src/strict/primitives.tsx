@@ -87,7 +87,8 @@ export function css(style: Style | undefined): JSX.CSSProperties | undefined {
     else if (colours.has(name)) out[property] = `var(--${value})`
     else if (name === "borderRadius") out[property] = value === "full" ? "9999px" : value ? `var(--radius-${value})` : 0
     else if (name.startsWith("border")) out[property] = `${value}px`
-    else if (name === "overflow") out[property] = value === "scroll" ? "auto" : value
+    // What scrolls has no scrollbar drawn beside it, as on a phone and on a native host, which draw one over it as it moves.
+    else if (name === "overflow") Object.assign(out, value === "scroll" ? { overflow: "auto", "scrollbar-width": "none" } : { overflow: value })
     else if (name === "lineClamp") Object.assign(out, { display: "-webkit-box", "-webkit-box-orient": "vertical", "-webkit-line-clamp": value, overflow: "hidden" })
     else if (spaces.has(name) || sizes.has(name)) out[property] = typeof value === "number" ? `${value}px` : (tokens[value] ?? value)
     else out[property] = value

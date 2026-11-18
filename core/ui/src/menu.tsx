@@ -1,9 +1,10 @@
-import { children, createContext, createSignal, omit, onSettled, useContext } from "solid-js"
+import { children, createContext, createSignal, createUniqueId, omit, onSettled, useContext } from "solid-js"
 import { Icon } from "./button.tsx"
 import { RowMenu } from "./list.tsx"
 import { messages } from "./shared.ts"
 import { popover } from "./popover.ts"
 import { machine, type Part, type Root } from "./zag.tsx"
+import type { JSX } from "@solidjs/web"
 import type { ButtonProps } from "./button.tsx"
 import type * as menu from "@zag-js/menu"
 
@@ -36,6 +37,7 @@ export const Menu: {
   ItemGroup: Part<menu.ItemGroupProps>
   ItemGroupLabel: Part<menu.ItemGroupLabelProps>
   Separator: Part<{}, HTMLHRElement>
+  Group: (props: { label: JSX.Element; children?: JSX.Element }) => JSX.Element
 } = {
   ...Ark,
   Root: (props) => {
@@ -70,6 +72,15 @@ export const Menu: {
       >
         {inside.toArray().length ? inside() : <Icon name="dots-three" />}
       </Ark.Trigger>
+    )
+  },
+  Group: (props) => {
+    const id = createUniqueId()
+    return (
+      <Ark.ItemGroup id={id}>
+        <Ark.ItemGroupLabel htmlFor={id}>{props.label}</Ark.ItemGroupLabel>
+        {props.children}
+      </Ark.ItemGroup>
     )
   },
   Positioner: (props) => {

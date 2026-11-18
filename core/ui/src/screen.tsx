@@ -58,6 +58,8 @@ export function Screen(props: { heading?: JSX.Element; action?: JSX.Element; bac
     else if (props.onBack) props.onBack()
     else history.back()
   }
+  // The device's own back calls a Back of the screen's own, as a tap on it does.
+  createEffect(() => !!props.back && !!props.onBack, (now) => (now ? covers(back) : undefined))
   return (
     <div class={["ui-screen", props.class]}>
       <header>

@@ -158,6 +158,8 @@ export declare const Menu: {
   Positioner: (props: { children?: Element }) => Element
   Content: (props: { children?: Element }) => Element
   Item: (props: { value: string; destructive?: boolean; disabled?: boolean; children?: Element }) => Element
+  /** Items under a small heading, as iOS's menus group them. */
+  Group: (props: { label: Element; children?: Element }) => Element
   Separator: (props: {}) => Element
 }
 

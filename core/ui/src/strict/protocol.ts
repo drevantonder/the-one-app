@@ -93,6 +93,7 @@ export interface Props {
   "aria-selected"?: Bool
   "aria-checked"?: Bool | "mixed"
   "aria-expanded"?: Bool
+  "aria-pressed"?: Bool | "mixed"
   "aria-busy"?: Bool
   "aria-current"?: Bool
   "aria-invalid"?: Bool

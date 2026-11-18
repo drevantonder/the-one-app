@@ -277,6 +277,12 @@ export const Menu: typeof Strict.Menu = {
     )
   },
   Separator: () => <Box role="separator" style={{ borderBottomWidth: 1, marginBlock: 4 }} />,
+  Group: (props) => (
+    <Box role="group">
+      <Text style={{ font: "footnote", color: "muted-foreground", paddingInline: 8, paddingBlock: 6 }}>{props.label}</Text>
+      {props.children}
+    </Box>
+  ),
 }
 
 /** What a strict page may use that a native host can't draw yet: each throws, naming itself, where it's used. */
