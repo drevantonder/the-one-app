@@ -22,8 +22,10 @@
 # each in a checkout of its own, and a second of the same kind waits for the first. One published while the network's
 # update of the one before is under way takes its place there. A build the network has published from this commit, or
 # from a newer one, which has this one's changes, covers it: it's left as it is, so a release that finishes late
-# doesn't undo a newer one, and one of this commit is published again, so a network that didn't hear of it does. So
-# is a client built from
+# doesn't undo a newer one, and one of this commit is published again, so a network that didn't hear of it does. That's
+# the first thing a release looks at, and a release waiting for another looks again as it waits, and ends at once, with
+# the exit status 0, when the one it waits for is of a commit that has its changes, saying which to follow with `one
+# builds`: only a release whose commit nothing covers waits to publish. So is a client built from
 # the same as the network's latest, in the same series (`OneCore.Builds.talk?/2`): it keeps its build, which `one
 # --version` says, rather than being built again for a version it wouldn't differ in. A client's `inputs` are what
 # `client_inputs` says, kept with it as a runtime's are.
@@ -102,18 +104,10 @@ here="$(uname -s | sed -e s/Linux/linux/ -e s/Darwin/macos/)-$(uname -m | sed s/
 # release starts holds, so it's held until the last of them ends, even when the release is stopped and they aren't;
 # a pid file, released as the script ended, let a release start over the builds of one stopped before it, and two
 # releases take a lock released between their looks at it (18 Nov). A daemon a build starts would hold it too, as long
-# as it runs: the compiler cache's, sccache (`~/.cargo/config.toml`), is started before it's taken.
-if [[ -z $dry && $(uname) == Linux ]]; then
-  kept=${XDG_CACHE_HOME:-$HOME/.cache}/the-one-app/release-$part
-  mkdir -p "$(dirname "$kept")"
-  ! command -v sccache >/dev/null || sccache --show-stats >/dev/null
-  exec 9>>"$kept.lock"
-  flock -n 9 || { echo "Waiting for the $part release of $(cat "$kept.lock") on this machine to finish" && flock 9; }
-  echo "$build, pid $$" >"$kept.lock"
-fi
-# What the network has, after the release before this one, and whether a build is from a newer commit than this.
-builds=$(one builds)
-git fetch -q origin main
+# as it runs: the compiler cache's, sccache (`~/.cargo/config.toml`), is started before it's taken. A release looks at
+# what the network has before it waits, and as it waits, and ends at once, as a covered one does, when the release it
+# waits for, or one published since, is of a commit that has its changes.
+kept=${XDG_CACHE_HOME:-$HOME/.cache}/the-one-app/release-$part
 
 triple() {
   case $1 in
@@ -141,62 +135,114 @@ unchanged() {
   [[ -n $latest && $(series "$latest") == "$(series "$build")" ]] && echo "$latest"
 }
 
-# What's asked for, by name. A desktop or the CLI is built for each kind of machine a device of the network's is,
-# but a phone, whose app the network's owner builds.
-names=()
-for want in "${wanted[@]}"; do
-  case $want in
-    server) names+=($(jq -r '.servers[].target | "server/" + .' <<<"$builds")) ;;
-    client) names+=($(jq -r '.devices[].target | select(startswith("linux-")) | "one/" + ., "one-cli/" + .' <<<"$builds")
-      $(jq -r '.devices[].target | select(startswith("macos-")) | "one/" + .' <<<"$builds")
-      $(jq -r '.devices[].target | select(startswith("windows-")) | "one/" + ., "one-cli/" + .' <<<"$builds")) ;;
-    *) names+=("$want") ;;
-  esac
-done
-names=($(printf '%s\n' "${names[@]}" | sort -u))
-
-# A release only while every server and the edge talks with it, so is at most one breaking release from it
-# (`OneCore.Builds.talk?/2`): servers can catch up with an edge ahead of them, and a breaking release waits for
-# whichever is two behind. Devices aren't waited for: their people update them, which works whatever they're on.
-behind=$(jq -r --arg build "$build" '
-  def series: split(".") | map(tonumber? // 0) | if .[0] == 0 then .[0:2] else .[0:1] end;
-  def apart($a; $b): if ($a | length) == ($b | length) then ($a[-1] - $b[-1]) | fabs else infinite end;
-  ($build | series) as $mine
-  | [(.servers[] | select(apart(.build // "0.15.0" | series; $mine) > 1) | "\(.name) on \(.build)"),
-     (select(apart(.edge // "0.15.0" | series; $mine) > 1) | "the edge on \(.edge)")]
-  | join(", ")' <<<"$builds")
-[[ -z $behind ]] || { echo "$build is a breaking release from $behind, which wouldn't talk with it: release the one between to them first." >&2 && exit 1; }
-
-
 # Whether a build is this commit's, or a newer one's on main, which has its changes.
 covers() {
   local sha=${1##*[-.]}
   [[ $commit == "$sha"* ]] || { git cat-file -e "$sha^{commit}" 2>/dev/null && git merge-base --is-ancestor "$commit" "$sha"; }
 }
 
-# Which are built here, and which are published already.
-mine=()
-for name in "${names[@]}"; do
-  kind=${name#*/}
-  # A server is published as its code, which is the same for every kind, and its kind's runtime, which a kind of
-  # machine new to the network has none of yet.
-  latest=$(jq -r --arg n "${name/#server\/*/server-code}" '.latest[$n].build // ""' <<<"$builds")
-  if [[ -n $latest ]] && covers "$latest" &&
-    { [[ $name != server/* ]] || jq -e --arg n "server-runtime/$kind" '.latest[$n]' <<<"$builds" >/dev/null; }; then
-    if [[ $latest == "$build" ]]; then echo "$name  $build is published already"; else echo "$name  $latest is published, which has $build's changes"; fi
-  elif [[ $name == server/* && $here != linux-* ]]; then
-    echo "$name is built on Linux: build it there with tooling/release $name" >&2 && exit 1
-  elif [[ $name == server/* || $kind == "$here" || ($here == linux-* && ($kind == windows-* || $name == one/macos-*)) ]]; then
-    # A client's inputs name the Rust that builds it, which is this machine's, and GitHub's for a Mac's.
-    if [[ $name != server/* ]] && was=$(unchanged "$name"); then
-      echo "$name  built from the same as $was, which stays the latest"
+# What the network has, and which of what's asked for it has none of from this commit or a newer one: those are `mine`,
+# to build, and `notes` says why each of the rest isn't.
+survey() {
+  builds=$(one builds)
+  git fetch -q origin main
+  # What's asked for, by name. A desktop or the CLI is built for each kind of machine a device of the network's is,
+  # but a phone, whose app the network's owner builds.
+  names=()
+  for want in "${wanted[@]}"; do
+    case $want in
+      server) names+=($(jq -r '.servers[].target | "server/" + .' <<<"$builds")) ;;
+      client) names+=($(jq -r '.devices[].target | select(startswith("linux-")) | "one/" + ., "one-cli/" + .' <<<"$builds")
+        $(jq -r '.devices[].target | select(startswith("macos-")) | "one/" + .' <<<"$builds")
+        $(jq -r '.devices[].target | select(startswith("windows-")) | "one/" + ., "one-cli/" + .' <<<"$builds")) ;;
+      *) names+=("$want") ;;
+    esac
+  done
+  names=($(printf '%s\n' "${names[@]}" | sort -u))
+
+  # A release only while every server and the edge talks with it, so is at most one breaking release from it
+  # (`OneCore.Builds.talk?/2`): servers can catch up with an edge ahead of them, and a breaking release waits for
+  # whichever is two behind. Devices aren't waited for: their people update them, which works whatever they're on.
+  behind=$(jq -r --arg build "$build" '
+    def series: split(".") | map(tonumber? // 0) | if .[0] == 0 then .[0:2] else .[0:1] end;
+    def apart($a; $b): if ($a | length) == ($b | length) then ($a[-1] - $b[-1]) | fabs else infinite end;
+    ($build | series) as $mine
+    | [(.servers[] | select(apart(.build // "0.15.0" | series; $mine) > 1) | "\(.name) on \(.build)"),
+       (select(apart(.edge // "0.15.0" | series; $mine) > 1) | "the edge on \(.edge)")]
+    | join(", ")' <<<"$builds")
+  [[ -z $behind ]] || { echo "$build is a breaking release from $behind, which wouldn't talk with it: release the one between to them first." >&2 && exit 1; }
+
+  mine=() notes=()
+  # Which are built here, and which are published already.
+  for name in "${names[@]}"; do
+    kind=${name#*/}
+    # A server is published as its code, which is the same for every kind, and its kind's runtime, which a kind of
+    # machine new to the network has none of yet.
+    latest=$(jq -r --arg n "${name/#server\/*/server-code}" '.latest[$n].build // ""' <<<"$builds")
+    if [[ -n $latest ]] && covers "$latest" &&
+      { [[ $name != server/* ]] || jq -e --arg n "server-runtime/$kind" '.latest[$n]' <<<"$builds" >/dev/null; }; then
+      if [[ $latest == "$build" ]]; then notes+=("$name  $build is published already"); else notes+=("$name  $latest is published, which has $build's changes"); fi
+    elif [[ $name == server/* && $here != linux-* ]]; then
+      echo "$name is built on Linux: build it there with tooling/release $name" >&2 && exit 1
+    elif [[ $name == server/* || $kind == "$here" || ($here == linux-* && ($kind == windows-* || $name == one/macos-*)) ]]; then
+      # A client's inputs name the Rust that builds it, which is this machine's, and GitHub's for a Mac's.
+      if [[ $name != server/* ]] && was=$(unchanged "$name"); then
+        notes+=("$name  built from the same as $was, which stays the latest")
+      else
+        mine+=("$name")
+      fi
     else
-      mine+=("$name")
+      echo "$name isn't built on $here: build it on such a machine with tooling/release $name" >&2 && exit 1
     fi
-  else
-    echo "$name isn't built on $here: build it on such a machine with tooling/release $name" >&2 && exit 1
-  fi
-done
+  done
+}
+
+# A release with nothing left to build ends here, whenever that's found out, even while it waits: published again,
+# which sends nothing, so a network that didn't hear of what it has does.
+covered() {
+  ((${#mine[@]})) && return
+  printf '%s\n' "${notes[@]}"
+  [[ -n $dry ]] || one publish --builds '[]' >/dev/null
+  exit 0
+}
+
+# Whether the release holding the lock is of a commit with this one's changes, for each build this one has left, so
+# its wait is for nothing: it says so, and this one ends as a covered one does. The holder keeps what it releases
+# beside the lock for as long as it holds it.
+holding() {
+  local held held_build held_commit held_wanted name want ok
+  held=$(cat "$kept.releasing" 2>/dev/null) && read -r held_build held_commit held_wanted <<<"$held" || return 1
+  [[ $commit == "$held_commit" ]] || { git cat-file -e "$held_commit^{commit}" 2>/dev/null && git merge-base --is-ancestor "$commit" "$held_commit"; } || return 1
+  for name in "${mine[@]}"; do
+    ok=
+    for want in $held_wanted; do
+      [[ $want == "$name" || ($want == server && $name == server/*) || ($want == client && $name != server/*) ]] && ok=yes
+    done
+    [[ -n $ok ]] || return 1
+  done
+  echo "$held_build from ${held_commit:0:12}, which has $build's changes, is publishing now: follow it with \`one builds\`."
+}
+
+survey && covered
+if [[ -z $dry && $(uname) == Linux ]]; then
+  mkdir -p "$(dirname "$kept")"
+  ! command -v sccache >/dev/null || sccache --show-stats >/dev/null
+  exec 9>>"$kept.lock"
+  # It waits 30 s at a time, to look again at what the network has and what the holder releases, which is what it
+  # waits for the end of.
+  while ! flock -n 9; do
+    holding && exit 0
+    [[ -n ${waiting:-} ]] || echo "Waiting for the $part release of $(cat "$kept.lock") on this machine to finish"
+    waiting=yes
+    flock -w 30 9 || { survey && covered; }
+  done
+  echo "$build, pid $$" >"$kept.lock"
+  echo "$build $commit ${wanted[*]}" >"$kept.releasing"
+  trap 'rm -f "$kept.releasing"' EXIT
+  # What the release before this one published.
+  survey && covered
+fi
+((${#notes[@]})) && printf '%s\n' "${notes[@]}"
 for name in "${mine[@]}"; do
   if [[ $name == one/macos-* && $here != macos-* ]]; then echo "$name  $build, built on GitHub"; else echo "$name  $build, built here"; fi
 done
@@ -204,8 +250,6 @@ done
 # Windows' installer is made with NSIS, as most Windows apps' are, and Linux has it as a package.
 [[ " ${mine[*]} " != *" one/windows-"* ]] || command -v makensis >/dev/null ||
   { echo "Windows' installer is made with makensis: sudo apt install nsis" >&2 && exit 1; }
-# Published already: published again, which sends nothing, so a network that didn't hear of it does.
-((${#mine[@]})) || { one publish --builds '[]' >/dev/null && exit; }
 
 # It builds in one checkout kept for releasing each part on this machine, put at the commit released, so each release
 # builds, downloads and installs only what changed since the one before, as the Mac's ~/scratch/one-release does,
