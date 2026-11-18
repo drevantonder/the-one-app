@@ -37,8 +37,6 @@ export interface View {
   frame: HTMLIFrameElement
   tapped?: number
   over?: boolean
-  /** Where in the window the icon it was opened from was, which it goes back into as it closes. */
-  from?: Rect
   /** Whether the device's status bar shows while it does: unless it asked otherwise (`client({ statusBar })`). */
   statusBar?: boolean
 }

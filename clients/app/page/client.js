@@ -403,7 +403,7 @@ document.addEventListener("visibilitychange", () => on({ type: document.hidden ?
 /// Whether an app's page is in front of its person: the window's answer, the one showing while it shows apps, in a
 /// window that's on screen.
 /** @param {View} view @returns {boolean} */
-const onScreen = (view) => !document.hidden && shown.getSnapshot().hasTag("pages") && view === showing(history.state)
+const onScreen = (view) => !document.hidden && shown.getSnapshot().hasTag("pages") && view === showing(here())
 
 /// What the window says as it opens: the steps it takes to its person's home, the first of which says whether its
 /// network answers. With a launcher kept from before, it's starting that alone.
@@ -617,7 +617,7 @@ function reloadPage(view) {
 /// Says over the app that's showing what its page needs of its person, if anything: that it's been updated, with
 /// Reload, or that it didn't open, with Try Again: only while the window shows its apps, as it alone owns the screen.
 function notes() {
-  const view = showing(history.state)
+  const view = showing(here())
   const now = view && shown.getSnapshot().hasTag("pages") ? pageOf(view) : undefined
   byId("update").hidden = !now?.matches("stale")
   byId("page-problem").hidden = !now?.matches("failed")
@@ -627,11 +627,11 @@ function notes() {
   }
 }
 byId("reload").addEventListener("click", () => {
-  const view = showing(history.state)
+  const view = showing(here())
   if (view) page(view, { type: "reload" })
 })
 byId("page-problem-button").addEventListener("click", () => {
-  const view = showing(history.state)
+  const view = showing(here())
   if (!view) return
   view.tapped = performance.now()
   page(view, { type: "retry" })
@@ -664,6 +664,25 @@ function load(entrypoint, subject, fragment) {
 /// The app showing, or the launcher: what goes as another shows.
 /** @type {View | undefined} */
 let front
+
+/// The way back through this window: for each of its history entries from the launcher's, the key of the app it
+/// shows (`null` for the launcher's), where it is in the browser's whole history, which counts the entries an app's
+/// own screens add too, and the icon it was opened from, which it goes back into. An entry says how deep it is
+/// (`history.state`), so going back or forward knows which way it goes, and a link to the launcher goes all the way
+/// back to it.
+/** @type {{ key: string | null, at: number, from?: Rect }[]} */
+let stack = [{ key: null, at: history.length - 1 }]
+/// How deep the entry the window is on is: 0 at the launcher's.
+let depth = 0
+/// The key of the app the window's entry shows, or `null` for the launcher.
+const here = () => stack[depth]?.key ?? null
+/// The entry the window is on becomes the launcher's, as the app it showed is gone, or as the page loaded again on
+/// an app's entry.
+function restart() {
+  history.replaceState(null, "")
+  stack = [{ key: null, at: stack[depth]?.at ?? history.length - 1 }]
+  depth = 0
+}
 
 /// The device's status bar, as the app that's showing would have it: shown unless it asked otherwise.
 let statusBar = true
@@ -748,7 +767,7 @@ let swiping = true
 /** @type {boolean | undefined} */
 let backs
 function gestures() {
-  const view = showing(history.state)
+  const view = showing(here())
   const on = !view?.over
   if (on !== swiping) invoke("navigation_gestures", { on })
   swiping = on
@@ -912,7 +931,7 @@ addEventListener("message", async ({ source, data }) => {
   const { id, method, params = {} } = data
   if (id === undefined) {
     // The app's user went back out of it. The app stays open behind the launcher.
-    if (method === "ui/notifications/request-teardown" && !view.frame.inert && history.state) history.back()
+    if (method === "ui/notifications/request-teardown" && !view.frame.inert && depth) history.back()
     // Something is open over its page, or nothing is any more.
     if (method === "notifications/one/over") {
       view.over = params.over === true
@@ -940,7 +959,8 @@ addEventListener("message", async ({ source, data }) => {
 
 /// Shows an app over whatever's showing, by what a `one:` link says after its scheme: `<app>[/<page>][#<fragment>]`,
 /// its app's name, and its page if it isn't the app's first app, and the place in it, for `subject`. With `behind`
-/// it only starts. The launcher, linked to, is gone back to. → whether there is one here.
+/// it only starts. The launcher, linked to, is gone back to, past every app open over it. → whether there is one
+/// here.
 /** @param {string} link @param {string} [subject] @param {boolean} [behind] @param {Rect} [from] */
 function go(link, subject, behind, from) {
   const [entrypoint, fragment] = link.split("#", 2)
@@ -950,16 +970,20 @@ function go(link, subject, behind, from) {
   const next = load(page, subject, fragment)
   if (behind) return true
   if (next.entrypoint === launcher) {
-    if (history.state) history.back()
+    // Each app's screens it went through on the way are steps back too.
+    if (depth) history.go(Math.min(-depth, stack[0].at - stack[depth].at))
     return true
   }
-  const showing = history.state === next.key
-  // It goes back into the icon it came out of, or slides out if it came from none.
-  next.from = from
+  const showing = here() === next.key
   move(() => show(next.key, tapped), false, from)
   // The way back out of an app is an entry in this window's history, made as it's opened, so the device's back
   // leads out of the app however soon it's pressed.
-  if (!showing) history.pushState(next.key, "")
+  if (!showing) {
+    depth += 1
+    history.pushState(depth, "")
+    // It goes back into the icon it came out of, or slides out if it came from none.
+    stack.splice(depth, Infinity, { key: next.key, at: history.length - 1, from })
+  }
   return true
 }
 
@@ -989,7 +1013,7 @@ listen("changed", ({ payload: view }) => {
 /// that's showing shuts first. → whether anything was. If nothing was, the device goes back through this window's
 /// history, which leads back through an app's screens and out of it, and from the launcher out of the app.
 window.back = () => {
-  const view = open.get(history.state) ?? open.get(key(launcher))
+  const view = open.get(here() ?? "") ?? open.get(key(launcher))
   if (!view?.over || view.frame.inert) return false
   post(view, { method: "notifications/one/back" })
   return true
@@ -997,18 +1021,20 @@ window.back = () => {
 
 /// A tap on an iPhone's status bar (the app's window there calls this): the app that's showing scrolls to its top.
 window.scrollToTop = () => {
-  const view = showing(history.state)
+  const view = showing(here())
   if (view) post(view, { method: "notifications/one/scroll-to-top" })
 }
 
 // The device's own way back, and this page's, both end here.
 addEventListener("popstate", (event) => {
-  const { state } = event
   const tapped = performance.now()
   shownByDevice = Boolean(event.hasUAVisualTransition)
-  // Back to the launcher, the app that was showing goes back into the icon it came out of.
-  const back = !open.has(state)
-  move(() => show(state, tapped), back, back ? front?.from : undefined)
+  const to = typeof event.state === "number" ? event.state : 0
+  const back = to < depth
+  // Going back, the app that was showing goes back into the icon it came out of, if it came out of one.
+  const into = back ? stack[depth]?.from : undefined
+  depth = to
+  move(() => show(here(), tapped), back, into)
   shownByDevice = false
 })
 
@@ -1030,7 +1056,8 @@ function returned() {
   if (document.hidden) return
   for (const subject of listed) list(subject)
   invoke("refresh", { view: key(launcher) })
-  if (open.has(history.state)) invoke("refresh", { view: history.state })
+  const view = here()
+  if (view) invoke("refresh", { view })
 }
 document.addEventListener("visibilitychange", returned)
 addEventListener("focus", returned)
@@ -1041,7 +1068,7 @@ function start() {
   if (home) page(home, { type: "retry" })
   else load(launcher)
   // The app that was showing when the page was loaded again is gone, so the launcher shows.
-  if (history.state) history.replaceState(null, "")
+  restart()
   show(null, 0)
 }
 
@@ -1049,7 +1076,7 @@ function start() {
 /// to from it.
 function openAppStore() {
   const view = load(appStore)
-  if (history.state) history.replaceState(null, "")
+  restart()
   show(view.key, performance.now())
 }
 
