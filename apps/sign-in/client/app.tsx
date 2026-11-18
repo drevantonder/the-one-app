@@ -5,11 +5,11 @@
 // This device becomes a server and stops being one; a server's services are switched on and off; and a device is
 // taken out, or this one signs out. Each server says whether it's ready, active and running, or why not, and an
 // update it's taking as it moves on (`OneCore.Release`). This device becoming a server, or stopping being one, says
-// each stage. Above them all are the devices waiting to sign in as whoever's looking, each let in by tapping the
-// number it shows, of three, or blocked.
+// each stage. Above them all are the devices waiting to sign in as whoever's looking, each let in by typing the
+// number it shows, as Microsoft Authenticator has it, or blocked.
 import { createMemo, createSignal, Errored, For, Loading, refresh, Show } from "solid-js"
 import { render } from "@solidjs/web"
-import { Button, call, changed, client, confirm, Empty, haptic, List, Problem, Row, Screen, Section, seen, Sheet, Skeleton, Spinner, Split, Steps, Switch, toast } from "ui"
+import { Button, call, changed, client, confirm, Empty, Field, haptic, Input, List, Problem, Row, Screen, Section, seen, Sheet, Skeleton, Spinner, Split, Steps, Switch, toast } from "ui"
 import { on } from "./mine.tsx"
 import "./app.css"
 
@@ -88,7 +88,6 @@ interface Waiting {
   name: string
   at: string
   place: string | null
-  numbers: number[]
 }
 
 const json = <T,>(tool: string, inputs?: object, who?: string): Promise<T> => call(tool, inputs, { subject: who }).then(JSON.parse)
@@ -335,7 +334,7 @@ const linked = () => new URLSearchParams(location.hash.slice(1)).get("waiting") 
 setAnswering(linked())
 addEventListener("hashchange", () => setAnswering(linked()))
 
-/// The person's answer to a device waiting to sign in as them: the number they tapped, which lets it in if it's the
+/// The person's answer to a device waiting to sign in as them: the number they typed, which lets it in if it's the
 /// one it shows and blocks it if not, or Not Me, which blocks it. Once it's in, this device hands it its person's key if
 /// it holds it, as `encryption_approve` does, which a device without it, and a browser, leave.
 async function answer(device: Waiting, number?: number) {
@@ -353,19 +352,27 @@ async function answer(device: Waiting, number?: number) {
   toast(number === undefined ? `${device.name} was blocked.` : `${device.name} is signed in as you${unlocked ? ", with your key" : ""}.`)
 }
 
-/// Is this you signing in? The three numbers, one of which the device shows, and Not Me.
+/// Is this you signing in? The number the device shows, typed, as Microsoft Authenticator asks for it: picking one of
+/// a few could be a lucky guess. It's typed, never filled in: the device's one-time-code autofill is off. Then Yes,
+/// or Not Me.
 function Answer(props: { device?: Waiting }) {
   return (
     <Sheet heading="Is this you signing in?" open={!!props.device} onClose={() => setAnswering()}>
       <Show when={props.device}>
         {(device) => (
-          <div class="answer">
-            <p>Tap the number showing on {device().name}.</p>
-            <div class="numbers">
-              <For each={device().numbers}>{(number) => <Button variant="secondary" onClick={() => answer(device(), number)}>{number}</Button>}</For>
-            </div>
+          <form
+            class="answer"
+            onSubmit={(event) => {
+              event.preventDefault()
+              answer(device(), Number(new FormData(event.currentTarget).get("number")))
+            }}
+          >
+            <Field label={`Enter the number showing on ${device().name}`}>
+              <Input name="number" class="number" inputmode="numeric" pattern="[0-9]{2}" maxlength={2} autocomplete="off" enterkeyhint="done" required autofocus />
+            </Field>
+            <Button type="submit">Yes</Button>
             <Button variant="outline" onClick={() => answer(device())}>Not Me</Button>
-          </div>
+          </form>
         )}
       </Show>
     </Sheet>

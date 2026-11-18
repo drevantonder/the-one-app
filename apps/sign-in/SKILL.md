@@ -30,10 +30,10 @@ that one question for it, and a new device when they also say the code it shows 
   and everyone invited who hasn't joined yet. `remove_person` takes someone out, or ends an invitation: their
   devices, assistants and passkeys stop working, they're in no group and shared nothing, and what they made stays. Whoever invites does it.
 - A device that isn't in yet asks who's signing in. Once its person names themselves, it shows a number and waits:
-  `waiting` lists the devices waiting to sign in as your person, each with three numbers, one of which it shows,
-  for a few minutes. Let one in only when your person tells you the number it shows: `approve` with its `request`
-  and that `number`. A wrong number blocks it, and so does `deny`. Never guess: a device that names your person
-  could be a stranger's, and the number is what keeps it out. The app on a device that holds your person's key then
+  `waiting` lists the devices waiting to sign in as your person, for a few minutes, and never the number each
+  shows: your person types it in Devices. Let one in only when your person tells you the number it shows:
+  `approve` with its `request` and that `number`. A wrong number blocks it, and so does `deny`. A device that names
+  your person could be a stranger's, and the number is what keeps it out. The app on a device that holds your person's key then
   hands it the key too, as `encryption_approve` does; with `one` on such a device, call `encryption_approve` with
   its `device` (as `waiting` lists it) and `name` afterwards.
 - It can show a code and a link at the network's address instead. Its person opens the link where they sign in,

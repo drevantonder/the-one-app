@@ -5,7 +5,7 @@
 // compare with the device's before they let it in or stop it (`Stage`). Opened from the app's Sign-In & Security, someone
 // makes another passkey. Whichever it was, this browser is signed in after, and is one of that person's devices,
 // whose Home Screen it goes on to when there's nothing else to answer. In the app's own window, the page first asks
-// who's signing in, then shows the number that person taps on one of their devices to let this one in, as it waits
+// who's signing in, then shows the number that person types on one of their devices to let this one in, as it waits
 // (`Request` in `edge/auth.ts`). Use a Passkey shows the device's code instead, its button goes on to the passkey there (one the app may use, its network's, as `/.well-known`
 // says), and Use Another Device gives the link and the code to open where they're signed in, for a passkey the app
 // can't reach. Every passkey is asked for its PRF output, which unlocks its person's key (`passkey.ts`): a device
@@ -335,7 +335,7 @@ function shows(): Shows {
       if (how() === "away") return { heading: "Sign in on another device", button: shares ? "Share Link" : copied() ? "Copied" : "Copy Link", onSignIn: share, stop: "Back", onStop: () => setHow("passkey"), elsewhere: true }
       if (how() === "passkey") return { heading: "Sign in", note: "Check this code where you sign in", code: shown, problem: why, button: "Sign in", href: link.href, stop: "Use Another Device", onStop: () => setHow("away") }
       if (number() !== undefined)
-        return { heading: "Check your devices", note: "On another of your devices, open Devices and tap", code: String(number()), button: "Use a Passkey", onSignIn: () => setHow("passkey"), stop: "Back", onStop: () => setNumber() }
+        return { heading: "Check your devices", note: "On another of your devices, open Devices and enter", code: String(number()), button: "Use a Passkey", onSignIn: () => setHow("passkey"), stop: "Back", onStop: () => setNumber() }
       return { heading: "Sign in", problem: why, button: "Continue", onSignIn: name, stop: "Use a Passkey", onStop: () => setHow("passkey"), asksWho: true }
     case "device":
       switch (now.stage) {

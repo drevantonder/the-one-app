@@ -260,7 +260,7 @@ defmodule SignIn do
         name: "waiting",
         read_only: true,
         description:
-          "Lists the devices waiting to sign in as you: each named you, and shows a number that one of the three here is",
+          "Lists the devices waiting to sign in as you: each named you, and shows a number its person types to let it in",
         inputs: none,
         outputs: %{
           type: "object",
@@ -276,10 +276,9 @@ defmodule SignIn do
                   name: %{type: "string", description: "What the device calls itself"},
                   at: %{type: "string", description: "When it named you, ISO 8601"},
                   place: %{type: ["string", "null"], description: "Roughly where it asked from: a city"},
-                  ends: %{type: "string", description: "When it stops waiting, ISO 8601"},
-                  numbers: %{type: "array", items: %{type: "integer"}, description: "One of them is the number it shows"}
+                  ends: %{type: "string", description: "When it stops waiting, ISO 8601"}
                 },
-                required: ["request", "device", "name", "at", "place", "ends", "numbers"]
+                required: ["request", "device", "name", "at", "place", "ends"]
               }
             }
           },
@@ -289,13 +288,13 @@ defmodule SignIn do
       %{
         name: "approve",
         description:
-          "Approves a device as yours: by the code it shows, or one that's waiting by the number it shows. A wrong number blocks it",
+          "Approves a device as yours: by the code it shows, or one that's waiting by the number its person reads off it. A wrong number blocks it",
         inputs: %{
           type: "object",
           properties: %{
             code: %{type: "string", description: "The code the device shows, as WDJB-MJHT"},
             request: %{type: "string", description: "A device waiting to sign in as you, as `waiting` lists it"},
-            number: %{type: "integer", description: "With `request`: the number the device shows"}
+            number: %{type: "integer", description: "With `request`: the number the device shows, as its person says it"}
           }
         },
         outputs: %{

@@ -3,7 +3,7 @@
 // for it, and a new device when they also say the code it shows matches the one they're shown, as Better Auth's
 // device authorization has it, or when a device or assistant of theirs lets it in by that code. A new device may
 // instead name whose it is (`/device/claim`): that person's devices list it as waiting, and one of them lets it in by
-// tapping the number it shows (`RequestState`). Each is then a line
+// typing the number it shows (`RequestState`). Each is then a line
 // in this app's own artifact, `devices/<device>`, saying whose it is: that's where a server reads it, so no call
 // asks anything here. What a person goes by is a line there too, `people/<name>`: the name they chose as they
 // joined, and their email where how they signed in has one, which a server tells apps of by `people`.
@@ -91,9 +91,9 @@ interface DeviceCode {
  * A request to sign in: a new device's code, once the device named whose it is. It's in one of four states, and moves
  * only as `answer` moves it, each move with its guard:
  *
- *     waiting → approved   that person taps the number it shows on one of their devices (`approve` with `number`),
+ *     waiting → approved   that person types the number it shows on one of their devices (`approve` with `number`),
  *                          or anyone signed in lets it in by its code, as before (`/device/approve`, `approve`)
- *     waiting → denied     that person taps another number, or Not Me (`deny`), or stops it by its code
+ *     waiting → denied     that person types another number, or Not Me (`deny`), or stops it by its code
  *     waiting → expired    `ASKS_FOR` passes with neither: its code ends, and the device asks for another
  *     waiting → waiting    the device names someone again: a new number, and no more time than it had left
  *
@@ -605,19 +605,6 @@ async function answer(adapter: Adapter, code: DeviceCode, user: { id: string; na
 }
 
 /**
- * The three numbers a request's person is shown to tap, one of them the one its device shows, in an order of its
- * own, and the same each time it's shown.
- */
-async function numbers(code: DeviceCode) {
-  const bytes = new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(code.id)));
-  const shown = [code.number!];
-  for (const byte of bytes) if (shown.length < 3 && !shown.includes(10 + (byte % 90))) shown.push(10 + (byte % 90));
-  const at = bytes[31] % 3;
-  [shown[0], shown[at]] = [shown[at], shown[0]];
-  return shown;
-}
-
-/**
  * Has a server acting for `user` notify them that a device is waiting to sign in as them (`sign-in_notify`). It
  * comes as a sharing link's holder does, since the edge is nobody, and the server checks with the edge that it is.
  */
@@ -762,15 +749,16 @@ export async function asked(auth: Auth, origin: string, { ask, who: name, buildi
     await internalAdapter.deleteSession(signed_in.token);
     return { removed: browser(signed_in.userAgent), device: await browserDevice(signed_in.id) };
   }
-  // The devices waiting to sign in as this person (`RequestState`), each with the numbers they're shown to tap.
+  // The devices waiting to sign in as this person (`RequestState`). Nothing here says the number each shows: its
+  // person reads it off the device and types it, as Microsoft Authenticator has them, so picking isn't guessing.
   if (ask === "waiting") {
     const named = await adapter.findMany<DeviceCode>({ model: "deviceCode", where: [{ field: "person", value: user.id }, { field: "status", value: "pending" }] });
     const waiting = named.filter((code) => state(code) === "waiting").toSorted((a, b) => +new Date(b.named!) - +new Date(a.named!));
     return {
-      waiting: await Promise.all(waiting.map(async (code) => ({ request: code.id, device: code.clientId, name: code.name, at: code.named, place: code.place ?? null, ends: code.expiresAt, numbers: await numbers(code) }))),
+      waiting: waiting.map((code) => ({ request: code.id, device: code.clientId, name: code.name, at: code.named, place: code.place ?? null, ends: code.expiresAt })),
     };
   }
-  // A request answered on one of its person's devices: the number tapped lets it in if it's the one it shows, and
+  // A request answered on one of its person's devices: the number typed lets it in if it's the one it shows, and
   // stops it if not, as Not Me does.
   if ((ask === "approve" && about.request) || ask === "deny") {
     const code = await adapter.findOne<DeviceCode>({ model: "deviceCode", where: [{ field: "id", value: String(about.request) }, { field: "person", value: user.id }] });
