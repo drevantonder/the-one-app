@@ -29,7 +29,7 @@ defmodule OneCore.App.Manifest do
   # The keys of each map in a list an app says, as JSON names them.
   @keys %{
     tools: ~w(name description inputs outputs read_only by_link ui task_support)a,
-    entrypoints: ~w(name page icon category subject)a,
+    entrypoints: ~w(name page icon category subject badge)a,
     widgets: ~w(name tool sizes)a,
     offers: ~w(name kind description)a,
     jobs: ~w(tool every inputs)a

@@ -370,6 +370,10 @@ defmodule OneCore.App do
   - An entrypoint may say its `subject`, who it's opened for, which One Core passes to the launcher as it is too:
     `subject: "user"` is an entrypoint about whoever opens it, as Vault and Devices are, which is opened for them wherever
     it's installed. Without one, it's opened for whoever it's installed for, or whose page it's on.
+  - An entrypoint may say its `badge`, one of the app's tools that only reads, whose answer's `count` is the red count
+    on its icon while it's more than 0, as an iPhone's app sets its own: what's waiting for whoever's looking, as
+    Devices counts the devices waiting to sign in as them (`badge: "waiting"`). A Home Screen asks it again whenever
+    something changed, so it only reads what the app keeps.
   - An app that keeps something in its people's Vaults (an account at an outside service, a Chrome profile, a key)
     registers its item type there, as the Vault's skill says: `vault.types`, with the section it's listed under, how
     one is added, and the component that draws one, if it has one. An account is such an item, and isn't an app:

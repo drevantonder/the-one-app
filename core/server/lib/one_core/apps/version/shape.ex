@@ -41,7 +41,8 @@ defmodule OneCore.Apps.Version.Shape do
         "name" => @text,
         "icon" => %{"type" => "string", "description" => "a file of the app"},
         "category" => @text,
-        "subject" => @text
+        "subject" => @text,
+        "badge" => %{"type" => "string", "description" => "the name of one of this app's tools that only reads"}
       }
     },
     widgets: %{

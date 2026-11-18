@@ -34,6 +34,7 @@ defmodule OneCore.Apps.Version.Checks do
         tool_problems(tools, rest, prefix) ++
         entrypoint_problems(entrypoints, rest, prefix) ++
         widget_problems(widgets, tools, prefix) ++
+        badge_problems(entrypoints, tools, prefix) ++
         other_problems(description, app, prefix)
 
     case problems do
@@ -89,16 +90,25 @@ defmodule OneCore.Apps.Version.Checks do
   defp widget_problems(widgets, tools, prefix) do
     tools = for {tool, _at} <- indexed(tools), do: tool
 
-    for {%{tool: name}, at} <- indexed(widgets), is_binary(name), why = widget_tool(name, tools) do
+    for {%{tool: name}, at} <- indexed(widgets), is_binary(name), why = reading_tool(name, tools) do
       "#{prefix}widgets()[#{at}].tool: got #{Shape.given(name)}, #{why}"
     end
   end
 
-  defp widget_tool(name, tools) do
+  # An entrypoint's badge is a count one of the app's tools answers, which a Home Screen asks again and again.
+  defp badge_problems(entrypoints, tools, prefix) do
+    tools = for {tool, _at} <- indexed(tools), do: tool
+
+    for {%{badge: name}, at} <- indexed(entrypoints), is_binary(name), why = reading_tool(name, tools) do
+      "#{prefix}entrypoints()[#{at}].badge: got #{Shape.given(name)}, #{why}"
+    end
+  end
+
+  defp reading_tool(name, tools) do
     case Enum.find(tools, &(&1[:name] == name)) do
       nil -> "expected one of this app's tools that only read: #{Enum.join(Enum.map(tools, & &1[:name]), ", ")}"
       %{read_only: true} -> nil
-      _ -> "which doesn't say read_only: true in tools/0, as a tool that only reads does and a widget calls"
+      _ -> "which doesn't say read_only: true in tools/0, as a tool that only reads does and a Home Screen calls"
     end
   end
 
@@ -209,7 +219,8 @@ defmodule OneCore.Apps.Version.Checks do
             page: page,
             icon: if(is_map_key(rest, entrypoint[:icon] || icon), do: data(entrypoint[:icon] || icon, rest)),
             category: entrypoint[:category],
-            subject: entrypoint[:subject]
+            subject: entrypoint[:subject],
+            badge: entrypoint[:badge]
           }
 
     widgets =
