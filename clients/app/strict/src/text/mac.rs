@@ -2,7 +2,8 @@
 // open_type.rs) at commit 69e2130295c2649963eb639fc70b4f2ee8ea1624 (gpui 0.2.2 on crates.io), and cut down for the
 // strict host: Core Text's shaping and Core Graphics' rasterizing, on a Mac, with Core Text's own fallback for a
 // character the typeface lacks. Changed: no font-kit; one typeface, from its bytes, at the weight asked for on its
-// `wght` axis, with tabular figures by its `tnum` feature, and tracking as Core Text's kern.
+// `wght` axis and its size on its `opsz` (as CSS's `font-optical-sizing: auto`), with tabular figures by its `tnum`
+// feature, and tracking as Core Text's kern.
 // Copyright 2022 - 2025 Zed Industries, Inc. Licensed under the Apache License, Version 2.0
 // (clients/app/strict/LICENSE-APACHE); this file is changed from the original.
 
@@ -48,8 +49,8 @@ const RUN_RIGHT_TO_LEFT: u32 = 1;
 pub struct CoreTextSystem {
     /// The typeface, as its bytes load it.
     typeface: CTFont,
-    /// The typeface at a weight, with tabular figures or not.
-    styled: HashMap<(u16, bool), CTFont>,
+    /// The typeface at a weight and an optical size, with tabular figures or not.
+    styled: HashMap<(u16, u32, bool), CTFont>,
     /// The faces glyphs are drawn from, by `FontId`, and whether each is emoji.
     faces: Vec<(CTFont, bool)>,
     /// Each face's `FontId`, by its PostScript name, and the weight and figures it was asked at where it's the
@@ -66,16 +67,19 @@ impl CoreTextSystem {
         CoreTextSystem { typeface, styled: HashMap::new(), faces: Vec::new(), ids: HashMap::new() }
     }
 
-    /// The typeface at `style`'s weight and figures.
+    /// The typeface at `style`'s weight, its size as its optical size, and its figures.
     fn styled(&mut self, style: &TextStyle) -> CTFont {
         let typeface = &self.typeface;
         self.styled
-            .entry((style.weight, style.tabular))
+            .entry((style.weight, style.size.to_bits(), style.tabular))
             .or_insert_with(|| unsafe {
                 let descriptor = typeface.copy_descriptor();
                 let wght = CFNumber::from(i64::from(u32::from_be_bytes(*b"wght")));
                 let weighted = CTFontDescriptorCreateCopyWithVariation(descriptor.as_concrete_TypeRef(), wght.as_concrete_TypeRef(), f64::from(style.weight));
-                let mut descriptor = CTFontDescriptor::wrap_under_create_rule(weighted);
+                let opsz = CFNumber::from(i64::from(u32::from_be_bytes(*b"opsz")));
+                let sized = CTFontDescriptorCreateCopyWithVariation(weighted, opsz.as_concrete_TypeRef(), f64::from(style.size));
+                core_foundation::base::CFRelease(weighted as _);
+                let mut descriptor = CTFontDescriptor::wrap_under_create_rule(sized);
                 if style.tabular {
                     let feature = CFDictionary::from_CFType_pairs(&[
                         (CFString::wrap_under_get_rule(kCTFontOpenTypeFeatureTag), CFString::new("tnum").as_CFType()),
@@ -94,7 +98,7 @@ impl CoreTextSystem {
     fn id_for_native_font(&mut self, font: CTFont, style: &TextStyle) -> FontId {
         let postscript_name = font.postscript_name();
         let key = if postscript_name == self.typeface.postscript_name() {
-            format!("{postscript_name} {} {}", style.weight, style.tabular)
+            format!("{postscript_name} {} {} {}", style.weight, style.size, style.tabular)
         } else {
             postscript_name.clone()
         };

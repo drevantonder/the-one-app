@@ -4,7 +4,8 @@
 // its `wght` axis in shaping and rasterizing alike, letter spacing is cosmic-text's, there are no user fallback chains,
 // a glyph says where its characters end, how wide it is and which way it runs, for a caret in right-to-left text, a
 // line's glyphs are placed left to right from its own left edge, which cosmic-text breaks text into where it asks,
-// Android's own fonts are the fallback there, and a COLRv1 emoji is drawn by skrifa (`colr`).
+// Android's own fonts are the fallback there, a COLRv1 emoji is drawn by skrifa (`colr`), and a variable font with an
+// optical size axis is set at its size on it (`opsz`), as CSS's `font-optical-sizing: auto` sets it.
 // Copyright 2022 - 2025 Zed Industries, Inc. Licensed under the Apache License, Version 2.0
 // (clients/app/strict/LICENSE-APACHE); this file is changed from the original.
 
@@ -114,7 +115,10 @@ impl CosmicTextSystem {
             let mut glyphs: Vec<&cosmic_text::LayoutGlyph> = layout.glyphs.iter().collect();
             glyphs.sort_by(|a, b| a.x.total_cmp(&b.x));
             let mut runs: Vec<ShapedRun> = Vec::new();
+            // How much further each glyph's moved on by those before it, left to right, as each is set at its optical size.
+            let mut moved = 0.0;
             for glyph in glyphs {
+                let sized = self.optical(glyph.font_id, glyph.font_weight, glyph.glyph_id, style.size);
                 let font_id = self.font_id(glyph.font_id, glyph.font_weight);
                 let is_emoji = self.faces[font_id.0].2;
                 // HACK: Prevent crash caused by variation selectors.
@@ -124,15 +128,16 @@ impl CosmicTextSystem {
                 let shaped_glyph = ShapedGlyph {
                     id: GlyphId(glyph.glyph_id as u32),
                     position: point(
-                        (glyph.x - left + glyph.x_offset * style.size).into(),
+                        (glyph.x - left + moved + glyph.x_offset * style.size).into(),
                         (glyph.y - glyph.y_offset * style.size).into(),
                     ),
                     index: glyph.start,
                     end: glyph.end,
-                    advance: glyph.w,
+                    advance: glyph.w + sized,
                     rtl: glyph.level.is_rtl(),
                     is_emoji,
                 };
+                moved += sized;
                 if let Some(last_run) = runs.last_mut().filter(|last_run| last_run.font_id == font_id) {
                     last_run.glyphs.push(shaped_glyph);
                 } else {
@@ -142,7 +147,7 @@ impl CosmicTextSystem {
             let len = layout.glyphs.iter().map(|glyph| glyph.end).max().unwrap_or(0);
             out.push(LineLayout {
                 font_size: px(style.size),
-                width: layout.w.into(),
+                width: (layout.w + moved).into(),
                 ascent: layout.max_ascent.into(),
                 descent: layout.max_descent.into(),
                 runs,
@@ -154,6 +159,24 @@ impl CosmicTextSystem {
             last.len = text.len();
         }
         out
+    }
+
+    /// How much wider glyph `glyph` of face `id` at `weight` is at optical size `size` than at its font's default,
+    /// where it has an `opsz` axis: cosmic-text shapes a variable font on its `wght` axis alone, and this is the rest
+    /// of what the font's `HVAR` says of its advance.
+    fn optical(&mut self, id: fontdb::ID, weight: Weight, glyph: u16, size: f32) -> f32 {
+        use skrifa::MetadataProvider;
+        let Some(font) = self.font_system.get_font(id, weight) else { return 0.0 };
+        let index = self.font_system.db().face(id).map_or(0, |face| face.index);
+        let Ok(face) = skrifa::FontRef::from_index(font.data(), index) else { return 0.0 };
+        let (wght, opsz) = (skrifa::Tag::new(b"wght"), skrifa::Tag::new(b"opsz"));
+        if face.axes().get_by_tag(opsz).is_none() {
+            return 0.0;
+        }
+        let advance = |location: &skrifa::instance::Location| face.glyph_metrics(skrifa::instance::Size::new(size), location).advance_width(skrifa::GlyphId::new(glyph.into())).unwrap_or(0.0);
+        let at = face.axes().location([(wght, f32::from(weight.0)), (opsz, size)]);
+        let default = face.axes().location([(wght, f32::from(weight.0))]);
+        advance(&at) - advance(&default)
     }
 
     pub fn raster_bounds(&mut self, params: &RenderGlyphParams) -> Result<Bounds<DevicePixels>> {
@@ -208,11 +231,15 @@ impl CosmicTextSystem {
             params.subpixel_variant.y as f32 / SUBPIXEL_VARIANTS_Y as f32 / scale_factor,
         );
         let mut scaler = self.swash_scale_context.builder(font_ref).size(params.font_size() * scale_factor).hint(true);
-        // A variable font drawn at the weight asked for, as it was shaped (cosmic-text's `swash_image`).
-        let wght = swash::Tag::from_be_bytes(*b"wght");
-        if let Some(axis) = font_ref.variations().find_by_tag(wght) {
-            let value = f32::from(weight.0).clamp(axis.min_value(), axis.max_value());
-            scaler = scaler.normalized_coords(font_ref.variations().normalized_coords([(wght, value)]));
+        // A variable font drawn at the weight asked for, as it was shaped (cosmic-text's `swash_image`), and at its size
+        // on its optical size axis, as it was laid out (`optical`).
+        let (wght, opsz) = (swash::Tag::from_be_bytes(*b"wght"), swash::Tag::from_be_bytes(*b"opsz"));
+        let settings: Vec<(swash::Tag, f32)> = [(wght, f32::from(weight.0)), (opsz, params.font_size())]
+            .into_iter()
+            .filter_map(|(tag, value)| font_ref.variations().find_by_tag(tag).map(|axis| (tag, value.clamp(axis.min_value(), axis.max_value()))))
+            .collect();
+        if !settings.is_empty() {
+            scaler = scaler.normalized_coords(font_ref.variations().normalized_coords(settings));
         }
         let mut scaler = scaler.build();
 

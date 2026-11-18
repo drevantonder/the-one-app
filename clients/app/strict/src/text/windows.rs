@@ -132,7 +132,11 @@ impl DirectWriteTextSystem {
         }
         unsafe {
             let wide: Vec<u16> = text.encode_utf16().collect();
-            let axes = [DWRITE_FONT_AXIS_VALUE { axisTag: DWRITE_FONT_AXIS_TAG_WEIGHT, value: f32::from(style.weight) }];
+            // Its optical size is its size, as CSS's `font-optical-sizing: auto` sets a variable font's `opsz`.
+            let axes = [
+                DWRITE_FONT_AXIS_VALUE { axisTag: DWRITE_FONT_AXIS_TAG_WEIGHT, value: f32::from(style.weight) },
+                DWRITE_FONT_AXIS_VALUE { axisTag: DWRITE_FONT_AXIS_TAG_OPTICAL_SIZE, value: style.size },
+            ];
             let format: IDWriteTextFormat3 = self.factory.CreateTextFormat(&self.family, &self.collection, &axes, style.size, &self.locale)?;
             if let Some(fallback) = &self.fallback {
                 format.SetFontFallback(fallback)?;
