@@ -15,6 +15,8 @@
 import { createEffect, createMemo, createSignal, Errored, flush, For, Loading, onSettled, refresh, Show, untrack } from "solid-js"
 import { createActor } from "xstate"
 import {
+  ActionBar,
+  type Action,
   Badge,
   Box,
   negative,
@@ -95,9 +97,6 @@ const looks = styles({
   lifted: { position: "absolute", boxShadow: tokens.shadow.lifted, opacity: 1, transitionProperty: ["opacity"], transition: tokens.motion.settle },
   liftedIcon: { borderRadius: tokens.radius.icon },
   liftedWidget: { borderRadius: tokens.radius.large },
-  // The launcher's footer: two pills of Liquid Glass floating over its foot, as Raycast's are.
-  floating: { flexDirection: "row", alignItems: "center", gap: tokens.grid[2], paddingInline: tokens.grid[3], borderRadius: tokens.radius.full, backgroundColor: tokens.colour.glass, boxShadow: tokens.shadow.glass, backdropFilter: tokens.material.glass, color: tokens.colour.secondaryLabel, pointerEvents: "auto" },
-  key: { minWidth: tokens.grid[4], paddingInline: tokens.grid[1], alignItems: "center", justifyContent: "center", borderRadius: tokens.radius.small, boxShadow: tokens.shadow.edge, backgroundColor: tokens.colour.quinaryLabel },
   // The launcher's panel's edge inside, lit along its top, as Raycast's window has, over everything in it.
   edge: { position: "absolute", top: 0, bottom: 0, start: 0, end: 0, zIndex: 20, boxShadow: tokens.shadow.edge, pointerEvents: "none" },
   round: { borderRadius: tokens.radius.large },
@@ -180,8 +179,6 @@ const [chosen, setChosen] = createSignal(0)
 /// it's on and where on it.
 type Selected = { owner: number; page: number; index: number }
 const [selected, setSelected] = createSignal<Selected | undefined>(undefined, { equals: (a, b) => a?.owner === b?.owner && a?.page === b?.page && a?.index === b?.index })
-/// Whether the launcher's Actions menu is open.
-const [acting, setActing] = createSignal(false)
 /// The apps of an App Library whose names have `words` in them: with a screen of their own, or `background`. Those
 /// whose name starts with them come first, then those with a word that does, then the rest, each A to Z, as
 /// Raycast's root search ranks what it finds.
@@ -1440,11 +1437,6 @@ function OwnerPill(props: { owners: Owner[]; chip?: boolean }) {
 /// PC, opens Actions either way.
 function LauncherBar(props: { owners: Owner[]; found: () => Listed[]; move: (key: string) => boolean; open: () => void; tab: () => void; library: boolean }) {
   const keys = (event: Keyed) => {
-    if ((mac() ? event.metaKey : event.ctrlKey) && event.key.toLowerCase() === "k") {
-      event.preventDefault()
-      setActing(true)
-      return
-    }
     if (event.altKey || event.metaKey || event.ctrlKey) return
     const typed = !!query().trim()
     if (event.key === "Enter") {
@@ -1524,17 +1516,10 @@ function Results(props: { owner: Owner; found: () => Listed[] }) {
 type Target = { item?: Item; listed?: Listed; place?: { page: number; index: number }; from?: From }
 /// The name a target's opened by: an app's, or for a widget, its app's.
 const targetName = (target: Target) => target.listed?.name ?? (target.item && (opener(target.item)?.name ?? target.item.name))
-/// A key, as the footer and the Actions menu show it: in a small keycap, as Raycast's are.
-const Key = (props: { children: Element }) => (
-  <Box style={[looks.key, { height: 18 }]}>
-    <Text style={{ font: "caption-2", color: "muted-foreground" }}>{props.children}</Text>
-  </Box>
-)
-
-/// The launcher's footer, as Raycast's is: two pills floating over its foot. On the left, the Home Screen's icon and
-/// name, and on Home its page dots and the App Library's glyph; on the right, what Return does, and Actions, ⌘K, a
-/// menu of what can be done with it: Open, Add to or Remove from Home Screen, Show in App Library and its App Store
-/// Page.
+/// The launcher's footer, the UI library's action bar, as Raycast's is: two pills floating over its foot. On the left,
+/// the Home Screen's icon and name, and on Home its page dots and the App Library's glyph; on the right, what Return
+/// does, and Actions, ⌘K, the action panel of what can be done with it: Open, Add to or Remove from Home Screen, Show
+/// in App Library and its App Store Page.
 function LauncherFoot(props: { owners: Owner[]; laid: Kind[][]; target: () => Target | undefined; open: () => void; act: (action: string) => void }) {
   const owner = () => props.owners[state().context.at.owner]
   const store = () => props.owners[0]?.store
@@ -1543,56 +1528,32 @@ function LauncherFoot(props: { owners: Owner[]; laid: Kind[][]; target: () => Ta
     return target?.listed?.app ?? (target?.item && opener(target.item)?.app)
   }
   const item = () => props.target()?.item ?? (props.target()?.listed && opens(props.target()!.listed!))
+  const actions = (): Action[] => {
+    const target = props.target()
+    if (!target) return []
+    return [
+      { label: query().trim() ? "Open App" : `Open ${targetName(target)}`, onAction: props.open },
+      ...(!target.place && item() && addable(item()!, owner()) ? [{ label: state().context.at.owner ? `Add to ${owner().name}'s Home Screen` : "Add to Home Screen", keys: ["mod", "d"], onAction: () => props.act("add") }] : []),
+      ...(item() && opener(item()!) ? [{ label: "Show in App Library", onAction: () => props.act("library") }] : []),
+      ...(store() && app() ? [{ label: "App Store Page", onAction: () => props.act("store") }] : []),
+      ...(target.place && owner()?.arranges ? [{ label: "Remove from Home Screen", destructive: true, section: "remove", onAction: () => props.act("remove") }] : []),
+    ]
+  }
   return (
-    <Box role="toolbar" style={{ position: "absolute", bottom: 10, left: 10, right: 10, height: 36, zIndex: 6, flexDirection: "row", alignItems: "center", justifyContent: "space-between", pointerEvents: "none", opacity: state().matches("editing") ? 0 : 1 }}>
-      <Box style={[looks.floating, { height: 36 }]}>
-        <Image src="home.svg" alt="" style={{ width: 18, height: 18, borderRadius: "sm" }} />
-        <Text style={{ font: "caption-1", color: "muted-foreground" }}>Home Screen</Text>
-        <Show when={!query().trim()}>
-          <DotsPill owners={props.owners} laid={props.laid} flat />
-        </Show>
-      </Box>
-      <Show when={props.target()}>
-        {(target) => (
-          <Box style={[looks.floating, { height: 36 }]}>
-            <Box role="button" onClick={props.open} style={{ flexDirection: "row", alignItems: "center", gap: 8, height: "100%" }}>
-              <Text style={{ font: "caption-1", color: "foreground" }}>{query().trim() ? "Open App" : `Open ${targetName(target())}`}</Text>
-              <Key>↵</Key>
-            </Box>
-            <Menu.Root
-              open={acting()}
-              onOpenChange={({ open }) => setActing(open)}
-              onSelect={({ value }) => (setActing(false), props.act(value))}
-            >
-              <Menu.Trigger variant="ghost" aria-label={`Actions, ${mac() ? "⌘" : "Ctrl"} K`}>
-                <Box style={{ flexDirection: "row", alignItems: "center", gap: 4 }}>
-                  <Text style={{ font: "caption-1", color: "muted-foreground" }}>Actions</Text>
-                  <Key>{mac() ? "⌘" : "Ctrl"}</Key>
-                  <Key>K</Key>
-                </Box>
-              </Menu.Trigger>
-              <Menu.Positioner>
-                <Menu.Content>
-                  <Menu.Item value="open">{`Open ${targetName(target())}`}</Menu.Item>
-                  <Show when={target().place && owner()?.arranges}>
-                    <Menu.Item value="remove">Remove from Home Screen</Menu.Item>
-                  </Show>
-                  <Show when={!target().place && item() && addable(item()!, owner())}>
-                    <Menu.Item value="add">{state().context.at.owner ? `Add to ${owner().name}'s Home Screen` : "Add to Home Screen"}</Menu.Item>
-                  </Show>
-                  <Show when={item() && opener(item()!)}>
-                    <Menu.Item value="library">Show in App Library</Menu.Item>
-                  </Show>
-                  <Show when={store() && app()}>
-                    <Menu.Item value="store">App Store Page</Menu.Item>
-                  </Show>
-                </Menu.Content>
-              </Menu.Positioner>
-            </Menu.Root>
-          </Box>
-        )}
-      </Show>
-    </Box>
+    <Show when={!state().matches("editing")}>
+      <ActionBar
+        start={
+          <>
+            <Image src="home.svg" alt="" style={{ width: 18, height: 18, borderRadius: "sm" }} />
+            <Text>Home Screen</Text>
+            <Show when={!query().trim()}>
+              <DotsPill owners={props.owners} laid={props.laid} flat />
+            </Show>
+          </>
+        }
+        actions={actions()}
+      />
+    </Show>
   )
 }
 
@@ -1907,7 +1868,6 @@ function HomeScreen(props: { owners: Owner[] }) {
       if (!hidden) return
       setQuery("")
       setChosen(0)
-      setActing(false)
       if (home.getSnapshot().matches("nothing") && home.getSnapshot().context.at.screen !== 0) home.send({ type: "go", screen: 0 })
       choose(first(ordered(home.getSnapshot().context.at)))
     },
