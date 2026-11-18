@@ -248,15 +248,20 @@ function Marketplace(props: { market: Market }) {
 }
 
 /// Get, on an app's page: it installs the app for whoever it can still be installed for, and where that's more than one
-/// owner, asks who, in a menu under it. It's gone once there's nobody left you may install it for.
+/// owner, asks who, in a menu under it. Once there's nobody left you may install it for, it's Open where the app has
+/// a screen and is installed, as an iPhone's App Store has it: for you first, then the owners after you.
 function Get(props: { all: Owners; listed: Listed }) {
   const left = () => props.all.owners.filter((owner) => !only(props.all, owner) && !owner.installs.some((install) => install.app === props.listed.app))
   const busy = () => left().some((owner) => working() === `${owner.who}|${props.listed.app}|install`)
   const [asking, setAsking] = createSignal(false)
   let anchor!: HTMLSpanElement
   const get = () => (left().length === 1 ? install(left()[0], props.listed) : setAsking(true))
+  const opens = () =>
+    props.listed.entrypoints.length
+      ? props.all.owners.flatMap((owner) => owner.installs.filter((done) => done.app === props.listed.app && done.state === "installed").map((done) => ({ owner, done })))[0]
+      : undefined
   return (
-    <Show when={left().length || busy()}>
+    <Show when={left().length || busy()} fallback={<Show when={opens()}>{(it) => <Button onClick={() => open(it().done.name, { subject: it().owner.subject })}>Open</Button>}</Show>}>
       <span class="get" ref={anchor}>
         <Button loading={busy()} onClick={get}>
           Get
@@ -370,15 +375,17 @@ function Page(props: { market: Market; all: Owners; listed: Listed }) {
         <Show when={props.listed.icon} fallback={<span class="icon blank" />}>
           <img class="icon" src={props.listed.icon!} alt="" />
         </Show>
-        <div>
+        <div class="named">
           <h2>{props.listed.title}</h2>
           <Show when={props.listed.subtitle}>
             <p>{props.listed.subtitle}</p>
           </Show>
+          <Show when={props.listed.app}>
+            <div class="action">
+              <Get all={props.all} listed={props.listed} />
+            </div>
+          </Show>
         </div>
-        <Show when={props.listed.app}>
-          <Get all={props.all} listed={props.listed} />
-        </Show>
       </div>
       <Show when={props.listed.app} fallback={<p class="quiet">Ask your AI to check it and install it.</p>}>
         <List class="installs">
@@ -471,7 +478,7 @@ function AppStore(props: { market: Market; all: Owners; onBack?: () => void }) {
         </Screen>
       </div>
       <Show when={covered()}>
-        <Show when={view().details} fallback={<Screen back><Page market={props.market} all={props.all} listed={opened()!} /></Screen>}>
+        <Show when={view().details} fallback={<Screen back heading={opened()!.title}><Page market={props.market} all={props.all} listed={opened()!} /></Screen>}>
           <Details listed={opened()!} />
         </Show>
       </Show>
@@ -487,7 +494,7 @@ export function Listing(props: { app: string; onBack: () => void }) {
         <Loading fallback={<Screen back onBack={props.onBack}><Skeleton rows={4} /></Screen>}>
           <Show when={market().apps.find((one) => one.app === props.app) ?? installed(market(), owners(), props.app)} fallback={<Screen back onBack={props.onBack}><Empty>It's not in the App Store.</Empty></Screen>}>
             {(shown) => (
-              <Screen back onBack={props.onBack}>
+              <Screen back onBack={props.onBack} heading={shown().title}>
                 <Page market={market()} all={owners()} listed={shown()} />
               </Screen>
             )}

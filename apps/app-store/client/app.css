@@ -117,32 +117,48 @@
     gap: 1.5rem 0.75rem;
   }
 
-  /* An app's page. */
+  /* An app's page. Its head is as an iPhone's App Store has it: a large icon, and beside it the app's name, what it
+     is under that, and Get or Open at the foot, level with the icon's. */
   .app-page {
     display: grid;
     gap: 1.5rem;
     max-width: var(--readable);
   }
   .app-page .head {
-    display: flex;
-    align-items: center;
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr);
     gap: 1rem;
   }
-  /* Get sits at the end of the head, as an iPhone's App Store has it. */
-  .app-page .get {
-    margin-inline-start: auto;
-  }
   .app-page .icon {
-    flex: none;
-    width: 4.5rem;
-    height: 4.5rem;
+    display: block;
+    width: 7.5rem;
+    height: 7.5rem;
     border-radius: 22.5%;
   }
+  .app-page .named {
+    display: flex;
+    flex-direction: column;
+    gap: 0.25rem;
+    min-width: 0;
+  }
   .app-page h2 {
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 2;
+    overflow: hidden;
     font-size: var(--text-title);
     font-weight: var(--title-weight);
     letter-spacing: var(--title-tracking);
     line-height: 1.15;
+  }
+  .app-page .action {
+    display: flex;
+    margin-top: auto;
+    padding-top: 0.5rem;
+  }
+  .app-page .action .ui-button {
+    min-width: 5rem;
+    border-radius: 999px;
   }
   .app-page .head p,
   .quiet {
@@ -188,4 +204,29 @@
     display: none;
   }
 
+  /* An app's name in the bar comes in once the big one under it has scrolled away under the bar, as an iPhone's App
+     Store has it. `--top-bar` is how tall the bar is, where what the screen is in draws its own. */
+  @supports (animation-timeline: view()) {
+    .ui-screen:has(> main > .app-page) {
+      timeline-scope: --app-name;
+    }
+    .app-page .head h2 {
+      view-timeline: --app-name block;
+      view-timeline-inset: var(--top-bar, calc(var(--control) + 0.75rem + var(--safe-top))) 0;
+    }
+    .ui-screen:has(> main > .app-page) > header > h1 {
+      animation: app-name linear both;
+      animation-timeline: --app-name;
+      animation-range: exit 0% exit 100%;
+    }
+  }
+}
+
+@keyframes app-name {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
 }
