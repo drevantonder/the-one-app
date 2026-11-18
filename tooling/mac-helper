@@ -2,7 +2,7 @@
 # Builds and publishes an app's helper app for a Mac: a small macOS app of the app's own, whose source is a folder of
 # its `server/bin/` (`main.swift` and its `Info.plist`, which names it), that its service runs there so macOS asks
 # its person for a permission in the helper's name and keeps what they allow it (Computer Use's). It's built on the
-# Mac `ssh mac` reaches, with the app's icon made a helper's (`tooling/helper-icon`), and signed with the owner's
+# Mac `ssh mac` reaches, with the app's icon (`client/icon.svg`, or `icon.png` or `icon.svg` beside its SKILL.md) made a helper's (`tooling/helper-icon`), and signed with the owner's
 # Developer ID, so macOS keeps what's allowed through every build of it: an app that isn't signed by a developer is
 # known by its build, and asked for again with each. The keychain holding the identity, `ptc-build`, is unlocked
 # and locked again in the same connection, its password read there.
@@ -16,7 +16,9 @@
 #     tooling/mac-helper apps/<app>/server/bin/<name>
 set -euo pipefail
 
-root=$(cd "$(dirname "$0")/.." && pwd)
+# Run from the checkout of the app's repo (this one, or the network's); the tools are this one's.
+tools=$(cd "$(dirname "$0")/.." && pwd)
+root=$(git rev-parse --show-toplevel)
 cd "$root"
 source=${1%/}
 app=${source#apps/} && app=${app%%/*}
@@ -31,9 +33,11 @@ work=$(mktemp -d)
 trap 'rm -r "$work"' EXIT
 mkdir "$work/helper"
 git ls-files -z -- "$source" | xargs -0 cp -t "$work/helper"
-tooling/helper-icon "apps/$app/client/icon.svg" "$work/AppIcon.iconset"
+for icon in "apps/$app/client/icon.svg" "apps/$app/icon.png" "apps/$app/icon.svg"; do [[ -e $icon ]] && break; done
+[[ -e $icon ]] || { echo "$app has no icon." >&2 && exit 1; }
+"$tools/tooling/helper-icon" "$icon" "$work/AppIcon.iconset"
 # What it's built from: its source, the app's icon and the ring.
-hash=$(cat "$work/helper"/* "apps/$app/client/icon.svg" icons/ring.png tooling/helper-icon | sha256sum | cut -c1-64)
+hash=$(cat "$work/helper"/* "$icon" "$tools/icons/ring.png" "$tools/tooling/helper-icon" | sha256sum | cut -c1-64)
 
 cat >"$work/build" <<'BUILD'
 set -euo pipefail
