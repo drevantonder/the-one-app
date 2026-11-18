@@ -160,7 +160,8 @@ defmodule ComputerUse.Desktop do
         tool(service, "get_desktop_state", %{"max_image_dimension" => max(width, height)})
       end
 
-    Enum.find_value(result["content"], &(&1["type"] == "image" && &1["data"])) || raise "Cua Driver gave no picture of the screen"
+    # A window it can't picture (a minimized one, on Windows) it says why of.
+    Enum.find_value(result["content"], &(&1["type"] == "image" && &1["data"])) || raise "Cua Driver gave no picture: #{text(result)}"
   end
 
   @doc "The computer's top-level windows, as Cua Driver's `list_windows` gives them: of one app (`app`, `pid`) or all."

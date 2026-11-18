@@ -46,6 +46,7 @@ own pointer and keyboard) only when a task truly needs it or they're away. These
 - `elements` (`pid`, `window_id`) reads a window's elements through accessibility, as rows `[N]`; the element's
   `element_token` is `<snapshot_id>:N`. `query` narrows a large window. A new read of the window replaces its tokens.
 - `screenshot` with `pid` and `window_id` is a picture of that window alone, as it is behind whatever is in front.
+  Windows can't picture a minimized window: read it with `elements` instead.
 - `click`, `double_click`, `scroll`, `type` and `key` with an `element_token`, or with `pid` and `window_id` (x and y
   then in that window's own screenshot), act in the background: the window stays behind, and the person's pointer
   doesn't move. `set_value` sets a field, slider or pop-up menu's value by its `element_token`. Prefer an element to a
