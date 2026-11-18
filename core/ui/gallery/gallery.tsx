@@ -3,10 +3,11 @@
 // core/ui builds it as an app's page is built; nothing here calls a tool.
 import { createListCollection } from "ui"
 import { createSignal, For } from "solid-js"
-import { Alert, Badge, Box, Button, Sheet, Checkbox, Empty, Field, Icon, Input, List, Menu, Problem, RadioGroup, render, Row, Screen, Search, Section, Select, Skeleton, Spinner, Status, Steps, Switch, Text } from "ui"
+import { Alert, Badge, Box, Button, Sheet, Checkbox, Empty, Field, Icon, Input, List, Textarea, Menu, Problem, RadioGroup, render, Row, Screen, Search, Section, Select, Skeleton, Spinner, Status, Steps, Switch, Text } from "ui"
 
 const [over, setOver] = createSignal<"sheet" | "alert">()
 const [notes, setNotes] = createSignal(["First note", "Second note", "Third note"])
+const [code, setCode] = createSignal("")
 const fruits = createListCollection({ items: [{ value: "apple", label: "Apple" }, { value: "pear", label: "Pear" }] })
 
 render(() => (
@@ -90,11 +91,34 @@ render(() => (
       <Field label="Email" error="That isn't an email address">
         <Input value="andre@" aria-invalid="true" />
       </Field>
+      <Field label="Code" hint="Digits only">
+        <Input inputmode="numeric" value={code()} onInput={(event) => setCode(event.currentTarget.value.replace(/[^0-9]/g, ""))} />
+      </Field>
+      <Field label="Password">
+        <Input type="password" value="hunter2" autocomplete="current-password" />
+      </Field>
+      <Field label="Off" disabled>
+        <Input value="Can't change this" />
+      </Field>
+      <Field label="Note">
+        <Textarea placeholder="Anything else" />
+      </Field>
       <Search placeholder="Search" aria-label="Search" />
+      <Search placeholder="Search" aria-label="Search found" value="git" />
       <Switch label="Notifications" hint="On this device" checked />
+      <Switch label="Off" />
       <Checkbox label="Remember me" />
-      <RadioGroup value="a" options={[{ value: "a", label: "Daily" }, { value: "b", label: "Weekly" }]} />
-      <Select.Root collection={fruits} value={["apple"]} />
+      <Checkbox label="Ticked" checked />
+      <Checkbox label="Must be ticked" error="Tick this to go on." />
+      <Field label="How often">
+        <RadioGroup value="a" options={[{ value: "a", label: "Daily" }, { value: "b", label: "Weekly" }, { value: "c", label: "Never", disabled: true }]} />
+      </Field>
+      <Field label="Fruit">
+        <Select.Root collection={fruits} value={["apple"]} />
+      </Field>
+      <Field label="Nothing chosen">
+        <Select.Root collection={fruits} placeholder="Pick one" />
+      </Field>
     </Section>
     <Section heading="States">
       <Empty>Nothing here yet.</Empty>

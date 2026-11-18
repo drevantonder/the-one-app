@@ -11,14 +11,10 @@
     "typecheck": "tsc -p ."
   },
   "dependencies": {
-    "@internationalized/date": "3.12.4",
     "@solidjs/universal": "2.0.0",
     "@solidjs/vite-plugin": "3.0.0",
     "@solidjs/web": "2.0.0",
     "@zag-js/collection": "2.0.0-next.4",
-    "@zag-js/date-picker": "2.0.0-next.4",
-    "@zag-js/number-input": "2.0.0-next.4",
-    "@zag-js/select": "2.0.0-next.4",
     "@zag-js/solid": "2.0.0-next.4",
     "@zag-js/tabs": "2.0.0-next.4",
     "@zag-js/toast": "2.0.0-next.4",

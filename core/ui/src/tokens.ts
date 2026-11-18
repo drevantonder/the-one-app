@@ -263,7 +263,9 @@ export const tokens = {
     /** What's carried by a finger: a soft drop shadow. */
     lifted: shadow({ x: 0, y: 12, blur: 28, spread: -6, colour: "oklch(0 0 0 / 30%)" }),
     focus: shadow({ x: 0, y: 0, blur: 0, spread: 3, colour: "oklch(0.55 0 0 / 50%)" }), /** A window's, a sheet's or a menu's: its shadow, and its 1px edge inside. */
-    window: shadow({ x: 0, y: 10, blur: 30, spread: 0, colour: "oklch(0 0 0 / 20%)" }, { x: 0, y: 0, blur: 0, spread: 1, colour: "oklch(0.5 0 0 / 15%)", inset: true }), edge: shadow({ x: 0, y: 0, blur: 0, spread: 1, colour: "oklch(0.5 0 0 / 15%)", inset: true }) }, (key) => `shadow-${key}`),
+    window: shadow({ x: 0, y: 10, blur: 30, spread: 0, colour: "oklch(0 0 0 / 20%)" }, { x: 0, y: 0, blur: 0, spread: 1, colour: "oklch(0.5 0 0 / 15%)", inset: true }), edge: shadow({ x: 0, y: 0, blur: 0, spread: 1, colour: "oklch(0.5 0 0 / 15%)", inset: true }),
+    /** A field's edge, and where the keyboard is in it, where what's in it is wrong. */
+    wrongEdge: shadow({ x: 0, y: 0, blur: 0, spread: 1, colour: "#ff3b30", inset: true }), wrongFocus: shadow({ x: 0, y: 0, blur: 0, spread: 3, colour: "rgb(255 59 48 / 50%)" }) }, (key) => `shadow-${key}`),
   material: named({ glass: material(20, 1.8), thin: material(18, 1.2) }, (key) => `material-${key}`),
   font: named(fonts, (key) => `font-${key}`),
   weight: named(weightRoles, (key) => `weight-${key}`),
@@ -272,6 +274,8 @@ export const tokens = {
     large: type(sizes.large, weights.label),
     medium: type(sizes.medium, weights.body, { lineHeight: 1.35 }),
     small: type(sizes.small, weights.body),
+    /** What's typed in a field: medium, but never under 16px under a finger, where an iPhone would zoom into it. */
+    field: type(lengths.textField, weights.body),
   }, (key) => `type-${key}`),
   motion: named({ ...motions, spin: motion(1000, [0, 0, 1, 1]), hold: motion(500, out) }, (key) => `move-${key}`),
 }

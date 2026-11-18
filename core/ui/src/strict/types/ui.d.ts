@@ -120,33 +120,44 @@ export declare function Path(props: PathProps): Element
 /** What's drawn over the whole window, over the page: a sheet, a menu. A `modal` one makes everything else inert. */
 export declare function Layer(props: { modal?: boolean; children?: Element }): Element
 
-/** What an `Input`'s or a `Search`'s `onInput` is told: what's in it now. */
+/** What an editable text's `onInput` is told: what's in it now. */
 export type Typed = {
   currentTarget: { value: string }
 }
 
-export type InputProps = Pick<Semantics, "aria-label" | "aria-description" | "aria-invalid"> & {
-  style?: Style
+/** What an input's action key does, a phone keyboard's Done, Go, Next, Search or Send, or a new line. */
+export type Action = Exclude<Props["action"], undefined>
+/** What an editable text's `onAction` is told: what its action key did. */
+export type Acted = {
+  action: Action
+}
+
+export type EditableTextProps = Pick<Semantics, "aria-label" | "aria-description" | "aria-invalid"> & {
   name?: string
   value?: string
   type?: Props["type"]
   inputmode?: Props["inputmode"]
+  multiline?: boolean
   placeholder?: string
+  /** What its action key does: `done` in one line unless it says, a new line in several. */
+  action?: Action
   disabled?: boolean
   readonly?: boolean
   required?: boolean
   autofocus?: boolean
   autocapitalize?: Props["autocapitalize"]
+  autocorrect?: boolean
   spellcheck?: boolean
   autocomplete?: string
+  style?: Style
   onInput?: (event: Typed) => void
+  /** Its action key was pressed: Return in one line, or a phone's Done, Go, Search or Send. */
+  onAction?: (event: Acted) => void
   onFocus?: () => void
   onBlur?: () => void
   onKeyDown?: (event: Keyed) => void
 }
-export declare function Input(props: InputProps): Element
-export declare function Textarea(props: Omit<InputProps, "type" | "style">): Element
-export declare function Search(props: Omit<InputProps, "type" | "style">): Element
+export declare function EditableText(props: EditableTextProps): Element
 
 // The components.
 
@@ -201,14 +212,21 @@ export declare function Status(props: { heading: Element; text?: Element; over?:
 export declare function Steps(props: { steps: Element[]; at: number; text?: Element }): Element
 
 export declare function Field(props: { label?: Element; hint?: Element; error?: string; disabled?: boolean; children?: Element }): Element
+/** An `Input`'s props: an editable text's, in a field's box, with styles of its own over it. */
+export type InputProps = Omit<EditableTextProps, "style" | "multiline"> & {
+  style?: Styles
+}
+export declare function Input(props: InputProps): Element
+export declare function Textarea(props: Omit<InputProps, "style">): Element
+export declare function Search(props: Omit<InputProps, "type" | "style">): Element
 /** What a `Checkbox`'s or a `Switch`'s `onChange` is told: whether it's ticked now. */
 export type Ticked = {
   currentTarget: { checked: boolean }
 }
 export type ChoiceProps = {
-  name?: string
   label?: Element
   hint?: Element
+  error?: string
   checked?: boolean
   disabled?: boolean
   "aria-label"?: string
@@ -217,10 +235,8 @@ export type ChoiceProps = {
 export declare function Checkbox(props: ChoiceProps): Element
 export declare function Switch(props: ChoiceProps): Element
 export declare function RadioGroup(props: {
-  name?: string
   value?: string
   options: { value: string; label: Element; disabled?: boolean }[]
-  required?: boolean
   disabled?: boolean
   onChange?: (value: string) => void
 }): Element
@@ -231,12 +247,12 @@ export type Choices = ListCollection<Choice>
 export declare function createListCollection(options: { items: Choice[] }): Choices
 export declare const Select: {
   Root: (props: {
-    name?: string
     collection: Choices
     value?: string[]
     defaultValue?: string[]
     placeholder?: string
     disabled?: boolean
+    "aria-label"?: string
     onValueChange?: (details: { value: string[] }) => void
   }) => Element
 }

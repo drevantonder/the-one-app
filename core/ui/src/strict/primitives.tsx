@@ -1,11 +1,11 @@
-// The strict primitives, as the DOM draws them: a box, a scroll, a text, an image and a path, each a plain element with
-// the semantic props the strict protocol has (protocol.ts). The input is the UI library's `Input`. A native host draws
+// The strict primitives, as the DOM draws them: a box, a scroll, a text, an image, a path and an editable text, each a
+// plain element with the semantic props the strict protocol has (protocol.ts). A native host draws
 // the same props from the ops Solid's universal renderer sends it. A primitive's `style` is styles (../styles.ts),
 // drawn by their classes, or, on a page written for version 1, one style object, drawn as inline CSS.
 import { createEffect, omit, onCleanup, onSettled } from "solid-js"
 import { Dynamic, Portal, render as mount, type JSX } from "@solidjs/web"
 import { layer } from "./layer.ts"
-import type { Props, Version1Style } from "./protocol.ts"
+import type { Action, Props, Version1Style } from "./protocol.ts"
 import type { Laid, Located, Pressed, Wheeled } from "./types/ui.d.ts"
 import { web, type Styles } from "../styles.ts"
 
@@ -91,7 +91,9 @@ export interface BoxProps extends Listens {
 }
 
 /** The roles of what's pressed, which the DOM draws as a button, so the keyboard reaches it too. */
-const pressed = new Set(["button", "menuitem", "tab", "checkbox", "radio", "switch", "option", "link"])
+const pressed = new Set(["button", "menuitem", "tab", "checkbox", "radio", "switch", "option", "link", "combobox"])
+/** The roles of what's chosen from a list another holds the keyboard for, which a press takes no focus from it. */
+const chosen = new Set(["option"])
 
 /// `<Box style={{ flexDirection: "row", gap: "gutter", padding: 12, backgroundColor: "muted", borderRadius: "lg" }}>...</Box>`:
 /// a strict app's own layout, around anything else: a flex column unless its `style` says otherwise, as React Native's
@@ -110,6 +112,7 @@ export function Box(props: BoxProps) {
       {...moves}
       ref={[moves.ref, (element: HTMLElement) => watched(element, props)]}
       data-scrolls={v1(props.style) && props.style.overflow === "scroll" ? "" : undefined}
+      onMouseDown={(event: MouseEvent) => props.role && chosen.has(props.role) && event.preventDefault()}
       {...drawn("ui-strict-box", props.style)}
     >
       {props.children}
@@ -260,6 +263,91 @@ export function Path(props: PathProps) {
     <svg viewBox={props.viewBox} preserveAspectRatio="none" role={props.role} aria-label={props["aria-label"]} aria-hidden={props["aria-hidden"] ?? (props.role ? undefined : "true")} {...drawn("ui-strict-path", props.style)}>
       <path d={props.d} vector-effect="non-scaling-stroke" />
     </svg>
+  )
+}
+
+/** What an editable text's `onInput` is told: the DOM's `input` event, whose `currentTarget.value` is what's in it now. */
+export interface Typed {
+  currentTarget: { value: string }
+}
+
+/** What an editable text's `onAction` is told: what its action key did. */
+export interface Acted {
+  action: Action
+}
+
+/** An editable text's props. */
+export interface EditableTextProps extends Pick<Semantics, "aria-label" | "aria-description" | "aria-invalid"> {
+  name?: string
+  value?: string
+  type?: Props["type"]
+  inputmode?: Props["inputmode"]
+  multiline?: boolean
+  placeholder?: string
+  action?: Action
+  autocapitalize?: Props["autocapitalize"]
+  autocorrect?: boolean
+  spellcheck?: boolean
+  autocomplete?: string
+  autofocus?: boolean
+  disabled?: boolean
+  readonly?: boolean
+  required?: boolean
+  style?: Style
+  onInput?: (event: Typed) => void
+  onAction?: (event: Acted) => void
+  onFocus?: () => void
+  onBlur?: () => void
+  onKeyDown?: (event: Keyed) => void
+}
+
+/** A phone keyboard's word on its action key, by the action. */
+const hints: Record<Action, "enter" | "done" | "go" | "next" | "previous" | "search" | "send"> = { newline: "enter", done: "done", go: "go", next: "next", previous: "previous", search: "search", send: "send" }
+
+/// `<EditableText value={text()} onInput={(event) => setText(event.currentTarget.value)} onAction={save} />`: text
+/// to type, bare: the DOM's own `<input>`, or `<textarea>` with `multiline`, so selection, an input method's
+/// composing, paste and autofill are the device's own. `action` names its action key (a phone's Done, Go, Search,
+/// Send), and `onAction` is told it was pressed: Return in one line, as an input method that's composing doesn't. In
+/// several lines Return is a new line unless `action` says otherwise. What a page drawn on the DOM gives it besides
+/// (`pattern`, a form's `name`) reaches the element. A `readonly` one is all selected as it's focused, to copy.
+export function EditableText(props: EditableTextProps) {
+  const own = omit(props as EditableTextProps & { class?: string }, "style", "class", "multiline", "action", "autocorrect", "autofocus", "onAction", "onKeyDown", "onFocus", "onInput")
+  const action = (): Action => props.action ?? (props.multiline ? "newline" : "done")
+  const keyed = (event: KeyboardEvent) => {
+    props.onKeyDown?.(event)
+    if (event.key !== "Enter" || event.isComposing || event.keyCode === 229 || event.defaultPrevented || !props.onAction || action() === "newline" || event.shiftKey) return
+    event.preventDefault()
+    props.onAction({ action: action() })
+  }
+  // What's in it is what the app last set: where the app keeps something else of what was typed (only its digits), the
+  // field shows that, as a native host does.
+  const typed = (event: InputEvent) => {
+    props.onInput?.(event as unknown as Typed)
+    const field = event.currentTarget as HTMLInputElement
+    queueMicrotask(() => props.value !== undefined && field.value !== props.value && (field.value = props.value))
+  }
+  const focused = (event: FocusEvent) => {
+    if (props.readonly) (event.currentTarget as HTMLInputElement).select()
+    props.onFocus?.()
+  }
+  // A page in a frame of another origin, as an app's is, isn't given `autofocus`: it's focused as it's drawn.
+  const focus = (element: HTMLElement) => props.autofocus && requestAnimationFrame(() => element.isConnected && element.focus({ preventScroll: true }))
+  const looks = () => drawn("ui-strict-input", props.style)
+  return (
+    <Dynamic
+      component={props.multiline ? "textarea" : "input"}
+      type={props.multiline ? undefined : (props.type ?? "text")}
+      enterkeyhint={props.action || !props.multiline ? hints[action()] : undefined}
+      autocorrect={props.autocorrect === undefined ? undefined : props.autocorrect ? "on" : "off"}
+      autofocus={props.autofocus}
+      {...own}
+      ref={focus}
+      onKeyDown={keyed}
+      onInput={typed}
+      onFocus={focused}
+      {...looks()}
+      class={[looks().class, (props as { class?: string }).class].filter(Boolean).join(" ")}
+    />
   )
 }
 

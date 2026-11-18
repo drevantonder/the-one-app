@@ -1,5 +1,6 @@
 import { createSignal, For, Match, Show, Switch as Which } from "solid-js"
 import { Spinner } from "./button.tsx"
+import { Switch } from "./field.tsx"
 
 /** A widget's layout, as its tool answers it (the skill `building-apps` lists its parts): one part, which may hold
  * others. It's what an app said, so what's a number is read as one where it's used. */
@@ -149,10 +150,9 @@ function Press(props: { part: Layout; onCall?: OnCall }) {
 function Flip(props: { part: Layout; onCall?: OnCall }) {
   const [busy, act] = acts(props)
   return (
-    <label class="ui-choice switch" onClick={(event) => event.stopPropagation()}>
-      <span>{props.part.label}</span>
-      <input type="checkbox" role="switch" switch checked={!!props.part.on} disabled={busy()} onChange={(event) => act({ ...(props.part.inputs ?? {}), on: event.currentTarget.checked })} />
-    </label>
+    <span class="flip" onClick={(event) => event.stopPropagation()}>
+      <Switch label={props.part.label as string} checked={!!props.part.on} disabled={busy()} onChange={(event) => act({ ...(props.part.inputs ?? {}), on: event.currentTarget.checked })} />
+    </span>
   )
 }
 

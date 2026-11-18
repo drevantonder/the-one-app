@@ -11,13 +11,11 @@ export const [messages, setMessages] = createStore({
   copy: "Copy",
   details: "Details",
   exitFullScreen: "Exit Full Screen",
-  file: "Choose a file",
   fullScreen: "Full Screen",
   hideDetails: "Hide Details",
   loading: "Loading",
   more: "More",
   ok: "OK",
-  remove: "Remove",
   showDetails: "Show Details",
 })
 

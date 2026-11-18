@@ -21,7 +21,7 @@
 }
 
 /* How every component of the UI library looks, from the tokens (tokens.css). The UI library's own parts are `ui-` classes; what
-   Zag draws in Ark's shape is styled by the attribute Zag names each part with (`data-select-content`), which Ark
+   Zag draws in Ark's shape is styled by the attribute Zag names each part with (`data-tabs-trigger`), which Ark
    gives it too. */
 
 /* The page itself, before any script has run: the theme, so nothing flashes white. */
@@ -136,7 +136,7 @@ html:has(.ui-dialog[open]) {
 }
 
 /* What every control of the UI library starts from, under what any of them says of itself. */
-:where(.ui-screen, .ui-dialog, .ui-search, .ui-file, .ui-toast, [data-tabs-root], [data-date-picker-content]) button {
+:where(.ui-screen, .ui-dialog, .ui-toast, [data-tabs-root]) button {
   margin: 0;
   padding: 0;
   border: 0;
@@ -145,11 +145,6 @@ html:has(.ui-dialog[open]) {
   color: inherit;
   cursor: pointer;
   touch-action: manipulation;
-}
-:where(.ui-box, .ui-choice input) {
-  margin: 0;
-  font: inherit;
-  color: inherit;
 }
 /* What's typed in an app's own field, as in the UI library's, at least 16px under a finger (tokens.css). */
 :where(input, textarea, select) {
@@ -172,7 +167,7 @@ img {
 }
 /* What's the app's own, not what it shows: read and pressed, not selected, and a long press on it opens no link's
    preview. */
-:is(.ui-button, .ui-field label, .ui-choice, [role="tab"], [role="menuitem"], [role="option"], .ui-screen > header, .ui-section > h2) {
+:is(.ui-button, [role="tab"], [role="menuitem"], [role="option"], .ui-screen > header, .ui-section > h2) {
   -webkit-user-select: none;
   user-select: none;
   -webkit-touch-callout: none;
@@ -349,345 +344,9 @@ img {
   to { rotate: 1turn; }
 }
 
-/* A field: its label, what's typed in or chosen, and a grey hint or its problem below. */
-.ui-field {
-  display: grid;
-  gap: 0.375rem;
-  min-width: 0;
-  font-size: var(--text-base);
-}
-.ui-field > label:not(.ui-choice) {
-  justify-self: start;
-  font-weight: var(--label-weight);
-  line-height: 1.25;
-}
-.ui-field > p {
-  color: var(--muted-foreground);
-  font-size: var(--text-footnote);
-  line-height: 1.35;
-}
-.ui-field > p.error {
-  color: var(--destructive);
-}
-.ui-field[data-disabled] > label {
-  opacity: 0.5;
-}
-
-/* What's typed in or chosen from: a text field, and the face of a select or a date. */
-.ui-box {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  width: 100%;
-  min-width: 0;
-  height: var(--control);
-  padding: 0 0.75rem;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-md);
-  background: light-dark(transparent, color-mix(in oklab, var(--border) 30%, transparent));
-  font-size: var(--text-field);
-  text-align: start;
-  box-shadow: var(--shadow-xs);
-}
-.ui-box::placeholder, .ui-box .placeholder, .ui-box [data-placeholder-shown] {
-  color: var(--muted-foreground);
-  opacity: 1;
-}
-.ui-box:disabled, .ui-box[data-disabled] {
-  opacity: 0.5;
-  cursor: default;
-}
-.ui-box[aria-invalid="true"], .ui-box[data-invalid] {
-  --ring-color: var(--destructive);
-  border-color: var(--destructive);
-}
-input.ui-box {
-  /* Ours, whatever the device draws a search or a number field as. */
-  appearance: none;
-}
-input.ui-box::-webkit-search-cancel-button, input.ui-box::-webkit-search-decoration {
-  display: none;
-}
-textarea.ui-box {
-  display: block;
-  height: auto;
-  min-height: calc(var(--control) * 2);
-  padding-block: 0.5rem;
-  line-height: 1.45;
-  resize: none;
-  /* As tall as what's typed, where the browser can. */
-  field-sizing: content;
-}
-.ui-box > span {
-  flex: 1;
-  min-width: 0;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.ui-box > .ui-icon {
-  color: var(--muted-foreground);
-}
-button.ui-box {
-  cursor: pointer;
-}
-
-/* A search field: a magnifier before what's typed, and the button that clears it after. */
-.ui-search {
-  position: relative;
-  display: grid;
-  max-width: var(--readable);
-}
-.ui-search > .ui-icon {
-  position: absolute;
-  inset-block: 0;
-  inset-inline-start: 0.75rem;
-  height: 100%;
-  color: var(--muted-foreground);
-}
-.ui-search > .ui-box {
-  padding-inline: calc(1.25rem + var(--icon)) var(--control);
-}
-.ui-search > button {
-  position: absolute;
-  inset-block: 0;
-  inset-inline-end: 0;
-  display: grid;
-  place-content: center;
-  width: var(--control);
-  border: 1px solid transparent;
-  border-radius: var(--radius-md);
-  color: var(--muted-foreground);
-}
-@media (hover: hover) and (pointer: fine) {
-  .ui-search > button:hover {
-    color: var(--foreground);
-  }
-}
-
-/* A select, a date or a file: its face, and the device's own control. Under a finger the device's control lies over
-   the face, unseen, so a tap opens the device's own picker; with a mouse the face opens ours and the control only
-   holds the value. */
-.ui-picker {
-  position: relative;
-  display: grid;
-}
-.ui-picker > .native {
-  position: absolute;
-  inset: 0;
-  width: 100%;
-  height: 100%;
-  margin: 0;
-  opacity: 0;
-  cursor: pointer;
-}
-.ui-picker:has(> .native:focus-visible) > .ui-box {
-  border-color: var(--ring-color, var(--muted-foreground));
-  outline: 3px solid color-mix(in oklab, var(--ring-color, var(--muted-foreground)) 50%, transparent);
-}
-
-/* One thing to tick or choose, with what it says beside it: a checkbox, a switch, a radio. */
-.ui-choice {
-  --box: calc(var(--control) * 0.45);
-  --track: calc(var(--control) * 0.55);
-  display: flex;
-  align-items: center;
-  justify-self: stretch;
-  gap: 0.625rem;
-  /* As wide as a list, so a switch lines up with the end of one above it. */
-  max-width: var(--readable);
-  min-height: var(--control);
-  font-weight: var(--body-weight);
-  cursor: pointer;
-}
-.ui-choice:has(:disabled) {
-  cursor: default;
-}
-.ui-choice > span {
-  flex: 1;
-  min-width: 0;
-  font-weight: var(--label-weight);
-}
-.ui-choice small {
-  display: block;
-  color: var(--muted-foreground);
-  font-size: var(--text-footnote);
-  font-weight: var(--body-weight);
-}
-.ui-choice input {
-  appearance: none;
-  flex: none;
-  display: grid;
-  place-content: center;
-  width: var(--box);
-  height: var(--box);
-  border: 1px solid var(--border);
-  border-radius: 4px;
-  background: light-dark(transparent, color-mix(in oklab, var(--border) 30%, transparent));
-  box-shadow: var(--shadow-xs);
-  cursor: inherit;
-}
-.ui-choice input[aria-invalid="true"] {
-  --ring-color: var(--destructive);
-  border-color: var(--destructive);
-}
-.ui-choice input:not([role], [type="radio"])::before {
-  content: "";
-  width: calc(var(--box) * 0.75);
-  height: calc(var(--box) * 0.75);
-  background: var(--primary-foreground);
-  mask: url('data:image/svg+xml,<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256"><path d="M229.66,77.66l-128,128a8,8,0,0,1-11.32,0l-56-56a8,8,0,0,1,11.32-11.32L96,188.69,218.34,66.34a8,8,0,0,1,11.32,11.32Z" stroke="black" stroke-width="16"/></svg>') center / contain no-repeat;
-  opacity: 0;
-  scale: 0.5;
-  transition: opacity var(--move-quick) var(--ease-quick), scale var(--move-quick) var(--ease-quick);
-}
-.ui-choice input:checked {
-  border-color: var(--primary);
-  background: var(--primary);
-}
-.ui-choice input:checked::before {
-  opacity: 1;
-  scale: 1;
-}
-/* A switch: the same control, drawn as a track with a thumb, at the end of its label. */
-.ui-choice.switch > span {
-  order: -1;
-}
-.ui-choice input[role="switch"] {
-  justify-content: start;
-  width: calc(var(--track) * 1.75);
-  height: var(--track);
-  padding: 0 1px;
-  border-color: transparent;
-  border-radius: 999px;
-  background: light-dark(var(--border), color-mix(in oklab, var(--border) 80%, transparent));
-}
-.ui-choice input[role="switch"]::before {
-  content: "";
-  width: calc(var(--track) - 4px);
-  height: calc(var(--track) - 4px);
-  border-radius: 50%;
-  background: light-dark(var(--background), var(--foreground));
-  transition: translate var(--move-settle) var(--ease-settle);
-}
-.ui-choice input[role="switch"]:checked {
-  background: var(--primary);
-}
-.ui-choice input[role="switch"]:checked::before {
-  background: light-dark(var(--background), var(--primary-foreground));
-  translate: calc(var(--track) * 0.75) 0;
-}
-.ui-choice input[role="switch"]:checked:dir(rtl)::before {
-  translate: calc(var(--track) * -0.75) 0;
-}
-.ui-choice input:disabled {
-  opacity: 0.5;
-}
-.ui-field:not([data-disabled]) .ui-choice:has(:disabled) > span {
-  opacity: 0.5;
-}
-/* Radios: the same control, round, with a dot. */
-.ui-radios {
-  display: grid;
-}
-.ui-choice input[type="radio"] {
-  border-radius: 50%;
-}
-.ui-choice input[type="radio"]::before {
-  content: "";
-  width: calc(var(--box) * 0.5);
-  height: calc(var(--box) * 0.5);
-  border-radius: 50%;
-  background: var(--primary-foreground);
-  opacity: 0;
-  scale: 0.5;
-  transition: opacity var(--move-quick) var(--ease-quick), scale var(--move-quick) var(--ease-quick);
-}
-.ui-choice input[type="radio"]:checked::before {
-  opacity: 1;
-  scale: 1;
-}
-
-/* Files: what's chosen, one group, a file to a line, and the button that chooses more. */
-.ui-file {
-  display: grid;
-  gap: 0.375rem;
-}
-.ui-file ul {
-  display: grid;
-  margin: 0;
-  padding: 0;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-md);
-  list-style: none;
-  box-shadow: var(--shadow-xs);
-}
-.ui-file li {
-  display: flex;
-  align-items: center;
-  gap: 0.625rem;
-  padding: 0.375rem;
-}
-.ui-file li + li {
-  border-top: 1px solid var(--border);
-}
-.ui-file img, .ui-file .thumb {
-  flex: none;
-  width: var(--control);
-  height: var(--control);
-  border-radius: var(--radius-sm);
-  background: var(--muted);
-  object-fit: cover;
-}
-.ui-file .thumb {
-  display: grid;
-  place-content: center;
-  color: var(--muted-foreground);
-}
-.ui-file .words {
-  display: grid;
-  flex: 1;
-  min-width: 0;
-  line-height: 1.35;
-}
-.ui-file .words > * {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-.ui-file small {
-  color: var(--muted-foreground);
-  font-size: var(--text-footnote);
-}
-.ui-file li button {
-  display: grid;
-  flex: none;
-  place-content: center;
-  width: var(--control);
-  height: var(--control);
-  border: 1px solid transparent;
-  border-radius: var(--radius-sm);
-  color: var(--muted-foreground);
-}
-.ui-file .ui-box {
-  font-weight: var(--label-weight);
-}
-.ui-file .native::file-selector-button {
-  cursor: pointer;
-}
-@media (hover: hover) and (pointer: fine) {
-  .ui-file li button:hover:not(:disabled) {
-    background: var(--muted);
-    color: var(--foreground);
-  }
-  .ui-file .ui-picker:hover > .ui-box:not([data-disabled]) {
-    background: var(--muted);
-  }
-}
-
-/* What floats over the page from the thing that opened it: a menu, a select's list, a calendar, the toasts. It's a
-   popover, so it's drawn over everything and nothing it sits inside can cut it off. Zag places it. */
-:is([data-select-positioner], [data-date-picker-positioner], [data-toast-group])[popover] {
+/* The toasts float over the page. They're a popover, so they're drawn over everything and nothing they sit inside can
+   cut them off. */
+[data-toast-group][popover] {
   inset: auto;
   margin: 0;
   padding: 0;
@@ -695,166 +354,6 @@ button.ui-box {
   background: none;
   color: inherit;
   overflow: visible;
-}
-:is([data-select-content], [data-date-picker-content]) {
-  padding: 0.25rem;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-md);
-  background: var(--card);
-  color: var(--foreground);
-  font-size: var(--text-base);
-  box-shadow: var(--shadow-lg);
-  outline: 0;
-  opacity: 0;
-  scale: 0.97;
-  transform-origin: var(--transform-origin);
-  transition: opacity var(--move-quick) var(--ease-quick), scale var(--move-quick) var(--ease-quick);
-}
-:popover-open > :is([data-select-content], [data-date-picker-content]) {
-  opacity: 1;
-  scale: 1;
-}
-@starting-style {
-  :popover-open > :is([data-select-content], [data-date-picker-content]) {
-    opacity: 0;
-    scale: 0.97;
-  }
-}
-/* One thing to choose in one. */
-[data-select-item] {
-  display: flex;
-  align-items: center;
-  gap: 0.5rem;
-  min-height: calc(var(--control) - 0.25rem);
-  padding: 0 0.5rem;
-  border-radius: var(--radius-sm);
-  outline: 0;
-  cursor: default;
-  white-space: nowrap;
-}
-[data-select-item][data-highlighted] {
-  background: var(--muted);
-  color: var(--foreground);
-}
-[data-select-item][data-disabled] {
-  opacity: 0.5;
-}
-@media (pointer: coarse) {
-  [data-select-item] {
-    min-height: var(--control);
-  }
-}
-
-
-/* A select's own list, with a mouse. */
-[data-select-content] {
-  max-height: min(20rem, var(--available-height, 20rem));
-  overflow-y: auto;
-  overscroll-behavior: contain;
-}
-[data-select-item-text] {
-  flex: 1;
-  overflow: hidden;
-  text-overflow: ellipsis;
-}
-[data-select-item-indicator] {
-  display: flex;
-}
-/* What isn't chosen keeps its tick's room. */
-[data-select-item-indicator][hidden] {
-  display: flex !important;
-  visibility: hidden;
-}
-[data-select-trigger] {
-  cursor: pointer;
-}
-
-/* The calendar, with a mouse. */
-[data-date-picker-content] {
-  --cell: 2rem;
-  display: grid;
-  gap: 0.5rem;
-  padding: 0.75rem;
-}
-[data-date-picker-view-control] {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  margin-bottom: 0.5rem;
-}
-[data-date-picker-view-control] button {
-  display: grid;
-  place-content: center;
-  min-width: var(--cell);
-  height: var(--cell);
-  padding: 0 0.5rem;
-  border: 1px solid transparent;
-  border-radius: var(--radius-sm);
-  font-weight: var(--label-weight);
-}
-[data-date-picker-view-control] button:disabled {
-  opacity: 0.5;
-}
-[data-date-picker-table] {
-  border-collapse: collapse;
-}
-[data-date-picker-table-header] {
-  width: var(--cell);
-  height: var(--cell);
-  color: var(--muted-foreground);
-  font-size: var(--text-footnote);
-  font-weight: var(--body-weight);
-}
-[data-date-picker-table-cell] {
-  padding: 0;
-  text-align: center;
-}
-[data-date-picker-table-cell-trigger] {
-  display: grid;
-  place-content: center;
-  min-width: var(--cell);
-  height: var(--cell);
-  border: 1px solid transparent;
-  border-radius: var(--radius-sm);
-  cursor: default;
-  font-variant-numeric: tabular-nums;
-}
-[data-date-picker-table-cell-trigger]:is([data-view="month"], [data-view="year"]) {
-  min-width: calc(var(--cell) * 7 / 4);
-  height: calc(var(--cell) * 1.25);
-}
-[data-date-picker-table-cell-trigger][data-today] {
-  background: var(--muted);
-  color: var(--foreground);
-}
-[data-date-picker-table-cell-trigger][data-outside-range] {
-  color: var(--muted-foreground);
-}
-[data-date-picker-table-cell-trigger][data-selected] {
-  background: var(--primary);
-  color: var(--primary-foreground);
-}
-[data-date-picker-table-cell-trigger][data-disabled] {
-  opacity: 0.4;
-}
-[data-date-picker-clear-trigger] {
-  justify-self: start;
-  height: var(--cell);
-  padding: 0 0.5rem;
-  border: 1px solid transparent;
-  border-radius: var(--radius-sm);
-  color: var(--muted-foreground);
-  font-size: var(--text-footnote);
-}
-@media (hover: hover) and (pointer: fine) {
-  [data-date-picker-view-control] button:hover,
-  [data-date-picker-table-cell-trigger]:hover:not([data-disabled], [data-selected]) {
-    background: var(--muted);
-  }
-  [data-date-picker-clear-trigger]:hover {
-    background: var(--muted);
-    color: var(--foreground);
-  }
 }
 
 /* Tabs: a few views of one thing. */
@@ -1627,7 +1126,7 @@ button.ui-box {
       translate: none;
     }
   }
-  .ui-dialog, :is([data-select-content], [data-date-picker-content]), .ui-choice input::before {
+  .ui-dialog {
     scale: none !important;
   }
   /* A toast fades in and out where it is, and moves to its place in the stack at once. */
@@ -1685,11 +1184,6 @@ button.ui-box {
   color: var(--foreground);
   font: var(--title-weight) var(--text-title) / 1.15 var(--font-mono);
   letter-spacing: 0.08em;
-}
-.ui-sign-in .ui-field {
-  width: 100%;
-  min-width: 16rem;
-  text-align: start;
 }
 .ui-sign-in .answers {
   display: grid;
@@ -2014,16 +1508,9 @@ html:has(.ui-sign-in) {
   font: var(--label-weight) 0.8125rem var(--font-sans);
   cursor: pointer;
 }
-.ui-widget .ui-choice {
-  --track: 1.375rem;
+.ui-widget .flip {
   flex: 1;
-  min-height: 0;
-  gap: 0.5rem;
-}
-.ui-widget .ui-choice > span {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  min-width: 0;
 }
 
 /* The strict primitives (strict/primitives.tsx). A box is a flex column, as React Native's View and every native host's
@@ -2085,6 +1572,32 @@ button.ui-strict-box:focus-visible {
   flex: none;
   overflow: visible;
   fill: currentColor;
+}
+/* An editable text is the device's own field, bare: its box and type are its styles'. Its placeholder is the text's
+   colour at 60%, as secondary text is. */
+.ui-strict-input {
+  appearance: none;
+  display: block;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: start;
+  outline: 0;
+}
+.ui-strict-input::placeholder {
+  color: inherit;
+  opacity: 0.6;
+}
+.ui-strict-input::-webkit-search-cancel-button, .ui-strict-input::-webkit-search-decoration {
+  display: none;
+}
+textarea.ui-strict-input {
+  resize: none;
+  /* As tall as what's typed, where the browser can. */
+  field-sizing: content;
 }
 .ui-strict-image {
   display: block;

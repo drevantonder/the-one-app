@@ -13,7 +13,9 @@ export { createListCollection } from "../../collection.ts"
 export { negative, styles } from "../../styles.ts"
 export { tokens } from "../../tokens.ts"
 
-export { Box, Image, Input, Layer, Path, render, Scroll, Search, Text, Textarea } from "./primitives.tsx"
+export { Box, EditableText, Image, Layer, Path, render, Scroll, Text } from "./primitives.tsx"
+export { Checkbox, Field, Input, RadioGroup, Search, Switch, Textarea } from "../../field.tsx"
+export { Select } from "../../select.tsx"
 import { Box, Image, Text } from "./primitives.tsx"
 import { breadcrumb } from "./bridge.ts"
 export { call, changed, client, connection, covers, direction, open, pinShortcut, reducedMotion, safeArea, sizeChanged, viewport } from "./bridge.ts"
@@ -106,12 +108,7 @@ const later = (name: string) => () => {
 }
 export const Split = later("Split") as typeof Strict.Split
 export const Steps = later("Steps") as typeof Strict.Steps
-export const Field = later("Field") as typeof Strict.Field
-export const Checkbox = later("Checkbox") as typeof Strict.Checkbox
-export const Switch = later("Switch") as typeof Strict.Switch
 export const LiveScreen = later("LiveScreen") as typeof Strict.LiveScreen
-export const RadioGroup = later("RadioGroup") as typeof Strict.RadioGroup
-export const Select = { Root: later("Select") } as typeof Strict.Select
 export const Tabs = { Root: later("Tabs"), List: later("Tabs"), Trigger: later("Tabs"), Content: later("Tabs"), Indicator: later("Tabs") } as typeof Strict.Tabs
 export const toast = later("toast") as typeof Strict.toast
 export const leave = later("leave") as typeof Strict.leave

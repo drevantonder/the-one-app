@@ -292,8 +292,21 @@ iframe[data-move] {
   -webkit-user-select: text;
   user-select: text;
 }
+/* Where the recovery key is typed: a field, as the UI library draws one. */
 #recovery .entry {
+  display: block;
+  width: 100%;
+  min-height: calc(var(--control) * 2);
+  margin: 0;
+  padding: 0.5rem 0.75rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: light-dark(transparent, color-mix(in oklab, var(--border) 30%, transparent));
+  color: inherit;
   font-size: var(--text-field);
+  box-shadow: var(--shadow-xs);
+  resize: none;
+  field-sizing: content;
 }
 #recovery .key {
   padding: 0.75rem;

@@ -9,7 +9,7 @@
 /// what's its own with its own CSS, from the UI library's custom properties (`--foreground`, `--muted-foreground`,
 /// `--border`, `--warning`, `--radius`, `--gap`), with any hover of its own behind `@media (hover: hover) and
 /// (pointer: fine)`, as the UI library's is: a touch screen leaves what was tapped looking hovered. A page shows pictures only from `data:` addresses and its
-/// app's own files. Menu, Select, DatePicker, NumberInput and Tabs are Ark UI's, with Ark's parts and props
+/// app's own files. Tabs are Ark UI's, with Ark's parts and props, and Select takes Ark's select's root props
 /// (ark-ui.com/llms-solid.txt); the rest are the UI library's own. An app may be TypeScript (`.tsx`, `.ts`) as well as
 /// JavaScript: the UI library's types are its `types/` (`one code --name ui`), which the app's `tsconfig.json` names
 /// as `"paths": { "ui": ["<there>/index.d.ts"] }`, and its build doesn't check them. A field's text is never set
@@ -20,7 +20,8 @@
 /// `tsconfig.json` is `{ "extends": "<ui>/tsconfig.strict.json", "include": ["**/*"] }` (in this repo
 /// `../../../core/ui/tsconfig.strict.json`) and its entrypoint says so, with the protocol version it's written for:
 /// `%{page: "client/index.html", host: 2}`. It's written with the UI library alone: its components and the primitives,
-/// `Box`, `Scroll` (a box whose content scrolls), `Text`, `Image`, `Path` (a vector shape) and `Input`, each styled by
+/// `Box`, `Scroll` (a box whose content scrolls), `Text`, `Image`, `Path` (a vector shape) and `EditableText` (bare text to
+/// type, which `Input` draws in a field's box), each styled by
 /// its `style`: styles from `styles()`, beside what uses them, whose values are the design tokens (`tokens`, from
 /// core/ui/src/tokens.ts), never a raw colour, size or font, which the typecheck refuses:
 /// `const look = styles({ row: { flexDirection: "row", gap: tokens.space.md, paddingInline: tokens.length.gutter,
@@ -34,8 +35,8 @@
 /// in a Worker runs in it (core/ui/src/strict/types/globals.d.ts says which). `render(() => <App />)` from `ui` draws
 /// the page. Words are in a `Text`, or in a component that takes them (a
 /// `Row`'s `heading`). A press is `onClick={() => ...}`, what's typed `onInput={(event) =>
-/// setText(event.currentTarget.value)}`, a key `onKeyDown={(event) => event.key === "Enter" && save()}`, a switch's
-/// `onChange={(event) => set(event.currentTarget.checked)}`. `bun run lint:strict apps/<app>/client`, from the repo's
+/// setText(event.currentTarget.value)}`, Return in it `onAction={save}`, a key `onKeyDown={(event) => event.key ===
+/// "Escape" && close()}`, a switch's `onChange={(event) => set(event.currentTarget.checked)}`. `bun run lint:strict apps/<app>/client`, from the repo's
 /// root, checks a page. What a strict page may use is `core/ui/src/strict/types/ui.d.ts`: one that needs what isn't
 /// there adds it there, with only what every host can draw (`protocol.ts`), and core/ui's `bun run typecheck` then says
 /// whether the DOM's takes it. A page written for version 1 has one `style` object of token names instead.
@@ -45,12 +46,9 @@ export { seen } from "./seen.ts"
 export { words } from "./words.ts"
 export { Button, Icon, Spinner } from "./button.tsx"
 export { Badge } from "./badge.tsx"
-export { Checkbox, Field, File, fitted, Input, RadioGroup, Search, Switch, Textarea, useField } from "./field.tsx"
-export { NumberInput } from "./number-input.tsx"
+export { Checkbox, Field, Input, RadioGroup, Search, Switch, Textarea, useField } from "./field.tsx"
 export { createListCollection } from "./collection.ts"
 export { Select } from "./select.tsx"
-export { DatePicker } from "./date-picker.tsx"
-export { parseDate } from "./day.ts"
 export { List, Row } from "./list.tsx"
 export { go, Screen, Section, Split } from "./screen.tsx"
 export { LiveScreen } from "./live-screen.tsx"
@@ -61,6 +59,6 @@ export { Alert, confirm, Sheet } from "./sheet.tsx"
 export { SignIn } from "./sign-in.tsx"
 export { toast } from "./toast.tsx"
 export { Widget } from "./widget.tsx"
-export { Box, Image, Layer, Path, render, Scroll, Text } from "./strict/primitives.tsx"
+export { Box, EditableText, Image, Layer, Path, render, Scroll, Text } from "./strict/primitives.tsx"
 export { negative, styles } from "./styles.ts"
 export { tokens } from "./tokens.ts"
