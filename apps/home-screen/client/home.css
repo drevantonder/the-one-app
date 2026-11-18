@@ -177,7 +177,7 @@ body {
   color: inherit;
   font: inherit;
   /* As small as a phone's own labels, so most names fit under an icon. */
-  font-size: 0.75rem;
+  font-size: var(--text-caption-1);
   line-height: 1.25;
   cursor: pointer;
   touch-action: manipulation;
@@ -229,7 +229,10 @@ body {
   border-radius: 999px;
   background: var(--destructive);
   color: white;
-  font: 600 0.8125rem/1 var(--font-sans);
+  font: inherit;
+  font-size: var(--text-footnote);
+  font-weight: var(--figure-weight);
+  line-height: 1;
   font-variant-numeric: tabular-nums;
 }
 .app > .badge {
@@ -303,7 +306,7 @@ body {
   background: none;
   color: var(--muted-foreground);
   font: inherit;
-  font-size: 0.9375rem;
+  font-size: var(--text-subheadline);
   font-weight: var(--label-weight);
   cursor: pointer;
   touch-action: manipulation;
@@ -346,7 +349,7 @@ body {
 .found .app span {
   max-width: 100%;
   overflow: hidden;
-  font-size: 0.75rem;
+  font-size: var(--text-caption-1);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
@@ -397,7 +400,7 @@ body {
 .category .app span {
   max-width: 100%;
   overflow: hidden;
-  font-size: 0.6875rem;
+  font-size: var(--text-caption-2);
   line-height: 1.2;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -422,7 +425,7 @@ body {
   max-width: 100%;
   overflow: hidden;
   color: var(--muted-foreground);
-  font-size: 0.8125rem;
+  font-size: var(--text-footnote);
   font-weight: var(--label-weight);
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -587,7 +590,7 @@ html.launcher body {
   -webkit-backdrop-filter: none;
   backdrop-filter: none;
   color: color-mix(in oklab, var(--foreground) 75%, transparent);
-  font-size: 0.71875rem;
+  font-size: var(--text-caption-2);
   font-weight: var(--label-weight);
 }
 .home.library .launcher-bar .owner-pill {
@@ -659,7 +662,7 @@ html.launcher body {
 .results .section {
   padding: 0.5625rem 0.625rem 0.3125rem;
   color: var(--muted-foreground);
-  font-size: 0.6875rem;
+  font-size: var(--text-caption-2);
   font-weight: var(--label-weight);
 }
 .results .result {
@@ -681,15 +684,15 @@ html.launcher body {
 }
 .results .name {
   overflow: hidden;
-  font-size: 0.84375rem;
-  font-weight: 500;
+  font-size: var(--text-footnote);
+  font-weight: var(--label-weight);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
 .results .kind {
   margin-inline-start: auto;
   color: var(--muted-foreground);
-  font-size: 0.75rem;
+  font-size: var(--text-caption-1);
   white-space: nowrap;
 }
 .results > .ui-state {
@@ -709,7 +712,7 @@ html.launcher body {
   border-top: 0.5px solid var(--hairline);
   background: color-mix(in oklab, var(--foreground) 2%, transparent);
   color: var(--muted-foreground);
-  font-size: 0.75rem;
+  font-size: var(--text-caption-1);
 }
 .launcher-foot .space {
   flex: 1;
@@ -782,7 +785,10 @@ html.launcher body {
   border-radius: 0.3125rem;
   background: var(--key, color-mix(in oklab, var(--foreground) 8%, transparent));
   color: color-mix(in oklab, var(--foreground) 75%, transparent);
-  font: 600 0.6875rem / 1 var(--font-sans);
+  font: inherit;
+  font-size: var(--text-caption-2);
+  font-weight: var(--label-weight);
+  line-height: 1;
 }
 .launcher-actions {
   min-width: 14rem;
@@ -909,7 +915,6 @@ html.launcher body {
   border: 0;
   background: none;
   color: var(--muted-foreground);
-  font-size: 1rem;
   cursor: pointer;
 }
 .dots button[aria-current] {
@@ -1111,7 +1116,10 @@ html.launcher body {
   border-radius: 999px;
   background: var(--destructive);
   color: white;
-  font: 600 0.8125rem/1 var(--font-sans);
+  font: inherit;
+  font-size: var(--text-footnote);
+  font-weight: var(--figure-weight);
+  line-height: 1;
   font-variant-numeric: tabular-nums;
 }
 /* + and Done, floating at the top over the pages, in the owner pill's row, + on the left and Done on the right, as
