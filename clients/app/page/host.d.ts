@@ -128,6 +128,7 @@ export type Moved =
   | { type: "listed" }
   | { type: "none"; only?: string }
   | { type: "tooOld" }
+  | { type: "unchecked"; why: string }
   | { type: "drawn"; key: string }
   | { type: "failed"; key: string; why: string }
   | { type: "load"; view: View }

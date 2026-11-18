@@ -608,6 +608,7 @@ const machine = setup({
         none: { target: "no_launcher", actions: assign({ only: ({ event }) => event.only }) },
         tooOld: "needs_updating",
         failed: { guard: "launcher", target: "launcher_failed", actions: assign({ why: ({ event }) => event.why }) },
+        unchecked: { target: "launcher_failed", actions: assign({ why: ({ event }) => event.why }) },
       },
     },
     // The network's own sign-in page, which the client brings the window back from once its person has approved
@@ -815,12 +816,14 @@ function spinner() {
 }
 
 /// Whether this device is behind the latest build of its program for its kind of machine, as its network says
-/// (`builds`): a browser, or an app whose network says nothing of its build, isn't.
+/// (`builds`): a browser, or an app whose network says nothing of its build, isn't. Throws why, where its network
+/// couldn't say.
 async function behind() {
   const { build, target } = await invoke("client")
   if (!build || !target) return false
-  const response = /** @type {{ structuredContent?: { latest?: Record<string, { build: string }> } }} */ (await invoke("request", { view: "client", method: "tools/call", params: { name: "builds" } }))
-  const latest = response.structuredContent?.latest?.[`one/${target}`]?.build
+  const result = /** @type {{ structuredContent?: { latest?: Record<string, { build: string }> }, content?: { text: string }[], isError?: boolean }} */ (await invoke("request", { view: "client", method: "tools/call", params: { name: "builds" } }))
+  if (result.isError) throw new Error(result.content?.[0]?.text)
+  const latest = result.structuredContent?.latest?.[`one/${target}`]?.build
   return Boolean(latest) && latest !== build
 }
 
@@ -829,7 +832,9 @@ async function behind() {
 /// which is a server's word, so a list kept from before is asked for again first, and while its network doesn't
 /// answer, the window waits. With none, this app needs updating where its network says an update is ready for it
 /// (`behind`): otherwise it's the network that has none right now. A launcher missing from a later list, as during a
-/// release, leaves the one that's open as it is. Each of this user's lists says again whether an update is ready.
+/// release, leaves the one that's open as it is. Each of this user's lists says again whether an update is ready, by
+/// one check while its network answers; a check that fails leaves what was said as it was, and with no launcher says
+/// why in its problem box, with Try Again, since it can't say which it is.
 /** @param {string} [subject] */
 async function list(subject) {
   listed.add(subject)
@@ -848,8 +853,15 @@ async function list(subject) {
       crumb()
       shortcuts()
       if (launcher || own) on({ type: "listed" })
-      else if (shown.getSnapshot().context.connection === "online") on((await behind().catch(() => false)) ? { type: "tooOld" } : { type: "none", only: await only() })
-      on({ type: "updateReady", ready: !phone && (await behind().catch(() => false)) })
+      if (shown.getSnapshot().context.connection !== "online") return
+      const late = await behind().catch((/** @type {Error} */ error) => error)
+      if (late instanceof Error) {
+        if (launcher || own) exception(`Couldn't check for an update: ${late.message}`)
+        else on({ type: "unchecked", why: late.message })
+        return
+      }
+      if (!launcher && !own) on(late ? { type: "tooOld" } : { type: "none", only: await only() })
+      on({ type: "updateReady", ready: !phone && late })
     }
   } catch {
     // Nothing kept, and its network didn't answer: it's listed again once it does.

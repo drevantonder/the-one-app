@@ -224,7 +224,7 @@ iframe {
 }
 #title-bar-app {
   color: var(--foreground);
-  font-weight: 600;
+  font-weight: var(--label-weight);
 }
 #title-bar-nav img {
   width: 16px;
