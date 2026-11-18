@@ -39,6 +39,10 @@ declare global {
         notify(message: string): Promise<void>;
         presence(keys: string[]): Promise<Record<string, { connected: boolean; last_seen?: number } | null>>;
       };
+      /** The apps that use this network's passkeys and open its links (`vars` in `wrangler.jsonc`). */
+      APPLE_APPS: string[];
+      ANDROID_APPS: { package_name: string; sha256_cert_fingerprints: string[] }[];
+      APP_LINKS: string[];
     }
   }
 }

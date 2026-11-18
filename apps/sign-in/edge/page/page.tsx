@@ -4,8 +4,10 @@
 // device's code, as that device's link has it, its person signs in if they aren't yet, and is shown the code to
 // compare with the device's before they let it in or stop it (`Stage`). Opened from the app's Sign-In & Security, someone
 // makes another passkey. Whichever it was, this browser is signed in after, and is one of that person's devices,
-// whose Home Screen it goes on to when there's nothing else to answer. In the app's own window, which has no
-// passkeys, the page shows the device's code and its button opens the page in the device's browser instead.
+// whose Home Screen it goes on to when there's nothing else to answer. In the app's own window, the page shows the
+// device's code, its button goes on to the passkey there (one the app may use, its network's, as `/.well-known`
+// says), and Use Another Device gives the link and the code to open where they're signed in, for a passkey the app
+// can't reach.
 import { createSignal, Show } from "solid-js"
 import { render } from "@solidjs/web"
 import mark from "../../../../icons/Logo.png"
@@ -64,6 +66,10 @@ type Stage =
   | { stage: "failed"; why: string }
 
 const [stage, setStage] = createSignal<Stage>({ stage: "checking" })
+/// Whether the app's own window shows the link and the code to open elsewhere (Use Another Device), not the passkey.
+const [away, setAway] = createSignal(false)
+/// Whether the link was copied, where there's no share sheet.
+const [copied, setCopied] = createSignal(false)
 /// The name someone joining goes by, as they type it.
 const [called, setCalled] = createSignal("")
 
@@ -194,13 +200,24 @@ async function respond(yes: boolean) {
   setStage({ stage: yes ? "approved" : "denied", name })
 }
 
-/// The link the device gives, as it's opened in the device's own browser.
+/// The link the device gives, as it's opened anywhere else, and as it's shown, which is short enough to type.
 const link = new URL(location.href)
 link.searchParams.delete("app")
 link.searchParams.delete("why")
+const typed = `${link.host}${link.pathname}${link.search}`
+/// Whether this device has a share sheet to hand the link to.
+const shares = "share" in navigator
+
+/// Hands the link to the device's share sheet, or copies it where there's none. Closing the sheet isn't a problem.
+async function share() {
+  if (!shares) return navigator.clipboard.writeText(link.href).then(() => setCopied(true))
+  await navigator.share({ url: link.href }).catch((error: Error) => {
+    if (error.name !== "AbortError") throw error
+  })
+}
 
 /// What a stage shows, as `SignIn` takes it, whether it asks for a name, and the assistant it asks about.
-type Shows = Parameters<typeof SignIn>[0] & { asksName?: boolean; app?: App }
+type Shows = Parameters<typeof SignIn>[0] & { asksName?: boolean; app?: App; elsewhere?: boolean }
 
 /// What each stage shows: its heading, the spinner's line while something's under way, the code, the warning, the
 /// problem, the button and what it does, and the one line left once it's answered.
@@ -209,7 +226,8 @@ function shows(): Shows {
   const failed = now.stage === "failed" ? now.why : undefined
   switch (flow.flow) {
     case "deviceInApp":
-      return { heading: "Sign in", note: "Check this code where you sign in", code: shown, problem: why, button: "Sign in", href: link.href }
+      if (away()) return { heading: "Sign in on another device", button: shares ? "Share Link" : copied() ? "Copied" : "Copy Link", onSignIn: share, stop: "Back", onStop: () => setAway(false), elsewhere: true }
+      return { heading: "Sign in", note: "Check this code where you sign in", code: shown, problem: why, button: "Sign in", href: link.href, stop: "Use Another Device", onStop: () => setAway(true) }
     case "device":
       switch (now.stage) {
         case "checking":
@@ -325,6 +343,16 @@ render(
       done={shows().done}
     >
       {shows().app && <Consent app={shows().app!} />}
+      {shows().elsewhere && (
+        <div class="elsewhere">
+          <p>Open this where you're signed in</p>
+          <p class="link">{typed}</p>
+          <div class="code">
+            <p>It will show</p>
+            <p class="shown">{shown}</p>
+          </div>
+        </div>
+      )}
       {shows().asksName && !shows().done && (
         <Field label="Your name">
           <Input name="name" autocomplete="name" required value={called()} onInput={(event) => setCalled(event.target.value)} />

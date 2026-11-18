@@ -7,6 +7,22 @@
   "d1_databases": [{ "binding": "DB", "database_name": "network-sign-in" }],
   // Which version of it is deployed, by which it makes its tables once for each (`auth.ts`).
   "version_metadata": { "binding": "VERSION" },
+  // The apps that use this network's passkeys, and open the links of its listed in APP_LINKS, which iOS and Android
+  // check against the files this serves (`/.well-known/apple-app-site-association`, `/.well-known/assetlinks.json`).
+  // They're the One App's own build: on iPhone, its team and bundle ID; on Android, its package and the SHA-256 of
+  // the certificate it's signed with, the Android SDK's debug keystore on the Linux machine that builds it, as it has
+  // no release keystore yet. A network that builds an app of its own names that here instead.
+  "vars": {
+    "APPLE_APPS": ["X96JC3HCV7.app.theone.client"],
+    "ANDROID_APPS": [
+      {
+        "package_name": "app.theone.client",
+        "sha256_cert_fingerprints": ["0D:54:3D:D7:FC:04:A3:56:BE:47:9F:60:17:A5:7A:DD:23:17:7E:7F:D1:BC:FC:74:36:E8:66:FE:E5:4A:3A:55"]
+      }
+    ],
+    // A request for a key in Vault, which opens it in the app.
+    "APP_LINKS": ["/vault/request"]
+  },
   // The sign-in page as it's built (`page/`, an app's page built against the UI library), which the Worker hands out
   // itself: every request comes to it first.
   "assets": { "directory": "files", "binding": "ASSETS", "run_worker_first": true }

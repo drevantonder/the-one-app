@@ -2,7 +2,8 @@
 // provider that MCP's authorization asks for (`/.well-known`). It says who a request at the network's address is
 // from (`Who`), which the network's MCP endpoint asks (`core/edge/mcp/mcp.ts`): an assistant somewhere else with the
 // token a person let it have, or a browser signed in here, the web client. It serves the network's privacy page too
-// (`/privacy`), which an OAuth client's consent screen links to, naming the network's owner.
+// (`/privacy`), which an OAuth client's consent screen links to, naming the network's owner, and the files that let
+// the network's apps use its passkeys and open its links (`ASSOCIATIONS`).
 import { env, WorkerEntrypoint } from "cloudflare:workers";
 import { requireMcpAuth } from "@better-auth/mcp";
 import { asked, assistant, at, BELIEVED, browserDevice, who, type Ask, type Auth } from "./auth.ts";
@@ -13,6 +14,7 @@ const NETWORK = "network/";
 export default {
   async fetch(request: Request, _env, ctx) {
     const url = new URL(request.url);
+    if (url.pathname in ASSOCIATIONS) return Response.json(ASSOCIATIONS[url.pathname](), { headers: { "cache-control": "public, max-age=3600" } });
     if (request.method === "GET" && (url.pathname.includes("/.well-known/") || url.pathname === JWKS)) return discovery(url, ctx);
     const auth = await at(url.origin);
     if (url.pathname === "/privacy") return privacy(auth, url);
@@ -21,6 +23,23 @@ export default {
     return env.ASSETS.fetch(request);
   },
 } satisfies ExportedHandler;
+
+/**
+ * What tells iOS and Android which apps are this network's (`APPLE_APPS`, `ANDROID_APPS`), so that their web views
+ * offer its passkeys and its links (`APP_LINKS`) open in them: Apple's app site association and Google's Digital
+ * Asset Links.
+ */
+const ASSOCIATIONS: Record<string, () => unknown> = {
+  "/.well-known/apple-app-site-association": () => ({
+    webcredentials: { apps: env.APPLE_APPS },
+    applinks: { details: [{ appIDs: env.APPLE_APPS, components: env.APP_LINKS.map((path) => ({ "/": path })) }] },
+  }),
+  "/.well-known/assetlinks.json": () =>
+    env.ANDROID_APPS.map((target) => ({
+      relation: ["delegate_permission/common.handle_all_urls", "delegate_permission/common.get_login_creds"],
+      target: { namespace: "android_app", ...target },
+    })),
+};
 
 /**
  * The network's privacy page (`page/privacy.html`), with its address and the name its first owner goes by, who's

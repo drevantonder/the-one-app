@@ -83,3 +83,25 @@
 .ui-sign-in:has(.can) .ui-button {
   min-width: 0;
 }
+
+/* Use Another Device, in the app's own window: the link to open where they're signed in, short enough to type, and
+   the code it will show there. */
+.ui-sign-in .elsewhere {
+  display: grid;
+  gap: 1.25rem;
+  width: 100%;
+}
+.elsewhere > p {
+  margin: 0 0 -0.75rem;
+  color: var(--muted-foreground);
+}
+.elsewhere > .link {
+  margin: 0;
+  padding: 0.75rem 1rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  color: var(--foreground);
+  font-family: var(--font-mono);
+  overflow-wrap: anywhere;
+  user-select: all;
+}
