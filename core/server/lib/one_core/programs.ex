@@ -21,7 +21,7 @@ defmodule OneCore.Programs do
 
   defp found(name) do
     case System.find_executable(name) do
-      nil -> {:error, "This server can't find #{name}: put it on its PATH, as `mise install` does in The One App's folder."}
+      nil -> {:error, "This server can't find #{name}: put it on its PATH, as `mise install` does in the One App's folder."}
       path -> {:ok, path}
     end
   end

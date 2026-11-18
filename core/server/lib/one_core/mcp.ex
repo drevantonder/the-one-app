@@ -721,7 +721,7 @@ defmodule OneCore.Mcp do
   # and any reads one that it has the address of.
   defp instructions(mode, who) do
     network = """
-    This is a One App network: what one user, family or workplace keeps and makes, which you use as whoever you act \
+    This is a network of the One App: what one user, family or workplace keeps and makes, which you use as whoever you act \
     for. Its tools are its apps', each named <app>_<tool>, and One Core's own, which add and remove apps, \
     servers and services.
 

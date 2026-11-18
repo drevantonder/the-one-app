@@ -61,7 +61,7 @@ export default {
  */
 const llms = (origin: string) => `# ${new URL(origin).host}
 
-> A One App network: a person's, a family's or a workplace's email, messages, calendar, files, devices and more,
+> A network of the One App: a person's, a family's or a workplace's email, messages, calendar, files, devices and more,
 > each an app. An assistant comes in as the person who lets it in, and does what they can, through MCP or the
 > \`one\` command.
 
