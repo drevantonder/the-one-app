@@ -197,9 +197,22 @@ defmodule OneCore.Entrypoint do
   end
 
   defp run(bun, args, failed, folder) do
-    case System.cmd(bun, args, stderr_to_stdout: true, cd: folder) do
+    case System.cmd(bun, args, stderr_to_stdout: true, cd: folder, env: runtime()) do
       {_, 0} -> :ok
       {said, _} -> {:error, "#{failed}:\n#{String.trim(said)}"}
+    end
+  end
+
+  # The Solid compiler is a native Windows DLL Bun loads, which needs the Visual C++ runtime, and a PC may not have it:
+  # its DLLs are the Erlang VM's, beside it (`tooling/release`), so Bun looks in the VM's folder too.
+  defp runtime do
+    case :os.type() do
+      {:win32, _} ->
+        erts = Path.join([:code.root_dir(), "erts-#{:erlang.system_info(:version)}", "bin"])
+        [{"PATH", String.replace(erts, "/", "\\") <> ";" <> System.get_env("PATH", "")}]
+
+      _ ->
+        []
     end
   end
 end
