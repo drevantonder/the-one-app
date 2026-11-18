@@ -132,6 +132,7 @@ pub fn front(app: AppHandle) {
 pub fn open_window(app: AppHandle, entrypoint: String, subject: Option<String>, link: String) -> Result<(), String> {
     let hosts = app.state::<Hosts>();
     let key = format!("{}|{entrypoint}", subject.as_deref().unwrap_or_default());
+    yield_to(&app, crate::shortcuts::app_id(&entrypoint, subject.as_deref()));
     let mut open = hosts.open.lock().expect("no host panics");
     if let Some(host) = open.get_mut(&key) {
         match &host.to {
@@ -163,6 +164,27 @@ pub fn open_window(app: AppHandle, entrypoint: String, subject: Option<String>, 
         }
     });
     Ok(())
+}
+
+/// Lets the app `id` come in front, as a person opened it here: since macOS 14 an app comes in front only where the
+/// one in front lets it (cooperative activation), so an app's window would otherwise open behind this one. AppKit's,
+/// on the main thread.
+fn yield_to(app: &AppHandle, id: String) {
+    #[cfg(target_os = "macos")]
+    let _ = app.run_on_main_thread(move || unsafe {
+        use objc2::runtime::{AnyClass, AnyObject};
+        let (Some(application), Some(string), Ok(id)) = (AnyClass::get(c"NSApplication"), AnyClass::get(c"NSString"), std::ffi::CString::new(id)) else {
+            return;
+        };
+        let shared: *mut AnyObject = objc2::msg_send![application, sharedApplication];
+        let id: *mut AnyObject = objc2::msg_send![string, stringWithUTF8String: id.as_ptr()];
+        let yields: bool = objc2::msg_send![shared, respondsToSelector: objc2::sel!(yieldActivationToApplicationWithBundleIdentifier:)];
+        if yields {
+            let () = objc2::msg_send![shared, yieldActivationToApplicationWithBundleIdentifier: id];
+        }
+    });
+    #[cfg(not(target_os = "macos"))]
+    let _ = (app, id);
 }
 
 /// Talks with one app's window until it ends.
