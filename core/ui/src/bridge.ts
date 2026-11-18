@@ -216,6 +216,11 @@ export const leave = () => greet().then(() => notify("ui/notifications/request-t
 export const open = (app: string, { subject, behind, from }: Subject & { behind?: boolean; from?: { x: number; y: number; width: number; height: number; radius?: number } } = {}): Promise<unknown> =>
   greet().then(() => ask("ui/open-link", /^https?:/.test(app) ? { url: app } : { url: `one:${app}`, subject, behind, from }))
 
+/// `sizeChanged({ height: 420 })`: tells the client how large the page's content is, in CSS pixels, as an MCP App tells
+/// its host (`ui/notifications/size-changed`). A window sized by what it shows, a computer's launcher, takes it; one
+/// whose page fills it keeps its size.
+export const sizeChanged = (size: { width?: number; height?: number }) => greet().then(() => notify("ui/notifications/size-changed", size))
+
 /// `pinShortcut("notes/client/index.html")`: puts an app, by its entrypoint, on the device's own home screen, as its
 /// own apps go there, which opens it here. Android asks its person where; a device that can't, which `client()` says
 /// (`pinsShortcuts`), throws.

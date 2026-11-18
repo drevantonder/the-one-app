@@ -15,7 +15,7 @@
 /// as `"paths": { "ui": ["<there>/index.d.ts"] }`, and its build doesn't check them. A field's text is never set
 /// under 16px on a touch screen, where an iPhone zooms into it: the UI library's fields and its base styles keep every
 /// `<input>`, `<textarea>` and `<select>` at 16px or more there, and a field of another size sets `--text-field`.
-export { call, changed, client, connection, covers, haptic, leave, open, pinShortcut, showRecoveryKey, updateReady, upload, useRecoveryKey } from "./bridge.ts"
+export { call, changed, client, connection, covers, haptic, leave, open, pinShortcut, showRecoveryKey, sizeChanged, updateReady, upload, useRecoveryKey } from "./bridge.ts"
 export { pace, seen, share, words } from "./shared.ts"
 export { Button, Icon, Spinner } from "./button.tsx"
 export { Checkbox, Field, File, fitted, Input, RadioGroup, Search, Switch, Textarea, useField } from "./field.tsx"
