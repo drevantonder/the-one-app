@@ -815,7 +815,7 @@ impl Painter<'_> {
                 let words = if words.is_empty() { node.str("placeholder").unwrap_or_default().to_owned() } else { words };
                 (Some(Measure::Input { words: if words.is_empty() { " ".into() } else { words }, text, multiline: node.is("multiline") }), Vec::new())
             }
-            Kind::Image | Kind::Path => (None, Vec::new()),
+            Kind::Image | Kind::Path | Kind::Picker => (None, Vec::new()),
             Kind::Box | Kind::Scroll => {
                 let children: Vec<Id> = node.children.iter().copied().filter(|child| tree.nodes.contains_key(child)).collect();
                 let built: Vec<NodeId> = children.into_iter().map(|child| self.build(child, text, false)).collect();
@@ -989,6 +989,7 @@ impl Painter<'_> {
             }
             Kind::Image => self.paint_image(node, content, radii, opacity, mask),
             Kind::Path => self.paint_path(node, content, &look, text.color, rotate, opacity, mask),
+            Kind::Picker => {}
             Kind::Box | Kind::Scroll => {
                 let mut child_mask = mask;
                 let mut child_offset = laid_out.origin;

@@ -55,6 +55,9 @@ pub enum Kind {
     Image,
     /// A vector shape, SVG's `<path>`: its `d` in its `viewBox`.
     Path,
+    /// The device's own chooser, see-through over its box, which a computer draws nothing of: the UI library draws
+    /// one only where a finger points.
+    Picker,
     Input,
     RawText,
 }
