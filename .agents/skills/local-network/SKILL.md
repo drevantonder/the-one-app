@@ -7,20 +7,20 @@ description: Use to run a whole network of your own on this machine, to try a ch
 
 Its header says what each flag does. It builds what isn't built (the UI library, then the server's `mix compile` as it
 starts, which builds the Rust workspace's debug build with `cargo build`), starts the server, and prints how to use it once it's
-running. A worktree's first network starts from a copy of the build of the worktree beside it that built last (`tooling/copy-build`), so
-its first network builds only the workspace's own crates and One Core, and starts in about 20 s; after that, in about 12 s.
+running. A worktree's first build starts from a copy of the build of a worktree beside it (`tooling/copy-build`, which
+`tooling/network` and `mix compile` run; run it yourself before a first `cargo`), so its first network builds only what
+differs, and starts in about 20 s; after that, in about 10 s.
 Run it in the background and let your harness tell you when it ends; put the folder in your scratch folder.
 
 ## The fastest loop
 
-- An app or One Core's Elixir (`core/server/lib/`) changed: just call a tool. Before a client's request, the
-  network's code reloader (`tooling/code_reloader.exs`) loads what changed into every server, in under a second: One
-  Core's modules while it runs, and an app deployed as `one deploy --files-from` deploys it, its app built again
-  too. A compile error, or what a running server can't load (a supervisor, a struct, `-on_load`: the rule a hot load
-  follows), is that request's error, saying so. A changed NIF is built again by `mix compile` in `core/server/`, and
-  then loads beside the build before.
-- Anything else changed (One Core's NIFs, `core/ui`, `clients/`, the deps), or a request says to: stop it and start it
-  again in the same folder. Only what changed is built again, so that's seconds.
+- An app, One Core's Elixir, the UI library (`core/ui`) or any Rust changed: just call a tool, or reload the app's
+  page. Before a client's request, the network's code reloader (`tooling/code_reloader.exs`) loads what changed into
+  every server, as a server's update hot-loads: One Core's modules while it runs, the Rust workspace built again
+  (`one` and every NIF, each loaded beside the build before), the UI library built again and served, and an app
+  deployed as `one deploy --files-from` deploys it. A build error, or what a running server can't load (a supervisor,
+  a struct, `-on_load`: the rule a hot load follows), is that request's error, saying so.
+- The deps or the config changed, or a request says to: stop it and start it again in the same folder.
 - A commit, or a rebase that moves it, builds `one` again once (about 5 s): a build is named by its commit.
 
 ## Acting as someone

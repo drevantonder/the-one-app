@@ -9,13 +9,17 @@ defmodule CodeReloader do
   A server started with `--reloader <its node>` (`mix network`) asks it before it answers a client's request
   (`OneCore.MCP`), so the request sees what changed in this checkout since the last:
 
-  - One Core's code is compiled here and loaded into every server while it runs (`OneCore.Release.swap/3`), unless
-    it's what a running server can't load (`OneCore.Release.modules/2`, the rule a hot load follows): then the request
-    is refused, saying why and that the network starts again for it.
+  - The Rust workspace, where a file of it changed, is built again as `mix compile` builds it (`nifs/1` in
+    `core/server/mix.exs`): `one`, and the NIFs, of One Core and of this repo's apps, each put where it's loaded from.
+  - One Core's code is compiled here and loaded into every server while it runs (`OneCore.Release.swap/3`), its NIFs
+    too, each beside the build before, unless it's what a running server can't load (`OneCore.Release.modules/2`,
+    the rule a hot load follows): then the request is refused, saying why and that the network starts again for it.
+  - The UI library (`core/ui`), where a file of it changed, is built again and is the one every server serves, as a
+    release's is (`OneCore.Release.ui/1`).
   - An app of this repo whose files changed is deployed for the network again, as `one deploy --files-from` deploys
     it. A request is refused with why it didn't deploy.
 
-  Rust, the deps and the config are built as the network starts again. Its compiler's output is its log.
+  The deps and the config are built as the network starts again. Its compilers' output is its log.
   """
   use GenServer
   alias OneCore.{Folder, Release}
@@ -33,26 +37,39 @@ defmodule CodeReloader do
   def reload(server), do: GenServer.call(__MODULE__, {:reload, server}, :infinity)
 
   @impl GenServer
-  def init(copy), do: {:ok, %{copy: copy, servers: [], core: nil, apps: nil}}
+  def init(copy), do: {:ok, %{copy: copy, servers: [], rust: nil, core: nil, ui: nil, apps: nil}}
 
   # What the servers run is what's compiled when the first starts, so that's what a change is told from.
   @impl GenServer
   def handle_call({:serving, server}, _from, %{core: nil} = state) do
     copy(state)
-    handle_call({:serving, server}, nil, %{state | core: core(), apps: apps()})
+    handle_call({:serving, server}, nil, %{state | rust: rust(), core: core(), ui: ui(), apps: apps()})
   end
 
   def handle_call({:serving, server}, _from, state), do: {:reply, :ok, %{state | servers: [server | state.servers]}}
 
   # What failed is the request's answer, and the next request tries again.
   def handle_call({:reload, server}, _from, state) do
-    with {:ok, state} <- reloaded(core(), state), {:ok, state} <- deployed(apps(), server, state) do
+    with {:ok, state} <- built(rust(), state),
+         {:ok, state} <- reloaded(core(), state),
+         {:ok, state} <- ui_built(ui(), state),
+         {:ok, state} <- deployed(apps(), server, state) do
       {:reply, :ok, state}
     else
       {:error, why, state} -> {:reply, {:error, why}, state}
     end
   catch
     kind, why -> {:reply, {:error, "The code reloader failed: " <> Exception.format(kind, why, __STACKTRACE__)}, state}
+  end
+
+  defp built(rust, %{rust: rust} = state), do: {:ok, state}
+
+  defp built(rust, state) do
+    Mix.Project.get!().nifs([])
+    {:ok, %{state | rust: rust}}
+  rescue
+    error in Mix.Error ->
+      {:error, "The Rust workspace didn't build: #{Exception.message(error)}, in #{state.copy}.log", state}
   end
 
   defp reloaded(core, %{core: core} = state), do: {:ok, state}
@@ -88,15 +105,33 @@ defmodule CodeReloader do
 
   # Each compiler runs once in a VM unless it's run again, as Phoenix's code reloader runs them.
   defp compiled do
-    for compiler <- Mix.Tasks.Compile.compilers(), do: Mix.Task.reenable("compile.#{compiler}")
+    Mix.Task.Compiler.reenable()
     Mix.Task.rerun("compile.all", ["--no-deps-check", "--return-errors"])
   end
 
   # A copy of what the servers run, which what's compiled next is told from.
   defp copy(state) do
     File.rm_rf!(state.copy)
-    File.mkdir_p!(state.copy)
-    for dir <- ["ebin", "consolidated"], do: File.cp_r!(Path.join(@build, dir), Path.join(state.copy, dir))
+
+    for dir <- ["ebin", "consolidated", "priv/native"], copy = Path.join(state.copy, dir) do
+      File.mkdir_p!(Path.dirname(copy))
+      File.cp_r!(Path.join(@build, dir), copy)
+    end
+  end
+
+  # As `bun build.js` builds it as the network starts, into the folder every server serves it from.
+  defp ui_built(ui, %{ui: ui} = state), do: {:ok, state}
+
+  defp ui_built(ui, state) do
+    case System.cmd("bun", ["build.js"], cd: Path.join(@root, "core/ui"), stderr_to_stdout: true) do
+      {_output, 0} ->
+        for server <- state.servers, do: :ok = :erpc.call(server, Release, :ui, [Path.join(@root, "core/ui/dist")])
+        Mix.shell().info("Built the UI library")
+        {:ok, %{state | ui: ui}}
+
+      {output, _status} ->
+        {:error, "The UI library didn't build:\n" <> output, state}
+    end
   end
 
   defp swap(server, changes, new) do
@@ -131,7 +166,12 @@ defmodule CodeReloader do
     end
   end
 
-  defp code(dir), do: %{ebin: Path.join(dir, "ebin"), consolidated: Path.join(dir, "consolidated")}
+  defp code(dir),
+    do: %{
+      ebin: Path.join(dir, "ebin"),
+      consolidated: Path.join(dir, "consolidated"),
+      native: Path.join(dir, "priv/native")
+    }
 
   defp diagnostic(%{file: file, position: position, message: message}),
     do: "#{Path.relative_to(to_string(file), @root)}:#{line(position)}: #{message}"
@@ -139,14 +179,30 @@ defmodule CodeReloader do
   defp line({line, _column}), do: line
   defp line(line), do: line
 
-  # What One Core's code is compiled from, and what each app is deployed from, by each file's contents: a file's
-  # time is only to the second, and hashing them all takes no longer than reading their times.
-  defp core, do: hashes(Path.wildcard(Path.join(@root, "core/server/lib/**/*.ex")))
+  # What the Rust workspace, One Core's code and the UI library are built from, and what each app is deployed from, by
+  # each file's contents: a file's time is only to the second, and hashing them all takes no longer than reading their
+  # times. One Core's is its NIFs too, as they're built.
+  defp rust, do: hashes(tracked(["*.rs", "*Cargo.toml", "Cargo.lock", ".cargo"]))
+
+  defp core,
+    do:
+      hashes(
+        Path.wildcard(Path.join(@root, "core/server/lib/**/*.ex")) ++ Path.wildcard(Path.join(@build, "priv/native/*"))
+      )
+
+  defp ui, do: hashes(tracked(["core/ui"]))
 
   defp apps do
     for folder <- Path.wildcard(Path.join(@root, "apps/*")), {:ok, paths} <- [Folder.files(folder)], into: %{} do
       {Path.basename(folder), hashes(Enum.map(paths, &Path.join(folder, &1)))}
     end
+  end
+
+  defp tracked(pathspecs) do
+    {files, 0} =
+      System.cmd("git", ["ls-files", "-z", "--cached", "--others", "--exclude-standard", "--" | pathspecs], cd: @root)
+
+    for file <- String.split(files, <<0>>, trim: true), do: Path.join(@root, file)
   end
 
   defp hashes(paths), do: for(path <- paths, {:ok, text} <- [File.read(path)], into: %{}, do: {path, :erlang.md5(text)})

@@ -409,8 +409,9 @@ defmodule OneCore.Release do
   @doc """
   One Core's modules that differ from the code `old` to the code `new`, as `{removed, added, changed}`, and why a
   running server can't load them, or `nil`: the rule `compare/2` applies to them. `old` and `new` are whole builds, or
-  the folders a developer's `_build` keeps One Core's code in, `%{ebin: <folder>, consolidated: <folder>}`, as a local
-  network's code reloader has them (`tooling/code_reloader.exs`). It loads the code of both into the VM it runs
+  the folders a developer's `_build` keeps One Core's code and NIFs in,
+  `%{ebin: <folder>, consolidated: <folder>, native: <folder>}`, as a local network's code reloader has them
+  (`tooling/code_reloader.exs`). It loads the code of both into the VM it runs
   in, as `compare/2` does.
   """
   def modules(old, new) do
@@ -517,15 +518,16 @@ defmodule OneCore.Release do
 
   defp nif?(module), do: Code.ensure_loaded?(module) and function_exported?(module, :__nif__, 0)
 
-  # A NIF's library as the build `build` has it, or `nil` for a developer's `_build`, whose NIFs are built apart.
-  defp native(%{}, _library), do: nil
-
+  # A NIF's library as the build `build` has it.
   defp native(build, library) do
-    case Path.wildcard(Path.join(build, "lib/one_core-*/priv/native/#{library}.{so,dll}")) do
+    case Path.wildcard(Path.join(natives(build), "#{library}.{so,dll}")) do
       [file] -> File.read!(file)
       [] -> nil
     end
   end
+
+  defp natives(%{native: native}), do: native
+  defp natives(build), do: Path.join(build, "lib/one_core-*/priv/native")
 
   @doc """
   Says the calling process keeps what the NIF `nif` (a module that says `use OneCore.Nif`) opened, as
@@ -757,9 +759,17 @@ defmodule OneCore.Release do
       )
 
     Application.put_env(:one_core, :build, named(build))
-    Application.put_env(:one_core, :ui, Path.join(build, "ui"))
+    ui(Path.join(build, "ui"))
+  end
+
+  @doc """
+  Has the UI library this server serves be the build in `folder`, as a hot load does, and the apps built against
+  another built again, by the server that builds them: as a local network's code reloader has it, as it changes.
+  """
+  def ui(folder) do
+    Application.put_env(:one_core, :ui, folder)
     :persistent_term.erase({OneCore.Entrypoint, :library})
-    Task.Supervisor.start_child(OneCore.Asks, &OneCore.Apps.Deploy.rebuild/0)
+    {:ok, _pid} = Task.Supervisor.start_child(OneCore.Asks, &OneCore.Apps.Deploy.rebuild/0)
     :ok
   end
 end
