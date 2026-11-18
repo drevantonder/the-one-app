@@ -38,8 +38,7 @@ defmodule Vault.Store do
       at integer not null, primary key (item, name)
     ) without rowid
     """,
-    # Which item each name is, now that each item is an artifact of its own. The tables before it are what was kept
-    # before that, which each item was copied from (`moved/2`).
+    # Which item each name is, now that each item is an artifact of its own.
     "create table artifacts (id text primary key, name text not null)",
     # What was a plugin is an app.
     "alter table uses rename column plugin to app",
@@ -54,7 +53,12 @@ defmodule Vault.Store do
     "alter table requests add column by text",
     # A request allowed is `allowed`, as `Vault.Requests` names its states, and one that waited too long is kept
     # `expired` by the job that finds it.
-    "update requests set state = 'allowed' where state = 'set'"
+    "update requests set state = 'allowed' where state = 'set'",
+    # What was kept before each item was an artifact of its own, which every item was copied out of.
+    "drop table items",
+    "drop table fields",
+    "drop table uses",
+    "drop table contents"
   ]
 
   # Someone's Vault is theirs alone: no relation tuple has anyone else ask for a user, the network's owner included.
@@ -115,12 +119,7 @@ defmodule Vault.Store do
 
   @doc "The item named `name`, any case: the first whose record is there."
   def find(call, db, name) do
-    ids =
-      transaction(call, db, fn d ->
-        moved(d, db)
-        for %{"id" => id} <- query(d, "select id from artifacts where name = ? collate nocase", [name]), do: id
-      end)
-
+    ids = transaction(call, db, &for(%{"id" => id} <- query(&1, "select id from artifacts where name = ? collate nocase", [name]), do: id))
     Enum.find_value(ids, &record(db, &1))
   end
 
@@ -128,12 +127,7 @@ defmodule Vault.Store do
 
   @doc "Every item that's there."
   def everything(call, db) do
-    ids =
-      transaction(call, db, fn d ->
-        moved(d, db)
-        for %{"id" => id} <- query(d, "select id from artifacts"), do: id
-      end)
-
+    ids = transaction(call, db, &for(%{"id" => id} <- query(&1, "select id from artifacts"), do: id))
     for {:ok, data, _tag} <- Artifact.read_all(root(db), Enum.map(ids, &"#{&1}/item")), do: JSON.decode!(data)
   end
 
@@ -177,39 +171,6 @@ defmodule Vault.Store do
   @doc "What items are called, by their artifacts, deleted ones too, from the database, which keeps each name."
   def names(call, db) do
     for %{"id" => id, "name" => name} <- transaction(call, db, &query(&1, "select id, name from artifacts")), do: {artifact(db, id), name}
-  end
-
-  # The items the database held before each was an artifact of its own are copied into one, each once, under its
-  # id, with what was kept of it, and listed once the copy is written; the database's copy stays as it was.
-  defp moved(d, db) do
-    for old <- query(d, "select * from items where id not in (select id from artifacts)") do
-      fields =
-        for field <- query(d, "select name, value, secret from fields where item = ? order by rowid", [old["id"]]),
-            do: %{"name" => field["name"], "value" => field["value"], "secret" => field["secret"] == 1}
-
-      contents =
-        for kept <- query(d, "select * from contents where item = ?", [old["id"]]), into: %{} do
-          {kept["name"], %{"blob" => "contents/#{kept["blob"]}", "key" => kept["key"], "size" => kept["size"], "at" => kept["at"]}}
-        end
-
-      record = %{
-        "id" => old["id"],
-        "name" => old["name"],
-        "hosts" => JSON.decode!(old["hosts"]),
-        "agents" => old["agents"] == 1,
-        "oauth" => old["oauth"] && JSON.decode!(old["oauth"]),
-        "fields" => fields,
-        "uses" => for(%{"app" => app} <- query(d, "select app from uses where item = ?", [old["id"]]), do: app),
-        "contents" => contents,
-        "state" => nil,
-        "changed" => old["changed"]
-      }
-
-      :ok = Artifact.write(root(db), "#{old["id"]}/item", JSON.encode!(record))
-      query(d, "insert into artifacts (id, name) values (?, ?)", [old["id"], old["name"]])
-    end
-
-    :ok
   end
 
   @doc "A short-lived link to one blob of an item's, as what's handed on takes it: JSON's keys."

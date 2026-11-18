@@ -18,13 +18,18 @@ their own device, where they pick or type it; `save_from_browser` saves one a we
 `fetch` makes a web request with an item they let agents use, and you never see the secret. If someone pastes one anyway, don't repeat it: in code mode, or over the web, ask for it
 with `request`; only as a plain tool on a device (`one mcp`, `one vault set`) keep it with `set`.
 
-- `list` shows what's there: each item's fields, a secret one without its value, its sites, the apps switched
-  on for it, whether agents may use it, its state and its `artifact`, the requests still waiting, the apps that
-  use the Vault, and the kinds of item they keep.
+- `security` says how ready the Vault is, first of all: `not_set_up` (no key yet), `no_server` (no server opens it,
+  so it keeps nothing), `device_lacks_key` (it works, but this device can't choose servers or approve devices) or
+  `ready`; and the devices holding its person's key, those asking to, and the servers that open it.
+- `list` shows what's there: each item's `kind` (`password`, `account` or `app_item`, an app's type), its fields, a
+  secret one without its value, its websites (`hosts`), its `access` (`agents` and the apps switched on for it), its
+  `status` and its `artifact`; every request kept, with its `state`; the apps that use the Vault, by name and title;
+  and the kinds of item they keep.
 - `request` asks for an item by its `title` and the `fields` it needs, for an `app` or, with none, for you.
-  Give the person the link it answers with. Today the link's page tells them to open Vault on a device of
-  theirs, where the request waits at the top; `status` says when they've answered. Allowing it switches the
-  item on for whoever asked, and lets its secrets go to the request's `hosts` too.
+  Give the person the link it answers with: it opens Vault on their device, where it asks as an alert, "<you> wants
+  to use a key", with Don't Allow and Allow, and waits under Requests too. A request moves once, from `waiting` to
+  `allowed`, `declined` or, after a week, `expired`, which `list` says by its `id`. Allowing it gives whoever asked
+  access to the item, and lets its secrets go to the request's `hosts` too; new values typed for it make a new item.
 - `save_from_browser` is how a secret you set up on a website gets in, as a password manager's Save does: an
   OAuth client's secret, an API key, a key file. It takes it from a Chrome or Chrome Profiles `session` of yours,
   straight from the browser, so it never reaches you: from elements on the page (`fields`, each with its `target`,
@@ -32,27 +37,28 @@ with `request`; only as a plain tool on a device (`one mcp`, `one vault set`) ke
   file or a `json` value in it, such as `web.client_secret`), which is deleted once it's saved. Save it the moment
   it shows, before you snapshot or screenshot anything. Give the item's `hosts`, and `secret: false` for what may
   be shown, as a client_id. It makes a new item, or adds to one a save from a browser made, never another; its
-  person is notified and sees "Added by an agent from <site>", with Undo. It answers each field's length and the
+  person is notified and sees "Added by an agent from <site>", and deletes it if they didn't want it. It answers each field's length and the
   first 8 hex of its SHA-256, to check against what the site says. Using it is still the person's to allow: an app
   that needs it, or `fetch`, still asks with `request`, which they answer with the item.
 - `fetch` fills `{{<field>}}` into a request's url, headers or body (escaped as JSON string text in a body whose
   `content-type` is JSON), for an item agents may use, and answers
   the status, headers and body. It goes only to one of the item's sites, and a secret the site says back is
   blotted out.
-- `set` keeps one field of an item, making the item if there's none. Say `secret: false` for what may be
-  shown, as a username, and `hosts` for the sites its secrets go to. The value is encrypted on the device you
+- `set` keeps one field of an item, making a password if there's none by that name. Say `secret: false` for what
+  may be shown, as a username, and `hosts` for the sites its secrets go to, which are added to its own. The value is encrypted on the device you
   run on before it's sent, so `set` is for `one` or MCP on a device, as a plain tool. A script or `call` in code
   mode runs on a server, where nothing encrypts it, so a secret given there is refused: in code mode, and over the
   web, ask with `request` instead.
-- `use` switches an app on for an item, or off. An app that's switched on uses it through the Vault's tools
-  without seeing it, or, one with a service, is handed the secret itself, which trusts its code with it. `agents` lets agents use an item with `fetch`: that's the person's to
-  decide, in the Vault's app or by allowing a request, so ask with `request` and don't call it for yourself.
+- `access` gives an app (`who`, by its name) access to an item, or with `on: false` takes it away. An app with
+  access uses it through the Vault's tools without seeing it, or, one with a service, is handed the secret itself,
+  which trusts its code with it. `who: "agents"` lets agents use it with `fetch`: that's the person's to decide, in
+  the Vault's app or by allowing a request, so ask with `request` and don't give it to yourself.
 - `grant` chooses the servers that open the Vault, from a device that holds its person's key (the skill
   `encryption` says how one comes to). A Vault no server opens keeps no secret, so that comes first.
 - Someone's Vault is theirs alone: nobody asks for another user's, and the network's owner reads none. A group's
   or the network's is its members' to use (`ONE_SUBJECT=groups/family`), and its owner's to choose servers for.
 - Deleting an item is soft delete's, as for anything an app made: `soft-delete delete --artifact` with its
-  `artifact`, as `list` gives it, and it can be restored for 30 days. `remove` takes one field out of an item.
+  `artifact`, as `list` gives it, and it can be restored for 30 days. `remove_field` takes one field out of an item.
 - Deleting an item, switching an app on and choosing servers are a person's decisions. Do them when asked to,
   and say what you did.
 
@@ -92,8 +98,8 @@ and never sees a secret, so an untrusted app can use one too. It requires this a
   or `timeout`. A signed-in item's `access_token` is renewed when it has ended, or when the service says it has.
 - `items` lists the items switched on for the app, each with the service whose sign-in made it:
   `[{"name": "Google a@example.com", "sign_in": "Google", "artifact": "...", "state": null}]`. `state` says which
-  of three states one is in (Item types, below), and `stop_using` switches one off for it, leaving it to whatever
-  else uses it.
+  of three states one is in (Item types, below), and `access` with `on: false` takes the app's own access to one
+  away, as signing out does, leaving it to whatever else uses it. An app never gives itself access.
 - The other tools are its person's, and refuse an app.
 - An app that does something for other apps, as `google-account` does for the Google apps, calls these on
   behalf of whichever called it: `OneCore.Call.tool(call, "vault", "fetch", request, on_behalf_of: call.caller)`.
@@ -107,7 +113,7 @@ An app trusted with a secret itself, whose service hands it to a program, requir
   key a session it holds is encrypted with, in an item it makes, switched on for it. `remove(call, item)` removes
   one, as when that account is signed out. `items(call)` lists what's switched on for it.
 - `value` raises unless the item is switched on for the app, which its person does in the Vault's app or
-  with `use`, or which `keep` did. `values(call, item)` gives all its fields at once, and `rename(call, item, to)`
+  with `access`, or which `keep` did. `values(call, item)` gives all its fields at once, and `rename(call, item, to)`
   renames it, its fields and contents with it.
 - An item's contents are what's too large for a field, like a Chrome profile, kept as 1Password keeps a file: a
   blob of the Vault's, sealed under a key made for it alone, which only the item holds. `write_contents(call, item,
@@ -133,8 +139,9 @@ list of types:
     def hook("vault.types", _about, _call),
       do: [%{name: "Chrome profile", section: "Chrome Profiles", prefix: "Chrome profile: ", component: "profile", create: %{tool: "create", name: true}}]
 
-- `name` is one item of it, as a person reads it, and `prefix` what its items' names start with. An item switched on
-  for the app whose name starts with it is of that type, and what follows is the item as a person reads it.
+- `name` is one item of it, as a person reads it, and `prefix` what its items' names start with. An item the app
+  makes (`keep`, or a sign-in) whose name starts with it is of that type, kept as its kind as it's made, and what
+  follows is the item as a person reads it. One the app makes that's of no type of its is an account.
 - `section` is the heading its items are listed under: its own (Chrome Profiles), or one several apps' types share
   (Accounts).
 - `create` is how one is added, an action as below; `name: true` asks its person for a name first, which the tool is
@@ -147,12 +154,13 @@ list of types:
   opens its page `client/<component>.html` in a frame of its own instead, with the item after a `#`, where it keeps
   what its own app may do. Without a component, an item opens with its fields, as a password does.
 
-An item is in one of three states, which the Vault shows and the app says, with `state` (or `state/5`). The app
-keeps its own detailed states (WhatsApp's linking, Chrome Profiles' update) and says only which of these it's in:
+An item is in one of three states, which the Vault shows and the app that keeps it says, with `state` (or `state/5`):
+only that app, never another with access to it, and never for a password. The app keeps its own detailed states
+(WhatsApp's linking, Chrome Profiles' update) and says only which of these it's in:
 
 - `ready`: usable, which shows nothing: fine is silent. Every item starts there, and a password is always there.
 - `busy`, with a `message` ("Saving…"): something's under way, shown as a spinner and it.
-- `action_required`, with a `message`, why ("Signed out on your phone"), and one `action`: its person has to act,
+- `needs_action`, with a `message`, why ("Signed out on your phone"), and one `action`: its person has to act,
   shown as a dot, why and a button. An action is a tool of the app's, called as its person, whose `url`, if it
   gives one, opens in their browser (`%{label: "Sign In", tool: "sign_in", inputs: %{account: "+614..."}}`), or a
   page of its client's (`%{label: "Sign In", page: "client/sign-in.html#+614..."}`).

@@ -57,14 +57,6 @@ defmodule Vault.Requests do
     end)
   end
 
-  @doc "How a request is: its title and its state."
-  def status(call, db, id) do
-    case Store.transaction(call, db, &Store.query(&1, "select title, state from requests where id = ?", [id])) do
-      [%{"title" => title, "state" => state}] -> %{title: title, state: state}
-      [] -> raise "There's no request #{id}."
-    end
-  end
-
   @doc """
   Answers a request as its person: with one of their items (`item`), with new values for a new item (`values`), or
   declining it. Allowing gives whoever asked access to the item, and lets its secrets go to the request's websites too.

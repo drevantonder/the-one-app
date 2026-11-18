@@ -217,51 +217,6 @@ defmodule Vault do
         outputs: %{type: "object", properties: %{item: item, field: %{type: "string"}}, required: ["item", "field"]}
       },
       %{
-        name: "remove",
-        description:
-          "Takes a field out of an item. Deleting a whole item is soft delete's, as for anything an app made: `soft-delete_delete` with the item's artifact, as `list` gives it, so it can be restored for 30 days.",
-        inputs: %{
-          type: "object",
-          properties: %{item: item, field: %{type: "string", description: "The field to take out"}},
-          required: ["item", "field"]
-        },
-        outputs: %{type: "object", properties: %{item: item, field: %{type: "string"}}, required: ["item", "field"]}
-      },
-      %{
-        name: "use",
-        description: """
-        Switches an app on for an item, so its code may use the item's fields, or with `on` false, off. That
-        trusts the app with the secret. Only the person lets agents use one: ask them, with `request`.
-        """,
-        inputs: %{
-          type: "object",
-          properties: %{
-            item: item,
-            app: %{type: "string", description: "The app's name, like gmail"},
-            on: %{type: "boolean", description: "False switches it off"}
-          },
-          required: ["item", "app"]
-        },
-        outputs: %{
-          type: "object",
-          properties: %{item: item, app: %{type: "string"}, on: %{type: "boolean"}},
-          required: ["item", "app", "on"]
-        }
-      },
-      %{
-        name: "agents",
-        description: """
-        Lets agents use an item with `fetch`, or with `on` false, no longer. This is the person's to decide, in the
-        Vault's app or by answering a request: an agent asks with `request`, and doesn't call this for itself.
-        """,
-        inputs: %{
-          type: "object",
-          properties: %{item: item, on: %{type: "boolean", description: "False stops it"}},
-          required: ["item"]
-        },
-        outputs: %{type: "object", properties: %{item: item, on: %{type: "boolean"}}, required: ["item", "on"]}
-      },
-      %{
         name: "save_from_browser",
         description: """
         Saves a secret from a browser of yours (Chrome's or Chrome Profiles' `session`) into the Vault without you
@@ -322,7 +277,7 @@ defmodule Vault do
         description: """
         Asks the person for a key, token, password or sign-in, for an app or for you to use, instead of handling
         its value yourself. Answers with a link to give them: they pick one of their items or type a new one on
-        their own device, and you never see it. Tell them, and check `status` when they say it's done.
+        their own device, and you never see it. Tell them; `list` says how it went once they say they've answered.
         """,
         inputs: %{
           type: "object",
@@ -342,26 +297,11 @@ defmodule Vault do
         outputs: %{
           type: "object",
           properties: %{
-            id: %{type: "string", description: "The request's id, for status"},
+            id: %{type: "string", description: "The request's id, which `list` gives its state by"},
             link: %{type: ["string", "null"], description: "The link to give the person, where the network has an address"},
             message: %{type: "string", description: "What to tell them"}
           },
           required: ["id", "link", "message"]
-        }
-      },
-      %{
-        name: "status",
-        read_only: true,
-        description: "Says how a request went: waiting, allowed, declined or expired. Never a value. `list` says it too.",
-        inputs: %{
-          type: "object",
-          properties: %{id: %{type: "string", description: "The request's id"}},
-          required: ["id"]
-        },
-        outputs: %{
-          type: "object",
-          properties: %{title: %{type: "string"}, state: %{type: "string", enum: Requests.states()}},
-          required: ["title", "state"]
         }
       },
       %{
@@ -495,15 +435,6 @@ defmodule Vault do
         }
       },
       %{
-        name: "stop_using",
-        description: """
-        For an app's code: switches an item off for the app that calls this, as signing out of it does.
-        Whatever else it's switched on for still uses it.
-        """,
-        inputs: %{type: "object", properties: %{item: item}, required: ["item"]},
-        outputs: %{type: "object", properties: %{item: item}, required: ["item"]}
-      },
-      %{
         name: "state",
         description: """
         For an app's code: says which of three states an item switched on for the app that calls this is in, for
@@ -515,7 +446,7 @@ defmodule Vault do
           type: "object",
           properties: %{
             item: item,
-            state: %{type: "string", enum: ~w(ready busy needs_action action_required), description: "action_required is what needs_action was called"},
+            state: %{type: "string", enum: ~w(ready busy needs_action)},
             message: %{type: "string", description: "What's under way, or why its person has to act"},
             action: %{
               type: "object",
@@ -591,30 +522,6 @@ defmodule Vault do
             }
           },
           required: ["names"]
-        }
-      },
-      %{
-        name: "unlocked_on",
-        read_only: true,
-        description: "Says which servers open your Vault, and which may be chosen to.",
-        inputs: %{type: "object", properties: %{}},
-        outputs: %{
-          type: "object",
-          properties: %{
-            artifact: %{type: "string"},
-            epoch: %{type: "integer"},
-            servers: %{type: "array", items: %{type: "string"}, description: "The servers that open it"},
-            may: %{
-              type: "array",
-              description: "The servers that may be chosen to",
-              items: %{
-                type: "object",
-                properties: %{key: %{type: "string"}, name: %{type: ["string", "null"]}},
-                required: ["key", "name"]
-              }
-            }
-          },
-          required: ["artifact", "epoch", "servers", "may"]
         }
       },
       %{
@@ -891,23 +798,18 @@ defmodule Vault do
   defp delete!(call, db, item), do: Call.tool(call, "soft-delete", "delete", %{"artifact" => Store.artifact(db, item["id"])})
 
   # The tools an app's code calls, which act for it. The rest are its person's.
-  @apps ~w(fetch items sign_in stop_using state access)
+  @apps ~w(fetch items sign_in state access)
 
   @impl true
   def call(tool, _inputs, %Call{caller: caller}) when caller != nil and tool not in @apps,
     do: raise("vault_#{tool} is its person's, not an app's. An app calls #{Enum.join(@apps, ", ")}.")
 
-  def call(tool, _inputs, %Call{caller: nil}) when tool in ~w(items sign_in stop_using state),
+  def call(tool, _inputs, %Call{caller: nil}) when tool in ~w(items sign_in state),
     do: raise("vault_#{tool} is for an app's code, and acts for the app that calls it.")
 
   def call("items", _inputs, call) do
     db = Store.own(call)
     %{items: used_by(db, Items.all(call, db), call.caller)}
-  end
-
-  def call("stop_using", %{"item" => name}, call) do
-    call("access", %{"item" => name, "who" => "itself", "on" => false}, call)
-    %{item: name}
   end
 
   def call("state", %{"item" => name, "state" => state} = inputs, call) do
@@ -929,8 +831,6 @@ defmodule Vault do
     names = Store.names(call, Store.own(call))
     %{names: for({artifact, name} <- names, artifact in artifacts, do: %{artifact: artifact, name: name})}
   end
-
-  def call("unlocked_on", _inputs, call), do: Store.encryption(call).unlocked_on(call, Store.items_artifact(call))
 
   def call("security", inputs, call) do
     opened = Store.encryption(call).unlocked_on(call, Store.items_artifact(call))
@@ -1031,7 +931,7 @@ defmodule Vault do
     end)
   end
 
-  def call(remove, %{"item" => name, "field" => field}, call) when remove in ["remove", "remove_field"] do
+  def call("remove_field", %{"item" => name, "field" => field}, call) do
     db = Store.own(call)
     found = Items.find!(call, db, name)
     if Items.fields(found)[field] == nil, do: raise("#{name} has no field named #{field}.")
@@ -1054,16 +954,6 @@ defmodule Vault do
     %{item: name, who: who, on: on}
   end
 
-  def call("use", %{"item" => name, "app" => app} = inputs, call) do
-    call("access", %{"item" => name, "who" => app, "on" => Map.get(inputs, "on", true)}, call)
-    %{item: name, app: app, on: Map.get(inputs, "on", true)}
-  end
-
-  def call("agents", %{"item" => name} = inputs, call) do
-    call("access", %{"item" => name, "who" => "agents", "on" => Map.get(inputs, "on", true)}, call)
-    %{item: name, on: Map.get(inputs, "on", true)}
-  end
-
   def call("request", %{"title" => title, "fields" => fields} = inputs, call) do
     db = Store.own(call)
     app = if name = inputs["app"], do: Access.who!(call, name)
@@ -1073,8 +963,6 @@ defmodule Vault do
     where = if link, do: "Give them this link: #{link}. It", else: "Ask them to open Vault on a device of theirs: it"
     %{id: id, link: link, message: "#{where} shows the request, to answer on their own device. You never see what they type."}
   end
-
-  def call("status", %{"id" => id}, call), do: Requests.status(call, Store.own(call), id)
 
   def call("answer", %{"id" => id} = inputs, call) do
     db = Store.own(call)

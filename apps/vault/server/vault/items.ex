@@ -160,7 +160,6 @@ defmodule Vault.Items do
   end
 
   # What an app said of its item's status, checked, as an item keeps it: nothing for `ready`, since fine is silent.
-  # `action_required` is what `needs_action` was called.
   defp said!(state, message, action, app) do
     case to_string(state) do
       "ready" ->
@@ -169,7 +168,7 @@ defmodule Vault.Items do
       "busy" when is_binary(message) ->
         %{"state" => "busy", "message" => message, "by" => app}
 
-      needs when needs in ["needs_action", "action_required"] and is_binary(message) and is_map(action) ->
+      "needs_action" when is_binary(message) and is_map(action) ->
         action = JSON.decode!(JSON.encode!(action))
 
         if not is_binary(action["label"]) or not (is_binary(action["tool"]) or is_binary(action["page"])),
@@ -259,7 +258,7 @@ defmodule Vault.Items do
       end
 
     type = item["type"] && Enum.find(types, &(&1.artifact == item["type"]["app"] and &1.name == item["type"]["name"]))
-    apps = for who <- item["access"], who != "agents", do: named(names, who)
+    apps = Enum.uniq(for who <- item["access"], who != "agents", do: named(names, who))
 
     %{
       name: item["name"],
