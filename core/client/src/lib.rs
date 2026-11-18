@@ -685,7 +685,14 @@ pub async fn endpoint(key: SecretKey, network: Option<&Network>, port: u16) -> R
         .secret_key(key)
         .alpns(vec![ALPN.to_vec()])
         .transport_config(
-            QuicTransportConfig::builder().max_idle_timeout(Some(SILENT.try_into()?)).keep_alive_interval(THERE).build(),
+            QuicTransportConfig::builder()
+                .max_idle_timeout(Some(SILENT.try_into()?))
+                .keep_alive_interval(THERE)
+                // The Android emulator's network drops a batch of UDP datagrams sent as one (GSO) without an error, so
+                // a direct path there passes its handshake and pings but no answer of any size: a phone's datagrams
+                // go one at a time, which its radio's speed doesn't notice.
+                .enable_segmentation_offload(!cfg!(target_os = "android"))
+                .build(),
         )
         .relay_mode(relay)
         .net_report_config(probes)
