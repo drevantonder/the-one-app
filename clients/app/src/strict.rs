@@ -200,7 +200,9 @@ async fn window(started: Instant, entrypoint: &str, subject: Option<&str>, link:
                 let respond_asked = asked.clone();
                 let asked_by_app: strict::Asked =
                     Box::new(move |message, appearance| respond(message, appearance, &respond_state, &respond_to, &respond_asked));
-                let mut screen = Screen::new(sandbox, Some(asked_by_app), Size { width: options.size.width.0, height: options.size.height.0 });
+                // Its title bar, which its page keeps clear, as its host context's `safeAreaInsets` tells it.
+                let insets = strict::geometry::Edges { top: BAR.0 as f32, right: 0.0, bottom: 0.0, left: 0.0 };
+                let mut screen = Screen::new(sandbox, Some(asked_by_app), Size { width: options.size.width.0, height: options.size.height.0 }, insets);
                 // What it uses that this host can't draw, seen as it starts: it opens in a web view, with no window here.
                 if let Some(why) = screen.mismatched.take() {
                     return on_event(Event::Mismatched(why));
@@ -209,8 +211,7 @@ async fn window(started: Instant, entrypoint: &str, subject: Option<&str>, link:
                 // Its way Home, as an app's window on a computer has (DESIGN.md, App windows): Home brings the launcher
                 // forward and keeps this window open, as Window → Home Screen does.
                 let ring = format!("data:image/png;base64,{}", BASE64.encode(include_bytes!("../../../icons/Logo.png")));
-                let (bar, start) = (BAR.0 as f32, BAR.1 as f32);
-                screen.breadcrumb = Some(strict::Breadcrumb { ring, icon, name: name.clone(), bar, start, home: Box::new(crate::computer::summon) });
+                screen.breadcrumb = Some(strict::Breadcrumb { ring, icon, name: name.clone(), start: BAR.1 as f32, home: Box::new(crate::computer::summon) });
                 windows.open(options, screen, on_event)
             }
             // Its page's own module didn't start: the window says so, as a web view's page does.
@@ -278,7 +279,6 @@ fn respond(
                 "displayMode": "fullscreen",
                 "availableDisplayModes": ["fullscreen"],
                 "deviceCapabilities": {"touch": false, "hover": true},
-                "safeAreaInsets": {"top": BAR.0, "right": 0, "bottom": 0, "left": 0},
                 "breadcrumb": true,
                 "connection": "online",
                 "updateReady": false,

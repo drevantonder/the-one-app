@@ -209,9 +209,9 @@ pub struct Conditions {
     pub touch: bool,
     pub phone: bool,
     pub reduced_motion: bool,
-    /// What the window keeps for itself at its top, right, bottom and left, in whole pixels: a computer's window its
-    /// breadcrumb's bar. The UI library's `safe-top`, `safe-right`, `safe-bottom` and `safe-left` lengths are these,
-    /// as its tokens say the host sets them.
+    /// What the window keeps for itself at its top, right, bottom and left, in whole pixels (`Screen::insets`, which
+    /// its page is told as `safeAreaInsets`): the UI library's `safe-top`, `safe-right`, `safe-bottom` and `safe-left`
+    /// lengths are these, as its tokens say the host sets them.
     pub insets: [u16; 4],
 }
 

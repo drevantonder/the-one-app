@@ -43,8 +43,7 @@ pub struct Breadcrumb {
     pub ring: String,
     pub icon: Option<String>,
     pub name: String,
-    /// How tall the bar it's in is, which the page keeps clear, and how far in from the window's start it begins.
-    pub bar: f32,
+    /// How far in from the window's start it begins, in the band its top inset keeps clear.
     pub start: f32,
     pub home: Box<dyn FnMut()>,
 }
@@ -82,10 +81,15 @@ pub struct Screen {
     pub breadcrumb: Option<Breadcrumb>,
     home: Option<Bounds<f32>>,
     pressing_home: bool,
-    /// The room its page has, and whether it asked for less motion, as the page was last told them (its host
-    /// context's `containerDimensions` and `reducedMotion`, as a frame's host tells an MCP App).
+    /// What the window keeps for itself at each of its page's edges: a computer's title bar, its traffic lights or
+    /// caption buttons, and its breadcrumb; a phone's status bar, notch and home indicator. The host sets it as the
+    /// window opens and as it changes, and the page is told it as an MCP App is, its host context's `safeAreaInsets`,
+    /// which the UI library's `safe-top`, `safe-right`, `safe-bottom` and `safe-left` lengths are.
+    pub insets: Edges<f32>,
+    /// The room its page has, and whether it asked for less motion, as the page was last told them with its insets
+    /// (its host context's `containerDimensions` and `reducedMotion`).
     room: Size<f32>,
-    told: Option<(Size<f32>, bool)>,
+    told: Option<(Size<f32>, bool, Edges<f32>)>,
     asked: Option<Asked>,
     /// What has the keyboard.
     focused: Option<Id>,
@@ -139,8 +143,9 @@ pub struct Screen {
 }
 
 impl Screen {
-    /// The screen of an app whose JS has started, from what it's posted so far, with `room` logical pixels to draw in.
-    pub fn new(sandbox: Sandbox, asked: Option<Asked>, room: Size<f32>) -> Screen {
+    /// The screen of an app whose JS has started, from what it's posted so far, with `room` logical pixels to draw in,
+    /// `insets` of them its window's own (`Screen::insets`).
+    pub fn new(sandbox: Sandbox, asked: Option<Asked>, room: Size<f32>, insets: Edges<f32>) -> Screen {
         let mut screen = Screen {
             tree: Tree::default(),
             sandbox,
@@ -150,6 +155,7 @@ impl Screen {
             breadcrumb: None,
             home: None,
             pressing_home: false,
+            insets,
             room,
             told: None,
             asked,
@@ -300,7 +306,8 @@ impl Screen {
                             Some(mut answer) if method.as_deref() == Some("ui/initialize") && answer["result"].is_object() => {
                                 answer["result"]["hostContext"]["containerDimensions"] = json!({"width": self.room.width, "height": self.room.height});
                                 answer["result"]["hostContext"]["reducedMotion"] = json!(self.reduced_motion);
-                                self.told = Some((self.room, self.reduced_motion));
+                                answer["result"]["hostContext"]["safeAreaInsets"] = self.safe_area();
+                                self.told = Some((self.room, self.reduced_motion, self.insets));
                                 answers.push(answer);
                             }
                             Some(answer) => answers.push(answer),
@@ -343,18 +350,27 @@ impl Screen {
 
     /// The conditions its tokens' values vary by, as its window is now.
     fn conditions(&self) -> Conditions {
-        let top = self.breadcrumb.as_ref().map_or(0, |crumb| crumb.bar.round() as u16);
-        Conditions { dark: self.dark(), reduced_motion: self.reduced_motion, insets: [top, 0, 0, 0], ..Conditions::default() }
+        let insets = [self.insets.top, self.insets.right, self.insets.bottom, self.insets.left].map(|inset| inset.round().max(0.0) as u16);
+        Conditions { dark: self.dark(), reduced_motion: self.reduced_motion, insets, ..Conditions::default() }
+    }
+
+    /// Its insets as MCP Apps' host context says them (`safeAreaInsets`).
+    fn safe_area(&self) -> Value {
+        json!({"top": self.insets.top, "right": self.insets.right, "bottom": self.insets.bottom, "left": self.insets.left})
     }
 
     /// Paints the screen into `scene`, `size` logical pixels at `scale` device pixels each.
     pub fn paint(&mut self, size: Size<Pixels>, scale: f32, text: &mut TextSystem, atlas: &Atlas, scene: &mut Scene) {
         scene.clear();
-        // The page is told when its room or its motion changes, as a frame's host tells an MCP App.
+        // The page is told when its room, its motion or its insets change, as a frame's host tells an MCP App.
         self.room = Size { width: size.width.0, height: size.height.0 };
-        if self.told.is_some_and(|told| told != (self.room, self.reduced_motion)) {
-            self.told = Some((self.room, self.reduced_motion));
-            let context = json!({"containerDimensions": {"width": self.room.width, "height": self.room.height}, "reducedMotion": self.reduced_motion});
+        if self.told.is_some_and(|told| told != (self.room, self.reduced_motion, self.insets)) {
+            self.told = Some((self.room, self.reduced_motion, self.insets));
+            let context = json!({
+                "containerDimensions": {"width": self.room.width, "height": self.room.height},
+                "reducedMotion": self.reduced_motion,
+                "safeAreaInsets": self.safe_area(),
+            });
             self.message(&json!({"jsonrpc": "2.0", "method": "ui/notifications/host-context-changed", "params": context}));
         }
         let conditions = self.conditions();
@@ -429,7 +445,7 @@ impl Screen {
         }
         // The window's breadcrumb, over its page.
         let hovering = |bounds: &Bounds<f32>| self.pointer.is_some_and(|at| bounds.contains(&at));
-        let home = self.breadcrumb.as_ref().map(|crumb| painter.breadcrumb(crumb, self.home.as_ref().is_some_and(hovering)));
+        let home = self.breadcrumb.as_ref().map(|crumb| painter.breadcrumb(crumb, self.insets.top, self.home.as_ref().is_some_and(hovering)));
         let (placed, mut tab_order, rects, animating, modal) = (painter.placed, painter.tab_order, painter.rects, painter.animating, painter.modal);
         self.home = home;
         let moving = self.transitions.finish(now);
@@ -1470,7 +1486,7 @@ impl Painter<'_> {
     /// A window's breadcrumb over the top of its page (`Breadcrumb`), in a computer's own size, as shadcn's: Home light,
     /// highlighted under the pointer (`hovered`); a muted /; then the app's icon and its name in semibold. → where
     /// Home is.
-    fn breadcrumb(&mut self, crumb: &Breadcrumb, hovered: bool) -> Bounds<f32> {
+    fn breadcrumb(&mut self, crumb: &Breadcrumb, bar: f32, hovered: bool) -> Bounds<f32> {
         let conditions = self.conditions;
         let window = self.window;
         let colour = |id: &str, otherwise: &str| colour_token(id, conditions).unwrap_or_else(|| colour(otherwise, conditions.dark));
@@ -1484,7 +1500,7 @@ impl Painter<'_> {
             tabular: false,
         };
         let (home_style, app_style) = (style(None), style(label.map(|font| font.weight)));
-        let middle = crumb.bar / 2.0;
+        let middle = bar / 2.0;
         let (icon, gap, pad) = (16.0, 6.0, 6.0);
         let mut x = crumb.start;
         // Home, with the ring.

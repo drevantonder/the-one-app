@@ -2,6 +2,7 @@
 //!
 //!     cargo run -p strict --example screenshot -- <page's built folder> <out.png> <out.json> \
 //!       [--ui core/ui/dist/client] [--answers answers.json] [--size 480x360] [--scale 2] [--dark] [--requests <file>|-]
+//!       [--safe-area <top>,<right>,<bottom>,<left>]
 //!
 //! It runs the module the folder's `index.html` loads, as `bun app.js` built it, with the UI library a native host
 //! loads from `--ui` (`bun run build` in core/ui), and answers what the page asks its client from `--answers`, as
@@ -34,6 +35,12 @@ fn main() -> anyhow::Result<()> {
         .unwrap_or((480.0, 360.0));
     let scale: f32 = flag("--scale").and_then(|scale| scale.parse().ok()).unwrap_or(2.0);
     let dark = args.iter().any(|arg| arg == "--dark");
+    // What the window keeps for itself at each edge, as a phone's status bar and home indicator, or a title bar.
+    let safe: Vec<f32> = flag("--safe-area").map(|edges| edges.split(',').filter_map(|edge| edge.parse().ok()).collect()).unwrap_or_default();
+    let insets = match safe[..] {
+        [top, right, bottom, left] => strict::geometry::Edges { top, right, bottom, left },
+        _ => Default::default(),
+    };
     let requests = match flag("--requests").as_deref() {
         Some("-") => std::io::read_to_string(std::io::stdin())?,
         Some(file) => std::fs::read_to_string(file)?,
@@ -95,7 +102,7 @@ fn main() -> anyhow::Result<()> {
             },
         })
     });
-    let mut screen = Screen::new(sandbox, Some(asked), Size { width, height });
+    let mut screen = Screen::new(sandbox, Some(asked), Size { width, height }, insets);
     screen.theme = Some(if dark { Appearance::Dark } else { Appearance::Light });
     let context = Context::new(false)?;
     let device = Size { width: DevicePixels((width * scale).round() as i32), height: DevicePixels((height * scale).round() as i32) };
