@@ -165,6 +165,22 @@ interface Attachment {
 const utf8 = new TextEncoder();
 const refuse = (status: number, why: string) => new Response(why, { status });
 
+/**
+ * Whoever signed `request` with its `body`, if the network admits them, as `admitted` (`{until}` for a device's run
+ * of a client, whose token expires), with what the body says, JSON's, or `{}` with none; or the refusal they're
+ * answered: 403 for one the network doesn't know, and 400 for a body that isn't JSON.
+ */
+async function admit(network: RelayEnv["NETWORK"], request: Request, body: string) {
+  const key = await verifiedKey(request, body);
+  const admitted = key && (await network.admits(key, request.headers.get("one-token")));
+  if (!key || !admitted) return refuse(403, "This network doesn't know you");
+  try {
+    return { key, admitted, said: JSON.parse(body || "{}") as Record<string, unknown> };
+  } catch {
+    return refuse(400, "What was sent isn't JSON");
+  }
+}
+
 export default class extends WorkerEntrypoint<RelayEnv> {
   async fetch(request: Request) {
     const url = new URL(request.url);
@@ -316,13 +332,12 @@ export default class extends WorkerEntrypoint<RelayEnv> {
    * says neither, a server from before they said them, is taken as before: active and running while it's connected.
    */
   async handleSeen(request: Request, url: URL) {
-    const body = request.method === "POST" ? await request.text() : "";
-    const key = await verifiedKey(request, body);
-    const admitted = key && (await this.env.NETWORK.admits(key, request.headers.get("one-token")));
-    if (!admitted) return refuse(403, "This network doesn't know you");
+    const admitted = await admit(this.env.NETWORK, request, request.method === "POST" ? await request.text() : "");
+    if (admitted instanceof Response) return admitted;
+    const { key } = admitted;
     if (request.method === "POST") {
-      if (admitted.until !== undefined) return refuse(403, "Only a server says what it is");
-      const said = JSON.parse(body || "{}") as { server_membership?: ServerMembership; server_daemon_status?: ServerDaemonStatus; version?: unknown } & Reported;
+      if (admitted.admitted.until !== undefined) return refuse(403, "Only a server says what it is");
+      const said = admitted.said as { server_membership?: ServerMembership; server_daemon_status?: ServerDaemonStatus; version?: unknown } & Reported;
       const version = typeof said.version === "string" ? said.version : undefined;
       const status = MEMBERSHIPS.includes(said.server_membership!) && SAID.includes(said.server_daemon_status!)
         ? { server_membership: said.server_membership!, server_daemon_status: said.server_daemon_status!, at: Date.now() }
@@ -350,15 +365,13 @@ export default class extends WorkerEntrypoint<RelayEnv> {
    * gives it.
    */
   async handleUpdate(request: Request) {
-    const body = request.method === "POST" ? await request.text() : "";
-    const key = await verifiedKey(request, body);
-    const admitted = key && (await this.env.NETWORK.admits(key, request.headers.get("one-token")));
-    if (!admitted) return refuse(403, "This network doesn't know you");
+    const admitted = await admit(this.env.NETWORK, request, request.method === "POST" ? await request.text() : "");
+    if (admitted instanceof Response) return admitted;
     let input: Input = { status: true };
     if (request.method === "POST") {
-      if (admitted.until !== undefined) return refuse(403, "Only a server says a build was published, or asks for Update Now");
-      const said = JSON.parse(body || "{}");
-      if (typeof said.published === "string") input = { published: said.published, ...(said.latest && typeof said.latest === "object" && { latest: said.latest }) };
+      if (admitted.admitted.until !== undefined) return refuse(403, "Only a server says a build was published, or asks for Update Now");
+      const { said } = admitted;
+      if (typeof said.published === "string") input = { published: said.published, ...(typeof said.latest === "object" && said.latest !== null && { latest: said.latest as Record<string, string> }) };
       else if (said.now === true) input = { now: true };
       else return refuse(400, 'A server says {"published": <build>, "latest": {<name>: <build>}} or {"now": true}');
     }
@@ -508,8 +521,9 @@ export class Relay extends DurableObject<RelayEnv> {
 
   /** A server connects to hear outsiders' calls. It signed the request, so its key is known at once. */
   async server(request: Request) {
-    const key = await verifiedKey(request, "");
-    if (!key || !(await this.env.NETWORK.admits(key, request.headers.get("one-token")))) return refuse(403, "This network doesn't know you");
+    const admitted = await admit(this.env.NETWORK, request, "");
+    if (admitted instanceof Response) return admitted;
+    const { key } = admitted;
     for (const before of this.ctx.getWebSockets(`outside ${key}`)) before.close(1000, "It connected again");
     const [theirs, ours] = Object.values(new WebSocketPair());
     this.ctx.acceptWebSocket(ours, [`outside ${key}`]);
