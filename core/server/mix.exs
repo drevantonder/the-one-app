@@ -8,6 +8,7 @@ defmodule OneCore.MixProject do
       elixir: "~> 1.20",
       elixirc_paths: elixirc_paths(Mix.env()),
       deps: [
+        {:castore, "~> 1.0"},
         {:ex_json_schema, "~> 0.11"},
         {:fuse, "~> 2.5"},
         {:mime, "~> 2.0"},

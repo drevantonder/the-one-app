@@ -16,6 +16,10 @@ defmodule OneCore.Application do
 
     # A server that couldn't reach the bucket may have missed being told something meanwhile: once it can, it looks again.
     OneCore.Bucket.Fuse.install(&Server.reconnected/0)
+    # Windows keeps a few root certificates and fetches the rest only as its own programs ask it to, which Erlang
+    # doesn't, so github.com's was missing on a new PC: a server there trusts Mozilla's, as Mint does where a system
+    # has none (`castore`). Every `:public_key.cacerts_get/0`, and so every HTTPS request, has them from here.
+    if match?({:win32, _}, :os.type()), do: :ok = :public_key.cacerts_load(CAStore.file_path())
     # Apps tell the time in any zone: `DateTime.new(date, time, "Australia/Sydney")`.
     Calendar.put_time_zone_database(Tz.TimeZoneDatabase)
     {:ok, key} = Iroh.key(Server.key_file())
