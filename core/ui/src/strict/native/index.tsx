@@ -29,6 +29,7 @@ export { Metadata } from "../../metadata.tsx"
 export { Menu } from "../../menu.tsx"
 export { ActionBar, ActionPanel, Keys } from "../../actions.tsx"
 export { Tabs } from "../../tabs.tsx"
+export { Widget } from "../../widget.tsx"
 export { Alert, confirm, Sheet } from "../../sheet.tsx"
 export { toast } from "../../toast.tsx"
 
@@ -39,5 +40,4 @@ const later = (name: string) => () => {
   throw new Error(`${name} isn't drawn on a native host yet (core/ui/src/strict/native/index.tsx)`)
 }
 export const LiveScreen = later("LiveScreen") as typeof Strict.LiveScreen
-export const Widget = later("Widget") as typeof Strict.Widget
 export const visible: typeof Strict.visible = () => true
