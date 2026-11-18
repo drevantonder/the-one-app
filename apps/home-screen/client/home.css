@@ -216,25 +216,46 @@ body {
   text-align: center;
 }
 
-/* The App Store's page: its screen, from its own top, scrolling under the bar. It has no title: its search is in
-   the top row, and its Back, where a category is chosen, at the row's start, in the same glass. */
+/* The App Store's page, and an app's App Store page over the Home Screen: its screen, from its own top, scrolling
+   under the top row. The top row is the screen's bar, drawn in the Home Screen's way: no title on the App Store
+   itself, whose search is in the row; Back, where there's somewhere to go back to, at the row's start, in the same
+   glass; and a screen's name small in its middle, as an iPhone's App Store has it (an app's page fades its name in
+   once the big one has scrolled away, app-store's app.css). What's under it starts below it. */
 .page.store {
   padding: 0 0 5rem;
   --screen-height: 100%;
 }
-.page.store .ui-screen > header {
+:is(.page.store, .about) {
+  --top-bar: calc(var(--safe-top, 0px) + var(--top-row) * var(--pages-scale, 1));
+}
+:is(.page.store, .about) .ui-screen > header {
   min-height: 0;
   height: 0;
   padding: 0;
   z-index: 3;
+  pointer-events: none;
 }
-.page.store .ui-screen > header::before,
-.page.store .ui-screen > header > h1 {
+:is(.page.store, .about) .ui-screen > header::before {
   display: none;
 }
-.page.store .ui-screen > header > .back {
+:is(.page.store, .about) .ui-screen > header > h1 {
   position: absolute;
-  top: calc(var(--safe-top, 0px) + (var(--top-row) - var(--bar)) / 2);
+  top: var(--safe-top, 0px);
+  inset-inline: calc(2 * var(--gutter) + var(--bar) * var(--pages-scale, 1));
+  display: block;
+  height: calc(var(--top-row) * var(--pages-scale, 1));
+  padding: 0;
+  overflow: hidden;
+  font-size: calc(var(--text-base) * var(--pages-scale, 1));
+  font-weight: var(--title-weight);
+  line-height: calc(var(--top-row) * var(--pages-scale, 1));
+  text-align: center;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+:is(.page.store, .about) .ui-screen > header > .back {
+  position: absolute;
+  top: calc(var(--safe-top, 0px) + (var(--top-row) - var(--bar)) / 2 * var(--pages-scale, 1));
   inset-inline-start: calc(var(--gutter) + var(--safe-left, 0px));
   width: var(--bar);
   height: var(--bar);
@@ -245,9 +266,34 @@ body {
   box-shadow: inset 0 0 0 0.5px color-mix(in oklab, var(--foreground) 12%, transparent), inset 0 1px 0 color-mix(in oklab, white 30%, transparent);
   -webkit-backdrop-filter: blur(20px) saturate(1.8);
   backdrop-filter: blur(20px) saturate(1.8);
+  pointer-events: auto;
+  scale: var(--pages-scale, 1);
+  transform-origin: 0 0;
 }
-.page.store .ui-screen > main {
+:is(.page.store, .about) .ui-screen > main {
+  padding-top: calc(var(--top-bar) + 0.75rem);
+}
+:is(.page.store, .about) .ui-screen > main:has(> .ui-search:first-child) {
   padding-top: 0;
+}
+
+/* What scrolls under the status bar and the top row softens into the background there, as iOS 26's scroll edge
+   does, a little past the row, so nothing under the clock or the row is read through it. It's at the top of a page
+   that scrolls, staying there, and takes no room. */
+:is(.page.scrolls, .about)::before {
+  content: "";
+  position: sticky;
+  z-index: 1;
+  top: 0;
+  display: block;
+  height: calc(var(--safe-top, 0px) + var(--top-row) * var(--pages-scale, 1) + 1rem);
+  margin: 0 calc(-1 * var(--page-inline, 0px)) calc(-1 * (var(--safe-top, 0px) + var(--top-row) * var(--pages-scale, 1) + 1rem));
+  background: linear-gradient(var(--background) var(--safe-top, 0px), color-mix(in oklab, var(--background) 85%, transparent) calc(100% - 1.5rem), transparent);
+  -webkit-backdrop-filter: blur(12px);
+  backdrop-filter: blur(12px);
+  -webkit-mask-image: linear-gradient(black calc(100% - 1.5rem), transparent);
+  mask-image: linear-gradient(black calc(100% - 1.5rem), transparent);
+  pointer-events: none;
 }
 
 /* The App Library's and the App Store's search, in the top row as the owner pill is on Home, as tall and in the same
@@ -279,10 +325,11 @@ body {
    icon has its app's name under it, and is as big as the square leaves room for once the name is in; the square's
    padding and gaps follow its width. */
 .page.library {
-  padding: 0 1.25rem 6rem;
+  --page-inline: 1.25rem;
+  padding: 0 var(--page-inline) 6rem;
 }
 .home.wide .page.library {
-  padding-inline: var(--pages-side);
+  --page-inline: var(--pages-side);
 }
 .library .shelf {
   display: grid;
