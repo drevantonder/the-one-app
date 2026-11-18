@@ -17,6 +17,9 @@ import { createActor } from "xstate"
 import {
   Badge,
   Box,
+  negative,
+  styles,
+  tokens,
   Button,
   call,
   changed,
@@ -63,6 +66,24 @@ import { at as gridAt, BAR, type Box as Place, cell as cellOf, DOTS, grid, gridH
 import { type At, carries, type Drop, type Editing, fitted, type Held, type Kind, machine, nearest, pack, type Page, type Placed, shown, spans } from "./machine.ts"
 import type { Entrypoint, Category, Item, Listed, Pages, Size, Widget as WidgetItem } from "./types.ts"
 import { src } from "./types.ts"
+
+/// The Home Screen's own looks, by the design tokens' roles: Liquid Glass for its pills, + and Done, what's opened or
+/// held over a frosted Home Screen, and the window's shadow on what floats.
+const look = styles({
+  cover: { position: "absolute", top: 0, bottom: 0, start: 0, end: 0 },
+  frosted: { backgroundColor: tokens.colour.veil, backdropFilter: tokens.material.thin },
+  pill: { flexDirection: "row", alignItems: "center", borderRadius: tokens.radius.full },
+  glass: { paddingInline: tokens.grid[1], pointerEvents: "auto", backgroundColor: tokens.colour.glass, boxShadow: tokens.shadow.glass, backdropFilter: tokens.material.glass },
+  panel: { position: "absolute", paddingTop: tokens.grid[6], paddingInline: tokens.grid[4], paddingBottom: tokens.grid[4], borderRadius: tokens.radius.large, backgroundColor: tokens.colour.tile },
+  menu: { position: "absolute", overflow: "hidden", borderRadius: tokens.radius.large, backgroundColor: tokens.colour.glass, backdropFilter: tokens.material.glass, boxShadow: tokens.shadow.window, color: tokens.colour.label },
+  overview: { position: "absolute", zIndex: 15, backgroundColor: tokens.colour.veil, backdropFilter: tokens.material.thin, transitionProperty: ["opacity"], transition: tokens.motion.settle },
+  gone: { opacity: 0 },
+  miniature: { position: "relative", overflow: "hidden", borderRadius: tokens.radius.medium, backgroundColor: tokens.colour.background, boxShadow: tokens.shadow.window },
+  // An icon sinks under the finger, dimmed at once, for as long as it takes to hold, and comes back quickly.
+  icon: { position: "relative", scale: { default: 1, pressed: 0.94 }, opacity: { default: 1, pressed: 0.85 }, transitionProperty: ["scale"], transition: tokens.motion.hold },
+  tint: { position: "absolute", top: 0, bottom: 0, start: 0, end: 0, borderRadius: tokens.radius.large, backgroundColor: tokens.colour.tile },
+  chosen: { position: "absolute", top: negative(tokens.grid[1]), bottom: negative(tokens.grid[1]), start: negative(tokens.grid[1]), end: negative(tokens.grid[1]), borderRadius: tokens.radius.medium, backgroundColor: tokens.colour.selection },
+})
 
 const SIZES: Record<Size, string> = { "2x2": "Small", "4x2": "Medium", "4x4": "Large" }
 const json = <T,>(tool: string, inputs?: object, subject?: string): Promise<T> => call(tool, inputs, { subject }).then(JSON.parse)
@@ -259,8 +280,7 @@ function Tile(props: { name: string; icon: string; size: number; scale: number; 
       onClick={(event) => tapping() && props.onPress?.(false, from(event))}
       style={{ alignItems: "center", gap: 7, minWidth: 0, width: "100%" }}
     >
-      {/* TODO(strict v2): an icon sinks under the finger (scale 0.94, dimmed) for as long as it takes to hold. */}
-      <Box style={{ position: "relative", width: props.size, height: props.size }}>
+      <Box style={[look.icon, { width: props.size, height: props.size }]}>
         <Image src={src(props.icon)} alt="" style={{ width: props.size, height: props.size, borderRadius: "xl" }} />
         <Count count={props.badge} />
       </Box>
@@ -510,8 +530,8 @@ function HomeCell(props: {
       }}
     >
       <Show when={props.picked}>
-        {/* TODO(strict v2): a chosen widget brightens its own 6% tint of the panel to 12%, rather than a ring. */}
-        <Box aria-hidden="true" style={{ position: "absolute", top: -4, right: -4, bottom: -4, left: -4, borderRadius: "md", ...(widget() ? { borderWidth: 1, borderColor: "muted-foreground" } : { backgroundColor: "border" }) }} />
+        {/* What's chosen has the highlight behind it: an app's, and a widget's own tint brightened by it. */}
+        <Box aria-hidden="true" style={look.chosen} />
       </Show>
       <Show
         when={widget()}
@@ -656,11 +676,10 @@ function Library(props: { owner: Owner }) {
                   paddingTop: laid().padding.top,
                   paddingInline: laid().padding.inline,
                   paddingBottom: laid().padding.bottom,
-                  // TODO(strict v2): a category's square is a 14% tint of muted-foreground, 1.5rem round.
-                  borderRadius: "xl",
-                  backgroundColor: "muted",
+                  position: "relative",
                 }}
               >
+                <Box aria-hidden="true" style={look.tint} />
                 <For each={shown()} keyed={(entrypoint) => entrypoint.entrypoint ?? entrypoint.app}>
                   {(entrypoint) => <LibraryEntrypoint entrypoint={entrypoint()} owner={props.owner} icon={laid().icon} small />}
                 </For>
@@ -854,28 +873,25 @@ function OpenCategory(props: { owner: Owner; opened: string }) {
       aria-label={category()?.category}
       style={{ position: "absolute", top: 0, left: 0, width: room().width, height: viewport().height, zIndex: 10, pointerEvents: phase() === "closing" ? "none" : "auto" }}
     >
-      {/* TODO(strict v2): what's behind blurs (18px, saturated), and the panel grows from its place's own shape, not to scale. */}
-      <Box aria-hidden="true" onClick={close} style={{ position: "absolute", top: 0, left: 0, right: 0, bottom: 0, backgroundColor: "background", opacity: 0.8 * t() }} />
+      {/* What's behind blurs through a veil. */}
+      <Box aria-hidden="true" onClick={close} style={[look.cover, look.frosted, { opacity: t() }]} />
       <Text role="heading" aria-level={2} style={{ position: "absolute", left: 0, right: 0, top: panel().y - 54, font: "title", textAlign: "center", opacity: t(), translateY: moving() ? 12 * (1 - t()) : 0 }}>
         {category()?.category}
       </Text>
       <Box
-        style={{
-          position: "absolute",
-          left: panel().x,
-          top: panel().y,
-          width: panel().width,
-          height: panel().height,
-          paddingTop: 24,
-          paddingInline: 16,
-          paddingBottom: 16,
-          borderRadius: "xl",
-          backgroundColor: "muted",
-          translateX: moving() ? from().x * (1 - t()) : 0,
-          translateY: moving() ? from().y * (1 - t()) : 0,
-          scale: moving() ? from().scale + (1 - from().scale) * t() : 1,
-          opacity: moving() ? 1 : t(),
-        }}
+        style={[
+          look.panel,
+          {
+            start: panel().x,
+            top: panel().y,
+            width: panel().width,
+            height: panel().height,
+            translateX: moving() ? from().x * (1 - t()) : 0,
+            translateY: moving() ? from().y * (1 - t()) : 0,
+            scale: moving() ? from().scale + (1 - from().scale) * t() : 1,
+            opacity: moving() ? 1 : t(),
+          },
+        ]}
       >
         <Box style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", rowGap: 16, columnGap: 12, opacity: Math.max(0, (t() - 0.3) / 0.7) }}>
           <For each={category()?.entrypoints ?? []} keyed={(entrypoint) => entrypoint.entrypoint ?? entrypoint.app}>
@@ -980,9 +996,8 @@ function Holding(props: { owner: Owner; index: number; held: Held }) {
   const tile = untrack(laidPage).tile
   return (
     <Box style={{ position: "absolute", top: 0, left: 0, width: room().width, height: viewport().height, zIndex: 20 }}>
-      {/* TODO(strict v2): the Home Screen blurs under what's held (14px), the menu has a large shadow, and it shrinks back
-          into what was held as it goes. */}
-      <Box aria-hidden="true" onClick={dismiss} style={{ position: "absolute", top: 0, left: 0, right: 0, bottom: 0, backgroundColor: "background", opacity: 0.85 * Math.min(1, grow.value() * 2) }} />
+      {/* The Home Screen blurs through a veil under what's held, and its menu floats in glass, as a window does. */}
+      <Box aria-hidden="true" onClick={dismiss} style={[look.cover, look.frosted, { opacity: Math.min(1, grow.value() * 2) }]} />
       <Show when={item ?? (props.held.listed as Item | undefined)}>
         {(item) => (
           <Box aria-hidden="true" style={{ position: "absolute", display: "grid", left: held.x + (held.width - copyWidth) / 2, top: held.y + (held.height - copyHeight) / 2, width: copyWidth, height: copyHeight, scale: scale * (1 + 0.06 * motion()), pointerEvents: "none" }}>
@@ -995,19 +1010,16 @@ function Holding(props: { owner: Owner; index: number; held: Held }) {
       <Box
         role="menu"
         aria-label={(item ?? props.held.listed)?.name}
-        style={{
-          position: "absolute",
-          left,
-          ...(below ? { top: held.y + held.height + 12 } : { bottom: height - held.y + 12 }),
-          width: 240,
-          overflow: "hidden",
-          borderRadius: "md",
-          borderWidth: 1,
-          backgroundColor: "card",
-          color: "foreground",
-          opacity: Math.min(1, grow.value() * 3),
-          scale: reducedMotion() ? 1 : 0.25 + 0.75 * motion(),
-        }}
+        style={[
+          look.menu,
+          {
+            start: left,
+            ...(below ? { top: held.y + held.height + 12 } : { bottom: height - held.y + 12 }),
+            width: 240,
+            opacity: Math.min(1, grow.value() * 3),
+            scale: reducedMotion() ? 1 : 0.25 + 0.75 * motion(),
+          },
+        ]}
       >
         <Show when={library && props.held.listed}>
           {(listed) => (
@@ -1174,7 +1186,7 @@ const THUMB = grid(368, 654, 32, 20, 20, 0)
 /// The page overview: every Home page small, in order, each with a tick for whether it's shown. Unticked, a page is
 /// hidden and can be deleted; dragging one puts it elsewhere, following the finger, and taking another's place as it
 /// passes over it. Let go, it springs into its place. Done goes back to editing.
-function Overview(props: { owner: Owner; index: number }) {
+function Overview(props: { owner: Owner; index: number; going?: boolean }) {
   const pages = () => editing()?.pages ?? []
   const [dragging, setDragging] = createSignal<Page>()
   const [moved, setMoved] = createSignal({ x: 0, y: 0 })
@@ -1240,9 +1252,8 @@ function Overview(props: { owner: Owner; index: number }) {
   })
   const scale = MINIATURE / THUMB.width
   return (
-    // TODO(strict v2): the overview is over the blurred Home Screen, fades out as it closes, its miniatures have a shadow,
-    // and the others glide aside as one's dragged.
-    <Box role="dialog" aria-label="Pages" style={{ position: "absolute", top: 0, left: 0, width: room().width, height: viewport().height, zIndex: 15, backgroundColor: "background" }}>
+    // Over the blurred Home Screen, it fades out as it closes; its miniatures float, with a window's shadow.
+    <Box role="dialog" aria-label="Pages" style={[look.overview, props.going && look.gone, { top: 0, start: 0, width: room().width, height: viewport().height }]}>
       <Box style={{ flexDirection: "row", justifyContent: "flex-end", alignItems: "center", paddingTop: room().safe.top, height: room().safe.top + TOP_ROW, paddingInline: 16 }}>
         <Button variant="secondary" onClick={() => home.send({ type: "dismiss" })}>Done</Button>
       </Box>
@@ -1255,7 +1266,7 @@ function Overview(props: { owner: Owner; index: number }) {
                   role="button"
                   aria-label={`Page ${index() + 1}`}
                   {...drag(page, index())}
-                  style={{ position: "relative", width: MINIATURE, height: (MINIATURE * 16) / 9, overflow: "hidden", borderRadius: "md", borderWidth: 1, backgroundColor: "background", scale: dragging() === page ? 1.05 : 1 }}
+                  style={[look.miniature, { width: MINIATURE, height: (MINIATURE * 16) / 9, scale: dragging() === page ? 1.05 : 1 }]}
                 >
                   <Box style={{ position: "absolute", left: (MINIATURE - THUMB.width) / 2, top: ((MINIATURE * 16) / 9 - THUMB.height) / 2, scale, opacity: page.hidden ? 0.4 : 1, pointerEvents: "none" }}>
                     <HomePage owner={props.owner} index={props.index} page={index()} placed={(pack(page.items.map((item, at): Cell => ({ item, index: at })), (cell) => spans(cell.item))[0] ?? [])} laid={THUMB} scale={scale} small />
@@ -1574,9 +1585,9 @@ function DotsPill(props: { owners: Owner[]; laid: Kind[][]; flat?: boolean }) {
   }
   const height = () => (props.flat ? LAUNCHER_FOOT : DOTS)
   return (
-    // TODO(strict v2): the dots pill and the owner pill are iOS 26's Liquid Glass: the pages blur through them, with a
-    // rim of light and a soft shadow.
-    <Box style={{ flexDirection: "row", alignItems: "center", height: height(), paddingInline: props.flat ? 0 : 4, borderRadius: "full", ...(props.flat ? {} : { backgroundColor: "card", borderWidth: 1 }) }}>
+    // iOS 26's Liquid Glass, the pages blurred through it with a rim of light and a soft shadow, but in the launcher's
+    // footer, which is flat.
+    <Box style={[look.pill, !props.flat && look.glass, { height: height() }]}>
       <Roll count={props.owners.length} height={height()} row={(index) => <Dots owner={props.owners[index]} index={index} count={count(index)} size={props.flat ? 6 : 7} />} />
       <Box
         role="button"
@@ -1675,31 +1686,52 @@ function Refused(props: { owner: Owner; held: Held }) {
 }
 
 /// While pages are edited, + and Done float at the top, either side of the owner pill, over the pages, which stay
-/// where they are, as on a phone; in the launcher, in its footer's place. They fade in.
-// TODO(strict v2): + and Done are in the owner pill's glass, and fade out as editing ends.
-function EditBar() {
+/// where they are, as on a phone; in the launcher, in its footer's place, each in Liquid Glass. They fade in, and out
+/// as editing ends.
+function EditBar(props: { going?: boolean }) {
   const fade = tween(200, () => {})
-  onSettled(() => fade.to(1))
+  createEffect(
+    () => !!props.going,
+    (going) => fade.to(going ? 0 : 1),
+  )
   const top = () => (launcher() ? viewport().height - LAUNCHER_FOOT : room().safe.top)
   const height = () => (launcher() ? LAUNCHER_FOOT : TOP_ROW)
   const width = () => (room().wide && !launcher() ? Math.min(room().width - 2 * room().side, room().fit * (laidPage().width * room().scale + room().gap) - room().gap) : room().width)
   return (
     <Box style={{ position: "absolute", zIndex: 7, top: top(), left: (room().width - width()) / 2, width: width(), height: height(), flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingInline: launcher() ? 10 : 16, opacity: fade.value(), pointerEvents: "none" }}>
-      <Box style={{ pointerEvents: "auto" }}>
-        <Button variant="secondary" size="icon" aria-label="Add Widget" onClick={() => state().matches({ editing: "still" }) && home.send({ type: "gallery" })}>
+      <Box style={[look.pill, look.glass]}>
+        <Button variant="ghost" size="icon" aria-label="Add Widget" onClick={() => state().matches({ editing: "still" }) && home.send({ type: "gallery" })}>
           <Icon name="plus" />
         </Button>
       </Box>
-      <Box style={{ pointerEvents: "auto" }}>
-        <Button variant="secondary" onClick={() => home.send({ type: "done" })}>Done</Button>
+      <Box style={[look.pill, look.glass]}>
+        <Button variant="ghost" onClick={() => home.send({ type: "done" })}>Done</Button>
       </Box>
     </Box>
   )
 }
 
+/// What's shown while `when` gives it, kept as it was for `ms` after, as it goes: what to show, and whether it's going.
+function lingering<T>(when: () => T | false | undefined | null, ms: number): [() => T | undefined, () => boolean] {
+  const [shown, setShown] = createSignal<T>()
+  const [going, setGoing] = createSignal(false)
+  let timer: ReturnType<typeof setTimeout> | undefined
+  createEffect(when, (now) => {
+    clearTimeout(timer)
+    if (now) return void (setGoing(false), setShown(() => now))
+    if (untrack(shown) === undefined) return
+    setGoing(true)
+    timer = setTimeout(() => (setShown(undefined), setGoing(false)), ms)
+  })
+  return [shown, going]
+}
+
 function HomeScreen(props: { owners: Owner[] }) {
   // The owners as they are when a spring, a gesture or what the machine sends asks, outside anything that tracks them.
   const owned = () => untrack(() => props.owners)
+  // + and Done, and the pages' overview, fade out as they go, at the settle pace.
+  const [editBar, editBarGoing] = lingering(() => state().matches("editing"), 200)
+  const [overview, overviewGoing] = lingering(() => state().matches({ editing: "overview" }) && editing(), 200)
   // The room the pages have: the window, less the launcher's bars.
   createEffect(
     () => ({ size: viewport(), safe: safeArea(), launcher: launcher() }),
@@ -2360,8 +2392,8 @@ function HomeScreen(props: { owners: Owner[] }) {
         </Show>
         <LauncherFoot owners={props.owners} laid={laid().screens} target={target} open={openTarget} act={act} />
       </Show>
-      <Show when={state().matches("editing")}>
-        <EditBar />
+      <Show when={editBar()}>
+        <EditBar going={editBarGoing()} />
       </Show>
       <Show when={copy()}>
         {(now) => {
@@ -2403,8 +2435,8 @@ function HomeScreen(props: { owners: Owner[] }) {
       </Show>
       <Show when={opened()}>{(opened) => <OpenCategory owner={props.owners[0]} opened={opened()} />}</Show>
       <Show when={held()}>{(held) => <Holding owner={owner()} index={state().context.at.owner} held={held()} />}</Show>
-      <Show when={state().matches({ editing: "overview" }) && editing()}>
-        {(edited) => <Overview owner={props.owners[edited().owner]} index={edited().owner} />}
+      <Show when={overview()}>
+        {(edited) => <Overview owner={props.owners[edited().owner]} index={edited().owner} going={overviewGoing()} />}
       </Show>
       <Show when={editing()}>{(edited) => <Gallery owner={props.owners[edited().owner]} />}</Show>
       <Show when={state().matches("editing") && !state().context.held?.item?.widget && state().context.held?.item && state().context.held}>
