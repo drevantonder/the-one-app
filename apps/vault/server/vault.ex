@@ -390,7 +390,7 @@ defmodule Vault do
         name: "answer",
         description: """
         Answers a request, as its person does on their own device: with one of their items, with new values, or by
-        declining. Allowing it switches the item on for whoever asked.
+        declining. Allowing it switches the item on for whoever asked, and lets its secrets go to `hosts` too.
         """,
         inputs: %{
           type: "object",
@@ -1324,10 +1324,15 @@ defmodule Vault do
   end
 
   # A request allowed with an item: switched on for whichever app asked, or for agents if no app did.
+  # Allowing a request switches the item on for whoever asked, and lets its secrets go to the sites it named too.
   defp allow!(db, request, item) do
-    if app = request["app"],
-      do: change!(db, item, &Map.update!(&1, "uses", fn uses -> Enum.uniq(uses ++ [app]) end)),
-      else: change!(db, item, &Map.put(&1, "agents", true))
+    change!(db, item, fn record ->
+      record = Map.update!(record, "hosts", &Enum.uniq(&1 ++ JSON.decode!(request["hosts"])))
+
+      if app = request["app"],
+        do: Map.update!(record, "uses", &Enum.uniq(&1 ++ [app])),
+        else: Map.put(record, "agents", true)
+    end)
   end
 
   # The item, if `by` may use it: an app switched on for it, or agents its person let.

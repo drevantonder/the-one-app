@@ -24,7 +24,7 @@ with `request`; only as a plain tool on a device (`one mcp`, `one vault set`) ke
 - `request` asks for an item by its `title` and the `fields` it needs, for an `app` or, with none, for you.
   Give the person the link it answers with. Today the link's page tells them to open Vault on a device of
   theirs, where the request waits at the top; `status` says when they've answered. Allowing it switches the
-  item on for whoever asked.
+  item on for whoever asked, and lets its secrets go to the request's `hosts` too.
 - `save_from_browser` is how a secret you set up on a website gets in, as a password manager's Save does: an
   OAuth client's secret, an API key, a key file. It takes it from a Chrome or Chrome Profiles `session` of yours,
   straight from the browser, so it never reaches you: from elements on the page (`fields`, each with its `target`,
@@ -35,7 +35,8 @@ with `request`; only as a plain tool on a device (`one mcp`, `one vault set`) ke
   person is notified and sees "Added by an agent from <site>", with Undo. It answers each field's length and the
   first 8 hex of its SHA-256, to check against what the site says. Using it is still the person's to allow: an app
   that needs it, or `fetch`, still asks with `request`, which they answer with the item.
-- `fetch` fills `{{<field>}}` into a request's url, headers or body, for an item agents may use, and answers
+- `fetch` fills `{{<field>}}` into a request's url, headers or body (escaped as JSON string text in a body whose
+  `content-type` is JSON), for an item agents may use, and answers
   the status, headers and body. It goes only to one of the item's sites, and a secret the site says back is
   blotted out.
 - `set` keeps one field of an item, making the item if there's none. Say `secret: false` for what may be

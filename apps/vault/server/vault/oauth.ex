@@ -77,7 +77,7 @@ defmodule Vault.OAuth do
 
   @doc """
   Makes a web request with `{{<field>}}` filled in from `fields` wherever it's written: in the URL, a header or
-  the body, only to one of `hosts`, so what's asked with an item goes nowhere else. `secret` names the fields that
+  the body (escaped, in a JSON one, as a JSON string's text), only to one of `hosts`, so what's asked with an item goes nowhere else. `secret` names the fields that
   are secret, which are blotted out of what the site answers. Gives `%{status: ..., headers: ..., body: ...}`. A
   redirect is answered as it is, not followed: it may lead to another site.
   """
@@ -97,14 +97,18 @@ defmodule Vault.OAuth do
 
     if not to?(request.url, hosts), do: raise("It's used only with #{listed(hosts)}, and that's #{site}.")
 
-    fill = &Regex.replace(~r/\{\{([A-Za-z0-9_]+)\}\}/, &1, fn _all, field -> fields[field] end)
-    headers = for {name, value} <- request[:headers] || %{}, do: {fill.(name), fill.(value)}
+    fill = fn text, as -> Regex.replace(~r/\{\{([A-Za-z0-9_]+)\}\}/, text, fn _all, field -> as.(fields[field]) end) end
+    plain = &fill.(&1, fn value -> value end)
+    headers = for {name, value} <- request[:headers] || %{}, do: {plain.(name), plain.(value)}
     method = (request[:method] || "get") |> to_string() |> String.downcase() |> method!()
-    body = request[:body] && fill.(request.body)
+
+    # In a JSON body a value is written inside a string, so it's escaped as a JSON string's text is.
+    json? = Enum.any?(headers, fn {name, value} -> String.downcase(name) == "content-type" and value =~ ~r/json/i end)
+    body = request[:body] && if(json?, do: fill.(request.body, &String.slice(JSON.encode!(&1), 1..-2//1)), else: plain.(request.body))
 
     case Req.request(
            method: method,
-           url: fill.(request.url),
+           url: plain.(request.url),
            headers: headers,
            body: body,
            redirect: false,

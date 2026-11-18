@@ -247,7 +247,7 @@ function RequestSheet() {
           <p class="about">
             {request()!.why ? `${request()!.why!.trim().replace(/[^.!?]$/, "$&.")} ` : ""}
             {who()} can use {picked() || request()!.title}
-            {!picked() && request()!.hosts.length ? `, sent only to ${listed(request()!.hosts)}` : ""}. Nobody is shown what you type.
+            {request()!.hosts.length ? `, sent ${picked() ? "to its sites and" : "only"} to ${listed(request()!.hosts)}` : ""}. Nobody is shown what you type.
           </p>
           <Show when={fits().length}>
             <Field label="Use">
