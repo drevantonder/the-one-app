@@ -1,7 +1,7 @@
 //! An app's window drawn natively, where its entrypoint's page is in strict mode and needs a runtime version this
 //! program has (`runtimeVersion`, core/ui/src/strict/renderer.ts's `RUNTIME_VERSION`, `strict::RUNTIME_VERSION`):
 //! this process, the One App's, draws it on its strict thread (`strict::platform`) beside every other strict app's window, so another open
-//! app costs a few MB, and its JS runs in a QuickJS sandbox of its own. Any other app's window is a web view in a
+//! app costs a few MB, and its JS runs in a QuickJS sandbox of its own, on a thread of its own. Any other app's window is a web view in a
 //! process of its own, as before (`host`), and so is a strict one that needs a later runtime version.
 //!
 //! It asks what a page would, over the same channel a web view's window does (`hosts`), here an in-memory one: its
@@ -23,7 +23,7 @@ use std::time::Instant;
 use data_encoding::BASE64;
 use serde_json::{Value, json};
 use strict::geometry::{Pixels, Size};
-use strict::js::{Clock, Files, Sandbox};
+use strict::js::{Clock, Files, Thread};
 use strict::platform::{Event, Strict, WindowId, WindowOptions};
 use strict::{Appearance, Screen};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
@@ -86,6 +86,8 @@ struct Page {
     page: Url,
     module: Url,
     trusted: bool,
+    /// The UI library's design tokens (`ui.css`), and its tables.
+    css: String,
     tables: Vec<String>,
     /// Its name and icon, as a `data:` address, as its app lists them, for the window's title and breadcrumb.
     name: Option<String>,
@@ -117,6 +119,8 @@ async fn probe(entrypoint: &str, subject: Option<&str>) -> anyhow::Result<Option
     let html = crate::hosts::file(page.as_str()).await.map_err(|error| anyhow::anyhow!(error))?;
     let html = BASE64.decode(html["body"].as_str().unwrap_or_default().as_bytes())?;
     let module = module_script(&String::from_utf8_lossy(&html)).ok_or_else(|| anyhow::anyhow!("its page loads no module"))?;
+    let css = crate::hosts::file(page.join("/ui/client/ui.css")?.as_str()).await.map_err(|error| anyhow::anyhow!("ui.css didn't load: {error}"))?;
+    let css = String::from_utf8(BASE64.decode(css["body"].as_str().unwrap_or_default().as_bytes())?)?;
     // Its tables, each needing a runtime version this program has, or it's a web view's. An app with no styles of its own has
     // no table of them.
     let mut tables = Vec::new();
@@ -134,7 +138,7 @@ async fn probe(entrypoint: &str, subject: Option<&str>) -> anyhow::Result<Option
         tables.push(text);
     }
     let name = resource["name"].as_str().filter(|name| !name.is_empty()).map(str::to_owned);
-    Ok(Some(Page { module: page.join(&module)?, page, trusted, tables, name, icon }))
+    Ok(Some(Page { module: page.join(&module)?, page, trusted, css, tables, name, icon }))
 }
 
 /// Opens the launcher's page natively, if it's strict and of a version this program speaks, in a panel put away until
@@ -161,8 +165,16 @@ enum Kind {
 }
 
 async fn window(started: Instant, entrypoint: &str, subject: Option<&str>, link: &str, mut kind: Kind) -> anyhow::Result<bool> {
-    let Some(Page { page, module, trusted, tables, name: listed, icon }) = probe(entrypoint, subject).await? else { return Ok(false) };
+    let Some(Page { page, module, trusted, css, tables, name: listed, icon }) = probe(entrypoint, subject).await? else { return Ok(false) };
     let launcher = matches!(kind, Kind::Launcher(_));
+    // The design tokens and styles, which come with the UI library, as its pages' do, and its app's styles.
+    strict::tokens::load(&css);
+    if let [tokens, styles @ ..] = &tables[..] {
+        strict::tokens::load_table(tokens)?;
+        for styles in styles {
+            strict::load_styles(styles)?;
+        }
+    }
     let strict = Strict::get()?;
     let asked: Arc<Mutex<HashMap<String, Asked>>> = Arc::default();
     let window: Arc<OnceLock<WindowId>> = Arc::default();
@@ -182,17 +194,19 @@ async fn window(started: Instant, entrypoint: &str, subject: Option<&str>, link:
     let state = Arc::new(Mutex::new(State { chosen: chosen.clone(), trusted, entrypoint: entrypoint.to_owned(), view, next: 0, launcher }));
     let (entrypoint, subject, link) = (entrypoint.to_owned(), subject.map(str::to_owned), link.to_owned());
     let cache = crate::app().shell.home()?.join("strict").join(::client::BUILD);
+    // The page's files, which the app's window has, each asked for as the sandbox imports it, on its JS thread, which
+    // starts now, as its window opens.
+    let next = std::sync::atomic::AtomicU64::new(0);
+    let files: Files = Box::new(move |url: &Url| {
+        let id = format!("f{}", next.fetch_add(1, std::sync::atomic::Ordering::Relaxed));
+        let (answer_to, answer) = mpsc::channel();
+        files_asked.lock().expect("nothing panics holding it").insert(id.clone(), Asked::File(answer_to));
+        let _ = files_to.send(json!({"id": id, "file": url.as_str()}));
+        let file = answer.recv()?.map_err(|error| anyhow::anyhow!("{error}"))?;
+        Ok(String::from_utf8(file)?)
+    });
+    let js = Thread::start(&module, files, Some(cache), Clock::real());
     strict.run(move |windows| {
-        // The page's files, which the app's window has, each asked for as the sandbox imports it, on the strict thread.
-        let next = std::sync::atomic::AtomicU64::new(0);
-        let mut files: Files = Box::new(move |url: &Url| {
-            let id = format!("f{}", next.fetch_add(1, std::sync::atomic::Ordering::Relaxed));
-            let (answer_to, answer) = mpsc::channel();
-            files_asked.lock().expect("nothing panics holding it").insert(id.clone(), Asked::File(answer_to));
-            let _ = files_to.send(json!({"id": id, "file": url.as_str()}));
-            let file = answer.recv()?.map_err(|error| anyhow::anyhow!("{error}"))?;
-            Ok(String::from_utf8(file)?)
-        });
         let (size, panel) = match launcher {
             true => ((computer::SIZE.width as f32, computer::SIZE.height as f32), Some(computer::CORNER)),
             false => ((1024.0, 720.0), None),
@@ -204,18 +218,6 @@ async fn window(started: Instant, entrypoint: &str, subject: Option<&str>, link:
             tag: json!({"entrypoint": entrypoint, "subject": subject}),
             panel: panel.map(|corner| corner as f32),
         };
-        // The design tokens, which come with the UI library, as its pages' do.
-        let tokens = module.join("/ui/client/ui.css").map_err(anyhow::Error::from).and_then(|css| files(&css));
-        let sandbox = tokens.and_then(|css| {
-            strict::tokens::load(&css);
-            if let [tokens, styles @ ..] = &tables[..] {
-                strict::tokens::load_table(tokens)?;
-                for styles in styles {
-                    strict::load_styles(styles)?;
-                }
-            }
-            Sandbox::start(&module, files, Some(cache), Clock::real())
-        });
         let app = entrypoint.split('/').next().unwrap_or_default().to_owned();
         let on_event = {
             let (to, app, entrypoint, subject, link) = (to.clone(), app.clone(), entrypoint.clone(), subject.clone(), link.clone());
@@ -240,6 +242,12 @@ async fn window(started: Instant, entrypoint: &str, subject: Option<&str>, link:
                     let _ = to.send(json!({"id": "visible", "command": "visible", "args": {"onScreen": false}}));
                 }
                 Event::Closed => {}
+                // The launcher's is only its page's: one that didn't start is the web launcher's.
+                Event::Failed(why) if launcher => {
+                    eprintln!("the launcher is a web view's: its page didn't start: {why}");
+                    computer::native(None);
+                }
+                Event::Failed(why) => eprintln!("{entrypoint} didn't start: {why}"),
                 // The launcher whose page turns out to need what this host can't draw is the web launcher's.
                 Event::Mismatched(why) if launcher => {
                     eprintln!("the launcher is a web view's: {why}");
@@ -254,8 +262,8 @@ async fn window(started: Instant, entrypoint: &str, subject: Option<&str>, link:
                 }
             }
         };
-        let opened = match sandbox {
-            Ok(sandbox) => {
+        let opened = match js {
+            Ok(js) => {
                 let respond_state = state.clone();
                 let respond_to = to.clone();
                 let respond_asked = asked.clone();
@@ -265,11 +273,7 @@ async fn window(started: Instant, entrypoint: &str, subject: Option<&str>, link:
                 // launcher has none.
                 let top = if launcher { 0.0 } else { BAR.0 as f32 };
                 let insets = strict::geometry::Edges { top, right: 0.0, bottom: 0.0, left: 0.0 };
-                let mut screen = Screen::new(sandbox, Some(asked_by_app), Size { width: options.size.width.0, height: options.size.height.0 }, insets);
-                // What it uses that this host can't draw, seen as it starts: it opens in a web view, with no window here.
-                if let Some(why) = screen.mismatched.take() {
-                    return on_event(Event::Mismatched(why));
-                }
+                let mut screen = Screen::new(js, Some(asked_by_app), Size { width: options.size.width.0, height: options.size.height.0 }, insets);
                 screen.theme = theme(chosen.as_deref());
                 // A picture it names by an address is one of its app's files, as a web view's page loads it.
                 let next_picture = std::cell::Cell::new(0u64);
@@ -291,19 +295,7 @@ async fn window(started: Instant, entrypoint: &str, subject: Option<&str>, link:
                 }
                 windows.open(options, screen, on_event)
             }
-            // Its page's own module didn't start: the window says so, as a web view's page does.
-            Err(error) => {
-                eprintln!("{entrypoint} didn't start: {error:#}");
-                windows.open_failed(options, &format!("{name} didn't open"), on_event)
-            }
-        };
-        // The launcher's is only its page's: one that didn't start is the web launcher's.
-        let opened = match opened {
-            Ok(id) if launcher && windows.failed(id) => {
-                windows.close(id);
-                Err(anyhow::anyhow!("its page didn't start"))
-            }
-            opened => opened,
+            Err(error) => Err(error),
         };
         match opened {
             Ok(id) => drop(window.set(id)),

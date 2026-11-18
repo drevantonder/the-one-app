@@ -1,8 +1,9 @@
 //! Every strict app's window, drawn by one thread of one process: one connection to the display, one GPU context, one
-//! glyph atlas and one font set, and a QuickJS sandbox per app (its `Screen`), so another open app costs a few MB, as
-//! Zed's and Raycast's windows do. What the rest of the program asks of them (open one, tell one's app something) is a
-//! job run on that thread (`Strict::run`), as GPUI's foreground executor runs its work: on a computer a thread of its
-//! own, and on Android the app's UI thread, where its views are (`android`).
+//! glyph atlas and one font set, and a QuickJS sandbox per app (its `Screen`'s) on a thread of its own (`js::Thread`),
+//! so another open app costs a few MB, as Zed's and Raycast's windows do, and one busy in its JS holds up no window's
+//! frames. What the rest of the program asks of them (open one, tell one's app something) is a job run on that thread
+//! (`Strict::run`), as GPUI's foreground executor runs its work: on a computer a thread of its own, and on Android the
+//! app's UI thread, where its views are (`android`).
 
 use std::collections::HashMap;
 use std::sync::{Arc, OnceLock};
@@ -43,6 +44,8 @@ pub enum Event {
     Closed,
     /// Its page uses what this host can't draw, so it's closed, to open in a web view: why.
     Mismatched(String),
+    /// Its page's module didn't run, so it says only that its app didn't open: why.
+    Failed(String),
     /// A panel was summoned and its frame is on screen: how long after it was asked to show (`summon`).
     Shown(std::time::Duration),
     /// A panel put itself away, as something else was clicked or came in front.
@@ -157,6 +160,7 @@ struct Window {
     summoned: Option<std::time::Instant>,
     /// What it shows: its app's screen, or why its app didn't open.
     screen: Result<Screen, String>,
+    title: String,
     /// What draws it, once it has a surface: at once on a computer, as its view's is made on Android.
     renderer: Option<Renderer>,
     scene: crate::render::scene::Scene,
@@ -186,7 +190,9 @@ impl Windows {
         Ok(Windows { display, context, atlas, text, windows: HashMap::new(), next: 1 })
     }
 
-    /// Opens a window showing `screen`, which tells `on_event` what happens to it.
+    /// Opens a window showing `screen`, which tells `on_event` what happens to it. It's shown once its app's JS
+    /// has started and heard back from what it first asked, or has waited long enough (`SHOWN_WITHIN`), and drawn
+    /// as that posts what it changed.
     pub fn open(&mut self, options: WindowOptions, mut screen: Screen, on_event: impl FnMut(Event) + 'static) -> anyhow::Result<WindowId> {
         let id = self.next;
         self.next += 1;
@@ -196,29 +202,43 @@ impl Windows {
         if let Some(clipboard) = clipboard() {
             screen.clipboard = clipboard;
         }
+        if let Some(strict) = Strict::started() {
+            screen.on_post(move || strict.run(move |windows| windows.posted(id)));
+        }
         let renderer = self.renderer(&native)?;
         let opened = std::time::Instant::now();
         let panel = options.panel.is_some();
         self.windows.insert(
             id,
-            Window { native, opened, shown: panel, panel, visible: false, summoned: None, screen: Ok(screen), renderer, scene: Default::default(), dirty: true, drawn: false, glass: Vec::new(), on_event: Box::new(on_event), tag: options.tag },
+            Window {
+                native,
+                opened,
+                shown: panel,
+                panel,
+                visible: false,
+                summoned: None,
+                screen: Ok(screen),
+                title: options.title,
+                renderer,
+                scene: Default::default(),
+                dirty: true,
+                drawn: false,
+                glass: Vec::new(),
+                on_event: Box::new(on_event),
+                tag: options.tag,
+            },
         );
         Ok(id)
     }
 
-    /// Opens a window that says only `why`, centred: its app didn't open.
-    pub fn open_failed(&mut self, options: WindowOptions, why: &str, on_event: impl FnMut(Event) + 'static) -> anyhow::Result<WindowId> {
-        let id = self.next;
-        self.next += 1;
-        let native = self.display.open(id, &options)?;
-        let renderer = self.renderer(&native)?;
-        let opened = std::time::Instant::now();
-        let panel = options.panel.is_some();
-        self.windows.insert(
-            id,
-            Window { native, opened, shown: panel, panel, visible: false, summoned: None, screen: Err(why.to_owned()), renderer, scene: Default::default(), dirty: true, drawn: false, glass: Vec::new(), on_event: Box::new(on_event), tag: options.tag },
-        );
-        Ok(id)
+    /// Window `id`'s app's JS posted what it changed: it's applied, and drawn on the loop's turn.
+    fn posted(&mut self, id: WindowId) {
+        if let Some(window) = self.windows.get_mut(&id)
+            && let Ok(screen) = &mut window.screen
+            && screen.pump()
+        {
+            window.dirty = true;
+        }
     }
 
     /// What draws `native`, where it has a surface to draw on yet.
@@ -240,11 +260,6 @@ impl Windows {
         let window = self.windows.get_mut(&id)?;
         window.dirty = true;
         window.screen.as_mut().ok().map(f)
-    }
-
-    /// Whether window `id` shows only why its app didn't open.
-    pub fn failed(&self, id: WindowId) -> bool {
-        self.windows.get(&id).is_some_and(|window| window.screen.is_err())
     }
 
     /// Every window, for the inspector's `windows`: what it says it is, its id (`window`), and its `window` op's
@@ -389,6 +404,14 @@ impl Windows {
             {
                 screen.fire();
                 window.dirty = true;
+            }
+        }
+        // A window whose page's module didn't run says only that its app didn't open.
+        for window in self.windows.values_mut() {
+            if let Some(why) = window.screen.as_ref().ok().and_then(Screen::didnt_start).map(str::to_owned) {
+                window.screen = Err(format!("{} didn't open", window.title));
+                window.dirty = true;
+                (window.on_event)(Event::Failed(why));
             }
         }
         let mismatched: Vec<(WindowId, String)> =

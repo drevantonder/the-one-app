@@ -18,7 +18,7 @@ use std::path::PathBuf;
 
 use serde_json::{Value, json};
 use strict::geometry::{DevicePixels, Pixels, Size};
-use strict::js::{Clock, Files, Sandbox};
+use strict::js::{Clock, Files, Thread};
 use strict::render::{Atlas, Context, Renderer, scene::Scene};
 use strict::text::{PlatformTextSystem, TextSystem};
 use strict::{Appearance, Screen};
@@ -83,8 +83,7 @@ fn main() -> anyhow::Result<()> {
 
     let started = std::time::Instant::now();
     let mut text = TextSystem::new(PlatformTextSystem::new(strict::FONT, strict::fonts()?, false));
-    let sandbox = Sandbox::start(&page, files, None, Clock::fixed())?;
-    let ran = started.elapsed();
+    let js = Thread::start(&page, files, None, Clock::fixed())?;
     // What the page asks its client, answered from `answers`, as record.js answers it.
     let asked: strict::Asked = Box::new(move |message, _| {
         let id = message.get("id")?.clone();
@@ -102,8 +101,14 @@ fn main() -> anyhow::Result<()> {
             },
         })
     });
-    let mut screen = Screen::new(sandbox, Some(asked), Size { width, height }, insets);
+    let mut screen = Screen::new(js, Some(asked), Size { width, height }, insets);
     screen.theme = Some(if dark { Appearance::Dark } else { Appearance::Light });
+    // Its JS runs on a thread of its own, as in a window: each step is drawn once what it set off has run.
+    screen.idle();
+    let ran = started.elapsed();
+    if let Some(why) = screen.didnt_start() {
+        anyhow::bail!("its page didn't start: {why}");
+    }
     let context = Context::new(false)?;
     let device = Size { width: DevicePixels((width * scale).round() as i32), height: DevicePixels((height * scale).round() as i32) };
     let atlas = std::sync::Arc::new(Atlas::new(&context));
@@ -111,6 +116,7 @@ fn main() -> anyhow::Result<()> {
     let mut scene = Scene::default();
     let size = Size { width: Pixels(width), height: Pixels(height) };
     let mut draw = |screen: &mut Screen| -> anyhow::Result<(u32, u32, Vec<u8>)> {
+        screen.idle();
         screen.paint(size, scale, &mut text, renderer.sprite_atlas(), &mut scene);
         renderer.draw(&scene);
         renderer.read().ok_or_else(|| anyhow::anyhow!("nothing was drawn"))
@@ -135,6 +141,7 @@ fn main() -> anyhow::Result<()> {
         let to = answered.clone();
         let deadline = request.f64("deadline").unwrap_or(5000.0);
         screen.inspect(request, Box::new(move |answer| *to.borrow_mut() = Some(answer)));
+        screen.idle();
         // A `settle` not settled at once is told so at its deadline.
         if answered.borrow().is_none() {
             std::thread::sleep(std::time::Duration::from_secs_f64(deadline / 1000.0));
@@ -145,6 +152,8 @@ fn main() -> anyhow::Result<()> {
     }
     let (w, h, rgba) = draw(&mut screen)?;
     let drawn = started.elapsed();
+    // What it told the page as it drew (where each node is, what's in sight) has run, for its tree.
+    screen.idle();
     renderer.destroy();
     image::RgbaImage::from_raw(w, h, rgba).ok_or_else(|| anyhow::anyhow!("the frame is the wrong size"))?.save(png)?;
     std::fs::write(tree, serde_json::to_string_pretty(&screen.semantics())?)?;

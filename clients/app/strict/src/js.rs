@@ -10,9 +10,13 @@
 //! QuickJS's own `qjsc` compiles a program ahead of time. What the Web APIs answer with a promise runs on rquickjs's
 //! async runtime, which nothing here waits on: each call into the sandbox runs its jobs until none is left.
 
-use std::cell::{Cell, RefCell};
+use std::cell::RefCell;
+use std::collections::VecDeque;
 use std::path::PathBuf;
 use std::rc::Rc;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Condvar, Mutex, mpsc};
+use std::time::Duration;
 
 use anyhow::anyhow;
 use futures_lite::future::block_on;
@@ -48,47 +52,62 @@ const STACK: usize = 1 << 20;
 
 /// What the sandbox reads its clock from, in ms since it started: the real time, or, for output that's the same every
 /// time, one that starts at a fixed time and moves only as it's told. Either is paused, stepped and sought by the
-/// inspector (`crate::inspect`): paused, it moves only as it's told (`advance`).
+/// inspector (`crate::inspect`): paused, it moves only as it's told (`advance`). The app's JS thread and its window's
+/// read the same one.
 #[derive(Clone)]
-pub struct Clock(Rc<Ticking>);
+pub struct Clock(Arc<Ticking>);
 
 struct Ticking {
     /// What `Date` says at its start, in ms since 1970, for a fixed clock; the real date otherwise.
     epoch_ms: Option<f64>,
     started: std::time::Instant,
-    /// How far it's been moved on, beyond the real time since it started.
-    ahead: Cell<f64>,
-    /// Where it stopped, while it's paused.
-    paused: Cell<Option<f64>>,
+    /// How far it's been moved on, beyond the real time since it started, and where it stopped, while it's paused.
+    moved: Mutex<Moved>,
+}
+
+#[derive(Clone, Copy)]
+struct Moved {
+    ahead: f64,
+    paused: Option<f64>,
 }
 
 impl Clock {
     pub fn real() -> Clock {
-        Clock(Rc::new(Ticking { epoch_ms: None, started: std::time::Instant::now(), ahead: Cell::new(0.0), paused: Cell::new(None) }))
+        Clock(Arc::new(Ticking { epoch_ms: None, started: std::time::Instant::now(), moved: Mutex::new(Moved { ahead: 0.0, paused: None }) }))
     }
 
     /// 1 January 2026, 00:00 UTC, paused.
     pub fn fixed() -> Clock {
-        Clock(Rc::new(Ticking { epoch_ms: Some(1_767_225_600_000.0), started: std::time::Instant::now(), ahead: Cell::new(0.0), paused: Cell::new(Some(0.0)) }))
+        Clock(Arc::new(Ticking { epoch_ms: Some(1_767_225_600_000.0), started: std::time::Instant::now(), moved: Mutex::new(Moved { ahead: 0.0, paused: Some(0.0) }) }))
+    }
+
+    fn moved(&self) -> std::sync::MutexGuard<'_, Moved> {
+        self.0.moved.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
+
+    fn elapsed(&self) -> f64 {
+        self.0.started.elapsed().as_secs_f64() * 1000.0
     }
 
     pub fn now(&self) -> f64 {
-        self.0.paused.get().unwrap_or_else(|| self.0.started.elapsed().as_secs_f64() * 1000.0 + self.0.ahead.get())
+        let moved = *self.moved();
+        moved.paused.unwrap_or_else(|| self.elapsed() + moved.ahead)
     }
 
     pub fn paused(&self) -> bool {
-        self.0.paused.get().is_some()
+        self.moved().paused.is_some()
     }
 
     pub fn pause(&self) {
-        if !self.paused() {
-            self.0.paused.set(Some(self.now()));
-        }
+        let now = self.now();
+        self.moved().paused.get_or_insert(now);
     }
 
     pub fn resume(&self) {
-        if let Some(at) = self.0.paused.take() {
-            self.0.ahead.set(at - self.0.started.elapsed().as_secs_f64() * 1000.0);
+        let elapsed = self.elapsed();
+        let mut moved = self.moved();
+        if let Some(at) = moved.paused.take() {
+            moved.ahead = at - elapsed;
         }
     }
 
@@ -111,15 +130,16 @@ impl Clock {
 
     /// Moves it on by `ms`.
     pub fn advance(&self, ms: f64) {
-        match self.0.paused.get() {
-            Some(at) => self.0.paused.set(Some(at + ms)),
-            None => self.0.ahead.set(self.0.ahead.get() + ms),
+        let mut moved = self.moved();
+        match moved.paused.as_mut() {
+            Some(at) => *at += ms,
+            None => moved.ahead += ms,
         }
     }
 }
 
 /// Reads a module's source by its address.
-pub type Files = Box<dyn FnMut(&Url) -> anyhow::Result<String>>;
+pub type Files = Box<dyn FnMut(&Url) -> anyhow::Result<String> + Send>;
 
 /// What the app's JS gave its host.
 pub enum Posted {
@@ -127,11 +147,13 @@ pub enum Posted {
     Mutation(Mutation),
     /// A JSON-RPC message for its client (`host.post`), as JSON.
     Message(String),
+    /// What it threw, as a browser's console logs an uncaught error: it carries on.
+    Threw(String),
 }
 
 /// One app's JS, running.
 /// Its fields drop in order: what's held in the runtime before the runtime.
-pub struct Sandbox {
+struct Sandbox {
     /// The prelude's `due`, `fire` and `unhandled`.
     host: Persistent<rquickjs::Object<'static>>,
     context: AsyncContext,
@@ -145,7 +167,8 @@ pub struct Sandbox {
 impl Sandbox {
     /// Starts the module at `page`, which a page's `<script type="module">` names, running it until it waits on
     /// something. It and its imports are read by `files`, each compiled once and kept in `cache`.
-    pub fn start(page: &Url, files: Files, cache: Option<PathBuf>, clock: Clock) -> anyhow::Result<Sandbox> {
+    /// QuickJS stops what it runs, as an uncatchable error, once `stop` is set: its window closed.
+    fn start(page: &Url, files: Files, cache: Option<PathBuf>, clock: Clock, stop: Arc<AtomicBool>) -> anyhow::Result<Sandbox> {
         let runtime = AsyncRuntime::new()?;
         let rejected: Rc<RefCell<Vec<(Persistent<Value<'static>>, Persistent<Value<'static>>)>>> = Rc::default();
         let to = rejected.clone();
@@ -155,6 +178,7 @@ impl Sandbox {
             runtime.set_gc_threshold(MEMORY / 4).await;
             runtime.set_max_stack_size(STACK).await;
             runtime.set_loader(Resolve, Modules { files, cache }).await;
+            runtime.set_interrupt_handler(Some(Box::new(move || stop.load(Ordering::Relaxed)))).await;
             // QuickJS tells of a rejected promise with no handler as it's rejected, and again if one is added after.
             runtime
                 .set_host_promise_rejection_tracker(Some(Box::new(move |ctx, promise, reason, handled| {
@@ -203,7 +227,7 @@ impl Sandbox {
 
     /// Tells the UI library what the person did (`ui.event`), or a message from its client (`ui.message`), as a
     /// plain object made directly, and runs it until it waits again.
-    pub fn send(&self, to: &str, message: &serde_json::Value) -> anyhow::Result<()> {
+    fn send(&self, to: &str, message: &serde_json::Value) -> anyhow::Result<()> {
         let called = block_on(self.context.with(|ctx| {
             let ui: rquickjs::Object = run(&ctx, ctx.globals().get("ui"))?;
             let function: Function = run(&ctx, ui.get(to))?;
@@ -216,7 +240,7 @@ impl Sandbox {
     }
 
     /// When its next timer is due, in ms from now on its clock, if it has one.
-    pub fn due(&self) -> Option<f64> {
+    fn due(&self) -> Option<f64> {
         let due: f64 = block_on(self.context.with(|ctx| -> rquickjs::Result<f64> {
             let host = self.host.clone().restore(&ctx)?;
             host.get::<_, Function>("due")?.call(())
@@ -226,7 +250,7 @@ impl Sandbox {
     }
 
     /// Each of its timers: when it's due, in ms from now (`in`), and how often an interval runs (`every`).
-    pub fn timers(&self) -> Vec<serde_json::Value> {
+    fn timers(&self) -> Vec<serde_json::Value> {
         block_on(self.context.with(|ctx| -> rquickjs::Result<String> {
             let host = self.host.clone().restore(&ctx)?;
             host.get::<_, Function>("timers")?.call(())
@@ -237,7 +261,7 @@ impl Sandbox {
     }
 
     /// Runs the timers that are due.
-    pub fn fire(&self) -> anyhow::Result<()> {
+    fn fire(&self) -> anyhow::Result<()> {
         let fired = block_on(self.context.with(|ctx| {
             let host = run(&ctx, self.host.clone().restore(&ctx))?;
             run(&ctx, host.get::<_, Function>("fire").and_then(|fire| fire.call::<_, ()>(())))
@@ -279,9 +303,9 @@ impl Sandbox {
     }
 
     /// Collects what its JS no longer holds, as a browser does while nothing's happening, and puts off its next
-    /// collection until it holds twice as much and 8 MB more, within its memory, so a frame doesn't wait on one:
+    /// collection until it holds twice as much and 8 MB more, within its memory, so what it's sent doesn't wait on one:
     /// QuickJS's collector goes through all it holds at once, 15 to 25 ms for a long list's page.
-    pub fn collect(&self) {
+    fn collect(&self) {
         block_on(async {
             self.runtime.run_gc().await;
             let held = usize::try_from(self.runtime.memory_usage().await.malloc_size).unwrap_or(0);
@@ -290,12 +314,231 @@ impl Sandbox {
     }
 
     /// What it has given its host since this was last asked.
-    pub fn take(&self) -> Vec<Posted> {
+    fn take(&self) -> Vec<Posted> {
         std::mem::take(&mut *self.posted.borrow_mut())
+    }
+
+}
+
+/// One app's JS on a thread of its own, as React Native's runs off its UI thread: its window's thread sends it what
+/// the person did and what its client said (`send`) and goes on drawing, and it sends back what that changed as one
+/// batch a turn (`take`), which its window applies at once, waking that thread to (`on_post`). A window whose app is
+/// busy still scrolls, animates and draws, and so does every other.
+pub struct Thread {
+    calls: mpsc::Sender<Call>,
+    shared: Arc<Shared>,
+    clock: Clock,
+    /// How many calls it's been sent.
+    sent: u64,
+}
+
+enum Call {
+    /// `ui.event` or `ui.message`, with what it says.
+    Send(&'static str, serde_json::Value),
+    /// Runs the timers that are due, and looks again at when the next is, as its clock was moved or paused.
+    Fire,
+}
+
+#[derive(Default)]
+struct Shared {
+    posted: Mutex<Posts>,
+    /// Told as a batch comes, or the thread ends.
+    turned: Condvar,
+    /// What to call as a batch comes and none was waiting, and whether one is.
+    wake: Mutex<Option<Box<dyn Fn() + Send>>>,
+    waiting: AtomicBool,
+    /// Its window closed: what's running stops.
+    stop: Arc<AtomicBool>,
+}
+
+#[derive(Default)]
+struct Posts {
+    posted: VecDeque<Posted>,
+    /// How many calls it's run, whether its module has run (or why it didn't), and whether the thread ended.
+    ran: u64,
+    started: Option<Result<(), String>>,
+    ended: bool,
+    /// When its next timer is due, on its clock, and each of its timers (`Sandbox::timers`), as its last turn left them.
+    due: Option<f64>,
+    timers: Vec<serde_json::Value>,
+    /// When, on its clock, its last turn ended.
+    turned: f64,
+}
+
+/// How long its JS is still before what it dropped is collected: a pause in scrolling or typing, as a browser's idle
+/// time is.
+const IDLE: Duration = Duration::from_millis(250);
+
+/// How much stack its thread has: the sandbox's, and room for Rust's around it.
+const THREAD_STACK: usize = STACK * 4;
+
+impl Thread {
+    /// Starts the module at `page` on a thread of its own, as `Sandbox::start` says.
+    pub fn start(page: &Url, files: Files, cache: Option<PathBuf>, clock: Clock) -> anyhow::Result<Thread> {
+        let (calls, queue) = mpsc::channel::<Call>();
+        let shared = Arc::new(Shared::default());
+        let (page, on, time) = (page.clone(), shared.clone(), clock.clone());
+        std::thread::Builder::new().name(format!("js {}", page.host_str().unwrap_or_default())).stack_size(THREAD_STACK).spawn(move || {
+            // Told as it ends, however it does, so nothing waits on it for ever.
+            struct Ended(Arc<Shared>);
+            impl Drop for Ended {
+                fn drop(&mut self) {
+                    self.0.post(|posts| posts.ended = true);
+                }
+            }
+            let _ended = Ended(on.clone());
+            let sandbox = match Sandbox::start(&page, files, cache, time.clone(), on.stop.clone()) {
+                Ok(sandbox) => sandbox,
+                Err(error) => return on.post(|posts| posts.started = Some(Err(format!("{error:#}")))),
+            };
+            // Whether it's run something since it last collected.
+            let (mut threw, mut ran, mut collect) = (Vec::new(), 0, true);
+            loop {
+                // A timer due now runs now, its clock paused or not.
+                while sandbox.due().is_some_and(|due| due <= 0.0) {
+                    threw.extend(sandbox.fire().err());
+                    collect = true;
+                }
+                let (due, timers) = (sandbox.due(), sandbox.timers());
+                let now = time.now();
+                // It's started once what its module posted as it ran is here too, so its window shows that.
+                on.post(|posts| {
+                    posts.started = Some(Ok(()));
+                    posts.posted.extend(sandbox.take());
+                    posts.posted.extend(threw.drain(..).map(|error: anyhow::Error| Posted::Threw(format!("{error:#}"))));
+                    posts.ran += std::mem::take(&mut ran);
+                    posts.due = due.map(|due| now + due);
+                    (posts.timers, posts.turned) = (timers, now);
+                });
+                // Its next timer, by the real time, unless its clock is paused, or what it dropped collected once it's
+                // been still a while.
+                let timer = due.filter(|_| !time.paused()).map(|due| Duration::from_secs_f64(due.max(0.0) / 1000.0));
+                let still = collect.then_some(IDLE);
+                let first = match timer.into_iter().chain(still).min() {
+                    Some(wait) => match queue.recv_timeout(wait) {
+                        Ok(call) => Some(call),
+                        Err(mpsc::RecvTimeoutError::Timeout) => {
+                            if still.is_some_and(|still| still <= wait) {
+                                collect = false;
+                                sandbox.collect();
+                            }
+                            None
+                        }
+                        Err(mpsc::RecvTimeoutError::Disconnected) => return,
+                    },
+                    None => match queue.recv() {
+                        Ok(call) => Some(call),
+                        Err(_) => return,
+                    },
+                };
+                collect |= first.is_some();
+                // Every call that's come runs in this turn, and what they changed goes back as one batch.
+                for call in first.into_iter().chain(std::iter::from_fn(|| queue.try_recv().ok())) {
+                    ran += 1;
+                    if let Call::Send(to, message) = call {
+                        threw.extend(sandbox.send(to, &message).err());
+                    }
+                }
+            }
+        })?;
+        Ok(Thread { calls, shared, clock, sent: 0 })
+    }
+
+    /// Tells the UI library what the person did (`ui.event`), or a message from its client (`ui.message`), for its
+    /// thread to run when it can.
+    pub fn send(&mut self, to: &'static str, message: serde_json::Value) {
+        self.call(Call::Send(to, message));
+    }
+
+    /// Has it run the timers that are due, as its clock was moved or paused, and wait again till its next.
+    pub fn fire(&mut self) {
+        self.call(Call::Fire);
+    }
+
+    fn call(&mut self, call: Call) {
+        if self.calls.send(call).is_ok() {
+            self.sent += 1;
+        }
+    }
+
+    /// What it's given its host since this was last asked: what it did with what it was sent, a batch at a time.
+    pub fn take(&self) -> Vec<Posted> {
+        self.shared.waiting.store(false, Ordering::Release);
+        self.shared.posts().posted.drain(..).collect()
+    }
+
+    /// Calls `wake`, from its thread, as it posts what its window hasn't taken: at once if it already has.
+    pub fn on_post(&self, wake: impl Fn() + Send + 'static) {
+        *self.shared.wake.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = Some(Box::new(wake));
+        self.shared.waiting.store(false, Ordering::Release);
+        self.shared.woken();
+    }
+
+    /// Whether its module has run (`Ok`), or why it didn't, once it's known.
+    pub fn started(&self) -> Option<Result<(), String>> {
+        self.shared.posts().started.clone()
+    }
+
+    /// Whether it has something it was sent to run yet, or hasn't started: what it then posts is on its way.
+    pub fn busy(&self) -> bool {
+        let posts = self.shared.posts();
+        !posts.ended && (posts.started.is_none() || posts.ran < self.sent)
+    }
+
+    /// Waits until it has run all it was sent, or ended.
+    pub fn wait(&self) {
+        let mut posts = self.shared.posts();
+        while !posts.ended && (posts.started.is_none() || posts.ran < self.sent) {
+            posts = self.shared.turned.wait(posts).unwrap_or_else(std::sync::PoisonError::into_inner);
+        }
+    }
+
+    /// When its next timer is due, in ms from now on its clock, if it has one.
+    pub fn due(&self) -> Option<f64> {
+        Some(self.shared.posts().due? - self.clock.now())
+    }
+
+    /// Each of its timers: when it's due, in ms from now (`in`), and how often an interval runs (`every`).
+    pub fn timers(&self) -> Vec<serde_json::Value> {
+        let posts = self.shared.posts();
+        let since = self.clock.now() - posts.turned;
+        let mut timers = posts.timers.clone();
+        for timer in &mut timers {
+            timer["in"] = serde_json::json!(timer["in"].as_f64().unwrap_or_default() - since);
+        }
+        timers
     }
 
     pub fn clock(&self) -> &Clock {
         &self.clock
+    }
+}
+
+impl Drop for Thread {
+    /// Its window closed: what it's running stops, and with no more to run, its thread ends.
+    fn drop(&mut self) {
+        self.shared.stop.store(true, Ordering::Relaxed);
+    }
+}
+
+impl Shared {
+    fn posts(&self) -> std::sync::MutexGuard<'_, Posts> {
+        self.posted.lock().unwrap_or_else(std::sync::PoisonError::into_inner)
+    }
+
+    /// Changes what's posted, and tells whoever waits on it, and its window, if it's not been told already.
+    fn post(&self, change: impl FnOnce(&mut Posts)) {
+        change(&mut self.posts());
+        self.turned.notify_all();
+        self.woken();
+    }
+
+    fn woken(&self) {
+        if !self.waiting.swap(true, Ordering::AcqRel) {
+            if let Some(wake) = self.wake.lock().unwrap_or_else(std::sync::PoisonError::into_inner).as_ref() {
+                wake();
+            }
+        }
     }
 }
 

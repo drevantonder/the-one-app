@@ -315,9 +315,10 @@ pub struct Asked {
 }
 
 /// What's still pending, as `settle` lists it, from what the app asked and hasn't heard back, its timers
-/// (`Sandbox::timers`, each `{in, every?}`), how many properties are on their way (`moving`), and whether what it draws
-/// changed since the frame drawn last (`changed`), so a frame is due, which what changed starts moving in.
-pub fn pending(asked: &HashMap<String, Asked>, timers: &[Value], moving: usize, changed: bool) -> Vec<Value> {
+/// (`Thread::timers`, each `{in, every?}`), how many properties are on their way (`moving`), whether what it draws
+/// changed since the frame drawn last (`changed`), so a frame is due, which what changed starts moving in, and whether
+/// its JS thread is still running what it was sent (`running`), or starting.
+pub fn pending(asked: &HashMap<String, Asked>, timers: &[Value], moving: usize, changed: bool, running: bool) -> Vec<Value> {
     let mut pending: Vec<Value> = asked
         .values()
         .map(|asked| json!({"kind": "request", "method": asked.method, "tool": asked.tool, "ms": asked.since.elapsed().as_millis() as u64}))
@@ -332,6 +333,9 @@ pub fn pending(asked: &HashMap<String, Asked>, timers: &[Value], moving: usize, 
     }
     if changed {
         pending.push(json!({"kind": "frame"}));
+    }
+    if running {
+        pending.push(json!({"kind": "script"}));
     }
     pending
 }

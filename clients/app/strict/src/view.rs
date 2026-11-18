@@ -12,7 +12,7 @@ use taffy::prelude::{AvailableSpace, NodeId, TaffyTree};
 use crate::editing::{self, Clipboard, Field, Ime};
 use crate::geometry::{Background, Bounds, ContentMask, Corners, Edges, Hsla, Pixels, Point, ScaledPixels, Size, point, px};
 use crate::inspect::{self, Key, Rect, Rects};
-use crate::js::{Posted, Sandbox};
+use crate::js::{Posted, Thread};
 use crate::render::Atlas;
 use crate::render::atlas::AtlasKey;
 use crate::render::scene::{Backdrop, BorderStyle, PolychromeSprite, Quad, Scene, Shadow, TransformationMatrix};
@@ -94,7 +94,11 @@ const SHORTCUT_HELD: std::time::Duration = std::time::Duration::from_millis(600)
 
 pub struct Screen {
     tree: Tree,
-    sandbox: Sandbox,
+    /// Its app's JS, on a thread of its own, and whether its module has run, or why it didn't.
+    js: Thread,
+    started: Option<Result<(), String>>,
+    /// The inspector's answers to what it did, each told once the app's JS has run what that did.
+    replies: Vec<(Value, inspected::Reply)>,
     /// As Colour Mode says, or as the device is (`None`).
     pub theme: Option<Appearance>,
     /// As the device is, which the window says.
@@ -165,8 +169,6 @@ pub struct Screen {
     /// The tree as Taffy lays it out, kept from frame to frame (`Retained`), the states its styles were last resolved
     /// in, and the frame it's on.
     layout: Retained,
-    /// When its JS's garbage is collected, once nothing's happened for `IDLE`.
-    collect: Option<Instant>,
     styled: States,
     frame: u64,
     /// What the last frame showed, which a frame that would show the same doesn't paint again.
@@ -200,12 +202,14 @@ pub struct Screen {
 }
 
 impl Screen {
-    /// The screen of an app whose JS has started, from what it's posted so far, with `room` logical pixels to draw in,
-    /// `insets` of them its window's own (`Screen::insets`).
-    pub fn new(sandbox: Sandbox, asked: Option<Asked>, room: Size<f32>, insets: Edges<f32>) -> Screen {
+    /// The screen of an app whose JS is starting on its own thread, which it draws as that posts, with `room` logical
+    /// pixels to draw in, `insets` of them its window's own (`Screen::insets`).
+    pub fn new(js: Thread, asked: Option<Asked>, room: Size<f32>, insets: Edges<f32>) -> Screen {
         let mut screen = Screen {
             tree: Tree::default(),
-            sandbox,
+            js,
+            started: None,
+            replies: Vec::new(),
             theme: None,
             appearance: Appearance::Light,
             reduced_motion: false,
@@ -242,7 +246,6 @@ impl Screen {
             again: false,
             transitions: Default::default(),
             layout: Retained::default(),
-            collect: None,
             styled: States::default(),
             frame: 0,
             seen: None,
@@ -269,8 +272,26 @@ impl Screen {
         &self.tree
     }
 
-    pub fn sandbox(&self) -> &Sandbox {
-        &self.sandbox
+    /// Calls `wake` on its app's JS thread as that posts what this hasn't applied (`pump`).
+    pub fn on_post(&self, wake: impl Fn() + Send + 'static) {
+        self.js.on_post(wake);
+    }
+
+    /// Why its app's module didn't run, once it's known it didn't.
+    pub fn didnt_start(&self) -> Option<&str> {
+        self.started.as_ref()?.as_ref().err().map(String::as_str)
+    }
+
+    /// Waits for its app's JS to run all it's been sent, and what the host answers at once of what that asked, applying
+    /// what it posts: for a harness, which draws what a step left once it's done.
+    pub fn idle(&mut self) {
+        loop {
+            self.js.wait();
+            self.pump();
+            if !self.js.busy() {
+                return;
+            }
+        }
     }
 
     /// The semantic tree, as an agent and a screen reader read it.
@@ -278,9 +299,9 @@ impl Screen {
         json!(self.tree.semantics(0))
     }
 
-    /// Whether the app is waiting to hear back from its client about something it asked.
+    /// Whether the app hasn't started yet, or is waiting to hear back from its client about something it asked.
     pub fn waiting(&self) -> bool {
-        !self.unanswered.is_empty()
+        self.started.is_none() || !self.unanswered.is_empty()
     }
 
     pub fn dark(&self) -> bool {
@@ -295,14 +316,11 @@ impl Screen {
     /// Tells the app event `name` on node `id`, with what it says of it (`told`), when it happened on the clock the
     /// app's own is, as every DOM event has its `timeStamp`, and takes what it changed.
     pub(super) fn tell(&mut self, id: Id, name: &str, told: Value) {
-        let mut event = json!({"id": id, "name": name, "timeStamp": self.sandbox.clock().now()});
+        let mut event = json!({"id": id, "name": name, "timeStamp": self.js.clock().now()});
         if let (Some(event), Value::Object(told)) = (event.as_object_mut(), told) {
             event.extend(told);
         }
-        if let Err(error) = self.sandbox.send("event", &event) {
-            self.threw(error);
-        }
-        self.pump();
+        self.js.send("event", event);
     }
 
     /// Tells node `id` it was clicked, at `at` in the window, or in its middle by a key or an agent, with where it's
@@ -318,34 +336,29 @@ impl Screen {
         if message.get("method").is_none() {
             self.unanswered.remove(&message["id"].to_string());
         }
-        if let Err(error) = self.sandbox.send("message", message) {
-            self.threw(error);
-        }
-        self.pump();
+        self.js.send("message", message.clone());
     }
 
     /// Logs what the app's JS threw, as a browser's console does, and carries on.
-    fn threw(&mut self, error: anyhow::Error) {
-        eprintln!("strict app error: {error:#}");
-        self.failed = Some(format!("{error:#}"));
+    fn threw(&mut self, error: String) {
+        eprintln!("strict app error: {error}");
+        self.failed = Some(error);
     }
 
-    /// How long until the screen has something to do by itself: the app's next timer, unless its clock is paused,
-    /// or an inspector's `settle` coming to its deadline. The window calls `fire` then.
+    /// How long until the screen has something to do by itself: an inspector's `settle` coming to its deadline, a
+    /// frame of what moves, or the caret's blink. The window calls `fire` then. The app's timers are its JS thread's.
     pub fn due(&self) -> Option<Duration> {
-        let timer = self.sandbox.due().filter(|_| !self.sandbox.clock().paused()).map(|due| Duration::from_secs_f64(due.max(0.0) / 1000.0));
         let now = Instant::now();
         let settle = self.settling.iter().map(|(until, _)| until.saturating_duration_since(now)).min();
         // What moves by itself draws again each frame.
         let frame = self.animating.then_some(Duration::from_millis(16));
-        let collect = self.collect.map(|at| at.saturating_duration_since(now));
-        timer.into_iter().chain(settle).chain(frame).chain(self.blinks()).chain(collect).min()
+        settle.into_iter().chain(frame).chain(self.blinks()).min()
     }
 
     /// How long until the caret blinks on or off: as GTK's does, on two thirds of each 1.2 s and off a third, until
     /// it's been still 10 s, when it stays on. None while the app's clock is paused, or no input has the keyboard.
     fn blinks(&self) -> Option<Duration> {
-        let clock = self.sandbox.clock();
+        let clock = self.js.clock();
         let typing = self.active && self.focused.is_some_and(|id| self.fields.contains_key(&id));
         let since = clock.now() - self.blink;
         if !typing || clock.paused() || since >= BLINK_STOPS {
@@ -358,100 +371,84 @@ impl Screen {
 
     /// Whether the caret shows now.
     fn caret_shows(&self) -> bool {
-        let since = self.sandbox.clock().now() - self.blink;
+        let since = self.js.clock().now() - self.blink;
         self.active && (since >= BLINK_STOPS || since % BLINK < BLINK * 2.0 / 3.0)
     }
 
-    /// Runs the app's timers that are due, and tells the `settle`s whose time has come.
+    /// Applies what the app's JS has posted, and tells the `settle`s whose time has come.
     pub fn fire(&mut self) {
-        if self.collect.is_some_and(|at| at <= Instant::now()) {
-            self.collect = None;
-            self.sandbox.collect();
-        }
-        if self.sandbox.due().is_some_and(|due| due <= 0.0) {
-            if let Err(error) = self.sandbox.fire() {
-                self.threw(error);
-            }
-            self.pump();
-        }
+        self.pump();
         self.tell_settled();
     }
 
-    /// Applies what the app has posted, and answers what it asked that the host answers at once.
-    fn pump(&mut self) {
-        // What its JS dropped is collected once it's been still a while (`Sandbox::collect`).
-        self.collect = Some(Instant::now() + IDLE);
-        loop {
-            let mut answers = Vec::new();
-            let appearance = self.theme.unwrap_or(self.appearance);
-            for posted in self.sandbox.take() {
-                match posted {
-                    // What comes after what this host can't draw goes to the web view it opens in instead.
-                    Posted::Mutation(_) if self.mismatched.is_some() => {}
-                    Posted::Mutation(mutation) => {
-                        match self.tree.apply([mutation]) {
-                            Err(error) if error.is::<crate::tree::Mismatch>() => self.mismatched = Some(error.to_string()),
-                            Err(error) => self.threw(error),
-                            Ok(()) => self.changed(),
-                        }
+    /// Applies what the app's JS has posted since it was last asked, all at once, as it's one turn's or more, and
+    /// answers what it asked that the host answers at once. → whether anything came.
+    pub fn pump(&mut self) -> bool {
+        let posted = self.js.take();
+        let came = !posted.is_empty() || self.started.is_none();
+        if self.started.is_none() {
+            self.started = self.js.started();
+        }
+        let appearance = self.theme.unwrap_or(self.appearance);
+        for posted in posted {
+            match posted {
+                Posted::Threw(error) => self.threw(error),
+                // What comes after what this host can't draw goes to the web view it opens in instead.
+                Posted::Mutation(_) if self.mismatched.is_some() => {}
+                Posted::Mutation(mutation) => match self.tree.apply([mutation]) {
+                    Err(error) if error.is::<crate::tree::Mismatch>() => self.mismatched = Some(error.to_string()),
+                    Err(error) => self.threw(format!("{error:#}")),
+                    Ok(()) => self.changed(),
+                },
+                Posted::Message(message) => {
+                    let (Ok(message), Some(asked)) = (serde_json::from_str::<Value>(&message), self.asked.as_mut()) else { continue };
+                    let (id, method, tool) = (message.get("id").map(Value::to_string), message["method"].as_str().map(str::to_owned), message["params"]["name"].as_str().map(str::to_owned));
+                    // What it copies, or shares, which a computer with no share sheet copies (`done`: "copied"), goes on
+                    // the clipboard.
+                    if let (Some(id), Some(asked @ ("one/copy" | "one/share")), Some(text)) = (message.get("id"), method.as_deref(), message["params"]["text"].as_str()) {
+                        self.clipboard.write(false, text);
+                        let result = if asked == "one/share" { json!({"done": "copied"}) } else { json!({}) };
+                        self.js.send("message", json!({"jsonrpc": "2.0", "id": id, "result": result}));
+                        continue;
                     }
-                    Posted::Message(message) => {
-                        let (Ok(message), Some(asked)) = (serde_json::from_str::<Value>(&message), self.asked.as_mut()) else { continue };
-                        let (id, method, tool) = (message.get("id").map(Value::to_string), message["method"].as_str().map(str::to_owned), message["params"]["name"].as_str().map(str::to_owned));
-                        // What it copies, or shares, which a computer with no share sheet copies (`done`: "copied"), goes on
-                        // the clipboard.
-                        if let (Some(id), Some(asked @ ("one/copy" | "one/share")), Some(text)) = (message.get("id"), method.as_deref(), message["params"]["text"].as_str()) {
-                            self.clipboard.write(false, text);
-                            let result = if asked == "one/share" { json!({"done": "copied"}) } else { json!({}) };
-                            answers.push(json!({"jsonrpc": "2.0", "id": id, "result": result}));
-                            continue;
+                    match asked(message, appearance) {
+                        // What only the window knows of where the page is, which it adds to its client's answer.
+                        Some(mut answer) if method.as_deref() == Some("ui/initialize") && answer["result"].is_object() => {
+                            answer["result"]["hostContext"]["containerDimensions"] = json!({"width": self.room.width, "height": self.room.height});
+                            answer["result"]["hostContext"]["reducedMotion"] = json!(self.reduced_motion);
+                            answer["result"]["hostContext"]["safeAreaInsets"] = self.safe_area();
+                            answer["result"]["hostContext"]["visible"] = json!(self.visible);
+                            self.told = Some((self.room, self.reduced_motion, self.insets));
+                            self.js.send("message", answer);
                         }
-                        match asked(message, appearance) {
-                            // What only the window knows of where the page is, which it adds to its client's answer.
-                            Some(mut answer) if method.as_deref() == Some("ui/initialize") && answer["result"].is_object() => {
-                                answer["result"]["hostContext"]["containerDimensions"] = json!({"width": self.room.width, "height": self.room.height});
-                                answer["result"]["hostContext"]["reducedMotion"] = json!(self.reduced_motion);
-                                answer["result"]["hostContext"]["safeAreaInsets"] = self.safe_area();
-                                answer["result"]["hostContext"]["visible"] = json!(self.visible);
-                                self.told = Some((self.room, self.reduced_motion, self.insets));
-                                answers.push(answer);
+                        Some(answer) => self.js.send("message", answer),
+                        None => {
+                            if let (Some(id), Some(method)) = (id, method) {
+                                self.unanswered.insert(id, inspect::Asked { method, tool, since: Instant::now() });
                             }
-                            Some(answer) => answers.push(answer),
-                            None => {
-                                if let (Some(id), Some(method)) = (id, method) {
-                                    self.unanswered.insert(id, inspect::Asked { method, tool, since: Instant::now() });
-                                }
-                            }
                         }
                     }
-                }
-            }
-            if answers.is_empty() {
-                // What says `autofocus` takes the keyboard as it says so, as an active menu item does.
-                let wants: Vec<Id> = self.tree.autofocused().collect();
-                self.autofocused.retain(|id| wants.contains(id));
-                if let Some(id) = wants.into_iter().filter(|id| !self.autofocused.contains(id)).max() {
-                    self.autofocused.insert(id);
-                    self.focus(Some(id));
-                    continue;
-                }
-                // A timer due now runs now, the clock paused or not.
-                if self.sandbox.due().is_some_and(|due| due <= 0.0) {
-                    if let Err(error) = self.sandbox.fire() {
-                        self.threw(error);
-                    }
-                    continue;
-                }
-                self.sync_fields();
-                self.tell_settled();
-                return;
-            }
-            for answer in answers {
-                if let Err(error) = self.sandbox.send("message", &answer) {
-                    self.threw(error);
                 }
             }
         }
+        if came {
+            // What says `autofocus` takes the keyboard as it says so, as an active menu item does.
+            let wants: Vec<Id> = self.tree.autofocused().collect();
+            self.autofocused.retain(|id| wants.contains(id));
+            if let Some(id) = wants.into_iter().filter(|id| !self.autofocused.contains(id)).max() {
+                self.autofocused.insert(id);
+                self.focus(Some(id));
+            }
+            self.sync_fields();
+        }
+        // The inspector's answers wait for what they did to have run.
+        if !self.replies.is_empty() && !self.js.busy() {
+            for (answer, reply) in std::mem::take(&mut self.replies) {
+                reply(answer);
+            }
+        }
+        self.tell_settled();
+        came
     }
 
     /// The conditions its tokens' values vary by, as its window is now.
@@ -467,7 +464,7 @@ impl Screen {
 
     /// Notes that what it draws changed now, if nothing had since the frame drawn last.
     fn changed(&mut self) {
-        let now = self.sandbox.clock().now();
+        let now = self.js.clock().now();
         self.changed.get_or_insert(now);
     }
 
@@ -487,7 +484,7 @@ impl Screen {
         let conditions = self.conditions();
         let window = Bounds { origin: point(0.0, 0.0), size: Size { width: size.width.0, height: size.height.0 } };
         self.states.focused = self.focused;
-        let now = self.sandbox.clock().now();
+        let now = self.js.clock().now();
         let caret = self.caret_shows();
         // A frame where nothing it shows has changed keeps the scene it drew, and costs nothing.
         let hovering = |bounds: &Bounds<f32>| self.pointer.is_some_and(|at| bounds.contains(&at));
@@ -955,7 +952,7 @@ impl Screen {
         if let Some(input) = self.focused.filter(|focused| self.fields.contains_key(focused)) {
             self.edit(input, Field::blur);
         }
-        self.blink = self.sandbox.clock().now();
+        self.blink = self.js.clock().now();
         let blurred = std::mem::replace(&mut self.focused, id);
         if let Some(blurred) = blurred.filter(|blurred| self.tree.nodes.get(blurred).is_some_and(|node| node.listens("blur"))) {
             self.event(blurred, "blur", None);
@@ -1092,7 +1089,7 @@ impl Screen {
     /// was being composed in it.
     pub fn activate(&mut self, active: bool) {
         self.active = active;
-        self.blink = self.sandbox.clock().now();
+        self.blink = self.js.clock().now();
         if let Some(id) = self.focused.filter(|id| !active && self.fields.contains_key(id)) {
             self.edit(id, Field::finish_composition);
         }
@@ -1140,7 +1137,7 @@ impl Screen {
     /// Input `id`'s editing changed from `before`, or perhaps not: its caret shows again, and its app hears its
     /// editing state (`input`) if it's different, with its text as `value` too, which version 1 said alone.
     fn edited(&mut self, id: Id, before: editing::Value) {
-        self.blink = self.sandbox.clock().now();
+        self.blink = self.js.clock().now();
         let Some(value) = self.fields.get(&id).map(Field::value).filter(|value| *value != before) else { return };
         if self.tree.nodes.get(&id).is_some_and(|node| node.listens("input")) {
             self.tell(id, "input", json!({"editing": value, "value": value.text}));
@@ -2335,9 +2332,6 @@ impl Painter<'_> {
 /// A caret's blink, in milliseconds on the app's clock: on two thirds of it and off a third, as GTK's, until it's been
 /// still `BLINK_STOPS`.
 const BLINK: f64 = 1200.0;
-/// How long its JS is still before what it dropped is collected: a pause in scrolling or typing, as a browser's idle
-/// time is.
-const IDLE: Duration = Duration::from_millis(250);
 const BLINK_STOPS: f64 = 10_000.0;
 
 /// Where an input's text was drawn: its paragraph (of its display text, or its placeholder while it's `empty`), its
