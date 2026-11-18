@@ -1,7 +1,6 @@
 // Android Emulator: your emulators on every machine, and one of them live, to use as a phone, start, stop or remove.
 import { createMemo, createSignal, Errored, For, Loading, Match, refresh, Show, Switch } from "solid-js"
-import { render } from "@solidjs/web"
-import { Button, call, changed, confirm, Empty, List, LiveScreen, Menu, Problem, Row, Screen, Skeleton, Split, Status, Steps, toast } from "ui"
+import { Button, call, changed, confirm, Empty, List, LiveScreen, Menu, Problem, render, Row, Screen, Skeleton, Split, Status, Steps, toast } from "ui"
 
 /** An emulator, as `android-emulator_list` answers it. */
 interface Emulator {
@@ -45,7 +44,9 @@ function Detail(props: { emulator: Emulator }) {
     await call(`android-emulator_${value}`, { emulator: e().name })
       .then(() => value === "remove" && setOpen())
       // A start that fails says why where it would have shown, as the problem it's stopped with.
-      .catch((error) => value !== "start" && toast(error))
+      .catch((error) => {
+        if (value !== "start") toast(error)
+      })
       .finally(() => setBusy(false))
   }
   const actions = () => ACTIONS[e().state]
@@ -127,4 +128,4 @@ function App() {
   )
 }
 
-render(() => <App />, document.body)
+render(() => <App />)
