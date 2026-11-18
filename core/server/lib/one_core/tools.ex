@@ -1042,7 +1042,8 @@ defmodule OneCore.Tools do
 
     case app do
       nil -> reaches!(principal, subject, "installer")
-      app -> reaches!(principal, app, "editor")
+      # Whether it runs trusted, on its servers with their full access, is its owner's to switch, as `apps_trust` has it.
+      app -> reaches!(principal, app, if(trusted == Store.trusted?(app), do: "editor", else: "owner"))
     end
 
     if app == nil and inputs["new"] != true, do: elsewhere!(principal, name)
