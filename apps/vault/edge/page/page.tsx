@@ -1,27 +1,28 @@
-// The Vault's page at a network's address. Someone an outside service sent back, once they signed in to it, is
-// told whether that's kept in their Vault now. Someone who opened a request's link is told where it's answered:
-// on a device of theirs, which is the only place a secret is typed.
+// The Vault's page at a network's address, where an outside service sends whoever signed in to it back: it says
+// whether that's kept in their Vault now, and opens the Vault from there.
 import { createSignal } from "solid-js"
 import { render } from "@solidjs/web"
 import mark from "../../../../icons/Logo.png"
 import { SignIn } from "ui"
 
-const callback = location.pathname === "/vault/callback"
 /// What the server said of the sign-in: `{ done }` or `{ problem }`.
 const [result, setResult] = createSignal<{ done?: string; problem?: string }>()
-if (callback)
-  fetch(location.href, { method: "POST" })
-    .then((response) => response.json())
-    .then(setResult, () => setResult({ problem: "Couldn't reach the network. Start the sign-in again." }))
+fetch(location.href, { method: "POST" })
+  .then((response) => response.json())
+  .then(setResult, () => setResult({ problem: "Couldn't reach the network. Start the sign-in again." }))
 
 render(
   () => (
     <SignIn
       mark={<img src={mark} alt="" />}
-      heading={!callback ? "Open Vault" : result()?.done ? "Signed in" : result()?.problem ? "Not signed in" : "Signing in"}
-      done={callback ? result()?.done : "Requests for your keys and sign-ins are answered in Vault, on a device of yours."}
+      heading={result()?.done ? "Signed in" : result()?.problem ? "Not signed in" : "Signing in"}
+      status={result() ? undefined : "Signing in…"}
       problem={result()?.problem}
-    />
+      button="Open Vault"
+      href="/?open=vault"
+    >
+      {result()?.done && <p class="done">{result()!.done}</p>}
+    </SignIn>
   ),
   document.body,
 )

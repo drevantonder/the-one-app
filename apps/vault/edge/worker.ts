@@ -2,8 +2,8 @@
 // (`/vault/callback`), with a code and the `state` their sign-in began with, and this passes both through the relay
 // to a server acting for whoever's sign-in it is, which the state starts with. That server swaps the code for
 // tokens and keeps them in their Vault: this part holds nothing, and a code alone redeems nothing, since only the
-// server holds what proves who asked for it (PKCE). A request for a key leads here too (`/vault/request`), to a
-// page that says where it's answered.
+// server holds what proves who asked for it (PKCE). A request for a key's link (`/vault/request?id=`) opens it in the
+// Vault, by the web client's link to an app's place (`/?open=<one: link>`), as the app on a device opens it.
 import { env } from "cloudflare:workers";
 
 declare global {
@@ -57,7 +57,11 @@ export default {
     const url = new URL(request.url);
     // The page asks for what it shows once it's open, so the answer is words in the page, never a page of its own.
     if (url.pathname === "/vault/callback" && request.method === "POST") return Response.json(await callback(url.searchParams));
-    if (["/vault/callback", "/vault/request"].includes(url.pathname)) return env.ASSETS.fetch(new URL("/vault/", url));
+    if (url.pathname === "/vault/callback") return env.ASSETS.fetch(new URL("/vault/", url));
+    if (url.pathname === "/vault/request") {
+      const id = url.searchParams.get("id");
+      return Response.redirect(new URL(`/?open=${encodeURIComponent(id ? `vault#request=${id}` : "vault")}`, url).href, 302);
+    }
     return env.ASSETS.fetch(request);
   },
 } satisfies ExportedHandler;

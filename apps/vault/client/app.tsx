@@ -5,7 +5,7 @@
 // it's in: nothing when it's ready, a spinner and what's under way, or a dot, why and the one action that fixes it. One
 // of a type with a component is drawn beside the list by its own app. Deleting one is soft delete's. Below, the
 // servers that open the Vault, and which devices hold its person's key, since only one of those chooses the servers.
-import { createMemo, createSignal, Errored, For, Loading, refresh, Show } from "solid-js"
+import { createEffect, createMemo, createSignal, Errored, For, Loading, refresh, Show, untrack } from "solid-js"
 import { Dynamic, render } from "@solidjs/web"
 import "./app.css"
 import { Button, call, changed, Checkbox, confirm, createListCollection, Empty, Field, Input, List, open as opening, Problem, RadioGroup, Row, Screen, Section, Select, Sheet, showRecoveryKey, Skeleton, Spinner, Split, Switch, toast, useRecoveryKey } from "ui"
@@ -168,6 +168,17 @@ const component = (type: ItemType) => import(/* @vite-ignore */ new URL(`../../$
 const [open, setOpen] = createSignal<string>()
 const [sheet, setSheet] = createSignal<Sheet>()
 const shut = () => setSheet()
+/// A link to a request, `one:vault#request=<id>`, as a request's own link (`/vault/request?id=`) leads to: its sheet,
+/// once the Vault has listed it. It's followed once, and the address forgets it, so the same link is followed again.
+const [linked, setLinked] = createSignal<string>()
+function follow() {
+  const id = new URLSearchParams(location.hash.slice(1)).get("request")
+  if (!id) return
+  history.replaceState(history.state, "", location.pathname + location.search)
+  setLinked(id)
+}
+follow()
+addEventListener("hashchange", follow)
 const holds = () => !!key().slot
 
 /// A field of an item to type: a new item's first, a new one of an item's, or one that's there to change.
@@ -615,6 +626,15 @@ function Vault() {
   const plain = () => contents().items.filter((item) => !item.type)
   /// A section for each kind of item: those with any here, or that can be added.
   const kinds = () => sections().filter(([, types]) => types.some((type) => (type.create && type.trusted) || contents().items.some((item) => item.type === type.id)))
+  createEffect(
+    () => linked() && contents().requests.find(({ id }) => id === linked()),
+    (request) => {
+      if (!untrack(linked)) return
+      setLinked()
+      if (request) setSheet({ kind: "request", request })
+      else toast("That request isn't waiting any more.")
+    },
+  )
   return (
     <>
       <Split open={!!item()} onClose={() => setOpen()} detail={<Show when={item()} fallback={<Show when={contents().items.length}><Empty>Pick an item to see what it holds.</Empty></Show>}>{(item) => <Detail item={item()} />}</Show>}>

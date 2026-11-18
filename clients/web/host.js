@@ -282,13 +282,25 @@ async function opening() {
 const cannot = (why) => () => Promise.reject(new Error(why))
 const NO_KEY = "A browser can't hold your key. Use the app on your phone or computer for that."
 
+/// Where this tab keeps the link it was opened with while its person signs in.
+const OPEN = "open"
 /** @type {{ [Command in keyof Commands]?: (...args: Parameters<Commands[Command]>) => ReturnType<Commands[Command]> | Promise<ReturnType<Commands[Command]>> }} */
 const commands = {
   /// Where this browser is with its network, as the app's client says a device's session (`Session` in core/client):
   /// signed in here, or sent to sign in, and whether its network answers. A browser keeps nothing of a network's, so
   /// with its address not answering it's still opening, and asks again by itself (`tryAgain`).
+  /// What the address it was opened at links to (`/?open=<one: link>`, as a request's link in Vault leads here) is
+  /// opened once it's signed in: it's kept in this tab while its person signs in, and the address forgets it.
   async start() {
-    return { seq: (told = 0), ...(await opened()), connection }
+    const linked = new URLSearchParams(location.search).get("open")
+    if (linked) {
+      sessionStorage.setItem(OPEN, linked)
+      history.replaceState(null, "", location.pathname)
+    }
+    const now = await opened()
+    const open = now.session.state === "signIn" ? null : sessionStorage.getItem(OPEN)
+    if (open) sessionStorage.removeItem(OPEN)
+    return { seq: (told = 0), ...now, connection, ...(open && { open }) }
   },
   /// The files a server lists for `subject`, and the open apps that are out of date.
   async apps({ subject }) {
