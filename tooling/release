@@ -251,10 +251,9 @@ clients=() windows=()
 for name in "${mine[@]}"; do
   file=$(tr / - <<<"$name")
   if [[ $name == one/macos-* && $here != macos-* ]]; then
-    (run=$(gh workflow run mac-client.yml --ref main -f commit="$commit" -f rust="$(rustc -V | cut -d' ' -f2)" 2>&1 | grep -o 'https://github.com/.*/actions/runs/[0-9]*') &&
-      echo "Building $name on GitHub's macOS runner: $run" && gh run watch "${run##*/}" --exit-status >/dev/null &&
-      gh run download "${run##*/}" -n "$file" -D "$out" && client_inputs "${name#*/}" >"$out/$file.inputs" ||
-      { echo "$name wasn't built on GitHub: gh run view ${run##*/} --log-failed" >&2 && exit 1; }) &
+    (echo "Building $name on GitHub's macOS runner" && run=$(tooling/github-run mac-client.yml -f commit="$commit" -f rust="$(rustc -V | cut -d' ' -f2)") &&
+      gh run download "$run" -n "$file" -D "$out" && client_inputs "${name#*/}" >"$out/$file.inputs" ||
+      { echo "$name wasn't built on GitHub." >&2 && exit 1; }) &
     clients+=($!)
   elif [[ $name == one/windows-* || $name == one-cli/windows-* ]]; then
     windows+=("$name")
