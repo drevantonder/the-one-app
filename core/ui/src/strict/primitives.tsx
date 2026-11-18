@@ -2,11 +2,12 @@
 // plain element with the semantic props the strict protocol has (protocol.ts). A native host draws
 // the same props from the ops Solid's universal renderer sends it. A primitive's `style` is styles (../styles.ts),
 // drawn by their classes, or, on a page written for version 1, one style object, drawn as inline CSS.
-import { createEffect, For, omit, onCleanup, onSettled } from "solid-js"
+import { createEffect, For, omit, onCleanup, onSettled, Show } from "solid-js"
 import { Dynamic, Portal, render as mount, type JSX } from "@solidjs/web"
 import { tellDrawn } from "../bridge.ts"
 import { layer } from "./layer.ts"
-import type { TextInputAction, Props, Version1Style } from "./protocol.ts"
+import type { Ice, Props, TextInputAction, Version1Style } from "./protocol.ts"
+import { fullScreen, mods, named, type Input } from "./input.ts"
 import type { Laid, Located, Pressed, Wheeled } from "./types/ui.d.ts"
 import { web, type Styles } from "../styles.ts"
 
@@ -50,6 +51,169 @@ export function Picker(props: PickerProps) {
     <select aria-label={props["aria-label"]} disabled={props.disabled} value={props.value ?? ""} onInput={(event) => props.onInput?.({ currentTarget: { value: event.currentTarget.value } })} {...drawn("ui-strict-picker", props.style)}>
       <For each={props.options}>{(option) => <option value={option.value} disabled={option.disabled} selected={option.value === props.value}>{option.label}</option>}</For>
     </select>
+  )
+}
+
+/** A video's props: its stream's signalling, which the page does, and what it's told of it. */
+export interface VideoProps {
+  ice?: Ice
+  answer?: string
+  watch?: boolean
+  label: string
+  autofocus?: boolean
+  style?: Style
+  onOffer?: (event: { sdp: string }) => void
+  onState?: (event: { state: "connected" | "lost" }) => void
+  onSize?: (event: { width: number; height: number }) => void
+}
+
+/** Whether ⌘ is the key held for a shortcut, as on a Mac, an iPhone or an iPad. */
+const mac = /Mac|iPhone|iPad/.test(navigator.platform)
+/** How far a wheel turns for one of its steps, in pixels. */
+const STEP = 60
+
+/// A screen's live video over WebRTC (protocol.ts's `video`): on the DOM a `<video>`, its peer connection and its
+/// data channel, which what's done on it goes down, and a field, unseen, that what's typed goes to, focused as it's
+/// pressed, or as its `autofocus` is set, so a phone shows its keyboard. Each `ice` is a connection, the last one closed; its `offer` is told once
+/// its candidates are gathered, and its `answer` is set as it comes.
+export function Video(props: VideoProps) {
+  let video!: HTMLVideoElement
+  let field: HTMLInputElement | undefined
+  let peer: RTCPeerConnection | undefined
+  let channel: RTCDataChannel | undefined
+  // What the last connection is told once it's lost.
+  let lose = () => {}
+  const send = (input: Input) => !props.watch && channel?.readyState === "open" && channel.send(JSON.stringify(input))
+
+  createEffect(
+    () => props.ice,
+    (ice) => {
+      if (!ice) return
+      if (!globalThis.RTCPeerConnection) return void props.onState?.({ state: "lost" })
+      const pc = (peer = new RTCPeerConnection(ice))
+      let over = false
+      const lost = (lose = () => !over && ((over = true), props.onState?.({ state: "lost" })))
+      pc.addTransceiver("video", { direction: "recvonly" })
+      // Both ends make the data channel (id 0), so it opens with the connection, with nothing more to say.
+      const data = (channel = pc.createDataChannel("input", { negotiated: true, id: 0 }))
+      pc.ontrack = ({ track, receiver }) => {
+        // As little as can be held back to play it smoothly: it's a screen you're using.
+        receiver.jitterBufferTarget = 0
+        video.srcObject = new MediaStream([track])
+      }
+      data.onopen = () => !over && props.onState?.({ state: "connected" })
+      data.onclose = lost
+      pc.onconnectionstatechange = () => ["failed", "closed"].includes(pc.connectionState) && lost()
+      // The offer goes whole, with its candidates: once they're all gathered, or a moment after the first through
+      // TURN, since each TURN server more is one more to wait on.
+      pc.setLocalDescription()
+        .then(
+          () =>
+            new Promise<void>((done) => {
+              const timer = setTimeout(done, 5000)
+              pc.onicegatheringstatechange = () => pc.iceGatheringState === "complete" && done()
+              pc.onicecandidate = ({ candidate }) => candidate?.type === "relay" && (clearTimeout(timer), setTimeout(done, 300))
+            }),
+        )
+        .then(() => !over && props.onOffer?.({ sdp: pc.localDescription!.sdp }), lost)
+      return () => {
+        over = true
+        pc.close()
+      }
+    },
+  )
+  // Its field has the keyboard each time `autofocus` is set, so what's typed goes to the screen.
+  createEffect(
+    () => !!props.autofocus && !props.watch,
+    (on) => void (on && requestAnimationFrame(() => field?.isConnected && field.focus({ preventScroll: true }))),
+  )
+  createEffect(
+    () => props.answer,
+    (sdp) => void (sdp && peer?.signalingState === "have-local-offer" && peer.setRemoteDescription({ type: "answer", sdp }).catch(lose)),
+  )
+
+  // Where on the screen the pointer is: in its pixels, from where the video is drawn, as big as fits, in the middle.
+  const at = (event: MouseEvent) => {
+    const [width, height] = [video.videoWidth, video.videoHeight]
+    if (!width || !height) return
+    const box = video.getBoundingClientRect()
+    const scale = Math.min(box.width / width, box.height / height)
+    const x = (event.clientX - box.left - (box.width - width * scale) / 2) / scale
+    const y = (event.clientY - box.top - (box.height - height * scale) / 2) / scale
+    return { x: Math.round(Math.min(Math.max(x, 0), width - 1)), y: Math.round(Math.min(Math.max(y, 0), height - 1)) }
+  }
+  // The pointer, where it is as it moves, at most once a frame, and its buttons as they go down and up.
+  let moved: { x: number; y: number } | undefined
+  const move = (event: PointerEvent) => {
+    const point = at(event)
+    if (!point) return
+    if (!moved) requestAnimationFrame(() => (send({ t: "move", ...moved! }), (moved = undefined)))
+    moved = point
+  }
+  const button = (event: PointerEvent, down: boolean) => {
+    const point = at(event)
+    if (props.watch || !point) return
+    // What's typed goes to the field, focused once the press is over, as the browser moves focus as it goes down.
+    if (down) (event.currentTarget as HTMLElement).setPointerCapture(event.pointerId)
+    else field?.focus({ preventScroll: true })
+    send({ t: "move", ...point })
+    send({ t: "button", b: [1, 2, 3][event.button] ?? 1, down, mods: mods(event, mac) })
+  }
+  let turned = { x: 0, y: 0 }
+  const wheel = (event: WheelEvent) => {
+    const point = at(event)
+    if (props.watch || !point || (!event.deltaY && !event.deltaX)) return
+    event.preventDefault()
+    // A wheel's steps, from however far it turned: a trackpad turns a little at a time, a mouse's wheel a line.
+    const lines = event.deltaMode === WheelEvent.DOM_DELTA_LINE ? STEP / 3 : event.deltaMode === WheelEvent.DOM_DELTA_PAGE ? STEP * 10 : 1
+    turned = { x: turned.x + event.deltaX * lines, y: turned.y + event.deltaY * lines }
+    send({ t: "move", ...point })
+    for (const [axis, less, more] of [["y", 4, 5], ["x", 6, 7]] as const) {
+      while (Math.abs(turned[axis]) >= STEP) {
+        const b = turned[axis] > 0 ? more : less
+        send({ t: "button", b, down: true, mods: [] })
+        send({ t: "button", b, down: false, mods: [] })
+        turned[axis] -= Math.sign(turned[axis]) * STEP
+      }
+    }
+  }
+  const key = (event: KeyboardEvent) => {
+    // The device's full screen is the page's, and goes on to what it's in.
+    const name = !fullScreen(event) && named(event)
+    if (!name) return
+    event.preventDefault()
+    send({ t: "key", key: name, mods: mods(event, mac) })
+  }
+  return (
+    <div
+      ref={(box: HTMLDivElement) => box.addEventListener("wheel", wheel, { passive: false })}
+      onPointerMove={move}
+      onPointerDown={(event) => button(event, true)}
+      onPointerUp={(event) => button(event, false)}
+      onContextMenu={(event) => !props.watch && event.preventDefault()}
+      {...drawn("ui-strict-video", props.style)}
+    >
+      <video
+        ref={video}
+        aria-label={props.label}
+        autoplay
+        muted
+        playsinline
+        disablepictureinpicture
+        onResize={() => props.onSize?.({ width: video.videoWidth, height: video.videoHeight })}
+      />
+      <Show when={!props.watch}>
+        <input
+          ref={field}
+          aria-label={`Type in ${props.label}`}
+          autocomplete="off"
+          autocapitalize="off"
+          spellcheck={false}
+          onKeyDown={key}
+          onInput={(event) => (event.target.value && send({ t: "text", text: event.target.value }), (event.target.value = ""))}
+        />
+      </Show>
+    </div>
   )
 }
 
@@ -356,8 +520,13 @@ export function EditableText(props: EditableTextProps) {
     if (props.readonly) (event.currentTarget as HTMLInputElement).select()
     props.onFocus?.()
   }
-  // A page in a frame of another origin, as an app's is, isn't given `autofocus`: it's focused as it's drawn.
-  const focus = (element: HTMLElement) => props.autofocus && requestAnimationFrame(() => element.isConnected && element.focus({ preventScroll: true }))
+  // A page in a frame of another origin, as an app's is, isn't given `autofocus`: it's focused as it's drawn, and
+  // again each time it's set.
+  const focus = (element: HTMLElement) =>
+    createEffect(
+      () => !!props.autofocus,
+      (on) => void (on && requestAnimationFrame(() => element.isConnected && element.focus({ preventScroll: true }))),
+    )
   const looks = () => drawn("ui-strict-input", props.style)
   return (
     <Dynamic

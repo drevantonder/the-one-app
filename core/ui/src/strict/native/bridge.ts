@@ -98,6 +98,8 @@ export const direction: typeof Strict.direction = () => "ltr"
 /** Whether a finger points at it, as its host says (`deviceCapabilities.touch`): a phone's does, a computer's doesn't. */
 export const touch = () => fingered()
 export const reducedMotion: typeof Strict.reducedMotion = () => still()
+/** A native host says nothing yet of whether its page is shown, so it is. */
+export const visible: typeof Strict.visible = () => true
 export const sizeChanged: typeof Strict.sizeChanged = async (size) => (await greeted, host?.post({ jsonrpc: "2.0", method: "ui/notifications/size-changed", params: size }))
 export const pinShortcut: typeof Strict.pinShortcut = async (entrypoint) => (await greeted, ask("one/pin-shortcut", { entrypoint }))
 export const open: typeof Strict.open = async (app, { subject, behind, from } = {}) => (await greeted, ask("ui/open-link", /^https?:/.test(app) ? { url: app } : { url: `one:${app}`, subject, behind, from }))

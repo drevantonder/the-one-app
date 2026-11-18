@@ -38,8 +38,20 @@ export type Id = number
  * - `picker`: the device's own way of choosing one of a few (`options`), as a phone's wheel or sheet is: see-through
  *   over its box, so what's drawn under it shows, and pressed, it opens the device's picker, which sends `input` with
  *   the `value` chosen. A page uses it where a finger points; a host with no picker of its own may draw none.
+ * - `video`: a screen's live video over WebRTC, scaled to fit its box, keeping its shape, as a remote desktop app shows
+ *   one. The node is the stream: it makes the peer connection, with its `ice` (the screen's ICE servers, and the policy
+ *   to use them by), receiving video only, and a data channel both ends make (`input`, negotiated, id 0); once it has
+ *   gathered its candidates it sends `offer` with its SDP, whole, and the page sets its `answer`, the screen's. A new
+ *   `ice` is a new connection, the last one closed. It sends `state`, `connected` as its data channel opens and `lost`
+ *   as the channel closes or the connection fails, and `size`, the video's own, as it comes and changes. What the
+ *   person does on it, unless it's `watch`ed, goes straight down the data channel as JSON, each where on the screen it
+ *   is (its video's pixels), as core/ui/src/strict/input.ts has it (`Input`): the pointer as it moves, its buttons
+ *   down and up (1 to 3) and a wheel's steps (4 to 7) with the modifiers held, the keys that aren't text (as X names
+ *   them), and what's typed or pasted, which takes a field of its own so a phone's keyboard comes up as it's pressed,
+ *   or as its `autofocus` is set. The device's full screen keys (F11, ⌃⌘F) aren't sent: they go on as `keydown` to the node it's in. A host that
+ *   doesn't draw it says so (`Host.video`), and the page that uses it is opened another way.
  * A `raw-text` outside a `text` is drawn as if in one. */
-export type Type = "box" | "scroll" | "text" | "image" | "path" | "input" | "picker" | "raw-text"
+export type Type = "box" | "scroll" | "text" | "image" | "path" | "input" | "picker" | "video" | "raw-text"
 
 /** JS → host: what changed since the last update, in order, as one batch. The host draws once it has the batch. */
 export interface Update {
@@ -97,6 +109,13 @@ export interface Event {
   /** `wheel`'s: how far a trackpad or a wheel moved, in CSS pixels. */
   deltaX?: number
   deltaY?: number
+  /** A `video`'s `offer`: its SDP offer, with its candidates. */
+  sdp?: string
+  /** A `video`'s `state`: its data channel open (`connected`), or its connection lost. */
+  state?: "connected" | "lost"
+  /** A `video`'s `size`: its video's own, in its pixels. */
+  width?: number
+  height?: number
 }
 
 /** Where a node is drawn in the window, in CSS pixels. */
@@ -116,6 +135,9 @@ export interface Host {
   /** Takes a JSON-RPC message for the app's client, as a page on the DOM posts one to its frame's parent (MCP Apps):
    * `ui/initialize`, `tools/call` and the rest, which the client answers as it answers a page. */
   post(message: object): void
+  /** Whether it draws `video`. A page that uses one where it doesn't tells it `unsupported`, so it's opened another
+   * way, as a host of version 2 before it drew video doesn't know the type. */
+  video?: boolean
 }
 
 /** What the UI library gives the host, as `globalThis.ui`, once it's loaded. */
@@ -135,7 +157,10 @@ export interface Sandbox {
  * action key is pressed (a keyboard's Enter, or a phone's Done, Go, Next, Search or Send). A host offers them as
  * accessibility actions too: `click` is AccessKit's `Click`, `input` its `SetValue`, `focus` and `blur` its `Focus`
  * and `Blur`, `scroll` its `ScrollIntoView` and `ScrollDown`. */
-export type EventName = "click" | "input" | "action" | "focus" | "blur" | "keydown" | "pointerenter" | "pointerleave" | "scroll" | "layout" | Moved
+export type EventName = "click" | "input" | "action" | "focus" | "blur" | "keydown" | "pointerenter" | "pointerleave" | "scroll" | "layout" | Moved | Streamed
+
+/** What a `video` tells its page of its stream: `offer`, `state` and `size`. */
+export type Streamed = "offer" | "state" | "size"
 
 /** What a page that's moved by hand listens for, as the Home Screen's pages are, a finger's or a mouse's, as the DOM
  * names them: a pointer's (`pointerdown` to `pointercancel`) go to the node under it and to each node it's in that
@@ -216,6 +241,15 @@ export interface Props {
   /** `picker`: what can be chosen, each its value and what it says, and whether it can be. Its `value` is the one
    * chosen. */
   options?: { value: string; label: string; disabled?: boolean }[]
+  /** `video`: the ICE servers to connect with, as WebRTC's `RTCConfiguration` has them, and the policy to use them by.
+   * A new one is a new connection. */
+  ice?: Ice
+  /** `video`: the screen's SDP answer to its `offer`. */
+  answer?: string
+  /** `video`: looked at only, so nothing done on it is sent. */
+  watch?: boolean
+  /** `video`: what it shows, its accessible name, as an `image`'s `alt`. */
+  label?: string
   /** `input`: what kind of text it takes, as an `<input type>`: which keyboard a phone shows, and `password` hides it. */
   type?: "text" | "search" | "email" | "url" | "tel" | "number" | "password"
   /** `input`: which keyboard a touch screen shows for it, as `inputmode`: `numeric` is digits alone. */
@@ -253,6 +287,15 @@ export interface Props {
   onPointerCancel?: true
   onContextMenu?: true
   onWheel?: true
+  onOffer?: true
+  onState?: true
+  onSize?: true
+}
+
+/** What a `video` connects with, as WebRTC's `RTCConfiguration` has it. */
+export interface Ice {
+  iceServers: { urls: string | string[]; username?: string; credential?: string }[]
+  iceTransportPolicy?: "all" | "relay"
 }
 
 /** A state that's so or not, as ARIA writes it. */

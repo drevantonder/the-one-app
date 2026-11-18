@@ -5,11 +5,11 @@
 // the props every host can draw, and the check says whether the DOM's takes them.
 import type { Element } from "solid-js"
 import type { ListCollection } from "@zag-js/collection"
-import type { Props, Rect, Version1Style } from "../protocol.ts"
+import type { Ice, Props, Rect, Version1Style } from "../protocol.ts"
 import type { Look, Styled, Styles } from "../../styles.ts"
 import type { tokens as Tokens } from "../../tokens.ts"
 
-export type { Element, Look, Rect, Styled, Styles }
+export type { Element, Ice, Look, Rect, Styled, Styles }
 
 /** A primitive's `style`: styles (`styles()`), or, on a page written for version 1, one style object. */
 export type Style = Styles | Version1Style
@@ -116,6 +116,24 @@ export type PathProps = Pick<Semantics, "role" | "aria-label" | "aria-hidden"> &
   style?: Style
 }
 export declare function Path(props: PathProps): Element
+
+/** A screen's live video over WebRTC, which sends what's done on it to the screen itself (protocol.ts's `video`): the
+ * page does its signalling, a new `ice` connecting, its `offer` answered with the screen's `answer`. */
+export type VideoProps = {
+  ice?: Ice
+  answer?: string
+  /** Looked at only: nothing done on it is sent. */
+  watch?: boolean
+  label: string
+  /** Has the keyboard, what's typed going to the screen, each time it's set. */
+  autofocus?: boolean
+  style?: Style
+  onOffer?: (event: { sdp: string }) => void
+  onState?: (event: { state: "connected" | "lost" }) => void
+  /** The video's own size, in its pixels, as it comes and changes. */
+  onSize?: (event: { width: number; height: number }) => void
+}
+export declare function Video(props: VideoProps): Element
 
 /** What's drawn over the whole window, over the page: a sheet, a menu. A `modal` one makes everything else inert. */
 export declare function Layer(props: { modal?: boolean; children?: Element }): Element

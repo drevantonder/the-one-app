@@ -20,8 +20,8 @@
 /// `tsconfig.json` is `{ "extends": "<ui>/tsconfig.strict.json", "include": ["**/*"] }` (in this repo
 /// `../../../core/ui/tsconfig.strict.json`) and its entrypoint says so, with the protocol version it's written for:
 /// `%{page: "client/index.html", host: 2}`. It's written with the UI library alone: its components and the primitives,
-/// `Box`, `Scroll` (a box whose content scrolls), `Text`, `Image`, `Path` (a vector shape) and `EditableText` (bare text to
-/// type, which `Input` draws in a field's box), each styled by
+/// `Box`, `Scroll` (a box whose content scrolls), `Text`, `Image`, `Path` (a vector shape), `EditableText` (bare text to
+/// type, which `Input` draws in a field's box) and `Video` (a screen's live video, which `LiveScreen` draws), each styled by
 /// its `style`: styles from `styles()`, beside what uses them, whose values are the design tokens (`tokens`, from
 /// core/ui/src/tokens.ts), never a raw colour, size or font, which the typecheck refuses:
 /// `const look = styles({ row: { flexDirection: "row", gap: tokens.space.md, paddingInline: tokens.length.gutter,
@@ -61,6 +61,6 @@ export { Alert, confirm, Sheet } from "./sheet.tsx"
 export { SignIn } from "./sign-in.tsx"
 export { toast } from "./toast.tsx"
 export { Widget } from "./widget.tsx"
-export { Box, EditableText, Image, Layer, Path, render, Scroll, Text } from "./strict/primitives.tsx"
+export { Box, EditableText, Image, Layer, Path, render, Scroll, Text, Video } from "./strict/primitives.tsx"
 export { negative, styles } from "./styles.ts"
 export { tokens } from "./tokens.ts"

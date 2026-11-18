@@ -330,89 +330,6 @@ img {
   to { rotate: 1turn; }
 }
 
-/* A screen as it is now, as a remote desktop app shows one: as wide as its place, and as tall as fits under the bar
-   with a line or two left under it. What it's of is drawn as big as fits, in the middle. */
-.ui-live-screen {
-  display: grid;
-  gap: 0.25rem;
-  min-width: 0;
-}
-.ui-live-screen > .view {
-  position: relative;
-  height: max(16rem, calc(100dvh - 15rem));
-  overflow: hidden;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-md);
-  background: var(--muted);
-  cursor: default;
-  touch-action: pan-y;
-}
-/* Watched, it keeps its own size, so it's drawn as its shape, as tall as fits. */
-.ui-live-screen > .view.watch {
-  height: auto;
-  max-height: calc(100dvh - 8rem);
-}
-.ui-live-screen > .view:fullscreen, .ui-live-screen > .view.full {
-  position: fixed;
-  inset: 0;
-  z-index: 10;
-  height: auto;
-  max-height: none;
-  border: 0;
-  border-radius: 0;
-  touch-action: none;
-}
-.ui-live-screen > .view > img, .ui-live-screen > .view > video {
-  display: block;
-  width: 100%;
-  height: 100%;
-  object-fit: contain;
-  user-select: none;
-}
-/* What it shows in place of the screen: in its middle, on the view's grey. */
-.ui-live-screen > .view > .state {
-  position: absolute;
-  inset: 0;
-  display: grid;
-  place-content: center;
-  padding: var(--gutter);
-  background: var(--muted);
-}
-/* Where what's typed on it goes: unseen, but focused, so a phone shows its keyboard. */
-.ui-live-screen > .view > .keys {
-  position: absolute;
-  inset-block-end: 0;
-  inset-inline-start: 0;
-  width: 1px;
-  height: 1px;
-  opacity: 0;
-  pointer-events: none;
-}
-.ui-live-screen > .view > .leave {
-  position: absolute;
-  inset-block-start: max(0.5rem, var(--safe-top));
-  inset-inline-end: max(0.5rem, var(--safe-right));
-  opacity: 0.85;
-}
-.ui-live-screen > .view > video[hidden] {
-  display: none;
-}
-.ui-live-screen > .bar {
-  display: flex;
-  align-items: center;
-  justify-content: flex-end;
-  gap: 0.5rem;
-}
-.ui-live-screen > .bar > .note {
-  flex: 1;
-  margin: 0;
-  color: var(--muted-foreground);
-  font-size: var(--text-footnote);
-}
-.ui-live-screen > .bar > .ui-button:last-child {
-  margin-inline-end: calc((var(--icon) - var(--control)) / 2);
-}
-
 /* What's over the page: a sheet, or an alert. */
 .ui-dialog {
   position: fixed;
@@ -819,6 +736,30 @@ textarea.ui-strict-input {
   display: block;
   min-width: 0;
   object-fit: contain;
+}
+/* A screen's live video: drawn as big as fits, in the middle, under a finger moving it alone. Its field, unseen but
+   focused as it's pressed, is where what's typed goes, so a phone shows its keyboard. */
+.ui-strict-video {
+  display: block;
+  position: relative;
+  touch-action: none;
+  -webkit-user-select: none;
+  user-select: none;
+}
+.ui-strict-video > video {
+  display: block;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+.ui-strict-video > input {
+  position: absolute;
+  inset-block-end: 0;
+  inset-inline-start: 0;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+  pointer-events: none;
 }
 [data-font="body"] {
   font-size: var(--text-base);
