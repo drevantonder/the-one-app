@@ -3,8 +3,6 @@
   "main": "worker.ts",
   "compatibility_date": "2026-11-01",
   "workers_dev": false,
-  // Better Auth and what it's built on are megabytes, which a new copy of the Worker parses before its first request.
-  "minify": true,
   // Its accounts: who has signed in, their passkeys, and the devices and assistants they let act as them.
   "d1_databases": [{ "binding": "DB", "database_name": "network-sign-in" }],
   // Which version of it is deployed, by which it makes its tables once for each (`auth.ts`).
