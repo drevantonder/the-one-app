@@ -38,6 +38,7 @@ window = [
   "dep:objc2-ui-kit",
   "dep:webkit2gtk",
   "dep:gtk",
+  "dep:resvg",
   "cli/window",
 ]
 
@@ -69,9 +70,6 @@ notifications_client = { path = "../../apps/notifications/client/native", option
 tauri-plugin-notification = { version = "2.8", optional = true }
 # The window opens where and as large as it was last, as a computer's apps do.
 tauri-plugin-window-state = { version = "2.5", optional = true }
-# A `one:` link opens the app at what it links to (`links`): one app, the only one, which a second start with a link
-# hands it to.
-tauri-plugin-deep-link = { version = "2.6", optional = true }
 tauri-plugin-single-instance = { version = "2.5", features = ["deep-link"], optional = true }
 
 # The web view's own back and forward gestures, which Tauri doesn't switch on (`navigation_gestures`).
@@ -79,6 +77,9 @@ tauri-plugin-single-instance = { version = "2.5", features = ["deep-link"], opti
 # the web view instead (`MainActivity`), as this plugin's Vibrator there doesn't follow the system's Touch feedback.
 [target.'cfg(not(target_os = "android"))'.dependencies]
 tauri-plugin-haptics = { version = "2.4", optional = true }
+# A `one:` link opens the app at what it links to (`links`): one app, the only one, which a second start with a link
+# hands it to, and on an iPhone what Spotlight or its App Shortcut opens (`shortcuts`).
+tauri-plugin-deep-link = { version = "2.6", optional = true }
 
 [target.'cfg(target_vendor = "apple")'.dependencies]
 objc2 = { version = "0.6", optional = true }
@@ -98,3 +99,5 @@ libc = "=0.2.189"
 # takes an app home (`edge`).
 objc2-core-foundation = { version = "0.3", default-features = false, features = ["std", "CFCGTypes"], optional = true }
 objc2-ui-kit = { version = "0.3", default-features = false, features = ["std", "objc2-core-foundation", "UIGeometry", "UIGestureRecognizer", "UIInterface", "UIPanGestureRecognizer", "UIResponder", "UIScreenEdgePanGestureRecognizer", "UIScrollView", "UIView", "UIWindow"], optional = true }
+# Each app's icon where Spotlight and the App Shortcut show it (`shortcuts`), which is an SVG or a PNG, drawn as a PNG.
+resvg = { version = "0.47", default-features = false, optional = true }

@@ -25,6 +25,7 @@ use tauri_plugin_opener::OpenerExt;
 use notifications_client as notifications;
 
 pub mod phone;
+mod shortcuts;
 
 /// What an app's page may load, which is what an MCP App may by default: its own app's files and the files of
 /// the apps it uses, which are all at its own address, and nothing from anywhere else.
@@ -182,12 +183,16 @@ fn parts(resource: &str) -> Option<(&str, &str, &str)> {
 
 /// The files a server lists for `subject`, a group or the network, or for this client's user, and with them the open
 /// apps that are `outdated` and load again, each as its address names it. Every file listed is kept behind this, so
-/// with no server up an app opens whole, even one that was never opened, or whose apps have changed since.
+/// with no server up an app opens whole, even one that was never opened, or whose apps have changed since. The user's
+/// apps with a screen are where the device lists its own apps too (`shortcuts`).
 #[tauri::command]
 async fn apps(app: AppHandle, views: State<'_, Views>, subject: Option<String>) -> Result<Value, String> {
     // A person is told what went wrong, and not what was behind it.
     let mut listed = views.listed(subject.as_deref()).await.map_err(|error| error.to_string())?;
     listed["outdated"] = views.outdated(subject.as_deref(), &listed).into();
+    if subject.is_none() {
+        shortcuts::keep(&app, shortcuts::listed(&listed));
+    }
     let keep = listed.clone();
     tauri::async_runtime::spawn(async move {
         for resource in resources(&keep) {
@@ -339,7 +344,7 @@ async fn start(app: AppHandle) -> Result<Value, ()> {
     told["testflight"] = json!(testflight());
     let connection = app.try_state::<Views>().map(|views| *views.client.connection().borrow());
     told["connection"] = json!(connection.unwrap_or(Connection::Offline));
-    #[cfg(desktop)]
+    #[cfg(not(target_os = "android"))]
     {
         use tauri_plugin_deep_link::DeepLinkExt;
         let started = app.deep_link().get_current().ok().flatten().unwrap_or_default();
@@ -369,7 +374,7 @@ fn testflight() -> bool {
 
 /// What a `one:` link opens, as the window's page opens it (`go`): `<app>[/<page>][#<fragment>]`, an app, or a page
 /// of one, and the place in it its fragment names, which the app follows (`one:home-screen#library`).
-#[cfg(desktop)]
+#[cfg(not(target_os = "android"))]
 fn link(url: &Url) -> Option<String> {
     (url.scheme() == "one").then(|| url.as_str()["one:".len()..].to_owned())
 }
@@ -377,8 +382,8 @@ fn link(url: &Url) -> Option<String> {
 /// Opens what each `one:` link the device hands the app links to, over whatever's showing, as a tap on a notification
 /// does, and brings the window forward. The link the app was started with is the page's to ask for (`start`). A
 /// computer's program that isn't a developer's build takes the device's `one:` links: Linux and Windows have a
-/// program say so itself (a Mac's says so in its bundle).
-#[cfg(desktop)]
+/// program say so itself (a Mac's and an iPhone's say so in their bundles).
+#[cfg(not(target_os = "android"))]
 fn links(app: &tauri::App) -> tauri::Result<()> {
     use tauri_plugin_deep_link::DeepLinkExt;
     #[cfg(all(any(windows, target_os = "linux"), not(debug_assertions)))]
@@ -387,6 +392,7 @@ fn links(app: &tauri::App) -> tauri::Result<()> {
     }
     let handle = app.handle().clone();
     app.deep_link().on_open_url(move |event| {
+        #[cfg(desktop)]
         if let Some(window) = handle.get_webview_window("main") {
             let _ = window.unminimize();
             let _ = window.show();
@@ -867,6 +873,10 @@ async fn follows(app: AppHandle, client: Arc<Client>) {
             (Some(_), Session::SignIn { .. }) => true,
             _ => false,
         };
+        // A device that isn't in its network lists none of its apps.
+        if matches!(now, Session::SignIn { .. }) {
+            shortcuts::keep(&app, Vec::new());
+        }
         if starts_again {
             home(&app);
         } else {
@@ -948,8 +958,9 @@ pub fn run() {
                 let _ = window.show();
                 let _ = window.set_focus();
             }
-        }))
-        .plugin(tauri_plugin_deep_link::init());
+        }));
+    #[cfg(not(target_os = "android"))]
+    let builder = builder.plugin(tauri_plugin_deep_link::init());
     #[cfg(desktop)]
     let builder = builder
         .plugin(tauri_plugin_window_state::Builder::new().with_state_flags(WINDOW_STATE).skip_initial_state("main").build());
@@ -974,7 +985,7 @@ pub fn run() {
             let window = window.title(app.package_info().name.clone()).inner_size(1024.0, 720.0).center().build()?;
             #[cfg(desktop)]
             opens_as_it_was(&window)?;
-            #[cfg(desktop)]
+            #[cfg(not(target_os = "android"))]
             links(app)?;
             #[cfg(mobile)]
             let window = window.build()?;

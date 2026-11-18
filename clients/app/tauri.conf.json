@@ -14,7 +14,8 @@
   },
   "plugins": {
     "deep-link": {
-      "desktop": { "schemes": ["one"] }
+      "desktop": { "schemes": ["one"] },
+      "mobile": [{ "scheme": ["one"], "appLink": false }]
     }
   },
   "bundle": {
