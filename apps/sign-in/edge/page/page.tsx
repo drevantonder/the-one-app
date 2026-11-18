@@ -8,7 +8,9 @@
 // who's signing in, then shows the number that person taps on one of their devices to let this one in, as it waits
 // (`Request` in `edge/auth.ts`). Use a Passkey shows the device's code instead, its button goes on to the passkey there (one the app may use, its network's, as `/.well-known`
 // says), and Use Another Device gives the link and the code to open where they're signed in, for a passkey the app
-// can't reach.
+// can't reach. Every passkey is asked for its PRF output, which unlocks its person's key (`passkey.ts`): a device
+// approved with one that can holds the key as it comes in, and a device that's in but doesn't hold it opens this page
+// to Unlock with Passkey.
 import { createSignal, Show } from "solid-js"
 import { render } from "@solidjs/web"
 import mark from "../../../../icons/Logo.png"
@@ -17,6 +19,7 @@ import { createAuthClient } from "better-auth/client"
 import { deviceAuthorizationClient } from "better-auth/client/plugins"
 import { passkeyClient } from "@better-auth/passkey/client"
 import Bowser from "bowser"
+import { forDevice, NO_PRF, opened as openedKey, output, PRF, prfKey } from "./passkey.ts"
 import "./page.css"
 
 const auth = createAuthClient({ basePath: "/sign-in/auth", plugins: [passkeyClient(), deviceAuthorizationClient()] })
@@ -25,7 +28,8 @@ const params = new URLSearchParams(location.search)
 
 /// How the page was opened, which picks what it does: someone joining with an invitation, someone who has joined
 /// making another passkey (the app's Sign-In & Security), an assistant's request to be let in, which Better Auth carries signed
-/// in the query and goes back as it came, a new device's code in a browser, or in the app's own window, and otherwise
+/// in the query and goes back as it came, a new device's code in a browser, or in the app's own window, a device of
+/// theirs asking for their key (the Vault's Unlock with Passkey), or a passkey made ready to unlock it, and otherwise
 /// signing in.
 type Flow =
   | { flow: "join"; invite: string }
@@ -33,6 +37,7 @@ type Flow =
   | { flow: "assistant"; request: string; client: string }
   | { flow: "device"; code: string }
   | { flow: "deviceInApp"; code: string }
+  | { flow: "unlock"; device?: string }
   | { flow: "signIn" }
 
 const flow: Flow = params.has("client_id")
@@ -41,6 +46,8 @@ const flow: Flow = params.has("client_id")
     ? { flow: "join", invite: opened.get("invite")! }
     : opened.has("passkey")
       ? { flow: "addPasskey", another: opened.get("passkey")! }
+      : opened.has("unlock")
+      ? { flow: "unlock", device: opened.get("unlock") || undefined }
       : params.has("user_code")
         ? { flow: params.has("app") ? "deviceInApp" : "device", code: params.get("user_code")! }
         : { flow: "signIn" }
@@ -59,11 +66,12 @@ type Stage =
   | { stage: "checking" }
   | { stage: "needsPasskey" }
   | { stage: "claiming" }
-  | { stage: "comparing"; name: string }
-  | { stage: "approved"; name: string }
+  | { stage: "comparing"; name: string; device: string }
+  | { stage: "approved"; name: string; unlocked: boolean }
   | { stage: "denied"; name: string }
   | { stage: "ready"; app: App }
   | { stage: "created" }
+  | { stage: "unlocked"; name?: string }
   | { stage: "failed"; why: string }
 
 const [stage, setStage] = createSignal<Stage>({ stage: "checking" })
@@ -156,32 +164,110 @@ async function claim() {
   if (!data.client_id) return setStage({ stage: "failed", why: "Someone else is approving this device." })
   if (data.status !== "pending") return setStage({ stage: "failed", why: "Already approved." })
   // What the device calls itself, which this network's hook adds (`edge/auth.ts`).
-  setStage({ stage: "comparing", name: (data as { name?: string }).name ?? "A device" })
+  setStage({ stage: "comparing", name: (data as { name?: string }).name ?? "A device", device: data.client_id })
+}
+
+/// The passkey answered on this page, by its credential ID, with its PRF output if it gave one.
+let used: { credential: string; prf?: Uint8Array } | undefined
+
+/// What WebAuthn said as a passkey was made or used, as Better Auth hands it back.
+type Answered = { webauthn?: { response: { id: string }; clientExtensionResults?: AuthenticationExtensionsClientOutputs } }
+
+/// Keeps the passkey just answered, and says with it which key its PRF output derives, or that it gave none (`null`),
+/// which a device that holds its person's key encrypts the key to (`edge/auth.ts`).
+async function answered(result: Answered, prf: Uint8Array | undefined | null) {
+  used = { credential: result.webauthn!.response.id, prf: prf ?? undefined }
+  if (prf !== undefined) await ask("/passkey/prf-key", { credential: used.credential, key: prf && (await prfKey(prf)) })
+}
+
+/// Signs in with a passkey, asked for its PRF output, which whoever was signed in here before no longer is.
+async function withPasskey() {
+  await auth.signOut()
+  const result = await auth.signIn.passkey({ returnWebAuthnResponse: true, extensions: PRF })
+  const { error } = result
+  if ((error as { code?: string } | null)?.code === "PASSKEY_NOT_FOUND") {
+    // The browser offered a passkey this network doesn't have: one since removed, or one an earlier network at this
+    // address made. WebAuthn's Signal API has the password manager remove it, so it isn't offered again.
+    const { webauthn } = result as Answered
+    if (webauthn && PublicKeyCredential.signalUnknownCredential) PublicKeyCredential.signalUnknownCredential({ rpId: location.hostname, credentialId: webauthn.response.id })
+    throw new Error("This passkey is no longer valid for this network. Try again and choose another one, or ask to be invited again if you have no other.")
+  }
+  if (error) throw new Error(error.message ?? "That passkey didn't work. Try again.")
+  await answered(result as Answered, output((result as Answered).webauthn?.clientExtensionResults) ?? null)
+}
+
+/// A passkey just made: its PRF output if making it gave one. One that has PRF but gave none as it was made (most
+/// providers but iCloud Keychain and Google Password Manager) gives it once it's used, so someone adding a passkey
+/// to unlock with uses it once more here. Someone joining has no key yet, and gives it the next time they sign in.
+async function made(result: Answered, again: boolean) {
+  const results = result.webauthn?.clientExtensionResults
+  const prf = output(results)
+  if (prf || !results?.prf?.enabled) return answered(result, prf ?? null)
+  if (again) return withPasskey()
+  used = { credential: result.webauthn!.response.id }
+}
+
+/// Calls a tool of the network's as whoever is signed in here, as the web client does (`clients/web/host.js`).
+async function tool<T>(name: string, inputs: object): Promise<T> {
+  const response = await fetch("/mcp", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name, arguments: inputs } }) })
+  const { result, error } = await response.json()
+  const said = result?.content?.[0]?.text
+  if (error || result?.isError) throw new Error(error?.message ?? said ?? "That didn't work. Try again.")
+  return JSON.parse(said)
+}
+
+/**
+ * Lets the device whose key is `device` hold its person's key, with the passkey just answered here, if its PRF
+ * output opens the key a device that holds it encrypted to it: it's encrypted to the device, as a device that holds
+ * it approves one. Whether it did.
+ */
+async function unlock(device: string, name: string) {
+  if (!used?.prf) return false
+  const { owner, key } = await ask<{ owner: string; key: string | null }>("/passkey/encrypted-key", { credential: used.credential })
+  if (!key) return false
+  const opened = await openedKey(used.prf, owner, used.credential, key)
+  try {
+    await tool("encryption_approve", { device, name, key: await forDevice(opened, owner, device) })
+  } finally {
+    opened.fill(0)
+  }
+  return true
+}
+
+/// The device a link to Unlock with Passkey names, once a passkey's opened it: it's one of this person's that's
+/// asking for their key, as the Vault asks before it opens the link.
+async function unlockAsked(device: string) {
+  if (!used?.prf) throw new Error(NO_PRF)
+  const { asking } = await tool<{ asking: { device: string; name: string }[] }>("encryption_key", {})
+  const name = asking.find((asked) => asked.device === device)?.name
+  if (!name) throw new Error("That device isn't asking for your key. Choose Unlock with Passkey on it again.")
+  if (!(await unlock(device, name))) throw new Error("This passkey can't unlock your key yet. Open Sign-In & Security on a device that holds it, then try again.")
+  setStage({ stage: "unlocked", name })
 }
 
 /// The passkey question, and what answering it lets in. Someone joining makes their passkey, and is signed in
 /// with it. Whoever was signed in here before no longer is.
 async function signIn() {
   if (flow.flow === "addPasskey") {
-    const { error } = await auth.passkey.addPasskey({ context: flow.another, name: ["Passkey", Bowser.parse(navigator.userAgent).os.name].filter(Boolean).join(" on ") })
+    await auth.signOut()
+    const name = ["Passkey", Bowser.parse(navigator.userAgent).os.name].filter(Boolean).join(" on ")
+    const result = await auth.passkey.addPasskey({ context: flow.another, name, createSession: true, extensions: PRF, returnWebAuthnResponse: true })
+    const { error } = result
     // Better Auth's own words for a device that holds a passkey of theirs already, which is all the browser says.
     if ((error as { code?: string } | null)?.code === "ERROR_AUTHENTICATOR_PREVIOUSLY_REGISTERED") throw new Error("This device has a passkey of yours already. Open the link on another one.")
     if (error) throw new Error(error.message ?? "That passkey wasn't made. Try again.")
+    await made(result as Answered, true)
     return setStage({ stage: "created" })
   }
-  if (flow.flow === "join" && !called().trim()) throw new Error("Say your name first.")
-  await auth.signOut()
-  const result = flow.flow === "join" ? await auth.passkey.addPasskey({ context: flow.invite, createSession: true }) : await auth.signIn.passkey({ returnWebAuthnResponse: true })
-  const { error } = result
-  if ((error as { code?: string } | null)?.code === "PASSKEY_NOT_FOUND") {
-    // The browser offered a passkey this network doesn't have: one since removed, or one an earlier network at this
-    // address made. WebAuthn's Signal API has the password manager remove it, so it isn't offered again.
-    const { webauthn } = result as { webauthn?: { response: { id: string } } }
-    if (webauthn && PublicKeyCredential.signalUnknownCredential) PublicKeyCredential.signalUnknownCredential({ rpId: location.hostname, credentialId: webauthn.response.id })
-    throw new Error("This passkey is no longer valid for this network. Try again and choose another one, or ask to be invited again if you have no other.")
-  }
-  if (error) throw new Error(error.message ?? "That passkey didn't work. Try again.")
-  if (flow.flow === "join") await ask("/update-user", { called: called().trim() })
+  if (flow.flow === "join") {
+    if (!called().trim()) throw new Error("Say your name first.")
+    await auth.signOut()
+    const result = await auth.passkey.addPasskey({ context: flow.invite, createSession: true, extensions: PRF, returnWebAuthnResponse: true })
+    if (result.error) throw new Error(result.error.message ?? "That passkey didn't work. Try again.")
+    await made(result as Answered, false)
+    await ask("/update-user", { called: called().trim() })
+  } else await withPasskey()
+  if (flow.flow === "unlock") return flow.device ? unlockAsked(flow.device) : setStage(used?.prf ? { stage: "unlocked" } : { stage: "failed", why: NO_PRF })
   if (flow.flow === "assistant") {
     // They allowed it and signed in, so the assistant is sent back with what it came for.
     const { url } = await ask<{ url: string }>("/oauth2/consent", { accept: true, oauth_query: flow.request })
@@ -198,11 +284,18 @@ async function cancel() {
   location.replace(url)
 }
 
-/// This person's answer to the device whose code they compared.
+/// This person's answer to the device whose code they compared. Saying it matches asks for their passkey, if it
+/// wasn't just answered here, so the device holds their key as it comes in when the passkey unlocks it.
 async function respond(yes: boolean) {
-  const { name } = stage() as { name: string }
-  await ask(yes ? "/device/approve" : "/device/deny", { userCode: (flow as { code: string }).code })
-  setStage({ stage: yes ? "approved" : "denied", name })
+  const { name, device } = stage() as { name: string; device: string }
+  if (!yes) {
+    await ask("/device/deny", { userCode: (flow as { code: string }).code })
+    return setStage({ stage: "denied", name })
+  }
+  if (!used) await withPasskey()
+  const unlocked = await unlock(device, name)
+  await ask("/device/approve", { userCode: (flow as { code: string }).code })
+  setStage({ stage: "approved", name, unlocked })
 }
 
 /// The link the device gives, as it's opened anywhere else, and as it's shown, which is short enough to type.
@@ -264,7 +357,7 @@ function shows(): Shows {
             onStop: () => respond(false),
           }
         case "approved":
-          return { heading: `Approve ${now.name}?`, done: `It's yours now: ${now.name}. Go back to it.` }
+          return { heading: `Approve ${now.name}?`, done: now.unlocked ? `It's yours now, and holds your key: ${now.name}. Go back to it.` : `It's yours now: ${now.name}. Go back to it.` }
         case "denied":
           return { heading: `Approve ${now.name}?`, done: `Denied: ${now.name} wasn't approved.` }
         default:
@@ -288,6 +381,15 @@ function shows(): Shows {
           return { heading: "Sign in", problem: `Couldn't tell who's asking: ${failed}`, button: "Try Again", onSignIn: begin }
         default:
           return { heading: "Sign in", status: "Checking who's asking…" }
+      }
+    case "unlock":
+      switch (now.stage) {
+        case "unlocked":
+          return { heading: "Unlock with Passkey", done: now.name ? `Unlocked: ${now.name} holds your key now. Go back to it.` : "Your passkey can unlock your key. Go back to the app." }
+        case "failed":
+          return { heading: "Unlock with Passkey", problem: failed, button: "Try Again", onSignIn: signIn }
+        default:
+          return { heading: "Unlock with Passkey", note: flow.device ? "Use a passkey of yours to let the device hold your key." : "Use the passkey that should unlock your key on a new device.", button: "Continue", onSignIn: signIn }
       }
     case "addPasskey":
       return now.stage === "created" ? { heading: "Add a passkey", done: "Your passkey is created. Go back to the app." } : { heading: "Add a passkey", button: "Create a passkey", onSignIn: signIn }

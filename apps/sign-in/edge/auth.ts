@@ -9,7 +9,7 @@
 // joined, and their email where how they signed in has one, which a server tells apps of by `people`.
 import { env, waitUntil } from "cloudflare:workers";
 import { betterAuth } from "better-auth";
-import { APIError, createAuthEndpoint, createAuthMiddleware, getSessionFromCtx } from "better-auth/api";
+import { APIError, createAuthEndpoint, createAuthMiddleware, getAuthoritativeSessionFromCtx, getSessionFromCtx } from "better-auth/api";
 import { getMigrations } from "better-auth/db/migration";
 import { jwt } from "better-auth/plugins";
 import { cimd } from "@better-auth/cimd";
@@ -231,6 +231,32 @@ const DEVICE_TOKEN = "/sign-in/auth/device/token";
 const AUTHORIZE = "/sign-in/auth/oauth2/authorize";
 const SIGN_IN = "/sign-in/";
 
+/** A passkey as Better Auth keeps it, with what lets it unlock its person's key. */
+interface Passkey {
+  id: string;
+  userId: string;
+  name?: string;
+  credentialID: string;
+  createdAt: Date;
+  prfKey?: string | null;
+  encryptedKey?: string | null;
+}
+
+/**
+ * The passkey named by `credential` in what the sign-in page asks, which this browser's session was made with in the
+ * last few minutes, and whose it is: what it says of a passkey's PRF output is believed only from that passkey.
+ */
+async function usedJustNow(ctx: { body?: { credential?: unknown } } & Parameters<typeof getAuthoritativeSessionFromCtx>[0]) {
+  const session = await getAuthoritativeSessionFromCtx(ctx);
+  const credential = String(ctx.body?.credential ?? "");
+  const made = session as { session: { passkey?: string | null; createdAt: Date } } | null;
+  if (!session || made!.session.passkey !== credential || Date.now() - new Date(made!.session.createdAt).getTime() >= FRESH * 1000)
+    throw new APIError("FORBIDDEN", { message: "Sign in again with that passkey." });
+  const [passkey] = await ctx.context.adapter.findMany<Passkey>({ model: "passkey", where: [{ field: "userId", value: session.user.id }, { field: "credentialID", value: credential }] });
+  if (!passkey) throw new APIError("FORBIDDEN", { message: "That isn't one of your passkeys." });
+  return { passkey, user: session.user as User };
+}
+
 /** A device's code as Better Auth looks it up: its letters and digits, in capitals. */
 const plain = (code: unknown) => String(code).replace(/[^a-zA-Z0-9]/g, "").toUpperCase();
 
@@ -263,6 +289,11 @@ const devices = () => ({
         place: { type: "string", required: false },
       },
     },
+    // What lets a passkey unlock its person's key on a new device (`page/passkey.ts`): the public key its PRF output
+    // derives, empty for a passkey that said it has none, and their key, encrypted to it by a device that holds it.
+    passkey: { fields: { prfKey: { type: "string", required: false }, encryptedKey: { type: "string", required: false } } },
+    // The passkey a browser's session was made with, by its credential ID.
+    session: { fields: { passkey: { type: "string", required: false } } },
   },
   // Naming whoever's signing in says whether they're here, and notifies them, so one address names only so many.
   rateLimit: [{ pathMatcher: (path: string) => path === "/device/claim", window: NAMED.window, max: 10 }],
@@ -302,6 +333,22 @@ const devices = () => ({
         return ctx.json({ number: set.number });
       },
     ),
+    // The sign-in page says which key a passkey's PRF output derives, or that it gave none, as it's just been used.
+    passkeyPrfKey: createAuthEndpoint("/passkey/prf-key", { method: "POST" }, async (ctx) => {
+      const { passkey } = await usedJustNow(ctx);
+      const key = ctx.body?.key === null ? "" : String(ctx.body?.key ?? "");
+      if (key && !/^[0-9a-f]{64}$/.test(key)) throw new APIError("BAD_REQUEST", { message: "That isn't a passkey's key." });
+      // A passkey that gave no PRF output this time, where a web view or provider didn't pass it on, keeps the key it
+      // gave before, and what's encrypted to it.
+      if (!key && passkey.prfKey) return ctx.json({});
+      if (passkey.prfKey !== key) await ctx.context.adapter.update({ model: "passkey", where: [{ field: "id", value: passkey.id }], update: { prfKey: key, encryptedKey: null } });
+      return ctx.json({});
+    }),
+    // What the sign-in page opens with a passkey's PRF output, on a new device: the person's key, encrypted to it.
+    passkeyEncryptedKey: createAuthEndpoint("/passkey/encrypted-key", { method: "POST" }, async (ctx) => {
+      const { passkey, user } = await usedJustNow(ctx);
+      return ctx.json({ owner: who(user), key: passkey.encryptedKey || null });
+    }),
   },
   async onRequest(request: Request) {
     const url = new URL(request.url);
@@ -350,6 +397,13 @@ const devices = () => ({
       },
     ],
     after: [
+      {
+        // A browser's session keeps which passkey made it, so only that passkey's page says what unlocks with it.
+        matcher: (ctx) => (ctx.path === "/passkey/verify-authentication" || ctx.path === "/passkey/verify-registration") && !!ctx.context.newSession,
+        handler: createAuthMiddleware(async (ctx) => {
+          await ctx.context.internalAdapter.updateSession(ctx.context.newSession!.session.token, { passkey: String(ctx.body.response.id) });
+        }),
+      },
       {
         // A device's code keeps what the device calls itself.
         matcher: (ctx) => ctx.path === "/device/code" && !(ctx.context.returned instanceof Error),
@@ -620,6 +674,8 @@ export interface Ask {
   request?: unknown;
   number?: unknown;
   passkey?: string;
+  /** What `encrypt_for_passkeys` keeps, by credential ID. */
+  keys?: unknown;
   /** Whether the network is being built, where a server acts as whoever a client says (`mix network --development`). */
   building?: boolean;
 }
@@ -661,7 +717,7 @@ export async function asked(auth: Auth, origin: string, { ask, who: name, buildi
     const [devices, browsers, passkeys] = await Promise.all([
       adapter.findMany<Device>({ model: "device", where: mine }),
       internalAdapter.listSessions(user.id),
-      adapter.findMany<{ id: string; name?: string; createdAt: Date }>({ model: "passkey", where: mine }),
+      adapter.findMany<Passkey>({ model: "passkey", where: mine }),
     ]);
     // Whether an app is connected to the relay, which says when it was last seen otherwise.
     using presence = await env.RELAY.presence(devices.filter(({ kind }) => kind === "app").map(({ id }) => id));
@@ -675,7 +731,15 @@ export async function asked(auth: Auth, origin: string, { ask, who: name, buildi
         // A browser that's signed in is a device too, named by what it says it is.
         ...browsers.map(({ id, userAgent, createdAt }) => ({ id, kind: "browser", name: browser(userAgent), added: createdAt })),
       ],
-      passkeys: passkeys.map(({ id, name, createdAt }) => ({ id, name: name || "Passkey", added: createdAt })),
+      // Whether each unlocks its person's key on a new device, and what a device that holds the key encrypts it to.
+      passkeys: passkeys.map(({ id, name, createdAt, credentialID, prfKey, encryptedKey }) => ({
+        id,
+        name: name || "Passkey",
+        added: createdAt,
+        credential: credentialID,
+        prf_key: prfKey ?? null,
+        unlocks: !!(prfKey && encryptedKey),
+      })),
     };
   }
   if (ask === "remove_device") {
@@ -750,6 +814,19 @@ export async function asked(auth: Auth, origin: string, { ask, who: name, buildi
   }
   // A link that this person makes another passkey by, in a browser, within a quarter of an hour.
   if (ask === "passkey") return { link: `${origin}/sign-in/#passkey=${await invitation(adapter, user, 15 * 60 * 1000)}` };
+  // A device that holds this person's key encrypted it to their passkeys whose PRF output derives `prf_key`, which
+  // is kept only for a passkey whose key it still is.
+  if (ask === "encrypt_for_passkeys") {
+    const keys = (about.keys ?? {}) as Record<string, { prf_key?: unknown; key?: unknown }>;
+    let kept = 0;
+    for (const passkey of await adapter.findMany<Passkey>({ model: "passkey", where: mine })) {
+      const given = keys[passkey.credentialID];
+      if (!given || !passkey.prfKey || given.prf_key !== passkey.prfKey || typeof given.key !== "string") continue;
+      await adapter.update({ model: "passkey", where: [{ field: "id", value: passkey.id }], update: { encryptedKey: given.key } });
+      kept++;
+    }
+    return { passkeys: kept };
+  }
   if (ask === "remove_passkey") {
     const passkeys = await adapter.findMany<{ id: string; name?: string }>({ model: "passkey", where: mine });
     const passkey = passkeys.find(({ id }) => id === about.passkey);

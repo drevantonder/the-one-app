@@ -47,7 +47,13 @@ defmodule SignIn do
         page: "client/security.html",
         subject: "user"
       },
-      %{name: "Connect Your AI", page: "client/connect.html", icon: "client/connect.svg", category: "AI", subject: "user"}
+      %{
+        name: "Connect Your AI",
+        page: "client/connect.html",
+        icon: "client/connect.svg",
+        category: "AI",
+        subject: "user"
+      }
     ]
   end
 
@@ -118,9 +124,47 @@ defmodule SignIn do
         inputs: none,
         outputs: %{
           type: "object",
-          properties: %{link: %{type: "string", description: "Where to make it, in a browser, within a quarter of an hour"}},
+          properties: %{
+            link: %{type: "string", description: "Where to make it, in a browser, within a quarter of an hour"}
+          },
           required: ["link"]
         }
+      },
+      %{
+        name: "encrypt_for_passkeys",
+        description: """
+        Lets your passkeys unlock your key on a new device: from a device that holds it, encrypts it to each passkey
+        whose PRF output derives a key and that doesn't unlock it yet. A passkey says that key as it's used to sign in.
+        """,
+        inputs: %{
+          type: "object",
+          properties: %{
+            keys: %{
+              type: "string",
+              format: "passkey-keys",
+              passkeys: "devices",
+              description: "Your key, encrypted to each passkey, which this device fills in"
+            }
+          }
+        },
+        outputs: %{
+          type: "object",
+          properties: %{passkeys: %{type: "integer", description: "How many more unlock it"}},
+          required: ["passkeys"]
+        }
+      },
+      %{
+        name: "unlock_with_passkey",
+        description: """
+        Makes a link that lets a device of yours that's asking for your key hold it, once you use a passkey that
+        unlocks it there, in a browser. Without a device, using the passkey there lets it unlock your key: a device
+        that holds it encrypts it to the passkey next. Open it, don't pass it on.
+        """,
+        inputs: %{
+          type: "object",
+          properties: %{device: %{type: "string", description: "The device's key, as `encryption_key` lists it asking"}}
+        },
+        outputs: %{type: "object", properties: %{link: %{type: "string"}}, required: ["link"]}
       },
       %{
         name: "devices",
@@ -152,9 +196,16 @@ defmodule SignIn do
                 properties: %{
                   id: %{type: "string", description: "What remove_passkey takes"},
                   name: %{type: "string"},
-                  added: %{type: "string", description: "When, ISO 8601"}
+                  added: %{type: "string", description: "When, ISO 8601"},
+                  credential: %{type: "string", description: "Its WebAuthn credential ID"},
+                  prf_key: %{
+                    type: ["string", "null"],
+                    description:
+                      "The key its PRF output derives, which your key is encrypted to so it unlocks it on a new device: empty if it has no PRF, null until it's next used"
+                  },
+                  unlocks: %{type: "boolean", description: "Whether it unlocks your key on a new device"}
                 },
-                required: ["id", "name", "added"]
+                required: ["id", "name", "added", "credential", "prf_key", "unlocks"]
               }
             }
           },
@@ -176,15 +227,24 @@ defmodule SignIn do
             }
           }
         },
-        outputs: %{type: "object", properties: %{people: %{type: "array", items: %{
+        outputs: %{
           type: "object",
           properties: %{
-            who: %{type: "string", description: "users/<name>"},
-            called: %{type: ["string", "null"], description: "The name they go by"},
-            email: %{type: ["string", "null"], description: "Their email, where signing in has one"}
+            people: %{
+              type: "array",
+              items: %{
+                type: "object",
+                properties: %{
+                  who: %{type: "string", description: "users/<name>"},
+                  called: %{type: ["string", "null"], description: "The name they go by"},
+                  email: %{type: ["string", "null"], description: "Their email, where signing in has one"}
+                },
+                required: ["who", "called", "email"]
+              }
+            }
           },
-          required: ["who", "called", "email"]
-        }}}, required: ["people"]}
+          required: ["people"]
+        }
       },
       %{
         name: "name",
@@ -276,7 +336,11 @@ defmodule SignIn do
           properties: %{device: %{type: "string", description: "The device's id, as `devices` lists it"}},
           required: ["device"]
         },
-        outputs: %{type: "object", properties: %{removed: %{type: "string", description: "Its name"}}, required: ["removed"]}
+        outputs: %{
+          type: "object",
+          properties: %{removed: %{type: "string", description: "Its name"}},
+          required: ["removed"]
+        }
       },
       %{
         name: "remove_passkey",
@@ -286,7 +350,11 @@ defmodule SignIn do
           properties: %{passkey: %{type: "string", description: "The passkey's id, as `devices` lists it"}},
           required: ["passkey"]
         },
-        outputs: %{type: "object", properties: %{removed: %{type: "string", description: "Its name"}}, required: ["removed"]}
+        outputs: %{
+          type: "object",
+          properties: %{removed: %{type: "string", description: "Its name"}},
+          required: ["removed"]
+        }
       }
     ]
   end
@@ -358,6 +426,22 @@ defmodule SignIn do
 
   def call("devices", _inputs, call), do: ask(%{ask: "devices", who: person(call)})
 
+  def call("encrypt_for_passkeys", %{"keys" => keys}, call) do
+    case JSON.decode(keys) do
+      {:ok, %{} = keys} -> %{passkeys: ask(%{ask: "encrypt_for_passkeys", who: person(call), keys: keys})["passkeys"]}
+      _ -> raise "Those aren't your key encrypted to your passkeys. A device that holds it fills them in."
+    end
+  end
+
+  def call("encrypt_for_passkeys", _inputs, _call),
+    do: raise("A device that holds your key encrypts it to your passkeys: in the app there, or with `one` on it.")
+
+  def call("unlock_with_passkey", inputs, _call) do
+    device = inputs["device"] || ""
+    if not (device =~ ~r/^([0-9a-f]{64})?$/), do: raise("A device is named by its key.")
+    %{link: address() <> "/sign-in/#unlock=" <> device}
+  end
+
   # Whoever may see who's in the network sees who each of them is: a member of it, as the apps that validate
   # `reach` say. Everyone sees who they are themselves.
   def call("people", inputs, call) do
@@ -369,8 +453,11 @@ defmodule SignIn do
     people =
       for "users/" <> name = user <- users do
         case Artifact.read(call.own, "people/" <> name) do
-          {:ok, stored, _tag} -> Map.merge(%{"called" => nil, "email" => nil}, Map.put(JSON.decode!(stored), "who", user))
-          :absent -> %{"who" => user, "called" => nil, "email" => nil}
+          {:ok, stored, _tag} ->
+            Map.merge(%{"called" => nil, "email" => nil}, Map.put(JSON.decode!(stored), "who", user))
+
+          :absent ->
+            %{"who" => user, "called" => nil, "email" => nil}
         end
       end
 
@@ -465,15 +552,16 @@ defmodule SignIn do
   defp person(_call), do: raise("This is a person's to ask, and nobody is asking.")
 
   # Asks this app's edge function, as this server: it answers only the network's own.
-  defp ask(what) do
-    address =
-      Application.get_env(:one_core, :address) ||
-        raise "People sign in at a network's address, and this network has none."
+  defp address do
+    Application.get_env(:one_core, :address) ||
+      raise "People sign in at a network's address, and this network has none."
+  end
 
+  defp ask(what) do
     # A network being built acts as whoever a client says, who joined nowhere, so the edge makes them as it's asked.
     body = JSON.encode!(Map.put(what, :building, Application.get_env(:one_core, :development, false)))
 
-    request = [method: :post, url: address <> "/sign-in/ask", body: body, headers: Edge.signed("/sign-in/ask", body)]
+    request = [method: :post, url: address() <> "/sign-in/ask", body: body, headers: Edge.signed("/sign-in/ask", body)]
 
     case Edge.send!(request ++ [retry: false]) do
       %{status: 200, body: %{"error" => why}} -> raise why

@@ -20,6 +20,11 @@ that one question for it, and a new device when they also say the code it shows 
   passkeys. An app says whether it's `connected`, and if not when it was `last_seen`. `remove_device` takes one out: it's nobody's from the next thing it asks. `remove_passkey` removes a
   passkey, but never your last. `add_passkey` makes a link your person makes another passkey by, in a browser, within a quarter of an hour:
   open it for them, and pass it to nobody.
+- A passkey with WebAuthn's PRF unlocks its person's key on a new device too (the encryption app's skill says how).
+  `devices` says which do (`unlocks`). A device that holds the key encrypts it to each that can with
+  `encrypt_for_passkeys`; the app does that itself as Sign-In & Security or the Vault's Security opens. A passkey
+  that hasn't said since it was made does once it's used: `unlock_with_passkey` with no device makes the link for
+  that, and with a device that's asking for the key, lets that device in.
 - `people` says who people are: the name each goes by, chosen as they joined, and their email where signing in
   has one. `name` changes the name your person goes by, when they ask. `everyone` lists everyone in the network
   and everyone invited who hasn't joined yet. `remove_person` takes someone out, or ends an invitation: their
