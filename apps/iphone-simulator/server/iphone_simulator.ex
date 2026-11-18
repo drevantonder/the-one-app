@@ -36,7 +36,7 @@ defmodule IphoneSimulator do
   @impl true
   def requires do
     %{
-      "core" => ">= 0.22.18",
+      "core" => ">= 0.25.4",
       "database" => "to keep your simulators",
       "webrtc" => "to show a simulator's screen live"
     }
@@ -53,7 +53,8 @@ defmodule IphoneSimulator do
     do: [
       %{
         page: "client/index.html",
-        subject: "user"
+        subject: "user",
+        host: 1
       }
     ]
 

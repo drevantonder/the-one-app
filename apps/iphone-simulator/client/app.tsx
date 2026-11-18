@@ -1,7 +1,6 @@
 // iPhone Simulator: your simulators on every Mac, and one of them live, to use as an iPhone, start, stop or remove.
 import { createMemo, createSignal, Errored, For, Loading, Match, refresh, Show, Switch } from "solid-js"
-import { render } from "@solidjs/web"
-import { Button, call, changed, confirm, Empty, List, LiveScreen, Menu, Problem, Row, Screen, Skeleton, Split, Status, Steps, toast } from "ui"
+import { Button, call, changed, confirm, Empty, List, LiveScreen, Menu, Problem, render, Row, Screen, Skeleton, Split, Status, Steps, toast } from "ui"
 
 /** A simulator, as `iphone-simulator_list` answers it. */
 interface Simulator {
@@ -45,7 +44,9 @@ function Detail(props: { simulator: Simulator }) {
     await call(`iphone-simulator_${value}`, { simulator: e().name })
       .then(() => value === "remove" && setOpen())
       // A start that fails says why where it would have shown, as the problem it's stopped with.
-      .catch((error) => value !== "start" && toast(error))
+      .catch((error) => {
+        if (value !== "start") toast(error)
+      })
       .finally(() => setBusy(false))
   }
   const actions = () => ACTIONS[e().state]
@@ -130,4 +131,4 @@ function App() {
   )
 }
 
-render(() => <App />, document.body)
+render(() => <App />)
