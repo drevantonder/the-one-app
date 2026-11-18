@@ -1370,6 +1370,8 @@ async function respond(view, method, params) {
         timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
         deviceCapabilities: { touch: matchMedia("(pointer: coarse)").matches, hover: matchMedia("(hover: hover)").matches },
         safeAreaInsets: insets(view.frame),
+        // Whether the window names it above it, in its title bar's breadcrumb (`titled`), so its first screen doesn't.
+        breadcrumb: Boolean(own) && !titleBar.hidden,
         // Whether its network answers, and whether an update for this device is ready, which the window keeps it
         // told of: the launcher shows Update while one is.
         connection: shown.getSnapshot().context.connection,

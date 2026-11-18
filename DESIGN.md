@@ -47,6 +47,7 @@ What users see, as the project's owner decided it. Only their decisions are here
 - The web is the same.
 - The computer's own app (Mac, Windows, Linux) has no rail and no recent apps (18 Nov): "That was a YAGNI at this stage." Each app is a window of its own, whose breadcrumb goes Home (App windows), and the Dock or taskbar and Cmd-Tab or Alt-Tab go between apps, as they do between any of the computer's apps.
 - An app's first screen has no Back to the Home Screen: the rail, a computer's breadcrumb, and the device's own gestures (Android's back, the trackpad's swipe, the iPhone's swipe in from the left edge, Escape), leave it. An app's own Back stays for its own screens.
+- On a computer, where the breadcrumb names the app, its first screen has no big title of its own (18 Nov): its bar keeps only its buttons. Deeper screens keep their title and Back; no deeper crumbs (YAGNI). Phones keep their titles, as iOS's large titles.
 
 ## Home Screen
 

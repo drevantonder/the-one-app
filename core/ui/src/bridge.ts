@@ -12,10 +12,12 @@ interface JsonRpcResponse {
 }
 
 /** What the client says of where the page is shown: light or dark, how far in from each edge what the device
- * keeps for itself reaches, whether its network answers, and whether an update for this device is ready. */
+ * keeps for itself reaches, whether the window names the app above it (an app's own window on a computer, in its
+ * title bar's breadcrumb), whether its network answers, and whether an update for this device is ready. */
 interface HostContext {
   theme?: "light" | "dark" | null
   safeAreaInsets?: { top: number; right: number; bottom: number; left: number }
+  breadcrumb?: boolean
   connection?: Connection
   updateReady?: boolean
 }
@@ -83,13 +85,15 @@ export const updateReady = () => (greet(), updatable())
 
 /// Light or dark, where the client says which (Colour Mode), and otherwise the device's own: as
 /// `color-scheme` for colours, and as a `light` or `dark` class for what can't follow it (tokens.css). And what the
-/// device keeps for itself at each edge, as `--safe-top` and the rest, whether its network answers and whether an
-/// update is ready.
+/// device keeps for itself at each edge, as `--safe-top` and the rest, whether the window names the app above it
+/// (`data-breadcrumb`, which a first screen's title gives way to), whether its network answers and whether an update
+/// is ready.
 function dress(context: HostContext | undefined) {
   if (context?.connection) setConnected(context.connection)
   if (context && "updateReady" in context) setUpdatable(context.updateReady === true)
   const root = document.documentElement
   if (context?.safeAreaInsets) for (const [edge, inset] of Object.entries(context.safeAreaInsets)) root.style.setProperty(`--safe-${edge}`, `${inset}px`)
+  if (context && "breadcrumb" in context) root.toggleAttribute("data-breadcrumb", context.breadcrumb === true)
   if (!context || !("theme" in context)) return
   root.style.colorScheme = context.theme ?? ""
   for (const name of ["light", "dark"]) root.classList.toggle(name, context.theme === name)

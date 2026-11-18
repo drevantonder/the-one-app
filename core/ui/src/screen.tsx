@@ -44,7 +44,9 @@ const Opened = createContext<() => (() => void) | undefined>(() => undefined)
 /// top that stays as it scrolls, with its `heading` and what it does (`action`: its one main button, or a menu),
 /// then what's in it, one part under another. With `back` the bar starts with a Back button, which calls `onBack`,
 /// or goes back in the browser's history as the device's own back gesture does. A split's list closes what's open
-/// beside it first. An app's first screen has no Back: the window's rail and the device's back leave the app.
+/// beside it first. An app's first screen has no Back: the window's rail, its title bar's Home on a computer, and the
+/// device's back leave the app. Where the window's breadcrumb names the app, its first screen's heading gives way to it
+/// (ui.css).
 export function Screen(props: { heading?: JSX.Element; action?: JSX.Element; back?: boolean; onBack?: () => void; class?: JSX.ClassValue; children?: JSX.Element }) {
   const opened = useContext(Opened)
   const back = () => {

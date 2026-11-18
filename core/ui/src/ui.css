@@ -1175,6 +1175,15 @@ button.ui-box {
 :is(.ui-screen > header > h1, .ui-dialog header h2):dir(rtl) {
   text-align: right;
 }
+/* Where the window names the app above it, in its title bar's breadcrumb (`data-breadcrumb`, an app's own window on
+   a computer), the app's first screen, which has no Back, doesn't name it again: its bar keeps only what it does,
+   and with nothing to do, only what's kept clear at the top. A phone keeps it, as iOS's large titles. */
+:root[data-breadcrumb] .ui-screen > header:not(:has(> .back)) > h1 {
+  visibility: hidden;
+}
+:root[data-breadcrumb] .ui-screen > header:not(:has(> .back, > :not(h1))) {
+  min-height: var(--safe-top);
+}
 .ui-screen > header > .back {
   /* Beside the list it came from, a screen has nowhere to go back to (the split's). */
   display: var(--screen-back, grid);
