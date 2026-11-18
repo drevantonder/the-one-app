@@ -5,6 +5,7 @@
     "": {
       "name": "telemetry",
       "dependencies": {
+        "@noble/hashes": "2.4.0",
         "@opentelemetry/api": "1.10.0",
         "@opentelemetry/core": "3.1.1",
         "@opentelemetry/otlp-transformer": "0.301.2",
@@ -19,6 +20,8 @@
   },
   "packages": {
     "@cloudflare/workers-types": ["@cloudflare/workers-types@5.20261116.1", "", {}, "sha512-bym4dNT9Hnm+goedLTTTH85T6S4wOJJaOpKgk9MlEGU18/JKsChN+wHvSWUAIy5YVSm6LnuaUu3d3N4K0m8Dtg=="],
+
+    "@noble/hashes": ["@noble/hashes@2.4.0", "", {}, "sha512-X5XaVWZIBCT7HHZGm5I7ZQXDwLG+bGXuSrMQAW+7Zvl87h1kmc1ZB1VSRJcpUfoUrGQp4Fkoxm5kZ+Ms+aW+eA=="],
 
     "@opentelemetry/api": ["@opentelemetry/api@1.10.0", "", {}, "sha512-lMkyes8iHrG+mk6WH7X70MdCLI2RS0FwNBY1PyQ8UemaijE2m5mv5A0Niy3HtbYTFrgkUEQjFMXmSAk2hQDuPQ=="],
 

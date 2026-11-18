@@ -13,6 +13,7 @@
 // as a server's export is (`Telemetry.Store`): protobuf's messages one after another are one message, so it's one
 // export request.
 import { DurableObject, env } from "cloudflare:workers";
+import { bytesToHex, randomBytes } from "@noble/hashes/utils.js";
 import { ROOT_CONTEXT, SpanKind, SpanStatusCode, trace, type Context } from "@opentelemetry/api";
 import { W3CTraceContextPropagator } from "@opentelemetry/core";
 import { ProtobufTraceSerializer } from "@opentelemetry/otlp-transformer";
@@ -58,14 +59,13 @@ const route = (path: string) => path.replace(/^\/(link|apps)\/.*/, "/$1/*");
 /** The ids the next span is given: those the Worker carried on, so a server's span it reached is under it. */
 const next: { trace?: string; span?: string } = {};
 const random: IdGenerator = {
-  generateTraceId: () => hex(16),
-  generateSpanId: () => hex(8),
+  generateTraceId: () => bytesToHex(randomBytes(16)),
+  generateSpanId: () => bytesToHex(randomBytes(8)),
 };
 const ids: IdGenerator = {
   generateTraceId: () => next.trace ?? random.generateTraceId(),
   generateSpanId: () => next.span ?? random.generateSpanId(),
 };
-const hex = (bytes: number) => Array.from(crypto.getRandomValues(new Uint8Array(bytes)), (byte) => byte.toString(16).padStart(2, "0")).join("");
 
 const exported = new InMemorySpanExporter();
 const tracer = new TracerProvider({
@@ -152,7 +152,7 @@ export default {
 export class Batch extends DurableObject {
   async add(otlp: Uint8Array) {
     if (!(await this.ctx.storage.getAlarm())) await this.ctx.storage.setAlarm(Date.now() + EVERY);
-    await this.ctx.storage.put(`otlp/${Date.now()}/${hex(4)}`, otlp);
+    await this.ctx.storage.put(`otlp/${Date.now()}/${bytesToHex(randomBytes(4))}`, otlp);
   }
 
   async alarm() {

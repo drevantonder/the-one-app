@@ -7,6 +7,7 @@
 import { CipherSuite, DhkemX25519HkdfSha256, HkdfSha256 } from "@hpke/core"
 import { Chacha20Poly1305 } from "@hpke/chacha20poly1305"
 import { ed25519 } from "@noble/curves/ed25519.js"
+import { bytesToHex, hexToBytes } from "@noble/hashes/utils.js"
 
 /// HPKE as the encryption app's `cipher` has it: X25519, HKDF-SHA256 and ChaCha20-Poly1305.
 const suite = new CipherSuite({ kem: new DhkemX25519HkdfSha256(), kdf: new HkdfSha256(), aead: new Chacha20Poly1305() })
@@ -24,8 +25,6 @@ export function output(results: AuthenticationExtensionsClientOutputs | undefine
   return first ? new Uint8Array(first as ArrayBuffer) : undefined
 }
 
-const hex = (bytes: ArrayBuffer | Uint8Array) => Array.from(new Uint8Array(bytes), (byte) => byte.toString(16).padStart(2, "0")).join("")
-const unhex = (text: string) => Uint8Array.from(text.match(/../g) ?? [], (byte) => parseInt(byte, 16))
 const base64 = (bytes: Uint8Array) => btoa(String.fromCharCode(...bytes))
 const unbase64 = (text: string) => Uint8Array.from(atob(text), (char) => char.charCodeAt(0))
 const text = (what: string) => new TextEncoder().encode(what)
@@ -33,7 +32,7 @@ const text = (what: string) => new TextEncoder().encode(what)
 /// The public key a passkey's PRF output derives, in hex, as it's kept with the passkey.
 export async function prfKey(prf: Uint8Array) {
   const { publicKey } = await suite.kem.deriveKeyPair(prf)
-  return hex(await suite.kem.serializePublicKey(publicKey))
+  return bytesToHex(new Uint8Array(await suite.kem.serializePublicKey(publicKey)))
 }
 
 /// `owner`'s key, as a device that holds it encrypted it to the passkey `credential`, opened by its PRF output.
@@ -49,9 +48,9 @@ export async function opened(prf: Uint8Array, owner: string, credential: string,
  * device's key, the X25519 form of its Ed25519 one, and what tells it from another key.
  */
 export async function forDevice(key: Uint8Array<ArrayBuffer>, owner: string, device: string) {
-  const recipientPublicKey = await suite.kem.deserializePublicKey(ed25519.utils.toMontgomery(unhex(device)))
+  const recipientPublicKey = await suite.kem.deserializePublicKey(ed25519.utils.toMontgomery(hexToBytes(device)))
   const { enc, ct } = await suite.seal({ recipientPublicKey, info: text(`one/encryption/1/owner\n${owner}\n${device}`) }, key)
   const hkdf = await crypto.subtle.importKey("raw", key, "HKDF", false, ["deriveBits"])
   const check = await crypto.subtle.deriveBits({ name: "HKDF", hash: "SHA-256", salt: new Uint8Array(32), info: text("one/encryption/1/check") }, hkdf, 256)
-  return JSON.stringify({ check: hex(check), slot: base64(new Uint8Array([...new Uint8Array(enc), ...new Uint8Array(ct)])) })
+  return JSON.stringify({ check: bytesToHex(new Uint8Array(check)), slot: base64(new Uint8Array([...new Uint8Array(enc), ...new Uint8Array(ct)])) })
 }

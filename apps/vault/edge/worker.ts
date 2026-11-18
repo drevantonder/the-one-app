@@ -11,14 +11,12 @@ declare global {
     /** Its bindings: its page's files, and what the edge gives every app's part (`core/edge/edge.js`). */
     interface Env {
       ASSETS: Fetcher;
-      NETWORK: { servers(of: string): Promise<string[]> };
+      NETWORK: { servers(of?: string): Promise<string[]> };
       RELAY: { forward(servers: string[], message: string): Promise<{ server: string; answer: string } | null> };
     }
   }
 }
 
-/** A server on this list acts for the network, and so for everyone in it. */
-const NETWORK = "network/";
 /** Whose something is: a user, a group or the network, as relation tuples name them. */
 const OWNER = /^(?:(?:users|groups)\/[a-z][a-z0-9-]*|network)$/;
 
@@ -50,7 +48,7 @@ async function callback(params: URLSearchParams, again: boolean) {
   // a link, and the Vault's tool checks it's the one it gave.
   const call = { name: "vault_oauth_callback", arguments: inputs, _meta: { link: `${owner}/${state}` } };
   const message = JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/call", params: call });
-  const servers = new Set([...(await env.NETWORK.servers(`${owner}/`)), ...(await env.NETWORK.servers(NETWORK))]);
+  const servers = new Set([...(await env.NETWORK.servers(`${owner}/`)), ...(await env.NETWORK.servers())]);
   const reached = await env.RELAY.forward([...servers], message);
   if (!reached) return { problem: "None of this network's servers answered. Start the sign-in again once one is on." };
   type Result = { isError?: boolean; content?: { text?: string }[]; structuredContent?: Record<string, unknown> };

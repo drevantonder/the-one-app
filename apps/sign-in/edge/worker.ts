@@ -6,10 +6,8 @@
 // the network's apps use its passkeys and open its links (`ASSOCIATIONS`).
 import { env, WorkerEntrypoint } from "cloudflare:workers";
 import { requireMcpAuth } from "@better-auth/mcp";
+import { bytesToHex } from "@noble/hashes/utils.js";
 import { asked, assistant, at, BELIEVED, browserDevice, who, type Ask, type Auth } from "./auth.ts";
-
-/** A server on this list acts for the network, and so for everyone in it. */
-const NETWORK = "network/";
 
 export default {
   async fetch(request: Request, _env, ctx) {
@@ -130,7 +128,7 @@ export class Who extends WorkerEntrypoint {
       if (signedIn) {
         const { secret } = await auth.$context;
         const signature = await crypto.subtle.sign("HMAC", await signing(secret), signs(signedIn.session.id));
-        const hex = Array.from(new Uint8Array(signature), (byte) => byte.toString(16).padStart(2, "0")).join("");
+        const hex = bytesToHex(new Uint8Array(signature));
         return {
           device: await browserDevice(signedIn.session.id),
           who: who(signedIn.user),
@@ -203,8 +201,8 @@ async function ask(request: Request, auth: Auth, url: URL) {
   } catch {
     return Response.json({ error: "An ask is JSON" }, { status: 400 });
   }
-  const of = ["invite", "owner", "everyone", "remove_person"].includes(what.ask ?? "") ? [NETWORK] : [NETWORK, `${what.who}/`];
-  const acting = (await Promise.all(of.map((of) => env.NETWORK.servers(of)))).flat();
+  const ofNetwork = ["invite", "owner", "everyone", "remove_person"].includes(what.ask ?? "");
+  const acting = (await Promise.all([env.NETWORK.servers(), ...(ofNetwork ? [] : [env.NETWORK.servers(`${what.who}/`)])])).flat();
   if (!server || !acting.includes(server)) return Response.json({ error: "Only a server acting for them asks this" }, { status: 403 });
   return Response.json(await asked(auth, url.origin, what));
 }

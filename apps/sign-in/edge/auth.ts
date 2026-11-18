@@ -16,6 +16,7 @@ import { cimd } from "@better-auth/cimd";
 import { mcp } from "@better-auth/mcp";
 import { DEVICE_CODE_GRANT_TYPE, getIssuer, oauthDeviceAuthorization, verifyOAuthQueryParams } from "@better-auth/oauth-provider";
 import { passkey } from "@better-auth/passkey";
+import { bytesToHex, randomBytes } from "@noble/hashes/utils.js";
 import Bowser from "bowser";
 import * as z from "zod";
 import type { BetterAuthPlugin, DBAdapter, User as AuthUser } from "better-auth";
@@ -35,7 +36,7 @@ declare global {
       };
       NETWORK: {
         verifiedKey(url: string, headers: Record<string, string>, body: string): Promise<string | null>;
-        servers(of: string): Promise<string[]>;
+        servers(of?: string): Promise<string[]>;
         owner(): Promise<string | null>;
       };
       RELAY: {
@@ -133,8 +134,7 @@ const ASKS_FOR = 5 * 60;
  */
 const NAMED = { max: 5, window: 15 * 60 };
 
-const hex = (bytes: ArrayBuffer | Uint8Array) => Array.from(new Uint8Array(bytes), (byte) => byte.toString(16).padStart(2, "0")).join("");
-const sha256 = async (text: string) => hex(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(text)));
+const sha256 = async (text: string) => bytesToHex(new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(text))));
 
 /** What a browser is called, from what it says of itself: "Chrome on Linux". */
 function browser(agent?: string | null) {
@@ -162,7 +162,7 @@ export const browserDevice = (session: string) => sha256(`browser\n${session}`);
  * this Worker that last made its tables (`createAuth`), in one round trip to the database.
  */
 async function stored() {
-  const generated = hex(crypto.getRandomValues(new Uint8Array(32)));
+  const generated = bytesToHex(randomBytes(32));
   const [, , , secret, migrated] = await env.DB.batch<{ secret?: string; version?: string }>([
     env.DB.prepare("create table if not exists secret (secret text not null)"),
     env.DB.prepare("insert into secret select ? where not exists (select 1 from secret)").bind(generated),
@@ -623,7 +623,7 @@ async function numbers(code: DeviceCode) {
  */
 async function tell(user: User, request: string) {
   const params = { name: "sign-in_notify", arguments: { who: who(user), request }, _meta: { link: `${who(user)}/${request}` } };
-  const servers = new Set([...(await env.NETWORK.servers(`${who(user)}/`)), ...(await env.NETWORK.servers("network/"))]);
+  const servers = new Set([...(await env.NETWORK.servers(`${who(user)}/`)), ...(await env.NETWORK.servers())]);
   const reached = await env.RELAY.forward([...servers], JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/call", params }));
   if (!reached) throw new Error("none of its servers answered");
 }
@@ -652,7 +652,7 @@ function made(internalAdapter: InternalAdapter, origin: string, name: string): P
  */
 async function invitation(adapter: Adapter, user: { id: string }, lasts: number) {
   await adapter.deleteMany({ model: "invite", where: [{ field: "userId", value: user.id }] });
-  const link = hex(crypto.getRandomValues(new Uint8Array(24)));
+  const link = bytesToHex(randomBytes(24));
   await adapter.create({ model: "invite", data: { id: await sha256(link), userId: user.id, expiresAt: new Date(Date.now() + lasts) }, forceAllowId: true });
   return link;
 }
