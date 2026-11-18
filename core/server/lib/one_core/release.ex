@@ -372,7 +372,8 @@ defmodule OneCore.Release do
   A hot load replaces only One Core's own code and NIFs (`load/1`), so it restarts for anything else, and for what its
   code can't be swapped under: a runtime built from anything else (`runtime-inputs`, which `tooling/release` writes:
   the VM, Elixir, Bun, the deps, One Core's config and `rel/`), messages to and from the `one` running the server
-  other than what that `one` speaks (`client::serve::protocol`, which it says in `ONE_PROTOCOL`), a breaking change
+  other than what that `one` speaks (`client::serve::protocol`, which it says in `ONE_PROTOCOL`), an update after one
+  that didn't take (`went_back`, in `ONE_SERVER_STATUS`), a breaking change
   (another 0.minor), an `.app` that changed beyond its modules, and among
   the modules that changed, `OneCore.Application`, a supervisor, a module with `-on_load`, a struct and a macro. A
   supervisor is one by its behaviour or by the child spec it gives (`child_spec/1`), whose children differ. A macro's
@@ -395,6 +396,11 @@ defmodule OneCore.Release do
 
       System.get_env("ONE_PROTOCOL") != Iroh.protocol() ->
         "it speaks other messages than the one running the server (client::serve)"
+
+      # A hot load is run by the code of the build it's loaded into, so where that code can't load it (as a Windows
+      # server before `load/1` read its backslashed path), trying again goes back again: a restart takes it.
+      went_back = JSON.decode!(System.get_env("ONE_SERVER_STATUS", "{}"))["went_back"] ->
+        "the last update didn't take: #{went_back}"
 
       Builds.apart(was, now) > 0 ->
         "#{now} is a breaking change from #{was}"
@@ -625,6 +631,9 @@ defmodule OneCore.Release do
   before it ends on the new build, so what it was asked over the endpoint before can't be answered.
   """
   def load(build) do
+    # Expanded, as Windows gives paths with backslashes, which `Path.wildcard/2` reads as escapes.
+    build = Path.expand(build)
+
     case loaded(build) do
       :ok ->
         say(%{"loaded" => %{"build" => Builds.build()}})
