@@ -1,0 +1,26 @@
+{
+  // A strict app's: its tsconfig.json extends this, with `"include": ["**/*"]`. A strict app is written against the
+  // strict UI library alone (src/strict/types): no DOM, no element of the DOM's, no stylesheet, no Web API, so it
+  // runs on a native host and on the DOM alike. `bun run lint:strict <its folder>` checks it.
+  "compilerOptions": {
+    "target": "es2024",
+    "module": "esnext",
+    "moduleResolution": "bundler",
+    "lib": ["es2024"],
+    "types": [],
+    "jsx": "preserve",
+    "jsxImportSource": "ui",
+    "strict": true,
+    "noEmit": true,
+    "skipLibCheck": true,
+    "allowImportingTsExtensions": true,
+    "verbatimModuleSyntax": true,
+    "noUncheckedSideEffectImports": true,
+    "paths": {
+      "ui": ["./src/strict/types/ui.d.ts"],
+      "ui/jsx-runtime": ["./src/strict/types/jsx-runtime.d.ts"],
+      "solid-js": ["./node_modules/solid-js"]
+    }
+  },
+  "files": ["./src/strict/types/globals.d.ts"]
+}

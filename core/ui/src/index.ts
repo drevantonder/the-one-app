@@ -15,6 +15,21 @@
 /// as `"paths": { "ui": ["<there>/index.d.ts"] }`, and its build doesn't check them. A field's text is never set
 /// under 16px on a touch screen, where an iPhone zooms into it: the UI library's fields and its base styles keep every
 /// `<input>`, `<textarea>` and `<select>` at 16px or more there, and a field of another size sets `--text-field`.
+/// **Strict mode.** A strict page runs natively on a computer and on Android, and unchanged on the DOM everywhere
+/// else (the web, an iPhone, MCP Apps). Every app's page is to be strict. A page is strict when its `tsconfig.json` is
+/// `{ "extends": "<ui>/tsconfig.strict.json", "include": ["**/*"] }` (in this repo
+/// `../../../core/ui/tsconfig.strict.json`) and its entrypoint says so, with the protocol version it's written for:
+/// `%{page: "client/index.html", host: 1}`. It's written with the UI library alone: its components and the four
+/// primitives, `Box`, `Text`, `Image` and `Input`, laid out and coloured by their `style`, which is CSS's names with
+/// the design tokens' values: `{ flexDirection: "row", gap: "gap", padding: 12, backgroundColor: "muted", color:
+/// "muted-foreground", borderRadius: "lg", font: "label" }`. There's no element of the DOM's (`<div>`, `<span>`,
+/// `<p>`), no `class`, no stylesheet, and no `document`, `window` or other Web API; `render(() => <App />)` from `ui`
+/// draws the page. Words are in a `Text`, or in a component that takes them (a `Row`'s `heading`). A press is
+/// `onClick={() => ...}`, what's typed `onInput={(event) => setText(event.currentTarget.value)}`, a switch's
+/// `onChange={(event) => set(event.currentTarget.checked)}`. `bun run lint:strict apps/<app>/client`, from the
+/// repo's root, checks a page. What a strict page may use is `core/ui/src/strict/types/ui.d.ts`: one that needs what
+/// isn't there (a component, a prop, a style) adds it there, with only what every host can draw (`protocol.ts`), and
+/// core/ui's `bun run typecheck` then says whether the DOM's component takes it.
 export { call, changed, client, connection, covers, haptic, leave, open, pinShortcut, showRecoveryKey, sizeChanged, updateReady, upload, useRecoveryKey } from "./bridge.ts"
 export { pace, seen, share, words } from "./shared.ts"
 export { Button, Icon, Spinner } from "./button.tsx"
@@ -35,3 +50,4 @@ export { confirm, Sheet } from "./sheet.tsx"
 export { SignIn } from "./sign-in.tsx"
 export { toast } from "./toast.tsx"
 export { Widget } from "./widget.tsx"
+export { Box, Image, render, Text } from "./strict/primitives.tsx"

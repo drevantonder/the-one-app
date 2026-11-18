@@ -26,6 +26,9 @@ try {
   await build({
     configFile: false,
     root: source,
+    // Its TypeScript is read as the UI library's is, whatever the app's own tsconfig.json says for its editor: a strict
+    // app's extends one of the UI library's (tsconfig.strict.json), which isn't beside it where a server builds it.
+    tsconfig: new URL("tsconfig.json", import.meta.url).pathname,
     // Its files find each other wherever the client serves the app.
     base: "./",
     logLevel: "silent",

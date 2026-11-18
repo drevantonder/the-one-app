@@ -32,6 +32,11 @@ What users see, as the project's owner decided it. Only their decisions are here
 - Admin things (infrastructure apps, managing users) show only to the people who can act on them, the network's owners (17 Nov). Everyone else never sees them.
 - A section header's See All sits on the title's baseline, smaller than the title, ending at the content's edge (17 Nov), as iOS's App Store does.
 
+## Strict (18 Nov)
+
+- Every app's screens and the launcher are written in strict mode (Solid Strict DOM), so they run natively on a computer (GPUI) and on Android (Lynx), and unchanged on the DOM on the web, an iPhone and in MCP Apps. Strict is the UI library's components and four primitives (box, text, image, input), styled only by the design tokens: flex and grid, spacing, colour by token, radius and the type styles. Nothing else is strict.
+- Everything written in strict updates over the air.
+
 ## App windows (18 Nov)
 
 - On a computer, every app opens as its own window, in its own light process, as Safari's "Add to Dock" web apps do: its own Dock or taskbar icon, its own Cmd-Tab or Alt-Tab entry, and on a Mac its own menu bar (the app's name, Edit, Window). Every app, no mix of the two ("that's just confusing"). The Home Screen is the launcher (Launcher), and opening an app from it opens or brings forward that app's window. Phones and the web are unchanged.

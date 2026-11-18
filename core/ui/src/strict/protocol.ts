@@ -13,7 +13,10 @@ export const VERSION = 1
 /** A node, as the host knows it. `0` is the root, which the host makes: an app's window, or its frame. */
 export type Id = number
 
-/** What a node is: one of the four primitives, or a run of text inside a `text` (Lynx's `raw-text`). */
+/** What a node is: one of the four primitives, or a run of text inside a `text` (Lynx's `raw-text`). A `box` is a flex
+ * column unless its style says otherwise, as React Native's View; a `text` in a `text` runs on in its line, and one in
+ * a `box` is a block, as React Native's Text; a text takes its parent's `font` and `color` where it has none of its
+ * own, as CSS does, and the root's are `body` and `foreground`. A `raw-text` outside a `text` is drawn as if in one. */
 export type Type = "box" | "text" | "image" | "input" | "raw-text"
 
 /** JS → host: what changed since the last update, in order, as one batch. The host draws once it has the batch. */
@@ -51,7 +54,7 @@ export type EventName = "click" | "input" | "focus" | "blur"
 
 /** Every node's props, as `set` sends them, named as a strict app's JSX names them, which are the DOM's. One semantic
  * tree, which a screen reader and an agent both read: a node's role, its name (`aria-label`, or what a `text` says),
- * its value, its states (`aria-…`, `disabled`, `checked`) and its actions (which `on…` it has), as ARIA has them and a
+ * its value, its states (`aria-…`, `disabled`) and its actions (which `on…` it has), as ARIA has them and a
  * host maps them to AccessKit's. A listener is sent as `true` while there is one, `null` once there isn't. */
 export interface Props {
   /** What it is, by ARIA's name, which a host maps to AccessKit's `Role`. None is a plain group. */
@@ -66,15 +69,15 @@ export interface Props {
   "aria-valuenow"?: number
   "aria-valuemin"?: number
   "aria-valuemax"?: number
-  "aria-disabled"?: boolean
-  "aria-selected"?: boolean
-  "aria-checked"?: boolean | "mixed"
-  "aria-expanded"?: boolean
-  "aria-busy"?: boolean
-  "aria-current"?: boolean
-  "aria-invalid"?: boolean
+  "aria-disabled"?: Bool
+  "aria-selected"?: Bool
+  "aria-checked"?: Bool | "mixed"
+  "aria-expanded"?: Bool
+  "aria-busy"?: Bool
+  "aria-current"?: Bool
+  "aria-invalid"?: Bool
   /** Left out of the semantic tree: it's only how it looks. */
-  "aria-hidden"?: boolean
+  "aria-hidden"?: Bool
   /** How it's laid out and looks: the strict style subset. */
   style?: Style
   /** `image`: a `data:` address, or a file of the app's own by its path. */
@@ -96,6 +99,9 @@ export interface Props {
   onFocus?: true
   onBlur?: true
 }
+
+/** A state that's so or not, as ARIA writes it. */
+export type Bool = "true" | "false"
 
 /** ARIA's roles a strict node may have. */
 export type Role =

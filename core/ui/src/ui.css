@@ -2225,3 +2225,67 @@ html:has(.ui-sign-in) {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+
+/* The strict primitives (strict/primitives.tsx). A box is a flex column, as React Native's View and every native host's
+   is, with a border only where its style gives it a width; a box that's pressed is a bare button. A text is a block
+   in one of the type styles (tokens.css), by its `data-font`. */
+.ui-box {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  border: 0 solid var(--border);
+}
+button.ui-box {
+  appearance: none;
+  margin: 0;
+  padding: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  text-align: inherit;
+}
+.ui-text {
+  margin: 0;
+}
+.ui-image {
+  display: block;
+  min-width: 0;
+  object-fit: contain;
+}
+[data-font="body"] {
+  font-size: var(--text-base);
+  font-weight: var(--body-weight);
+}
+[data-font="label"] {
+  font-size: var(--text-base);
+  font-weight: var(--label-weight);
+}
+[data-font="title"] {
+  font-size: var(--text-title);
+  font-weight: var(--title-weight);
+  letter-spacing: var(--title-tracking);
+  line-height: 1.2;
+}
+[data-font="figure"] {
+  font-size: var(--text-title);
+  font-weight: var(--figure-weight);
+  letter-spacing: var(--figure-tracking);
+  line-height: 1.2;
+  font-variant-numeric: tabular-nums;
+}
+[data-font="subheadline"] {
+  font-size: var(--text-subheadline);
+  font-weight: var(--body-weight);
+}
+[data-font="footnote"] {
+  font-size: var(--text-footnote);
+  font-weight: var(--body-weight);
+}
+[data-font="caption-1"] {
+  font-size: var(--text-caption-1);
+  font-weight: var(--body-weight);
+}
+[data-font="caption-2"] {
+  font-size: var(--text-caption-2);
+  font-weight: var(--body-weight);
+}

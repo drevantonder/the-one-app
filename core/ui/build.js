@@ -59,8 +59,10 @@ ${skill().join("\n")}`)
 
 // The UI library's types, for an app written in TypeScript: declarations only, unchecked (`bun run typecheck` checks).
 await $`${here("node_modules/.bin/tsc")} -p . --noEmit false --declaration --emitDeclarationOnly --noCheck --rewriteRelativeImportExtensions --rootDir src --outDir dist/types`.cwd(here("."))
+// And the UI library as a strict app's tsconfig names it (tsconfig.strict.json), which is declarations already.
+cpSync(here("src/strict/types"), here("dist/types/strict/types"), { recursive: true })
 
-for (const file of ["app.js", "package.json", "bun.lock"]) cpSync(here(file), here(`dist/build/${file}`))
+for (const file of ["app.js", "package.json", "bun.lock", "tsconfig.json"]) cpSync(here(file), here(`dist/build/${file}`))
 
 // Solid's own skills, unchanged, and the cheatsheet its primer points to, beside it.
 cpSync(here("node_modules/solid-js/skills"), here("dist/skills"), { recursive: true })

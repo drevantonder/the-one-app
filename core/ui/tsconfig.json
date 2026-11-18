@@ -13,5 +13,6 @@
     "allowImportingTsExtensions": true,
     "verbatimModuleSyntax": true
   },
-  "include": ["src"]
+  "include": ["src"],
+  "exclude": ["src/strict/types/globals.d.ts", "src/strict/types/jsx-runtime.d.ts"]
 }

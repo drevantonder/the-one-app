@@ -42,7 +42,12 @@ defmodule OneCore.Apps.Version.Shape do
         "icon" => %{"type" => "string", "description" => "a file of the app"},
         "category" => @text,
         "subject" => @text,
-        "badge" => %{"type" => "string", "description" => "the name of one of this app's tools that only reads"}
+        "badge" => %{"type" => "string", "description" => "the name of one of this app's tools that only reads"},
+        "host" => %{
+          "type" => "integer",
+          "minimum" => 1,
+          "description" => "the strict protocol's version its page is written for (core/ui/src/strict/protocol.ts)"
+        }
       }
     },
     widgets: %{

@@ -219,7 +219,8 @@ defmodule OneCore.Apps.Version.Checks do
             icon: if(is_map_key(rest, entrypoint[:icon] || icon), do: data(entrypoint[:icon] || icon, rest)),
             category: entrypoint[:category],
             subject: entrypoint[:subject],
-            badge: entrypoint[:badge]
+            badge: entrypoint[:badge],
+            host: entrypoint[:host]
           }
 
     widgets =

@@ -378,6 +378,9 @@ defmodule OneCore.App do
     on its icon while it's more than 0, as an iPhone's app sets its own: what's waiting for whoever's looking, as
     Devices counts the devices waiting to sign in as them (`badge: "waiting"`). A Home Screen asks it again whenever
     something changed, so it only reads what the app keeps.
+  - An entrypoint may say its `host`, the version of the strict protocol its page is written for
+    (`core/ui/src/strict/protocol.ts`, `host: 1`): its page is in strict mode (the UI library's skill), so a native
+    host that speaks that version draws it itself, and an older host, or a browser, opens it as any other page.
   - An app that keeps something in its people's Vaults (an account at an outside service, a Chrome profile, a key)
     registers its item type there, as the Vault's skill says: `vault.types`, with the section it's listed under, how
     one is added, and the component that draws one, if it has one. An account is such an item, and isn't an app:
