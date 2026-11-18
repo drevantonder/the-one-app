@@ -1,4 +1,4 @@
-/* The App Store's look, all under `.app-store`, the element its screen is drawn in, wherever that is. */
+/* The App Store's look, all under `.app-store`, the element its screen is drawn in. */
 .app-store {
   /* An app's icon, as big as on a Home Screen, with its name under it, as small as a phone's own labels. */
   .app-tile {
@@ -228,7 +228,7 @@
    fades its name in once the big one has scrolled away, above). What scrolls under the clock and the row softens into
    the background there, as iOS 26's scroll edge does. Its controls are a computer's own size under a pointer and a
    fingertip under a finger, as the Home Screen's are. */
-body > .app-store {
+.app-store {
   --bar: 2rem;
   --top-row: calc(var(--bar) + 1rem);
   --top-bar: calc(var(--safe-top, 0px) + var(--top-row));
@@ -320,7 +320,7 @@ body > .app-store {
   }
 }
 @media (pointer: coarse) {
-  body > .app-store {
+  .app-store {
     --bar: 2.75rem;
   }
 }

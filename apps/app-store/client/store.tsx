@@ -1,13 +1,10 @@
 // App Store: every app the network can install, a row of each category. An app's page has Get, which installs it, and
 // a row for each owner, with where its install is for them and what to do about it: managing what's installed is
-// otherwise the App Library's. It's this app's page, and the
-// launcher's page after the App Library, which imports it (package.json's `exports`): its look comes with it, under
-// `.app-store`, so the launcher's and its own don't meet.
+// otherwise the App Library's. A link opens it at an app's page (`one:app-store#app=<its artifact>`), as the App
+// Library does for an app with no screen of its own.
 import { createEffect, createMemo, createSignal, Errored, For, Loading, Match, refresh, Show, Switch } from "solid-js"
-import styles from "./app.css?inline"
+import "./app.css"
 import { Button, call, changed, confirm, covers, Empty, go, Icon, List, Menu, open, Problem, Row, Screen, Search, Skeleton, Spinner, toast } from "ui"
-
-if (!document.getElementById("app-store")) document.head.append(Object.assign(document.createElement("style"), { id: "app-store", textContent: styles }))
 
 /** An app the network can install, as `app-store_marketplace` lists it. */
 interface Listed {
@@ -479,7 +476,7 @@ function Details(props: { listed: Listed }) {
   )
 }
 
-function AppStore(props: { market: Market; all: Owners; onBack?: () => void }) {
+function AppStore(props: { market: Market; all: Owners; onBack: () => void }) {
   // An app the Marketplace doesn't list, as an installed one may not be, still has its page, as a link opens it.
   const opened = () => props.market.apps.find((listed) => key(listed) === view().app) ?? (view().app ? installed(props.market, props.all, view().app!) : undefined)
   const covered = () => !!(view().app && opened())
@@ -488,7 +485,7 @@ function AppStore(props: { market: Market; all: Owners; onBack?: () => void }) {
   return (
     <>
       <div class="under" hidden={covered()}>
-        <Screen back={!!(view().category || props.onBack)} onBack={() => (view().category ? history.back() : props.onBack?.())} class="apps">
+        <Screen back onBack={() => (view().category ? history.back() : props.onBack())} class="apps">
           <Marketplace market={props.market} />
         </Screen>
       </div>
@@ -501,33 +498,14 @@ function AppStore(props: { market: Market; all: Owners; onBack?: () => void }) {
   )
 }
 
-/// An app's page, by its artifact, as the launcher shows it for an app with no entrypoint of its own, with Back.
-export function Listing(props: { app: string; onBack: () => void }) {
-  return (
-    <div class="app-store">
-      <Errored fallback={(error) => <Screen back onBack={props.onBack}><Problem heading="Can't show it" text={error() as Error} /></Screen>}>
-        <Loading fallback={<Screen back onBack={props.onBack}><Skeleton rows={4} /></Screen>}>
-          <Show when={market().apps.find((one) => one.app === props.app) ?? installed(market(), owners(), props.app)} fallback={<Screen back onBack={props.onBack}><Empty>It's not in the App Store.</Empty></Screen>}>
-            {(shown) => (
-              <Screen back onBack={props.onBack} heading={shown().title}>
-                <Page market={market()} all={owners()} listed={shown()} />
-              </Screen>
-            )}
-          </Show>
-        </Loading>
-      </Errored>
-    </div>
-  )
-}
-
 /// An app that's installed as the Marketplace doesn't list it, by its artifact.
 const installed = (market: Market, all: Owners, app: string) => {
   const install = all.owners.flatMap((owner) => owner.installs).find((one) => one.app === app)
   return install && listed(market, install)
 }
 
-/// The App Store, as its page and the launcher's show it. `onBack` is its Back, out of it, where it has one.
-export default function Store(props: { onBack?: () => void }) {
+/// The App Store. `onBack` is its Back on its first screen, which closes it.
+export default function Store(props: { onBack: () => void }) {
   // A step in, to a category or an app, is a step the device's own back goes back out of; an app's page a link opened
   // is where the App Store starts, and the device's back closes it.
   createEffect(
@@ -536,8 +514,8 @@ export default function Store(props: { onBack?: () => void }) {
   )
   return (
     <div class="app-store">
-      <Errored fallback={(error) => <Screen back={!!props.onBack} onBack={props.onBack}><Problem heading="Can't show apps" text={error() as Error} /></Screen>}>
-        <Loading fallback={<Screen back={!!props.onBack} onBack={props.onBack}><Skeleton rows={4} /></Screen>}>
+      <Errored fallback={(error) => <Screen back onBack={props.onBack}><Problem heading="Can't show apps" text={error() as Error} /></Screen>}>
+        <Loading fallback={<Screen back onBack={props.onBack}><Skeleton rows={4} /></Screen>}>
           <AppStore market={market()} all={owners()} onBack={props.onBack} />
         </Loading>
       </Errored>
