@@ -767,14 +767,15 @@ export async function asked(auth: Auth, origin: string, { ask, who: name, buildi
     const named = await adapter.findMany<DeviceCode>({ model: "deviceCode", where: [{ field: "person", value: user.id }, { field: "status", value: "pending" }] });
     const waiting = named.filter((code) => state(code) === "waiting").toSorted((a, b) => +new Date(b.named!) - +new Date(a.named!));
     return {
-      waiting: await Promise.all(waiting.map(async (code) => ({ request: code.id, name: code.name, at: code.named, place: code.place ?? null, ends: code.expiresAt, numbers: await numbers(code) }))),
+      waiting: await Promise.all(waiting.map(async (code) => ({ request: code.id, device: code.clientId, name: code.name, at: code.named, place: code.place ?? null, ends: code.expiresAt, numbers: await numbers(code) }))),
     };
   }
   // A request answered on one of its person's devices: the number tapped lets it in if it's the one it shows, and
-  // stops it if not, as Not Me does.
+  // stops it if not, as Not Me does. A `device` that its person's key is handed to must be the request's.
   if ((ask === "approve" && about.request) || ask === "deny") {
     const code = await adapter.findOne<DeviceCode>({ model: "deviceCode", where: [{ field: "id", value: String(about.request) }, { field: "person", value: user.id }] });
     if (!code || state(code) !== "waiting") return { error: "That device isn't waiting to sign in any more." };
+    if (about.device && about.device !== code.clientId) return { error: "Your key is handed only to the device that's waiting." };
     const right = ask === "approve" && Number(about.number) === code.number;
     if (!(await answer(adapter, code, user, right ? "approved" : "denied"))) return { error: "That device isn't waiting to sign in any more." };
     if (ask === "approve" && !right) return { error: `That isn't the number ${code.name} showed, so it was blocked. If it was you, start again on it.` };

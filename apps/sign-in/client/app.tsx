@@ -84,6 +84,7 @@ interface Thing extends ServerStatus {
 /** A device waiting to sign in as whoever's looking, as `sign-in_waiting` lists it. */
 interface Waiting {
   request: string
+  device: string
   name: string
   at: string
   place: string | null
@@ -335,15 +336,17 @@ setAnswering(linked())
 addEventListener("hashchange", () => setAnswering(linked()))
 
 /// The person's answer to a device waiting to sign in as them: the number they tapped, which lets it in if it's the
-/// one it shows and blocks it if not, or Not Me, which blocks it.
+/// one it shows and blocks it if not, or Not Me, which blocks it. This device hands it its person's key if it holds it.
 async function answer(device: Waiting, number?: number) {
   setAnswering()
-  const done = await doing(() =>
-    number === undefined ? call("sign-in_deny", { request: device.request }) : call("sign-in_approve", { request: device.request, number }),
-  )
+  let unlocked = false
+  const done = await doing(async () => {
+    if (number === undefined) return call("sign-in_deny", { request: device.request })
+    unlocked = JSON.parse(await call("sign-in_approve", { request: device.request, device: device.device, number })).unlocked
+  })
   if (!done) return haptic("error")
   haptic("success")
-  toast(number === undefined ? `${device.name} was blocked.` : `${device.name} is signed in as you.`)
+  toast(number === undefined ? `${device.name} was blocked.` : `${device.name} is signed in as you${unlocked ? ", with your key" : ""}.`)
 }
 
 /// Is this you signing in? The three numbers, one of which the device shows, and Not Me.
