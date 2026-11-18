@@ -1,5 +1,6 @@
 // Builds the UI library into dist, which is the app `ui`. What runs in a client is in client/, as every app's is: ui.css
-// is the one stylesheet, ui.js every component, solid.js and web.js are Solid, and zag.js is Zag's Solid adapter,
+// is the one stylesheet, ui.js every component, solid.js and web.js are Solid, native/ what a native host loads in place
+// of web.js and ui.js, and zag.js is Zag's Solid adapter,
 // which the UI library and every app share (app.js leaves them out of an app). SKILL.md is the UI library's skill, and skills/ are Solid's, as the version apps are
 // built with has them, Emil Kowalski's, pstack's, Modern Web Guidance and our design rules. build/ is how an app is built against it: app.js, with what it needs to run, which a server
 // installs and runs on an app's source.
@@ -28,6 +29,29 @@ await build({
       // What an app imports from each is what each exports, whether or not the UI library uses it.
       preserveEntrySignatures: "strict",
       output: { entryFileNames: "[name].js", chunkFileNames: "ui-[hash].js" },
+    },
+  },
+})
+
+// The UI library a native host loads in their place (src/strict/native), as /ui/client/native/web.js, Solid's
+// universal renderer sending the strict protocol's ops, and ui.js, the strict UI library drawn with it. A strict page's
+// own bundle is the one built for the DOM: what it imports of web.js (`createComponent`, `memo`) both have.
+await build({
+  configFile: false,
+  root: here("."),
+  base: "./",
+  logLevel: "warn",
+  plugins: [solid()],
+  resolve: { alias: { "@solidjs/web": here("src/strict/native/renderer.ts") } },
+  build: {
+    outDir: "dist/client/native",
+    emptyOutDir: false,
+    sourcemap: true,
+    rolldownOptions: {
+      input: { web: here("src/strict/native/renderer.ts"), ui: here("src/strict/native/index.tsx") },
+      external: ["solid-js"],
+      preserveEntrySignatures: "strict",
+      output: { entryFileNames: "[name].js", chunkFileNames: "native-[hash].js", paths: { "solid-js": "/ui/client/solid.js" } },
     },
   },
 })

@@ -31,7 +31,8 @@
 /// isn't there (a component, a prop, a style) adds it there, with only what every host can draw (`protocol.ts`), and
 /// core/ui's `bun run typecheck` then says whether the DOM's component takes it.
 export { call, changed, client, connection, covers, haptic, leave, open, pinShortcut, showRecoveryKey, sizeChanged, updateReady, upload, useRecoveryKey } from "./bridge.ts"
-export { pace, seen, share, words } from "./shared.ts"
+export { pace, seen, share } from "./shared.ts"
+export { words } from "./words.ts"
 export { Button, Icon, Spinner } from "./button.tsx"
 export { Badge } from "./badge.tsx"
 export { Checkbox, Field, File, fitted, Input, RadioGroup, Search, Switch, Textarea, useField } from "./field.tsx"

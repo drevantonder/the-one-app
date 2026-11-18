@@ -1,40 +1,7 @@
 // What every component of the UI library draws from: the words it says, the device it's on, and how things move.
-import { createSignal, createStore } from "solid-js"
+import { createSignal } from "solid-js"
 
-/// The few words the UI library says itself, in English until a page says otherwise with `words`.
-export const [messages, setMessages] = createStore({
-  back: "Back",
-  cancel: "Cancel",
-  clear: "Clear",
-  close: "Close",
-  copied: "Copied",
-  copy: "Copy",
-  details: "Details",
-  exitFullScreen: "Exit Full Screen",
-  file: "Choose a file",
-  fullScreen: "Full Screen",
-  hideDetails: "Hide Details",
-  loading: "Loading",
-  more: "More",
-  ok: "OK",
-  remove: "Remove",
-  showDetails: "Show Details",
-})
-
-/// What a person reads of a tool's error: its first paragraph. What follows a blank line is for an agent, as MCP's
-/// text is the model's: which tool to call next, or what went wrong inside an app.
-export const readable = (error: string): string => error.split(/\n\s*\n/, 1)[0]
-
-/// All of an error a screen shows: what a tool said, whole, where it's an `Error` `call` threw (its `cause`), or
-/// the text itself.
-export const whole = (error: string | Error): string => (error instanceof Error ? (typeof error.cause === "string" ? error.cause : error.message) : error)
-
-/// `words({ back: "Zurück", cancel: "Abbrechen", close: "Schließen" })`: says the UI library's own words in the user's
-/// language, once, for every component on the page. A word the UI library doesn't say throws the words it does.
-export function words(theirs: Partial<Record<keyof typeof messages, string>>): void {
-  for (const name in theirs) if (!(name in messages)) throw new Error(`The UI library has no word "${name}". It has: ${Object.keys(messages).join(", ")}`)
-  setMessages((words) => void Object.assign(words, theirs))
-}
+export { messages, readable, setMessages, whole, words } from "./words.ts"
 
 /// Whether a media query matches, as a signal that follows the device.
 function matching(query: string) {
