@@ -10,14 +10,49 @@ import { asked, assistant, at, BELIEVED, browserDevice, who, type Ask, type Auth
 const NETWORK = "network/";
 
 export default {
-  async fetch(request: Request) {
+  async fetch(request: Request, _env, ctx) {
     const url = new URL(request.url);
+    if (request.method === "GET" && (url.pathname.startsWith("/.well-known/") || url.pathname === JWKS)) return discovery(request, ctx);
     const auth = await at(url.origin);
     if (url.pathname === "/sign-in/ask") return ask(request, auth, url);
     if (url.pathname.startsWith("/sign-in/auth/") || url.pathname.startsWith("/.well-known/")) return auth.handler(request);
     return env.ASSETS.fetch(request);
   },
 } satisfies ExportedHandler;
+
+/** Where Better Auth hands out the keys its tokens are signed with. */
+const JWKS = "/sign-in/auth/jwks";
+/** How long a discovery document is answered from Cloudflare's cache before it's asked for again behind it, in seconds. */
+const DISCOVERED = 60;
+
+/**
+ * A discovery document (OAuth's metadata, and the keys), from Cloudflare's cache where this data center has one, so
+ * an assistant finding out how to sign in never waits for Better Auth to start, even just after a deploy. One that's
+ * older than `DISCOVERED`, or from another deploy, is answered as it is and asked for again behind it.
+ */
+async function discovery(request: Request, ctx: ExecutionContext) {
+  const version = `"${env.VERSION.id}"`;
+  const fresh = async () => {
+    const answer = await (await at(new URL(request.url).origin)).handler(new Request(request.url));
+    if (!answer.ok) return answer;
+    const kept = new Response(answer.body, answer);
+    kept.headers.set("cache-control", `public, max-age=${DISCOVERED}`);
+    kept.headers.set("etag", version);
+    kept.headers.set("date", new Date().toUTCString());
+    // Kept for a day, as the cache keeps what its headers say, and answered from for as long.
+    const stored = new Response(kept.clone().body, kept);
+    stored.headers.set("cache-control", "public, max-age=86400");
+    await caches.default.put(request.url, stored);
+    return kept;
+  };
+  const cached = await caches.default.match(request.url);
+  if (!cached) return fresh();
+  const age = Date.now() - Date.parse(cached.headers.get("date") ?? "");
+  if (cached.headers.get("etag") !== version || !(age < DISCOVERED * 1000)) ctx.waitUntil(fresh());
+  const answer = new Response(cached.body, cached);
+  answer.headers.set("cache-control", `public, max-age=${DISCOVERED}`);
+  return answer;
+}
 
 /** Who a request is from, as the network's MCP endpoint has it (`core/edge/mcp/mcp.ts`). */
 interface Signed {
@@ -38,6 +73,13 @@ export class Who extends WorkerEntrypoint {
    */
   async who(request: Request): Promise<Signed | { refused: Response }> {
     const url = new URL(request.url);
+    const metadata = `${url.origin}/.well-known/oauth-protected-resource/mcp`;
+    // A request that carries nothing to check is nobody's, and is answered MCP's challenge to sign in without
+    // starting Better Auth, which asks the database first: an assistant's first request is this.
+    if (!url.pathname.startsWith("/apps/") && !request.headers.has("authorization") && !request.headers.has("cookie")) {
+      const challenge = { "www-authenticate": `Bearer resource_metadata="${metadata}"`, "access-control-expose-headers": "WWW-Authenticate" };
+      return { refused: Response.json({ jsonrpc: "2.0", error: { code: -32000, message: "missing authorization header" }, id: null }, { status: 401, headers: challenge }) };
+    }
     const auth = await at(url.origin);
     const resource = `${url.origin}/mcp`;
     if (url.pathname.startsWith("/apps/")) return (await appsSession(auth, url)) ?? { refused: new Response("Sign in again", { status: 401 }) };
@@ -68,7 +110,7 @@ export class Who extends WorkerEntrypoint {
     return {
       device: await assistant(claims.azp as string, claims.sub as string),
       who: claims.who as string,
-      challenge: `Bearer error="invalid_token", resource_metadata="${url.origin}/.well-known/oauth-protected-resource/mcp"`,
+      challenge: `Bearer error="invalid_token", resource_metadata="${metadata}"`,
     };
   }
 }
