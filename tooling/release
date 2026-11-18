@@ -90,7 +90,8 @@ done
 # (`OneCore.Builds.talk?/2`). Devices aren't waited for: their people update them, which works whatever they're on.
 behind=$(jq -r --arg build "$build" '
   def series: (split(".") | map(tonumber? // 0)) as [$major, $minor] | if $major == 0 then "0.\($minor)" else "\($major)" end;
-  (.network.build // "0.15.0" | series) as $now
+  select(.network.build)
+  | (.network.build | series) as $now
   | select(($build | series) != $now)
   | [(.servers[] | select((.build // "0.15.0" | series) != $now) | "\(.name) on \(.build)"),
      (select((.edge // "0.15.0" | series) != $now) | "the edge on \(.edge)")]
