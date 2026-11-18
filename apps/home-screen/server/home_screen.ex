@@ -22,7 +22,7 @@ defmodule HomeScreen do
   def icon, do: "client/home.svg"
 
   @impl true
-  def requires, do: %{"core" => ">= 0.26.5"}
+  def requires, do: %{"core" => ">= 0.26.74"}
 
   alias OneCore.{Artifact, Call}
   alias OneCore.Apps.Icons

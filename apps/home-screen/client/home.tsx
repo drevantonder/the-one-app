@@ -16,6 +16,8 @@ import { createEffect, createMemo, createSignal, Errored, flush, For, Loading, o
 import { createActor } from "xstate"
 import {
   ActionBar,
+  createListbox,
+  Section,
   type Action,
   Badge,
   Box,
@@ -101,8 +103,6 @@ const looks = styles({
   edge: { position: "absolute", top: 0, bottom: 0, start: 0, end: 0, zIndex: 20, boxShadow: tokens.shadow.edge, pointerEvents: "none" },
   round: { borderRadius: tokens.radius.large },
   heading: { position: "absolute", start: 0, end: 0, paddingTop: tokens.grid[3], paddingInline: tokens.grid[4] },
-  picked: { backgroundColor: tokens.colour.selection },
-  result: { flexDirection: "row", alignItems: "center", gap: tokens.grid[3], height: tokens.length.row, paddingInline: tokens.grid[2], borderRadius: tokens.radius.medium },
   chosen: { position: "absolute", top: negative(tokens.grid[1]), bottom: negative(tokens.grid[1]), start: negative(tokens.grid[1]), end: negative(tokens.grid[1]), borderRadius: tokens.radius.large, backgroundColor: tokens.colour.selection },
 })
 
@@ -172,9 +172,10 @@ const [launcher, setLauncher] = createSignal(false)
 /// A Mac's keys are ⌘, and a PC's Ctrl.
 const [mac, setMac] = createSignal(false)
 client().then(({ pinsShortcuts, launcher, mac }) => (setPins(!!pinsShortcuts), setLauncher(!!launcher), setMac(!!mac)), () => {})
-/// What's typed in the launcher's search, and which of the apps it finds is chosen, which Return opens.
+/// What's typed in the launcher's search, and its results, a listbox: which of the apps it finds is chosen, which
+/// Return opens.
 const [query, setQuery] = createSignal("")
-const [chosen, setChosen] = createSignal(0)
+const results = createListbox()
 /// What the launcher's arrow keys have chosen on Home: an app or a widget of an owner, by which of their pages shown
 /// it's on and where on it.
 type Selected = { owner: number; page: number; index: number }
@@ -1450,17 +1451,14 @@ function LauncherBar(props: { owners: Owner[]; found: () => Listed[]; move: (key
       props.tab()
     } else if (!typed) {
       if (props.move(event.key)) event.preventDefault()
-    } else if (event.key === "ArrowDown" || event.key === "ArrowUp") {
-      event.preventDefault()
-      setChosen(Math.max(0, Math.min(props.found().length - 1, chosen() + (event.key === "ArrowDown" ? 1 : -1))))
-    }
+    } else results.keys(event)
   }
   // The search has the keyboard as the launcher's summoned: it's drawn again each time it's shown.
   return (
     <Box style={{ position: "absolute", top: 0, left: 0, right: 0, height: LAUNCHER_BAR, zIndex: 6, flexDirection: "row", alignItems: "center", gap: 12, paddingInline: 16 }}>
       <Box style={{ flexGrow: 1 }}>
         <Show when={visible()}>
-          <EditableText type="search" action="search" placeholder="Search apps…" aria-label="Search apps" autofocus value={query()} onKeyDown={keys} onInput={(event) => (setQuery(event.currentTarget.value), setChosen(0))} style={looks.bare} />
+          <EditableText type="search" action="search" placeholder="Search apps…" aria-label="Search apps" autofocus value={query()} {...(query().trim() ? results.field() : {})} onKeyDown={keys} onInput={(event) => (setQuery(event.currentTarget.value), results.choose(0))} style={looks.bare} />
         </Show>
       </Box>
       <Show when={!query().trim() && !props.library}>
@@ -1481,31 +1479,21 @@ function Results(props: { owner: Owner; found: () => Listed[] }) {
   return (
     <Box style={{ position: "absolute", top: LAUNCHER_BAR, left: 0, right: 0, bottom: LAUNCHER_FOOT, zIndex: 5, overflow: "scroll", paddingInline: LAUNCHER_SIDE }}>
       <Show when={props.found().length} fallback={<Box style={{ marginBlock: 32 }}><Empty>No apps match.</Empty></Box>}>
-        <Box style={{ height: LAUNCHER_HEADING, paddingTop: 12, paddingInline: LAUNCHER_SIDE }} aria-hidden="true">
-          <Text style={{ font: "caption-2", color: "muted-foreground" }}>Results</Text>
-        </Box>
-        <Box role="listbox" aria-label="Results">
-          <For each={props.found()} keyed={(listed) => listed.entrypoint ?? listed.app}>
-            {(listed, at) => (
-              <Box
-                role="option"
-                aria-label={listed().name}
-                aria-selected={at() === chosen() ? "true" : "false"}
-                onPointerMove={() => setChosen(at())}
-                onClick={(event) => press(listed(), props.owner, false, from(event))}
-                style={[looks.result, at() === chosen() && looks.picked]}
-              >
-                <Image src={src(listed().icon)} alt="" style={{ width: 22, height: 22, flexShrink: 0, borderRadius: "sm" }} />
-                <Text style={{ font: "footnote", lineClamp: 1, flexShrink: 0, maxWidth: "60%" }}>{listed().name}</Text>
-                <Show when={listed().title !== listed().name}>
-                  <Text style={{ font: "footnote", color: "muted-foreground", lineClamp: 1, flexShrink: 1 }}>{listed().title}</Text>
-                </Show>
-                <Box style={{ flexGrow: 1 }} />
-                <Text style={{ font: "footnote", color: "muted-foreground", flexShrink: 0 }}>App</Text>
-              </Box>
-            )}
-          </For>
-        </Box>
+        <Section heading="Results">
+          <List listbox={results} label="Results">
+            <For each={props.found()} keyed={(listed) => listed.entrypoint ?? listed.app}>
+              {(listed) => (
+                <Row
+                  start={<Image src={src(listed().icon)} alt="" style={{ width: 22, height: 22, borderRadius: "sm" }} />}
+                  heading={listed().name}
+                  text={listed().title !== listed().name ? listed().title : undefined}
+                  end={<Text>App</Text>}
+                  onClick={(event) => press(listed(), props.owner, false, event && from(event))}
+                />
+              )}
+            </For>
+          </List>
+        </Section>
       </Show>
     </Box>
   )
@@ -1867,7 +1855,7 @@ function HomeScreen(props: { owners: Owner[] }) {
     (hidden) => {
       if (!hidden) return
       setQuery("")
-      setChosen(0)
+      results.choose(0)
       if (home.getSnapshot().matches("nothing") && home.getSnapshot().context.at.screen !== 0) home.send({ type: "go", screen: 0 })
       choose(first(ordered(home.getSnapshot().context.at)))
     },
@@ -1901,7 +1889,7 @@ function HomeScreen(props: { owners: Owner[] }) {
   /// What the launcher's Return opens and its Actions are for: the app its search chose, or what's highlighted on Home.
   const target = createMemo((): Target | undefined => {
     if (query().trim()) {
-      const listed = found()[chosen()]
+      const listed = found()[results.chosen()]
       const item = listed && opens(listed)
       return listed && { listed, item, place: item && placeOf(props.owners[state().context.at.owner], item) }
     }
