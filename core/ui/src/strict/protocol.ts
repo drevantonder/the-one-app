@@ -128,7 +128,7 @@ export interface Sandbox {
  * action key is pressed (a keyboard's Enter, or a phone's Done, Go, Next, Search or Send). A host offers them as
  * accessibility actions too: `click` is AccessKit's `Click`, `input` its `SetValue`, `focus` and `blur` its `Focus`
  * and `Blur`, `scroll` its `ScrollIntoView` and `ScrollDown`. */
-export type EventName = "click" | "input" | "action" | "focus" | "blur" | "keydown" | "pointerenter" | "pointerleave" | "scroll" | Moved
+export type EventName = "click" | "input" | "action" | "focus" | "blur" | "keydown" | "pointerenter" | "pointerleave" | "scroll" | "layout" | Moved
 
 /** What a page that's moved by hand listens for, as the Home Screen's pages are, a finger's or a mouse's, as the DOM
  * names them: a pointer's (`pointerdown` to `pointercancel`) go to the node under it and to each node it's in that
@@ -221,7 +221,8 @@ export interface Props {
   autocapitalize?: "none" | "sentences" | "words" | "characters"
   spellcheck?: boolean
   autocomplete?: string
-  /** `input`: has the keyboard as it's drawn. */
+  /** Has the keyboard as it's drawn, and again each time it's set: a field a phone's keyboard comes up for, a menu's
+   * item its arrow keys move to. */
   autofocus?: boolean
   disabled?: boolean
   required?: boolean
@@ -234,6 +235,8 @@ export interface Props {
   onPointerEnter?: true
   onPointerLeave?: true
   onScroll?: true
+  /** Told where it's drawn (`rect`) as it's laid out and each time that changes, as React Native's `onLayout`. */
+  onLayout?: true
   onPointerDown?: true
   onPointerMove?: true
   onPointerUp?: true

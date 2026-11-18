@@ -93,6 +93,8 @@ const look = styles({
   destructive: { backgroundColor: tokens.colour.red, color: tokens.colour.onAccent },
   square: { width: tokens.length.control, paddingInline: 0, flexShrink: 0 },
   disabled: { opacity: 0.5, cursor: "default" },
+  /** A menu's button, while its menu is open: one with no fill of its own shows it's the one. */
+  open: { backgroundColor: tokens.colour.quinaryLabel },
   badge: {
     flexDirection: "row",
     alignItems: "center",
@@ -141,6 +143,7 @@ export interface ButtonProps {
   "aria-label"?: string
   "aria-haspopup"?: "menu" | "dialog" | "listbox"
   "aria-expanded"?: "true" | "false"
+  autofocus?: boolean
   onClick?: (event: Located) => void
   /** Where it sits in what it's in, the only part of its look a caller changes. */
   style?: Styles<"marginTop" | "marginBottom" | "marginStart" | "marginEnd" | "alignSelf" | "flexGrow">
@@ -161,7 +164,7 @@ export function Button(props: ButtonProps) {
       aria-disabled={off() ? "true" : undefined}
       aria-busy={props.loading ? "true" : undefined}
       onClick={(event: Located) => !off() && props.onClick?.(event)}
-      style={[look.button, props.variant && props.variant !== "default" && look[props.variant], props.size === "icon" && look.square, off() && look.disabled, props.style]}
+      style={[look.button, props.variant && props.variant !== "default" && look[props.variant], props.size === "icon" && look.square, off() && look.disabled, props["aria-expanded"] === "true" && (props.variant === "outline" || props.variant === "ghost") && look.open, props.style]}
     >
       <Show when={props.loading}>
         <Spinner />

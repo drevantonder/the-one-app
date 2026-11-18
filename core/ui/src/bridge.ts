@@ -120,6 +120,8 @@ const [size, setSize] = createSignal({ width: innerWidth, height: innerHeight })
 addEventListener("resize", () => setSize({ width: innerWidth, height: innerHeight }))
 /// `viewport().width`: the window's size, in CSS pixels, as it changes, for what's laid out by hand.
 export const viewport = () => size()
+/// `direction()`: which way the page's words run, as its language has them: `rtl` for Arabic or Hebrew.
+export const direction = (): "ltr" | "rtl" => (getComputedStyle(document.documentElement).direction === "rtl" ? "rtl" : "ltr")
 
 const [still, setStill] = createSignal(reduced.matches)
 reduced.addEventListener("change", () => setStill(reduced.matches))

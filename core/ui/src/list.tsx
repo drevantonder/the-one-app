@@ -1,10 +1,11 @@
 // A list and its rows: written once in strict, on the primitives, the same on the DOM and on a native host.
-import { children, createSignal, onCleanup, Show } from "solid-js"
+import { children, createEffect, createSignal, For, onCleanup, Show } from "solid-js"
 import type { JSX } from "@solidjs/web"
 import { Box, Text } from "#primitives"
+import { direction, reducedMotion } from "#bridge"
 import { RowMenu, type RowMenu as Menu } from "./menu.tsx"
 import { negative, styles } from "./styles.ts"
-import { tokens } from "./tokens.ts"
+import { duration, tokens } from "./tokens.ts"
 import type { Located, Pressed } from "./strict/types/ui.d.ts"
 
 const look = styles({
@@ -49,16 +50,80 @@ const look = styles({
   action: { flexShrink: 0, flexDirection: "row", alignItems: "center", marginStart: "auto", paddingBottom: tokens.grid[2], paddingEnd: tokens.grid[3] },
   swipe: { position: "absolute", top: 0, bottom: 0, end: 0, alignItems: "center", justifyContent: "center", overflow: "hidden", backgroundColor: tokens.colour.red, color: tokens.colour.onAccent, cursor: "pointer" },
   chevron: { color: tokens.colour.secondaryLabel },
+  // A row coming or going: it opens up where it goes, or closes up, fading as it does.
+  slot: { overflow: "hidden", transitionProperty: ["height", "opacity"], transition: tokens.motion.settle },
+  entering: { opacity: { default: 1, entering: 0 } },
+  leaving: { opacity: 0, transitionProperty: ["height", "opacity"], transition: tokens.motion.settle },
 })
 
+/** How long a row takes to open up or close up, in milliseconds: the settle pace's (tokens.ts). */
+const settle = duration(tokens.motion.settle)
+
+/** A row as the list draws it: coming (its height opening up from none), there, or going (closing up), and the
+ * height it's held at while it does. */
+type Slot = { node: JSX.Element; state: () => State; setState: (state: State) => void; to: () => number | undefined; setTo: (to: number | undefined) => void; height?: number }
+type State = "coming" | "there" | "going"
+
+const slot = (node: JSX.Element, state: State, to?: number): Slot => {
+  const [now, setState] = createSignal(state)
+  const [held, setTo] = createSignal(to)
+  return { node, state: now, setState, to: held, setTo }
+}
+
 /// `<List><For each={notes()}>{(note) => <Row heading={note.text} />}</For></List>`: things of one kind, one under
-/// another, in one group that stops at a readable width however wide the room is. With no rows it shows nothing.
+/// another, in one group that stops at a readable width however wide the room is. With no rows it shows nothing. A
+/// row added to a list that has some opens up where it goes, and one taken out closes up, the rest making room or
+/// closing the gap, at the settle pace; for whoever asked for less motion a new row fades in and one taken out just
+/// goes. A list that changes in any other way (filled, a row changed for another) just shows what it's given.
 export function List(props: { children?: JSX.Element }) {
   const rows = children(() => props.children)
+  const [slots, setSlots] = createSignal<Slot[]>([])
+  createEffect(
+    () => rows.toArray(),
+    (next) => {
+      const before = slots().filter((one) => one.state() !== "going")
+      const kept = new Set(next)
+      const gone = before.filter((one) => !kept.has(one.node))
+      const had = new Set(before.map((one) => one.node))
+      const come = next.filter((node) => !had.has(node))
+      // First filled, or some gone and some come (a row changed, another list's rows): a plain swap.
+      const plain = !before.length || (gone.length > 0 && come.length > 0)
+      const still = reducedMotion()
+      const made: Slot[] = next.map((node) => before.find((one) => one.node === node) ?? slot(node, plain ? "there" : "coming", plain || still ? undefined : 0))
+      // What's going keeps its place, before the row that followed it, until it's closed up.
+      if (!plain && !still)
+        for (const one of gone) {
+          const after = before.slice(before.indexOf(one) + 1).find((other) => kept.has(other.node))
+          const at = after ? made.findIndex((other) => other.node === after.node) : made.length
+          one.setState("going")
+          one.setTo(one.height)
+          made.splice(at, 0, one)
+          requestAnimationFrame(() => requestAnimationFrame(() => one.setTo(0)))
+          setTimeout(() => setSlots((now) => now.filter((other) => other !== one)), settle)
+        }
+      setSlots(made)
+    },
+  )
+  /// A row's height as it's laid out: a coming one opens up to it, then is as tall as it is.
+  const laid = (one: Slot, height: number) => {
+    if (one.state() === "coming" && one.height === undefined) {
+      requestAnimationFrame(() => requestAnimationFrame(() => one.setTo(height)))
+      setTimeout(() => (one.setState("there"), one.setTo(undefined)), settle)
+    }
+    if (one.state() !== "going") one.height = height
+  }
   return (
-    <Show when={rows.toArray().length}>
+    <Show when={slots().length}>
       <Box role="list" style={look.list}>
-        <Box style={look.rows}>{rows()}</Box>
+        <Box style={look.rows}>
+          <For each={slots()}>
+            {(one) => (
+              <Box style={[look.slot, one.state() === "coming" && look.entering, one.state() === "going" && look.leaving, one.to() !== undefined && { height: one.to()! }]}>
+                <Box onLayout={(event) => laid(one, event.currentTarget.getBoundingClientRect().height)}>{one.node}</Box>
+              </Box>
+            )}
+          </For>
+        </Box>
       </Box>
     </Show>
   )
@@ -115,7 +180,7 @@ export function Row(props: {
   }
   const move = (event: Pressed) => {
     if (!start) return
-    const dx = start.x - event.clientX
+    const dx = (start.x - event.clientX) * (direction() === "rtl" ? -1 : 1)
     const dy = event.clientY - start.y
     if (!swiping && Math.hypot(dx, dy) < SLOP) return
     clearTimeout(held)
@@ -170,7 +235,7 @@ export function Row(props: {
       </Show>
     </>
   )
-  const moving = () => [settling() && look.settling, swiped() > 0 && { translateX: -swiped() }]
+  const moving = () => [settling() && look.settling, swiped() > 0 && { translateX: direction() === "rtl" ? swiped() : -swiped() }]
   return (
     <RowMenu value={setMenu}>
       <Box

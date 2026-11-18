@@ -272,3 +272,8 @@ function named<T extends Record<string, Token>>(group: T, id: (key: string) => s
   return group
 }
 
+/** How long a motion token takes by default, in milliseconds, for what a page times itself as it moves. */
+export const duration = (token: Token<"motion">): number => {
+  const value = (token.value as { duration: number | { default: number } }).duration
+  return typeof value === "number" ? value : value.default
+}

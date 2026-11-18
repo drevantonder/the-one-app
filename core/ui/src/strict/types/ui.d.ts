@@ -40,6 +40,10 @@ export type Pressed = Located & {
   pointerType: "mouse" | "touch" | "pen"
   button: number
 }
+/** Where a node is drawn, as it's laid out. */
+export type Laid = {
+  currentTarget: { getBoundingClientRect(): Rect }
+}
 /** A trackpad's or a wheel's scroll, in CSS pixels. */
 export type Wheeled = {
   deltaX: number
@@ -80,6 +84,10 @@ export type BoxProps = Semantics & {
   /** A right-click, or a touch held, as the device has it, in place of the device's own menu. */
   onContextMenu?: (event: Located) => void
   onWheel?: (event: Wheeled) => void
+  /** Told where it's drawn as it's laid out, and each time that changes, as React Native's `onLayout`. */
+  onLayout?: (event: Laid) => void
+  /** Has the keyboard as it's drawn, and again each time it's set. */
+  autofocus?: boolean
   children?: Element
 }
 export declare function Box(props: BoxProps): Element
@@ -176,6 +184,7 @@ export type ButtonProps = {
   "aria-label"?: string
   "aria-haspopup"?: "menu" | "dialog" | "listbox"
   "aria-expanded"?: "true" | "false"
+  autofocus?: boolean
   onClick?: (event: Located) => void
   /** Where it sits in what it's in, the only part of its look a caller changes. */
   style?: Styles<"marginTop" | "marginBottom" | "marginStart" | "marginEnd" | "alignSelf" | "flexGrow">
@@ -337,6 +346,8 @@ export declare function sizeChanged(size: { width?: number; height?: number }): 
 export declare function pinShortcut(entrypoint: string): Promise<unknown>
 /** The window's size, in CSS pixels, as it changes. */
 export declare function viewport(): { width: number; height: number }
+/** Which way the page's words run, as its language has them. */
+export declare function direction(): "ltr" | "rtl"
 /** What the device keeps for itself at each edge of the window (a status bar, a notch, a home indicator), as it
  * changes: the CSS's `env(safe-area-inset-*)`. */
 export declare function safeArea(): { top: number; right: number; bottom: number; left: number }

@@ -3,7 +3,7 @@
 import { children, createContext, createSignal, onCleanup, Show, useContext } from "solid-js"
 import type { JSX } from "@solidjs/web"
 import { Box, Layer, Text } from "#primitives"
-import { viewport } from "#bridge"
+import { direction, viewport } from "#bridge"
 import { Button, Icon, type ButtonProps } from "./button.tsx"
 import { messages } from "./words.ts"
 import { styles } from "./styles.ts"
@@ -25,11 +25,21 @@ export interface RowMenu {
 /// bar, finds none.
 export const RowMenu = createContext<((menu: RowMenu | undefined) => void) | null>(null)
 
+/** An item, as the menu's keys move through them: its value, what it says, and whether it can be chosen. */
+type Entry = { value: string; label: string; disabled: boolean }
+
 /** What a menu's parts share. */
 const Opened = createContext<{
   at: () => At | undefined
   open: (at: At | undefined) => void
   select: (value: string) => void
+  /** Its items, in order, and the one the keyboard is on. */
+  items: () => Entry[]
+  add: (entry: Entry) => () => void
+  active: () => string | undefined
+  setActive: (value: string | undefined) => void
+  /** Whether it was open and has closed, so its button takes the keyboard back. */
+  closed: () => boolean
   destructive: () => { value: string; label: JSX.Element } | undefined
   setDestructive: (item: { value: string; label: JSX.Element } | undefined) => void
 }>()
@@ -85,8 +95,21 @@ export const Menu = {
   Root: (props: { onSelect?: (details: { value: string }) => void; children?: JSX.Element }) => {
     const [at, setAt] = createSignal<At>()
     const [destructive, setDestructive] = createSignal<{ value: string; label: JSX.Element }>()
-    const select = (value: string) => (setAt(undefined), props.onSelect?.({ value }))
-    return <Opened value={{ at, open: setAt, select, destructive, setDestructive }}>{props.children}</Opened>
+    const [items, setItems] = createSignal<Entry[]>([])
+    const [active, setActive] = createSignal<string>()
+    const [closed, setClosed] = createSignal(false)
+    // Opened, the keyboard is on its first item; closed, back on its button.
+    const open = (where: At | undefined) => {
+      setClosed(!!at() && !where)
+      setActive(where ? items().find((item) => !item.disabled)?.value : undefined)
+      setAt(where)
+    }
+    const select = (value: string) => (open(undefined), props.onSelect?.({ value }))
+    const add = (entry: Entry) => {
+      setItems((now) => [...now, entry])
+      return () => setItems((now) => now.filter((item) => item !== entry))
+    }
+    return <Opened value={{ at, open, select, destructive, setDestructive, items, add, active, setActive, closed }}>{props.children}</Opened>
   },
   Trigger: (props: { variant?: ButtonProps["variant"]; size?: "icon"; "aria-label"?: string; children?: JSX.Element }) => {
     const menu = useContext(Opened)!
@@ -105,6 +128,7 @@ export const Menu = {
         aria-label={props["aria-label"] ?? (words() ? undefined : messages.more)}
         aria-haspopup="menu"
         aria-expanded={menu.at() ? "true" : "false"}
+        autofocus={menu.closed()}
         onClick={(event: Located) => {
           const rect = event?.currentTarget.getBoundingClientRect()
           menu.open(menu.at() || !rect ? undefined : { x: rect.x, y: rect.y, width: rect.width, height: rect.height })
@@ -125,7 +149,7 @@ export const Menu = {
         {(at) => (
           <Layer modal>
             <Box style={look.catcher} onClick={() => menu.open(undefined)} />
-            <Box style={[look.anchor, { top: at().y, start: at().x, width: at().width, height: at().height }]}>
+            <Box style={[look.anchor, { top: at().y, start: direction() === "rtl" ? viewport().width - at().x - at().width : at().x, width: at().width, height: at().height }]}>
               <Box style={above() ? look.above : look.below} onKeyDown={(event) => event.key === "Escape" && menu.open(undefined)}>
                 {inside()}
               </Box>
@@ -135,11 +159,34 @@ export const Menu = {
       </Show>
     )
   },
-  Content: (props: { children?: JSX.Element }) => (
-    <Box role="menu" tabindex={-1} style={look.content}>
-      {props.children}
-    </Box>
-  ),
+  /** The items, which the keyboard moves through as WAI-ARIA's menu pattern has it: the arrows to the next and the
+   * one before, round from the last to the first, Home and End to the first and the last, a letter to the next that
+   * starts with it, and Tab out, closing it. */
+  Content: (props: { children?: JSX.Element }) => {
+    const menu = useContext(Opened)!
+    const keys = (event: { key: string; preventDefault(): void }) => {
+      const usable = menu.items().filter((item) => !item.disabled)
+      if (!usable.length) return
+      const at = usable.findIndex((item) => item.value === menu.active())
+      const to = (index: number) => (event.preventDefault(), menu.setActive(usable[(index + usable.length) % usable.length].value))
+      if (event.key === "ArrowDown") to(at + 1)
+      else if (event.key === "ArrowUp") to(at < 0 ? -1 : at - 1)
+      else if (event.key === "Home") to(0)
+      else if (event.key === "End") to(-1)
+      else if (event.key === "Tab") menu.open(undefined)
+      else if (event.key.length === 1 && event.key !== " ") {
+        const letter = event.key.toLowerCase()
+        const after = [...usable.slice(at + 1), ...usable.slice(0, at + 1)]
+        const found = after.find((item) => item.label.toLowerCase().startsWith(letter))
+        if (found) (event.preventDefault(), menu.setActive(found.value))
+      }
+    }
+    return (
+      <Box role="menu" tabindex={-1} onKeyDown={keys} style={look.content}>
+        {props.children}
+      </Box>
+    )
+  },
   Item: (props: { value: string; destructive?: boolean; disabled?: boolean; children?: JSX.Element }) => {
     const menu = useContext(Opened)!
     if (props.destructive) {
@@ -147,13 +194,16 @@ export const Menu = {
       onCleanup(() => menu.setDestructive(undefined))
     }
     const inside = children(() => props.children)
+    onCleanup(menu.add({ value: props.value, label: typeof props.children === "string" ? props.children : "", disabled: !!props.disabled }))
     return (
       <Box
         role="menuitem"
-        tabindex={0}
+        tabindex={-1}
+        autofocus={menu.active() === props.value}
+        onPointerEnter={() => !props.disabled && menu.setActive(props.value)}
         aria-disabled={props.disabled ? "true" : undefined}
         onClick={() => !props.disabled && menu.select(props.value)}
-        onKeyDown={(event) => (event.key === "Enter" || event.key === " ") && !props.disabled && menu.select(props.value)}
+        onKeyDown={(event) => (event.key === "Enter" || event.key === " ") && (event.preventDefault(), !props.disabled && menu.select(props.value))}
         style={[look.item, props.destructive && look.destructive, props.disabled && look.disabled]}
       >
         {inside.toArray().map((part) => (typeof part === "string" ? <Text>{part}</Text> : part))}

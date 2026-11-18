@@ -8,11 +8,11 @@ import { covers, viewport } from "#bridge"
 import { Button, Icon } from "./button.tsx"
 import { messages } from "./words.ts"
 import { negative, styles } from "./styles.ts"
-import { tokens } from "./tokens.ts"
+import { duration, tokens } from "./tokens.ts"
 import type { Pressed } from "./strict/types/ui.d.ts"
 
 /** How long what's over the page takes to go, in milliseconds: the travel pace's (tokens.ts). */
-const going = (tokens.motion.travel.value as { duration: { default: number } }).duration.default
+const going = duration(tokens.motion.travel)
 
 /** Where a sheet is in the middle of the window, not at its foot: a window 40rem wide or more. */
 const wide = () => viewport().width >= 640

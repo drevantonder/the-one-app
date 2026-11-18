@@ -2,11 +2,11 @@
 // the semantic props the strict protocol has (protocol.ts). The input is the UI library's `Input`. A native host draws
 // the same props from the ops Solid's universal renderer sends it. A primitive's `style` is styles (../styles.ts),
 // drawn by their classes, or, on a page written for version 1, one style object, drawn as inline CSS.
-import { omit, onSettled } from "solid-js"
+import { createEffect, omit, onCleanup, onSettled } from "solid-js"
 import { Dynamic, Portal, render as mount, type JSX } from "@solidjs/web"
 import { layer } from "./layer.ts"
 import type { Props, Version1Style } from "./protocol.ts"
-import type { Located, Pressed, Wheeled } from "./types/ui.d.ts"
+import type { Laid, Located, Pressed, Wheeled } from "./types/ui.d.ts"
 import { web, type Styles } from "../styles.ts"
 
 /// `<Layer modal>…</Layer>`: what's drawn over the whole window, over the page and every layer before it, as a
@@ -79,6 +79,10 @@ interface Listens extends Semantics {
   onPointerCancel?: (event: Pressed) => void
   onContextMenu?: (event: Located) => void
   onWheel?: (event: Wheeled) => void
+  /** Told where it's drawn as it's laid out, and each time that changes, as React Native's `onLayout`. */
+  onLayout?: (event: Laid) => void
+  /** Has the keyboard as it's drawn, and again each time it's set. */
+  autofocus?: boolean
 }
 
 /** A box's props. */
@@ -95,7 +99,7 @@ const pressed = new Set(["button", "menuitem", "tab", "checkbox", "radio", "swit
 /// `option`, …) it's something to press, which the keyboard reaches too; any other `role` and `aria-…` say what it is
 /// to a screen reader and to an agent, as ARIA has them. A page moved by hand listens to its pointers too (`follows`).
 export function Box(props: BoxProps) {
-  const own = omit(props, "style", "children", ...moved)
+  const own = omit(props, "style", "children", "autofocus", "onLayout", ...moved)
   const moves = movable(props)
   const button = () => !!props.role && pressed.has(props.role) && !!props.onClick
   return (
@@ -104,6 +108,7 @@ export function Box(props: BoxProps) {
       type={button() ? "button" : undefined}
       {...own}
       {...moves}
+      ref={[moves.ref, (element: HTMLElement) => watched(element, props)]}
       data-scrolls={v1(props.style) && props.style.overflow === "scroll" ? "" : undefined}
       {...drawn("ui-strict-box", props.style)}
     >
@@ -128,6 +133,19 @@ export function Scroll(props: ScrollProps) {
       {props.children}
     </div>
   )
+}
+
+/// A box's keyboard and layout: it takes the keyboard each time its `autofocus` is set, and is told where it's drawn
+/// as that changes (`onLayout`).
+function watched(element: HTMLElement, props: BoxProps) {
+  createEffect(
+    () => !!props.autofocus,
+    (focus) => void (focus && queueMicrotask(() => element.focus({ preventScroll: false }))),
+  )
+  if (!props.onLayout) return
+  const sized = new ResizeObserver(() => props.onLayout?.({ currentTarget: element }))
+  sized.observe(element)
+  onCleanup(() => sized.disconnect())
 }
 
 /** What a page moved by hand listens for (protocol.ts's `Moved`), which `movable` draws. */

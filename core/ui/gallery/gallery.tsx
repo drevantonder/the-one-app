@@ -2,10 +2,11 @@
 // one looks is checked against, before and after, on the DOM and on a native host. `bun app.js gallery <out>` in
 // core/ui builds it as an app's page is built; nothing here calls a tool.
 import { createListCollection } from "ui"
-import { createSignal } from "solid-js"
+import { createSignal, For } from "solid-js"
 import { Alert, Badge, Box, Button, Sheet, Checkbox, Empty, Field, Icon, Input, List, Menu, Problem, RadioGroup, render, Row, Screen, Search, Section, Select, Skeleton, Spinner, Status, Steps, Switch, Text } from "ui"
 
 const [over, setOver] = createSignal<"sheet" | "alert">()
+const [notes, setNotes] = createSignal(["First note", "Second note", "Third note"])
 const fruits = createListCollection({ items: [{ value: "apple", label: "Apple" }, { value: "pear", label: "Pear" }] })
 
 render(() => (
@@ -71,6 +72,15 @@ render(() => (
         <Row heading="The current one" text="Open beside the list" current onClick={() => {}} />
         <Row heading="With an end" end={<Text style={{ color: "muted-foreground", fontVariantNumeric: "tabular-nums" }}>12:30</Text>} />
         <Row heading="With a control" control={<Checkbox aria-label="Done" checked />} action={<Menu.Root><Menu.Trigger aria-label="More" /><Menu.Positioner><Menu.Content><Menu.Item value="a">Rename</Menu.Item><Menu.Item value="b" destructive>Delete</Menu.Item></Menu.Content></Menu.Positioner></Menu.Root>} />
+      </List>
+    </Section>
+    <Section heading="Rows coming and going">
+      <Box style={{ flexDirection: "row", gap: 8 }}>
+        <Button variant="outline" onClick={() => setNotes([...notes().slice(0, 1), `Note ${notes().length + 1}`, ...notes().slice(1)])}>Add Row</Button>
+        <Button variant="outline" onClick={() => setNotes(notes().slice(0, 1).concat(notes().slice(2)))}>Remove Row</Button>
+      </Box>
+      <List>
+        <For each={notes()}>{(note) => <Row heading={note} />}</For>
       </List>
     </Section>
     <Section heading="Fields">

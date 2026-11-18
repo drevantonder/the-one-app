@@ -16,7 +16,7 @@ export { tokens } from "../../tokens.ts"
 export { Box, Image, Input, Layer, Path, render, Scroll, Search, Text, Textarea } from "./primitives.tsx"
 import { Box, Image, Text } from "./primitives.tsx"
 import { breadcrumb } from "./bridge.ts"
-export { call, changed, client, connection, covers, open, pinShortcut, reducedMotion, safeArea, sizeChanged, viewport } from "./bridge.ts"
+export { call, changed, client, connection, covers, direction, open, pinShortcut, reducedMotion, safeArea, sizeChanged, viewport } from "./bridge.ts"
 
 // The components, as the DOM's look and read: the same roles and names, from the design tokens.
 
