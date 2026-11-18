@@ -89,7 +89,8 @@ defmodule OneCore.Mcp do
 
   @doc """
   The answer to one message from whoever holds the key `from`, as JSON. A notification's is empty. `ask` is the
-  message as this server took it, which says what a call it asks for is doing while it runs (`OneCore.Iroh`).
+  message as this server took it, which says what a call it asks for is doing while it runs (`OneCore.Iroh`), with
+  the build of the NIF that took it, which is the one it's used with: `{nif, ask}`.
   """
   def handle(message, from, ask \\ nil) do
     case JSON.decode(message) do

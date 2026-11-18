@@ -176,7 +176,10 @@ fn start(
         let address = client::address(&endpoint, network.as_ref()).map_err(|error| format!("{error:#}"))?;
         if let Some(network) = network {
             endpoint.online().await;
-            tokio::spawn(outside::listen(network, endpoint.secret_key().clone(), handler));
+            // It listens there while the endpoint is open: one closed, as a hot load closes it to open another
+            // (`OneCore.Server`), leaves the relay to the one after it.
+            let listen = outside::listen(network, endpoint.secret_key().clone(), handler);
+            tokio::spawn(endpoint.closed().run_until(listen));
         }
         let address = serde_json::to_string(&address).map_err(|error| error.to_string())?;
         let clients = Clients::default();

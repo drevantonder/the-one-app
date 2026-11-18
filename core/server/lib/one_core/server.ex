@@ -44,8 +44,7 @@ defmodule OneCore.Server do
   `address` to be told it. With no address, it no longer does. A client that can't be reached there is forgotten.
   """
   def watch(client, address, device) do
-    {_key, endpoint} = :persistent_term.get(__MODULE__)
-    Iroh.watch(endpoint, client, address && JSON.encode!(address), device)
+    with {nif, endpoint} <- endpoint(), do: nif.watch(endpoint, client, address && JSON.encode!(address), device)
 
     if address && device,
       do: Registry.dispatch(OneCore.Waiting, {:watching, device}, &for({process, _} <- &1, do: send(process, {:watching, device})))
@@ -56,11 +55,14 @@ defmodule OneCore.Server do
   None with no server started.
   """
   def devices do
-    case :persistent_term.get(__MODULE__, nil) do
-      {_key, endpoint} -> Iroh.devices(endpoint)
+    case endpoint() do
+      {nif, endpoint} -> nif.devices(endpoint)
       nil -> []
     end
   end
+
+  # How long an endpoint that a hot load closes answers what it took already (`terminate/2`).
+  @drains 5_000
 
   # How long a device that was woken has to watch again: a push reaches a phone in a second or two, and its app
   # starts and connects in a few more.
@@ -79,8 +81,12 @@ defmodule OneCore.Server do
   `wake: false` it isn't, as for what's only asked of devices that are awake.
   """
   def ask_device(device, message, options \\ []) do
-    {_key, endpoint} = :persistent_term.get(__MODULE__)
-    ask = fn -> await(&Iroh.ask_client(endpoint, device, message, self(), &1)) end
+    ask = fn ->
+      case endpoint() do
+        {nif, endpoint} -> await(&nif.ask_client(endpoint, device, message, self(), &1))
+        nil -> :unreachable
+      end
+    end
 
     with :unreachable <- ask.(),
          true <- Keyword.get(options, :wake, true),
@@ -122,6 +128,11 @@ defmodule OneCore.Server do
 
   @doc "This server's key, or `nil` where no server is running."
   def key, do: elem(:persistent_term.get(__MODULE__, {nil, nil}), 0)
+
+  # This server's endpoint, as `{nif, endpoint}`: the build of its NIF that opened it, which is the one it's used
+  # with, since a hot load loads another build beside it (`OneCore.Nif`), and what one build opened can't be used with
+  # another. `nil` while none is open, as while a hot load starts this process again on that build.
+  defp endpoint, do: elem(:persistent_term.get(__MODULE__, {nil, nil}), 1)
 
   @doc """
   Whether this server is ready: it's active, one of its network's servers, and running, which a build starting is
@@ -211,8 +222,8 @@ defmodule OneCore.Server do
   ask another, and what it took already is answered, for up to `within` milliseconds. Then its endpoint closes.
   """
   def close(within) do
-    case :persistent_term.get(__MODULE__, nil) do
-      {_key, endpoint} -> Iroh.close(endpoint, within)
+    case endpoint() do
+      {nif, endpoint} -> nif.close(endpoint, within)
       nil -> :ok
     end
   end
@@ -297,21 +308,29 @@ defmodule OneCore.Server do
 
   # A connection is opened when there's none, to where the server says it is now. One whose connection no longer
   # answered may only have lost what it was sent, as a network now and then does, so it's connected to again, which
-  # one that's there answers at once (`Iroh.connect/4`), one that started again too.
+  # one that's there answers at once (`Iroh.connect/4`), one that started again too. What the server asked says it's
+  # doing is said of `relay`, the message this one is answering by asking it, if that came over this endpoint: one
+  # that came over another, closed since, has nobody to say it to.
   defp ask(server, message, relay \\ nil) do
-    {_key, endpoint} = :persistent_term.get(__MODULE__)
-    request = fn -> await(&Iroh.ask_server(endpoint, server, message, self(), &1, relay)) end
+    case endpoint() do
+      {nif, endpoint} ->
+        relay = with {^nif, ask} <- relay, do: ask, else: (_ -> nil)
+        request = fn -> await(&nif.ask_server(endpoint, server, message, self(), &1, relay)) end
 
-    case request.() do
-      :closed -> connect(endpoint, server, request)
-      {:gone, _address} -> connect(endpoint, server, request)
-      response -> response
+        case request.() do
+          :closed -> connect(nif, endpoint, server, request)
+          {:gone, _address} -> connect(nif, endpoint, server, request)
+          response -> response
+        end
+
+      nil ->
+        :unreachable
     end
   end
 
-  defp connect(endpoint, server, request) do
+  defp connect(nif, endpoint, server, request) do
     with {:ok, address} <- Servers.address(server),
-         :ok <- await(&Iroh.connect(endpoint, address, self(), &1)) do
+         :ok <- await(&nif.connect(endpoint, address, self(), &1)) do
       case request.() do
         :closed -> :unreachable
         {:gone, _address} -> :unreachable
@@ -333,23 +352,36 @@ defmodule OneCore.Server do
 
   @impl true
   def init(nil) do
+    # What it opened closes as it stops (`terminate/2`).
+    Process.flag(:trap_exit, true)
     network = if at = Application.get_env(:one_core, :address), do: {at, Edge.token()}
-    {:ok, {endpoint, address}} = Iroh.start(key_file(), network, self())
+    nif = OneCore.Nif.build(Iroh)
+    {:ok, {endpoint, address}} = nif.start(key_file(), network, self())
     OneCore.Release.holds(Iroh)
     key = JSON.decode!(address)["id"]
-    :persistent_term.put(__MODULE__, {key, endpoint})
+    :persistent_term.put(__MODULE__, {key, {nif, endpoint}})
     {:ok, machine} = :inet.gethostname()
     name = Application.get_env(:one_core, :name) || to_string(machine)
     Servers.started(key, address, name, Application.get_env(:one_core, :owner, "network"))
     # The clients that were watching before it stopped may have missed something meanwhile, a new build of its
     # apps among them, so they're told to ask again.
     changed()
-    {:ok, %{endpoint: endpoint}}
+    {:ok, %{nif: nif, endpoint: endpoint}}
+  end
+
+  # A hot load of another build of its NIF stops it, and starts it again on that build (`OneCore.Release.holds/1`).
+  # So it closes its endpoint as it stops: one left open would answer for its key beside the next one, with nobody
+  # behind it, until the VM collected it. It takes nothing new from now on, and what it took already is answered over
+  # it for up to `@drains`, the request a hot load is for among them, while the next one opens.
+  @impl true
+  def terminate(_why, server) do
+    :persistent_term.put(__MODULE__, {key(), nil})
+    Task.start(fn -> server.nif.close(server.endpoint, @drains) end)
   end
 
   @impl true
   def handle_cast({:notify, notification}, server) do
-    Iroh.notify(server.endpoint, notification)
+    server.nif.notify(server.endpoint, notification)
     {:noreply, server}
   end
 
@@ -359,7 +391,7 @@ defmodule OneCore.Server do
   def handle_info({:ask, ask, from, message}, server) do
     reply = fn ->
       Apps.started()
-      Iroh.reply(ask, Mcp.handle(message, from, ask))
+      server.nif.reply(ask, Mcp.handle(message, from, {server.nif, ask}))
     end
 
     Task.Supervisor.start_child(OneCore.Asks, reply)

@@ -20,7 +20,8 @@ use tokio_tungstenite::tungstenite::client::IntoClientRequest;
 /// connection that says nothing. So the server says something this often, and connects again after this long.
 const EVERY: Duration = Duration::from_secs(30);
 
-/// Keeps the connection open for as long as the server runs, handing each call to `asked` as a client's is.
+/// Keeps the connection open for as long as it runs, which is while its endpoint is open, handing each call to `asked`
+/// as a client's is.
 pub async fn listen(network: Network, key: SecretKey, handler: LocalPid) {
     loop {
         // Why it ended doesn't matter: the next one is the same either way.

@@ -25,7 +25,7 @@ defmodule OneCore.Call.State do
   process reads. Each move changes that row only if nothing else moved it meanwhile, so a cancel arriving as a call
   completes is one or the other, and a move the table doesn't have is refused.
   """
-  alias OneCore.{Iroh, Server, Servers}
+  alias OneCore.{Server, Servers}
 
   @table __MODULE__
   @stack :"$one_call_states"
@@ -275,9 +275,9 @@ defmodule OneCore.Call.State do
   def message(%{message: message}), do: message
 
   defp told(id) do
-    with %{ask: ask} = row when ask != nil <- get(id),
+    with %{ask: {nif, ask}} = row <- get(id),
          text when is_binary(text) <- message(row),
-         do: Iroh.stage(ask, text)
+         do: nif.stage(ask, text)
 
     :ok
   end
@@ -408,7 +408,7 @@ defmodule OneCore.Call.State do
   end
 
   @doc """
-  The MCP request this process's call answers, as this server took it (`OneCore.Iroh`), or `nil`: what a server it's
+  The MCP request this process's call answers, as this server took it (`OneCore.Mcp.handle/3`), or `nil`: what a server it's
   passed on to says it's doing is told whoever asked it.
   """
   def answering do
