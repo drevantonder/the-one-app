@@ -59,7 +59,8 @@ defmodule Database.Lease do
   alias Database.Log
 
   # The fewest pages logged since a snapshot before the next, so that a small database isn't kept whole on every
-  # other write.
+  # other write. An entry that only takes the lease counts as a page: a server opening the database reads every
+  # entry since the snapshot, while every call waits, and servers taking the lease from each other log nothing else.
   @least 64
 
   # How long, in milliseconds, a server answers from its copy after it last saw the log's next entry free, and how
@@ -379,7 +380,7 @@ defmodule Database.Lease do
   # makes it wait longer. A new database, whose log is only this server taking its lease, has nothing anyone could
   # answer from, so it writes at once.
   defp opened(data, snapshot, entries) do
-    logged = Enum.sum_by(entries, &length(Map.get(&1, :pages, [])))
+    logged = Enum.sum_by(entries, &max(length(Map.get(&1, :pages, [])), 1))
     wait = if snapshot == 0 and entries == [%{server: data.server}], do: 0, else: @writes_after
     %{data | db: connected(file(data)), logged: logged, settled: System.monotonic_time(:millisecond) + wait}
   end
