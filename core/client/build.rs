@@ -32,5 +32,9 @@ fn main() {
     let base =
         std::fs::read_to_string("../../clients/app/tauri.conf.json").expect("clients/app/tauri.conf.json is there");
     let identifier = merged.or_else(|| identifier(&base)).expect("Tauri's config has an identifier");
+    // A debug build is a different app to the system, as Chrome Canary and Electron's and Expo's development builds
+    // are: its own folder, never the installed one's, so a build tried from a checkout can't open its person's own
+    // client. `ONE_HOME` still says where it's kept instead.
+    let identifier = if std::env::var("PROFILE").is_ok_and(|profile| profile == "debug") { format!("{identifier}.dev") } else { identifier };
     println!("cargo:rustc-env=ONE_IDENTIFIER={identifier}");
 }

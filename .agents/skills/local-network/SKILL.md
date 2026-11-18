@@ -30,8 +30,8 @@ Run it in the background and let your harness tell you when it ends; put the fol
     ONE_AS=alice target/debug/one permissions groups
     ONE_SUBJECT=network target/debug/one deploy --name <app> --files-from apps/<app>
 
-Always set `ONE_HOME`: without it, `one` (yours or the installed one) is the owner's live client on the live
-network. `ONE_AS` picks the user, since nobody signs in on a network being built; `ONE_SUBJECT=groups/<name>` or
+Always set `ONE_HOME`: without it, the installed `one` is the owner's live client on the live network, and a debug
+build (yours) is a client of its own that's on no network. `ONE_AS` picks the user, since nobody signs in on a network being built; `ONE_SUBJECT=groups/<name>` or
 `ONE_SUBJECT=network` runs a call for a group or the network.
 
 `owner`, `alice` and `bob` start with their encryption set up, their keys on `<folder>/client`'s device, so the
