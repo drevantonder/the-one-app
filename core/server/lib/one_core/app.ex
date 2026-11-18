@@ -164,12 +164,14 @@ defmodule OneCore.App do
     to read it, or with `"editor"` or `"owner"` as a third argument, to change it or to say who else may. It
     raises with the reason if it may not, which is then what the caller is told, and `OneCore.Call.reaches?/3`
     asks without raising. What the app made for whoever it runs for is reached without asking. Anything else
-    is reached only if both the app and whoever it runs for have that relation to it, which the apps that
+    is reached only if both the app and whoever asked have that relation to it, which the apps that
     decide `reach` say. `permissions` is one, which a network starts with, and its skill says how something is
     shared. With none, nothing is reached but by the network's first owner.
   - A tool runs for whoever asked, `call.subject`. Whoever asks
     can ask for a group they're a member of, or for the network: `call.subject` is then the group, what the tool
-    makes is the group's, it reaches what the group may, and `call.actor` is who asked. A tool that the holder of a
+    makes is the group's, and `call.actor` is who asked. They call a tool that only reads (`read_only: true`) if
+    they may see what the app made for the group (`groups/family/made/<app>`), and any other if they may change it,
+    and it reaches only what they may themselves. A tool that the holder of a
     sharing link may call too says `by_link: true`: it then runs for someone who is no user, so it keeps to what
     `reach` gives it.
   - `OneCore.Call.owns?(call)` says whether whoever asked owns whoever the call runs for: themselves, or the

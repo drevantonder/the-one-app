@@ -59,16 +59,37 @@ defmodule OneCore.Apps.Calls do
           # that doesn't only read, it's invalidated: here, and by the servers this one tells.
           cached = if found[:read_only] == true, do: [], else: Enum.filter(Hooks.cached(), &(&1 in version.hooks))
 
-          try do
-            call = %{called(at, name, versions, ask, principal, forwarded) | caller: caller, state: State.id()}
-            result = tool(found, about, principal, Map.values(versions), &invoked(versions, name, {:tool, tool, &1}, call))
-            if cached != [], do: Server.notify_servers(Enum.uniq([at | Apps.chain(subject)]), "invalidate", cached)
-            {:ran, result}
-          after
-            Hooks.invalidate(cached)
+          if why = member_refused(found, name, principal, caller) do
+            {:ran, refuse(about, principal, -32000, why)}
+          else
+            try do
+              call = %{called(at, name, versions, ask, principal, forwarded) | caller: caller, state: State.id()}
+              result = tool(found, about, principal, Map.values(versions), &invoked(versions, name, {:tool, tool, &1}, call))
+              if cached != [], do: Server.notify_servers(Enum.uniq([at | Apps.chain(subject)]), "invalidate", cached)
+              {:ran, result}
+            after
+              Hooks.invalidate(cached)
+            end
           end
       end
     end)
+  end
+
+  # A member asking for a group or the network runs an app's tool only as far as they may themselves: one that only
+  # reads as a viewer of what the app made for them (`<them>/made/<app>`), any other as an editor, as the apps that
+  # validate `reach` say. It's asked here, before the tool runs, since the app reaches what it makes for whoever it
+  # runs for without asking (`OneCore.Call.make/2`) and one database holds it for every call of theirs. An app
+  # calling another's tool answers for what it asks itself.
+  defp member_refused(tool, name, {actor, subject}, caller) do
+    if actor != nil and actor != subject and caller == nil do
+      relation = if tool[:read_only] == true, do: "viewer", else: "editor"
+      reach = %{"who" => actor, "relation" => relation, "artifact" => "#{subject}/made/#{name}"}
+
+      case Hooks.validate("reach", reach, {actor, subject}) do
+        :ok -> nil
+        {:refuse, why} -> why
+      end
+    end
   end
 
   @doc """

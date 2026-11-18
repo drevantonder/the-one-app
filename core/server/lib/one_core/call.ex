@@ -188,9 +188,9 @@ defmodule OneCore.Call do
   The artifact named `name`, for a call that may reach it as `relation`: a `viewer` reads it, an `editor` changes
   it too, and an `owner` says who else may. Raises with the reason if it may not.
 
-  An app reaches an artifact only if both it and whoever it runs for have that relation to it, which is for the
-  apps that validate `reach` to say: with none, only the network's first owner reaches it. Nothing is asked about what
-  the app made for whoever it runs for, and nothing about the app where it made the artifact for someone
+  An app reaches an artifact only if both it and whoever asked have that relation to it, which is for the apps that
+  validate `reach` to say: with none, only the network's first owner reaches it. Nothing is asked about what the app
+  made for whoever it runs for (a member asking for a group or the network was asked before the tool ran), and nothing about the app where it made the artifact for someone
   else, or the artifact is its own. Another app's own artifact is never reached: it's always that one app's.
 
       note = OneCore.Call.reach(call, "users/alice/made/notes/7")
@@ -215,13 +215,17 @@ defmodule OneCore.Call do
     # What's someone's sits under their prefix by what it is: what an app made for them, or an app's own.
     kind = if hd(parts) == "network", do: Enum.slice(parts, 1, 2), else: Enum.slice(parts, 2, 2)
 
+    # Whoever asked is asked about, so a member asking for a group or the network reaches only what they may
+    # themselves. With nobody asking, as for a scheduled job, it's whoever the call runs for.
+    asking = actor || subject
+
     about =
       cond do
         name == Artifact.name(call.own) -> [subject]
         match?(["own" | _], kind) -> nil
         kind == ["made", app] and String.starts_with?(name, subject <> "/") -> []
-        kind == ["made", app] -> [subject]
-        true -> [subject, call.who]
+        kind == ["made", app] -> [asking]
+        true -> [asking, call.who]
       end
 
     if about == nil do

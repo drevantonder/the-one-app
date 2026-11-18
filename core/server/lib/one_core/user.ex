@@ -11,7 +11,8 @@ defmodule OneCore.User do
   nobody.
 
   A request is for whoever it's from, unless it says who else: a group, or the network. It then runs for them,
-  with their artifacts, once the apps that validate `reach` say whoever asked is their `member`.
+  with their artifacts, once the apps that validate `reach` say whoever asked is their `member`, and an app's tool
+  only as far as whoever asked may what that app made for them (`OneCore.Apps.Calls`).
   """
   alias OneCore.{Bucket, Hooks, Servers}
 
