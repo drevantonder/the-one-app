@@ -84,7 +84,8 @@ document.body.append(safeArea)
 /** @param {HTMLIFrameElement} frame */
 function insets(frame) {
   const safe = getComputedStyle(safeArea)
-  const at = frame.getBoundingClientRect()
+  // Where it's laid out, not where a move has it now: an app that loads as it slides in is told where it ends up.
+  const at = { top: frame.offsetTop, right: frame.offsetLeft + frame.offsetWidth, bottom: frame.offsetTop + frame.offsetHeight, left: frame.offsetLeft }
   const reach = (/** @type {string} */ edge, /** @type {number} */ from) => Math.max(0, Math.round(parseFloat(safe.getPropertyValue(`padding-${edge}`)) - from))
   return { top: reach("top", at.top), right: reach("right", innerWidth - at.right), bottom: reach("bottom", innerHeight - at.bottom), left: reach("left", at.left) }
 }
