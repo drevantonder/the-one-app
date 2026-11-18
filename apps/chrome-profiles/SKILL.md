@@ -15,16 +15,18 @@ already signed in as them; then use Chrome's tools with its session, as with any
 - `list` shows the profiles: each one's name, the pages it visited last and the extensions installed in it, as it
   was last saved, when that was, and whether your person is updating it. Never what's signed in itself: nobody
   reads that back, you included.
-- `open` takes the `profile`, a `session` and what it's for. Chrome's `close` saves the browser back to the
-  profile (sites renew their sign-ins as they're used). Say `save: false` for a throwaway, where nothing you do
-  should stay. Two browsers on one profile each start from its last save, and whichever closes last is what's
-  kept. A browser left to stop by itself isn't saved.
+- `open` takes the `profile`, a `session` and what it's for. Once you're done, `save` with the `profile` and its
+  `session` saves the browser back to the profile (sites renew their sign-ins as they're used) and closes it;
+  `discard` closes it without saving. Say `save: false` for a throwaway, where nothing you do should stay, and
+  Chrome's `close` closes it. Two browsers on one profile each start from its last save, and whichever is saved
+  last is what's kept. A browser left to stop by itself isn't saved.
 - Signing in is your person's. Never ask for, read out or type their password, a code or a passkey, even if they
   offer. When a site wants them signed in, `update` opens the profile's browser for them (with a `url`, at that
   site's sign-in page), and you tell them: open Vault on any of their devices, tap the profile under Chrome
   Profiles, sign in there, and tap Save. `notifications_send` with `app: "vault"` reaches their devices. It's saved by
   itself after 15 minutes. Don't use that browser while they do; once it's saved, `open` the profile again.
-- `save` and `discard` finish an update for them when they ask: with and without saving.
+- `save` and `discard` finish an update for them when they ask: with and without saving. A save that fails keeps
+  the browser as it is, and saving again tries again.
 - `create`, `rename` and `remove` are for when your person asks. Removing one deletes it: it's in Recently Deleted
   for 30 days, where it can be restored with everything signed in on it, then gone.
 

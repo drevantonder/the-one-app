@@ -18,10 +18,11 @@ defmodule Chrome do
   dir, so nothing that fails loses it.
 
   A browser's profile is its user data dir, `/root/.chromium` in its container. As one is created it offers
-  `chrome.starting`, for an app to hand it a user data dir to start from, and as it closes `chrome.closing`, with
-  the one it closed with, for that app to keep: each a gzipped tarball in its container, which the app sends
-  to the bucket or fetches from it with Containers' `upload` and `download`, so no hook or tool's result carries a
-  profile's bytes.
+  `chrome.starting`, for an app to hand it a user data dir to start from: a blob in the bucket, by a link and the key
+  it's sealed with, which Chrome fetches into its container with Containers' `download`. An app that keeps one
+  takes it with `quit`, which leaves a gzipped tarball of it in the container for the app to send with Containers'
+  `upload`, and as a browser closes it offers `chrome.closing`, for that app to refuse while it hasn't. No hook moves
+  a profile's bytes, which take longer than a hook has, and no tool's result carries them.
 
   A running browser is a screen in Computer Use, as every container with a display is, and `screen` acts on it for an
   app that lets its person use the browser: to sign in, or to get an agent past a captcha.
@@ -86,19 +87,18 @@ defmodule Chrome do
         description:
           "A browser is about to start for the first time, for whoever the call is for: its `session`, `description`, " <>
             "the `url` it opens, its `container`, as Containers' tools name it, and `user_data`, nil. An app that has " <>
-            "a user data dir for it writes it into that container as a gzipped tarball of the folder's contents " <>
-            "(Containers' `download`, at #{@tarball}), and answers %{\"user_data\" => \"#{@tarball}\"}: the browser " <>
-            "starts from it."
+            "a user data dir for it answers %{\"user_data\" => %{\"link\" => link, \"key\" => key}}: a link that reads a " <>
+            "blob of a gzipped tarball of the folder's contents, as Containers' `upload` sent it, and its key. Chrome " <>
+            "fetches it (Containers' `download`) and the browser starts from it."
       },
       %{
         name: "closing",
         kind: :validate,
         description:
-          "A browser is being closed with `close`, and Chrome has quit: its `session`, `description`, `container`, " <>
-            "and `user_data`, the path in that container of a gzipped tarball of its user data dir as it closed, " <>
-            "without caches, for an app to send to the bucket now (Containers' `upload`), before the container is removed. " <>
-            "An app refuses when it couldn't keep what it needed of it: the browser then stays, its Chrome " <>
-            "stopped, and `close` says why."
+          "A browser is about to be closed with `close`, its container removed with its user data dir: its " <>
+            "`session`, `description` and `container`. An app that keeps the user data dir and hasn't yet (`quit`, " <>
+            "then Containers' `upload`) refuses, saying how it's kept: the browser then stays as it was, and `close` " <>
+            "says why."
       }
     ]
   end
@@ -148,6 +148,24 @@ defmodule Chrome do
             }
           },
           required: ["browsers"]
+        }
+      },
+      %{
+        name: "quit",
+        description:
+          "For an app that keeps a browser's user data dir: quit its Chrome as a person would, so it writes everything " <>
+            "down, and pack its user data dir without caches into a gzipped tarball in its container, for Containers' " <>
+            "`upload`. The container stays, with Chrome stopped, until `close`.",
+        inputs: object(),
+        outputs: %{
+          type: "object",
+          properties: %{
+            session: @session,
+            container: %{type: "string", description: "Its container, as Containers' tools name it"},
+            user_data: %{type: "string", description: "The tarball's path in the container"},
+            size: %{type: "integer", description: "The tarball's size in bytes"}
+          },
+          required: ["session", "container", "user_data", "size"]
         }
       },
       %{
@@ -398,18 +416,22 @@ defmodule Chrome do
         off = for %{"on" => false, "machine" => machine} <- Call.tool(call, "containers", "machines", %{})["machines"], do: machine
         if off != [], do: raise("#{session} isn't on a machine that's on: #{Enum.join(off, ", ")} is off. Close it once that's back")
 
-      %{"state" => "running", "name" => name} = c ->
-        pack!(call, session)
-        about = %{"session" => session, "description" => c["description"], "container" => name, "user_data" => @tarball}
-        run_hook(call, "closing", about)
-        remove(call, session)
-
-      %{} ->
+      %{"name" => name} = c ->
+        run_hook(call, "closing", %{"session" => session, "description" => c["description"], "container" => name})
         remove(call, session)
     end
 
     Artifact.remove(call.own, key(call, session))
     %{session: session}
+  end
+
+  # A stopped one is started for its Chrome to be quit as a person would, as a carry's is.
+  def call("quit", %{"session" => session}, call) do
+    c = browser(call, session) || raise("You have no browser called #{session}")
+    if c["state"] != "running", do: on(call, "start", c["name"])
+    packed = on(call, "exec", c["name"], %{"command" => @pack <> "test $? = 0 && stat -c %s #{@tarball}\n", "timeout" => 120})
+    if packed["exit"] != 0, do: raise("Couldn't pack #{session}'s user data dir: #{String.trim(packed["stderr"])}")
+    %{session: session, container: c["name"], user_data: @tarball, size: packed["stdout"] |> String.trim() |> String.to_integer()}
   end
 
   def call("screen", %{"session" => session} = inputs, call), do: containers(call, "screen", session, Map.delete(inputs, "session"))
@@ -431,7 +453,12 @@ defmodule Chrome do
       "user_data" => nil
     }
 
-    if tarball = run_hook(call, "starting", about)["user_data"], do: unpack!(call, session, tarball)
+    with %{"link" => link, "key" => key} <- run_hook(call, "starting", about)["user_data"] do
+      Call.stage(call, "Fetching its profile")
+      containers(call, "download", session, %{"path" => @tarball, "link" => link, "key" => key})
+      unpack!(call, session, @tarball)
+    end
+
     launch(call, session, inputs["url"])
   end
 
@@ -500,12 +527,6 @@ defmodule Chrome do
 
     if unpacked["exit"] != 0,
       do: raise("Couldn't open the profile #{session} was handed: #{String.trim(unpacked["stderr"])}")
-  end
-
-  # Packs the browser's user data dir into its container's #{@tarball}, as Chrome quits.
-  defp pack!(call, session) do
-    packed = containers(call, "exec", session, %{"command" => @pack, "timeout" => 120})
-    if packed["exit"] != 0, do: raise("Couldn't pack #{session}'s user data dir: #{String.trim(packed["stderr"])}")
   end
 
   defp launch(call, session, url) do

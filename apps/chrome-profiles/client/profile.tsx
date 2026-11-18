@@ -10,7 +10,7 @@ interface Profile {
   history: { url: string; title: string; visited: number }[]
   extensions: { id: string; name: string; icon: string | null }[]
   saved?: number
-  updating?: { session: string; until: number; state: State; why?: string }
+  updating?: { session: string; until: number; state: State; stage?: string; why?: string }
 }
 
 /** What the Vault gives the component: the profile by its name, who it's for, and what to do once it's renamed or gone. */
@@ -70,7 +70,8 @@ function Updating(props: { profile: Profile; subject?: string }) {
     setBusy(tool)
     await call(`chrome-profiles_${tool}`, { profile: p().profile }, subject)
       .then(() => toast(tool === "save" ? `Saved ${p().profile}` : `Closed ${p().profile} without saving`))
-      .catch(toast)
+      // A save that fails says so on the update itself, with Try Again.
+      .catch(tool === "save" ? () => {} : toast)
     setBusy()
   }
   const again = () => call("chrome-profiles_update", { profile: p().profile }, subject).catch(toast)
@@ -91,17 +92,22 @@ function Updating(props: { profile: Profile; subject?: string }) {
           />
         </Show>
         <Show when={u().state === "saving" || u().state === "discarding"}>
-          <Status heading={u().state === "saving" ? `Saving ${p().profile}…` : "Closing the browser…"} />
+          <Status heading={u().state === "saving" ? `Saving ${p().profile}…` : "Closing the browser…"} text={u().stage} />
         </Show>
       </LiveScreen>
       <Show when={u().state === "ready" && u().why}>
-        <Problem warn heading="Couldn't save the profile" text={u().why} />
+        {/* The first paragraph is what its person reads; why it failed is under Show Details. */}
+        <Problem
+          heading={`Couldn't save ${p().profile}`}
+          text={`Everything in its browser is kept, so nothing is lost.\n\n${u().why}`}
+          action={<Button variant="outline" loading={busy() === "save"} disabled={!!busy()} onClick={() => finish("save")}>Try Again</Button>}
+        />
       </Show>
-      <Show when={u().state !== "failed"}>
+      <Show when={u().state !== "failed" && !(u().state === "ready" && u().why)}>
         <p style={muted}>Use it as you would Chrome: sign in to any sites you like. It's saved by itself at {time.format(u().until)}.</p>
       </Show>
       <div style={{ display: "flex", gap: "0.5rem" }}>
-        <Show when={u().state !== "failed"}>
+        <Show when={u().state !== "failed" && !u().why}>
           <Button loading={busy() === "save" || u().state === "saving"} disabled={u().state !== "ready" || !!busy()} onClick={() => finish("save")}>
             Save
           </Button>
