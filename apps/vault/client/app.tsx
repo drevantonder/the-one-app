@@ -9,7 +9,7 @@
 import { createEffect, createMemo, createSignal, Errored, For, Loading, Match, refresh, Show, Switch as Choose, untrack } from "solid-js"
 import { Dynamic, render } from "@solidjs/web"
 import "./app.css"
-import { Button, call, changed, Checkbox, confirm, covers, createListCollection, Empty, Field, go, Input, List, open as opening, Problem, Row, Screen, Search, Section, Select, Sheet, showRecoveryKey, Skeleton, Spinner, Split, Switch, toast, useRecoveryKey } from "ui"
+import { Badge, Button, call, changed, Checkbox, confirm, covers, createListCollection, Empty, Field, go, Input, List, open as opening, Problem, Row, Screen, Search, Section, Select, Sheet, showRecoveryKey, Skeleton, Spinner, Split, Switch, toast, useRecoveryKey } from "ui"
 
 /** A field of an item: a secret one has no value here. */
 interface ItemField {
@@ -328,7 +328,7 @@ function Sidebar() {
       <List>
         <For each={kinds()}>{(kind) => <Row heading={kind.label} end={<span class="count">{count(kind.to)}</span>} current={at(kind.to)} onClick={() => enter(kind.to)} />}</For>
         <Show when={waiting().length}>
-          <Row heading="Requests" end={<span class="badge" aria-label={`${waiting().length} waiting`}>{waiting().length}</span>} current={at("requests")} onClick={() => enter("requests")} />
+          <Row heading="Requests" end={<Badge variant="destructive" aria-label={`${waiting().length} waiting`}>{waiting().length}</Badge>} current={at("requests")} onClick={() => enter("requests")} />
         </Show>
       </List>
       <List>
