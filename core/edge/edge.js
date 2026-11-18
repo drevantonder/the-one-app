@@ -10,9 +10,10 @@
 // That's the pieces in this folder, the web client's files (`clients/web`), and each app's edge function: an app
 // that has one holds an ordinary Worker in the folder `edge` of its own (`apps/<name>/edge`), with a
 // `wrangler.jsonc` and a `package.json` that names the first part of each path it answers (`"paths": ["mcp"]`).
-// The gateway's list of paths is made here from those. A part is built in `target/edge/<name>`, a copy as deep in
-// the repo as the folder it's of, so nothing that building leaves behind is among its app's files, and what it
-// reaches in the repo by a path from itself it still reaches. It's given three bindings beside its own:
+// The gateway's list of paths is made here from those. A part is built in `target/edge-dev/<name>` or
+// `target/edge-deploy/<name>`, a copy as deep in the repo as the folder it's of, so nothing that building leaves behind
+// is among its app's files, and what it reaches in the repo by a path from itself it still reaches. A deploy never
+// rewrites what a local network's edge runs from. It's given three bindings beside its own:
 //
 // - `OWN` writes and removes blobs of its app's own artifact for the network, where its app's servers read.
 // - `NETWORK` says who the network's servers are, and whether a key is one of the network's own.
@@ -99,7 +100,7 @@ const version = (await $`sh ${root}/tooling/version`.text()).trim();
   await Bun.write(`${web}/dist/page/update.json.sig`, sign(null, said, key).toString("base64"));
 }
 
-const built = `${root}/target/edge`;
+const built = `${root}/target/edge-${what}`;
 rmSync(built, { recursive: true, force: true });
 mkdirSync(built, { recursive: true });
 const paths = { ...PIECES };
