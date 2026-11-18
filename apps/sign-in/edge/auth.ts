@@ -10,6 +10,7 @@ import { betterAuth } from "better-auth";
 import { APIError, createAuthMiddleware, getSessionFromCtx } from "better-auth/api";
 import { getMigrations } from "better-auth/db/migration";
 import { jwt } from "better-auth/plugins";
+import { cimd } from "@better-auth/cimd";
 import { mcp } from "@better-auth/mcp";
 import { DEVICE_CODE_GRANT_TYPE, oauthDeviceAuthorization } from "@better-auth/oauth-provider";
 import { passkey } from "@better-auth/passkey";
@@ -297,6 +298,18 @@ const devices = () => ({
   },
 }) satisfies BetterAuthPlugin;
 
+/**
+ * Fetches an assistant's metadata document, or what that names, as Better Auth's CIMD asks: over HTTPS, and never
+ * by a redirect. Better Auth refuses an address that's private before asking. A name that resolves to one is
+ * refused by Cloudflare itself, which resolves it once and connects to what it resolved: a Worker's fetch reaches
+ * only the public internet.
+ */
+function fetchMetadata(input: RequestInfo | URL, init?: RequestInit) {
+  const request = new Request(input, { ...init, redirect: "manual" });
+  if (new URL(request.url).protocol !== "https:" || !["GET", "HEAD"].includes(request.method)) throw new TypeError("Only an HTTPS GET or HEAD");
+  return fetch(request);
+}
+
 /** Better Auth for the network at `origin`, with its tables made. */
 async function createAuth(origin: string) {
   const { secret, migrated } = await stored();
@@ -358,6 +371,10 @@ async function createAuth(origin: string) {
         // Who the token's holder acts as, so that asking for their servers asks nothing of the database.
         customAccessTokenClaims: ({ user }) => ({ who: who(user!) }),
       }),
+      // An assistant may instead name itself by the address of its metadata document, which MCP recommends and
+      // Claude asks for first. Better Auth checks the address, fetches it within 5 seconds and 5 KB, checks it names
+      // that address and the redirect it asks for, and keeps it as its cache headers say.
+      cimd({ fetchClientMetadataResource: fetchMetadata, metadataProfile: "mcp-2026-07-28" }),
       // A new device shows a code, and its link carries it. Its person opens that where they sign in, and says
       // whether the code they're shown matches. The metadata names where it asks (RFC 8628).
       // A device's `client_id` is its key, which it signed what it asked with (`onRequest` in `devices`).

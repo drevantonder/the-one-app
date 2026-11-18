@@ -13,6 +13,7 @@
     "typecheck": "tsc && tsc -p page"
   },
   "dependencies": {
+    "@better-auth/cimd": "1.7.25",
     "@better-auth/mcp": "1.7.25",
     "@better-auth/oauth-provider": "1.7.25",
     "@better-auth/passkey": "1.7.25",
