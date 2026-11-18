@@ -5,10 +5,10 @@ import { converter, parse } from "culori"
 import { parseAst, type Plugin } from "vite"
 import { conditions, VERSION, type Condition, type Rgba, type State, type Style as Entry2, type Styles as Table, type Token as Entry, type Tokens } from "./src/strict/protocol.ts"
 import { negative } from "./src/styles.ts"
-import { tokens, type Token } from "./src/tokens.ts"
+import { legacy, tokens, type Token } from "./src/tokens.ts"
 
 type Varying = Record<"default" | Condition, unknown>
-const all = Object.values(tokens).flatMap((group) => Object.values(group) as Token[])
+const all = [...new Set([...Object.values(tokens), ...Object.values(legacy)].flatMap((group) => Object.values(group) as Token[]))]
 
 /** A value by condition, as `{ default, dark, … }`, whether or not it varies. */
 const varying = (value: unknown): Partial<Varying> => (value && typeof value === "object" && "default" in value ? (value as Varying) : { default: value })
@@ -34,9 +34,14 @@ function declared(token: Token, condition: "default" | Condition): [string, stri
   const value = token.value as any
   switch (token.kind) {
     case "colour": {
+      if (condition !== "default") return []
+      if (value.of) return [[token.id, `color-mix(in oklab, var(--${value.of.id}) ${value.alpha * 100}%, transparent)`]]
       const by = varying(value)
-      if (condition === "default") return [[token.id, by.dark ? `light-dark(${by.default}, ${by.dark})` : String(by.default)]]
-      return []
+      return [[token.id, by.dark ? `light-dark(${by.default}, ${by.dark})` : String(by.default)]]
+    }
+    case "material": {
+      const at = varying(value)[condition] as any
+      return at ? [[token.id, `blur(${css(at.blur)}) saturate(${at.saturate})`]] : []
     }
     case "length":
     case "radius": {
@@ -44,7 +49,7 @@ function declared(token: Token, condition: "default" | Condition): [string, stri
       return length ? [[token.id, css(length)]] : []
     }
     case "shadow":
-      return condition === "default" ? [[token.id, value.map((shadow: any) => `${shadow.x}px ${shadow.y}px ${shadow.blur}px ${shadow.spread}px ${shadow.colour}`).join(", ")]] : []
+      return condition === "default" ? [[token.id, value.map((shadow: any) => `${shadow.inset ? "inset " : ""}${shadow.x}px ${shadow.y}px ${shadow.blur}px ${shadow.spread}px ${shadow.colour}`).join(", ")]] : []
     case "font":
       return condition === "default" ? [[token.id, value.map((family: string) => (/^[\w-]+$/.test(family) ? family : `"${family}"`)).join(", ")]] : []
     case "weight": {
@@ -92,10 +97,14 @@ export function tokensTable(): Tokens {
   const entry = (token: Token): Entry => {
     const value = token.value as any
     switch (token.kind) {
-      case "colour":
-        return { kind: "colour", value: each(value, rgba) as never }
+      case "colour": {
+        if (!value.of) return { kind: "colour", value: each(value, rgba) as never }
+        // A colour at a part of another's opacity, as it is in each condition the other's varies by.
+        const of = varying(value.of.value)
+        return { kind: "colour", value: each(of.dark ? of : of.default, (colour: string) => { const [r, g, b, a] = rgba(colour); return [r, g, b, Math.round(a * value.alpha * 10000) / 10000] }) as never }
+      }
       case "shadow":
-        return { kind: "shadow", value: value.map((shadow: any) => ({ x: { px: shadow.x }, y: { px: shadow.y }, blur: { px: shadow.blur }, spread: { px: shadow.spread }, colour: rgba(shadow.colour) })) }
+        return { kind: "shadow", value: value.map((shadow: any) => ({ x: { px: shadow.x }, y: { px: shadow.y }, blur: { px: shadow.blur }, spread: { px: shadow.spread }, colour: rgba(shadow.colour), ...(shadow.inset ? { inset: true } : {}) })) }
       case "type":
         return { kind: "type", value: { font: value.font.id, size: value.size.value, lineHeight: value.lineHeight, weight: value.weight.id, tracking: value.tracking, tabular: value.tabular } }
       default:
@@ -177,6 +186,10 @@ function declarations(property: string, value: any): string {
       return `--ui-x:${plain};translate:var(--ui-x,0) var(--ui-y,0)`
     case "translateY":
       return `--ui-y:${plain};translate:var(--ui-x,0) var(--ui-y,0)`
+    case "rotate":
+      return `rotate:${value}deg`
+    case "backdropFilter":
+      return `-webkit-backdrop-filter:${plain};backdrop-filter:${plain}`
     case "lineClamp":
       return `display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:${value};overflow:hidden`
     case "userSelect":

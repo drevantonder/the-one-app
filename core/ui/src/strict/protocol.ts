@@ -134,8 +134,7 @@ export type EventName = "click" | "input" | "action" | "focus" | "blur" | "keydo
  * names them: a pointer's (`pointerdown` to `pointercancel`) go to the node under it and to each node it's in that
  * listens, the innermost first, as the DOM's bubble, and once a pointer is down on a node, its moves and its end go
  * to that node, wherever it goes, as a touch's do; `contextmenu` is a right-click, or a touch held (AccessKit's
- * `ShowContextMenu`); `wheel` a trackpad's or a wheel's scroll over it. No host draws these yet, so a page that uses
- * them names no `host`, and a web view draws it. */
+ * `ShowContextMenu`); `wheel` a trackpad's or a wheel's scroll over it. */
 export type Moved = "pointerdown" | "pointermove" | "pointerup" | "pointercancel" | "contextmenu" | "wheel"
 
 /** An input's editing state, as Flutter's `TextEditingValue`: its text, what's selected, and what an input method is
@@ -332,9 +331,7 @@ export interface Version1Style {
   zIndex?: number
   /** Drawn moved, larger or turned from where it's laid out, around its middle, which moves nothing else: CSS's
    * `translate`, `scale` and `rotate` (degrees), React Native's `transform`. What a page moves by hand, a frame at a
-   * time (`requestAnimationFrame`), it moves with these. Version 2's classes have these too (`absolute`, `inset-…`,
-   * `z-…`, `translate-…`, `scale-…`); version 1's here are what a page moved by hand needs, which no host draws yet
-   * (`Moved`). */
+   * time (`requestAnimationFrame`), it moves with these. */
   translateX?: number
   translateY?: number
   scale?: number
@@ -386,7 +383,10 @@ export type Token =
    * half its height. */
   | { kind: "radius"; value: Varies<Length | { percent: number }> }
   /** Shadows, drawn under what has it, the first nearest. */
-  | { kind: "shadow"; value: Varies<{ x: Length; y: Length; blur: Length; spread: Length; colour: Rgba }[]> }
+  | { kind: "shadow"; value: Varies<{ x: Length; y: Length; blur: Length; spread: Length; colour: Rgba; inset?: true }[]> }
+  /** What shows through what has it (`backdropFilter`): what's behind, blurred so far and saturated so much (1 is as
+   * it is), as Apple's materials and Liquid Glass. */
+  | { kind: "material"; value: Varies<{ blur: Length; saturate: number }> }
   /** Font families, the first a device has. */
   | { kind: "font"; value: string[] }
   /** A font weight, 1 to 1000, lighter in `dark` where light text on dark looks heavier. */
@@ -468,6 +468,8 @@ export interface Properties {
   translateX: Dimension
   translateY: Dimension
   scale: number
+  /** Turned, in degrees, around its middle. */
+  rotate: number
   opacity: number
   backgroundColor: Ref
   color: Ref
@@ -482,6 +484,8 @@ export interface Properties {
   borderBottomStartRadius: Ref | 0
   borderBottomEndRadius: Ref | 0
   boxShadow: Ref | "none"
+  /** A material token: what's behind it shows through, blurred, under its background. */
+  backdropFilter: Ref | "none"
   /** A type style token: size, line height, weight, tracking and figures together. */
   font: Ref
   fontFamily: Ref

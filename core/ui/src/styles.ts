@@ -65,6 +65,7 @@ export interface Look {
   translateX: Size | Pull
   translateY: Size | Pull
   scale: number
+  rotate: number
   opacity: number
   backgroundColor: Of<"colour">
   color: Of<"colour">
@@ -81,6 +82,7 @@ export interface Look {
   borderBottomStartRadius: Of<"radius"> | 0
   borderBottomEndRadius: Of<"radius"> | 0
   boxShadow: Of<"shadow"> | "none"
+  backdropFilter: Of<"material"> | "none"
   /** A type style: size, line height, weight, tracking and figures together. */
   font: Of<"type">
   fontFamily: Of<"font">

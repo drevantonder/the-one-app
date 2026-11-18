@@ -1,6 +1,10 @@
-// The design tokens: every colour, length, radius, shadow, font, weight, type style and pace the UI library and every
-// app draw with, as typed values, each the same everywhere or varying by condition (dark, touch, phone, reduced
-// motion: strict/protocol.ts's `Condition`). This is their one source. The UI library's build makes from it the web's
+// The design tokens: every colour, length, radius, shadow, material, font, weight, type style and pace the UI library
+// and every app draw with, as typed values, each the same everywhere or varying by condition (dark, touch, phone,
+// reduced motion: strict/protocol.ts's `Condition`). This is their one source. `tokens` are by role, as Raycast's
+// model has them (text at 100, 60, 40, 20 and 10%, a background, a selection, a loader, seven accents each with a
+// tint, a 4px grid, three radii, a window's shadow and edge, three sizes of text and a large title), and strict code
+// names only those, so their values change here alone. `legacy` are what the UI library's components drawn with CSS
+// name, until each is written in strict. The UI library's build makes from it the web's
 // CSS variables (tokens.css, which isn't edited by hand) and a native host's token table (/ui/client/tokens.json), and
 // a style names a token here by reference (`tokens.colour.mutedForeground`), never by its value.
 //
@@ -30,12 +34,16 @@ const radius = (value: Varies<Length | { percent: number }>): Token<"radius"> =>
 const rem = (rem: number): Length => ({ rem })
 const px = (px: number): Length => ({ px })
 
-/** A shadow: its offsets, blur and spread in pixels, and its colour. */
-type Shadow = { x: number; y: number; blur: number; spread: number; colour: string }
+/** A shadow: its offsets, blur and spread in pixels, its colour, and whether it's inside the edge. */
+type Shadow = { x: number; y: number; blur: number; spread: number; colour: string; inset?: boolean }
 const shadow = (...shadows: Shadow[]): Token<"shadow"> => ({ kind: "shadow", id: "", value: shadows })
 const font = (...families: string[]): Token<"font"> => ({ kind: "font", id: "", value: families })
 /** A weight, a little lighter in dark: light text on dark looks heavier. */
 const weight = (weight: number): Token<"weight"> => ({ kind: "weight", id: "", value: { default: weight, dark: weight - 25 } })
+/** A colour as another at a part of its opacity: text at 60%, an accent's 15% tint. */
+const alpha = (of: Token<"colour">, percent: number): Token<"colour"> => ({ kind: "colour", id: "", value: { of, alpha: percent / 100 } })
+/** What shows through what has it: what's behind, blurred so far and saturated so much. */
+const material = (blur: number, saturate: number): Token<"material"> => ({ kind: "material", id: "", value: { blur: px(blur), saturate } })
 const motion = (duration: Varies<number>, easing: Varies<[number, number, number, number]>): Token<"motion"> => ({ kind: "motion", id: "", value: { duration, easing } })
 
 const colours = {
@@ -165,23 +173,93 @@ const motions = {
   travel: motion({ default: 300, reducedMotion: 200 }, { default: [0.32, 0.72, 0, 1], reducedMotion: out }),
 }
 
-/** Each token's id, as its kind's group names it: a colour by itself (`muted-foreground`), a length as it's known
- * (`text-base`, `control`), and the rest by their group (`radius-md`, `shadow-xs`, `font-sans`, `label-weight`,
- * `type-label`, `move-quick`). */
-function named<T extends Record<string, Token>>(group: T, id: (key: string) => string): T {
-  for (const [key, token] of Object.entries(group)) token.id = id(key.replace(/[A-Z0-9]/g, (letter) => `-${letter.toLowerCase()}`).replace(/^x(x+)l$/, (_, more) => `${more.length + 1}xl`))
-  return group
+// By role.
+
+const label = colour("oklch(0.145 0 0)", "oklch(0.985 0 0)")
+const accent = (light: string, dark: string) => colour(light, dark)
+const accents = {
+  red: accent("#ff3b30", "#ff453a"),
+  orange: accent("#ff9500", "#ff9f0a"),
+  yellow: accent("#ffcc00", "#ffd60a"),
+  green: accent("#34c759", "#30d158"),
+  blue: accent("#007aff", "#0a84ff"),
+  purple: accent("#af52de", "#bf5af2"),
+  magenta: accent("#ff2d55", "#ff375f"),
+}
+/** Colours: one text colour at five strengths, a background and the second of its gradient, what's selected, what's
+ * loading, and the accents, each with its tint. */
+const roles = {
+  label,
+  secondaryLabel: alpha(label, 60),
+  tertiaryLabel: alpha(label, 40),
+  quaternaryLabel: alpha(label, 20),
+  quinaryLabel: alpha(label, 10),
+  background: colours.background,
+  backgroundGradient: colour("oklch(1 0 0)", "oklch(0.145 0 0)"),
+  selection: alpha(label, 10),
+  loader: alpha(label, 40),
+  ...accents,
+  redTint: alpha(accents.red, 15),
+  orangeTint: alpha(accents.orange, 15),
+  yellowTint: alpha(accents.yellow, 15),
+  greenTint: alpha(accents.green, 15),
+  blueTint: alpha(accents.blue, 15),
+  purpleTint: alpha(accents.purple, 15),
+  magentaTint: alpha(accents.magenta, 15),
 }
 
-/** Every token, by kind. */
-export const tokens = {
+/** The 4px grid, by its steps: `grid[3]` is 12px. */
+const grid = Object.fromEntries([0.5, 1, 2, 3, 4, 5, 6, 8, 10, 12, 16, 20, 24].map((step) => [step, length(rem(step / 4))])) as Record<0.5 | 1 | 2 | 3 | 4 | 5 | 6 | 8 | 10 | 12 | 16 | 20 | 24, Token<"length">>
+
+/** Sizes of text: large, medium and small, and a phone's large title. */
+const sizes = {
+  large: length(rem(1)),
+  medium: length(rem(0.875)),
+  small: length(rem(0.75)),
+  largeTitle: length({ default: rem(1.75), phone: rem(34 / 17) }),
+}
+const weightRoles = {
+  regular: weights.body,
+  medium: weights.label,
+  semibold: weights.title,
+}
+
+/** What the UI library's components drawn with CSS name, as their CSS variables, until each is written in strict. */
+export const legacy = {
   colour: named(colours, (key) => key),
   length: named(lengths, (key) => key),
   space: named(space, (key) => `space-${key}`),
   radius: named(radii, (key) => `radius-${key}`),
   shadow: named(shadows, (key) => `shadow-${key}`),
-  font: named(fonts, (key) => `font-${key}`),
   weight: named(weights, (key) => `${key}-weight`),
   type: named(types, (key) => `type-${key}`),
+}
+
+export const tokens = {
+  colour: named(roles, (key) => key),
+  grid: named(grid, (key) => `grid-${key.replace(".", "-")}`),
+  length: named({ control: lengths.control, icon: lengths.icon, gutter: lengths.gutter, readable: lengths.readable, hairline: lengths.hairline }, (key) => key),
+  size: named(sizes, (key) => `size-${key}`),
+  radius: named({ small: radius(px(6)), medium: radius(px(10)), large: radius(px(18)), full: radii.full, icon: radii.icon }, (key) => `radius-${key}`),
+  shadow: named({ window: shadow({ x: 0, y: 10, blur: 30, spread: 0, colour: "oklch(0 0 0 / 20%)" }), edge: shadow({ x: 0, y: 0, blur: 0, spread: 1, colour: "oklch(0.5 0 0 / 15%)", inset: true }) }, (key) => `shadow-${key}`),
+  material: named({ glass: material(20, 1.8), thin: material(14, 1.2) }, (key) => `material-${key}`),
+  font: named(fonts, (key) => `font-${key}`),
+  weight: named(weightRoles, (key) => `weight-${key}`),
+  type: named({
+    largeTitle: type(sizes.largeTitle, weights.title, { lineHeight: 1.2, tracking: -0.015 }),
+    large: type(sizes.large, weights.label),
+    medium: type(sizes.medium, weights.body),
+    small: type(sizes.small, weights.body),
+  }, (key) => `type-${key}`),
   motion: named(motions, (key) => `move-${key}`),
 }
+
+
+/** Each token's id, its CSS variable's name, as its kind's group names it: a colour by itself (`secondary-label`), a
+ * length as it's known (`control`), and the rest by their group (`grid-3`, `radius-small`, `type-medium`,
+ * `move-quick`). A token in two groups keeps the first's: `legacy`'s, which its CSS names, until it goes. */
+function named<T extends Record<string, Token>>(group: T, id: (key: string) => string): T {
+  for (const [key, token] of Object.entries(group)) token.id ||= id(key.replace(/([a-z])([A-Z0-9])/g, (_, before, letter) => `${before}-${letter.toLowerCase()}`).replace(/^x(x+)l$/, (_, more) => `${more.length + 1}xl`))
+  return group
+}
+
