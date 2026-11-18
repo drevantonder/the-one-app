@@ -30,11 +30,14 @@ Tauri's WebDriver drives the app: `tauri-driver` (`cargo install tauri-driver --
 `WebKitWebDriver` (`webkit2gtk-driver`), with any WebDriver client. Start a network (`local-network`), then:
 
     ONE_HOME=<folder>/client ONE_AS=owner dbus-run-session -- xvfb-run -a -s "-screen 0 1024x900x24" bash -c '
-      tauri-driver >"$0/driver.log" 2>&1 & driver=$!
-      uv run -q --with selenium python3 <your script>
+      free() { python3 -c "import socket; s = socket.socket(); s.bind((\"\", 0)); print(s.getsockname()[1])"; }
+      export WEBDRIVER=http://127.0.0.1:$(free)
+      tauri-driver --port ${WEBDRIVER##*:} --native-port $(free) >"$0/driver.log" 2>&1 & driver=$!
+      uv run -q --with selenium python3 <your script, which connects to $WEBDRIVER>
       kill $driver' <scratch folder>
 
-Without `dbus-run-session` GTK waits half a minute for a desktop that isn't there. The session's capabilities are
+Without `dbus-run-session` GTK waits half a minute for a desktop that isn't there. Its ports are free ones, never
+`tauri-driver`'s own 4444 and 4445: other agents run WebDriver on this machine too. The session's capabilities are
 `{"browserName": "wry", "tauri:options": {"application": "<repo>/target/debug/one", "args": ["<link>"]}}`, then
 `set_window_size(390, 844)`; the app's log is `driver.log`. One app runs per desktop session: a second start,
 `target/debug/one <link>`, hands its link to it, as a desktop's link handler does.
@@ -49,6 +52,9 @@ Without `dbus-run-session` GTK waits half a minute for a desktop that isn't ther
 - An app's elements are in its frame: switch to it to find, click or wait, and back to the window for the picture
   (`save_screenshot`). An element's own screenshot inside a frame comes out black.
 - A hold is `click_and_hold(…).pause(1).release()`; WebKit's driver's right-click opens no menu.
+- Touch isn't WebKitGTK's: its driver sends a touch pointer as a mouse, and one finger at most. Touch and a second
+  finger are Chromium's, so Android's (below) or Chrome's: CDP's `Input.dispatchTouchEvent` with a `touchPoints`
+  entry per finger, or in Chrome W3C Actions with one `pointerType: "touch"` pointer per finger in one action.
 - What every page says to its console, Solid's dev warnings too, is in `driver.log` as `CONSOLE WARN …` (a debug
   build only). WebKitGTK here has no WebDriver BiDi, so `log.entryAdded` isn't there.
 
@@ -68,6 +74,10 @@ isn't debuggable: tap "Use without an account" and "No thanks" once (find them w
 AVD keeps that. A phone's app needs a network with an address
 (`tooling/network <folder> --edge`, or the README's `TAURI_ONE_ADDRESS`); `adb reverse tcp:<port> tcp:<port>` makes
 the emulator's `localhost:<port>` this machine's. Stop the emulator when you're done (`adb emu kill`).
+
+A debug build's app is a WebView that takes CDP: `adb forward tcp:0 localabstract:webview_devtools_remote_$(adb
+shell pidof app.theone.client)` gives the port, `/json` there its page, and an app's frame is in `Page.getFrameTree`.
+That's how touch and a second finger reach it (`Input.dispatchTouchEvent`); `adb shell input` has one finger.
 
 ### iPhone simulator
 
