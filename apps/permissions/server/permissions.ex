@@ -4,7 +4,9 @@ defmodule Permissions do
   this app's database, and it decides the `reach` hook from them, so an app reaches an artifact only where a
   tuple says both it and whoever it runs for may.
 
-  Nothing here knows how anyone signs in. Who asks is `call.subject`, as One Core says it.
+  Nothing here knows how anyone signs in. Who asks is the call's actor, as One Core says it: a member runs a call
+  for a group or the network, and may share, list and check only what they may themselves. A scheduled job is asked
+  by nobody, so it's whoever it runs for.
   """
   @behaviour OneCore.App
 
@@ -271,17 +273,17 @@ defmodule Permissions do
 
   def call("shared", %{"artifact" => artifact}, call) do
     transaction(call, fn db ->
-      reaches!(db, call.subject, "viewer", artifact)
+      reaches!(db, asking(call), "viewer", artifact)
       %{tuples: query(db, "select relation, who from tuples where artifact = ? order by relation, who", [artifact])}
     end)
   end
 
   def call("check", %{"artifact" => artifact} = inputs, call) do
-    who = Map.get(inputs, "who", call.subject)
+    who = Map.get(inputs, "who", asking(call))
     relation = Map.get(inputs, "relation", "viewer")
 
     transaction(call, fn db ->
-      if who != call.subject, do: reaches!(db, call.subject, "viewer", artifact)
+      if who != asking(call), do: reaches!(db, asking(call), "viewer", artifact)
       %{who: who, relation: relation, artifact: artifact, may: may?(db, who, relation, artifact)}
     end)
   end
@@ -291,8 +293,8 @@ defmodule Permissions do
   # which is said as it is.
   def call("users", %{"artifact" => artifact, "relation" => relation}, call) do
     transaction(call, fn db ->
-      if not (member?(db, call.subject, artifact) or may?(db, call.subject, "viewer", artifact)),
-        do: raise("#{call.subject} isn't in #{artifact}, nor sees it, so doesn't see who has it.")
+      if not (member?(db, asking(call), artifact) or may?(db, asking(call), "viewer", artifact)),
+        do: raise("#{asking(call)} isn't in #{artifact}, nor sees it, so doesn't see who has it.")
 
       up = followed(db, @parents, Enum.uniq([artifact, OneCore.User.owner(artifact) || artifact, "network"]), [])
       tuples = "select who as next from tuples where artifact = ? and relation in (?, ?, ?)"
@@ -303,7 +305,7 @@ defmodule Permissions do
 
   # Every user is in the network, so its members are every user a tuple names, as who or as whose an artifact is.
   def call("members", %{"of" => "network"}, call) do
-    if not user?(call.subject), do: raise("Only a user lists the network's users.")
+    if not user?(asking(call)), do: raise("Only a user lists the network's users.")
 
     transaction(call, fn db ->
       named = query(db, "select distinct who as name from tuples union select distinct artifact from tuples", [])
@@ -315,8 +317,8 @@ defmodule Permissions do
 
   def call("members", %{"of" => "groups/" <> _ = group}, call) do
     transaction(call, fn db ->
-      if not (member?(db, call.subject, group) or may?(db, call.subject, "viewer", group)),
-        do: raise("#{call.subject} isn't in #{group}, so doesn't see who is.")
+      if not (member?(db, asking(call), group) or may?(db, asking(call), "viewer", group)),
+        do: raise("#{asking(call)} isn't in #{group}, so doesn't see who is.")
 
       %{members: Enum.sort(Enum.filter(followed(db, @members, [group], []), &user?/1))}
     end)
@@ -352,7 +354,7 @@ defmodule Permissions do
         do: raise("There's a group called #{called} already.")
 
       for relation <- ["owner", "member"],
-          do: query(db, "insert into tuples (artifact, relation, who) values (?, ?, ?)", [group, relation, call.subject])
+          do: query(db, "insert into tuples (artifact, relation, who) values (?, ?, ?)", [group, relation, asking(call)])
 
       query(db, "insert into names (artifact, called) values (?, ?)", [group, called])
       %{group: group, called: called}
@@ -362,7 +364,7 @@ defmodule Permissions do
   def call("groups", _inputs, call) do
     transaction(call, fn db ->
       groups =
-        for "groups/" <> _ = group <- Enum.sort(followed(db, @groups, [call.subject], []) -- [call.subject]) do
+        for "groups/" <> _ = group <- Enum.sort(followed(db, @groups, [asking(call)], []) -- [asking(call)]) do
         having = &for %{"who" => who} <- query(db, @having, [group, &1]), do: who
         # A group that sharing with it made, and not `group`, is called what it's named.
         called =
@@ -393,11 +395,15 @@ defmodule Permissions do
   end
 
   # Raises unless whoever asks may write or remove a tuple with this relation to the artifact: an owner or an
-  # editor shares up to their own relation and says who's a member, and only an owner adds or removes an owner
-  # or a parent, or says who installs apps.
+  # editor shares up to their own relation, and only an owner adds or removes an owner, a member or a parent, or
+  # says who installs apps: a group's members own what's made for it.
   defp shares!(db, call, artifact, relation) do
-    reaches!(db, call.subject, if(relation in ["owner", "installer", "parent"], do: "owner", else: "editor"), artifact)
+    owner = relation in ["owner", "member", "installer", "parent"]
+    reaches!(db, asking(call), if(owner, do: "owner", else: "editor"), artifact)
   end
+
+  # Whoever asks: the call's actor, or whoever it runs for where nobody asked, as for a scheduled job.
+  defp asking(call), do: call.actor || call.subject
 
   defp reaches!(db, who, relation, artifact) do
     if not may?(db, who, relation, artifact), do: raise("#{who} isn't #{a(relation)} of #{artifact}.")
@@ -419,9 +425,10 @@ defmodule Permissions do
     end)
   end
 
-  # How the names start of what's a who's own with no tuple saying so.
-  defp theirs("groups/" <> _ = group), do: group <> "/made/"
-  defp theirs(who), do: who <> "/"
+  # How the names start of what's a who's own with no tuple saying so: all of a user's, and what was made for a
+  # group or the network. Their apps and what those keep are whoever owns them to say, with a tuple.
+  defp theirs("users/" <> _ = user), do: user <> "/"
+  defp theirs(who), do: who <> "/made/"
 
   # Whether `who` is in a group, themselves or through a group that is, or is a user asking about the network,
   # which every user is in.

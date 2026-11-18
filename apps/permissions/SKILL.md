@@ -28,16 +28,18 @@ Its words:
 - Who is a user (`users/alice`), a group, meaning its members (`groups/family`), `everyone` in the network, a
   app by its artifact's name, or a sharing link's holder (`users/alice/links/...`).
 - `owner`, `editor` and `viewer` are what someone may do: an owner is an editor, and an editor is a viewer.
-  Whoever an artifact's name starts with owns it, a group's members own what was made for the group
-  (`groups/family/made/...`), and the network's owner owns everything. Whoever has a relation to a user or a group
+  Whoever a user's artifact's name starts with owns it, a group's members own what was made for the group
+  (`groups/family/made/...`), and every user what was made for the network (`network/made/...`). A group's or
+  the network's apps, and what those keep, are their owners', and the network's owner owns everything. Whoever has a relation to a user or a group
   has it to everything that's theirs: a group's owner owns its apps and what they keep. `member` puts a user or
   a group in a group. `parent` names another artifact as who, and gives whoever has a relation to that one the
   same relation to this.
 - `installer` of the network (or of a group) may install apps for it, as its owner does, and nothing more an owner
   may: `share --artifact network --relation installer --who users/carol`, which only an owner writes or removes.
   `users --artifact network --relation installer` lists who may, owners among them; anyone in the network sees it.
-- `share` writes a tuple and `unshare` removes one, or finds it already gone. An owner or an editor shares with viewers and editors and
-  adds a group's members, and only an owner adds an owner or a parent. `shared` lists an artifact's tuples,
+- `share` writes a tuple and `unshare` removes one, or finds it already gone. An owner or an editor shares with viewers and editors, and
+  only an owner adds an owner, a group's member or a parent. Whoever asks shares only what they may themselves,
+  whoever the call runs for. `shared` lists an artifact's tuples,
   and `check` says whether someone may reach it.
 - `forget` removes every tuple that names someone taken out of the network, so whoever joins by their name next
   inherits nothing. Taking someone out (`sign-in_remove_person`) calls it, and it refuses anyone still in.
