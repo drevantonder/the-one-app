@@ -83,6 +83,14 @@ defmodule OneCore.Tools do
     required: ["build", "sha256", "size", "link"]
   }
 
+  @protocol %{
+    type: ["object", "null"],
+    properties: %{oldest: %{type: "integer"}, newest: %{type: "integer"}},
+    description:
+      "The protocols it speaks with the network's other parts (`OneCore.Protocol`), from `oldest` to `newest`, or " <>
+        "null for none this server knows"
+  }
+
   @server_update_status %{
     type: "string",
     enum: ["up_to_date", "downloading", "checked", "verifying"],
@@ -744,8 +752,9 @@ defmodule OneCore.Tools do
       last said it is, and the latest for each kind of machine, so it says whether everything is on the same build; and whether its apps are `synced` with what's
       installed or `syncing`, under `apps`.
       A build is the version of the commit it was built from, Semantic Versioning's, with its commit's count and
-      hash as build metadata: 0.15.2+2974.febd37350abc. Servers, the edge and clients talk only on the same 0.minor:
-      `why` says what's on one that doesn't. With `server`, that server answers, saying its own.
+      hash as build metadata: 0.15.2+2974.febd37350abc. Servers, the edge and clients talk where the protocols they
+      speak overlap, whatever their versions (`protocol`, from `oldest` to `newest`): `why` says what's on one that
+      doesn't. With `server`, that server answers, saying its own.
       """,
       inputs: %{
         type: "object",
@@ -756,7 +765,9 @@ defmodule OneCore.Tools do
         properties: %{
           server: %{type: "string", description: "The key of the server that answered"},
           build: %{type: "string", description: "Its build: <version>+<count>.<commit>"},
+          protocol: @protocol,
           edge: %{type: ["string", "null"], description: "The build the network's edge is, if it says"},
+          edge_protocol: %{type: ["object", "null"], description: "The protocols the network's edge speaks, if it's reached"},
           latest: %{type: "object", description: "The latest build of each kind of machine, by its name: server-runtime/linux-x86_64"},
           servers: %{
             type: "array",
@@ -797,8 +808,9 @@ defmodule OneCore.Tools do
                 },
                 why: %{
                   type: "string",
-                  description: "Why it doesn't talk with the server that answered or the edge, being more than one 0.minor apart"
+                  description: "Why it doesn't talk with the server that answered or the edge: they speak no protocol in common"
                 },
+                protocol: @protocol,
                 server_update_status: @server_update_status,
                 server_update_stage: @server_update_stage,
                 update_method: @update_method,
@@ -812,7 +824,13 @@ defmodule OneCore.Tools do
             type: "array",
             items: %{
               type: "object",
-              properties: %{device: %{type: "string", description: "The device's key"}, build: %{type: "string"}},
+              properties: %{
+                device: %{type: "string", description: "The device's key"},
+                build: %{type: "string"},
+                protocol: @protocol,
+                connected: %{type: "boolean", description: "Whether it's connected to the network's edge now"},
+                last_seen: %{type: "integer", description: "When it was last connected, in milliseconds since 1970"}
+              },
               required: ["device"]
             }
           },

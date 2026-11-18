@@ -10,7 +10,7 @@ defmodule OneCore.Server do
   """
   use GenServer
   require Logger
-  alias OneCore.{Builds, Edge, Hooks, Iroh, Mcp, Apps, Servers}
+  alias OneCore.{Builds, Edge, Hooks, Iroh, Mcp, Apps, Protocol, Servers}
   alias OneCore.Call.State
 
   def start_link(_), do: GenServer.start_link(__MODULE__, nil, name: __MODULE__)
@@ -157,14 +157,13 @@ defmodule OneCore.Server do
 
   @doc """
   Asks the server whose key is `server` for `method`. Gives `{:ok, result}`, or `{:error, code, why}` if it refused;
-  `:unreachable` if it couldn't be reached, isn't ready, or is more than one breaking release behind this server's,
-  so they don't talk (`OneCore.Builds.talk?/2`) and it was asked nothing; or `:stopped` if it stopped answering after
-  it was asked, so it may have done what was asked. One that far ahead refuses, saying this one is behind.
+  `:unreachable` if it couldn't be reached, isn't ready, or speaks only a protocol older than this server's, so they
+  don't talk (`OneCore.Protocol`); or `:stopped` if it stopped answering after it was asked, so it may have done what
+  was asked. One that speaks only a newer one refuses, saying this one is behind.
 
-  Every request says this server's build, as `_meta.version`, and one more than a breaking release from the server
-  asked is refused before anything of it is read (`OneCore.Mcp`). Servers one breaking release apart talk, so a
-  release reaches each in turn with the network whole; one further behind is skipped, as if it were off, and one
-  further ahead refuses what this one asks.
+  Every request says the protocol this server speaks, as `_meta.protocol`, and its build, as `_meta.version`, and one
+  of a protocol the server asked doesn't speak is refused before anything of it is read (`OneCore.Mcp`). One behind
+  is skipped, as if it were off, and one ahead refuses what this one asks.
 
   Only a server that's ready (`OneCore.Servers.presence/1`), or isn't known not to be, is asked. With `ready: :any`
   one that isn't is asked too, unless it's stopped, for what only it can answer: a server that's starting answers
@@ -175,7 +174,7 @@ defmodule OneCore.Server do
     # this one knows the other is still running it, however long it takes (`client::Reached::ask`).
     # Its id is its own, so cancelling the call it's for tells that server which of its calls to cancel.
     id = System.unique_integer([:positive])
-    meta = %{progressToken: id, version: Builds.build()}
+    meta = %{progressToken: id, protocol: Protocol.range(), version: Builds.build()}
     meta = Map.merge(meta, Map.new(:otel_propagator_text_map.inject([])))
     params = Map.update(params, :_meta, meta, &Map.merge(&1, meta))
     message = JSON.encode!(%{jsonrpc: "2.0", id: id, method: method, params: params})
@@ -188,7 +187,7 @@ defmodule OneCore.Server do
          {:ok, response} <- passed(method, server, id, fn -> ask(server, message, State.answering()) end) do
       case JSON.decode(response) do
         {:ok, %{"result" => result}} -> {:ok, result}
-        {:ok, %{"error" => %{"code" => -32022, "data" => %{"version" => theirs}}}} -> refused(server, theirs)
+        {:ok, %{"error" => %{"code" => -32022, "data" => %{} = data}}} -> refused(server, data)
         {:ok, %{"error" => %{"code" => code, "message" => why}}} -> {:error, code, why}
         # An answer cut short, or none, is from a server that went away after it was asked.
         _ -> :stopped
@@ -201,18 +200,19 @@ defmodule OneCore.Server do
   defp passed("tools/call", server, id, ask), do: State.forwarding(server, id, ask)
   defp passed(_method, _server, _id, ask), do: ask.()
 
-  # A server more than one breaking release from this one was asked nothing. One that's behind is updated in its
-  # turn, which a release does next: it's as if it were off, so whoever asked asks another. One that's ahead was
-  # updated first, and this one is the one behind.
-  defp refused(server, theirs) do
-    Servers.build_again(server)
+  # A server that doesn't speak this one's protocol refused it (`OneCore.Mcp`), saying the range it speaks, or, from
+  # before parts said theirs, its build. One that's behind is updated in its turn: it's as if it were off, so whoever
+  # asked asks another. One that's ahead was updated first, and this one is the one behind.
+  defp refused(server, %{} = data) do
+    Servers.protocol_again(server)
+    theirs = Protocol.of(data["supported"], data["version"])
 
     why =
-      "#{named(server)} is on #{theirs} and #{named(key())} on #{Builds.build()}, more than one breaking release apart, so they don't talk until one is updated"
+      "#{named(server)} speaks protocol #{Protocol.name(theirs)} and #{named(key())} #{Protocol.name(Protocol.range())}, so they don't talk until one is updated"
 
     Logger.warning(why)
 
-    if Builds.older?(theirs, Builds.build()),
+    if Protocol.behind?(theirs),
       do: :unreachable,
       else: {:error, -32022, "#{why}: #{named(key())} is the one behind, and is asked nothing until it's updated"}
   end
@@ -233,8 +233,8 @@ defmodule OneCore.Server do
     presence = Servers.presence(server) || %{}
 
     cond do
-      not Builds.talk?(Servers.build(server), Builds.build()) ->
-        "#{named(server)} is on #{Servers.build(server)} and #{named(key())} on #{Builds.build()}, more than one breaking release apart, so it's asked nothing until it's updated"
+      not Protocol.speaks?(Servers.protocol(server)) ->
+        "#{named(server)} speaks protocol #{Protocol.name(Servers.protocol(server))} and #{named(key())} #{Protocol.name(Protocol.range())}, so it's asked nothing until it's updated"
 
       presence["last_seen"] ->
         "#{named(server)} was last seen #{Servers.ago(presence["last_seen"])}"

@@ -22,7 +22,7 @@ defmodule OneCore.Servers do
   looks at someone (`reload/1`) or invalidates it all (`invalidate/0`).
   """
   require Logger
-  alias OneCore.{Bucket, Builds, Cache, Edge, Hooks, Server}
+  alias OneCore.{Bucket, Builds, Cache, Edge, Hooks, Protocol, Server}
 
   @network "network"
 
@@ -156,14 +156,18 @@ defmodule OneCore.Servers do
   end
 
   @doc """
-  The build the network's edge is, as its relay says, or `nil` where it says none or can't be reached. A call from
-  outside goes only to servers on a version that talks with it (`OneCore.Builds.talk?/2`).
+  The network's edge, as its relay says, `%{"build" => <its build>, "protocol" => <the protocol it speaks>}`, and
+  whether each of `keys`, devices' or servers', is here, as `presence/1` says, in `"presence"`; or `nil` where it can't
+  be reached. A call from outside goes only to servers that speak a protocol it does (`OneCore.Protocol`).
   """
-  def edge do
+  def edge(keys \\ []) do
     if at = Application.get_env(:one_core, :address) do
       path = "/relay/seen"
-      response = Edge.send!(method: :get, url: at <> path, params: [keys: ""], headers: Edge.signed(path, ""))
-      List.first(Req.Response.get_header(response, "one-version"))
+      params = [keys: Enum.join(keys, ",")]
+      response = Edge.send!(method: :get, url: at <> path, params: params, headers: Edge.signed(path, ""))
+      build = List.first(Req.Response.get_header(response, "one-version"))
+      body = if is_map(response.body), do: response.body, else: %{}
+      %{"build" => build, "protocol" => Protocol.of(body["protocol"], build), "presence" => body["presence"] || %{}}
     end
   rescue
     Edge.Unreachable -> nil
@@ -219,6 +223,7 @@ defmodule OneCore.Servers do
         JSON.encode!(
           Map.merge(OneCore.Release.status(), %{
             "version" => build,
+            "protocol" => Protocol.range(),
             "name" => Application.get_env(:one_core, :name),
             "installed" => Application.get_env(:one_core, :installed, false)
           })
@@ -343,13 +348,18 @@ defmodule OneCore.Servers do
   end
 
   @doc """
-  The build the server whose key is `key` runs, as it said when it last started (`OneCore.Builds.say/1`), or `nil`
-  where it never said.
+  The protocol the server whose key is `key` speaks (`OneCore.Protocol.of/2`), as it said when it last started or
+  updated (`OneCore.Builds.say/1`), or `nil` where it never said.
   """
-  def build(key), do: cached({:build, key}, fn -> read("servers/#{key}/build", %{})["build"] end)
+  def protocol(key) do
+    cached({:protocol, key}, fn ->
+      said = read("servers/#{key}/build", %{})
+      Protocol.of(said["protocol"], said["build"])
+    end)
+  end
 
-  @doc "Which build the server whose key is `key` runs is read again: it refused what it was asked for being on another."
-  def build_again(key), do: Cache.invalidate(__MODULE__, {:build, key})
+  @doc "Which protocol the server whose key is `key` speaks is read again: it refused what it was asked for speaking another."
+  def protocol_again(key), do: Cache.invalidate(__MODULE__, {:protocol, key})
 
   @doc "How long ago `at`, in milliseconds since 1970, was, as a person would say it short: `2 min ago`."
   def ago(at) do

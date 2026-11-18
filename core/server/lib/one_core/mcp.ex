@@ -41,6 +41,7 @@ defmodule OneCore.Mcp do
     Edge,
     Hooks,
     Apps,
+    Protocol,
     Server,
     Servers,
     Services,
@@ -251,35 +252,34 @@ defmodule OneCore.Mcp do
   defp speaks(version),
     do: {:error, -32022, "Unsupported protocol version", %{supported: @versions, requested: version}}
 
-  # Parts of the platform talk across one breaking release and no more (`OneCore.Builds.talk?/2`): a server, a
-  # client and the edge each say their build as `_meta.version`, and what one two or more away says is refused before
-  # anything of it is read, as MCP refuses a protocol version it doesn't speak (-32022), and one that says none is
-  # refused as too old. What updates a part that's behind is answered whatever it's on, however far
-  # behind, as an app store always lets an old app update, since it's how a part catches up: the builds it
-  # downloads, an update, the task an update is followed by (`tasks/get`, as a client's Update follows it), the list
-  # of tools a client reads before it calls one, and which builds run, by which the program keeping a server running,
-  # still the build before, tells a build it tries answers (`clients/cli/src/serving.rs`). That's this exception's
-  # whole list, and it's permanent: a client of any version must always be able to update.
+  # Parts of the platform talk where the protocols they speak overlap (`OneCore.Protocol`): a server, a client and the
+  # edge each say theirs as `_meta.protocol`, and a request of one that speaks none this server does is refused before
+  # anything of it is read, as MCP refuses a protocol version it doesn't speak (-32022), saying the range this one
+  # speaks. The refusal says this server's build too, by which a client from before parts said their protocol (0.24 to
+  # 0.26) knows it's the one to update. What updates a part that's behind is answered whatever it speaks, as an app
+  # store always lets an old app update, since it's how a part catches up: the builds it downloads, an update, the
+  # task an update is followed by (`tasks/get`, as a client's Update follows it), the list of tools a client reads
+  # before it calls one, and which builds run, by which the program keeping a server running, still the build before,
+  # tells a build it tries answers (`clients/cli/src/serving.rs`). That's this exception's whole list, and it's
+  # permanent: a client of any version must always be able to update.
   defp talks(method, _params) when method in ["tools/list", "tasks/get"], do: :ok
   defp talks("tools/call", %{"name" => name}) when name in ["builds", "download", "update"], do: :ok
 
   defp talks(_method, params) do
-    theirs = meta(params)["version"]
+    theirs = Protocol.of(meta(params)["protocol"], meta(params)["version"])
 
-    if Builds.talk?(theirs, Builds.build()) do
+    if Protocol.speaks?(theirs) do
       :ok
     else
       here = Servers.name(Server.key()) || "This server"
-      on = theirs || "a build that doesn't say its version"
+      speaks = "#{here} speaks protocol #{Protocol.name(Protocol.range())}, and what asked #{Protocol.name(theirs)}"
 
       why =
-        if Builds.older?(theirs, Builds.build()),
-          do:
-            "#{here} is on #{Builds.build()}, and what asked on #{on}, more than one breaking release behind, which doesn't talk with it until it's updated (`one update`)",
-          else:
-            "#{here} is on #{Builds.build()}, more than one breaking release behind what asked on #{on}: it's asked once it's updated"
+        if Protocol.behind?(theirs),
+          do: "#{speaks}, which is older: it talks with it once it's updated (`one update`)",
+          else: "#{speaks}, which is newer: it's asked once it's updated"
 
-      {:error, -32022, why, %{version: Builds.build(), requested: theirs}}
+      {:error, -32022, why, %{supported: Protocol.range(), requested: theirs, version: Builds.build()}}
     end
   end
 

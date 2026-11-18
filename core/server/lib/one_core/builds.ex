@@ -17,7 +17,7 @@ defmodule OneCore.Builds do
   writes as it starts and as an update of it moves on (`say/1`), and a device's under its user's prefix,
   `devices/<key>`, which it says as it renews its pass (`seen/3`).
   """
-  alias OneCore.{Bucket, Server, Servers}
+  alias OneCore.{Bucket, Protocol, Server, Servers}
   alias OneCore.Apps.{Installed, Store}
 
   @builds "network/builds/"
@@ -28,7 +28,7 @@ defmodule OneCore.Builds do
 
   @doc """
   The version a build is, Semantic Versioning's, or `nil` for one that doesn't say it, as one from before builds had
-  versions (`<count>-<commit>`), which is too old to talk with any part of the platform.
+  versions (`<count>-<commit>`).
   """
   def version(build) do
     case Version.parse(to_string(build)) do
@@ -36,14 +36,6 @@ defmodule OneCore.Builds do
       :error -> nil
     end
   end
-
-  @doc """
-  Whether the builds `a` and `b` talk: parts of the platform (servers, the edge, clients) talk across one breaking
-  release, a 0.minor or from 1.0 a major, as Cargo, npm and Hex read a version, and refuse two or more, as Kubernetes'
-  version skew policy does. So a release reaches each part in turn with nothing split, and a change that would break
-  talking across one stays compatible for one release.
-  """
-  def talk?(a, b), do: apart(a, b) <= 1
 
   @doc "How many breaking releases apart the builds `a` and `b` are: 0.19 and 0.21 are 2, and 0.21 and 1.0 any number."
   def apart(a, b) do
@@ -57,15 +49,6 @@ defmodule OneCore.Builds do
   defp series(%Version{major: 0, minor: minor}), do: {0, minor}
   defp series(%Version{major: major}), do: major
   defp series(nil), do: nil
-
-  @doc "Whether the build `a` is a version before `b`'s: one that doesn't say its version is before any."
-  def older?(a, b) do
-    case {version(a), version(b)} do
-      {nil, _b} -> true
-      {_a, nil} -> false
-      {a, b} -> Version.compare(a, b) == :lt
-    end
-  end
 
   @doc "The kind of machine this is, as builds are named, the same as a client names it: `linux-x86_64`, `macos-aarch64`."
   def target do
@@ -90,7 +73,8 @@ defmodule OneCore.Builds do
       target: target(),
       device: Application.get_env(:one_core, :device),
       installed: Application.get_env(:one_core, :installed, false),
-      runtime: runtime()
+      runtime: runtime(),
+      protocol: Protocol.range()
     }
 
     Servers.say("servers/#{key}/build", JSON.encode!(Map.merge(info, OneCore.Release.status())))
@@ -206,9 +190,12 @@ defmodule OneCore.Builds do
     end
   end
 
-  @doc "Keeps which build the device whose key is `device`, `by`'s, says it is, when that's changed."
+  @doc """
+  Keeps which build the device whose key is `device`, `by`'s, says it is, and the protocol it speaks, when that's
+  changed.
+  """
   def seen(by, device, %{} = info) do
-    info = Map.take(info, ~w(build target name))
+    info = Map.take(info, ~w(build target name protocol))
     blob = "#{by}/devices/#{device}"
 
     case Bucket.read(blob) do
@@ -242,9 +229,10 @@ defmodule OneCore.Builds do
   @doc """
   Which build each of `owner`'s servers runs, with what its machine is called and what it is (`say/1`), as it says
   it and, where the network's edge says it now, whether it's ready (`OneCore.Servers.presence/1`), and which each
-  of `by`'s devices last said it is, and the latest for each kind of machine: what shows whether everything is on
-  the same build; and `apps`, whether what runs on the server that answers is what's installed, `synced`, or it's
-  `syncing` (`OneCore.Apps.sync/2`).
+  of `by`'s devices last said it is, with when it was last seen, and the latest for each kind of machine: what shows
+  whether everything is on the same build; the protocol each part speaks (`OneCore.Protocol.of/2`), which says which
+  talk; and `apps`, whether what runs on the server that answers is what's installed, `synced`, or it's `syncing`
+  (`OneCore.Apps.sync/2`).
   """
   def list(by, owner) do
     keys = Servers.acting(owner)
@@ -253,25 +241,34 @@ defmodule OneCore.Builds do
     [latest | read] = Bucket.read_all([@latest | Enum.map(keys, &"servers/#{&1}/build")] ++ devices)
     {server_reads, device_reads} = Enum.split(read, length(keys))
 
-    edge = Servers.edge()
+    edge = Servers.edge(Enum.map(devices, &Path.basename/1)) || %{}
 
     servers =
       for {key, read} <- Enum.zip(keys, server_reads) do
         info = with {:ok, info, _tag} <- read, do: JSON.decode!(info), else: (:absent -> %{})
         presence = Map.take(Servers.presence(key) || %{}, @presence)
+        info = Map.put(info, "protocol", Protocol.of(info["protocol"], info["build"]))
         server = Map.merge(info, Map.merge(presence, %{"server" => key, "name" => Servers.name(key)}))
         if why = why(server, edge), do: Map.put(server, "why", why), else: server
       end
 
     devices =
-      for {blob, {:ok, info, _tag}} <- Enum.zip(devices, device_reads),
-          do: Map.put(JSON.decode!(info), "device", Path.basename(blob))
+      for {blob, {:ok, info, _tag}} <- Enum.zip(devices, device_reads) do
+        info = JSON.decode!(info)
+        device = Path.basename(blob)
+        seen = Map.take(edge["presence"][device] || %{}, ~w(connected last_seen))
+
+        Map.merge(info, Map.put(seen, "device", device))
+        |> Map.put("protocol", Protocol.of(info["protocol"], info["build"]))
+      end
 
     %{
       server: Server.key(),
       build: build(),
+      protocol: Protocol.range(),
       network: network(servers),
-      edge: edge,
+      edge: edge["build"],
+      edge_protocol: edge["protocol"],
       latest: with({:ok, latest, _tag} <- latest, do: JSON.decode!(latest), else: (:absent -> %{})),
       servers: servers,
       devices: devices,
@@ -307,15 +304,15 @@ defmodule OneCore.Builds do
         do: %{name: name, state: state, why: why}
   end
 
-  # Why `server` doesn't talk with this one or the edge, for being two or more breaking releases from theirs, or
-  # `nil` where it does. The edge sends one that far behind its own nothing until it's updated.
-  defp why(%{"build" => theirs, "name" => name}, edge) do
+  # Why `server` doesn't talk with this one or the edge, for speaking none of the protocols theirs does, or `nil`
+  # where it does. The edge sends one behind its own nothing until it's updated.
+  defp why(%{"protocol" => theirs, "name" => name}, edge) do
     cond do
-      not talk?(theirs, build()) ->
-        "It's on #{theirs} and #{Servers.name(Server.key()) || "this server"} on #{build()}, more than one breaking release apart, so they don't talk until one is updated"
+      not Protocol.speaks?(theirs) ->
+        "It speaks protocol #{Protocol.name(theirs)} and #{Servers.name(Server.key()) || "this server"} #{Protocol.name(Protocol.range())}, so they don't talk until one is updated"
 
-      edge != nil and not talk?(theirs, edge) and older?(theirs, edge) ->
-        "It's on #{theirs}, more than one breaking release before the edge's #{edge}, so the edge sends #{name || "it"} nothing until it's updated"
+      edge["protocol"] != nil and not Protocol.overlap?(theirs, edge["protocol"]) ->
+        "It speaks protocol #{Protocol.name(theirs)} and the edge #{Protocol.name(edge["protocol"])}, so the edge sends #{name || "it"} nothing until one is updated"
 
       true ->
         nil
