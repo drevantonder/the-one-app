@@ -205,10 +205,10 @@ export const leave = () => greet().then(() => notify("ui/notifications/request-t
 /// from it does. `open("notes/client/index.html", { subject: "groups/family" })` names a page of the app's that isn't
 /// its first app, and who it's for if not whoever this one is: a group, or `network`. It's how a Home Screen page opens
 /// an app. With `behind: true` the app only starts, as a finger lands on its icon, and shows when it's opened
-/// without. `from` is where its icon is in this page, which the app grows out of as it shows and goes back into
-/// as it closes, as an iPhone's do. `open("https://...")`, a web address, opens it in the device's own browser, outside the app, as an
-/// outside service's sign-in page is opened.
-export const open = (app: string, { subject, behind, from }: Subject & { behind?: boolean; from?: { x: number; y: number; width: number; height: number } } = {}): Promise<unknown> =>
+/// without. `from` is where its icon or widget is in this page, with its corners' `radius`, which the app grows out
+/// of as it shows and goes back into as it closes, as an iPhone's do. `open("https://...")`, a web address, opens it
+/// in the device's own browser, outside the app, as an outside service's sign-in page is opened.
+export const open = (app: string, { subject, behind, from }: Subject & { behind?: boolean; from?: { x: number; y: number; width: number; height: number; radius?: number } } = {}): Promise<unknown> =>
   greet().then(() => ask("ui/open-link", /^https?:/.test(app) ? { url: app } : { url: `one:${app}`, subject, behind, from }))
 
 /// `const { device, network, build, server, push } = await client()`: this device's key, as Devices lists it, the
