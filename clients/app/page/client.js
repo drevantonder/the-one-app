@@ -778,7 +778,7 @@ function draw() {
     byId("problem-button").textContent = action ?? ""
   }
   // What's shown is reported once, as it's shown.
-  const said = behind ? "Update Required: This version of The One App no longer works with your network." : problem && `${problem[0]}: ${problem[1]}`
+  const said = behind ? "Update Required: This version of the One App no longer works with your network." : problem && `${problem[0]}: ${problem[1]}`
   if (said && said !== lastProblem) report("one.client.problem", said)
   lastProblem = said
   notes()

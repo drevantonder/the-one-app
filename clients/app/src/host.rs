@@ -266,7 +266,7 @@ fn window(opened: Opened, class: &str) -> anyhow::Result<ExitCode> {
                 crate::title_bar::double_clicked(window.gtk_window().upcast_ref())
             }
             Event::UserEvent(Told::Home) => {
-                // The Home Screen is The One App's, which comes in front only where this app lets it.
+                // The Home Screen is the One App's, which comes in front only where this app lets it.
                 #[cfg(target_os = "macos")]
                 crate::hosts::yield_activation(home_screen);
                 let _ = to.send(json!({"id": "front", "command": "front"}));
@@ -374,7 +374,7 @@ async fn connect(address: &str) -> anyhow::Result<impl AsyncRead + AsyncWrite + 
             return Ok(stream);
         }
     }
-    anyhow::bail!("The One App didn't start")
+    anyhow::bail!("the One App didn't start")
 }
 
 #[cfg(unix)]

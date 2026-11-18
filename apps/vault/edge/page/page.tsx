@@ -87,7 +87,7 @@ render(() => {
       </Show>
       <Show when={status() === "cancelled"}>
         <p class="said">
-          You didn't let {listed(ended()!.apps?.length ? ended()!.apps! : ["The One App"])} use your {ended()!.service} account.
+          You didn't let {listed(ended()!.apps?.length ? ended()!.apps! : ["the One App"])} use your {ended()!.service} account.
         </p>
       </Show>
       <Show when={ended() && after()}>

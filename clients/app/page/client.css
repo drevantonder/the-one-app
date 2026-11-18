@@ -177,7 +177,7 @@ iframe {
   align-items: center;
   translate: 0 -50%;
 }
-/* Its breadcrumb, as shadcn's: Home, light, with The One App's ring, highlighted under the pointer; a muted /; then the
+/* Its breadcrumb, as shadcn's: Home, light, with the One App's ring, highlighted under the pointer; a muted /; then the
    app, its icon and its name, in semibold, which isn't pressed. In a computer's own size. */
 #title-bar-nav ol {
   display: flex;
