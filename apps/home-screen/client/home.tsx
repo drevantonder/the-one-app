@@ -19,7 +19,7 @@ import { Button, call, changed, confirm, covers, Empty, haptic, Icon, List, Menu
 import "./home.css"
 import { give, glide, jump, settle, speed, spring, type Spring, stop } from "./pager.ts"
 import { offset, reflow } from "./reflow.ts"
-import { type At, type Drop, type Editing, fitted, type Held, type Kind, machine, pack, type Page, type Placed, shown, spans } from "./machine.ts"
+import { type At, carries, type Drop, type Editing, fitted, type Held, type Kind, machine, pack, type Page, type Placed, shown, spans } from "./machine.ts"
 import type { Entrypoint, Category, Item, Listed, Pages, Size, Widget as WidgetItem } from "./types.ts"
 
 const SIZES: Record<Size, string> = { "2x2": "Small", "4x2": "Medium", "4x4": "Large" }
@@ -188,6 +188,7 @@ function holds(held: () => Held | undefined, arranges: () => boolean, menu = arr
       if (!what?.item || !arranges()) return
       grab = { x: from.clientX, y: from.clientY }
       pointer = { x: at.clientX, y: at.clientY }
+      carrier = at.pointerId
       home.send({ type: "lift", held: { ...what, rect: rect() }, editing: state().matches("editing") ? undefined : pending() })
       // The Home Screen keeps the pointer from here on, whatever's drawn again under it.
       document.querySelector<HTMLElement>(".home")?.setPointerCapture(at.pointerId)
@@ -253,10 +254,12 @@ const pending = () => {
 
 /// Until when a tap isn't one: just after something carried was put down.
 let quiet = 0
-/// Where the pointer was last, and where it pressed what it lifted: what's carried stays where the finger took it.
+/// Where the pointer was last, and where it pressed what it lifted: what's carried stays where the finger took it,
+/// `carrier`, whichever other fingers there are.
 let pointer = { x: 0, y: 0 }
 let grab = { x: 0, y: 0 }
-addEventListener("pointermove", (event) => (pointer = { x: event.clientX, y: event.clientY }), { capture: true, passive: true })
+let carrier = -1
+addEventListener("pointermove", (event) => event.isPrimary && (pointer = { x: event.clientX, y: event.clientY }), { capture: true, passive: true })
 
 /// What an element is kept in, `where`, under `key`, for as long as it's drawn: it moves when its key changes.
 function registered<K extends string | number>(where: Record<K, HTMLElement>, key: () => K) {
@@ -278,7 +281,8 @@ function HomePage(props: { owner: Owner; index: number; page: number; placed: Pl
     return editingHere() && held?.page === props.page && held.index === cell.index
   }
   const lifted = (cell: Cell) => at(cell) && state().matches({ editing: "dragging" })
-  const waiting = (cell: Cell) => at(cell) && (state().matches({ editing: "asking" }) || state().matches({ editing: "installing" }) || state().matches({ editing: "refused" }))
+  // Dropped where it isn't installed, what was stacked on it waits with it.
+  const waiting = (cell: Cell) => editingHere() && carries(state().context.held, cell.item) && (state().matches({ editing: "asking" }) || state().matches({ editing: "installing" }) || state().matches({ editing: "refused" }))
   const arranges = () => props.owner.arranges && !props.small
   const removing = async (item: Item, index: number) => {
     if (await confirm(removal(item))) home.send({ type: "remove", page: props.page, index })
@@ -1076,31 +1080,45 @@ function Toolbar(props: { laid: Kind[][] }) {
 /// Who an owner is in a sentence: you, Everyone, or a group by its name.
 const named = (owner: Owner) => (owner.subject ? owner.name : "you")
 
-/// An app dropped on an owner it isn't installed for, who you may install for, waits where it was dropped while a
-/// sheet asks: Install, as the App Store installs, for them, its progress shown where it waits, and it stays; or
-/// Cancel, and it's back in the App Library. If it couldn't be installed it's back too, and a toast says why.
+/// What's carried and stacked on it, each as a person reads its name: an app from the App Library by its app's.
+const carriedApps = (held: Held) => [held.item, ...(held.stack ?? [])].flatMap((item) => (item && !item.widget ? [{ item: item as Entrypoint, title: item === held.item ? (held.listed?.title ?? item.name) : item.name }] : []))
+
+/// Apps dropped on an owner they aren't all installed for, who you may install for, wait where they were dropped while
+/// one sheet asks about the ones that aren't: Install, as the App Store installs, for them, one after another, their
+/// progress shown where they wait, and they stay; or Cancel, and they're back where they came from. If one couldn't be
+/// installed they're all back, and a toast says why.
 function Asking(props: { owner: Owner; held: Held }) {
-  const item = () => props.held.item as Entrypoint
-  const title = () => props.held.listed?.title ?? item().name
+  const missing = () => carriedApps(props.held).filter(({ item }) => !installedFor(item, props.owner))
+  const titles = () => and(missing().map(({ title }) => title))
   const install = async () => {
-    const [owner, app, name, called] = [props.owner, item().app, item().entrypoint.split("/")[0], untrack(title)]
+    const [owner, apps] = [props.owner, untrack(missing)]
     home.send({ type: "install" })
-    try {
-      // Named as it is where it was taken from, so the entrypoint it's placed as is its own for them too.
-      const done = JSON.parse(await call("install", { app, name }, { subject: owner.subject }))
-      if (done.also?.length) toast(done.also.join(" "))
-      home.send({ type: "installed" })
-    } catch (error) {
-      toast(`Couldn't install ${called} for ${named(owner)}. ${(error as Error).message ?? error}`)
-      home.send({ type: "failed" })
+    for (const { item, title } of apps) {
+      try {
+        // Named as it is where it was taken from, so the entrypoint it's placed as is its own for them too.
+        const done = JSON.parse(await call("install", { app: item.app, name: item.entrypoint.split("/")[0] }, { subject: owner.subject }))
+        if (done.also?.length) toast(done.also.join(" "))
+      } catch (error) {
+        toast(`Couldn't install ${title} for ${named(owner)}. ${(error as Error).message ?? error}`)
+        home.send({ type: "failed" })
+        return void refresh(owners)
+      }
     }
+    home.send({ type: "installed" })
     refresh(owners)
   }
-  const reach = () => (props.owner.subject === "network" ? "Everyone in the network will have it." : props.owner.subject ? `Everyone in ${props.owner.name} will have it.` : "It'll be yours.")
+  const reach = () => {
+    const it = missing().length > 1 ? "them" : "it"
+    return props.owner.subject === "network" ? `Everyone in the network will have ${it}.` : props.owner.subject ? `Everyone in ${props.owner.name} will have ${it}.` : `${missing().length > 1 ? "They'll" : "It'll"} be yours.`
+  }
   return (
-    <Sheet heading={`Install ${title()} for ${named(props.owner)}?`} open={state().matches({ editing: "asking" })} onClose={() => state().matches({ editing: "asking" }) && home.send({ type: "cancel" })}>
+    <Sheet heading={`Install ${titles()} for ${named(props.owner)}?`} open={state().matches({ editing: "asking" })} onClose={() => state().matches({ editing: "asking" }) && home.send({ type: "cancel" })}>
       <div class="asking">
-        <img src={item().icon} alt="" />
+        <div class="icons">
+          <For each={missing()} keyed={({ item }) => item.entrypoint}>
+            {(app) => <img src={app().item.icon} alt="" />}
+          </For>
+        </div>
         <p>{reach()}</p>
         <Button onClick={install}>Install</Button>
         <Button variant="secondary" onClick={() => home.send({ type: "cancel" })}>Cancel</Button>
@@ -1111,7 +1129,7 @@ function Asking(props: { owner: Owner; held: Held }) {
 
 /// An app dropped on an owner whose pages are someone else's to change: a sheet says so, and who can, and it goes back.
 function Refused(props: { owner: Owner; held: Held }) {
-  const title = () => props.held.listed?.title ?? props.held.item?.name
+  const title = () => and(carriedApps(props.held).map(({ title }) => title))
   const who = createMemo(async () => {
     const [{ users }, { people }] = await Promise.all([
       json<{ users: string[] }>("permissions_users", { artifact: props.owner.subject, relation: "owner" }),
@@ -1241,14 +1259,14 @@ function HomeScreen(props: { owners: Owner[] }) {
   /// Library's and the App Store's; and how far along its Home's last is.
   const pitch = () => root.clientWidth
   const stops = (owner: number) => untrack(screens)[owner]?.length || 1
-  const furthest = (owner: number) => (stops(owner) - 1) * pitch()
   const homeEnd = (owner: number) => Math.max(0, untrack(() => homes(owner).length) - 1) * pitch()
   /// The owners, up and down, and where each is across: one way along Home's screenfuls and on through the App Library
   /// and the App Store, which the owner shown takes the sections past Home along, as the pager moves them.
-  const down = spring((y) => {
+  const down: Spring = spring((y) => {
     main.style.translate = `0 ${-y}px`
     roll(y / height())
     look()
+    rested(down)
   })
   const across: Spring[] = []
   const sideways = (owner: number) =>
@@ -1256,7 +1274,12 @@ function HomeScreen(props: { owners: Owner[] }) {
       if (tracks[owner]) tracks[owner].style.translate = `${-Math.min(x, homeEnd(owner)) * rtl()}px 0`
       if (owner === shownOwner()) sections.style.translate = `${-Math.max(0, x - homeEnd(owner)) * rtl()}px 0`
       look()
+      rested(across[owner])
     }))
+  /// What's carried, while it's dragged, and what it does once the pages under it come to rest.
+  let carried: HTMLElement | undefined
+  let settledUnder: (() => void) | undefined
+  const rested = (one: Spring | undefined) => one && one.value === one.target && !one.velocity && settledUnder?.()
   /// The owner and screenful nearest where they are, which the bar and the pills follow.
   const look = () => {
     const owner = shownOwner()
@@ -1274,9 +1297,14 @@ function HomeScreen(props: { owners: Owner[] }) {
   /// page scrolls itself, as the App Library does, or they're being edited. Until it has moved 10 points it may be a
   /// tap or a hold; then it's a swipe, along the way it moved most, and the pages follow it from there. Across, on
   /// anything on them that scrolls sideways itself, it's that row's, unless it's at its end that way, as iOS's scroll
-  /// views hand a swipe on. A mouse has the wheel and the keys.
-  let swipe: { id: number; x: number; y: number; axis?: "x" | "y"; row?: HTMLElement; owner: number; from: number; base: number; moves: { time: number; value: number }[] } | undefined
+  /// views hand a swipe on. While something's carried, a second finger swipes as one does without it,
+  /// along Home's pages and between owners, and the first stays with what it carries; its tap on an app stacks it.
+  /// A mouse has the wheel and the keys.
+  let swipe: { id: number; x: number; y: number; axis?: "x" | "y"; on: Element; row?: HTMLElement; owner: number; from: number; base: number; moves: { time: number; value: number }[] } | undefined
   let swiped = 0
+  const carrying = () => state().matches({ editing: "dragging" })
+  /// Whether a second finger is swiping the pages under what the first carries.
+  const swiping = () => !!swipe?.axis && swipe.id !== carrier
   /// The nearest of what's under a finger that scrolls sideways itself and has more than it shows, short of the pages.
   const row = (on: Element) => {
     for (let at: Element | null = on; at && !at.matches(".page, .sections"); at = at.parentElement)
@@ -1287,17 +1315,21 @@ function HomeScreen(props: { owners: Owner[] }) {
     const along = Math.abs(row.scrollLeft)
     return -dx * rtl() > 0 ? along < row.scrollWidth - row.clientWidth - 1 : along > 1
   }
+  /// How many screenfuls a swipe across has: Home's, while something's carried, which stays on them.
+  const reach = (owner: number) => (carrying() ? untrack(() => homes(owner).length) || 1 : stops(owner))
   const press = (event: PointerEvent) => {
     const on = event.target as Element
     // The pills over Home are their own: the owner's list, and the dots, which a finger slides along.
     if (event.pointerType === "mouse" || event.button || !on.closest(".sections") || on.closest(".pill")) return
-    // A category shrinking back into its place lets the pages under it have the finger.
-    if (!state().matches("nothing") && !state().matches({ category: "closing" }) && !(state().matches({ editing: "still" }) && !on.closest(".cell"))) return
+    // A category shrinking back into its place lets the pages under it have the finger, and while something's carried,
+    // every finger but the one carrying it has them, one at a time.
+    const second = carrying() && event.pointerId !== carrier && !swipe
+    if (!second && !state().matches("nothing") && !state().matches({ category: "closing" }) && !(state().matches({ editing: "still" }) && !on.closest(".cell"))) return
     const owner = shownOwner()
     // A finger that lands while they move catches them.
     stop(down)
     stop(sideways(owner))
-    swipe = { id: event.pointerId, x: event.clientX, y: event.clientY, row: row(on), owner, from: 0, base: 0, moves: [] }
+    swipe = { id: event.pointerId, x: event.clientX, y: event.clientY, on, row: row(on), owner, from: 0, base: 0, moves: [] }
   }
   const drag = (event: PointerEvent) => {
     if (!swipe || event.pointerId !== swipe.id) return
@@ -1305,9 +1337,11 @@ function HomeScreen(props: { owners: Owner[] }) {
       const [dx, dy] = [event.clientX - swipe.x, event.clientY - swipe.y]
       if (Math.hypot(dx, dy) < 10) return
       const axis = Math.abs(dx) > Math.abs(dy) ? "x" : "y"
-      // A hold that began has the finger, and up and down is the page's own where it scrolls, and nobody's while editing.
-      const free = state().matches("nothing") || state().matches({ category: "closing" }) || state().matches({ editing: "still" })
-      if (!free || (axis === "y" && (state().matches("editing") || kindOf(swipe.owner) !== "home"))) return void (swipe = undefined)
+      // A hold that began has the finger, and up and down is the page's own where it scrolls, and nobody's while
+      // editing, but a second finger's while something's carried: an app, which goes to another owner, not a widget.
+      const free = state().matches("nothing") || state().matches({ category: "closing" }) || state().matches({ editing: "still" }) || (carrying() && swipe.id !== carrier)
+      const vertical = carrying() ? !state().context.held?.item?.widget : !state().matches("editing")
+      if (!free || (axis === "y" && (!vertical || kindOf(swipe.owner) !== "home"))) return void (swipe = undefined)
       if (axis === "x" && swipe.row && scrolls(swipe.row, dx)) return void (swipe = undefined)
       const moving = axis === "x" ? sideways(swipe.owner) : down
       const size = axis === "x" ? pitch() : height()
@@ -1316,7 +1350,7 @@ function HomeScreen(props: { owners: Owner[] }) {
     }
     const x = swipe.axis === "x"
     const moved = x ? -(event.clientX - swipe.x) * rtl() : -(event.clientY - swipe.y)
-    const end = x ? furthest(swipe.owner) : (owned().length - 1) * height()
+    const end = x ? (reach(swipe.owner) - 1) * pitch() : (owned().length - 1) * height()
     const size = x ? pitch() : height()
     const value = swipe.base + moved
     swipe.moves.push({ time: event.timeStamp, value })
@@ -1329,18 +1363,29 @@ function HomeScreen(props: { owners: Owner[] }) {
     if (event.type === "pointerup" && swipe.axis) drag(event)
     const done = swipe
     swipe = undefined
-    if (!done.axis) return
+    // A second finger's tap on an app stacks it on what's carried, and the pages it caught go on where they were going.
+    if (!done.axis) {
+      if (!carrying() || done.id === carrier) return
+      slide(home.getSnapshot().context.at, true)
+      if (event.type === "pointerup") stack(done.on)
+      return
+    }
     swiped = performance.now()
     const velocity = event.type === "pointercancel" ? 0 : speed(done.moves, event.timeStamp)
+    const { at } = home.getSnapshot().context
     if (done.axis === "x") {
       const moving = sideways(done.owner)
-      const screen = settle(done.from, moving.value / pitch(), velocity, stops(done.owner))
+      const screen = settle(done.from, moving.value / pitch(), velocity, reach(done.owner))
       glide(moving, screen * pitch(), velocity)
-      home.send({ type: "settled", at: { owner: done.owner, screen } })
+      // What's carried goes to the page swiped to, as it does held at the edge; there the finger places it.
+      if (carrying() && screen !== at.screen) home.send({ type: "flip", by: screen > at.screen ? 1 : -1 })
+      else home.send({ type: "settled", at: { owner: done.owner, screen } })
     } else {
       const owner = settle(done.from, down.value / height(), velocity, owned().length)
       glide(down, owner * height(), velocity)
-      home.send({ type: "settled", at: { owner, screen: Math.round(sideways(owner).value / pitch()) } })
+      const by = owner > at.owner ? 1 : -1
+      if (carrying() && owner !== at.owner) home.send({ type: "flip", owner: by, editing: draft(owned()[owner], owner) })
+      else home.send({ type: "settled", at: { owner, screen: Math.round(sideways(owner).value / pitch()) } })
     }
   }
   /// The pages have the finger, not the web view the Home Screen is in: an iPhone's scrolls it up and down, bouncing,
@@ -1348,6 +1393,37 @@ function HomeScreen(props: { owners: Owner[] }) {
   /// and so is across, on a row that scrolls sideways, until the finger has said which way it's going.
   const touchMove = (event: TouchEvent) => {
     if (swipe && !(swipe.axis !== "x" && (event.target as Element).closest?.(".page.scrolls")) && !(!swipe.axis && swipe.row)) event.preventDefault()
+  }
+  /// An app a second finger tapped flies from its place onto what's carried, as an iPhone's does, with a tick.
+  const joined = (cell: HTMLElement) => {
+    haptic("selection")
+    const [icon, to] = [cell.querySelector("img"), carried?.querySelector("img")]
+    if (!icon || !to || still.matches) return
+    const [from, end] = [icon.getBoundingClientRect(), to.getBoundingClientRect()]
+    const ghost = icon.cloneNode() as HTMLImageElement
+    Object.assign(ghost.style, { position: "fixed", zIndex: "29", left: `${from.x}px`, top: `${from.y}px`, width: `${from.width}px`, height: `${from.height}px`, borderRadius: "22.5%", pointerEvents: "none" })
+    root.append(ghost)
+    const moved = { translate: `${end.x + end.width / 2 - (from.x + from.width / 2)}px ${end.y + end.height / 2 - (from.y + from.height / 2)}px`, scale: `${end.width / from.width}` }
+    ghost.animate([{ translate: "0 0", scale: "1" }, moved], { ...paced("settle"), fill: "forwards" }).finished.finally(() => ghost.remove())
+  }
+  /// How many are carried, on what's carried, once there's more than one, as an iPhone's count badge says.
+  createEffect(
+    createMemo(() => state().context.held?.stack?.length ?? 0),
+    (stacked) => {
+      if (carried && stacked) carried.dataset.count = String(stacked + 1)
+      else delete carried?.dataset.count
+    },
+  )
+  /// What a second finger tapped, while something's carried: an app on the page shown joins it.
+  const stack = (on: Element) => {
+    const cell = on.closest<HTMLElement>(".cell[data-index]:not(.lifted)")
+    const page = cell?.closest<HTMLElement>("[data-page]")
+    if (!cell || !page) return
+    const before = home.getSnapshot().context.held?.stack?.length ?? 0
+    // The tap opens nothing, nor takes it off with its ⊖.
+    swiped = performance.now()
+    home.send({ type: "stack", page: Number(page.dataset.page), index: Number(cell.dataset.index) })
+    if ((home.getSnapshot().context.held?.stack?.length ?? 0) > before) joined(cell)
   }
   /// A finger that swiped taps nothing as it lifts.
   const tapped = (event: MouseEvent) => {
@@ -1380,13 +1456,18 @@ function HomeScreen(props: { owners: Owner[] }) {
       root.append(copy)
       if (!still.matches) copy.animate([{ scale: `${scale}`, filter: "drop-shadow(0 0 0 oklch(0 0 0 / 0))" }, {}], paced("settle"))
       haptic("medium")
+      const id = carrier
+      carried = copy
       const moves: { time: number; x: number; y: number }[] = []
       let edge: ReturnType<typeof setTimeout> | undefined
       let side: "" | "left" | "right" | "up" | "down" = ""
-      // A page, or an owner, turns after a moment at its edge, and again while it stays there, as an iPhone's does.
+      // A page, or an owner, turns after a moment at its edge, and again while it stays there, as an iPhone's does,
+      // unless a second finger is turning them.
       const turn = () => {
         const { at } = home.getSnapshot().context
-        if (side === "left" || side === "right") home.send({ type: "flip", by: side === "left" ? -1 : 1 })
+        if (swiping()) {
+          // It waits for the second finger.
+        } else if (side === "left" || side === "right") home.send({ type: "flip", by: side === "left" ? -1 : 1 })
         else {
           const [by, all] = [side === "up" ? -1 : 1, untrack(owners)!] as const
           if (all[at.owner + by]) home.send({ type: "flip", owner: by, editing: draft(all[at.owner + by], at.owner + by) })
@@ -1396,6 +1477,7 @@ function HomeScreen(props: { owners: Owner[] }) {
         edge = setTimeout(turn, 900)
       }
       const move = (event: PointerEvent) => {
+        if (event.pointerId !== id) return
         follow(event.clientX, event.clientY)
         moves.push({ time: event.timeStamp, x: event.clientX, y: event.clientY })
         if (moves.length > 32) moves.shift()
@@ -1408,14 +1490,18 @@ function HomeScreen(props: { owners: Owner[] }) {
           side = now
           if (side) edge = setTimeout(turn, 600)
         }
-        if (side) return
-        const under = document.elementsFromPoint(event.clientX, event.clientY) as HTMLElement[]
+        if (!side) over(x, y)
+      }
+      // Over the place under the finger, while nothing's turning the pages under it: a second finger swiping them.
+      const over = (x: number, y: number) => {
+        if (swiping()) return
+        const under = document.elementsFromPoint(x, y) as HTMLElement[]
         const page = under.find((element) => element.dataset?.page !== undefined)
         if (!page) return
         // Over where each cell sits, not where it's drawn while it glides there, or one gliding past takes the place.
         const cell = [...page.querySelectorAll<HTMLElement>(".cell[data-index]:not(.lifted)")].find((one) => {
           const [box, by] = [one.getBoundingClientRect(), offset(one, scale)]
-          return event.clientX >= box.left - by.x && event.clientX < box.right - by.x && event.clientY >= box.top - by.y && event.clientY < box.bottom - by.y
+          return x >= box.left - by.x && x < box.right - by.x && y >= box.top - by.y && y < box.bottom - by.y
         })
         const { held } = home.getSnapshot().context
         const index = cell ? Number(cell.dataset.index) : Number.MAX_SAFE_INTEGER
@@ -1426,12 +1512,16 @@ function HomeScreen(props: { owners: Owner[] }) {
       let left = held
       // How fast the finger was going as it let go, which the copy goes on at.
       let thrown = { x: 0, y: 0 }
+      // Once the pages a second finger turned come to rest, what's carried goes where the first is.
+      settledUnder = () => !side && over(pointer.x, pointer.y)
       const drop = (event: PointerEvent) => {
+        if (event.pointerId !== id) return
         left = home.getSnapshot().context.held ?? left
         if (event.type === "pointerup") thrown = { x: speed(moves.map(({ time, x }) => ({ time, value: x })), event.timeStamp), y: speed(moves.map(({ time, y }) => ({ time, value: y })), event.timeStamp) }
         const { held, at } = home.getSnapshot().context
-        const [owner, item] = [untrack(owners)![at.owner], held?.item]
-        const to: Drop = !owner.arranges ? "refuse" : !item || item.widget || installedFor(item as Entrypoint, owner) ? "place" : "ask"
+        const owner = untrack(owners)![at.owner]
+        const items = held?.item ? [held.item, ...(held.stack ?? [])] : []
+        const to: Drop = !owner.arranges ? "refuse" : items.every((item) => item.widget || installedFor(item as Entrypoint, owner)) ? "place" : "ask"
         home.send({ type: "drop", to })
       }
       addEventListener("pointermove", move)
@@ -1439,6 +1529,13 @@ function HomeScreen(props: { owners: Owner[] }) {
       addEventListener("pointercancel", drop)
       return () => {
         clearTimeout(edge)
+        carried = undefined
+        settledUnder = undefined
+        // A second finger still swiping lets go of the pages: they go back to where what was carried was put down.
+        if (swipe && swipe.id !== id) {
+          swipe = undefined
+          slide(home.getSnapshot().context.at, true)
+        }
         removeEventListener("pointermove", move)
         removeEventListener("pointerup", drop)
         removeEventListener("pointercancel", drop)

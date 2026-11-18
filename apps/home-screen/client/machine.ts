@@ -7,7 +7,9 @@
 //     step(owner): on Home only.   list ─pick─► another owner: on Home only
 //   open ─► category (App Library), as now
 //   holding (an app in the App Library) ─lift─► editing.dragging, with Home brought forward on the last owner
-//   editing.dragging: over · flip(page ±1) · flip(owner ±1) · drop ─► still | asking | refused
+//   editing.dragging: over · flip(page ±1) · flip(owner ±1) · stack · drop ─► still | asking | refused
+//     flip: held at an edge, or a second finger's swipe, which pages as a swipe does while the first holds what's
+//     carried. stack: a second finger's tap on another app, which joins what's carried, and lands after it as it ends
 //   asking ─install─► installing ─installed─► still (placed) · ─failed─► still (back, saying why) · ─cancel─► still (back)
 //   refused ─dismiss─► still (back)
 //   asking · refused ─link─► still (back), then the link · installing: a link waits, unfollowed, for the install
@@ -107,9 +109,11 @@ export interface At {
 }
 
 /** What a finger holds: an item of a Home page, by the page shown and where it is on it, or empty space there, or an
- * app of the App Library (`listed`), which may be on its way to a page as an `item`. `rect` is where it was. */
+ * app of the App Library (`listed`), which may be on its way to a page as an `item`. `rect` is where it was. Carried,
+ * the apps a second finger tapped are `stack`, in order, off their pages until it's put down, and after it then. */
 export interface Held {
   item?: Item
+  stack?: Item[]
   listed?: Listed
   page: number
   index: number
@@ -175,6 +179,8 @@ export type Event =
    * `editing` as they're kept. */
   | { type: "flip"; by: 1 | -1 }
   | { type: "flip"; owner: 1 | -1; editing: Editing }
+  /** Another finger tapped an app on the page shown, at `index`: it joins what's carried, as an iPhone stacks them. */
+  | { type: "stack"; page: number; index: number }
   /** It was let go, and where it landed says what follows. */
   | { type: "drop"; to: Drop }
   /** The question an app dropped where it isn't installed asks: Install, and how that went, or Cancel. */
@@ -226,6 +232,15 @@ function put(editing: Editing, held: Held, page: number, index: number): { editi
   return { editing: { ...editing, pages: fit }, held: { ...held, page: shown(fit).indexOf(now), index: fit[now].items.findIndex((other) => same(other, item)), from: "page" } }
 }
 
+/// Whether `item` is what's `held`, or stacked on it.
+export const carries = (held: Held | undefined, item: Item) => !!held?.item && [held.item, ...(held.stack ?? [])].some((one) => same(one, item))
+
+/// Where `item` is now in the pages being edited: the page shown it's on, and its place there.
+function find(editing: Editing, item: Item) {
+  const at = editing.pages.findIndex((page) => !page.hidden && page.items.some((other) => same(other, item)))
+  return { page: shown(editing.pages).indexOf(at), index: at < 0 ? -1 : editing.pages[at].items.findIndex((other) => same(other, item)) }
+}
+
 /// Every owner's pages being edited: the one shown, and the rest.
 const everyone = ({ editing, drafts }: Context) => (editing ? [editing, ...drafts] : drafts)
 
@@ -245,6 +260,12 @@ export const machine = setup({
     another: ({ context, event }) => {
       const { owner } = event as Extract<Event, { type: "flip"; owner: 1 | -1 }>
       return !context.held?.item?.widget && within(context.at.owner + owner, context.screens.length) !== context.at.owner
+    },
+    // Apps stack, not widgets, as on an iPhone: what's carried is an app, and so is what was tapped.
+    stacks: ({ context: { editing, held }, event }) => {
+      const { page, index } = event as Extract<Event, { type: "stack" }>
+      const item = editing?.pages[shown(editing.pages)[page]]?.items[index]
+      return !!item && !item.widget && !!held?.item && !held.item.widget && !same(item, held.item)
     },
     ask: ({ event }) => (event as Extract<Event, { type: "drop" }>).to === "ask",
     refuse: ({ event }) => (event as Extract<Event, { type: "drop" }>).to === "refuse",
@@ -322,6 +343,26 @@ export const machine = setup({
       const moved = put(theirs, held!, within(last[owner] ?? 0, homes(screens[owner] ?? [])) * fit, Infinity)
       const screen = Math.floor(moved.held.page / fit)
       return { ...moved, drafts, before, at: { owner, screen }, last: last.with(owner, screen) }
+    }),
+    // Off its page, onto what's carried, last.
+    stack: assign(({ context, event }) => {
+      const { page, index } = event as Extract<Event, { type: "stack" }>
+      const editing = context.editing!
+      const at = shown(editing.pages)[page]
+      const item = editing.pages[at].items[index]
+      const left = { ...editing, pages: editing.pages.map((one, where) => (where === at ? { ...one, items: one.items.toSpliced(index, 1) } : one)) }
+      const held = context.held!
+      return { editing: left, held: { ...held, ...find(left, held.item!), stack: [...(held.stack ?? []), item] } }
+    }),
+    // What's carried is put down: what was stacked on it goes in after it, in the order it was tapped.
+    land: assign(({ context }) => {
+      const { editing, held } = context
+      if (!editing || !held?.item || !held.stack?.length) return {}
+      const { page, index } = find(editing, held.item)
+      const at = shown(editing.pages)[page]
+      const pages = editing.pages.map((one, where) => (where === at ? { ...one, items: one.items.toSpliced(index + 1, 0, ...held.stack!) } : one))
+      const landed = { ...editing, pages: fitted(pages) }
+      return { editing: landed, held: { ...held, ...find(landed, held.item) } }
     }),
     // Every owner's pages as they were when it was lifted: it's back where it came from, and off the pages it was put
     // on, in the App Library, where it came from there.
@@ -433,9 +474,12 @@ export const machine = setup({
           },
         },
         // What's lifted follows the finger, and the rest make room where it's over. Held at a side it turns the page,
-        // and at the top or the bottom, the owner.
+        // and at the top or the bottom, the owner; a second finger swipes them as one does without it. A second
+        // finger's tap on another app stacks it on what's carried, and however the drag ends, the stack lands.
         dragging: {
+          exit: "land",
           on: {
+            stack: { guard: "stacks", actions: "stack" },
             over: { actions: "over" },
             flip: [
               { guard: ({ event }) => "by" in event, actions: ["flip", "glide"] },

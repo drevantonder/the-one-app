@@ -850,6 +850,24 @@ body {
 .carried .ui-widget {
   height: 100%;
 }
+/* Apps stacked on what's carried, as an iPhone stacks them: their count in a red badge at its corner. */
+.carried[data-count]::after {
+  content: attr(data-count);
+  position: absolute;
+  top: -0.375rem;
+  right: max(-0.375rem, (100% - var(--tile, 3.75rem)) / 2 - 0.5rem);
+  display: grid;
+  place-items: center;
+  min-width: 1.375rem;
+  height: 1.375rem;
+  padding: 0 0.375rem;
+  box-sizing: border-box;
+  border-radius: 999px;
+  background: var(--destructive);
+  color: white;
+  font: 600 0.8125rem/1 var(--font-sans);
+  font-variant-numeric: tabular-nums;
+}
 /* + and Done, floating at the top over the pages, in the owner pill's row, + on the left and Done on the right, as
    on a phone. They fade in as editing begins, and go at once. On a wide window they're over the corners of the pages
    shown. */
@@ -1176,6 +1194,12 @@ body {
   justify-items: center;
   gap: 0.75rem;
   text-align: center;
+}
+.asking .icons {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 0.75rem;
 }
 .asking img {
   width: 4rem;
