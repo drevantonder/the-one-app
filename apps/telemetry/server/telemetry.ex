@@ -15,7 +15,7 @@ defmodule Telemetry do
   thing it keeps in its database.
   """
   @behaviour OneCore.App
-  alias Telemetry.{Alerts, Otlp, Read, Record, Store}
+  alias Telemetry.{Alerts, Forward, Otlp, Read, Record, Store}
   alias OneCore.Call
 
   @impl true
@@ -136,6 +136,7 @@ defmodule Telemetry do
               }
             },
             names: %{type: "object", additionalProperties: %{type: "string"}, description: "What a person calls each app"},
+            forwarding: %{type: ["string", "null"], description: "Where a copy of what's kept is sent, if anywhere (`forward`)"},
             retention: %{
               type: "object",
               properties: %{
@@ -147,7 +148,7 @@ defmodule Telemetry do
               required: ["since", "bytes", "days", "most_bytes"]
             }
           },
-          required: ["from", "to", "failing", "slowest", "spending", "calls", "names", "retention"]
+          required: ["from", "to", "failing", "slowest", "spending", "calls", "names", "retention", "forwarding"]
         }
       },
       %{
@@ -387,6 +388,32 @@ defmodule Telemetry do
         }
       },
       %{
+        name: "forward",
+        description:
+          "Sends a copy of everything kept from now on to an OpenTelemetry endpoint, as OTLP over HTTP (Grafana Cloud, Honeycomb, a collector), or stops with no endpoint. The headers it wants, its key among them, are filled in from a Vault item of yours that's switched on for Telemetry, as Vault's fetch fills them. Only the network's owners may",
+        inputs: %{
+          type: "object",
+          properties: %{
+            endpoint: %{
+              type: ["string", "null"],
+              description: "Its OTLP/HTTP address, to which /v1/traces, /v1/metrics and /v1/logs are added. null stops sending"
+            },
+            item: %{type: "string", description: "The Vault item its headers are filled in from"},
+            headers: %{
+              type: "object",
+              additionalProperties: %{type: "string"},
+              description: "The headers it wants, with {{<field>}} where an item's field goes: {\"x-honeycomb-team\": \"{{key}}\"}"
+            }
+          },
+          required: ["endpoint"]
+        },
+        outputs: %{
+          type: "object",
+          properties: %{endpoint: %{type: ["string", "null"]}, item: %{type: ["string", "null"]}},
+          required: ["endpoint", "item"]
+        }
+      },
+      %{
         name: "prune",
         description:
           "Puts each hour that's over into one blob, and lets go of what's older than #{Store.days()} days or past #{div(Store.most_bytes(), 1024 * 1024)} MB. The clock calls it every hour",
@@ -438,7 +465,8 @@ defmodule Telemetry do
       spending: Read.spending(batches),
       calls: Read.calls(batches, from, to),
       names: names(call),
-      retention: Store.retention(call.own)
+      retention: Store.retention(call.own),
+      forwarding: (Forward.where(call) || %{})[:endpoint]
     }
   end
 
@@ -482,6 +510,11 @@ defmodule Telemetry do
   end
 
   def call("prune", _inputs, call), do: Store.prune(call.own)
+
+  def call("forward", %{"endpoint" => endpoint} = inputs, call) do
+    if endpoint && !inputs["item"], do: raise("Name the Vault item its headers are filled in from, as item.")
+    Forward.set(call, endpoint, inputs["item"], inputs["headers"])
+  end
   def call("alerts", _inputs, call), do: Alerts.list(call)
   def call("mute", %{"kind" => kind, "muted" => muted}, call), do: Alerts.mute(call, kind, muted)
   def call("evaluate", _inputs, call), do: Alerts.evaluate(call)

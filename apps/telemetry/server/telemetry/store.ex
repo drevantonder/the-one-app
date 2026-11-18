@@ -64,6 +64,13 @@ defmodule Telemetry.Store do
     {names, decode(own, names)}
   end
 
+  @doc "The exports kept as `names`, each by its name, as they're kept: OTLP's protobuf."
+  def raw(own, names), do: for({name, {:ok, data, _tag}} <- Enum.zip(names, Artifact.read_all(own, names)), do: {name, data})
+
+  @doc "The signal an export kept as `name` is of, `traces`, `metrics` or `logs`, or `nil` for one kept before OTLP."
+  def signal("otlp/" <> _ = name), do: String.trim_leading(Path.extname(name), ".")
+  def signal(_name), do: nil
+
   @doc "How much is kept: since when, in milliseconds since 1970, how many bytes, for how many days, and the most."
   def retention(own) do
     names = list(own)
@@ -142,7 +149,7 @@ defmodule Telemetry.Store do
 
   defp batch("batches/" <> _, "{" <> _ = edge), do: Map.put(JSON.decode!(edge), "metrics", [])
   defp batch("batches/" <> _, _term), do: nil
-  defp batch(name, data), do: Otlp.decode(String.trim_leading(Path.extname(name), "."), data)
+  defp batch(name, data), do: Otlp.decode(signal(name), data)
 
   defp folder(name), do: name |> Path.dirname() |> String.replace_prefix("batches/", "otlp/")
   defp hour?(name), do: String.starts_with?(Path.basename(name), "hour-")

@@ -67,7 +67,9 @@ defmodule Telemetry.Alerts do
       text text, resolved text, began integer not null, last integer not null, ended integer
     )
     """,
-    "create table muted (kind text primary key) without rowid"
+    "create table muted (kind text primary key) without rowid",
+    # Where a copy of what's kept is sent (`Telemetry.Forward`).
+    "create table forward (id integer primary key check (id = 1), endpoint text not null, who text not null, item text not null, headers text not null)"
   ]
 
   @kinds %{
@@ -125,7 +127,8 @@ defmodule Telemetry.Alerts do
 
   @doc """
   Reads what was recorded since it last looked, moves each alert on (the moduledoc's state machine), and tells the
-  network's first owner what fired and what cleared. Gives how many it told.
+  network's first owner what fired and what cleared. Sends a copy of what it read where its owner said
+  (`Telemetry.Forward`). Gives how many it told.
   """
   def evaluate(call) do
     now = System.os_time(:millisecond)
@@ -151,7 +154,7 @@ defmodule Telemetry.Alerts do
 
     signals = signals(batches)
 
-    outbox =
+    {outbox, fresh} =
       transaction(call, fn db ->
         # Another evaluation read them already, as one that ran long overlapping the next does.
         if looked == (query(db, "select at from looked", []) != []) and not read?(db, names) do
@@ -160,12 +163,14 @@ defmodule Telemetry.Alerts do
           query(db, "delete from batches where at < ?", [now - 2 * @gap])
           query(db, "insert or replace into looked (id, at) values (1, ?)", [now])
           step(db, now, conditions(db, now, asked), unknown(asked))
-          outbox(db)
+          {outbox(db), names}
         else
-          []
+          {[], []}
         end
       end)
 
+    # What's newly kept is sent where its owner said, if they did.
+    Telemetry.Forward.send(call, fresh)
     tell(call, outbox)
   end
 
@@ -505,12 +510,14 @@ defmodule Telemetry.Alerts do
 
   ## The database
 
-  defp transaction(call, fun) do
+  @doc "Runs `fun` in a transaction on Telemetry's database, whose tables are this module's `@schema`."
+  def transaction(call, fun) do
     database = Call.app(call, "database")
     database.transaction(call, @schema, &fun.({database, &1}))
   end
 
-  defp query({database, db}, sql, values), do: database.query(db, sql, values)
+  @doc "Runs one statement in a `transaction/2`."
+  def query({database, db}, sql, values), do: database.query(db, sql, values)
 
   defp ms(ns), do: div(ns, 1_000_000)
   defp minute(ns), do: div(ms(ns), @minute) * @minute

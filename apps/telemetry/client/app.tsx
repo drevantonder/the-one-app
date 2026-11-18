@@ -51,6 +51,7 @@ interface Overview {
   spending: Spent[]
   names: Record<string, string>
   retention: { days: number; bytes: number; most_bytes: number }
+  forwarding: string | null
 }
 
 /** A span of a trace, as `telemetry_trace` answers it. */
@@ -368,6 +369,7 @@ function Telemetry(props: { all: Overview }) {
         </Section>
         <p class="hint">
           Kept for {all().retention.days} days, up to {size(all().retention.most_bytes)}. {size(all().retention.bytes)} now.
+          <Show when={all().forwarding}>{(to) => ` A copy goes to ${new URL(to()).host}.`}</Show>
         </p>
       </Screen>
     </Split>

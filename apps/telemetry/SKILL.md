@@ -54,6 +54,9 @@ client sent a `traceparent`.
   an app not answering. `alerts` lists them, the open ones and those resolved in the last day, and each kind with
   what fires it; `mute` stops a kind being told, or has it told again, as the switches on Telemetry's screen do. A
   problem is one notification however long it lasts, and it's told again once it's resolved, but for a new error.
+- `forward` sends a copy of everything kept from then on to an OpenTelemetry endpoint the network's owner names
+  (Grafana Cloud, Honeycomb, a collector of their own), as OTLP over HTTP, with the headers it wants filled in from
+  a Vault item of theirs switched on for Telemetry; with no endpoint it stops. It's off until then.
 - Whose a call was is shown to the network's owners, and to whoever it was: to anyone else, how the network is
   doing is open, and who did what isn't.
 
