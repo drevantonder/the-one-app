@@ -1,0 +1,39 @@
+{
+  "project_info": {
+    "project_number": "320666900367",
+    "project_id": "thevantonders-one",
+    "storage_bucket": "thevantonders-one.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:320666900367:android:c369f1eff79e72c3499dfa",
+        "android_client_info": {
+          "package_name": "app.theone.client"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "320666900367-1rsmk3n3chr7ks5hau0h4jg8ji3vj06n.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyAOP9M4u9oiHJ5GHe5aLIStUE2e1-K-6sE"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "320666900367-1rsmk3n3chr7ks5hau0h4jg8ji3vj06n.apps.googleusercontent.com",
+              "client_type": 3
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}
