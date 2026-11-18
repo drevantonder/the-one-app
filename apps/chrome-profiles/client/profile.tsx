@@ -2,6 +2,7 @@
 // in it and the pages it visited last, as it was last saved, and updating it yourself: its browser, drawn here, which
 // you click and type on as you would Chrome, then save. `Summary` is its row's line in the Vault's list.
 import { createMemo, createSignal, For, Loading, refresh, Show } from "solid-js"
+import "./profile.css"
 import { Button, call, changed, confirm, Empty, Field, Input, List, LiveScreen, Menu, Problem, Row, Screen, Section, Sheet, Status, Steps, toast } from "ui"
 
 /** A profile, as `chrome-profiles_list` answers it. */
@@ -37,7 +38,6 @@ function since(at: number) {
 const time = new Intl.DateTimeFormat(undefined, { timeStyle: "short" })
 /// A page's site, as its address bar shows it: "github.com".
 const site = (url: string) => URL.parse(url)?.hostname.replace(/^www\./, "") ?? url
-const muted = { color: "var(--muted-foreground)" }
 
 /// The profile, as `chrome-profiles_list` answers it now, asked again whenever something changed.
 function useProfile(props: Props) {
@@ -118,9 +118,9 @@ function Updating(props: { profile: Profile; subject?: string }) {
         />
       </Show>
       <Show when={u().state !== "failed" && !(u().state === "ready" && u().why)}>
-        <p style={muted}>Use it as you would Chrome: sign in to any sites you like. It's saved by itself at {time.format(u().until)}.</p>
+        <p class="chrome-profile-note">Use it as you would Chrome: sign in to any sites you like. It's saved by itself at {time.format(u().until)}.</p>
       </Show>
-      <div style={{ display: "flex", gap: "0.5rem" }}>
+      <div class="chrome-profile-actions">
         <Show when={u().state !== "failed" && !u().why}>
           <Button loading={busy() === "save" || u().state === "saving"} disabled={u().state !== "ready" || !!busy()} onClick={() => finish("save")}>
             Save
@@ -205,7 +205,7 @@ export default function ChromeProfile(props: Props) {
               <Show when={p().extensions.length} fallback={<Empty>No extensions.</Empty>}>
                 <List>
                   <For each={p().extensions} keyed={(e) => e.id}>
-                    {(e) => <Row start={<img src={e().icon ?? ""} alt="" style={{ display: "block", width: "1.5rem", height: "1.5rem" }} />} heading={e().name} />}
+                    {(e) => <Row start={<img src={e().icon ?? ""} alt="" class="chrome-profile-extension" />} heading={e().name} />}
                   </For>
                 </List>
               </Show>
