@@ -1217,16 +1217,20 @@ impl Here {
         self.folder.join("builds").join(build)
     }
 
-    /// Where the server is started from: its build's folder, but on Windows `current`, a junction to it. Windows
-    /// Firewall keeps what its person allowed by the path a program was started by, and the VM that holds the
-    /// server's socket is in its build's own folder, so each update would ask them again.
+    /// Where the server is started from: its build's folder, but on Windows `current`, the build's files hard linked
+    /// there as it starts (`linked`), in place of the ones before. Windows Firewall keeps what its person allowed by
+    /// the path a program was started by, and the VM that holds the server's socket is in its build's own folder, so
+    /// each update would ask them again. Not a junction: Windows doesn't follow one a person made for a process that
+    /// guards against them (Redirection Guard), as an ssh session's do.
     fn started(&self, build: &str) -> Result<PathBuf> {
         #[cfg(windows)]
         {
             let current = self.folder.join("current");
-            // Removing a junction removes only it, never what it points to.
-            let _ = fs::remove_dir(&current);
-            junction::create(self.build(build), &current)?;
+            match fs::remove_dir_all(&current) {
+                Err(error) if error.kind() != std::io::ErrorKind::NotFound => Err(error)?,
+                _ => {}
+            }
+            linked(&self.build(build), &current)?;
             Ok(current)
         }
         #[cfg(not(windows))]

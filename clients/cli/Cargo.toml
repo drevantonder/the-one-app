@@ -29,9 +29,8 @@ git_repos_client = { path = "../../apps/git-repos/client/native" }
 libc = "0.2"
 
 # How Windows keeps a server running (`serving`): the job object it's held in, its log, and the pipe it says it's
-# running on, and the junction it's started by.
+# running on.
 [target.'cfg(windows)'.dependencies]
-junction = "2"
 tokio = { workspace = true, features = ["net"] }
 windows-sys = { version = "0.61", features = ["Win32_Foundation", "Win32_Security", "Win32_System_Console", "Win32_System_JobObjects"] }
 
