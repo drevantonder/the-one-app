@@ -11,7 +11,7 @@ use std::collections::HashMap;
 use anyhow::Result;
 use core_foundation::array::CFArray;
 use core_foundation::attributed_string::CFMutableAttributedString;
-use core_foundation::base::{CFRange, TCFType};
+use core_foundation::base::{CFRange, CFType, TCFType};
 use core_foundation::dictionary::CFDictionary;
 use core_foundation::number::CFNumber;
 use core_foundation::string::{CFString, CFStringRef};
@@ -37,6 +37,9 @@ unsafe extern "C" {
     static kCTFontOpenTypeFeatureTag: CFStringRef;
     static kCTFontOpenTypeFeatureValue: CFStringRef;
     fn CTRunGetStatus(run: core_text::run::CTRunRef) -> u32;
+    fn CTTypesetterCreateWithAttributedString(string: core_foundation::attributed_string::CFAttributedStringRef) -> core_foundation::base::CFTypeRef;
+    fn CTTypesetterSuggestLineBreak(typesetter: core_foundation::base::CFTypeRef, start: isize, width: f64) -> isize;
+    fn CTTypesetterCreateLine(typesetter: core_foundation::base::CFTypeRef, range: CFRange) -> core_text::line::CTLineRef;
 }
 
 /// A run's status says it runs right to left (`kCTRunStatusRightToLeft`).
@@ -106,9 +109,43 @@ impl CoreTextSystem {
     }
 
     pub fn layout_line(&mut self, text: &str, style: &TextStyle) -> LineLayout {
+        let string = self.attributed(text, style);
+        let line = CTLine::new_with_attributed_string(string.as_concrete_TypeRef());
+        self.shape(&line, text, style, text.len())
+    }
+
+    /// `text` broken into lines no wider than `width` by Core Text's typesetter, each line's glyphs placed from its
+    /// own left edge, left to right, as Unicode's bidi algorithm reorders a line once it's broken (UAX #9, L1 and
+    /// L2); with no width, one line however long. Each line's `len` is where it ends in `text`.
+    pub fn layout_lines(&mut self, text: &str, style: &TextStyle, width: Option<f32>) -> Vec<LineLayout> {
+        let string = self.attributed(text, style);
+        let Some(width) = width else {
+            let line = CTLine::new_with_attributed_string(string.as_concrete_TypeRef());
+            return vec![self.shape(&line, text, style, text.len())];
+        };
+        let typesetter = unsafe { CFType::wrap_under_create_rule(CTTypesetterCreateWithAttributedString(string.as_concrete_TypeRef())) };
+        let units = string.char_len();
+        let mut lines = Vec::new();
+        let mut start = 0;
+        while start < units {
+            let count = unsafe { CTTypesetterSuggestLineBreak(typesetter.as_CFTypeRef(), start, f64::from(width)) }.max(1);
+            let line = unsafe { CTLine::wrap_under_create_rule(CTTypesetterCreateLine(typesetter.as_CFTypeRef(), CFRange::init(start, count))) };
+            start += count;
+            let mut end = StringIndexConverter::new(text);
+            end.advance_to_utf16_ix(start as usize);
+            lines.push(self.shape(&line, text, style, end.utf8_ix));
+        }
+        if lines.is_empty() {
+            let line = CTLine::new_with_attributed_string(string.as_concrete_TypeRef());
+            lines.push(self.shape(&line, text, style, text.len()));
+        }
+        lines
+    }
+
+    /// `text` in `style`'s face at its size, tracked: Core Text's attributed string.
+    fn attributed(&mut self, text: &str, style: &TextStyle) -> CFMutableAttributedString {
         let font = self.styled(style).clone_with_font_size(style.size.into());
         let tracking = style.tracking * style.size;
-        // Construct the attributed string, converting UTF8 ranges to UTF16 ranges.
         let mut string = CFMutableAttributedString::new();
         string.replace_str(&CFString::new(text), CFRange::init(0, 0));
         let range = CFRange::init(0, string.char_len());
@@ -118,8 +155,14 @@ impl CoreTextSystem {
                 string.set_attribute(range, kCTKernAttributeName, &CFNumber::from(f64::from(tracking)));
             }
         }
+        string
+    }
+
+    /// A line Core Text set from `text`, its glyphs from its own left edge, ending at `len` in `text`.
+    fn shape(&mut self, line: &CTLine, text: &str, style: &TextStyle, len: usize) -> LineLayout {
+        let font = self.styled(style).clone_with_font_size(style.size.into());
+        let tracking = style.tracking * style.size;
         // Retrieve the glyphs from the shaped line, converting UTF16 offsets to UTF8 offsets.
-        let line = CTLine::new_with_attributed_string(string.as_concrete_TypeRef());
         let glyph_runs = line.glyph_runs();
         let mut runs = <Vec<ShapedRun>>::with_capacity(glyph_runs.len() as usize);
         let mut ix_converter = StringIndexConverter::new(text);
@@ -168,7 +211,7 @@ impl CoreTextSystem {
         starts.sort_unstable();
         starts.dedup();
         for glyph in runs.iter_mut().flat_map(|run| run.glyphs.iter_mut()) {
-            glyph.end = starts.iter().copied().find(|start| *start > glyph.index).unwrap_or(text.len());
+            glyph.end = starts.iter().copied().find(|start| *start > glyph.index).unwrap_or(len);
         }
         let typographic_bounds = line.get_typographic_bounds();
         LineLayout {
@@ -177,7 +220,7 @@ impl CoreTextSystem {
             width: px(typographic_bounds.width as f32),
             ascent: px(ascent),
             descent: px(descent),
-            len: text.len(),
+            len,
             // It runs right to left by its first strong character, as Unicode's bidi algorithm says (P2 and P3).
             rtl: unicode_bidi::get_base_direction(text) == unicode_bidi::Direction::Rtl,
         }
