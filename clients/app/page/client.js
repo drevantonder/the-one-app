@@ -264,7 +264,8 @@ function moves(leaving, coming, back, icon) {
 ///         │         and notes()                    └───────────┘ ◄┘   then moves from there to it
 ///         │                                         │       ▲
 ///         │                                   grab: │       │ release: p → 1 if far or flicked, else → 0,
-///         │                                  caught │       │ and the window's history follows it
+///         │                                  caught │       │ or where the device's gesture ended; the
+///         │                                         │       │ window's history follows it
 ///         │                              where p is ▼       │
 ///         │   grab [back leads somewhere: an   ┌───────────┐
 ///         │   app at its first screen, with    │ tracking  │  drag(p): drawn there
@@ -274,7 +275,8 @@ function moves(leaving, coming, back, icon) {
 ///     show, while tracking: as while playing, the finger keeping it unless it goes somewhere else.
 ///     popped(to), drawn already by the device: still at `to`, with nothing drawn; while playing toward it, nothing.
 ///
-/// A computer's trackpad swipe sends `grab`, `drag` and `release` (`wheel`).
+/// A computer's trackpad swipe sends `grab`, `drag` and `release` (`wheel`), as does Android's back gesture
+/// (`backStarted`).
 /** @typedef {{ from: View, to: View, upper: View, parts: Animation[], p: number, target: number, velocity: number, stiffness: number }} Move */
 /** @param {Move} move */
 const toward = (move) => (move.target === 1 ? move.to : move.from)
@@ -362,8 +364,8 @@ const moveMachine = setup({
     // Let go far enough or fast enough, it carries on, and otherwise goes back; the window's history follows it.
     release: ({ context, event }) => {
       const move = /** @type {Move} */ (context.move)
-      const { velocity } = /** @type {Extract<Shown, { type: "release" }>} */ (event)
-      move.target = Math.abs(velocity) > 1 ? (velocity > 0 ? 1 : 0) : Math.round(move.p)
+      const { velocity, end } = /** @type {Extract<Shown, { type: "release" }>} */ (event)
+      move.target = end ?? (Math.abs(velocity) > 1 ? (velocity > 0 ? 1 : 0) : Math.round(move.p))
       move.velocity = velocity
       const to = toward(move)
       for (const step of [-1, 1]) if (stack[depth + step] && showing(stack[depth + step].key) === to) history.go(step)
@@ -975,8 +977,11 @@ function gestures() {
   if (back !== backs) globalThis.androidBack?.postMessage(String(back))
   backs = back
 }
-/// Whether back from what's showing takes an app home: it's at its first screen, with nothing open over it.
-const home = () => depth > 0 && front?.first === true && !front.over
+/// The window's own sheet or alert open over every app (its recovery key, Update Required), if one is.
+const covering = () => /** @type {HTMLDialogElement | null} */ (document.querySelector("dialog[open]"))
+/// Whether back from what's showing takes an app home: it's at its first screen, with nothing open over it, the
+/// app's or the window's.
+const home = () => depth > 0 && front?.first === true && !front.over && !covering()
 
 /// A trackpad's two-finger swipe sideways, as each frame tells of its wheel (`src/initialization-script.js`), the
 /// way a browser's swipe between pages goes back: at an app's first screen, swiping back takes it home, the move
@@ -1284,10 +1289,53 @@ listen("changed", ({ payload: view }) => {
   else if (open.has(view)) post(/** @type {View} */ (open.get(view)), { method: "notifications/one/changed" })
 })
 
-/// The device's own back, where a device has one (the app's window there calls this): what's open over the app
-/// that's showing shuts first. → whether anything was. If nothing was, the device goes back through this window's
-/// history, which leads back through an app's screens and out of it, and from the launcher out of the app.
+/// Android's back gesture, as its finger comes in from the edge (`MainActivity`): where back takes an app home, the
+/// move follows it in the shape of Android's back to home, the app drawn a little way (`BACK`) toward where it goes as
+/// the finger comes all the way in, and once Android says it's done (`back`), carries on home from there, or
+/// cancelled, goes back.
+let backing = false
+/// How far Android's back gesture draws the move, at most, before it's let go: the app as small as 0.9 of itself
+/// going into its icon, as Android's own back to home has it.
+const BACK = 0.12
+/** @type {{ p: number, at: number, velocity: number }} */
+const backed = { p: 0, at: 0, velocity: 0 }
+window.backStarted = () => {
+  if (!home()) return
+  on({ type: "grab" })
+  backing = moving()?.matches("tracking") === true
+  Object.assign(backed, { p: 0, at: performance.now(), velocity: 0 })
+}
+/** @param {number} progress */
+window.backProgressed = (progress) => {
+  if (!backing) return
+  // Most of the way in the gesture's first part, slowing after, as Android's own does (its decelerate curve).
+  const p = BACK * (1 - (1 - Math.min(1, Math.max(0, progress))) ** 3)
+  const now = performance.now()
+  const dt = (now - backed.at) / 1000
+  if (dt > 0) backed.velocity = 0.6 * ((p - backed.p) / dt) + 0.4 * backed.velocity
+  Object.assign(backed, { p, at: now })
+  on({ type: "drag", p })
+}
+window.backCancelled = () => {
+  if (backing) on({ type: "release", velocity: backed.velocity, end: 0 })
+  backing = false
+}
+/// The device's own back, where a device has one (the app's window there calls this): Android's gesture, done, takes
+/// the app it drew going home the rest of the way, and otherwise what's open over the app that's showing shuts first,
+/// the window's own sheet as it would to Escape (an alert that can't be shut stays).
+/// → whether either was. If neither was, the device goes back through this window's history, which leads back through
+/// an app's screens and out of it, and from the launcher out of the app.
 window.back = () => {
+  if (backing) {
+    backing = false
+    on({ type: "release", velocity: backed.velocity, end: 1 })
+    return true
+  }
+  const sheet = covering()
+  if (sheet) {
+    sheet.requestClose()
+    return true
+  }
   const view = open.get(here() ?? "") ?? open.get(key(launcher))
   if (!view?.over || view.frame.inert) return false
   post(view, { method: "notifications/one/back" })

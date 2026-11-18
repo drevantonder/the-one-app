@@ -103,7 +103,7 @@ export interface Context {
 /** What moves the window's move between its launcher and its apps (`client.js`'s `moveMachine`): an app to show,
  * coming back or going on, and the icon it comes out of or goes back into; one the device has already drawn the move
  * to; the spring at rest; the window covering every app; and a finger taking the move, moving it and letting go, at
- * `velocity`, in moves a second. */
+ * `velocity`, in moves a second, and `end`, where it ends when the device's gesture decided that itself. */
 export type Shown =
   | { type: "show"; to: View; back: boolean; icon?: Rect; tapped: number }
   | { type: "popped"; to: View; tapped: number }
@@ -111,7 +111,7 @@ export type Shown =
   | { type: "freeze" }
   | { type: "grab" }
   | { type: "drag"; p: number }
-  | { type: "release"; velocity: number }
+  | { type: "release"; velocity: number; end?: 0 | 1 }
 
 /** What moves the window (`client.js`). */
 export type Moved =
@@ -207,6 +207,10 @@ declare global {
     }
     /** The device's own back (`client.js`). */
     back: () => boolean
+    /** Android's back gesture coming in from the edge, as far in as `progress`, and let go short (`client.js`). */
+    backStarted: () => void
+    backProgressed: (progress: number) => void
+    backCancelled: () => void
     /** A tap on an iPhone's status bar (`client.js`). */
     scrollToTop: () => void
   }

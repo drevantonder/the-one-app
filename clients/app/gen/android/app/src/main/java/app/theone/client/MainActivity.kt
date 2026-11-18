@@ -9,6 +9,7 @@ import android.view.HapticFeedbackConstants
 import android.webkit.WebView
 import android.window.OnBackInvokedCallback
 import android.window.OnBackInvokedDispatcher
+import androidx.activity.BackEventCompat
 import androidx.activity.OnBackPressedCallback
 import androidx.activity.SystemBarStyle
 import androidx.activity.enableEdgeToEdge
@@ -56,8 +57,9 @@ class MainActivity : TauriActivity() {
 
   /**
    * Back closes what's open over an app's page before it goes anywhere: a sheet, an alert, a menu. The page knows
-   * whether anything is (`back` in home.js). If nothing was, back is what it was before this was asked: back
-   * through the web view's history, and from its start out of the app.
+   * whether anything is (`back` in client.js). If nothing was, back is what it was before this was asked: back
+   * through the web view's history, and from its start out of the app. As the back gesture is made (predictive back),
+   * the page draws an app going home with it, where that's where back goes (`backStarted` in client.js).
    */
   override fun onWebViewCreate(webView: WebView) {
     if (WebViewFeature.isFeatureSupported(WebViewFeature.WEB_MESSAGE_LISTENER)) {
@@ -87,6 +89,13 @@ class MainActivity : TauriActivity() {
       }
     }
     onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
+      override fun handleOnBackStarted(backEvent: BackEventCompat) = webView.evaluateJavascript("backStarted()", null)
+
+      override fun handleOnBackProgressed(backEvent: BackEventCompat) =
+        webView.evaluateJavascript("backProgressed(${backEvent.progress})", null)
+
+      override fun handleOnBackCancelled() = webView.evaluateJavascript("backCancelled()", null)
+
       override fun handleOnBackPressed() {
         webView.evaluateJavascript("back()") { closed ->
           if (closed == "true") return@evaluateJavascript
