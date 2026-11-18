@@ -38,7 +38,10 @@ let device
 /// again while it doesn't, and that ask.
 /** @type {import("../app/page/host.js").Connection} */
 let connection = "connecting"
-let again = 1000
+/// How long it waits before asking again, doubling from `FIRST` to `MOST`, each wait a random time from half of it
+/// to all of it (jitter, so browsers that lost the network together don't all ask together once it's back).
+const [FIRST, MOST] = [1000, 3000]
+let again = FIRST
 /** @type {ReturnType<typeof setTimeout> | undefined} */
 let asking
 
@@ -134,9 +137,10 @@ function connected(next) {
 
 /// Says whether its network answered what was just asked, which leaves it offline until it's tried again
 /// (`tryAgain`), and an answer to what was asked while it was offline is a try that was answered. While it doesn't
-/// answer, this browser asks again by itself, sooner at first and then less often, as what's outside a device comes
-/// and goes, and no person should have to ask for what was going to come back anyway. Once it answers, every open app
-/// asks again, for what it missed.
+/// answer, this browser asks again by itself, every few seconds at most, as what's outside a device comes and goes,
+/// and no person should have to ask for what was going to come back anyway: at once as the browser says it's online
+/// again or the page is seen again, and otherwise as `again` says. Once it answers, every open app asks again, for
+/// what it missed.
 /** @param {boolean} now */
 function answered(now) {
   const lost = connection === "offline" || unanswered > 0
@@ -151,20 +155,25 @@ function answered(now) {
   if (!now) unanswered ||= performance.now()
   if (now && unanswered && performance.now() - unanswered > 3000) report({ name: "one.client.unanswered", took: performance.now() - unanswered, error: "No server is answering" })
   else if (now) sendReports()
-  if (now) [again, unanswered] = [1000, 0]
+  if (now) [again, unanswered] = [FIRST, 0]
   else tryAgain()
 }
 /// Tries its network again once `again` has passed, or with `now`, at once: by opening again while it hasn't, and
 /// by asking a server once it has.
 function tryAgain(now = false) {
   clearTimeout(asking)
-  asking = setTimeout(() => {
-    again = Math.min(again * 2, 30000)
-    connected("connecting")
-    if (apps) mcp("ping").catch(() => {})
-    else opening()
-  }, now ? 0 : again)
+  asking = setTimeout(
+    () => {
+      again = Math.min(again * 2, MOST)
+      connected("connecting")
+      if (apps) mcp("ping").catch(() => {})
+      else opening()
+    },
+    now ? 0 : again * (0.5 + Math.random() / 2),
+  )
 }
+for (const [target, event] of /** @type {const} */ ([[window, "online"], [document, "visibilitychange"]]))
+  target.addEventListener(event, () => connection === "offline" && document.visibilityState === "visible" && tryAgain(true))
 
 /// What each open app was answered that only reads, by what it asked: it's answered that again until something
 /// changes, as the app's client answers a view (`Subscription` in `core/client`).
