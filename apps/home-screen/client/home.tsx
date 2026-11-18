@@ -1482,33 +1482,36 @@ function HomeScreen(props: { owners: Owner[] }) {
     const watched = new ResizeObserver(resized)
     watched.observe(root)
 
-    // A trackpad or a wheel: one gesture is one page or one owner, read here, since a browser snaps a trackpad's small
-    // scroll back where it started. Up and down on a page that scrolls itself is that page's. A gesture's momentum
-    // dies away, so once it has stepped, what follows is its tail and is let be, until a pause, or a push that grows
-    // again once the tail has fallen to half its peak: a new gesture, which steps at once, wherever the pages are.
-    let total = 0
-    let axis: "x" | "y" | undefined
-    let done = false
-    let last = 0
-    let size = 0
-    let peak = 0
+    // A trackpad or a wheel: one gesture is one screenful or one owner at most, however hard it's flicked, as macOS's
+    // Launchpad and an iPad with a trackpad page. A browser says nothing of where a gesture starts or ends, nor tells
+    // its momentum from the fingers, so a gesture is a run of wheel events: its momentum follows the fingers with no
+    // pause until it dies away, and is part of it, however its pushes rise and fall as they're coalesced. It ends once
+    // the events stop for a moment, or turn back. It steps once its pushes along its axis add up to 30 points, and the
+    // rest of it is let be. A mouse wheel's notches, where they come in lines or pages (`deltaMode`), are a step each.
+    // Up and down on a page that scrolls itself is that page's.
+    const QUIET = 120
+    let gesture: { axis: "x" | "y"; sign: number; total: number; done: boolean } | undefined
+    let last = -Infinity
     const wheel = (event: WheelEvent) => {
       if (!home.getSnapshot().matches("nothing")) return
-      const now = performance.now()
-      const push = Math.max(Math.abs(event.deltaX), Math.abs(event.deltaY))
-      if (now - last > 250 || (done && size < peak / 2 && push > 8 && push > size * 1.5)) [total, axis, done, peak] = [0, undefined, false, 0]
-      last = now
-      size = push
-      peak = Math.max(peak, push)
-      axis ??= Math.abs(event.deltaX) > Math.abs(event.deltaY) ? "x" : "y"
-      if (axis === "y" && (event.target as Element).closest?.(".page.scrolls")) return
+      const quiet = event.timeStamp - last > QUIET
+      last = event.timeStamp
+      const along = (axis: "x" | "y") => (axis === "x" ? event.deltaX : event.deltaY)
+      const notch = event.deltaMode !== WheelEvent.DOM_DELTA_PIXEL
+      const back = !!gesture?.sign && Math.sign(along(gesture.axis)) === -gesture.sign && Math.abs(along(gesture.axis)) > 2
+      if (!gesture || quiet || notch || back) {
+        const axis = Math.abs(event.deltaX) > Math.abs(event.deltaY) ? "x" : "y"
+        gesture = { axis, sign: 0, total: 0, done: false }
+      }
+      gesture.sign ||= Math.sign(along(gesture.axis))
+      if (gesture.axis === "y" && (event.target as Element).closest?.(".page.scrolls")) return
       event.preventDefault()
-      if (done) return
-      total += axis === "x" ? event.deltaX : event.deltaY
-      if (Math.abs(total) < 30) return
-      done = true
-      const by = Math.sign(total) as 1 | -1
-      home.send(axis === "y" ? { type: "step", owner: by } : { type: "step", screen: (by * rtl()) as 1 | -1 })
+      if (gesture.done) return
+      gesture.total += along(gesture.axis)
+      if (!gesture.total || (!notch && Math.abs(gesture.total) < 30)) return
+      gesture.done = true
+      const by = Math.sign(gesture.total) as 1 | -1
+      home.send(gesture.axis === "y" ? { type: "step", owner: by } : { type: "step", screen: (by * rtl()) as 1 | -1 })
     }
     root.addEventListener("wheel", wheel, { passive: false })
     root.addEventListener("pointerdown", press)
