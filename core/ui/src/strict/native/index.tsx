@@ -4,7 +4,6 @@
 // (../check.ts). A component the strict UI library has that isn't here yet throws, naming it.
 import { createContext, createSignal, For, Show, useContext } from "solid-js"
 import type { Element } from "solid-js"
-import { event } from "./renderer.ts"
 import { messages, readable, whole } from "../../words.ts"
 import type { Props, Type } from "../protocol.ts"
 import type * as Strict from "../types/ui.d.ts"
@@ -14,90 +13,10 @@ export { createListCollection } from "../../collection.ts"
 export { negative, styles } from "../../styles.ts"
 export { tokens } from "../../tokens.ts"
 
-export { Box, Image, Input, Path, render, Scroll, Search, Text, Textarea } from "./primitives.tsx"
+export { Box, Image, Input, Layer, Path, render, Scroll, Search, Text, Textarea } from "./primitives.tsx"
 import { Box, Image, Text } from "./primitives.tsx"
-
-// The bridge, as the DOM's (../../bridge.ts): the JSON-RPC a page and its client say to each other, through the host.
-
-const host = (globalThis as { host?: { post(message: object): void } }).host
-const waiting = new Map<number, (response: { result?: unknown; error?: { message: string } }) => void>()
-const listeners = new Set<() => void>()
-let requests = 0
-
-;(globalThis as { ui?: object }).ui = {
-  event,
-  message(message: { id?: number; method?: string; result?: unknown; error?: { message: string } }) {
-    if (message.method === "notifications/one/changed") for (const listener of listeners) listener()
-    else if (message.method === "ui/notifications/host-context-changed") dress((message as { params?: object }).params)
-    else if (message.id !== undefined) waiting.get(message.id)?.(message)
-  },
-}
-
-function ask<T>(method: string, params: object): Promise<T> {
-  const id = ++requests
-  return new Promise((done, failed) => {
-    waiting.set(id, ({ result, error }) => {
-      waiting.delete(id)
-      if (error) failed(new Error(error.message))
-      else done(result as T)
-    })
-    host?.post({ jsonrpc: "2.0", id, method, params })
-  })
-}
-
-/** What the client says of where the page is shown, as the DOM's bridge reads it: whether the window names the app
- * above it (a computer's app window, whose breadcrumb a first screen's title gives way to), whether its network
- * answers, what the device keeps for itself at each edge, the window's size and whether its person asked for less
- * motion. */
-const [breadcrumb, setBreadcrumb] = createSignal(false)
-const [connected, setConnected] = createSignal<ReturnType<typeof Strict.connection>>("online")
-const [insets, setInsets] = createSignal({ top: 0, right: 0, bottom: 0, left: 0 })
-const [size, setSize] = createSignal({ width: 0, height: 0 })
-const [still, setStill] = createSignal(false)
-interface Context {
-  breadcrumb?: boolean
-  connection?: ReturnType<typeof Strict.connection>
-  safeAreaInsets?: ReturnType<typeof Strict.safeArea>
-  containerDimensions?: { width: number; height: number }
-  reducedMotion?: boolean
-}
-function dress(context?: Context) {
-  if (context && "breadcrumb" in context) setBreadcrumb(context.breadcrumb === true)
-  if (context?.connection) setConnected(context.connection)
-  if (context?.safeAreaInsets) setInsets(context.safeAreaInsets)
-  if (context?.containerDimensions) setSize(context.containerDimensions)
-  if (context && "reducedMotion" in context) setStill(context.reducedMotion === true)
-}
-
-/** A client answers a page once it has said what it is, which it does as it loads. */
-const greeted = ask<{ hostContext?: object }>("ui/initialize", { protocolVersion: "2026-01-26", appInfo: { name: "", version: "1" }, appCapabilities: {} }).then(({ hostContext }) => {
-  dress(hostContext)
-  host?.post({ jsonrpc: "2.0", method: "ui/notifications/initialized", params: {} })
-})
-
-export const call: typeof Strict.call = async (tool, inputs = {}, { subject } = {}) => {
-  await greeted
-  const { content, isError } = await ask<{ content: { text?: string }[]; isError?: boolean }>("tools/call", { name: tool, arguments: inputs, ...(subject ? { _meta: { subject } } : {}) })
-  const text = content.map(({ text }) => text ?? "").join("\n")
-  if (isError) throw new Error(readable(text), { cause: text })
-  return text
-}
-
-export const client = (async (change: Strict.ClientChange = {}) => {
-  await greeted
-  return ask("one/client", change)
-}) as typeof Strict.client
-export const safeArea: typeof Strict.safeArea = () => insets()
-export const viewport: typeof Strict.viewport = () => size()
-export const reducedMotion: typeof Strict.reducedMotion = () => still()
-export const sizeChanged: typeof Strict.sizeChanged = async (size) => (await greeted, host?.post({ jsonrpc: "2.0", method: "ui/notifications/size-changed", params: size }))
-export const pinShortcut: typeof Strict.pinShortcut = async (entrypoint) => (await greeted, ask("one/pin-shortcut", { entrypoint }))
-export const open: typeof Strict.open = async (app, { subject, behind, from } = {}) => (await greeted, ask("ui/open-link", /^https?:/.test(app) ? { url: app } : { url: `one:${app}`, subject, behind, from }))
-
-export const changed: typeof Strict.changed = (listener) => {
-  listeners.add(listener)
-  return () => void listeners.delete(listener)
-}
+import { breadcrumb } from "./bridge.ts"
+export { call, changed, client, connection, covers, open, pinShortcut, reducedMotion, safeArea, sizeChanged, viewport } from "./bridge.ts"
 
 // The components, as the DOM's look and read: the same roles and names, from the design tokens.
 
@@ -208,51 +127,8 @@ export const Status: typeof Strict.Status = (props) => (
   </Box>
 )
 
-/** What a menu's parts share: whether it's open, and what picking an item does. */
-const Opened = createContext<{ open: () => boolean; setOpen: (open: boolean) => void; select: (value: string) => void }>()
-
-export const Menu: typeof Strict.Menu = {
-  Root: (props) => {
-    const [own, setOwn] = createSignal(false)
-    const open = () => props.open ?? own()
-    const setOpen = (now: boolean) => (setOwn(now), props.onOpenChange?.({ open: now }))
-    return <Opened value={{ open, setOpen, select: (value) => (setOpen(false), props.onSelect?.({ value })) }}>{props.children}</Opened>
-  },
-  Trigger: (props) => {
-    const menu = useContext(Opened)!
-    return (
-      <Box role="button" aria-label={props["aria-label"] ?? (props.children ? undefined : messages.more)} aria-expanded={menu.open() ? "true" : "false"} onClick={() => menu.setOpen(!menu.open())} style={{ height: "control", minWidth: "control", alignItems: "center", justifyContent: "center", borderRadius: "md" }}>
-        {props.children ?? <Icon name="dots-three" />}
-      </Box>
-    )
-  },
-  Positioner: (props) => <>{props.children}</>,
-  Content: (props) => {
-    const menu = useContext(Opened)!
-    return (
-      <Show when={menu.open()}>
-        <Box role="menu" style={{ paddingBlock: 4, borderWidth: 1, borderRadius: "md", backgroundColor: "card", color: "foreground" }}>
-          {props.children}
-        </Box>
-      </Show>
-    )
-  },
-  Item: (props) => {
-    const menu = useContext(Opened)!
-    return (
-      <Box role="menuitem" aria-disabled={props.disabled ? "true" : undefined} onClick={() => !props.disabled && menu.select(props.value)} style={{ paddingInline: 8, paddingBlock: 6, borderRadius: "sm", color: props.destructive ? "destructive" : undefined }}>
-        <Text>{props.children}</Text>
-      </Box>
-    )
-  },
-  Separator: () => <Box role="separator" style={{ borderBottomWidth: 1, marginBlock: 4 }} />,
-  Group: (props) => (
-    <Box role="group">
-      <Text style={{ font: "footnote", color: "muted-foreground", paddingInline: 8, paddingBlock: 6 }}>{props.label}</Text>
-      {props.children}
-    </Box>
-  ),
-}
+export { Menu } from "../../menu.tsx"
+export { Alert, confirm, Sheet } from "../../sheet.tsx"
 
 /** What a strict page may use that a native host can't draw yet: each throws, naming itself, where it's used. */
 const later = (name: string) => () => {
@@ -266,11 +142,8 @@ export const Switch = later("Switch") as typeof Strict.Switch
 export const LiveScreen = later("LiveScreen") as typeof Strict.LiveScreen
 export const RadioGroup = later("RadioGroup") as typeof Strict.RadioGroup
 export const Select = { Root: later("Select") } as typeof Strict.Select
-export const Sheet = later("Sheet") as typeof Strict.Sheet
-export const Alert = later("Alert") as typeof Strict.Alert
 export const Tabs = { Root: later("Tabs"), List: later("Tabs"), Trigger: later("Tabs"), Content: later("Tabs"), Indicator: later("Tabs") } as typeof Strict.Tabs
 export const toast = later("toast") as typeof Strict.toast
-export const confirm = later("confirm") as typeof Strict.confirm
 export const leave = later("leave") as typeof Strict.leave
 /** A native host doesn't open an app to a link yet. */
 export const link: typeof Strict.link = () => undefined
@@ -282,7 +155,5 @@ export const share = later("share") as typeof Strict.share
 export const seen = later("seen") as typeof Strict.seen
 export const haptic: typeof Strict.haptic = () => {}
 export const Widget = later("Widget") as typeof Strict.Widget
-export const covers: typeof Strict.covers = () => () => {}
 export const keydown = later("keydown") as typeof Strict.keydown
-export const connection: typeof Strict.connection = () => connected()
 export const visible: typeof Strict.visible = () => true

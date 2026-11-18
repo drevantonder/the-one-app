@@ -1,81 +1,83 @@
-import { createEffect, createSignal, onSettled, Show } from "solid-js"
-import { render } from "@solidjs/web"
-import { covers } from "./bridge.ts"
-import { Button, Icon } from "./button.tsx"
-import { messages, readable, reduced } from "./shared.ts"
-import { Details } from "./states.tsx"
-import { hold } from "./toast.tsx"
+// What's over the page, as a system's own: a sheet, up from the foot of a narrow window and in the middle of a wide
+// one, and an alert, a question that stops everything until it's answered. Written once in strict, on the
+// primitives, the same on the DOM and on a native host: each a modal layer (#primitives' `Layer`) over the window.
+import { children, createEffect, createRoot, createSignal, onCleanup, Show } from "solid-js"
 import type { JSX } from "@solidjs/web"
+import { Box, Layer, Scroll, Text } from "#primitives"
+import { covers, viewport } from "#bridge"
+import { Button, Icon } from "./button.tsx"
+import { messages } from "./words.ts"
+import { negative, styles } from "./styles.ts"
+import { tokens } from "./tokens.ts"
+import type { Pressed } from "./strict/types/ui.d.ts"
 
-/// The sheets and alerts that are open, the last opened last.
-const open: HTMLDialogElement[] = []
+/** How long what's over the page takes to go, in milliseconds: the travel pace's (tokens.ts). */
+const going = (tokens.motion.travel.value as { duration: { default: number } }).duration.default
 
-/// Where a sheet is in the middle of the window, not at its foot (ui.css).
-const wide = matchMedia("(min-width: 40rem)")
+/** Where a sheet is in the middle of the window, not at its foot: a window 40rem wide or more. */
+const wide = () => viewport().width >= 640
 
-/// The browser's own `<dialog>`, shown over the page while `props.open`. The browser keeps focus inside it and
-/// closes it on Escape and on the device's back gesture; a press outside closes it too. It calls `onClose` once
-/// it's shut, however that came about.
-function Dialog(props: {
-  open?: boolean
-  onClose?: () => void
-  class?: string
-  role?: "alertdialog"
-  labelledby?: string
-  describedby?: string
-  ref?: (dialog: HTMLDialogElement) => void
-  children?: JSX.Element
-}) {
-  let dialog!: HTMLDialogElement
-  let pressed: EventTarget | null = null
-  let shut: (() => void) | undefined
+const look = styles({
+  scrim: {
+    position: "absolute", top: 0, bottom: 0, start: 0, end: 0, backgroundColor: tokens.colour.overlay, pointerEvents: "auto",
+    opacity: { default: 1, entering: 0 }, transitionProperty: ["opacity"], transition: tokens.motion.travel,
+  },
+  gone: { opacity: 0 },
+  place: { position: "absolute", top: 0, bottom: 0, start: 0, end: 0, alignItems: "stretch", justifyContent: "flex-end" },
+  middle: { alignItems: "center", justifyContent: "center", padding: tokens.grid[4] },
+  panel: {
+    maxHeight: "92%", backgroundColor: tokens.colour.background, color: tokens.colour.label, boxShadow: tokens.shadow.window,
+    borderTopStartRadius: tokens.radius.large, borderTopEndRadius: tokens.radius.large, pointerEvents: "auto", overflow: "hidden",
+    translateY: { default: 0, entering: "100%" }, transitionProperty: ["translateY", "opacity", "scale"], transition: tokens.motion.travel,
+  },
+  down: { translateY: "100%" },
+  floating: { width: "100%", maxWidth: tokens.length.sheet, borderRadius: tokens.radius.large, translateY: 0, opacity: { default: 1, entering: 0 }, scale: { default: 1, entering: 0.97 } },
+  shrunk: { opacity: 0, scale: 0.97 },
+  pulled: { transitionProperty: [] },
+  grabber: { alignSelf: "center", width: tokens.grid[10], height: tokens.length.grabber, marginTop: tokens.length.grabberGap, borderRadius: tokens.radius.full, backgroundColor: tokens.colour.quaternaryLabel },
+  header: { flexDirection: "row", alignItems: "center", gap: tokens.grid[2], paddingBlock: tokens.grid[2], paddingStart: tokens.length.gutter, paddingEnd: tokens.grid[2] },
+  heading: { flexGrow: 1, minWidth: 0, font: tokens.type.large, fontWeight: tokens.weight.semibold, lineClamp: 2 },
+  body: { gap: tokens.length.gutter, paddingTop: tokens.grid[1], paddingInline: tokens.length.gutter, paddingBottom: tokens.length.gutter },
+  alert: { width: "100%", maxWidth: tokens.length.alert, gap: tokens.grid[2], padding: tokens.grid[5], borderRadius: tokens.radius.large },
+  text: { color: tokens.colour.secondaryLabel },
+  footer: { flexDirection: "row", flexWrap: "wrap-reverse", gap: tokens.grid[2], marginTop: tokens.grid[3] },
+  half: { flexGrow: 1, flexBasis: "45%" },
+})
 
-  /// An open dialog makes everything outside it inert, a toast too. So toasts show from inside the one that's on
-  /// top, and from the page again once none is open. And an open dialog is what a device's own back closes.
-  const topmost = (is: boolean) => {
-    if (open.includes(dialog)) open.splice(open.indexOf(dialog), 1)
-    if (is) open.push(dialog)
-    hold(open.at(-1))
-    shut?.()
-    shut = is ? covers(() => dialog.close()) : undefined
-  }
-
-  createEffect(() => !!props.open, (now) => {
-    if (now === dialog.open) return
-    if (!now) return dialog.close()
-    dialog.showModal()
-    topmost(true)
-    // The keyboard doesn't come up on a phone unless the app asked for it, with `autofocus` on a field.
-    ;(dialog.querySelector<HTMLElement>("[autofocus]") ?? dialog).focus()
-  })
-  onSettled(() => () => topmost(false))
-
-  /// A press that both starts and ends on the dialog itself was on what's around it.
-  const outside = (event: PointerEvent | MouseEvent) => {
-    if (event.type === "pointerdown") pressed = event.target
-    else if (event.target === dialog && pressed === dialog) dialog.close()
-  }
-
-  const closed = () => {
-    // Opened again before the browser said it had closed: it's open, and that's not news.
-    if (dialog.open) return
-    topmost(false)
-    props.onClose?.()
-  }
-
+/// What a sheet and an alert share: shown over the window in a modal layer while `open`, with what's around it
+/// dimmed, kept until it's gone as it closes; Escape, the device's back and a press on what's around it close it,
+/// each calling `onClose`.
+function Over(props: { open?: boolean; onClose?: () => void; children: (leaving: () => boolean) => JSX.Element }) {
+  const [shown, setShown] = createSignal(false)
+  const [leaving, setLeaving] = createSignal(false)
+  let timer: ReturnType<typeof setTimeout> | undefined
+  createEffect(
+    () => !!props.open,
+    (open) => {
+      clearTimeout(timer)
+      if (open) return void (setLeaving(false), setShown(true))
+      if (!shown()) return
+      setLeaving(true)
+      timer = setTimeout(() => (setShown(false), setLeaving(false)), going)
+    },
+  )
+  // The device's back closes what's on top, as it would go back.
+  createEffect(
+    () => !!props.open,
+    (open) => {
+      if (!open) return
+      const shut = covers(() => props.onClose?.())
+      return shut
+    },
+  )
+  onCleanup(() => clearTimeout(timer))
   return (
-    <dialog
-      ref={[(element: HTMLDialogElement) => (dialog = element), props.ref]}
-      class={props.class}
-      role={props.role}
-      aria-labelledby={props.labelledby}
-      aria-describedby={props.describedby}
-      onPointerDown={outside}
-      onClick={outside}
-      onClose={closed}
-    >
-      {props.children}
-    </dialog>
+    <Show when={shown()}>
+      <Layer modal>
+        <Box style={[look.scrim, leaving() && look.gone]} onClick={() => props.onClose?.()} />
+        {props.children(leaving)}
+      </Layer>
+    </Show>
   )
 }
 
@@ -84,132 +86,99 @@ function Dialog(props: {
 /// Escape, the device's back, a press outside and a pull down close it too: each calls `onClose`, which sets
 /// `open` false. `autofocus` on a field in it brings up a phone's keyboard as it opens.
 export function Sheet(props: { heading?: JSX.Element; open?: boolean; onClose?: () => void; children?: JSX.Element }) {
-  let dialog!: HTMLDialogElement
-  let pulling: { x: number; y: number; down: number; moves: { time: number; value: number }[]; started?: number; fade?: Animation } | null = null
-  const id = `ui-sheet-${Math.random().toString(36).slice(2)}`
-
-  /// A sheet at the foot of the window goes down with the finger that pulls it, and on letting go closes if it was
-  /// pulled far or flicked, and comes back if not. A finger that's scrolling what's in the sheet isn't pulling it:
-  /// only one that goes down with nothing above left to scroll to. Only the sheet's own `translate` changes as it
-  /// goes, and the backdrop's fade is held at how far down it is: nothing inside the sheet is restyled.
-  const pull = (event: TouchEvent) => {
-    const finger = event.touches[0] ?? event.changedTouches[0]
-    if (event.type === "touchstart") {
-      const under = event.composedPath()
-      const scrolled = (under.slice(0, under.indexOf(dialog)) as Element[]).some((element) => element.scrollTop > 0)
-      pulling = wide.matches || scrolled || event.touches.length > 1 ? null : { x: finger.clientX, y: finger.clientY, down: 0, moves: [] }
-      return
-    }
-    const was = pulling
+  // A finger pulling it down: where it started, how far it's gone, and its last moves, for how fast it was let go.
+  const [pull, setPull] = createSignal<{ y: number; down: number; height: number; started: number; moves: { time: number; down: number }[] }>()
+  const press = (event: Pressed) => {
+    if (wide() || event.pointerType === "mouse") return
+    setPull({ y: event.clientY, down: 0, height: event.currentTarget.getBoundingClientRect().height, started: event.timeStamp, moves: [] })
+  }
+  const move = (event: Pressed) => {
+    const was = pull()
     if (!was) return
-    const down = finger.clientY - was.y
-    if (event.type === "touchmove") {
-      if (was.started === undefined) {
-        const across = Math.abs(finger.clientX - was.x)
-        // Not far enough yet to tell which way it's going.
-        if (Math.hypot(across, down) < 4) return
-        // Going up or sideways, or the device has already started scrolling: it's not a pull.
-        if (down < across || !event.cancelable) return void (pulling = null)
-        was.started = event.timeStamp
-        dialog.setAttribute("data-pulled", "")
-        was.fade = dialog.animate([{ opacity: 1 }, { opacity: 0 }], { pseudoElement: "::backdrop", duration: 1000, fill: "both" })
-        was.fade.pause()
-      }
-      event.preventDefault()
-      was.down = down
-      was.moves = [...was.moves.slice(-31), { time: event.timeStamp, value: down }]
-      dialog.style.translate = `0 ${Math.max(0, down)}px`
-      was.fade!.currentTime = 1000 * Math.min(1, Math.max(0, down) / dialog.offsetHeight)
-      return
-    }
-    pulling = null
-    if (was.started === undefined) return
-    was.fade!.cancel()
-    dialog.removeAttribute("data-pulled")
-    // How fast it was going down as it was let go, in px a millisecond, from the last move at least 80 ms before the
-    // last, as a slow device's moves come further apart: none if it had stopped.
+    const down = Math.max(0, event.clientY - was.y)
+    setPull({ ...was, down, moves: [...was.moves.slice(-31), { time: event.timeStamp, down }] })
+  }
+  /// Let go a third of the way down, or flicked down, it closes; otherwise it goes back.
+  const lift = (event: Pressed) => {
+    const was = pull()
+    setPull(undefined)
+    if (!was) return
     const last = was.moves.at(-1)
     const from = was.moves.findLast((move) => last!.time - move.time >= 80) ?? was.moves[0]
-    const speed = !last || event.timeStamp - last.time > 80 ? 0 : (last.value - from.value) / Math.max(1, last.time - from.time)
-    // Let go a third of the way down, or flicked: still going down, and fast enough on average since it was taken.
+    const speed = !last || event.timeStamp - last.time > 80 ? 0 : (last.down - from.down) / Math.max(1, last.time - from.time)
     const flicked = speed > 0 && was.down / Math.max(1, event.timeStamp - was.started) > 0.11
-    if (event.type !== "touchend" || !(was.down > dialog.offsetHeight / 3 || flicked)) return void dialog.style.removeProperty("translate")
-    // For whoever asked for less motion it fades where it was let go. Otherwise it goes on down, no slower than the
-    // finger took it.
-    if (!reduced.matches) {
-      dialog.style.removeProperty("translate")
-      if (flicked) dialog.style.transitionDuration = `${Math.max(120, Math.min(200, (dialog.offsetHeight - was.down) / speed))}ms`
-    }
-    dialog.close()
-    // Reading the transitions starts them, at that pace; what was set for them goes once they've ended.
-    Promise.allSettled(dialog.getAnimations().map((move) => move.finished)).then(() => {
-      dialog.style.removeProperty("translate")
-      dialog.style.removeProperty("transition-duration")
-    })
+    if (was.down > was.height / 3 || flicked) props.onClose?.()
   }
-  const touched = (element: HTMLDialogElement) => {
-    for (const type of ["touchstart", "touchmove", "touchend", "touchcancel"] as const) element.addEventListener(type, pull, { passive: false })
-  }
-
+  const keys = (event: { key: string }) => event.key === "Escape" && props.onClose?.()
   return (
-    <Dialog class="ui-dialog sheet" open={props.open} onClose={props.onClose} labelledby={id} ref={(element) => touched((dialog = element))}>
-      <div class="panel">
-        <header>
-          <h2 id={id}>{props.heading}</h2>
-          <button class="press ring" aria-label={messages.close} onClick={() => dialog.close()}>
-            <Icon name="x" />
-          </button>
-        </header>
-        <div class="body">{props.children}</div>
-      </div>
-    </Dialog>
+    <Over open={props.open} onClose={props.onClose}>
+      {(leaving) => (
+        <Box style={[look.place, wide() && look.middle]}>
+          <Box
+            role="dialog"
+            aria-modal="true"
+            tabindex={-1}
+            aria-label={typeof props.heading === "string" ? props.heading : undefined}
+            onKeyDown={keys}
+            onPointerDown={press}
+            onPointerMove={move}
+            onPointerUp={lift}
+            onPointerCancel={() => setPull(undefined)}
+            style={[look.panel, wide() && look.floating, leaving() && (wide() ? look.shrunk : look.down), pull() && look.pulled, pull() && { translateY: pull()!.down }]}
+          >
+            <Show when={!wide()}>
+              <Box aria-hidden="true" style={look.grabber} />
+            </Show>
+            <Box role="banner" style={look.header}>
+              <Text role="heading" aria-level={2} style={look.heading}>
+                {props.heading}
+              </Text>
+              <Button variant="ghost" size="icon" aria-label={messages.close} onClick={() => props.onClose?.()}>
+                <Icon name="x" />
+              </Button>
+            </Box>
+            <Scroll style={look.body}>{props.children}</Scroll>
+          </Box>
+        </Box>
+      )}
+    </Over>
   )
 }
 
 /// `<Alert heading="Vault wants to use a key" text="Sent only to api.github.com." open={!!asking()} onClose={() => setAsking()} action={<><Button variant="outline" onClick={decline}>Don't Allow</Button><Button onClick={allow}>Allow</Button></>}>...</Alert>`:
 /// a question that stops everything until it's answered, as a system's permission prompt does, in the middle of the
 /// window while `open`: its `heading`, its grey `text`, what's chosen or typed for it, then its buttons (`action`),
-/// side by side while both fit, and otherwise one over the other, the first below, as iOS lays them out (ui.css).
+/// sharing the row while two fit, and otherwise one over the other, the first below, as iOS lays them out.
 /// `confirm` asks a question with only Cancel and OK; this is for one that needs more. Escape and the device's back
 /// close it too, which calls `onClose`, and the app sets `open` false.
 export function Alert(props: { heading: JSX.Element; text?: JSX.Element; open?: boolean; onClose?: () => void; action?: JSX.Element; children?: JSX.Element }) {
-  const id = `ui-alert-${Math.random().toString(36).slice(2)}`
+  const actions = children(() => props.action)
   return (
-    <Dialog class="ui-dialog alert" role="alertdialog" labelledby={id} describedby={props.text ? `${id}-text` : undefined} open={props.open} onClose={props.onClose}>
-      <div class="panel">
-        <h2 id={id}>{props.heading}</h2>
-        <Show when={props.text}>
-          <p id={`${id}-text`}>{props.text}</p>
-        </Show>
-        {props.children}
-        <Show when={props.action}>
-          <footer>{props.action}</footer>
-        </Show>
-      </div>
-    </Dialog>
-  )
-}
-
-/// The question `confirm` asks, which keeps showing as it fades out.
-function Asked(props: { question?: Question; open: boolean; onResult: (yes: boolean, reset: false) => void }) {
-  let confirmed = false
-  return (
-    <Alert
-      heading={props.question?.heading}
-      text={props.question?.text}
-      open={props.open}
-      onClose={() => props.onResult(confirmed, (confirmed = false))}
-      action={
-        <>
-          <button type="button" class="ui-button press ring" data-variant="outline" autofocus onClick={(event) => ((confirmed = false), event.currentTarget.closest("dialog")!.close())}>
-            {messages.cancel}
-          </button>
-          <button type="button" class="ui-button press ring" data-variant={props.question?.destructive ? "destructive" : "default"} onClick={(event) => ((confirmed = true), event.currentTarget.closest("dialog")!.close())}>
-            {props.question?.action || messages.ok}
-          </button>
-        </>
-      }
-    />
+    <Over open={props.open} onClose={props.onClose}>
+      {(leaving) => (
+        <Box style={[look.place, look.middle]}>
+          <Box
+            role="alertdialog"
+            aria-modal="true"
+            tabindex={-1}
+            aria-label={typeof props.heading === "string" ? props.heading : undefined}
+            onKeyDown={(event) => event.key === "Escape" && props.onClose?.()}
+            style={[look.panel, look.floating, look.alert, leaving() && look.shrunk]}
+          >
+            <Text role="heading" aria-level={2} style={look.heading}>
+              {props.heading}
+            </Text>
+            <Show when={props.text}>
+              <Text style={look.text}>{props.text}</Text>
+            </Show>
+            {props.children}
+            <Show when={props.action}>
+              <Box style={look.footer}>{actions.toArray().map((action) => <Box style={look.half}>{action}</Box>)}</Box>
+            </Show>
+          </Box>
+        </Box>
+      )}
+    </Over>
   )
 }
 
@@ -228,41 +197,30 @@ let ask: ((question: Question) => Promise<boolean>) | undefined
 /// press outside are no.
 export function confirm(question: Question): Promise<boolean> {
   if (!ask) {
-    const [question, setQuestion] = createSignal<Question>()
+    const [asked, setAsked] = createSignal<Question>()
     const [open, setOpen] = createSignal(false)
-    let resolve: (yes: boolean) => void
-    const host = document.body.appendChild(document.createElement("div"))
-    render(() => <Asked question={question()} open={open()} onResult={(yes) => (setOpen(false), resolve(yes))} />, host)
-    ask = (question) => new Promise<boolean>((done) => ((resolve = done), setQuestion(question), setOpen(true)))
+    let answer: (yes: boolean) => void = () => {}
+    const answered = (yes: boolean) => (setOpen(false), answer(yes))
+    createRoot(() => (
+      <Alert
+        heading={asked()?.heading}
+        text={asked()?.text}
+        open={open()}
+        onClose={() => answered(false)}
+        action={
+          <>
+            <Button variant="outline" onClick={() => answered(false)}>
+              {messages.cancel}
+            </Button>
+            <Button variant={asked()?.destructive ? "destructive" : "default"} onClick={() => answered(true)}>
+              {asked()?.action || messages.ok}
+            </Button>
+          </>
+        }
+      />
+    ))
+    ask = (question) => new Promise<boolean>((done) => ((answer = done), setAsked(question), setOpen(true)))
   }
   return ask(question)
 }
 
-let detail: ((text: string) => void) | undefined
-
-/// Shows all of a tool's error in a sheet: what a person reads of it, then the rest and Copy. What a toast's Details
-/// opens.
-export function details(text: string): void {
-  if (!detail) {
-    const [shown, setShown] = createSignal<string>()
-    const [open, setOpen] = createSignal(false)
-    const host = document.body.appendChild(document.createElement("div"))
-    render(
-      () => (
-        <Sheet heading={messages.details} open={open()} onClose={() => setOpen(false)}>
-          <Show when={shown()} keyed>
-            {(text) => (
-              <>
-                <p>{readable(text)}</p>
-                <Details text={text} />
-              </>
-            )}
-          </Show>
-        </Sheet>
-      ),
-      host,
-    )
-    detail = (text) => (setShown(text), setOpen(true))
-  }
-  detail(text)
-}

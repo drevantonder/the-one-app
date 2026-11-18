@@ -3,7 +3,7 @@
 // to the parts inside, each of which spreads its part's attributes and listeners on its element. They're named and
 // shaped as Ark's are, so that once Ark runs on Solid 2.0 each component imports its parts from
 // `@ark-ui/solid/<component>` instead. The look is ui.css's, by the attribute Zag names each part with
-// (`data-menu-content`), which Ark gives it too.
+// (`data-select-content`), which Ark gives it too.
 //
 // None of Zag is needed to draw: a component looks the same before its machine is here. So ui.js holds no Zag. Each
 // component's machine, with Zag's Solid adapter, is a file of its own (`zag/<component>.js`), loaded once the page

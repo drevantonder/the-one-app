@@ -6,6 +6,7 @@ import { Box, Path, Text } from "#primitives"
 import { messages } from "./words.ts"
 import { styles, type Styles } from "./styles.ts"
 import { tokens } from "./tokens.ts"
+import type { Located } from "./strict/types/ui.d.ts"
 import calendarBlank from "@phosphor-icons/core/assets/regular/calendar-blank.svg?raw"
 import caretLeft from "@phosphor-icons/core/assets/regular/caret-left.svg?raw"
 import caretRight from "@phosphor-icons/core/assets/regular/caret-right.svg?raw"
@@ -138,7 +139,9 @@ export interface ButtonProps {
   loading?: boolean
   disabled?: boolean
   "aria-label"?: string
-  onClick?: () => void
+  "aria-haspopup"?: "menu" | "dialog" | "listbox"
+  "aria-expanded"?: "true" | "false"
+  onClick?: (event: Located) => void
   /** Where it sits in what it's in, the only part of its look a caller changes. */
   style?: Styles<"marginTop" | "marginBottom" | "marginStart" | "marginEnd" | "alignSelf" | "flexGrow">
   children?: JSX.Element
@@ -157,7 +160,7 @@ export function Button(props: ButtonProps) {
       role="button"
       aria-disabled={off() ? "true" : undefined}
       aria-busy={props.loading ? "true" : undefined}
-      onClick={() => !off() && props.onClick?.()}
+      onClick={(event: Located) => !off() && props.onClick?.(event)}
       style={[look.button, props.variant && props.variant !== "default" && look[props.variant], props.size === "icon" && look.square, off() && look.disabled, props.style]}
     >
       <Show when={props.loading}>

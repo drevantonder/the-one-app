@@ -2,7 +2,9 @@ import { createMemo, For } from "solid-js"
 import { render } from "@solidjs/web"
 import { popover } from "./popover.ts"
 import { messages, readable, whole } from "./shared.ts"
-import { details } from "./sheet.tsx"
+import { Sheet } from "./sheet.tsx"
+import { Details } from "./states.tsx"
+import { createRoot, createSignal, Show } from "solid-js"
 import type { GroupService, Options, Store } from "@zag-js/toast"
 
 // Ark UI's toast (ark-ui.com/docs/components/toast) has an app draw each toast. The UI library draws them itself, the
@@ -67,4 +69,29 @@ function Toast(props: { toast: Options; index: number; parent: GroupService }) {
       <span {...api().getGhostAfterProps()} />
     </div>
   )
+}
+
+let detail: ((text: string) => void) | undefined
+
+/// Shows all of a tool's error in a sheet: what a person reads of it, then the rest and Copy. What a toast's Details
+/// opens.
+export function details(text: string): void {
+  if (!detail) {
+    const [shown, setShown] = createSignal<string>()
+    const [open, setOpen] = createSignal(false)
+    createRoot(() => (
+      <Sheet heading={messages.details} open={open()} onClose={() => setOpen(false)}>
+        <Show when={shown()} keyed>
+          {(text) => (
+            <>
+              <p>{readable(text)}</p>
+              <Details text={text} />
+            </>
+          )}
+        </Show>
+      </Sheet>
+    ))
+    detail = (text) => (setShown(text), setOpen(true))
+  }
+  detail(text)
 }

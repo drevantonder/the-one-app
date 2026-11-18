@@ -8,6 +8,7 @@
   --background: light-dark(oklch(1 0 0), oklch(0.145 0 0));
   --background-gradient: light-dark(oklch(1 0 0), oklch(0.145 0 0));
   --selection: color-mix(in oklab, var(--label) 10%, transparent);
+  --overlay: oklch(0 0 0 / 50%);
   --on-accent: oklch(1 0 0);
   --loader: color-mix(in oklab, var(--label) 40%, transparent);
   --red: light-dark(#ff3b30, #ff453a);
@@ -42,6 +43,11 @@
   --gutter: 1rem;
   --readable: 42rem;
   --hairline: 1px;
+  --sheet: 28rem;
+  --alert: 22rem;
+  --menu: 10rem;
+  --grabber: 0px;
+  --grabber-gap: 0px;
   --size-large: 1rem;
   --size-medium: 0.875rem;
   --size-small: 0.75rem;
@@ -52,7 +58,7 @@
   --radius-full: 9999px;
   --radius-icon: 22.5%;
   --shadow-focus: 0px 0px 0px 3px oklch(0.55 0 0 / 50%);
-  --shadow-window: 0px 10px 30px 0px oklch(0 0 0 / 20%);
+  --shadow-window: 0px 10px 30px 0px oklch(0 0 0 / 20%), inset 0px 0px 0px 1px oklch(0.5 0 0 / 15%);
   --shadow-edge: inset 0px 0px 0px 1px oklch(0.5 0 0 / 15%);
   --material-glass: blur(20px) saturate(1.8);
   --material-thin: blur(14px) saturate(1.2);
@@ -79,7 +85,6 @@
   --destructive: light-dark(oklch(0.565 0.245 27.325), oklch(0.704 0.191 22.216));
   --warning: light-dark(oklch(0.555 0.163 48.998), oklch(0.828 0.189 84.429));
   --border: light-dark(oklch(0.922 0 0), oklch(1 0 0 / 10%));
-  --overlay: oklch(0 0 0 / 50%);
   --sidebar: light-dark(oklch(0.985 0 0), oklch(0.205 0 0));
   --hl-kw: light-dark(#cf222e, #ff7b72);
   --hl-str: light-dark(#0a3069, #a5d6ff);
@@ -132,6 +137,8 @@
   :root {
     --control: 2.75rem;
     --icon: 1.125rem;
+    --grabber: 0.25rem;
+    --grabber-gap: 0.5rem;
     --text-base: 1rem;
     --text-field: 1rem;
   }

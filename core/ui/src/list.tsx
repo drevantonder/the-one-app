@@ -1,9 +1,9 @@
-import { createContext, createSignal, onSettled, Show } from "solid-js"
+import { createSignal, onSettled, Show } from "solid-js"
 import type { Accessor } from "solid-js"
 import type { JSX } from "@solidjs/web"
 import { Icon } from "./button.tsx"
 import { pace, reduced } from "./shared.ts"
-import type { Api } from "./zag.tsx"
+import { RowMenu } from "./menu.tsx"
 
 /// `<List><For each={notes()}>{(note) => <Row heading={note.text} />}</For></List>`: things of one kind, one under
 /// another, in one group that stops at a readable width however wide the room is. With no rows it shows nothing. A
@@ -117,8 +117,8 @@ export function Row(props: {
       </Show>
       <Show when={menu()?.destructive()}>
         {(item) => (
-          <button type="button" class="swipe" tabindex="-1" aria-hidden="true" onClick={() => menu()?.select(item().dataset.value!)}>
-            <span>{item().textContent}</span>
+          <button type="button" class="swipe" tabindex="-1" aria-hidden="true" onClick={() => menu()?.select(item().value)}>
+            <span>{item().label}</span>
           </button>
         )}
       </Show>
@@ -126,18 +126,6 @@ export function Row(props: {
     </RowMenu>
   )
 }
-
-/** What a ⋯ menu in a row gives the row: its machine, to open it where the row was pressed, its `destructive` item,
- * and what selects an item, as pressing it does. */
-export interface RowMenu {
-  api: Accessor<Api>
-  destructive: Accessor<HTMLElement | undefined>
-  select: (value: string) => void
-}
-
-/// How a menu in a row's `end` tells the row it's there, and that it's gone. A menu anywhere else, as in a screen's bar,
-/// finds none.
-export const RowMenu = createContext<((menu: RowMenu | undefined) => void) | null>(null)
 
 /// How far a finger moves before it's a swipe or a scroll, not a press.
 const SLOP = 10
@@ -165,7 +153,16 @@ function presses(row: HTMLElement, menu: Accessor<RowMenu | undefined>) {
     row.style.setProperty("--swiped", `${swiped}px`)
   }
   const theirs = (event: Event) => event.target instanceof Element && !!event.target.closest("[data-menu-trigger], .control, .action, .swipe")
-  const context = () => menu()?.api().getContextTriggerProps()
+  // A press held still opens the menu where it's held.
+  let held: ReturnType<typeof setTimeout> | undefined
+  let opened = false
+  const at = (event: MouseEvent) => ({ x: event.clientX, y: event.clientY, width: 0, height: 0 })
+  const context = () => ({
+    onPointerDown: (event: PointerEvent) => ((opened = false), (held = setTimeout(() => ((opened = true), menu()?.open(at(event))), 500))),
+    onPointerUp: (_event: PointerEvent) => clearTimeout(held),
+    onPointerCancel: (_event: PointerEvent) => clearTimeout(held),
+    onContextMenu: (event: MouseEvent) => (event.preventDefault(), menu()?.open(at(event))),
+  })
 
   const down = (event: PointerEvent) => {
     if (!menu() || theirs(event) || event.button !== 0) return
@@ -173,7 +170,7 @@ function presses(row: HTMLElement, menu: Accessor<RowMenu | undefined>) {
     start = { x: event.clientX, y: event.clientY, at: swiped }
     swiping = false
     moves = []
-    context()?.onPointerDown(event)
+    context().onPointerDown(event)
   }
   const move = (event: PointerEvent) => {
     if (!start) return
@@ -198,7 +195,7 @@ function presses(row: HTMLElement, menu: Accessor<RowMenu | undefined>) {
     const item = menu()?.destructive()
     if (item && swiped > row.offsetWidth * 0.6) {
       aside(row.offsetWidth, true)
-      menu()?.select(item.dataset.value!)
+      menu()?.select(item.value)
       setTimeout(() => aside(0, true), 400)
     } else {
       // Its speed as it was let go, in px a millisecond toward the start, from the last move at least 80 ms back, carried
@@ -218,7 +215,7 @@ function presses(row: HTMLElement, menu: Accessor<RowMenu | undefined>) {
   const click = (event: MouseEvent) => {
     // The item it showed was pressed: done, and the row goes back.
     if (event.target instanceof Element && event.target.closest(".swipe")) return aside(0, true)
-    if (theirs(event) || !(event.timeStamp - moved < 600 || menu()?.api().open)) return
+    if (theirs(event) || !(event.timeStamp - moved < 600 || opened)) return
     event.preventDefault()
     event.stopPropagation()
   }

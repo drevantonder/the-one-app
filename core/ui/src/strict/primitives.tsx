@@ -2,11 +2,35 @@
 // the semantic props the strict protocol has (protocol.ts). The input is the UI library's `Input`. A native host draws
 // the same props from the ops Solid's universal renderer sends it. A primitive's `style` is styles (../styles.ts),
 // drawn by their classes, or, on a page written for version 1, one style object, drawn as inline CSS.
-import { omit } from "solid-js"
-import { Dynamic, render as mount, type JSX } from "@solidjs/web"
+import { omit, onSettled } from "solid-js"
+import { Dynamic, Portal, render as mount, type JSX } from "@solidjs/web"
+import { layer } from "./layer.ts"
 import type { Props, Version1Style } from "./protocol.ts"
 import type { Located, Pressed, Wheeled } from "./types/ui.d.ts"
-import { classes, type Styles } from "../styles.ts"
+import { web, type Styles } from "../styles.ts"
+
+/// `<Layer modal>…</Layer>`: what's drawn over the whole window, over the page and every layer before it, as a
+/// sheet or a menu is: a box the window's size that lets presses through where nothing of its own is (what's in it
+/// says `pointerEvents: "auto"`). While a `modal` one is shown, everything else is inert: nothing else is pressed,
+/// focused or read by a screen reader.
+export function Layer(props: { modal?: boolean; children?: JSX.Element }) {
+  let box!: HTMLDivElement
+  onSettled(() => {
+    if (!props.modal) return
+    const others = [...document.body.children].filter((element) => element !== box.parentElement && element !== box && !(element as HTMLElement).inert) as HTMLElement[]
+    for (const other of others) other.inert = true
+    // The keyboard goes into it: to what asks for it (`autofocus`, a phone's keyboard with it), or to its dialog.
+    box.querySelector<HTMLElement>("[autofocus], [aria-modal='true']")?.focus()
+    return () => others.forEach((other) => (other.inert = false))
+  })
+  return (
+    <Portal mount={document.body}>
+      <div ref={box} {...drawn("ui-strict-box", layer)}>
+        {props.children}
+      </div>
+    </Portal>
+  )
+}
 
 /// `render(() => <App />)`: draws an app's first screen, where its page is: the page itself on the web, the app's
 /// window on a native host. → what takes it away again.
@@ -18,7 +42,7 @@ type Style = Styles | Version1Style
 const v1 = (style: Style | undefined): style is Version1Style => !!style && !Array.isArray(style) && typeof style === "object" && !("$id" in style)
 /** What a primitive's element has of its `style`: its classes after the primitive's own, its inline CSS, and a version
  * 1 type style's `data-font`. */
-const drawn = (own: string, style: Style | undefined) => (v1(style) ? { class: own, style: css(style), "data-font": style.font } : { class: `${own} ${classes(style as Styles)}` })
+const drawn = (own: string, style: Style | undefined) => (v1(style) ? { class: own, style: css(style), "data-font": style.font } : (({ class: names, style: inline }) => ({ class: `${own} ${names}`, style: inline }))(web(style as Styles)))
 
 /** What a primitive takes of the protocol's props: its role and states, with what it listens for. */
 type Semantics = Pick<Props, Extract<keyof Props, "role" | `aria-${string}`>>

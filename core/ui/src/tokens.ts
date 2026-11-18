@@ -197,6 +197,8 @@ const roles = {
   background: colours.background,
   backgroundGradient: colour("oklch(1 0 0)", "oklch(0.145 0 0)"),
   selection: alpha(label, 10),
+  /** What dims the page under a sheet or an alert. */
+  overlay: colours.overlay,
   /** Words and icons on an accent. */
   onAccent: colour("oklch(1 0 0)"),
   loader: alpha(label, 40),
@@ -240,10 +242,13 @@ export const legacy = {
 export const tokens = {
   colour: named(roles, (key) => key),
   grid: named(grid, (key) => `grid-${key.replace(".", "-")}`),
-  length: named({ control: lengths.control, icon: lengths.icon, gutter: lengths.gutter, readable: lengths.readable, hairline: lengths.hairline }, (key) => key),
+  length: named({ control: lengths.control, icon: lengths.icon, gutter: lengths.gutter, readable: lengths.readable, hairline: lengths.hairline, sheet: length(rem(28)), alert: length(rem(22)), menu: length(rem(10)),
+    /** A sheet's grabber, which says under a finger that it can be pulled down, and is nothing under a mouse. */
+    grabber: length({ default: px(0), touch: rem(0.25) }), grabberGap: length({ default: px(0), touch: rem(0.5) }) }, (key) => key),
   size: named(sizes, (key) => `size-${key}`),
   radius: named({ small: radius(px(6)), medium: radius(px(10)), large: radius(px(18)), full: radii.full, icon: radii.icon }, (key) => `radius-${key}`),
-  shadow: named({ focus: shadow({ x: 0, y: 0, blur: 0, spread: 3, colour: "oklch(0.55 0 0 / 50%)" }), window: shadow({ x: 0, y: 10, blur: 30, spread: 0, colour: "oklch(0 0 0 / 20%)" }), edge: shadow({ x: 0, y: 0, blur: 0, spread: 1, colour: "oklch(0.5 0 0 / 15%)", inset: true }) }, (key) => `shadow-${key}`),
+  shadow: named({ focus: shadow({ x: 0, y: 0, blur: 0, spread: 3, colour: "oklch(0.55 0 0 / 50%)" }), /** A window's, a sheet's or a menu's: its shadow, and its 1px edge inside. */
+    window: shadow({ x: 0, y: 10, blur: 30, spread: 0, colour: "oklch(0 0 0 / 20%)" }, { x: 0, y: 0, blur: 0, spread: 1, colour: "oklch(0.5 0 0 / 15%)", inset: true }), edge: shadow({ x: 0, y: 0, blur: 0, spread: 1, colour: "oklch(0.5 0 0 / 15%)", inset: true }) }, (key) => `shadow-${key}`),
   material: named({ glass: material(20, 1.8), thin: material(14, 1.2) }, (key) => `material-${key}`),
   font: named(fonts, (key) => `font-${key}`),
   weight: named(weightRoles, (key) => `weight-${key}`),

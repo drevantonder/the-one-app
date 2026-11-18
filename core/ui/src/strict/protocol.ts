@@ -185,9 +185,9 @@ export interface Props {
   "aria-haspopup"?: Bool | "menu" | "listbox" | "dialog"
   /** Left out of the semantic tree: it's only how it looks. */
   "aria-hidden"?: Bool
-  /** How it's laid out and looks: its styles (`Styles`) by id, the last winning where two say the same property. A
-   * page written for 1 sends one `Version1Style` instead. */
-  style?: StyleId[] | Version1Style
+  /** How it's laid out and looks: its styles (`Styles`) by id, and inline ones worked out as the page runs, the last
+   * winning where two say the same property. A page written for 1 sends one `Version1Style` instead. */
+  style?: (StyleId | Inline)[] | Version1Style
   /** `image`: a `data:` address, or a file of the app's own by its path. */
   src?: string
   /** `image`: what it shows, its accessible name. Empty for one that's only how it looks. */
@@ -397,6 +397,11 @@ export type Token =
   /** How a change moves: how long it takes, in milliseconds, and its easing, a cubic Bézier's two points. */
   | { kind: "motion"; value: { duration: Varies<number>; easing: Varies<[x1: number, y1: number, x2: number, y2: number]> } }
 
+/** What a style can't know ahead: where something is as the page runs, a finger moving it or a menu placed under
+ * what opened it, in CSS pixels (`rotate` in degrees, `scale` and `opacity` as numbers), as React Native's inline
+ * styles are. */
+export type Inline = { [P in "top" | "bottom" | "start" | "end" | "width" | "height" | "translateX" | "translateY" | "scale" | "rotate" | "opacity"]?: number }
+
 /** A style's id. The same style is the same id in every table, so a host may keep them all in one. */
 export type StyleId = string
 
@@ -429,7 +434,7 @@ export type Dimension = Ref | `${number}%` | "auto" | 0
 export interface Properties {
   display: "flex" | "grid" | "none"
   flexDirection: "row" | "column" | "row-reverse" | "column-reverse"
-  flexWrap: "nowrap" | "wrap"
+  flexWrap: "nowrap" | "wrap" | "wrap-reverse"
   flexGrow: number
   flexShrink: number
   flexBasis: Dimension
@@ -457,7 +462,9 @@ export interface Properties {
   maxWidth: Dimension | "none"
   maxHeight: Dimension | "none"
   aspectRatio: number
-  position: "relative" | "absolute"
+  /** `fixed` is placed in the window, over what's in it, whatever scrolls, as the DOM's top layer is: a sheet, a
+   * menu. */
+  position: "relative" | "absolute" | "fixed"
   top: Dimension
   bottom: Dimension
   start: Dimension

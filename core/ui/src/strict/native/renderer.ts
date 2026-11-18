@@ -71,7 +71,7 @@ export const { render: mount, effect, memo, createComponent, createElement, crea
       queue({ op: "set", id: node.id, name: name as "onClick", value: typeof value === "function" ? true : null })
     } else if (name === "style" && value && (Array.isArray(value) || "$id" in (value as object))) {
       // Styles go by their ids, from the tables the host has (../protocol.ts's `Styles`), the last winning.
-      queue({ op: "set", id: node.id, name: "style", value: flat(value as Styles).map((style) => style.$id) })
+      queue({ op: "set", id: node.id, name: "style", value: flat(value as Styles).map((style) => ("$id" in style ? style.$id : style)) })
     } else queue({ op: "set", id: node.id, name: name as "role", value: value ?? null })
   },
   insertNode(parent, node, anchor) {
@@ -101,6 +101,15 @@ export function event({ id, name, editing, action, key, shiftKey, altKey, ctrlKe
   const handler = nodes.get(id)?.deref()?.handlers[name]
   const target = { value: editing?.text ?? "", scrollTop: scrollTop ?? 0, scrollLeft: scrollLeft ?? 0, getBoundingClientRect: () => rect ?? { x: 0, y: 0, width: 0, height: 0 } }
   handler?.({ ...told, currentTarget: target, target, editing, action, key: key ?? "", shiftKey: !!shiftKey, altKey: !!altKey, ctrlKey: !!ctrlKey, metaKey: !!metaKey, preventDefault() {} })
+}
+
+/** Takes `node` out of what it's in, as Solid takes a node out. */
+export function detach(node: Node) {
+  if (!node.parent) return
+  const parent = node.parent
+  parent.children.splice(parent.children.indexOf(node), 1)
+  node.parent = undefined
+  queue({ op: "remove", parent: parent.id, id: node.id })
 }
 
 /** Draws a page at the root. */

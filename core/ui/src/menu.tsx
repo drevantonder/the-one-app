@@ -1,103 +1,172 @@
-import { children, createContext, createSignal, createUniqueId, omit, onSettled, useContext } from "solid-js"
-import { Icon } from "./button.tsx"
-import { RowMenu } from "./list.tsx"
-import { messages } from "./shared.ts"
-import { popover } from "./popover.ts"
-import { machine, type Part, type Root } from "./zag.tsx"
+// A menu: a button that opens a few things to do, over the page under it. Written once in strict, on the primitives,
+// the same on the DOM and on a native host.
+import { children, createContext, createSignal, onCleanup, Show, useContext } from "solid-js"
 import type { JSX } from "@solidjs/web"
-import type { ButtonProps } from "./button.tsx"
-import type * as menu from "@zag-js/menu"
+import { Box, Layer, Text } from "#primitives"
+import { viewport } from "#bridge"
+import { Button, Icon, type ButtonProps } from "./button.tsx"
+import { messages } from "./words.ts"
+import { styles } from "./styles.ts"
+import { tokens } from "./tokens.ts"
+import type { Located } from "./strict/types/ui.d.ts"
 
-const { Ark, use, live } = machine("menu", () => import("./zag/menu.ts"), null, {
-  Trigger: ["button", "getTriggerProps"],
-  Indicator: ["div", "getIndicatorProps"],
-  Positioner: ["div", "getPositionerProps"],
-  Content: ["div", "getContentProps"],
-  Item: ["div", "getItemProps", (zag) => zag.itemProps],
-  ItemGroup: ["div", "getItemGroupProps", (zag) => zag.itemGroupProps],
-  ItemGroupLabel: ["div", "getItemGroupLabelProps", (zag) => zag.itemGroupLabelProps],
-  Separator: ["hr", "getSeparatorProps"],
+/** Where a menu opens: under what opened it, or where a row was held. */
+type At = { x: number; y: number; width: number; height: number }
+
+/** What a menu in a row gives the row (list.tsx): what opens it where the row was held, its `destructive` item, which
+ * a swipe shows, and what chooses an item as pressing it does. */
+export interface RowMenu {
+  open: (at: At) => void
+  destructive: () => { value: string; label: JSX.Element } | undefined
+  select: (value: string) => void
+}
+
+/// How a menu in a row's `end` tells the row it's there, and that it's gone. A menu anywhere else, as in a screen's
+/// bar, finds none.
+export const RowMenu = createContext<((menu: RowMenu | undefined) => void) | null>(null)
+
+/** What a menu's parts share. */
+const Opened = createContext<{
+  at: () => At | undefined
+  open: (at: At | undefined) => void
+  select: (value: string) => void
+  destructive: () => { value: string; label: JSX.Element } | undefined
+  setDestructive: (item: { value: string; label: JSX.Element } | undefined) => void
+}>()
+
+const look = styles({
+  catcher: { position: "absolute", top: 0, bottom: 0, start: 0, end: 0, pointerEvents: "auto" },
+  anchor: { position: "absolute" },
+  below: { position: "absolute", top: "100%", end: 0, marginTop: tokens.grid[1], pointerEvents: "auto" },
+  above: { position: "absolute", bottom: "100%", end: 0, marginBottom: tokens.grid[1], pointerEvents: "auto" },
+  content: {
+    minWidth: tokens.length.menu,
+    maxWidth: tokens.length.alert,
+    padding: tokens.grid[1],
+    borderRadius: tokens.radius.medium,
+    backgroundColor: tokens.colour.background,
+    color: tokens.colour.label,
+    boxShadow: tokens.shadow.window,
+    font: tokens.type.medium,
+    opacity: { default: 1, entering: 0 },
+    scale: { default: 1, entering: 0.97 },
+    transitionProperty: ["opacity", "scale"],
+    transition: tokens.motion.quick,
+  },
+  item: {
+    flexDirection: "row",
+    alignItems: "center",
+    gap: tokens.grid[2],
+    minHeight: tokens.grid[8],
+    paddingInline: tokens.grid[2],
+    paddingEnd: tokens.grid[4],
+    borderRadius: tokens.radius.small,
+    backgroundColor: { hover: tokens.colour.quinaryLabel, focused: tokens.colour.quinaryLabel },
+    cursor: "default",
+    userSelect: "none",
+  },
+  destructive: { color: tokens.colour.red, backgroundColor: { hover: tokens.colour.redTint, focused: tokens.colour.redTint } },
+  disabled: { opacity: 0.5 },
+  separator: { height: tokens.length.hairline, marginBlock: tokens.grid[1], backgroundColor: tokens.colour.quinaryLabel },
+  label: { paddingInline: tokens.grid[2], paddingBlock: tokens.grid[1], color: tokens.colour.secondaryLabel, font: tokens.type.small, fontWeight: tokens.weight.medium },
 })
 
 /// `<Menu.Root onSelect={({ value }) => value === "delete" && remove()}>`, then `<Menu.Trigger />`, then
 /// `<Menu.Positioner><Menu.Content>` around `<Menu.Item value="rename">Rename</Menu.Item>`s, a `<Menu.Separator />`
-/// between groups and `<Menu.Item value="delete" destructive>Delete</Menu.Item>`: a button that opens a few things to
-/// do. It's Ark UI's menu (ark-ui.com/docs/components/menu), with its parts and props. The trigger is three dots,
-/// named `aria-label` (More unless said); with words in it, it's a button of `variant` (a `Button`'s, `outline`
-/// unless said) that says them, and `size="icon"` keeps one with an icon in it to its icon. An item starts with an
-/// `<Icon />` if it's given one, and `destructive` is for what can't be undone. In a `Row`'s `end`, the row opens it
-/// too, and swipes to its `destructive` item.
-export const Menu: {
-  Root: Root<menu.Props>
-  Trigger: Part<Pick<ButtonProps, "variant" | "size">, HTMLButtonElement>
-  Indicator: Part
-  Positioner: Part
-  Content: Part
-  Item: Part<menu.ItemProps & { destructive?: boolean }>
-  ItemGroup: Part<menu.ItemGroupProps>
-  ItemGroupLabel: Part<menu.ItemGroupLabelProps>
-  Separator: Part<{}, HTMLHRElement>
-  Group: (props: { label: JSX.Element; children?: JSX.Element }) => JSX.Element
-} = {
-  ...Ark,
-  Root: (props) => {
-    const [destructive, setDestructive] = createSignal<HTMLElement>()
-    const select = (value: string) => props.onSelect?.({ value } as menu.SelectionDetails)
-    return (
-      <Own value={{ destructive, setDestructive, select }}>
-        <Ark.Root {...props} positioning={{ strategy: "fixed", placement: "bottom-end", gutter: 4, ...props.positioning }} />
-      </Own>
-    )
+/// between groups, `<Menu.Group label="Install for">` around some under a small heading, and `<Menu.Item
+/// value="delete" destructive>Delete</Menu.Item>`: a button that opens a few things to do, under it, over the page. The
+/// trigger is three dots, named `aria-label` (More unless said); with words in it, it's a button of `variant` (a
+/// `Button`'s, `outline` unless said) that says them, and `size="icon"` keeps one with an icon in it to its icon. An
+/// item starts with an `<Icon />` if it's given one, and `destructive` is for what can't be undone. A press outside,
+/// Escape and choosing an item close it. In a `Row`'s `end`, a long press or a right-click on the row opens it too,
+/// and a finger swipes the row to its `destructive` item.
+export const Menu = {
+  Root: (props: { onSelect?: (details: { value: string }) => void; children?: JSX.Element }) => {
+    const [at, setAt] = createSignal<At>()
+    const [destructive, setDestructive] = createSignal<{ value: string; label: JSX.Element }>()
+    const select = (value: string) => (setAt(undefined), props.onSelect?.({ value }))
+    return <Opened value={{ at, open: setAt, select, destructive, setDestructive }}>{props.children}</Opened>
   },
-  Trigger: (props) => {
+  Trigger: (props: { variant?: ButtonProps["variant"]; size?: "icon"; "aria-label"?: string; children?: JSX.Element }) => {
+    const menu = useContext(Opened)!
     // In a row, the row opens it too.
     const row = useContext(RowMenu)
-    if (row && live()) {
-      const { destructive, select } = useContext(Own)!
-      const api = use()
-      onSettled(() => {
-        row({ api, destructive, select })
-        return () => row(undefined)
-      })
+    if (row) {
+      row({ open: menu.open, destructive: menu.destructive, select: menu.select })
+      onCleanup(() => row(undefined))
     }
     const inside = children(() => props.children)
     const words = () => inside.toArray().length > 0 && props.size !== "icon"
     return (
-      <Ark.Trigger
-        {...omit(props, "variant", "size", "class", "children")}
-        class={["ui-button press ring", props.class]}
-        data-variant={props.variant ?? (words() ? "outline" : "ghost")}
-        data-size={words() ? undefined : "icon"}
+      <Button
+        variant={props.variant ?? (words() ? "outline" : "ghost")}
+        size={words() ? undefined : "icon"}
         aria-label={props["aria-label"] ?? (words() ? undefined : messages.more)}
+        aria-haspopup="menu"
+        aria-expanded={menu.at() ? "true" : "false"}
+        onClick={(event: Located) => {
+          const rect = event?.currentTarget.getBoundingClientRect()
+          menu.open(menu.at() || !rect ? undefined : { x: rect.x, y: rect.y, width: rect.width, height: rect.height })
+        }}
       >
         {inside.toArray().length ? inside() : <Icon name="dots-three" />}
-      </Ark.Trigger>
+      </Button>
     )
   },
-  Group: (props) => {
-    const id = createUniqueId()
+  /** Where a menu's content shows: in a layer over the page, under what opened it, its end at that's end, or above
+   * it where that's in the window's lower half. */
+  Positioner: (props: { children?: JSX.Element }) => {
+    const menu = useContext(Opened)!
+    const above = () => menu.at()!.y + menu.at()!.height / 2 > viewport().height / 2
     return (
-      <Ark.ItemGroup id={id}>
-        <Ark.ItemGroupLabel htmlFor={id}>{props.label}</Ark.ItemGroupLabel>
-        {props.children}
-      </Ark.ItemGroup>
+      <Show when={menu.at()}>
+        {(at) => (
+          <Layer modal>
+            <Box style={look.catcher} onClick={() => menu.open(undefined)} />
+            <Box style={[look.anchor, { top: at().y, start: at().x, width: at().width, height: at().height }]}>
+              <Box style={above() ? look.above : look.below} onKeyDown={(event) => event.key === "Escape" && menu.open(undefined)}>
+                {props.children}
+              </Box>
+            </Box>
+          </Layer>
+        )}
+      </Show>
     )
   },
-  Positioner: (props) => {
-    const api = use()
-    return <Ark.Positioner {...props} ref={popover(() => api().open, () => api().setOpen(false))} />
+  Content: (props: { children?: JSX.Element }) => (
+    <Box role="menu" tabindex={-1} style={look.content}>
+      {props.children}
+    </Box>
+  ),
+  Item: (props: { value: string; destructive?: boolean; disabled?: boolean; children?: JSX.Element }) => {
+    const menu = useContext(Opened)!
+    if (props.destructive) {
+      menu.setDestructive({ value: props.value, label: props.children })
+      onCleanup(() => menu.setDestructive(undefined))
+    }
+    const inside = children(() => props.children)
+    return (
+      <Box
+        role="menuitem"
+        tabindex={0}
+        aria-disabled={props.disabled ? "true" : undefined}
+        onClick={() => !props.disabled && menu.select(props.value)}
+        onKeyDown={(event) => (event.key === "Enter" || event.key === " ") && !props.disabled && menu.select(props.value)}
+        style={[look.item, props.destructive && look.destructive, props.disabled && look.disabled]}
+      >
+        {inside.toArray().map((part) => (typeof part === "string" ? <Text>{part}</Text> : part))}
+      </Box>
+    )
   },
-  Item: (props) => {
-    const own = useContext(Own)
-    let item: HTMLElement | undefined
-    onSettled(() => {
-      if (!props.destructive || !item) return
-      own?.setDestructive(item)
-      return () => own?.setDestructive((now) => (now === item ? undefined : now))
-    })
-    return <Ark.Item {...omit(props, "destructive")} ref={(element: HTMLElement) => (item = element)} data-destructive={props.destructive ? "" : undefined} />
-  },
+  Separator: (_props: {}) => <Box role="separator" style={look.separator} />,
+  /** Items under a small heading, as iOS's menus group them. */
+  Group: (props: { label: JSX.Element; children?: JSX.Element }) => (
+    <Box role="group" aria-label={typeof props.label === "string" ? props.label : undefined}>
+      <Text aria-hidden="true" style={look.label}>
+        {props.label}
+      </Text>
+      {props.children}
+    </Box>
+  ),
 }
 
-/// What a menu's parts share beyond Zag's: its `destructive` item, and what selects an item as pressing it does.
-const Own = createContext<{ destructive: () => HTMLElement | undefined; setDestructive: (item: HTMLElement | undefined | ((now: HTMLElement | undefined) => HTMLElement | undefined)) => void; select: (value: string) => void }>()

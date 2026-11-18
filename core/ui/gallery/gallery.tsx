@@ -2,8 +2,10 @@
 // one looks is checked against, before and after, on the DOM and on a native host. `bun app.js gallery <out>` in
 // core/ui builds it as an app's page is built; nothing here calls a tool.
 import { createListCollection } from "ui"
-import { Badge, Box, Button, Checkbox, Empty, Field, Icon, Input, List, Menu, Problem, RadioGroup, render, Row, Screen, Search, Section, Select, Skeleton, Spinner, Status, Steps, Switch, Text } from "ui"
+import { createSignal } from "solid-js"
+import { Alert, Badge, Box, Button, Sheet, Checkbox, Empty, Field, Icon, Input, List, Menu, Problem, RadioGroup, render, Row, Screen, Search, Section, Select, Skeleton, Spinner, Status, Steps, Switch, Text } from "ui"
 
+const [over, setOver] = createSignal<"sheet" | "alert">()
 const fruits = createListCollection({ items: [{ value: "apple", label: "Apple" }, { value: "pear", label: "Pear" }] })
 
 render(() => (
@@ -36,6 +38,32 @@ render(() => (
         <Badge variant="outline">Beta</Badge>
         <Spinner />
       </Box>
+    </Section>
+    <Section heading="Over the page">
+      <Box style={{ flexDirection: "row", gap: 8 }}>
+        <Button variant="outline" onClick={() => setOver("sheet")}>Open Sheet</Button>
+        <Button variant="outline" onClick={() => setOver("alert")}>Open Alert</Button>
+        <Menu.Root>
+          <Menu.Trigger aria-label="Open Menu" />
+          <Menu.Positioner>
+            <Menu.Content>
+              <Menu.Group label="Install for">
+                <Menu.Item value="me">Just Me</Menu.Item>
+                <Menu.Item value="family">Family</Menu.Item>
+              </Menu.Group>
+              <Menu.Separator />
+              <Menu.Item value="rename">Rename</Menu.Item>
+              <Menu.Item value="off" disabled>Turn Off</Menu.Item>
+              <Menu.Item value="delete" destructive>Delete</Menu.Item>
+            </Menu.Content>
+          </Menu.Positioner>
+        </Menu.Root>
+      </Box>
+      <Sheet heading="Add Note" open={over() === "sheet"} onClose={() => setOver()}>
+        <Text>What a sheet holds, which scrolls where it's taller than the window allows.</Text>
+        <Button>Save</Button>
+      </Sheet>
+      <Alert heading="Vault wants to use a key" text="Sent only to api.github.com." open={over() === "alert"} onClose={() => setOver()} action={<><Button variant="outline" onClick={() => setOver()}>Don't Allow</Button><Button onClick={() => setOver()}>Allow</Button></>} />
     </Section>
     <Section heading="List">
       <List>

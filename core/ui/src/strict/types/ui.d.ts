@@ -109,6 +109,9 @@ export type PathProps = Pick<Semantics, "role" | "aria-label" | "aria-hidden"> &
 }
 export declare function Path(props: PathProps): Element
 
+/** What's drawn over the whole window, over the page: a sheet, a menu. A `modal` one makes everything else inert. */
+export declare function Layer(props: { modal?: boolean; children?: Element }): Element
+
 /** What an `Input`'s or a `Search`'s `onInput` is told: what's in it now. */
 export type Typed = {
   currentTarget: { value: string }
@@ -168,7 +171,9 @@ export type ButtonProps = {
   loading?: boolean
   disabled?: boolean
   "aria-label"?: string
-  onClick?: () => void
+  "aria-haspopup"?: "menu" | "dialog" | "listbox"
+  "aria-expanded"?: "true" | "false"
+  onClick?: (event: Located) => void
   /** Where it sits in what it's in, the only part of its look a caller changes. */
   style?: Styles<"marginTop" | "marginBottom" | "marginStart" | "marginEnd" | "alignSelf" | "flexGrow">
   children?: Element
