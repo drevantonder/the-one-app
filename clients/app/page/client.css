@@ -158,6 +158,28 @@ iframe[inert] {
 [hidden] {
   display: none !important;
 }
+/* What the window shows of itself comes and goes as a short fade, as iOS's own do: its launch screen into the Home
+   Screen, Updating, and over an app, "Updated" and what didn't open. The launch screen is there from the first
+   paint, as the device's own was, so only what shows later fades in. */
+#state,
+#state > *,
+#page-problem,
+#update {
+  transition:
+    opacity var(--move-settle) var(--ease-settle),
+    display var(--move-settle) allow-discrete;
+}
+:is(#state, #state > *, #page-problem, #update)[hidden] {
+  opacity: 0;
+}
+@starting-style {
+  #state:has(> #mark[hidden]),
+  #state > :not(#mark, #steps),
+  #page-problem,
+  #update {
+    opacity: 0;
+  }
+}
 
 /* While the window moves between the launcher and an app (client.js's `moves`), both frames are seen and take taps,
    the one that moves over the other above it. */
