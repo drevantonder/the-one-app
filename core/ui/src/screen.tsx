@@ -209,11 +209,13 @@ function Heading(props: { level: number; "aria-hidden"?: "true"; style: Paramete
 
 /// `<Section heading="This week">...</Section>`: a part of a screen under a small grey heading.
 export function Section(props: { heading?: JSX.Element; children?: JSX.Element }) {
-  const grouped = useContext(ListStyle) === "insetGrouped"
+  // Grouped cards head their groups, and so does a sidebar under a finger, which is drawn as them.
+  const style = useContext(ListStyle)
+  const grouped = () => style === "insetGrouped" || (style === "sidebar" && touch())
   return (
-    <Box style={[look.section, grouped && look.groupedSection]}>
+    <Box style={[look.section, grouped() && look.groupedSection]}>
       <Show when={props.heading}>
-        <Heading level={2} style={[look.heading, touch() && look.touchHeading, grouped && look.groupedHeading]}>
+        <Heading level={2} style={[look.heading, touch() && look.touchHeading, grouped() && look.groupedHeading]}>
           {props.heading}
         </Heading>
       </Show>

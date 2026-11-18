@@ -6,6 +6,7 @@ import { Box, EditableText, Path, Text } from "#primitives"
 import { touch } from "#bridge"
 import type { EditableTextProps, Keyed } from "./strict/primitives.tsx"
 import { Icon } from "./button.tsx"
+import { ListStyle } from "./list.tsx"
 import { messages } from "./words.ts"
 import { styles, type Styles } from "./styles.ts"
 import { tokens } from "./tokens.ts"
@@ -38,6 +39,8 @@ const look = styles({
   lines: { height: "auto", minHeight: tokens.grid[16], paddingBlock: tokens.grid[2] },
   search: { position: "relative", maxWidth: tokens.length.readable },
   searchText: { paddingStart: tokens.length.control, paddingEnd: tokens.length.control },
+  // A sidebar's search is a pill, as macOS's and Raycast's Settings' are.
+  pill: { borderRadius: tokens.radius.full },
   magnifier: { position: "absolute", top: 0, bottom: 0, start: tokens.grid[3], justifyContent: "center", color: tokens.colour.secondaryLabel, pointerEvents: "none" },
   clear: {
     position: "absolute",
@@ -196,6 +199,7 @@ function Boxed(props: InputProps & { multiline?: boolean; own?: Styles }) {
 /// what's typed to find something in a list: a field with a magnifier and, once there's text, a button that clears
 /// it. Escape clears it too. The list it narrows is the app's.
 export function Search(props: Omit<InputProps, "type" | "style">) {
+  const sidebar = useContext(ListStyle) === "sidebar"
   const [own, setOwn] = createSignal("")
   const text = () => props.value ?? own()
   const typed = (value: string) => {
@@ -218,7 +222,7 @@ export function Search(props: Omit<InputProps, "type" | "style">) {
         value={text()}
         onInput={(event) => typed(event.currentTarget.value)}
         onKeyDown={keyed}
-        own={look.searchText}
+        own={[look.searchText, sidebar && look.pill]}
       />
       <Box style={look.magnifier}>
         <Icon name="magnifying-glass" />
