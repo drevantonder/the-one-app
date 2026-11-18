@@ -268,7 +268,8 @@ defmodule OneCore.Call do
   @doc """
   Every app anyone in the network has deployed, whether or not it's installed for anyone now: each one's `app`,
   as its artifact's name, what a person reads of it where it's listed (`OneCore.Apps.Version.listing/1`: its
-  `title`, `icon`, `subtitle`, `about`, `category`, `entrypoints` and `widgets`) as its latest version has it. An app store is drawn from it. Whoever may see one reads and installs it, and so does everyone in a group or
+  `title`, `icon`, `subtitle`, `about`, `category`, `entrypoints` and `widgets`) as its latest version has it, and the
+  git repo it was deployed from (`repo`), the same for each copy of the same app. An app store is drawn from it. Whoever may see one reads and installs it, and so does everyone in a group or
   the network it's in use for (`OneCore.Tools`).
   """
   def deployed(%__MODULE__{}), do: OneCore.Apps.Deploy.deployed()

@@ -103,6 +103,32 @@ defmodule OneCore.Apps.Store do
 
   def trusted?(%{} = about), do: about["trusted"] != false
 
+  @doc """
+  Whether two apps are copies of the same app: the same artifact, or the same name deployed from the same git repo,
+  whose folder `apps/<name>` both take their updates from (`OneCore.Apps.Lifecycle.check/1`). An app that says no
+  repo is the same only as itself, so a different app that happens to share a name never is.
+  """
+  def same?(artifact, artifact), do: true
+
+  def same?(one, other),
+    do: Path.basename(one) == Path.basename(other) and repo(one) != nil and repo(one) == repo(other)
+
+  @doc """
+  The git repo an app was deployed from, as its latest version says (`about/1`), or as a deploy's `from` says,
+  written one way however it was given: `owner/repo` for GitHub's, as `one install` takes it. `nil` for none.
+  """
+  def repo(artifact) when is_binary(artifact), do: repo(about(artifact)["from"])
+
+  def repo(%{"source" => source}) when is_binary(source),
+    do:
+      source
+      |> String.downcase()
+      |> String.trim_trailing("/")
+      |> String.replace_suffix(".git", "")
+      |> String.replace(~r{^(https?://|ssh://git@|git@)github\.com[/:]}, "")
+
+  def repo(_from), do: nil
+
   @doc "A deploy's `files`, with the id that makes its set of files its own (`keep/8`)."
   def deployment(files), do: Map.put(files, @deployment, Base.encode16(:crypto.strong_rand_bytes(16), case: :lower))
 

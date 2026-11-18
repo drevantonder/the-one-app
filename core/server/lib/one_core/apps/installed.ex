@@ -7,11 +7,18 @@ defmodule OneCore.Apps.Installed do
                                                                     recently deleted ─restored─► installed
       installing ─fails, or its task ends first, as its server stopping ends it─► not installed (why · Try Again)
       not installed ─Deploy─► installed (whoever it's for deployed it, so it's theirs)
+      installed, recently deleted or not installed ─Superseded─► not installed: the network's has it now
+                                                               └─► as it was, of a group's copy, the broader one
 
   with a `stage` inside installing: its `requirements` installed first, then `fetching` its code, `building` it and
   `starting` it. Whatever's installed runs the app's one version, the same everywhere it's installed: its updates
   and whether it's trusted are the app's (`OneCore.Apps.Update`). Recently Deleted (the app soft-delete) purges and
   restores it, with what it kept, by its own clock and its own Restore: this machine has neither.
+
+  An app has one copy (`OneCore.Apps.Lifecycle.supersede/2`). Installed or deployed for a group or the network, the
+  same app's copy that only those it covers have is superseded by it: each of that copy's records goes into the
+  network's install, which acts for them now, or moves to a group's copy, where it was in its life; and whoever it was
+  for keeps their data, which is kept by the name it's installed by, not by its artifact.
 
   Each owner's are one blob, `<owner>/installs`, with each app's record by the name it's installed by: the
   `app` it is, its `state`, its `stage`, `why` it isn't installed where it failed to be, when it was `deleted`, who
@@ -79,6 +86,8 @@ defmodule OneCore.Apps.Installed do
   now, `nil` for none, or `{:error, why}` where the table hasn't that move. The app's artifact is told.
   """
   def change(owner, name, event) do
+    was = read(owner)[name]
+
     changed =
       Artifact.update(%Artifact{prefix: "#{owner}/"}, @blob, fn was ->
         kept = if was, do: JSON.decode!(was), else: %{"apps" => read(owner)}
@@ -93,6 +102,8 @@ defmodule OneCore.Apps.Installed do
 
     record = JSON.decode!(changed)["apps"][name]
     if record, do: marked(owner, record)
+    # A record that moved to another artifact isn't the one before's any more.
+    if was && was["app"] != (record || %{})["app"], do: unmarked(was["app"], owner)
     record
   catch
     {__MODULE__, why} -> {:error, why}
@@ -127,7 +138,10 @@ defmodule OneCore.Apps.Installed do
   `{:stage, stage}`, `:done`, `{:fail, why}`, `{:uninstall, group}`, `:restore` and `:purge` (Recently Deleted's), where
   `group` says what went to Recently Deleted together, as one: `%{"with" => names}` on the one uninstalled, and
   `%{"deleted_with" => name}` on each app that required it; and
-  `{:deployed, app, by}`, where whoever it's installed for deployed it, which is theirs, installed at once.
+  `{:deployed, app, by}`, where whoever it's installed for deployed it, which is theirs, installed at once; and
+  `{:superseded, app, inside}`, where `app` is the broader copy of the same app: `inside` where it's installed for
+  someone whose apps theirs are found before (the network), whose install it's in now, so the record goes, and
+  otherwise (a group's) it moves to `app` as it is. One that's installing finishes first.
   """
   def move(record, event, at)
 
@@ -162,6 +176,13 @@ defmodule OneCore.Apps.Installed do
       do: {:ok, %{record | "app" => app}},
       else: {:ok, (record || %{}) |> Map.merge(%{"app" => app, "by" => by}) |> moved("installed")}
   end
+
+  def move(%{"state" => state}, {:superseded, _app, true}, _at) when state in ~w(installed recently_deleted not_installed),
+    do: {:ok, nil}
+
+  def move(%{"state" => state} = record, {:superseded, app, false}, _at)
+      when state in ~w(installed recently_deleted not_installed),
+      do: {:ok, %{record | "app" => app}}
 
   def move(record, event, {owner, name}), do: {:error, refused(record, event, name, owner)}
 

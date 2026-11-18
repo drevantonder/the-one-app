@@ -204,8 +204,14 @@ defmodule OneCore.Apps.Lifecycle do
             ran(owner, [{artifact, number, {:ok, version}}])
 
             case Apps.versions([owner]) do
-              %{^name => %{artifact: ^artifact}} -> move(owner, name, :done)
-              _ -> failed(owner, name, "It didn't start.")
+              %{^name => %{artifact: ^artifact}} ->
+                with %{} = record <- move(owner, name, :done) do
+                  supersede(owner, artifact)
+                  record
+                end
+
+              _ ->
+                failed(owner, name, "It didn't start.")
             end
           else
             {:error, why} -> failed(owner, name, why)
@@ -502,14 +508,74 @@ defmodule OneCore.Apps.Lifecycle do
   end
 
   @doc """
+  Keeps one copy of an app (`OneCore.Apps.Store.same?/2`). Once the app `artifact` is installed for `owner`, a group or
+  the network, each other copy of the same app that only those `owner` covers have, its members or everyone, is
+  superseded by it (`OneCore.Apps.Installed`'s Superseded): where the install for `owner` is one their calls find
+  after their own, the network's, each of the copy's records is in it now, and it acts for them; where it isn't, a
+  group's, which runs only for the group, the record moves to `artifact`. Then the copy, installed for nobody, goes to
+  Recently Deleted (the hook `superseded`), so it comes back as it was if it's restored. What each keeps with it stays
+  theirs, where it is, since it's kept by the name the app is installed by, not its artifact. A copy someone outside
+  `owner` has stays; so does one whose record is installing, until it's done, and one whose data `artifact` wouldn't
+  read, since it keeps everyone's together (`own/0` is `:installed`). Gives the copies superseded.
+  """
+  def supersede(owner, artifact) do
+    {at, version} = Enum.find(Apps.versions([owner]), {nil, nil}, fn {_name, version} -> version.artifact == artifact end)
+
+    copies =
+      if version && (owner == @network or String.starts_with?(owner, "groups/")),
+        do: for(%{app: copy} <- Deploy.deployed(), copy != artifact, Store.same?(copy, artifact), do: copy),
+        else: []
+
+    for copy <- copies,
+        holders = Enum.uniq([Store.whose(copy) | Installed.installed_for(copy)]),
+        Enum.all?(holders, &covers?(owner, &1)),
+        records = for(holder <- holders, {name, %{"app" => ^copy}} <- Installed.read(holder), do: {holder, name}),
+        not Enum.any?(records, fn {holder, name} -> stranded?(owner, holder, name, version) end),
+        moved = for({holder, name} <- records, do: superseded(owner, at, version, holder, name)),
+        not Enum.any?(moved, &match?({:error, _why}, &1)) do
+      Hooks.observe("superseded", %{"app" => copy, "by" => artifact}, {nil, Store.whose(copy)})
+      copy
+    end
+  end
+
+  # Moves `holder`'s record of `name` into the install of the same app for `owner` as `at`, or to its artifact.
+  defp superseded(owner, at, version, holder, name) do
+    inside = owner in Apps.chain(holder)
+
+    with record when not is_tuple(record) <- move(holder, name, {:superseded, version.artifact, inside}) do
+      if inside and holder != owner and version.own == :subject, do: Installed.subject(owner, at, holder)
+      ran(holder)
+      record
+    end
+  end
+
+  # Whether what `holder` kept with their copy is what the install for `owner` wouldn't read for them: it keeps
+  # everyone's together, as its own.
+  defp stranded?(owner, holder, name, version),
+    do: owner in Apps.chain(holder) and version.own == :installed and Bucket.list("#{holder}/own/#{name}/") != []
+
+  # Whether what's installed for `owner` is for `who` too: the network is for everyone, and a group for its members.
+  defp covers?(owner, owner), do: true
+  defp covers?(@network, _who), do: true
+
+  defp covers?("groups/" <> _ = group, "users/" <> _ = who),
+    do: Hooks.validate("reach", %{"who" => who, "relation" => "member", "artifact" => group}, {who, group}) == :ok
+
+  defp covers?(_owner, _who), do: false
+
+  @doc """
   Moves on what's installed for `owner` that the clock moves, as a server acting for them does once a day: one whose
-  task is over has failed, and one that failed isn't in use for them.
+  task is over has failed, one that failed isn't in use for them, and one installed supersedes the narrower copies of
+  itself (`supersede/2`).
   """
   def reconcile(owner) do
     for {name, record} <- Installed.read(owner) do
       case record do
         %{"state" => "installing"} ->
           settled(owner, name, record)
+
+        %{"state" => "installed", "app" => artifact} ->
+          supersede(owner, artifact)
 
         # Its server may have stopped between its failing and saying so in its artifact.
         %{"state" => "not_installed", "app" => artifact} ->

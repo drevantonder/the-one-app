@@ -234,6 +234,13 @@ defmodule OneCore.App.Manifest do
      them: what the same app installed for everyone reads for them stays. An app that keeps what's deleted takes
      those along, as one.
      """},
+    {"superseded", :observe,
+     """
+     An app has one copy, and this one was superseded by the broader copy of the same app, installed or deployed for
+     a group or the network that covers everyone who had it: each of its installs moved to that one. It's about the
+     `app` superseded, by its artifact's name, installed for nobody now, and `by`, the copy that stays. An app that
+     keeps what's deleted takes it along, so it comes back as it was if it's restored.
+     """},
     {"joined", :observe,
      """
      A server was let act for someone. It's about the `server`'s key, who it's `for`, and `by`, the key of the

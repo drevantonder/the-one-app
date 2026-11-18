@@ -366,6 +366,8 @@ defmodule OneCore.Tools do
       website. It answers with those apps. One nobody has installed is removed as anything deleted is, by the app that keeps what's deleted,
       where there is one (soft-delete).
       `one install <owner>/<repo> --app <name>` deploys one from a git repo, saying where it came from (`from`).
+      Where a group or the network has a member's own copy of it, deploying it for them from the same repo makes it
+      theirs: the one copy from then on, and the member's goes to Recently Deleted, keeping what they kept.
       `one deploy --files-from <folder>` in a git repo says so too, and, as `git push` refuses a non-fast-forward, is
       refused where the live version came from a commit that yours doesn't contain, unless `--force`.
       """,
@@ -500,7 +502,9 @@ defmodule OneCore.Tools do
       one of them to, themselves. Its code runs on a server of whoever it's for, unless it's untrusted.
       `one install <owner>/<repo> --app <name>` installs one from a git repo instead, as a copy of your own.
       It's the same app, with its one version and whether it's trusted, for everyone who has it, with an artifact of
-      its own for whoever it's installed for: a copy is another app. One in use for a group you're in or for the
+      its own for whoever it's installed for. An app has one copy: installed for a group or the network, it supersedes
+      the copies of the same app (the same name from the same git repo) that only they have, whose installs move to
+      it, keeping what each person kept, and which go to Recently Deleted. One in use for a group you're in or for the
       network is open to you; one that isn't, whoever it belongs to shares with you first, as a viewer. The apps it
       requires are installed for you first.
       """,

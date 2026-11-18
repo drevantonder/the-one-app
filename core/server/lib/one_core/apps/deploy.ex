@@ -9,7 +9,7 @@ defmodule OneCore.Apps.Deploy do
   alias OneCore.Call.State
   alias OneCore.{Entrypoint, Bucket, Builds, Sandbox, Server, Servers}
   alias OneCore.Apps
-  alias OneCore.Apps.{Installed, Calls, LoadedVersion, Precompiled, Store, Version}
+  alias OneCore.Apps.{Installed, Calls, Lifecycle, LoadedVersion, Precompiled, Store, Version}
   alias OneCore.Apps.Version.Compile
 
   @network "network"
@@ -50,7 +50,7 @@ defmodule OneCore.Apps.Deploy do
 
   @doc "Deploys as `deploy/5` does, installing it for `owner` only where `install?` says so of the version."
   def deploy(owner, name, files, from, trusted, install?) do
-    artifact = Apps.app(owner, name) || "#{owner}/apps/#{name}"
+    artifact = target(owner, name, from)
     trusted = if trusted == :stored, do: Store.trusted?(artifact), else: trusted != false
     # What it commits against, read before it writes anything (`OneCore.Apps.Store.keep/8`).
     was = Store.latest(artifact)
@@ -90,8 +90,32 @@ defmodule OneCore.Apps.Deploy do
     end
   end
 
+  # The app a deploy for `owner` makes a version of: the one `name` is for them, or a new one of theirs. Where that's
+  # a narrower owner's copy, a person's own installed for everyone, and what's deployed comes from the same git repo,
+  # it's the same app, and it moves to them: it's deployed as theirs, `<owner>/apps/<name>`, which supersedes the
+  # copy (`OneCore.Apps.Lifecycle.supersede/2`), so the app has one copy, the broadest.
+  defp target(owner, name, from) do
+    ours = "#{owner}/apps/#{name}"
+
+    case Apps.app(owner, name) do
+      nil ->
+        ours
+
+      app ->
+        moves = broader?(owner, Store.whose(app)) and Store.repo(from) != nil and Store.repo(from) == Store.repo(app)
+        if moves, do: ours, else: app
+    end
+  end
+
+  # Whether `owner` is broader than `whose`: the network than a group or a user, and a group than a user.
+  defp broader?(owner, whose), do: breadth(owner) > breadth(whose)
+  defp breadth(@network), do: 2
+  defp breadth("groups/" <> _), do: 1
+  defp breadth(_user), do: 0
+
   # After `latest`: its author has it installed by the installation machine's own move for an app they deployed, and
-  # the servers of whoever has it take it, this one at once, with the version the deploy loaded.
+  # the servers of whoever has it take it, this one at once, with the version the deploy loaded. It supersedes the
+  # narrower copies of itself.
   defp committed(owner, name, number, %Version{artifact: artifact} = version, install) do
     forget()
     moved = if install, do: Installed.change(owner, name, {:deployed, artifact, nil}), else: %{}
@@ -99,8 +123,12 @@ defmodule OneCore.Apps.Deploy do
     Server.notify_servers(Enum.uniq([owner | Installed.installed_for(artifact)]))
 
     case moved do
-      {:error, why} -> {:error, "#{name} is deployed as version #{number}, and isn't installed for #{owner}: #{why}"}
-      _ -> :ok
+      {:error, why} ->
+        {:error, "#{name} is deployed as version #{number}, and isn't installed for #{owner}: #{why}"}
+
+      _ ->
+        if install, do: Lifecycle.supersede(owner, artifact)
+        :ok
     end
   end
 
@@ -232,9 +260,10 @@ defmodule OneCore.Apps.Deploy do
 
   @doc """
   Every app anyone has deployed, as its latest version has it: `[%{app: artifact, description: its skill's,
-  tools: [names], requires: %{name => why}, trusted: ..., title: ..., icon: ..., subtitle: ..., about: ...,
+  tools: [names], requires: %{name => why}, trusted: ..., repo: ..., title: ..., icon: ..., subtitle: ..., about: ...,
   category: ..., entrypoints: [...], widgets: [...]}]`, what a person reads of it as `Version.listing/1` gives it, its
-  requirements as `requires/0` gives them, and whether it's trusted. It's what lists every app there is, whether or
+  requirements as `requires/0` gives them, whether it's trusted, and the git repo it was deployed from
+  (`Store.repo/1`), which tells copies of the same app (`Store.same?/2`). It's what lists every app there is, whether or
   not anyone has it now. One that was removed, by the app that keeps what's deleted, has no latest version, and
   isn't listed.
 
@@ -277,7 +306,7 @@ defmodule OneCore.Apps.Deploy do
     deployed =
       for {{artifact, about}, {:ok, description, _tag}} <- Enum.zip(abouts, described),
           {:ok, listing} <- [Version.listed(artifact, description)],
-          do: Map.merge(listing, %{app: artifact, trusted: Store.trusted?(about)})
+          do: Map.merge(listing, %{app: artifact, trusted: Store.trusted?(about), repo: Store.repo(about["from"])})
 
     :ets.insert(__MODULE__, {:deployed, deployed, System.monotonic_time(:millisecond)})
     deployed
