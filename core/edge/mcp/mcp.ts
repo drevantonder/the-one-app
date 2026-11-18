@@ -303,13 +303,13 @@ async function nobodys(answer: Response) {
 
 /**
  * Where a signed-in browser's apps' files are, `/apps/<its session, signed>`, and the device it is: its session, as
- * Devices lists it. An app's page has an origin of its own in the web client, so its files are asked for with no
+ * Devices lists it, and its key, as a server knows it, which it fills a tool's `device` input in with. An app's page has an origin of its own in the web client, so its files are asked for with no
  * cookie, and the signed session in their address says whose they are.
  */
 async function apps(request: Request, env: Env) {
   const who = await signedIn(request, env);
   if ("refused" in who || !who.apps) return Response.json({ error: "Sign in" }, { status: 401 });
-  return withCookies(Response.json({ apps: who.apps, device: who.session }), who.cookies);
+  return withCookies(Response.json({ apps: who.apps, device: who.session, key: who.device }), who.cookies);
 }
 
 /** `answer`, with the cookies of a browser's session the app that signs people in renewed, if it did. */

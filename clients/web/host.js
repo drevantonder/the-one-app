@@ -29,11 +29,14 @@ export const listen = (event, handler) => {
 /** @param {string} event @param {unknown} payload */
 const emit = (event, payload) => hearing.get(event)?.forEach((handler) => handler({ payload }))
 
-/// Where this browser's apps' files are, and this browser as Devices lists it, once it's signed in (`start`).
+/// Where this browser's apps' files are, this browser as Devices lists it, and its key as a server knows it, once
+/// it's signed in (`start`).
 /** @type {string} */
 let apps
 /** @type {string} */
 let device
+/** @type {string} */
+let key
 /// Whether its network answers, as the app's client says it (`Connection` in core/client), how soon it's asked
 /// again while it doesn't, and that ask.
 /** @type {import("../app/page/host.js").Connection} */
@@ -57,6 +60,7 @@ const CLIENT = { name: "one-web" }
 /// signed in goes to sign in again.
 /** @param {string} method @param {Record<string, any>} params @returns {Promise<any>} */
 async function mcp(method, params = {}) {
+  if (method === "tools/call") params = await filled(params)
   // The span this request is, carried as W3C's `traceparent`, which the edge's span and a server's are under, so a
   // trace runs from this browser on. It's reported if it fails or is slow, as the app's client reports its own
   // (`span` in `core/client`), but not when it failed for no server answering while none was already: that's the
@@ -98,11 +102,12 @@ const reports = () => JSON.parse(localStorage.getItem(REPORTS) ?? "[]")
 /** @param {Record<string, any>} record */
 function report(record) {
   const stored = reports()
-  const browser = ["Edge", "Firefox", "Chrome", "Safari"].find((name) => navigator.userAgent.includes(name === "Edge" ? "Edg/" : `${name}/`))
-  const attributes = { ...record.attributes, "service.name": "web", "user_agent.name": browser, "os.type": os() }
+  const attributes = { ...record.attributes, "service.name": "web", "user_agent.name": browser(), "os.type": os() }
   if (stored.length < 300) localStorage.setItem(REPORTS, JSON.stringify([...stored, { ...record, attributes, time: Date.now() }]))
   if (connection === "online") sendReports()
 }
+/// Which browser this is, by its name.
+const browser = () => ["Edge", "Firefox", "Chrome", "Safari"].find((name) => navigator.userAgent.includes(name === "Edge" ? "Edg/" : `${name}/`))
 /// The device's operating system, by the names the app's client reports its own by (Rust's `env::consts::OS`). An
 /// iPad's Safari says it's a Mac, but has a touch screen.
 const os = () => {
@@ -199,7 +204,7 @@ async function read(view, method, params) {
 
 /// The tools a server lists, by which a call is known to only read: asked for as soon as this browser is signed in,
 /// as nearly every app's first call waits on it, and again once something may have changed them.
-/** @type {Promise<{ name: string, annotations?: { readOnlyHint?: boolean } }[]> | undefined} */
+/** @type {Promise<{ name: string, annotations?: { readOnlyHint?: boolean }, inputSchema?: { properties?: Record<string, { format?: string }> } }[]> | undefined} */
 let tools
 const listTools = () =>
   (tools = mcp("tools/list").then(
@@ -209,6 +214,20 @@ const listTools = () =>
       throw error
     },
   ))
+
+/// A tool's call with the inputs a device fills in itself filled in where none is given, as the app's client fills
+/// them (`core/client/src/resolve.rs`): `device`, this browser's key as a server knows it, and `device-name`, what
+/// it's called. The rest are filled in by what only a device holds, which a browser doesn't.
+/** @param {Record<string, any>} params */
+async function filled(params) {
+  const listed = /** @type {Awaited<NonNullable<typeof tools>>} */ (await (tools ?? listTools()))
+  const tool = listed.find(({ name }) => name === params.name)
+  /** @type {Record<string, string>} */
+  const own = { device: key, "device-name": called() }
+  const fills = Object.entries(tool?.inputSchema?.properties ?? {}).filter(([name, says]) => says.format && own[says.format] && params.arguments?.[name] === undefined)
+  if (!fills.length) return params
+  return { ...params, arguments: { ...params.arguments, ...Object.fromEntries(fills.map(([name, says]) => [name, own[/** @type {string} */ (says.format)]])) } }
+}
 
 /// Whether asking `method` only reads. A tool does when the server's list of tools says so.
 /** @param {string} view @param {string} method @param {Record<string, unknown>} params */
@@ -271,7 +290,7 @@ async function opened() {
     answered(false)
     return { session: { state: "opening" } }
   }
-  ;({ apps, device } = await response.json())
+  ;({ apps, device, key } = await response.json())
   answered(true)
   listTools().catch(() => {})
   return { session: { state: "signedIn" } }
@@ -281,6 +300,12 @@ async function opening() {
   const now = await opened()
   if (now.session.state !== "opening") emit("session", { seq: ++told, ...now })
 }
+
+/// Each operating system, as a person calls it, by `os()`'s names: what a browser is called, beside its own name.
+/** @type {Record<string, string>} */
+const SYSTEMS = { ios: "iPhone", android: "Android", macos: "Mac", windows: "Windows", chromeos: "ChromeOS", linux: "Linux" }
+/// What this browser is called, as Sign-In calls it: "Chrome on Linux".
+const called = () => `${browser() ?? "Browser"} on ${SYSTEMS[os() ?? ""] ?? "this device"}`
 
 /// What a browser can't do, as it's said where it's asked.
 /** @param {string} why */
