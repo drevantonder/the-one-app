@@ -41,6 +41,14 @@ defmodule HomeScreen do
     ]
   end
 
+  # Colour Mode is Settings' Appearance (`settings.sections`), drawn by this app's component.
+  @impl true
+  def hooks, do: ["settings.sections"]
+
+  @impl true
+  def hook("settings.sections", _about, _call),
+    do: [%{in: "settings", name: "Appearance", component: "appearance", icon: "client/colour-mode.svg", group: "general", order: 2}]
+
   @impl true
   def tools do
     none = %{type: "object", properties: %{}}

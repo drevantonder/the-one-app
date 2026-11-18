@@ -1,4 +1,7 @@
 {
+  "exports": {
+    "./appearance": "./appearance.tsx"
+  },
   "dependencies": {
     "xstate": "5.33.3"
   }
