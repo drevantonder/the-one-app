@@ -122,18 +122,13 @@ defmodule OneCore.Sandbox do
 
   # Starts a program behind the wall, which the app `sandbox` is, with its pipes as a port this process owns.
   defp walled(program, arguments, policy) do
-    case Apps.run(["network"], "sandbox", fn _at, versions ->
-           versions["sandbox"].app.start(program, arguments, policy)
-         end) do
-      {:ok, port} ->
-        {:ok, port}
-
-      {:error, "There's no app named sandbox"} ->
-        {:error, "An untrusted app runs in a sandbox, which needs the app sandbox installed for the network"}
-
-      {:error, why} ->
-        {:error, why}
-    end
+    with {:error, why} <-
+           Apps.run(["network"], "sandbox", fn _at, versions ->
+             versions["sandbox"].app.start(program, arguments, policy)
+           end),
+         do:
+           {:error,
+            "An untrusted app runs behind the app sandbox, installed for the network, which didn't start it: #{why}"}
   end
 
   @doc """
@@ -537,12 +532,8 @@ defmodule OneCore.Sandbox do
   def handle_event(:info, :replied, _state, data), do: {:keep_state, %{data | requests: data.requests - 1}}
 
   @impl true
-  def terminate(_why, _state, %{port: port}) when is_port(port) do
-    kill(port)
-    Port.close(port)
-  catch
-    _, _ -> :ok
-  end
+  # Its port closes as this process ends, but that doesn't end the program behind it, which is killed.
+  def terminate(_why, _state, %{port: port}) when is_port(port), do: kill(port)
 
   def terminate(_why, _state, _data), do: :ok
 

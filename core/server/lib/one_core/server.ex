@@ -265,8 +265,7 @@ defmodule OneCore.Server do
 
   @doc """
   Looks in the bucket at what other servers put there for `owner`: the servers on their list, what each acts for
-  and the services it runs, and what's installed for them, running the latest version of each app. Looking at the
-  network invalidates whose each device is too, which the network's apps say. Its clients are told if an app
+  and the services it runs, and what's installed for them, running the latest version of each app. Its clients are told if an app
   changed.
 
   A server looks at someone when it's told to, when it's asked for them and last looked more than five minutes
@@ -276,7 +275,6 @@ defmodule OneCore.Server do
   def reload(owner) do
     Servers.reload(owner)
     OneCore.Apps.Deploy.forget()
-    if owner == "network", do: Hooks.invalidate(["device"])
     if Apps.sync(owner), do: changed([owner])
     # An app updated by a server elsewhere may require what isn't installed for them yet.
     if Servers.here?(owner), do: Task.start(fn -> OneCore.Apps.Lifecycle.required(owner) end)
