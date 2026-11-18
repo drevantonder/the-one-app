@@ -113,9 +113,14 @@ export default class extends WorkerEntrypoint<UpdaterEnv> {
     return new Response("The network's updater is reached through its relay", { status: 404 });
   }
 
-  /** Tells the network's one updater `input`, with who's here: what it is, and what to tell every server, if anything. */
-  update(input: Input, presence: Record<string, Presence | null>) {
-    return this.env.UPDATER.get(this.env.UPDATER.idFromName("network")).update(input, presence);
+  /**
+   * Tells the network's one updater `input`, with who's here: what it is, and what to tell every server, if anything.
+   * What the Durable Object answered is disposed of once it's copied: Workers RPC keeps a call's context open until
+   * its result is, so one left to the caller's end was cancelled with it (`using`, as Cloudflare's RPC lifecycle has it).
+   */
+  async update(input: Input, presence: Record<string, Presence | null>): Promise<{ status: object; broadcast?: string }> {
+    using answered = await this.env.UPDATER.get(this.env.UPDATER.idFromName("network")).update(input, presence);
+    return { status: answered.status, ...(answered.broadcast && { broadcast: answered.broadcast }) };
   }
 }
 

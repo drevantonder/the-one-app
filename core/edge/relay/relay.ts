@@ -302,8 +302,11 @@ export default class extends WorkerEntrypoint<RelayEnv> {
   }
 
   /** Whether each of `keys`, servers' and devices', is here (`Presence`), or `null` for one never seen. */
-  presence(keys: string[]): Promise<Record<string, Presence | null>> {
-    return this.relay((relay) => relay.presence(keys));
+  async presence(keys: string[]): Promise<Record<string, Presence | null>> {
+    // Disposed of once it's copied, so the relay's call ends as it answers (`updater.ts`). Its own keys are copied,
+    // not its disposer.
+    using presence = await this.relay((relay) => relay.presence(keys));
+    return Object.fromEntries(Object.entries(presence));
   }
 
   /**
@@ -458,9 +461,10 @@ export class Relay extends DurableObject<RelayEnv> {
     const [presence, versions] = await Promise.all([this.presence(keys), this.versions(keys)]);
     const servers = Object.fromEntries(keys.map((key) => [key, presence[key] && { ...presence[key], version: versions[key] }]));
     try {
-      const { status, broadcast } = await this.env.UPDATER.update(input, servers);
-      if (broadcast) this.notify(broadcast);
-      return status;
+      // Disposed of as it's read, so the updater's call ends as it answers (`updater.ts`).
+      using answered = await this.env.UPDATER.update(input, servers);
+      if (answered.broadcast) this.notify(answered.broadcast);
+      return answered.status;
     } catch (error) {
       console.log(JSON.stringify({ telemetry: { start: Date.now(), end: Date.now(), attributes: { "one.updater": Object.keys(input)[0] }, error: `The network's updater wasn't told: ${error}` } }));
       return null;

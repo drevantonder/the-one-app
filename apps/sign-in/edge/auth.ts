@@ -524,7 +524,7 @@ export async function asked(auth: Auth, origin: string, { ask, who: name, buildi
       adapter.findMany<{ id: string; name?: string; createdAt: Date }>({ model: "passkey", where: mine }),
     ]);
     // Whether an app is connected to the relay, which says when it was last seen otherwise.
-    const presence = await env.RELAY.presence(devices.filter(({ kind }) => kind === "app").map(({ id }) => id));
+    using presence = await env.RELAY.presence(devices.filter(({ kind }) => kind === "app").map(({ id }) => id));
     const when = (id: string) => {
       const here = presence[id];
       return here ? { connected: here.connected, ...(here.last_seen && { last_seen: new Date(here.last_seen) }) } : {};
