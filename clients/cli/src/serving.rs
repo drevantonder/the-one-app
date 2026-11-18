@@ -42,6 +42,12 @@
 //!     so no other server, or an app it runs, has a say: every server can take a build at once
 //! ```
 //!
+//! What it does is reported for Telemetry as it happens (`Reports`), kept on the device until a server is told, so a
+//! server that won't start is reported by its machine all the same: each start, with how long it took and why the
+//! run before ended (`one.server.start`, an error where it didn't start); each stop, an error where it wasn't asked
+//! (`one.server.stop`); ending unasked `LOOP_ENDS` times within `LOOP` (`one.server.crash_loop`); and each update,
+//! how it was taken, how long it took, and whether it was kept, went back or stayed, and why (`one.server.update`).
+//!
 //! A server that missed a release, as one asleep or away during it, is caught up by its network's update once it's
 //! back, which it hears of as the server says it's running, or can reach the network again, at the network's edge.
 //!
@@ -58,7 +64,7 @@ use std::collections::VecDeque;
 use std::path::{Path, PathBuf};
 use std::process::Stdio;
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use std::{env, fs};
 
 use anyhow::{Context, Result, bail, ensure};
@@ -83,6 +89,11 @@ const START: Duration = Duration::from_secs(180);
 const STOP: Duration = Duration::from_secs(20);
 /// How many of the last lines a build said are kept to say why it didn't start.
 const LAST: usize = 5;
+/// A server that ends without being asked `LOOP_ENDS` times within `LOOP` is in a crash loop.
+const LOOP: Duration = Duration::from_secs(600);
+const LOOP_ENDS: usize = 3;
+/// How long what's reported has to reach a server as this program ends, before it's kept for next time.
+const TELLING: Duration = Duration::from_secs(5);
 
 /// Where joining or leaving is: each has the one way out on failure, back to where it began.
 #[derive(Serialize, Deserialize, Clone, Copy, PartialEq, Debug)]
@@ -120,6 +131,13 @@ struct Record {
     next: Option<Pair>,
     /// Why the last update didn't take, which the server says until one does.
     went_back: Option<String>,
+    /// Why the server's last run ended, as this program saw it, which its next start reports.
+    ended: Option<String>,
+    /// When it ended without being asked within the last `LOOP`, in milliseconds since 1970.
+    #[serde(default)]
+    unasked: Vec<u64>,
+    /// When the update being taken by restarting was told to go, in milliseconds since 1970.
+    update_began: Option<u64>,
 }
 
 impl Record {
@@ -174,6 +192,73 @@ impl Record {
         self.server_update_stage = None;
     }
 
+    /// The server ended without being asked to, for `why`, which its next start reports. Gives how many times it has
+    /// within `LOOP`.
+    fn ended_unasked(&mut self, why: &str) -> usize {
+        let now = now();
+        self.unasked.retain(|at| now.saturating_sub(*at) < LOOP.as_millis() as u64);
+        self.unasked.push(now);
+        self.ended = Some(why.to_owned());
+        self.unasked.len()
+    }
+}
+
+/// What this program reports of its server for Telemetry (`Client::report`), each record saying which server.
+struct Reports {
+    client: Arc<Client>,
+    server: String,
+}
+
+impl Reports {
+    fn report(&self, mut record: Value) {
+        record["attributes"]["one.server"] = json!(self.server);
+        self.client.report(record);
+    }
+
+    /// The server ended without being asked to, `ends` times within `LOOP`: a stop that failed, and a crash loop once
+    /// it's `LOOP_ENDS`.
+    fn ended_unasked(&self, record: Value, ends: usize, why: &str) {
+        self.report(record);
+        if ends >= LOOP_ENDS {
+            let minutes = LOOP.as_secs() / 60;
+            self.report(json!({"name": "one.server.crash_loop", "error": format!("It ended {ends} times in {minutes} minutes without being asked. The last: {why}")}));
+        }
+    }
+
+    /// An update, as it ended: how it was taken, from which build to which, how long it took, and `went_back` or
+    /// `stayed` with why where it wasn't kept.
+    fn update(&self, method: Option<UpdateMethod>, from: &str, to: &str, took: Option<Duration>, error: Option<String>, outcome: &str) {
+        let mut record = json!({"name": "one.server.update", "attributes": {
+            "one.update.from": from, "one.update.to": to, "one.update.outcome": outcome,
+            "one.update.method": match method { Some(UpdateMethod::HotLoad) => "hot_load", Some(UpdateMethod::Restart) => "restart", None => "none" },
+        }});
+        if let Some(took) = took {
+            record["took"] = json!(took.as_secs_f64() * 1000.0);
+        }
+        if let Some(error) = error {
+            record["error"] = json!(error);
+        }
+        self.report(record);
+    }
+
+    /// Tells a server now what's reported: asking any server anything has the client tell it what's kept, and what
+    /// no server answers stays kept on the device for next time. Ending, it waits for that, within `TELLING`.
+    async fn tell(&self, ending: bool) {
+        let _ = timeout(TELLING, self.client.request("ping", json!({}))).await;
+        if ending {
+            let _ = timeout(TELLING, self.client.close()).await;
+        }
+    }
+}
+
+/// Now, in milliseconds since 1970.
+fn now() -> u64 {
+    SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_millis() as u64
+}
+
+/// How long since `at`, in milliseconds since 1970.
+fn since(at: u64) -> Duration {
+    Duration::from_millis(now().saturating_sub(at))
 }
 
 /// Makes this device a server of whoever it's for: its person, or the group or network `ONE_SUBJECT` names. It's put
@@ -422,11 +507,20 @@ pub fn server() -> Option<Value> {
 
 /// Runs this device's server, as the system runs it: starts the build the record says, within `START`, keeps or goes
 /// back from a pair being verified, and takes the latest builds when the server's asked. It ends when the server
-/// stops, or when the system stops it, after the server has, and non-zero for the system to start it again.
+/// stops, or when the system stops it, after the server has, and non-zero for the system to start it again. What it
+/// reported is told before it ends, a failure most of all.
 pub async fn run(client: Arc<Client>) -> Result<()> {
+    let here = Here::of(&client::home()?);
+    client.service("server");
+    let reports = Reports { client: client.clone(), server: here.key()? };
+    let ran = serve(&client, &here, &reports).await;
+    reports.tell(true).await;
+    ran
+}
+
+async fn serve(client: &Arc<Client>, here: &Here, reports: &Reports) -> Result<()> {
     // The program's own file, named before an update replaces what's there.
     let program = env::current_exe()?;
-    let here = Here::of(&client::home()?);
     let key = here.key()?;
     let address = client.address().context("A server is for a network with an address, and this one has none.")?;
     let who = env::var("ONE_SUBJECT").context("ONE_SUBJECT says who the server is for")?;
@@ -488,7 +582,11 @@ pub async fn run(client: Arc<Client>) -> Result<()> {
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .kill_on_drop(true);
-    let mut server = server.spawn().with_context(|| format!("couldn't start the build {}", pair.build))?;
+    let spawned = Instant::now();
+    let mut server = match server.spawn() {
+        Ok(server) => server,
+        Err(error) => return didnt_start(&here, reports, &pair, verifying, &program, spawned, format!("it couldn't be run: {error}")).await,
+    };
     // Everything it starts goes when it does, or when this does.
     #[cfg(windows)]
     let _contained = system::contain(&server)?;
@@ -516,11 +614,14 @@ pub async fn run(client: Arc<Client>) -> Result<()> {
     if let Err(why) = started.await {
         let _ = server.kill().await;
         let why = format!("{why:#}. Its last lines: {}", Vec::from(last).join(" | "));
-        ensure!(verifying, "The server on {} didn't start: {why}", pair.build);
-        here.change(|record| record.go_back(why))?;
-        return Err(again(&program));
+        return didnt_start(&here, reports, &pair, verifying, &program, spawned, why).await;
     }
+    let mut restarted = None;
+    let mut began = None;
+    let from = record.current.as_ref().map(|current| current.build.clone()).unwrap_or_default();
     record = here.change(|record| {
+        restarted = record.ended.take();
+        began = record.update_began.take();
         if verifying {
             let was = record.current.as_ref().map(|was| was.build.clone()).unwrap_or_default();
             record.took(pair.clone());
@@ -534,21 +635,74 @@ pub async fn run(client: Arc<Client>) -> Result<()> {
     here.prune(&record)?;
     tell(&mut server, &record.told(ServerDaemonStatus::Running)).await;
     system::ready(&key)?;
+    // A start says why the run before ended: what this program saw, or nothing where it saw nothing, as when it was
+    // killed or its machine lost power.
+    let why = restarted.unwrap_or_else(|| "It ended without saying why: killed, or its machine lost power".to_owned());
+    reports.report(json!({"name": "one.server.start", "took": spawned.elapsed().as_secs_f64() * 1000.0,
+        "attributes": {"one.server.build": pair.build, "one.server.restart.reason": why}}));
+    if verifying {
+        reports.update(record.update_method, &from, &pair.build, began.map(since), None, "took");
+    }
+    reports.tell(false).await;
 
     let stopping = stopped();
     tokio::pin!(stopping);
     loop {
         tokio::select! {
             heard = said.recv() => match heard {
-                Some(Heard { said: Some(Said::Prepare), .. }) => prepare(&here, &mut record, &mut server, &mut said, &program).await?,
-                Some(Heard { said: Some(Said::Go), .. }) => go(&here, &mut record, &mut server, &mut said, &program).await?,
+                Some(Heard { said: Some(Said::Prepare), .. }) => prepare(&here, &mut record, &mut server, &mut said, &program, reports).await?,
+                Some(Heard { said: Some(Said::Go), .. }) => go(&here, &mut record, &mut server, &mut said, &program, reports).await?,
                 Some(_) => {}
-                None => bail!("The server stopped: {}", server.wait().await?),
+                None => {
+                    let why = format!("The server stopped: {}", server.wait().await?);
+                    let mut ends = 0;
+                    here.change(|record| ends = record.ended_unasked(&why))?;
+                    reports.ended_unasked(json!({"name": "one.server.stop", "error": why}), ends, &why);
+                    bail!(why)
+                }
             },
             // `one serve off` says it's leaving before it has the system stop this, and the server drains.
-            _ = &mut stopping => return stop(&mut server, &here.read()?.told(ServerDaemonStatus::Stopping)).await,
+            _ = &mut stopping => {
+                let why = "The system stopped it";
+                here.change(|record| record.ended = Some(why.to_owned()))?;
+                reports.report(json!({"name": "one.server.stop", "attributes": {"one.server.stop.reason": why}}));
+                return stop(&mut server, &here.read()?.told(ServerDaemonStatus::Stopping)).await
+            }
         }
     }
+}
+
+/// The server on `pair` didn't start, for `why`: it's reported, and a pair being verified is gone back from, and the
+/// one before started in its place. One that isn't fails, for the system to start it again.
+async fn didnt_start(
+    here: &Here,
+    reports: &Reports,
+    pair: &Pair,
+    verifying: bool,
+    program: &Path,
+    spawned: Instant,
+    why: String,
+) -> Result<()> {
+    let failed = format!("The server on {} didn't start: {why}", pair.build);
+    let mut ends = 0;
+    let mut began = None;
+    let was = here.change(|record| {
+        ends = record.ended_unasked(&failed);
+        began = record.update_began.take();
+        if verifying {
+            record.go_back(&why);
+        }
+    })?;
+    let start = json!({"name": "one.server.start", "took": spawned.elapsed().as_secs_f64() * 1000.0, "error": failed,
+        "attributes": {"one.server.build": pair.build}});
+    reports.ended_unasked(start, ends, &failed);
+    if verifying {
+        let from = was.current.as_ref().map(|current| current.build.as_str()).unwrap_or_default();
+        reports.update(was.update_method, from, &pair.build, began.map(since), Some(why), "went_back");
+    }
+    ensure!(verifying, failed);
+    reports.tell(true).await;
+    Err(again(program))
 }
 
 /// A line the server said, and the message it is, if it's one: only a line on its output is.
@@ -639,6 +793,7 @@ async fn prepare(
     server: &mut Child,
     said: &mut UnboundedReceiver<Heard>,
     program: &Path,
+    reports: &Reports,
 ) -> Result<()> {
     *record = here
         .save(server, |record| {
@@ -663,9 +818,10 @@ async fn prepare(
                 record.went_back = None;
             }
             Err(error) => {
+                let to = record.next.take().map(|next| next.build).unwrap_or_default();
+                reports.update(None, &on, &to, None, Some(format!("{error:#}")), "stayed");
                 record.server_update_status = ServerUpdateStatus::UpToDate;
                 record.server_update_stage = None;
-                record.next = None;
                 record.went(format!("Stayed on {on}: {error:#}"));
             }
         })
@@ -719,6 +875,7 @@ async fn go(
     server: &mut Child,
     said: &mut UnboundedReceiver<Heard>,
     program: &Path,
+    reports: &Reports,
 ) -> Result<()> {
     if record.server_update_status != ServerUpdateStatus::Checked {
         return Ok(());
@@ -730,6 +887,8 @@ async fn go(
         *record = here.change(|record| {
             record.server_update_status = ServerUpdateStatus::Verifying;
             record.server_update_stage = Some(ServerUpdateStage::Starting);
+            record.update_began = Some(now());
+            record.ended = Some(format!("It restarted to take {}", next.build));
         })?;
         stop(server, &record.told(ServerDaemonStatus::Stopping)).await?;
         if next.program != current.program {
@@ -748,8 +907,10 @@ async fn go(
         .await?;
     // Loaded is kept: its code loaded and every process it stopped started again on it (`OneCore.Release.load/1`).
     // Saying it's up to date on it says so at the network's edge, which is what the network's updater waits for.
+    let began = Instant::now();
     let loaded = if next.build == current.build { Ok(()) } else { load(server, said, &here.build(&next.build)).await };
     if let Err(why) = loaded {
+        reports.update(record.update_method, &current.build, &next.build, Some(began.elapsed()), Some(format!("{why:#}")), "went_back");
         *record = here.change(|record| record.go_back(format!("{why:#}")))?;
         let back = match server.try_wait()? {
             None => load(server, said, &here.build(&current.build)).await,
@@ -767,6 +928,7 @@ async fn go(
             println!("one {} is in place, and runs the server from its next start.", next.program);
         }
         *record = here.change(|record| record.took(next.clone()))?;
+        reports.update(record.update_method, &current.build, &next.build, Some(began.elapsed()), None, "took");
         if next.build != current.build {
             println!("The server is on the build {} now, from {}, loaded while it ran.", next.build, current.build);
         }
