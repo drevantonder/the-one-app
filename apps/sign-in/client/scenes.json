@@ -317,5 +317,34 @@
   "Connect": {
     "like": "Server",
     "page": "client/connect.html"
+  },
+  "Devices, on a phone": {
+    "like": "Devices",
+    "touch": true,
+    "size": [
+      390,
+      844
+    ]
+  },
+  "A device, on a phone": {
+    "like": "Devices",
+    "touch": true,
+    "size": [
+      390,
+      844
+    ],
+    "taps": [
+      "Alex's Laptop"
+    ]
+  },
+  "A device": {
+    "like": "Devices",
+    "taps": [
+      "Alex's Laptop"
+    ],
+    "size": [
+      900,
+      780
+    ]
   }
 }

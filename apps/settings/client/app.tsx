@@ -4,7 +4,7 @@
 // component (`settings.sections`), drawn here if the app is trusted and in a frame of its own if it isn't, as the
 // Vault draws an item type's. Updates and an app's page are Settings' own.
 import { createMemo, createSignal, Errored, For, Loading, refresh, Show } from "solid-js"
-import { Badge, Box, Button, call, changed, client, component, confirm, Empty, Image, link, List, open as opening, Problem, render, Row, Screen, Search, Section, Skeleton, Spinner, Split, styles, Switch, Text, toast, tokens, viewport } from "ui"
+import { Badge, Box, Button, call, changed, client, component, confirm, Empty, History, Image, link, List, ListStyle, open as opening, Problem, render, Row, Screen, Search, Section, Skeleton, Spinner, Split, styles, Switch, Text, toast, tokens, viewport } from "ui"
 
 /** What an app adds to Settings, as `settings_sections` answers it. */
 interface Added {
@@ -85,11 +85,14 @@ const look = styles({
     width: tokens.grid[8],
     height: tokens.grid[8],
     borderRadius: tokens.radius.full,
-    backgroundColor: tokens.colour.tile,
+    backgroundColor: tokens.colour.tertiaryLabel,
     alignItems: "center",
     justifyContent: "center",
   },
-  initials: { font: tokens.type.small, color: tokens.colour.secondaryLabel },
+  initials: { font: tokens.type.small, fontWeight: tokens.weight.semibold, color: tokens.colour.onAccent },
+  /// Why an app can't be removed, under Remove App.
+  why: { font: tokens.type.small, color: tokens.colour.secondaryLabel, paddingInline: tokens.grid[3] },
+  personName: { fontWeight: tokens.weight.semibold },
   readable: { gap: tokens.length.gutter, maxWidth: tokens.length.readable },
 })
 
@@ -123,7 +126,7 @@ function Sidebar(props: { shown?: string }) {
   const wanted = (name: string) => name.toLowerCase().includes(words().trim().toLowerCase())
   const of = (group: Added["group"]) => sidebar(added()).filter((one) => one.group === group && wanted(one.name!))
   const person = () => sidebar(added()).find((one) => one.group === "you")
-  const choose = (id: string) => setOpen(id)
+  const choose = (id: string) => choosing(id)
   const row = (section: () => Added) => (
     <Row
       start={<Tile icon={section().icon ?? section().app_icon} />}
@@ -136,7 +139,7 @@ function Sidebar(props: { shown?: string }) {
   const own = () => wanted("Updates")
   return (
     <Screen heading="Settings">
-      <Search placeholder="Search" aria-label="Search Settings" value={words()} onInput={(event) => setWords(event.currentTarget.value)} />
+      <Search placeholder="Search settings…" aria-label="Search Settings" value={words()} onInput={(event) => setWords(event.currentTarget.value)} />
       <Show when={person() && !words()}>
         <List>
           <Row
@@ -145,7 +148,7 @@ function Sidebar(props: { shown?: string }) {
                 <Text style={look.initials}>{initials(me()?.called ?? "You")}</Text>
               </Box>
             }
-            heading={me()?.called ?? "You"}
+            heading={<Text style={look.personName}>{me()?.called ?? "You"}</Text>}
             text={person()!.name!}
             current={props.shown === person()!.id}
             onClick={() => choose(person()!.id)}
@@ -386,12 +389,14 @@ function AppPage(props: { app: App }) {
         </Show>
       </List>
       <Groups in="app" app={app().name} />
-      <Box style={look.readable}>
-        <Button variant="destructive" disabled={!app().removes} onClick={remove}>Remove App</Button>
-        <Show when={!app().removes}>
-          <Text style={look.initials}>{`This is ${whose(app().for)}'s, and you're not one of its owners.`}</Text>
-        </Show>
-      </Box>
+      <List>
+        <Row
+          heading="Remove App…"
+          text={app().removes ? "It's in Recently Deleted for 30 days, with what it kept." : `This is ${whose(app().for)}'s, and you're not one of its owners.`}
+          destructive={app().removes}
+          onClick={app().removes ? remove : undefined}
+        />
+      </List>
     </Screen>
   )
 }
@@ -399,12 +404,41 @@ function AppPage(props: { app: App }) {
 function Settings() {
   // Beside the sidebar, the first section shows until another is chosen, as Raycast's Settings opens on General.
   const shown = () => open() ?? (beside() ? (sidebar(added()).find((one) => one.group !== "you")?.id ?? "updates") : undefined)
+  // Back and Forward go through what was open beside the sidebar, as macOS's System Settings' do.
+  const [past, setPast] = createSignal<string[]>([])
+  const [future, setFuture] = createSignal<string[]>([])
+  const history = () => ({
+    back: past().length ? () => (setFuture([shown()!, ...future()]), setOpen(past().at(-1)), setPast(past().slice(0, -1))) : undefined,
+    forward: future().length ? () => (setPast([...past(), shown()!]), setOpen(future()[0]), setFuture(future().slice(1))) : undefined,
+  })
+  choosing = (id) => {
+    if (id === shown()) return
+    if (beside() && shown()) setPast([...past(), shown()!])
+    setFuture([])
+    setOpen(id)
+  }
+  // A section is a page of settings, its lists grouped cards, as Raycast's Settings and iOS's Settings draw them.
   return (
-    <Split open={!!open()} onClose={() => setOpen()} detail={<Show when={shown()} keyed fallback={<Empty>Choose a section.</Empty>}>{(id) => <Detail id={id} />}</Show>}>
+    <ListStyle value="sidebar">
+    <Split
+      open={!!open()}
+      onClose={() => setOpen()}
+      detail={
+        <ListStyle value="insetGrouped">
+          <History value={beside() ? history() : null}>
+            <Show when={shown()} keyed fallback={<Empty>Choose a section.</Empty>}>{(id) => <Detail id={id} />}</Show>
+          </History>
+        </ListStyle>
+      }
+    >
       <Sidebar shown={shown()} />
     </Split>
+    </ListStyle>
   )
 }
+
+/// Opens a section beside the sidebar, which Back then goes back from (`Settings`).
+let choosing = (id: string) => void setOpen(id)
 
 render(() => (
   <Errored fallback={(error, retry) => <Screen heading="Settings"><Problem heading="Can't show Settings" text={error() as Error} action={<Button onClick={() => ([added, apps].forEach(refresh), retry())}>Try Again</Button>} /></Screen>}>

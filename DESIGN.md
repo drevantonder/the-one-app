@@ -102,6 +102,7 @@ What users see, as the project's owner decided it. Only their decisions are here
 - Settings is one app, in Utilities, where every app brings its settings, as Raycast's Settings has its extensions'; Andre's pick of the mockup (`design/settings-mockups.html`). Its sidebar: the search, whoever's looking with Sign In & Security under their name, the sections in three groups, then every app they have, A to Z, with an Update pill where one's ready.
 - What an app adds to another section's page (a device's) is a group headed by that app's icon and name, so it's clear which app brings what.
 - On a phone the sidebar is cards, and each section is pushed as a page, as iOS's Settings.
+- Its anatomy is the mockup's, not only its values (18 Nov): a sidebar of rows with their icons; a section's page as grouped cards of 46px rows, each heading over its grey line, with headings above the cards and destructive actions as red rows; Back and Forward in one pill beside the title; no footer pills or Actions ⌘K, as Raycast's Settings window has none.
 
 ## Vault
 

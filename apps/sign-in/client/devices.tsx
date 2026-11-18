@@ -8,7 +8,7 @@
 // each stage. Above them all are the devices waiting to sign in as whoever's looking, each let in by typing the
 // number it shows, as Microsoft Authenticator has it, or blocked.
 import { createMemo, createSignal, Errored, For, Loading, refresh, Show } from "solid-js"
-import { Box, Button, call, changed, client, confirm, Empty, Field, haptic, Input, link, List, Problem, Row, Screen, Section, seen, Sheet, Skeleton, Spinner, Split, Steps, styles, Switch, Text, toast, tokens, type Element } from "ui"
+import { Badge, Box, Button, call, changed, client, confirm, Empty, Field, haptic, Icon, Input, link, List, Problem, Row, Screen, Section, seen, Sheet, Skeleton, Spinner, Split, Steps, styles, Switch, Text, toast, tokens, type Element } from "ui"
 import { on } from "./mine.tsx"
 
 /** A build a machine is on, as `builds` answers it. */
@@ -178,7 +178,7 @@ function about(thing: Thing) {
     server: () => presence(thing),
   }[thing.kind ?? "server"]()
   const checked = thing.server_update_status === "checked" && updates.checked.row
-  return [what, checked || (thing.behind && "Update ready")].filter(Boolean).join(" · ")
+  return [what, checked].filter(Boolean).join(" · ")
 }
 
 /// Does something, says why if it couldn't be done, and shows everything as it is after. → whether it was done.
@@ -243,6 +243,7 @@ const look = styles({
   readable: { gap: tokens.length.gutter, maxWidth: tokens.length.readable },
   answer: { gap: tokens.length.gutter },
   muted: { color: tokens.colour.secondaryLabel },
+  glyph: { width: tokens.length.control, height: tokens.length.control, alignItems: "center", justifyContent: "center", borderRadius: tokens.radius.small, backgroundColor: tokens.colour.quinaryLabel, color: tokens.colour.secondaryLabel },
   /// The number typed, big as figures are.
   number: { height: "auto", paddingBlock: tokens.grid[4], font: tokens.type.largeTitle, fontVariantNumeric: "tabular-nums", textAlign: "center" },
 })
@@ -283,26 +284,30 @@ function Detail(props: { thing: Thing; all: All; groups?: Groups }) {
           </Box>
         </Section>
       </Show>
-      <List>
-        <Show when={thing().behind && thing().here}>
-          <Row heading="Update ready" end={<Button variant="outline" loading={working() === thing().id} onClick={press(thing(), update)}>Update</Button>} />
-        </Show>
-        <Show when={thing().here && thing().kind === "app"}>
-          <Row
-            heading="Server"
-            text={serving() === undefined ? "Runs your apps from this device whenever it's on." : <><Spinner /> {serving() ? "Starting…" : "Stopping…"}</>}
-            end={<Switch aria-label="Server" checked={serving() ?? !!props.all.here.server} disabled={serving() !== undefined} onChange={(event) => serve(event.currentTarget.checked)} />}
-          />
-        </Show>
-        <Show when={!thing().kind && thing().server_membership}>
-          <Row heading="Server" text={capital(thing().server_membership!)} />
-          <Row heading="Server daemon" text={capital(thing().server_daemon_status ?? "stopped")} />
-          <Row
-            heading={thing().server_ready ? "Ready" : "Not ready"}
-            text={thing().server_ready ? "Calls go to it." : thing().server_ready_reason === "stopped" && thing().last_seen ? `Stopped, ${seen(thing().last_seen!)}` : capital(thing().server_ready_reason ?? "stopped")}
-          />
-        </Show>
-      </List>
+      <Show when={(thing().behind && thing().here) || (thing().here && thing().kind === "app") || (!thing().kind && thing().server_membership)}>
+        <Section heading="Options">
+          <List>
+            <Show when={thing().behind && thing().here}>
+              <Row heading="Update ready" end={<Button variant="outline" loading={working() === thing().id} onClick={press(thing(), update)}>Update</Button>} />
+            </Show>
+            <Show when={thing().here && thing().kind === "app"}>
+              <Row
+                heading="Server"
+                text={serving() === undefined ? "Runs your apps from this device whenever it's on." : <><Spinner /> {serving() ? "Starting…" : "Stopping…"}</>}
+                end={<Switch aria-label="Server" checked={serving() ?? !!props.all.here.server} disabled={serving() !== undefined} onChange={(event) => serve(event.currentTarget.checked)} />}
+              />
+            </Show>
+            <Show when={!thing().kind && thing().server_membership}>
+              <Row heading="Server" text={capital(thing().server_membership!)} />
+              <Row heading="Server daemon" text={capital(thing().server_daemon_status ?? "stopped")} />
+              <Row
+                heading={thing().server_ready ? "Ready" : "Not ready"}
+                text={thing().server_ready ? "Calls go to it." : thing().server_ready_reason === "stopped" && thing().last_seen ? `Stopped, ${seen(thing().last_seen!)}` : capital(thing().server_ready_reason ?? "stopped")}
+              />
+            </Show>
+          </List>
+        </Section>
+      </Show>
       <Show when={server()?.services?.length}>
         <Section heading="Services">
           <List>
@@ -342,11 +347,16 @@ function Detail(props: { thing: Thing; all: All; groups?: Groups }) {
           <Show when={thing().build}>{(build) => <Row heading="Build" end={<Text style={look.muted}>{build().split("+")[0]}</Text>} />}</Show>
         </List>
       </Section>
-      <Box style={look.readable}>
-        <Show when={thing().kind} fallback={<Button variant="destructive" onClick={() => removeServer(thing())}>Remove</Button>}>
-          <Button variant={thing().here ? "outline" : "destructive"} onClick={() => remove(thing())}>{thing().here ? "Sign Out" : "Remove"}</Button>
+      <List>
+        <Show when={thing().kind} fallback={<Row heading="Remove Server…" text="It stops running your apps." destructive onClick={() => removeServer(thing())} />}>
+          <Row
+            heading={thing().here ? "Sign Out…" : "Remove Device…"}
+            text={thing().here ? "It stops acting as you." : "Signs it out of your network."}
+            destructive
+            onClick={() => remove(thing())}
+          />
         </Show>
-      </Box>
+      </List>
     </Screen>
   )
 }
@@ -419,9 +429,27 @@ function Answer(props: { device?: Waiting }) {
   )
 }
 
+/// What kind of thing a device is, by its glyph in a well, as Raycast's Settings draws one: an app on a device, a
+/// browser, an assistant or a server.
+const glyphs = { app: "devices", browser: "globe", assistant: "robot", server: "hard-drives" } as const
+const Glyph = (props: { thing: Thing }) => (
+  <Box style={look.glyph}>
+    <Icon name={glyphs[props.thing.kind ?? "server"]} />
+  </Box>
+)
+
 function Things(props: { all: All; groups?: Groups }) {
   const opened = () => [...props.all.devices, ...props.all.servers].find((thing) => thing.id === open())
-  const row = (thing: () => Thing) => <Row heading={thing().name ?? "Server"} text={about(thing())} current={open() === thing().id} onClick={() => setOpen(thing().id)} />
+  const row = (thing: () => Thing) => (
+    <Row
+      start={<Glyph thing={thing()} />}
+      heading={thing().name ?? "Server"}
+      text={about(thing())}
+      end={<Show when={thing().behind && !underway(thing())}><Badge variant="secondary">Update</Badge></Show>}
+      current={open() === thing().id}
+      onClick={() => setOpen(thing().id)}
+    />
+  )
   const said = () => props.all.update && softwareUpdate(props.all.update)
   return (
     <Split open={!!opened()} onClose={() => setOpen()} detail={<Show when={opened()}><Detail thing={opened()!} all={props.all} groups={props.groups} /></Show>}>
@@ -443,11 +471,13 @@ function Things(props: { all: All; groups?: Groups }) {
           </Section>
         </Show>
         <Answer device={props.all.waiting.find((device) => device.request === answering())} />
-        <Show when={props.all.devices.length} fallback={<Empty>No connected apps yet.</Empty>}>
-          <List>
-            <For each={props.all.devices} keyed={(device) => device.id}>{row}</For>
-          </List>
-        </Show>
+        <Section heading="Your Devices">
+          <Show when={props.all.devices.length} fallback={<Empty>No connected apps yet.</Empty>}>
+            <List>
+              <For each={props.all.devices} keyed={(device) => device.id}>{row}</For>
+            </List>
+          </Show>
+        </Section>
         <Show when={props.all.servers.length}>
           <Section heading="Servers">
             <List>

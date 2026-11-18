@@ -911,17 +911,19 @@ export default function Accounts() {
               </Show>
               <Show when={creatable("accounts").length}>
                 <List>
-                  <Row heading="Sign in to your accounts for your apps." action={<Button variant="secondary" onClick={addAccount}>Add Account</Button>} />
+                  <Row heading="Sign in to your accounts for your apps." end={<Button variant="secondary" onClick={addAccount}>Add Account</Button>} />
                 </List>
               </Show>
             </Section>
             <Section heading="Passwords and Keys">
-              <Show when={items("passwords").length} fallback={<Empty>None yet.</Empty>}>
+              <Show when={items("passwords").length}>
                 <List>
                   <For each={items("passwords")} keyed={(item) => item.artifact}>{(item) => <ItemRow item={item()} />}</For>
                 </List>
               </Show>
-              <Button variant="secondary" onClick={() => setSheet({ kind: "field" })}>Add Password or Key</Button>
+              <List>
+                <Row heading="Keep a password or key for your apps and agents." end={<Button variant="secondary" onClick={() => setSheet({ kind: "field" })}>Add</Button>} />
+              </List>
             </Section>
             <For each={sections()}>
               {(section) => (
@@ -939,9 +941,16 @@ export default function Accounts() {
                     </List>
                   </Show>
                   <Show when={creatable(`section:${section}`).length}>
-                    <Button variant="secondary" onClick={() => (creatable(`section:${section}`).length === 1 ? create(creatable(`section:${section}`)[0]) : setSheet({ kind: "add", section }))}>
-                      {`Add ${titled(typeIn(section)!.name)}`}
-                    </Button>
+                    <List>
+                      <Row
+                        heading={`Add a ${typeIn(section)!.name} for your apps.`}
+                        end={
+                          <Button variant="secondary" onClick={() => (creatable(`section:${section}`).length === 1 ? create(creatable(`section:${section}`)[0]) : setSheet({ kind: "add", section }))}>
+                            {`Add ${titled(typeIn(section)!.name)}`}
+                          </Button>
+                        }
+                      />
+                    </List>
                   </Show>
                 </Section>
               )}
