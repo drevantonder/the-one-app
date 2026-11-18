@@ -234,7 +234,7 @@ defmodule OneCore.Apps.Installed do
   @doc "Whether `name` is one an app is installed by: `:ok`, or `{:error, why}`."
   def named(name) do
     cond do
-      not (is_binary(name) and name =~ ~r/^[a-z][a-z0-9-]*$/) ->
+      not (is_binary(name) and name =~ ~r/^[a-z][a-z0-9-]*\z/) ->
         {:error, "An app's name is lowercase letters, digits and hyphens, starting with a letter"}
 
       # A client finds the UI library where it finds an app's files, by this name (`OneCore.Mcp`), and apps' icons

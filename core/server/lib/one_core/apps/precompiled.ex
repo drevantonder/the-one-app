@@ -55,7 +55,7 @@ defmodule OneCore.Apps.Precompiled do
   defp build?({path, %{"url" => "https://" <> _, "sha256" => sha256}}),
     do:
       path =~ ~r{^server/(nif/[^/.]+/[a-z0-9_]+-[a-z0-9_]+\.so|bin/[^/.]+/[a-z0-9_]+-[a-z0-9_]+)$} and
-        sha256 =~ ~r/^[0-9a-f]{64}$/
+        sha256 =~ ~r/^[0-9a-f]{64}\z/
 
   defp build?(_), do: false
 

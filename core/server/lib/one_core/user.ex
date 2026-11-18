@@ -177,7 +177,7 @@ defmodule OneCore.User do
 
   @doc "Whether `name` is a user's or a group's name, after `users/` or `groups/`: `:ok`, or `{:error, why}`."
   def named(name) do
-    if is_binary(name) and name =~ ~r/^[a-z][a-z0-9-]*$/,
+    if is_binary(name) and name =~ ~r/^[a-z][a-z0-9-]*\z/,
       do: :ok,
       else: {:error, "A user's name is lowercase letters, digits and hyphens, starting with a letter"}
   end

@@ -180,7 +180,10 @@ defmodule OneCore.Call do
   """
   def make(%__MODULE__{subject: subject, actor: actor, app: app} = call, id) do
     if User.link?(subject), do: raise("A sharing link's holder makes nothing: nothing in a network is theirs")
-    if not (is_binary(id) and id =~ ~r/^[A-Za-z0-9_-]+$/), do: raise(ArgumentError, "an id is letters, digits, _ and -")
+
+    if not (is_binary(id) and id =~ ~r/^[A-Za-z0-9_-]+\z/),
+      do: raise(ArgumentError, "an id is letters, digits, _ and -")
+
     %Artifact{prefix: "#{subject}/made/#{app}/#{id}/", reached: {call.who, {actor, subject}, "owner"}}
   end
 

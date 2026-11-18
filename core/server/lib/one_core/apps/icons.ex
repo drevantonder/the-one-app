@@ -27,7 +27,7 @@ defmodule OneCore.Apps.Icons do
   @doc "The icon at `address`, as `address/1` gave it: `{:ok, kind, data}`, or `:absent`."
   def read("ui://icons/" <> named) do
     with [hash, file] <- String.split(named, "/", parts: 2),
-         true <- hash =~ ~r/^[0-9a-f]{64}$/,
+         true <- hash =~ ~r/^[0-9a-f]{64}\z/,
          {:ok, data, _tag} <- Bucket.read("icons/#{hash}") do
       {:ok, Version.kind(file), data}
     else

@@ -716,7 +716,7 @@ defmodule OneCore.Sandbox do
     modules =
       for {name, mods} <- beams, is_map(mods), into: %{} do
         written =
-          for {module, data} <- mods, is_binary(module) and module =~ ~r/^[A-Za-z0-9_.]+$/ and is_binary(data) do
+          for {module, data} <- mods, is_binary(module) and module =~ ~r/^[A-Za-z0-9_.]+\z/ and is_binary(data) do
             File.write!(Path.join(writing, module <> ".beam"), Base.decode64!(data))
             module
           end

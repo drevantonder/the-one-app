@@ -376,7 +376,7 @@ defmodule OneCore.Mcp do
   defp result("one/token", params, from, {"users/" <> _ = by, _for}, _forwarded) do
     device = User.device(from, meta(params))
 
-    if not User.link?(by) and is_binary(device) and device =~ ~r/^[0-9a-f]{64}$/ do
+    if not User.link?(by) and is_binary(device) and device =~ ~r/^[0-9a-f]{64}\z/ do
       Task.Supervisor.start_child(OneCore.Asks, fn -> Builds.seen(by, device, params["build"]) end)
       {:ok, %{token: Edge.token(device), who: by}}
     else
