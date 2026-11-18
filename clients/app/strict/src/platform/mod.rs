@@ -395,9 +395,19 @@ impl Windows {
                 window.shown = true;
                 self.display.show(&window.native);
             }
-            // A panel put away draws nothing until it's summoned again, and a window with no surface yet (Android's view,
-            // until it's laid out) is drawn once it has one.
+            // A panel put away is drawn as its page changes, never shown, so its text is shaped, its glyphs and
+            // pictures are in the atlas and its surface has had a frame by the time it's summoned, and the frame it
+            // shows with is as quick as any after (26 to 52 ms on Linux's first summon after the app started, where
+            // later ones take 7). What moves asks for no more frames while it's away. A window with no surface yet
+            // (Android's view, until it's laid out) is drawn once it has one.
             if window.panel && !window.visible {
+                if std::mem::take(&mut window.dirty)
+                    && let (Ok(screen), Some(renderer)) = (&mut window.screen, window.renderer.as_mut())
+                {
+                    renderer.update_drawable_size(window.native.device_size());
+                    screen.paint(window.native.size(), window.native.scale(), &mut self.text, &self.atlas, &mut window.scene);
+                    renderer.draw(&window.scene);
+                }
                 continue;
             }
             let Some(renderer) = window.renderer.as_mut().filter(|_| window.dirty) else { continue };
