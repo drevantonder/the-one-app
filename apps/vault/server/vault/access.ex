@@ -36,12 +36,15 @@ defmodule Vault.Access do
 
   @doc """
   Gives `who` (`"agents"` or an app's artifact) access to an item, or with `on` false takes it away, and keeps the
-  app's tuple on the Vault in step. Gives the item.
+  app's tuple on the Vault in step. The tuple moves first, so where the permissions app refuses, the item is as it
+  was. Gives the item.
   """
   def switch(call, db, item, who, on) do
-    changed = Store.change!(db, item, &Map.update!(&1, "access", fn access -> if on, do: Enum.uniq(access ++ [who]), else: access -- [who] end))
-    if who != "agents", do: in_step(call, db, who, on)
-    changed
+    if who != "agents" do
+      if on, do: in_step(call, db, who, true), else: unshare_unless_used(call, db, item, who)
+    end
+
+    Store.change!(db, item, &Map.update!(&1, "access", fn access -> if on, do: Enum.uniq(access ++ [who]), else: access -- [who] end))
   end
 
   @doc """
@@ -54,18 +57,18 @@ defmodule Vault.Access do
     if gone == [] do
       item
     else
-      pruned = Store.change!(db, item, &Map.update!(&1, "access", fn access -> access -- gone end))
-      for who <- gone, do: share(call, "unshare", Artifact.name(db), who)
-      pruned
+      for who <- gone, do: unshare_unless_used(call, db, item, who)
+      Store.change!(db, item, &Map.update!(&1, "access", fn access -> access -- gone end))
     end
   end
 
-  @doc "Keeps an app's tuple on someone's Vault as its access says: shared while it has access to an item."
+  @doc "Shares someone's Vault with an app as it gets access to an item: the tuple it reaches it by."
   def in_step(call, db, app, true), do: share(call, "share", Artifact.name(db), app)
 
-  def in_step(call, db, app, false) do
-    if not Enum.any?(Vault.Items.all(call, db), &(app in &1["access"])), do: share(call, "unshare", Artifact.name(db), app)
-    :ok
+  # An app's tuple is taken back with its access to its last item, by the records as kept, which `prune/4` reads in turn.
+  defp unshare_unless_used(call, db, item, app) do
+    others = Enum.filter(Store.everything(call, db), &(&1["id"] != item["id"]))
+    if not Enum.any?(others, &(app in &1["access"])), do: share(call, "unshare", Artifact.name(db), app)
   end
 
   @doc "Shares someone's Vault with the app making a call, before it has an item there: the tuple it reaches it by."
@@ -77,9 +80,9 @@ defmodule Vault.Access do
 
     case Calls.call("permissions", tool, inputs, {call.actor, call.subject}) do
       {:ok, _said} -> :ok
-      {:forwarded, %{"isError" => true, "content" => [%{"text" => why} | _]}} -> if(tool == "share", do: raise(why), else: :ok)
+      {:forwarded, %{"isError" => true, "content" => [%{"text" => why} | _]}} -> raise(why)
       {:forwarded, _result} -> :ok
-      {:error, why} -> if(tool == "share", do: raise(why), else: :ok)
+      {:error, why} -> raise(why)
     end
   end
 end
