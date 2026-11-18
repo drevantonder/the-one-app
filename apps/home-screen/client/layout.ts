@@ -12,11 +12,13 @@ export const TOP_ROW = BAR + 16
 export const DOTS = 32
 /** A phone's page, which a wide window draws larger, as many side by side as fit. */
 export const PHONE = 390
-/** How much smaller a computer's launcher draws a phone's pages: two side by side across its panel. */
-export const LAUNCHER_SCALE = 0.8
-/** The launcher's search bar across its top, and its footer bar. */
-export const LAUNCHER_BAR = 52
-export const LAUNCHER_FOOT = 38
+/** The launcher's search bar across its top, as Raycast's is; the room its footer's pills float in, over its foot;
+ * and its section's heading ("Home", "Results"), as Raycast's are. */
+export const LAUNCHER_BAR = 64
+export const LAUNCHER_FOOT = 56
+export const LAUNCHER_HEADING = 30
+/** How far in from the launcher's sides the pages and rows are, as Raycast's list is. */
+export const LAUNCHER_SIDE = 8
 /** A grid's gaps, across and down, and the tallest a row is. */
 const COLUMN_GAP = 12
 const ROW_GAP = 16
@@ -45,12 +47,12 @@ export interface Room {
 
 /// The pages' room, `width` by `height`: on a wide window, a phone's pages drawn larger to suit its height, twice at
 /// most, so a bigger screen shows more pages rather than larger icons, as many whole ones side by side as fit; a
-/// launcher's smaller, two across its panel, with a hairline between them.
+/// launcher's two across its panel, as near a phone's size as fit, with a hairline between them.
 export function measure(width: number, height: number, launcher: boolean, safe: Insets): Room {
   const wide = width >= 544
-  const scale = !wide ? 1 : launcher ? LAUNCHER_SCALE : Math.max(1, Math.min(2, height / 900))
-  const [side, gap] = launcher ? [16, 0] : [32 * scale, 48 * Math.min(scale, 1.6)]
-  const fit = wide ? Math.max(1, Math.floor((width - 2 * side + gap) / (PHONE * scale + gap))) : 1
+  const scale = !wide ? 1 : launcher ? Math.min(1, (width - 2 * LAUNCHER_SIDE) / (2 * PHONE)) : Math.max(1, Math.min(2, height / 900))
+  const [side, gap] = launcher ? [LAUNCHER_SIDE, 0] : [32 * scale, 48 * Math.min(scale, 1.6)]
+  const fit = launcher && wide ? 2 : wide ? Math.max(1, Math.floor((width - 2 * side + gap) / (PHONE * scale + gap))) : 1
   return { width, height, wide, fit, scale, side, gap, launcher, safe }
 }
 
@@ -73,7 +75,7 @@ export interface Page {
 export function page(room: Room): Page {
   const width = room.wide ? Math.min((room.width - 2 * room.side - (room.fit - 1) * room.gap) / room.fit, 560 * room.scale) / room.scale : room.width
   const height = room.height / room.scale
-  const [top, left, right, bottom] = room.launcher ? [16 / room.scale, 18 / room.scale, 18 / room.scale, 10 / room.scale] : [room.safe.top + TOP_ROW + 8, 20 + room.safe.left, 20 + room.safe.right, 0]
+  const [top, left, right, bottom] = room.launcher ? [4 / room.scale, 12 / room.scale, 12 / room.scale, 4 / room.scale] : [room.safe.top + TOP_ROW + 8, 20 + room.safe.left, 20 + room.safe.right, 0]
   return grid(width, height, top, left, right, bottom, room.launcher)
 }
 

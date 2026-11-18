@@ -63,7 +63,7 @@ import {
   Widget,
 } from "ui"
 import { give, glide, jump, settle, speed, spring, type Spring, stop } from "./pager.ts"
-import { at as gridAt, BAR, type Box as Place, cell as cellOf, DOTS, grid, gridHeight, LAUNCHER_BAR, LAUNCHER_FOOT, lefts, measure, page as pageOf, type Page as Laid, type Room, TOP_ROW } from "./layout.ts"
+import { at as gridAt, BAR, type Box as Place, cell as cellOf, DOTS, grid, gridHeight, LAUNCHER_BAR, LAUNCHER_FOOT, LAUNCHER_HEADING, LAUNCHER_SIDE, lefts, measure, page as pageOf, type Page as Laid, type Room, TOP_ROW } from "./layout.ts"
 import { type At, carries, type Drop, type Editing, fitted, type Held, type Kind, machine, nearest, pack, type Page, type Placed, shown, spans } from "./machine.ts"
 import type { Entrypoint, Category, Item, Listed, Pages, Size, Widget as WidgetItem } from "./types.ts"
 import { src } from "./types.ts"
@@ -95,7 +95,16 @@ const looks = styles({
   lifted: { position: "absolute", boxShadow: tokens.shadow.lifted, opacity: 1, transitionProperty: ["opacity"], transition: tokens.motion.settle },
   liftedIcon: { borderRadius: tokens.radius.icon },
   liftedWidget: { borderRadius: tokens.radius.large },
-  chosen: { position: "absolute", top: negative(tokens.grid[1]), bottom: negative(tokens.grid[1]), start: negative(tokens.grid[1]), end: negative(tokens.grid[1]), borderRadius: tokens.radius.medium, backgroundColor: tokens.colour.selection },
+  // The launcher's footer: two pills of Liquid Glass floating over its foot, as Raycast's are.
+  floating: { flexDirection: "row", alignItems: "center", gap: tokens.grid[2], paddingInline: tokens.grid[3], borderRadius: tokens.radius.full, backgroundColor: tokens.colour.glass, boxShadow: tokens.shadow.glass, backdropFilter: tokens.material.glass, color: tokens.colour.secondaryLabel, pointerEvents: "auto" },
+  key: { minWidth: tokens.grid[4], paddingInline: tokens.grid[1], alignItems: "center", justifyContent: "center", borderRadius: tokens.radius.small, boxShadow: tokens.shadow.edge, backgroundColor: tokens.colour.quinaryLabel },
+  // The launcher's panel's edge inside, lit along its top, as Raycast's window has, over everything in it.
+  edge: { position: "absolute", top: 0, bottom: 0, start: 0, end: 0, zIndex: 20, boxShadow: tokens.shadow.edge, pointerEvents: "none" },
+  round: { borderRadius: tokens.radius.large },
+  heading: { position: "absolute", start: 0, end: 0, paddingTop: tokens.grid[3], paddingInline: tokens.grid[4] },
+  picked: { backgroundColor: tokens.colour.selection },
+  result: { flexDirection: "row", alignItems: "center", gap: tokens.grid[3], height: tokens.length.row, paddingInline: tokens.grid[2], borderRadius: tokens.radius.medium },
+  chosen: { position: "absolute", top: negative(tokens.grid[1]), bottom: negative(tokens.grid[1]), start: negative(tokens.grid[1]), end: negative(tokens.grid[1]), borderRadius: tokens.radius.large, backgroundColor: tokens.colour.selection },
 })
 
 const SIZES: Record<Size, string> = { "2x2": "Small", "4x2": "Medium", "4x4": "Large" }
@@ -157,7 +166,7 @@ const editingOwner = (owner: number) => state().matches("editing") && editing()?
 const [pins, setPins] = createSignal(false)
 /// Whether this Home Screen is a computer's launcher (`client().launcher`): a panel the system summons over whatever's
 /// in front, as Spotlight and Raycast are, which goes once an app opens from it. It's Raycast's chrome around Home's
-/// pages: one search bar across its top, with the keyboard as it opens, and one footer bar, with the page dots and the
+/// pages: one search bar across its top, with the keyboard as it opens, and two pills floating over its foot, with the page dots and the
 /// App Library's glyph, and what Return and ⌘K do. The arrow keys move a highlight over Home's apps and widgets, and
 /// typing turns it into a list of the apps found (`leave` puts it away).
 const [launcher, setLauncher] = createSignal(false)
@@ -173,12 +182,17 @@ type Selected = { owner: number; page: number; index: number }
 const [selected, setSelected] = createSignal<Selected | undefined>(undefined, { equals: (a, b) => a?.owner === b?.owner && a?.page === b?.page && a?.index === b?.index })
 /// Whether the launcher's Actions menu is open.
 const [acting, setActing] = createSignal(false)
-/// The apps of an App Library whose names have `words` in them, A to Z: with a screen of their own, or `background`.
-const findIn = (library: Category[], words: string, background: boolean) =>
-  library
+/// The apps of an App Library whose names have `words` in them: with a screen of their own, or `background`. Those
+/// whose name starts with them come first, then those with a word that does, then the rest, each A to Z, as
+/// Raycast's root search ranks what it finds.
+const findIn = (library: Category[], words: string, background: boolean) => {
+  const typed = words.trim().toLowerCase()
+  const rank = (name: string) => (name.toLowerCase().startsWith(typed) ? 0 : name.toLowerCase().split(/[\s&-]+/).some((word) => word.startsWith(typed)) ? 1 : 2)
+  return library
     .flatMap((category) => category.entrypoints)
-    .filter((listed) => !listed.entrypoint === background && listed.name.toLowerCase().includes(words.trim().toLowerCase()))
-    .sort((a, b) => a.name.localeCompare(b.name))
+    .filter((listed) => !listed.entrypoint === background && listed.name.toLowerCase().includes(typed))
+    .sort((a, b) => rank(a.name) - rank(b.name) || a.name.localeCompare(b.name))
+}
 
 /** Where an icon or a widget is drawn, with how round its corners are there, which an app grows out of. */
 type From = Rect & { radius: number }
@@ -1389,8 +1403,11 @@ function OwnerPill(props: { owners: Owner[]; chip?: boolean }) {
       onSelect={({ value }) => home.send({ type: "pick", owner: Number(value) })}
     >
       <Menu.Trigger variant={props.chip ? "ghost" : "secondary"} aria-label={props.owners[at()]?.name}>
-        <Box style={{ flexDirection: "row", alignItems: "center", gap: 5 }}>
-          <Roll count={props.owners.length} height={BAR - 8} row={(index) => <Text style={{ font: props.chip ? "caption-2" : "label", lineClamp: 1, maxWidth: 144 }}>{props.owners[index]?.name}</Text>} />
+        <Box style={{ flexDirection: "row", alignItems: "center", gap: props.chip ? 8 : 5, color: props.chip ? "muted-foreground" : undefined }}>
+          <Show when={props.chip}>
+            <Image src="home.svg" alt="" style={{ width: 16, height: 16, borderRadius: "sm" }} />
+          </Show>
+          <Roll count={props.owners.length} height={BAR - 8} row={(index) => <Text style={{ font: props.chip ? "footnote" : "label", lineClamp: 1, maxWidth: 144 }}>{props.owners[index]?.name}</Text>} />
           <Box style={{ color: "muted-foreground", scale: 0.75 }}>
             <Icon name="caret-down" />
           </Box>
@@ -1416,11 +1433,11 @@ function OwnerPill(props: { owners: Owner[]; chip?: boolean }) {
   )
 }
 
-/// The launcher's search bar, across its top, as Raycast's is: the ring, the search, which keeps the keyboard, and the
-/// owner chip. With nothing typed, the arrow keys move the highlight over Home (`move`), Tab goes to the App Library
-/// and back, Return opens what's highlighted and Escape puts the launcher away; with something typed, up and down
-/// choose among the apps found (`Results`), Return opens the one chosen, and Escape empties it. ⌘K, or Ctrl+K on a PC,
-/// opens Actions either way.
+/// The launcher's search bar, across its top, as Raycast's is: the search, bare and large, which keeps the keyboard,
+/// and the owner chip. With nothing typed, the arrow keys move the highlight over Home (`move`), Tab goes to the App
+/// Library and back, Return opens what's highlighted and Escape puts the launcher away; with something typed, up and
+/// down choose among the results (`Results`), Return opens the one chosen, and Escape empties it. ⌘K, or Ctrl+K on a
+/// PC, opens Actions either way.
 function LauncherBar(props: { owners: Owner[]; found: () => Listed[]; move: (key: string) => boolean; open: () => void; tab: () => void; library: boolean }) {
   const keys = (event: Keyed) => {
     if ((mac() ? event.metaKey : event.ctrlKey) && event.key.toLowerCase() === "k") {
@@ -1448,11 +1465,10 @@ function LauncherBar(props: { owners: Owner[]; found: () => Listed[]; move: (key
   }
   // The search has the keyboard as the launcher's summoned: it's drawn again each time it's shown.
   return (
-    <Box style={{ position: "absolute", top: 0, left: 0, right: 0, height: LAUNCHER_BAR, zIndex: 6, flexDirection: "row", alignItems: "center", gap: 11, paddingInline: 16, borderBottomWidth: 1 }}>
-      <Image src="ring.png" alt="" style={{ width: 19, height: 19 }} />
+    <Box style={{ position: "absolute", top: 0, left: 0, right: 0, height: LAUNCHER_BAR, zIndex: 6, flexDirection: "row", alignItems: "center", gap: 12, paddingInline: 16 }}>
       <Box style={{ flexGrow: 1 }}>
         <Show when={visible()}>
-          <EditableText type="search" action="search" placeholder="Search apps and actions…" aria-label="Search apps" autofocus value={query()} onKeyDown={keys} onInput={(event) => (setQuery(event.currentTarget.value), setChosen(0))} style={looks.bare} />
+          <EditableText type="search" action="search" placeholder="Search apps…" aria-label="Search apps" autofocus value={query()} onKeyDown={keys} onInput={(event) => (setQuery(event.currentTarget.value), setChosen(0))} style={looks.bare} />
         </Show>
       </Box>
       <Show when={!query().trim() && !props.library}>
@@ -1462,21 +1478,21 @@ function LauncherBar(props: { owners: Owner[]; found: () => Listed[]; move: (key
   )
 }
 
-/// What the launcher's search found, in place of Home's pages: a list of the apps whose names have what's typed in
-/// them, A to Z, as the App Library's search finds them, each its icon, name and category, the first chosen for Return,
-/// as Raycast lists what it finds. The pointer chooses one too, and a click opens it.
+/// What the launcher's search found, in place of Home's pages, as Raycast's root search lists it: under Results, a
+/// row for each, its icon, its name, the app it's part of where that's another name, and what it is at its end; the
+/// first chosen for Return. The pointer chooses one too, and a click opens it.
 function Results(props: { owner: Owner; found: () => Listed[] }) {
   const from = (event: Located): From => {
     const at = event.currentTarget.getBoundingClientRect()
-    return { x: at.x + 10, y: at.y + 9, width: 22, height: 22, radius: 5 }
+    return { x: at.x + 8, y: at.y + (at.height - 22) / 2, width: 22, height: 22, radius: 5 }
   }
   return (
-    <Box style={{ position: "absolute", top: LAUNCHER_BAR, left: 0, right: 0, bottom: LAUNCHER_FOOT, zIndex: 5, overflow: "scroll", paddingTop: 6, paddingInline: 8, paddingBottom: 8 }}>
+    <Box style={{ position: "absolute", top: LAUNCHER_BAR, left: 0, right: 0, bottom: LAUNCHER_FOOT, zIndex: 5, overflow: "scroll", paddingInline: LAUNCHER_SIDE }}>
       <Show when={props.found().length} fallback={<Box style={{ marginBlock: 32 }}><Empty>No apps match.</Empty></Box>}>
-        <Box style={{ paddingTop: 9, paddingInline: 10, paddingBottom: 5 }} aria-hidden="true">
-          <Text style={{ font: "caption-2", color: "muted-foreground" }}>Apps</Text>
+        <Box style={{ height: LAUNCHER_HEADING, paddingTop: 12, paddingInline: LAUNCHER_SIDE }} aria-hidden="true">
+          <Text style={{ font: "caption-2", color: "muted-foreground" }}>Results</Text>
         </Box>
-        <Box role="listbox" aria-label="Apps">
+        <Box role="listbox" aria-label="Results">
           <For each={props.found()} keyed={(listed) => listed.entrypoint ?? listed.app}>
             {(listed, at) => (
               <Box
@@ -1485,12 +1501,15 @@ function Results(props: { owner: Owner; found: () => Listed[] }) {
                 aria-selected={at() === chosen() ? "true" : "false"}
                 onPointerMove={() => setChosen(at())}
                 onClick={(event) => press(listed(), props.owner, false, from(event))}
-                style={{ flexDirection: "row", alignItems: "center", gap: 11, height: 40, paddingInline: 10, borderRadius: "md", backgroundColor: at() === chosen() ? "border" : undefined }}
+                style={[looks.result, at() === chosen() && looks.picked]}
               >
-                <Image src={src(listed().icon)} alt="" style={{ width: 22, height: 22, borderRadius: "sm" }} />
-                <Text style={{ font: "footnote", lineClamp: 1, flexShrink: 1 }}>{listed().name}</Text>
+                <Image src={src(listed().icon)} alt="" style={{ width: 22, height: 22, flexShrink: 0, borderRadius: "sm" }} />
+                <Text style={{ font: "footnote", lineClamp: 1, flexShrink: 0, maxWidth: "60%" }}>{listed().name}</Text>
+                <Show when={listed().title !== listed().name}>
+                  <Text style={{ font: "footnote", color: "muted-foreground", lineClamp: 1, flexShrink: 1 }}>{listed().title}</Text>
+                </Show>
                 <Box style={{ flexGrow: 1 }} />
-                <Text style={{ font: "caption-1", color: "muted-foreground" }}>{listed().category}</Text>
+                <Text style={{ font: "footnote", color: "muted-foreground", flexShrink: 0 }}>App</Text>
               </Box>
             )}
           </For>
@@ -1505,16 +1524,17 @@ function Results(props: { owner: Owner; found: () => Listed[] }) {
 type Target = { item?: Item; listed?: Listed; place?: { page: number; index: number }; from?: From }
 /// The name a target's opened by: an app's, or for a widget, its app's.
 const targetName = (target: Target) => target.listed?.name ?? (target.item && (opener(target.item)?.name ?? target.item.name))
-/// A key, as the footer and the Actions menu show it.
+/// A key, as the footer and the Actions menu show it: in a small keycap, as Raycast's are.
 const Key = (props: { children: Element }) => (
-  <Box style={{ minWidth: 20, height: 20, paddingInline: 5, alignItems: "center", justifyContent: "center", borderRadius: "sm", backgroundColor: "border" }}>
+  <Box style={[looks.key, { height: 18 }]}>
     <Text style={{ font: "caption-2", color: "muted-foreground" }}>{props.children}</Text>
   </Box>
 )
 
-/// The launcher's footer bar, as Raycast's is: on the left, the page dots and the App Library's glyph, or what the
-/// search chose; on the right, what Return does, and Actions, ⌘K, a menu of what can be done with it: Open, Add to or
-/// Remove from Home Screen, Show in App Library and its App Store Page.
+/// The launcher's footer, as Raycast's is: two pills floating over its foot. On the left, the Home Screen's icon and
+/// name, and on Home its page dots and the App Library's glyph; on the right, what Return does, and Actions, ⌘K, a
+/// menu of what can be done with it: Open, Add to or Remove from Home Screen, Show in App Library and its App Store
+/// Page.
 function LauncherFoot(props: { owners: Owner[]; laid: Kind[][]; target: () => Target | undefined; open: () => void; act: (action: string) => void }) {
   const owner = () => props.owners[state().context.at.owner]
   const store = () => props.owners[0]?.store
@@ -1524,60 +1544,53 @@ function LauncherFoot(props: { owners: Owner[]; laid: Kind[][]; target: () => Ta
   }
   const item = () => props.target()?.item ?? (props.target()?.listed && opens(props.target()!.listed!))
   return (
-    <Box role="toolbar" style={{ position: "absolute", bottom: 0, left: 0, right: 0, height: LAUNCHER_FOOT, zIndex: 6, flexDirection: "row", alignItems: "center", gap: 10, paddingLeft: 14, paddingRight: 10, borderTopWidth: 1, backgroundColor: "muted", color: "muted-foreground", opacity: state().matches("editing") ? 0 : 1 }}>
-      <Show when={query().trim()} fallback={<DotsPill owners={props.owners} laid={props.laid} flat />}>
-        <Show when={props.target()}>
-          {(target) => (
-            <Box style={{ flexDirection: "row", alignItems: "center", gap: 8, minWidth: 0, color: "foreground" }}>
-              <Image src={src(target().listed?.icon ?? "")} alt="" style={{ width: 16, height: 16, borderRadius: "sm" }} />
-              <Text style={{ font: "caption-1", lineClamp: 1 }}>{targetName(target())}</Text>
-            </Box>
-          )}
+    <Box role="toolbar" style={{ position: "absolute", bottom: 10, left: 10, right: 10, height: 36, zIndex: 6, flexDirection: "row", alignItems: "center", justifyContent: "space-between", pointerEvents: "none", opacity: state().matches("editing") ? 0 : 1 }}>
+      <Box style={[looks.floating, { height: 36 }]}>
+        <Image src="home.svg" alt="" style={{ width: 18, height: 18, borderRadius: "sm" }} />
+        <Text style={{ font: "caption-1", color: "muted-foreground" }}>Home Screen</Text>
+        <Show when={!query().trim()}>
+          <DotsPill owners={props.owners} laid={props.laid} flat />
         </Show>
-      </Show>
-      <Box style={{ flexGrow: 1 }} />
+      </Box>
       <Show when={props.target()}>
         {(target) => (
-          <>
-            <Box role="button" onClick={props.open} style={{ flexDirection: "row", alignItems: "center", gap: 6, height: 28, paddingInline: 6, borderRadius: "sm" }}>
-              <Text style={{ font: "caption-1", color: "foreground" }}>{query().trim() ? "Open" : `Open ${targetName(target())}`}</Text>
+          <Box style={[looks.floating, { height: 36 }]}>
+            <Box role="button" onClick={props.open} style={{ flexDirection: "row", alignItems: "center", gap: 8, height: "100%" }}>
+              <Text style={{ font: "caption-1", color: "foreground" }}>{query().trim() ? "Open App" : `Open ${targetName(target())}`}</Text>
               <Key>↵</Key>
             </Box>
-            <Box style={{ width: 1, height: 16, backgroundColor: "border" }} />
-          </>
+            <Menu.Root
+              open={acting()}
+              onOpenChange={({ open }) => setActing(open)}
+              onSelect={({ value }) => (setActing(false), props.act(value))}
+            >
+              <Menu.Trigger variant="ghost" aria-label={`Actions, ${mac() ? "⌘" : "Ctrl"} K`}>
+                <Box style={{ flexDirection: "row", alignItems: "center", gap: 4 }}>
+                  <Text style={{ font: "caption-1", color: "muted-foreground" }}>Actions</Text>
+                  <Key>{mac() ? "⌘" : "Ctrl"}</Key>
+                  <Key>K</Key>
+                </Box>
+              </Menu.Trigger>
+              <Menu.Positioner>
+                <Menu.Content>
+                  <Menu.Item value="open">{`Open ${targetName(target())}`}</Menu.Item>
+                  <Show when={target().place && owner()?.arranges}>
+                    <Menu.Item value="remove">Remove from Home Screen</Menu.Item>
+                  </Show>
+                  <Show when={!target().place && item() && addable(item()!, owner())}>
+                    <Menu.Item value="add">{state().context.at.owner ? `Add to ${owner().name}'s Home Screen` : "Add to Home Screen"}</Menu.Item>
+                  </Show>
+                  <Show when={item() && opener(item()!)}>
+                    <Menu.Item value="library">Show in App Library</Menu.Item>
+                  </Show>
+                  <Show when={store() && app()}>
+                    <Menu.Item value="store">App Store Page</Menu.Item>
+                  </Show>
+                </Menu.Content>
+              </Menu.Positioner>
+            </Menu.Root>
+          </Box>
         )}
-      </Show>
-      <Show when={props.target()}>
-        <Menu.Root
-          open={acting()}
-          onOpenChange={({ open }) => setActing(open)}
-          onSelect={({ value }) => (setActing(false), props.act(value))}
-        >
-          <Menu.Trigger variant="ghost" aria-label={`Actions, ${mac() ? "⌘" : "Ctrl"} K`}>
-            <Box style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
-              <Text style={{ font: "caption-1", color: "foreground" }}>Actions</Text>
-              <Key>{mac() ? "⌘" : "Ctrl"}</Key>
-              <Key>K</Key>
-            </Box>
-          </Menu.Trigger>
-          <Menu.Positioner>
-            <Menu.Content>
-              <Menu.Item value="open">Open</Menu.Item>
-              <Show when={props.target()?.place && owner()?.arranges}>
-                <Menu.Item value="remove">Remove from Home Screen</Menu.Item>
-              </Show>
-              <Show when={!props.target()?.place && item() && addable(item()!, owner())}>
-                <Menu.Item value="add">{state().context.at.owner ? `Add to ${owner().name}'s Home Screen` : "Add to Home Screen"}</Menu.Item>
-              </Show>
-              <Show when={item() && opener(item()!)}>
-                <Menu.Item value="library">Show in App Library</Menu.Item>
-              </Show>
-              <Show when={store() && app()}>
-                <Menu.Item value="store">App Store Page</Menu.Item>
-              </Show>
-            </Menu.Content>
-          </Menu.Positioner>
-        </Menu.Root>
       </Show>
     </Box>
   )
@@ -1596,12 +1609,12 @@ function DotsPill(props: { owners: Owner[]; laid: Kind[][]; flat?: boolean }) {
     const screen = props.laid[state().context.at.owner]?.indexOf("library") ?? -1
     if (screen >= 0) home.send({ type: "go", screen })
   }
-  const height = () => (props.flat ? LAUNCHER_FOOT : DOTS)
+  const height = () => (props.flat ? 36 : DOTS)
   return (
     // iOS 26's Liquid Glass, the pages blurred through it with a rim of light and a soft shadow, but in the launcher's
     // footer, which is flat.
     <Box style={[looks.pill, !props.flat && looks.glass, { height: height() }]}>
-      <Roll count={props.owners.length} height={height()} row={(index) => <Dots owner={props.owners[index]} index={index} count={count(index)} size={props.flat ? 6 : 7} />} />
+      <Roll count={props.owners.length} height={height()} row={(index) => <Dots owner={props.owners[index]} index={index} count={count(index)} size={props.flat ? 5 : 7} />} />
       <Box
         role="button"
         aria-label="App Library"
@@ -1748,9 +1761,9 @@ function HomeScreen(props: { owners: Owner[] }) {
   // The room the pages have: the window, less the launcher's bars.
   createEffect(
     () => ({ size: viewport(), safe: safeArea(), launcher: launcher() }),
-    ({ size, safe, launcher }) => void setRoom(measure(size.width, size.height - (launcher ? LAUNCHER_BAR + LAUNCHER_FOOT : 0), launcher, safe)),
+    ({ size, safe, launcher }) => void setRoom(measure(size.width, size.height - (launcher ? LAUNCHER_BAR + LAUNCHER_HEADING + LAUNCHER_FOOT : 0), launcher, safe)),
   )
-  const sectionsTop = () => (launcher() ? LAUNCHER_BAR : 0)
+  const sectionsTop = () => (launcher() ? LAUNCHER_BAR + LAUNCHER_HEADING : 0)
 
   /// Each owner's Home pages as they're drawn: the ones they keep shown, or while they're edited, as they're edited,
   /// each placed on its grid. A page kept with more than fits goes on over the next ones.
@@ -1906,8 +1919,8 @@ function HomeScreen(props: { owners: Owner[] }) {
   /// the Home pages shown use, or what its search found; the App Library and Home while it's edited, six rows' worth.
   /// Its client makes its window that tall (`sizeChanged`), as an MCP App's host fits its frame to what it says.
   const tall = () => {
-    const bars = LAUNCHER_BAR + LAUNCHER_FOOT
-    if (query().trim()) return bars + 6 + (found().length ? 28 + found().length * 40 : 64 + 48) + 8
+    const bars = LAUNCHER_BAR + LAUNCHER_HEADING + LAUNCHER_FOOT
+    if (query().trim()) return bars + (found().length ? found().length * 38 : 82)
     const { at } = state().context
     const laid = laidPage()
     const full = kindOf(at.owner) === "library" || state().matches("editing")
@@ -1919,7 +1932,8 @@ function HomeScreen(props: { owners: Owner[] }) {
   }
   let told = 0
   createEffect(
-    () => launcher() && Math.ceil(tall()),
+    // Never shorter than Actions' menu needs over the footer, as Raycast's panel has room for it.
+    () => launcher() && Math.ceil(Math.max(tall(), LAUNCHER_BAR + 300)),
     (height) => {
       if (height && height !== told) sizeChanged({ height: (told = height) })
     },
@@ -2400,10 +2414,18 @@ function HomeScreen(props: { owners: Owner[] }) {
         }
       >
         <LauncherBar owners={props.owners} found={found} move={move} open={openTarget} tab={tab} library={library()} />
+        <Show when={!query().trim()}>
+          <Box aria-hidden="true" style={[looks.heading, { top: LAUNCHER_BAR, height: LAUNCHER_HEADING }]}>
+            <Text style={{ font: "caption-2", color: "muted-foreground" }}>{library() ? "App Library" : "Home"}</Text>
+          </Box>
+        </Show>
         <Show when={query().trim()}>
           <Results owner={props.owners[0]} found={found} />
         </Show>
         <LauncherFoot owners={props.owners} laid={laid().screens} target={target} open={openTarget} act={act} />
+      </Show>
+      <Show when={launcher()}>
+        <Box aria-hidden="true" style={[looks.edge, mac() && looks.round]} />
       </Show>
       <Show when={editBar()}>
         <EditBar going={editBarGoing()} />

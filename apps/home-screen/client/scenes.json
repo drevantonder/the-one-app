@@ -712,8 +712,8 @@
   "Launcher on a computer": {
     "like": "Home, two pages",
     "size": [
-      760,
-      480
+      750,
+      475
     ],
     "answers": {
       "one/client": {
@@ -728,8 +728,8 @@
   "Launcher, nothing installed": {
     "like": "Home, nothing installed",
     "size": [
-      760,
-      480
+      750,
+      475
     ],
     "answers": {
       "one/client": {
