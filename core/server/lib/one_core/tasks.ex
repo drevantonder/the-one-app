@@ -21,7 +21,7 @@ defmodule OneCore.Tasks do
   Its record names the task, and is moved by how the task ended (`over/1`), its server stopping included: so the one
   thing that says a run on a server was lost is here.
   """
-  alias OneCore.{Artifact, Call, Server, Servers, Trace, User}
+  alias OneCore.{Artifact, Call, Server, Servers, User}
   alias OneCore.Call.State
 
   # The extension, as a client says it takes it and a server says it has it.
@@ -64,12 +64,12 @@ defmodule OneCore.Tasks do
   """
   def start(run, tool, principal) do
     requester = self()
-    trace = Trace.traceparent()
+    trace = OpenTelemetry.Ctx.get_current()
     client = Process.get(:"$one_request", %{})[:client]
 
     {:ok, runner} =
       Task.Supervisor.start_child(OneCore.Asks, fn ->
-        Trace.follow(trace)
+        OpenTelemetry.Ctx.attach(trace)
         id = State.begin(%{requester: requester, principal: principal, tool: tool, client: client})
 
         outcome =

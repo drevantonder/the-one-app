@@ -48,6 +48,8 @@ defmodule OneCore.Hooks do
   require Logger
   alias OneCore.{Cache, Apps}
   alias OneCore.Apps.Calls
+  alias OpenTelemetryAPIExperimental.Counter
+  require Counter
 
   # How long an app has to answer a hook, in milliseconds. A check is answered in well under a millisecond, and
   # the slowest answer is one whose app's server has just gone: finding that out and taking over from it
@@ -74,7 +76,7 @@ defmodule OneCore.Hooks do
       {:ok, {kind, reason, stacktrace}} -> :erlang.raise(kind, reason, stacktrace)
       _ ->
         # Said as a number too, by its app, whose not answering is the symptom (Telemetry's `unanswered` alert).
-        :telemetry.execute([:one, :hook, :timeouts], %{count: 1}, %{app: to_string(app), hook: to_string(hook)})
+        Counter.add(:"one.hook.timeouts", 1, %{"one.app" => to_string(app), "one.hook" => to_string(hook)})
         raise "#{app} didn't answer #{hook} within #{div(@timeout, 1000)} seconds"
     end
   end

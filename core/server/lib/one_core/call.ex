@@ -475,12 +475,12 @@ defmodule OneCore.Call do
   # Asks `server` from a process of its own, in this call's trace, and gives it `within` to answer: one that hasn't
   # is taken as gone after it was asked, and its answer, if it ever comes, goes to nobody.
   defp request_within(server, method, params, within) do
-    trace = OneCore.Trace.traceparent()
+    trace = OpenTelemetry.Ctx.get_current()
     state = State.id()
 
     asking =
       Task.async(fn ->
-        OneCore.Trace.follow(trace)
+        OpenTelemetry.Ctx.attach(trace)
         State.follow(state)
 
         try do

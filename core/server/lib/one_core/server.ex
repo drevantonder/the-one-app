@@ -10,7 +10,7 @@ defmodule OneCore.Server do
   """
   use GenServer
   require Logger
-  alias OneCore.{Builds, Edge, Hooks, Iroh, Mcp, Apps, Servers, Trace}
+  alias OneCore.{Builds, Edge, Hooks, Iroh, Mcp, Apps, Servers}
   alias OneCore.Call.State
 
   def start_link(_), do: GenServer.start_link(__MODULE__, nil, name: __MODULE__)
@@ -165,7 +165,7 @@ defmodule OneCore.Server do
     # Its id is its own, so cancelling the call it's for tells that server which of its calls to cancel.
     id = System.unique_integer([:positive])
     meta = %{progressToken: id, version: Builds.build()}
-    meta = if parent = Trace.traceparent(), do: Map.put(meta, :traceparent, parent), else: meta
+    meta = Map.merge(meta, Map.new(:otel_propagator_text_map.inject([])))
     params = Map.update(params, :_meta, meta, &Map.merge(&1, meta))
     message = JSON.encode!(%{jsonrpc: "2.0", id: id, method: method, params: params})
 

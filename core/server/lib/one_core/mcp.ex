@@ -47,7 +47,6 @@ defmodule OneCore.Mcp do
     Skills,
     Tasks,
     Tools,
-    Trace,
     User
   }
 
@@ -116,7 +115,9 @@ defmodule OneCore.Mcp do
         version = meta(params)["io.modelcontextprotocol/protocolVersion"]
 
         try do
-          Trace.follow(meta(params)["traceparent"])
+          # The span it's under, W3C's `traceparent`, or none: a call run here next is its child.
+          OpenTelemetry.Ctx.clear()
+          :otel_propagator_text_map.extract(Enum.filter(meta(params), &match?({"traceparent", parent} when is_binary(parent), &1)))
 
           with :ok <- speaks(version),
                :ok <- talks(method, params),
@@ -159,7 +160,8 @@ defmodule OneCore.Mcp do
       # is all that's believed of who said it.
       {:ok, %{"method" => "notifications/one/measured", "params" => %{} = params}} ->
         with {:ok, {by, _for}, false} <- User.asking(from, meta(params)) do
-          about = %{"records" => List.wrap(params["records"]), "device" => User.device(from, meta(params)), "who" => by}
+          said = if params["otlp"], do: %{"otlp" => List.wrap(params["otlp"])}, else: %{"records" => List.wrap(params["records"])}
+          about = Map.merge(said, %{"device" => User.device(from, meta(params)), "who" => by})
           Hooks.observe("measured", about, {nil, "network"})
         end
 

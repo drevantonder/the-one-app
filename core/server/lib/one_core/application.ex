@@ -13,6 +13,8 @@ defmodule OneCore.Application do
   def start(_type, _args) do
     # What a crash reports holds what it was working with, which may be a person's tokens: none of it reaches the log.
     OneCore.Redact.install()
+    # What it logs that's a warning or worse is exported with its spans and metrics (`OneCore.Otlp`).
+    OneCore.Otlp.start()
 
     # A server that couldn't reach the bucket may have missed being told something meanwhile: once it can, it looks again.
     OneCore.Bucket.Fuse.install(&Server.reconnected/0)

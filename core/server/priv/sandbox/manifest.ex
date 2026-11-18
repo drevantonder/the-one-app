@@ -210,8 +210,8 @@ defmodule OneCore.App.Manifest do
      """
      A tool was called. It's about what `call` is about, how long the call `took` in microseconds, its `error`,
      which is `nil` if it answered and otherwise why it was refused or what it raised, whether it was `forwarded`
-     to another server to run, whether its app makes it an MCP `task` (`OneCore.Tasks`), and its `trace`: its
-     `traceId`, `spanId` and `parentSpanId` (`OneCore.Trace`). A call passed on is observed on both servers.
+     to another server to run, whether its app makes it an MCP `task` (`OneCore.Tasks`), and its `trace`: its span's
+     `traceId` and `spanId`, OpenTelemetry's. A call passed on is observed on both servers.
      """},
     {"changed", :observe,
      """
@@ -222,9 +222,17 @@ defmodule OneCore.App.Manifest do
     {"measured", :observe,
      """
      A client said what it measured of itself. It's observed by the apps installed for the network, and it's about the
-     `device`'s key and `who` it's of, as its request proved, and its `records`, each as Telemetry's tool `record`
-     takes one, with the `time` it was made, in milliseconds since 1970, and the client's own say of which it is in
-     its `attributes`: what went wrong or was slow there, kept on the device until a server could be told.
+     `device`'s key and `who` it's of, as its request proved, and what its OpenTelemetry SDK exported, `otlp`: each a
+     `signal` (`traces`, `metrics` or `logs`) and its export request in OTLP's protobuf, in base64. What went wrong
+     or was slow there, kept on the device until a server could be told. A client from before 0.23.48 says
+     `records` instead, each as Telemetry's tool `record` takes one, with the `time` it was made, in milliseconds
+     since 1970.
+     """},
+    {"exported", :observe,
+     """
+     This server's OpenTelemetry SDK exported what it gathered (`OneCore.Otlp`), as it does once a minute: its
+     `signal`, `traces`, `metrics` or `logs`, and `otlp`, the export request in OTLP's protobuf, in base64. It's
+     observed by the apps installed for the network, on a server that runs them.
      """},
     {"uninstalled", :observe,
      """

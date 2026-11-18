@@ -8,7 +8,10 @@ defmodule OneCore.Apps.Calls do
   """
   require Logger
   alias ExJsonSchema.Validator.Error
-  alias OneCore.{Artifact, Call, Hooks, Apps, Sandbox, Server, Servers, Tasks, Trace, User}
+  alias OneCore.{Artifact, Call, Hooks, Apps, Sandbox, Server, Servers, Tasks, User}
+  alias OpenTelemetryAPIExperimental.Histogram
+  require OpenTelemetry.Tracer, as: Tracer
+  require Histogram
   alias OneCore.Call.State
   alias OneCore.Apps.{Installed, Version}
 
@@ -164,37 +167,44 @@ defmodule OneCore.Apps.Calls do
     end
   end
 
-  # Runs a call as a span of its trace, and tells the apps that observe calls how it went: whether it answered,
-  # and whether another server ran it. With none observing, it's only run.
+  # Runs a call as a span of its trace, OpenTelemetry's, which the SDK exports (`OneCore.Otlp`), with how long it took
+  # as `one.tool.duration`, and tells the apps that observe calls how it went: whether it answered, and whether
+  # another server ran it, which measures it there. Its span says the app, the tool, whose call it was as an owner's
+  # prefix (`users/alice`), and how it ended: never what it was given or answered.
   defp observed(about, {_actor, subject} = principal, call) do
-    if Hooks.hooking("called", subject) == [] do
-      call.()
-    else
-      began = System.monotonic_time(:microsecond)
+    app = about["app"] || "one"
+    attributes = %{"one.app" => app, "one.tool" => about["tool"]}
+    attributes = if about["task"] == true, do: Map.put(attributes, "one.task", true), else: attributes
+    began = System.monotonic_time(:microsecond)
 
-      Trace.span(fn trace ->
-        ended = call.()
+    Tracer.with_span "#{app} #{about["tool"]}", %{kind: :server, attributes: Map.put(attributes, "one.for", User.owner(subject) || "link")} do
+      ended = call.()
+      took = System.monotonic_time(:microsecond) - began
 
-        took = System.monotonic_time(:microsecond) - began
-        about = Map.merge(about, %{"trace" => trace, "took" => took})
-
+      {error, forwarded} =
         case ended do
-          {:ok, _result} ->
-            Hooks.observe("called", Map.merge(about, %{"error" => nil, "forwarded" => false}), principal)
-
-          {:error, why} ->
-            Hooks.observe("called", Map.merge(about, %{"error" => why, "forwarded" => false}), principal)
-
-          {:forwarded, result} ->
-            Hooks.observe("called", Map.merge(about, %{"error" => passed(result), "forwarded" => true}), principal)
-
+          {:ok, _result} -> {nil, false}
+          {:error, why} -> {why, false}
+          {:forwarded, result} -> {passed(result), true}
           # It would have been passed on again, so the server that passed it here observes it.
-          :forwarding_loop ->
-            :ok
+          :forwarding_loop -> {nil, nil}
         end
 
-        ended
-      end)
+      if forwarded != nil do
+        if forwarded, do: Tracer.set_attribute("one.forwarded", true)
+        if error, do: Tracer.set_status(:error, String.slice(error, 0, 1000))
+        outcome = if error, do: "error", else: "ok"
+        if not forwarded, do: Histogram.record(:"one.tool.duration", took / 1000, Map.put(attributes, "one.outcome", outcome))
+
+        if Hooks.hooking("called", subject) != [] do
+          span = Tracer.current_span_ctx()
+          trace = %{"traceId" => OpenTelemetry.Span.hex_trace_id(span), "spanId" => OpenTelemetry.Span.hex_span_id(span)}
+          about = Map.merge(about, %{"trace" => trace, "took" => took, "error" => error, "forwarded" => forwarded})
+          Hooks.observe("called", about, principal)
+        end
+      end
+
+      ended
     end
   end
 
