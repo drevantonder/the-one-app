@@ -90,7 +90,7 @@ defmodule Telemetry.Otlp do
 
       %{
         "time" => time,
-        "severity" => severity(log[:severity_number] || 0),
+        "severity" => severity(log[:severity_number]),
         "eventName" => if(log[:event_name] in [nil, ""], do: attributes["event.name"], else: log.event_name),
         "body" => value(log[:body]),
         "attributes" => Map.drop(attributes, ~w(otel_trace_id otel_span_id otel_trace_flags event.name)),
@@ -171,10 +171,14 @@ defmodule Telemetry.Otlp do
   defp status(%{code: :STATUS_CODE_ERROR} = status), do: %{"code" => "error", "message" => status[:message] || ""}
   defp status(_status), do: %{"code" => "ok", "message" => ""}
 
-  # OpenTelemetry's severity numbers: 9-12 are INFO, 13-16 WARN, 17 and over ERROR.
-  defp severity(number) when number >= 17, do: "ERROR"
-  defp severity(number) when number >= 13, do: "WARN"
-  defp severity(_number), do: "INFO"
+  # OpenTelemetry's severity numbers, by their names: ERROR and FATAL are errors, WARN warnings.
+  defp severity(number) do
+    case to_string(number) do
+      "SEVERITY_NUMBER_" <> level when level in ~w(ERROR ERROR2 ERROR3 ERROR4 FATAL FATAL2 FATAL3 FATAL4) -> "ERROR"
+      "SEVERITY_NUMBER_WARN" <> _ -> "WARN"
+      _ -> "INFO"
+    end
+  end
 
   defp hex(bytes), do: Base.encode16(bytes, case: :lower)
 end
