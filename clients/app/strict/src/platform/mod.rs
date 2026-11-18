@@ -19,6 +19,10 @@ use linux::{Display, NativeWindow, appearance, clipboard, reduced_motion};
 mod windows;
 #[cfg(target_os = "windows")]
 use windows::{Display, NativeWindow, appearance, clipboard, reduced_motion};
+#[cfg(target_os = "macos")]
+mod mac;
+#[cfg(target_os = "macos")]
+use mac::{Display, NativeWindow, appearance, clipboard, reduced_motion};
 
 /// A window, as the windows' thread names it.
 pub type WindowId = u64;
@@ -49,7 +53,7 @@ pub struct WindowOptions {
 #[derive(Clone)]
 pub struct Strict(Sender);
 
-#[cfg(target_os = "linux")]
+#[cfg(any(target_os = "linux", target_os = "macos"))]
 type Sender = calloop::channel::Sender<Job>;
 #[cfg(target_os = "windows")]
 type Sender = windows::Sender;
@@ -70,7 +74,7 @@ impl Strict {
 #[cfg(target_os = "windows")]
 use windows::start;
 
-#[cfg(target_os = "linux")]
+#[cfg(any(target_os = "linux", target_os = "macos"))]
 fn start() -> anyhow::Result<Strict> {
     let (sender, channel) = calloop::channel::channel::<Job>();
     let (ready_to, ready) = std::sync::mpsc::channel();
@@ -310,8 +314,8 @@ impl Windows {
             Input::Up(at, button) => screen.pointer_up(at, button),
             Input::Wheel(at, delta) => drop(screen.scroll(at, delta)),
             Input::Key(key) => {
-                // Ctrl-W and Ctrl-Q close the window, as a Linux app's do.
-                if key.ctrl && !key.alt && matches!(key.key.as_str(), "w" | "q") {
+                // Ctrl-W and Ctrl-Q close the window, as a Linux or Windows app's do (a Mac's is ⌘W, its own).
+                if !cfg!(target_os = "macos") && key.ctrl && !key.alt && matches!(key.key.as_str(), "w" | "q") {
                     return self.close(id);
                 }
                 screen.key(&key);
@@ -328,7 +332,7 @@ pub(crate) enum Input {
     Resized(Size<crate::geometry::DevicePixels>),
     Expose,
     /// The system went light or dark.
-    #[cfg_attr(not(target_os = "windows"), allow(dead_code))]
+    #[cfg_attr(target_os = "linux", allow(dead_code))]
     Appearance(crate::Appearance),
     Close,
     Moved(crate::geometry::Point<f32>),

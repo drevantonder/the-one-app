@@ -126,8 +126,8 @@ objc2 = { version = "0.6", optional = true }
 muda = { version = "0.20", optional = true }
 objc2-foundation = { version = "0.3", default-features = false, features = ["std", "objc2-core-foundation", "NSGeometry"], optional = true }
 
-# A strict app's own window, drawn natively (`strict`), on Linux and Windows.
-[target.'cfg(any(target_os = "linux", windows))'.dependencies]
+# A strict app's own window, drawn natively (`strict`), on Linux, a Mac and Windows.
+[target.'cfg(any(target_os = "linux", target_os = "macos", windows))'.dependencies]
 strict = { path = "strict", optional = true }
 
 [target.'cfg(target_os = "linux")'.dependencies]

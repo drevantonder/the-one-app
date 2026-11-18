@@ -63,9 +63,11 @@ blade-graphics = { git = "https://github.com/kvark/blade", rev = "3d86d537fe100a
 blade-macros = { git = "https://github.com/kvark/blade", rev = "3d86d537fe100a06a091850253f692e7ca8bceaf" }
 blade-util = { git = "https://github.com/kvark/blade", rev = "3d86d537fe100a06a091850253f692e7ca8bceaf" }
 
-[target.'cfg(target_os = "linux")'.dependencies]
-# The windows' thread's event loop, as GPUI's Linux platform has it.
+[target.'cfg(any(target_os = "linux", target_os = "macos"))'.dependencies]
+# The windows' thread's event loop, as GPUI's Linux platform has it; a Mac's wakes it from AppKit's main thread.
 calloop = "0.14"
+
+[target.'cfg(target_os = "linux")'.dependencies]
 cosmic-text = "0.19"
 # The desktop's light or dark, from its portal, through libdbus, as tao reads the desktop.
 dbus = "0.9"
@@ -109,4 +111,18 @@ windows-numerics = "0.3"
 # The clipboard, as arboard serves it, as on Linux.
 arboard = { version = "3", default-features = false }
 # Which way a line runs, by its first strong character, as cosmic-text says it on Linux.
+unicode-bidi = "0.3"
+
+[target.'cfg(target_os = "macos")'.dependencies]
+# Text as GPUI's Mac platform shapes and rasterizes it: Core Text and Core Graphics.
+core-foundation = "0.10"
+core-graphics = "0.24"
+core-text = "21"
+# AppKit's windows, on its main thread, by objc2's bindings, as Blade reaches Metal.
+dispatch2 = "0.3"
+objc2 = "0.6"
+objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "objc2-core-foundation", "objc2-quartz-core", "NSAccessibility", "NSAppearance", "NSApplication", "NSCursor", "NSPasteboard", "NSEvent", "NSGraphics", "NSResponder", "NSRunningApplication", "NSText", "NSTextInputClient", "NSTextInputContext", "NSTrackingArea", "NSView", "NSWindow", "NSWorkspace"] }
+objc2-foundation = { version = "0.3", default-features = false, features = ["std", "objc2-core-foundation", "NSArray", "NSAttributedString", "NSGeometry", "NSNotification", "NSObjCRuntime", "NSRange", "NSString"] }
+objc2-quartz-core = { version = "0.3", default-features = false, features = ["std", "objc2-core-foundation", "CALayer", "CAMetalLayer"] }
+# Which way a line runs, by its first strong character, as on Windows.
 unicode-bidi = "0.3"

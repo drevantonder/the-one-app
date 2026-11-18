@@ -1,5 +1,5 @@
 //! Text: a platform's text system shapes a line and rasterizes its glyphs (`linux`, cosmic-text; `windows`,
-//! DirectWrite), and this module, the same everywhere, wraps the line to a width, clamps it with an ellipsis, measures
+//! DirectWrite; `mac`, Core Text), and this module, the same everywhere, wraps the line to a width, clamps it with an ellipsis, measures
 //! it for layout and paints its glyphs from the atlas. The types are GPUI's (crates/gpui/src/text_system/line_layout.rs and platform.rs), as its
 //! platform text systems speak them.
 
@@ -21,6 +21,10 @@ pub use linux::CosmicTextSystem as PlatformTextSystem;
 mod windows;
 #[cfg(target_os = "windows")]
 pub use windows::DirectWriteTextSystem as PlatformTextSystem;
+#[cfg(target_os = "macos")]
+mod mac;
+#[cfg(target_os = "macos")]
+pub use mac::CoreTextSystem as PlatformTextSystem;
 
 pub(crate) const SUBPIXEL_VARIANTS_X: u8 = 4;
 pub(crate) const SUBPIXEL_VARIANTS_Y: u8 = if cfg!(target_os = "windows") || cfg!(target_os = "linux") { 1 } else { SUBPIXEL_VARIANTS_X };

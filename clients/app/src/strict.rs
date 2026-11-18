@@ -242,6 +242,12 @@ fn respond(
     let params = &message["params"];
     let mut state = state.lock().expect("nothing panics holding it");
     let shown = state.chosen.clone().unwrap_or_else(|| if appearance == Appearance::Dark { "dark" } else { "light" }.into());
+    // What the window's own controls are over at the page's top, which it keeps clear: a Mac's title bar, its traffic
+    // lights over the page (`title_bar`).
+    #[cfg(target_os = "macos")]
+    let top = crate::title_bar::MAC.height;
+    #[cfg(not(target_os = "macos"))]
+    let top = 0.0;
     let answered = match method {
         "ui/initialize" => Some(Ok(json!({
             "protocolVersion": "2026-01-26",
@@ -252,7 +258,7 @@ fn respond(
                 "displayMode": "fullscreen",
                 "availableDisplayModes": ["fullscreen"],
                 "deviceCapabilities": {"touch": false, "hover": true},
-                "safeAreaInsets": {"top": 0, "right": 0, "bottom": 0, "left": 0},
+                "safeAreaInsets": {"top": top, "right": 0, "bottom": 0, "left": 0},
                 "breadcrumb": false,
                 "connection": "online",
                 "updateReady": false,
