@@ -92,13 +92,18 @@ impl Screen {
             }
             "ime" => {
                 let input = self.focused.filter(|id| self.fields.contains_key(id)).context("no input has the keyboard: tap one first")?;
+                if let Some([start, end]) = request.inputs.get("select").and_then(|range| serde_json::from_value::<[usize; 2]>(range.clone()).ok()) {
+                    self.ime(Ime::Select(start..end));
+                }
                 match (request.str("commit"), request.str("preedit")) {
+                    _ if request.bool("finish") => self.ime(Ime::Finish),
                     (Some(commit), _) => self.ime(Ime::Commit(commit.to_owned())),
                     (None, Some(preedit)) => {
                         let cursor = request.inputs.get("cursor").and_then(Value::as_u64).map(|units| editing::byte(preedit, units as usize));
                         self.ime(Ime::Preedit(preedit.to_owned(), cursor))
                     }
-                    (None, None) => bail!("say what the input method composes (`preedit`, and its `cursor`) or commits (`commit`)"),
+                    (None, None) if request.inputs.contains_key("select") => {}
+                    (None, None) => bail!("say what the input method composes (`preedit`, and its `cursor`), commits (`commit`), selects (`select`) or finishes (`finish`)"),
                 }
                 json!({"node": input, "editing": self.fields.get(&input).map(editing::Field::value)})
             }

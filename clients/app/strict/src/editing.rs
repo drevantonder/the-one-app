@@ -25,7 +25,18 @@
 //! A text input's editing: what's typed, selected and composed, as every platform's keyboard bridge says it
 //! (`Value`, Flutter's `TextEditingValue`, the strict protocol's `Editing`), and what keys, an input method, a paste
 //! and a pointer do to it (`Field`). Offsets in a `Field` are bytes of its text, on character boundaries; a `Value`'s
-//! are UTF-16 code units, as JS and Android count them.
+//! are UTF-16 code units, as JS, Android and AppKit count them.
+//!
+//! A platform's keyboard bridge talks to the screen's input with the keyboard through `Screen`, never to a `Field`:
+//! it reads `Screen::editing` (the `Value`: text, selection, what's composed) and `Screen::caret_rect` (where its
+//! input method's window goes), finds a character at a point with `Screen::index_at`, and says what happened with
+//! `Screen::key` (a key, by the DOM's `KeyboardEvent.key` and its modifiers, ⌘ as `meta`) and `Screen::ime` (`Ime`).
+//! AppKit's `NSTextInputClient`, for one: `setMarkedText:selectedRange:replacementRange:` is `Ime::Select` of the
+//! replacement range, where it gives one, then `Ime::Preedit`; `insertText:replacementRange:` is `Ime::Select`, then
+//! `Ime::Commit`; `unmarkText` is `Ime::Finish`; `selectedRange`, `markedRange`, `hasMarkedText` and
+//! `attributedSubstringForProposedRange:` read the `Value`; `firstRectForCharacterRange:` is the caret's rect;
+//! `characterIndexForPoint:` is `index_at`; and `doCommandBySelector:` is the key it stands for (`deleteBackward:`
+//! Backspace, `insertNewline:` Enter, `moveLeft:` ArrowLeft, `moveWordLeft:` ArrowLeft with `alt`, and so on).
 
 use std::collections::VecDeque;
 
@@ -64,6 +75,12 @@ pub enum Ime {
     Preedit(String, Option<usize>),
     /// Text that replaces the composition, or the selection where there's none.
     Commit(String),
+    /// This range of the text, in UTF-16 units as a `Value`'s, is selected, for what the input method composes or
+    /// commits next to replace: a reconversion (Japanese 変換 of committed text), AppKit's `replacementRange`.
+    /// Mid-composition the input method converts what it has, so it's ignored, as Rune's is.
+    Select(std::ops::Range<usize>),
+    /// What's composed is written into the text and the composition ends (AppKit's `unmarkText`).
+    Finish,
 }
 
 /// The computer's clipboards: the one copy and paste use, and on Linux the primary selection, which what's selected
@@ -451,6 +468,13 @@ impl Field {
                 self.preedit = None;
                 self.commit(&text);
             }
+            Ime::Select(range) if self.preedit.is_none() => {
+                self.history.run = Run::Closed;
+                self.place = None;
+                (self.anchor, self.focus) = (byte(&self.text, range.start), byte(&self.text, range.end));
+            }
+            Ime::Select(_) => {}
+            Ime::Finish => self.finish_composition(),
         }
     }
 

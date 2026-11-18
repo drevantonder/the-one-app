@@ -27,8 +27,9 @@
 //!   `shift` extends the selection.
 //! - `type` (`text`, and a selector but for `text`, or the input with the keyboard) → `{typed, value, editing}`: the
 //!   text typed into it, a character at a time, each an `input` event.
-//! - `ime` (`preedit`, with its `cursor` in UTF-16 units, or `commit`) → `{node, editing}`: what an input method
-//!   composes or commits in the input with the keyboard, as a platform's input method says it.
+//! - `ime` (`select`, a `[start, end]` in UTF-16 units, then `preedit`, with its `cursor` in UTF-16 units, or
+//!   `commit`, or `finish`) → `{node, editing}`: what an input method selects to replace, composes, commits or
+//!   finishes in the input with the keyboard, as a platform's input method says it (`editing::Ime`).
 //! - `key` (`key`, as the DOM's `KeyboardEvent.key` names it: `Enter`, `Escape`, `Tab`, `Backspace`, `a`; and
 //!   `shift`, `alt`, `ctrl`, `meta`) → `{node}`: pressed where the keyboard is. Tab moves it, Enter and Space press
 //!   what has it, what listens for `keydown` hears it, and an input edits by it as a Linux field does (Ctrl+C, X, V,

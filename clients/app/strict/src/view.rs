@@ -802,6 +802,21 @@ impl Screen {
         }
     }
 
+    /// The editing state of the input with the keyboard, for a platform's keyboard bridge (`editing`).
+    pub fn editing(&self) -> Option<editing::Value> {
+        self.focused.and_then(|id| self.fields.get(&id)).map(Field::value)
+    }
+
+    /// The character of the input with the keyboard nearest to `at`, in the window, in UTF-16 units of its
+    /// `editing` text, as AppKit's `characterIndexForPoint:` asks.
+    pub fn index_at(&self, at: Point<f32>) -> Option<usize> {
+        let id = self.focused?;
+        let (field, drawn) = (self.fields.get(&id)?, self.drawn.get(&id)?);
+        let index = drawn.index_at(at);
+        // What's drawn is its editing text, what's composed in it too, but for a password's dots.
+        Some(if field.secure { editing::utf16(&field.text, field.to_model(index)) } else { editing::utf16(&field.display(), index) })
+    }
+
     /// Where the input with the keyboard has its caret, in the window, for the platform's input method to show what
     /// it composes beside: none where it takes no typing (a password takes no input method).
     pub fn caret_rect(&self) -> Option<Bounds<f32>> {
