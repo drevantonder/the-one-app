@@ -75,10 +75,16 @@ const looks = styles({
   frosted: { backgroundColor: tokens.colour.veil, backdropFilter: tokens.material.thin },
   pill: { flexDirection: "row", alignItems: "center", borderRadius: tokens.radius.full },
   glass: { paddingInline: tokens.grid[1], pointerEvents: "auto", backgroundColor: tokens.colour.glass, boxShadow: tokens.shadow.glass, backdropFilter: tokens.material.glass },
-  panel: { position: "absolute", paddingTop: tokens.grid[6], paddingInline: tokens.grid[4], paddingBottom: tokens.grid[4], borderRadius: tokens.radius.large, backgroundColor: tokens.colour.tile },
+  panel: { position: "absolute", overflow: "hidden", borderRadius: tokens.radius.large, backgroundColor: tokens.colour.tile },
+  // What's in an opened category, at the panel's size in its middle, which shows more of it as it grows.
+  inPanel: { position: "absolute", paddingTop: tokens.grid[6], paddingInline: tokens.grid[4], paddingBottom: tokens.grid[4] },
   menu: { position: "absolute", overflow: "hidden", borderRadius: tokens.radius.large, backgroundColor: tokens.colour.glass, backdropFilter: tokens.material.glass, boxShadow: tokens.shadow.window, color: tokens.colour.label },
   overview: { position: "absolute", zIndex: 15, backgroundColor: tokens.colour.veil, backdropFilter: tokens.material.thin, transitionProperty: ["opacity"], transition: tokens.motion.settle },
   gone: { opacity: 0 },
+  slots: { position: "relative" },
+  slot: { position: "absolute", top: 0, start: 0, zIndex: 0, alignItems: "center", gap: tokens.grid[3] },
+  carried: { zIndex: 1 },
+  gliding: { transitionProperty: ["translateX", "translateY"], transition: tokens.motion.settle },
   miniature: { position: "relative", overflow: "hidden", borderRadius: tokens.radius.medium, backgroundColor: tokens.colour.background, boxShadow: tokens.shadow.window },
   // An icon sinks under the finger, dimmed at once, for as long as it takes to hold, and comes back quickly.
   icon: { position: "relative", scale: { default: 1, pressed: 0.94 }, opacity: { default: 1, pressed: 0.85 }, transitionProperty: ["scale"], transition: tokens.motion.hold },
@@ -839,8 +845,8 @@ function tween(duration: number, done: (at: number) => void) {
   }
 }
 
-/// A category opened over its App Library: its name, and its apps in a panel that grows out of its place there and
-/// shrinks back into it, as an iPhone's folder does, while what's behind it is dimmed. Its apps open only once it has
+/// A category opened over its App Library: its name, and its apps in a panel that grows out of its square there, its
+/// shape becoming the panel's, and shrinks back into it, as an iPhone's folder does, while what's behind it is dimmed. Its apps open only once it has
 /// grown. Tapping beside the panel, Escape or the device's own back closes it, even as it grows: it turns back from
 /// where it got to. For whoever asked for less motion, it fades in and out where it is.
 function OpenCategory(props: { owner: Owner; opened: string }) {
@@ -864,15 +870,15 @@ function OpenCategory(props: { owner: Owner; opened: string }) {
     const top = (viewport().height - (height + 20 + 34)) / 2 + 54
     return { x: (room().width - width) / 2, y: top, width, height }
   }
-  // Where its place was, as a way from the panel and a size: it's drawn there, and grows to the panel.
-  const from = () => {
-    const place = places[props.opened]
-    const to = panel()
-    if (!place) return { x: 0, y: 0, scale: 1 }
-    return { x: place.x + place.width / 2 - (to.x + to.width / 2), y: place.y + place.height / 2 - (to.y + to.height / 2), scale: place.width / to.width }
-  }
   const t = () => zoom.value()
   const moving = () => !reducedMotion() && !!places[props.opened]
+  // Where it's drawn: its square in the App Library, becoming the panel as it opens.
+  const shape = () => {
+    const [to, from] = [panel(), places[props.opened]]
+    if (!moving() || !from) return to
+    const at = (a: number, b: number) => a + (b - a) * t()
+    return { x: at(from.x, to.x), y: at(from.y, to.y), width: at(from.width, to.width), height: at(from.height, to.height) }
+  }
   const tile = () => Math.min(60, 88 - 28)
   return (
     <Box
@@ -885,29 +891,17 @@ function OpenCategory(props: { owner: Owner; opened: string }) {
       <Text role="heading" aria-level={2} style={{ position: "absolute", left: 0, right: 0, top: panel().y - 54, font: "title", textAlign: "center", opacity: t(), translateY: moving() ? 12 * (1 - t()) : 0 }}>
         {category()?.category}
       </Text>
-      <Box
-        style={[
-          looks.panel,
-          {
-            start: panel().x,
-            top: panel().y,
-            width: panel().width,
-            height: panel().height,
-            translateX: moving() ? from().x * (1 - t()) : 0,
-            translateY: moving() ? from().y * (1 - t()) : 0,
-            scale: moving() ? from().scale + (1 - from().scale) * t() : 1,
-            opacity: moving() ? 1 : t(),
-          },
-        ]}
-      >
-        <Box style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", rowGap: 16, columnGap: 12, opacity: Math.max(0, (t() - 0.3) / 0.7) }}>
-          <For each={category()?.entrypoints ?? []} keyed={(entrypoint) => entrypoint.entrypoint ?? entrypoint.app}>
-            {(entrypoint) => (
-              <Box style={{ height: 88 }}>
-                <Tile name={entrypoint().name} icon={entrypoint().icon} size={tile()} scale={1} badge={badgeOf(entrypoint() as Entrypoint, props.owner)} onPress={(behind, from) => phase() === "open" && press(entrypoint(), props.owner, behind, from)} />
-              </Box>
-            )}
-          </For>
+      <Box style={[looks.panel, { start: shape().x, top: shape().y, width: shape().width, height: shape().height, opacity: moving() ? 1 : t() }]}>
+        <Box style={[looks.inPanel, { start: (shape().width - panel().width) / 2, top: (shape().height - panel().height) / 2, width: panel().width, height: panel().height }]}>
+          <Box style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", rowGap: 16, columnGap: 12, opacity: Math.max(0, (t() - 0.3) / 0.7) }}>
+            <For each={category()?.entrypoints ?? []} keyed={(entrypoint) => entrypoint.entrypoint ?? entrypoint.app}>
+              {(entrypoint) => (
+                <Box style={{ height: 88 }}>
+                  <Tile name={entrypoint().name} icon={entrypoint().icon} size={tile()} scale={1} badge={badgeOf(entrypoint() as Entrypoint, props.owner)} onPress={(behind, from) => phase() === "open" && press(entrypoint(), props.owner, behind, from)} />
+                </Box>
+              )}
+            </For>
+          </Box>
         </Box>
       </Box>
     </Box>
@@ -1192,10 +1186,12 @@ const THUMB = grid(368, 654, 32, 20, 20, 0)
 
 /// The page overview: every Home page small, in order, each with a tick for whether it's shown. Unticked, a page is
 /// hidden and can be deleted; dragging one puts it elsewhere, following the finger, and taking another's place as it
-/// passes over it. Let go, it springs into its place. Done goes back to editing.
+/// passes over it, the others gliding aside to make room. Let go, it springs into its place. Done goes back to editing.
 function Overview(props: { owner: Owner; index: number; going?: boolean }) {
   const pages = () => editing()?.pages ?? []
   const [dragging, setDragging] = createSignal<Page>()
+  // The one last dragged, which follows the finger and springs back from where it's let go, `moved` from its place.
+  const [carried, setCarried] = createSignal<Page>()
   const [moved, setMoved] = createSignal({ x: 0, y: 0 })
   const remove = async (page: number) => {
     if (await confirm({ heading: "Delete Page?", text: "Its apps stay in the App Library.", action: "Delete", destructive: true })) home.send({ type: "delete", page })
@@ -1218,7 +1214,9 @@ function Overview(props: { owner: Owner; index: number; going?: boolean }) {
       if (event.button) return
       down = { ...event, at: index, laid: place(index) }
       moves = []
+      setMoved({ x: 0, y: 0 })
       setDragging(page)
+      setCarried(page)
     },
     onPointerMove: (event: Pressed) => {
       if (!down || event.pointerId !== down.pointerId) return
@@ -1265,10 +1263,18 @@ function Overview(props: { owner: Owner; index: number; going?: boolean }) {
         <Button variant="secondary" onClick={() => home.send({ type: "dismiss" })}>Done</Button>
       </Box>
       <Box style={{ flexGrow: 1, flexBasis: 0, overflow: "scroll", paddingTop: 16, paddingInline: 24, paddingBottom: 48 + room().safe.bottom }}>
-        <Box style={{ display: "grid", gridTemplateColumns: `repeat(${across()}, 1fr)`, rowGap: 24, columnGap: 16 }}>
+        {/* Each in its place by where it is in the pages, so that, as one's dragged past the others, they glide to theirs. */}
+        <Box style={[looks.slots, { height: Math.ceil(pages().length / across()) * pitch().y - 24 }]}>
           <For each={pages()}>
             {(page, index) => (
-              <Box style={{ alignItems: "center", gap: 12, zIndex: dragging() === page ? 1 : 0, translateX: dragging() === page ? moved().x : 0, translateY: dragging() === page ? moved().y : 0 }}>
+              <Box
+                style={[
+                  looks.slot,
+                  carried() === page ? looks.carried : looks.gliding,
+                  { width: pitch().x - 16 },
+                  { translateX: place(index()).x + (carried() === page ? moved().x : 0), translateY: place(index()).y + (carried() === page ? moved().y : 0) },
+                ]}
+              >
                 <Box
                   role="button"
                   aria-label={`Page ${index() + 1}`}
