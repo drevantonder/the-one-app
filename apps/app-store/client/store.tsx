@@ -2,9 +2,9 @@
 // a row for each owner, with where its install is for them and what to do about it: managing what's installed is
 // otherwise the App Library's. A link opens it at an app's page (`one:app-store#app=<its artifact>`), as the App
 // Library does for an app with no screen of its own.
-import { createEffect, createMemo, createSignal, Errored, For, Loading, Match, refresh, Show, Switch } from "solid-js"
+import { createMemo, createSignal, Errored, For, Loading, Match, refresh, Show, Switch } from "solid-js"
 import "./app.css"
-import { Button, call, changed, confirm, covers, Empty, go, Icon, List, Menu, open, Problem, Row, Screen, Search, Skeleton, Spinner, toast } from "ui"
+import { Button, call, changed, confirm, Empty, go, Icon, List, Menu, open, Problem, Row, Screen, Search, Skeleton, Spinner, toast } from "ui"
 
 /** An app the network can install, as `app-store_marketplace` lists it. */
 interface Listed {
@@ -506,12 +506,6 @@ const installed = (market: Market, all: Owners, app: string) => {
 
 /// The App Store. `onBack` is its Back on its first screen, which closes it.
 export default function Store(props: { onBack: () => void }) {
-  // A step in, to a category or an app, is a step the device's own back goes back out of; an app's page a link opened
-  // is where the App Store starts, and the device's back closes it.
-  createEffect(
-    createMemo(() => !!(view().category || view().app) && !view().linked),
-    (deep) => (deep ? covers(() => history.back()) : undefined),
-  )
   return (
     <div class="app-store">
       <Errored fallback={(error) => <Screen back onBack={props.onBack}><Problem heading="Can't show apps" text={error() as Error} /></Screen>}>
