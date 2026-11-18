@@ -320,12 +320,25 @@ async fn join(client: &Client, here: &Here, key: &str, who: &str) -> Result<()> 
 }
 
 /// Takes back what joining did, from wherever it got to: the system no longer runs it, it's off its owner's list,
-/// and its folder goes. Gives what of that couldn't be done, to say with why joining failed.
+/// and its folder goes. Gives all of that couldn't be done, to say with why joining failed.
 async fn undo_joining(client: &Client, here: &Here, key: &str) -> String {
-    let _ = system::remove(here, key);
-    let listed = tool(client, "remove_server", json!({"key": key})).await.err();
-    let _ = fs::remove_dir_all(&here.folder);
-    listed.map(|why| format!(", though it's still on the list of servers: {why:#}")).unwrap_or_default()
+    let mut left = Vec::new();
+    // Joining that stopped before the system had it has nothing there to remove.
+    match system::installed(here, key) {
+        Ok(true) => left.extend(system::remove(here, key).err().map(|why| format!("the system still has it: {why:#}"))),
+        Ok(false) => {}
+        Err(why) => left.push(format!("the system may still have it: {why:#}")),
+    }
+    if let Err(why) = tool(client, "remove_server", json!({"key": key})).await {
+        left.push(format!("it's still on the list of servers: {why:#}"));
+    }
+    match fs::remove_dir_all(&here.folder) {
+        Err(why) if why.kind() != std::io::ErrorKind::NotFound => {
+            left.push(format!("its folder {} is still here: {why}", here.folder.display()))
+        }
+        _ => {}
+    }
+    if left.is_empty() { String::new() } else { format!(", though {}", left.join("; ")) }
 }
 
 /// Joining or leaving that nothing is doing any more, as one the machine went off during, goes back to where it
@@ -364,7 +377,7 @@ fn who(client: &Client) -> Result<String> {
 /// The environment the system runs the server with: the client it updates by, who it's for, and where programs
 /// are found, `path` where it's known, as the system gave it to a server that's running, and otherwise its person's
 /// login PATH. Windows starts a task with its person's environment as they log in, PATH and all.
-async fn unit_env(who: String, path: Option<String>) -> Result<Vec<(&'static str, String)>> {
+async fn unit_env(who: String, #[cfg_attr(not(unix), expect(unused_variables))] path: Option<String>) -> Result<Vec<(&'static str, String)>> {
     let mut env = vec![("ONE_HOME", client::home()?.display().to_string()), ("ONE_SUBJECT", who)];
     #[cfg(unix)]
     env.push((
@@ -374,8 +387,6 @@ async fn unit_env(who: String, path: Option<String>) -> Result<Vec<(&'static str
             None => login_path().await?,
         },
     ));
-    #[cfg(not(unix))]
-    let _ = path;
     // A network being built has a command say who it acts as, and so does what runs here for it.
     if let Ok(name) = env::var("ONE_AS") {
         env.push(("ONE_AS", name));
@@ -526,13 +537,13 @@ async fn serve(client: &Arc<Client>, here: &Here, reports: &Reports) -> Result<(
     let key = here.key()?;
     let address = client.address().context("A server is for a network with an address, and this one has none.")?;
     let who = env::var("ONE_SUBJECT").context("ONE_SUBJECT says who the server is for")?;
-    if settled(&client, &here, false).await?.server_membership == ServerMembership::Inactive {
+    if settled(client, here, false).await?.server_membership == ServerMembership::Inactive {
         println!("This device isn't a server: `one serve on` makes it one.");
         return Ok(());
     }
     // The system runs it as this build says to, from its next start. Where it can't be rewritten, as one changed by
     // hand may not be, it runs as it was set up rather than not at all.
-    if let Err(error) = system::install(&here, &key, &program, &unit_env(who.clone(), env::var("PATH").ok()).await?) {
+    if let Err(error) = system::install(here, &key, &program, &unit_env(who.clone(), env::var("PATH").ok()).await?) {
         eprintln!("Couldn't rewrite how the system runs it, so it runs as it was set up: {error:#}");
     }
     let log = here.folder.join("server.log");
@@ -594,7 +605,7 @@ async fn serve(client: &Arc<Client>, here: &Here, reports: &Reports) -> Result<(
     let spawned = Instant::now();
     let mut server = match server.spawn() {
         Ok(server) => server,
-        Err(error) => return didnt_start(&here, reports, &pair, verifying, &program, spawned, format!("it couldn't be run: {error}")).await,
+        Err(error) => return didnt_start(here, reports, &pair, verifying, &program, spawned, format!("it couldn't be run: {error}")).await,
     };
     // Everything it starts goes when it does, or when this does.
     #[cfg(windows)]
@@ -623,7 +634,7 @@ async fn serve(client: &Arc<Client>, here: &Here, reports: &Reports) -> Result<(
     if let Err(why) = started.await {
         let _ = server.kill().await;
         let why = format!("{why:#}. Its last lines: {}", Vec::from(last).join(" | "));
-        return didnt_start(&here, reports, &pair, verifying, &program, spawned, why).await;
+        return didnt_start(here, reports, &pair, verifying, &program, spawned, why).await;
     }
     let mut restarted = None;
     let mut began = None;
@@ -659,8 +670,8 @@ async fn serve(client: &Arc<Client>, here: &Here, reports: &Reports) -> Result<(
     loop {
         tokio::select! {
             heard = said.recv() => match heard {
-                Some(Heard { said: Some(Said::Prepare), .. }) => prepare(&here, &mut record, &mut server, &mut said, &program, reports).await?,
-                Some(Heard { said: Some(Said::Go), .. }) => go(&here, &mut record, &mut server, &mut said, &program, reports).await?,
+                Some(Heard { said: Some(Said::Prepare), .. }) => prepare(here, &mut record, &mut server, &mut said, &program, reports).await?,
+                Some(Heard { said: Some(Said::Go), .. }) => go(here, &mut record, &mut server, &mut said, &program, reports).await?,
                 Some(_) => {}
                 None => {
                     let why = format!("The server stopped: {}", server.wait().await?);
