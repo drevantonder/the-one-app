@@ -158,7 +158,8 @@ export class NetworkUpdater extends DurableObject<UpdaterEnv> {
     this.step(state, presence, reported);
 
     await this.ctx.storage.put("state", state);
-    await this.ctx.storage.setAlarm(state.until ?? Date.now() + 365 * 86_400_000);
+    if (state.until) await this.ctx.storage.setAlarm(state.until);
+    else await this.ctx.storage.deleteAlarm();
     const status = this.status(state, reported);
     const changed = JSON.stringify([state, this.instructions(state, reported)]) !== before;
     if (changed) said(state, status);
