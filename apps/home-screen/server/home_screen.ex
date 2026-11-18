@@ -35,7 +35,8 @@ defmodule HomeScreen do
         name: "Colour Mode",
         page: "client/colour-mode.html",
         icon: "client/colour-mode.svg",
-        subject: "user"
+        subject: "user",
+        host: 2
       }
     ]
   end

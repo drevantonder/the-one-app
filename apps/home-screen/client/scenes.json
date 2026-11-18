@@ -740,5 +740,21 @@
         "mac": true
       }
     }
+  },
+  "Colour Mode": {
+    "page": "client/colour-mode.html",
+    "answers": {
+      "one/client": {
+        "theme": null
+      }
+    }
+  },
+  "Colour Mode, dark chosen": {
+    "page": "client/colour-mode.html",
+    "answers": {
+      "one/client": {
+        "theme": "dark"
+      }
+    }
   }
 }
