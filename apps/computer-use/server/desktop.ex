@@ -608,16 +608,29 @@ defmodule ComputerUse.Desktop do
 
   # The scheduled task of its person's that runs Cua Driver in their session as they log on, as their server's own
   # does (`one serve on`), needing no administrator: Task Scheduler starts it each minute it isn't running, and
-  # restarts one that couldn't start. A task has no environment of its own, so cmd sets it, and Cua Driver is a
-  # console program, which a task would show a console window for, so it's in a console with none, conhost's
-  # headless one. It runs as the person's limited user, as their server does: it can't use the windows of a program
-  # run as administrator, which Windows keeps from theirs. Registered again when it changed, after stopping the one
-  # running; then started, which does nothing while it runs.
+  # restarts one that couldn't start. A task has no environment of its own, so a batch file of the service's sets it
+  # and starts Cua Driver: conhost quotes the arguments it's given again, as C programs do, which cmd doesn't read, so
+  # nothing quoted inside them got through, and a path or value with a space broke. Cua Driver is a console program,
+  # which a task would show a console window for, so it's in a console with none, conhost's headless one. It runs as
+  # the person's limited user, as their server does: it can't use the windows of a program run as administrator,
+  # which Windows keeps from theirs. The task is theirs by their SID, as their server's is. Registered again when it
+  # or the batch file changed, after stopping the one running; then started, which does nothing while it runs.
   defp scheduled_task(driver, environment, folder) do
     name = "The One App Computer Use #{key()}"
-    user = "#{System.fetch_env!("USERDOMAIN")}\\#{System.fetch_env!("USERNAME")}"
-    sets = Enum.map_join(environment, "", fn {variable, value} -> ~s(set "#{variable}=#{value}"&& ) end)
-    run = ~s(--headless cmd.exe /d /s /c "#{sets}#{Enum.map_join(command(driver), " ", &~s("#{&1}"))}")
+    {whoami, 0} = System.cmd("whoami", ["/user", "/fo", "csv", "/nh"])
+    user = whoami |> String.trim() |> String.split(",") |> List.last() |> String.trim(~s("))
+    windows = &String.replace(&1, "/", "\\")
+    # In UTF-8, as a person's folder may be named in any script, with a batch file's `%` written twice.
+    batch = &String.replace(&1, "%", "%%")
+    script = Path.join(folder, "cua-driver.cmd")
+
+    lines =
+      ["@chcp 65001 >nul"] ++
+        Enum.map(environment, fn {variable, value} -> ~s(@set "#{variable}=#{batch.(windows.(value))}") end) ++
+        ["@" <> Enum.map_join(List.update_at(command(driver), 0, windows), " ", &~s("#{batch.(&1)}"))]
+
+    text = Enum.join(lines, "\r\n") <> "\r\n"
+    run = ~s(--headless cmd.exe /d /c "#{windows.(script)}")
 
     task = """
     <?xml version="1.0" encoding="UTF-16"?>
@@ -642,9 +655,10 @@ defmodule ComputerUse.Desktop do
 
     registered = Path.join(folder, "task.xml")
 
-    if File.read(registered) != {:ok, task} do
+    if File.read(registered) != {:ok, task} or File.read(script) != {:ok, text} do
       System.cmd(driver, ["stop", "--socket", socket()], stderr_to_stdout: true)
       schtasks(["/end", "/tn", name])
+      File.write!(script, text)
       # Task Scheduler reads a task's XML as UTF-16.
       writing = registered <> ".utf16"
       File.write!(writing, :unicode.characters_to_binary(task, :utf8, {:utf16, :little}) |> then(&(<<0xFF, 0xFE>> <> &1)))
