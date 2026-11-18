@@ -1,5 +1,5 @@
 #!/usr/bin/env bun
-// Makes the Windows programs it's given The One App's in their version resources and icon, which Windows shows a
+// Makes the Windows programs it's given the One App's in their version resources and icon, which Windows shows a
 // program by: in Windows Firewall's prompt (its name, its icon and, for a program that isn't signed, its publisher,
 // which is CompanyName) and its list of allowed apps, among others. A program with no version resource, as Rust builds
 // one, has one made, of version VERSION. Its OriginalFilename is its file's name. Erlang/OTP's copyright stays in its
@@ -27,9 +27,9 @@ for (const file of process.argv.slice(2)) {
   for (const language of languages.length ? languages : [{ lang: 1033, codepage: 1200 }]) {
     const theirs = version.getStringValues(language).LegalCopyright;
     version.setStringValues(language, {
-      CompanyName: "The One App",
-      ProductName: "The One App",
-      FileDescription: "The One App",
+      CompanyName: "the One App",
+      ProductName: "the One App",
+      FileDescription: "the One App",
       LegalCopyright: theirs ? `${copyright}. ${theirs}` : copyright,
       OriginalFilename: basename(file),
     });

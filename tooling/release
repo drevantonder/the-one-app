@@ -228,7 +228,7 @@ for name in "${mine[@]}"; do
     one/*) cargo=(build) program=release/one ;;
     *) continue ;;
   esac
-  # Windows shows a program by its version resource and icon, as in Windows Firewall's prompt: one's are The One App's.
+  # Windows shows a program by its version resource and icon, as in Windows Firewall's prompt: one's are the One App's.
   # It's named there as its file is, one.exe.
   (echo "Building $name" && CARGO_TARGET_DIR=$target/clients/$file cargo "${cargo[@]}" --release -p app &&
     mkdir "$out/$file.d" && cp "$target/clients/$file/$program" "$out/$file.d/" &&
@@ -330,7 +330,7 @@ for kind in "${servers[@]}"; do
     crate=$(basename "$(dirname "$nif")")
     if [[ $kind == windows-* ]]; then cp "$nif" "$priv/$crate.dll"; else cp "$nif" "$priv/$crate.so"; fi
   done
-  # Windows' VM keeps its debugging symbols apart already. It's The One App's there, by name, icon and publisher, which
+  # Windows' VM keeps its debugging symbols apart already. It's the One App's there, by name, icon and publisher, which
   # Windows Firewall asks a person about as the server takes connections, rather than Erlang, which nobody there knows
   # they have.
   if [[ $kind == windows-* ]]; then tooling/windows-name "$(echo "$release"/erts-*/bin/erl.exe)"; else
