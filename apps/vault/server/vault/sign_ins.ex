@@ -213,24 +213,18 @@ defmodule Vault.SignIns do
   defp again(_call, _db, _sign_in), do: raise("Only a sign-in that didn't sign you in starts again.")
 
   # A sign-in's tokens go only to the service's own sites, where the app that asks says they go: its token address's
-  # site, which its person chose (`start/7`), or a name under it, or one of its client's sites. Without the Public
-  # Suffix List, what a token address is under is its name less its first part, where it has more than two:
-  # oauth2.googleapis.com is under googleapis.com, and github.com under itself; an IP address is under nothing.
+  # site, which its person chose (`start/7`), or a site under the same registrable domain (`Vault.PublicSuffix`), as
+  # a browser decides whose cookie a site may set, or one of its client's sites. A token address with none, an IP
+  # address or a public suffix itself, has no other.
   defp own!(service, client_hosts) do
     token = URI.parse(service.token)
-
-    under =
-      case {:inet.parse_address(String.to_charlist(token.host)), String.split(token.host, ".")} do
-        {{:ok, _address}, _parts} -> nil
-        {_name, [_one]} -> nil
-        {_name, [_first | rest] = parts} -> if length(parts) > 2, do: Enum.join(rest, "."), else: token.host
-      end
+    domain = Vault.PublicSuffix.registrable(token.host)
 
     for site <- service.hosts,
         site not in client_hosts,
         site != Vault.Fetch.site!(token),
         host = hd(String.split(site, ":")),
-        under == nil or (host != under and not String.ends_with?(host, "." <> under)) do
+        domain == nil or Vault.PublicSuffix.registrable(host) != domain do
       raise "#{service.name}'s tokens go only to its own sites, or #{service.client}'s, and #{site} isn't one."
     end
   end
