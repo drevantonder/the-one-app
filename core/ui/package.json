@@ -2,6 +2,9 @@
   "name": "ui",
   "private": true,
   "type": "module",
+  "imports": {
+    "#primitives": "./src/strict/primitives.tsx"
+  },
   "scripts": {
     "build": "bun build.js",
     "typecheck": "tsc -p ."

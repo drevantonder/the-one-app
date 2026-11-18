@@ -4,37 +4,18 @@
 // (../check.ts). A component the strict UI library has that isn't here yet throws, naming it.
 import { createContext, createSignal, For, Show, useContext } from "solid-js"
 import type { Element } from "solid-js"
-import { createElement, event, render as draw, spread } from "./renderer.ts"
+import { event } from "./renderer.ts"
 import { messages, readable, whole } from "../../words.ts"
 import type { Props, Type } from "../protocol.ts"
 import type * as Strict from "../types/ui.d.ts"
-import caretLeft from "@phosphor-icons/core/assets/regular/caret-left.svg?raw"
-import caretRight from "@phosphor-icons/core/assets/regular/caret-right.svg?raw"
-import dotsThree from "@phosphor-icons/core/assets/regular/dots-three.svg?raw"
-import warningCircle from "@phosphor-icons/core/assets/fill/warning-circle-fill.svg?raw"
 
 export { words } from "../../words.ts"
 export { createListCollection } from "../../collection.ts"
 export { negative, styles } from "../../styles.ts"
 export { tokens } from "../../tokens.ts"
 
-/** A primitive: a node of its type, with its props. */
-const primitive = (type: Exclude<Type, "raw-text">) => (props: object) => {
-  const node = createElement(type)
-  spread(node, props)
-  return node as unknown as Element
-}
-
-export const Box: typeof Strict.Box = primitive("box")
-export const Scroll: typeof Strict.Scroll = primitive("scroll")
-export const Path: typeof Strict.Path = primitive("path")
-export const Text: typeof Strict.Text = primitive("text")
-export const Image: typeof Strict.Image = primitive("image")
-export const Input: typeof Strict.Input = primitive("input")
-export const Textarea: typeof Strict.Textarea = (props) => primitive("input")({ ...props, multiline: true })
-export const Search: typeof Strict.Search = (props) => primitive("input")({ ...props, type: "search" })
-
-export const render: typeof Strict.render = (code) => draw(code as never)
+export { Box, Image, Input, Path, render, Scroll, Search, Text, Textarea } from "./primitives.tsx"
+import { Box, Image, Text } from "./primitives.tsx"
 
 // The bridge, as the DOM's (../../bridge.ts): the JSON-RPC a page and its client say to each other, through the host.
 
@@ -120,46 +101,8 @@ export const changed: typeof Strict.changed = (listener) => {
 
 // The components, as the DOM's look and read: the same roles and names, from the design tokens.
 
-const svg = (raw: string) => `data:image/svg+xml,${encodeURIComponent(raw)}`
-const icons: Partial<Record<Strict.IconName, string>> = { "caret-left": svg(caretLeft), "caret-right": svg(caretRight), "dots-three": svg(dotsThree), "warning-circle": svg(warningCircle) }
-
-export const Icon: typeof Strict.Icon = (props) => {
-  const src = icons[props.name]
-  if (!src) throw new Error(`No icon named "${props.name}" on a native host yet. There are: ${Object.keys(icons).join(", ")}`)
-  return <Image src={src} alt="" aria-hidden="true" style={{ width: "icon", height: "icon" }} />
-}
-
-export const Spinner: typeof Strict.Spinner = () => <Box role="status" aria-label={messages.loading} style={{ width: "icon", height: "icon", borderWidth: 1, borderRadius: "full", borderColor: "muted-foreground" }} />
-
-const looks: Record<NonNullable<Strict.ButtonProps["variant"]>, Props["style"]> = {
-  default: { backgroundColor: "primary", color: "primary-foreground" },
-  secondary: { backgroundColor: "muted", color: "foreground" },
-  outline: { borderWidth: 1, borderColor: "border", backgroundColor: "background" },
-  ghost: {},
-  destructive: { backgroundColor: "destructive", color: "primary-foreground" },
-}
-
-export const Button: typeof Strict.Button = (props) => (
-  <Box
-    role="button"
-    aria-label={props["aria-label"]}
-    aria-disabled={props.disabled || props.loading ? "true" : undefined}
-    aria-busy={props.loading ? "true" : undefined}
-    onClick={() => !props.disabled && !props.loading && props.onClick?.()}
-    style={{ flexDirection: "row", alignItems: "center", justifyContent: "center", gap: 8, height: "control", minWidth: "control", paddingInline: props.size === "icon" ? 0 : 16, borderRadius: "md", ...looks[props.variant ?? "default"] }}
-  >
-    <Show when={props.loading}>
-      <Spinner />
-    </Show>
-    <Text style={{ font: "label" }}>{props.children}</Text>
-  </Box>
-)
-
-export const Badge: typeof Strict.Badge = (props) => (
-  <Box aria-label={props["aria-label"]} style={{ paddingInline: 8, borderRadius: "full", ...(props.variant === "destructive" ? { backgroundColor: "destructive", color: "primary-foreground" } : props.variant === "outline" ? { borderWidth: 1 } : { backgroundColor: props.variant === "secondary" ? "muted" : "primary", color: props.variant === "secondary" ? "foreground" : "primary-foreground" }) }}>
-    <Text style={{ font: "caption-1", fontVariantNumeric: "tabular-nums" }}>{props.children}</Text>
-  </Box>
-)
+export { Badge, Button, Icon, Spinner } from "../../button.tsx"
+import { Button, Icon, Spinner } from "../../button.tsx"
 
 export const Screen: typeof Strict.Screen = (props) => (
   <Box style={{ flexGrow: 1, backgroundColor: "background", color: "foreground" }}>

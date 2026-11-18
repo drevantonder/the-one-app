@@ -46,7 +46,7 @@ await build({
   base: "./",
   logLevel: "warn",
   plugins: [stylesPlugin(made), solid()],
-  resolve: { alias: { "@solidjs/web": here("src/strict/native/renderer.ts") } },
+  resolve: { alias: { "@solidjs/web": here("src/strict/native/renderer.ts"), "#primitives": here("src/strict/native/primitives.tsx") } },
   build: {
     outDir: "dist/client/native",
     emptyOutDir: false,

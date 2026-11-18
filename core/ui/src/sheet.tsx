@@ -201,12 +201,12 @@ function Asked(props: { question?: Question; open: boolean; onResult: (yes: bool
       onClose={() => props.onResult(confirmed, (confirmed = false))}
       action={
         <>
-          <Button variant="outline" autofocus onClick={(event) => ((confirmed = false), event.currentTarget.closest("dialog")!.close())}>
+          <button type="button" class="ui-button press ring" data-variant="outline" autofocus onClick={(event) => ((confirmed = false), event.currentTarget.closest("dialog")!.close())}>
             {messages.cancel}
-          </Button>
-          <Button variant={props.question?.destructive ? "destructive" : "default"} onClick={(event) => ((confirmed = true), event.currentTarget.closest("dialog")!.close())}>
+          </button>
+          <button type="button" class="ui-button press ring" data-variant={props.question?.destructive ? "destructive" : "default"} onClick={(event) => ((confirmed = true), event.currentTarget.closest("dialog")!.close())}>
             {props.question?.action || messages.ok}
-          </Button>
+          </button>
         </>
       }
     />

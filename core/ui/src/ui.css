@@ -2291,6 +2291,17 @@ button.ui-strict-box:focus-visible {
   overflow-y: auto;
   scrollbar-width: none;
 }
+/* What turns or pulses while it's drawn (a style's `animationName`). */
+@keyframes ui-spin {
+  to {
+    rotate: 360deg;
+  }
+}
+@keyframes ui-pulse {
+  50% {
+    opacity: 0.5;
+  }
+}
 .ui-strict-path {
   display: block;
   flex: none;

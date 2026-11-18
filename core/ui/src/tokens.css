@@ -8,6 +8,7 @@
   --background: light-dark(oklch(1 0 0), oklch(0.145 0 0));
   --background-gradient: light-dark(oklch(1 0 0), oklch(0.145 0 0));
   --selection: color-mix(in oklab, var(--label) 10%, transparent);
+  --on-accent: oklch(1 0 0);
   --loader: color-mix(in oklab, var(--label) 40%, transparent);
   --red: light-dark(#ff3b30, #ff453a);
   --orange: light-dark(#ff9500, #ff9f0a);
@@ -50,6 +51,7 @@
   --radius-large: 18px;
   --radius-full: 9999px;
   --radius-icon: 22.5%;
+  --shadow-focus: 0px 0px 0px 3px oklch(0.55 0 0 / 50%);
   --shadow-window: 0px 10px 30px 0px oklch(0 0 0 / 20%);
   --shadow-edge: inset 0px 0px 0px 1px oklch(0.5 0 0 / 15%);
   --material-glass: blur(20px) saturate(1.8);
@@ -66,6 +68,8 @@
   --ease-settle: cubic-bezier(0.22, 1, 0.36, 1);
   --move-travel: 300ms;
   --ease-travel: cubic-bezier(0.32, 0.72, 0, 1);
+  --move-spin: 1000ms;
+  --ease-spin: cubic-bezier(0, 0, 1, 1);
   --foreground: light-dark(oklch(0.145 0 0), oklch(0.985 0 0));
   --card: light-dark(oklch(1 0 0), oklch(0.205 0 0));
   --primary: light-dark(oklch(0.205 0 0), oklch(0.922 0 0));

@@ -197,6 +197,8 @@ const roles = {
   background: colours.background,
   backgroundGradient: colour("oklch(1 0 0)", "oklch(0.145 0 0)"),
   selection: alpha(label, 10),
+  /** Words and icons on an accent. */
+  onAccent: colour("oklch(1 0 0)"),
   loader: alpha(label, 40),
   ...accents,
   redTint: alpha(accents.red, 15),
@@ -241,7 +243,7 @@ export const tokens = {
   length: named({ control: lengths.control, icon: lengths.icon, gutter: lengths.gutter, readable: lengths.readable, hairline: lengths.hairline }, (key) => key),
   size: named(sizes, (key) => `size-${key}`),
   radius: named({ small: radius(px(6)), medium: radius(px(10)), large: radius(px(18)), full: radii.full, icon: radii.icon }, (key) => `radius-${key}`),
-  shadow: named({ window: shadow({ x: 0, y: 10, blur: 30, spread: 0, colour: "oklch(0 0 0 / 20%)" }), edge: shadow({ x: 0, y: 0, blur: 0, spread: 1, colour: "oklch(0.5 0 0 / 15%)", inset: true }) }, (key) => `shadow-${key}`),
+  shadow: named({ focus: shadow({ x: 0, y: 0, blur: 0, spread: 3, colour: "oklch(0.55 0 0 / 50%)" }), window: shadow({ x: 0, y: 10, blur: 30, spread: 0, colour: "oklch(0 0 0 / 20%)" }), edge: shadow({ x: 0, y: 0, blur: 0, spread: 1, colour: "oklch(0.5 0 0 / 15%)", inset: true }) }, (key) => `shadow-${key}`),
   material: named({ glass: material(20, 1.8), thin: material(14, 1.2) }, (key) => `material-${key}`),
   font: named(fonts, (key) => `font-${key}`),
   weight: named(weightRoles, (key) => `weight-${key}`),
@@ -251,7 +253,7 @@ export const tokens = {
     medium: type(sizes.medium, weights.body),
     small: type(sizes.small, weights.body),
   }, (key) => `type-${key}`),
-  motion: named(motions, (key) => `move-${key}`),
+  motion: named({ ...motions, spin: motion(1000, [0, 0, 1, 1]) }, (key) => `move-${key}`),
 }
 
 

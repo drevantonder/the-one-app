@@ -1,6 +1,11 @@
+// Something to press, a count or word beside something, an icon and a spinner: written once in strict, on the
+// primitives (#primitives), the same on the DOM and on a native host.
 import { omit, Show } from "solid-js"
 import type { JSX } from "@solidjs/web"
-import { messages } from "./shared.ts"
+import { Box, Path, Text } from "#primitives"
+import { messages } from "./words.ts"
+import { styles, type Styles } from "./styles.ts"
+import { tokens } from "./tokens.ts"
 import calendarBlank from "@phosphor-icons/core/assets/regular/calendar-blank.svg?raw"
 import caretLeft from "@phosphor-icons/core/assets/regular/caret-left.svg?raw"
 import caretRight from "@phosphor-icons/core/assets/regular/caret-right.svg?raw"
@@ -26,7 +31,7 @@ import plusCircle from "@phosphor-icons/core/assets/regular/plus-circle.svg?raw"
 import squaresFour from "@phosphor-icons/core/assets/regular/squares-four.svg?raw"
 import x from "@phosphor-icons/core/assets/regular/x.svg?raw"
 
-// The Phosphor icons the UI library draws with, by Phosphor's own names, as what's inside each one's <svg>.
+// The Phosphor icons the UI library draws with, by Phosphor's own names: each one path in a 256 square.
 const svgs = {
   "calendar-blank": calendarBlank,
   "caret-down": caretDown,
@@ -53,60 +58,132 @@ const svgs = {
   "warning-circle": warningCircle,
   x,
 }
-const icons = Object.fromEntries(Object.entries(svgs).map(([name, svg]) => [name, svg.replace(/^<svg[^>]*>|<\/svg>\s*$/g, "")])) as Record<string, string>
+const paths = Object.fromEntries(Object.entries(svgs).map(([name, svg]) => [name, svg.match(/ d="([^"]+)"/)![1]])) as Record<string, string>
 
 /** The name of one of the UI library's icons. */
 export type IconName = keyof typeof svgs
 
-/// `<Icon name="plus" />`: one of the UI library's icons, by Phosphor's name for it, the size of the text around it and
-/// its colour. A name the UI library doesn't have throws the names it has. An app that wants another puts Phosphor's SVG
-/// where the icon goes. `along` turns an arrow that points along the line of text where text runs right to left.
+const look = styles({
+  icon: { width: tokens.length.icon, height: tokens.length.icon, flexShrink: 0 },
+  spinner: { width: tokens.length.icon, height: tokens.length.icon, flexShrink: 0, fill: "none", stroke: "currentColor", strokeWidth: 2, animationName: "spin", animation: tokens.motion.spin },
+  button: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    gap: tokens.grid[2],
+    height: tokens.length.control,
+    paddingInline: tokens.grid[4],
+    borderRadius: tokens.radius.medium,
+    backgroundColor: { default: tokens.colour.label },
+    color: tokens.colour.background,
+    font: tokens.type.medium,
+    fontWeight: tokens.weight.medium,
+    whiteSpace: "nowrap",
+    cursor: "pointer",
+    userSelect: "none",
+    opacity: { default: 1, hover: 0.9, pressed: 0.7 },
+    boxShadow: { default: "none", focused: tokens.shadow.focus },
+    transitionProperty: ["opacity", "backgroundColor", "boxShadow"],
+    transition: tokens.motion.quick,
+  },
+  secondary: { backgroundColor: { default: tokens.colour.quinaryLabel, hover: tokens.colour.quaternaryLabel }, color: tokens.colour.label, opacity: { default: 1, pressed: 0.7 } },
+  outline: { backgroundColor: { default: tokens.colour.background, hover: tokens.colour.quinaryLabel }, color: tokens.colour.label, boxShadow: { default: tokens.shadow.edge, focused: tokens.shadow.focus }, opacity: { default: 1, pressed: 0.7 } },
+  ghost: { backgroundColor: { hover: tokens.colour.quinaryLabel }, color: tokens.colour.label, opacity: { default: 1, pressed: 0.7 } },
+  destructive: { backgroundColor: tokens.colour.red, color: tokens.colour.onAccent },
+  square: { width: tokens.length.control, paddingInline: 0, flexShrink: 0 },
+  disabled: { opacity: 0.5, cursor: "default" },
+  badge: {
+    flexDirection: "row",
+    alignItems: "center",
+    justifyContent: "center",
+    minWidth: tokens.grid[5],
+    height: tokens.grid[5],
+    paddingInline: tokens.grid[2],
+    borderRadius: tokens.radius.full,
+    backgroundColor: tokens.colour.label,
+    color: tokens.colour.background,
+    font: tokens.type.small,
+    fontWeight: tokens.weight.semibold,
+    whiteSpace: "nowrap",
+  },
+  badgeSecondary: { backgroundColor: tokens.colour.quinaryLabel, color: tokens.colour.label },
+  badgeDestructive: { backgroundColor: tokens.colour.red, color: tokens.colour.onAccent },
+  badgeOutline: { backgroundColor: tokens.colour.background, color: tokens.colour.label, boxShadow: tokens.shadow.edge },
+})
+
+/// `<Icon name="plus" />`: one of the UI library's icons, by Phosphor's name for it, an icon's size, in the colour of
+/// the text around it. A name the UI library doesn't have throws the names it has. An app that wants another draws
+/// Phosphor's path with a `Path`.
 export function Icon(props: { name: IconName; along?: boolean }) {
-  const paths = () => {
-    if (!icons[props.name]) throw new Error(`No icon named "${props.name}". There are: ${Object.keys(icons).join(", ")}`)
-    return icons[props.name]
+  const d = () => {
+    if (!paths[props.name]) throw new Error(`No icon named "${props.name}". There are: ${Object.keys(paths).join(", ")}`)
+    return paths[props.name]
   }
-  return <svg class={["ui-icon", { along: props.along }]} viewBox="0 0 256 256" aria-hidden="true" innerHTML={paths()} />
+  return <Path viewBox="0 0 256 256" d={d()} aria-hidden="true" style={look.icon} />
 }
 
-/// `<Spinner />`: something's under way. The size of the text around it.
+/// `<Spinner />`: something's under way, an icon's size.
 export function Spinner() {
   return (
-    <span class="ui-spinner" role="status" aria-label={messages.loading}>
-      <svg viewBox="0 0 24 24" aria-hidden="true">
-        <circle cx="12" cy="12" r="9" />
-      </svg>
-    </span>
+    <Box role="status" aria-label={messages.loading}>
+      <Path viewBox="0 0 24 24" d="M12 3a9 9 0 1 0 9 9" style={look.spinner} />
+    </Box>
   )
 }
 
-/** A `Button`'s props: a `<button>`'s, and how it looks. */
-export interface ButtonProps extends JSX.ButtonHTMLAttributes<HTMLButtonElement> {
+/** A `Button`'s props. */
+export interface ButtonProps {
   variant?: "default" | "secondary" | "outline" | "ghost" | "destructive"
   size?: "icon"
   loading?: boolean
+  disabled?: boolean
+  "aria-label"?: string
+  onClick?: () => void
+  /** Where it sits in what it's in, the only part of its look a caller changes. */
+  style?: Styles<"marginTop" | "marginBottom" | "marginStart" | "marginEnd" | "alignSelf" | "flexGrow">
+  children?: JSX.Element
 }
 
 /// `<Button onClick={save}>Save</Button>`: something to press. `variant` says how much it matters: one `default`
 /// to a view, then `secondary`, `outline` and `ghost`, and `destructive` for what can't be undone. `size="icon"`
-/// is square, for an icon alone (`<Icon name="plus" />`), named by `aria-label`. `type="submit"` sends the form
-/// it's in. `loading` shows it's working and can't be pressed again. Anything else is a `<button>`'s.
+/// is square, for an icon alone (`<Icon name="plus" />`), named by `aria-label`. `loading` shows it's working and
+/// can't be pressed again. `style` places it, and changes nothing else of its look.
 export function Button(props: ButtonProps) {
-  const own = omit(props, "variant", "size", "loading", "children", "type", "disabled")
+  const off = () => !!props.disabled || !!props.loading
   return (
-    <button
-      type={props.type ?? "button"}
-      {...own}
-      class={["ui-button press ring", props.class]}
-      data-variant={props.variant ?? "default"}
-      data-size={props.size}
-      disabled={props.disabled || props.loading}
+    <Box
+      // What a page drawn on the DOM gives a `<button>` besides (a form's `type="submit"`) still reaches it.
+      {...omit(props as ButtonProps & Record<string, unknown>, "variant", "size", "loading", "disabled", "onClick", "style", "children")}
+      role="button"
+      aria-disabled={off() ? "true" : undefined}
       aria-busy={props.loading ? "true" : undefined}
+      onClick={() => !off() && props.onClick?.()}
+      style={[look.button, props.variant && props.variant !== "default" && look[props.variant], props.size === "icon" && look.square, off() && look.disabled, props.style]}
     >
       <Show when={props.loading}>
         <Spinner />
       </Show>
-      {props.children}
-    </button>
+      {typeof props.children === "string" ? <Text>{props.children}</Text> : props.children}
+    </Box>
+  )
+}
+
+/** A `Badge`'s props. */
+export interface BadgeProps {
+  variant?: "default" | "secondary" | "destructive" | "outline"
+  "aria-label"?: string
+  children?: JSX.Element
+}
+
+const badges = { default: undefined, secondary: look.badgeSecondary, destructive: look.badgeDestructive, outline: look.badgeOutline }
+
+/// `<Badge variant="destructive" aria-label="3 waiting">3</Badge>`: a short count or word beside what it's about, as
+/// shadcn's Badge. `destructive` is the red count of what waits for someone, as on an iPhone's icons; `default`,
+/// `secondary` and `outline` are for a word that only says what something is.
+export function Badge(props: BadgeProps) {
+  return (
+    <Box aria-label={props["aria-label"]} style={[look.badge, badges[props.variant ?? "default"]]}>
+      <Text>{props.children}</Text>
+    </Box>
   )
 }

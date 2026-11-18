@@ -169,6 +169,8 @@ export type ButtonProps = {
   disabled?: boolean
   "aria-label"?: string
   onClick?: () => void
+  /** Where it sits in what it's in, the only part of its look a caller changes. */
+  style?: Styles<"marginTop" | "marginBottom" | "marginStart" | "marginEnd" | "alignSelf" | "flexGrow">
   children?: Element
 }
 export declare function Button(props: ButtonProps): Element

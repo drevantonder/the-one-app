@@ -359,9 +359,9 @@ function Connected(props: { label: string; screen: (inputs: ScreenInputs) => Pro
             heading="Can't reach this screen"
             text={state().context.why}
             action={
-              <Button variant="outline" onClick={(event) => (event.stopPropagation(), connection.send({ type: "again" }))}>
+              <button type="button" class="ui-button press ring" data-variant="outline" onClick={(event) => (event.stopPropagation(), connection.send({ type: "again" }))}>
                 Try Again
-              </Button>
+              </button>
             }
           />
         </Show>
@@ -379,9 +379,9 @@ function Connected(props: { label: string; screen: (inputs: ScreenInputs) => Pro
         </Show>
         {/* Full screen in the window, or under a finger, has no Escape: it has its own way out. */}
         <Show when={full() === "window" || (full() && touch())}>
-          <Button class="leave" variant="secondary" size="icon" aria-label={messages.exitFullScreen} onClick={(event) => (event.stopPropagation(), toggle())}>
+          <button type="button" class="ui-button press ring leave" data-variant="secondary" data-size="icon" aria-label={messages.exitFullScreen} onClick={(event) => (event.stopPropagation(), toggle())}>
             <Icon name="corners-in" />
-          </Button>
+          </button>
         </Show>
       </div>
       <div class="bar">
@@ -390,9 +390,9 @@ function Connected(props: { label: string; screen: (inputs: ScreenInputs) => Pro
             Live video isn't connecting, so this updates each second.
           </p>
         </Show>
-        <Button variant="ghost" size="icon" aria-label={messages.fullScreen} title={`${messages.fullScreen} (${mac ? "⌃⌘F" : "F11"})`} onClick={toggle}>
+        <button type="button" class="ui-button press ring" data-variant="ghost" data-size="icon" aria-label={messages.fullScreen} title={`${messages.fullScreen} (${mac ? "⌃⌘F" : "F11"})`} onClick={toggle}>
           <Icon name="corners-out" />
-        </Button>
+        </button>
       </div>
     </div>
   )

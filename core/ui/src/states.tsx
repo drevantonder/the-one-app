@@ -72,9 +72,9 @@ export function Details(props: { text: string }) {
   return (
     <div class="ui-details">
       <pre>{props.text.slice(readable(props.text).length).trim()}</pre>
-      <Button variant="ghost" size="icon" aria-label={copied() ? messages.copied : messages.copy} title={messages.copy} onClick={() => navigator.clipboard.writeText(props.text).then(() => setCopied(true))}>
+      <button type="button" class="ui-button press ring" data-variant="ghost" data-size="icon" aria-label={copied() ? messages.copied : messages.copy} title={messages.copy} onClick={() => navigator.clipboard.writeText(props.text).then(() => setCopied(true))}>
         <Icon name={copied() ? "check" : "copy"} />
-      </Button>
+      </button>
     </div>
   )
 }
