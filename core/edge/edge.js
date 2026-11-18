@@ -154,7 +154,7 @@ if (at) gateway.routes = [{ pattern: at.hostname, custom_domain: true }];
 await Bun.write(`${built}/gateway.jsonc`, JSON.stringify(gateway, null, 2));
 const gatewayConfig = relative(here, `${built}/gateway.jsonc`);
 
-const wrangler = (...args) => Bun.spawn(["bun", "x", "wrangler", ...args], { cwd: here, stdio: ["inherit", "inherit", "inherit"] }).exited;
+const wrangler = (...args) => Bun.spawn(["bun", "x", "wrangler", ...args], { cwd: here, env: process.env, stdio: ["inherit", "inherit", "inherit"] }).exited;
 // The relay and the MCP endpoint are told their tail parts in a copy of their config beside the gateway's, and the MCP
 // endpoint the part that says who a request is from.
 const config = {
