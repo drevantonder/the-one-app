@@ -77,6 +77,7 @@ defmodule OneCore.Tools do
       build: %{type: "string"},
       sha256: %{type: "string"},
       size: %{type: "integer"},
+      signature: %{type: "string", description: "The platform's Ed25519 signature of `<name> <build> <sha256>`, in base64"},
       link: @link
     },
     required: ["build", "sha256", "size", "link"]
@@ -834,9 +835,9 @@ defmodule OneCore.Tools do
       name: "download",
       read_only: true,
       description: """
-      Gives the latest builds for a kind of machine, each with its SHA-256 and a link that downloads it within a
-      minute: `server` for a server installed there, and `one` for the program.
-      `one serve on` and `one update` take them, checking each against its SHA-256 before they run it.
+      Gives the latest builds for a kind of machine, each with its SHA-256, the platform's signature and a link that
+      downloads it within a minute: `server` for a server installed there, and `one` for the program.
+      `one serve on` and `one update` take them, checking each against its signature and SHA-256 before they run it.
       """,
       inputs: %{
         type: "object",
@@ -866,7 +867,8 @@ defmodule OneCore.Tools do
             description:
               "Each build: its name, <what>/<target> for a kind of machine (server-runtime/linux-x86_64, " <>
                 "one/macos-aarch64, one-setup/windows-x86_64) or <what> for every kind (server-code), its build, " <>
-                "sha256 and size, and a runtime's inputs, the SHA-256 of what it's built from",
+                "sha256 and size, a runtime's inputs, the SHA-256 of what it's built from, and the platform's " <>
+                "signature of it, which `one` checks before it takes it",
             items: %{
               type: "object",
               properties: %{
@@ -877,7 +879,8 @@ defmodule OneCore.Tools do
                 build: %{type: "string"},
                 inputs: %{type: "string", pattern: "^[0-9a-f]{64}$"},
                 sha256: %{type: "string", pattern: "^[0-9a-f]{64}$"},
-                size: %{type: "integer"}
+                size: %{type: "integer"},
+                signature: %{type: "string", description: "Ed25519's of `<name> <build> <sha256>`, in base64"}
               },
               required: ["name", "build", "sha256", "size"]
             }

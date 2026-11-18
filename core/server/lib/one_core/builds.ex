@@ -107,7 +107,9 @@ defmodule OneCore.Builds do
     end
   end
 
-  @doc "The latest build of each name, as `latest` says: `%{name => %{\"build\", \"sha256\", \"size\"}}`."
+  @doc """
+  The latest build of each name, as `latest` says: `%{name => %{\"build\", \"sha256\", \"size\", \"signature\"}}`.
+  """
   def latest do
     case Bucket.read(@latest) do
       {:ok, latest, _tag} -> JSON.decode!(latest)
@@ -132,7 +134,8 @@ defmodule OneCore.Builds do
 
   @doc """
   Makes `builds` the latest of their names: each `%{\"name\", \"build\", \"sha256\", \"size\"}`, and a runtime's
-  `\"inputs\"`, the SHA-256 of what it's built from, which `tooling/release` tells whether it changed by. While the bucket lacks
+  `\"inputs\"`, the SHA-256 of what it's built from, which `tooling/release` tells whether it changed by, and its
+  `\"signature\"`, the platform's, which `one` checks before it takes it (`clients/cli/src/serving.rs`). While the bucket lacks
   any of their files, gives a link to send each one it lacks by, `{:send, %{name => link}}`, and changes nothing:
   sending them and asking again makes them the latest, `{:ok, latest}`. The files no name is latest for any more,
   or was just before, are removed: a machine downloads only the latest, and one whose update doesn't take goes back
@@ -189,7 +192,7 @@ defmodule OneCore.Builds do
         :absent -> {%{}, nil}
       end
 
-    now = Map.merge(was, Map.new(builds, &{&1["name"], Map.take(&1, ~w(build sha256 size inputs))}))
+    now = Map.merge(was, Map.new(builds, &{&1["name"], Map.take(&1, ~w(build sha256 size inputs signature))}))
 
     written =
       if tag, do: Bucket.replace(@latest, JSON.encode!(now), tag), else: Bucket.write(@latest, JSON.encode!(now))
