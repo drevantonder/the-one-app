@@ -1080,6 +1080,9 @@ defmodule OneCore.Tools do
           listing: Version.listing(Apps.running(subject)[name])
         }
 
+      {:error, why, details} ->
+        throw({Call, {:refused, why, details}})
+
       {:error, why} ->
         raise why
     end

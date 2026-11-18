@@ -722,6 +722,7 @@ defmodule OneCore.Apps.Lifecycle do
         told(artifact, Update.change(artifact, :done))
 
       {:error, why} -> told(artifact, Update.change(artifact, {:fail, why}))
+      {:error, why, _details} -> told(artifact, Update.change(artifact, {:fail, why}))
     end
   end
 
@@ -737,8 +738,12 @@ defmodule OneCore.Apps.Lifecycle do
 
     with {_number, code, _tag} <- Store.latest(artifact) || {:error, "There's no app named #{Path.basename(artifact)}"},
          {:ok, number, _warnings} <-
-           Deploy.deploy(whose, name, Store.source(artifact, code), :stored, trusted, fn _ -> Apps.app(whose, name) == artifact end),
-         do: {:ok, number}
+           Deploy.deploy(whose, name, Store.source(artifact, code), :stored, trusted, fn _ -> Apps.app(whose, name) == artifact end) do
+      {:ok, number}
+    else
+      {:error, why, _details} -> {:error, why}
+      other -> other
+    end
   end
 
   @doc """

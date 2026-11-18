@@ -683,6 +683,7 @@ defmodule OneCore.Mcp do
     case outcome do
       {:ok, result} -> changed(name, answer(name, result), principal)
       {:error, why} -> {:ok, %{content: [%{type: "text", text: why}], isError: true}}
+      {:error, why, details} -> {:ok, %{content: [%{type: "text", text: why}], structuredContent: details, isError: true}}
       # Another server ran it and told every client watching, as each watches every server. This one may not
       # know the tool, as while its apps load, so it can't tell whether it only read.
       {:forwarded, result} -> {:ok, result}

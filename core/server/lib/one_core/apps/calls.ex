@@ -212,6 +212,7 @@ defmodule OneCore.Apps.Calls do
         case ended do
           {:ok, _result} -> {nil, false}
           {:refused, why} -> {{:refused, why}, false}
+          {:refused, why, _details} -> {{:refused, why}, false}
           {:error, why} -> {why, false}
           {:forwarded, result} -> {passed(result), true}
           # It would have been passed on again, so the server that passed it here observes it.
@@ -233,7 +234,11 @@ defmodule OneCore.Apps.Calls do
         if not forwarded, do: Histogram.record(:"one.tool.duration", took / 1000, Map.put(attributes, "one.outcome", outcome))
       end
 
-      with {:refused, why} <- ended, do: {:error, why}
+      case ended do
+        {:refused, why} -> {:error, why}
+        {:refused, why, details} -> {:error, why, details}
+        other -> other
+      end
     end
   end
 

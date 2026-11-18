@@ -9,7 +9,7 @@ defmodule OneCore.Apps.Deploy do
   alias OneCore.Call.State
   alias OneCore.{Entrypoint, Bucket, Builds, Sandbox, Server, Servers}
   alias OneCore.Apps
-  alias OneCore.Apps.{Installed, Calls, Lifecycle, LoadedVersion, Precompiled, Store, Version}
+  alias OneCore.Apps.{Installed, Calls, Lifecycle, LoadedVersion, Precompiled, Requires, Store, Version}
   alias OneCore.Apps.Version.Compile
 
   @network "network"
@@ -71,7 +71,7 @@ defmodule OneCore.Apps.Deploy do
         with {:ok, styling} <- Entrypoint.strict(files, version, trusted),
              :ok <- if(why = Version.waiting(name, version), do: {:error, why}, else: :ok),
              :ok <- described(name, version),
-             :ok <- if(install, do: fits(owner, name, version), else: :ok),
+             :ok <- if(install, do: fits_deploy(owner, name, version), else: :ok),
              {:ok, warnings} <- if(trusted, do: {:ok, warnings}, else: Sandbox.check(owner, version, built)),
              _ = stage.("Keeping it in the bucket"),
              # Its files, what it describes and that it's listed are written first, and none is read until `latest`
@@ -338,8 +338,12 @@ defmodule OneCore.Apps.Deploy do
   jobs requires an app that keeps them. `:ok`, or `{:error, why}`.
   """
   def fits(owner, name, version) do
+    with {:error, why, _details} <- fits_deploy(owner, name, version), do: {:error, why}
+  end
+
+  defp fits_deploy(owner, name, version) do
     with :ok <- launcher(owner, name, version),
-         :ok <- required(owner, name, Map.keys(version.requires)),
+         :ok <- required(owner, name, version.requires),
          do: scheduled(owner, name, version)
   end
 
@@ -441,7 +445,7 @@ defmodule OneCore.Apps.Deploy do
 
   # One app that couldn't be built again is said, and the rest are still built.
   defp rebuilt(whose, name, files, install?) do
-    deploy(whose, name, files, :stored, :stored, install?)
+    with {:error, why, _details} <- deploy(whose, name, files, :stored, :stored, install?), do: {:error, why}
   rescue
     error -> {:error, Exception.message(error)}
   end
@@ -495,19 +499,26 @@ defmodule OneCore.Apps.Deploy do
 
   # The apps an app requires are there before it is: installed for `owner`, or for the network.
   defp required(owner, name, requires) do
-    case Enum.reject(requires, &is_map_key(Apps.running(owner), &1)) do
+    running = Apps.running(owner)
+
+    case Enum.reject(Enum.sort(requires), fn {req, _why} -> is_map_key(running, req) end) do
       [] ->
         :ok
 
-      [missing] ->
-        {:error,
-         "#{name} requires #{missing}, which isn't installed for #{owner} or the network. Add it for them first, " <>
-           "or deploy it."}
-
       missing ->
-        {:error,
-         "#{name} requires #{Enum.join(missing, ", ")}, which aren't installed for #{owner} or the network. " <>
-           "Add them for them first, or deploy them."}
+        why =
+          case Enum.map(missing, &elem(&1, 0)) do
+            [one] ->
+              "#{name} requires #{one}, which isn't installed for #{owner} or the network. Add it for them first, " <>
+                "or deploy it."
+
+            many ->
+              "#{name} requires #{Enum.join(many, ", ")}, which aren't installed for #{owner} or the network. " <>
+                "Add them for them first, or deploy them."
+          end
+
+        details = for {req, reason} <- missing, do: Map.put(Requires.source(owner, req, owner), :why, reason)
+        {:error, why, %{missing: details}}
     end
   end
 

@@ -52,14 +52,19 @@ defmodule OneCore.Apps.Requires do
     end)
   end
 
-  defp source(owner, name, whose) do
+  @doc """
+  Where `owner` can get the app `name` from in this network, when it's required by an app of `whose`: their Recently
+  Deleted (`deleted: true`, restored there first), their own app of that name, `whose`'s, or the network's; `app: nil`
+  where none of these has it.
+  """
+  def source(owner, name, whose \\ nil) do
     record = Installed.read(owner)[name]
 
     {artifact, deleted} =
       if match?(%{"state" => "recently_deleted"}, record) do
         {record["app"], true}
       else
-        Enum.find_value(Enum.uniq([owner, whose, @network]), {nil, false}, fn from ->
+        Enum.find_value(Enum.reject(Enum.uniq([owner, whose, @network]), &is_nil/1), {nil, false}, fn from ->
           if Store.latest("#{from}/apps/#{name}"), do: {"#{from}/apps/#{name}", false}
         end)
       end
