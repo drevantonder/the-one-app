@@ -979,6 +979,9 @@ fn fs_shadow(input: ShadowVarying) -> @location(0) vec4<f32> {
     if (shadow.inset != 0u) {
         // Inside its box, where its own box isn't.
         alpha = saturate(0.5 - quad_sdf(input.local, shadow.outer, shadow.outer_radii)) * (1.0 - alpha);
+    } else {
+        // Outside its box, as CSS draws a shadow: a box with no fill of its own, a field's, shows none of it.
+        alpha *= saturate(0.5 + quad_sdf(input.local, shadow.outer, shadow.outer_radii));
     }
     return blend_color(input.color, alpha);
 }
