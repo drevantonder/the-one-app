@@ -13,8 +13,8 @@ your own to install, build, run or break things in, instead of the user's device
 machines that run them.
 
 - `create` takes an `image`, a `name`, what it's for in a few words (`description`) and a `size` (small, medium,
-  large), and says each stage: pulling an image its machine hasn't got, building `desktop`, starting. A shell image
-  such as `docker.io/library/ubuntu:24.04` keeps running with no command. Then `exec` runs commands in it, `read_file`
+  large), and says each stage: pulling an image its machine hasn't got, waiting for `desktop` to be built, starting. A
+  shell image such as `docker.io/library/ubuntu:24.04` keeps running with no command. Then `exec` runs commands in it, `read_file`
   and `write_file` move files up to 16 MB, and `logs` reads what its own command printed. `list` shows yours and their
   state, Podman's (an exited one with its exit code); one on a machine that's off is `unknown`. An app's code moves
   a file of any size with `upload` and `download`: to the bucket and back, sealed with a key it's given, a chunk at a
@@ -23,8 +23,9 @@ machines that run them.
   command ends, `on-failure` starts it again when that fails, and `always` whenever it ends and after the machine
   reboots. One stopped by hand, or for going unused, stays stopped until the next reboot. There's no `unless-stopped`.
 - `image: "desktop"` is a Linux desktop: a 1280×800 display (Xvnc, `DISPLAY=:99`, which `screen` resizes) with Openbox
-  and Google Chrome on it, downloaded from Google as each machine builds the image, and again each week in the
-  background, so only a machine's first desktop waits minutes for it. A running one is a screen in Computer Use,
+  and Google Chrome on it, downloaded from Google as each machine builds the image, as Containers starts there and
+  again each week, in the background, so a desktop waits for it only in the minute after that: `machines` says how far
+  its build is. A running one is a screen in Computer Use,
   called what the container is: look at it and act on it there. Chrome's DevTools Protocol is on port 9222 inside it
   (`exec` with `curl -s 127.0.0.1:9222/json`), and `playwright-mcp` is Playwright's MCP server, to start on it.
 - `commit` makes an image of a prepared container, and `create` from that image's name makes throwaway copies of

@@ -4,16 +4,19 @@
 # person to watch and use as live video (`webrtc-stream`, GStreamer's WebRTC).
 #
 # It's Google's own Chrome, so a person signs in to it, and to Google, as they would on their own computer. Chrome's
-# terms don't let it be passed on, so each machine builds this itself, downloading Chrome from Google, and again each
-# week for Chrome's security fixes (`Containers.Podman`). Its policies leave browser sign-in to the person, and turn
-# off what a new browser would prompt for, and the warning about the flags a container needs.
+# terms don't let it be passed on, so it's never published to a registry: each machine builds this itself, downloading
+# Chrome from Google, as Containers starts there, before anyone asks for it, and again each week for Chrome's security
+# fixes (`Containers.Podman`). A build takes about a minute, as long as pulling its 790 MB would. Chrome's download
+# says how far it is a line at a time, for `Containers.Podman` to show. Its policies leave browser sign-in to the
+# person, and turn off what a new browser would prompt for, and the warning about the flags a container needs.
 FROM docker.io/library/node:22-bookworm-slim
 RUN apt-get update \
  && apt-get install -y --no-install-recommends tigervnc-standalone-server x11-xserver-utils openbox xdotool imagemagick x11-utils sqlite3 \
     fonts-dejavu-core fonts-noto-color-emoji fonts-wqy-microhei ca-certificates curl procps \
     gstreamer1.0-x gstreamer1.0-plugins-base gstreamer1.0-plugins-good gstreamer1.0-plugins-bad gstreamer1.0-plugins-ugly \
     gstreamer1.0-nice python3-gst-1.0 gir1.2-gst-plugins-bad-1.0 python3-xlib \
- && curl -fsSLo /tmp/chrome.deb https://dl.google.com/linux/direct/google-chrome-stable_current_$(dpkg --print-architecture).deb \
+ && (curl -fL --progress-bar -o /tmp/chrome.deb https://dl.google.com/linux/direct/google-chrome-stable_current_$(dpkg --print-architecture).deb 2>&1 \
+    || echo "E: Couldn't download Chrome from Google" >&2) | tr '\r' '\n' \
  && apt-get install -y --no-install-recommends /tmp/chrome.deb \
  && rm -rf /tmp/chrome.deb /var/lib/apt/lists/* /etc/apt/sources.list.d/google-chrome.list \
  && mkdir -p /etc/opt/chrome/policies/managed \

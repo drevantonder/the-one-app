@@ -36,17 +36,62 @@ defmodule Containers.Podman do
   def init(_) do
     System.find_executable("podman") || raise "This machine has no podman to run containers with"
     send(self(), :build)
-    {:ok, nil}
+    {:ok, %{building: nil, waiting: [], progress: nil}}
   end
 
-  # Builds the new week's desktop image once the week turns, and once its files change, on a machine that has one,
-  # so `create` uses the newest there is and never waits for it. Checked as the service starts and then each hour.
+  # Builds this week's desktop image as the service starts, as its app is updated, and then each hour, unless it's
+  # here, so it's ready before anyone asks for a desktop or a browser, and new each week for Chrome's security fixes
+  # and once its files change. `create` uses the newest there is meanwhile.
   @impl GenServer
   def handle_info(:build, state) do
+    Process.send_after(self(), :build, 3_600_000)
+    {:noreply, building(state)}
+  end
+
+  def handle_info(:updated, state), do: {:noreply, building(state)}
+
+  def handle_info({:progress, progress}, state) do
+    if progress != state.progress, do: tell()
+    {:noreply, %{state | progress: progress}}
+  end
+
+  def handle_info({ref, result}, %{building: %Task{ref: ref}} = state) do
+    Process.demonitor(ref, [:flush])
+    for from <- state.waiting, do: GenServer.reply(from, result)
+    tell()
+    {:noreply, %{state | building: nil, waiting: [], progress: nil}}
+  end
+
+  @impl GenServer
+  def handle_call(:build, from, state), do: {:noreply, Map.update!(building(state), :waiting, &[from | &1])}
+  def handle_call(:progress, _from, state), do: {:reply, state.progress, state}
+
+  # A new version may build from new files, so it builds as the service does as it starts. The version before kept
+  # no state.
+  @impl GenServer
+  def code_change(_old, state, _extra) do
+    send(self(), :updated)
+    {:ok, if(is_map(state), do: state, else: %{building: nil, waiting: [], progress: nil})}
+  end
+
+  # The build that's running, or one started.
+  defp building(%{building: nil} = state) do
     service = self()
-    Task.start(fn -> if image(service, "desktop"), do: build(service) end)
-    Process.send_after(service, :build, 3_600_000)
-    {:noreply, state}
+    %{state | building: Task.async(fn -> built(service) end)}
+  end
+
+  defp building(state), do: state
+
+  defp built(service) do
+    {:ok, build!(service)}
+  rescue
+    e -> {:error, Exception.message(e)}
+  end
+
+  # Tells every app watching that the desktop image's progress changed, so a screen waiting on it shows how far it is.
+  defp tell do
+    service = self()
+    for who <- Enum.take(OneCore.Service.acts_for(), 1), do: Task.start(fn -> OneCore.Service.app(service, who, :changed) end)
   end
 
   @doc """
@@ -109,23 +154,100 @@ defmodule Containers.Podman do
   def pull(service, image), do: podman!(service, ["pull", "--quiet", image], 900) && image
 
   @doc """
-  Builds the app's own image, the desktop, from its Containerfile, for the week and the files it's built from,
-  unless it's here, and gives its name. It's built again from scratch each week for Google Chrome's security fixes,
-  which it downloads as it's built. It removes the ones this server built before it, but those a container still
-  uses, which Podman refuses to remove: a later build does.
+  The desktop image, built for this week and the files it's built from, once the build that's running, or one started
+  now, has ended. One is built at a time, so whoever asks while it runs waits for that one.
   """
   def build(service) do
+    case GenServer.call(service, :build, :infinity) do
+      {:ok, image} -> image
+      {:error, why} -> raise why
+    end
+  end
+
+  @doc """
+  How far the desktop image's build is, as a person reads it ("Installing packages: 40%"), while there's none here to
+  create from yet: `nil` once there is, as a week's new build runs behind it then, or where none is running.
+  """
+  def progress(service), do: if(!image(service, "desktop"), do: GenServer.call(service, :progress))
+
+  # Builds the app's own image, the desktop, from its Containerfile, for the week and the files it's built from,
+  # unless it's here, and gives its name. It's built again from scratch each week for Google Chrome's security fixes,
+  # which it downloads as it's built. It removes the ones this server built before it, but those a container still
+  # uses, which Podman refuses to remove: a later build does. It tells the service how far it is as it goes.
+  defp build!(service) do
     folder = OneCore.Service.folder(service, "server/desktop")
     {year, week} = :calendar.iso_week_number()
     image = "localhost/containers-desktop:#{Path.basename(folder)}-#{year}-#{week}"
 
     if run(service, ["image", "exists", image], 10).exit != 0 do
-      podman!(service, ["build", "--pull=newer", "--no-cache", "--label", made_here(), "-t", image, folder], 900)
+      send(service, {:progress, "Starting"})
+      args = ["build", "--pull=newer", "--no-cache", "--label", made_here(), "-t", image, folder]
+
+      ran = run(service, args, 900, :text, {&progressed/2, %{service: service, phase: "Starting", of: 0, done: 0}})
+
+      # Podman stopped from outside ends 0 too, having built nothing.
+      if ran.exit != 0 or run(service, ["image", "exists", image], 10).exit != 0,
+        do: raise("#{why_not_built(ran.stderr)}\n\nWhat its build said last:\n\n#{tail(ran.stdout <> ran.stderr, 60)}")
+
       for before <- desktops(service), before != image, do: run(service, ["rmi", before], 60)
     end
 
     image
   end
+
+  # How far a build of the Containerfile is, from a line it printed: apt's packages, which it counts as it downloads,
+  # unpacks and sets up each, then Chrome, which it downloads, saying how far, and installs, then Playwright's MCP server, then the
+  # image saved. Tells the service as it changes.
+  defp progressed(line, was) do
+    at =
+      cond do
+        line =~ ~r/^\d+ upgraded, (\d+) newly installed/ ->
+          [_, of] = Regex.run(~r/(\d+) newly installed/, line)
+          %{was | phase: if(was.phase == "Starting", do: "Installing packages", else: "Installing Chrome"), of: String.to_integer(of) * 3, done: 0}
+
+        was.phase in ["Installing packages", "Installing Chrome"] and line =~ ~r/^(Get:\d+ |Unpacking |Setting up )/ ->
+          at = %{was | done: was.done + 1}
+
+          cond do
+            at.phase == "Installing Chrome" and String.starts_with?(line, "Setting up google-chrome-stable") -> %{at | phase: "Installing Playwright"}
+            at.phase == "Installing packages" and at.done >= at.of -> %{at | phase: "Downloading Chrome", of: 0, done: 0}
+            true -> at
+          end
+
+        was.phase == "Downloading Chrome" and line =~ ~r/^#+\s+\d+(\.\d+)?%/ ->
+          [percent] = Regex.run(~r/\d+/, line)
+          %{was | of: 100, done: String.to_integer(percent)}
+
+        line =~ ~r/^(STEP \d+\/\d+: (COPY|CMD)|COMMIT)/ ->
+          %{was | phase: "Saving the image"}
+
+        true ->
+          was
+      end
+
+    if said(at) != said(was), do: send(at.service, {:progress, said(at)})
+    at
+  end
+
+  defp said(%{phase: phase, of: of, done: done}) when phase in ["Installing packages", "Downloading Chrome"] and of > 0,
+    do: "#{phase}: #{min(div(done * 10, of) * 10, 90)}%"
+
+  defp said(%{phase: phase}), do: phase
+
+  # What went wrong, in a line: apt's, npm's or curl's first error, or Podman's own.
+  defp why_not_built(stderr) do
+    lines = String.split(stderr, "\n", trim: true)
+
+    reason =
+      case Enum.find_value(lines, &Regex.run(~r/^(?:E: |npm (?:ERR!|error) |curl: \(\d+\) )(.+)/, &1, capture: :all_but_first)) do
+        [reason] -> reason
+        nil -> String.replace_prefix(List.last(lines) || "its build stopped", "Error: ", "")
+      end
+
+    "The desktop image couldn't be built: #{String.trim_trailing(reason, ".")}."
+  end
+
+  defp tail(text, lines), do: text |> String.split("\n") |> Enum.take(-lines) |> Enum.join("\n") |> String.trim()
 
   @doc """
   Creates a container from an image on this machine and starts it. `spec` has its `id` and labels, the `image`,
@@ -415,13 +537,23 @@ defmodule Containers.Podman do
   defp podman!(service, args, timeout \\ 60) do
     case run(service, args, timeout) do
       %{exit: 0, stdout: stdout} -> stdout
-      %{stderr: stderr} -> raise String.trim(String.replace(stderr, ~r/^Error: /m, ""))
+      %{stderr: stderr} -> raise why(stderr)
     end
+  end
+
+  # What Podman said went wrong: its last `Error:` line, which is what a person reads, then all it said, where there's
+  # more, as its warnings and retries before it.
+  defp why(stderr) do
+    lines = String.split(String.trim(stderr), "\n", trim: true)
+    error = Enum.find(Enum.reverse(lines), List.last(lines) || "Podman failed", &String.starts_with?(&1, "Error: "))
+    reason = String.replace_prefix(error, "Error: ", "")
+    if length(lines) > 1, do: reason <> "\n\n" <> String.trim(stderr), else: reason
   end
 
   # Runs podman with `args` for at most `timeout` seconds, as Shell's runner runs a command: its own process group,
   # stopped whole once it takes too long, with what it writes as errors in a file beside while it runs.
-  defp run(service, args, timeout, output \\ :text) do
+  # With `each`, a function and what it starts from, it's given each line printed and what it gave for the one before.
+  defp run(service, args, timeout, output \\ :text, each \\ nil) do
     errors = Path.join(OneCore.Service.folder(service), "errors-#{System.unique_integer([:positive])}")
 
     program =
@@ -429,10 +561,10 @@ defmodule Containers.Podman do
         :binary,
         :exit_status,
         args: ["-c", ~s(exec </dev/null 2>"$0"; exec podman "$@"), errors | args]
-      ])
+      ] ++ if(each, do: [{:line, 16_384}], else: []))
 
     {:os_pid, pid} = Port.info(program, :os_pid)
-    {exit, stdout} = read(program, pid, System.monotonic_time(:millisecond) + timeout * 1000, [])
+    {exit, stdout} = read(program, pid, System.monotonic_time(:millisecond) + timeout * 1000, [], each)
     stderr = File.read!(errors)
     File.rm!(errors)
     stderr = if exit == -1, do: stderr <> "\n(stopped after #{timeout}s)", else: stderr
@@ -443,9 +575,11 @@ defmodule Containers.Podman do
     end
   end
 
-  defp read(program, pid, until, printed) do
+  defp read(program, pid, until, printed, each) do
     receive do
-      {^program, {:data, data}} -> read(program, pid, until, [printed | data])
+      {^program, {:data, {:noeol, part}}} -> read(program, pid, until, [printed | part], each)
+      {^program, {:data, {:eol, line}}} -> read(program, pid, until, [printed, line, "\n"], with({fun, at} <- each, do: {fun, fun.(line, at)}))
+      {^program, {:data, data}} -> read(program, pid, until, [printed | data], each)
       {^program, {:exit_status, status}} -> {status, IO.iodata_to_binary(printed)}
     after
       max(0, until - System.monotonic_time(:millisecond)) ->

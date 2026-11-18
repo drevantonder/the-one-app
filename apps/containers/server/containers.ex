@@ -106,7 +106,8 @@ defmodule Containers do
       %{
         name: "machines",
         read_only: true,
-        description: "The machines that run containers, each by the name `create` takes, whether it's on now, and if not when it last was (ms since 1970).",
+        description:
+          "The machines that run containers, each by the name `create` takes, whether it's on now, and if not when it last was (ms since 1970), and where it's on and has no desktop image yet, how far its build is. Each machine builds it by itself as Containers starts there, in about a minute, and again each week.",
         inputs: %{type: "object", properties: %{}},
         outputs: %{
           type: "object",
@@ -118,7 +119,11 @@ defmodule Containers do
                 properties: %{
                   machine: %{type: ["string", "null"], description: "What create's machine takes"},
                   on: %{type: "boolean"},
-                  last_on: %{type: "integer", description: "When it last was, if it's off, in milliseconds since 1970"}
+                  last_on: %{type: "integer", description: "When it last was, if it's off, in milliseconds since 1970"},
+                  desktop: %{
+                    type: ["string", "null"],
+                    description: ~s(How far the image desktop's build is, as a person reads it, while the machine has none yet: "Installing packages: 40%". Null otherwise.)
+                  }
                 },
                 required: ["machine", "on"]
               }
@@ -158,7 +163,7 @@ defmodule Containers do
         name: "create",
         task_support: :optional,
         description:
-          "Create a Linux container, from a Docker image or `desktop`, and start it. It gets no files or network of its machine's, and no privileges: only its own, with the limits of its size, and the ports asked for. It says each stage: pulling an image not on the machine, building `desktop` there the first time (a few minutes; after that it's rebuilt each week in the background), then starting. Gives the container as `list` does.",
+          "Create a Linux container, from a Docker image or `desktop`, and start it. It gets no files or network of its machine's, and no privileges: only its own, with the limits of its size, and the ports asked for. It says each stage: pulling an image not on the machine, waiting for `desktop` to be built there where it isn't yet (each machine builds it as Containers starts there, in about a minute, and again each week in the background; `machines` says how far it is), then starting. Gives the container as `list` does.",
         inputs: %{
           type: "object",
           required: ["image", "name", "description"],
@@ -443,7 +448,7 @@ defmodule Containers do
       for server <- Service.servers(call, Podman) do
         case Service.seen(server) do
           at when is_integer(at) -> %{machine: Service.name(server), on: false, last_on: at}
-          _ -> %{machine: Service.name(server), on: true}
+          _ -> %{machine: Service.name(server), on: true, desktop: Service.call(call, Podman, :progress, [], server)}
         end
       end
 
@@ -468,7 +473,7 @@ defmodule Containers do
     image =
       Service.call(call, Podman, :image, [image], server) ||
         if image == "desktop" do
-          Call.stage(call, "Building the desktop image on #{machine}, which takes a few minutes the first time")
+          Call.stage(call, "Building the desktop image on #{machine}, which takes about a minute: `machines` says how far it is")
           Service.call(call, Podman, :build, [], server)
         else
           Call.stage(call, "Pulling #{image} on #{machine}")
@@ -670,6 +675,10 @@ defmodule Containers do
   defp did("scroll", %{"direction" => direction} = inputs), do: "Scrolled #{direction} #{inputs["amount"] || 5}"
   defp did("type", %{"text" => text}), do: "Typed #{String.length(text)} characters"
   defp did("key", %{"keys" => keys}), do: "Pressed #{keys}"
+
+  @doc false
+  # How far the desktop image's build is changed: every app watching is told. For `Containers.Podman`.
+  def changed(call), do: Call.changed(call)
 
   defp settings(call) do
     case Artifact.read(call.own, "settings") do
