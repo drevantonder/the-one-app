@@ -55,38 +55,7 @@ export const Section: typeof Strict.Section = (props) => (
   </Box>
 )
 
-export const List: typeof Strict.List = (props) => (
-  <Box role="list" style={{ maxWidth: "readable", borderWidth: 1, borderRadius: "xl", backgroundColor: "card", color: "foreground", overflow: "hidden" }}>
-    {props.children}
-  </Box>
-)
-
-export const Row: typeof Strict.Row = (props) => {
-  const inside = () => (
-    <>
-      <Show when={props.start}>{props.start}</Show>
-      <Box style={{ flexGrow: 1, flexShrink: 1 }}>
-        <Text style={{ font: "label", lineClamp: 1 }}>{props.heading}</Text>
-        <Show when={props.text}>
-          <Text style={{ color: "muted-foreground", lineClamp: 2 }}>{props.text}</Text>
-        </Show>
-      </Box>
-      <Show when={props.end}>{props.end}</Show>
-    </>
-  )
-  const row = { flexDirection: "row", alignItems: "center", gap: 12, flexGrow: 1, paddingBlock: 10 } as const
-  return (
-    <Box role="listitem" style={{ flexDirection: "row", alignItems: "center", gap: 12, paddingInline: 16, minHeight: "control", borderBottomWidth: 1, backgroundColor: props.current ? "muted" : undefined }}>
-      <Show when={props.control}>{props.control}</Show>
-      <Show when={props.onClick} fallback={<Box style={row}>{inside()}</Box>}>
-        <Box role="button" aria-current={props.current ? "true" : undefined} onClick={() => props.onClick?.()} style={row}>
-          {inside()}
-        </Box>
-      </Show>
-      <Show when={props.action}>{props.action}</Show>
-    </Box>
-  )
-}
+export { List, Row } from "../../list.tsx"
 
 const state = { alignItems: "center", justifyContent: "center", gap: 12, paddingBlock: 48, textAlign: "center" } as const
 

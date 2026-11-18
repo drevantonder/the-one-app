@@ -37,6 +37,7 @@ const Opened = createContext<{
 const look = styles({
   catcher: { position: "absolute", top: 0, bottom: 0, start: 0, end: 0, pointerEvents: "auto" },
   anchor: { position: "absolute" },
+  closed: { display: "none" },
   below: { position: "absolute", top: "100%", end: 0, marginTop: tokens.grid[1], pointerEvents: "auto" },
   above: { position: "absolute", bottom: "100%", end: 0, marginBottom: tokens.grid[1], pointerEvents: "auto" },
   content: {
@@ -114,18 +115,19 @@ export const Menu = {
     )
   },
   /** Where a menu's content shows: in a layer over the page, under what opened it, its end at that's end, or above
-   * it where that's in the window's lower half. */
+   * it where that's in the window's lower half. Closed, it's kept, unseen, so a row knows its destructive item. */
   Positioner: (props: { children?: JSX.Element }) => {
     const menu = useContext(Opened)!
     const above = () => menu.at()!.y + menu.at()!.height / 2 > viewport().height / 2
+    const inside = children(() => props.children)
     return (
-      <Show when={menu.at()}>
+      <Show when={menu.at()} fallback={<Box style={look.closed}>{inside()}</Box>}>
         {(at) => (
           <Layer modal>
             <Box style={look.catcher} onClick={() => menu.open(undefined)} />
             <Box style={[look.anchor, { top: at().y, start: at().x, width: at().width, height: at().height }]}>
               <Box style={above() ? look.above : look.below} onKeyDown={(event) => event.key === "Escape" && menu.open(undefined)}>
-                {props.children}
+                {inside()}
               </Box>
             </Box>
           </Layer>

@@ -1,237 +1,209 @@
-import { createSignal, onSettled, Show } from "solid-js"
-import type { Accessor } from "solid-js"
+// A list and its rows: written once in strict, on the primitives, the same on the DOM and on a native host.
+import { children, createSignal, onCleanup, Show } from "solid-js"
 import type { JSX } from "@solidjs/web"
-import { Icon } from "./button.tsx"
-import { pace, reduced } from "./shared.ts"
-import { RowMenu } from "./menu.tsx"
+import { Box, Text } from "#primitives"
+import { RowMenu, type RowMenu as Menu } from "./menu.tsx"
+import { negative, styles } from "./styles.ts"
+import { tokens } from "./tokens.ts"
+import type { Located, Pressed } from "./strict/types/ui.d.ts"
+
+const look = styles({
+  list: {
+    maxWidth: tokens.length.readable,
+    borderRadius: tokens.radius.large,
+    backgroundColor: tokens.colour.background,
+    color: tokens.colour.label,
+    boxShadow: tokens.shadow.edge,
+    overflow: "hidden",
+  },
+  // Every row draws the line above it, and the list hides the first's.
+  rows: { marginTop: negative(tokens.length.hairline) },
+  row: { position: "relative", flexDirection: "row", alignItems: "stretch", overflow: "hidden", borderTopWidth: tokens.length.hairline, borderColor: tokens.colour.quinaryLabel },
+  wraps: { flexWrap: "wrap" },
+  current: { backgroundColor: tokens.colour.quinaryLabel },
+  held: { userSelect: "none", touchAction: "pan-y" },
+  inside: {
+    flexGrow: 1,
+    flexShrink: 1,
+    flexBasis: tokens.length.menu,
+    minWidth: 0,
+    flexDirection: "row",
+    alignItems: "center",
+    gap: tokens.grid[3],
+    minHeight: tokens.length.row,
+    paddingBlock: tokens.grid[2],
+    paddingInline: tokens.grid[3],
+    backgroundColor: { hover: tokens.colour.quinaryLabel, pressed: tokens.colour.quaternaryLabel, focused: tokens.colour.quinaryLabel },
+    transitionProperty: ["backgroundColor"],
+    transition: tokens.motion.quick,
+  },
+  pressable: { cursor: "pointer" },
+  after: { paddingStart: 0 },
+  settling: { transitionProperty: ["translateX", "width"], transition: tokens.motion.settle },
+  words: { flexGrow: 1, flexShrink: 1, minWidth: 0 },
+  heading: { font: tokens.type.medium, fontWeight: tokens.weight.medium, lineClamp: 1 },
+  text: { font: tokens.type.medium, color: tokens.colour.secondaryLabel, lineClamp: 2 },
+  start: { flexShrink: 0 },
+  end: { flexShrink: 0, maxWidth: "50%", color: tokens.colour.secondaryLabel, textAlign: "end" },
+  control: { flexShrink: 0, minWidth: tokens.length.control, justifyContent: "center", alignItems: "center", paddingStart: tokens.grid[1] },
+  action: { flexShrink: 0, flexDirection: "row", alignItems: "center", marginStart: "auto", paddingBottom: tokens.grid[2], paddingEnd: tokens.grid[3] },
+  swipe: { position: "absolute", top: 0, bottom: 0, end: 0, alignItems: "center", justifyContent: "center", overflow: "hidden", backgroundColor: tokens.colour.red, color: tokens.colour.onAccent, cursor: "pointer" },
+  chevron: { color: tokens.colour.secondaryLabel },
+})
 
 /// `<List><For each={notes()}>{(note) => <Row heading={note.text} />}</For></List>`: things of one kind, one under
-/// another, in one group that stops at a readable width however wide the room is. With no rows it shows nothing. A
-/// row added to a list that has some opens up where it goes, and one taken out closes up, the rest making room or
-/// closing the gap. A list that changes in any other way (filled, a row edited, another list's rows) just shows
-/// what it's given.
-export function List(props: { children?: JSX.Element; class?: JSX.ClassValue }) {
+/// another, in one group that stops at a readable width however wide the room is. With no rows it shows nothing.
+export function List(props: { children?: JSX.Element }) {
+  const rows = children(() => props.children)
   return (
-    <div class={["ui-list", props.class]} role="list" ref={moves}>
-      {props.children}
-    </div>
-  )
-}
-
-/// What a row says. An app often draws its whole list again with new rows: one that says the same is the same row.
-const says = (row: Element) => row.textContent
-
-/// Watches a list's rows come and go, and moves them as they do.
-function moves(list: HTMLElement) {
-  let rows: HTMLElement[] = []
-  const seen = new MutationObserver(() => {
-    const before = rows
-    const after = (rows = ([...list.children] as HTMLElement[]).filter((row) => !row.inert))
-    if (!before.length) return
-    const left = Map.groupBy(after, says)
-    const stayed = new Map(before.map((row) => [row, left.get(says(row))?.shift()]))
-    const gone = before.filter((row) => !stayed.get(row))
-    const come = [...left.values()].flat()
-    // Some gone and some new is a row that changed, or another list's rows: a plain swap.
-    if (gone.length && come.length) return
-    // For whoever asked for less motion, a new row fades in where it is, and one taken out just goes.
-    for (const row of come) row.animate(reduced.matches ? { opacity: [0, 1] } : { height: ["0px", `${row.offsetHeight}px`], opacity: [0, 1] }, pace(list, "settle"))
-    if (!reduced.matches) for (const row of gone) leave(list, row, before.slice(before.indexOf(row) + 1).map((later) => stayed.get(later)).find(Boolean))
-    seen.takeRecords()
-  })
-  queueMicrotask(() => {
-    rows = [...list.children] as HTMLElement[]
-    seen.observe(list, { childList: true })
-  })
-}
-
-/// A row that was taken out leaves a copy of itself where it was, `before` the row that followed it, for as long as
-/// it takes to close up: the row itself is the app's, and gone.
-function leave(list: HTMLElement, row: HTMLElement, before: HTMLElement | null = null) {
-  const height = `${row.offsetHeight || (list.firstElementChild as HTMLElement | null)?.offsetHeight || 0}px`
-  const copy = row.cloneNode(true) as HTMLElement
-  copy.inert = true
-  list.insertBefore(copy, before?.parentNode === list ? before : null)
-  copy.animate({ opacity: [1, 0] }, { ...pace(list, "quick"), fill: "forwards" })
-  copy.animate({ height: [height, "0px"] }, pace(list, "settle")).finished.then(() => copy.remove())
-}
-
-/// `<Row heading="Coffee with Sam" text="Meals · 12 Nov" />`: one thing in a list: its `heading`, one grey line of
-/// `text`, what it starts with (`start`, an icon) and what it ends with (`end`: an amount, a switch). With `href`
-/// it's a link to what it opens, with a chevron; with `onClick` the whole row is pressed and opens in place.
-/// `current` marks the one that's open beside the list, in a split. `control` is a control before all of it,
-/// pressed apart from the row, as a checkbox that picks rows is: `control={<input type="checkbox" aria-label="On
-/// this claim" checked={...} onChange={...} />}`. It's drawn as the UI library's, and the row's whole height in front of
-/// the row is its to press. `action` is a button after all of it, pressed apart from the row, as Sign In is for an
-/// account that needs it: a button can't be inside the row's own. A ⋯ `Menu` in its `end` opens on a long press or a right-click on the row too, and a
-/// `destructive` item in it (Delete, Remove) shows as a swipe toward the row's start under a finger, as a phone's
-/// lists do.
-export function Row(props: {
-  heading?: JSX.Element
-  text?: JSX.Element
-  start?: JSX.Element
-  end?: JSX.Element
-  href?: string
-  onClick?: (event: MouseEvent) => void
-  current?: boolean
-  control?: JSX.Element
-  action?: JSX.Element
-}) {
-  const inside = () => (
-    <>
-      <Show when={props.start}>
-        <span class="start">{props.start}</span>
-      </Show>
-      <span class="words">
-        <span class="heading">{props.heading}</span>
-        <Show when={props.text}>
-          <span class="text">{props.text}</span>
-        </Show>
-      </span>
-      <Show when={props.end}>
-        <span class="end">{props.end}</span>
-      </Show>
-      <Show when={props.href}>
-        <Icon name="caret-right" along />
-      </Show>
-    </>
-  )
-  const [menu, setMenu] = createSignal<RowMenu>()
-  let row!: HTMLDivElement
-  onSettled(() => presses(row, menu))
-  return (
-    <RowMenu value={setMenu}>
-    <div class="ui-row" role="listitem" ref={row} data-current={props.current ? "" : undefined} data-menu={menu() ? "" : undefined} data-swipe={menu()?.destructive() ? "" : undefined}>
-      <Show when={props.control}>
-        <label class="ui-choice control">{props.control}</label>
-      </Show>
-      <Show when={props.href} fallback={
-        <Show when={props.onClick} fallback={<div class="row">{inside()}</div>}>
-          <button type="button" class="row press" aria-current={props.current ? "true" : undefined} onClick={(event) => props.onClick?.(event)}>{inside()}</button>
-        </Show>
-      }>
-        <a class="row press" href={props.href} aria-current={props.current ? "true" : undefined}>{inside()}</a>
-      </Show>
-      <Show when={props.action}>
-        <span class="action">{props.action}</span>
-      </Show>
-      <Show when={menu()?.destructive()}>
-        {(item) => (
-          <button type="button" class="swipe" tabindex="-1" aria-hidden="true" onClick={() => menu()?.select(item().value)}>
-            <span>{item().label}</span>
-          </button>
-        )}
-      </Show>
-    </div>
-    </RowMenu>
+    <Show when={rows.toArray().length}>
+      <Box role="list" style={look.list}>
+        <Box style={look.rows}>{rows()}</Box>
+      </Box>
+    </Show>
   )
 }
 
 /// How far a finger moves before it's a swipe or a scroll, not a press.
 const SLOP = 10
+/// How long a press is held before it opens a row's menu.
+const HOLD = 500
+/// How far aside a row stays to show its destructive item.
+const SHOWN = 88
 
-/// A press on a row with a menu: held, or a right-click, it opens the menu where it was, as Zag's context menu does
-/// (`getContextTriggerProps`). With a `destructive` item, a finger swiping the row toward its start moves it aside
-/// to show that item, which stays shown past half its width and is done when swiped most of the way. A press on the
-/// row while it's aside, anywhere but that item, puts it back. Let go, it goes where it was heading: a flick toward the
-/// start shows the item and one back hides it, however short. Presses on the menu's own button, or the row's
-/// `control` or `action`, are theirs. → what stops it.
-function presses(row: HTMLElement, menu: Accessor<RowMenu | undefined>) {
+/// `<Row heading="Coffee with Sam" text="Meals · 12 Nov" />`: one thing in a list: its `heading`, up to two grey lines
+/// of `text`, what it starts with (`start`, an icon) and what it ends with (`end`: an amount, a switch). With
+/// `onClick` the whole row is pressed and opens in place. `current` marks the one that's open beside the list, in a
+/// split. `control` is a control before all of it, pressed apart from the row, as a checkbox that picks rows is, and
+/// `action` a button after all of it, pressed apart from the row, as Sign In is for an account that needs it; an action
+/// that would leave the words narrower than a menu goes under them. A ⋯ `Menu` in its `end` opens on a long press or a
+/// right-click on the row too, and its `destructive` item (Delete, Remove) shows as a finger swipes the row toward
+/// its start, as a phone's lists do: pressed, or swiped most of the way, it's done.
+export function Row(props: {
+  heading?: JSX.Element
+  text?: JSX.Element
+  start?: JSX.Element
+  end?: JSX.Element
+  onClick?: () => void
+  current?: boolean
+  control?: JSX.Element
+  action?: JSX.Element
+}) {
+  const [menu, setMenu] = createSignal<Menu>()
+  // How far aside the row is, and whether it's on its way somewhere by itself.
+  const [swiped, setSwiped] = createSignal(0)
+  const [settling, setSettling] = createSignal(false)
+  let width = 0
   let start: { x: number; y: number; at: number } | undefined
   let swiping = false
-  let swiped = 0
-  // Where the row was over the last moves, for how fast it was going as it was let go.
   let moves: { time: number; value: number }[] = []
-  // When a press last swiped the row, or put it back: the click its lifting makes isn't a press on the row.
+  // When a press last swiped the row, held it or put it back: the click its lifting makes isn't a press on the row.
   let moved = -Infinity
-  const toward = () => (getComputedStyle(row).direction === "rtl" ? -1 : 1)
-  // How far aside the row stays to show its item: the item's words, with room either side.
-  const shown = () => (row.querySelector<HTMLElement>(".swipe > span")?.offsetWidth ?? 0) + 40
-  const aside = (px: number, settle = false) => {
-    swiped = Math.max(0, Math.min(px, row.offsetWidth))
-    row.toggleAttribute("data-settling", settle)
-    row.style.setProperty("--swiped", `${swiped}px`)
-  }
-  const theirs = (event: Event) => event.target instanceof Element && !!event.target.closest("[data-menu-trigger], .control, .action, .swipe")
-  // A press held still opens the menu where it's held.
   let held: ReturnType<typeof setTimeout> | undefined
-  let opened = false
-  const at = (event: MouseEvent) => ({ x: event.clientX, y: event.clientY, width: 0, height: 0 })
-  const context = () => ({
-    onPointerDown: (event: PointerEvent) => ((opened = false), (held = setTimeout(() => ((opened = true), menu()?.open(at(event))), 500))),
-    onPointerUp: (_event: PointerEvent) => clearTimeout(held),
-    onPointerCancel: (_event: PointerEvent) => clearTimeout(held),
-    onContextMenu: (event: MouseEvent) => (event.preventDefault(), menu()?.open(at(event))),
-  })
+  onCleanup(() => clearTimeout(held))
+  const aside = (px: number, settle = false) => (setSettling(settle), setSwiped(Math.max(0, Math.min(px, width || px))))
+  const at = (event: Located) => ({ x: event.clientX, y: event.clientY, width: 0, height: 0 })
 
-  const down = (event: PointerEvent) => {
-    if (!menu() || theirs(event) || event.button !== 0) return
-    if (swiped) return void ((moved = event.timeStamp), aside(0, true))
-    start = { x: event.clientX, y: event.clientY, at: swiped }
+  const down = (event: Pressed) => {
+    if (!menu() || event.button !== 0) return
+    width = event.currentTarget.getBoundingClientRect().width
+    if (swiped()) return void ((moved = event.timeStamp), aside(0, true))
+    start = { x: event.clientX, y: event.clientY, at: swiped() }
     swiping = false
     moves = []
-    context().onPointerDown(event)
+    held = setTimeout(() => ((moved = Infinity), (start = undefined), menu()?.open(at(event))), HOLD)
   }
-  const move = (event: PointerEvent) => {
+  const move = (event: Pressed) => {
     if (!start) return
-    const dx = (start.x - event.clientX) * toward()
+    const dx = start.x - event.clientX
     const dy = event.clientY - start.y
     if (!swiping && Math.hypot(dx, dy) < SLOP) return
+    clearTimeout(held)
     if (!swiping) {
-      context()?.onPointerCancel(event)
       swiping = event.pointerType === "touch" && !!menu()?.destructive() && Math.abs(dx) > Math.abs(dy)
       if (!swiping) return void (start = undefined)
-      row.setPointerCapture(event.pointerId)
     }
     aside(start.at + dx)
-    moves = [...moves.slice(-31), { time: event.timeStamp, value: swiped }]
+    moves = [...moves.slice(-31), { time: event.timeStamp, value: swiped() }]
   }
-  const up = (event: PointerEvent) => {
+  const up = (event: Pressed) => {
+    clearTimeout(held)
+    if (moved === Infinity) moved = event.timeStamp
     if (!start) return
     start = undefined
-    context()?.onPointerUp(event)
     if (!swiping) return
     moved = event.timeStamp
     const item = menu()?.destructive()
-    if (item && swiped > row.offsetWidth * 0.6) {
-      aside(row.offsetWidth, true)
+    if (item && swiped() > width * 0.6) {
+      aside(width, true)
       menu()?.select(item.value)
       setTimeout(() => aside(0, true), 400)
-    } else {
-      // Its speed as it was let go, in px a millisecond toward the start, from the last move at least 80 ms back, carried
-      // on as a phone's scrolling slows (its 0.998 a millisecond) to where it would stop.
-      const last = moves.at(-1)
-      const from = moves.findLast((move) => last!.time - move.time >= 80) ?? moves[0]
-      const speed = !last || event.timeStamp - last.time > 80 ? 0 : (last.value - from.value) / Math.max(1, last.time - from.time)
-      aside(swiped + (speed * 0.998) / (1 - 0.998) > shown() / 2 ? shown() : 0, true)
+      return
     }
+    // Let go, it goes where it was heading: its speed as it was let go, carried on as a phone's scrolling slows.
+    const last = moves.at(-1)
+    const from = moves.findLast((move) => last!.time - move.time >= 80) ?? moves[0]
+    const speed = !last || event.timeStamp - last.time > 80 ? 0 : (last.value - from.value) / Math.max(1, last.time - from.time)
+    aside(swiped() + (speed * 0.998) / (1 - 0.998) > SHOWN / 2 ? SHOWN : 0, true)
   }
-  const cancel = (event: PointerEvent) => {
-    context()?.onPointerCancel(event)
+  const cancel = () => {
+    clearTimeout(held)
     if (start && swiping) aside(0, true)
     start = undefined
   }
   // What a press that was a swipe, a held press, or put the row back would otherwise do as it lifts: open the row.
-  const click = (event: MouseEvent) => {
-    // The item it showed was pressed: done, and the row goes back.
-    if (event.target instanceof Element && event.target.closest(".swipe")) return aside(0, true)
-    if (theirs(event) || !(event.timeStamp - moved < 600 || opened)) return
-    event.preventDefault()
-    event.stopPropagation()
-  }
-  const right = (event: MouseEvent) => {
-    if (!theirs(event)) context()?.onContextMenu(event)
-  }
-  // Pressed anywhere else, a row that's aside goes back.
-  const elsewhere = (event: PointerEvent) => {
-    if (swiped && !row.contains(event.target as Node)) aside(0, true)
-  }
-  row.addEventListener("pointerdown", down)
-  row.addEventListener("pointermove", move)
-  row.addEventListener("pointerup", up)
-  row.addEventListener("pointercancel", cancel)
-  row.addEventListener("click", click, true)
-  row.addEventListener("contextmenu", right)
-  document.addEventListener("pointerdown", elsewhere, true)
-  return () => document.removeEventListener("pointerdown", elsewhere, true)
+  const pressed = (event: Located) => event.timeStamp - moved >= 600 && props.onClick?.()
+
+  const inside = () => (
+    <>
+      <Show when={props.start}>
+        <Box style={look.start}>{props.start}</Box>
+      </Show>
+      <Box style={look.words}>
+        <Text style={look.heading}>{props.heading}</Text>
+        <Show when={props.text}>
+          <Text style={look.text}>{props.text}</Text>
+        </Show>
+      </Box>
+      <Show when={props.end}>
+        <Box style={look.end}>{props.end}</Box>
+      </Show>
+    </>
+  )
+  const moving = () => [settling() && look.settling, swiped() > 0 && { translateX: -swiped() }]
+  return (
+    <RowMenu value={setMenu}>
+      <Box
+        role="listitem"
+        onPointerDown={down}
+        onPointerMove={move}
+        onPointerUp={up}
+        onPointerCancel={cancel}
+        onContextMenu={(event) => menu()?.open(at(event))}
+        style={[look.row, !!props.action && look.wraps, props.current && look.current, !!menu() && look.held]}
+      >
+        <Show when={props.control}>
+          <Box style={[look.control, moving()]}>{props.control}</Box>
+        </Show>
+        <Show
+          when={props.onClick}
+          fallback={<Box style={[look.inside, !!props.control && look.after, moving()]}>{inside()}</Box>}
+        >
+          <Box role="button" aria-current={props.current ? "true" : undefined} onClick={pressed} style={[look.inside, look.pressable, !!props.control && look.after, moving()]}>
+            {inside()}
+          </Box>
+        </Show>
+        <Show when={props.action}>
+          <Box style={[look.action, moving()]}>{props.action}</Box>
+        </Show>
+        <Show when={menu()?.destructive()}>
+          {(item) => (
+            <Box aria-hidden="true" onClick={() => (menu()?.select(item().value), aside(0, true))} style={[look.swipe, settling() && look.settling, { width: swiped() }]}>
+              <Text>{item().label}</Text>
+            </Box>
+          )}
+        </Show>
+      </Box>
+    </RowMenu>
+  )
 }

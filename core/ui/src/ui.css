@@ -136,7 +136,7 @@ html:has(.ui-dialog[open]) {
 }
 
 /* What every control of the UI library starts from, under what any of them says of itself. */
-:where(.ui-screen, .ui-dialog, .ui-search, .ui-file, .ui-row, .ui-toast, [data-tabs-root], [data-date-picker-content]) button {
+:where(.ui-screen, .ui-dialog, .ui-search, .ui-file, .ui-toast, [data-tabs-root], [data-date-picker-content]) button {
   margin: 0;
   padding: 0;
   border: 0;
@@ -172,7 +172,7 @@ img {
 }
 /* What's the app's own, not what it shows: read and pressed, not selected, and a long press on it opens no link's
    preview. */
-:is(.ui-button, .ui-field label, .ui-choice, [role="tab"], [role="menuitem"], [role="option"], .ui-screen > header, .ui-section > h2, .ui-row > :is(a, button).row) {
+:is(.ui-button, .ui-field label, .ui-choice, [role="tab"], [role="menuitem"], [role="option"], .ui-screen > header, .ui-section > h2) {
   -webkit-user-select: none;
   user-select: none;
   -webkit-touch-callout: none;
@@ -200,14 +200,13 @@ img {
 }
 
 /* Where the keyboard is: a ring, red on what's wrong or can't be undone (`--ring-color`). */
-/* A row's control is the app's own input, and has it too. */
-:is(.ring, .ui-row > .control input) {
+.ring {
   outline: 3px solid transparent;
   transition-property: opacity, color, background-color, border-color, outline-color, box-shadow;
   transition-duration: var(--move-quick);
   transition-timing-function: var(--ease-quick);
 }
-:is(.ring, .ui-row > .control input):focus-visible {
+.ring:focus-visible {
   border-color: var(--ring-color, var(--muted-foreground));
   outline-color: color-mix(in oklab, var(--ring-color, var(--muted-foreground)) 50%, transparent);
 }
@@ -959,189 +958,6 @@ button.ui-box {
   .ui-toast button:hover {
     background: var(--muted);
   }
-}
-
-/* A list: things of one kind, one under another, in one group that stops at a readable width. */
-.ui-list {
-  display: block;
-  max-width: var(--readable);
-  border: 1px solid var(--border);
-  border-radius: var(--radius-xl);
-  background: var(--card);
-  color: var(--foreground);
-  overflow: hidden;
-}
-.ui-list:empty {
-  display: none;
-}
-.ui-row {
-  display: block;
-  overflow: hidden;
-  /* A long list costs only the rows on screen. */
-  content-visibility: auto;
-  contain-intrinsic-block-size: auto calc(var(--control) + 1rem);
-}
-/* Every row draws the line above it but the first. */
-.ui-row + .ui-row {
-  border-top: 1px solid var(--border);
-}
-/* A row with a control before it, or an action after it: each is pressed apart from the rest, the control's part
-   the row's whole height. */
-.ui-row:has(> .control, > .action) {
-  display: flex;
-}
-/* An action that would leave the words less than 12rem goes under them, so the name always reads. */
-.ui-row:has(> .action) {
-  flex-wrap: wrap;
-}
-.ui-row > .control {
-  flex: none;
-  justify-content: center;
-  min-width: var(--control);
-  padding-inline-start: 0.25rem;
-}
-.ui-row > .control + .row {
-  flex: 1;
-  min-width: 0;
-  padding-inline-start: 0;
-}
-.ui-row > .action {
-  display: flex;
-  flex: none;
-  align-items: center;
-  /* Wrapped under the words, it ends the row at their end. */
-  margin-inline-start: auto;
-  padding-block-end: 0.5rem;
-  padding-inline-end: 0.75rem;
-}
-.ui-row > .row:has(+ .action) {
-  flex: 1 1 12rem;
-  min-width: 0;
-}
-.ui-row > .row {
-  display: flex;
-  align-items: center;
-  gap: 0.75rem;
-  width: 100%;
-  min-height: calc(var(--control) + 0.5rem);
-  padding: 0.5rem 0.75rem;
-  color: inherit;
-  font-size: var(--text-base);
-  text-align: start;
-  text-decoration: none;
-  outline: 0;
-}
-.ui-row > :is(a, button).row {
-  cursor: pointer;
-}
-@media (hover: hover) and (pointer: fine) {
-  .ui-row > :is(a, button).row:hover {
-    background: color-mix(in oklab, var(--muted) 50%, transparent);
-  }
-}
-/* Pressed, a row fills grey at once, as a phone's lists do, rather than dimming, and clears as it's let go. */
-.ui-row > :is(a, button).row.press {
-  transition: background-color var(--move-quick) var(--ease-quick);
-}
-.ui-row > :is(a, button).row.press:active {
-  background: var(--border);
-  opacity: 1;
-  transition-duration: 0s;
-}
-/* A row with a menu opens it on a long press or a right-click too, so pressing it long selects nothing and opens no
-   preview of a link. */
-.ui-row[data-menu] {
-  -webkit-user-select: none;
-  user-select: none;
-  -webkit-touch-callout: none;
-}
-/* A row whose menu deletes or removes it moves aside under a finger swiping it toward its start, and shows that
-   at its end, in red, as a phone's lists do: pressed, or swiped all the way, it's done. */
-.ui-row[data-swipe] {
-  position: relative;
-  touch-action: pan-y;
-}
-.ui-row[data-swipe] > :not(.swipe) {
-  translate: calc(var(--swiped, 0px) * -1) 0;
-}
-.ui-row[data-swipe]:dir(rtl) > :not(.swipe) {
-  translate: var(--swiped, 0px) 0;
-}
-.ui-row > .swipe {
-  position: absolute;
-  inset-block: 0;
-  inset-inline-end: 0;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  width: var(--swiped, 0px);
-  padding: 0;
-  overflow: hidden;
-  border: 0;
-  background: var(--destructive);
-  color: white;
-  font: inherit;
-  font-weight: var(--label-weight);
-  white-space: nowrap;
-}
-.ui-row > .swipe > span {
-  flex: none;
-}
-.ui-row[data-settling] > * {
-  transition: translate var(--move-settle) var(--ease-settle), width var(--move-settle) var(--ease-settle);
-}
-/* The one that's open beside the list. Where it's pushed over the list instead, nothing is (the split's). */
-.ui-row[data-current] {
-  background: var(--row-current, var(--muted));
-}
-.ui-row > .row:focus-visible {
-  background: var(--muted);
-  box-shadow: inset 0 0 0 2px var(--muted-foreground);
-}
-.ui-row .words {
-  display: grid;
-  flex: 1;
-  min-width: 0;
-  line-height: 1.35;
-}
-.ui-row .words > span {
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  /* Each runs the way its own words do (Arabic right to left), and lines up where the app's language does, as an
-     iPhone's lists line it up. */
-  unicode-bidi: plaintext;
-  text-align: left;
-}
-.ui-row .words > span:dir(rtl) {
-  text-align: right;
-}
-/* The grey line says up to two lines of what it says, as a phone's lists do, so a long email or a link in it can be
-   read. */
-.ui-row .words > .text {
-  display: -webkit-box;
-  -webkit-box-orient: vertical;
-  -webkit-line-clamp: 2;
-  white-space: normal;
-}
-.ui-row .heading {
-  font-weight: var(--label-weight);
-}
-.ui-row .text, .ui-row .row > .ui-icon {
-  color: var(--muted-foreground);
-}
-.ui-row .start {
-  display: flex;
-  flex: none;
-}
-.ui-row .end {
-  display: flex;
-  flex: none;
-  /* What it ends with leaves the row's words half of it at least: a long one wraps, never cut short. */
-  max-width: 50%;
-  color: var(--muted-foreground);
-  font-variant-numeric: tabular-nums;
-  text-align: end;
 }
 
 /* A whole view of an app: a bar that stays as it scrolls, then what's in it, which passes under the bar and under

@@ -46,6 +46,7 @@
   --sheet: 28rem;
   --alert: 22rem;
   --menu: 10rem;
+  --row: 2.75rem;
   --grabber: 0px;
   --grabber-gap: 0px;
   --size-large: 1rem;
@@ -137,6 +138,7 @@
   :root {
     --control: 2.75rem;
     --icon: 1.125rem;
+    --row: 3.25rem;
     --grabber: 0.25rem;
     --grabber-gap: 0.5rem;
     --text-base: 1rem;
@@ -149,6 +151,7 @@
     --control: 2.5882rem;
     --icon: 1.1176rem;
     --gutter: 16px;
+    --row: 3.0588rem;
     --size-large-title: 2rem;
     --text-lg: 1rem;
     --text-title: 1.6471rem;

@@ -244,6 +244,8 @@ export const tokens = {
   grid: named(grid, (key) => `grid-${key.replace(".", "-")}`),
   length: named({ control: lengths.control, icon: lengths.icon, gutter: lengths.gutter, readable: lengths.readable, hairline: lengths.hairline, sheet: length(rem(28)), alert: length(rem(22)), menu: length(rem(10)),
     /** A sheet's grabber, which says under a finger that it can be pulled down, and is nothing under a mouse. */
+    /** How tall a row in a list is at least: what's pressed, and a little room. */
+    row: length({ default: rem(2.75), touch: rem(3.25), phone: rem(52 / 17) }),
     grabber: length({ default: px(0), touch: rem(0.25) }), grabberGap: length({ default: px(0), touch: rem(0.5) }) }, (key) => key),
   size: named(sizes, (key) => `size-${key}`),
   radius: named({ small: radius(px(6)), medium: radius(px(10)), large: radius(px(18)), full: radii.full, icon: radii.icon }, (key) => `radius-${key}`),
@@ -255,7 +257,7 @@ export const tokens = {
   type: named({
     largeTitle: type(sizes.largeTitle, weights.title, { lineHeight: 1.2, tracking: -0.015 }),
     large: type(sizes.large, weights.label),
-    medium: type(sizes.medium, weights.body),
+    medium: type(sizes.medium, weights.body, { lineHeight: 1.35 }),
     small: type(sizes.small, weights.body),
   }, (key) => `type-${key}`),
   motion: named({ ...motions, spin: motion(1000, [0, 0, 1, 1]) }, (key) => `move-${key}`),

@@ -96,6 +96,7 @@ export interface Look {
   strokeWidth: number
   cursor: Properties["cursor"]
   pointerEvents: Properties["pointerEvents"]
+  touchAction: Properties["touchAction"]
   userSelect: Properties["userSelect"]
   transitionProperty: (keyof Properties)[]
   transition: Of<"motion">

@@ -512,6 +512,10 @@ export interface Properties {
   strokeWidth: number
   cursor: "default" | "pointer" | "text" | "grab" | "grabbing" | "not-allowed"
   pointerEvents: "auto" | "none"
+  /** Which drags of a finger the device scrolls by itself, telling the node `pointercancel` as it starts, as CSS's
+   * `touch-action`: `pan-y` scrolls a list up and down through a row that's swiped sideways. Otherwise a finger down
+   * on a node that listens for its pointer moves it alone. */
+  touchAction: "auto" | "pan-x" | "pan-y"
   userSelect: "auto" | "none" | "text"
   /** What changes of it move rather than jump, and how (a motion token). */
   transitionProperty: (keyof Properties)[]

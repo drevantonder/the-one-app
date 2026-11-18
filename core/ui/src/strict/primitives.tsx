@@ -170,7 +170,8 @@ function follows(box: HTMLElement, props: BoxProps) {
   box.addEventListener("pointermove", (event) => !down.has(event.pointerId) && props.onPointerMove?.(told(event)))
   box.addEventListener("dragstart", (event) => event.preventDefault())
   box.dataset.follows = ""
-  box.addEventListener("touchmove", (event) => down.size && !scrolls(event.target, box) && event.cancelable && event.preventDefault(), { passive: false })
+  // A box whose style lets the device scroll one way (`touchAction`) has its pointer cancelled as it does.
+  box.addEventListener("touchmove", (event) => down.size && !scrolls(event.target, box) && !getComputedStyle(box).touchAction.startsWith("pan") && event.cancelable && event.preventDefault(), { passive: false })
   box.addEventListener(
     "wheel",
     (event) => {
