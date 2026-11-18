@@ -92,6 +92,40 @@ impl DirectWriteTextSystem {
         })
     }
 
+    /// `text` broken into lines no wider than `width`, where Unicode's line breaking (UAX #14) allows, each line set
+    /// by DirectWrite on its own, so each is reordered as Unicode's bidi algorithm says once it's broken (UAX #9, L1
+    /// and L2), its glyphs from its own left edge; with no width, one line however long. Each line's `len` is where it
+    /// ends in `text`.
+    pub fn layout_lines(&mut self, text: &str, style: &TextStyle, width: Option<f32>) -> Vec<LineLayout> {
+        let Some(width) = width else { return vec![self.layout_line(text, style)] };
+        let breaks: Vec<usize> = unicode_linebreak::linebreaks(text).map(|(at, _)| at).collect();
+        let mut lines = Vec::new();
+        let mut start = 0;
+        while start < text.len() {
+            let mut fits = breaks.iter().copied().filter(|at| *at > start);
+            let mut end = fits.next().unwrap_or(text.len());
+            for at in fits {
+                if self.layout_line(text[start..at].trim_end(), style).width.0 > width {
+                    break;
+                }
+                end = at;
+            }
+            let mut line = self.layout_line(&text[start..end], style);
+            for glyph in line.runs.iter_mut().flat_map(|run| run.glyphs.iter_mut()) {
+                glyph.index += start;
+                glyph.end += start;
+            }
+            line.len = end;
+            line.rtl = unicode_bidi::get_base_direction(text) == unicode_bidi::Direction::Rtl;
+            lines.push(line);
+            start = end;
+        }
+        if lines.is_empty() {
+            lines.push(self.layout_line(text, style));
+        }
+        lines
+    }
+
     fn try_layout_line(&mut self, text: &str, style: &TextStyle) -> Result<LineLayout> {
         if text.is_empty() {
             return Ok(LineLayout { font_size: px(style.size), ..Default::default() });
