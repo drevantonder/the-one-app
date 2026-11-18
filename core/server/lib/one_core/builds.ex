@@ -166,6 +166,8 @@ defmodule OneCore.Builds do
   end
 
   defp taken?(["server-code"]), do: true
+  # The programs that run a server, as `clients/cli/src/serving.rs` names itself (`PROGRAM`): `one`, and `one-cli`
+  # without its window. A phone's app runs none, and a server's runtime comes with the server build it's taken with.
   defp taken?([program, _target]), do: program in ["one", "one-cli"]
   defp taken?(_name), do: false
 
