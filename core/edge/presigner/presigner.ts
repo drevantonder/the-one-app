@@ -5,14 +5,25 @@
 // (only if absent, or only if unchanged), so nothing in a network overwrites a blob blind: the condition is a
 // signed header, which the bucket refuses to go without. It also says who the network's own servers and clients
 // are, for the other pieces here and for a client (`Network`), and keeps the blobs an app's edge function
-// writes for its app's servers (`Own`). It keeps nothing itself and runs no app code. Another Worker is
+// writes for its app's servers (`Own`). It keeps no blob itself, only the lists of servers it has read lately, and
+// runs no app code. Another Worker is
 // given only `Network` or `Own`: nothing but an ask signed by a server's key reaches the rest.
-import { WorkerEntrypoint } from "cloudflare:workers";
+import { DurableObject, WorkerEntrypoint } from "cloudflare:workers";
 import { AwsClient } from "aws4fetch";
 import { verifiedKey, unsigned, isKey, signedBy } from "../ask.ts";
 
 /** How long a signed request works for, in seconds. */
 const SIGNED_FOR = 60;
+/**
+ * How long a list of servers read from the bucket is believed, in milliseconds, at most: a list is changed by a write
+ * the presigner signs, which says so (`Changes`), and this is only for one that a write it didn't sign changed.
+ */
+const KEPT = 30_000;
+/**
+ * A list of servers is that of a user, a group or the network, `servers` under its prefix. Whoever writes one asks the
+ * presigner to sign the write (`sign`), which is how the presigner hears that it's changing.
+ */
+const LIST = /^(?:(?:users|groups)\/[^/]+\/|network\/)servers$/;
 /** The network's own prefix. A server on its list acts for the network, and reaches every user's and group's blobs. */
 const NETWORK = "network/";
 /**
@@ -209,6 +220,8 @@ async function sign(env: PresignerEnv, by: string, token: string | null, body: s
   const ask = parse(body);
   if (!ask) return refuse(400, "An ask is JSON that names one blob's key, to read, write, replace, list or remove");
   if (!(await allowed(env, by, token, ask))) return refuse(403, "You aren't on its list of servers");
+  // Said before it's signed, so no list read from now on is believed until what's signed has had its time to land.
+  if (LIST.test(ask.key)) await changes(env).hold();
   const { method, url, headers } = request(env, ask);
   url.searchParams.set("X-Amz-Expires", String(SIGNED_FOR));
   const signed = await bucket(env).sign(url, { method, headers, aws: { signQuery: true } });
@@ -306,18 +319,52 @@ async function servers(lists: Lists, of: unknown): Promise<string[]> {
 /** The lists of servers, by their prefixes, as one request reads them. */
 type Lists = (prefix: string | undefined) => Promise<string[] | null>;
 
+/** A list of servers as the bucket gave it, and when it was asked for. */
+const kept = new Map<string, { at: number; list: string[] | null }>();
+
 /**
- * Reads the lists of servers for one request: each from the bucket once, however often it's asked for, and never
- * kept past the request, so a server taken off a list is refused from the next request on.
+ * Says when a list of servers was last changed, for every copy of the presigner, which each keep what they've read in
+ * memory that no copy can reach into: a write to a list is signed for `SIGNED_FOR` seconds, so a list that was read
+ * before that has passed may not be the one that's there then. Every list is held back from belief until then, and read
+ * from the bucket again once it has, so a server taken off a list is refused on its next request, not when `KEPT`
+ * ends. A Durable Object is one place that every copy asks, and answers in the order things happened.
+ */
+export class Changes extends DurableObject<PresignerEnv> {
+  /** Lists read at or before this time, in milliseconds, aren't believed. */
+  async until(): Promise<number> {
+    return (await this.ctx.storage.get<number>("until")) ?? 0;
+  }
+
+  /** A write is signed now. The clocks of the copies and this one differ a little, so it's held a few seconds past that. */
+  async hold(): Promise<void> {
+    await this.ctx.storage.put("until", Date.now() + (SIGNED_FOR + 5) * 1000);
+  }
+}
+
+const changes = (env: PresignerEnv) => env.CHANGES.getByName("lists");
+
+/**
+ * Reads the lists of servers for one request: each from the bucket once, however often it's asked for, and from
+ * what an earlier request read if that was read since the last change to any list and less than `KEPT` ago. What's
+ * kept is the list, never a request for it: a promise made in one request can't be settled in another that has ended.
  */
 function reader(env: PresignerEnv): Lists {
   const read = new Map<string | undefined, Promise<string[] | null>>();
-  return (prefix) => read.get(prefix) ?? read.set(prefix, list(env, prefix)).get(prefix)!;
+  let until: Promise<number> | undefined;
+  const get = async (prefix: string) => {
+    const [at, held] = [Date.now(), await (until ??= changes(env).until())];
+    const had = kept.get(prefix);
+    if (had && had.at > held && at - had.at < KEPT) return had.list;
+    const found = await list(env, prefix);
+    for (const [old, { at: read }] of kept) if (at - read >= KEPT) kept.delete(old);
+    kept.set(prefix, { at, list: found });
+    return found;
+  };
+  return (prefix) => read.get(prefix) ?? read.set(prefix, prefix ? get(prefix) : Promise.resolve([])).get(prefix)!;
 }
 
-/** The list of servers kept under `prefix`, `null` if there's none yet, and nobody's for no prefix. */
-async function list(env: PresignerEnv, prefix: string | undefined): Promise<string[] | null> {
-  if (!prefix) return [];
+/** The list of servers kept under `prefix`, `null` if there's none yet. */
+async function list(env: PresignerEnv, prefix: string): Promise<string[] | null> {
   const got = await bucket(env).fetch(blob(env, `${prefix}servers`));
   if (got.status === 404) return null;
   if (!got.ok) throw new Error(`The bucket answered ${got.status} for ${prefix}servers`);
