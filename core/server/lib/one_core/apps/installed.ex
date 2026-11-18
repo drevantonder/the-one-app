@@ -260,9 +260,10 @@ defmodule OneCore.Apps.Installed do
       not (is_binary(name) and name =~ ~r/^[a-z][a-z0-9-]*$/) ->
         {:error, "An app's name is lowercase letters, digits and hyphens, starting with a letter"}
 
-      # A client finds the UI library where it finds an app's files, by this name (`OneCore.MCP`).
-      name == "ui" ->
-        {:error, "ui is the UI library's, which is One Core's own: name the app something else"}
+      # A client finds the UI library where it finds an app's files, by this name (`OneCore.MCP`), and apps' icons
+      # by theirs (`OneCore.Apps.Icons`).
+      name in ~w(ui icons) ->
+        {:error, "#{name} is One Core's own, where clients find #{if name == "ui", do: "the UI library", else: "apps' icons"}: name the app something else"}
 
       true ->
         :ok

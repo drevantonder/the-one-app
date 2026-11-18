@@ -52,7 +52,7 @@ defmodule OneCore.Mcp do
   }
 
   alias OneCore.Call.State
-  alias OneCore.Apps.{Calls, Store, Version}
+  alias OneCore.Apps.{Calls, Icons, Store, Version}
 
   # The rules every agent is told first, here and in the network's `/llms.txt` (`core/edge/mcp/mcp.ts`).
   @external_resource Path.expand("../../priv/rules.md", __DIR__)
@@ -467,6 +467,13 @@ defmodule OneCore.Mcp do
       {:ok, %{contents: [Map.merge(%{uri: uri, mimeType: Version.kind(path)}, content(data))]}}
     else
       _ -> {:error, -32002, "There's nothing at #{uri}"}
+    end
+  end
+
+  defp resources("resources/read", %{"uri" => "ui://icons/" <> _ = uri}, _who) do
+    case Icons.read(uri) do
+      {:ok, kind, data} -> {:ok, %{contents: [Map.merge(%{uri: uri, mimeType: kind}, content(data))]}}
+      :absent -> {:error, -32002, "There's nothing at #{uri}"}
     end
   end
 
