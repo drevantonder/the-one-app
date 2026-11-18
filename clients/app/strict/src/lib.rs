@@ -2,6 +2,7 @@
 //! sandbox of its own (`js`), the ops it posts build a tree (`tree`), and the window draws that tree with GPUI's
 //! elements and the UI library's design tokens (`tokens`), sending what the person does back as events (`view`).
 
+mod clone;
 pub mod inspect;
 pub mod js;
 mod style;

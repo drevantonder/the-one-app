@@ -1,83 +1,37 @@
-//! An app's JS, in a QuickJS sandbox of its own (rquickjs), with no Web APIs: only the language, its timers and
-//! `console` (core/ui/src/strict/types/globals.d.ts), and how it talks with its host (`Host` and `Sandbox` in
-//! core/ui/src/strict/protocol.ts): `globalThis.host` takes its ops and what it posts its client, and the UI library
-//! gives `globalThis.ui`, which takes what the person did and the client's messages. Its page's module and what that
-//! imports are read by `Files`, and each runs as QuickJS's bytecode, compiled once and kept (`cache`), as QuickJS's
-//! own `qjsc` compiles a program ahead of time.
+//! An app's JS, in a QuickJS sandbox of its own (rquickjs), with the Web APIs a Worker has, the WinterTC Minimum Common
+//! API's, but the network's (`fetch`): AWS LLRT's implementations of them, the sandbox's own clock, timers and
+//! `console` (`prelude.js`), and core/ui/src/strict/types/globals.d.ts says which. It talks with its host as `Host` and
+//! `Sandbox` in core/ui/src/strict/protocol.ts say: `globalThis.host` takes its ops and what it posts its client, and
+//! the UI library gives `globalThis.ui`, which takes what the person did and the client's messages. Its page's module
+//! and what that imports are read by `Files`, and each runs as QuickJS's bytecode, compiled once and kept (`cache`), as
+//! QuickJS's own `qjsc` compiles a program ahead of time. What the Web APIs answer with a promise runs on rquickjs's
+//! async runtime, which nothing here waits on: each call into the sandbox runs its jobs until none is left.
 
 use std::cell::{Cell, RefCell};
 use std::path::PathBuf;
 use std::rc::Rc;
 
 use anyhow::anyhow;
+use futures_lite::future::block_on;
 use rquickjs::loader::{ImportAttributes, Loader, Resolver};
 use rquickjs::module::{Declared, WriteOptions};
-use rquickjs::{CatchResultExt, Context, Ctx, Function, Module, Runtime};
+use rquickjs::{AsyncContext, AsyncRuntime, CatchResultExt, Ctx, Function, Module, Persistent, Value};
 use sha2::{Digest, Sha256};
 use url::Url;
 
-/// The sandbox's globals, before the app's own code runs. `__update`, `__post`, `__now` and `__log` are the host's. A
-/// fixed clock (`FIXED`, in ms since 1970, or `null`) makes `Date`, `performance.now` and `Math.random` the same on
-/// every run.
-const PRELUDE: &str = r#"
-const timers = new Map()
-let nextTimer = 1
-globalThis.host = {
-  update: (update) => __update(JSON.stringify(update)),
-  post: (message) => __post(JSON.stringify(message)),
+/// The sandbox's own globals (`prelude.js`), with the DOM's events (`event-target-shim.js`).
+const PRELUDE: &str = include_str!("prelude.js");
+const EVENT_TARGET_SHIM: &str = include_str!("event-target-shim.js");
+
+/// The Web APIs that are LLRT's, as its own runtime adds them to a context.
+fn web(ctx: &Ctx) -> rquickjs::Result<()> {
+    llrt_exceptions::init(ctx)?;
+    llrt_url::init(ctx)?;
+    llrt_util::init(ctx)?;
+    llrt_stream_web::init(ctx)?;
+    llrt_buffer::init(ctx)?;
+    llrt_crypto::init(ctx)
 }
-globalThis.queueMicrotask = (task) => void Promise.resolve().then(task)
-globalThis.setTimeout = (callback, delay = 0, ...args) => {
-  const id = nextTimer++
-  timers.set(id, { due: __now() + Math.max(0, delay), run: () => callback(...args) })
-  return id
-}
-globalThis.clearTimeout = (id) => void timers.delete(id)
-globalThis.setInterval = (callback, delay = 0, ...args) => {
-  const id = nextTimer++
-  const every = Math.max(1, delay)
-  const run = () => {
-    timers.set(id, { due: __now() + every, every, run })
-    callback(...args)
-  }
-  timers.set(id, { due: __now() + every, every, run })
-  return id
-}
-globalThis.clearInterval = globalThis.clearTimeout
-const say = (level) => (...parts) => __log(level, parts.map((part) => typeof part === "string" ? part : part instanceof Error ? `${part}\n${part.stack}` : JSON.stringify(part) ?? String(part)).join(" "))
-globalThis.console = { log: say("log"), info: say("info"), debug: say("debug"), warn: say("warn"), error: say("error") }
-const START = __now()
-if (FIXED !== null) {
-  const RealDate = Date
-  globalThis.Date = class extends RealDate {
-    constructor(...args) {
-      if (args.length) super(...args)
-      else super(FIXED + __now() - START)
-    }
-    static now() { return FIXED + __now() - START }
-  }
-  let seed = 0x9e3779b9
-  Math.random = () => {
-    seed = (seed + 0x6d2b79f5) | 0
-    let t = Math.imul(seed ^ (seed >>> 15), 1 | seed)
-    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t
-    return ((t ^ (t >>> 14)) >>> 0) / 4294967296
-  }
-}
-// The host's own: when the next timer is due, each timer, and running those that are.
-;({
-  due: () => Math.min(...[...timers.values()].map((timer) => timer.due)),
-  timers: () => JSON.stringify([...timers.values()].map((timer) => ({ in: timer.due - __now(), every: timer.every }))),
-  fire: () => {
-    const now = __now()
-    for (const [id, timer] of [...timers]) {
-      if (timer.due > now || !timers.has(id)) continue
-      timers.delete(id)
-      timer.run()
-    }
-  },
-})
-"#;
 
 /// How much memory and stack an app's JS may have.
 const MEMORY: usize = 64 << 20;
@@ -129,6 +83,15 @@ impl Clock {
         }
     }
 
+    /// The language the sandbox's JS formats in (`navigator.language`): the host's, or for a fixed clock, whose output
+    /// is the same everywhere, `en-US`.
+    pub fn locale(&self) -> String {
+        match self.0.epoch_ms {
+            Some(_) => "en-US".into(),
+            None => sys_locale::get_locale().unwrap_or_else(|| "en-US".into()),
+        }
+    }
+
     /// Moves it on by `ms`.
     pub fn advance(&self, ms: f64) {
         match self.0.paused.get() {
@@ -152,11 +115,13 @@ pub enum Posted {
 /// One app's JS, running.
 /// Its fields drop in order: what's held in the runtime before the runtime.
 pub struct Sandbox {
-    /// The prelude's `due` and `fire`.
-    timers: rquickjs::Persistent<rquickjs::Object<'static>>,
-    context: Context,
-    _runtime: Runtime,
+    /// The prelude's `due`, `fire` and `unhandled`.
+    host: Persistent<rquickjs::Object<'static>>,
+    context: AsyncContext,
+    runtime: AsyncRuntime,
     posted: Rc<RefCell<Vec<Posted>>>,
+    /// Promises rejected with nothing to handle them yet, and why, as QuickJS tells of them.
+    rejected: Rc<RefCell<Vec<(Persistent<Value<'static>>, Persistent<Value<'static>>)>>>,
     clock: Clock,
 }
 
@@ -164,21 +129,29 @@ impl Sandbox {
     /// Starts the module at `page`, which a page's `<script type="module">` names, running it until it waits on
     /// something. It and its imports are read by `files`, each compiled once and kept in `cache`.
     pub fn start(page: &Url, files: Files, cache: Option<PathBuf>, clock: Clock) -> anyhow::Result<Sandbox> {
-        let runtime = Runtime::new()?;
-        runtime.set_memory_limit(MEMORY);
-        runtime.set_max_stack_size(STACK);
-        // A promise nothing handles is an error a browser reports (`unhandledrejection`), where QuickJS says nothing.
-        let unhandled = page.to_string();
-        runtime.set_host_promise_rejection_tracker(Some(Box::new(move |_, _, reason, handled| {
-            if !handled {
-                eprintln!("{unhandled} error: unhandled rejection: {}", reason.get::<rquickjs::Coerced<String>>().map_or_else(|_| "?".into(), |reason| reason.0));
-            }
-        })));
-        runtime.set_loader(Resolve, Modules { files, cache });
-        let context = Context::full(&runtime)?;
+        let runtime = AsyncRuntime::new()?;
+        let rejected: Rc<RefCell<Vec<(Persistent<Value<'static>>, Persistent<Value<'static>>)>>> = Rc::default();
+        let to = rejected.clone();
+        block_on(async {
+            runtime.set_memory_limit(MEMORY).await;
+            runtime.set_max_stack_size(STACK).await;
+            runtime.set_loader(Resolve, Modules { files, cache }).await;
+            // QuickJS tells of a rejected promise with no handler as it's rejected, and again if one is added after.
+            runtime
+                .set_host_promise_rejection_tracker(Some(Box::new(move |ctx, promise, reason, handled| {
+                    let mut rejected = to.borrow_mut();
+                    if handled {
+                        rejected.retain(|(was, _)| was.clone().restore(&ctx).ok().as_ref() != Some(&promise));
+                    } else {
+                        rejected.push((Persistent::save(&ctx, promise), Persistent::save(&ctx, reason)));
+                    }
+                })))
+                .await;
+        });
+        let context = block_on(AsyncContext::full(&runtime))?;
         let posted: Rc<RefCell<Vec<Posted>>> = Rc::default();
         let app = page.to_string();
-        let timers = context.with(|ctx| -> anyhow::Result<_> {
+        let (host, started) = block_on(context.with(|ctx| -> anyhow::Result<_> {
             let globals = ctx.globals();
             let to = posted.clone();
             globals.set("__update", Function::new(ctx.clone(), move |json: String| to.borrow_mut().push(Posted::Update(json)))?)?;
@@ -187,61 +160,99 @@ impl Sandbox {
             let now = clock.clone();
             globals.set("__now", Function::new(ctx.clone(), move || now.now())?)?;
             globals.set("__log", Function::new(ctx.clone(), move |level: String, line: String| eprintln!("{app} {level}: {line}"))?)?;
+            globals.set("structuredClone", rquickjs::prelude::Func::from(|ctx, value, options| crate::clone::structured_clone(&ctx, value, options)))?;
+            run(&ctx, web(&ctx))?;
             let fixed = clock.0.epoch_ms.map_or_else(|| "null".into(), |epoch_ms| epoch_ms.to_string());
-            let timers: rquickjs::Object = run(&ctx, ctx.eval(format!("const FIXED = {fixed};\n{PRELUDE}")))?;
+            let locale = serde_json::to_string(&clock.locale())?;
+            let host: rquickjs::Object = run(&ctx, ctx.eval(format!("const FIXED = {fixed}, LOCALE = {locale}, shim = (() => {{\n{EVENT_TARGET_SHIM}\n}})();\n{PRELUDE}")))?;
             let started = run(&ctx, Module::import(&ctx, page.as_str()))?;
-            while ctx.execute_pending_job() {}
-            // What its module threw as it ran, which its promise holds.
-            if let Some(Err(error)) = started.result::<rquickjs::Value>() {
-                run(&ctx, Err(error))?;
+            Ok((Persistent::save(&ctx, host), Persistent::save(&ctx, started)))
+        }))?;
+        let sandbox = Sandbox { host, context, runtime, posted, rejected, clock };
+        sandbox.settle()?;
+        // What its module threw as it ran, which its promise holds.
+        block_on(sandbox.context.with(|ctx| {
+            let started = run(&ctx, started.restore(&ctx))?;
+            match started.result::<Value>() {
+                Some(Err(error)) => run(&ctx, Err(error)),
+                _ => Ok(()),
             }
-            Ok(rquickjs::Persistent::save(&ctx, timers))
-        })?;
-        Ok(Sandbox { timers, context, _runtime: runtime, posted, clock })
+        }))?;
+        Ok(sandbox)
     }
 
     /// Tells the UI library what the person did (`ui.event`), or a message from its client (`ui.message`), and runs
     /// it until it waits again.
     pub fn send(&self, to: &str, message: &serde_json::Value) -> anyhow::Result<()> {
-        self.context.with(|ctx| {
+        block_on(self.context.with(|ctx| {
             let ui: rquickjs::Object = run(&ctx, ctx.globals().get("ui"))?;
             let function: Function = run(&ctx, ui.get(to))?;
-            let message: rquickjs::Value = run(&ctx, ctx.json_parse(message.to_string()))?;
-            run(&ctx, function.call::<_, ()>((rquickjs::function::This(ui), message)))?;
-            while ctx.execute_pending_job() {}
-            Ok(())
-        })
+            let message: Value = run(&ctx, ctx.json_parse(message.to_string()))?;
+            run(&ctx, function.call::<_, ()>((rquickjs::function::This(ui), message)))
+        }))?;
+        self.settle()
     }
 
     /// When its next timer is due, in ms from now on its clock, if it has one.
     pub fn due(&self) -> Option<f64> {
-        let due: f64 = self.context.with(|ctx| -> rquickjs::Result<f64> {
-            let timers = self.timers.clone().restore(&ctx)?;
-            timers.get::<_, Function>("due")?.call(())
-        }).ok()?;
+        let due: f64 = block_on(self.context.with(|ctx| -> rquickjs::Result<f64> {
+            let host = self.host.clone().restore(&ctx)?;
+            host.get::<_, Function>("due")?.call(())
+        }))
+        .ok()?;
         due.is_finite().then_some(due - self.clock.now())
     }
 
     /// Each of its timers: when it's due, in ms from now (`in`), and how often an interval runs (`every`).
     pub fn timers(&self) -> Vec<serde_json::Value> {
-        self.context
-            .with(|ctx| -> rquickjs::Result<String> {
-                let timers = self.timers.clone().restore(&ctx)?;
-                timers.get::<_, Function>("timers")?.call(())
-            })
-            .ok()
-            .and_then(|timers| serde_json::from_str(&timers).ok())
-            .unwrap_or_default()
+        block_on(self.context.with(|ctx| -> rquickjs::Result<String> {
+            let host = self.host.clone().restore(&ctx)?;
+            host.get::<_, Function>("timers")?.call(())
+        }))
+        .ok()
+        .and_then(|timers| serde_json::from_str(&timers).ok())
+        .unwrap_or_default()
     }
 
     /// Runs the timers that are due.
     pub fn fire(&self) -> anyhow::Result<()> {
-        self.context.with(|ctx| {
-            let timers = run(&ctx, self.timers.clone().restore(&ctx))?;
-            run(&ctx, timers.get::<_, Function>("fire").and_then(|fire| fire.call::<_, ()>(())))?;
-            while ctx.execute_pending_job() {}
-            Ok(())
-        })
+        block_on(self.context.with(|ctx| {
+            let host = run(&ctx, self.host.clone().restore(&ctx))?;
+            run(&ctx, host.get::<_, Function>("fire").and_then(|fire| fire.call::<_, ()>(())))
+        }))?;
+        self.settle()
+    }
+
+    /// Runs its jobs, and what the Web APIs answer with a promise, until none is left, then tells it of each promise
+    /// rejected that nothing handled (`unhandledrejection`), as a browser does once its microtasks have run.
+    fn settle(&self) -> anyhow::Result<()> {
+        loop {
+            loop {
+                match block_on(self.runtime.execute_pending_job()) {
+                    Ok(true) => {}
+                    Ok(false) => break,
+                    Err(error) => block_on(error.0.with(|ctx| eprintln!("a job threw: {:?}", ctx.catch()))),
+                }
+            }
+            let rejected = std::mem::take(&mut *self.rejected.borrow_mut());
+            if rejected.is_empty() {
+                return Ok(());
+            }
+            block_on(self.context.with(|ctx| {
+                let told = (|| {
+                    let list = rquickjs::Array::new(ctx.clone())?;
+                    for (at, (promise, reason)) in rejected.into_iter().enumerate() {
+                        let pair = rquickjs::Array::new(ctx.clone())?;
+                        pair.set(0, promise.restore(&ctx)?)?;
+                        pair.set(1, reason.restore(&ctx)?)?;
+                        list.set(at, pair)?;
+                    }
+                    let host = self.host.clone().restore(&ctx)?;
+                    host.get::<_, Function>("unhandled")?.call::<_, ()>((list,))
+                })();
+                run(&ctx, told)
+            }))?;
+        }
     }
 
     /// What it has given its host since this was last asked.

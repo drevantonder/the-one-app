@@ -16,8 +16,21 @@ anyhow.workspace = true
 gpui = { git = "https://github.com/zed-industries/zed", rev = "1043f4a86ab911a381d9bfe45cf6b36d3cdcc89a" }
 # A Linux window is X11's or Wayland's, whichever the desktop is: GPUI builds neither unless asked.
 gpui_platform = { git = "https://github.com/zed-industries/zed", rev = "1043f4a86ab911a381d9bfe45cf6b36d3cdcc89a", features = ["x11", "wayland"] }
-# QuickJS, with its module loader: a page's module imports the UI library's.
-rquickjs = { version = "0.14", features = ["loader"] }
+# QuickJS, with its module loader: a page's module imports the UI library's. Its async runtime runs what the Web APIs
+# below answer with a promise.
+rquickjs = { version = "0.14", features = ["loader", "futures"] }
+# The Web APIs a strict app's JS has, the WinterTC Minimum Common API's, as AWS's LLRT implements them on rquickjs, from
+# its repo at a release (v0.10.0-beta): crates.io has only a release on an older rquickjs.
+llrt_buffer = { git = "https://github.com/awslabs/llrt", rev = "b7ccc1487be185ac65fa4355e022bf9eea4df076" }
+llrt_crypto = { git = "https://github.com/awslabs/llrt", rev = "b7ccc1487be185ac65fa4355e022bf9eea4df076" }
+llrt_exceptions = { git = "https://github.com/awslabs/llrt", rev = "b7ccc1487be185ac65fa4355e022bf9eea4df076" }
+llrt_stream_web = { git = "https://github.com/awslabs/llrt", rev = "b7ccc1487be185ac65fa4355e022bf9eea4df076" }
+llrt_url = { git = "https://github.com/awslabs/llrt", rev = "b7ccc1487be185ac65fa4355e022bf9eea4df076" }
+llrt_util = { git = "https://github.com/awslabs/llrt", rev = "b7ccc1487be185ac65fa4355e022bf9eea4df076" }
+llrt_utils = { git = "https://github.com/awslabs/llrt", rev = "b7ccc1487be185ac65fa4355e022bf9eea4df076", default-features = false }
+futures-lite = "2"
+# The host's language, which the sandbox's JS formats in.
+sys-locale = "0.3"
 serde = { version = "1", features = ["derive"] }
 serde_json.workspace = true
 sha2 = "0.11"

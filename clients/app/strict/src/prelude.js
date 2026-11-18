@@ -1,0 +1,199 @@
+// The sandbox's own globals, run after LLRT's Web APIs and before the app's code. `__update`, `__post`, `__now`,
+// `__log`, `FIXED` (ms since 1970 for a fixed clock, or null), `LOCALE` and `shim` (event-target-shim.js) are the
+// host's (js.rs). It evaluates to what the host itself calls: its timers, and what it tells of promises nothing
+// handled. What throws in a timer or a listener is reported (`reportError`), as a browser does, and runs nothing less.
+const timers = new Map()
+let nextTimer = 1
+globalThis.host = {
+  update: (update) => __update(JSON.stringify(update)),
+  post: (message) => __post(JSON.stringify(message)),
+}
+globalThis.setTimeout = (callback, delay = 0, ...args) => {
+  const id = nextTimer++
+  timers.set(id, { due: __now() + Math.max(0, delay), run: () => callback(...args) })
+  return id
+}
+globalThis.clearTimeout = (id) => void timers.delete(id)
+globalThis.setInterval = (callback, delay = 0, ...args) => {
+  const id = nextTimer++
+  const every = Math.max(1, delay)
+  const run = () => {
+    timers.set(id, { due: __now() + every, every, run })
+    callback(...args)
+  }
+  timers.set(id, { due: __now() + every, every, run })
+  return id
+}
+globalThis.clearInterval = globalThis.clearTimeout
+const say = (level) => (...parts) => __log(level, parts.map((part) => typeof part === "string" ? part : part instanceof Error ? `${part}\n${part.stack}` : JSON.stringify(part) ?? String(part)).join(" "))
+globalThis.console = { log: say("log"), info: say("info"), debug: say("debug"), warn: say("warn"), error: say("error") }
+
+// What's the host's in the WinterTC Minimum Common API, as Cloudflare Workers and Deno have it: `self`, events and
+// aborting, a clock that's the sandbox's own (paused and stepped by the inspector), the host's name and language, and
+// globalThis as an EventTarget that's told of errors nothing caught. Node's extras that LLRT adds beside the Web's go.
+globalThis.self = globalThis
+delete globalThis.Buffer
+for (const name of ["createHash", "createHmac", "randomBytes", "randomInt", "randomFillSync", "randomFill"]) delete crypto[name]
+// LLRT's File isn't drawn from its Blob, so it lacks the one method of Blob's it doesn't have itself.
+Object.defineProperty(File.prototype, "stream", { configurable: true, writable: true, value: function stream() { return new Blob([this]).stream() } })
+const { Event, EventTarget, defineEventAttribute, setErrorHandler } = shim
+globalThis.Event = Event
+globalThis.EventTarget = EventTarget
+setErrorHandler((error) => reportError(error))
+globalThis.CustomEvent = class CustomEvent extends Event {
+  #detail
+  constructor(type, init = {}) {
+    super(type, init)
+    this.#detail = init.detail ?? null
+  }
+  get detail() { return this.#detail }
+}
+globalThis.ErrorEvent = class ErrorEvent extends Event {
+  #init
+  constructor(type, init = {}) {
+    super(type, init)
+    this.#init = init
+  }
+  get message() { return this.#init.message ?? "" }
+  get filename() { return this.#init.filename ?? "" }
+  get lineno() { return this.#init.lineno ?? 0 }
+  get colno() { return this.#init.colno ?? 0 }
+  get error() { return this.#init.error }
+}
+globalThis.PromiseRejectionEvent = class PromiseRejectionEvent extends Event {
+  #init
+  constructor(type, init) {
+    super(type, init)
+    this.#init = init
+  }
+  get promise() { return this.#init.promise }
+  get reason() { return this.#init.reason }
+}
+// AbortController and AbortSignal, as the DOM Standard says.
+const made = Symbol()
+let abort
+globalThis.AbortSignal = class AbortSignal extends EventTarget {
+  #aborted = false
+  #reason
+  #dependents = new Set()
+  constructor(key) {
+    if (key !== made) throw new TypeError("Illegal constructor")
+    super()
+  }
+  get aborted() { return this.#aborted }
+  get reason() { return this.#reason }
+  throwIfAborted() {
+    if (this.#aborted) throw this.#reason
+  }
+  static abort(reason) {
+    const signal = new AbortSignal(made)
+    abort(signal, reason)
+    return signal
+  }
+  static timeout(ms) {
+    const signal = new AbortSignal(made)
+    setTimeout(() => abort(signal, new DOMException("The operation timed out.", "TimeoutError")), ms)
+    return signal
+  }
+  static any(signals) {
+    const signal = new AbortSignal(made)
+    const aborted = [...signals].find((source) => source.aborted)
+    if (aborted) abort(signal, aborted.reason)
+    else for (const source of signals) source.#dependents.add(signal)
+    return signal
+  }
+  static {
+    abort = (signal, reason = new DOMException("This operation was aborted", "AbortError")) => {
+      if (signal.#aborted) return
+      const dependents = [...signal.#dependents].filter((dependent) => !dependent.#aborted)
+      signal.#dependents.clear()
+      for (const each of [signal, ...dependents]) {
+        each.#aborted = true
+        each.#reason = reason
+      }
+      for (const each of [signal, ...dependents]) each.dispatchEvent(new Event("abort"))
+    }
+  }
+}
+defineEventAttribute(AbortSignal.prototype, "abort")
+globalThis.AbortController = class AbortController {
+  #signal = new AbortSignal(made)
+  get signal() { return this.#signal }
+  abort(reason) { abort(this.#signal, reason) }
+}
+const START = __now()
+const ORIGIN = FIXED ?? Date.now()
+globalThis.Performance = class Performance extends EventTarget {
+  get timeOrigin() { return ORIGIN }
+  now() { return __now() - START }
+  toJSON() { return { timeOrigin: ORIGIN } }
+}
+globalThis.performance = new Performance()
+globalThis.navigator = { userAgent: "One", language: LOCALE, languages: [LOCALE] }
+const events = new EventTarget()
+for (const name of ["addEventListener", "removeEventListener", "dispatchEvent"]) globalThis[name] = events[name].bind(events)
+globalThis.onunhandledrejection = null
+// Whether nothing cancelled it: a listener or the `on…` handler.
+const told = (event, handler) => {
+  dispatchEvent(event)
+  if (typeof handler === "function") handler.call(globalThis, event)
+  return !event.defaultPrevented
+}
+globalThis.reportError = (error) => {
+  const event = new ErrorEvent("error", { cancelable: true, error, message: String(error?.message ?? error) })
+  if (told(event)) console.error("Uncaught", error)
+}
+
+if (FIXED !== null) {
+  const RealDate = Date
+  globalThis.Date = class extends RealDate {
+    constructor(...args) {
+      if (args.length) super(...args)
+      else super(FIXED + __now() - START)
+    }
+    static now() { return FIXED + __now() - START }
+  }
+  let seed = 0x9e3779b9
+  Math.random = () => {
+    seed = (seed + 0x6d2b79f5) | 0
+    let t = Math.imul(seed ^ (seed >>> 15), 1 | seed)
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296
+  }
+  crypto.getRandomValues = (array) => {
+    const bytes = new Uint8Array(array.buffer, array.byteOffset, array.byteLength)
+    for (let at = 0; at < bytes.length; at++) bytes[at] = Math.floor(Math.random() * 256)
+    return array
+  }
+  crypto.randomUUID = () => {
+    const bytes = crypto.getRandomValues(new Uint8Array(16))
+    bytes[6] = (bytes[6] & 0x0f) | 0x40
+    bytes[8] = (bytes[8] & 0x3f) | 0x80
+    const hex = [...bytes].map((byte) => byte.toString(16).padStart(2, "0")).join("")
+    return `${hex.slice(0, 8)}-${hex.slice(8, 12)}-${hex.slice(12, 16)}-${hex.slice(16, 20)}-${hex.slice(20)}`
+  }
+}
+
+;({
+  due: () => Math.min(...[...timers.values()].map((timer) => timer.due)),
+  timers: () => JSON.stringify([...timers.values()].map((timer) => ({ in: timer.due - __now(), every: timer.every }))),
+  fire: () => {
+    const now = __now()
+    for (const [id, timer] of [...timers]) {
+      if (timer.due > now || !timers.has(id)) continue
+      timers.delete(id)
+      try {
+        timer.run()
+      } catch (error) {
+        reportError(error)
+      }
+    }
+  },
+  // Promises rejected with nothing to handle them once its jobs ran, each `[promise, reason]`.
+  unhandled: (rejected) => {
+    for (const [promise, reason] of rejected) {
+      const event = new PromiseRejectionEvent("unhandledrejection", { cancelable: true, promise, reason })
+      if (told(event, globalThis.onunhandledrejection)) console.error("Uncaught (in promise)", reason)
+    }
+  },
+})

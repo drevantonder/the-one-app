@@ -1,6 +1,9 @@
-// What a strict app's JS has beyond the language itself (ES2024): what its sandbox, QuickJS on a native host, and a
-// browser both have. No `document`, `window` or other Web API: the UI library is how an app reaches its screen and
-// its network.
+// What a strict app's JS has beyond the language itself (ES2024, with Intl): what its sandbox, QuickJS on a native
+// host (clients/app/strict/src/js.rs), and a browser both have. That's the Web APIs a Worker has, the WinterTC Minimum
+// Common API's (web-apis.d.ts), but the network's: no `fetch`, `Request`, `Response`, `Headers` or `FormData`, as an
+// app reaches the network through `call()`, and no WebAssembly, which QuickJS hasn't. No `document`, `window` or other
+// DOM API: the UI library is how an app reaches its screen.
+/// <reference path="./web-apis.d.ts" />
 declare var console: {
   log(...data: unknown[]): void
   info(...data: unknown[]): void
@@ -13,6 +16,21 @@ declare function clearTimeout(id: number | undefined): void
 declare function setInterval(handler: () => void, timeout?: number): number
 declare function clearInterval(id: number | undefined): void
 declare function queueMicrotask(callback: () => void): void
+declare var self: typeof globalThis
+declare var navigator: { readonly userAgent: string; readonly language: string; readonly languages: readonly string[] }
+interface Performance extends EventTarget {
+  readonly timeOrigin: DOMHighResTimeStamp
+  now(): DOMHighResTimeStamp
+  toJSON(): { timeOrigin: DOMHighResTimeStamp }
+}
+declare var performance: Performance
+/** What's told of an error nothing caught (`reportError`) and of a promise rejected with nothing to handle it. */
+declare function addEventListener(type: "error", listener: (event: ErrorEvent) => void, options?: boolean | AddEventListenerOptions): void
+declare function addEventListener(type: "unhandledrejection", listener: (event: PromiseRejectionEvent) => void, options?: boolean | AddEventListenerOptions): void
+declare function removeEventListener(type: "error", listener: (event: ErrorEvent) => void, options?: boolean | EventListenerOptions): void
+declare function removeEventListener(type: "unhandledrejection", listener: (event: PromiseRejectionEvent) => void, options?: boolean | EventListenerOptions): void
+declare function dispatchEvent(event: Event): boolean
+declare var onunhandledrejection: ((event: PromiseRejectionEvent) => void) | null
 /** Calls `callback` before the host draws its next frame, with the time, on the clock events' `timeStamp`s are on. What
  * a page moves by hand, as a finger lets go, it moves a frame at a time with this. */
 declare function requestAnimationFrame(callback: (time: number) => void): number
