@@ -56,9 +56,13 @@ defmodule Vault.SignIns do
       client["client_id"] ||
         raise "#{service.client} has no client_id. Keep the one #{service.name} gave you there."
 
-      # Its client_secret goes to the token address, as any secret goes only to one of its item's sites.
-      if client["client_secret"] && not Vault.Fetch.to?(service.token, found["hosts"]),
-        do: raise("#{service.client}'s secrets go only to its sites, and #{service.name}'s token address isn't one. Its person adds it, in the Vault.")
+      # The code and its verifier go to the token address, which redeems them for tokens, as its client_secret does:
+      # only to one of the client's sites, which its person chose.
+      if not Vault.Fetch.to?(service.token, found["hosts"]),
+        do: raise("#{service.client}'s sign-ins go only to its sites, and #{service.name}'s token address isn't one. Its person adds it, in the Vault.")
+
+      own!(service, found["hosts"])
+      if not String.contains?(item, "{{"), do: ours!(Items.find(call, db, item), app, service.name)
 
       Store.transaction(call, db, fn d ->
         Store.query(d, "delete from sign_ins where at < ?", [Store.now() - @waits])
@@ -156,6 +160,7 @@ defmodule Vault.SignIns do
     tokens = exchange(service, client, code, sign_in["verifier"], address() <> "/vault/callback")
     name = signed_in(sign_in["item"], service, tokens)
     app = sign_in["app"]
+    ours!(Items.find(call, db, name), app, service["name"])
 
     # Signed in, it's ready: whatever it needed of its person is done, and the app they signed in for has access, as
     # their signing in says.
@@ -206,6 +211,38 @@ defmodule Vault.SignIns do
   end
 
   defp again(_call, _db, _sign_in), do: raise("Only a sign-in that didn't sign you in starts again.")
+
+  # A sign-in's tokens go only to the service's own sites, where the app that asks says they go: its token address's
+  # site, which its person chose (`start/7`), or a name under it, or one of its client's sites. Without the Public
+  # Suffix List, what a token address is under is its name less its first part, where it has more than two:
+  # oauth2.googleapis.com is under googleapis.com, and github.com under itself; an IP address is under nothing.
+  defp own!(service, client_hosts) do
+    token = URI.parse(service.token)
+
+    under =
+      case {:inet.parse_address(String.to_charlist(token.host)), String.split(token.host, ".")} do
+        {{:ok, _address}, _parts} -> nil
+        {_name, [_one]} -> nil
+        {_name, [_first | rest] = parts} -> if length(parts) > 2, do: Enum.join(rest, "."), else: token.host
+      end
+
+    for site <- service.hosts,
+        site not in client_hosts,
+        site != Vault.Fetch.site!(token),
+        host = hd(String.split(site, ":")),
+        under == nil or (host != under and not String.ends_with?(host, "." <> under)) do
+      raise "#{service.name}'s tokens go only to its own sites, or #{service.client}'s, and #{site} isn't one."
+    end
+  end
+
+  # A sign-in writes only into an item a sign-in to the same service made, which the app keeps or uses, as signing in
+  # again does, never into another of its person's.
+  defp ours!(nil, _app, _service), do: :ok
+
+  defp ours!(found, app, service) do
+    if not (found["oauth"]["name"] == service and app in [found["app"] | found["access"]]),
+      do: raise("#{found["name"]} is in the Vault already, and no sign-in to #{service} for this app made it.")
+  end
 
   # The item a sign-in's tokens become: its name, with any {{<claim>}} filled in from who the service says signed in.
   defp signed_in(name, service, tokens) do

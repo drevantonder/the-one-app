@@ -89,9 +89,12 @@ and never sees a secret, so an untrusted app can use one too. It requires this a
   them back to the network's address, and their tokens become the item named as the service is, or as `item`
   says, for a second account, switched on for the app. All the app says is the service's own: where it
   signs in (`authorize`), where it gives tokens (`token`), its `scopes`, the sites its tokens are sent to
-  (`hosts`), anything more its sign-in page is asked with (`params`), and `client`, the item that holds the
-  `client_id` the service gave whoever registered the app with it, and its `client_secret` if it has one,
-  which goes only to that item's sites: its person keeps the service's token address among them. A network
+  (`hosts`: the token address's site, names under it, such as gmail.googleapis.com under oauth2.googleapis.com's
+  googleapis.com, or the client's sites), anything more its sign-in page is asked with (`params`), and `client`, the
+  item that holds the `client_id` the service gave whoever registered the app with it, and its `client_secret` if it
+  has one. The code goes only to that item's sites, its secret too: its person keeps the service's token address
+  among them. An item that's there already is written only by signing in to the same service again, for an app
+  that uses it. A network
   without an address has nowhere to be sent back to. An item's name that says `{{<claim>}}` is filled in from
   who signed in, as the service's OpenID Connect ID token says: `"Google {{email}}"`, with `openid` and `email`
   among the scopes, is an item for each account.

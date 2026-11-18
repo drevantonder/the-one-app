@@ -395,7 +395,8 @@ defmodule Vault do
         For an app's code: starts an OAuth sign-in to an outside service for the app that calls this, and
         answers the link its person opens in their browser. The tokens become the item `item`, switched on for the
         app. `client` is the item holding the client_id the service gave, and its client_secret, which goes only
-        to its sites, so the service's token address is one of them.
+        to its sites, so the service's token address is one of them. `hosts` are the token address's site, names
+        under it, or the client's sites, and `item` a new one or one this sign-in made before.
         """,
         inputs: %{
           type: "object",
