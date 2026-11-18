@@ -21,18 +21,19 @@ release-please's manifest mode does: a breaking change (`type!:` or a `BREAKING 
 minor, a `feat` or a `fix` the next patch, and a commit touching two parts moves each. Before 1.0 a minor is
 breaking, as Cargo, npm and Hex read 0.x. A build is that version with its commit's count and hash as build
 metadata, `0.18.2+2974.febd37350abc`. Nothing decides a bump but how commits are marked and what they touch: `!`
-marks what breaks whoever uses the part the commit changes. One that wasn't marked is marked by a commit after it
+marks what breaks whoever uses the part the commit changes. A version names a release and refuses nothing: an app's
+`!` moves only that app, and the platform's whether parts talk is their protocol's. One that wasn't marked is marked by a commit after it
 that touches the same part, `fix!: <what broke>`, before it's released.
 
 Exactly two rules hold at runtime:
 
-- Parts one 0.minor apart talk, and two or more apart don't (`OneCore.Builds.talk?/2`). A server refuses a request
-  of one that far off (`OneCore.Mcp`), which says why; a server asks one that far behind it nothing, as if it were
-  off; the relay passes the edge's calls only to servers within one of its own (`core/edge/relay/relay.ts`), apart
-  from whether they're ready. What updates a
-  part that's behind, `tools/list`, `builds`, `download`, `update` and its task's `tasks/get`, is answered whatever
-  it's on, so a client of any version can always update. `one builds` says each
-  server's `build`, the `edge`'s, and `why` one doesn't talk.
+- Parts talk where the protocols they speak overlap (`OneCore.Protocol`, `core/protocol.json`), whatever their
+  versions. A server refuses a request of a part that speaks none it does (`OneCore.Mcp`), saying why; a server asks
+  one like that nothing, as if it were off; the relay passes the edge's calls only to servers that speak one it does
+  (`core/edge/relay/relay.ts`), apart from whether they're ready. What updates a part that's behind, `tools/list`,
+  `builds`, `download`, `update` and its task's `tasks/get`, is answered whatever it speaks, so a client of any
+  version can always update. `one builds` says each part's `protocol`, the `edge_protocol`, each device's
+  `last_seen`, and `why` a server doesn't talk.
 - An app runs on a server on its `requires`' `"core" => ">= 0.16.0"` or newer (`OneCore.Apps.Version.platform/1`,
   worked out from the two versions, never kept): `runs`, or `waiting_for_server` on an older one (deploying it there
   is refused, saying so). `one apps` and `one builds` say which, and a server that can't run one says why in
@@ -49,11 +50,11 @@ a newer build or Update Now (the `update` tool). Run no `one update` for a relea
 Nothing is watched after a release: each server verifies a build before it keeps it, and a bug found later is fixed
 forward.
 
-Any release mixes with what's live, a breaking one too, since parts one 0.minor apart talk. Release the servers
-first, then the edge from the commit they run, then the clients; an app that requires the new platform is deployed
-once every server is on it. `tooling/release` refuses a build on the next 0.minor while any server or the edge isn't on the
-network's current one, naming which: two apart don't talk. Devices aren't waited for, since their people update
-them, whatever they're on.
+Any release mixes with what's live, a breaking one too, since a release that changes the wire speaks the protocol
+before beside its own. Release the servers first, then the edge from the commit they run, then the clients; an app
+that requires the new platform is deployed once every server is on it. `tooling/release` refuses a build that speaks
+no protocol a server, the edge or a device seen in the last 90 days does, naming which: drop an old protocol only
+once none of them speaks only it. Devices are otherwise not waited for, since their people update them.
 
 | Changed | Release |
 | --- | --- |
@@ -118,11 +119,13 @@ where its Cloudflare token is kept are in Agent Memory, not the repo.
   `launchctl kickstart -k gui/$(id -u)/app.theone.server.<key's first 12>`); it goes back by itself if it doesn't
   answer.
 - Deploying the edge before the servers, from a commit they don't run: its relay took them all for gone and server
-  updates went back (17 Nov). It now sends nothing only to those more than one 0.minor behind it; the edge still
+  updates went back (17 Nov). It now sends nothing only to those that speak no protocol it does; the edge still
   goes after the servers.
 - A breaking release that removed two app categories (17 Nov), when parts talked only on one 0.minor and apps
-  pinned one with `~>`: the network split in two and six apps waited for updates. Now parts talk across one, and apps
-  say a minimum.
+  pinned one with `~>`: the network split in two and six apps waited for updates. Now apps say a minimum.
+- Refusing parts by how many 0.minors apart they were (until 19 Nov): three `!`s that changed nothing on the wire
+  took the platform from 0.24 to 0.26, and phones on 0.24 that spoke exactly what 0.26 does were refused. Now parts
+  talk by their protocol.
 
 ## Report
 

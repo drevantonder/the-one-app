@@ -26,8 +26,8 @@
 # the first thing a release looks at, and a release waiting for another looks again as it waits, and ends at once, with
 # the exit status 0, when the one it waits for is of a commit that has its changes, saying which to follow with `one
 # builds`: only a release whose commit nothing covers waits to publish. So is a client built from
-# the same as the network's latest, in the same series (`OneCore.Builds.talk?/2`): it keeps its build, which `one
-# --version` says, rather than being built again for a version it wouldn't differ in. A client's `inputs` are what
+# the same as the network's latest: it keeps its build, which `one --version` says, rather than being built again for
+# a version it wouldn't differ in. A client's `inputs` are what
 # `client_inputs` says, kept with it as a runtime's are.
 #
 # A server is an Erlang release of One Core (`core/server/mix.exs`) that needs nothing else on its machine: the VM
@@ -123,21 +123,21 @@ triple() {
   esac
 }
 
-# What a client for a kind of machine is built from: its crate and what it's built with (`tooling/input-hash`), and the
-# files its window shows from outside the crate (Tauri's `frontendDist`). Its own build isn't in it: that's the version
-# `one --version` says, so a client built for an earlier build still says what it is.
+# What a client for a kind of machine is built from: its crate and what it's built with (`tooling/input-hash`), the
+# files its window shows from outside the crate (Tauri's `frontendDist`), and the protocols it speaks
+# (`core/protocol.json`). Its own build isn't in it: that's the version `one --version` says, so a client built for an
+# earlier build still says what it is.
 client_inputs() {
-  { echo "$key" && tooling/input-hash clients/app "$(triple "$1")" && jq -r '.build.frontendDist[]' clients/app/tauri.conf.json | (cd clients/app && xargs sha256sum); } |
+  { echo "$key" && tooling/input-hash clients/app "$(triple "$1")" && sha256sum core/protocol.json &&
+    jq -r '.build.frontendDist[]' clients/app/tauri.conf.json | (cd clients/app && xargs sha256sum); } |
     sha256sum | cut -d' ' -f1
 }
 
-# Whether a client is the network's latest already: built from what it would be now, and in the same series, so what
-# talks with the servers (`OneCore.Builds.talk?/2`) doesn't drift further from them with each release it skips.
-series() { local version=${1%%+*}; [[ $version == 0.* ]] && echo "${version%.*}" || echo "${version%%.*}"; }
+# Whether a client is the network's latest already: built from what it would be now.
 unchanged() {
   local latest
   latest=$(jq -r --arg n "$1" --arg i "$(client_inputs "${1#*/}")" '.latest[$n] | select(.inputs == $i) | .build' <<<"$builds")
-  [[ -n $latest && $(series "$latest") == "$(series "$build")" ]] && echo "$latest"
+  [[ -n $latest ]] && echo "$latest"
 }
 
 # Whether a build is this commit's, or a newer one's on main, which has its changes.
@@ -165,17 +165,20 @@ survey() {
   done
   names=($(printf '%s\n' "${names[@]}" | sort -u))
 
-  # A release only while every server and the edge talks with it, so is at most one breaking release from it
-  # (`OneCore.Builds.talk?/2`): servers can catch up with an edge ahead of them, and a breaking release waits for
-  # whichever is two behind. Devices aren't waited for: their people update them, which works whatever they're on.
-  behind=$(jq -r --arg build "$build" '
-    def series: split(".") | map(tonumber? // 0) | if .[0] == 0 then .[0:2] else .[0:1] end;
-    def apart($a; $b): if ($a | length) == ($b | length) then ($a[-1] - $b[-1]) | fabs else infinite end;
-    ($build | series) as $mine
-    | [(.servers[] | select(apart(.build // "0.15.0" | series; $mine) > 1) | "\(.name) on \(.build)"),
-       (select(apart(.edge // "0.15.0" | series; $mine) > 1) | "the edge on \(.edge)")]
+  # A release only while every server, the edge and every device seen in the last 90 days speaks a protocol it does
+  # (`OneCore.Protocol`), so one that drops an old protocol waits until nothing still in use speaks only that. A part
+  # that says none speaks what its build does, as `OneCore.Protocol.of/2` has it.
+  behind=$(jq -r --argjson mine "$(cat core/protocol.json)" --argjson since "$((($(date +%s) - 90 * 86400) * 1000))" '
+    def spoken($said; $build):
+      $said // ($build // "" | split(".") | map(tonumber? // 0) | if .[0] > 0 or .[1] >= 24 then {oldest: 1, newest: 1} else null end);
+    def talks: . != null and .oldest <= $mine.newest and $mine.oldest <= .newest;
+    def named: if . == null then "none" elif .oldest == .newest then "\(.oldest)" else "\(.oldest) to \(.newest)" end;
+    [(.servers[] | select(spoken(.protocol; .build) | talks | not) | "\(.name) (protocol \(spoken(.protocol; .build) | named))"),
+     (select(.edge != null and (spoken(.edge_protocol; .edge) | talks | not)) | "the edge (protocol \(spoken(.edge_protocol; .edge) | named))"),
+     (.devices[] | select(.connected or (.last_seen // 0) > $since) | select(spoken(.protocol; .build) | talks | not)
+       | "\(.name) (protocol \(spoken(.protocol; .build) | named), on \(.build))")]
     | join(", ")' <<<"$builds")
-  [[ -z $behind ]] || { echo "$build is a breaking release from $behind, which wouldn't talk with it: release the one between to them first." >&2 && exit 1; }
+  [[ -z $behind ]] || { echo "$build speaks protocol $(jq -r 'if .oldest == .newest then "\(.oldest)" else "\(.oldest) to \(.newest)" end' core/protocol.json), which $behind, still in use, doesn't: keep the protocol they speak until none seen in 90 days does." >&2 && exit 1; }
 
   mine=() notes=()
   # Which are built here, and which are published already.

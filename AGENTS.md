@@ -50,12 +50,12 @@ before choosing.
   co-author or "Generated with" lines.
 - Mark with `!` (`feat(core)!: …`) a change that breaks whoever uses what the commit touches, such as a rename with
   no alias: the platform (core, the edge, the clients) or an app, each with its own version (the `release` skill).
-  It tells them, in the commit and the next 0.minor; it splits nothing.
-  Before a platform `!`, name the older part it breaks; if you can't, it's no `!`. Each one moves the platform a 0.minor
-  and leaves a phone two behind unable to connect until it's rebuilt (three tonight were mistakes, 19 Nov).
-- Parts of the platform one 0.minor apart talk, and two apart refuse each other, saying why, as Kubernetes' version
-  skew policy has it. So a change to what parts say to each other stays compatible for one release: the new beside
-  the old, and the old removed in the next. No version gate until something needs one.
+  It tells them, in the commit and the next 0.minor; it refuses nobody. Before a platform `!`, name the older part it
+  breaks; if you can't, it's no `!`.
+- Parts of the platform talk where the protocols they speak overlap, whatever their versions, as MCP's
+  `protocolVersion` has it: `core/protocol.json`, said in every request (`OneCore.Protocol`). A change to what crosses
+  the wire between parts raises its `newest`, with the newer part speaking the older beside it; `oldest` goes up in a
+  change of its own once no part seen in 90 days speaks only the older (`tooling/release` refuses it before then).
 - An app's `requires` says the lowest core it needs, `"core" => ">= 0.20.0"`, as Android's `minSdkVersion` does, and
   runs on every version after.
 - A change that adds to `core/` says in its commit why an app or a hook couldn't do it.
