@@ -2229,13 +2229,13 @@ html:has(.ui-sign-in) {
 /* The strict primitives (strict/primitives.tsx). A box is a flex column, as React Native's View and every native host's
    is, with a border only where its style gives it a width; a box that's pressed is a bare button. A text is a block
    in one of the type styles (tokens.css), by its `data-font`. */
-.ui-box {
+.ui-strict-box {
   display: flex;
   flex-direction: column;
   min-width: 0;
   border: 0 solid var(--border);
 }
-button.ui-box {
+button.ui-strict-box {
   appearance: none;
   margin: 0;
   padding: 0;
@@ -2244,10 +2244,10 @@ button.ui-box {
   font: inherit;
   text-align: inherit;
 }
-.ui-text {
+.ui-strict-text {
   margin: 0;
 }
-.ui-image {
+.ui-strict-image {
   display: block;
   min-width: 0;
   object-fit: contain;

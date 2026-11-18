@@ -29,7 +29,7 @@ export interface BoxProps extends Semantics {
 export function Box(props: BoxProps) {
   const own = omit(props, "style", "children")
   return (
-    <Dynamic component={props.role === "button" ? "button" : "div"} type={props.role === "button" ? "button" : undefined} {...own} class="ui-box" data-font={props.style?.font} style={css(props.style)}>
+    <Dynamic component={props.role === "button" ? "button" : "div"} type={props.role === "button" ? "button" : undefined} {...own} class="ui-strict-box" data-font={props.style?.font} style={css(props.style)}>
       {props.children}
     </Dynamic>
   )
@@ -50,7 +50,7 @@ export function Text(props: TextProps) {
   const own = omit(props, "style", "children")
   const tag = () => (props.role === "heading" ? `h${props["aria-level"] ?? 2}` : "span")
   return (
-    <Dynamic component={tag()} {...own} role={props.role === "heading" ? undefined : props.role} class="ui-text" data-font={props.style?.font} style={css(props.style)}>
+    <Dynamic component={tag()} {...own} role={props.role === "heading" ? undefined : props.role} class="ui-strict-text" data-font={props.style?.font} style={css(props.style)}>
       {props.children}
     </Dynamic>
   )
@@ -68,7 +68,7 @@ export interface ImageProps extends Pick<Semantics, "aria-hidden"> {
 /// `<Image src="icon.svg" alt="" style={{ width: 24, height: 24 }} />`: a picture, from a `data:` address or the app's
 /// own files, named by `alt`.
 export function Image(props: ImageProps) {
-  return <img src={props.src} alt={props.alt} aria-hidden={props["aria-hidden"]} class="ui-image" style={css(props.style)} />
+  return <img src={props.src} alt={props.alt} aria-hidden={props["aria-hidden"]} class="ui-strict-image" style={css(props.style)} />
 }
 
 const colours = new Set(["backgroundColor", "color", "borderColor"])
