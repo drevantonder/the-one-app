@@ -145,7 +145,8 @@ export const reducedMotion = () => still()
 /// `keydown((event) => event.key === "Escape" && close())`: each key pressed that isn't something's own, not in a
 /// field, a menu or a dialog, which take their keys themselves. → what stops it.
 export function keydown(listener: (event: KeyboardEvent) => void): () => void {
-  const heard = (event: KeyboardEvent) => !event.defaultPrevented && !(event.target as Element).closest?.("input, textarea, select, dialog, [role=menu], [role=dialog]") && listener(event)
+  // A shortcut held with ⌘ or Ctrl (⌘K, ⌘↵) is heard from a field too, as a computer's app's menus hear it.
+  const heard = (event: KeyboardEvent) => !event.defaultPrevented && (event.metaKey || event.ctrlKey || !(event.target as Element).closest?.("input, textarea, select, dialog, [role=menu], [role=dialog]")) && listener(event)
   addEventListener("keydown", heard)
   return () => removeEventListener("keydown", heard)
 }

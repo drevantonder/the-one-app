@@ -26,6 +26,7 @@ export { Empty, Problem, Skeleton, Status, Steps } from "../../states.tsx"
 export { List, Row } from "../../list.tsx"
 
 export { Menu } from "../../menu.tsx"
+export { ActionBar, ActionPanel, Keys } from "../../actions.tsx"
 export { Tabs } from "../../tabs.tsx"
 export { Alert, confirm, Sheet } from "../../sheet.tsx"
 export { toast } from "../../toast.tsx"

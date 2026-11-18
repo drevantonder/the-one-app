@@ -126,10 +126,10 @@ export type Typed = {
 }
 
 /** What an input's action key does, a phone keyboard's Done, Go, Next, Search or Send, or a new line. */
-export type Action = Exclude<Props["action"], undefined>
+export type TextInputAction = Exclude<Props["action"], undefined>
 /** What an editable text's `onAction` is told: what its action key did. */
 export type Acted = {
-  action: Action
+  action: TextInputAction
 }
 
 export type EditableTextProps = Pick<Semantics, "aria-label" | "aria-description" | "aria-invalid"> & {
@@ -140,7 +140,7 @@ export type EditableTextProps = Pick<Semantics, "aria-label" | "aria-description
   multiline?: boolean
   placeholder?: string
   /** What its action key does: `done` in one line unless it says, a new line in several. */
-  action?: Action
+  action?: TextInputAction
   disabled?: boolean
   readonly?: boolean
   required?: boolean
@@ -264,6 +264,13 @@ export declare function LiveScreen(props: { label: string; screen?: (inputs: Scr
 export declare function Alert(props: { heading: Element; text?: Element; open?: boolean; onClose?: () => void; action?: Element; children?: Element }): Element
 
 export declare function Sheet(props: { heading?: Element; open?: boolean; onClose?: () => void; children?: Element }): Element
+
+/** Something that can be done, as the action panel lists it: what it says, what does it, the keys that do it too
+ * (`["mod", "enter"]`), an icon, whether it can't be undone, whether it can't be done now, and its section. */
+export type Action = { label: string; onAction: () => void; keys?: string[]; icon?: IconName; destructive?: boolean; disabled?: boolean; section?: string }
+export declare function Keys(props: { keys: string[] }): Element
+export declare function ActionPanel(props: { open: boolean; onOpenChange: (open: boolean) => void; actions: Action[] }): Element
+export declare function ActionBar(props: { start?: Element; actions?: Action[] }): Element
 
 export declare const Menu: {
   Root: (props: { open?: boolean; onOpenChange?: (details: { open: boolean }) => void; onSelect?: (details: { value: string }) => void; children?: Element }) => Element

@@ -4,6 +4,7 @@
 // Nothing here calls a tool.
 import { For, Show } from "solid-js"
 import { Box, link, render, Scroll, Section, Text, type Scene, type Scenes } from "ui"
+import actions from "./actions.scenes.tsx"
 import buttons from "./buttons.scenes.tsx"
 import fields from "./fields.scenes.tsx"
 import lists from "./lists.scenes.tsx"
@@ -12,7 +13,7 @@ import states from "./states.scenes.tsx"
 import tabs from "./tabs.scenes.tsx"
 import text from "./text.scenes.tsx"
 
-const scenes: Scenes = { ...text, ...buttons, ...lists, ...fields, ...states, ...tabs, ...over }
+const scenes: Scenes = { ...text, ...buttons, ...lists, ...fields, ...states, ...tabs, ...over, ...actions }
 const draw = (scene: Scene) => (typeof scene === "function" ? scene() : scene.render())
 const named = () => {
   const to = link()

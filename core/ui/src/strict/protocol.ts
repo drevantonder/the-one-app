@@ -71,7 +71,7 @@ export interface Event {
   /** An `input`'s editing state, with `input`: what's typed, selected and composed now. */
   editing?: Editing
   /** What an `input`'s action key did, with `action`. */
-  action?: Action
+  action?: TextInputAction
   /** The key, with `keydown`, as the DOM's `KeyboardEvent.key` names it (`Enter`, `Escape`, `ArrowDown`, `a`), and
    * which modifiers were held. */
   key?: string
@@ -159,7 +159,7 @@ export interface Editing {
 
 /** What an input's action key does, as Flutter's `TextInputAction`, which a phone's keyboard names on it: `newline`
  * (a multiline input's Enter), `done`, `go`, `next`, `previous`, `search`, `send`. */
-export type Action = "newline" | "done" | "go" | "next" | "previous" | "search" | "send"
+export type TextInputAction = "newline" | "done" | "go" | "next" | "previous" | "search" | "send"
 
 /** Every node's props, as `set` sends them, named as a strict app's JSX names them, which are the DOM's. One semantic
  * tree, which a screen reader and an agent both read: a node's role, its name (`aria-label`, or what a `text` says),
@@ -212,7 +212,7 @@ export interface Props {
    * ahead of this, which the host keeps until the app sets it again. */
   editing?: Editing
   /** `input`: what its action key does. One line's is `done` unless it says otherwise, several lines' `newline`. */
-  action?: Action
+  action?: TextInputAction
   /** `picker`: what can be chosen, each its value and what it says, and whether it can be. Its `value` is the one
    * chosen. */
   options?: { value: string; label: string; disabled?: boolean }[]

@@ -6,7 +6,7 @@ import { createEffect, For, omit, onCleanup, onSettled } from "solid-js"
 import { Dynamic, Portal, render as mount, type JSX } from "@solidjs/web"
 import { tellDrawn } from "../bridge.ts"
 import { layer } from "./layer.ts"
-import type { Action, Props, Version1Style } from "./protocol.ts"
+import type { TextInputAction, Props, Version1Style } from "./protocol.ts"
 import type { Laid, Located, Pressed, Wheeled } from "./types/ui.d.ts"
 import { web, type Styles } from "../styles.ts"
 
@@ -295,7 +295,7 @@ export interface Typed {
 
 /** What an editable text's `onAction` is told: what its action key did. */
 export interface Acted {
-  action: Action
+  action: TextInputAction
 }
 
 /** An editable text's props. */
@@ -306,7 +306,7 @@ export interface EditableTextProps extends Pick<Semantics, "aria-label" | "aria-
   inputmode?: Props["inputmode"]
   multiline?: boolean
   placeholder?: string
-  action?: Action
+  action?: TextInputAction
   autocapitalize?: Props["autocapitalize"]
   autocorrect?: boolean
   spellcheck?: boolean
@@ -324,7 +324,7 @@ export interface EditableTextProps extends Pick<Semantics, "aria-label" | "aria-
 }
 
 /** A phone keyboard's word on its action key, by the action. */
-const hints: Record<Action, "enter" | "done" | "go" | "next" | "previous" | "search" | "send"> = { newline: "enter", done: "done", go: "go", next: "next", previous: "previous", search: "search", send: "send" }
+const hints: Record<TextInputAction, "enter" | "done" | "go" | "next" | "previous" | "search" | "send"> = { newline: "enter", done: "done", go: "go", next: "next", previous: "previous", search: "search", send: "send" }
 
 /// `<EditableText value={text()} onInput={(event) => setText(event.currentTarget.value)} onAction={save} />`: text
 /// to type, bare: the DOM's own `<input>`, or `<textarea>` with `multiline`, so selection, an input method's
@@ -335,7 +335,7 @@ const hints: Record<Action, "enter" | "done" | "go" | "next" | "previous" | "sea
 /// text runs the way its first strong character does (`dir="auto"`), so Hebrew or Arabic starts at the right.
 export function EditableText(props: EditableTextProps) {
   const own = omit(props as EditableTextProps & { class?: string }, "style", "class", "multiline", "action", "autocorrect", "autofocus", "onAction", "onKeyDown", "onFocus", "onInput")
-  const action = (): Action => props.action ?? (props.multiline ? "newline" : "done")
+  const action = (): TextInputAction => props.action ?? (props.multiline ? "newline" : "done")
   const keyed = (event: KeyboardEvent) => {
     props.onKeyDown?.(event)
     if (event.key !== "Enter" || event.isComposing || event.keyCode === 229 || event.defaultPrevented || !props.onAction || action() === "newline" || event.shiftKey) return

@@ -3,6 +3,7 @@ import { createStore } from "solid-js"
 
 /// The few words the UI library says itself, in English until a page says otherwise with `words`.
 export const [messages, setMessages] = createStore({
+  actions: "Actions",
   back: "Back",
   cancel: "Cancel",
   clear: "Clear",
@@ -15,7 +16,9 @@ export const [messages, setMessages] = createStore({
   hideDetails: "Hide Details",
   loading: "Loading",
   more: "More",
+  noActions: "No actions",
   ok: "OK",
+  searchActions: "Search for actions…",
   showDetails: "Show Details",
 })
 

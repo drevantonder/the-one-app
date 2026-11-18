@@ -194,6 +194,8 @@ const roles = {
   selection: alpha(label, 10),
   /** What dims the page under a sheet or an alert. */
   overlay: colours.overlay,
+  /** A panel over the window, its glass a little lighter than the window's: the action panel, an alert. */
+  panel: colour("oklch(0.991 0.001 286.38 / 92%)", "oklch(0.266 0.011 278.1 / 92%)"),
   /** Liquid Glass's fill, over what's blurred behind it: white, two thirds see-through in light and mostly in dark. */
   glass: colour("oklch(1 0 0 / 66%)", "oklch(1 0 0 / 13%)"),
   /** What veils a page behind something opened over it, over what's blurred. */
@@ -214,13 +216,15 @@ const roles = {
 }
 
 /** The 4px grid, by its steps: `grid[3]` is 12px. */
-const grid = Object.fromEntries([0.5, 1, 2, 2.5, 3, 4, 5, 6, 8, 10, 12, 16, 20, 24].map((step) => [step, length(rem(step / 4))])) as Record<0.5 | 1 | 2 | 2.5 | 3 | 4 | 5 | 6 | 8 | 10 | 12 | 16 | 20 | 24, Token<"length">>
+const grid = Object.fromEntries([0.5, 1, 1.5, 2, 2.5, 3, 4, 5, 6, 8, 10, 12, 16, 20, 24].map((step) => [step, length(rem(step / 4))])) as Record<0.5 | 1 | 1.5 | 2 | 2.5 | 3 | 4 | 5 | 6 | 8 | 10 | 12 | 16 | 20 | 24, Token<"length">>
 
 /** Sizes of text: large, medium and small, and a phone's large title. */
 const sizes = {
   large: length({ default: rem(1.125), phone: rem(1) }),
   medium: length({ default: rem(0.8125), touch: rem(0.9375), phone: rem(15 / 17) }),
   small: length({ default: rem(0.6875), touch: rem(0.8125), phone: rem(13 / 17) }),
+  /** A footer pill's and a toast's: Raycast's 12px. */
+  caption: length({ default: rem(0.75), touch: rem(0.8125), phone: rem(13 / 17) }),
   largeTitle: length({ default: rem(1.25), phone: rem(34 / 17) }),
 }
 const weightRoles = {
@@ -270,6 +274,13 @@ export const tokens = {
     /** A sheet's grabber, which says under a finger that it can be pulled down, and is nothing under a mouse. */
     grabber: length({ default: px(0), touch: rem(0.25) }),
     grabberGap: length({ default: px(0), touch: rem(0.5) }),
+    /** A footer's pill, and what a window's foot keeps clear for its pills: Raycast's 36px, 10px off the edge. */
+    pill: length(rem(2.25)),
+    footer: length(rem(3.5)),
+    /** A key's chip, as ⌘ and K are shown beside what they do. */
+    key: length(rem(1.125)),
+    /** The action panel's width. */
+    actionPanel: length(rem(20)),
     /** How tall a row in a list is at least: what's pressed, and a little room. */
     row: length({ default: rem(2.375), touch: rem(3.25), phone: rem(52 / 17) }),
   }, (key) => key),
@@ -290,6 +301,13 @@ export const tokens = {
     ),
     /** A window's, a sheet's or a menu's, as Raycast's: a hairline outside, three soft shadows under it, and its edge. */
     window: lightDark([...windowShadow.light, ...edge.light], [...windowShadow.dark, ...edge.dark]),
+    /** A floating pill's, as Raycast's footer has them: a hairline round it and a line of light along its top. */
+    pill: lightDark(
+      [{ x: 0, y: 0, blur: 0, spread: 0.5, colour: "oklch(0 0 0 / 12%)" }, { x: 0, y: 1, blur: 3, spread: 0, colour: "oklch(0 0 0 / 6%)" }, { x: 0, y: 0.5, blur: 0, spread: 0, colour: "oklch(1 0 0 / 90%)", inset: true }],
+      [{ x: 0, y: 0, blur: 0, spread: 0.5, colour: "oklch(0 0 0 / 25%)" }, { x: 0, y: 0.5, blur: 0, spread: 0, colour: "oklch(1 0 0 / 18%)", inset: true }],
+    ),
+    /** A key's chip: an outline, as Raycast draws ⌘ and K. */
+    key: lightDark([{ x: 0, y: 0, blur: 0, spread: 1, colour: "oklch(0 0 0 / 16%)", inset: true }], [{ x: 0, y: 0, blur: 0, spread: 1, colour: "oklch(1 0 0 / 20%)", inset: true }]),
     /** A raised thing's edge inside: a half-pixel line, lit along the top. */
     edge: lightDark(edge.light, edge.dark),
     /** A field's edge, and where the keyboard is in it, where what's in it is wrong. */
@@ -306,6 +324,7 @@ export const tokens = {
     large: type(sizes.large, weights.label),
     medium: type(sizes.medium, weights.body, { lineHeight: 1.35 }),
     small: type(sizes.small, weights.body),
+    caption: type(sizes.caption, weights.body, { lineHeight: 1.35 }),
     /** What's typed in a field: medium, but never under 16px under a finger, where an iPhone would zoom into it. */
     field: type(lengths.textField, weights.body),
   }, (key) => `type-${key}`),
