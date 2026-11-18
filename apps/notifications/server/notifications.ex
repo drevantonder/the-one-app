@@ -259,7 +259,12 @@ defmodule Notifications do
               maxLength: 2000,
               description: "Where it reaches the device: an APNs or FCM token, or a browser's subscription as JSON"
             },
-            name: %{type: "string", maxLength: 80, description: "What the device is called"},
+            name: %{
+              type: "string",
+              maxLength: 80,
+              format: "device-name",
+              description: "What the device is called. This device's, if left out"
+            },
             device: %{type: "string", format: "device", description: "The device's key. This device's, if left out"},
             key: %{
               type: "string",
