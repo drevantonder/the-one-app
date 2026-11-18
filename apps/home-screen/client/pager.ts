@@ -4,6 +4,7 @@
 // ends they give with resistance; once it lifts, a spring seeded with the finger's speed takes them to a page: the
 // next if it was flicked or dragged past half way, else back where they were. A finger that lands while they move
 // catches them where they are.
+import { reducedMotion } from "ui"
 
 /** One axis of the pages: where they are, in points, where they're going, and how fast. `draw` puts them there. */
 export interface Spring {
@@ -27,8 +28,8 @@ let last = 0
 let frame = 0
 
 function step(now: number) {
-  // A frame late, as when the page was hidden, is taken as one, so nothing jumps.
-  const dt = Math.min(1 / 30, (now - last) / 1000)
+  // A frame late, as when the page was hidden, is taken as one, so nothing jumps; the first is a frame's.
+  const dt = last ? Math.min(1 / 30, (now - last) / 1000) : 1 / 60
   last = now
   for (const one of moving) {
     for (let at = 0; at < dt; at += 1 / 240) {
@@ -48,12 +49,12 @@ function step(now: number) {
 
 /// Takes `one` to `target`, leaving at `velocity`, or there at once for whoever asked for less motion.
 export function glide(one: Spring, target: number, velocity = one.velocity) {
-  if (matchMedia("(prefers-reduced-motion: reduce)").matches) return jump(one, target)
+  if (reducedMotion()) return jump(one, target)
   one.target = target
   one.velocity = velocity
   moving.add(one)
   if (!frame) {
-    last = performance.now()
+    last = 0
     frame = requestAnimationFrame(step)
   }
 }
