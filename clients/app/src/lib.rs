@@ -98,16 +98,19 @@ impl Views {
     /// Asks again, as a window is back on screen, if something changed while none was.
     async fn caught_up(&self) {
         if self.on_screen() && self.missed.swap(false, Ordering::Relaxed) {
-            self.refresh().await
+            self.refresh(None).await
         }
     }
 
-    /// Asks again for what every view was answered.
-    async fn refresh(&self) {
+    /// Asks again for what every view was answered, all at once, or only of `app`'s tools.
+    async fn refresh(&self, app: Option<&str>) {
         let shown: Vec<_> = self.subscriptions.lock().expect("no view panics").values().cloned().collect();
+        let mut asks = tokio::task::JoinSet::new();
         for shown in shown {
-            shown.refresh().await
+            let app = app.map(str::to_owned);
+            asks.spawn(async move { shown.refresh(app.as_deref()).await });
         }
+        while asks.join_next().await.is_some() {}
     }
 
     /// The files of every app a server lists for `subject`, a group or the network, or for this client's user, as MCP
@@ -338,7 +341,7 @@ async fn request(view: String, method: String, params: Value) -> Result<Value, S
 /// Asks again for what a view was answered: its user returned to it.
 #[cfg_attr(mobile, tauri::command)]
 async fn refresh(view: String) -> Result<(), String> {
-    views()?.subscription(&view).refresh().await;
+    views()?.subscription(&view).refresh(None).await;
     Ok(())
 }
 
@@ -434,7 +437,7 @@ async fn recovery_key(subject: Option<String>) -> Result<String, String> {
 async fn recover(key: String, subject: Option<String>) -> Result<(), String> {
     let views = views()?;
     encryption_client::recover(&views.client, &key, subject.as_deref()).await.map_err(|error| error.to_string())?;
-    views.refresh().await;
+    views.refresh(None).await;
     Ok(())
 }
 
@@ -901,7 +904,7 @@ async fn opens() {
             eprintln!("this client's connection: {now:?}");
             app.shell.emit("connection", json!(now));
             if now == Connection::Online {
-                views.refresh().await
+                views.refresh(None).await
             }
         }
     });
@@ -946,7 +949,7 @@ async fn opens() {
             }
             if views.on_screen() {
                 eprintln!("a server said something changed");
-                views.refresh().await
+                views.refresh(message["params"]["app"].as_str()).await
             } else {
                 views.missed.store(true, Ordering::Relaxed)
             }

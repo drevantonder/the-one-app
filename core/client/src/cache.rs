@@ -108,8 +108,9 @@ pub(crate) fn write(file: &Path, bytes: &[u8]) -> Result<()> {
 
 /// What one view has been answered since it opened. It asks through this, and every view gets the same, with
 /// nothing to write: what only reads is answered from what was kept and asked again behind it, and asked again
-/// after the view changes something, when its user returns to it, and when a server says something changed. When
-/// an answer comes back different, the view is told to ask again, and is answered at once.
+/// after the view changes something, when its user returns to it, and when a server says something changed, which
+/// is only what that server says is of the app that changed it, if it says. When an answer comes back different,
+/// the view is told to ask again, and is answered at once.
 pub struct Subscription {
     client: Arc<Client>,
     /// What only reads, by what was asked, with the answer the view was last given.
@@ -129,13 +130,23 @@ impl Subscription {
             return self.read(method, params).await;
         }
         let response = self.client.request(method, params).await?;
-        self.refresh().await;
+        self.refresh(None).await;
         Ok(response)
     }
 
-    /// Asks the server again for everything the view was answered, and tells the view if any of it changed.
-    pub async fn refresh(&self) {
-        let requests: Vec<String> = self.responses.lock().expect("no view panics").keys().cloned().collect();
+    /// Asks the server again for everything the view was answered, or with `app`, the tools of that app, which is
+    /// all a server says changed when it's one's call that did (`notifications/one/changed`), and tells the view if
+    /// any of it changed.
+    pub async fn refresh(&self, app: Option<&str>) {
+        let prefix = app.map(|app| format!("{app}_"));
+        let requests: Vec<String> = (self.responses.lock().expect("no view panics").iter())
+            .filter(|(_, (method, params, _))| {
+                prefix.as_ref().is_none_or(|prefix| {
+                    *method == "tools/call" && params["name"].as_str().is_some_and(|name| name.starts_with(prefix))
+                })
+            })
+            .map(|(request, _)| request.clone())
+            .collect();
         self.refresh_for(requests).await
     }
 
