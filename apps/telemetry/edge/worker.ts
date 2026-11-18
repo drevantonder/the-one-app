@@ -7,32 +7,25 @@
 // `name` is a span of that name, kept whatever ran it, as the network's updater says each step of an update. Nothing else of a
 // request is kept: no query, header, cookie, body or other log line, so never a token or a code.
 //
-// Spans are gathered a minute at a time in a Durable Object and kept as one blob of Telemetry's own artifact for
-// the network, `batches/<day>/<hour>/<to>-edge-<bytes>`, as a server keeps its batch (`Telemetry.Store`), in JSON.
+// Each span is made with OpenTelemetry's own SDK, with the trace and span ids the Worker said it carried on, and is
+// gathered a minute at a time in a Durable Object as OTLP's protobuf, which OpenTelemetry's own serializer writes. A
+// minute is kept as one blob of Telemetry's own artifact for the network, `otlp/<day>/<hour>/<to>-edge-<bytes>.traces`,
+// as a server's export is (`Telemetry.Store`): protobuf's messages one after another are one message, so it's one
+// export request.
 import { DurableObject, env } from "cloudflare:workers";
+import { ROOT_CONTEXT, SpanKind, SpanStatusCode, trace, type Context } from "@opentelemetry/api";
+import { W3CTraceContextPropagator } from "@opentelemetry/core";
+import { ProtobufTraceSerializer } from "@opentelemetry/otlp-transformer";
+import { resourceFromAttributes } from "@opentelemetry/resources";
+import { InMemorySpanExporter, SimpleSpanProcessor, TracerProvider, type IdGenerator } from "@opentelemetry/sdk-trace";
 
 declare global {
   namespace Cloudflare {
     interface Env {
       BATCH: DurableObjectNamespace<Batch>;
-      OWN: { write(name: string, data: string): Promise<boolean> };
+      OWN: { write(name: string, data: Uint8Array): Promise<boolean> };
     }
   }
-}
-
-/** A span as Telemetry keeps one: OpenTelemetry's, with times in nanoseconds since 1970. */
-interface Span {
-  traceId: string;
-  spanId: string;
-  parentSpanId: string | null;
-  name: string;
-  kind: "server";
-  start: number;
-  end: number;
-  attributes: Record<string, string | number | boolean>;
-  status: { code: "ok" | "error"; message: string };
-  events: [];
-  server: "edge";
 }
 
 /** What a Worker says of a request, in a line `{"telemetry": …}` of its log. */
@@ -56,15 +49,37 @@ interface LogLine {
 const ROUTINE = /^\/(ping|relay|relay\/seen|presigner\/.*)$|\.[a-z0-9]+$/;
 /** How long a minute's spans wait to be kept, in milliseconds. */
 const EVERY = 60_000;
-
-const hex = (bytes: number) => Array.from(crypto.getRandomValues(new Uint8Array(bytes)), (byte) => byte.toString(16).padStart(2, "0")).join("");
-const PARENT = /^00-([0-9a-f]{32})-([0-9a-f]{16})-[0-9a-f]{2}$/;
+/** The most a minute keeps, in bytes: past it, the newest. */
+const MOST = 2 * 1024 * 1024;
 
 /** A path as a route: what names a sharing link or a session in it isn't kept. */
 const route = (path: string) => path.replace(/^\/(link|apps)\/.*/, "/$1/*");
 
-/** The span for one Worker's event, or null for one that's routine and went well. */
-function span(item: TraceItem): Span | null {
+/** The ids the next span is given: those the Worker carried on, so a server's span it reached is under it. */
+const next: { trace?: string; span?: string } = {};
+const random: IdGenerator = {
+  generateTraceId: () => hex(16),
+  generateSpanId: () => hex(8),
+};
+const ids: IdGenerator = {
+  generateTraceId: () => next.trace ?? random.generateTraceId(),
+  generateSpanId: () => next.span ?? random.generateSpanId(),
+};
+const hex = (bytes: number) => Array.from(crypto.getRandomValues(new Uint8Array(bytes)), (byte) => byte.toString(16).padStart(2, "0")).join("");
+
+const exported = new InMemorySpanExporter();
+const tracer = new TracerProvider({
+  resource: resourceFromAttributes({ "service.name": "one-edge", "host.name": "edge" }),
+  idGenerator: ids,
+  spanProcessors: [new SimpleSpanProcessor({ exporter: exported })],
+}).getTracer("telemetry");
+const propagator = new W3CTraceContextPropagator();
+const getter = { get: (carrier: Record<string, string>, key: string) => carrier[key], keys: (carrier: Record<string, string>) => Object.keys(carrier) };
+/** A `traceparent`'s span as a context, or none. */
+const under = (traceparent?: string): Context => (traceparent ? propagator.extract(ROOT_CONTEXT, { traceparent }, getter) : ROOT_CONTEXT);
+
+/** Makes the span for one Worker's event, unless it's routine and went well. */
+function span(item: TraceItem) {
   const event = item.event as (TraceItemFetchEventInfo & { rpcMethod?: string }) | null;
   const worker = (item.scriptName ?? "").replace(/^network-/, "");
   const request = event && "request" in event ? event.request : null;
@@ -90,56 +105,58 @@ function span(item: TraceItem): Span | null {
   const name =
     record.name ?? (request ? `${request.method} ${path}` : event?.rpcMethod ? [worker, event.rpcMethod].filter(Boolean).join(" ") : null);
   const routine = !record.name && (item.executionModel === "durableObject" || (path ? ROUTINE.test(path) : event?.rpcMethod !== "forward"));
-  if (!name || (!error && routine)) return null;
+  if (!name || (!error && routine)) return;
 
-  const [, trace = hex(16), id = hex(8)] = PARENT.exec(record.traceparent ?? "") ?? [];
-  const start = Math.round((record.start ?? item.eventTimestamp ?? Date.now()) * 1e6);
-  const end = record.end !== undefined ? Math.round(record.end * 1e6) : start + Math.round(((item as { wallTime?: number }).wallTime ?? 0) * 1e6);
-  return {
-    traceId: trace,
-    spanId: id,
-    parentSpanId: PARENT.exec(record.parent ?? "")?.[1] === trace ? PARENT.exec(record.parent!)![2] : null,
+  // Its own ids are those it carried on, and it's under the span it came in with where that's of the same trace.
+  const own = trace.getSpanContext(under(record.traceparent));
+  const parent = trace.getSpanContext(under(record.parent));
+  Object.assign(next, { trace: own?.traceId, span: own?.spanId });
+  const start = record.start ?? item.eventTimestamp ?? Date.now();
+  const span = tracer.startSpan(
     name,
-    kind: "server",
-    start,
-    end,
-    attributes: {
-      ...(worker && { "one.worker": worker }),
-      ...(request && { "http.request.method": request.method, "http.route": path! }),
-      ...(status !== undefined && { "http.response.status_code": status }),
-      ...record.attributes,
+    {
+      kind: SpanKind.SERVER,
+      startTime: start,
+      attributes: {
+        ...(worker && { "one.worker": worker }),
+        ...(request && { "http.request.method": request.method, "http.route": path! }),
+        ...(status !== undefined && { "http.response.status_code": status }),
+        ...record.attributes,
+      },
     },
-    status: { code: error ? "error" : "ok", message: (error ?? "").slice(0, 1000) },
-    events: [],
-    server: "edge",
-  };
+    own && parent?.traceId === own.traceId ? under(record.parent) : ROOT_CONTEXT,
+  );
+  delete next.trace, delete next.span;
+  if (error) span.setStatus({ code: SpanStatusCode.ERROR, message: error.slice(0, 1000) });
+  span.end(record.end ?? start + ((item as { wallTime?: number }).wallTime ?? 0));
 }
 
 export default {
   async tail(items: TraceItem[]) {
-    const spans = items.map(span).filter((span) => span !== null);
-    if (spans.length) await env.BATCH.get(env.BATCH.idFromName("edge")).add(spans);
+    for (const item of items) span(item);
+    const spans = exported.getFinishedSpans();
+    exported.reset();
+    const otlp = spans.length ? ProtobufTraceSerializer.serializeRequest(spans) : undefined;
+    if (otlp) await env.BATCH.get(env.BATCH.idFromName("edge")).add(otlp);
   },
 } satisfies ExportedHandler;
 
 /** A minute's spans, kept once it's over. */
 export class Batch extends DurableObject {
-  async add(spans: Span[]) {
-    if (!(await this.ctx.storage.getAlarm())) {
-      await this.ctx.storage.put("from", Date.now() * 1e6);
-      await this.ctx.storage.setAlarm(Date.now() + EVERY);
-    }
-    await this.ctx.storage.put(`spans/${Date.now()}/${hex(4)}`, spans);
+  async add(otlp: Uint8Array) {
+    if (!(await this.ctx.storage.getAlarm())) await this.ctx.storage.setAlarm(Date.now() + EVERY);
+    await this.ctx.storage.put(`otlp/${Date.now()}/${hex(4)}`, otlp);
   }
 
   async alarm() {
-    const spans = [...(await this.ctx.storage.list<Span[]>({ prefix: "spans/" })).values()].flat().slice(-2000);
-    const from = (await this.ctx.storage.get<number>("from")) ?? Date.now() * 1e6;
+    const exports = [...(await this.ctx.storage.list<Uint8Array>({ prefix: "otlp/" })).values()];
+    let bytes = 0;
+    const kept = exports.reverse().filter((otlp) => (bytes += otlp.length) <= MOST).reverse();
+    const data = new Uint8Array(kept.reduce((sum, otlp) => sum + otlp.length, 0));
+    kept.reduce((at, otlp) => (data.set(otlp, at), at + otlp.length), 0);
     const to = Date.now() * 1e6;
-    const data = JSON.stringify({ server: "edge", machine: "edge", from, to, spans, logs: [], metrics: [] });
     const at = new Date(to / 1e6).toISOString();
-    const name = `batches/${at.slice(0, 10)}/${at.slice(11, 13)}/${to}-edge-${new TextEncoder().encode(data).length}`;
-    await env.OWN.write(name, data);
+    if (data.length) await env.OWN.write(`otlp/${at.slice(0, 10)}/${at.slice(11, 13)}/${to}-edge-${data.length}.traces`, data);
     await this.ctx.storage.deleteAll();
   }
 }

@@ -267,7 +267,7 @@ defmodule Telemetry.Read do
   Which client a record is from, as a person reads it, from what the client said of itself: "App on Andre's
   iPhone", "claude-code (MCP) on linux". `nil` for a server's own.
   """
-  def from(%{"attributes" => %{"service.name" => service} = attributes}) when service != "one-server" do
+  def from(%{"attributes" => %{"service.name" => service} = attributes}) when service not in ["one-server", "one-edge"] do
     on = if attributes["host.name"], do: " on #{attributes["host.name"]}", else: ""
 
     case service do

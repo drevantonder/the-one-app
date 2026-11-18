@@ -7,5 +7,12 @@
   "devDependencies": {
     "@cloudflare/workers-types": "5.20261116.1",
     "typescript": "7.0.2"
+  },
+  "dependencies": {
+    "@opentelemetry/api": "1.10.0",
+    "@opentelemetry/core": "3.1.1",
+    "@opentelemetry/otlp-transformer": "0.301.2",
+    "@opentelemetry/resources": "3.1.1",
+    "@opentelemetry/sdk-trace": "3.1.1"
   }
 }
