@@ -25,6 +25,12 @@ serde_urlencoded = "0.7"
 sha2 = "0.11"
 # Names the key file without replacing one that's there, on every system, a phone included.
 tempfile = "3"
+# What the client records of itself, with OpenTelemetry's own SDK, exported as OTLP (`src/telemetry.rs`).
+async-trait = "0.1"
+opentelemetry = { version = "0.33", default-features = false, features = ["trace", "metrics", "logs"] }
+opentelemetry-http = { version = "0.33", default-features = false }
+opentelemetry-otlp = { version = "0.33", default-features = false, features = ["http-proto", "trace", "metrics", "logs"] }
+opentelemetry_sdk = { version = "0.33", default-features = false, features = ["trace", "metrics", "logs"] }
 # A random part of each wait before it asks its network again, so devices that lost it together don't all ask at once.
 fastrand = "2"
 tokio.workspace = true

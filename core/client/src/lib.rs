@@ -12,6 +12,7 @@
 
 mod resolve;
 mod cache;
+mod telemetry;
 pub mod serve;
 
 use std::io::{ErrorKind, Write};
@@ -998,11 +999,12 @@ pub struct Client {
     tools: Vec<Arc<dyn DeviceTools>>,
     /// What this client knows of each tool, as a server last listed them (`resolve`).
     listed: std::sync::Mutex<Option<Arc<resolve::Listed>>>,
-    /// What this client says of itself in each record it reports (`report`), as OpenTelemetry's resource attributes
-    /// say a service: which client it is (`service.name`), its build, its device's name and its operating system.
+    /// What this client says of itself in what it records (`report`), as OpenTelemetry's resource attributes say a
+    /// service: which client it is (`service.name`), its build, its device's name and its operating system, until its
+    /// SDK is made, as it first records something (`telemetry`).
     resource: Arc<std::sync::RwLock<serde_json::Map<String, Value>>>,
-    /// Whether this client reported something since it last told a server, and the telling, one at a time.
-    reporting: AtomicBool,
+    telemetry: Arc<std::sync::OnceLock<telemetry::Telemetry>>,
+    /// Telling a server what was recorded, one at a time.
     sending: Mutex<()>,
     /// Since when no server has answered, if none has.
     unanswered: std::sync::Mutex<Option<Instant>>,
@@ -1089,12 +1091,11 @@ impl Client {
         let listed = std::sync::Mutex::default();
         let reach = Mutex::default();
         let resource = Arc::new(std::sync::RwLock::new(resource()));
-        let reporting = AtomicBool::new(home.join(REPORTS).exists());
         let address = config.map(|config| config.address);
         let client = Arc::new_cyclic(|me| Self {
             home, key, address, session: watch::Sender::new(session), admitting: Mutex::default(),
             again: Arc::default(), link, reach, notifications, says, watching, connection, behind: watch::Sender::new(None), resolvers, tools,
-            listed, resource, reporting, sending: Mutex::default(), unanswered: std::sync::Mutex::default(),
+            listed, resource, telemetry: Arc::default(), sending: Mutex::default(), unanswered: std::sync::Mutex::default(),
             me: me.clone(), runtime: tokio::runtime::Handle::current(),
         });
         accept(endpoint, client.me.clone());
@@ -1437,7 +1438,7 @@ impl Client {
         }
         // A request is read once on its way out: for what this device fills in of it, what it says of itself, and
         // the span it is of a trace (`span`).
-        let (message, lists, reads, span): (std::borrow::Cow<[u8]>, bool, bool, Option<Value>) =
+        let (message, lists, reads, span): (std::borrow::Cow<[u8]>, bool, bool, Option<opentelemetry_sdk::trace::Span>) =
             match serde_json::from_slice::<Value>(message) {
                 Ok(mut request) if request["method"].is_string() => {
                     if request.get("id").is_some() && request["params"]["_meta"]["progressToken"].is_null() {
@@ -1452,7 +1453,6 @@ impl Client {
                 }
                 _ => (message.into(), false, false, None),
             };
-        let started = Instant::now();
         let reached = std::sync::Mutex::new("none");
         // A server that went away after it was asked is asked again elsewhere only for what only reads: anything
         // else it may have done.
@@ -1486,19 +1486,16 @@ impl Client {
             self.behind.send_if_modified(|now| now.is_some() != why.is_some() && { *now = why; true });
         }
         if let Some(mut span) = span {
+            use opentelemetry::trace::{Span, Status};
             let refused = match &response {
                 Err(why) => Some(why.to_string()),
                 Ok(response) => refused(response),
             };
-            let took = started.elapsed();
-            if refused.is_some() || took > SLOW {
-                span["took"] = json!(took.as_secs_f64() * 1000.0);
-                span["attributes"]["one.reached"] = json!(*reached.lock().expect("no ask panics"));
-                if let Some(refused) = refused {
-                    span["error"] = json!(refused);
-                }
-                self.report(span);
+            span.set_attribute(opentelemetry::KeyValue::new("one.reached", *reached.lock().expect("no ask panics")));
+            if let Some(refused) = refused {
+                span.set_status(Status::error(refused));
             }
+            span.end();
         }
         if response.is_ok() {
             self.send_soon();
@@ -1584,18 +1581,14 @@ impl Client {
     }
 
     /// Has `request` carry the span it is, as W3C's `traceparent` in its `_meta`, which a server's span of it is under,
-    /// so a trace runs from this client on. Gives the span as a record for `report`, should it fail or be slow.
-    /// An MCP client says which it is, for what it reports: in `initialize`, or in each request's `_meta` from MCP's
-    /// 2026-07-28 on.
-    fn span(&self, request: &mut Value) -> Value {
-        let ids = SecretKey::generate().to_bytes();
-        let (trace, span) = (hex(&ids[..16]), hex(&ids[16..24]));
-        let meta = &mut request["params"]["_meta"];
-        if meta["traceparent"].is_null() {
-            meta["traceparent"] = json!(format!("00-{trace}-{span}-01"));
-        }
-        let method = request["method"].as_str().unwrap_or_default();
-        let client = match method {
+    /// so a trace runs from this client on, by OpenTelemetry's propagator. Gives the span, which is kept should it fail
+    /// or be slow. An MCP client says which it is, for what it records: in `initialize`, or in each request's `_meta`
+    /// from MCP's 2026-07-28 on.
+    fn span(&self, request: &mut Value) -> opentelemetry_sdk::trace::Span {
+        use opentelemetry::propagation::TextMapPropagator;
+        use opentelemetry::trace::{Span, TraceContextExt};
+        let method = request["method"].as_str().unwrap_or_default().to_owned();
+        let client = match method.as_str() {
             "initialize" => &request["params"]["clientInfo"]["name"],
             _ => &request["params"]["_meta"]["io.modelcontextprotocol/clientInfo"]["name"],
         };
@@ -1604,14 +1597,30 @@ impl Client {
             resource.insert("service.name".into(), json!("mcp"));
             resource.insert("mcp.client.name".into(), client.clone());
         }
-        // A span's name is MCP's: its method, and the tool it calls, if it calls one.
-        let tool = request["params"]["name"].as_str().filter(|_| method == "tools/call");
-        json!({
-            "name": tool.map_or(method.to_owned(), |tool| format!("{method} {tool}")),
-            "traceId": trace,
-            "spanId": span,
-            "kind": "client",
-            "attributes": {"mcp.method.name": method, "gen_ai.tool.name": tool},
+        let client = client.as_str().map(str::to_owned);
+        let tool = request["params"]["name"].as_str().filter(|_| method == "tools/call").map(str::to_owned);
+        let mut span = telemetry::request_span(self.telemetry(), &method, tool.as_deref());
+        if let Some(client) = client {
+            span.set_attribute(opentelemetry::KeyValue::new("mcp.client.name", client));
+        }
+        let meta = &mut request["params"]["_meta"];
+        if meta["traceparent"].is_null() {
+            let mut carrier = std::collections::HashMap::new();
+            let cx = opentelemetry::Context::new().with_remote_span_context(span.span_context().clone());
+            opentelemetry_sdk::propagation::TraceContextPropagator::new().inject_context(&cx, &mut carrier);
+            for (name, value) in carrier {
+                meta[name] = json!(value);
+            }
+        }
+        span
+    }
+
+    /// This client's OpenTelemetry SDK, made with what it says of itself the first time it records something.
+    fn telemetry(&self) -> &telemetry::Telemetry {
+        self.telemetry.get_or_init(|| {
+            let mut resource = self.resource.write().expect("no report panics");
+            resource.entry("host.name").or_insert_with(|| json!(name()));
+            telemetry::Telemetry::new(self.home.clone(), &resource)
         })
     }
 
@@ -1620,17 +1629,8 @@ impl Client {
     /// record is Telemetry's (its tool `record`): a `name` and `attributes`, and a `value`, or how long something
     /// `took` with its `error` if it failed, or else a log line, with an `error` if it is one. Names, sizes and
     /// outcomes only: never what anyone wrote, was given or answered, and never a secret.
-    pub fn report(&self, mut record: Value) {
-        let mut resource = self.resource.write().expect("no report panics");
-        if !resource.contains_key("host.name") {
-            resource.insert("host.name".into(), json!(name()));
-        }
-        for (attribute, value) in resource.iter() {
-            record["attributes"][attribute] = value.clone();
-        }
-        drop(resource);
-        report(&self.home, &record);
-        self.reporting.store(true, Ordering::Relaxed);
+    pub fn report(&self, record: Value) {
+        self.telemetry().record(&record);
         if *self.connection.borrow() == Connection::Online {
             self.send_soon();
         }
@@ -1646,7 +1646,8 @@ impl Client {
     /// reaches a server, if not before.
     fn panics(&self) {
         static HOOKED: std::sync::Once = std::sync::Once::new();
-        let (home, resource) = (self.home.clone(), self.resource.clone());
+        let Some(me) = self.me.upgrade() else { return };
+        let me = Arc::downgrade(&me);
         HOOKED.call_once(move || {
             let before = std::panic::take_hook();
             std::panic::set_hook(Box::new(move |panic| {
@@ -1657,10 +1658,9 @@ impl Client {
                     record["attributes"]["code.file.path"] = json!(at.file());
                     record["attributes"]["code.line.number"] = json!(at.line());
                 }
-                for (attribute, value) in resource.read().map(|resource| resource.clone()).unwrap_or_default() {
-                    record["attributes"][attribute] = value;
+                if let Some(me) = me.upgrade() {
+                    me.telemetry().record(&record);
                 }
-                report(&home, &record);
                 before(panic)
             }));
         });
@@ -1669,7 +1669,7 @@ impl Client {
     /// Tells a server what was reported, soon after it's asked something else, and never in the way of that.
     fn send_soon(&self) {
         if let Some(me) = self.me.upgrade()
-            && self.reporting.load(Ordering::Relaxed)
+            && self.home.join(telemetry::REPORTS).exists()
         {
             self.runtime.spawn(async move { me.send_reports().await });
         }
@@ -1679,23 +1679,24 @@ impl Client {
     /// hear `measured`. What it can't tell is kept again for next time. Telling reports nothing itself.
     async fn send_reports(&self) {
         let _one = self.sending.lock().await;
-        if !self.reporting.swap(false, Ordering::Relaxed) {
-            return;
-        }
-        // The kept records are this run's to tell once it has moved them: other clients keep theirs anew.
-        let sending = self.home.join(format!("{REPORTS}.{}", self.link().endpoint.id()));
-        if fs::rename(self.home.join(REPORTS), &sending).is_err() {
+        // The kept exports are this run's to tell once it has moved them: other clients keep theirs anew.
+        let sending = self.home.join(format!("{}.{}", telemetry::REPORTS, self.link().endpoint.id()));
+        if fs::rename(self.home.join(telemetry::REPORTS), &sending).is_err() {
             return;
         }
         let stored = fs::read_to_string(&sending).unwrap_or_default();
         let _ = fs::remove_file(&sending);
-        let records: Vec<Value> = stored.lines().filter_map(|line| serde_json::from_str(line).ok()).collect();
-        let notification = json!({"jsonrpc": "2.0", "method": MEASURED, "params": {"records": records}});
-        if !records.is_empty() && self.ask(notification.to_string().as_bytes()).await.is_err() {
-            for record in &records {
-                keep(&self.home, record);
+        // A line a client before OpenTelemetry's SDK kept, a record, is let go.
+        let exports: Vec<Value> = stored
+            .lines()
+            .filter_map(|line| serde_json::from_str::<Value>(line).ok())
+            .filter(|line| line["signal"].is_string())
+            .collect();
+        let notification = json!({"jsonrpc": "2.0", "method": MEASURED, "params": {"otlp": exports}});
+        if !exports.is_empty() && self.ask(notification.to_string().as_bytes()).await.is_err() {
+            for export in &exports {
+                telemetry::keep(&self.home, export);
             }
-            self.reporting.store(true, Ordering::Relaxed);
         }
     }
 
@@ -1704,6 +1705,9 @@ impl Client {
     /// seconds, so that isn't waited for.
     pub async fn close(&self) {
         // What's left to tell is told first, to a server this run reached.
+        if let Some(telemetry) = self.telemetry.get() {
+            telemetry.flush();
+        }
         if self.reach.lock().await.open.is_some() {
             self.send_reports().await;
         }
@@ -1839,16 +1843,8 @@ const RENEW: Duration = Duration::from_secs(30 * 60);
 /// How soon a token that couldn't be asked for is asked for again: the device may be offline.
 const AGAIN: Duration = Duration::from_secs(60);
 
-/// What a client's records are kept in until a server is told (`Client::report`): a line of JSON each, in its home
-/// folder, which every client of the device adds to, and past this many bytes, a few hundred records, no more.
-const REPORTS: &str = "reports";
-const REPORTS_MOST: u64 = 128 * 1024;
-
 /// What a client tells a server of what it reported, for the apps that hear `measured`.
 const MEASURED: &str = "notifications/one/measured";
-
-/// How long a request takes before it's reported though it was answered.
-const SLOW: Duration = Duration::from_secs(2);
 
 /// How long its network not answering goes unshown: the window's page shows nothing for a moment's gap.
 const UNNOTICED: Duration = Duration::from_secs(3);
@@ -1860,23 +1856,6 @@ fn resource() -> serde_json::Map<String, Value> {
         ("service.version".to_owned(), json!(BUILD)),
         ("os.type".to_owned(), json!(env::consts::OS)),
     ])
-}
-
-/// Keeps `record` in `home`, now, for whichever client of the device next reaches a server (`Client::report`).
-fn report(home: &Path, record: &Value) {
-    let mut record = record.clone();
-    record["time"] = json!(SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default().as_millis() as u64);
-    keep(home, &record);
-}
-
-fn keep(home: &Path, record: &Value) {
-    let file = home.join(REPORTS);
-    if fs::metadata(&file).is_ok_and(|metadata| metadata.len() > REPORTS_MOST) {
-        return;
-    }
-    let line = format!("{record}\n");
-    let log = fs::OpenOptions::new().create(true).append(true).open(&file);
-    let _ = log.and_then(|mut log| log.write_all(line.as_bytes()));
 }
 
 /// Why a server refused what it was asked, as the person asking is told, if it did: a JSON-RPC error, or a tool's.
