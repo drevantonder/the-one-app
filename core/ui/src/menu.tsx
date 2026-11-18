@@ -148,7 +148,7 @@ export const Menu = {
         aria-haspopup="menu"
         aria-expanded={menu.at() ? "true" : "false"}
         autofocus={menu.closed()}
-        {...({ onLayout: (event: Laid) => menu.place(rectOf(event)) } as {})}
+        onLayout={(event) => menu.place(rectOf(event))}
         onClick={(event: Located) => {
           const rect = event?.currentTarget.getBoundingClientRect()
           menu.open(menu.at() || !rect ? undefined : { x: rect.x, y: rect.y, width: rect.width, height: rect.height })

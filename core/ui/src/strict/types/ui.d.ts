@@ -186,6 +186,7 @@ export type ButtonProps = {
   "aria-expanded"?: "true" | "false"
   autofocus?: boolean
   onClick?: (event: Located) => void
+  onLayout?: (event: Laid) => void
   /** Where it sits in what it's in, the only part of its look a caller changes. */
   style?: Styles<"marginTop" | "marginBottom" | "marginStart" | "marginEnd" | "alignSelf" | "flexGrow">
   children?: Element

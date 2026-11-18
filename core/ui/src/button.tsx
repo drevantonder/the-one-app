@@ -1,12 +1,12 @@
 // Something to press, a count or word beside something, an icon and a spinner: written once in strict, on the
 // primitives (#primitives), the same on the DOM and on a native host.
-import { children, omit, Show } from "solid-js"
+import { children, Show } from "solid-js"
 import type { JSX } from "@solidjs/web"
 import { Box, Path, Text } from "#primitives"
 import { messages } from "./words.ts"
 import { styles, type Styles } from "./styles.ts"
 import { tokens } from "./tokens.ts"
-import type { Located } from "./strict/types/ui.d.ts"
+import type { Laid, Located } from "./strict/types/ui.d.ts"
 import calendarBlank from "@phosphor-icons/core/assets/regular/calendar-blank.svg?raw"
 import caretLeft from "@phosphor-icons/core/assets/regular/caret-left.svg?raw"
 import caretRight from "@phosphor-icons/core/assets/regular/caret-right.svg?raw"
@@ -145,6 +145,8 @@ export interface ButtonProps {
   "aria-expanded"?: "true" | "false"
   autofocus?: boolean
   onClick?: (event: Located) => void
+  /** Told where it's drawn as it's laid out, as a menu's button is, which its menu opens under. */
+  onLayout?: (event: Laid) => void
   /** Where it sits in what it's in, the only part of its look a caller changes. */
   style?: Styles<"marginTop" | "marginBottom" | "marginStart" | "marginEnd" | "alignSelf" | "flexGrow">
   children?: JSX.Element
@@ -160,9 +162,12 @@ export function Button(props: ButtonProps) {
   const inside = children(() => props.children)
   return (
     <Box
-      // What a page drawn on the DOM gives a `<button>` besides (a form's `type="submit"`) still reaches it.
-      {...omit(props as ButtonProps & Record<string, unknown>, "variant", "size", "loading", "disabled", "onClick", "style", "children")}
       role="button"
+      aria-label={props["aria-label"]}
+      aria-haspopup={props["aria-haspopup"]}
+      aria-expanded={props["aria-expanded"]}
+      autofocus={props.autofocus}
+      onLayout={props.onLayout}
       aria-disabled={off() ? "true" : undefined}
       aria-busy={props.loading ? "true" : undefined}
       onClick={(event: Located) => !off() && props.onClick?.(event)}
