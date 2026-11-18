@@ -50,6 +50,7 @@ const [connected, setConnected] = createSignal<ReturnType<typeof Strict.connecti
 const [insets, setInsets] = createSignal({ top: 0, right: 0, bottom: 0, left: 0 })
 const [size, setSize] = createSignal({ width: 0, height: 0 })
 const [still, setStill] = createSignal(false)
+const [shown, setShown] = createSignal(true)
 interface Context {
   breadcrumb?: boolean
   connection?: ReturnType<typeof Strict.connection>
@@ -60,6 +61,8 @@ interface Context {
   link?: string
   /** MCP Apps' own: whether a finger points at it, and a mouse hovers. */
   deviceCapabilities?: { touch?: boolean; hover?: boolean }
+  /** Whether its window is on screen, as a computer's launcher put away isn't: the DOM's `visibilityState`. */
+  visible?: boolean
 }
 const [fingered, setFingered] = createSignal(false)
 const [opened, setOpened] = createSignal<string>()
@@ -71,6 +74,7 @@ function dress(context?: Context) {
   if (context?.safeAreaInsets) setInsets(context.safeAreaInsets)
   if (context?.containerDimensions) setSize(context.containerDimensions)
   if (context && "reducedMotion" in context) setStill(context.reducedMotion === true)
+  if (context && "visible" in context) setShown(context.visible !== false)
 }
 
 /** A client answers a page once it has said what it is, which it does as it loads. */
@@ -98,8 +102,8 @@ export const direction: typeof Strict.direction = () => "ltr"
 /** Whether a finger points at it, as its host says (`deviceCapabilities.touch`): a phone's does, a computer's doesn't. */
 export const touch = () => fingered()
 export const reducedMotion: typeof Strict.reducedMotion = () => still()
-/** A native host says nothing yet of whether its page is shown, so it is. */
-export const visible: typeof Strict.visible = () => true
+/** Whether the page is on screen, as its host says (`hostContext.visible`), as the DOM's `visibilityState` says it. */
+export const visible: typeof Strict.visible = () => shown()
 export const sizeChanged: typeof Strict.sizeChanged = async (size) => (await greeted, host?.post({ jsonrpc: "2.0", method: "ui/notifications/size-changed", params: size }))
 export const pinShortcut: typeof Strict.pinShortcut = async (entrypoint) => (await greeted, ask("one/pin-shortcut", { entrypoint }))
 export const open: typeof Strict.open = async (app, { subject, behind, from } = {}) => (await greeted, ask("ui/open-link", /^https?:/.test(app) ? { url: app } : { url: `one:${app}`, subject, behind, from }))
