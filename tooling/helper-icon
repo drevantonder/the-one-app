@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # The icon of a helper app: a small app of an app's own, which macOS shows a person by its name and icon where it
 # asks for a permission and in System Settings → Privacy & Security (Computer Use's, say). It's the app's own icon,
-# large, on macOS's icon grid, with the One App's ring small in its corner, so it reads as that app's, of The One
+# large, on macOS's icon grid, with the One App's ring small in its corner, so it reads as that app's, of the One
 # App. Written as an iconset, the folder of PNGs at the sizes an .icns holds, which `iconutil -c icns` on a Mac
 # makes the helper's AppIcon.icns from:
 #
