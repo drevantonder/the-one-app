@@ -127,9 +127,10 @@ defmodule OneCore.Builds do
   Makes `builds` the latest of their names: each `%{\"name\", \"build\", \"sha256\", \"size\"}`, and a runtime's
   `\"inputs\"`, the SHA-256 of what it's built from, which `tooling/release` tells whether it changed by. While the bucket lacks
   any of their files, gives a link to send each one it lacks by, `{:send, %{name => link}}`, and changes nothing:
-  sending them and asking again makes them the latest, `{:ok, latest}`. The files no name is latest for any more
-  are removed: a machine downloads only the latest, and one whose update doesn't take goes back to the build it
-  kept of its own.
+  sending them and asking again makes them the latest, `{:ok, latest}`. The files no name is latest for any more,
+  or was just before, are removed: a machine downloads only the latest, and one whose update doesn't take goes back
+  to the build it kept of its own. The one before stays, as a machine may be downloading it as a newer is published,
+  as a Mac's `one` is published after Linux's builds of the same release (18 Nov: the Mac's 404 held an update).
   """
   def publish(builds) do
     missing =
@@ -185,7 +186,7 @@ defmodule OneCore.Builds do
       if tag, do: Bucket.replace(@latest, JSON.encode!(now), tag), else: Bucket.write(@latest, JSON.encode!(now))
 
     if written == :ok do
-      named = for {_name, build} <- now, do: @builds <> build["sha256"]
+      named = for {_name, build} <- Map.to_list(now) ++ Map.to_list(was), do: @builds <> build["sha256"]
       for blob <- Bucket.list(@builds), blob != @latest, blob not in named, do: Bucket.remove(blob)
       now
     else
