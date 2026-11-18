@@ -42,7 +42,7 @@
   width: 100%;
   padding: 1rem 1.125rem;
   border: 1px solid var(--border);
-  border-radius: var(--radius-lg);
+  border-radius: var(--radius-md);
   text-align: start;
 }
 .can h2 {
@@ -70,7 +70,7 @@
 .ui-sign-in .note {
   margin: 0;
   color: var(--muted-foreground);
-  font-size: var(--text-sm);
+  font-size: var(--text-footnote);
 }
 /* Cancel, then Allow, side by side. */
 .ui-sign-in:has(.can) .answers {
@@ -99,7 +99,7 @@
   margin: 0;
   padding: 0.75rem 1rem;
   border: 1px solid var(--border);
-  border-radius: var(--radius-lg);
+  border-radius: var(--radius-md);
   color: var(--foreground);
   font-family: var(--font-mono);
   overflow-wrap: anywhere;

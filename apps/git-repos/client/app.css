@@ -3,22 +3,22 @@
 .actions {
   display: flex;
   align-items: center;
-  gap: calc(var(--gap) / 2);
+  gap: calc(var(--gutter) / 2);
 }
 
 .whose,
 .count {
   margin: 0;
   color: var(--muted-foreground);
-  font-size: var(--text-sm);
+  font-size: var(--text-footnote);
 }
 
 .bar {
   display: flex;
   flex-wrap: wrap;
   align-items: center;
-  gap: var(--gap);
-  margin-block: var(--gap);
+  gap: var(--gutter);
+  margin-block: var(--gutter);
   max-width: var(--readable);
 }
 
@@ -60,7 +60,7 @@
 
 .box {
   max-width: var(--readable);
-  margin-block-end: var(--gap);
+  margin-block-end: var(--gutter);
   border: 1px solid var(--border);
   border-radius: var(--radius-md);
   overflow: hidden;
@@ -78,7 +78,7 @@
   background: var(--muted);
   border-bottom: 1px solid var(--border);
   cursor: pointer;
-  font-size: var(--text-sm);
+  font-size: var(--text-footnote);
 }
 
 .latest .who {
@@ -136,13 +136,13 @@
 
 .file .size {
   color: var(--muted-foreground);
-  font-size: var(--text-sm);
+  font-size: var(--text-footnote);
 }
 
 @media (hover: hover) and (pointer: fine) {
   .file:hover,
   .latest:hover {
-    background: var(--accent);
+    background: var(--muted);
   }
   .crumb:hover {
     text-decoration: underline;
@@ -152,7 +152,7 @@
 .file:focus-visible,
 .latest:focus-visible,
 .crumb:focus-visible {
-  outline: 2px solid var(--ring);
+  outline: 2px solid var(--muted-foreground);
   outline-offset: -2px;
 }
 
@@ -160,7 +160,7 @@
   margin: 0;
   padding: 0.625rem 1rem;
   color: var(--muted-foreground);
-  font-size: var(--text-sm);
+  font-size: var(--text-footnote);
   border-bottom: 1px solid var(--border);
   background: var(--muted);
 }
@@ -210,7 +210,7 @@
 .readme-name {
   margin: 0;
   padding: 0.625rem 1rem;
-  font-size: var(--text-sm);
+  font-size: var(--text-footnote);
   font-weight: var(--label-weight);
   border-bottom: 1px solid var(--border);
 }
@@ -223,7 +223,7 @@
 .markdown pre,
 .markdown code {
   font-family: var(--font-mono);
-  font-size: var(--text-sm);
+  font-size: var(--text-footnote);
   background: var(--muted);
   border-radius: var(--radius-sm);
 }

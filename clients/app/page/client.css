@@ -37,7 +37,7 @@ html[data-launcher="glass"] :is(#state, #page-problem) {
   background: transparent;
 }
 html[data-launcher="solid"] body {
-  background: var(--popover);
+  background: var(--card);
 }
 /* What the window shows of itself fills its middle, over the frames, with the background behind it: the UI library
    draws each state (`.ui-state.middle`). */
@@ -101,7 +101,7 @@ html[data-launcher="solid"] body {
   overflow: hidden;
   background: var(--muted);
   color: var(--muted-foreground);
-  font-size: var(--text-sm);
+  font-size: var(--text-footnote);
   animation: banner var(--move-settle) var(--ease-settle) 3s backwards;
 }
 @keyframes banner {
@@ -186,7 +186,7 @@ iframe {
   margin: 0;
   padding: 0;
   list-style: none;
-  font-size: var(--text-sm);
+  font-size: var(--text-footnote);
   line-height: 1;
   white-space: nowrap;
 }
@@ -214,8 +214,8 @@ iframe {
 }
 @media (hover: hover) and (pointer: fine) {
   #home-screen:hover {
-    background: var(--accent);
-    color: var(--accent-foreground);
+    background: var(--muted);
+    color: var(--foreground);
   }
 }
 #title-bar-nav .separator {
@@ -297,7 +297,7 @@ iframe[data-move] {
 }
 #recovery .key {
   padding: 0.75rem;
-  border: 1px solid var(--input);
+  border: 1px solid var(--border);
   border-radius: var(--radius-md);
 }
 #recovery .wrong {

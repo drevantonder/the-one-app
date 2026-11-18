@@ -111,8 +111,8 @@ export const Spinner: typeof Strict.Spinner = () => <Box role="status" aria-labe
 
 const looks: Record<NonNullable<Strict.ButtonProps["variant"]>, Props["style"]> = {
   default: { backgroundColor: "primary", color: "primary-foreground" },
-  secondary: { backgroundColor: "secondary", color: "secondary-foreground" },
-  outline: { borderWidth: 1, borderColor: "input", backgroundColor: "background" },
+  secondary: { backgroundColor: "muted", color: "foreground" },
+  outline: { borderWidth: 1, borderColor: "border", backgroundColor: "background" },
   ghost: {},
   destructive: { backgroundColor: "destructive", color: "primary-foreground" },
 }
@@ -134,7 +134,7 @@ export const Button: typeof Strict.Button = (props) => (
 )
 
 export const Badge: typeof Strict.Badge = (props) => (
-  <Box aria-label={props["aria-label"]} style={{ paddingInline: 8, borderRadius: "full", ...(props.variant === "destructive" ? { backgroundColor: "destructive", color: "primary-foreground" } : props.variant === "outline" ? { borderWidth: 1 } : { backgroundColor: props.variant === "secondary" ? "secondary" : "primary", color: props.variant === "secondary" ? "secondary-foreground" : "primary-foreground" }) }}>
+  <Box aria-label={props["aria-label"]} style={{ paddingInline: 8, borderRadius: "full", ...(props.variant === "destructive" ? { backgroundColor: "destructive", color: "primary-foreground" } : props.variant === "outline" ? { borderWidth: 1 } : { backgroundColor: props.variant === "secondary" ? "muted" : "primary", color: props.variant === "secondary" ? "foreground" : "primary-foreground" }) }}>
     <Text style={{ font: "caption-1", fontVariantNumeric: "tabular-nums" }}>{props.children}</Text>
   </Box>
 )
@@ -154,7 +154,7 @@ export const Screen: typeof Strict.Screen = (props) => (
       </Show>
       {props.action}
     </Box>
-    <Box role="main" style={{ flexGrow: 1, overflow: "scroll", gap: "gap", paddingInline: "gutter", paddingBottom: "gutter" }}>
+    <Box role="main" style={{ flexGrow: 1, overflow: "scroll", gap: "gutter", paddingInline: "gutter", paddingBottom: "gutter" }}>
       {props.children}
     </Box>
   </Box>
@@ -172,7 +172,7 @@ export const Section: typeof Strict.Section = (props) => (
 )
 
 export const List: typeof Strict.List = (props) => (
-  <Box role="list" style={{ maxWidth: "readable", borderWidth: 1, borderRadius: "xl", backgroundColor: "card", color: "card-foreground", overflow: "hidden" }}>
+  <Box role="list" style={{ maxWidth: "readable", borderWidth: 1, borderRadius: "xl", backgroundColor: "card", color: "foreground", overflow: "hidden" }}>
     {props.children}
   </Box>
 )
@@ -192,7 +192,7 @@ export const Row: typeof Strict.Row = (props) => {
   )
   const row = { flexDirection: "row", alignItems: "center", gap: 12, flexGrow: 1, paddingBlock: 10 } as const
   return (
-    <Box role="listitem" style={{ flexDirection: "row", alignItems: "center", gap: 12, paddingInline: 16, minHeight: "control", borderBottomWidth: 1, backgroundColor: props.current ? "accent" : undefined }}>
+    <Box role="listitem" style={{ flexDirection: "row", alignItems: "center", gap: 12, paddingInline: 16, minHeight: "control", borderBottomWidth: 1, backgroundColor: props.current ? "muted" : undefined }}>
       <Show when={props.control}>{props.control}</Show>
       <Show when={props.onClick} fallback={<Box style={row}>{inside()}</Box>}>
         <Box role="button" aria-current={props.current ? "true" : undefined} onClick={() => props.onClick?.()} style={row}>
@@ -264,7 +264,7 @@ export const Menu: typeof Strict.Menu = {
     const menu = useContext(Opened)!
     return (
       <Show when={menu.open()}>
-        <Box role="menu" style={{ paddingBlock: 4, borderWidth: 1, borderRadius: "md", backgroundColor: "popover", color: "popover-foreground" }}>
+        <Box role="menu" style={{ paddingBlock: 4, borderWidth: 1, borderRadius: "md", backgroundColor: "card", color: "foreground" }}>
           {props.children}
         </Box>
       </Show>

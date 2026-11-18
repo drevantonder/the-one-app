@@ -218,22 +218,21 @@ export type Role =
 
 /** A colour, by its token: `muted-foreground` is `var(--muted-foreground)`. */
 export type Colour =
-  | "background" | "foreground" | "card" | "card-foreground" | "popover" | "popover-foreground" | "primary"
-  | "primary-foreground" | "secondary" | "secondary-foreground" | "muted" | "muted-foreground" | "accent"
-  | "accent-foreground" | "pressed" | "destructive" | "warning" | "border" | "input" | "ring" | "overlay"
+  | "background" | "foreground" | "card" | "primary" | "primary-foreground" | "muted" | "muted-foreground" | "destructive"
+  | "warning" | "border" | "overlay" | "sidebar"
 
 /** A type style (DESIGN.md: text is one of a few type styles), each a size, a weight and a tracking from the tokens. */
 export type Font = "body" | "label" | "title" | "figure" | "subheadline" | "footnote" | "caption-1" | "caption-2"
 
-/** A space: pixels, or a screen's `gap` or `gutter`. */
-export type Space = number | "gap" | "gutter"
+/** A space: pixels, or a screen's `gutter`. */
+export type Space = number | "gutter"
 
 /** A size: pixels, a percentage of the room, `auto`, or a token: what's pressed (`control`), an icon (`icon`), and
  * where lists stop growing (`readable`). */
 export type Size = number | `${number}%` | "auto" | "control" | "icon" | "readable"
 
 /** A radius, by its token, or `full` for a pill or a circle. */
-export type Radius = 0 | "sm" | "md" | "lg" | "xl" | "full"
+export type Radius = 0 | "sm" | "md" | "xl" | "full"
 
 export interface Version1Style {
   display?: "flex" | "grid" | "none"
@@ -326,8 +325,9 @@ export type Token =
   | { kind: "colour"; value: Varies<Rgba> }
   /** A length: a space, a size, a border's width. */
   | { kind: "length"; value: Varies<Length> }
-  /** A corner's radius; a pill's or a circle's is half its height, `{ px: 9999 }`. */
-  | { kind: "radius"; value: Varies<Length> }
+  /** A corner's radius, or a part of its box's side (`{ percent: 22.5 }`); a pill's or a circle's is `{ px: 9999 }`,
+   * half its height. */
+  | { kind: "radius"; value: Varies<Length | { percent: number }> }
   /** Shadows, drawn under what has it, the first nearest. */
   | { kind: "shadow"; value: Varies<{ x: Length; y: Length; blur: Length; spread: Length; colour: Rgba }[]> }
   /** Font families, the first a device has. */
@@ -338,7 +338,7 @@ export type Token =
    * tracking (in ems) and whether its figures line up (tabular). */
   | { kind: "type"; value: { font: TokenId; size: Varies<Length>; lineHeight: number; weight: TokenId; tracking: number; tabular: boolean } }
   /** How a change moves: how long it takes, in milliseconds, and its easing, a cubic Bézier's two points. */
-  | { kind: "motion"; value: { duration: Varies<number>; easing: [x1: number, y1: number, x2: number, y2: number] } }
+  | { kind: "motion"; value: { duration: Varies<number>; easing: Varies<[x1: number, y1: number, x2: number, y2: number]> } }
 
 /** A style's id. The same style is the same id in every table, so a host may keep them all in one. */
 export type StyleId = string

@@ -197,7 +197,7 @@ function Trace(props: { id: string; where: string; names: Record<string, string>
             <For each={trace().spans}>
               {(span) => (
                 <Box role="listitem" style={{ gap: 4, paddingLeft: span.depth * 12 }}>
-                  <Box style={{ flexDirection: "row", justifyContent: "space-between", gap: "gap" }}>
+                  <Box style={{ flexDirection: "row", justifyContent: "space-between", gap: "gutter" }}>
                     <Text style={{ font: "body", color: span.outcome === "error" ? "destructive" : undefined }}>{named(span.name, props.names)}</Text>
                     <Text style={{ font: "body", color: "muted-foreground", fontVariantNumeric: "tabular-nums" }}>{took(span.took)}</Text>
                   </Box>

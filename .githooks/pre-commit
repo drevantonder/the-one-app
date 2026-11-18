@@ -23,3 +23,12 @@ left=$(for folder in $moved; do git ls-files -- "$folder/"; done)
   echo "$left" | sed 's/^/    /' >&2
   exit 1
 }
+
+# The tokens' CSS is made from tokens.ts (core/ui/tables.ts): a commit with one has the other as it makes it.
+if git diff --cached --name-only | grep -q '^core/ui/src/tokens\.\(ts\|css\)$'; then
+  made=$(cd core/ui && bun tables.ts) || exit 1
+  [ "$made" = "$(git show :core/ui/src/tokens.css)" ] || {
+    echo "core/ui/src/tokens.css isn't what core/ui/src/tokens.ts makes: run \`bun tables.ts > src/tokens.css\` in core/ui, and add it." >&2
+    exit 1
+  }
+fi

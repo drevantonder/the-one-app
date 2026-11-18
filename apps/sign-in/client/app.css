@@ -1,7 +1,7 @@
 /* What isn't a list stops at the width a list does, so a button or a prompt isn't a line across a wide window. */
 .readable {
   display: grid;
-  gap: var(--gap);
+  gap: var(--gutter);
   max-width: var(--readable);
 }
 
@@ -17,12 +17,12 @@
 /* Is this you signing in? The number typed, big as figures are, then Yes and Not Me. */
 .answer {
   display: grid;
-  gap: var(--gap);
+  gap: var(--gutter);
 }
 .answer .number {
   height: 4rem;
   text-align: center;
   font-size: var(--text-title);
-  font-weight: var(--figure-weight);
+  font-weight: var(--title-weight);
   font-variant-numeric: tabular-nums;
 }

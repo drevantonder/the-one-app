@@ -162,7 +162,7 @@ function Inbox(props: { inbox: Inbox }) {
       </Section>
       <Show when={props.inbox.apps.length}>
         <Section heading="Allow Notifications">
-          <Box style={{ gap: "gap" }}>
+          <Box style={{ gap: "gutter" }}>
             <For each={props.inbox.apps} keyed={(app) => app.app}>
               {(app) => <Switch label={app().name} checked={app().allowed} onChange={(event) => change("notifications_allow", { app: app().app, allow: event.currentTarget.checked })} />}
             </For>

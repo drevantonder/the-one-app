@@ -3,7 +3,7 @@
   width: 100%;
   padding: 1rem 1.125rem;
   border: 1px solid var(--border);
-  border-radius: var(--radius-lg);
+  border-radius: var(--radius-md);
   text-align: start;
 }
 .connected h2 {
@@ -34,5 +34,5 @@
   color: var(--muted-foreground);
 }
 .ui-sign-in .note {
-  font-size: var(--text-sm);
+  font-size: var(--text-footnote);
 }

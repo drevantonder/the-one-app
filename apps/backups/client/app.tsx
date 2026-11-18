@@ -158,7 +158,7 @@ function Opened(props: { destination: Destination }) {
           </List>
         </Section>
       </Show>
-      <Box style={{ flexDirection: "row", flexWrap: "wrap", gap: "gap", maxWidth: "readable" }}>
+      <Box style={{ flexDirection: "row", flexWrap: "wrap", gap: "gutter", maxWidth: "readable" }}>
         <Show when={destination().backups.length}>
           <Button variant="secondary" onClick={() => setRestoring(destination())}>Restore</Button>
           <Button variant="outline" loading={working() === "check"} onClick={check}>Check</Button>

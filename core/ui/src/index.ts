@@ -22,7 +22,7 @@
 /// `%{page: "client/index.html", host: 1}`. It's written with the UI library alone: its components and the primitives,
 /// `Box`, `Scroll` (a box whose content scrolls), `Text`, `Image`, `Path` (a vector shape) and `Input`, laid out and
 /// coloured by their `style`, which is CSS's names with the design tokens' values: `{ flexDirection: "row", gap:
-/// "gap", padding: 12, backgroundColor: "muted", color: "muted-foreground", borderRadius: "lg", font: "label" }`.
+/// "gap", padding: 12, backgroundColor: "muted", color: "muted-foreground", borderRadius: "md", font: "label" }`.
 /// There's no element of the DOM's (`<div>`, `<span>`, `<p>`), no `class`, no stylesheet, and no `document`, `window`
 /// or other Web API; `render(() => <App />)` from `ui` draws the page. Words are in a `Text`, or in a component that
 /// takes them (a `Row`'s `heading`). A press is `onClick={() => ...}`, what's typed `onInput={(event) =>

@@ -201,7 +201,7 @@ body {
   outline: none;
 }
 .tile:focus-visible img {
-  outline: 2px solid var(--ring);
+  outline: 2px solid var(--muted-foreground);
   outline-offset: 2px;
 }
 .tile span {
@@ -231,7 +231,7 @@ body {
   color: white;
   font: inherit;
   font-size: var(--text-footnote);
-  font-weight: var(--figure-weight);
+  font-weight: var(--title-weight);
   line-height: 1;
   font-variant-numeric: tabular-nums;
 }
@@ -253,11 +253,11 @@ body {
   top: calc(var(--safe-top, 0px) + (var(--top-row) - var(--bar)) / 2);
   width: min(100% - 2 * var(--bar) - 1rem, 24rem);
   max-width: none;
-  margin: calc(var(--safe-top, 0px) + (var(--top-row) - var(--bar)) / 2) auto calc((var(--top-row) - var(--bar)) / 2 - var(--gap, 1.25rem) + 0.5rem);
+  margin: calc(var(--safe-top, 0px) + (var(--top-row) - var(--bar)) / 2) auto calc((var(--top-row) - var(--bar)) / 2 - var(--gutter, 1.25rem) + 0.5rem);
 }
 .page .ui-search > .ui-box {
   height: var(--bar);
-  font-size: var(--text-sm);
+  font-size: var(--text-footnote);
 }
 /* Its magnifier is over the glass. */
 .page .ui-search > .ui-icon {
@@ -495,7 +495,7 @@ body {
 .page .ui-search > .ui-box {
   border: 0;
   border-radius: 999px;
-  background: color-mix(in oklab, var(--popover) 66%, transparent);
+  background: color-mix(in oklab, var(--card) 66%, transparent);
   box-shadow:
     inset 0 0 0 0.5px color-mix(in oklab, var(--foreground) 12%, transparent),
     inset 0 1px 0 color-mix(in oklab, white 30%, transparent),
@@ -826,20 +826,20 @@ html.launcher body {
   padding: 0 0.75rem 0 0.875rem;
   color: var(--foreground);
   font: inherit;
-  font-size: var(--text-sm);
+  font-size: var(--text-footnote);
   font-weight: var(--title-weight);
   cursor: pointer;
   -webkit-tap-highlight-color: transparent;
 }
 .owner-pill:active:not([aria-disabled]),
 .owner-pill[aria-expanded="true"] {
-  background: color-mix(in oklab, var(--popover) 66%, var(--accent));
+  background: color-mix(in oklab, var(--card) 66%, var(--muted));
 }
 .owner-pill[aria-disabled] {
   cursor: default;
 }
 .owner-pill:focus-visible {
-  outline: 2px solid var(--ring);
+  outline: 2px solid var(--muted-foreground);
   outline-offset: 2px;
 }
 .owner-pill > .ui-icon {
@@ -964,7 +964,7 @@ html.launcher body {
   cursor: default;
 }
 :is(.dots button, .dots-pill .glyph):focus-visible {
-  outline: 2px solid var(--ring);
+  outline: 2px solid var(--muted-foreground);
   outline-offset: -2px;
   border-radius: 999px;
 }
@@ -993,7 +993,7 @@ html.launcher body {
     color: var(--foreground);
   }
   .owner-pill:not([aria-disabled]):hover {
-    background: color-mix(in oklab, var(--popover) 66%, var(--accent));
+    background: color-mix(in oklab, var(--card) 66%, var(--muted));
   }
 }
 
@@ -1118,7 +1118,7 @@ html.launcher body {
   color: white;
   font: inherit;
   font-size: var(--text-footnote);
-  font-weight: var(--figure-weight);
+  font-weight: var(--title-weight);
   line-height: 1;
   font-variant-numeric: tabular-nums;
 }
@@ -1200,8 +1200,8 @@ html.launcher body {
   width: 15rem;
   overflow: hidden;
   border-radius: 0.875rem;
-  background: color-mix(in oklab, var(--popover) 88%, transparent);
-  color: var(--popover-foreground);
+  background: color-mix(in oklab, var(--card) 88%, transparent);
+  color: var(--foreground);
   box-shadow: var(--shadow-lg);
 }
 /* Who an app of the App Library is installed for, above what can be done with it. */
@@ -1210,7 +1210,7 @@ html.launcher body {
   padding: 0.625rem 1rem;
   border-bottom: 1px solid var(--border);
   color: var(--muted-foreground);
-  font-size: var(--text-sm);
+  font-size: var(--text-footnote);
 }
 .hold-menu button {
   display: flex;
@@ -1248,7 +1248,7 @@ html.launcher body {
 }
 .hold-menu small {
   color: var(--muted-foreground);
-  font-size: var(--text-sm);
+  font-size: var(--text-footnote);
   line-height: 1.3;
 }
 .hold-menu button:disabled {
@@ -1257,7 +1257,7 @@ html.launcher body {
 }
 @media (hover: hover) and (pointer: fine) {
   .hold-menu button:not(:disabled):hover {
-    background: var(--accent);
+    background: var(--muted);
   }
 }
 @keyframes appear {
@@ -1308,7 +1308,7 @@ html.launcher body {
   overflow: hidden;
   border-radius: 1rem;
   background: var(--background);
-  box-shadow: 0 0 0 1px var(--border), var(--shadow-md);
+  box-shadow: 0 0 0 1px var(--border), var(--shadow-lg);
   cursor: grab;
   touch-action: none;
 }
@@ -1384,7 +1384,7 @@ html.launcher body {
   background: none;
   color: var(--muted-foreground);
   font: inherit;
-  font-size: var(--text-sm);
+  font-size: var(--text-footnote);
   cursor: pointer;
 }
 .gallery .size[aria-checked="true"] {
@@ -1405,7 +1405,7 @@ html.launcher body {
   height: 15.5rem;
 }
 .gallery .size[aria-checked="true"] .preview {
-  outline: 2px solid var(--ring);
+  outline: 2px solid var(--muted-foreground);
   outline-offset: 3px;
 }
 .ui-dialog .logo {

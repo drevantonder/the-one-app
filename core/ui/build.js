@@ -8,6 +8,7 @@ import { cpSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { transform } from "lightningcss"
 import solid from "@solidjs/vite-plugin"
 import { build } from "vite"
+import { tokensCss, tokensTable } from "./tables.ts"
 import { $ } from "bun"
 
 const here = (path) => new URL(path, import.meta.url).pathname
@@ -56,6 +57,10 @@ await build({
   },
 })
 
+// The tokens (src/tokens.ts) as the web's CSS variables, which the app's window also loads as they are
+// (clients/app/tauri.conf.json), and as a native host's table.
+writeFileSync(here("src/tokens.css"), tokensCss())
+writeFileSync(here("dist/client/tokens.json"), JSON.stringify(tokensTable()))
 const css = text("src/tokens.css") + text("src/ui.css")
 writeFileSync(here("dist/client/ui.css"), transform({ filename: "ui.css", code: Buffer.from(css), minify: true }).code)
 // The typeface, beside the stylesheet that names it (tokens.css), and what puts a page in its Colour Mode before it

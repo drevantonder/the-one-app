@@ -232,7 +232,7 @@ function Marketplace(props: { market: Market }) {
 /// A category to choose, a pill: the one chosen is dark.
 function Chip(props: { chosen: boolean; onClick: () => void; children: Element }) {
   return (
-    <Box role="button" aria-pressed={props.chosen ? "true" : "false"} onClick={props.onClick} style={{ flexShrink: 0, height: "control", paddingInline: 16, alignItems: "center", justifyContent: "center", borderRadius: "full", backgroundColor: props.chosen ? "primary" : "secondary", color: props.chosen ? "primary-foreground" : "secondary-foreground" }}>
+    <Box role="button" aria-pressed={props.chosen ? "true" : "false"} onClick={props.onClick} style={{ flexShrink: 0, height: "control", paddingInline: 16, alignItems: "center", justifyContent: "center", borderRadius: "full", backgroundColor: props.chosen ? "primary" : "muted", color: props.chosen ? "primary-foreground" : "foreground" }}>
       <Text style={{ font: "label" }}>{props.children}</Text>
     </Box>
   )

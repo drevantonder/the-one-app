@@ -43,7 +43,7 @@ export interface BoxProps extends Listens {
   children?: JSX.Element
 }
 
-/// `<Box style={{ flexDirection: "row", gap: "gap", padding: 12, backgroundColor: "muted", borderRadius: "lg" }}>...</Box>`:
+/// `<Box style={{ flexDirection: "row", gap: "gutter", padding: 12, backgroundColor: "muted", borderRadius: "lg" }}>...</Box>`:
 /// a strict app's own layout, around anything else: a flex column unless its `style` says otherwise, as React Native's
 /// View, styled from the design tokens only. With `role="button"` and `onClick` it's something to press, which the
 /// keyboard reaches too; any other `role` and `aria-…` say what it is to a screen reader and to an agent, as ARIA has
@@ -62,7 +62,7 @@ export interface ScrollProps extends BoxProps {
   onScroll?: (event: Scrolled) => void
 }
 
-/// `<Scroll style={{ flexGrow: 1, gap: "gap", paddingInline: "gutter" }}>...</Scroll>`: a box whose content scrolls
+/// `<Scroll style={{ flexGrow: 1, gap: "gutter", paddingInline: "gutter" }}>...</Scroll>`: a box whose content scrolls
 /// along its `flexDirection`, down in a column and sideways in a row, with no scrollbar beside it, as on a phone.
 /// `onScroll` is told how far it's scrolled.
 export function Scroll(props: ScrollProps) {
@@ -132,7 +132,7 @@ export function Path(props: PathProps) {
 const colours = new Set(["backgroundColor", "color", "borderColor"])
 const spaces = new Set(["gap", "rowGap", "columnGap", "padding", "paddingInline", "paddingBlock", "paddingTop", "paddingRight", "paddingBottom", "paddingLeft", "margin", "marginInline", "marginBlock"])
 const sizes = new Set(["flexBasis", "width", "height", "minWidth", "minHeight", "maxWidth", "maxHeight"])
-const tokens: Record<string, string> = { gap: "var(--gap)", gutter: "var(--gutter)", control: "var(--control)", icon: "var(--icon)", readable: "var(--readable)" }
+const tokens: Record<string, string> = { gutter: "var(--gutter)", control: "var(--control)", icon: "var(--icon)", readable: "var(--readable)" }
 
 /** A strict style as CSS: its tokens as the custom properties they name, its pixels as `px`. Its `font` is the
  * element's `data-font` (ui.css). */
