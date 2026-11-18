@@ -3,7 +3,7 @@ name: local-network
 description: Use to run a whole network of your own on this machine, to try a change, call its tools as different users, or open the app against it, without touching the owner's live network.
 ---
 
-    tooling/network <folder> [--standby] [--edge] [--owner <name>]
+    tooling/network <folder> [--standby] [--owner <name>]
 
 Its header says what each flag does. It builds what isn't built (the UI library, then the server's `mix compile` as it
 starts, which builds the Rust workspace's debug build with `cargo build`), starts the server, and prints how to use it once it's
@@ -40,8 +40,8 @@ then `one vault grant --servers <key>` (`one vault security` lists them).
 
 ## Signing a device in
 
-A device that isn't `<folder>/client` (a phone, the simulator, another client home) needs a network with an
-address, `--edge`. Put `{"address": "<the address>"}` in its home's `network` file (or build it with
+A device that isn't `<folder>/client` (a phone, the simulator, another client home) signs in at the network's
+address, which it prints. Put `{"address": "<the address>"}` in its home's `network` file (or build it with
 `TAURI_ONE_ADDRESS`), open it, and it shows a code. Then, as whoever it's to be, one step:
 
     ONE_AS=alice one sign-in approve --code WDJB-MJHT
@@ -60,7 +60,7 @@ node's name as `tooling/network` prints it. `:recon`, `:recon_trace` and `:obser
 
 ## Logs and stopping
 
-Everything is in the folder: `server.log`, `reloader.log` (and `standby.log`, `edge.log`, `bucket.log` with those flags), the
+Everything is in the folder: `server.log`, `reloader.log`, `edge.log`, `bucket.log` (and `standby.log` with that flag), the
 bucket, and the client's home. Starting again in the same folder carries on with what's there.
 
 Start it in the background, however you like (`setsid`, `mise exec`); its PID is then in `<folder>/pid`.
@@ -71,7 +71,7 @@ so a server installed with `one serve on` there reconnects by itself.
 
 - Copying `<folder>/client`'s `key` and `network` onto a phone: that client acts as whoever `ONE_AS` says and is
   nobody's at the address, so the phone says it was removed once its token ends. Approve the phone by its code.
-- Running `one` with `ONE_HOME` set and no `ONE_AS` on a `--edge` network: no one is signed in there, so it signs
+- Running `one` with `ONE_HOME` set and no `ONE_AS`: no one is signed in there, so it signs
   `<folder>/client` out and deletes its `servers` file. Set `ONE_AS=owner` (or the user) with `ONE_HOME`, as the
   network prints.
 - Starting a network with `--owner` and joining it with a virtual passkey just to approve a phone.

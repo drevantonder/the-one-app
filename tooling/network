@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Starts a whole network on this machine, to build or test with, and says how to use it:
 #
-#     tooling/network <folder> [--standby] [--edge] [--owner <name>]
+#     tooling/network <folder> [--standby] [--owner <name>]
 #
 # It needs what `mise install` and `rustup` install, and on Linux WebKitGTK (`libwebkit2gtk-4.1-dev`), which the
 # app's window is built on.
@@ -15,15 +15,16 @@
 # It's a network being built, so nobody signs in, and a client says which user it is: ONE_AS=<name> before a
 # command acts as that user, and ONE_SUBJECT=groups/<name> or ONE_SUBJECT=network has it run for a group or the network.
 # Its first owner is the user `owner`, and `owner`, `alice` and `bob` have their encryption set up on the client's
-# device. With --edge, another device signs in at its address by the code it shows, which `one sign-in approve`
-# approves as whoever ONE_AS names.
+# device. Another device signs in at its address by the code it shows, which `one sign-in approve` approves as whoever
+# ONE_AS names.
+#
+# Its edge runs here too (`core/edge/`), as every network has one: its Workers in `wrangler dev`, with a local S3
+# store as the bucket. Servers keep their blobs through the presigner there, people sign in at its address, and
+# whoever holds a sharing link has a way in.
 #
 # --standby starts a second server, which takes over when the first stops. Each server is called after its folder,
 #   `server` and `standby`, as two machines would be called what each is.
-# --edge runs the network's edge here too (`core/edge/`): its Workers in `wrangler dev`, with a local S3 store
-#   as the bucket. Servers then keep their blobs through the presigner there, and whoever holds a sharing link has a
-#   way in.
-# --owner <name>, with --edge, starts a network people sign in to instead: that user is its first owner, it says
+# --owner <name> starts a network people sign in to instead: that user is its first owner, it says
 #   where they join, with a passkey, and nobody acts as anyone by saying so.
 #
 # Where there's no desktop, as under `xvfb-run`, start the app inside `dbus-run-session`: GTK otherwise waits half a
@@ -35,12 +36,11 @@ root=$(cd "$(dirname "$0")/.." && pwd)
 # The tools this needs are the ones `mise.toml` names.
 command -v mix >/dev/null || exec mise exec -C "$root" -- "$0" "$@"
 
-usage="tooling/network <folder> [--standby] [--edge] [--owner <name>]"
-folder= standby= edge= owner=
+usage="tooling/network <folder> [--standby] [--owner <name>]"
+folder= standby= owner=
 while (($#)); do
   case $1 in
     --standby) standby=yes ;;
-    --edge) edge=yes ;;
     --owner) owner=${2-} && shift ;;
     -*) echo "$usage" >&2 && exit 1 ;;
     *) folder=$1 ;;
@@ -48,7 +48,7 @@ while (($#)); do
   shift
 done
 # People sign in at an address, and a standby is let in by a client, which there is someone's signed-in device.
-[[ -n $folder && (-z $owner || (-n $edge && -z $standby)) ]] || { echo "$usage" >&2 && exit 1; }
+[[ -n $folder && (-z $owner || -z $standby) ]] || { echo "$usage" >&2 && exit 1; }
 if [[ -n $owner ]]; then as=(--owner "$owner"); else as=(--development --owner owner); fi
 mkdir -p "$folder"
 folder=$(cd "$folder" && pwd)
@@ -75,38 +75,35 @@ wait_for() { grep -q -m1 -E "$1" <("$tail" -F --pid="${started[-1]}" -n +1 "$2")
 free_port() { bun -e 'const server = Bun.serve({ port: 0, fetch: () => new Response() }); console.log(server.port); server.stop()'; }
 random() { od -An -tx1 -N"$1" /dev/urandom | tr -d ' \n'; }
 
-at_address=()
-if [[ -n $edge ]]; then
-  (cd "$root/core/edge" && bun install --frozen-lockfile)
-  # The bucket's credentials are made up for this network, and only the presigner is given them, with the secret a
-  # network's first server shows. They're kept in the folder with its ports, so started again it's at the same
-  # address, which a server installed with `one serve on` still reaches.
-  [[ -s $folder/edge.env ]] || (umask 077 && echo "access=$(random 8) secret=$(random 24) first=$(random 16)" \
-    "bucket=127.0.0.1:$(free_port) gateway=$(free_port)" >"$folder/edge.env")
-  source "$folder/edge.env"
-  mkdir -p "$folder/bucket"
-  # A bucket on one folder has nothing to heal from, and nothing here asks what it holds, so its scanner and healing
-  # don't run: they read the folder over and over even when nothing is asked of it, and on a busy machine their
-  # listings time out and start again.
-  RUSTFS_ENABLE_SCANNER=false RUSTFS_ENABLE_HEAL=false \
-    RUSTFS_ACCESS_KEY=$access RUSTFS_SECRET_KEY=$secret rustfs server --address "$bucket" "$folder/bucket" >"$folder/bucket.log" 2>&1 &
-  started+=($!)
-  # Not `-o /dev/null`: curl retrying after an answer it wrote there truncates the file, and fails (23) on /dev/null.
-  curl -s --retry 60 --retry-all-errors --retry-delay 1 "http://$bucket/" >/dev/null
-  (cd "$root/core/edge" && ACCESS=$access SECRET=$secret BUCKET=http://$bucket/network bun -e '
-    import { AwsClient } from "aws4fetch";
-    const { ACCESS: accessKeyId, SECRET: secretAccessKey, BUCKET } = process.env;
-    const response = await new AwsClient({ accessKeyId, secretAccessKey, service: "s3", region: "auto" }).fetch(BUCKET, { method: "PUT" });
-    if (!response.ok && response.status !== 409) throw new Error(`the bucket answered ${response.status}`);')
-  # `wrangler dev` gives the presigner its secrets from the environment.
-  (cd "$root/core/edge" && BUCKET=http://$bucket/network ACCESS_KEY_ID=$access SECRET_ACCESS_KEY=$secret FIRST_SERVER=$first \
-    WRANGLER_SEND_METRICS=false exec bun run dev --port "$gateway" \
-    --inspector-port "$(free_port)" --persist-to "$folder/edge") >"$folder/edge.log" 2>&1 &
-  started+=($!)
-  curl -s --retry 60 --retry-all-errors --retry-delay 1 "http://localhost:$gateway/ping" >/dev/null
-  # A passkey is for a name, which on one machine is `localhost`.
-  at_address=(--address "http://localhost:$gateway" --first "$first")
-fi
+(cd "$root/core/edge" && bun install --frozen-lockfile)
+# The bucket's credentials are made up for this network, and only the presigner is given them, with the secret a
+# network's first server shows. They're kept in the folder with its ports, so started again it's at the same
+# address, which a server installed with `one serve on` still reaches.
+[[ -s $folder/edge.env ]] || (umask 077 && echo "access=$(random 8) secret=$(random 24) first=$(random 16)" \
+  "bucket=127.0.0.1:$(free_port) gateway=$(free_port)" >"$folder/edge.env")
+source "$folder/edge.env"
+mkdir -p "$folder/bucket"
+# A bucket on one folder has nothing to heal from, and nothing here asks what it holds, so its scanner and healing
+# don't run: they read the folder over and over even when nothing is asked of it, and on a busy machine their
+# listings time out and start again.
+RUSTFS_ENABLE_SCANNER=false RUSTFS_ENABLE_HEAL=false \
+  RUSTFS_ACCESS_KEY=$access RUSTFS_SECRET_KEY=$secret rustfs server --address "$bucket" "$folder/bucket" >"$folder/bucket.log" 2>&1 &
+started+=($!)
+# Not `-o /dev/null`: curl retrying after an answer it wrote there truncates the file, and fails (23) on /dev/null.
+curl -s --retry 60 --retry-all-errors --retry-delay 1 "http://$bucket/" >/dev/null
+(cd "$root/core/edge" && ACCESS=$access SECRET=$secret BUCKET=http://$bucket/network bun -e '
+  import { AwsClient } from "aws4fetch";
+  const { ACCESS: accessKeyId, SECRET: secretAccessKey, BUCKET } = process.env;
+  const response = await new AwsClient({ accessKeyId, secretAccessKey, service: "s3", region: "auto" }).fetch(BUCKET, { method: "PUT" });
+  if (!response.ok && response.status !== 409) throw new Error(`the bucket answered ${response.status}`);')
+# `wrangler dev` gives the presigner its secrets from the environment.
+(cd "$root/core/edge" && BUCKET=http://$bucket/network ACCESS_KEY_ID=$access SECRET_ACCESS_KEY=$secret FIRST_SERVER=$first \
+  WRANGLER_SEND_METRICS=false exec bun run dev --port "$gateway" \
+  --inspector-port "$(free_port)" --persist-to "$folder/edge") >"$folder/edge.log" 2>&1 &
+started+=($!)
+curl -s --retry 60 --retry-all-errors --retry-delay 1 "http://localhost:$gateway/ping" >/dev/null
+# A passkey is for a name, which on one machine is `localhost`.
+at_address=(--address "http://localhost:$gateway" --first "$first")
 
 # Each server is an Erlang node named after its folder and this network's, with a cookie only this network's folder
 # holds, so `iex --remsh` attaches to it. An installed server is no node at all (`core/server/rel/env.sh.eex`).
@@ -183,9 +180,8 @@ ${users[*]} have their encryption set up, with their keys on this client's devic
 
     iex --sname dbg-\$\$ --cookie \$(cat $folder/cookie) --remsh $(node_name server)
                                                      attaches to the server, with :recon and :observer_cli
-${at_address:+
 Its address is ${at_address[1]}.
-}
+
 What each part says is in $folder/*.log. kill \$(cat $folder/pid) stops it.
 SAID
 wait

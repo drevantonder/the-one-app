@@ -128,8 +128,8 @@ How to build the APK is in `clients/app/README.md`. In a worktree that hasn't bu
 build is about a minute, not minutes); sccache and `~/.gradle` are already shared by every worktree. A new AVD's Chrome asks to
 sign in and about notifications the first time it opens, and ignores its command-line file (`--disable-fre`) on a phone that
 isn't debuggable: tap "Use without an account" and "No thanks" once (find them with `adb shell uiautomator dump`), and the
-AVD keeps that. A phone's app needs a network with an address
-(`tooling/network <folder> --edge`, or the README's `TAURI_ONE_ADDRESS`); `adb reverse tcp:<port> tcp:<port>` makes
+AVD keeps that. A phone's app needs a network's address
+(the one `tooling/network` prints, or the README's `TAURI_ONE_ADDRESS`); `adb reverse tcp:<port> tcp:<port>` makes
 the emulator's `localhost:<port>` this machine's. Stop the emulator when you're done (`adb emu kill`).
 
 A debug build's app is a WebView that takes CDP: `adb forward tcp:0 localabstract:webview_devtools_remote_$(adb
