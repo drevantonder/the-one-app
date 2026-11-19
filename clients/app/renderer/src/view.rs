@@ -1678,6 +1678,8 @@ pub(crate) struct Placed {
 /// rather than drawing it again (`Painter::paint_layer`): its scene, and where it put what's in it.
 struct Layer {
     key: LayerKey,
+    /// Where what it's in had moved it as it was drawn: it's drawn where that's moved it since, as it is.
+    at: Point<f32>,
     /// It's been drawn, rather than only noted where it rests, as that was changing.
     recorded: bool,
     /// It's kept for the next frame: what's in it doesn't move by itself.
@@ -1700,6 +1702,7 @@ impl Layer {
     fn unsettled(key: LayerKey) -> Layer {
         Layer {
             key,
+            at: point(0.0, 0.0),
             recorded: false,
             kept: true,
             scene: Scene::default(),
@@ -1717,12 +1720,12 @@ impl Layer {
     }
 }
 
-/// What a layer was drawn for: where its node rests, what it's in moved and grew it by, how opaque that is, and the
-/// window's scale. Any other, and it's drawn again.
+/// What a layer was drawn for: where its node rests, what it's in grew it by, how opaque that is, and the window's
+/// scale. Any other, and it's drawn again; what it's in moving it (a card it's in sliding as it grows) only moves it,
+/// as a compositor moves a sublayer.
 #[derive(PartialEq)]
 struct LayerKey {
     laid_out: Bounds<f32>,
-    offset: Point<f32>,
     scale: f32,
     opacity: f32,
     device: f32,
@@ -2213,7 +2216,7 @@ impl Painter<'_> {
     fn paint_layer(&mut self, taffy_node: NodeId, id: Id, offset: Point<f32>, transform: Transform, look: &Look, mask: Bounds<f32>, opacity: f32, parent: Option<Id>, pointer: bool) {
         let Ok(laid) = self.layout.taffy.layout(taffy_node).copied() else { return };
         let laid_out = Bounds { origin: point(offset.x + laid.location.x, offset.y + laid.location.y), size: Size { width: laid.size.width, height: laid.size.height } };
-        let key = LayerKey { laid_out, offset: transform.offset, scale: transform.scale, opacity, device: self.scale };
+        let key = LayerKey { laid_out, scale: transform.scale, opacity, device: self.scale };
         match self.layers.get(&id) {
             Some(layer) if layer.key == key && layer.recorded => {}
             // Where it rests is changing (what it's in is growing): it's drawn as usual until it holds still a frame,
@@ -2234,7 +2237,9 @@ impl Painter<'_> {
         let centre = point(laid_out.origin.x + laid_out.size.width / 2.0, laid_out.origin.y + laid_out.size.height / 2.0);
         let translate = point(look.translate.0.of(laid_out.size.width), look.translate.1.of(laid_out.size.height));
         let (at, k, grown) = (transform.offset, transform.scale, look.scale);
-        let by = point(at.x + k * (centre.x + translate.x) - grown * (at.x + k * centre.x), at.y + k * (centre.y + translate.y) - grown * (at.y + k * centre.y));
+        // What it's in has moved it since it was drawn, which moves what was drawn as much, grown as it is.
+        let since = point(at.x - self.layers[&id].at.x, at.y - self.layers[&id].at.y);
+        let by = point(at.x + k * (centre.x + translate.x) - grown * (at.x + k * centre.x) + grown * since.x, at.y + k * (centre.y + translate.y) - grown * (at.y + k * centre.y) + grown * since.y);
         let moved = |bounds: Bounds<f32>| Bounds { origin: point(bounds.origin.x * grown + by.x, bounds.origin.y * grown + by.y), size: Size { width: bounds.size.width * grown, height: bounds.size.height * grown } };
         let layer = &self.layers[&id];
         self.scene.splice(&layer.scene, grown, [by.x * self.scale, by.y * self.scale], look.opacity, mask.scale_to(self.scale));
@@ -2285,6 +2290,7 @@ impl Painter<'_> {
         let (placed, rects, tab_order, intersections, drag_regions, kept_regions, glass, wanted, modal, framed, animating) = outside;
         let layer = Layer {
             key,
+            at: transform.offset,
             recorded: true,
             // What moves by itself or shows another frame's page changes as it's drawn: it's drawn afresh each frame.
             kept: !self.animating && self.framed.is_empty(),
