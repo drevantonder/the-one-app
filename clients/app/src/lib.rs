@@ -401,6 +401,9 @@ async fn update() -> Result<String, String> {
 async fn visible(on_screen: bool) -> Result<(), String> {
     let views = views()?;
     views.shown("main", on_screen);
+    if on_screen {
+        updater::looked();
+    }
     spawn(updater::ready());
     views.caught_up().await;
     Ok(())
@@ -915,6 +918,8 @@ async fn opens() {
         return;
     }
     let views = app.views.get().expect("it was just set");
+    // A newer build or page, which it's kept on from now on (`updater`).
+    updater::start();
 
     // The window follows whether its network answers, which is what the last thing asked found, and once it answers
     // again, every view asks again, so it picks up what it missed where it was.

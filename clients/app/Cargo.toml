@@ -37,6 +37,7 @@ window = [
   "dep:open",
   "dep:dirs",
   "dep:global-hotkey",
+  "dep:notify",
   "dep:tray-icon",
   "dep:window-vibrancy",
   "dep:encryption_client",
@@ -100,6 +101,8 @@ open = { version = "5", optional = true }
 dirs = { version = "6", optional = true }
 # The launcher's shortcut, ⌥Space on a Mac (`computer::shortcut`).
 global-hotkey = { version = "0.7", optional = true }
+# Hears the app's own program replaced by a newer build, as its device's server or `one update` does (`updater`).
+notify = { version = "8", optional = true }
 # The launcher's glass, as the system's own (NSVisualEffectView on a Mac, Acrylic on Windows).
 window-vibrancy = { version = "0.8", optional = true }
 

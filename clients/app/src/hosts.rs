@@ -478,6 +478,9 @@ pub(crate) async fn command(label: &str, command: &str, args: Value) -> Result<V
         "visible" => {
             let views = views()?;
             views.shown(label, args["onScreen"].as_bool() == Some(true));
+            if args["onScreen"].as_bool() == Some(true) {
+                crate::updater::looked();
+            }
             crate::spawn(crate::updater::ready());
             if args["onScreen"].as_bool() == Some(true) {
                 views.caught_up().await
