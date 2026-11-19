@@ -7,7 +7,8 @@
 // its scenes its screens', in `client/scenes.json`); with none, the gallery and every app that has scenes. An app's
 // scenes are what each screen shows, by name, and what it's given to show it, as the tools' answers a client would
 // give (record.js's answers): `{ "Inbox": { "answers": { "notifications_inbox": { … } } } }`, with any of `page` (its
-// page, `client/index.html` unless said, and a link after `#`), `taps` (what's pressed first, by what each is named or
+// page, `client/index.html` unless said, and a link after `#`), `component` (a component its client exports, drawn alone, in
+// place of a page, as another app's page draws it), `taps` (what's pressed first, by what each is named or
 // says), `size` (`[390, 844]`, a phone's, unless said), `touch` (a finger points at it, as on a phone), and `like` (another scene's name, as Storybook's args are a
 // component's: this is that scene, with its own taps, and its answers in place of that one's, tool by tool). An answer `{ "$error": "Couldn't reach it" }` is a tool's
 // refusal. A method of the client's (`ui/initialize`, `one/client`) is answered as it's named too. It's 1 January 2026,
@@ -57,7 +58,8 @@ async function scenesOf(target, built, serve) {
     const all = JSON.parse(readFileSync(join(target, "client/scenes.json"), "utf8"))
     const whole = (scene) => (scene.like ? { ...whole(all[scene.like]), taps: undefined, ...scene, answers: { ...whole(all[scene.like]).answers, ...scene.answers } } : scene)
     return Object.entries(all).map(([name, scene]) => {
-      const { page: at = "client/index.html", answers = {}, taps = [], size = sized ?? [390, 844], touch = false } = whole(scene)
+      const { component, answers = {}, taps = [], size = sized ?? [390, 844], touch = false } = whole(scene)
+      const at = whole(scene).page ?? (component ? `${COMPONENTS}/${component}.html` : "client/index.html")
       const [page, link] = at.split("#")
       return { name, page, link, answers, taps, size, touch }
     })
@@ -65,6 +67,35 @@ async function scenesOf(target, built, serve) {
   // The gallery lists its own, drawn at `#scenes`.
   const listed = await serve.text("index.html", "scenes")
   return JSON.parse(listed).map(({ name, taps, size = sized ?? [390, 844], touch = false }) => ({ name, page: "index.html", link: name, answers: {}, taps, size, touch }))
+}
+
+/// Where an app's exported components are built (its client, as a server builds it), for a scene that names one
+/// (`component`) rather than a page: the component alone, drawn in grouped cards, as Settings draws its sections.
+const COMPONENTS = "components"
+
+/// Builds `target`'s client into `built`'s COMPONENTS, with a page beside each module it exports that draws it, when one
+/// of its scenes names a component. → why it didn't build, if it didn't.
+function components(target, built) {
+  const all = existsSync(join(target, "client/scenes.json")) ? Object.values(JSON.parse(readFileSync(join(target, "client/scenes.json"), "utf8"))) : []
+  const named = [...new Set(all.map((scene) => scene.component).filter(Boolean))]
+  if (!named.length) return
+  const at = join(built, COMPONENTS)
+  const make = Bun.spawnSync(["bun", here("dist/build/app.js"), join(target, "client"), at])
+  if (make.exitCode !== 0) return make.stderr.toString().trim()
+  for (const component of named) {
+    writeFileSync(join(at, `${component}.scene.js`), `import { ListStyle, render } from "/ui/client/ui.js"
+import Shown from "./${component}.js"
+render(() => ListStyle({ value: "insetGrouped", get children() { return Shown({}) } }))
+`)
+    writeFileSync(join(at, `${component}.html`), `<!doctype html>
+<html lang="en">
+<script src="/ui/client/colour-mode.js"></script>
+<link rel="stylesheet" href="/ui/client/ui.css">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<script type="module" src="./${component}.scene.js"></script>
+`)
+  }
 }
 
 /// A stand-in client for a page in a frame: it answers what the page asks from `answers`, as a client would.
@@ -160,7 +191,10 @@ function native(built, scene, folder) {
   rmSync(at, { recursive: true, force: true })
   mkdirSync(at)
   writeFileSync(join(at, "index.html"), readFileSync(join(built, scene.page), "utf8").replace(/(src|href)="(\.\.\/)+/g, '$1="').replace(/(src|href)="\.\//g, '$1="'))
-  symlinkSync(join(built, "assets"), join(at, "assets"))
+  // A component's page is beside the modules its client's build made, which it loads from beside it.
+  if (scene.page.startsWith(`${COMPONENTS}/`)) {
+    for (const entry of readdirSync(join(built, COMPONENTS))) if (!entry.endsWith(".html")) symlinkSync(join(built, COMPONENTS, entry), join(at, entry))
+  } else symlinkSync(join(built, "assets"), join(at, "assets"))
   if (existsSync(join(built, dirname(scene.page), "styles.json"))) cpSync(join(built, dirname(scene.page), "styles.json"), join(at, "styles.json"))
   const answers = { ...scene.answers, "ui/initialize": scene.answers["ui/initialize"] ?? { hostContext: { link: scene.link, containerDimensions: { width: scene.size[0], height: scene.size[1] }, deviceCapabilities: { touch: scene.touch, hover: !scene.touch } } } }
   writeFileSync(join(folder, "answers.json"), JSON.stringify(answers))
@@ -218,9 +252,18 @@ const report = []
 for (const target of targets) {
   const name = target.endsWith("core/ui/gallery") ? "gallery" : target.split("/").at(-1)
   const built = join(out, name, "build")
-  const make = Bun.spawnSync(["bun", here("dist/build/app.js"), target, built])
+  // An app whose scenes are all of components has no page to build, and may have none at all.
+  const scenes = existsSync(join(target, "client/scenes.json")) ? JSON.parse(readFileSync(join(target, "client/scenes.json"), "utf8")) : {}
+  const ofComponent = (scene) => !!scene && (scene.component || ofComponent(scenes[scene.like]))
+  const pages = !Object.keys(scenes).length || Object.values(scenes).some((scene) => !ofComponent(scene))
+  const make = pages ? Bun.spawnSync(["bun", here("dist/build/app.js"), target, built]) : { exitCode: 0 }
   if (make.exitCode !== 0) {
     report.push(`${name}: didn't build\n${make.stderr.toString().trim()}`)
+    continue
+  }
+  const unbuilt = components(target, built)
+  if (unbuilt) {
+    report.push(`${name}: its components didn't build\n${unbuilt}`)
     continue
   }
   const serve = server(built, target)
