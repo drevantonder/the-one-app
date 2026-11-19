@@ -33,7 +33,7 @@ pub async fn draw(canvas: web_sys::HtmlCanvasElement, font: Vec<u8>, text: Strin
     let mut encoder = device.create_command_encoder(&Default::default());
     renderer::draw(&device, &queue, &mut encoder, &view, format, [width, height], &font, &text).map_err(|e| error(&e))?;
     queue.submit([encoder.finish()]);
-    frame.present();
+    queue.present(frame);
     Ok(js_sys_now() - started)
 }
 
