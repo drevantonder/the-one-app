@@ -71,6 +71,26 @@ struct Host {
 /// The one window a frame has: its page's.
 const WINDOW: WindowId = 1;
 
+/// A new GPU device, where the one drawn with was lost (`Windows::recover`): → it, once the browser has given it, having
+/// been asked for the first time this is asked.
+pub fn recover() -> Option<anyhow::Result<crate::render::Context>> {
+    thread_local! {
+        static ASKING: Cell<bool> = const { Cell::new(false) };
+        static CAME: RefCell<Option<anyhow::Result<crate::render::Context>>> = const { RefCell::new(None) };
+    }
+    if let Some(made) = CAME.take() {
+        return Some(made);
+    }
+    if !ASKING.replace(true) {
+        wasm_bindgen_futures::spawn_local(async {
+            CAME.set(Some(crate::render::Context::create().await));
+            ASKING.set(false);
+            soon();
+        });
+    }
+    None
+}
+
 /// The windows' thread is the browser's event loop, which is always there once a canvas is open.
 pub fn start() -> anyhow::Result<Native> {
     Ok(Native(Sender))

@@ -631,7 +631,17 @@ impl Windows {
     /// Makes what draws again, on a new GPU device, where the one it drew with was lost, as a browser makes a lost
     /// WebGPU device's: the atlas and every window's renderer, each window drawn afresh (`Screen::gpu_lost`).
     fn recover(&mut self) {
-        let made = Context::new().map(|context| {
+        #[cfg(not(target_arch = "wasm32"))]
+        self.recovered(Context::new());
+        // The web's is asked for with a promise, and drawn on once it's come.
+        #[cfg(target_arch = "wasm32")]
+        if let Some(made) = web::recover() {
+            self.recovered(made);
+        }
+    }
+
+    fn recovered(&mut self, made: anyhow::Result<Context>) {
+        let made = made.map(|context| {
             let atlas = Arc::new(Atlas::new(&context));
             (context, atlas)
         });
