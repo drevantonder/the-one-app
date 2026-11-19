@@ -1398,6 +1398,19 @@ impl Screen {
         Some(id)
     }
 
+    /// A tap on an iPhone's status bar: everything that scrolls goes back to its top, as the DOM's page does (`toTop` in
+    /// the UI library's bridge.ts).
+    pub fn scroll_to_top(&mut self) {
+        let scrolled: Vec<(Id, Point<f32>)> = self.scrolled.iter().filter(|(_, at)| at.y > 0.0).map(|(id, at)| (*id, point(at.x, 0.0))).collect();
+        for (id, at) in scrolled {
+            self.scrolled.insert(id, at);
+            if self.tree.nodes.get(&id).is_some_and(|node| node.listens("scroll")) {
+                self.tell(id, "scroll", json!({"scrollTop": at.y, "scrollLeft": at.x}));
+            }
+        }
+        self.changed();
+    }
+
     /// Gives the keyboard to `id`, or to nothing, telling the app what had it and what has it, where they listen. An
     /// input that loses it keeps what was being composed in it.
     fn focus(&mut self, id: Option<Id>) {

@@ -1,5 +1,6 @@
 // What an iPhone does for a native window's page itself (`Device` in mod.rs): its picker, the pop-up menu a `<select>`
-// opens in Safari, from a button over the picker's box; its share sheet; its haptics; and its text size.
+// opens in Safari, from a button over the picker's box; its share sheet; its haptics; its text size; and a tap on
+// its status bar.
 
 #include <string>
 
@@ -97,4 +98,32 @@ extern "C" bool device_haptic(const char* kind) {
 // The text size its person chose (Dynamic Type), as its body text's size in points.
 extern "C" double device_text_size() {
   return [UIFont preferredFontForTextStyle:UIFontTextStyleBody].pointSize;
+}
+
+typedef void (*DeviceTapped)(void* context);
+
+// A scroll view a point high along a window's top, which iOS asks as its status bar is tapped (`scrollsToTop`): it
+// says no, and tells the window, whose page scrolls to its top itself.
+@interface OneStatusBar : UIScrollView <UIScrollViewDelegate>
+@property(nonatomic) void* context;
+@property(nonatomic) DeviceTapped tapped;
+@end
+
+@implementation OneStatusBar
+- (BOOL)scrollViewShouldScrollToTop:(UIScrollView*)scrollView {
+  self.tapped(self.context);
+  return NO;
+}
+@end
+
+extern "C" void device_status_bar(UIView* view, void* context, DeviceTapped tapped) {
+  OneStatusBar* bar = [[OneStatusBar alloc] initWithFrame:CGRectMake(0, 0, view.bounds.size.width, 1)];
+  bar.autoresizingMask = UIViewAutoresizingFlexibleWidth;
+  bar.contentSize = CGSizeMake(view.bounds.size.width, 3);
+  bar.contentOffset = CGPointMake(0, 1);
+  bar.scrollsToTop = YES;
+  bar.context = context;
+  bar.tapped = tapped;
+  bar.delegate = bar;
+  [view addSubview:bar];
 }

@@ -149,6 +149,8 @@ thread_local! {
     static SLIDES: RefCell<HashMap<WindowId, Slide>> = RefCell::new(HashMap::new());
     /// What each window's text input plugin said, until the windows hear it: it can say it while they're in use.
     static SAID: RefCell<Vec<(WindowId, TextInputClient)>> = const { RefCell::new(Vec::new()) };
+    /// Each window whose status bar was tapped, until the windows hear it (`device.mm`).
+    static TAPPED: RefCell<Vec<WindowId>> = const { RefCell::new(Vec::new()) };
     /// What each window's picker chose, for which node, until the windows hear it (`device.mm`).
     static PICKED: RefCell<Vec<(WindowId, crate::tree::Id, String)>> = const { RefCell::new(Vec::new()) };
     /// The display link, once a frame's been wanted, and when the display showed the last frame it said.
@@ -262,6 +264,14 @@ fn with_windows<R>(f: impl FnOnce(&mut Windows) -> R) -> Option<R> {
         for (id, node, value) in PICKED.with(|picked| std::mem::take(&mut *picked.borrow_mut())) {
             windows.input(id, 0, Input::Picked(node, value));
         }
+        for id in TAPPED.with(|tapped| std::mem::take(&mut *tapped.borrow_mut())) {
+            if let Some(window) = windows.windows.get_mut(&id)
+                && let Ok(screen) = &mut window.screen
+            {
+                screen.scroll_to_top();
+                window.dirty = true;
+            }
+        }
         for (id, window) in windows.windows.iter_mut() {
             let Ok(screen) = &mut window.screen else { continue };
             for (node, action) in a11y::take(*id) {
@@ -364,6 +374,8 @@ impl Display {
         ui_view.addSubview(&card);
         let card = Retained::into_super(card);
         let layer = Retained::as_ptr(&card.layer()) as usize;
+        // A tap on the status bar scrolls it to its top, as iOS asks the scroll view along its top (`device.mm`).
+        unsafe { device_status_bar(view as *mut c_void, id as *mut c_void, status_bar_tapped) };
         let controller = window.ui_view_controller().cast::<UIViewController>();
         let text_input = Plugin(unsafe { text_input_new(controller, id as *mut c_void, said) });
         let a11y = a11y::A11y::new(ui_view, text_input.0, id);
@@ -866,6 +878,7 @@ unsafe extern "C" {
     fn device_share(view: *mut c_void, text: *const c_char) -> bool;
     fn device_haptic(kind: *const c_char) -> bool;
     fn device_text_size() -> f64;
+    fn device_status_bar(view: *mut c_void, context: *mut c_void, tapped: extern "C" fn(*mut c_void));
 }
 
 impl crate::view::Device for Device {
@@ -883,6 +896,12 @@ impl crate::view::Device for Device {
     fn haptic(&mut self, kind: &str) -> bool {
         unsafe { device_haptic(cstring(kind).as_ptr()) }
     }
+}
+
+/// Window `context`'s status bar was tapped, which the windows hear once they aren't in use.
+extern "C" fn status_bar_tapped(context: *mut c_void) {
+    TAPPED.with(|tapped| tapped.borrow_mut().push(context as WindowId));
+    wake();
 }
 
 /// Window `context`'s picker chose `value` for picker node `node`, which the windows hear once they aren't in use.
