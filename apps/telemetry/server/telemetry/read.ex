@@ -119,10 +119,13 @@ defmodule Telemetry.Read do
   defp tool(point), do: {point["attributes"]["one.app"], point["attributes"]["one.tool"]}
 
   defp over_time(points, from, to, step) do
-    for at <- from..to//step do
-      within = Enum.filter(points, &(&1["time"] > at and &1["time"] <= at + step))
-      if within == [], do: nil, else: quantiles(added(within)).p95
-    end
+    for {_at, within} <- steps(points, from, to, step), do: if(within == [], do: nil, else: quantiles(added(within)).p95)
+  end
+
+  # Each step's start from `from` to `to`, and the points in it: those after its start, up to its end.
+  defp steps(points, from, to, step) do
+    within = Enum.group_by(for(p <- points, p["time"] > from, do: p), &div(&1["time"] - from - 1, step))
+    for {at, index} <- Enum.with_index(from..to//step), do: {at, Map.get(within, index, [])}
   end
 
   @doc "Calls and failed calls in about 48 steps from `from` to `to`: each step's start in milliseconds and its counts."
@@ -130,8 +133,7 @@ defmodule Telemetry.Read do
     step = max(div(to - from, 48), 60_000_000_000)
     points = for b <- batches, p <- b["metrics"], p["name"] == "one.tool.duration", do: p
 
-    for at <- from..to//step do
-      within = Enum.filter(points, &(&1["time"] > at and &1["time"] <= at + step))
+    for {at, within} <- steps(points, from, to, step) do
       failed = for p <- within, p["attributes"]["one.outcome"] == "error", reduce: 0, do: (sum -> sum + p["count"])
       %{at: ms(at), calls: Enum.sum_by(within, & &1["count"]), failed: failed}
     end
@@ -218,8 +220,7 @@ defmodule Telemetry.Read do
     %{
       name: name,
       steps:
-        for at <- from..to//step do
-          within = Enum.filter(points, &(&1["time"] > at and &1["time"] <= at + step))
+        for {at, within} <- steps(points, from, to, step) do
           Map.put(if(within == [], do: %{count: 0}, else: quantiles(added(within))), :at, ms(at))
         end
     }
