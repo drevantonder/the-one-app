@@ -573,12 +573,15 @@ pub async fn open(canvas: web_sys::HtmlCanvasElement, scale: f32, page: String, 
     console_log();
     SCALE.set(scale);
     LINK.set(link);
+    // The room its page has, the canvas's in CSS pixels, which it's told as it asks (`ui/initialize`), as a native
+    // window's page is told its window's.
+    let room = Size { width: canvas.width() as f32 / scale, height: canvas.height() as f32 / scale };
     let media = |query: &str| web_sys::window().and_then(|window| window.match_media(query).ok().flatten()).is_some_and(|list| list.matches());
     HOST.set(Some(Host { canvas, calls, dark: media("(prefers-color-scheme: dark)"), reduced_motion: media("(prefers-reduced-motion: reduce)") }));
     let tokens = load(&tables).map_err(|error| JsError::new(&format!("{error:#}")))?;
     let context = crate::render::Context::create().await.map_err(|error| JsError::new(&format!("{error:#}")))?;
     let mut windows = Windows::made(Display, Ok(context)).map_err(|error| JsError::new(&format!("{error:#}")))?;
-    let mut screen = Screen::new(Thread::new(Clock::real()), Some(Box::new(asked)), Size { width: 0.0, height: 0.0 }, Default::default());
+    let mut screen = Screen::new(Thread::new(Clock::real()), Some(Box::new(asked)), room, Default::default());
     screen.page = tokens;
     let page = url::Url::parse(&page).map_err(|error| JsError::new(&format!("{error}")))?;
     screen.fetch = Some(Box::new(move |src: &str| fetch(&page, src)));
