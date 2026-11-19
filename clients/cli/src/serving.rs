@@ -573,7 +573,7 @@ async fn serve(client: &Arc<Client>, here: &Here, reports: &Reports) -> Result<(
     if pair.program != BUILD {
         if here.program(&pair.program).exists() {
             here.put_program(&pair.program, &program)?;
-            return Err(again(&program));
+            return Err(again(here, &program));
         }
         println!("The one the record pairs with {}, {}, isn't kept here, so {BUILD} runs it.", pair.build, pair.program);
         pair.program = BUILD.to_owned();
@@ -722,7 +722,7 @@ async fn didnt_start(
     }
     ensure!(verifying, failed);
     reports.tell(true).await;
-    Err(again(program))
+    Err(again(here, program))
 }
 
 /// A line the server said, and the message it is, if it's one: only a line on its output is.
@@ -795,12 +795,17 @@ async fn stop(server: &mut Child, told: &Told) -> Result<()> {
 }
 
 /// This program started again in its place, as the system started it, to run the pair the record says: on Windows,
-/// which replaces no running program, by ending for Task Scheduler to start it.
-fn again(program: &Path) -> anyhow::Error {
+/// which replaces no running program, by ending for Task Scheduler to start it again at once (`system::again`).
+fn again(#[cfg_attr(unix, expect(unused_variables))] here: &Here, program: &Path) -> anyhow::Error {
     #[cfg(unix)]
     return std::os::unix::process::CommandExt::exec(std::process::Command::new(program).args(["serve", "run"])).into();
     #[cfg(not(unix))]
-    anyhow::anyhow!("It ended to run {}, which Task Scheduler starts within a minute.", program.display())
+    {
+        if let Ok(key) = here.key() {
+            system::again(&key);
+        }
+        anyhow::anyhow!("It ended to run {}, which Task Scheduler starts as it ends.", program.display())
+    }
 }
 
 /// Prepares the latest server build and `one` as a pair, while the server answers on: downloads them, checks the build
@@ -894,7 +899,7 @@ async fn go(here: &Here, record: &mut Record, server: &mut Child, program: &Path
     if next.program != current.program {
         here.put_program(&next.program, program)?;
     }
-    Err(again(program))
+    Err(again(here, program))
 }
 
 /// The latest builds for this kind of machine, by what they are (`server-code`, `one`), each with a link to it, as the
@@ -1599,6 +1604,27 @@ mod system {
     pub fn remove(here: &Here, key: &str) -> Result<()> {
         let _ = stop(here, key);
         schtasks(&["/delete", "/tn", &name(key), "/f"])
+    }
+
+    /// Has Task Scheduler start the task again as soon as this program has ended, as one ending to run a newer build
+    /// does. A task that's running isn't started (`IgnoreNew`), and a program that ends is no failure to Task
+    /// Scheduler, so otherwise only its trigger starts it, within a minute. So a PowerShell that outlives this waits
+    /// for it to end and starts the task, as `Start-ScheduledTask` does; where that doesn't, the trigger still does.
+    pub fn again(key: &str) {
+        let script = format!(
+            "Wait-Process -Id {} -ErrorAction SilentlyContinue; Start-ScheduledTask -TaskName '{}'",
+            std::process::id(),
+            name(key)
+        );
+        let started = command("powershell")
+            .args(["-NoProfile", "-NonInteractive", "-Command", &script])
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .spawn();
+        if let Err(error) = started {
+            eprintln!("Task Scheduler starts it within a minute, as it couldn't be had to at once: {error}");
+        }
     }
 
     /// Tells `start` the server is running, by opening its pipe, which is all `start` waits for. Only to read it,
