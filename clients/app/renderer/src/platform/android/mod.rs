@@ -380,6 +380,8 @@ struct Touch {
     moved: bool,
     panning: bool,
     on_input: bool,
+    /// It landed on a fling, which it stopped, and presses nothing.
+    stopped: bool,
 }
 
 thread_local! {
@@ -517,9 +519,10 @@ pub extern "system" fn Java_app_theone_renderer_NativeView_nativeBack(_: JNIEnv,
 
 /// A finger: `action` is MotionEvent's (0 down, 1 up, 2 move, 3 cancel), at `x`, `y` in device pixels. A finger
 /// that moves further than `slop` pans what scrolls under it, and what it pressed isn't pressed. One on an input gives
-/// it the keyboard as it lifts, as a phone's own fields do, so one that lands there to scroll doesn't.
+/// it the keyboard as it lifts, as a phone's own fields do, so one that lands there to scroll doesn't. One that
+/// `stopped` a fling only stopped it.
 #[unsafe(no_mangle)]
-pub extern "system" fn Java_app_theone_renderer_NativeView_nativeTouch(_: JNIEnv, _: JObject, id: jlong, action: jint, x: jfloat, y: jfloat, slop: jfloat) -> jboolean {
+pub extern "system" fn Java_app_theone_renderer_NativeView_nativeTouch(_: JNIEnv, _: JObject, id: jlong, action: jint, x: jfloat, y: jfloat, slop: jfloat, stopped: jboolean) -> jboolean {
     let id = id as WindowId;
     let panning = with_windows(|windows| {
         let Some(window) = windows.windows.get(&id) else { return false };
@@ -544,9 +547,9 @@ pub extern "system" fn Java_app_theone_renderer_NativeView_nativeTouch(_: JNIEnv
             let mut touches = touches.borrow_mut();
             match action {
                 0 => {
-                    let on_input = screen.input_at(at);
-                    touches.insert(id, Touch { start: at, last: at, moved: false, panning: false, on_input });
-                    if !on_input {
+                    let (on_input, stopped) = (screen.input_at(at), stopped != 0);
+                    touches.insert(id, Touch { start: at, last: at, moved: false, panning: false, on_input, stopped });
+                    if !on_input && !stopped {
                         screen.pointer_down(at, 0, false);
                     }
                 }
@@ -554,8 +557,8 @@ pub extern "system" fn Java_app_theone_renderer_NativeView_nativeTouch(_: JNIEnv
                     let Some(touch) = touches.get_mut(&id) else { return };
                     if !touch.moved && ((at.x - touch.start.x).abs() > slop / density || (at.y - touch.start.y).abs() > slop / density) {
                         touch.moved = true;
-                        touch.panning = touch.on_input || screen.pans(touch.start, point(at.x - touch.start.x, at.y - touch.start.y));
-                        if touch.panning && !touch.on_input {
+                        touch.panning = touch.on_input || touch.stopped || screen.pans(touch.start, point(at.x - touch.start.x, at.y - touch.start.y));
+                        if touch.panning && !touch.on_input && !touch.stopped {
                             screen.pointer_cancel(at);
                         } else if !touch.panning {
                             screen.dragged();
@@ -563,14 +566,14 @@ pub extern "system" fn Java_app_theone_renderer_NativeView_nativeTouch(_: JNIEnv
                     }
                     if touch.panning {
                         screen.pan(touch.start, point(touch.last.x - at.x, touch.last.y - at.y));
-                    } else if !touch.on_input {
+                    } else if !touch.on_input && !touch.stopped {
                         screen.pointer_moved(at);
                     }
                     touch.last = at;
                 }
                 1 => {
                     let Some(touch) = touches.remove(&id) else { return };
-                    if touch.panning {
+                    if touch.panning || touch.stopped {
                         return;
                     }
                     let was = screen.focused();
@@ -584,7 +587,7 @@ pub extern "system" fn Java_app_theone_renderer_NativeView_nativeTouch(_: JNIEnv
                     }
                 }
                 _ => {
-                    if touches.remove(&id).is_some_and(|touch| !touch.on_input && !touch.panning) {
+                    if touches.remove(&id).is_some_and(|touch| !touch.on_input && !touch.panning && !touch.stopped) {
                         screen.pointer_cancel(at);
                     }
                 }

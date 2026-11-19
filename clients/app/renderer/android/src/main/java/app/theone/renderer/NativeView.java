@@ -144,8 +144,9 @@ public final class NativeView extends SurfaceView implements SurfaceHolder.Callb
     @Override public boolean onTouchEvent(MotionEvent e) {
         int action = e.getActionMasked();
         float slop = ViewConfiguration.get(getContext()).getScaledTouchSlop();
+        // A finger landing stops a fling, as it does a ScrollView's, and only that: it presses nothing.
+        boolean stopped = action == MotionEvent.ACTION_DOWN && !fling.isFinished();
         if (action == MotionEvent.ACTION_DOWN) {
-            // A finger landing stops a fling, as it does a ScrollView's.
             fling.forceFinished(true);
             if (speed == null) speed = VelocityTracker.obtain();
             speed.clear();
@@ -160,7 +161,7 @@ public final class NativeView extends SurfaceView implements SurfaceHolder.Callb
         // A second finger isn't followed.
         if (action > MotionEvent.ACTION_CANCEL) return true;
         if (speed != null) speed.addMovement(e);
-        boolean pans = nativeTouch(id, action, e.getX(), e.getY(), slop);
+        boolean pans = nativeTouch(id, action, e.getX(), e.getY(), slop, stopped);
         if (action == MotionEvent.ACTION_MOVE) panning = pans;
         if (action == MotionEvent.ACTION_UP && panning && speed != null) {
             ViewConfiguration configuration = ViewConfiguration.get(getContext());
@@ -266,7 +267,7 @@ public final class NativeView extends SurfaceView implements SurfaceHolder.Callb
     private native void nativeSurfaceDestroyed(long id);
     private native boolean nativeBack(long id);
     private native void nativeActive(long id, boolean active);
-    private native boolean nativeTouch(long id, int action, float x, float y, float slop);
+    private native boolean nativeTouch(long id, int action, float x, float y, float slop, boolean stopped);
     private native boolean nativePan(long id, float x, float y, float dx, float dy);
     private native void nativeLongPress(long id, float x, float y);
     private native void nativeEditingState(long id, int field, String text, int base, int extent, int composingStart, int composingEnd);
