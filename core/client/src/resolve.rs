@@ -74,13 +74,36 @@ impl Client {
         OWN.into_iter().chain(self.resolvers.iter().flat_map(|resolver| resolver.formats().iter().copied())).collect()
     }
 
-    /// What this client knows of the tools, as a server last listed them: asked for, if it hasn't seen a list.
+    /// What this client knows of the tools, as a server last listed them: from memory, or from what was kept on disk
+    /// (refreshed behind it once), or asked for once across concurrent callers.
     async fn listed(&self) -> Result<Arc<Listed>> {
         if let Some(listed) = self.listed.lock().expect("no ask panics").clone() {
             return Ok(listed);
         }
-        Box::pin(self.request("tools/list", json!({}))).await?;
+        let _listing = self.listing.lock().await;
+        if let Some(listed) = self.listed.lock().expect("no ask panics").clone() {
+            return Ok(listed);
+        }
+        if let Some(cached) = self.cached("tools/list", &json!({}))
+            && cached["tools"].is_array()
+        {
+            let known = Arc::new(listed(&cached, &self.formats()));
+            *self.listed.lock().expect("no ask panics") = Some(known.clone());
+            drop(_listing);
+            self.refresh_listed();
+            return Ok(known);
+        }
+        Box::pin(self.fresh("tools/list", &json!({}))).await?;
         Ok(self.listed.lock().expect("no ask panics").clone().unwrap_or_default())
+    }
+
+    /// Refreshes what this client knows of the tools in the background, once at a time.
+    pub fn refresh_listed(&self) {
+        let Some(client) = self.me.upgrade() else { return };
+        self.runtime.spawn(async move {
+            let Ok(_listing) = client.listing.try_lock() else { return };
+            let _ = client.fresh("tools/list", &json!({})).await;
+        });
     }
 
     /// Whether `request` only reads: one of `READS`, or a call of a tool that says it does.

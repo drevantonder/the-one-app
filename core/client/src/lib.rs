@@ -1008,6 +1008,8 @@ pub struct Client {
     tools: Vec<Arc<dyn DeviceTools>>,
     /// What this client knows of each tool, as a server last listed them (`resolve`).
     listed: std::sync::Mutex<Option<Arc<resolve::Listed>>>,
+    /// Asking a server for `tools/list`, one at a time, so concurrent startup calls don't stampede.
+    listing: Mutex<()>,
     /// What this client says of itself in what it records (`report`), as OpenTelemetry's resource attributes say a
     /// service: which client it is (`service.name`), its build, its device's name and its operating system, until its
     /// SDK is made, as it first records something (`telemetry`).
@@ -1098,13 +1100,14 @@ impl Client {
         let link = std::sync::RwLock::new(link);
         let (watching, connection) = (AtomicBool::new(false), watch::Sender::new(Connection::Connecting));
         let listed = std::sync::Mutex::default();
+        let listing = Mutex::default();
         let reach = Mutex::default();
         let resource = Arc::new(std::sync::RwLock::new(resource()));
         let address = config.map(|config| config.address);
         let client = Arc::new_cyclic(|me| Self {
             home, key, address, session: watch::Sender::new(session), admitting: Mutex::default(),
             again: Arc::default(), link, reach, notifications, says, watching, connection, behind: watch::Sender::new(None), resolvers, tools,
-            listed, resource, telemetry: Arc::default(), sending: Mutex::default(), unanswered: std::sync::Mutex::default(),
+            listed, listing, resource, telemetry: Arc::default(), sending: Mutex::default(), unanswered: std::sync::Mutex::default(),
             me: me.clone(), runtime: tokio::runtime::Handle::current(),
         });
         accept(endpoint, client.me.clone());

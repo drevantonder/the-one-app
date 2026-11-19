@@ -974,7 +974,11 @@ async fn opens() {
             }
             if views.on_screen() {
                 eprintln!("a server said something changed");
-                views.refresh(message["params"]["app"].as_str()).await
+                let app = message["params"]["app"].as_str();
+                if app.is_none() {
+                    views.client.refresh_listed();
+                }
+                views.refresh(app).await
             } else {
                 views.missed.store(true, Ordering::Relaxed)
             }

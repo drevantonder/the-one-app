@@ -10,12 +10,14 @@ use std::collections::HashMap;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
+use std::time::SystemTime;
 use std::{fs, process};
 
 use anyhow::{Context, Result, bail};
 use futures_util::future::join_all;
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
+use tokio::sync::watch;
 
 use crate::Client;
 
@@ -35,6 +37,14 @@ impl Client {
     /// What a server last answered `method` with.
     pub fn cached(&self, method: &str, params: &Value) -> Option<Value> {
         serde_json::from_slice(&fs::read(self.cache_file(method, params)).ok()?).ok()
+    }
+
+    /// What a server last answered `method` with, and when it was written on disk.
+    fn cached_entry(&self, method: &str, params: &Value) -> Option<(Value, Option<SystemTime>)> {
+        let path = self.cache_file(method, params);
+        let modified = fs::metadata(&path).ok().and_then(|meta| meta.modified().ok());
+        let value = serde_json::from_slice(&fs::read(&path).ok()?).ok()?;
+        Some((value, modified))
     }
 
     fn cache_file(&self, method: &str, params: &Value) -> PathBuf {
@@ -106,101 +116,255 @@ pub(crate) fn write(file: &Path, bytes: &[u8]) -> Result<()> {
     Ok(())
 }
 
+/// One cached read in a `Subscription`, following TanStack Query's invalidation model: a write marks matching entries
+/// stale (`invalidated > fetched`) and starts an independent background refetch (`fetching`). Subsequent reads join
+/// the in-flight refetch rather than returning stale pre-write data, and when any refetch changes an answer, the view
+/// is notified immediately without waiting for other queries.
+struct Query {
+    method: String,
+    params: Value,
+    /// The last answer the view was given.
+    response: Value,
+    /// Incremented on every write invalidation; `response` is fresh while `fetched >= invalidated`.
+    invalidated: u64,
+    /// The invalidation generation `response` was fetched at or after.
+    fetched: u64,
+    /// Active post-write refetch for `generation`, shared by any `read` waiting for a fresh answer.
+    fetching: Option<(u64, watch::Receiver<Option<bool>>)>,
+}
+
 /// What one view has been answered since it opened. It asks through this, and every view gets the same, with
-/// nothing to write: what only reads is answered from what was kept and asked again behind it, and asked again
-/// after the view changes something, when its user returns to it, and when a server says something changed, which
-/// is only what that server says is of the app that changed it, if it says. When an answer comes back different,
-/// the view is told to ask again, and is answered at once.
+/// nothing to write: what only reads is answered from what was kept and asked again behind it; writes resolve as
+/// soon as their own answer arrives, invalidating the reads they may affect and refetching them in the background;
+/// and reads are also asked again when the user returns to the view or a server says something changed. When an
+/// answer comes back different, the view is told to ask again, and is answered at once.
 pub struct Subscription {
     client: Arc<Client>,
-    /// What only reads, by what was asked, with the answer the view was last given.
-    responses: Mutex<HashMap<String, (String, Value, Value)>>,
+    /// What only reads, by what was asked, with the answer the view was last given and its invalidation state.
+    responses: Mutex<HashMap<String, Query>>,
+    /// When this view last completed a write, so a cold read doesn't serve a pre-write disk cache entry.
+    written: Mutex<Option<SystemTime>>,
     /// Tells the view that what it was answered has changed.
     changed: Box<dyn Fn() + Send + Sync>,
 }
 
 impl Subscription {
     pub fn new(client: Arc<Client>, changed: impl Fn() + Send + Sync + 'static) -> Arc<Self> {
-        Arc::new(Self { client, responses: Mutex::default(), changed: Box::new(changed) })
+        Arc::new(Self {
+            client,
+            responses: Mutex::default(),
+            written: Mutex::default(),
+            changed: Box::new(changed),
+        })
     }
 
-    /// Answers what the view asks: the result of `method`.
+    /// Answers what the view asks: the result of `method`. Writes resolve as soon as their own answer arrives and
+    /// invalidate cached reads in the background (TanStack Query `invalidateQueries` / `onSuccess`).
     pub async fn request(self: &Arc<Self>, method: &str, params: Value) -> Result<Value> {
         if self.reads(method, &params).await {
             return self.read(method, params).await;
         }
-        let response = self.client.request(method, params).await?;
-        self.refresh(None).await;
+        let response = self.client.request(method, params.clone()).await?;
+        if changes_tools(method, &params) {
+            self.client.refresh_listed();
+        }
+        self.invalidate(None);
         Ok(response)
+    }
+
+    /// Marks matching cached reads as stale and spawns an independent background refetch for each.
+    pub fn invalidate(self: &Arc<Self>, app: Option<&str>) {
+        *self.written.lock().expect("no view panics") = Some(SystemTime::now());
+        let prefix = app.map(|app| format!("{app}_"));
+        let mut spawned = Vec::new();
+        {
+            let mut responses = self.responses.lock().expect("no view panics");
+            for (key, query) in responses.iter_mut() {
+                if !matches_app(&query.method, &query.params, prefix.as_deref()) {
+                    continue;
+                }
+                query.invalidated += 1;
+                let generation = query.invalidated;
+                let (tx, rx) = watch::channel(None);
+                query.fetching = Some((generation, rx));
+                spawned.push((key.clone(), query.method.clone(), query.params.clone(), generation, tx));
+            }
+        }
+        for (key, method, params, generation, tx) in spawned {
+            let shown = self.clone();
+            tokio::spawn(async move { shown.fetch(key, method, params, generation, Some(tx)).await });
+        }
     }
 
     /// Asks the server again for everything the view was answered, or with `app`, the tools of that app, which is
-    /// all a server says changed when it's one's call that did (`notifications/one/changed`), and tells the view if
-    /// any of it changed.
+    /// all a server says changed when it's one's call that did (`notifications/one/changed`), and tells the view as
+    /// each answer changes.
     pub async fn refresh(&self, app: Option<&str>) {
         let prefix = app.map(|app| format!("{app}_"));
-        let requests: Vec<String> = (self.responses.lock().expect("no view panics").iter())
-            .filter(|(_, (method, params, _))| {
-                prefix.as_ref().is_none_or(|prefix| {
-                    *method == "tools/call" && params["name"].as_str().is_some_and(|name| name.starts_with(prefix))
-                })
-            })
-            .map(|(request, _)| request.clone())
-            .collect();
-        self.refresh_for(requests).await
+        let mut asks = Vec::new();
+        let mut waiting = Vec::new();
+        {
+            let responses = self.responses.lock().expect("no view panics");
+            for (key, query) in responses.iter() {
+                if !matches_app(&query.method, &query.params, prefix.as_deref()) {
+                    continue;
+                }
+                // A post-write invalidation refetch is already on its way to the server; join it rather than
+                // sending a duplicate RPC when `notifications/one/changed` arrives for the same write.
+                if query.fetched < query.invalidated
+                    && let Some((_, rx)) = &query.fetching
+                {
+                    waiting.push(rx.clone());
+                } else {
+                    asks.push((key.clone(), query.method.clone(), query.params.clone(), query.invalidated));
+                }
+            }
+        }
+        let fetches = asks.into_iter().map(|(key, method, params, generation)| async move {
+            self.fetch(key, method, params, generation, None).await;
+        });
+        let joins = waiting.into_iter().map(|mut rx| async move {
+            let _ = rx.wait_for(Option::is_some).await;
+        });
+        tokio::join!(join_all(fetches), join_all(joins));
     }
 
     async fn read(self: &Arc<Self>, method: &str, params: Value) -> Result<Value> {
-        let request = json!([method, params]).to_string();
-        if let Some((_, _, response)) = self.responses.lock().expect("no view panics").get(&request) {
-            return Ok(response.clone());
+        let key = json!([method, params]).to_string();
+        loop {
+            let wait = {
+                let mut responses = self.responses.lock().expect("no view panics");
+                if let Some(query) = responses.get_mut(&key) {
+                    if query.fetched >= query.invalidated {
+                        return Ok(query.response.clone());
+                    }
+                    match &query.fetching {
+                        Some((at, rx)) if *at == query.invalidated => Some(rx.clone()),
+                        _ => {
+                            let generation = query.invalidated;
+                            let (tx, rx) = watch::channel(None);
+                            query.fetching = Some((generation, rx.clone()));
+                            let (m, p) = (query.method.clone(), query.params.clone());
+                            let shown = self.clone();
+                            let k = key.clone();
+                            tokio::spawn(async move { shown.fetch(k, m, p, generation, Some(tx)).await });
+                            Some(rx)
+                        }
+                    }
+                } else {
+                    None
+                }
+            };
+            if let Some(mut rx) = wait {
+                let ok = rx.wait_for(Option::is_some).await.ok().and_then(|v| *v).unwrap_or(false);
+                let responses = self.responses.lock().expect("no view panics");
+                if let Some(query) = responses.get(&key) {
+                    if query.fetched >= query.invalidated || !ok {
+                        return Ok(query.response.clone());
+                    }
+                    // A newer write invalidated this query while we awaited an earlier fetch; wait for the newer one.
+                    continue;
+                }
+            }
+            let written = *self.written.lock().expect("no view panics");
+            let disk = self.client.cached_entry(method, &params);
+            let usable = disk.as_ref().is_some_and(|(_, modified)| {
+                written.is_none_or(|at| modified.is_some_and(|m| m >= at))
+            });
+            let (response, revalidate) = if usable {
+                (disk.expect("usable implies Some").0, true)
+            } else {
+                match self.client.fresh(method, &params).await {
+                    Ok(fresh) => {
+                        if *self.written.lock().expect("no view panics") != written {
+                            continue;
+                        }
+                        (fresh, false)
+                    }
+                    Err(error) => match disk {
+                        Some((cached, _)) => (cached, false),
+                        None => return Err(error),
+                    },
+                }
+            };
+            self.responses.lock().expect("no view panics").entry(key.clone()).or_insert_with(|| Query {
+                method: method.to_owned(),
+                params: params.clone(),
+                response: response.clone(),
+                invalidated: 0,
+                fetched: 0,
+                fetching: None,
+            });
+            if revalidate {
+                let shown = self.clone();
+                let (m, p) = (method.to_owned(), params);
+                tokio::spawn(async move { shown.fetch(key, m, p, 0, None).await });
+            }
+            return Ok(response);
         }
-        let (response, cached) = match self.client.cached(method, &params) {
-            Some(response) => (response, true),
-            None => (self.client.fresh(method, &params).await?, false),
-        };
-        self.responses
-            .lock()
-            .expect("no view panics")
-            .insert(request.clone(), (method.to_owned(), params, response.clone()));
-        if cached {
-            let shown = self.clone();
-            tokio::spawn(async move { shown.refresh_for(vec![request]).await });
-        }
-        Ok(response)
     }
 
-    async fn refresh_for(&self, requests: Vec<String>) {
-        let asks = requests.into_iter().filter_map(|request| {
-            let (method, params, _) = self.responses.lock().expect("no view panics").get(&request)?.clone();
-            Some(async move { (request, self.client.fresh(&method, &params).await) })
-        });
-        let mut changed = false;
-        for (request, fresh) in join_all(asks).await {
-            // With no server answering, what was kept stays what's shown.
-            let Ok(fresh) = fresh else { continue };
-            if let Some((_, _, response)) = self.responses.lock().expect("no view panics").get_mut(&request)
-                && *response != fresh
-            {
-                *response = fresh;
-                changed = true;
+    async fn fetch(
+        &self,
+        key: String,
+        method: String,
+        params: Value,
+        generation: u64,
+        done: Option<watch::Sender<Option<bool>>>,
+    ) {
+        let fresh = self.client.fresh(&method, &params).await;
+        let ok = fresh.is_ok();
+        let mut notify = false;
+        {
+            let mut responses = self.responses.lock().expect("no view panics");
+            if let Some(query) = responses.get_mut(&key) {
+                if query.fetching.as_ref().is_some_and(|(at, _)| *at == generation) {
+                    query.fetching = None;
+                }
+                // With no server answering, what was kept stays what's shown. Ignore any out-of-order response
+                // started before a newer invalidation or fetch.
+                if let Ok(fresh) = fresh
+                    && generation >= query.invalidated
+                    && generation >= query.fetched
+                {
+                    query.fetched = generation;
+                    if query.response != fresh {
+                        query.response = fresh;
+                        notify = true;
+                    }
+                }
             }
         }
-        if changed {
-            (self.changed)()
+        if let Some(tx) = done {
+            let _ = tx.send(Some(ok));
+        }
+        if notify {
+            (self.changed)();
         }
     }
 
     /// Whether asking `method` only reads. A tool does when the server's list of tools says so.
-    async fn reads(self: &Arc<Self>, method: &str, params: &Value) -> bool {
+    async fn reads(&self, method: &str, params: &Value) -> bool {
         match method {
             method if crate::resolve::READS.contains(&method) => true,
-            "tools/call" => {
-                let Ok(listed) = self.read("tools/list", json!({})).await else { return false };
-                let tools = listed["tools"].as_array().map(Vec::as_slice).unwrap_or_default();
-                tools.iter().any(|tool| tool["name"] == params["name"] && tool["annotations"]["readOnlyHint"] == true)
-            }
+            "tools/call" => self
+                .client
+                .reads(&json!({"method": method, "params": params}))
+                .await
+                .unwrap_or(false),
             _ => false,
         }
     }
+}
+
+fn matches_app(method: &str, params: &Value, prefix: Option<&str>) -> bool {
+    prefix.is_none_or(|prefix| method == "tools/call" && params["name"].as_str().is_some_and(|name| name.starts_with(prefix)))
+}
+
+/// Whether a write call may change the server's `tools/list`: One Core's own tools (no `_`) or `apps_*`.
+fn changes_tools(method: &str, params: &Value) -> bool {
+    method == "tools/call"
+        && params["name"]
+            .as_str()
+            .is_some_and(|name| !name.contains('_') || name.starts_with("apps_"))
 }
