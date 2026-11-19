@@ -37,7 +37,8 @@
 //!   what has it, what listens for `keydown` hears it, and an input edits by it as a Linux field does (Ctrl+C, X, V,
 //!   Z, Shift+Z, Y and A, Ctrl+arrows by word, Shift to select, Home and End), with a clipboard of the window's own
 //!   in the headless harness.
-//! - `scroll` (`dx`, `dy` in CSS pixels, and a selector of what's in what scrolls) → `{scrolled: {x, y}}`.
+//! - `scroll` (`dx`, `dy` in CSS pixels, and a selector of what's in what scrolls; `phase`, a trackpad's fingers' by
+//!   AppKit's names, and `momentum`, as a Mac says them, `view::Phase`) → `{scrolled: {x, y}}`.
 //! - `clock` (`pause`: true or false, `step`: ms, `seek`: ms since it started) → `{time, paused}`. The app's clock
 //!   (`Date`, `performance.now`, its timers) and the host's animations run on it. Paused, nothing is due until it's
 //!   stepped; a step runs each timer due in it at its own time, in order.

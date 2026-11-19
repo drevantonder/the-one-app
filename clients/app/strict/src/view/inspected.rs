@@ -153,7 +153,11 @@ impl Screen {
                 // What scrolls around the node selected, or the window.
                 let at = if request.selects() { self.rects.get(&inspect::one(&self.tree, request)?).map(|rect| rect.centre()) } else { None };
                 let (x, y) = at.unwrap_or((0.0, 0.0));
-                let scrolled = self.scroll(crate::geometry::point(x, y), crate::geometry::point(dx, dy)).and_then(|id| self.scrolled.get(&id).copied()).unwrap_or_default();
+                // The trackpad's phase, as a Mac's says it, where it's given.
+                let fingers = request.inputs.get("phase").and_then(Value::as_str).and_then(|named| super::Phase::FINGERS.into_iter().find(|one| *one == named));
+                let momentum = request.inputs.get("momentum").and_then(Value::as_bool);
+                let phase = (fingers.is_some() || momentum.is_some()).then(|| super::Phase { fingers, momentum: momentum.unwrap_or(false) });
+                let scrolled = self.scroll(crate::geometry::point(x, y), crate::geometry::point(dx, dy), phase).and_then(|id| self.scrolled.get(&id).copied()).unwrap_or_default();
                 json!({"scrolled": {"x": scrolled.x, "y": scrolled.y}})
             }
             "clock" => {

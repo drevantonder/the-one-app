@@ -21,7 +21,7 @@ use objc2::rc::Retained;
 use objc2::runtime::{AnyObject, NSObjectProtocol, ProtocolObject};
 use objc2::{DefinedClass, MainThreadMarker, MainThreadOnly, define_class, msg_send};
 use objc2_app_kit::{
-    NSAppearanceCustomization, NSApplication, NSBackingStoreType, NSCursor, NSEvent, NSEventModifierFlags, NSPanel, NSResponder, NSTrackingArea,
+    NSAppearanceCustomization, NSApplication, NSBackingStoreType, NSCursor, NSEvent, NSEventModifierFlags, NSEventPhase, NSPanel, NSResponder, NSTrackingArea,
     NSTrackingAreaOptions, NSView, NSViewLayerContentsRedrawPolicy, NSWindow, NSWindowDelegate, NSWindowStyleMask, NSWindowTabbingMode,
     NSWindowTitleVisibility,
 };
@@ -34,6 +34,7 @@ use crate::editing::{TextInput, TextInputClient};
 use crate::inspect::Key;
 use crate::geometry::{DevicePixels, Pixels, Point, Size};
 use crate::platform::{Input, WindowId, WindowOptions};
+use crate::view::Phase;
 
 /// What AppKit said, queued for the strict thread, which `ping` wakes.
 #[derive(Clone)]
@@ -525,7 +526,16 @@ define_class!(
             // content, so the DOM's, which move the view, are the other way.
             let per = if event.hasPreciseScrollingDeltas() { 1.0 } else { 40.0 };
             let delta = Point { x: -(event.scrollingDeltaX() as f32) * per, y: -(event.scrollingDeltaY() as f32) * per };
-            self.ivars().shared.send(Input::Wheel(self.at(event), delta));
+            // A trackpad's fingers' phase, and the momentum AppKit goes on with once they've lifted; a wheel has neither.
+            let (fingers, momentum) = (event.phase(), event.momentumPhase());
+            let phase = (fingers != NSEventPhase::None || momentum != NSEventPhase::None).then(|| Phase {
+                fingers: [NSEventPhase::Began, NSEventPhase::Changed, NSEventPhase::Ended, NSEventPhase::Cancelled, NSEventPhase::MayBegin]
+                    .iter()
+                    .position(|one| *one == fingers)
+                    .map(|at| Phase::FINGERS[at]),
+                momentum: momentum != NSEventPhase::None,
+            });
+            self.ivars().shared.send(Input::Wheel(self.at(event), delta, phase));
         }
     }
 

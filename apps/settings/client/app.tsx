@@ -4,7 +4,7 @@
 // component (`settings.sections`), drawn here if the app is trusted and by its page in a frame if it isn't, as the
 // Vault draws an item type's. Updates and an app's page are Settings' own.
 import { createMemo, createSignal, Errored, For, Loading, refresh, Show } from "solid-js"
-import { Badge, Button, call, changed, client, component, confirm, Empty, Frame, History, Image, link, List, ListStyle, Problem, render, Row, Screen, Search, Section, Skeleton, Spinner, Split, styles, Switch, Text, toast, tokens, View, viewport } from "ui"
+import { Badge, Box, Button, call, changed, client, component, confirm, Empty, Frame, History, Image, link, List, ListStyle, Problem, render, Row, Screen, Search, Section, Skeleton, Spinner, Split, styles, Switch, Text, toast, tokens, viewport } from "ui"
 
 /** What an app adds to Settings, as `settings_sections` answers it. */
 interface Added {
@@ -139,14 +139,14 @@ function Sidebar(props: { shown?: string }) {
   const own = () => wanted("Updates")
   return (
     <Screen heading="Settings">
-      <Search placeholder="Search settings…" aria-label="Search Settings" value={words()} onChangeText={setWords} />
+      <Search placeholder="Search settings…" aria-label="Search Settings" value={words()} onInput={(event) => setWords(event.currentTarget.value)} />
       <Show when={person() && !words()}>
         <List>
           <Row
             start={
-              <View style={look.avatar}>
+              <Box style={look.avatar}>
                 <Text style={look.initials}>{initials(me()?.called ?? "You")}</Text>
-              </View>
+              </Box>
             }
             heading={<Text style={look.personName}>{me()?.called ?? "You"}</Text>}
             text={person()!.name!}
@@ -228,10 +228,10 @@ function Groups(props: { in: Added["in"]; device?: string; kind?: string; server
       {(one) => (
         <Section
           heading={
-            <View style={look.heading}>
+            <Box style={look.heading}>
               <Tile icon={one().app_icon} small />
               <Text>{one().title}</Text>
-            </View>
+            </Box>
           }
         >
           <Show

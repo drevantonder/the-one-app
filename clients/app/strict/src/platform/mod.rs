@@ -529,7 +529,7 @@ impl Windows {
             Input::Left => screen.pointer_left(),
             Input::Down(at, button, shift) => screen.pointer_down(at, button, shift),
             Input::Up(at, button) => screen.pointer_up(at, button),
-            Input::Wheel(at, delta) => drop(screen.scroll(at, delta)),
+            Input::Wheel(at, delta, phase) => drop(screen.scroll(at, delta, phase)),
             Input::Key(key) => {
                 // Ctrl-W and Ctrl-Q close the window, as a Linux or Windows app's do (a Mac's is ⌘W, its own).
                 if !cfg!(target_os = "macos") && key.ctrl && !key.alt && matches!(key.key.as_str(), "w" | "q") {
@@ -580,8 +580,9 @@ pub(crate) enum Input {
     /// numbers them.
     Down(crate::geometry::Point<f32>, u8, bool),
     Up(crate::geometry::Point<f32>, u8),
-    /// Scrolled along and down by so many pixels (left and up negative).
-    Wheel(crate::geometry::Point<f32>, crate::geometry::Point<f32>),
+    /// Scrolled along and down by so many pixels (left and up negative), in the trackpad's phase where the system
+    /// says it.
+    Wheel(crate::geometry::Point<f32>, crate::geometry::Point<f32>, Option<crate::view::Phase>),
     /// A key the page hears first, as Flutter's keyboard manager gives its framework each key.
     Key(crate::inspect::Key),
     /// What X11's input method composes or commits, which has no text input plugin.

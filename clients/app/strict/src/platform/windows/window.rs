@@ -560,7 +560,8 @@ fn handle_msg(hwnd: HWND, state: &State, msg: u32, wparam: WPARAM, lparam: LPARA
             unsafe {
                 let _ = ScreenToClient(hwnd, &mut point);
             }
-            push(Input::Wheel(at(point.x, point.y), delta));
+            // A wheel message says no precision touchpad's phase: Windows' own momentum comes as more of them.
+            push(Input::Wheel(at(point.x, point.y), delta, None));
             Some(0)
         }
         WM_KEYDOWN | WM_SYSKEYDOWN => {

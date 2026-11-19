@@ -158,7 +158,7 @@ impl Screen {
     pub fn pointer_cancel(&mut self, at: Point<f32>) {
         if let Some(captured) = self.captured.take() {
             let chain = self.chain_from(captured);
-            self.pointer_event(&chain, "pointercancel", at, 0, point(0.0, 0.0));
+            self.pointer_event(&chain, "pointercancel", at, 0, None);
         }
         self.states.pressed = None;
         self.selecting = None;

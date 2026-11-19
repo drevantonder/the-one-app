@@ -2,7 +2,7 @@
 // what's wrong; how often they're made and which are kept. A destination opens beside the list with its backups,
 // Restore, Check and Stop Backing Up Here. Backups are the network's, so every call is for the network.
 import { createMemo, createSignal, Errored, For, Loading, Match, refresh, Show, Switch } from "solid-js"
-import { Button, call, changed, confirm, createListCollection, Empty, Field, Input, List, Problem, RadioGroup, Row, Screen, Section, Select, Sheet, Skeleton, Split, Status, Text, toast, View } from "ui"
+import { Box, Button, call, changed, confirm, createListCollection, Empty, Field, Input, List, Problem, RadioGroup, Row, Screen, Section, Select, Sheet, Skeleton, Split, Status, Text, toast } from "ui"
 
 /** A backup made to a destination. */
 interface Backup {
@@ -158,13 +158,13 @@ function Opened(props: { destination: Destination }) {
           </List>
         </Section>
       </Show>
-      <View style={{ flexDirection: "row", flexWrap: "wrap", gap: "gutter", maxWidth: "readable" }}>
+      <Box style={{ flexDirection: "row", flexWrap: "wrap", gap: "gutter", maxWidth: "readable" }}>
         <Show when={destination().backups.length}>
           <Button variant="secondary" onClick={() => setRestoring(destination())}>Restore</Button>
           <Button variant="outline" loading={working() === "check"} onClick={check}>Check</Button>
         </Show>
         <Button variant="destructive" onClick={stop}>Stop Backing Up Here</Button>
-      </View>
+      </Box>
     </Screen>
   )
 }
@@ -177,7 +177,7 @@ function AddSheet(props: { machines: All["machines"] }) {
   const [typed, setTyped] = createSignal<Record<string, string>>({})
   const [missing, setMissing] = createSignal<string[]>([])
   const machines = () => createListCollection({ items: props.machines.map((machine) => ({ value: machine.key, label: machine.name ?? machine.key.slice(0, 8) })) })
-  const type = (name: string) => (text: string) => (setTyped({ ...typed(), [name]: text }), setMissing(missing().filter((one) => one !== name)))
+  const type = (name: string) => (event: { currentTarget: { value: string } }) => (setTyped({ ...typed(), [name]: event.currentTarget.value }), setMissing(missing().filter((one) => one !== name)))
   const required = () => (kind() === "folder" ? (props.machines.length ? ["folder"] : []) : ["endpoint", "bucket", "item"])
   const add = async () => {
     const empty = required().filter((name) => !typed()[name]?.trim())
@@ -203,23 +203,23 @@ function AddSheet(props: { machines: All["machines"] }) {
             <Select.Root collection={machines()} value={[machine() ?? props.machines[0].key]} onValueChange={({ value: [key] }) => setMachine(key)} />
           </Field>
           <Field label="Folder" hint="Its whole path on that machine." error={error("folder")}>
-            <Input placeholder="/mnt/disk/backups" autoCapitalize="none" autoCorrect={false} spellCheck={false} value={typed().folder} onChangeText={type("folder")} onSubmitEditing={add} required />
+            <Input placeholder="/mnt/disk/backups" autocapitalize="none" autocorrect={false} spellcheck={false} value={typed().folder} onInput={type("folder")} onAction={add} required />
           </Field>
         </Show>
       </Show>
       <Show when={kind() === "s3"}>
         <Field label="Endpoint" error={error("endpoint")}>
-          <Input inputMode="url" placeholder="https://<account>.r2.cloudflarestorage.com" value={typed().endpoint} onChangeText={type("endpoint")} onSubmitEditing={add} required />
+          <Input type="url" placeholder="https://<account>.r2.cloudflarestorage.com" value={typed().endpoint} onInput={type("endpoint")} onAction={add} required />
         </Field>
         <Field label="Bucket" error={error("bucket")}>
-          <Input placeholder="backups" autoCapitalize="none" autoCorrect={false} spellCheck={false} value={typed().bucket} onChangeText={type("bucket")} onSubmitEditing={add} required />
+          <Input placeholder="backups" autocapitalize="none" autocorrect={false} spellcheck={false} value={typed().bucket} onInput={type("bucket")} onAction={add} required />
         </Field>
         <Field label="Keys" hint="An item in Everyone's Vault with access_key_id and secret_access_key, switched on for Backups." error={error("item")}>
-          <Input placeholder="Backups Storage" value={typed().item} onChangeText={type("item")} onSubmitEditing={add} required />
+          <Input placeholder="Backups Storage" value={typed().item} onInput={type("item")} onAction={add} required />
         </Field>
       </Show>
       <Field label="Name" hint="What to call it. The folder's or the bucket's name if left empty.">
-        <Input value={typed().name} onChangeText={type("name")} onSubmitEditing={add} />
+        <Input value={typed().name} onInput={type("name")} onAction={add} />
       </Field>
       <Button loading={working() === "add"} disabled={kind() === "folder" && !props.machines.length} onClick={add}>Add</Button>
     </Sheet>
@@ -299,7 +299,7 @@ function Restore(props: { destination: Destination }) {
       </Loading>
       <Show when={what() === "file"}>
         <Field label="File" hint="Its whole name in the network, as users/alice/made/notes/7/photo.jpg." error={missing() && !file().trim() ? "Fill in this field." : undefined}>
-          <Input autoCapitalize="none" autoCorrect={false} spellCheck={false} value={file()} onChangeText={setFile} onSubmitEditing={restore} required />
+          <Input autocapitalize="none" autocorrect={false} spellcheck={false} value={file()} onInput={(event) => setFile(event.currentTarget.value)} onAction={restore} required />
         </Field>
       </Show>
       <Text style={{ color: "muted-foreground", font: "body" }}>Only what's gone comes back. Nothing that's there now changes.</Text>

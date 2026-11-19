@@ -13,9 +13,56 @@
 // carried onto any owner's pages. Where it is, what's open over it and the editing are one state machine (machine.ts),
 // whose snapshot is one signal here. It's written in strict mode, so a native host draws it as the DOM does.
 import { createEffect, createMemo, createSignal, Errored, flush, For, Loading, onSettled, refresh, Show, untrack } from "solid-js"
-import { WheelGestures } from "wheel-gestures"
+import { type WheelEventData, WheelGestures } from "wheel-gestures"
 import { createActor } from "xstate"
-import { Badge, Button, call, changed, client, confirm, covers, type Element, Empty, haptic, Icon, type IconName, Image, keydown, type Keyed, type Layout, leave, link, List, type Located, Menu, negative, open, pinShortcut, Pressable, type Pressed, type PressableProps, Problem, type Rect, reducedMotion, render, Row, safeArea, Search, Sheet, sizeChanged, Spinner, type Style, styles, Text, TextInput, toast, tokens, View, viewport, visible, type Wheeled, Widget } from "ui"
+import {
+  Badge,
+  Box,
+  negative,
+  styles,
+  tokens,
+  Button,
+  call,
+  changed,
+  client,
+  confirm,
+  covers,
+  type Element,
+  EditableText,
+  Empty,
+  haptic,
+  Icon,
+  type IconName,
+  Image,
+  keydown,
+  type Keyed,
+  type Layout,
+  leave,
+  link,
+  List,
+  type Located,
+  Menu,
+  open,
+  pinShortcut,
+  type Pressed,
+  Problem,
+  type Rect,
+  reducedMotion,
+  render,
+  Row,
+  safeArea,
+  Search,
+  Sheet,
+  sizeChanged,
+  Spinner,
+  type Style,
+  Text,
+  toast,
+  viewport,
+  visible,
+  type Wheeled,
+  Widget,
+} from "ui"
 import { give, glide, jump, settle, speed, spring, type Spring, stop } from "./pager.ts"
 import { at as gridAt, BAR, type Box as Place, cell as cellOf, DOTS, GAP, grid, halfHeight, INSET, launcherRoom, lefts, LIBRARY, MARGIN, measure, PAGE, page as pageOf, type Page as Laid, panelSize, PILLS, type Room, SEARCH, SEARCH_HEIGHT, TOP_ROW } from "./layout.ts"
 import { type At, carries, type Drop, type Editing, fitted, type Held, type Kind, machine, nearest, pack, type Page, type Placed, shown, spans } from "./machine.ts"
@@ -237,14 +284,14 @@ function Card(props: { item: WidgetItem; owner: Owner; still?: boolean }) {
     launch(props.item.opens, props.owner, false, { x, y, width, height, radius: 22 * (width / (props.item.size === "2x2" ? 170 : 352)) })
   }
   return (
-    <View style={{ position: "relative", display: "grid", flexGrow: 1 }}>
+    <Box style={{ position: "relative", display: "grid", flexGrow: 1 }}>
       <Errored fallback={(error) => <Widget name={props.item.name} size={props.item.size} problem={String((error() as Error).message ?? error())} />}>
         <Loading fallback={<Widget name={props.item.name} size={props.item.size} />}>
           <Widget name={props.item.name} size={props.item.size} layout={layout()} problem={problem()} onCall={props.still ? undefined : act} onOpen={problem() ? retry : props.item.opens ? opens : undefined} />
           <Refresh every={layout().refresh} then={again} />
         </Loading>
       </Errored>
-    </View>
+    </Box>
   )
 }
 
@@ -264,9 +311,9 @@ function Refresh(props: { every?: number; then: () => void }) {
 /// What waits in an app, as its app counts it (`badge`): a red count at its icon's corner, as an iPhone's.
 const Count = (props: { count?: number }) => (
   <Show when={props.count}>
-    <View aria-hidden="true" style={{ position: "absolute", top: -6, right: -6 }}>
+    <Box aria-hidden="true" style={{ position: "absolute", top: -6, right: -6 }}>
       <Badge variant="destructive">{props.count}</Badge>
-    </View>
+    </Box>
   </Show>
 )
 
@@ -279,20 +326,20 @@ function Tile(props: { name: string; icon: string; size: number; scale: number; 
     return { x: tile.x + (tile.width - size) / 2, y: tile.y, width: size, height: size, radius: size * 0.225 }
   }
   return (
-    <Pressable
+    <Box
       role="button"
       aria-label={props.name}
       aria-description={props.badge ? `${props.badge} waiting` : undefined}
       onPointerDown={(event) => event.button === 0 && props.onPress?.(true)}
-      onPress={(event) => tapping() && props.onPress?.(false, from(event))}
+      onClick={(event) => tapping() && props.onPress?.(false, from(event))}
       style={{ alignItems: "center", gap: 7, minWidth: 0, width: "100%" }}
     >
-      <View style={[looks.icon, looks.square(props.size)]}>
+      <Box style={[looks.icon, looks.square(props.size)]}>
         <Image src={src(props.icon)} alt="" style={{ width: props.size, height: props.size, borderRadius: "xl" }} />
         <Count count={props.badge} />
-      </View>
+      </Box>
       <Text style={{ font: "caption-1", lineClamp: 1, textAlign: "center", maxWidth: "100%" }}>{props.name}</Text>
-    </Pressable>
+    </Box>
   )
 }
 
@@ -305,7 +352,7 @@ const removal = (item: Item): Parameters<typeof confirm>[0] =>
 type Cell = { item: Item; index: number }
 
 /** What the Home Screen's gestures listen for on what they're given. */
-type Holds = Pick<PressableProps, "onPointerDown" | "onPointerMove" | "onPointerUp" | "onPointerCancel" | "onContextMenu">
+type Holds = Pick<Parameters<typeof Box>[0], "onPointerDown" | "onPointerMove" | "onPointerUp" | "onPointerCancel" | "onContextMenu">
 
 /// Watches a finger or a mouse on what it's given, for the Home Screen's gestures: a press held still is a hold, as is
 /// a right-click; a press that moves while editing, or once held, lifts it, and so does one held still a while longer
@@ -435,13 +482,13 @@ function HomePage(props: { owner: Owner; index: number; page: number; placed: Pl
   // Made once: what a press began, its later moves read.
   const gestures = holds(() => (editingHere() ? undefined : { page: props.page, index: -1, from: "page" }), arranges)
   return (
-    <View
+    <Box
       role="group"
       aria-label={`Page ${props.page + 1}`}
       {...gestures}
       style={{ position: "relative", width: props.laid.width, height: props.laid.height }}
     >
-      <Show when={props.placed.length || editingHere()} fallback={<View style={{ position: "absolute", top: props.laid.top, left: 0, right: 0 }}><Empty>No apps on this page.</Empty></View>}>
+      <Show when={props.placed.length || editingHere()} fallback={<Box style={{ position: "absolute", top: props.laid.top, left: 0, right: 0 }}><Empty>No apps on this page.</Empty></Box>}>
         <For each={props.placed} keyed={({ item }) => (item.item.widget ?? item.item.entrypoint) + (item.item.size ?? "")}>
           {(placed) => (
             <HomeCell
@@ -464,7 +511,7 @@ function HomePage(props: { owner: Owner; index: number; page: number; placed: Pl
           )}
         </For>
       </Show>
-    </View>
+    </Box>
   )
 }
 
@@ -521,7 +568,7 @@ function HomeCell(props: {
     return now?.owner === props.index && now.page === props.page && now.index === props.placed.item.index
   }
   return (
-    <View
+    <Box
       {...gestures}
       onPointerMove={(event) => (props.onPoint(), gestures.onPointerMove?.(event))}
       style={{
@@ -538,12 +585,12 @@ function HomeCell(props: {
     >
       <Show when={props.picked}>
         {/* What's chosen has the highlight behind it: an app's, and a widget's own tint brightened by it. */}
-        <View aria-hidden="true" style={looks.chosen} />
+        <Box aria-hidden="true" style={looks.chosen} />
       </Show>
       <Show
         when={widget()}
         fallback={
-          <View style={{ position: "relative", opacity: props.waiting ? 0.45 : 1 }}>
+          <Box style={{ position: "relative", opacity: props.waiting ? 0.45 : 1 }}>
             <Tile
               name={(item() as Entrypoint).name}
               icon={(item() as Entrypoint).icon}
@@ -552,34 +599,34 @@ function HomeCell(props: {
               badge={badgeOf(item() as Entrypoint, props.owner)}
               onPress={(behind, from) => state().matches("nothing") && launch(item() as Entrypoint, props.owner, behind, from)}
             />
-          </View>
+          </Box>
         }
       >
         <Card item={item() as WidgetItem} owner={props.owner} still={props.small || props.jiggles} />
       </Show>
       <Show when={props.waiting && state().matches({ editing: "installing" })}>
-        <View role="status" aria-label={`Installing ${item().name}`} style={{ position: "absolute", top: props.laid.tile / 2 - 16, left: box().width / 2 - 16, width: 32, height: 32, borderRadius: "full", backgroundColor: "overlay", color: "primary-foreground", alignItems: "center", justifyContent: "center" }}>
+        <Box role="status" aria-label={`Installing ${item().name}`} style={{ position: "absolute", top: props.laid.tile / 2 - 16, left: box().width / 2 - 16, width: 32, height: 32, borderRadius: "full", backgroundColor: "overlay", color: "primary-foreground", alignItems: "center", justifyContent: "center" }}>
           <Spinner />
-        </View>
+        </Box>
       </Show>
       <Show when={props.jiggles && props.onRemove}>
         <Minus label={`Remove ${item().name}`} left={widget() ? -6 : Math.max(0, (box().width - props.laid.tile) / 2 - 8)} top={-6} onPress={() => props.onRemove?.()} />
       </Show>
-    </View>
+    </Box>
   )
 }
 
 /// ⊖, at the corner of what it takes off: pressed, not held or lifted.
 function Minus(props: { label: string; left: number; top: number; onPress: () => void }) {
   return (
-    <Pressable
+    <Box
       role="button"
       aria-label={props.label}
-      onPress={() => tapping() && props.onPress()}
+      onClick={() => tapping() && props.onPress()}
       style={{ position: "absolute", zIndex: 2, left: props.left, top: props.top, width: 24, height: 24, borderRadius: "full", backgroundColor: "muted-foreground", color: "background", alignItems: "center", justifyContent: "center" }}
     >
       <Icon name="minus" />
-    </Pressable>
+    </Box>
   )
 }
 
@@ -662,17 +709,17 @@ function Library(props: { owner: Owner; size?: { width: number; height: number }
   const open = () => (searching() ? !shut() : unfolded())
   // Components, not JSX made again whenever the App Library's asked again: its rows stay, each with its icon.
   const Categories = (inner: { list: Category[]; prefix: string }) => (
-    <View style={{ display: "grid", gridTemplateColumns: `repeat(${laid().across}, 1fr)`, gap: 20 }}>
+    <Box style={{ display: "grid", gridTemplateColumns: `repeat(${laid().across}, 1fr)`, gap: 20 }}>
       <For each={inner.list} keyed={(category) => category.category}>
         {(category) => {
           const key = () => inner.prefix + category().category
           const shown = () => (category().entrypoints.length > 4 ? category().entrypoints.slice(0, 3) : category().entrypoints)
           return (
-            <View style={{ alignItems: "center", gap: 6, minWidth: 0 }}>
-              <Pressable
+            <Box style={{ alignItems: "center", gap: 6, minWidth: 0 }}>
+              <Box
                 role="group"
                 aria-label={category().category}
-                onPress={opening(key)}
+                onClick={opening(key)}
                 style={{
                   display: "grid",
                   gridTemplateColumns: "repeat(2, 1fr)",
@@ -686,74 +733,74 @@ function Library(props: { owner: Owner; size?: { width: number; height: number }
                   position: "relative",
                 }}
               >
-                <View aria-hidden="true" style={looks.tint} />
+                <Box aria-hidden="true" style={looks.tint} />
                 <For each={shown()} keyed={(entrypoint) => entrypoint.entrypoint ?? entrypoint.app}>
                   {(entrypoint) => <LibraryEntrypoint entrypoint={entrypoint()} owner={props.owner} icon={laid().icon} small />}
                 </For>
                 <Show when={category().entrypoints.length > 4}>
-                  <Pressable role="button" aria-label={`All of ${category().category}`} onPress={opening(key)} style={{ display: "grid", gridTemplateColumns: "repeat(2, 1fr)", gap: 5, alignSelf: "center", justifyContent: "center", width: laid().icon + 14, height: laid().icon + 14, marginInline: "auto" }}>
+                  <Box role="button" aria-label={`All of ${category().category}`} onClick={opening(key)} style={{ display: "grid", gridTemplateColumns: "repeat(2, 1fr)", gap: 5, alignSelf: "center", justifyContent: "center", width: laid().icon + 14, height: laid().icon + 14, marginInline: "auto" }}>
                     <For each={category().entrypoints.slice(3, 7)} keyed={(entrypoint) => entrypoint.entrypoint ?? entrypoint.app}>
                       {(entrypoint) => <Image src={src(entrypoint().icon)} alt="" style={{ width: (laid().icon + 9) / 2, height: (laid().icon + 9) / 2, borderRadius: "md" }} />}
                     </For>
-                  </Pressable>
+                  </Box>
                 </Show>
-              </Pressable>
+              </Box>
               {/* Its apps take the focus, and its small icons, which open it, so its name doesn't again: it's for a finger. */}
-              <Pressable onPress={opening(key)} style={{ maxWidth: "100%" }}>
+              <Box onClick={opening(key)} style={{ maxWidth: "100%" }}>
                 <Text style={{ font: "footnote", color: "muted-foreground", lineClamp: 1 }}>{category().category}</Text>
-              </Pressable>
-            </View>
+              </Box>
+            </Box>
           )
         }}
       </For>
-    </View>
+    </Box>
   )
   const Found = (inner: { list: Listed[] }) => (
-    <View style={{ display: "grid", gridTemplateColumns: `repeat(${laid().found}, 1fr)`, rowGap: 16, columnGap: 12 }}>
+    <Box style={{ display: "grid", gridTemplateColumns: `repeat(${laid().found}, 1fr)`, rowGap: 16, columnGap: 12 }}>
       <For each={inner.list} keyed={(entrypoint) => entrypoint.entrypoint ?? entrypoint.app}>
         {(entrypoint) => <LibraryEntrypoint entrypoint={entrypoint()} owner={props.owner} icon={60} />}
       </For>
-    </View>
+    </Box>
   )
   return (
-    <View role="region" aria-label="App Library" style={{ width: props.size?.width ?? room().width, height: props.size?.height ?? room().height, flexShrink: 0 }}>
+    <Box role="region" aria-label="App Library" style={{ width: props.size?.width ?? room().width, height: props.size?.height ?? room().height, flexShrink: 0 }}>
       <Show when={!launcher()}>
-        <View style={{ paddingTop: room().safe.top + (TOP_ROW - BAR) / 2, paddingBottom: (TOP_ROW - BAR) / 2 - 12, alignItems: "center" }}>
-          <View style={{ width: Math.min(room().width - 2 * BAR - 16, 384) }}>
-            <Search placeholder="App Library" aria-label="Search the App Library" value={query()} onChangeText={(text) => (setQuery(text), setShut(false))} />
-          </View>
-        </View>
+        <Box style={{ paddingTop: room().safe.top + (TOP_ROW - BAR) / 2, paddingBottom: (TOP_ROW - BAR) / 2 - 12, alignItems: "center" }}>
+          <Box style={{ width: Math.min(room().width - 2 * BAR - 16, 384) }}>
+            <Search placeholder="App Library" aria-label="Search the App Library" value={query()} onInput={(event) => (setQuery(event.currentTarget.value), setShut(false))} />
+          </Box>
+        </Box>
       </Show>
-      <View style={{ flexGrow: 1, flexBasis: 0, overflow: "scroll", paddingInline: inline(), paddingTop: props.size ? 0 : 12, paddingBottom: props.size ? 0 : 96 + room().safe.bottom }}>
-        <View style={{ gap: 20, width: width(), marginInline: "auto" }}>
+      <Box style={{ flexGrow: 1, flexBasis: 0, overflow: "scroll", paddingInline: inline(), paddingTop: props.size ? 0 : 12, paddingBottom: props.size ? 0 : 96 + room().safe.bottom }}>
+        <Box style={{ gap: 20, width: width(), marginInline: "auto" }}>
           <Show when={searching() ? found(false).length || found(true).length : props.owner.library.length} fallback={<Empty>{searching() ? "No apps match." : "No apps yet."}</Empty>}>
             <Show when={searching()} fallback={<Show when={apps().length}><Categories list={apps()} prefix="" /></Show>}>
               <Show when={found(false).length}><Found list={found(false)} /></Show>
             </Show>
             <Show when={searching() ? found(true).length : background().length}>
-              <View role="region" aria-label="Background Apps" style={{ gap: 12 }}>
-                <Pressable
+              <Box role="region" aria-label="Background Apps" style={{ gap: 12 }}>
+                <Box
                   role="button"
                   aria-expanded={open() ? "true" : "false"}
-                  onPress={() => (searching() ? setShut(!shut()) : unfold(!unfolded()))}
+                  onClick={() => (searching() ? setShut(!shut()) : unfold(!unfolded()))}
                   style={{ flexDirection: "row", alignItems: "center", alignSelf: "flex-start", gap: 4, marginBlock: 4, paddingBlock: 4, color: "muted-foreground" }}
                 >
                   <Text style={{ font: "subheadline" }}>Background Apps</Text>
-                  <View style={{ rotate: open() ? 90 : 0, scale: 0.875 }}>
+                  <Box style={{ rotate: open() ? 90 : 0, scale: 0.875 }}>
                     <Icon name="caret-right" along />
-                  </View>
-                </Pressable>
+                  </Box>
+                </Box>
                 <Show when={open()}>
                   <Show when={searching()} fallback={<Categories list={background()} prefix={BEHIND} />}>
                     <Found list={found(true)} />
                   </Show>
                 </Show>
-              </View>
+              </Box>
             </Show>
           </Show>
-        </View>
-      </View>
-    </View>
+        </Box>
+      </Box>
+    </Box>
   )
 }
 
@@ -768,7 +815,7 @@ function LibraryEntrypoint(props: { entrypoint: Listed; owner: Owner; icon: numb
   }
   const held = holds(() => ({ item: opens(props.entrypoint), listed: props.entrypoint, page: 0, index: -1, from: "library" }), () => true)
   return (
-    <Pressable
+    <Box
       role="button"
       aria-label={props.entrypoint.name}
       aria-description={badge() ? `${badge()} waiting` : undefined}
@@ -777,18 +824,18 @@ function LibraryEntrypoint(props: { entrypoint: Listed; owner: Owner; icon: numb
         if (state().matches("nothing") && opens(props.entrypoint)) launch(opens(props.entrypoint)!, props.owner, true)
         held.onPointerDown?.(event)
       }}
-      onPress={(event) => {
+      onClick={(event) => {
         pressedApp = Date.now()
         if (tapping() && state().matches("nothing")) press(props.entrypoint, props.owner, false, from(event))
       }}
       style={{ alignItems: "center", gap: props.small ? 4 : 6, minWidth: 0 }}
     >
-      <View style={{ position: "relative", width: props.icon, height: props.icon }}>
+      <Box style={{ position: "relative", width: props.icon, height: props.icon }}>
         <Image src={src(props.entrypoint.icon)} alt="" style={{ width: props.icon, height: props.icon, borderRadius: "xl" }} />
         <Count count={badge()} />
-      </View>
+      </Box>
       <Text style={{ font: props.small ? "caption-2" : "caption-1", lineClamp: 1, textAlign: "center", maxWidth: "100%" }}>{props.entrypoint.name}</Text>
-    </Pressable>
+    </Box>
   )
 }
 /// When an app in the App Library was last pressed, which its category's square, under it, doesn't take as its own.
@@ -877,30 +924,30 @@ function OpenCategory(props: { owner: Owner; opened: string; within?: Rect }) {
   }
   const tile = () => Math.min(60, 88 - 28)
   return (
-    <View
+    <Box
       role="dialog"
       aria-label={category()?.category}
       style={{ position: "absolute", top: 0, left: 0, width: room().width, height: viewport().height, zIndex: 10, pointerEvents: phase() === "closing" ? "none" : "auto" }}
     >
       {/* What's behind blurs through a veil. */}
-      <Pressable aria-hidden="true" onPress={close} style={[looks.cover, looks.frosted, props.within && looks.round, props.within && looks.at(area().x, area().y, area().width, area().height), looks.opacity(t())]} />
+      <Box aria-hidden="true" onClick={close} style={[looks.cover, looks.frosted, props.within && looks.round, props.within && looks.at(area().x, area().y, area().width, area().height), looks.opacity(t())]} />
       <Text role="heading" aria-level={2} style={{ position: "absolute", left: area().x, width: area().width, top: panel().y - 54, font: "title", textAlign: "center", opacity: t(), translateY: moving() ? 12 * (1 - t()) : 0 }}>
         {category()?.category}
       </Text>
-      <View style={[looks.panel, looks.at(shape().x, shape().y, shape().width, shape().height), looks.opacity(moving() ? 1 : t())]}>
-        <View style={[looks.inPanel, looks.at((shape().width - panel().width) / 2, (shape().height - panel().height) / 2, panel().width, panel().height)]}>
-          <View style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", rowGap: 16, columnGap: 12, opacity: Math.max(0, (t() - 0.3) / 0.7) }}>
+      <Box style={[looks.panel, looks.at(shape().x, shape().y, shape().width, shape().height), looks.opacity(moving() ? 1 : t())]}>
+        <Box style={[looks.inPanel, looks.at((shape().width - panel().width) / 2, (shape().height - panel().height) / 2, panel().width, panel().height)]}>
+          <Box style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", rowGap: 16, columnGap: 12, opacity: Math.max(0, (t() - 0.3) / 0.7) }}>
             <For each={category()?.entrypoints ?? []} keyed={(entrypoint) => entrypoint.entrypoint ?? entrypoint.app}>
               {(entrypoint) => (
-                <View style={{ height: 88 }}>
+                <Box style={{ height: 88 }}>
                   <Tile name={entrypoint().name} icon={entrypoint().icon} size={tile()} scale={1} badge={badgeOf(entrypoint() as Entrypoint, props.owner)} onPress={(behind, from) => phase() === "open" && press(entrypoint(), props.owner, behind, from)} />
-                </View>
+                </Box>
               )}
             </For>
-          </View>
-        </View>
-      </View>
-    </View>
+          </Box>
+        </Box>
+      </Box>
+    </Box>
   )
 }
 
@@ -992,19 +1039,19 @@ function Holding(props: { owner: Owner; index: number; held: Held }) {
   const [copyWidth, copyHeight] = [held.width / scale, held.height / scale]
   const tile = untrack(laidPage).tile
   return (
-    <View style={{ position: "absolute", top: 0, left: 0, width: room().width, height: viewport().height, zIndex: 20 }}>
+    <Box style={{ position: "absolute", top: 0, left: 0, width: room().width, height: viewport().height, zIndex: 20 }}>
       {/* The Home Screen blurs through a veil under what's held, and its menu floats in glass, as a window does. */}
-      <Pressable aria-hidden="true" onPress={dismiss} style={[looks.cover, looks.frosted, looks.opacity(Math.min(1, grow.value() * 2))]} />
+      <Box aria-hidden="true" onClick={dismiss} style={[looks.cover, looks.frosted, looks.opacity(Math.min(1, grow.value() * 2))]} />
       <Show when={item ?? (props.held.listed as Item | undefined)}>
         {(item) => (
-          <View aria-hidden="true" style={{ position: "absolute", display: "grid", left: held.x + (held.width - copyWidth) / 2, top: held.y + (held.height - copyHeight) / 2, width: copyWidth, height: copyHeight, scale: scale * (1 + 0.06 * motion()), pointerEvents: "none" }}>
+          <Box aria-hidden="true" style={{ position: "absolute", display: "grid", left: held.x + (held.width - copyWidth) / 2, top: held.y + (held.height - copyHeight) / 2, width: copyWidth, height: copyHeight, scale: scale * (1 + 0.06 * motion()), pointerEvents: "none" }}>
             <Show when={item().widget} fallback={library ? <Image src={src((item() as Entrypoint).icon)} alt="" style={{ width: copyWidth, height: copyWidth, borderRadius: "xl" }} /> : <Tile name={(item() as Entrypoint).name} icon={(item() as Entrypoint).icon} size={tile} scale={scale} />}>
               <Card item={item() as WidgetItem} owner={props.owner} still />
             </Show>
-          </View>
+          </Box>
         )}
       </Show>
-      <View
+      <Box
         role="menu"
         aria-label={(item ?? props.held.listed)?.name}
         style={[
@@ -1015,9 +1062,9 @@ function Holding(props: { owner: Owner; index: number; held: Held }) {
       >
         <Show when={library && props.held.listed}>
           {(listed) => (
-            <View style={{ paddingInline: 16, paddingBlock: 10, borderBottomWidth: 1 }}>
+            <Box style={{ paddingInline: 16, paddingBlock: 10, borderBottomWidth: 1 }}>
               <Text style={{ font: "footnote", color: "muted-foreground" }}>Installed for {whose(listed().installed.for)}</Text>
-            </View>
+            </Box>
           )}
         </Show>
         <Show when={!library}>
@@ -1032,27 +1079,27 @@ function Holding(props: { owner: Owner; index: number; held: Held }) {
         <Show when={item || props.held.listed}>
           <HoldItem label={item?.widget ? "Remove Widget" : "Remove App"} why={cant()} icon="minus-circle" destructive={!cant()} onPress={library ? uninstalls : removing} />
         </Show>
-      </View>
-    </View>
+      </Box>
+    </Box>
   )
 }
 
 /// One of what can be done with what's held: its words, why it can't be done if it can't, greyed, and its icon.
 function HoldItem(props: { label: string; why?: string; icon: IconName; destructive?: boolean; onPress: () => void }) {
   return (
-    <Pressable
+    <Box
       role="menuitem"
       aria-disabled={props.why ? "true" : undefined}
       aria-description={props.why}
-      onPress={() => !props.why && props.onPress()}
+      onClick={() => !props.why && props.onPress()}
       style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 16, minHeight: 44, paddingInline: 16, paddingBlock: props.why ? 10 : 0, borderTopWidth: 1, color: props.why ? "muted-foreground" : props.destructive ? "destructive" : undefined }}
     >
-      <View style={{ flexShrink: 1 }}>
+      <Box style={{ flexShrink: 1 }}>
         <Text>{props.label}</Text>
         <Show when={props.why}>{(why) => <Text style={{ font: "footnote", color: "muted-foreground" }}>{why()}</Text>}</Show>
-      </View>
+      </Box>
       <Icon name={props.icon} />
-    </Pressable>
+    </Box>
   )
 }
 
@@ -1150,21 +1197,21 @@ function Gallery(props: { owner: Owner }) {
         }
       >
         {(widget) => (
-          <View style={{ gap: 16 }}>
-            <View role="radiogroup" aria-label="Size" style={{ flexDirection: "row", gap: 16, overflow: "scroll", padding: 4 }}>
+          <Box style={{ gap: 16 }}>
+            <Box role="radiogroup" aria-label="Size" style={{ flexDirection: "row", gap: 16, overflow: "scroll", padding: 4 }}>
               <For each={widget().sizes}>
                 {(one) => (
-                  <Pressable role="radio" aria-checked={size() === one ? "true" : "false"} aria-label={SIZES[one]} onPress={() => setSize(one)} style={{ alignItems: "center", gap: 8, flexShrink: 0, color: size() === one ? "foreground" : "muted-foreground" }}>
-                    <View style={{ display: "grid", width: PREVIEW[one][0], height: PREVIEW[one][1], padding: 2, borderRadius: "xl", borderWidth: size() === one ? 1 : 0, borderColor: "muted-foreground", pointerEvents: "none" }}>
+                  <Box role="radio" aria-checked={size() === one ? "true" : "false"} aria-label={SIZES[one]} onClick={() => setSize(one)} style={{ alignItems: "center", gap: 8, flexShrink: 0, color: size() === one ? "foreground" : "muted-foreground" }}>
+                    <Box style={{ display: "grid", width: PREVIEW[one][0], height: PREVIEW[one][1], padding: 2, borderRadius: "xl", borderWidth: size() === one ? 1 : 0, borderColor: "muted-foreground", pointerEvents: "none" }}>
                       <Card item={{ ...widget(), size: one }} owner={props.owner} still />
-                    </View>
+                    </Box>
                     <Text style={{ font: "footnote" }}>{SIZES[one]}</Text>
-                  </Pressable>
+                  </Box>
                 )}
               </For>
-            </View>
+            </Box>
             <Button onClick={add}>Add Widget</Button>
-          </View>
+          </Box>
         )}
       </Show>
     </Sheet>
@@ -1249,16 +1296,16 @@ function Overview(props: { owner: Owner; index: number; going?: boolean }) {
   const scale = MINIATURE / THUMB.width
   return (
     // Over the blurred Home Screen, it fades out as it closes; its miniatures float, with a window's shadow.
-    <View role="dialog" aria-label="Pages" style={[looks.overview, props.going && looks.gone, looks.at(0, 0, room().width, viewport().height)]}>
-      <View style={{ flexDirection: "row", justifyContent: "flex-end", alignItems: "center", paddingTop: room().safe.top, height: room().safe.top + TOP_ROW, paddingInline: 16 }}>
+    <Box role="dialog" aria-label="Pages" style={[looks.overview, props.going && looks.gone, looks.at(0, 0, room().width, viewport().height)]}>
+      <Box style={{ flexDirection: "row", justifyContent: "flex-end", alignItems: "center", paddingTop: room().safe.top, height: room().safe.top + TOP_ROW, paddingInline: 16 }}>
         <Button variant="secondary" onClick={() => home.send({ type: "dismiss" })}>Done</Button>
-      </View>
-      <View style={{ flexGrow: 1, flexBasis: 0, overflow: "scroll", paddingTop: 16, paddingInline: 24, paddingBottom: 48 + room().safe.bottom }}>
+      </Box>
+      <Box style={{ flexGrow: 1, flexBasis: 0, overflow: "scroll", paddingTop: 16, paddingInline: 24, paddingBottom: 48 + room().safe.bottom }}>
         {/* Each in its place by where it is in the pages, so that, as one's dragged past the others, they glide to theirs. */}
-        <View style={[looks.slots, looks.tall(Math.ceil(pages().length / across()) * pitch().y - 24)]}>
+        <Box style={[looks.slots, looks.tall(Math.ceil(pages().length / across()) * pitch().y - 24)]}>
           <For each={pages()}>
             {(page, index) => (
-              <View
+              <Box
                 style={[
                   looks.slot,
                   carried() === page ? looks.carried : looks.gliding,
@@ -1266,36 +1313,36 @@ function Overview(props: { owner: Owner; index: number; going?: boolean }) {
                   looks.moved(place(index()).x + (carried() === page ? moved().x : 0), place(index()).y + (carried() === page ? moved().y : 0)),
                 ]}
               >
-                <View
+                <Box
                   role="button"
                   aria-label={`Page ${index() + 1}`}
                   {...drag(page, index())}
                   style={[looks.miniature, looks.scaled(MINIATURE, (MINIATURE * 16) / 9, dragging() === page ? 1.05 : 1)]}
                 >
-                  <View style={{ position: "absolute", left: (MINIATURE - THUMB.width) / 2, top: ((MINIATURE * 16) / 9 - THUMB.height) / 2, scale, opacity: page.hidden ? 0.4 : 1, pointerEvents: "none" }}>
+                  <Box style={{ position: "absolute", left: (MINIATURE - THUMB.width) / 2, top: ((MINIATURE * 16) / 9 - THUMB.height) / 2, scale, opacity: page.hidden ? 0.4 : 1, pointerEvents: "none" }}>
                     <HomePage owner={props.owner} index={props.index} page={index()} placed={(pack(page.items.map((item, at): Cell => ({ item, index: at })), (cell) => spans(cell.item))[0] ?? [])} laid={THUMB} scale={scale} small />
-                  </View>
+                  </Box>
                   <Show when={page.hidden}>
                     <Minus label={`Delete page ${index() + 1}`} left={6} top={6} onPress={() => remove(index())} />
                   </Show>
-                </View>
-                <Pressable
+                </Box>
+                <Box
                   role="checkbox"
                   aria-checked={page.hidden ? "false" : "true"}
                   aria-label={`Show page ${index() + 1}`}
-                  onPress={() => home.send({ type: "hide", page: index(), hidden: !page.hidden })}
+                  onClick={() => home.send({ type: "hide", page: index(), hidden: !page.hidden })}
                   style={{ width: 28, height: 28, alignItems: "center", justifyContent: "center", borderRadius: "full", borderWidth: 1, borderColor: page.hidden ? "muted-foreground" : "foreground", backgroundColor: page.hidden ? undefined : "foreground", color: "background" }}
                 >
                   <Show when={!page.hidden}>
                     <Icon name="check" />
                   </Show>
-                </Pressable>
-              </View>
+                </Box>
+              </Box>
             )}
           </For>
-        </View>
-      </View>
-    </View>
+        </Box>
+      </Box>
+    </Box>
   )
 }
 
@@ -1307,18 +1354,18 @@ function Roll(props: { count: number; height: number; row: (index: number) => El
   // In the launcher each row goes where it's going by a spring, as the owners' pages roll.
   const rolling = () => launcher() && looks.rolling
   return (
-    <View style={{ position: "relative", height: props.height, overflow: "hidden", alignItems: "center" }}>
-      <View inert aria-hidden="true" style={{ height: props.height, opacity: 0, justifyContent: "center" }}>
+    <Box style={{ position: "relative", height: props.height, overflow: "hidden", alignItems: "center" }}>
+      <Box inert aria-hidden="true" style={{ height: props.height, opacity: 0, justifyContent: "center" }}>
         {props.row(nearest())}
-      </View>
+      </Box>
       <For each={Array.from({ length: props.count }, (_, index) => index)}>
         {(index) => (
-          <View inert={index !== nearest() || undefined} style={[looks.row, rolling(), looks.top(0), looks.drifted(Math.max(0, 1 - Math.abs(index - rolled()) * 1.5), (index - rolled()) * props.height), looks.tall(props.height)]}>
+          <Box inert={index !== nearest() || undefined} style={[looks.row, rolling(), looks.top(0), looks.drifted(Math.max(0, 1 - Math.abs(index - rolled()) * 1.5), (index - rolled()) * props.height), looks.tall(props.height)]}>
             {props.row(index)}
-          </View>
+          </Box>
         )}
       </For>
-    </View>
+    </Box>
   )
 }
 
@@ -1364,15 +1411,15 @@ function Dots(props: { owner: Owner; index: number; count: number; size: number;
     if (Date.now() > quietDots) home.send({ type: "go", screen: Math.max(0, Math.min(screen, last())) })
   }
   return (
-    <View role="navigation" aria-label={`${props.owner.name}'s pages`} aria-hidden={seen().owner !== props.index ? "true" : undefined} {...slide} style={{ flexDirection: "row", alignItems: "center", height: "100%" }}>
+    <Box role="navigation" aria-label={`${props.owner.name}'s pages`} aria-hidden={seen().owner !== props.index ? "true" : undefined} {...slide} style={{ flexDirection: "row", alignItems: "center", height: "100%" }}>
       <For each={Array.from({ length: Math.max(1, props.count) }, (_, at) => at)}>
         {(screen) => (
-          <Pressable role="button" aria-label={`Page ${screen + 1} of ${props.count}`} aria-current={lit(screen) ? "true" : undefined} onPress={press(screen)} style={{ height: "100%", justifyContent: "center", paddingInline: 1 }}>
-            <View style={{ width: props.size, height: props.size, marginInline: props.size * 0.64, borderRadius: "full", backgroundColor: shown(screen) >= 0.5 ? "foreground" : "muted-foreground", opacity: 0.4 + 0.6 * shown(screen) }} />
-          </Pressable>
+          <Box role="button" aria-label={`Page ${screen + 1} of ${props.count}`} aria-current={lit(screen) ? "true" : undefined} onClick={press(screen)} style={{ height: "100%", justifyContent: "center", paddingInline: 1 }}>
+            <Box style={{ width: props.size, height: props.size, marginInline: props.size * 0.64, borderRadius: "full", backgroundColor: shown(screen) >= 0.5 ? "foreground" : "muted-foreground", opacity: 0.4 + 0.6 * shown(screen) }} />
+          </Box>
         )}
       </For>
-    </View>
+    </Box>
   )
 }
 
@@ -1388,24 +1435,24 @@ function OwnerPill(props: { owners: Owner[] }) {
       onSelect={({ value }) => home.send({ type: "pick", owner: Number(value) })}
     >
       <Menu.Trigger variant="secondary" aria-label={props.owners[at()]?.name}>
-        <View style={{ flexDirection: "row", alignItems: "center", gap: 5 }}>
+        <Box style={{ flexDirection: "row", alignItems: "center", gap: 5 }}>
           <Roll count={props.owners.length} height={BAR - 8} row={(index) => <Text style={{ font: "label", lineClamp: 1, maxWidth: 144 }}>{props.owners[index]?.name}</Text>} />
-          <View style={{ color: "muted-foreground", scale: 0.75 }}>
+          <Box style={{ color: "muted-foreground", scale: 0.75 }}>
             <Icon name="caret-down" />
-          </View>
-        </View>
+          </Box>
+        </Box>
       </Menu.Trigger>
       <Menu.Positioner>
         <Menu.Content>
           <For each={props.owners}>
             {(owner, index) => (
               <Menu.Item value={String(index())}>
-                <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
-                  <View style={{ opacity: index() === at() ? 1 : 0 }}>
+                <Box style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+                  <Box style={{ opacity: index() === at() ? 1 : 0 }}>
                     <Icon name="check" />
-                  </View>
+                  </Box>
                   <Text>{owner.name}</Text>
-                </View>
+                </Box>
               </Menu.Item>
             )}
           </For>
@@ -1445,9 +1492,9 @@ const launcherKeys = (props: { move: (key: string) => boolean; open: () => void;
 /// The launcher's search, floating over its card: bare and large, with the keyboard as the launcher's summoned.
 function LauncherSearch() {
   return (
-    <View style={{ flexGrow: 1, flexDirection: "row", alignItems: "center", paddingInline: 18 }}>
-      <TextInput inputMode="search" enterKeyHint="search" placeholder="Search apps…" aria-label="Search apps" autoFocus value={query()} onChangeText={(text) => (setQuery(text), setChosenResult(0))} style={looks.bare} />
-    </View>
+    <Box style={{ flexGrow: 1, flexDirection: "row", alignItems: "center", paddingInline: 18 }}>
+      <EditableText type="search" action="search" placeholder="Search apps…" aria-label="Search apps" autofocus value={query()} onInput={(event) => (setQuery(event.currentTarget.value), setChosenResult(0))} style={looks.bare} />
+    </Box>
   )
 }
 
@@ -1460,46 +1507,46 @@ function Results(props: { owner: Owner; found: Listed[]; words: string }) {
   const widgets = () => widgetsOf(props.owner, props.found, props.words)
   const Heading = (inner: { children: string }) => <Text style={{ font: "footnote", color: "muted-foreground", paddingInline: 4, height: HEADING }}>{inner.children}</Text>
   return (
-    <View style={{ gap: 12 }}>
-      <Show when={props.found.length || widgets().length} fallback={<View style={{ paddingBlock: 24 }}><Empty>No apps match.</Empty></View>}>
+    <Box style={{ gap: 12 }}>
+      <Show when={props.found.length || widgets().length} fallback={<Box style={{ paddingBlock: 24 }}><Empty>No apps match.</Empty></Box>}>
         <Show when={props.found.length}>
           <Heading>Apps</Heading>
-          <View style={{ flexDirection: "row", gap: 12, alignItems: "flex-start" }}>
+          <Box style={{ flexDirection: "row", gap: 12, alignItems: "flex-start" }}>
             <Show when={lead()}>
               {(lead) => (
-                <View style={{ width: 2 * 76 + 8, height: 2 * 88 - 8, flexShrink: 0, display: "grid" }}>
+                <Box style={{ width: 2 * 76 + 8, height: 2 * 88 - 8, flexShrink: 0, display: "grid" }}>
                   <Card item={{ ...lead(), size: "2x2" }} owner={props.owner} />
-                </View>
+                </Box>
               )}
             </Show>
-            <View style={{ flexGrow: 1, flexDirection: "row", flexWrap: "wrap", rowGap: 12 }}>
+            <Box style={{ flexGrow: 1, flexDirection: "row", flexWrap: "wrap", rowGap: 12 }}>
               <For each={props.found} keyed={(listed) => listed.entrypoint ?? listed.app}>
                 {(listed, at) => (
-                  <View onPointerMove={() => setChosenResult(at())} style={{ position: "relative", width: 76, height: 88, paddingTop: 6 }}>
+                  <Box onPointerMove={() => setChosenResult(at())} style={{ position: "relative", width: 76, height: 88, paddingTop: 6 }}>
                     <Show when={chosenResult() === at()}>
-                      <View aria-hidden="true" style={looks.chosen} />
+                      <Box aria-hidden="true" style={looks.chosen} />
                     </Show>
                     <Tile name={listed().name} icon={listed().icon} size={tile} scale={1} badge={opens(listed()) ? badgeOf(opens(listed())!, props.owner) : undefined} onPress={(behind, from) => press(listed(), props.owner, behind, from)} />
-                  </View>
+                  </Box>
                 )}
               </For>
-            </View>
-          </View>
+            </Box>
+          </Box>
         </Show>
         <Show when={widgets().length}>
           <Heading>Widgets</Heading>
-          <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 12 }}>
+          <Box style={{ flexDirection: "row", flexWrap: "wrap", gap: 12 }}>
             <For each={widgets()} keyed={(one) => one.widget}>
               {(one) => (
-                <View style={{ width: 2 * 76 + 8, height: 2 * 88 - 8, display: "grid" }}>
+                <Box style={{ width: 2 * 76 + 8, height: 2 * 88 - 8, display: "grid" }}>
                   <Card item={{ ...one(), size: "2x2" }} owner={props.owner} />
-                </View>
+                </Box>
               )}
             </For>
-          </View>
+          </Box>
         </Show>
       </Show>
-    </View>
+    </Box>
   )
 }
 
@@ -1552,21 +1599,21 @@ function DotsPill(props: { owners: Owner[]; laid: Kind[][]; pages?: (owner: numb
   return (
     // iOS 26's Liquid Glass, the pages blurred through it with a rim of light and a soft shadow, but in the launcher's
     // footer, which is flat.
-    <View style={[looks.pill, !props.flat && looks.glass, looks.tall(height())]}>
+    <Box style={[looks.pill, !props.flat && looks.glass, looks.tall(height())]}>
       <Roll count={props.owners.length} height={height()} row={(index) => <Dots owner={props.owners[index]} index={index} count={count(index)} size={props.flat ? 5 : 7} shows={props.pages ? 2 : 1} />} />
-      <Pressable
+      <Box
         role="button"
         aria-label="App Library"
         aria-current={library() ? "true" : undefined}
         aria-disabled={state().matches("editing") ? "true" : undefined}
-        onPress={go}
+        onClick={go}
         style={{ height: "100%", justifyContent: "center", paddingLeft: 2, paddingRight: 4, color: library() ? "foreground" : "muted-foreground", opacity: state().matches("editing") ? 0.35 : library() ? 1 : 0.4 }}
       >
-        <View style={{ scale: 0.75 }}>
+        <Box style={{ scale: 0.75 }}>
           <Icon name="squares-four" />
-        </View>
-      </Pressable>
-    </View>
+        </Box>
+      </Box>
+    </Box>
   )
 }
 
@@ -1606,18 +1653,18 @@ function Asking(props: { owner: Owner; held: Held }) {
   }
   return (
     <Sheet heading={`Install ${titles()} for ${named(props.owner)}?`} open={state().matches({ editing: "asking" })} onClose={() => state().matches({ editing: "asking" }) && home.send({ type: "cancel" })}>
-      <View style={{ alignItems: "center", gap: 12 }}>
-        <View style={{ flexDirection: "row", flexWrap: "wrap", justifyContent: "center", gap: 12 }}>
+      <Box style={{ alignItems: "center", gap: 12 }}>
+        <Box style={{ flexDirection: "row", flexWrap: "wrap", justifyContent: "center", gap: 12 }}>
           <For each={missing()} keyed={({ item }) => item.entrypoint}>
             {(app) => <Image src={src(app().item.icon)} alt="" style={{ width: 64, height: 64, borderRadius: "xl" }} />}
           </For>
-        </View>
+        </Box>
         <Text style={{ color: "muted-foreground", textAlign: "center" }}>{reach()}</Text>
-        <View style={{ alignSelf: "stretch", gap: 12, paddingTop: 8 }}>
+        <Box style={{ alignSelf: "stretch", gap: 12, paddingTop: 8 }}>
           <Button onClick={install}>Install</Button>
           <Button variant="secondary" onClick={() => home.send({ type: "cancel" })}>Cancel</Button>
-        </View>
-      </View>
+        </Box>
+      </Box>
     </Sheet>
   )
 }
@@ -1636,16 +1683,16 @@ function Refused(props: { owner: Owner; held: Held }) {
   const dismiss = () => state().matches({ editing: "refused" }) && home.send({ type: "dismiss" })
   return (
     <Sheet heading={`You can't add apps for ${props.owner.name}`} open={state().matches({ editing: "refused" })} onClose={dismiss}>
-      <View style={{ alignItems: "center", gap: 12 }}>
+      <Box style={{ alignItems: "center", gap: 12 }}>
         <Errored fallback={(error) => <Problem heading="Can't show who can" text={error() as Error} />}>
           <Loading fallback={<Text> </Text>}>
             <Text style={{ color: "muted-foreground", textAlign: "center" }}>{who() ? `Only ${who()} can. Ask them to add ${title()}.` : `Ask one of its owners to add ${title()}.`}</Text>
           </Loading>
         </Errored>
-        <View style={{ alignSelf: "stretch", paddingTop: 8 }}>
+        <Box style={{ alignSelf: "stretch", paddingTop: 8 }}>
           <Button onClick={dismiss}>OK</Button>
-        </View>
-      </View>
+        </Box>
+      </Box>
     </Sheet>
   )
 }
@@ -1665,16 +1712,16 @@ function EditBar(props: { going?: boolean; within?: Rect }) {
   const width = () => props.within?.width ?? (room().wide ? Math.min(room().width - 2 * room().side, room().fit * (laidPage().width * room().scale + room().gap) - room().gap) : room().width)
   const left = () => props.within?.x ?? (room().width - width()) / 2
   return (
-    <View style={{ position: "absolute", zIndex: 7, top: top(), left: left(), width: width(), height: height(), flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingInline: props.within ? 10 : 16, opacity: fade.value(), pointerEvents: "none" }}>
-      <View style={[looks.pill, looks.glass]}>
+    <Box style={{ position: "absolute", zIndex: 7, top: top(), left: left(), width: width(), height: height(), flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingInline: props.within ? 10 : 16, opacity: fade.value(), pointerEvents: "none" }}>
+      <Box style={[looks.pill, looks.glass]}>
         <Button variant="ghost" size="icon" aria-label="Add Widget" onClick={() => state().matches({ editing: "still" }) && home.send({ type: "gallery" })}>
           <Icon name="plus" />
         </Button>
-      </View>
-      <View style={[looks.pill, looks.glass]}>
+      </Box>
+      <Box style={[looks.pill, looks.glass]}>
         <Button variant="ghost" onClick={() => home.send({ type: "done" })}>Done</Button>
-      </View>
-    </View>
+      </Box>
+    </Box>
   )
 }
 
@@ -2113,23 +2160,29 @@ function HomeScreen(props: { owners: Owner[] }) {
   }
 
   // A trackpad's two fingers along the pages move them one to one, as a finger does, giving at the ends, and as they
-  // lift the pages settle as a finger's do, at the speed they were going: wheel-gestures says when, by where the
-  // system's momentum, which follows, begins, and the momentum is let be. Up and down, or a wheel, is one owner a
-  // gesture at most, however hard it's flicked, as macOS's Launchpad and an iPad with a trackpad page, once its pushes
-  // add up to 30 points. Up and down over the App Library, which scrolls itself, is its own.
+  // lift the pages settle as a finger's do, at the speed they were going, and the momentum that follows is let be.
+  // Where the system says when they lift (a Mac's, as the wheel event's `phase`), that's when; elsewhere, as on the
+  // DOM, wheel-gestures tells, by where the momentum begins, or the events stop. Up and down, or a wheel, is one owner
+  // a gesture at most, however hard it's flicked, as macOS's Launchpad and an iPad with a trackpad page, once its
+  // pushes add up to 30 points. Up and down over the App Library, which scrolls itself, is its own.
   const trackpad = WheelGestures({ preventWheelAction: false, reverseSign: false })
-  let gesture: { axis: "x" | "y"; owner: number; from: number; base: number; done: boolean } | undefined
+  let gesture: { axis?: "x" | "y"; owner: number; from: number; base: number; done: boolean } | undefined
   trackpad.on("wheel", ({ isStart, isEnding, isMomentum, axisMovement: [x, y], axisVelocity, event }) => {
     if (isStart) {
       gesture = undefined
       if (!home.getSnapshot().matches("nothing")) return
-      const { owner } = home.getSnapshot().context.at
-      const moving = sideways(owner)
-      const axis = Math.abs(event.deltaX) > Math.abs(event.deltaY) ? "x" : "y"
-      if (axis === "x") stop(moving)
-      gesture = { axis, owner, base: moving.value, from: Math.round(moving.value / pitch()), done: false }
+      gesture = { owner: home.getSnapshot().context.at.owner, base: 0, from: 0, done: false }
     }
     if (!gesture || gesture.done) return
+    // Which way it goes is the first way it moves: fingers set down (`mayBegin`) don't move. Along, they catch the
+    // pages where they are, as a finger does.
+    if (!gesture.axis) {
+      if (!event.deltaX && !event.deltaY) return
+      gesture.axis = Math.abs(event.deltaX) > Math.abs(event.deltaY) ? "x" : "y"
+      const moving = sideways(gesture.owner)
+      if (gesture.axis === "x") stop(moving)
+      Object.assign(gesture, { base: moving.value - x + event.deltaX, from: Math.round(moving.value / pitch()) })
+    }
     if (gesture.axis === "y") {
       if (Math.abs(y) < 30) return
       gesture.done = true
@@ -2137,7 +2190,8 @@ function HomeScreen(props: { owners: Owner[] }) {
     }
     const moving = sideways(gesture.owner)
     const end = (stops(gesture.owner) - 1) * pitch()
-    if (!isMomentum && !isEnding) {
+    const lifted = isMomentum || isEnding || (event as Wheeled).phase === "ended" || (event as Wheeled).phase === "cancelled"
+    if (!lifted) {
       const value = gesture.base + x
       return jump(moving, value < 0 ? give(value, pitch()) : value > end ? end + give(value - end, pitch()) : value)
     }
@@ -2147,7 +2201,7 @@ function HomeScreen(props: { owners: Owner[] }) {
     glide(moving, screen * pitch(), velocity)
     home.send({ type: "settled", at: { owner: gesture.owner, screen } })
   })
-  const wheel = (event: Wheeled) => trackpad.feedWheel({ deltaX: event.deltaX, deltaY: event.deltaY, deltaMode: 0, timeStamp: event.timeStamp })
+  const wheel = (event: Wheeled) => trackpad.feedWheel({ deltaX: event.deltaX, deltaY: event.deltaY, deltaMode: 0, timeStamp: event.timeStamp, momentum: event.momentum, phase: event.phase } as WheelEventData)
 
   // What's carried, while it's dragged: a copy that lifts larger and follows the finger one to one, over what it would
   // go before. Held at a side of the screen a moment, it goes on to the next page, or the one before; at its top or
@@ -2332,7 +2386,7 @@ function HomeScreen(props: { owners: Owner[] }) {
   const held = () => (state().matches("holding") ? state().context.held : undefined)
   const owner = () => props.owners[state().context.at.owner]
   return (
-    <View
+    <Box
       onKeyDown={launcher() ? launcherKeys({ move, open: openTarget, toggleLibrary, library, found: () => found().length }) : undefined}
       style={{ position: "relative", width: launcher() ? viewport().width : room().width, height: viewport().height, overflow: "hidden", color: "foreground" }}
     >
@@ -2340,23 +2394,23 @@ function HomeScreen(props: { owners: Owner[] }) {
         when={launcher()}
         fallback={
           <>
-        <View
+        <Box
           {...swipes}
           onWheel={wheel}
           style={{ position: "absolute", top: 0, left: 0, width: room().width * 2, height: room().height, flexDirection: "row", translateX: -sectionsX() }}
         >
-          <View role="main" aria-label="Home" style={{ position: "relative", width: room().width, height: room().height, overflow: "hidden", flexShrink: 0 }}>
-            <View style={{ position: "absolute", top: 0, left: 0, width: room().width, translateY: -downY() }}>
+          <Box role="main" aria-label="Home" style={{ position: "relative", width: room().width, height: room().height, overflow: "hidden", flexShrink: 0 }}>
+            <Box style={{ position: "absolute", top: 0, left: 0, width: room().width, translateY: -downY() }}>
               <For each={props.owners} keyed={(owner) => owner.key}>
                 {(owner, index) => (
-                  <View role="region" aria-label={owner().name} style={{ position: "relative", width: room().width, height: room().height, overflow: "hidden" }}>
-                    <View style={{ position: "absolute", top: 0, left: 0, flexDirection: "row", translateX: -Math.min(xOf(index())[0](), Math.max(0, homes(index()).length - 1) * room().width), opacity: opacityOf(index())[0]() }}>
+                  <Box role="region" aria-label={owner().name} style={{ position: "relative", width: room().width, height: room().height, overflow: "hidden" }}>
+                    <Box style={{ position: "absolute", top: 0, left: 0, flexDirection: "row", translateX: -Math.min(xOf(index())[0](), Math.max(0, homes(index()).length - 1) * room().width), opacity: opacityOf(index())[0]() }}>
                       <For each={homes(index())} keyed={false}>
                         {(screen) => (
-                          <View style={{ position: "relative", width: room().width, height: room().height }}>
+                          <Box style={{ position: "relative", width: room().width, height: room().height }}>
                             <For each={(pages()[index()] ?? []).slice(screen().from, screen().from + screen().count)} keyed={false}>
                               {(placed, at) => (
-                                <View
+                                <Box
                                   style={{
                                     position: "absolute",
                                     top: (laidPage().height * (room().scale - 1)) / 2,
@@ -2365,61 +2419,61 @@ function HomeScreen(props: { owners: Owner[] }) {
                                   }}
                                 >
                                   <HomePage owner={owner()} index={index()} page={screen().from + at} placed={placed()} laid={laidPage()} scale={room().scale} />
-                                </View>
+                                </Box>
                               )}
                             </For>
-                          </View>
+                          </Box>
                         )}
                       </For>
-                    </View>
-                  </View>
+                    </Box>
+                  </Box>
                 )}
               </For>
-            </View>
-          </View>
+            </Box>
+          </Box>
           <Library owner={props.owners[0]} />
-        </View>
+        </Box>
             <Show when={!library()}>
-              <View style={{ position: "absolute", zIndex: 6, top: room().safe.top, left: 0, right: 0, height: TOP_ROW, alignItems: "center", justifyContent: "center", pointerEvents: "none" }}>
-                <View style={{ pointerEvents: "auto", opacity: state().matches("editing") ? 0.6 : 1 }}>
+              <Box style={{ position: "absolute", zIndex: 6, top: room().safe.top, left: 0, right: 0, height: TOP_ROW, alignItems: "center", justifyContent: "center", pointerEvents: "none" }}>
+                <Box style={{ pointerEvents: "auto", opacity: state().matches("editing") ? 0.6 : 1 }}>
                   <OwnerPill owners={props.owners} />
-                </View>
-              </View>
+                </Box>
+              </Box>
             </Show>
-            <View style={{ position: "absolute", zIndex: 6, bottom: room().safe.bottom + 16, left: 0, right: 0, alignItems: "center", pointerEvents: "none" }}>
-              <View style={{ pointerEvents: "auto" }}>
+            <Box style={{ position: "absolute", zIndex: 6, bottom: room().safe.bottom + 16, left: 0, right: 0, alignItems: "center", pointerEvents: "none" }}>
+              <Box style={{ pointerEvents: "auto" }}>
                 <DotsPill owners={props.owners} laid={laid().screens} />
-              </View>
-            </View>
+              </Box>
+            </Box>
           </>
         }
       >
         {/* A click beside the search and the card puts the launcher away, as one on another app's window would. */}
-        <Pressable aria-hidden="true" onPress={() => state().matches("nothing") && void leave()} style={looks.cover} />
-        <View style={[looks.surface, looks.search, looks.at((viewport().width - SEARCH) / 2, MARGIN, SEARCH, SEARCH_HEIGHT)]}>
+        <Box aria-hidden="true" onClick={() => state().matches("nothing") && void leave()} style={looks.cover} />
+        <Box style={[looks.surface, looks.search, looks.at((viewport().width - SEARCH) / 2, MARGIN, SEARCH, SEARCH_HEIGHT)]}>
           <LauncherSearch />
-        </View>
-        <View onWheel={wheel} style={[looks.surface, looks.card, looks.at(0, CARD_TOP, card().width, card().height), looks.shifted(cardLeft())]}>
+        </Box>
+        <Box onWheel={wheel} style={[looks.surface, looks.card, looks.at(0, CARD_TOP, card().width, card().height), looks.shifted(cardLeft())]}>
           {/* Home: each owner's pages, the owner shown's in place, the others rolled above and below it, faded. */}
-          <View role="main" aria-label="Home" inert={showing() !== "home" || undefined} style={[looks.fading, looks.cover, showing() !== "home" && looks.inert, looks.faded(showing() === "home" ? 1 : 0, showing() === "home" ? 1 : 1.03)]}>
+          <Box role="main" aria-label="Home" inert={showing() !== "home" || undefined} style={[looks.fading, looks.cover, showing() !== "home" && looks.inert, looks.faded(showing() === "home" ? 1 : 0, showing() === "home" ? 1 : 1.03)]}>
             <For each={props.owners} keyed={(owner) => owner.key}>
               {(owner, index) => {
                 const shown = () => index() === state().context.at.owner
                 const Page = (inner: { page: number; placed: Placed<Cell>[] }) => (
-                  <View style={{ position: "relative", width: PAGE, height: room().height, flexShrink: 0 }}>
-                    <View style={{ position: "absolute", top: (laidPage().height * (room().scale - 1)) / 2, left: (laidPage().width * (room().scale - 1)) / 2, scale: room().scale }}>
+                  <Box style={{ position: "relative", width: PAGE, height: room().height, flexShrink: 0 }}>
+                    <Box style={{ position: "absolute", top: (laidPage().height * (room().scale - 1)) / 2, left: (laidPage().width * (room().scale - 1)) / 2, scale: room().scale }}>
                       <HomePage owner={owner()} index={index()} page={inner.page} placed={inner.placed} laid={laidPage()} scale={room().scale} />
-                    </View>
-                  </View>
+                    </Box>
+                  </Box>
                 )
                 return (
-                  <View
+                  <Box
                     role="region"
                     aria-label={owner().name}
                     inert={!shown() || undefined}
                     style={[looks.owner, looks.rolling, !shown() && looks.inert, looks.at(INSET, PILLS, pagesAcross(index()) * PAGE, halves(index()) ? halfHeight(room()) : room().height), looks.drifted(shown() ? 1 : 0, (index() - state().context.at.owner) * 40)]}
                   >
-                    <View style={[looks.track, looks.slid(-trackX(index()), opacityOf(index())[0]())]}>
+                    <Box style={[looks.track, looks.slid(-trackX(index()), opacityOf(index())[0]())]}>
                       <For each={pages()[index()] ?? []} keyed={false}>
                         {(placed, at) => (
                           <Show when={halves(index())} fallback={<Page page={at} placed={placed()} />}>
@@ -2430,28 +2484,28 @@ function HomeScreen(props: { owners: Owner[] }) {
                           </Show>
                         )}
                       </For>
-                    </View>
-                  </View>
+                    </Box>
+                  </Box>
                 )
               }}
             </For>
-          </View>
+          </Box>
           {/* The App Library, in the same card, which grows to it as it cross-fades in. */}
-          <View inert={showing() !== "library" || undefined} style={[looks.layer, looks.fading, showing() !== "library" && looks.inert, looks.fill(INSET, 0, 0), looks.faded(showing() === "library" ? 1 : 0, showing() === "library" ? 1 : 0.965)]}>
+          <Box inert={showing() !== "library" || undefined} style={[looks.layer, looks.fading, showing() !== "library" && looks.inert, looks.fill(INSET, 0, 0), looks.faded(showing() === "library" ? 1 : 0, showing() === "library" ? 1 : 0.965)]}>
             <Library owner={props.owners[0]} size={{ width: LIBRARY, height: tallest() - INSET - PILLS }} />
-          </View>
+          </Box>
           {/* What was typed found, as it's typed, and as it goes, what it last found. */}
-          <View inert={showing() !== "search" || undefined} style={[looks.owner, looks.fading, showing() !== "search" && looks.inert, looks.fill(INSET, INSET, INSET), looks.drifted(showing() === "search" ? 1 : 0, showing() === "search" ? 0 : -8)]}>
+          <Box inert={showing() !== "search" || undefined} style={[looks.owner, looks.fading, showing() !== "search" && looks.inert, looks.fill(INSET, INSET, INSET), looks.drifted(showing() === "search" ? 1 : 0, showing() === "search" ? 0 : -8)]}>
             <Show when={words()}>{(typed) => <Results owner={props.owners[0]} found={findIn(props.owners[0]?.library ?? [], typed(), false)} words={typed()} />}</Show>
-          </View>
+          </Box>
           {/* Whose pages they are at the top, as a phone has it, and their dots at the foot, with the App Library's glyph. */}
-          <View inert={showing() !== "home" || undefined} style={[looks.row, looks.fading, showing() !== "home" && looks.inert, looks.top(0), looks.tall(PILLS), looks.opacity(showing() === "home" ? (state().matches("editing") ? 0.6 : 1) : 0)]}>
+          <Box inert={showing() !== "home" || undefined} style={[looks.row, looks.fading, showing() !== "home" && looks.inert, looks.top(0), looks.tall(PILLS), looks.opacity(showing() === "home" ? (state().matches("editing") ? 0.6 : 1) : 0)]}>
             <OwnerPill owners={props.owners} />
-          </View>
-          <View inert={showing() === "search" || undefined} style={[looks.row, looks.fading, showing() === "search" && looks.inert, looks.bottom(0), looks.tall(PILLS), looks.opacity(showing() === "search" ? 0 : 1)]}>
+          </Box>
+          <Box inert={showing() === "search" || undefined} style={[looks.row, looks.fading, showing() === "search" && looks.inert, looks.bottom(0), looks.tall(PILLS), looks.opacity(showing() === "search" ? 0 : 1)]}>
             <DotsPill owners={props.owners} laid={laid().screens} pages={(owner) => pages()[owner]?.length ?? 1} />
-          </View>
-        </View>
+          </Box>
+        </Box>
       </Show>
       <Show when={editBar()}>
         <EditBar going={editBarGoing()} within={launcher() ? cardRect() : undefined} />
@@ -2464,7 +2518,7 @@ function HomeScreen(props: { owners: Owner[] }) {
           const lift = () => (now().settling ? 1 : 1 + (widget() ? 0.05 : 0.12) * now().lifted)
           const tile = () => laidPage().tile
           return (
-            <View
+            <Box
               aria-hidden="true"
               style={{
                 position: "absolute",
@@ -2480,7 +2534,7 @@ function HomeScreen(props: { owners: Owner[] }) {
                 pointerEvents: "none",
               }}
             >
-              <View aria-hidden="true" style={[looks.lifted, widget() ? looks.liftedWidget : looks.liftedIcon, now().settling && looks.opacity(0), widget() ? looks.at(0, 0, width, height) : looks.at((width - tile()) / 2, 0, tile(), tile())]} />
+              <Box aria-hidden="true" style={[looks.lifted, widget() ? looks.liftedWidget : looks.liftedIcon, now().settling && looks.opacity(0), widget() ? looks.at(0, 0, width, height) : looks.at((width - tile()) / 2, 0, tile(), tile())]} />
               <Show when={now().held.item}>
                 {(item) => (
                   <Show when={item().widget} fallback={<Tile name={(item() as Entrypoint).name} icon={(item() as Entrypoint).icon} size={laidPage().tile} scale={scale()} />}>
@@ -2491,7 +2545,7 @@ function HomeScreen(props: { owners: Owner[] }) {
               <Show when={now().held.stack?.length}>
                 <Count count={(now().held.stack?.length ?? 0) + 1} />
               </Show>
-            </View>
+            </Box>
           )
         }}
       </Show>
@@ -2511,7 +2565,7 @@ function HomeScreen(props: { owners: Owner[] }) {
           </>
         )}
       </Show>
-    </View>
+    </Box>
   )
 }
 
@@ -2520,13 +2574,13 @@ function HomeScreen(props: { owners: Owner[] }) {
 /// one meeting what's new is the likeliest cause.
 function Broken(props: { error: Error }) {
   return (
-    <View style={{ height: viewport().height, justifyContent: "center", padding: 20 }}>
+    <Box style={{ height: viewport().height, justifyContent: "center", padding: 20 }}>
       <Problem
         heading="Home Screen didn't open."
         text={new Error(`Try again in a moment.\n\n${typeof props.error?.cause === "string" ? props.error.cause : (props.error?.message ?? props.error)}`)}
         action={<Button variant="secondary" onClick={() => refresh(owners)}>Try Again</Button>}
       />
-    </View>
+    </Box>
   )
 }
 

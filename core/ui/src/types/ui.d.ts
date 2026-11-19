@@ -44,11 +44,15 @@ export type Pressed = Located & {
 export type Laid = {
   currentTarget: { getBoundingClientRect(): Rect }
 }
-/** A trackpad's or a wheel's scroll, in CSS pixels. */
+/** A trackpad's or a wheel's scroll, in CSS pixels. Where the system says them, which a native host on a Mac does and
+ * the DOM doesn't: the trackpad's fingers' `phase`, by AppKit's names, and whether it's the `momentum` after they've
+ * lifted. */
 export type Wheeled = {
   deltaX: number
   deltaY: number
   timeStamp: number
+  phase?: "began" | "changed" | "ended" | "cancelled" | "mayBegin"
+  momentum?: boolean
 }
 
 /** What a key pressed is told, as the DOM's `KeyboardEvent`: `preventDefault()` keeps what the key does by itself

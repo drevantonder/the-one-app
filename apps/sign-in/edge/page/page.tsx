@@ -476,12 +476,12 @@ render(
       )}
       {shows().asksWho && (
         <Field label="Who's signing in?">
-          <Input name="person" autoComplete="username" autoCapitalize="none" placeholder="Name or email" required value={person()} onChangeText={setPerson} />
+          <Input name="person" autocomplete="username" autocapitalize="none" placeholder="Name or email" required value={person()} onInput={(event) => setPerson(event.target.value)} />
         </Field>
       )}
       {shows().asksName && !shows().done && (
         <Field label="Your name">
-          <Input name="name" autoComplete="name" required value={called()} onChangeText={setCalled} />
+          <Input name="name" autocomplete="name" required value={called()} onInput={(event) => setCalled(event.target.value)} />
         </Field>
       )}
     </SignIn>

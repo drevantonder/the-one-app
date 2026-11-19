@@ -150,13 +150,14 @@ impl Screen {
         true
     }
 
-    /// Scrolled at `at`: the page of the frame there scrolls, if it still can that way. → what scrolled, if it did.
-    pub(super) fn frame_scroll(&mut self, at: Point<f32>, delta: Point<f32>, wheel: bool) -> Option<Id> {
+    /// Scrolled at `at`, by a wheel or a trackpad (`wheel`, with its phase where the system says) or a finger: the
+    /// page of the frame there scrolls, if it still can that way. → what scrolled, if it did.
+    pub(super) fn frame_scroll(&mut self, at: Point<f32>, delta: Point<f32>, wheel: Option<Option<super::Phase>>) -> Option<Id> {
         let (id, local) = self.frame_at(at)?;
         let child = self.frames.get_mut(&id)?;
         match wheel {
-            true => child.screen.scroll(local, delta),
-            false => child.screen.pan(local, delta),
+            Some(phase) => child.screen.scroll(local, delta, phase),
+            None => child.screen.pan(local, delta),
         }
         .map(|_| id)
     }

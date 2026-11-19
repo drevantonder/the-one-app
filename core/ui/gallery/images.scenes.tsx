@@ -1,5 +1,5 @@
 import { For } from "solid-js"
-import { Image, type Scenes, Text, View } from "ui"
+import { Box, Image, Text, type Scenes } from "ui"
 
 /// A letter on a colour, as an SVG an app draws for an item with no icon of its own: its fill in oklch(), as CSS
 /// colours are, and its letter as SVG text.
@@ -15,15 +15,15 @@ const tiles = [
 
 export default {
   "Images/SVG tiles": () => (
-    <View style={{ gap: 12 }}>
+    <Box style={{ gap: 12 }}>
       <For each={tiles}>
         {(tile_) => (
-          <View style={{ flexDirection: "row", alignItems: "center", gap: 12 }}>
+          <Box style={{ flexDirection: "row", alignItems: "center", gap: 12 }}>
             <Image src={tile(tile_[0], tile_[1])} alt="" style={{ width: 32, height: 32, borderRadius: "md" }} />
             <Text>{tile_[1]}</Text>
-          </View>
+          </Box>
         )}
       </For>
-    </View>
+    </Box>
   ),
 } satisfies Scenes

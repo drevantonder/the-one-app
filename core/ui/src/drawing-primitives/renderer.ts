@@ -132,6 +132,10 @@ export interface Event {
   /** `wheel`'s: how far a trackpad or a wheel moved, in CSS pixels. */
   deltaX?: number
   deltaY?: number
+  /** `wheel`'s, where the system says them (a Mac's trackpad): its fingers' phase, by AppKit's names, and whether it's
+   * the momentum after they've lifted. */
+  phase?: Phase
+  momentum?: boolean
   /** A `video`'s `offer`: its SDP offer, with its candidates. */
   sdp?: string
   /** A `video`'s `state`: its data channel open (`connected`), or its connection lost. */
@@ -140,6 +144,9 @@ export interface Event {
   width?: number
   height?: number
 }
+
+/** A trackpad's fingers' phase, by AppKit's names. */
+export type Phase = "began" | "changed" | "ended" | "cancelled" | "mayBegin"
 
 /** Where a node is drawn in the window, in CSS pixels. */
 export interface Rect {

@@ -4,7 +4,7 @@
 // has a Home Screen of its own that its members see, and its owners add someone in the network to it and take members
 // out. Groups are each person's own, so they're asked for as the person, wherever the app was opened.
 import { createMemo, createSignal, Errored, For, Loading, refresh, Show } from "solid-js"
-import { Button, call, changed, confirm, Empty, Field, Icon, Input, List, Menu, Problem, Row, Screen, Section, share, Sheet, Skeleton, Split, styles, Text, toast, tokens, View } from "ui"
+import { Box, Button, call, changed, confirm, Empty, Field, Icon, Input, List, Menu, Problem, Row, Screen, Section, share, Sheet, Skeleton, Split, styles, Text, toast, tokens } from "ui"
 
 const look = styles({
   form: { gap: tokens.length.gutter },
@@ -102,12 +102,12 @@ function Name(props: { open: boolean; onClose: () => void; called?: string }) {
   }
   return (
     <Sheet heading="Your Name" open={props.open} onClose={() => (props.onClose(), setError())}>
-      <View style={look.form}>
+      <Box style={look.form}>
         <Field label="Name" hint="As people here know you." error={error()}>
-          <Input name="called" required autoFocus autoComplete="name" value={called()} onChangeText={setCalled} onSubmitEditing={save} />
+          <Input name="called" required autofocus autocomplete="name" value={called()} onInput={(event) => setCalled(event.currentTarget.value)} onAction={save} />
         </Field>
         <Button loading={working()} onClick={save}>Save</Button>
-      </View>
+      </Box>
     </Sheet>
   )
 }
@@ -145,20 +145,20 @@ function Invite(props: { open: boolean; onClose: () => void }) {
       <Show
         when={link()}
         fallback={
-          <View style={look.form}>
+          <Box style={look.form}>
             <Field label="Name" hint="Lowercase letters, digits and hyphens. It's who they are here, for good." error={error()}>
-              <Input name="name" required autoFocus autoCapitalize="none" spellCheck={false} value={name()} onChangeText={setName} onSubmitEditing={make} />
+              <Input name="name" required autofocus autocapitalize="none" spellcheck={false} value={name()} onInput={(event) => setName(event.currentTarget.value)} onAction={make} />
             </Field>
             <Button loading={working()} onClick={make}>Create Link</Button>
-          </View>
+          </Box>
         }
       >
-        <View style={look.form}>
+        <Box style={look.form}>
           <Field label="Link" hint="It works once, for a week.">
-            <Input readOnly value={link()} />
+            <Input readonly value={link()} />
           </Field>
           <Button onClick={send}>Share Link</Button>
-        </View>
+        </Box>
       </Show>
     </Sheet>
   )
@@ -173,12 +173,12 @@ function NewGroup(props: { open: boolean; onClose: () => void; me: string }) {
   }
   return (
     <Sheet heading="New Group" open={props.open} onClose={close}>
-      <View style={look.form}>
+      <Box style={look.form}>
         <Field label="Name">
-          <Input name="name" required autoFocus autoCapitalize="words" value={name()} onChangeText={setName} onSubmitEditing={send} />
+          <Input name="name" required autofocus autocapitalize="words" value={name()} onInput={(event) => setName(event.currentTarget.value)} onAction={send} />
         </Field>
         <Button onClick={send}>New Group</Button>
-      </View>
+      </Box>
     </Sheet>
   )
 }
@@ -278,10 +278,10 @@ function UsersAndGroups(props: { all: All }) {
           </Show>
           <Section
             heading={
-              <View style={look.groups}>
+              <Box style={look.groups}>
                 <Text style={look.grows}>Groups</Text>
                 <Button variant="secondary" onClick={() => setAdding("group")}>New Group</Button>
-              </View>
+              </Box>
             }
           >
             <Show when={props.all.groups.length} fallback={<Empty>You're in no groups yet.</Empty>}>

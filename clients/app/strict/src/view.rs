@@ -67,6 +67,21 @@ impl TitleRow {
     }
 }
 
+/// Where a trackpad's scroll is, where the system says (a Mac's; the DOM's wheel events don't): `fingers`, their
+/// phase, by AppKit's names (`began`, `changed`, `ended`, `cancelled`, `mayBegin`), while they're on it, and
+/// `momentum`, whether it's the scrolling the system goes on with after they've lifted. A page is told them as the
+/// wheel event's `phase` and `momentum`, the name wheel-gestures reads it by.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct Phase {
+    pub fingers: Option<&'static str>,
+    pub momentum: bool,
+}
+
+impl Phase {
+    /// The fingers' phases, by AppKit's names.
+    pub const FINGERS: [&'static str; 5] = ["began", "changed", "ended", "cancelled", "mayBegin"];
+}
+
 /// A panel's own background, which its window has no frame for (`WindowOptions::panel`): its corners' radius, and
 /// whether the host fills it with a popover's colour, where the system has no glass to draw under it (Linux).
 #[derive(Clone, Copy, Debug)]
@@ -851,7 +866,7 @@ impl Screen {
     }
 
     /// A pointer event to each node in `chain` that listens for it, the innermost first, as the DOM's bubble.
-    fn pointer_event(&mut self, chain: &[Id], name: &str, at: Point<f32>, button: u8, delta: Point<f32>) {
+    fn pointer_event(&mut self, chain: &[Id], name: &str, at: Point<f32>, button: u8, wheel: Option<(Point<f32>, Option<Phase>)>) {
         for &id in chain {
             if !self.tree.nodes.get(&id).is_some_and(|node| node.listens(name)) {
                 continue;
@@ -861,9 +876,15 @@ impl Screen {
                 "clientX": at.x, "clientY": at.y, "pointerId": 1, "pointerType": if self.touch { "touch" } else { "mouse" }, "button": button,
                 "rect": {"x": rect.x, "y": rect.y, "width": rect.width, "height": rect.height},
             });
-            if name == "wheel" {
+            if let Some((delta, phase)) = wheel {
                 told["deltaX"] = json!(delta.x);
                 told["deltaY"] = json!(delta.y);
+                if let Some(phase) = phase {
+                    told["momentum"] = json!(phase.momentum);
+                    if let Some(fingers) = phase.fingers {
+                        told["phase"] = json!(fingers);
+                    }
+                }
             }
             self.tell(id, name, told);
         }
@@ -883,10 +904,10 @@ impl Screen {
         self.states.hovered = hovered;
         self.changed();
         for id in left.into_iter().rev() {
-            self.pointer_event(&[id], "pointerleave", at, 0, point(0.0, 0.0));
+            self.pointer_event(&[id], "pointerleave", at, 0, None);
         }
         for id in entered {
-            self.pointer_event(&[id], "pointerenter", at, 0, point(0.0, 0.0));
+            self.pointer_event(&[id], "pointerenter", at, 0, None);
         }
         chain
     }
@@ -901,7 +922,7 @@ impl Screen {
             Some(captured) => self.chain_from(captured),
             None => chain,
         };
-        self.pointer_event(&target, "pointermove", at, 0, point(0.0, 0.0));
+        self.pointer_event(&target, "pointermove", at, 0, None);
         // A press held in an input selects as it's dragged.
         if let Some(id) = self.selecting
             && let (Some(field), Some(drawn)) = (self.fields.get_mut(&id), self.drawn.get(&id))
@@ -917,7 +938,7 @@ impl Screen {
         self.frame_left();
         let at = self.pointer.take().unwrap_or(point(0.0, 0.0));
         for id in std::mem::take(&mut self.states.hovered).into_iter().rev() {
-            self.pointer_event(&[id], "pointerleave", at, 0, point(0.0, 0.0));
+            self.pointer_event(&[id], "pointerleave", at, 0, None);
         }
     }
 
@@ -962,9 +983,9 @@ impl Screen {
         }
         let chain = self.under(at);
         self.captured = chain.first().copied();
-        self.pointer_event(&chain, "pointerdown", at, button, point(0.0, 0.0));
+        self.pointer_event(&chain, "pointerdown", at, button, None);
         if button == 2 {
-            return self.pointer_event(&chain, "contextmenu", at, button, point(0.0, 0.0));
+            return self.pointer_event(&chain, "contextmenu", at, button, None);
         }
         let pressed = self.pressed_in(&chain);
         let input = pressed.filter(|id| self.fields.contains_key(id));
@@ -1028,7 +1049,7 @@ impl Screen {
             Some(captured) => self.chain_from(captured),
             None => self.under(at),
         };
-        self.pointer_event(&target, "pointerup", at, button, point(0.0, 0.0));
+        self.pointer_event(&target, "pointerup", at, button, None);
         // What the pointer selected goes on the primary selection, as Linux's fields put it, never a password.
         if let Some(field) = self.selecting.take().and_then(|id| self.fields.get(&id))
             && !field.secure
@@ -1044,23 +1065,23 @@ impl Screen {
         }
     }
 
-    /// The wheel or a trackpad scrolled by `delta` pixels (down and right positive) at `at`: what's under it is told
-    /// (`wheel`), and the innermost thing there that can still scroll that way does, telling its app if it listens.
-    /// → what scrolled.
-    pub fn scroll(&mut self, at: Point<f32>, delta: Point<f32>) -> Option<Id> {
+    /// The wheel or a trackpad scrolled by `delta` pixels (down and right positive) at `at`, in `phase` where the
+    /// system says: what's under it is told (`wheel`), and the innermost thing there that can still scroll that way
+    /// does, telling its app if it listens. → what scrolled.
+    pub fn scroll(&mut self, at: Point<f32>, delta: Point<f32>, phase: Option<Phase>) -> Option<Id> {
         // A frame's page scrolls first, and what it can't, this one does, as a browser chains them.
-        if let Some(frame) = self.frame_scroll(at, delta, true) {
+        if let Some(frame) = self.frame_scroll(at, delta, Some(phase)) {
             return Some(frame);
         }
         let chain = self.under(at);
-        self.pointer_event(&chain, "wheel", at, 0, delta);
+        self.pointer_event(&chain, "wheel", at, 0, Some((delta, phase)));
         self.pan(at, delta)
     }
 
     /// A finger (or a screen reader) moved what's at `at` by `delta` pixels (down and right positive): the innermost
     /// thing there that can still scroll that way does, telling its app if it listens. → what scrolled.
     pub fn pan(&mut self, at: Point<f32>, delta: Point<f32>) -> Option<Id> {
-        if let Some(frame) = self.frame_scroll(at, delta, false) {
+        if let Some(frame) = self.frame_scroll(at, delta, None) {
             return Some(frame);
         }
         let chain = self.under(at);
