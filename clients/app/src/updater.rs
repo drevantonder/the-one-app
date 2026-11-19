@@ -146,8 +146,11 @@ async fn in_place() {
     }
 }
 
-/// Asks the network for its page, which is due once a newer one is kept.
+/// Asks the network for its page, which is due once a newer one is kept: one ask at a time, as each keeps what it
+/// downloads in the same folder (`page::update`).
 pub async fn page() {
+    static ASKING: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+    let _one = ASKING.lock().await;
     let Ok(views) = crate::views() else { return };
     let kept = async { crate::page::update(&views.client, &crate::app().shell.home()?).await }.await;
     match kept {
