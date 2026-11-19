@@ -6,7 +6,7 @@
 // one box atop the list, with the one thing that fixes it. A request is an alert, as a system's permission prompt is.
 // It's written in strict mode (the UI library's skill), so it runs on a native host as it does on the DOM.
 import { createEffect, createMemo, createSignal, Errored, For, Loading, Match, refresh, Show, Switch as Choose, untrack } from "solid-js"
-import { Alert, Badge, Box, Button, call, changed, Checkbox, component, confirm, createListCollection, Empty, Field, Frame, Image, Input, link, List, open as opening, Problem, render, Row, Screen, Search, Section, Select, Sheet, showRecoveryKey, Skeleton, Spinner, Split, Switch, Text, toast, useRecoveryKey } from "ui"
+import { Alert, Badge, Button, call, changed, Checkbox, component, confirm, createListCollection, Empty, Field, Frame, Image, Input, link, List, open as opening, Problem, render, Row, Screen, Search, Section, Select, Sheet, showRecoveryKey, Skeleton, Spinner, Split, Switch, Text, toast, useRecoveryKey, View } from "ui"
 
 /** A field of an item: a secret one has no value here. */
 interface ItemField {
@@ -400,21 +400,21 @@ function ItemScreen(props: { item: Item }) {
   return (
     <Screen
       heading={
-        <Box style={{ flexDirection: "row", alignItems: "center", gap: 10, minWidth: 0 }}>
+        <View style={{ flexDirection: "row", alignItems: "center", gap: 10, minWidth: 0 }}>
           <Tile item={item()} />
           <Text>{shown(item())}</Text>
-        </Box>
+        </View>
       }
       back
     >
       <Show when={item().status}>
         {(status) => (
-          <Box style={{ flexDirection: "row", alignItems: "center", gap: 12 }}>
-            <Box style={{ flexGrow: 1, flexShrink: 1, minWidth: 0 }}>
+          <View style={{ flexDirection: "row", alignItems: "center", gap: 12 }}>
+            <View style={{ flexGrow: 1, flexShrink: 1, minWidth: 0 }}>
               <Line status={status()} />
-            </Box>
+            </View>
             <Fix item={item()} />
-          </Box>
+          </View>
         )}
       </Show>
       <Section heading="Details">
@@ -514,23 +514,23 @@ function FieldSheet() {
       <Show when={at()}>
         <Show when={!at()!.item}>
           <Field label="Name">
-            <Input placeholder="GitHub" required autofocus value={name()} onInput={(event) => setName(event.currentTarget.value)} onAction={submit} />
+            <Input placeholder="GitHub" required autoFocus value={name()} onChangeText={setName} onSubmitEditing={submit} />
           </Field>
         </Show>
         <Show when={!at()!.field}>
           <Field label="Field" error={field() && !named() ? "Only letters, digits and _." : undefined}>
-            <Input placeholder="token" required autocapitalize="none" autocorrect={false} spellcheck={false} value={field()} onInput={(event) => setField(event.currentTarget.value)} onAction={submit} />
+            <Input placeholder="token" required autoCapitalize="none" autoCorrect={false} spellCheck={false} value={field()} onChangeText={setField} onSubmitEditing={submit} />
           </Field>
         </Show>
         <Field label={at()!.field ? "New value" : "Value"} hint={hidden() ? "It's encrypted on this device, and never shown again." : undefined}>
-          <Input type={hidden() ? "password" : "text"} autocomplete="off" autocapitalize="none" autocorrect={false} spellcheck={false} required autofocus={!!at()!.item} value={value()} onInput={(event) => setValue(event.currentTarget.value)} onAction={submit} />
+          <Input secureTextEntry={hidden()} autoComplete="off" autoCapitalize="none" autoCorrect={false} spellCheck={false} required autoFocus={!!at()!.item} value={value()} onChangeText={setValue} onSubmitEditing={submit} />
         </Field>
         <Show when={!at()!.field}>
           <Checkbox label="Secret" checked={secret()} onChange={(event) => setSecret(event.currentTarget.checked)} />
         </Show>
         <Show when={!at()!.item}>
           <Field label="Websites" hint="Where its secrets may be sent, like api.github.com.">
-            <Input type="url" autocapitalize="none" autocorrect={false} spellcheck={false} value={hosts()} onInput={(event) => setHosts(event.currentTarget.value)} onAction={submit} />
+            <Input inputMode="url" autoCapitalize="none" autoCorrect={false} spellCheck={false} value={hosts()} onChangeText={setHosts} onSubmitEditing={submit} />
           </Field>
         </Show>
         <Button loading={busy()} disabled={!ready()} onClick={save}>
@@ -590,7 +590,7 @@ function CreateSheet() {
   return (
     <Sheet heading={type() ? `Add ${titled(type()!.name)}` : ""} open={!!type()} onClose={shut}>
       <Field label="Name">
-        <Input required autofocus value={name()} onInput={(event) => setName(event.currentTarget.value)} onAction={() => name().trim() && make()} />
+        <Input required autoFocus value={name()} onChangeText={setName} onSubmitEditing={() => name().trim() && make()} />
       </Field>
       <Button loading={busy()} disabled={!name().trim()} onClick={make}>
         Add
@@ -679,12 +679,12 @@ function RequestAlert() {
             {(field, at) => (
               <Field label={label(field.name)}>
                 <Input
-                  type={field.secret === false ? "text" : "password"}
+                  secureTextEntry={field.secret !== false}
                   required
-                  autofocus={at() === 0}
+                  autoFocus={at() === 0}
                   value={typed()[field.name] ?? ""}
-                  onInput={(event) => setTyped((all) => ({ ...all, [field.name]: event.currentTarget.value }))}
-                  onAction={() => filled() && !busy() && allow()}
+                  onChangeText={(text) => setTyped((all) => ({ ...all, [field.name]: text }))}
+                  onSubmitEditing={() => filled() && !busy() && allow()}
                 />
               </Field>
             )}
@@ -780,12 +780,12 @@ const dot = { width: 8, height: 8, flexShrink: 0, borderRadius: "full", backgrou
 /// dot and why. Ready is nothing: fine is silent.
 function Line(props: { status: Status }) {
   return (
-    <Box style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
-      <Show when={props.status.state === "busy"} fallback={<Box aria-hidden="true" style={dot} />}>
+    <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
+      <Show when={props.status.state === "busy"} fallback={<View aria-hidden="true" style={dot} />}>
         <Spinner />
       </Show>
       <Text style={{ flexShrink: 1, minWidth: 0 }}>{props.status.message}</Text>
-    </Box>
+    </View>
   )
 }
 
@@ -819,17 +819,17 @@ function UsedBy(props: { item: Item }) {
   const apps = () => props.item.access.filter((who) => who !== "agents").map((name) => contents().apps.find((app) => app.name === name) ?? { name, title: name, icon: null })
   const what = () => props.item.fields.find((field) => field.secret)?.name
   return (
-    <Box style={inline}>
+    <View style={inline}>
       <Text>{[what() && label(what()!), apps().length ? "used by" : props.item.access.includes("agents") ? "agents may use it" : "used by nothing yet"].filter(Boolean).join(" · ")}</Text>
       <For each={apps()}>
         {(app, at) => (
-          <Box style={inline}>
+          <View style={inline}>
             <Show when={app.icon}>{(icon) => <Image src={src(icon())} alt="" style={small} />}</Show>
             <Text>{`${app.title}${at() < apps().length - 1 ? "," : ""}`}</Text>
-          </Box>
+          </View>
         )}
       </For>
-    </Box>
+    </View>
   )
 }
 
@@ -858,10 +858,10 @@ function Banner(props: { request: Request }) {
         heading={`${asker(props.request)} asks for ${props.request.title}`}
         text={props.request.why ?? undefined}
         action={
-          <Box style={inline}>
+          <View style={inline}>
             <Button variant="ghost" onClick={() => does("vault_answer", { id: props.request.id, decline: true })}>Don't Allow</Button>
             <Button variant="outline" onClick={() => setAsking(props.request)}>Choose…</Button>
-          </Box>
+          </View>
         }
       />
     </List>
@@ -932,10 +932,10 @@ export default function Accounts() {
               {(section) => (
                 <Section
                   heading={
-                    <Box style={inline}>
+                    <View style={inline}>
                       <Show when={typeIn(section)?.icon}>{(icon) => <Image src={icon()} alt="" style={small} />}</Show>
                       <Text>{section}</Text>
-                    </Box>
+                    </View>
                   }
                 >
                   <Show when={items(`section:${section}`).length} fallback={<Empty>None yet.</Empty>}>
@@ -960,7 +960,7 @@ export default function Accounts() {
             </For>
           </Show>
           <List>
-            <Row heading="Security" end={security().readiness !== "ready" ? <Box role="img" aria-label="Needs you" style={dot} /> : undefined} current={secure()} onClick={enter} />
+            <Row heading="Security" end={security().readiness !== "ready" ? <View role="img" aria-label="Needs you" style={dot} /> : undefined} current={secure()} onClick={enter} />
           </List>
         </Screen>
       </Split>

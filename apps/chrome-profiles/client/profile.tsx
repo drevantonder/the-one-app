@@ -2,7 +2,7 @@
 // in it and the pages it visited last, as it was last saved, and updating it yourself: its browser, drawn here, which
 // you click and type on as you would Chrome, then save. `Summary` is its row's line in the Vault's list.
 import { createMemo, createSignal, For, Loading, refresh, Show } from "solid-js"
-import { Box, Button, call, changed, confirm, Empty, Field, Image, Input, List, LiveScreen, Menu, Problem, Row, Screen, Section, Sheet, Status, Steps, Text, toast } from "ui"
+import { Button, call, changed, confirm, Empty, Field, Image, Input, List, LiveScreen, Menu, Problem, Row, Screen, Section, Sheet, Status, Steps, Text, toast, View } from "ui"
 
 /** A profile, as `chrome-profiles_list` answers it. */
 interface Profile {
@@ -124,7 +124,7 @@ function Updating(props: { profile: Profile; subject?: string }) {
       <Show when={u().state !== "failed" && !(u().state === "ready" && u().why)}>
         <Text style={{ color: "muted-foreground" }}>Use it as you would Chrome: sign in to any sites you like. It's saved by itself at {time(u().until)}.</Text>
       </Show>
-      <Box style={{ flexDirection: "row", gap: 8 }}>
+      <View style={{ flexDirection: "row", gap: 8 }}>
         <Show when={u().state !== "failed" && !u().why}>
           <Button loading={busy() === "save" || u().state === "saving"} disabled={u().state !== "ready" || !!busy()} onClick={() => finish("save")}>
             Save
@@ -133,7 +133,7 @@ function Updating(props: { profile: Profile; subject?: string }) {
         <Button variant="outline" loading={busy() === "discard" || u().state === "discarding"} disabled={!["ready", "failed"].includes(u().state) || !!busy()} onClick={() => finish("discard")}>
           Discard
         </Button>
-      </Box>
+      </View>
     </Section>
   )
 }
@@ -165,7 +165,7 @@ function Rename(props: Props & { asking: boolean; done: () => void }) {
   return (
     <Sheet heading="Rename Profile" open={props.asking} onClose={props.done}>
       <Field label="Name">
-        <Input required autofocus value={typed()} onInput={(event) => setTyped(event.currentTarget.value)} onAction={send} />
+        <Input required autoFocus value={typed()} onChangeText={setTyped} onSubmitEditing={send} />
       </Field>
       <Button loading={busy()} onClick={send}>Rename</Button>
     </Sheet>
