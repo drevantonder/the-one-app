@@ -37,7 +37,7 @@ defmodule AndroidEmulator do
   @impl true
   def requires do
     %{
-      "core" => ">= 0.32.47",
+      "core" => ">= 0.32.109",
       "database" => "to keep your emulators",
       "webrtc" => "to show an emulator's screen live"
     }
@@ -229,23 +229,13 @@ defmodule AndroidEmulator do
   @impl true
   def call("list", _inputs, call), do: %{emulators: listed(call)}
 
-  def call("machines", _inputs, call) do
-    machines =
-      for server <- Service.servers(call, Emulator) do
-        case Service.seen(server) do
-          at when is_integer(at) -> %{machine: Service.name(server), on: false, last_on: at}
-          _ -> %{machine: Service.name(server), on: true}
-        end
-      end
-
-    %{machines: machines}
-  end
+  def call("machines", _inputs, call), do: %{machines: Service.machines(call, Emulator)}
 
   def call("create", %{"name" => name} = inputs, call) do
     if Enum.any?(emulators(call), &(&1["name"] == name)), do: raise("You have an emulator called #{name} already")
     servers = Service.servers(call, Emulator)
     if servers == [], do: raise("No computer runs Android emulators yet. Ask your network's admin to set one up.\n\n`install_service` runs AndroidEmulator.Emulator on one.")
-    server = if inputs["machine"], do: machine(servers, inputs["machine"]), else: hd(servers)
+    server = if inputs["machine"], do: Service.machine!(call, Emulator, inputs["machine"]), else: hd(servers)
     id = "#{name}-#{Base.encode16(:crypto.strong_rand_bytes(4), case: :lower)}"
 
     spec = %{
@@ -314,15 +304,7 @@ defmodule AndroidEmulator do
     %{done: did(action, inputs)}
   end
 
-  def call("stop_idle", _inputs, call) do
-    stopped =
-      for server <- Service.servers(call, Emulator),
-          not is_integer(Service.seen(server)),
-          name <- Service.call(call, Emulator, :stop_idle, [@idle_hours * 3_600_000], server),
-          do: %{machine: Service.name(server), name: name}
-
-    %{stopped: stopped}
-  end
+  def call("stop_idle", _inputs, call), do: %{stopped: Service.stop_idle(call, Emulator, @idle_hours * 3_600_000)}
 
   @doc false
   # An emulator's state changed: every app watching is told. For `AndroidEmulator.Emulator`.
@@ -332,7 +314,7 @@ defmodule AndroidEmulator do
   # on with `screen`.
   @impl true
   def hook("computer-use.screens", _about, call) do
-    for server <- Service.servers(call, Emulator), s <- each(call, server, :screens), Call.reaches?(call, s["artifact"]) do
+    for {server, s} <- Service.each(call, Emulator, :screens), Call.reaches?(call, s["artifact"]) do
       %{
         "name" => s["name"],
         "description" => "#{s["description"]}, an Android emulator on #{Service.name(server)}",
@@ -411,19 +393,8 @@ defmodule AndroidEmulator do
   defp listed(call), do: Enum.map(emulators(call), &Map.drop(&1, ["server", "artifact", "id"]))
 
   defp emulators(call) do
-    for server <- Service.servers(call, Emulator),
-        e <- each(call, server, :list),
+    for {server, e} <- Service.each(call, Emulator, :list),
         Call.reaches?(call, e["artifact"]),
         do: Map.merge(e, %{"server" => server, "machine" => Service.name(server)})
-  end
-
-  # A machine that's known to be off has nothing to list now: `machines` says which.
-  defp each(call, server, function) do
-    if is_integer(Service.seen(server)), do: [], else: Service.call(call, Emulator, function, [], server)
-  end
-
-  defp machine(servers, name) do
-    Enum.find(servers, &(String.downcase(Service.name(&1) || "") == String.downcase(name))) ||
-      raise "No machine called #{name} runs emulators. They're on #{Enum.map_join(servers, ", ", &Service.name/1)}."
   end
 end

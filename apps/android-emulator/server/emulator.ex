@@ -130,7 +130,7 @@ defmodule AndroidEmulator.Emulator do
             else: Map.delete(data.emulators, id)
 
         # An emulator that ended was running a moment ago, though the machine says it's stopped already.
-        if emulators != data.emulators or to != was or event == "exited", do: tell()
+        if emulators != data.emulators or to != was or event == "exited", do: OneCore.Service.changed(self())
         {:reply, {:ok, to}, %{data | emulators: emulators}}
     end
   end
@@ -169,12 +169,6 @@ defmodule AndroidEmulator.Emulator do
   defp refused("removing", _), do: "It's being removed."
   defp refused(state, event), do: "It can't #{event} while it's #{state}."
 
-  # Tells every app watching that an emulator's state changed, as a call to the app does once it's done.
-  defp tell do
-    service = self()
-    for who <- Enum.take(OneCore.Service.acts_for(), 1), do: Task.start(fn -> OneCore.Service.app(service, who, :changed) end)
-  end
-
   # Takes the emulator `id` one step (`event`, by `@steps`, or `nil` for none) with `changes`, and gives its state.
   defp step(service, id, event, changes \\ %{}) do
     case GenServer.call(service, {:step, id, event, changes}) do
@@ -186,7 +180,7 @@ defmodule AndroidEmulator.Emulator do
   @doc "Every emulator here: its id, name, whose it is, what it's for, its state and when it was created and last used."
   def list(service) do
     avd = avd_home(service)
-    used = used(service)
+    used = OneCore.Service.used(service)
     running = processes()
     kept = GenServer.call(service, :emulators)
 
@@ -266,7 +260,7 @@ defmodule AndroidEmulator.Emulator do
     log = log(service, id)
     saved = String.contains?(read(log), "Saving snapshot 'default_boot' took")
     File.rm(Path.join(avd_home(service), id <> ".stopping"))
-    touch(service, id)
+    OneCore.Service.touch(service, id)
 
     emulator =
       [Path.join(sdk, "emulator/emulator"), "-avd", id, "-port", "#{port}", "-no-window", "-no-audio", "-no-boot-anim"] ++
@@ -356,7 +350,7 @@ defmodule AndroidEmulator.Emulator do
 
   @doc "A PNG of the phone's screen, as base64, by Android's `screencap`."
   def screenshot(service, id) do
-    touch(service, id)
+    OneCore.Service.touch(service, id)
 
     case adb(service, id, ~w(exec-out screencap -p), 15, :raw) do
       %{exit: 0, stdout: png} -> Base.encode64(png)
@@ -366,21 +360,21 @@ defmodule AndroidEmulator.Emulator do
 
   @doc "Runs Android's `input` with `args`, in the phone's shell: a tap, a swipe, text, a key."
   def input(service, id, args) do
-    touch(service, id)
+    OneCore.Service.touch(service, id)
     %{exit: 0} = adb!(service, id, ["shell", Enum.join(["input" | Enum.map(args, &word/1)], " ")], 30)
     :ok
   end
 
   @doc "Opens `url` in the phone, as its own app for it or its browser does."
   def open_url(service, id, url) do
-    touch(service, id)
+    OneCore.Service.touch(service, id)
     adb!(service, id, ["shell", "am start -a android.intent.action.VIEW -d #{word(url)}"], 30)
     :ok
   end
 
   @doc "Installs an APK, given as base64 or by its URL, granting what it asks for."
   def install(service, id, apk) do
-    touch(service, id)
+    OneCore.Service.touch(service, id)
     file = Path.join(OneCore.Service.folder(service), "install-#{System.unique_integer([:positive])}.apk")
 
     try do
@@ -398,7 +392,7 @@ defmodule AndroidEmulator.Emulator do
 
   @doc "Runs `command` in the phone's shell, as adb's shell user, for at most `timeout` seconds."
   def shell(service, id, command, timeout) do
-    touch(service, id)
+    OneCore.Service.touch(service, id)
     adb(service, id, ["shell", command], timeout)
   end
 
@@ -418,7 +412,7 @@ defmodule AndroidEmulator.Emulator do
   to use: `server/stream/stream.py` answers it and carries on by itself until the app goes. Gives the SDP answer.
   """
   def stream(service, id, request) do
-    touch(service, id)
+    OneCore.Service.touch(service, id)
     python = sender(service)
     adb!(service, id, ["push", scrcpy(service), "/data/local/tmp/scrcpy-server.jar"], 30)
     folder = OneCore.Service.folder(service)
@@ -677,20 +671,6 @@ defmodule AndroidEmulator.Emulator do
     case File.read(file) do
       {:ok, text} -> text
       _ -> ""
-    end
-  end
-
-  defp touch(service, id) do
-    folder = Path.join(OneCore.Service.folder(service), "used")
-    File.mkdir_p!(folder)
-    File.touch!(Path.join(folder, id))
-  end
-
-  defp used(service) do
-    folder = Path.join(OneCore.Service.folder(service), "used")
-
-    for file <- if(File.dir?(folder), do: File.ls!(folder), else: []), into: %{} do
-      {file, File.stat!(Path.join(folder, file), time: :posix).mtime * 1000}
     end
   end
 
