@@ -131,6 +131,14 @@ export class Network extends WorkerEntrypoint<PresignerEnv> {
   verifiedKey(url: string, headers: HeadersInit, body: string): Promise<string | null> {
     return verifiedKey(new Request(url, { headers }), body);
   }
+
+  /**
+   * The answer to what was asked at `url` with `headers` whose signature `verifiedKey` refused, as the edge gives it
+   * (`unsigned`), by which a server whose clock is off corrects it (`OneCore.Edge.ask!/2`).
+   */
+  unsigned(url: string, headers: HeadersInit): Response {
+    return unsigned(new Request(url, { headers }));
+  }
 }
 
 /**

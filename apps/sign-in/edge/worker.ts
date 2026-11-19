@@ -198,6 +198,8 @@ const signerKey = (request: Request, body: string) => env.NETWORK.verifiedKey(re
 async function ask(request: Request, auth: Auth, url: URL) {
   const body = await request.text();
   const server = await signerKey(request, body);
+  // A server whose clock is off is told the edge's, and asks again by it (`OneCore.Edge.ask!/2`).
+  if (!server) return env.NETWORK.unsigned(request.url, Object.fromEntries(request.headers));
   let what: Ask;
   try {
     what = JSON.parse(body);
@@ -206,6 +208,6 @@ async function ask(request: Request, auth: Auth, url: URL) {
   }
   const ofNetwork = ["invite", "owner", "everyone", "remove_person"].includes(what.ask ?? "");
   const acting = (await Promise.all([env.NETWORK.servers(), ...(ofNetwork ? [] : [env.NETWORK.servers(`${what.who}/`)])])).flat();
-  if (!server || !acting.includes(server)) return Response.json({ error: "Only a server acting for them asks this" }, { status: 403 });
+  if (!acting.includes(server)) return Response.json({ error: "Only a server acting for them asks this" }, { status: 403 });
   return Response.json(await asked(auth, url.origin, what));
 }

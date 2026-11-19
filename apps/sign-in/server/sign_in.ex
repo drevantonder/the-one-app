@@ -634,9 +634,8 @@ defmodule SignIn do
     # A network being built acts as whoever a client says, who joined nowhere, so the edge makes them as it's asked.
     body = JSON.encode!(Map.put(what, :building, Application.get_env(:one_core, :development, false)))
 
-    request = [method: :post, url: address() <> "/sign-in/ask", body: body, headers: Edge.signed("/sign-in/ask", body)]
-
-    case Edge.send!(request ++ [retry: false]) do
+    # Signed as every ask of the edge is, so one refused for this server's clock is signed again by the edge's.
+    case Edge.ask!([method: :post, url: address() <> "/sign-in/ask", body: body, retry: false], "/sign-in/ask") do
       %{status: 200, body: %{"error" => why}} -> raise why
       %{status: 200, body: response} -> response
       %{status: status} -> raise "The network's edge answered #{status}"

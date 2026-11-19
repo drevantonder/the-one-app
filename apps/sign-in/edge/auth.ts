@@ -35,6 +35,7 @@ declare global {
       };
       NETWORK: {
         verifiedKey(url: string, headers: Record<string, string>, body: string): Promise<string | null>;
+        unsigned(url: string, headers: Record<string, string>): Promise<Response>;
         servers(of?: string): Promise<string[]>;
         owner(): Promise<string | null>;
       };
