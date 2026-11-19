@@ -37,6 +37,15 @@ pub async fn serve(client: Arc<Client>, code: bool) -> Result<()> {
         let mut request: Value = serde_json::from_str(&message).unwrap_or_default();
         if request["method"] == "initialize" {
             said = request["params"]["clientInfo"].clone();
+            // An agent's MCP client goes by its own name, never one of the One App's: those say its person is on
+            // their own screen (the app's window, or a browser's), which a server believes of the One App alone.
+            if said["name"].as_str().is_some_and(|name| name.starts_with("one-")) {
+                said["name"] = json!(format!("mcp {}", said["name"].as_str().unwrap_or_default()));
+            }
+        }
+        // What an agent says of itself in a request is only what it said as it began, renamed as above.
+        if request["params"]["_meta"]["io.modelcontextprotocol/clientInfo"].is_object() {
+            request["params"]["_meta"]["io.modelcontextprotocol/clientInfo"] = Value::Null;
         }
         if request["method"].is_string() && said.is_object() && request["params"]["_meta"]["io.modelcontextprotocol/clientInfo"].is_null() {
             request["params"]["_meta"]["io.modelcontextprotocol/clientInfo"] = said.clone();
