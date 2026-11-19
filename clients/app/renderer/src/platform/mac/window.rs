@@ -26,7 +26,7 @@ use objc2_app_kit::{
     NSWindowTitleVisibility,
 };
 use objc2_foundation::{NSArray, NSNotification, NSObject, NSPoint, NSRect, NSSize, NSString};
-use objc2_quartz_core::{CAAutoresizingMask, CALayer, CAMetalLayer, CATransaction, kCAGravityTopLeft};
+use objc2_quartz_core::{CAAutoresizingMask, CALayer, CAMetalLayer, CATransaction, kCACornerCurveContinuous, kCAGravityTopLeft};
 
 use super::events;
 use crate::Cursor;
@@ -457,6 +457,7 @@ impl Display {
                 let view = &*(handle.view as *const View);
                 if let Some(layer) = view.layer() {
                     layer.setCornerRadius(*radius);
+                    layer.setCornerCurve(kCACornerCurveContinuous);
                     // A window that changes size this frame shows its new frame of drawing with the transaction, so the
                     // two change together; any other's comes as it's drawn, without the main thread waiting on its GPU.
                     let resized = (now.size.width, now.size.height) != (to.size.width, to.size.height);
@@ -985,6 +986,7 @@ unsafe fn panel(window: &NSWindow, view: &View, rect: NSRect, corner: f64) {
         content.addSubview(view);
         if let Some(layer) = view.layer() {
             layer.setCornerRadius(corner);
+            layer.setCornerCurve(kCACornerCurveContinuous);
             layer.setMasksToBounds(true);
         }
     }
@@ -1023,6 +1025,7 @@ unsafe fn round(glass: &NSView, corner: f64) {
             let () = msg_send![glass, setCornerRadius: corner];
         } else if let Some(layer) = glass.layer() {
             layer.setCornerRadius(corner);
+            layer.setCornerCurve(kCACornerCurveContinuous);
             layer.setMasksToBounds(true);
         }
     }

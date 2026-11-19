@@ -29,7 +29,7 @@ use objc2::runtime::{AnyClass, NSObjectProtocol};
 use objc2::{ClassType, MainThreadMarker, MainThreadOnly, define_class, msg_send, sel};
 use objc2_core_foundation::CGAffineTransform;
 use objc2_foundation::{NSNotification, NSNotificationCenter, NSObject, NSRunLoop, NSRunLoopCommonModes, NSString};
-use objc2_quartz_core::{CACurrentMediaTime, CADisplayLink, CAFrameRateRange, CAMetalLayer};
+use objc2_quartz_core::{CACurrentMediaTime, CADisplayLink, CAFrameRateRange, CAMetalLayer, kCACornerCurveContinuous};
 use objc2_ui_kit::{
     UIAccessibilityIsReduceMotionEnabled, UIAccessibilitySwitchControlStatusDidChangeNotification,
     UIAccessibilityVoiceOverStatusDidChangeNotification, UIApplication, UIPasteboard,
@@ -465,6 +465,7 @@ impl Display {
         native.card.setAlpha(f64::from(moved.opacity));
         let layer = native.card.layer();
         layer.setCornerRadius(f64::from(moved.corner));
+        layer.setCornerCurve(unsafe { kCACornerCurveContinuous });
         layer.setMasksToBounds(moved.corner > 0.0);
         let dim = UIColor::colorWithWhite_alpha(0.0, f64::from(moved.dim));
         native.view().setBackgroundColor(Some(&dim));
