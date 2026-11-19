@@ -37,10 +37,15 @@ function Dots(props: { owner: Owner; index: number; count: number; size: number;
   const current = () => (seen().owner === props.index ? seen().screen : (state().context.last[props.index] ?? 0))
   // A dot a page, the pages shown lit: a screenful's in the launcher, which shows `shows` from its first. As the pages
   // move, each is lit as much as its page shows.
-  const lit = (screen: number) => screen >= current() && screen < current() + (props.shows ?? 1)
+  // The App Library, after the last screenful of pages, lights the glyph and none of them.
+  const library = () => state().context.screens[props.index]?.indexOf("library") ?? -1
+  const onLibrary = () => library() >= 0 && current() >= library()
+  const lit = (screen: number) => !onLibrary() && screen >= current() && screen < current() + (props.shows ?? 1)
   const shown = (screen: number) => {
     const from = seen().owner === props.index ? along() : current()
-    return Math.max(0, Math.min(1, screen + 1 - from, from + (props.shows ?? 1) - screen))
+    // Where several pages are lit at once, as in the launcher, moving on to the App Library dims them as it comes.
+    const leaving = (props.shows ?? 1) < 2 || library() < 1 ? 0 : Math.max(0, Math.min(1, from - (library() - 1)))
+    return Math.max(0, Math.min(1, screen + 1 - from, from + (props.shows ?? 1) - screen)) * (1 - leaving)
   }
   const last = () => props.count - (props.shows ?? 1)
   let slid: { x: number; from: number; sliding: boolean; id: number } | undefined
