@@ -1,7 +1,7 @@
 // A Chrome profile, as the Vault draws it beside its list (the item type `vault.types` gives): the extensions installed
 // in it and the pages it visited last, as it was last saved, and updating it yourself: its browser, drawn here, which
 // you click and type on as you would Chrome, then save. `Summary` is its row's line in the Vault's list.
-import { createMemo, createSignal, For, Loading, refresh, Show } from "solid-js"
+import { createEffect, createMemo, createSignal, For, Loading, refresh, Show } from "solid-js"
 import { Button, call, changed, confirm, Empty, Field, Image, Input, List, LiveScreen, Menu, Problem, Row, Screen, Section, Sheet, since, Status, Steps, styles, Text, toast, tokens, View } from "ui"
 
 const look = styles({
@@ -142,13 +142,19 @@ function Update(props: { profile: string; subject?: string }) {
     await call("chrome-profiles_update", { profile: props.profile }, { subject: props.subject }).catch(toast)
     setBusy(false)
   }
-  return <Button loading={busy()} onPress={update}>Update Profile</Button>
+  return (
+    <View style={look.buttons}>
+      <Button loading={busy()} onPress={update}>Update Profile</Button>
+    </View>
+  )
 }
 
 /// A new name for the profile.
 function Rename(props: Props & { asking: boolean; done: () => void }) {
   const [busy, setBusy] = createSignal(false)
   const [typed, setTyped] = createSignal(props.item)
+  // Opened again, it starts from the name it has, not from what was typed and left.
+  createEffect(() => props.asking, (now) => void (now && setTyped(props.item)))
   const send = async () => {
     const name = typed().trim()
     if (!name) return
@@ -204,7 +210,7 @@ export default function ChromeProfile(props: Props) {
               <Show when={p().extensions.length} fallback={<Empty>No extensions.</Empty>}>
                 <List>
                   <For each={p().extensions} keyed={(e) => e.id}>
-                    {(e) => <Row start={<Image src={e().icon ?? ""} alt="" style={look.extension} />} heading={e().name} />}
+                    {(e) => <Row start={e().icon ? <Image src={e().icon!} alt="" style={look.extension} /> : undefined} heading={e().name} />}
                   </For>
                 </List>
               </Show>
