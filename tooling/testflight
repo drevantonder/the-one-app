@@ -22,58 +22,48 @@ key_id=R49QVKSHMK
 issuer=2dac44a7-07fb-45f2-85a8-e7f63345f838
 
 if [[ ${1:-} == --on-mac ]]; then
-  # On the Mac, in its checkout at the commit: builds the app unsigned, as no Apple account is signed in to Xcode
-  # there, then signs it with the team's App Store profiles, in the connection the keychain is unlocked in, and uploads
-  # it with the API key on standard input, which altool reads from a folder of its own for that command alone.
-  # The key is read first, before anything else reads what's on standard input.
+  # On the Mac, in its checkout at the commit: archives the app unsigned, as no Apple account is signed in to Xcode
+  # there, then exports it for the App Store, signed with the team's Apple Distribution certificate in the keychain,
+  # unlocked in this connection, and each target's App Store profile, which Xcode fetches with the API key where it
+  # hasn't one. It's manual signing: Xcode's automatic signing exports only with Apple's cloud-managed certificates,
+  # which App Store Connect refuses this key (403). Then it uploads it with the key, which arrives on standard input
+  # and is read first, before anything else reads what's there, into a folder of its own for these commands alone.
   keychain=$HOME/Library/Keychains/ptc-build.keychain-db
   work=$(mktemp -d) && trap 'rm -rf "$work"; security lock-keychain "$keychain"' EXIT
   cat >"$work/AuthKey_$key_id.p8" && exec </dev/null
   cd "$(dirname "$0")/../clients/app"
   network=$HOME/scratch/testflight-network/app
   git clean -qfdx gen/apple
-  python3 - gen/apple/project.yml <<'PY'
-import sys
-path = sys.argv[1]
-text = open(path).read()
-assert text.count("    settings:\n      base:\n") == 2
-open(path, "w").write(text.replace("    settings:\n      base:\n", "    settings:\n      base:\n        CODE_SIGNING_ALLOWED: NO\n"))
-PY
   gen/apple/generate "$network/tauri.conf.json"
-  # Its archive is made, and its export, which would sign it, fails.
   TAURI_ONE_ADDRESS=$(cat "$network/address") APPLE_DEVELOPMENT_TEAM=$team \
-    cargo tauri ios build --export-method app-store-connect --config "$network/tauri.conf.json" || true
-  built=(gen/apple/build/app_iOS.xcarchive/Products/Applications/*.app)
-  [[ -d ${built[0]} ]] || { echo "The app wasn't built" >&2 && exit 1; }
-
+    cargo tauri ios build --archive-only --no-sign --config "$network/tauri.conf.json"
+  archive=gen/apple/build/app_iOS.xcarchive
+  app=$(echo "$archive"/Products/Applications/*.app)
+  # The export signs each target with the entitlements its binary has, so each is signed first, ad hoc, with its own:
+  # the app's with its bundle identifier written in, as Xcode would have.
+  id=$(/usr/libexec/PlistBuddy -c "Print :CFBundleIdentifier" "$app/Info.plist")
+  sed "s/\$(PRODUCT_BUNDLE_IDENTIFIER)/$id/g" gen/apple/app_iOS/app_iOS.entitlements >"$work/app.entitlements"
+  codesign --force --sign - --entitlements gen/apple/Notifications/Notifications.entitlements "$app/PlugIns/Notifications.appex"
+  codesign --force --sign - --entitlements "$work/app.entitlements" "$app"
+  cat >"$work/export.plist" <<PLIST
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0"><dict>
+  <key>method</key><string>app-store-connect</string>
+  <key>teamID</key><string>$team</string>
+  <key>signingStyle</key><string>manual</string>
+  <key>signingCertificate</key><string>Apple Distribution</string>
+  <key>provisioningProfiles</key><dict>
+    <key>$id</key><string>The One App App Store</string>
+    <key>$id.notifications</key><string>The One App Notifications App Store</string>
+  </dict>
+</dict></plist>
+PLIST
   printf 'unlock-keychain -p "%s" "%s"\n' "$(cat ~/.config/ptc/build-keychain-pw)" "$keychain" | security -i >/dev/null
-  profile() {
-    for file in "$HOME/Library/Developer/Xcode/UserData/Provisioning Profiles"/*.mobileprovision; do
-      [[ $(security cms -D -i "$file" 2>/dev/null | plutil -extract Name raw -o - -) == "$1" ]] && echo "$file" && return
-    done
-    echo "There's no profile $1" >&2 && return 1
-  }
-  # Each is signed with its profile's entitlements, less what a signature can't hold as the profile's wildcards: the
-  # keychain's groups, and the associated domains, which for the app are the ones its build wrote.
-  sign() {
-    security cms -D -i "$2" >"$work/profile.plist" && plutil -extract Entitlements xml1 -o "$work/e.plist" "$work/profile.plist"
-    /usr/libexec/PlistBuddy -c "Delete :keychain-access-groups" "$work/e.plist" 2>/dev/null || true
-    /usr/libexec/PlistBuddy -c "Delete :com.apple.developer.associated-domains" "$work/e.plist" 2>/dev/null || true
-    if [[ -n ${3:-} ]]; then
-      # PlistBuddy, as plutil reads the key's dots as a path.
-      /usr/libexec/PlistBuddy -x -c "Print :com.apple.developer.associated-domains" "$3" >"$work/domains.plist"
-      /usr/libexec/PlistBuddy -c "Add :com.apple.developer.associated-domains array" -c "Merge $work/domains.plist :com.apple.developer.associated-domains" "$work/e.plist"
-    fi
-    cp "$2" "$1/embedded.mobileprovision"
-    codesign --force --keychain "$keychain" --sign "Apple Distribution" --entitlements "$work/e.plist" "$1"
-  }
-  mkdir "$work/Payload" && cp -R "${built[0]}" "$work/Payload/"
-  app=$(echo "$work"/Payload/*.app)
-  sign "$app/PlugIns/Notifications.appex" "$(profile "The One App Notifications App Store")"
-  sign "$app" "$(profile "The One App App Store")" gen/apple/app_iOS/app_iOS.entitlements
-  codesign --verify --strict --deep "$app"
-  (cd "$work" && zip -qry app.ipa Payload)
-  API_PRIVATE_KEYS_DIR=$work xcrun altool --upload-app -f "$work/app.ipa" -t ios --apiKey "$key_id" --apiIssuer "$issuer"
+  auth=(-authenticationKeyPath "$work/AuthKey_$key_id.p8" -authenticationKeyID "$key_id" -authenticationKeyIssuerID "$issuer")
+  xcodebuild -exportArchive -archivePath "$archive" -exportOptionsPlist "$work/export.plist" -exportPath "$work/out" -allowProvisioningUpdates "${auth[@]}"
+  (cd "$work" && unzip -q out/*.ipa -d signed && codesign --verify --strict --deep signed/Payload/*.app)
+  API_PRIVATE_KEYS_DIR=$work xcrun altool --upload-app -f "$work"/out/*.ipa -t ios --apiKey "$key_id" --apiIssuer "$issuer"
   exit
 fi
 

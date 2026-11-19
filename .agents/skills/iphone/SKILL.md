@@ -23,8 +23,10 @@ An app is a network's: the commands that build it are in that repo's `app/README
 
 ## What exists
 
-- No Apple account is signed in to Xcode, so `xcodebuild -allowProvisioningUpdates` and `cargo tauri ios build`'s
-  own signing and export fail (`errSecInternalComponent`).
+- No Apple account is signed in to Xcode, so its automatic signing fails: `cargo tauri ios build`'s own signing and
+  export (`errSecInternalComponent`), and an export with `signingStyle` `automatic` even with the API key, which signs
+  only with Apple's cloud-managed certificates, which App Store Connect refuses this key (403). An export with
+  `signingStyle` `manual`, the certificate and each target's profile by name, works (`tooling/testflight`).
 - The team is X96JC3HCV7, the owner's own (Individual), which signs the One App (`app.theone.client`) and The PTC
   App. Its identities are in a keychain of their own, `ptc-build`, not the login keychain: Apple Development, and
   Apple Distribution for TestFlight. Its password is the 1Password item "Mac build keychain (ptc-build)" in the
@@ -82,15 +84,18 @@ refuses (`Locked`). `one builds` shows the phone's new build only once the app h
 
 The owner's phone takes the One App from TestFlight, which updates it by itself; its Update Required's Update opens
 TestFlight. `tooling/testflight <the network's repo>` publishes main, as `tooling/release client` does whenever the
-phone's native code changed: it builds as above with `--export-method app-store-connect`, signs with the App Store
-profiles and Apple Distribution, uploads with the API key, and waits for Apple's processing, after which the internal
+phone's native code changed: it archives unsigned (`--archive-only --no-sign`), signs each target ad hoc with its own
+entitlements, which the export keeps, exports it with the App Store profiles and Apple Distribution
+(`xcodebuild -exportArchive`), uploads with the API key, and waits for Apple's processing, after which the internal
 group "The One App" has the build (`hasAccessToAllBuilds`) and its testers take it automatically.
 
 ## Mistakes already made
 
 - Signing through anything running in the owner's logged-in session (Xcode, a GUI `osascript`, a Terminal tab):
   each signature put a password dialog on his screen. Only ssh, and only a keychain unlocked in that connection.
-- Leaving signing to `cargo tauri ios build` or Xcode's export, which fail with no account signed in.
+- Leaving signing to `cargo tauri ios build` or Xcode's automatic signing, which fail with no account signed in.
+  `cargo tauri ios build` with the API key (`APPLE_API_KEY`) signs only the app's entitlements before its export, so
+  the notification extension would lose its App Group.
 - Signing with the wildcard profile: the phone got no APNs token and said it isn't woken by notifications.
 - Signing a simulator build ad hoc with entitlements that name the team, such as associated domains
   (`codesign -s - --entitlements`): the simulator killed it as it opened (`Code Signature Invalid`). Built for the
