@@ -62,6 +62,7 @@ defmodule Vault.SignIns do
         do: raise("#{service.client}'s sign-ins go only to its sites, and #{service.name}'s token address isn't one. Its person adds it, in the Vault.")
 
       own!(service, found["hosts"])
+      authorize!(service)
       if not String.contains?(item, "{{"), do: ours!(Items.find(call, db, item), app, service.name)
 
       Store.transaction(call, db, fn d ->
@@ -231,6 +232,15 @@ defmodule Vault.SignIns do
 
   # A sign-in writes only into an item a sign-in to the same service made, which the app keeps or uses, as signing in
   # again does, never into another of its person's.
+  # The link its person opens, where the Vault's page sends them, is a web page over https that names nobody before
+  # its site: never a script (`javascript:`), a file or a page sent in the clear.
+  defp authorize!(service) do
+    authorize = URI.parse(service.authorize || "")
+
+    if not (authorize.scheme == "https" and is_binary(authorize.host) and authorize.userinfo == nil),
+      do: raise("#{service.name}'s sign-in page is an https address.")
+  end
+
   defp ours!(nil, _app, _service), do: :ok
 
   defp ours!(found, app, service) do
