@@ -2,7 +2,7 @@
 // in it and the pages it visited last, as it was last saved, and updating it yourself: its browser, drawn here, which
 // you click and type on as you would Chrome, then save. `Summary` is its row's line in the Vault's list.
 import { createEffect, createMemo, createSignal, For, Loading, refresh, Show } from "solid-js"
-import { Button, call, changed, confirm, Empty, Field, Image, Input, List, LiveScreen, Menu, Problem, Row, Screen, Section, Sheet, since, Status, Steps, styles, Text, toast, tokens, View } from "ui"
+import { Button, call, changed, confirm, Empty, Field, Image, Input, List, LiveScreen, Problem, Row, Screen, Section, Sheet, since, Status, Steps, styles, Text, toast, tokens, View } from "ui"
 
 const look = styles({
   note: { color: tokens.colour.secondaryLabel },
@@ -178,34 +178,21 @@ function Rename(props: Props & { asking: boolean; done: () => void }) {
 export default function ChromeProfile(props: Props) {
   const profile = useProfile(props)
   const [asking, setAsking] = createSignal(false)
-  const act = async (value: string) => {
-    if (value === "rename") return setAsking(true)
+  const remove = async () => {
     const yes = await confirm({ heading: `Delete ${props.item}?`, text: "It's in Recently Deleted for 30 days, then gone, with everything signed in on it.", action: "Delete", destructive: true })
     if (yes) await call("chrome-profiles_remove", { profile: props.item }, { subject: props.subject }).then(() => props.close?.()).catch(toast)
   }
   return (
-    <Screen
-      heading={props.item}
-      back
-      action={
-        <Menu.Root onSelect={act}>
-          <Menu.Trigger aria-label={`More for ${props.item}`} />
-          <Menu.Positioner>
-            <Menu.Content>
-              <Menu.Item value="rename">Rename</Menu.Item>
-              <Menu.Separator />
-              <Menu.Item value="delete" destructive>Delete</Menu.Item>
-            </Menu.Content>
-          </Menu.Positioner>
-        </Menu.Root>
-      }
-    >
+    <Screen heading={props.item} back>
       <Show when={profile()}>
         {(p) => (
           <>
             <Show when={p().updating?.session} keyed fallback={<Update profile={p().profile} subject={props.subject} />}>
               <Updating profile={p()} subject={props.subject} />
             </Show>
+            <List>
+              <Row heading="Rename…" onPress={() => setAsking(true)} />
+            </List>
             <Section heading="Extensions">
               <Show when={p().extensions.length} fallback={<Empty>No extensions.</Empty>}>
                 <List>
@@ -224,6 +211,9 @@ export default function ChromeProfile(props: Props) {
                 </List>
               </Show>
             </Section>
+            <List>
+              <Row heading="Delete Profile…" destructive onPress={remove} />
+            </List>
           </>
         )}
       </Show>
