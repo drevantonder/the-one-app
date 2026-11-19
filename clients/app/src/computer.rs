@@ -283,6 +283,10 @@ fn launcher(home: std::path::PathBuf, link: Option<String>, started: std::time::
     if let Err(error) = links() {
         eprintln!("this device's one: links don't open this app: {error:#}");
     }
+    #[cfg(all(windows, not(debug_assertions)))]
+    if let Err(error) = toasts() {
+        eprintln!("this device shows this app's notifications as another app's: {error:#}");
+    }
     let _shortcut = shortcut(&home);
     // Started again as it updated, the app windows that were open open again.
     if let Some(reopen) = std::env::var("ONE_REOPEN").ok().and_then(|reopen| serde_json::from_str::<Vec<(String, Option<String>)>>(&reopen).ok()) {
@@ -791,6 +795,30 @@ fn links() -> anyhow::Result<()> {
         set(r"Software\Classes\one", "URL Protocol", "")?;
         set(r"Software\Classes\one\DefaultIcon", "", &format!("{program},0"))?;
         set(r"Software\Classes\one\shell\open\command", "", &format!("\"{program}\" \"%1\""))?;
+    }
+    Ok(())
+}
+
+/// Has Windows show this app's notifications as this app's, with its name and icon: a toast is shown as the app whose
+/// AppUserModelID it names (`notifications::listen`), and an app that has no shortcut with that ID in the Start menu
+/// is known by the ID's registration in the registry, as an unpackaged app's is.
+#[cfg(all(windows, not(debug_assertions)))]
+fn toasts() -> anyhow::Result<()> {
+    use windows::Win32::System::Registry::{HKEY_CURRENT_USER, REG_SZ, RegSetKeyValueW};
+    use windows::core::HSTRING;
+    let icon = crate::shortcuts::local_data_dir()?.join("AppIcon.ico");
+    std::fs::create_dir_all(icon.parent().expect("a file has a folder"))?;
+    let drawn = include_bytes!("../../../icons/AppIcon.ico");
+    if std::fs::read(&icon).ok().as_deref() != Some(drawn.as_slice()) {
+        std::fs::write(&icon, drawn)?;
+    }
+    let key = format!(r"Software\Classes\AppUserModelId\{}", ::client::NAME);
+    for (name, value) in [("DisplayName", crate::page::NAME.to_owned()), ("IconUri", icon.display().to_string())] {
+        let value: Vec<u16> = value.encode_utf16().chain([0]).collect();
+        unsafe {
+            RegSetKeyValueW(HKEY_CURRENT_USER, &HSTRING::from(&key), &HSTRING::from(name), REG_SZ.0, Some(value.as_ptr().cast()), (value.len() * 2) as u32)
+        }
+        .ok()?;
     }
     Ok(())
 }

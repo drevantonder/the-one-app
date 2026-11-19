@@ -144,14 +144,13 @@ pub fn plugin<R: Runtime>() -> tauri::plugin::TauriPlugin<R> {
 /// Shows each notification that reaches the inbox after the app started, as a server says something changed. One
 /// already read, on another device, isn't shown. A tap on one opens the app it's from (`tapped`, with its app's name),
 /// where the system says so: a Linux desktop's notifications do, through their default action. `identifier` is the
-/// app's, which a Mac shows its notifications as.
+/// app's, which a Mac and Windows show its notifications as.
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
 pub async fn listen(client: Arc<Client>, identifier: &str, tapped: impl Fn(String) + Clone + Send + 'static) {
     #[cfg(target_os = "macos")]
     if let Err(error) = notify_rust::set_application(identifier) {
         eprintln!("this Mac shows notifications as another app's: {error}");
     }
-    let _ = identifier;
     let mut notifications = client.notifications();
     // The newest notification there was, once the inbox has answered: what's after it is new.
     let mut latest = None;
@@ -180,9 +179,9 @@ pub async fn listen(client: Arc<Client>, identifier: &str, tapped: impl Fn(Strin
                         (Some(app), Some(page)) => Some(format!("{app}/{page}")),
                         (app, _) => app.map(str::to_owned),
                     };
-                    let tapped = tapped.clone();
+                    let (tapped, identifier) = (tapped.clone(), identifier.to_owned());
                     // The system's call waits on its notification service, and on Linux for the tap.
-                    tokio::task::spawn_blocking(move || show(&title, &body, opens, tapped));
+                    tokio::task::spawn_blocking(move || show(&identifier, &title, &body, opens, tapped));
                 }
             }
         }
@@ -205,9 +204,14 @@ pub async fn listen(client: Arc<Client>, identifier: &str, tapped: impl Fn(Strin
 
 /// Shows one notification, as the system's own, and hears it tapped where the system says (Linux's default action).
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
-fn show(title: &str, body: &str, opens: Option<String>, tapped: impl Fn(String)) {
+fn show(identifier: &str, title: &str, body: &str, opens: Option<String>, tapped: impl Fn(String)) {
     let mut shown = notify_rust::Notification::new();
     shown.summary(title).body(body);
+    // Without one, Windows shows it as PowerShell, the ID its toast library defaults to.
+    #[cfg(windows)]
+    shown.app_id(identifier);
+    #[cfg(not(windows))]
+    let _ = identifier;
     #[cfg(target_os = "linux")]
     shown.action("default", "Open");
     match shown.show() {
