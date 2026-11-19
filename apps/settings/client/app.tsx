@@ -403,8 +403,8 @@ function AppPage(props: { app: App }) {
 }
 
 /// What a link names, as Settings opens it: a section, Updates or an app's page as they are; an app by its name alone
-/// (`#sign-in`, as a link to one of its pages from before it moved into Settings is), its first section after the
-/// person's row, or else its page.
+/// (`#sign-in`, as the client opens an app with no page of its own, or a page it no longer has), its first section
+/// after the person's row, or else its page.
 function resolved(id: string) {
   if (id === "updates" || id.startsWith("app:") || added().some((one) => one.id === id && one.in === "settings")) return id
   const theirs = sidebar(added()).filter((one) => one.app === id)

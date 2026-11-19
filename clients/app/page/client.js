@@ -899,33 +899,32 @@ async function list(subject) {
   const apps = (/** @type {import("./host.js").Resource[]} */ resources) => new Set(resources.filter(({ _meta }) => _meta?.trusted === true).map(({ uri }) => uri.slice("ui://".length).split("/")[0]))
   const before = trusted.get(subject) ?? Promise.resolve(new Set())
   trusted.set(subject, listing.then(({ resources }) => apps(resources), () => before))
-  try {
-    let { resources, outdated } = await listing
-    // A screen runs its own app and the UI library, which every one of them runs.
-    const library = outdated.some((host) => host.split(".")[0] === "ui")
-    for (const view of open.values()) if (library || outdated.includes(view.host)) page(view, { type: "stale" })
-    if (!subject) {
-      if (!launcherIn(resources) && shown.getSnapshot().matches("opening")) {
-        await invoke("refresh", { view: "client" })
-        ;({ resources } = await invoke("apps", { subject }))
-      }
-      launcher = launcherIn(resources) || launcher
-      if (own) document.title = names.get(own.entrypoint) || document.title
-      crumb()
-      shortcuts()
-      if (launcher || own) on({ type: "listed" })
-      if (shown.getSnapshot().context.connection !== "online") return
-      const late = await behind().catch((/** @type {Error} */ error) => error)
-      if (late instanceof Error) {
-        if (launcher || own) exception(`Couldn't check for an update: ${late.message}`)
-        else on({ type: "unchecked", why: late.message })
-        return
-      }
-      if (!launcher && !own) on(late ? { type: "tooOld" } : { type: "none", only: await only() })
-      on({ type: "updateReady", ready: !phone && late })
+  // Nothing kept, and its network didn't answer: it's listed again once it does.
+  const got = await listing.catch(() => undefined)
+  if (!got) return
+  let { resources, outdated } = got
+  // A screen runs its own app and the UI library, which every one of them runs.
+  const library = outdated.some((host) => host.split(".")[0] === "ui")
+  for (const view of open.values()) if (library || outdated.includes(view.host)) page(view, { type: "stale" })
+  if (!subject) {
+    if (!launcherIn(resources) && shown.getSnapshot().matches("opening")) {
+      await invoke("refresh", { view: "client" })
+      ;({ resources } = await invoke("apps", { subject }))
     }
-  } catch {
-    // Nothing kept, and its network didn't answer: it's listed again once it does.
+    launcher = launcherIn(resources) || launcher
+    if (own) document.title = names.get(own.entrypoint) || document.title
+    crumb()
+    shortcuts()
+    if (launcher || own) on({ type: "listed" })
+    if (shown.getSnapshot().context.connection !== "online") return
+    const late = await behind().catch((/** @type {Error} */ error) => error)
+    if (late instanceof Error) {
+      if (launcher || own) exception(`Couldn't check for an update: ${late.message}`)
+      else on({ type: "unchecked", why: late.message })
+      return
+    }
+    if (!launcher && !own) on(late ? { type: "tooOld" } : { type: "none", only: await only() })
+    on({ type: "updateReady", ready: !phone && late })
   }
 }
 
