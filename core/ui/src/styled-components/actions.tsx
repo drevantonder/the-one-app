@@ -3,7 +3,7 @@
 // Written once on the drawing primitives, the same on the DOM and on a native host.
 import { createEffect, createMemo, createSignal, For, onSettled, Show } from "solid-js"
 import type { JSX } from "@solidjs/web"
-import { Box, EditableText, Layer, Text } from "#primitives"
+import { Modal, Pressable, Text, TextInput, View } from "#primitives"
 import { client, keydown } from "#bridge"
 import { Icon, type IconName } from "./button.tsx"
 import { messages } from "../words.ts"
@@ -144,9 +144,9 @@ const pressed = (keys: string[], event: Keyed) => {
 export function Keys(props: { keys: string[] }) {
   onSettled(ask)
   return (
-    <Box aria-hidden="true" style={look.keys}>
+    <View aria-hidden="true" style={look.keys}>
       <For each={props.keys}>{(key) => <Text style={look.key}>{shown(key)}</Text>}</For>
-    </Box>
+    </View>
   )
 }
 
@@ -180,52 +180,52 @@ export function ActionPanel(props: { open: boolean; onOpenChange: (open: boolean
   }
   return (
     <Show when={props.open}>
-      <Layer modal>
-        <Box style={look.catcher} onClick={close} />
-        <Box role="dialog" aria-label={messages.actions} onKeyDown={keys} style={look.panel}>
-          <Box role="listbox" style={look.list}>
+      <Modal>
+        <Pressable style={look.catcher} onPress={close} />
+        <View role="dialog" aria-label={messages.actions} onKeyDown={keys} style={look.panel}>
+          <View role="listbox" style={look.list}>
             <For each={found()} fallback={<Text style={look.none}>{messages.noActions}</Text>}>
               {(action, at) => (
                 <>
                   <Show when={at() > 0 && action.section !== found()[at() - 1].section}>
-                    <Box role="separator" style={look.separator} />
+                    <View role="separator" style={look.separator} />
                   </Show>
-                  <Box
+                  <Pressable
                     role="option"
                     aria-selected={usable()[active()] === action ? "true" : "false"}
                     aria-disabled={action.disabled ? "true" : undefined}
                     onPointerEnter={() => !action.disabled && setActive(usable().indexOf(action))}
-                    onClick={() => run(action)}
+                    onPress={() => run(action)}
                     style={[look.row, usable()[active()] === action && look.active, action.destructive && look.destructive, action.disabled && look.off]}
                   >
                     <Show when={action.icon}>
                       {(icon) => (
-                        <Box style={[look.glyph, action.destructive && look.destructiveGlyph]}>
+                        <View style={[look.glyph, action.destructive && look.destructiveGlyph]}>
                           <Icon name={icon()} />
-                        </Box>
+                        </View>
                       )}
                     </Show>
                     <Text style={look.label}>{action.label}</Text>
                     <Show when={action.keys?.length}>
                       <Keys keys={action.keys!} />
                     </Show>
-                  </Box>
+                  </Pressable>
                 </>
               )}
             </For>
-          </Box>
-          <Box style={look.search}>
-            <EditableText
+          </View>
+          <View style={look.search}>
+            <TextInput
               aria-label={messages.searchActions}
               placeholder={messages.searchActions}
               value={typed()}
-              autofocus
-              onInput={(event) => setTyped(event.currentTarget.value)}
+              autoFocus
+              onChangeText={(text) => setTyped(text)}
               style={look.field}
             />
-          </Box>
-        </Box>
-      </Layer>
+          </View>
+        </View>
+      </Modal>
     </Show>
   )
 }
@@ -259,28 +259,28 @@ export function ActionBar(props: { start?: JSX.Element; actions?: Action[] }) {
   )
   return (
     <>
-      <Box role="toolbar" style={look.bar}>
+      <View role="toolbar" style={look.bar}>
         <Show when={props.start}>
-          <Box style={[look.pill, look.start]}>{props.start}</Box>
+          <View style={[look.pill, look.start]}>{props.start}</View>
         </Show>
-        <Box style={look.space} />
+        <View style={look.space} />
         <Show when={actions().length}>
-          <Box style={look.pill}>
+          <View style={look.pill}>
             <Show when={primary()}>
               {(action) => (
-                <Box role="button" onClick={() => action().onAction()} style={look.part}>
+                <Pressable role="button" onPress={() => action().onAction()} style={look.part}>
                   <Text style={look.primary}>{action().label}</Text>
                   <Keys keys={keysOf(action())} />
-                </Box>
+                </Pressable>
               )}
             </Show>
-            <Box role="button" aria-haspopup="dialog" aria-expanded={open() ? "true" : "false"} onClick={() => setOpen(!open())} style={look.part}>
+            <Pressable role="button" aria-haspopup="dialog" aria-expanded={open() ? "true" : "false"} onPress={() => setOpen(!open())} style={look.part}>
               <Text>{messages.actions}</Text>
               <Keys keys={["mod", "K"]} />
-            </Box>
-          </Box>
+            </Pressable>
+          </View>
         </Show>
-      </Box>
+      </View>
       <ActionPanel open={open()} onOpenChange={setOpen} actions={actions()} />
     </>
   )

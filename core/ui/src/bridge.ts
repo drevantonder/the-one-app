@@ -158,7 +158,7 @@ document.addEventListener("mouseup", (event) => {
   pressedAt = undefined
   if (event.detail === 2 && inTitleRow(event)) notify("one/title-bar-double-click")
 })
-/// `<Box style={{ paddingTop: safeArea().top }}>`: what the device keeps for itself at each edge of the window (a
+/// `<View style={{ paddingTop: safeArea().top }}>`: what the device keeps for itself at each edge of the window (a
 /// status bar, a notch, a home indicator), in CSS pixels, as it changes: CSS's `--safe-top` and the rest, as numbers,
 /// for what's laid out by hand.
 export const safeArea = () => (greet(), insets())

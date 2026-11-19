@@ -1,8 +1,8 @@
-import { Badge, Box, Button, Icon, Spinner, type Scenes } from "ui"
+import { Badge, Button, Icon, type Scenes, Spinner, View } from "ui"
 
 export default {
   "Buttons/Variants": () => (
-    <Box style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
+    <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
       <Button>Default</Button>
       <Button variant="secondary">Secondary</Button>
       <Button variant="outline">Outline</Button>
@@ -13,15 +13,15 @@ export default {
       <Button variant="outline" size="icon" aria-label="More">
         <Icon name="dots-three" />
       </Button>
-    </Box>
+    </View>
   ),
   "Buttons/Badges and spinner": () => (
-    <Box style={{ flexDirection: "row", gap: 8, alignItems: "center" }}>
+    <View style={{ flexDirection: "row", gap: 8, alignItems: "center" }}>
       <Badge>3</Badge>
       <Badge variant="secondary">New</Badge>
       <Badge variant="destructive">12</Badge>
       <Badge variant="outline">Beta</Badge>
       <Spinner />
-    </Box>
+    </View>
   ),
 } satisfies Scenes

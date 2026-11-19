@@ -3,7 +3,7 @@
 // runner (core/ui/scenes.js) draws each to compare the DOM's with a native host's; `#scenes` lists them for it.
 // Nothing here calls a tool.
 import { For, Show } from "solid-js"
-import { Box, link, render, Scroll, Section, Text, type Scene, type Scenes } from "ui"
+import { link, render, type Scene, type Scenes, ScrollView, Section, Text, View } from "ui"
 import actions from "./actions.scenes.tsx"
 import buttons from "./buttons.scenes.tsx"
 import fields from "./fields.scenes.tsx"
@@ -33,7 +33,7 @@ render(() => (
   <Show
     when={named() ? scenes[named()!] : undefined}
     fallback={
-      <Scroll style={{ padding: 16, gap: 24 }}>
+      <ScrollView style={{ padding: 16, gap: 24 }}>
         <Text role="heading" aria-level={1} style={{ font: "title" }}>
           Gallery
         </Text>
@@ -42,19 +42,19 @@ render(() => (
             <Section heading={family}>
               <For each={Object.keys(scenes).filter((name) => name.startsWith(`${family}/`) && typeof scenes[name] === "function")}>
                 {(name) => (
-                  <Box style={{ gap: 8 }}>
+                  <View style={{ gap: 8 }}>
                     <Text style={{ font: "footnote", color: "muted-foreground" }}>{name.slice(family.length + 1)}</Text>
                     {draw(scenes[name])}
-                  </Box>
+                  </View>
                 )}
               </For>
             </Section>
           )}
         </For>
-      </Scroll>
+      </ScrollView>
     }
   >
-    {(scene) => <Box style={{ padding: 16, gap: 16 }}>{draw(scene())}</Box>}
+    {(scene) => <View style={{ padding: 16, gap: 16 }}>{draw(scene())}</View>}
   </Show>
   </Show>
 ))

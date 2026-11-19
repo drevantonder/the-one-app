@@ -3,7 +3,7 @@
 // their device's back and how they move between screens.
 import { children, createContext, createEffect, createSignal, onSettled, Show, useContext } from "solid-js"
 import type { JSX } from "@solidjs/web"
-import { Box, Scroll, Text } from "#primitives"
+import { Pressable, ScrollView, Text, View } from "#primitives"
 import { back as goBack, breadcrumb, covers, go, keydown, step, touch, viewport } from "#bridge"
 import { BarEnd, Button, Icon } from "./button.tsx"
 import { messages } from "../words.ts"
@@ -145,33 +145,33 @@ export function Screen(props: { heading?: JSX.Element; action?: JSX.Element; bac
   // cards, has none.
   const footed = () => computer && style === "plain" && actions().length > 0
   return (
-    <Box style={look.screen}>
-      <Box role="banner" style={[look.bar, computer && look.titleRow]}>
-        <Box style={[look.row, computer && edge().start && look.atStart, computer && edge().end && look.atEnd]}>
+    <View style={look.screen}>
+      <View role="banner" style={[look.bar, computer && look.titleRow]}>
+        <View style={[look.row, computer && edge().start && look.atStart, computer && edge().end && look.atEnd]}>
           <Show when={backed() || (computer && history)}>
-            <Box role="group" style={[look.pill, !computer && look.round]}>
-              <Box
+            <View role="group" style={[look.pill, !computer && look.round]}>
+              <Pressable
                 role="button"
                 aria-label={messages.back}
                 aria-disabled={backed() || history?.back ? undefined : "true"}
-                onClick={() => (backed() ? back() : history?.back?.())}
+                onPress={() => (backed() ? back() : history?.back?.())}
                 style={[look.pillButton, !(backed() || history?.back) && look.pillOff]}
               >
                 <Icon name="caret-left" along />
-              </Box>
+              </Pressable>
               <Show when={computer}>
-                <Box style={look.pillLine} />
-                <Box
+                <View style={look.pillLine} />
+                <Pressable
                   role="button"
                   aria-label={messages.forward}
                   aria-disabled={!backed() && history?.forward ? undefined : "true"}
-                  onClick={() => !backed() && history?.forward?.()}
+                  onPress={() => !backed() && history?.forward?.()}
                   style={[look.pillButton, (backed() || !history?.forward) && look.pillOff]}
                 >
                   <Icon name="caret-right" along />
-                </Box>
+                </Pressable>
               </Show>
-            </Box>
+            </View>
           </Show>
           <Heading level={1} aria-hidden={named() ? undefined : "true"} style={[look.title, computer && look.computerTitle, !named() && look.unnamed]}>
             {props.heading}
@@ -179,25 +179,25 @@ export function Screen(props: { heading?: JSX.Element; action?: JSX.Element; bac
           <Show when={props.action}>
             <BarEnd value={true}>
               <Collect value={computer ? collect : null}>
-                <Box style={look.action}>{props.action}</Box>
+                <View style={look.action}>{props.action}</View>
               </Collect>
             </BarEnd>
           </Show>
-        </Box>
-      </Box>
-      <Scroll role="main" style={look.main}>
-        <Box style={look.safe}>
-          <Box style={[look.parts, footed() && look.footed]}>
+        </View>
+      </View>
+      <ScrollView role="main" style={look.main}>
+        <View style={look.safe}>
+          <View style={[look.parts, footed() && look.footed]}>
             <Choose value={computer ? choose : null}>
               <Middle value={() => false}>{props.children}</Middle>
             </Choose>
-          </Box>
-        </Box>
-      </Scroll>
+          </View>
+        </View>
+      </ScrollView>
       <Show when={footed()}>
         <ActionBar actions={actions()} />
       </Show>
-    </Box>
+    </View>
   )
 }
 
@@ -207,7 +207,7 @@ function Heading(props: { level: number; "aria-hidden"?: "true"; style: Paramete
   const inside = children(() => props.children)
   const words = () => inside.toArray().every((part) => typeof part === "string" || typeof part === "number")
   return (
-    <Show when={words()} fallback={<Box role="heading" aria-level={props.level} aria-hidden={props["aria-hidden"]} style={props.style}>{inside()}</Box>}>
+    <Show when={words()} fallback={<View role="heading" aria-level={props.level} aria-hidden={props["aria-hidden"]} style={props.style}>{inside()}</View>}>
       <Text role="heading" aria-level={props.level} aria-hidden={props["aria-hidden"]} style={props.style}>
         {inside()}
       </Text>
@@ -221,14 +221,14 @@ export function Section(props: { heading?: JSX.Element; children?: JSX.Element }
   const style = useContext(ListStyle)
   const grouped = () => style === "insetGrouped" || (style === "sidebar" && touch())
   return (
-    <Box style={[look.section, grouped() && look.groupedSection]}>
+    <View style={[look.section, grouped() && look.groupedSection]}>
       <Show when={props.heading}>
         <Heading level={2} style={[look.heading, touch() && look.touchHeading, grouped() && look.groupedHeading]}>
           {props.heading}
         </Heading>
       </Show>
       {props.children}
-    </Box>
+    </View>
   )
 }
 
@@ -272,8 +272,8 @@ export function Split(props: { open?: boolean; onClose?: () => void; detail?: JS
   })
 
   return (
-    <Box style={[look.split, beside() && look.beside]}>
-      <Box aria-hidden={!beside() && shown() ? "true" : undefined} style={[look.pane, beside() ? look.list : look.over, beside() && sidebar && look.sidebar, !beside() && shown() && look.hidden]}>
+    <View style={[look.split, beside() && look.beside]}>
+      <View aria-hidden={!beside() && shown() ? "true" : undefined} style={[look.pane, beside() ? look.list : look.over, beside() && sidebar && look.sidebar, !beside() && shown() && look.hidden]}>
         <Room value={() => (beside() ? listWidth() : room())}>
           <Edge value={() => ({ start: edge().start, end: edge().end && !beside() })}>
           <Opened value={() => (props.open ? close : undefined)}>
@@ -281,8 +281,8 @@ export function Split(props: { open?: boolean; onClose?: () => void; detail?: JS
           </Opened>
           </Edge>
         </Room>
-      </Box>
-      <Box aria-hidden={!beside() && !shown() ? "true" : undefined} style={[look.pane, beside() ? look.detail : look.over, !beside() && !shown() && look.hidden]}>
+      </View>
+      <View aria-hidden={!beside() && !shown() ? "true" : undefined} style={[look.pane, beside() ? look.detail : look.over, !beside() && !shown() && look.hidden]}>
         <Room value={() => (beside() ? room() - listWidth() - 1 : room())}>
           <Edge value={() => ({ start: edge().start && !beside(), end: edge().end })}>
           <Leave value={close}>
@@ -294,7 +294,7 @@ export function Split(props: { open?: boolean; onClose?: () => void; detail?: JS
           </Leave>
           </Edge>
         </Room>
-      </Box>
-    </Box>
+      </View>
+    </View>
   )
 }

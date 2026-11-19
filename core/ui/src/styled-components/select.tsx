@@ -2,7 +2,7 @@
 // on the DOM and on a native host.
 import { createSignal, For, Show } from "solid-js"
 import type { CollectionItem, ListCollection } from "@zag-js/collection"
-import { Box, Layer, Picker, Text } from "#primitives"
+import { Picker, Portal, Pressable, Text, View } from "#primitives"
 import { touch, viewport } from "#bridge"
 import type { Keyed } from "../drawing-primitives/primitives.tsx"
 import type { Located, Rect } from "../types/ui.d.ts"
@@ -145,8 +145,8 @@ function SelectRoot<T extends CollectionItem>(props: SelectProps<T>) {
     }
   }
   return (
-    <Box style={look.select}>
-      <Box
+    <View style={look.select}>
+      <Pressable
         role="combobox"
         aria-haspopup="listbox"
         aria-expanded={open() ? "true" : "false"}
@@ -154,61 +154,62 @@ function SelectRoot<T extends CollectionItem>(props: SelectProps<T>) {
         aria-label={props["aria-label"] ?? field?.label()}
         aria-description={field?.message()}
         aria-invalid={field?.invalid() ? "true" : undefined}
-        onClick={(event: Located) => !touch() && (open() ? setOpen(false) : show(event.currentTarget.getBoundingClientRect()))}
+        onPress={(event: Located) => !touch() && (open() ? setOpen(false) : show(event.currentTarget.getBoundingClientRect()))}
         onKeyDown={keyed}
         onBlur={() => setOpen(false)}
         style={[look.face, field?.invalid() && look.wrong, off() && look.off]}
       >
         <Text style={[look.chosen, !text() && look.placeholder]}>{text() || props.placeholder || " "}</Text>
-        <Box style={look.caret}>
+        <View style={look.caret}>
           <Icon name="caret-up-down" />
-        </Box>
+        </View>
         <Show when={touch()}>
           <Picker
             aria-label={props["aria-label"] ?? field?.label()}
-            disabled={off()}
-            value={chosen()[0]}
-            options={items().map((item) => ({ value: value(item), label: props.collection.stringifyItem(item) ?? "", disabled: itemOff(item) }))}
-            onInput={(event) => {
-              const item = items().find((one) => value(one) === event.currentTarget.value)
+            enabled={!off()}
+            selectedValue={chosen()[0]}
+            onValueChange={(chose) => {
+              const item = items().find((one) => value(one) === chose)
               if (item) choose(item)
             }}
             style={look.native}
-          />
+          >
+            <For each={items()}>{(item) => <Picker.Item value={value(item)} label={props.collection.stringifyItem(item) ?? ""} enabled={!itemOff(item)} />}</For>
+          </Picker>
         </Show>
-      </Box>
+      </Pressable>
       <Show when={at()}>
         {(face) => (
-          <Layer>
-            <Box style={look.catcher} onClick={() => setOpen(false)} />
-            <Box style={look.anchor(face().y, face().x, face().width, face().height)}>
-              <Box role="listbox" style={[look.list, face().y + face().height / 2 > viewport().height / 2 ? look.above : look.below]}>
+          <Portal>
+            <Pressable style={look.catcher} onPress={() => setOpen(false)} />
+            <View style={look.anchor(face().y, face().x, face().width, face().height)}>
+              <View role="listbox" style={[look.list, face().y + face().height / 2 > viewport().height / 2 ? look.above : look.below]}>
                 <For each={items()}>
                   {(item, i) => {
                     const on = () => chosen().includes(value(item))
                     return (
-                      <Box
+                      <Pressable
                         role="option"
                         aria-selected={on() ? "true" : "false"}
                         aria-disabled={itemOff(item) ? "true" : undefined}
-                        tabindex={-1}
-                        onClick={() => choose(item)}
+                        tabIndex={-1}
+                        onPress={() => choose(item)}
                         onPointerEnter={() => setHighlighted(i())}
                         style={[look.item, i() === highlighted() && look.highlighted, itemOff(item) && look.itemOff]}
                       >
                         <Text style={look.itemText}>{props.collection.stringifyItem(item)}</Text>
-                        <Box style={[!on() && look.hidden]}>
+                        <View style={[!on() && look.hidden]}>
                           <Icon name="check" />
-                        </Box>
-                      </Box>
+                        </View>
+                      </Pressable>
                     )
                   }}
                 </For>
-              </Box>
-            </Box>
-          </Layer>
+              </View>
+            </View>
+          </Portal>
         )}
       </Show>
-    </Box>
+    </View>
   )
 }

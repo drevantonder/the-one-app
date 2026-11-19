@@ -1,5 +1,5 @@
 import { For } from "solid-js"
-import { Box, styles, Text, tokens, type Scenes } from "ui"
+import { type Scenes, styles, Text, tokens, View } from "ui"
 import { brand } from "./brand.ts"
 
 const look = styles({
@@ -24,30 +24,30 @@ const bars: [number, `#${string}`][] = [
 
 export default {
   "Styling/An app's own tokens": () => (
-    <Box style={look.row}>
-      <Box style={look.column}>
-        <Box style={look.tile} />
+    <View style={look.row}>
+      <View style={look.column}>
+        <View style={look.tile} />
         <Text style={look.label}>brand.accent</Text>
-      </Box>
-      <Box style={look.column}>
-        <Box style={look.ours} />
+      </View>
+      <View style={look.column}>
+        <View style={look.ours} />
         <Text style={look.label}>magenta</Text>
-      </Box>
-      <Box style={look.column}>
-        <Box style={look.tint} />
+      </View>
+      <View style={look.column}>
+        <View style={look.tint} />
         <Text style={look.label}>its tint</Text>
-      </Box>
-    </Box>
+      </View>
+    </View>
   ),
   "Styling/Dynamic styles": () => (
-    <Box style={{ gap: 16 }}>
-      <Box style={look.row}>
-        <For each={bars}>{([height, colour]) => <Box style={look.bar(height, colour)} />}</For>
-      </Box>
-      <Box style={look.track}>
-        <Box style={look.marker(40, 20, 0)} />
-        <Box style={look.marker(120, 20, 45)} />
-      </Box>
-    </Box>
+    <View style={{ gap: 16 }}>
+      <View style={look.row}>
+        <For each={bars}>{([height, colour]) => <View style={look.bar(height, colour)} />}</For>
+      </View>
+      <View style={look.track}>
+        <View style={look.marker(40, 20, 0)} />
+        <View style={look.marker(120, 20, 45)} />
+      </View>
+    </View>
   ),
 } satisfies Scenes

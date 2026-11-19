@@ -4,7 +4,7 @@
 import { createSignal, onCleanup, Show } from "solid-js"
 import type { JSX } from "@solidjs/web"
 import { assign, createActor, fromCallback, fromPromise, setup } from "xstate"
-import { Box, EditableText, Image, Layer, Text, Video } from "#primitives"
+import { Image, Portal, Pressable, Text, TextInput, Video, View } from "#primitives"
 import { client, safeArea, touch, viewport, visible } from "#bridge"
 import { BarEnd, Button, Icon } from "./button.tsx"
 import { Problem, Status } from "./states.tsx"
@@ -83,11 +83,11 @@ export function LiveScreen(props: { label: string; screen?: (inputs: ScreenInput
       when={props.screen}
       keyed
       fallback={
-        <Box style={look.root}>
-          <Box style={[look.view, look.tall(Math.max(256, viewport().height - 240))]}>
-            <Box style={look.middle}>{props.children}</Box>
-          </Box>
-        </Box>
+        <View style={look.root}>
+          <View style={[look.view, look.tall(Math.max(256, viewport().height - 240))]}>
+            <View style={look.middle}>{props.children}</View>
+          </View>
+        </View>
       }
     >
       {(screen) => <Connected label={props.label} screen={screen} watch={props.watch} />}
@@ -325,16 +325,16 @@ function Connected(props: { label: string; screen: (inputs: ScreenInputs) => Pro
 
   // Where the person types, presses and scrolls: its video, which sends it all itself, or its picture.
   const view = (
-    <Box
+    <View
       onKeyDown={(event) => fullScreen(event) && (event.preventDefault(), toggle())}
       style={[
         look.view,
         full() ? look.full : look.tall(watch && size() && place() ? Math.min((place()!.width * size()![1]) / size()![0], viewport().height - 128) : Math.max(256, viewport().height - 240)),
       ]}
     >
-      <Box
+      <Pressable
         onLayout={laid}
-        onClick={watch ? undefined : (event) => click(event)}
+        onPress={watch ? undefined : (event) => click(event)}
         onContextMenu={watch ? undefined : (event) => click(event, "right")}
         onPointerMove={watch ? undefined : (event: Pressed) => (pointer = event)}
         onWheel={watch ? undefined : wheel}
@@ -346,8 +346,8 @@ function Connected(props: { label: string; screen: (inputs: ScreenInputs) => Pro
               ice={servers()}
               answer={answer()}
               watch={watch}
-              label={props.label}
-              autofocus={full()}
+              aria-label={props.label}
+              autoFocus={full()}
               onOffer={({ sdp }) => connecting?.offer(sdp)}
               onState={({ state }) => (connecting ? connecting.state(state) : state === "lost" && connection.send({ type: "lost" }))}
               onSize={({ width, height }) => setSize([width, height])}
@@ -356,35 +356,35 @@ function Connected(props: { label: string; screen: (inputs: ScreenInputs) => Pro
           )}
         </Show>
         <Show when={!showsVideo() && picture()}>{(src) => <Image src={src()} alt={props.label} style={look.fill} />}</Show>
-      </Box>
+      </Pressable>
       <Show when={!watch && !live()}>
-        <EditableText
+        <TextInput
           aria-label={`Type in ${props.label}`}
           value={typed()}
-          autocomplete="off"
-          autocapitalize="none"
-          autocorrect={false}
-          spellcheck={false}
-          autofocus={typing()}
+          autoComplete="off"
+          autoCapitalize="none"
+          autoCorrect={false}
+          spellCheck={false}
+          autoFocus={typing()}
           onBlur={() => setTyping(false)}
           onKeyDown={key}
-          onInput={(event) => type(event.currentTarget.value)}
+          onChangeText={(text) => type(text)}
           style={look.keys}
         />
       </Show>
       <Show when={state().matches("connecting") || (state().matches("pictures") && !size())}>
-        <Box style={[look.fill, look.state]}>
-          <Box style={look.middle}>
+        <View style={[look.fill, look.state]}>
+          <View style={look.middle}>
             <Status heading="Connecting…" />
-          </Box>
-        </Box>
+          </View>
+        </View>
       </Show>
       <Show when={state().matches("reconnecting")}>
         <Status over heading="Reconnecting…" />
       </Show>
       <Show when={state().matches("unreachable")}>
-        <Box style={[look.fill, look.state]}>
-          <Box style={look.middle}>
+        <View style={[look.fill, look.state]}>
+          <View style={look.middle}>
             <Problem
               heading="Can't reach this screen"
               text={state().context.why}
@@ -394,31 +394,31 @@ function Connected(props: { label: string; screen: (inputs: ScreenInputs) => Pro
                 </Button>
               }
             />
-          </Box>
-        </Box>
+          </View>
+        </View>
       </Show>
       {/* On a phone the view is small: a tap opens it full screen, where taps are clicks. */}
       <Show when={touch() && !full()}>
-        <Box onClick={toggle} style={look.fill} />
+        <Pressable onPress={toggle} style={look.fill} />
       </Show>
       {/* Full screen has no Escape, which is the screen's: it has its own way out. */}
       <Show when={full()}>
-        <Box style={look.leave(Math.max(8, safeArea().top), Math.max(8, safeArea().right))}>
+        <View style={look.leave(Math.max(8, safeArea().top), Math.max(8, safeArea().right))}>
           <Button variant="secondary" size="icon" aria-label={messages.exitFullScreen} onClick={toggle}>
             <Icon name="corners-in" />
           </Button>
-        </Box>
+        </View>
       </Show>
-    </Box>
+    </View>
   )
 
   return (
-    <Box style={look.root}>
+    <View style={look.root}>
       {!full() && view}
       <Show when={full()}>
-        <Layer>{view}</Layer>
+        <Portal>{view}</Portal>
       </Show>
-      <Box style={look.bar}>
+      <View style={look.bar}>
         <Show when={state().matches("pictures")}>
           <Text style={look.note}>Live video isn't connecting, so this updates each second.</Text>
         </Show>
@@ -427,7 +427,7 @@ function Connected(props: { label: string; screen: (inputs: ScreenInputs) => Pro
             <Icon name="corners-out" />
           </Button>
         </BarEnd>
-      </Box>
-    </Box>
+      </View>
+    </View>
   )
 }

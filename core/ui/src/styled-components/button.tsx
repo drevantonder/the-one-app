@@ -2,7 +2,7 @@
 // primitives (#primitives), the same on the DOM and on a native host.
 import { children, createContext, Show, useContext } from "solid-js"
 import type { JSX } from "@solidjs/web"
-import { Box, Path, Text } from "#primitives"
+import { Path, Pressable, Svg, Text, View } from "#primitives"
 import { messages } from "../words.ts"
 import { collected } from "./collect.ts"
 import { negative, styles, type Styles } from "../styles.ts"
@@ -75,7 +75,8 @@ export type IconName = keyof typeof svgs
 
 const look = styles({
   icon: { width: tokens.length.icon, height: tokens.length.icon, flexShrink: 0 },
-  spinner: { width: tokens.length.icon, height: tokens.length.icon, flexShrink: 0, fill: "none", stroke: "currentColor", strokeWidth: 2, animationName: "spin", animation: tokens.motion.spin },
+  spinner: { width: tokens.length.icon, height: tokens.length.icon, flexShrink: 0, animationName: "spin", animation: tokens.motion.spin },
+  spinnerArc: { fill: "none", stroke: "currentColor", strokeWidth: 2 },
   button: {
     flexDirection: "row",
     alignItems: "center",
@@ -133,15 +134,15 @@ export function Icon(props: { name: IconName; along?: boolean }) {
     if (!paths[props.name]) throw new Error(`No icon named "${props.name}". There are: ${Object.keys(paths).join(", ")}`)
     return paths[props.name]
   }
-  return <Path viewBox="0 0 256 256" d={d()} aria-hidden="true" style={look.icon} />
+  return <Svg viewBox="0 0 256 256" aria-hidden="true" style={look.icon}><Path d={d()} /></Svg>
 }
 
 /// `<Spinner />`: something's under way, an icon's size.
 export function Spinner() {
   return (
-    <Box role="status" aria-label={messages.loading}>
-      <Path viewBox="0 0 24 24" d="M12 3a9 9 0 1 0 9 9" style={look.spinner} />
-    </Box>
+    <View role="status" aria-label={messages.loading}>
+      <Svg viewBox="0 0 24 24" style={look.spinner}><Path d="M12 3a9 9 0 1 0 9 9" style={look.spinnerArc} /></Svg>
+    </View>
   )
 }
 
@@ -181,23 +182,23 @@ export function Button(props: ButtonProps) {
   const words = () => inside.toArray().filter((part) => typeof part === "string").join(" ") || props["aria-label"] || ""
   if (collected(() => ({ label: words(), onAction: () => props.onClick?.(undefined as never), destructive: props.variant === "destructive", disabled: off() }))) return null
   return (
-    <Box
+    <Pressable
       role="button"
       aria-label={props["aria-label"]}
       aria-haspopup={props["aria-haspopup"]}
       aria-expanded={props["aria-expanded"]}
-      autofocus={props.autofocus}
+      autoFocus={props.autofocus}
       onLayout={props.onLayout}
       aria-disabled={off() ? "true" : undefined}
       aria-busy={props.loading ? "true" : undefined}
-      onClick={(event: Located) => !off() && props.onClick?.(event)}
+      onPress={(event: Located) => !off() && props.onClick?.(event)}
       style={[look.button, props.variant && props.variant !== "default" && look[props.variant], props.size === "icon" && look.square, end && props.variant === "ghost" && props.size === "icon" && look.pulled, off() && look.disabled, props["aria-expanded"] === "true" && (props.variant === "outline" || props.variant === "ghost") && look.open, props.style]}
     >
       <Show when={props.loading}>
         <Spinner />
       </Show>
       {inside.toArray().map((part) => (typeof part === "string" ? <Text>{part}</Text> : part))}
-    </Box>
+    </Pressable>
   )
 }
 
@@ -215,8 +216,8 @@ const badges = { default: undefined, secondary: look.badgeSecondary, destructive
 /// `secondary` and `outline` are for a word that only says what something is.
 export function Badge(props: BadgeProps) {
   return (
-    <Box aria-label={props["aria-label"]} style={[look.badge, badges[props.variant ?? "default"]]}>
+    <View aria-label={props["aria-label"]} style={[look.badge, badges[props.variant ?? "default"]]}>
       <Text>{props.children}</Text>
-    </Box>
+    </View>
   )
 }

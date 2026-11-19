@@ -3,7 +3,7 @@
 // off, never scrolled. Its name is small and grey, low in its order. Colour is for what needs someone.
 import { createContext, createSignal, For, Match, Show, Switch as Which, useContext } from "solid-js"
 import type { JSX } from "@solidjs/web"
-import { Box, Image, Path, Text } from "#primitives"
+import { Image, Path, Pressable, Svg, Text, View } from "#primitives"
 import type { Laid, Located, Rect } from "../types/ui.d.ts"
 import { Spinner } from "./button.tsx"
 import { Switch } from "./field.tsx"
@@ -248,9 +248,9 @@ function Drawn(props: { label?: string; style?: Styles; draw: (width: number, he
     if (width !== size()?.width || height !== size()?.height) setSize({ x: 0, y: 0, width, height })
   }
   return (
-    <Box role={props.label ? "img" : undefined} aria-label={props.label} onLayout={laid} style={props.style}>
+    <View role={props.label ? "img" : undefined} aria-label={props.label} onLayout={laid} style={props.style}>
       <Show when={size()?.width && size()?.height ? size() : undefined}>{(box) => props.draw(box().width, box().height)}</Show>
-    </Box>
+    </View>
   )
 }
 
@@ -264,10 +264,10 @@ function Spark(props: { part: Layout }) {
       draw={(width, height) => (
         <Show
           when={values().length}
-          fallback={<Path viewBox={`0 0 ${at(width)} ${at(height)}`} d={Array.from({ length: Math.ceil(width / 5) }, (_, index) => `M${index * 5} ${at(height / 2 - 0.75)}h2v1.5h-2Z`).join("")} style={look.over} />}
+          fallback={<Svg viewBox={`0 0 ${at(width)} ${at(height)}`} style={look.over}><Path d={Array.from({ length: Math.ceil(width / 5) }, (_, index) => `M${index * 5} ${at(height / 2 - 0.75)}h2v1.5h-2Z`).join("")} /></Svg>}
         >
-          <Path viewBox={`0 0 ${at(width)} ${at(height)}`} d={`M${along(values(), max(), width, height).map(([x, y]) => `${at(x)} ${at(y)}`).join("L")}L${at(width)} ${at(height)}L0 ${at(height)}Z`} style={[look.over, look.area]} />
-          <Path viewBox={`0 0 ${at(width)} ${at(height)}`} d={band(along(values(), max(), width, height), 1.5)} style={look.over} />
+          <Svg viewBox={`0 0 ${at(width)} ${at(height)}`} style={[look.over, look.area]}><Path d={`M${along(values(), max(), width, height).map(([x, y]) => `${at(x)} ${at(y)}`).join("L")}L${at(width)} ${at(height)}L0 ${at(height)}Z`} /></Svg>
+          <Svg viewBox={`0 0 ${at(width)} ${at(height)}`} style={look.over}><Path d={band(along(values(), max(), width, height), 1.5)} /></Svg>
         </Show>
       )}
     />
@@ -288,22 +288,22 @@ function Chart(props: { part: Layout }) {
       .join("")
   }
   return (
-    <Box style={[look.chart, ...room(props.part), look.height(number(props.part.height, 70))]}>
+    <View style={[look.chart, ...room(props.part), look.height(number(props.part.height, 70))]}>
       <Drawn
         label={props.part.label}
         style={look.bars}
         draw={(width, height) => (
-          <Path viewBox={`0 0 ${at(width)} ${at(height)}`} d={props.part.kind === "line" ? band(along(values(), max(), width, height), 1.5) : bars(width, height)} style={look.over} />
+          <Svg viewBox={`0 0 ${at(width)} ${at(height)}`} style={look.over}><Path d={props.part.kind === "line" ? band(along(values(), max(), width, height), 1.5) : bars(width, height)} /></Svg>
         )}
       />
       <Show when={Array.isArray(props.part.labels)}>
-        <Box style={look.labels}>
+        <View style={look.labels}>
           <For each={props.part.labels} keyed={false}>
             {(label) => <Text style={look.label}>{String(label() ?? "")}</Text>}
           </For>
-        </Box>
+        </View>
       </Show>
-    </Box>
+    </View>
   )
 }
 
@@ -319,8 +319,8 @@ function Bar(props: { width: number; height: number; value: number }) {
   }
   return (
     <>
-      <Path viewBox={`0 0 ${at(props.width)} ${at(props.height)}`} d={rounded(0, 0, props.width, props.height, round())} style={[look.over, look.track]} />
-      <Path viewBox={`0 0 ${at(props.width)} ${at(props.height)}`} d={filled()} style={look.over} />
+      <Svg viewBox={`0 0 ${at(props.width)} ${at(props.height)}`} style={[look.over, look.track]}><Path d={rounded(0, 0, props.width, props.height, round())} /></Svg>
+      <Svg viewBox={`0 0 ${at(props.width)} ${at(props.height)}`} style={look.over}><Path d={filled()} /></Svg>
     </>
   )
 }
@@ -341,15 +341,15 @@ function Gauge(props: { part: Layout }) {
     return `M${point(outer, 0)}A${outer} ${outer} 0 ${large} 1 ${point(outer, part)}L${point(inner, part)}A${at(inner)} ${at(inner)} 0 ${large} 0 ${point(inner, 0)}Z${end(0)}${end(part)}`
   }
   return (
-    <Box role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(share(props.part.value) * 100)} aria-label={props.part.label} style={[look.gauge, tone(props.part), look.square(size())]}>
-      <Path viewBox={`0 0 ${size()} ${size()}`} d={ring()} style={[look.over, look.track]} />
-      <Path viewBox={`0 0 ${size()} ${size()}`} d={filled()} style={look.over} />
+    <View role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(share(props.part.value) * 100)} aria-label={props.part.label} style={[look.gauge, tone(props.part), look.square(size())]}>
+      <Svg viewBox={`0 0 ${size()} ${size()}`} style={[look.over, look.track]}><Path d={ring()} /></Svg>
+      <Svg viewBox={`0 0 ${size()} ${size()}`} style={look.over}><Path d={filled()} /></Svg>
       <Show when={props.part.label && size() >= 36}>
-        <Box style={look.middle}>
+        <View style={look.middle}>
           <Text style={look.meterLabel}>{props.part.label}</Text>
-        </Box>
+        </View>
       </Show>
-    </Box>
+    </View>
   )
 }
 
@@ -371,17 +371,17 @@ function acts(props: { part: Layout }) {
 function Press(props: { part: Layout }) {
   const [busy, act, took] = acts(props)
   return (
-    <Box
+    <Pressable
       role="button"
       aria-disabled={busy() ? "true" : undefined}
       aria-busy={busy() ? "true" : undefined}
-      onClick={(event: Located) => (took(event), !busy() && act(props.part.inputs ?? {}))}
+      onPress={(event: Located) => (took(event), !busy() && act(props.part.inputs ?? {}))}
       style={[look.press, ...room(props.part), sized(props.part)]}
     >
       <Show when={busy()} fallback={<Text>{props.part.label}</Text>}>
         <Spinner />
       </Show>
-    </Box>
+    </Pressable>
   )
 }
 
@@ -389,9 +389,9 @@ function Flip(props: { part: Layout }) {
   const [busy, act, took] = acts(props)
   // Its own box takes the press first on the DOM, where it then goes on to the card, which leaves it be.
   return (
-    <Box tabindex={-1} onClick={took} style={[look.flip, ...room(props.part)]}>
+    <Pressable tabIndex={-1} onPress={took} style={[look.flip, ...room(props.part)]}>
       <Switch label={props.part.label} checked={!!props.part.on} disabled={busy()} onChange={(event) => act({ ...(props.part.inputs ?? {}), on: event.currentTarget.checked })} />
-    </Box>
+    </Pressable>
   )
 }
 
@@ -414,11 +414,11 @@ function Part(props: { part: Layout; root?: boolean; row?: boolean; first?: bool
   return (
     <Which>
       <Match when={(part().part === "column" || part().part === "row") && fits()}>
-        <Box style={[part().part === "row" ? look.row : look.column, props.root && part().part === "column" && look.root, gap(), part().align === "center" && look.centre, ...room(part()), sized(part())]}>
+        <View style={[part().part === "row" ? look.row : look.column, props.root && part().part === "column" && look.root, gap(), part().align === "center" && look.centre, ...room(part()), sized(part())]}>
           <For each={Array.isArray(part().parts) ? part().parts! : []} keyed={false}>
             {(inside, index) => <Part part={inside()} row={part().part === "row"} first={index === 0} />}
           </For>
-        </Box>
+        </View>
       </Match>
       <Match when={part().part === "text"}>
         <Text style={words()}>{part().text ?? ""}</Text>
@@ -427,30 +427,30 @@ function Part(props: { part: Layout; root?: boolean; row?: boolean; first?: bool
         <Text style={words()}>{time(part().at, part().style)}</Text>
       </Match>
       <Match when={part().part === "stat"}>
-        <Box style={[look.stat, ...room(part())]}>
-          <Box style={look.figure}>
+        <View style={[look.stat, ...room(part())]}>
+          <View style={look.figure}>
             <Text style={look.value}>{figure(part().value)}</Text>
             <Show when={part().unit}>
               <Text style={look.unit}>{part().unit}</Text>
             </Show>
-          </Box>
+          </View>
           <Show when={part().label}>
             <Text style={look.small}>{part().label}</Text>
           </Show>
-        </Box>
+        </View>
       </Match>
       <Match when={part().part === "gauge"}>
         <Gauge part={part()} />
       </Match>
       <Match when={part().part === "progress"}>
-        <Box style={[look.progress, ...room(part()), sized(part())]}>
+        <View style={[look.progress, ...room(part()), sized(part())]}>
           <Show when={part().label}>
             <Text style={look.small}>{part().label}</Text>
           </Show>
-          <Box role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(share(part().value) * 100)} aria-label={part().label} style={look.bar}>
+          <View role="progressbar" aria-valuemin={0} aria-valuemax={100} aria-valuenow={Math.round(share(part().value) * 100)} aria-label={part().label} style={look.bar}>
             <Drawn style={look.over} draw={(width, height) => <Bar width={width} height={height} value={share(part().value)} />} />
-          </Box>
-        </Box>
+          </View>
+        </View>
       </Match>
       <Match when={part().part === "spark"}>
         <Spark part={part()} />
@@ -459,43 +459,39 @@ function Part(props: { part: Layout; root?: boolean; row?: boolean; first?: bool
         <Chart part={part()} />
       </Match>
       <Match when={part().part === "item"}>
-        <Box style={[look.item, props.first && look.first, ...room(part())]}>
-          <Box style={look.words}>
+        <View style={[look.item, props.first && look.first, ...room(part())]}>
+          <View style={look.words}>
             <Text style={look.line}>{part().title || ""}</Text>
             <Show when={part().subtitle}>
               <Text style={look.small}>{part().subtitle}</Text>
             </Show>
-          </Box>
+          </View>
           <Show when={part().at || part().trailing}>
             <Text style={look.end}>{part().at ? time(part().at) : part().trailing}</Text>
           </Show>
-        </Box>
+        </View>
       </Match>
       <Match when={part().part === "image"}>
         <Show
           when={/^data:image\//.test(part().url ?? "") && part().url}
-          fallback={<Box style={[look.image, part().round && look.round, number(part().width) === undefined && look.full, sized(part(), number(part().height))]} />}
+          fallback={<View style={[look.image, part().round && look.round, number(part().width) === undefined && look.full, sized(part(), number(part().height))]} />}
         >
           {(url) => <Image src={url()} alt="" style={[look.image, part().round && look.round, number(part().width) === undefined && look.full, sized(part(), number(part().height))]} />}
         </Show>
       </Match>
       <Match when={part().part === "icon"}>
-        <Box aria-hidden="true" style={[look.icon, tone(part()), look.square(number(part().width, 16))]}>
+        <View aria-hidden="true" style={[look.icon, tone(part()), look.square(number(part().width, 16))]}>
           <Show when={part().path}>
-            <Path viewBox="0 0 24 24" d={String(part().path)} style={look.over} />
+            <Svg viewBox="0 0 24 24" style={look.over}><Path d={String(part().path)} /></Svg>
           </Show>
           {/* A badge, at the corner of what it's on, or the whole icon. */}
           <Show when={part().badge}>
-            <Path
-              viewBox="0 0 24 24"
-              d={String(part().badge)}
-              style={[look.over, part().path ? look.corner((number(part().width, 16) * 13) / 24, (number(part().width, 16) * 13) / 24, (number(part().width, 16) * 11) / 24, (number(part().width, 16) * 11) / 24) : undefined]}
-            />
+            <Svg viewBox="0 0 24 24" style={[look.over, part().path ? look.corner((number(part().width, 16) * 13) / 24, (number(part().width, 16) * 13) / 24, (number(part().width, 16) * 11) / 24, (number(part().width, 16) * 11) / 24) : undefined]}><Path d={String(part().badge)} /></Svg>
           </Show>
-        </Box>
+        </View>
       </Match>
       <Match when={part().part === "divider"}>
-        <Box role="separator" style={look.divider} />
+        <View role="separator" style={look.divider} />
       </Match>
       <Match when={part().part === "button"}>
         <Press part={part()} />
@@ -533,14 +529,14 @@ export function Widget(props: {
     props.onOpen?.(card)
   }
   return (
-    <Box
-      tabindex={-1}
-      onClick={props.onOpen ? open : undefined}
+    <Pressable
+      tabIndex={-1}
+      onPress={props.onOpen ? open : undefined}
       onLayout={(event: Laid) => setWidth(event.currentTarget.getBoundingClientRect().width)}
       style={[look.card, props.onOpen && look.opens]}
     >
       <Show when={props.onOpen}>
-        <Box role="button" aria-label={props.name} onClick={open} style={look.open} />
+        <Pressable role="button" aria-label={props.name} onPress={open} style={look.open} />
       </Show>
       <Card value={{ width, onCall: props.onCall, took }}>
         <Show when={props.problem || props.layout?.title !== false}>
@@ -550,6 +546,6 @@ export function Widget(props: {
           <Show when={props.layout}>{(layout) => <Part part={layout()} root />}</Show>
         </Show>
       </Card>
-    </Box>
+    </Pressable>
   )
 }

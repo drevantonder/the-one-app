@@ -2,7 +2,7 @@
 // primitives, the same on the DOM and on a native host.
 import { createContext, createSignal, onCleanup, Show, useContext } from "solid-js"
 import type { JSX } from "@solidjs/web"
-import { Box, Text } from "#primitives"
+import { Pressable, Text, View } from "#primitives"
 import { direction } from "#bridge"
 import type { Keyed, Laid } from "../types/ui.d.ts"
 import { styles } from "../styles.ts"
@@ -118,7 +118,7 @@ export const Tabs = {
     const indicate = () => (setIndicators((now) => now + 1), () => setIndicators((now) => now - 1))
     return (
       <Shared value={{ value, choose, tabs, add, place, setList, chosen, indicated, indicate, focused, setFocused }}>
-        <Box style={look.root}>{props.children}</Box>
+        <View style={look.root}>{props.children}</View>
       </Shared>
     )
   },
@@ -136,9 +136,9 @@ export const Tabs = {
       tabs.choose(all[to].value)
     }
     return (
-      <Box role="tablist" aria-orientation="horizontal" onKeyDown={keyed} onLayout={(event) => tabs.setList(rectOf(event))} style={look.list}>
+      <View role="tablist" aria-orientation="horizontal" onKeyDown={keyed} onLayout={(event) => tabs.setList(rectOf(event))} style={look.list}>
         {props.children}
-      </Box>
+      </View>
     )
   },
   Trigger: (props: { value: string; children?: JSX.Element }) => {
@@ -146,18 +146,18 @@ export const Tabs = {
     onCleanup(tabs.add(props.value))
     const chosen = () => tabs.value() === props.value
     return (
-      <Box
+      <Pressable
         role="tab"
         aria-selected={chosen() ? "true" : "false"}
-        tabindex={chosen() ? 0 : -1}
-        autofocus={tabs.focused() === props.value}
-        onClick={() => tabs.choose(props.value)}
+        tabIndex={chosen() ? 0 : -1}
+        autoFocus={tabs.focused() === props.value}
+        onPress={() => tabs.choose(props.value)}
         onBlur={() => tabs.focused() === props.value && tabs.setFocused(undefined)}
         onLayout={(event) => tabs.place(props.value, rectOf(event))}
         style={[look.trigger, chosen() && look.chosen, chosen() && !tabs.indicated() && look.mark]}
       >
         <Text style={look.label}>{props.children}</Text>
-      </Box>
+      </Pressable>
     )
   },
   Indicator: (_props: {}) => {
@@ -165,7 +165,7 @@ export const Tabs = {
     onCleanup(tabs.indicate())
     return (
       <Show when={tabs.chosen()}>
-        {(at) => <Box aria-hidden="true" style={[look.indicator(at().x, at().y, at().width, at().height), look.mark]} />}
+        {(at) => <View aria-hidden="true" style={[look.indicator(at().x, at().y, at().width, at().height), look.mark]} />}
       </Show>
     )
   },
@@ -173,9 +173,9 @@ export const Tabs = {
     const tabs = useContext(Shared)!
     return (
       <Show when={tabs.value() === props.value}>
-        <Box role="tabpanel" style={look.content}>
+        <View role="tabpanel" style={look.content}>
           {props.children}
-        </Box>
+        </View>
       </Show>
     )
   },

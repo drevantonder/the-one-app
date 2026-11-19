@@ -1,8 +1,8 @@
 // A toast: one line about what just happened, at the foot of the window for a few seconds. Written once on the drawing
-// primitives, the same on the DOM and on a native host: a layer over the window (#primitives' `Layer`), drawn
+// primitives, the same on the DOM and on a native host: a portal over the window (#primitives' `Portal`), drawn
 // while there are toasts, so it's over whatever was open when the first came.
 import { createRoot, createSignal, For, Show } from "solid-js"
-import { Box, Layer, Text } from "#primitives"
+import { Portal, Text, View } from "#primitives"
 import { Button } from "./button.tsx"
 import { Sheet } from "./sheet.tsx"
 import { Details } from "./states.tsx"
@@ -84,27 +84,27 @@ export async function toast(text: string | Error, { action }: { action?: { label
 function Toaster() {
   return (
     <Show when={toasts().length}>
-      <Layer>
-        <Box style={look.stack}>
+      <Portal>
+        <View style={look.stack}>
           <For each={toasts()} keyed={(one) => one.id}>
             {(one) => (
-              <Box role="status" aria-live="polite" style={[look.toast, !one().action && look.alone, one().leaving && look.leaving]}>
+              <View role="status" aria-live="polite" style={[look.toast, !one().action && look.alone, one().leaving && look.leaving]}>
                 <Text style={look.title}>{one().title}</Text>
                 <Show when={one().action}>
                   {(action) => (
                     <>
-                      <Box style={look.rule} />
+                      <View style={look.rule} />
                       <Button variant="ghost" onClick={() => (dismiss(one().id), action().run())}>
                         {action().label}
                       </Button>
                     </>
                   )}
                 </Show>
-              </Box>
+              </View>
             )}
           </For>
-        </Box>
-      </Layer>
+        </View>
+      </Portal>
     </Show>
   )
 }

@@ -2,9 +2,10 @@
 // written once on the drawing primitives (#primitives), the same on the DOM and on a native host.
 import { createContext, createSignal, For, omit, Show, useContext } from "solid-js"
 import type { JSX } from "@solidjs/web"
-import { Box, EditableText, Path, Text } from "#primitives"
+import { Path, Pressable, Svg, Text, TextInput, View } from "#primitives"
 import { touch } from "#bridge"
-import type { EditableTextProps, Keyed } from "../drawing-primitives/primitives.tsx"
+import type { Keyed, TextInputProps } from "../drawing-primitives/primitives.tsx"
+import { textInput, type EditableTextProps } from "../drawing-primitives/upgraded.ts"
 import { Icon } from "./button.tsx"
 import { ListStyle } from "./list.tsx"
 import { messages } from "../words.ts"
@@ -134,23 +135,24 @@ export function Field(props: FieldProps) {
   }
   return (
     <Context value={field}>
-      <Box style={[look.field, !touch() && !!props.label && look.beside]}>
+      <View style={[look.field, !touch() && !!props.label && look.beside]}>
         <Show when={props.label}>
           <Text style={[look.label, !touch() && look.besideLabel, props.disabled && look.dim]}>{props.label}</Text>
         </Show>
-        <Box style={look.control}>
+        <View style={look.control}>
           {props.children}
           <Show when={props.error || props.hint}>
             <Text style={[look.message, !!props.error && look.wrong]}>{props.error || props.hint}</Text>
           </Show>
-        </Box>
-      </Box>
+        </View>
+      </View>
     </Context>
   )
 }
 
-/** An `Input`'s props: an editable text's, in a field's box, with styles of its own over it: a big typed number's. */
-export interface InputProps extends Omit<EditableTextProps, "style" | "multiline"> {
+/** An `Input`'s props: a text input's, in a field's box, with styles of its own over it: a big typed number's. Until
+ * every page says `TextInput`'s props, it takes those before too (`EditableTextProps`). */
+export interface InputProps extends Omit<TextInputProps & EditableTextProps, "style" | "multiline"> {
   style?: Styles
 }
 
@@ -171,16 +173,17 @@ const named = (field: FieldContext | null, props: { "aria-label"?: string; "aria
   },
 })
 
-/// `<Input value={name()} onInput={(event) => setName(event.currentTarget.value)} onAction={save} />`: one line of
-/// text, in a `Field`. `type` (`email`, `url`, `tel`, `password`) and `autocomplete` (`username`, `current-password`,
-/// `one-time-code`) give the device's right keyboard and what it offers to fill in; `autocapitalize`, `autocorrect`
-/// and `spellcheck` say what it does to a name or a code. Return is `onAction`: what the field's sheet does, as a
-/// form's Return sends it; `action` names a phone's key for it (`go`, `send`, `search`; `done` unless it says).
+/// `<Input value={name()} onChangeText={setName} onSubmitEditing={save} />`: one line of text, in a `Field`, a
+/// `TextInput`'s props in a field's box. `inputMode` (`email`, `url`, `tel`, `numeric`), `secureTextEntry` and
+/// `autoComplete` (`username`, `current-password`, `one-time-code`) give the device's right keyboard and what it offers
+/// to fill in; `autoCapitalize`, `autoCorrect` and `spellCheck` say what it does to a name or a code. Return is
+/// `onSubmitEditing`: what the field's sheet does, as a form's Return sends it; `enterKeyHint` names a phone's key for
+/// it (`go`, `send`, `search`; `done` unless it says).
 export function Input(props: InputProps) {
   return <Boxed {...props} />
 }
 
-/// `<Textarea value={note()} onInput={(event) => setNote(event.currentTarget.value)} />`: several lines of text, in a
+/// `<Textarea value={note()} onChangeText={setNote} />`: several lines of text, in a
 /// `Field`, growing with what's typed, where Return is a new line.
 export function Textarea(props: Omit<InputProps, "style">) {
   return <Boxed {...props} multiline />
@@ -192,19 +195,20 @@ function Boxed(props: InputProps & { multiline?: boolean; own?: Styles }) {
   const field = useField()
   const wrong = () => (props["aria-invalid"] ?? (field?.invalid() ? "true" : undefined)) === "true"
   const off = () => !!props.disabled || !!field?.disabled()
-  return <EditableText {...omit(props, "style", "own", "aria-label", "aria-invalid", "disabled")} {...named(field, props)} style={[look.box, props.multiline && look.lines, props.own, wrong() && look.boxWrong, off() && look.dim, props.style]} />
+  return <TextInput {...omit(props, "style", "own", "aria-label", "aria-invalid", "disabled")} {...named(field, props)} style={[look.box, props.multiline && look.lines, props.own, wrong() && look.boxWrong, off() && look.dim, props.style]} />
 }
 
-/// `<Search placeholder="Search notes" aria-label="Search notes" value={words()} onInput={(event) => setWords(event.currentTarget.value)} />`:
+/// `<Search placeholder="Search notes" aria-label="Search notes" value={words()} onChangeText={setWords} />`:
 /// what's typed to find something in a list: a field with a magnifier and, once there's text, a button that clears
 /// it. Escape clears it too. The list it narrows is the app's.
-export function Search(props: Omit<InputProps, "type" | "style">) {
+export function Search(input: Omit<InputProps, "type" | "inputMode" | "style">) {
+  const props = textInput(input)
   const sidebar = useContext(ListStyle) === "sidebar"
   const [own, setOwn] = createSignal("")
   const text = () => props.value ?? own()
   const typed = (value: string) => {
     setOwn(value)
-    props.onInput?.({ currentTarget: { value } })
+    props.onChangeText?.(value)
   }
   const keyed = (event: Keyed) => {
     props.onKeyDown?.(event)
@@ -214,25 +218,25 @@ export function Search(props: Omit<InputProps, "type" | "style">) {
     typed("")
   }
   return (
-    <Box style={look.search}>
+    <View style={look.search}>
       <Boxed
-        {...omit(props, "onInput", "onKeyDown", "value")}
-        type="search"
-        action={props.action ?? "search"}
+        {...omit(props, "onChangeText", "onKeyDown", "value")}
+        inputMode="search"
+        enterKeyHint={props.enterKeyHint ?? "search"}
         value={text()}
-        onInput={(event) => typed(event.currentTarget.value)}
+        onChangeText={typed}
         onKeyDown={keyed}
         own={[look.searchText, sidebar && look.pill]}
       />
-      <Box style={look.magnifier}>
+      <View style={look.magnifier}>
         <Icon name="magnifying-glass" />
-      </Box>
+      </View>
       <Show when={text() && !props.disabled}>
-        <Box role="button" aria-label={messages.clear} onClick={() => typed("")} style={look.clear}>
+        <Pressable role="button" aria-label={messages.clear} onPress={() => typed("")} style={look.clear}>
           <Icon name="x" />
-        </Box>
+        </Pressable>
       </Show>
-    </Box>
+    </View>
   )
 }
 
@@ -263,34 +267,34 @@ function Choice(props: ChoiceProps & { role: "checkbox" | "switch"; mark: (on: b
   }
   const words = () => (
     <Show when={props.label}>
-      <Box style={look.words}>
+      <View style={look.words}>
         <Text style={look.said}>{props.label}</Text>
         <Show when={props.hint}>
           <Text style={look.hint}>{props.hint}</Text>
         </Show>
-      </Box>
+      </View>
     </Show>
   )
   return (
-    <Box style={look.field}>
-      <Box
+    <View style={look.field}>
+      <Pressable
         role={props.role}
         aria-checked={on() ? "true" : "false"}
         aria-disabled={props.disabled ? "true" : undefined}
         aria-invalid={props.error ? "true" : undefined}
         aria-label={props["aria-label"] ?? (typeof props.label === "string" ? props.label : undefined)}
         aria-description={props.error ?? (typeof props.hint === "string" ? props.hint : undefined)}
-        onClick={flip}
+        onPress={flip}
         style={[look.choice, props.disabled && look.off]}
       >
         <Show when={props.role === "switch"}>{words()}</Show>
         {props.mark(on(), !!props.error)}
         <Show when={props.role === "checkbox"}>{words()}</Show>
-      </Box>
+      </Pressable>
       <Show when={props.error}>
         <Text style={[look.message, look.wrong]}>{props.error}</Text>
       </Show>
-    </Box>
+    </View>
   )
 }
 
@@ -305,9 +309,9 @@ export function Checkbox(props: ChoiceProps) {
       {...props}
       role="checkbox"
       mark={(on, wrong) => (
-        <Box style={[look.tick, on && look.ticked, wrong && !on && look.tickWrong]}>
-          <Path viewBox="0 0 256 256" d={check} aria-hidden="true" style={[look.mark, on && look.shown]} />
-        </Box>
+        <View style={[look.tick, on && look.ticked, wrong && !on && look.tickWrong]}>
+          <Svg viewBox="0 0 256 256" aria-hidden="true" style={[look.mark, on && look.shown]}><Path d={check} /></Svg>
+        </View>
       )}
     />
   )
@@ -321,9 +325,9 @@ export function Switch(props: ChoiceProps) {
       {...props}
       role="switch"
       mark={(on) => (
-        <Box style={[look.track, on && look.on]}>
-          <Box style={[look.thumb, on && look.thumbOn]} />
-        </Box>
+        <View style={[look.track, on && look.on]}>
+          <View style={[look.thumb, on && look.thumbOn]} />
+        </View>
       )}
     />
   )
@@ -359,29 +363,29 @@ export function RadioGroup(props: RadioGroupProps) {
     if (next) choose(next.value)
   }
   return (
-    <Box role="radiogroup" aria-label={field?.label()} aria-description={field?.message()} aria-invalid={field?.invalid() ? "true" : undefined} onKeyDown={keyed} style={look.radios}>
+    <View role="radiogroup" aria-label={field?.label()} aria-description={field?.message()} aria-invalid={field?.invalid() ? "true" : undefined} onKeyDown={keyed} style={look.radios}>
       <For each={props.options}>
         {(option) => {
           const on = () => option.value === chosen()
           return (
-            <Box
+            <Pressable
               role="radio"
               aria-checked={on() ? "true" : "false"}
               aria-disabled={off(option) ? "true" : undefined}
-              tabindex={on() || (!chosen() && option === props.options[0]) ? 0 : -1}
-              onClick={() => !off(option) && choose(option.value)}
+              tabIndex={on() || (!chosen() && option === props.options[0]) ? 0 : -1}
+              onPress={() => !off(option) && choose(option.value)}
               style={[look.choice, off(option) && look.off]}
             >
-              <Box style={[look.tick, look.round, on() && look.ticked, field?.invalid() && !on() && look.tickWrong]}>
-                <Box style={[look.dot, on() && look.shown]} />
-              </Box>
-              <Box style={look.words}>
+              <View style={[look.tick, look.round, on() && look.ticked, field?.invalid() && !on() && look.tickWrong]}>
+                <View style={[look.dot, on() && look.shown]} />
+              </View>
+              <View style={look.words}>
                 <Text style={look.said}>{option.label}</Text>
-              </Box>
-            </Box>
+              </View>
+            </Pressable>
           )
         }}
       </For>
-    </Box>
+    </View>
   )
 }

@@ -1,9 +1,9 @@
 // What's over the page, as a system's own: a sheet, up from the foot of a narrow window and in the middle of a wide
 // one, and an alert, a question that stops everything until it's answered. Written once on the drawing
-// primitives, the same on the DOM and on a native host: each a modal layer (#primitives' `Layer`) over the window.
+// primitives, the same on the DOM and on a native host: each a `Modal` (#primitives) over the window.
 import { children, createEffect, createRoot, createSignal, onCleanup, Show } from "solid-js"
 import type { JSX } from "@solidjs/web"
-import { Box, Layer, Scroll, Text } from "#primitives"
+import { Modal, Pressable, ScrollView, Text, View } from "#primitives"
 import { covers, touch, viewport } from "#bridge"
 import { Button, Icon } from "./button.tsx"
 import { messages } from "../words.ts"
@@ -79,11 +79,11 @@ function Over(props: { open?: boolean; onClose?: () => void; children: (leaving:
   onCleanup(() => clearTimeout(timer))
   return (
     <Show when={shown()}>
-      <Layer modal>
-        <Box style={[look.scrim, leaving() && look.gone]} onClick={() => props.onClose?.()} />
+      <Modal>
+        <Pressable style={[look.scrim, leaving() && look.gone]} onPress={() => props.onClose?.()} />
         {/* What's over the page isn't the bar's, wherever it's written. */}
         <Collect value={null}>{props.children(leaving)}</Collect>
-      </Layer>
+      </Modal>
     </Show>
   )
 }
@@ -120,11 +120,11 @@ export function Sheet(props: { heading?: JSX.Element; open?: boolean; onClose?: 
   return (
     <Over open={props.open} onClose={props.onClose}>
       {(leaving) => (
-        <Box style={[look.place, wide() && look.middle]}>
-          <Box
+        <View style={[look.place, wide() && look.middle]}>
+          <View
             role="dialog"
             aria-modal="true"
-            tabindex={-1}
+            tabIndex={-1}
             aria-label={typeof props.heading === "string" ? props.heading : undefined}
             onKeyDown={keys}
             onPointerDown={press}
@@ -134,19 +134,19 @@ export function Sheet(props: { heading?: JSX.Element; open?: boolean; onClose?: 
             style={[look.panel, wide() && look.floating, !touch() && look.glass, leaving() && (wide() ? look.shrunk : look.down), pull() && look.pulled, pull() && look.dragged(pull()!.down)]}
           >
             <Show when={!wide()}>
-              <Box aria-hidden="true" style={look.grabber} />
+              <View aria-hidden="true" style={look.grabber} />
             </Show>
-            <Box role="banner" style={look.header}>
+            <View role="banner" style={look.header}>
               <Text role="heading" aria-level={2} style={[look.heading, !touch() && look.computerHeading]}>
                 {props.heading}
               </Text>
               <Button variant="ghost" size="icon" aria-label={messages.close} onClick={() => props.onClose?.()}>
                 <Icon name="x" />
               </Button>
-            </Box>
-            <Scroll style={look.body}>{props.children}</Scroll>
-          </Box>
-        </Box>
+            </View>
+            <ScrollView style={look.body}>{props.children}</ScrollView>
+          </View>
+        </View>
       )}
     </Over>
   )
@@ -163,11 +163,11 @@ export function Alert(props: { heading: JSX.Element; text?: JSX.Element; open?: 
   return (
     <Over open={props.open} onClose={props.onClose}>
       {(leaving) => (
-        <Box style={[look.place, look.middle]}>
-          <Box
+        <View style={[look.place, look.middle]}>
+          <View
             role="alertdialog"
             aria-modal="true"
-            tabindex={-1}
+            tabIndex={-1}
             aria-label={typeof props.heading === "string" ? props.heading : undefined}
             onKeyDown={(event) => event.key === "Escape" && props.onClose?.()}
             style={[look.panel, look.floating, !touch() && look.glass, look.alert, leaving() && look.shrunk]}
@@ -180,10 +180,10 @@ export function Alert(props: { heading: JSX.Element; text?: JSX.Element; open?: 
             </Show>
             {props.children}
             <Show when={props.action}>
-              <Box style={look.footer}>{actions.toArray().map((action) => <Box style={look.half}>{action}</Box>)}</Box>
+              <View style={look.footer}>{actions.toArray().map((action) => <View style={look.half}>{action}</View>)}</View>
             </Show>
-          </Box>
-        </Box>
+          </View>
+        </View>
       )}
     </Over>
   )

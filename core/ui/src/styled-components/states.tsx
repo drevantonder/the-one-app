@@ -2,7 +2,7 @@
 // drawing primitives (#primitives), the same on the DOM and on a native host.
 import { createSignal, Show, useContext } from "solid-js"
 import type { JSX } from "@solidjs/web"
-import { Box, Scroll, Text } from "#primitives"
+import { Pressable, ScrollView, Text, View } from "#primitives"
 import { copy } from "#bridge"
 import { Button, Icon, Spinner } from "./button.tsx"
 import { Middle } from "./screen.tsx"
@@ -103,10 +103,10 @@ const look = styles({
 export function Empty(props: { children?: JSX.Element; action?: JSX.Element }) {
   const middle = useContext(Middle)
   return (
-    <Box style={[look.state, middle() && look.middle, middle() && look.fill]}>
+    <View style={[look.state, middle() && look.middle, middle() && look.fill]}>
       <Text style={look.grey}>{props.children}</Text>
       {props.action}
-    </Box>
+    </View>
   )
 }
 
@@ -116,16 +116,16 @@ export function Skeleton(props: { rows?: number }) {
   const [late, setLate] = createSignal(false)
   setTimeout(() => setLate(true), 100)
   return (
-    <Box role="status" aria-busy="true" aria-label={messages.loading} style={look.state}>
-      <Box style={[look.skeleton, late() && look.late]}>
+    <View role="status" aria-busy="true" aria-label={messages.loading} style={look.state}>
+      <View style={[look.skeleton, late() && look.late]}>
         {Array.from({ length: props.rows ?? 3 }, (_, i) => (
-          <Box style={[look.line, i > 0 && look.next]}>
-            <Box style={look.bar} />
-            <Box style={[look.bar, look.longer]} />
-          </Box>
+          <View style={[look.line, i > 0 && look.next]}>
+            <View style={look.bar} />
+            <View style={[look.bar, look.longer]} />
+          </View>
         ))}
-      </Box>
-    </Box>
+      </View>
+    </View>
   )
 }
 
@@ -140,33 +140,33 @@ export function Problem(props: { heading: JSX.Element; text?: JSX.Element | Erro
   const all = () => (typeof props.text === "string" || props.text instanceof Error ? whole(props.text) : undefined)
   const [open, setOpen] = createSignal(false)
   return (
-    <Box role="alert" style={[look.state, middle() && look.middle, middle() && look.fill]}>
-      <Box style={[look.problem, middle() && look.centred, props.warn && look.warn]}>
-        <Box style={[look.symbol, props.warn && look.warnSymbol]}>
+    <View role="alert" style={[look.state, middle() && look.middle, middle() && look.fill]}>
+      <View style={[look.problem, middle() && look.centred, props.warn && look.warn]}>
+        <View style={[look.symbol, props.warn && look.warnSymbol]}>
           <Icon name="warning-circle" />
-        </Box>
-        <Box style={look.words}>
+        </View>
+        <View style={look.words}>
           <Text style={look.heading}>{props.heading}</Text>
           <Show when={props.text}>
             <Text style={look.said}>{all() === undefined ? (props.text as JSX.Element) : readable(all()!)}</Text>
           </Show>
           <Show when={all() && all() !== readable(all()!)}>
-            <Box role="button" aria-expanded={open() ? "true" : "false"} onClick={() => setOpen(!open())} style={look.toggle}>
-              <Box style={[look.caret, open() && look.turned]}>
+            <Pressable role="button" aria-expanded={open() ? "true" : "false"} onPress={() => setOpen(!open())} style={look.toggle}>
+              <View style={[look.caret, open() && look.turned]}>
                 <Icon name="caret-right" along />
-              </Box>
+              </View>
               <Text>{open() ? messages.hideDetails : messages.showDetails}</Text>
-            </Box>
+            </Pressable>
             <Show when={open()}>
               <Details text={all()!} />
             </Show>
           </Show>
-        </Box>
+        </View>
         <Show when={props.action}>
-          <Box style={look.actions}>{props.action}</Box>
+          <View style={look.actions}>{props.action}</View>
         </Show>
-      </Box>
-    </Box>
+      </View>
+    </View>
   )
 }
 
@@ -175,16 +175,16 @@ export function Problem(props: { heading: JSX.Element; text?: JSX.Element | Erro
 export function Details(props: { text: string }) {
   const [copied, setCopied] = createSignal(false)
   return (
-    <Box style={look.details}>
-      <Scroll style={look.code}>
+    <View style={look.details}>
+      <ScrollView style={look.code}>
         <Text style={look.mono}>{props.text.slice(readable(props.text).length).trim()}</Text>
-      </Scroll>
-      <Box style={look.copy}>
+      </ScrollView>
+      <View style={look.copy}>
         <Button variant="ghost" size="icon" aria-label={copied() ? messages.copied : messages.copy} onClick={() => void copy(props.text).then(() => setCopied(true))}>
           <Icon name={copied() ? "check" : "copy"} />
         </Button>
-      </Box>
-    </Box>
+      </View>
+    </View>
   )
 }
 
@@ -194,15 +194,15 @@ export function Details(props: { text: string }) {
 export function Status(props: { heading: JSX.Element; text?: JSX.Element; over?: boolean }) {
   const middle = useContext(Middle)
   return (
-    <Box role="status" style={[look.state, look.middle, middle() && look.fill, props.over && look.over]}>
-      <Box style={[look.status, props.over && look.card]}>
+    <View role="status" style={[look.state, look.middle, middle() && look.fill, props.over && look.over]}>
+      <View style={[look.status, props.over && look.card]}>
         <Spinner />
         <Text style={look.label}>{props.heading}</Text>
         <Show when={props.text}>
           <Text>{props.text}</Text>
         </Show>
-      </Box>
-    </Box>
+      </View>
+    </View>
   )
 }
 
@@ -212,20 +212,20 @@ export function Status(props: { heading: JSX.Element; text?: JSX.Element; over?:
 export function Steps(props: { steps: JSX.Element[]; at: number; text?: JSX.Element }) {
   const middle = useContext(Middle)
   return (
-    <Box role="status" style={[look.state, look.middle, middle() && look.fill]}>
-      <Box role="list" style={look.steps}>
+    <View role="status" style={[look.state, look.middle, middle() && look.fill]}>
+      <View role="list" style={look.steps}>
         {props.steps.map((step, i) => (
-          <Box role="listitem" style={[look.step, i === props.at && look.now]}>
-            <Box style={look.mark}>{i < props.at ? <Icon name="check" /> : i === props.at ? <Spinner /> : <Box style={look.dot} />}</Box>
-            <Box>
+          <View role="listitem" style={[look.step, i === props.at && look.now]}>
+            <View style={look.mark}>{i < props.at ? <Icon name="check" /> : i === props.at ? <Spinner /> : <View style={look.dot} />}</View>
+            <View>
               <Text>{step}</Text>
               <Show when={i === props.at && props.text}>
                 <Text style={look.note}>{props.text}</Text>
               </Show>
-            </Box>
-          </Box>
+            </View>
+          </View>
         ))}
-      </Box>
-    </Box>
+      </View>
+    </View>
   )
 }

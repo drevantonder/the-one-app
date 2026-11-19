@@ -1,12 +1,12 @@
 import { createSignal } from "solid-js"
-import { Box, Checkbox, createListCollection, Field, Input, RadioGroup, Search, Select, Switch, Textarea, type Scenes } from "ui"
+import { Checkbox, createListCollection, Field, Input, RadioGroup, type Scenes, Search, Select, Switch, Textarea, View } from "ui"
 
 const fruits = createListCollection({ items: [{ value: "apple", label: "Apple" }, { value: "pear", label: "Pear" }] })
 
 const Fields = () => {
   const [code, setCode] = createSignal("")
   return (
-    <Box style={{ gap: 16 }}>
+    <View style={{ gap: 16 }}>
       <Field label="Name" hint="As people see it">
         <Input placeholder="Your name" />
       </Field>
@@ -14,10 +14,10 @@ const Fields = () => {
         <Input value="andre@" aria-invalid="true" />
       </Field>
       <Field label="Code" hint="Digits only">
-        <Input inputmode="numeric" value={code()} onInput={(event) => setCode(event.currentTarget.value.replace(/[^0-9]/g, ""))} />
+        <Input inputMode="numeric" value={code()} onChangeText={(text) => setCode(text.replace(/[^0-9]/g, ""))} />
       </Field>
       <Field label="Password">
-        <Input type="password" value="hunter2" autocomplete="current-password" />
+        <Input secureTextEntry value="hunter2" autoComplete="current-password" />
       </Field>
       <Field label="Off" disabled>
         <Input value="Can't change this" />
@@ -41,7 +41,7 @@ const Fields = () => {
       <Field label="Nothing chosen">
         <Select.Root collection={fruits} placeholder="Pick one" />
       </Field>
-    </Box>
+    </View>
   )
 }
 

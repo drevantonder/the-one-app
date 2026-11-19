@@ -62,19 +62,21 @@ export type Keyed = {
   preventDefault(): void
 }
 
-/** What a `Scroll` scrolling is told: how far it's scrolled. */
 /** Whether a box is near the window: within half the window's size of what shows of it. */
 export type Intersected = {
   isIntersecting: boolean
 }
+/** What a scroll view scrolling is told: how far it's scrolled. */
 export type Scrolled = {
   currentTarget: { scrollTop: number; scrollLeft: number }
 }
 
-export type BoxProps = Semantics & {
+/** What every primitive but an image and a text input takes: how it looks, and what it listens for. */
+type Listens = Semantics & {
   style?: Style
-  tabindex?: 0 | -1
-  onClick?: (event: Located) => void
+  /** What Tab reaches, as the web's `tabIndex`: `0` for what it otherwise wouldn't, `-1` for what's focused only by a
+   * press. */
+  tabIndex?: 0 | -1
   onFocus?: () => void
   onBlur?: () => void
   onKeyDown?: (event: Keyed) => void
@@ -94,24 +96,41 @@ export type BoxProps = Semantics & {
    * `IntersectionObserver` with a `rootMargin` of 50% tells: what draws only what's near what shows does it by this. */
   onIntersection?: (event: Intersected) => void
   /** Has the keyboard as it's drawn, and again each time it's set. */
-  autofocus?: boolean
+  autoFocus?: boolean
   /** Out of reach, with all that's in it, as the DOM's `inert` is: never pressed, never reached by Tab, never read,
    * as what's faded out is. `undefined`, not `false`, for reachable. */
   inert?: true
   children?: Element
 }
-export declare function Box(props: BoxProps): Element
 
-export type ScrollProps = BoxProps & {
+export type ViewProps = Listens
+export declare function View(props: ViewProps): Element
+
+export type PressableProps = ViewProps & {
+  /** Pressed, by a pointer, a finger, or Enter or Space where the keyboard is. */
+  onPress?: (event: Located) => void
+  /** Not pressed, and says so. */
+  disabled?: boolean
+}
+export declare function Pressable(props: PressableProps): Element
+
+/** A view or a pressable by its name before, with its props before (`onClick`, `tabindex`, `autofocus`), until every
+ * page says `View` or `Pressable`. */
+export declare function Box(props: Omit<PressableProps, "onPress" | "tabIndex" | "autoFocus"> & { onClick?: (event: Located) => void; tabindex?: 0 | -1; autofocus?: boolean }): Element
+
+export type ScrollViewProps = ViewProps & {
   onScroll?: (event: Scrolled) => void
 }
-export declare function Scroll(props: ScrollProps): Element
+export declare function ScrollView(props: ScrollViewProps): Element
 
 export type TextProps = Semantics & {
   style?: Style
-  /** Pressed where its words are, as an inline link (`role="link"`), reached by Tab with a `tabindex`. */
-  tabindex?: 0 | -1
+  /** Pressed where its words are, as an inline link (`role="link"`), reached by Tab with a `tabIndex`. */
+  tabIndex?: 0 | -1
+  onPress?: (event: Located) => void
+  /** `onPress` and `tabIndex` by their names before, until every page says those. */
   onClick?: (event: Located) => void
+  tabindex?: 0 | -1
   children?: Element
 }
 export declare function Text(props: TextProps): Element
@@ -123,10 +142,17 @@ export type ImageProps = Pick<Semantics, "aria-hidden"> & {
 }
 export declare function Image(props: ImageProps): Element
 
-export type PathProps = Pick<Semantics, "role" | "aria-label" | "aria-hidden"> & {
-  d: string
+export type SvgProps = Pick<Semantics, "role" | "aria-label" | "aria-hidden"> & {
   viewBox: string
   style?: Style
+  children?: Element
+}
+export declare function Svg(props: SvgProps): Element
+
+export type PathProps = {
+  d: string
+  /** Its `fill`, `stroke` and `strokeWidth`. */
+  style?: Styles
 }
 export declare function Path(props: PathProps): Element
 
@@ -137,9 +163,9 @@ export type VideoProps = {
   answer?: string
   /** Looked at only: nothing done on it is sent. */
   watch?: boolean
-  label: string
+  "aria-label": string
   /** Has the keyboard, what's typed going to the screen, each time it's set. */
-  autofocus?: boolean
+  autoFocus?: boolean
   style?: Style
   onOffer?: (event: { sdp: string }) => void
   onState?: (event: { state: "connected" | "lost" }) => void
@@ -159,46 +185,68 @@ export type FrameProps = {
 }
 export declare function Frame(props: FrameProps): Element
 
-/** What's drawn over the whole window, over the page: a sheet, a menu. A `modal` one makes everything else inert. */
-export declare function Layer(props: { modal?: boolean; children?: Element }): Element
+/** What's drawn over the whole window, over the page, while it's `visible` (unless it says, it is), with everything
+ * else inert: a sheet, a menu. */
+export declare function Modal(props: { visible?: boolean; children?: Element }): Element
+/** What's drawn over the whole window, over the page, without taking it from anyone: a toast, a select's list. */
+export declare function Portal(props: { children?: Element }): Element
 
-/** What an editable text's `onInput` is told: what's in it now. */
+/** What an input's action key says, a phone keyboard's Done, Go, Next, Search or Send, or a new line (`enter`). */
+export type EnterKeyHint = "enter" | "done" | "go" | "next" | "previous" | "search" | "send"
+
+export type TextInputProps = Pick<Semantics, "role" | "aria-label" | "aria-description" | "aria-invalid" | "aria-controls" | "aria-activedescendant" | "aria-expanded"> & {
+  name?: string
+  value?: string
+  /** Which keyboard a touch screen shows: `numeric` is digits alone; `email`, `url`, `tel` and `search` are those kinds
+   * of field too. */
+  inputMode?: Props["inputmode"]
+  /** What's typed is hidden, as a password's. */
+  secureTextEntry?: boolean
+  multiline?: boolean
+  placeholder?: string
+  /** What its action key says and does: `done` in one line unless it says, a new line in several. */
+  enterKeyHint?: EnterKeyHint
+  disabled?: boolean
+  readOnly?: boolean
+  required?: boolean
+  autoFocus?: boolean
+  autoCapitalize?: Props["autocapitalize"]
+  autoCorrect?: boolean
+  spellCheck?: boolean
+  autoComplete?: string
+  style?: Style
+  /** What's in it now, each time that changes. */
+  onChangeText?: (text: string) => void
+  /** Its action key was pressed: Return in one line, or a phone's Done, Go, Search or Send. */
+  onSubmitEditing?: () => void
+  onFocus?: () => void
+  onBlur?: () => void
+  onKeyDown?: (event: Keyed) => void
+}
+export declare function TextInput(props: TextInputProps): Element
+
+/** What an editable text's `onInput` was told: what's in it now. */
 export type Typed = {
   currentTarget: { value: string }
 }
-
 /** What an input's action key does, a phone keyboard's Done, Go, Next, Search or Send, or a new line. */
 export type TextInputAction = Exclude<Props["action"], undefined>
-/** What an editable text's `onAction` is told: what its action key did. */
-export type Acted = {
-  action: TextInputAction
-}
 
-export type EditableTextProps = Pick<Semantics, "role" | "aria-label" | "aria-description" | "aria-invalid" | "aria-controls" | "aria-activedescendant" | "aria-expanded"> & {
-  name?: string
-  value?: string
+/** A text input's props by their names before, until every page says `TextInput`'s. */
+export type EditableTextProps = Omit<TextInputProps, "inputMode" | "secureTextEntry" | "enterKeyHint" | "readOnly" | "autoFocus" | "autoCapitalize" | "autoCorrect" | "spellCheck" | "autoComplete" | "onChangeText" | "onSubmitEditing"> & {
   type?: Props["type"]
   inputmode?: Props["inputmode"]
-  multiline?: boolean
-  placeholder?: string
-  /** What its action key does: `done` in one line unless it says, a new line in several. */
   action?: TextInputAction
-  disabled?: boolean
   readonly?: boolean
-  required?: boolean
   autofocus?: boolean
   autocapitalize?: Props["autocapitalize"]
   autocorrect?: boolean
   spellcheck?: boolean
   autocomplete?: string
-  style?: Style
   onInput?: (event: Typed) => void
-  /** Its action key was pressed: Return in one line, or a phone's Done, Go, Search or Send. */
-  onAction?: (event: Acted) => void
-  onFocus?: () => void
-  onBlur?: () => void
-  onKeyDown?: (event: Keyed) => void
+  onAction?: (event: { action: TextInputAction }) => void
 }
+/** A text input by its name before, until every page says `TextInput`. */
 export declare function EditableText(props: EditableTextProps): Element
 
 // The components.
@@ -270,13 +318,14 @@ export declare function Status(props: { heading: Element; text?: Element; over?:
 export declare function Steps(props: { steps: Element[]; at: number; text?: Element }): Element
 
 export declare function Field(props: { label?: Element; hint?: Element; error?: string; disabled?: boolean; children?: Element }): Element
-/** An `Input`'s props: an editable text's, in a field's box, with styles of its own over it. */
-export type InputProps = Omit<EditableTextProps, "style" | "multiline"> & {
+/** An `Input`'s props: a text input's, in a field's box, with styles of its own over it. Until every page says
+ * `TextInput`'s props, it takes those before too (`EditableTextProps`). */
+export type InputProps = Omit<TextInputProps & EditableTextProps, "style" | "multiline"> & {
   style?: Styles
 }
 export declare function Input(props: InputProps): Element
 export declare function Textarea(props: Omit<InputProps, "style">): Element
-export declare function Search(props: Omit<InputProps, "type" | "style">): Element
+export declare function Search(props: Omit<InputProps, "type" | "inputMode" | "style">): Element
 /** What a `Checkbox`'s or a `Switch`'s `onChange` is told: whether it's ticked now. */
 export type Ticked = {
   currentTarget: { checked: boolean }

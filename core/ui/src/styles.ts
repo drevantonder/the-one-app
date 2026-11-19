@@ -133,7 +133,7 @@ type Sheet = Record<string, Style | ((...values: never[]) => Style)>
 
 /// `const look = styles({ row: { flexDirection: "row", gap: tokens.space.md, backgroundColor: { default:
 /// tokens.colour.card, hover: tokens.colour.muted } }, bar: (height: number, colour: `#${string}`) => ({ height,
-/// backgroundColor: colour }) })`, then `<Box style={[look.row, open() && look.open, look.bar(share() * 80,
+/// backgroundColor: colour }) })`, then `<View style={[look.row, open() && look.open, look.bar(share() * 80,
 /// item.colour)]} />`: styles, beside what they style, whose values are tokens, never raw colours, sizes or fonts (a raw
 /// one is a warning, "make it a token"). A function is a dynamic style, as StyleX's are: a style of its values, which
 /// are what it's called with as it's called (a height as a number moves, a colour from data), and nothing else about it

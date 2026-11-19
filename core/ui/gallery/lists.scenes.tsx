@@ -1,22 +1,22 @@
 import { createSignal, For } from "solid-js"
-import { Badge, Box, Button, Checkbox, Icon, List, Menu, Metadata, Row, Section, Text, type Scenes } from "ui"
+import { Badge, Button, Checkbox, Icon, List, Menu, Metadata, Row, type Scenes, Section, Text, View } from "ui"
 
 const Rows = () => {
   const [notes, setNotes] = createSignal(["First note", "Second note", "Third note"])
   return (
-    <Box style={{ gap: 8 }}>
-      <Box style={{ flexDirection: "row", gap: 8 }}>
+    <View style={{ gap: 8 }}>
+      <View style={{ flexDirection: "row", gap: 8 }}>
         <Button variant="outline" onClick={() => setNotes([...notes().slice(0, 1), `Note ${notes().length + 1}`, ...notes().slice(1)])}>
           Add Row
         </Button>
         <Button variant="outline" onClick={() => setNotes(notes().slice(0, 1).concat(notes().slice(2)))}>
           Remove Row
         </Button>
-      </Box>
+      </View>
       <List>
         <For each={notes()}>{(note) => <Row heading={note} />}</For>
       </List>
-    </Box>
+    </View>
   )
 }
 

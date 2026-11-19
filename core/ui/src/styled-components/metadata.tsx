@@ -2,7 +2,7 @@
 // primitives, the same on the DOM and on a native host.
 import { children, For, Show } from "solid-js"
 import type { JSX } from "@solidjs/web"
-import { Box, Text } from "#primitives"
+import { Text, View } from "#primitives"
 import { touch } from "#bridge"
 import { List, Row } from "./list.tsx"
 import { negative, styles } from "../styles.ts"
@@ -37,16 +37,16 @@ export function Metadata(props: { children?: JSX.Element }) {
         </List>
       }
     >
-      <Box role="list" style={look.rows}>
+      <View role="list" style={look.rows}>
         <For each={all()}>
           {(label, at) => (
-            <Box role="listitem" style={[look.row, at() % 2 === 0 && look.striped]}>
+            <View role="listitem" style={[look.row, at() % 2 === 0 && look.striped]}>
               <Text style={look.title}>{label.title}</Text>
-              <Box style={look.text}>{typeof label.text === "string" ? <Text style={look.value}>{label.text}</Text> : label.text}</Box>
-            </Box>
+              <View style={look.text}>{typeof label.text === "string" ? <Text style={look.value}>{label.text}</Text> : label.text}</View>
+            </View>
           )}
         </For>
-      </Box>
+      </View>
     </Show>
   )
 }

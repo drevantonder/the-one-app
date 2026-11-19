@@ -1,11 +1,11 @@
-import { Box, Widget, type Layout, type Scenes } from "ui"
+import { type Layout, type Scenes, View, Widget } from "ui"
 
 // Each in a box a Home Screen cell's size: 2x2, 4x2 and 4x4.
 const cells = { "2x2": { width: 170, height: 170 }, "4x2": { width: 352, height: 170 }, "4x4": { width: 352, height: 370 } } as const
 const cell = (size: keyof typeof cells, name: string, layout?: Layout, problem?: string) => () => (
-  <Box style={cells[size]}>
+  <View style={cells[size]}>
     <Widget name={name} size={size} layout={layout} problem={problem} onCall={async () => {}} onOpen={() => {}} />
-  </Box>
+  </View>
 )
 
 // The scenes' clock is 1 January 2026, 00:00 UTC.

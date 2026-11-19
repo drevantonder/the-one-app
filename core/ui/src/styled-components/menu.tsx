@@ -2,7 +2,7 @@
 // the same on the DOM and on a native host.
 import { children, createContext, createEffect, createSignal, onCleanup, Show, useContext } from "solid-js"
 import type { JSX } from "@solidjs/web"
-import { Box, Layer, Text } from "#primitives"
+import { Modal, Pressable, Text, View } from "#primitives"
 import { direction, touch, viewport } from "#bridge"
 import { Button, Icon, type ButtonProps } from "./button.tsx"
 import { messages } from "../words.ts"
@@ -171,16 +171,16 @@ export const Menu = {
     const above = () => menu.at()!.y + menu.at()!.height / 2 > viewport().height / 2
     const inside = children(() => props.children)
     return (
-      <Show when={menu.at()} fallback={<Box style={look.closed}>{inside()}</Box>}>
+      <Show when={menu.at()} fallback={<View style={look.closed}>{inside()}</View>}>
         {(at) => (
-          <Layer modal>
-            <Box style={look.catcher} onClick={() => menu.open(undefined)} />
-            <Box style={look.anchor(at().y, direction() === "rtl" ? viewport().width - at().x - at().width : at().x, at().width, at().height)}>
-              <Box style={above() ? look.above : look.below} onKeyDown={(event) => event.key === "Escape" && menu.open(undefined)}>
+          <Modal>
+            <Pressable style={look.catcher} onPress={() => menu.open(undefined)} />
+            <View style={look.anchor(at().y, direction() === "rtl" ? viewport().width - at().x - at().width : at().x, at().width, at().height)}>
+              <View style={above() ? look.above : look.below} onKeyDown={(event) => event.key === "Escape" && menu.open(undefined)}>
                 {inside()}
-              </Box>
-            </Box>
-          </Layer>
+              </View>
+            </View>
+          </Modal>
         )}
       </Show>
     )
@@ -208,9 +208,9 @@ export const Menu = {
       }
     }
     return (
-      <Box role="menu" tabindex={-1} onKeyDown={keys} style={look.content}>
+      <View role="menu" tabIndex={-1} onKeyDown={keys} style={look.content}>
         {props.children}
-      </Box>
+      </View>
     )
   },
   Item: (props: { value: string; destructive?: boolean; disabled?: boolean; children?: JSX.Element }) => {
@@ -224,29 +224,29 @@ export const Menu = {
     onCleanup(menu.add({ value: props.value, label: label(), disabled: !!props.disabled, destructive: !!props.destructive }))
     collected(() => ({ label: label(), onAction: () => menu.select(props.value), destructive: !!props.destructive, disabled: !!props.disabled }))
     return (
-      <Box
+      <Pressable
         role="menuitem"
-        tabindex={-1}
-        autofocus={menu.active() === props.value}
+        tabIndex={-1}
+        autoFocus={menu.active() === props.value}
         onPointerEnter={() => !props.disabled && menu.setActive(props.value)}
         aria-disabled={props.disabled ? "true" : undefined}
-        onClick={() => !props.disabled && menu.select(props.value)}
+        onPress={() => !props.disabled && menu.select(props.value)}
         onKeyDown={(event) => (event.key === "Enter" || event.key === " ") && (event.preventDefault(), !props.disabled && menu.select(props.value))}
         style={[look.item, props.destructive && look.destructive, props.disabled && look.disabled]}
       >
         {inside.toArray().map((part) => (typeof part === "string" ? <Text>{part}</Text> : part))}
-      </Box>
+      </Pressable>
     )
   },
-  Separator: (_props: {}) => <Box role="separator" style={look.separator} />,
+  Separator: (_props: {}) => <View role="separator" style={look.separator} />,
   /** Items under a small heading, as iOS's menus group them. */
   Group: (props: { label: JSX.Element; children?: JSX.Element }) => (
-    <Box role="group" aria-label={typeof props.label === "string" ? props.label : undefined}>
+    <View role="group" aria-label={typeof props.label === "string" ? props.label : undefined}>
       <Text aria-hidden="true" style={look.label}>
         {props.label}
       </Text>
       {props.children}
-    </Box>
+    </View>
   ),
 }
 

@@ -1,7 +1,7 @@
 // A list and its rows: written once on the drawing primitives, the same on the DOM and on a native host.
 import { children, createContext, createEffect, createMemo, createSignal, flush, For, onCleanup, Show, useContext } from "solid-js"
 import type { JSX } from "@solidjs/web"
-import { Box, Text } from "#primitives"
+import { Pressable, Text, View } from "#primitives"
 import { direction, reducedMotion, touch, viewport } from "#bridge"
 import { Icon } from "./button.tsx"
 import { RowMenu, type RowMenu as Menu } from "./menu.tsx"
@@ -309,21 +309,21 @@ export function List(props: { listbox?: Listbox; label?: string; children?: JSX.
       },
     )
     return (
-      <Box onIntersection={(event) => setNear(event.isIntersecting)} style={[!drawn() && look.tall(mine().reduce((sum, one) => sum + (one.height ?? tall), 0))]}>
+      <View onIntersection={(event) => setNear(event.isIntersecting)} style={[!drawn() && look.tall(mine().reduce((sum, one) => sum + (one.height ?? tall), 0))]}>
         <Show when={drawn()}>
           <For each={mine()}>{(one, at) => slotted(one, () => chunk.start + at())}</For>
         </Show>
-      </Box>
+      </View>
     )
   }
   const slotted = (one: Slot, at: () => number) => (
-              <Box style={[look.slot, one.state() === "coming" && look.entering, one.state() === "going" && look.leaving, one.to() !== undefined && look.tall(one.to()!), !one.drawn() && look.tall(one.height ?? tall)]}>
+              <View style={[look.slot, one.state() === "coming" && look.entering, one.state() === "going" && look.leaving, one.to() !== undefined && look.tall(one.to()!), !one.drawn() && look.tall(one.height ?? tall)]}>
                 <Show
                   when={props.listbox}
-                  fallback={<Box onLayout={(event) => laid(one, event.currentTarget.getBoundingClientRect().height)}>{one.node}</Box>}
+                  fallback={<View onLayout={(event) => laid(one, event.currentTarget.getBoundingClientRect().height)}>{one.node}</View>}
                 >
                   {(listbox) => (
-                    <Box
+                    <View
                       role="option"
                       id={insides.get(listbox())!.option(at())}
                       aria-selected={listbox().chosen() === at() ? "true" : "false"}
@@ -332,18 +332,18 @@ export function List(props: { listbox?: Listbox; label?: string; children?: JSX.
                       style={[look.option, listbox().chosen() === at() && look.chosen]}
                     >
                       {one.node}
-                    </Box>
+                    </View>
                   )}
                 </Show>
-              </Box>
+              </View>
   )
   return (
     <Show when={slots().length}>
-      <Box role={props.listbox ? "listbox" : "list"} id={props.listbox?.id} aria-label={props.label} style={[look.list, flat() && look.flat, grouped() && look.groupedList]}>
-        <Box style={[look.rows, flat() && look.flatRows]}>
+      <View role={props.listbox ? "listbox" : "list"} id={props.listbox?.id} aria-label={props.label} style={[look.list, flat() && look.flat, grouped() && look.groupedList]}>
+        <View style={[look.rows, flat() && look.flatRows]}>
           <For each={chunks()}>{(start) => <Chunk start={start} />}</For>
-        </Box>
-      </Box>
+        </View>
+      </View>
     </Show>
   )
 }
@@ -373,11 +373,11 @@ export function Row(props: RowProps): JSX.Element {
   const [drawn, setDrawn] = createSignal(false)
   // The node it is, as its list has it, by which the list draws it.
   const [row] = children(() => (
-    <Box>
+    <View>
       <Show when={drawn() || props.current}>
         <Drawn {...props} />
       </Show>
-    </Box>
+    </View>
   )).toArray()
   drawing.set(row, setDrawn)
   onCleanup(() => drawing.delete(row))
@@ -489,28 +489,28 @@ function Drawn(props: RowProps) {
   const inside = () => (
     <>
       <Show when={props.start}>
-        <Box style={look.start}>{props.start}</Box>
+        <View style={look.start}>{props.start}</View>
       </Show>
-      <Box style={[look.words, flat() && look.flatWords]}>
+      <View style={[look.words, flat() && look.flatWords]}>
         <Text style={[look.heading, flat() && look.flatHeading, style !== "plain" && look.groupedHeading, grouped() && look.groupedSize, sidebar() && look.sidebarSize, props.destructive && look.destructive]}>{props.heading}</Text>
         <Show when={props.text}>
           <Text style={[look.text, flat() && look.flatText, style !== "plain" && !touch() && look.groupedText]}>{props.text}</Text>
         </Show>
-      </Box>
+      </View>
       <Show when={props.end}>
-        <Box style={look.end}>{props.end}</Box>
+        <View style={look.end}>{props.end}</View>
       </Show>
       <Show when={opens()}>
-        <Box style={look.chevron}>
+        <View style={look.chevron}>
           <Icon name="caret-right" />
-        </Box>
+        </View>
       </Show>
     </>
   )
   const moving = () => [settling() && look.settling, swiped() > 0 && look.moved(direction() === "rtl" ? swiped() : -swiped())]
   return (
     <RowMenu value={setMenu}>
-      <Box
+      <View
         role={inListbox ? undefined : "listitem"}
         onPointerDown={down}
         onPointerMove={move}
@@ -521,27 +521,27 @@ function Drawn(props: RowProps) {
         style={[look.row, !touch() && !grouped() && look.flatRow, !!props.action && look.wraps, props.current && look.current, !!menu() && look.held]}
       >
         <Show when={props.control}>
-          <Box style={[look.control, moving()]}>{props.control}</Box>
+          <View style={[look.control, moving()]}>{props.control}</View>
         </Show>
         <Show
           when={props.onClick}
-          fallback={<Box style={[look.inside, !touch() && look.flatInside, grouped() && look.groupedInside, sidebar() && look.sidebarInside, !!props.control && look.after, moving()]}>{inside()}</Box>}
+          fallback={<View style={[look.inside, !touch() && look.flatInside, grouped() && look.groupedInside, sidebar() && look.sidebarInside, !!props.control && look.after, moving()]}>{inside()}</View>}
         >
-          <Box role={inListbox ? undefined : "button"} aria-current={props.current ? "true" : undefined} onClick={pressed} style={[look.inside, !touch() && look.flatInside, grouped() && look.groupedInside, sidebar() && look.sidebarInside, look.pressable, inListbox && look.quiet, !!props.control && look.after, moving()]}>
+          <Pressable role={inListbox ? undefined : "button"} aria-current={props.current ? "true" : undefined} onPress={pressed} style={[look.inside, !touch() && look.flatInside, grouped() && look.groupedInside, sidebar() && look.sidebarInside, look.pressable, inListbox && look.quiet, !!props.control && look.after, moving()]}>
             {inside()}
-          </Box>
+          </Pressable>
         </Show>
         <Show when={props.action}>
-          <Box style={[look.action, moving()]}>{props.action}</Box>
+          <View style={[look.action, moving()]}>{props.action}</View>
         </Show>
         <Show when={menu()?.destructive()}>
           {(item) => (
-            <Box aria-hidden="true" onClick={() => (menu()?.select(item().value), aside(0, true))} style={[look.swipe, settling() && look.settling, look.swiped(swiped())]}>
+            <Pressable aria-hidden="true" onPress={() => (menu()?.select(item().value), aside(0, true))} style={[look.swipe, settling() && look.settling, look.swiped(swiped())]}>
               <Text>{item().label}</Text>
-            </Box>
+            </Pressable>
           )}
         </Show>
-      </Box>
+      </View>
     </RowMenu>
   )
 }

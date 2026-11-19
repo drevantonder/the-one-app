@@ -1,4 +1,4 @@
-import { ActionBar, ActionPanel, Box, Keys, styles, Text, tokens, type Action, type Scenes } from "ui"
+import { type Action, ActionBar, ActionPanel, Keys, type Scenes, styles, Text, tokens, View } from "ui"
 
 const look = styles({
   window: { position: "relative", height: tokens.grid[24], gap: tokens.grid[2] },
@@ -14,20 +14,20 @@ const actions: Action[] = [
 
 export default {
   "Actions/Keys": () => (
-    <Box style={look.row}>
+    <View style={look.row}>
       <Keys keys={["mod", "K"]} />
       <Keys keys={["enter"]} />
       <Keys keys={["mod", "shift", "enter"]} />
       <Keys keys={["escape"]} />
-    </Box>
+    </View>
   ),
   "Actions/Footer": {
     size: [750, 475],
     render: () => (
-      <Box style={look.window}>
+      <View style={look.window}>
         <Text>What's under the footer.</Text>
         <ActionBar start={<Text>Vault</Text>} actions={actions} />
-      </Box>
+      </View>
     ),
   },
   "Actions/Panel": {
