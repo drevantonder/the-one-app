@@ -434,16 +434,10 @@ defmodule Telemetry do
   @impl true
   def call("overview", inputs, call) do
     # How much is kept is listed as what's kept is read.
-    within = OpenTelemetry.Ctx.get_current()
-
-    retention =
-      Task.async(fn ->
-        OpenTelemetry.Ctx.attach(within)
-        Tracer.with_span("telemetry retention", do: Store.retention(call.own))
-      end)
-
+    retention = meanwhile(fn -> Tracer.with_span("telemetry retention", do: Store.retention(call.own)) end)
+    shown = meanwhile(fn -> shown(call) end)
     {batches, from, to} = read(call, inputs["hours"] || 24)
-    {shown, names} = {shown(call), names(call)}
+    {shown, names} = {Task.await(shown), names(call)}
 
     Tracer.with_span "telemetry aggregate" do
       %{
@@ -460,8 +454,9 @@ defmodule Telemetry do
   end
 
   def call("errors", inputs, call) do
+    shown = meanwhile(fn -> shown(call) end)
     {batches, _from, _to} = read(call, inputs["hours"] || 24)
-    %{errors: Read.errors(batches, shown(call))}
+    %{errors: Read.errors(batches, Task.await(shown))}
   end
 
   def call("slowest", inputs, call) do
@@ -516,6 +511,16 @@ defmodule Telemetry do
     to = System.os_time(:nanosecond)
     from = to - hours * 3_600_000_000_000
     {Store.read(call, from), from, to}
+  end
+
+  # Does `fun` while the call goes on, in its trace, for the call to await: asking who owns the network may be asked
+  # of the server holding Permissions' database, and listing how much is kept is a request of its own.
+  defp meanwhile(fun) do
+    within = OpenTelemetry.Ctx.get_current()
+    Task.async(fn ->
+      OpenTelemetry.Ctx.attach(within)
+      fun.()
+    end)
   end
 
   # Whose a call was is shown to the network's owners, and to whoever it was: to anyone else, how the network is
