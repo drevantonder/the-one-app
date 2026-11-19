@@ -146,10 +146,9 @@ const updates: Record<Exclude<ServerUpdateStatus, "up_to_date">, { step: string;
 
 /// The network's update, as Software Update says it: its line, and whether it's under way.
 function softwareUpdate(update: NetworkUpdate) {
-  const version = update.build?.split("+")[0] ?? ""
-  if (update.network_update_status === "up_to_date") return { text: `Up to date · ${version}` }
+  if (update.network_update_status === "up_to_date") return { text: "Up to date" }
   if (update.network_update_status === "held") return { text: `Update failed · ${update.held?.name ?? "A server"}: ${update.held?.why}`, action: "Try Again" }
-  if (update.waiting_for === "quiet") return { text: `Waiting for a quiet moment · ${version}`, action: "Update Now" }
+  if (update.waiting_for === "quiet") return { text: "Waiting for a quiet moment", action: "Update Now" }
   return { text: `Updating… ${update.done} of ${update.of}`, busy: true }
 }
 
@@ -284,7 +283,10 @@ function Detail(props: { thing: Thing; all: All; groups?: Groups }) {
           </View>
         </Section>
       </Show>
-      <Show when={(thing().behind && thing().here) || (thing().here && thing().kind === "app") || (!thing().kind && thing().server_membership)}>
+      <Show when={!thing().kind && thing().server_membership && thing().server_ready_reason === "stopped"}>
+        <Problem warn heading="This server isn't running" text={thing().last_seen ? `It was last seen ${seen(thing().last_seen!)}.` : "It hasn't been seen yet."} />
+      </Show>
+      <Show when={(thing().behind && thing().here) || (thing().here && thing().kind === "app")}>
         <Section heading="Options">
           <List>
             <Show when={thing().behind && thing().here}>
@@ -297,14 +299,6 @@ function Detail(props: { thing: Thing; all: All; groups?: Groups }) {
                 end={<Switch aria-label="Server" value={serving() ?? !!props.all.here.server} disabled={serving() !== undefined} onValueChange={serve} />}
               />
             </Show>
-            <Show when={!thing().kind && thing().server_membership}>
-              <Row heading="Server" text={capital(thing().server_membership!)} />
-              <Row heading="Server daemon" text={capital(thing().server_daemon_status ?? "stopped")} />
-              <Row
-                heading={thing().server_ready ? "Ready" : "Not ready"}
-                text={thing().server_ready ? "Calls go to it." : thing().server_ready_reason === "stopped" && thing().last_seen ? `Stopped, ${seen(thing().last_seen!)}` : capital(thing().server_ready_reason ?? "stopped")}
-              />
-            </Show>
           </List>
         </Section>
       </Show>
@@ -315,12 +309,15 @@ function Detail(props: { thing: Thing; all: All; groups?: Groups }) {
               {(service) => (
                 <Row
                   heading={service().called}
-                  text={service().needs}
                   end={
                     <Switch
                       aria-label={service().called}
                       value={service().on}
-                      onValueChange={(on) => doing(() => call(on ? "install_service" : "uninstall_service", { app: service().app, service: service().service, server: server()!.id }, { subject: server()!.subject }))}
+                      onValueChange={async (on) => {
+                        // What it needs of the machine is read as it's switched on, where its owner decides.
+                        if (on && !(await confirm({ heading: `Switch on ${service().called}?`, text: service().needs, action: "Switch On" }))) return refresh(mine)
+                        doing(() => call(on ? "install_service" : "uninstall_service", { app: service().app, service: service().service, server: server()!.id }, { subject: server()!.subject }))
+                      }}
                     />
                   }
                 />
@@ -343,7 +340,7 @@ function Detail(props: { thing: Thing; all: All; groups?: Groups }) {
       <Section heading="About">
         <List>
           <Row heading="Kind" end={<Text style={look.muted}>{kinds[thing().kind ?? "server"]}</Text>} />
-          <Show when={presence(thing())}>{(seen) => <Row heading="Last Seen" end={<Text style={look.muted}>{seen()}</Text>} />}</Show>
+          <Show when={presence(thing())}>{(seen) => <Row heading="Status" end={<Text style={look.muted}>{seen()}</Text>} />}</Show>
           <Show when={thing().build}>{(build) => <Row heading="Build" end={<Text style={look.muted}>{build().split("+")[0]}</Text>} />}</Show>
         </List>
       </Section>
@@ -466,7 +463,7 @@ function Things(props: { all: All; groups?: Groups }) {
         </Show>
         <Answer device={props.all.waiting.find((device) => device.request === answering())} />
         <Section heading="Your Devices">
-          <Show when={props.all.devices.length} fallback={<Empty>No connected apps yet.</Empty>}>
+          <Show when={props.all.devices.length} fallback={<Empty>No devices yet.</Empty>}>
             <List>
               <For each={props.all.devices} keyed={(device) => device.id}>{row}</For>
             </List>
@@ -477,6 +474,7 @@ function Things(props: { all: All; groups?: Groups }) {
             <List>
               <Show when={said()}>
                 <Row
+                  start={<View style={look.glyph}><Icon name="gear-six" /></View>}
                   heading="Software Update"
                   text={said()!.busy ? <><Spinner /> {said()!.text}</> : said()!.text}
                   end={
