@@ -139,12 +139,6 @@ fn said(message: &str) -> Result<String, String> {
     Ok(serde_json::from_str::<client::serve::Said>(message).map_err(|error| error.to_string())?.to_string())
 }
 
-/// Which messages this build reads and writes to `one serve run` (`client::serve::protocol`).
-#[rustler::nif]
-fn protocol() -> String {
-    client::serve::protocol()
-}
-
 /// Opens the endpoint whose key is kept in `key_file`, and sends each message asked to `asked` as
 /// `{:ask, ask, from, message}`, where `from` is the key of whoever asked. With a `network`, its address and the token
 /// shown there, it's reached through the relay at that address too, and hears what outsiders ask there, whose `from`
@@ -176,8 +170,8 @@ fn start(
         let address = client::address(&endpoint, network.as_ref()).map_err(|error| format!("{error:#}"))?;
         if let Some(network) = network {
             endpoint.online().await;
-            // It listens there while the endpoint is open: one closed, as a hot load closes it to open another
-            // (`OneCore.Server`), leaves the relay to the one after it.
+            // It listens there while the endpoint is open: one closed, as the server closes it as it stops
+            // (`OneCore.Server`), leaves the relay to the next.
             let listen = outside::listen(network, endpoint.secret_key().clone(), handler);
             tokio::spawn(endpoint.closed().run_until(listen));
         }

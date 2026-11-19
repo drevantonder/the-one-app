@@ -107,8 +107,6 @@ defmodule OneCore.Release do
     "server_daemon_status" => "starting",
     "server_update_status" => "up_to_date",
     "server_update_stage" => nil,
-    "update_method" => nil,
-    "update_method_reason" => nil,
     "next_build" => nil,
     "program_name" => nil,
     "program" => nil,
@@ -354,12 +352,7 @@ defmodule OneCore.Release do
         do: OneCore.Nif.build(module)
 
     say(%{"checked" => %{"build" => Builds.build()}})
-    # A `one` from before every update restarted asks how a server on the build `ONE_FROM` takes this one.
-    if System.get_env("ONE_FROM"), do: compare(nil, nil)
   end
-
-  @doc "Says a server takes this build by restarting, as a `one` from before every update restarted asks."
-  def compare(_old, _new), do: say(%{"compared" => %{"update_method" => "restart", "why" => "every update restarts"}})
 
   @doc """
   Has the UI library this server serves be the build in `folder`, and the apps built against another built again, by

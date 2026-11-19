@@ -47,7 +47,7 @@ client sent a `traceparent`.
 - Each server's machine reports its server's life, through `one serve run`, even while the server can't start, and
   keeps it until a server is told: `one.server.start` (how long it took, `one.server.restart.reason` why the run
   before ended, an error where it didn't start, with its last lines), `one.server.stop` (an error where nobody
-  asked), `one.server.crash_loop` and `one.server.update` (`one.update.method`, `one.update.outcome`: `took`,
+  asked), `one.server.crash_loop` and `one.server.update` (`one.update.outcome`: `took`,
   `went_back` or `stayed`, with why). Each says `one.server`, the server's key. The network's update is
   `network update` on the edge, an error while it's held. A database's lease moving to a server is
   `one.database.lease.moves` (`one.reason`), a call kept waiting by its holder `one.database.lease.wait`

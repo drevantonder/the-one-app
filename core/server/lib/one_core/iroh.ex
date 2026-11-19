@@ -20,9 +20,6 @@ defmodule OneCore.Iroh do
   """
   def said(_message), do: :erlang.nif_error(:nif_not_loaded)
 
-  @doc "Which messages `told/1` and `said/1` read and write (`client::serve::protocol`), as a SHA-256."
-  def protocol, do: :erlang.nif_error(:nif_not_loaded)
-
   @doc """
   Opens the endpoint whose key is kept in `key_file`, and sends each message asked to `asked` as
   `{:ask, ask, from, message}`, where `from` is the key of whoever asked. With a `network`, `{address, token}`, it's

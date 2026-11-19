@@ -96,26 +96,16 @@ defmodule OneCore.Tools do
     enum: ["up_to_date", "downloading", "checked", "verifying"],
     description:
       "Where an update of it is: up_to_date, downloading the latest build and program while it answers on and " <>
-        "checking how it takes them, checked and waiting for the network's update to say go, or verifying them, by " <>
-        "loading the build into it, kept once it's loaded, or by starting both in its place, kept once the build " <>
-        "says it's running at the edge, and otherwise gone back from"
+        "checking the build starts, checked and waiting for the network's update to say go, or verifying them, by " <>
+        "starting both in its place, kept once the build says it's running at the edge, and otherwise gone back from"
   }
 
   @server_update_stage %{
     type: ["string", "null"],
-    enum: ["checking", "loading", "starting", nil],
+    enum: ["checking", "starting", nil],
     description:
-      "Where downloading is once it's downloaded, checking the build starts and whether it can be loaded into the " <>
-        "server while it runs, and where verifying is, loading it, which takes seconds, or starting it in the server's place"
-  }
-
-  @update_method %{
-    type: ["string", "null"],
-    enum: ["hot_load", "restart", nil],
-    description:
-      "How checking chose to take the build: hot_load, loaded into the server while it runs, or restart, started " <>
-        "in its place, for a new runtime, `one`, 0.minor, supervision tree, struct, macro or -on_load module " <>
-        "(`update_method_reason`)"
+      "Where downloading is once it's downloaded, checking the build starts, and where verifying is, starting it " <>
+        "in the server's place"
   }
 
   @acts_for %{
@@ -813,7 +803,6 @@ defmodule OneCore.Tools do
                 protocol: @protocol,
                 server_update_status: @server_update_status,
                 server_update_stage: @server_update_stage,
-                update_method: @update_method,
                 runtime: %{type: ["string", "null"], description: "The server-runtime build it runs on"},
                 went_back: %{type: ["string", "null"], description: "Why its last update didn't take, until one does"}
               },

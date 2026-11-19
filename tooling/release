@@ -526,15 +526,13 @@ SIGN
 
   # The runtime is everything but One Core's own code. What it's built from says which it is: the one published, if
   # that's the same, and otherwise a new one, this build's. That's the VM, Elixir and Bun, the deps, One Core's config
-  # and release settings and this loop, which puts them together, kept in the runtime's file `runtime-inputs`, which a
-  # server on another runtime restarts for (`OneCore.Release.compare/2`); and One Core's NIFs, as each is named for
-  # what it's built from (`tooling/input-hash`), which a running server loads beside the ones it has.
+  # and release settings and this loop, which puts them together; and One Core's NIFs, as each is named for what it's
+  # built from (`tooling/input-hash`).
   runtime_inputs=$({
     echo "$kind $otp $(elixir --version | tail -1) $key" && cat "$release/bun" && { [[ ! -e $release/git ]] || cat "$release/git"; } &&
       (cd core/server && sha256sum mix.exs mix.lock config/* rel/*) &&
       sed -n '/^for kind in "${servers\[@\]}"; do$/,/^done$/p' tooling/release
   } | sha256sum | cut -d' ' -f1)
-  echo "$runtime_inputs" >"$release/runtime-inputs"
   inputs=$({
     echo "$runtime_inputs" && for crate in core/server/nif/*/; do tooling/input-hash "$crate" "$triple"; done
   } | sha256sum | cut -d' ' -f1)

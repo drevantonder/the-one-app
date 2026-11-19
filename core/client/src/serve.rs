@@ -3,22 +3,12 @@
 //! server's Elixir through its NIF (`core/server/nif/one_core_iroh`).
 //!
 //! The program tells the server what it is (`Told`), as it starts it, in `ONE_SERVER_STATUS`, and on its input as that
-//! changes, asks it for the latest builds, and has it load one. The server says on its output that it's running, that
-//! it's asked to update, that it can reach the network again, the latest builds, and whether it loaded a build, and a
-//! build being checked says which it is and how it's taken (`Said`). Taking a build asks nothing of any other server:
+//! changes, and asks it for the latest builds. The server says on its output that it's running, that it's asked to
+//! update, that it can reach the network again and the latest builds, and a build being checked says which it is
+//! (`Said`). Taking a build asks nothing of any other server:
 //! what to take is read by this one, and whether it answers is asked of it by its key.
 
-use std::path::PathBuf;
-
 use serde::{Deserialize, Serialize};
-use sha2::{Digest, Sha256};
-
-/// Which messages these are: the SHA-256 of this file, which defines them, and which `one serve run` and the server's
-/// NIF are each built from. A server loads a build while it runs only where that build reads and writes the messages
-/// the `one` running it does (`OneCore.Release.compare/2`); otherwise it restarts, run by the `one` paired with it.
-pub fn protocol() -> String {
-    crate::hex(&Sha256::digest(include_str!("serve.rs")))
-}
 
 /// Whether the device is one of its network's servers: joining while `one serve on` makes it one, until it answers
 /// by its key, active, and leaving while `one serve off` drains it.
@@ -43,7 +33,7 @@ pub enum ServerDaemonStatus {
 }
 
 /// Where an update is: up to date, downloading the latest server build and `one` together while the server answers
-/// on, and checking how it's taken (preparing), checked and waiting to be told to go, and verifying them.
+/// on, and checking the build starts (preparing), checked and waiting to be told to go, and verifying them.
 #[derive(Serialize, Deserialize, Clone, Copy, PartialEq, Default, Debug)]
 #[serde(rename_all = "snake_case")]
 pub enum ServerUpdateStatus {
@@ -54,23 +44,13 @@ pub enum ServerUpdateStatus {
     Verifying,
 }
 
-/// Where downloading is once it's downloaded, checking the build starts and how it's taken, and where verifying is,
-/// loading it or starting it.
+/// Where downloading is once it's downloaded, checking the build starts, and where verifying is, starting it in the
+/// server's place.
 #[derive(Serialize, Deserialize, Clone, Copy, PartialEq, Debug)]
 #[serde(rename_all = "snake_case")]
 pub enum ServerUpdateStage {
     Checking,
-    Loading,
     Starting,
-}
-
-/// How a build is taken, as checking chose (`OneCore.Release.compare/2`): loaded into the server while it runs, as
-/// a build that changed only One Core's code is, or started in its place, by the `one` paired with it.
-#[derive(Serialize, Deserialize, Clone, Copy, PartialEq, Debug)]
-#[serde(rename_all = "snake_case")]
-pub enum UpdateMethod {
-    HotLoad,
-    Restart,
 }
 
 /// What a server is, all of it, each time the program says it.
@@ -81,10 +61,6 @@ pub struct Status {
     pub server_update_status: ServerUpdateStatus,
     /// Where verifying is, while it's verifying.
     pub server_update_stage: Option<ServerUpdateStage>,
-    /// How the last update was taken, or is being.
-    pub update_method: Option<UpdateMethod>,
-    /// Why it restarts, where `update_method` is `restart`.
-    pub update_method_reason: Option<String>,
     /// The build being prepared, checked or verified.
     pub next_build: Option<String>,
     /// The builds' name of the `one` that runs it, which it takes the latest of: `one-cli/linux-x86_64`.
@@ -100,8 +76,6 @@ pub struct Status {
 #[derive(Serialize, Deserialize, Clone, PartialEq, Debug)]
 #[serde(untagged)]
 pub enum Told {
-    /// Load the build in this folder while it runs, and say whether it did (`Said::Loaded`, `Said::NotLoaded`).
-    Load { load: PathBuf },
     /// Say the latest builds for this kind of machine (`Said::Latest`, `Said::NoLatest`).
     Latest { latest: String },
     /// What it is now.
@@ -125,14 +99,8 @@ pub enum Said {
     Latest { builds: serde_json::Map<String, serde_json::Value> },
     /// It couldn't read the latest builds.
     NoLatest { why: String },
-    /// It loaded the build it was told to, and is that build now.
-    Loaded { build: String },
-    /// It couldn't load the build it was told to, and is on the code it had.
-    NotLoaded { build: String, why: String },
     /// The build being checked started, loaded its NIFs, and is this one (`OneCore.Release.check/0`).
     Checked { build: String },
-    /// How a server on another build takes this one (`OneCore.Release.compare/2`), and why, where it restarts.
-    Compared { update_method: UpdateMethod, why: Option<String> },
 }
 
 impl Said {
