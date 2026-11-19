@@ -1912,7 +1912,7 @@ listen("launcher", ({ payload }) => {
   if (typeof payload?.over === "boolean") (launcherOver = payload.over), gestures()
 })
 // The native launcher opens an app, or starts it as a finger lands on its icon, as its frame's page asks (`go`).
-listen("go", ({ payload }) => nativeLauncher && go(payload.link, payload.subject ?? undefined, payload.behind))
+listen("go", ({ payload }) => nativeLauncher && go(payload.link, payload.subject ?? undefined, payload.behind, payload.from ?? undefined))
 
 /// Shows the App Store with no launcher under it, which its person installs one with. There's nothing to go back
 /// to from it.
