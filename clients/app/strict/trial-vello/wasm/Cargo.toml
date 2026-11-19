@@ -1,0 +1,42 @@
+[package]
+name = "trial-vello-wasm"
+description = "Trial, not shipped: the smallest web build of each renderer, to weigh it: WebGPU only, size-optimised. Built once per feature (`hybrid`, `classic`, `ours`, `wgpu`)."
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+[workspace]
+
+[lib]
+crate-type = ["cdylib"]
+
+[features]
+# wgpu on WebGPU alone: what every one of them carries.
+wgpu = []
+# vello_gpu (was vello_hybrid), with Parley.
+hybrid = ["dep:vello_gpu", "dep:vello_common", "dep:glifo", "dep:parley"]
+# vello, the compute renderer, with Parley.
+classic = ["dep:vello", "dep:parley"]
+# Ours on wgpu, as the "Native renderer on wgpu" work makes it: our WGSL, its pipelines, Parley laying text out and
+# swash rasterizing glyphs into the atlas (etagere), as ours does on Linux.
+ours = ["dep:parley", "dep:swash", "dep:etagere"]
+
+[dependencies]
+wasm-bindgen = "0.2"
+wasm-bindgen-futures = "0.4"
+web-sys = { version = "0.3", features = ["HtmlCanvasElement"] }
+wgpu = { version = "30", default-features = false, features = ["webgpu", "wgsl"] }
+vello_gpu = { version = "0.4", optional = true, default-features = false, features = ["wgpu", "text", "all_shader_features"] }
+vello_common = { version = "0.4", optional = true }
+glifo = { version = "0.5", optional = true }
+vello = { version = "0.12", optional = true, default-features = false, features = ["wgpu"] }
+parley = { version = "0.13", optional = true, default-features = false, features = ["std"] }
+swash = { version = "0.2", optional = true }
+etagere = { version = "0.2", optional = true }
+
+[profile.release]
+opt-level = "z"
+lto = true
+codegen-units = 1
+panic = "abort"
+strip = true

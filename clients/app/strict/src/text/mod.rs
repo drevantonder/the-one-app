@@ -143,6 +143,8 @@ pub struct Line {
 pub struct Paragraph {
     pub lines: Vec<Line>,
     pub line_height: f32,
+    /// Trial (Vello): its words, for a text system of its own to lay out again.
+    pub words: String,
 }
 
 impl Paragraph {
@@ -318,7 +320,7 @@ impl TextSystem {
             wrap(&shaped, &cut_text, last.start, None, &mut end);
             lines.extend(end);
         }
-        Paragraph { lines, line_height }
+        Paragraph { lines, line_height, words: text.to_owned() }
     }
 
     /// Bytes `range` of `text` shaped as one line, each of `fonts` that's in it apart, one after another; its glyphs'

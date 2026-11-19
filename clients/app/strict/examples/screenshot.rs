@@ -131,11 +131,22 @@ fn main() -> anyhow::Result<()> {
     let mut scene = Scene::default();
     let size = Size { width: Pixels(width), height: Pixels(height) };
     let first_frame = std::cell::Cell::new(None);
+    // Trial (Vello): `--dump <dir>` writes each frame's scene there as JSON, named by `dump_name`, for
+    // clients/app/strict/trial-vello to draw again; and each frame's `renderer.draw` time is kept in `draws`.
+    let dump_dir = flag("--dump").map(PathBuf::from);
+    let dump_name: std::cell::RefCell<Option<String>> = std::cell::RefCell::new(Some("frame".into()));
+    let draws: std::cell::RefCell<Vec<f64>> = std::cell::RefCell::new(Vec::new());
     // A frame drawn, and with `read`, waited for and read back.
     let mut frame = |screen: &mut Screen, read: bool| -> anyhow::Result<(u32, u32, Vec<u8>)> {
         screen.idle();
         screen.paint(size, scale, &mut text, renderer.sprite_atlas(), &mut scene);
+        let drawing = std::time::Instant::now();
         renderer.draw(&scene);
+        draws.borrow_mut().push(drawing.elapsed().as_secs_f64() * 1000.0);
+        if let (Some(dir), Some(name)) = (&dump_dir, dump_name.borrow().as_ref()) {
+            std::fs::create_dir_all(dir)?;
+            std::fs::write(dir.join(format!("{name}.json")), dump(&scene, [device.width.0 as u32, device.height.0 as u32]).to_string())?;
+        }
         if !read {
             return Ok((0, 0, Vec::new()));
         }
@@ -190,23 +201,35 @@ fn main() -> anyhow::Result<()> {
         // How long a frame takes, on average over FRAMES each after `act`, which says false where there's nothing
         // to do it to: drawn one after another, as a window draws them, and the last waited for.
         const FRAMES: u32 = 30;
+        // Trial: each phase's `renderer.draw` times, median and worst, by name.
+        let phases: std::cell::RefCell<Vec<(String, f64, f64)>> = std::cell::RefCell::new(Vec::new());
+        let phase_name: std::cell::RefCell<String> = std::cell::RefCell::new(String::new());
         let mut frames = |screen: &mut Screen, act: &mut dyn FnMut(&mut Screen, u32) -> bool| -> anyhow::Result<Option<f64>> {
             let started = std::time::Instant::now();
+            draws.borrow_mut().clear();
             for at in 0..FRAMES {
                 if !act(screen, at) {
                     return Ok(None);
                 }
+                let phase = phase_name.borrow().clone();
+                *dump_name.borrow_mut() = (phase != "idle" || at == 0).then(|| format!("{phase}-{at:02}"));
                 frame(screen, at + 1 == FRAMES)?;
             }
+            let mut drawn = draws.borrow().clone();
+            drawn.sort_by(f64::total_cmp);
+            phases.borrow_mut().push((phase_name.borrow().clone(), drawn[drawn.len() / 2], *drawn.last().unwrap_or(&0.0)));
             Ok(Some(started.elapsed().as_secs_f64() * 1000.0 / f64::from(FRAMES)))
         };
+        *phase_name.borrow_mut() = "idle".into();
         let idle = frames(&mut screen, &mut |_, _| true)?;
+        *phase_name.borrow_mut() = "typing".into();
         let found = |screen: &mut Screen, role: &str| ask(screen, json!({"op": "query", "role": role}))?["result"]["nodes"][0]["node"].as_u64();
         let field = ["searchbox", "textbox"].into_iter().find_map(|role| found(&mut screen, role));
         let typing = match field {
             Some(node) => frames(&mut screen, &mut |screen, _| ask(screen, json!({"op": "type", "node": node, "text": "a"})).is_some_and(|answer| answer.get("result").is_some()))?,
             None => None,
         };
+        *phase_name.borrow_mut() = "scrolling".into();
         let list = found(&mut screen, "list");
         let scrolling = match list {
             Some(node) => frames(&mut screen, &mut |screen, at| {
@@ -222,6 +245,8 @@ fn main() -> anyhow::Result<()> {
             "measured {}",
             json!({"first_frame_ms": ms(first_frame_ms), "idle_ms": ms(idle), "typing_ms": ms(typing), "scrolling_ms": ms(scrolling), "memory_mb": memory_mb})
         );
+        let draw: serde_json::Map<String, Value> = phases.borrow().iter().map(|(name, median, worst)| (name.clone(), json!({"median_ms": median, "worst_ms": worst}))).collect();
+        eprintln!("drawn {}", Value::Object(draw));
     }
     renderer.destroy();
     Ok(())
@@ -237,4 +262,57 @@ fn ask(screen: &mut Screen, mut request: Value) -> Option<Value> {
     screen.inspect(request, Box::new(move |answer| *to.borrow_mut() = Some(answer)));
     screen.idle();
     answered.borrow_mut().take()
+}
+
+/// Trial (Vello): a frame's scene as JSON, in device pixels: every primitive with its draw order, each paragraph's
+/// words and styles, and what each sprite is a picture of.
+fn dump(scene: &Scene, size: [u32; 2]) -> Value {
+    use strict::geometry::{Bounds, Corners, Hsla, Rgba, ScaledPixels};
+    use strict::render::scene::{SpriteSource, TransformationMatrix};
+    let b = |bounds: &Bounds<ScaledPixels>| json!([bounds.origin.x.0, bounds.origin.y.0, bounds.size.width.0, bounds.size.height.0]);
+    let c = |colour: &Hsla| {
+        let rgba = Rgba::from(*colour);
+        json!([rgba.r, rgba.g, rgba.b, rgba.a])
+    };
+    let r = |radii: &Corners<ScaledPixels>| json!([radii.top_left.0, radii.top_right.0, radii.bottom_right.0, radii.bottom_left.0]);
+    let t = |turn: &TransformationMatrix| json!([turn.rotation_scale[0][0], turn.rotation_scale[0][1], turn.rotation_scale[1][0], turn.rotation_scale[1][1], turn.translation[0], turn.translation[1]]);
+    let quads: Vec<Value> = scene.quads.iter().map(|quad| json!({
+        "order": quad.order, "bounds": b(&quad.bounds), "mask": b(&quad.content_mask.bounds), "background": c(&quad.background.solid),
+        "border_color": c(&quad.border_color), "radii": r(&quad.corner_radii),
+        "borders": [quad.border_widths.top.0, quad.border_widths.right.0, quad.border_widths.bottom.0, quad.border_widths.left.0],
+        "dashed": quad.border_style as u32 == 1, "transform": t(&quad.transformation),
+    })).collect();
+    let shadows: Vec<Value> = scene.shadows.iter().map(|shadow| json!({
+        "order": shadow.order, "bounds": b(&shadow.bounds), "mask": b(&shadow.content_mask.bounds), "color": c(&shadow.color),
+        "radii": r(&shadow.corner_radii), "blur": shadow.blur_radius.0, "inset": shadow.inset == 1, "outer": b(&shadow.outer),
+        "outer_radii": r(&shadow.outer_radii), "transform": t(&shadow.transformation),
+    })).collect();
+    let underlines: Vec<Value> = scene.underlines.iter().map(|line| json!({
+        "order": line.order, "bounds": b(&line.bounds), "mask": b(&line.content_mask.bounds), "color": c(&line.color), "thickness": line.thickness.0,
+    })).collect();
+    let sprites: Vec<Value> = scene.polychrome_sprites.iter().filter(|sprite| !scene.sources.glyph_tiles.contains(&sprite.tile.key())).map(|sprite| {
+        let source = match scene.sources.sprites.get(&sprite.tile.key()) {
+            Some(SpriteSource::Image { src, size }) => json!({"image": src, "size": size}),
+            Some(SpriteSource::Path { d, view_box, fill, stroke, stroke_width }) => json!({
+                "path": d, "view_box": view_box, "fill": fill.as_ref().map(c), "stroke": stroke.as_ref().map(c), "stroke_width": stroke_width,
+            }),
+            None => Value::Null,
+        };
+        json!({"order": sprite.order, "bounds": b(&sprite.bounds), "mask": b(&sprite.content_mask.bounds), "radii": r(&sprite.corner_radii),
+               "opacity": sprite.opacity, "grayscale": sprite.grayscale, "transform": t(&sprite.transformation), "source": source})
+    }).collect();
+    let backdrops: Vec<Value> = scene.backdrops.iter().map(|backdrop| json!({
+        "order": backdrop.order, "bounds": b(&backdrop.bounds), "mask": b(&backdrop.content_mask.bounds), "radii": r(&backdrop.corner_radii),
+        "blur": backdrop.blur.0, "saturation": backdrop.saturation,
+    })).collect();
+    let texts: Vec<Value> = scene.sources.texts.iter().map(|text| json!({
+        "order": text.order, "words": text.words, "origin": text.origin, "width": text.width, "wrap": text.wrap, "max_lines": text.max_lines, "align": text.align,
+        "line_height": text.line_height, "scale": text.scale, "mask": b(&text.mask), "transform": t(&text.transformation),
+        "runs": text.runs.iter().map(|(range, style, colour)| json!({
+            "start": range.start, "end": range.end, "size": style.size, "weight": style.weight, "tracking": style.tracking,
+            "line_height": style.line_height, "tabular": style.tabular, "color": c(colour),
+        })).collect::<Vec<_>>(),
+    })).collect();
+    let glyphs = scene.monochrome_sprites.len() + scene.polychrome_sprites.iter().filter(|sprite| scene.sources.glyph_tiles.contains(&sprite.tile.key())).count();
+    json!({"size": size, "quads": quads, "shadows": shadows, "underlines": underlines, "sprites": sprites, "backdrops": backdrops, "texts": texts, "glyphs": glyphs})
 }

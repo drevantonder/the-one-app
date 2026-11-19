@@ -11,17 +11,66 @@ use super::atlas::{AtlasTextureId, AtlasTile};
 use super::bounds_tree::BoundsTree;
 use crate::geometry::{Background, Bounds, ContentMask, Corners, Edges, Hsla, ScaledPixels};
 
-pub(crate) type DrawOrder = u32;
+pub type DrawOrder = u32;
 
 #[derive(Default)]
 pub struct Scene {
     primitive_bounds: BoundsTree<ScaledPixels>,
-    pub(crate) shadows: Vec<Shadow>,
-    pub(crate) quads: Vec<Quad>,
-    pub(crate) underlines: Vec<Underline>,
-    pub(crate) monochrome_sprites: Vec<MonochromeSprite>,
-    pub(crate) polychrome_sprites: Vec<PolychromeSprite>,
-    pub(crate) backdrops: Vec<Backdrop>,
+    pub shadows: Vec<Shadow>,
+    pub quads: Vec<Quad>,
+    pub underlines: Vec<Underline>,
+    pub monochrome_sprites: Vec<MonochromeSprite>,
+    pub polychrome_sprites: Vec<PolychromeSprite>,
+    pub backdrops: Vec<Backdrop>,
+    /// Trial (Vello): what a renderer that lays out text and draws vectors itself needs, beside the sprites.
+    pub sources: Sources,
+}
+
+/// Trial (Vello): each paragraph's words, styles and box, and each sprite's image or path, by its tile, so a renderer
+/// can lay text out with its own text system (Parley) and draw paths as vectors instead of our atlas's sprites.
+#[derive(Default)]
+pub struct Sources {
+    pub texts: Vec<TextSource>,
+    pub sprites: std::collections::HashMap<(u32, u32, u32), SpriteSource>,
+    /// The tiles of glyphs (emoji are polychrome sprites too), which a text system of its own draws instead.
+    pub glyph_tiles: std::collections::HashSet<(u32, u32, u32)>,
+    /// While a paragraph is painted, the latest order its glyphs were given.
+    pub watching: Option<DrawOrder>,
+}
+
+/// A paragraph as `paint_text` drew it: its words in runs of one style and colour, at `origin` with lines `width`
+/// wide (logical pixels, before `scale`), aligned by `align`, each `line_height` apart, clipped to `mask` (device
+/// pixels) and turned by `transformation`; drawn at `order`, its last glyph's.
+#[derive(Clone, Debug)]
+pub struct TextSource {
+    pub order: DrawOrder,
+    pub words: String,
+    pub runs: Vec<(std::ops::Range<usize>, crate::text::TextStyle, Hsla)>,
+    pub origin: [f32; 2],
+    pub width: f32,
+    pub wrap: bool,
+    pub max_lines: Option<usize>,
+    pub align: f32,
+    pub line_height: f32,
+    pub scale: f32,
+    pub mask: Bounds<ScaledPixels>,
+    pub transformation: TransformationMatrix,
+}
+
+/// What a polychrome sprite is a picture of.
+#[derive(Clone, Debug)]
+pub enum SpriteSource {
+    /// An image by its `data:` address, decoded at `size` device pixels.
+    Image { src: String, size: [u32; 2] },
+    /// An SVG path's `d` in its `view_box`, stretched to the sprite, filled and stroked (`stroke_width` device pixels).
+    Path { d: String, view_box: String, fill: Option<Hsla>, stroke: Option<Hsla>, stroke_width: f32 },
+}
+
+impl super::atlas::AtlasTile {
+    /// Trial: the tile as a key.
+    pub fn key(&self) -> (u32, u32, u32) {
+        (self.texture_id.index, self.texture_id.kind as u32, self.tile_id.0)
+    }
 }
 
 impl Scene {
@@ -33,6 +82,9 @@ impl Scene {
         self.monochrome_sprites.clear();
         self.polychrome_sprites.clear();
         self.backdrops.clear();
+        self.sources.texts.clear();
+        self.sources.sprites.clear();
+        self.sources.glyph_tiles.clear();
     }
 
     pub(crate) fn insert_primitive(&mut self, primitive: impl Into<Primitive>) {
@@ -42,6 +94,14 @@ impl Scene {
             return;
         }
         let order = self.primitive_bounds.insert(clipped_bounds);
+        if let Some(watching) = &mut self.sources.watching {
+            *watching = (*watching).max(order);
+            match &primitive {
+                Primitive::MonochromeSprite(sprite) => _ = self.sources.glyph_tiles.insert(sprite.tile.key()),
+                Primitive::PolychromeSprite(sprite) => _ = self.sources.glyph_tiles.insert(sprite.tile.key()),
+                _ => {}
+            }
+        }
         match &mut primitive {
             Primitive::Shadow(shadow) => {
                 shadow.order = order;
@@ -254,7 +314,7 @@ pub(crate) enum PrimitiveBatch<'a> {
 
 #[derive(Default, Debug, Clone)]
 #[repr(C)]
-pub(crate) struct Quad {
+pub struct Quad {
     pub order: DrawOrder,
     pub border_style: BorderStyle,
     pub bounds: Bounds<ScaledPixels>,
@@ -274,7 +334,7 @@ impl From<Quad> for Primitive {
 
 #[derive(Debug, Clone)]
 #[repr(C)]
-pub(crate) struct Underline {
+pub struct Underline {
     pub order: DrawOrder,
     pub pad: u32, // align to 8 bytes
     pub bounds: Bounds<ScaledPixels>,
@@ -292,7 +352,7 @@ impl From<Underline> for Primitive {
 
 #[derive(Debug, Clone)]
 #[repr(C)]
-pub(crate) struct Shadow {
+pub struct Shadow {
     pub order: DrawOrder,
     pub blur_radius: ScaledPixels,
     pub bounds: Bounds<ScaledPixels>,
@@ -375,7 +435,7 @@ impl TransformationMatrix {
 
 #[derive(Clone, Debug)]
 #[repr(C)]
-pub(crate) struct MonochromeSprite {
+pub struct MonochromeSprite {
     pub order: DrawOrder,
     pub pad: u32, // align to 8 bytes
     pub bounds: Bounds<ScaledPixels>,
@@ -393,7 +453,7 @@ impl From<MonochromeSprite> for Primitive {
 
 #[derive(Clone, Debug)]
 #[repr(C)]
-pub(crate) struct PolychromeSprite {
+pub struct PolychromeSprite {
     pub order: DrawOrder,
     pub pad: u32, // align to 8 bytes
     pub grayscale: bool,
@@ -415,7 +475,7 @@ impl From<PolychromeSprite> for Primitive {
 /// corners, drawn under its background (`backdropFilter`).
 #[derive(Clone, Debug)]
 #[repr(C)]
-pub(crate) struct Backdrop {
+pub struct Backdrop {
     pub order: DrawOrder,
     pub pad: u32,
     pub blur: ScaledPixels,

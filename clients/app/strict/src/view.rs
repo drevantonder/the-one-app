@@ -2142,8 +2142,36 @@ impl Painter<'_> {
         // Glyphs grown with their box are rasterized at that size, so they stay sharp.
         let origin = point(px(content.origin.x / grown), px(content.origin.y / grown));
         let color = |index: usize| ranges.iter().find(|(start, end, _)| (*start..*end).contains(&index)).map_or(text.color, |(_, _, run)| run.color).opacity(opacity);
+        self.scene.sources.watching = Some(0);
         if let Err(error) = self.text.paint(paragraph, origin, width, text.align, &color, self.scale * grown, scaled_mask, self.turn.scaled(self.scale), self.atlas, self.scene) {
             log::warn!("text didn't draw: {error:#}");
+        }
+        // Trial (Vello): the paragraph as it was given, for Parley to lay out again, drawn where its last glyph was.
+        if let Some(order) = self.scene.sources.watching.take().filter(|order| *order > 0) {
+            let words = paragraph.words.clone();
+            let mut runs: Vec<(std::ops::Range<usize>, crate::text::TextStyle, Hsla)> = ranges
+                .iter()
+                .map(|(start, end, run)| ((*start).min(words.len())..(*end).min(words.len()), run.style, run.color.opacity(opacity)))
+                .filter(|(range, _, _)| !range.is_empty())
+                .collect();
+            if runs.is_empty() {
+                runs.push((0..words.len(), text.style, text.color.opacity(opacity)));
+            }
+            self.scene.sources.texts.push(crate::render::scene::TextSource {
+                order,
+                words,
+                runs,
+                origin: [origin.x.0, origin.y.0],
+                width,
+                wrap: text.wrap || paragraph.lines.len() > 1,
+                // Cut short with an ellipsis after this many lines, where ours was.
+                max_lines: paragraph.lines.last().filter(|last| last.end < paragraph.words.trim_end().len()).map(|_| paragraph.lines.len()),
+                align: text.align,
+                line_height,
+                scale: self.scale * grown,
+                mask: scaled_mask.bounds,
+                transformation: self.turn.scaled(self.scale),
+            });
         }
         for (start, end, run) in &ranges {
             if !run.underline {
@@ -2293,7 +2321,7 @@ impl Painter<'_> {
         let device = Size { width: (bounds.size.width * self.scale).round() as u32, height: (bounds.size.height * self.scale).round() as u32 };
         if let Some((_, tile)) = self.image(&format!("{}x{}{src}", device.width, device.height), || decode(src, device)) {
             let window = self.window;
-            self.sprite(tile, bounds, Corners::all(radius), 1.0, window);
+            self.sprite(tile, bounds, Corners::all(radius), 1.0, window, crate::render::scene::SpriteSource::Image { src: src.to_owned(), size: [device.width, device.height] });
         }
     }
 
@@ -2324,8 +2352,9 @@ impl Painter<'_> {
 
     /// A picture's sprite, `width`×`height` device pixels, at `bounds` in the window.
     #[allow(clippy::too_many_arguments)]
-    fn sprite(&mut self, tile: AtlasTile, bounds: Bounds<f32>, radii: Corners<f32>, opacity: f32, mask: Bounds<f32>) {
+    fn sprite(&mut self, tile: AtlasTile, bounds: Bounds<f32>, radii: Corners<f32>, opacity: f32, mask: Bounds<f32>, source: crate::render::scene::SpriteSource) {
         let scale = self.scale;
+        self.scene.sources.sprites.insert(tile.key(), source);
         self.scene.insert_primitive(PolychromeSprite {
             order: 0,
             pad: 0,
@@ -2366,7 +2395,8 @@ impl Painter<'_> {
             size,
         };
         let radii = Corners { top_left: radii.top_left.min(size.width / 2.0), top_right: radii.top_right.min(size.width / 2.0), bottom_right: radii.bottom_right.min(size.width / 2.0), bottom_left: radii.bottom_left.min(size.width / 2.0) };
-        self.sprite(tile, bounds, radii, opacity, mask);
+        let source = crate::render::scene::SpriteSource::Image { src: src.to_owned(), size: [device.width, device.height] };
+        self.sprite(tile, bounds, radii, opacity, mask, source);
     }
 
     /// A path, SVG's: its `d` in its `viewBox`, stretched to its box, filled and stroked as its style says, drawn by
@@ -2397,7 +2427,14 @@ impl Painter<'_> {
             width = look.stroke_width * self.scale,
         );
         let Some((_, tile)) = self.image(&format!("path{svg}"), || decode(&format!("data:image/svg+xml;base64,{}", data_encoding::BASE64.encode(svg.as_bytes())), device)) else { return };
-        self.sprite(tile, content, Corners::default(), opacity, mask);
+        let source = crate::render::scene::SpriteSource::Path {
+            d: d.to_owned(),
+            view_box: view_box.to_owned(),
+            fill: paint(look.fill),
+            stroke: paint(look.stroke),
+            stroke_width: look.stroke_width * self.scale,
+        };
+        self.sprite(tile, content, Corners::default(), opacity, mask, source);
     }
 }
 

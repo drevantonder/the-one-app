@@ -418,11 +418,11 @@ pub struct LinearColorStop {
 #[derive(Clone, Copy, Default, Debug, PartialEq)]
 #[repr(C)]
 pub struct Background {
-    pub(crate) tag: u32,
-    pub(crate) color_space: u32,
-    pub(crate) solid: Hsla,
-    pub(crate) gradient_angle_or_pattern_height: f32,
-    pub(crate) colors: [LinearColorStop; 2],
+    pub tag: u32,
+    pub color_space: u32,
+    pub solid: Hsla,
+    pub gradient_angle_or_pattern_height: f32,
+    pub colors: [LinearColorStop; 2],
     pad: u32,
 }
 

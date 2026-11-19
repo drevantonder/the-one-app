@@ -1,0 +1,29 @@
+[package]
+name = "trial-vello"
+description = "Trial, not shipped: the frames our harness dumps (`screenshot --dump`) drawn again by Vello's GPU renderers, vello_gpu (was vello_hybrid) and vello (the compute one), with text laid out by Parley, and our backdrop blur as a pass of its own beside them."
+version = "0.0.0"
+edition = "2024"
+publish = false
+
+# Its own workspace: Parley pins ICU4X's segmenter at 2.3, and the strict host's Intl uses 2.4.
+[workspace]
+
+[dependencies]
+anyhow = "1"
+bytemuck = { version = "1", features = ["derive"] }
+data-encoding = "2"
+image = { version = "0.25", default-features = false, features = ["png", "jpeg", "gif", "webp"] }
+memory-stats = "1"
+parley = "0.13"
+pollster = "0.4"
+resvg = { version = "0.47", default-features = false }
+serde_json = "1"
+vello = "0.12"
+vello_gpu = "0.4"
+vello_common = "0.4"
+glifo = "0.5"
+wgpu = "30"
+wuff = "0.2"
+
+[profile.release]
+debug = false
