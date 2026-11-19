@@ -29,7 +29,7 @@
     document.head.append(Object.assign(document.createElement("script"), { type: "importmap", textContent: JSON.stringify({ imports }) }))
     // Its tables: the UI library's tokens and styles, and its app's styles, which its build writes beside every page.
     const tables = await Promise.all(["/ui/client/tokens.json", "/ui/client/styles.json", "styles.json"].map(async (table) => (await fetch(new URL(table, base))).text()))
-    const renderer = await import("./web_renderer.js")
+    const [renderer, { textInput }, { semantics }] = await Promise.all([import("./web_renderer.js"), import("./text-input.js"), import("./semantics.js")])
     await renderer.default()
     const needs = Number(new URLSearchParams(location.search).get("runtime"))
     if (!(needs <= renderer.runtime_version())) throw new Error(`it needs runtime version ${needs}`)
@@ -39,11 +39,16 @@
       host: { post: (/** @type {object} */ message) => renderer.post(JSON.stringify(message)) },
     })
     const canvas = /** @type {HTMLCanvasElement} */ (document.querySelector("canvas"))
+    // Typing, through a real field (text-input.js), and what a screen reader reads (semantics.js).
+    const typing = textInput((method, args) => renderer.text_input_client(method, args))
+    const spoken = semantics(/** @type {HTMLElement} */ (document.getElementById("semantics")), (id, action) => renderer.act(id, action))
     const sized = (/** @type {number} */ width, /** @type {number} */ height) => [Math.max(1, Math.round(width)), Math.max(1, Math.round(height))]
     ;[canvas.width, canvas.height] = sized(innerWidth * devicePixelRatio, innerHeight * devicePixelRatio)
     await renderer.open(canvas, devicePixelRatio, tables, page.searchParams.get("theme"), matchMedia("(pointer: coarse)").matches, {
       post: (/** @type {object} */ message) => parent.postMessage(message, "*"),
       cursor: (/** @type {string} */ cursor) => void (canvas.style.cursor = cursor),
+      textInput: (/** @type {[string, unknown][]} */ calls) => calls.forEach(([method, args]) => typing.call(method, args)),
+      semantics: spoken,
       // Its first frame, marked on the frame's own element for whoever measures it.
       drawn: () => {
         document.documentElement.dataset.drawn = String(Math.round(performance.now()))
@@ -61,17 +66,27 @@
     const pointer = (/** @type {string} */ kind) => (/** @type {PointerEvent} */ event) => renderer.pointer(kind, event.offsetX, event.offsetY, event.button, event.shiftKey)
     canvas.addEventListener("pointermove", pointer("move"))
     canvas.addEventListener("pointerdown", (event) => (canvas.setPointerCapture(event.pointerId), pointer("down")(event)))
-    canvas.addEventListener("pointerup", pointer("up"))
+    // What a press gives the keyboard is focused in the press itself, which is when a phone brings up its keyboard.
+    canvas.addEventListener("pointerup", (event) => (pointer("up")(event), renderer.flush()))
     canvas.addEventListener("pointerleave", pointer("leave"))
     // A wheel's lines and pages, in CSS pixels, as a browser scrolls them.
     const unit = [1, 16, innerHeight]
     canvas.addEventListener("wheel", (event) => (event.preventDefault(), renderer.wheel(event.offsetX, event.offsetY, event.deltaX * unit[event.deltaMode], event.deltaY * unit[event.deltaMode])), { passive: false })
-    canvas.addEventListener("keydown", (event) => {
-      if (event.key === "Tab" || event.key === " " || event.key.startsWith("Arrow")) event.preventDefault()
+    // A key is the page's first, as a Mac's are (`platform::mac`): one that types nothing, or with ⌘ or Ctrl held.
+    // What types something goes to the field being typed in, and every key while its input method composes, and so do
+    // copy, cut and paste, so they're the browser's own clipboard's.
+    addEventListener("keydown", (event) => {
+      if (event.defaultPrevented) return
+      const field = typing.field && document.activeElement === typing.field
+      if (field && (typing.composing || event.isComposing || event.keyCode === 229)) return
+      const chord = event.metaKey || event.ctrlKey
+      if (field && !chord && [...event.key].length === 1) return
+      if (field && chord && ["c", "x", "v"].includes(event.key.toLowerCase())) return
+      if (field || event.key === "Tab" || event.key === " " || event.key.startsWith("Arrow") || (chord && event.key.length === 1)) event.preventDefault()
       renderer.key(event.key, event.shiftKey, event.altKey, event.ctrlKey, event.metaKey)
     })
-    canvas.addEventListener("focus", () => renderer.focused(true))
-    canvas.addEventListener("blur", () => renderer.focused(false))
+    addEventListener("focus", () => renderer.focused(true))
+    addEventListener("blur", () => renderer.focused(false))
     matchMedia("(prefers-color-scheme: dark)").addEventListener("change", ({ matches }) => renderer.appearance_changed(matches))
     canvas.focus()
     try {

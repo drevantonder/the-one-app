@@ -195,11 +195,23 @@ async function dom(browser, serve, key, scene, folder) {
   return { tree, problems }
 }
 
+/// Presses what's named or says `name` on our renderer's canvas, as a person would: found in its ARIA tree
+/// (clients/web/renderer/semantics.js) and pressed where it's drawn.
+async function press(frame, name) {
+  const page = frame.page()
+  if (name.key || name.type) return tap(frame, name)
+  const at = await page.locator("#page").boundingBox()
+  if (name.x !== undefined) return page.mouse.click(at.x + name.x, at.y + name.y)
+  const found = typeof name === "object" ? frame.getByRole(name.role, { name: name.name, exact: true }).first() : frame.locator(`#semantics [aria-label="${name.replaceAll('"', '\\"')}"], #semantics :text-is("${name.replaceAll('"', '\\"')}")`).last()
+  const box = await found.boundingBox({ timeout: 5000 }).catch(() => null)
+  if (!box) throw new Error(`Nothing named or saying "${typeof name === "object" ? name.name : name}" to press`)
+  await page.mouse.click(at.x + box.x + box.width / 2, at.y + box.y + box.height / 2)
+}
+
 /// A scene drawn by our renderer on the web, in headless Chromium's WebGPU, as `web.png`, once its first frame is drawn
-/// and what moves as it opens has settled, on the native harness's clock, language and time zone. A scene with taps
-/// isn't drawn yet: they find what to press in its ARIA tree, which it hasn't yet.
+/// and what moves as it opens has settled, on the native harness's clock, language and time zone, each tap pressed
+/// through its ARIA tree.
 async function web(browser, serve, key, scene, folder) {
-  if (scene.taps.length) return { missing: "a scene with taps isn't drawn on the web until it has an ARIA tree to find them in" }
   const page = await browser.newPage({ viewport: { width: scene.size[0], height: scene.size[1] }, deviceScaleFactor: 2, hasTouch: scene.touch, colorScheme: dark ? "dark" : "light", locale: "en-US", timezoneId: "UTC" })
   const problems = []
   page.on("pageerror", (error) => problems.push(String(error)))
@@ -210,6 +222,7 @@ async function web(browser, serve, key, scene, folder) {
   const frame = await (await page.waitForSelector("#page")).contentFrame()
   const drawn = await frame.waitForFunction(() => "drawn" in document.documentElement.dataset, null, { timeout: 20000 }).then(() => true, () => false)
   await page.waitForTimeout(1000)
+  for (const name of drawn ? scene.taps : []) await press(frame, name).then(() => page.waitForTimeout(1000))
   if (drawn) await page.screenshot({ path: join(folder, "web.png") })
   await page.close()
   return drawn ? { problems } : { missing: `it drew nothing${problems.length ? `: ${problems.join("; ")}` : ""}` }

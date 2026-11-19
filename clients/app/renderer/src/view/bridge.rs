@@ -41,8 +41,20 @@ impl Screen {
                 let rect = self.rects.get(&id).copied().unwrap_or(Rect { x: 0.0, y: 0.0, width: 0.0, height: 0.0 });
                 // From the input's own coordinates to the window's: where it is.
                 let transform = [1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, rect.x, rect.y, 0.0, 1.0];
+                // An input with an autofill hint is in a group with every other on the screen, which a password manager
+                // fills together, as Flutter's `TextInputConfiguration.fields`.
+                let mut configuration = editing::configuration(&field, &value);
+                if configuration.get("autofill").is_some() {
+                    let fields: Vec<Value> = self
+                        .inputs()
+                        .into_iter()
+                        .filter_map(|other| Some(editing::configuration(&self.field(other)?, &self.editing.fields.get(&other)?.value())))
+                        .filter(|other| other.get("autofill").is_some())
+                        .collect();
+                    configuration["fields"] = json!(fields);
+                }
                 calls.extend([
-                    TextInput::SetClient(id, editing::configuration(&field, &value)),
+                    TextInput::SetClient(id, configuration),
                     TextInput::SetEditableSizeAndTransform { width: rect.width, height: rect.height, transform },
                     TextInput::SetEditingState(value.clone()),
                     TextInput::Show,
@@ -80,6 +92,13 @@ impl Screen {
             }
             TextInputClient::PerformAction(client, action) if connection.client == Some(client) => {
                 self.action(client, action.trim_start_matches("TextInputAction."));
+            }
+            TextInputClient::UpdateEditingStateWithTag(client, filled) if connection.client == Some(client) => {
+                for (id, value) in filled {
+                    if self.editing.fields.contains_key(&id) {
+                        self.set_editing(id, &value);
+                    }
+                }
             }
             _ => {}
         }

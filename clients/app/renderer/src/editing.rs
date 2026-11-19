@@ -138,6 +138,9 @@ pub enum TextInputClient {
     UpdateEditingState(u64, Value),
     /// Its action key was pressed (`TextInputAction.done`…): its app hears it (`Screen::action`).
     PerformAction(u64, String),
+    /// A password manager filled these inputs of its autofill group (`TextInputConfiguration.fields`), each by its id
+    /// (its `uniqueIdentifier`).
+    UpdateEditingStateWithTag(u64, Vec<(u64, Value)>),
 }
 
 impl TextInputClient {
@@ -147,6 +150,10 @@ impl TextInputClient {
         match method {
             "TextInputClient.updateEditingState" => Some(TextInputClient::UpdateEditingState(client, Value::from_flutter(&arguments[1]))),
             "TextInputClient.performAction" => Some(TextInputClient::PerformAction(client, arguments[1].as_str()?.to_owned())),
+            "TextInputClient.updateEditingStateWithTag" => {
+                let filled = arguments[1].as_object()?.iter().filter_map(|(id, value)| Some((id.parse().ok()?, Value::from_flutter(value)))).collect();
+                Some(TextInputClient::UpdateEditingStateWithTag(client, filled))
+            }
             _ => None,
         }
     }
@@ -166,7 +173,7 @@ pub fn configuration(field: &serde_json::Value, value: &Value) -> serde_json::Va
         _ if prop("autocomplete") == "name" => "name",
         _ => "text",
     };
-    let hint = match prop("autocomplete").split_whitespace().last().unwrap_or_default() {
+    let hint = prop("autocomplete").split_whitespace().find_map(|token| match token {
         "username" => Some("username"),
         "current-password" => Some("password"),
         "new-password" => Some("newPassword"),
@@ -176,7 +183,7 @@ pub fn configuration(field: &serde_json::Value, value: &Value) -> serde_json::Va
         "tel" => Some("telephoneNumber"),
         "postal-code" => Some("postalCode"),
         _ => None,
-    };
+    });
     // As Chrome has it: a password, an address or a link isn't capitalized or corrected unless it says so.
     let literal = prop("type") == "password" || matches!(kind, "emailAddress" | "url");
     let capitalization = match prop("autocapitalize") {
@@ -199,6 +206,10 @@ pub fn configuration(field: &serde_json::Value, value: &Value) -> serde_json::Va
     });
     if let Some(hint) = hint {
         configuration["autofill"] = serde_json::json!({"uniqueIdentifier": field["id"].to_string(), "hints": [hint], "editingValue": value.flutter()});
+    }
+    // Its `autocomplete` as the page wrote it, for a field that's a real one (the web's): a passkey's `webauthn` too.
+    if !prop("autocomplete").is_empty() {
+        configuration["autocomplete"] = serde_json::json!(prop("autocomplete"));
     }
     configuration
 }

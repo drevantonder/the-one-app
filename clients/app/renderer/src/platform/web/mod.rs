@@ -38,8 +38,11 @@ thread_local! {
     /// The windows, once the page's canvas has its GPU (`open`).
     static WINDOWS: RefCell<Option<Windows>> = const { RefCell::new(None) };
     static JOBS: RefCell<VecDeque<Job>> = const { RefCell::new(VecDeque::new()) };
-    /// A microtask is on its way to run what's queued.
+    /// A microtask is on its way to run what's queued, and a turn is running now.
     static SOON: Cell<bool> = const { Cell::new(false) };
+    static TURNING: Cell<bool> = const { Cell::new(false) };
+    /// The semantic tree the frame's ARIA tree was last given (`semantics`).
+    static SPOKEN: RefCell<String> = const { RefCell::new(String::new()) };
     /// What the DOM said happened to the canvas, for the windows' next turn (`Display::events`).
     static EVENTS: RefCell<Vec<(WindowId, usize, Input)>> = const { RefCell::new(Vec::new()) };
     /// How many device pixels the canvas has to a CSS pixel, as the frame last said it (`resized`): the display's, and
@@ -134,14 +137,25 @@ fn soon() {
 /// and what's due (`Windows::turn`), then what the screen sent the page, and the timer for its next.
 fn turn() {
     SOON.set(false);
-    let due = WINDOWS.with_borrow_mut(|windows| {
-        let windows = windows.as_mut()?;
+    // What a turn calls in the frame (a field's focus) may tell it something at once: that's the next turn's.
+    if TURNING.replace(true) {
+        return soon();
+    }
+    let (due, semantics) = WINDOWS.with_borrow_mut(|windows| {
+        let Some(windows) = windows.as_mut() else { return (None, None) };
         while let Some(job) = JOBS.with_borrow_mut(VecDeque::pop_front) {
             job(windows);
         }
         windows.turn();
-        windows.due()
+        let semantics = windows.windows.get(&WINDOW).and_then(|window| window.screen.as_ref().ok()).map(semantics);
+        (windows.due(), semantics)
     });
+    TURNING.set(false);
+    // The ARIA tree follows the semantic tree, where it changed.
+    if let Some(semantics) = semantics.filter(|semantics| SPOKEN.with_borrow(|spoken| spoken != semantics)) {
+        call("semantics", &js_sys::JSON::parse(&semantics).unwrap_or(JsValue::NULL));
+        SPOKEN.set(semantics);
+    }
     deliver();
     if let Some(due) = due {
         let at = js_sys::Date::now() + due.as_secs_f64() * 1000.0;
@@ -160,6 +174,30 @@ fn turn() {
             }
         }
     }
+}
+
+/// The screen's semantic tree (`Screen::semantics`), each node with where it was drawn (`rect`), as JSON.
+fn semantics(screen: &Screen) -> String {
+    fn placed(screen: &Screen, node: &mut Value) {
+        if let Some(rect) = node["id"].as_u64().and_then(|id| screen.rect(id)) {
+            node["rect"] = serde_json::json!([rect.x, rect.y, rect.width, rect.height]);
+        }
+        for child in node["children"].as_array_mut().into_iter().flatten() {
+            placed(screen, child);
+        }
+    }
+    let mut tree = screen.semantics();
+    for node in tree.as_array_mut().into_iter().flatten() {
+        placed(screen, node);
+    }
+    tree.to_string()
+}
+
+/// Runs what's queued now, not in a microtask: a press that gives a field the keyboard focuses its field in the
+/// press's own event, which is when a phone's browser brings up its keyboard.
+#[wasm_bindgen]
+pub fn flush() {
+    turn();
 }
 
 /// Calls the page with what the screen sent it, in order, once its module has run, as a native host's JS thread runs
@@ -294,8 +332,11 @@ impl Display {
     }
     pub fn set_title_row(&self, _: &NativeWindow, _: Option<crate::view::TitleRow>) {}
 
-    /// Typing comes with the web's text input plugin, which the frame's JS will be told Flutter's calls for.
-    pub fn text_input(&self, _: &NativeWindow, _: &[crate::editing::TextInput]) {}
+    /// Tells the frame's text input plugin (`text-input.js`) Flutter's method calls, as each is `[method, arguments]`.
+    pub fn text_input(&self, _: &NativeWindow, calls: &[crate::editing::TextInput]) {
+        let calls: Vec<Value> = calls.iter().map(|call| serde_json::json!(call.call())).collect();
+        call("textInput", &js_sys::JSON::parse(&Value::Array(calls).to_string()).unwrap_or(JsValue::NULL));
+    }
 
     pub fn flush(&self) {}
 
@@ -383,11 +424,11 @@ pub async fn open(canvas: web_sys::HtmlCanvasElement, scale: f32, tables: Vec<St
     SCALE.set(scale);
     let media = |query: &str| web_sys::window().and_then(|window| window.match_media(query).ok().flatten()).is_some_and(|list| list.matches());
     HOST.set(Some(Host { canvas, calls, dark: media("(prefers-color-scheme: dark)"), reduced_motion: media("(prefers-reduced-motion: reduce)") }));
-    let page = load(&tables).map_err(|error| JsError::new(&format!("{error:#}")))?;
+    let tokens = load(&tables).map_err(|error| JsError::new(&format!("{error:#}")))?;
     let context = crate::render::Context::create().await.map_err(|error| JsError::new(&format!("{error:#}")))?;
     let mut windows = Windows::made(Display, Ok(context)).map_err(|error| JsError::new(&format!("{error:#}")))?;
     let mut screen = Screen::new(Thread::new(Clock::real()), Some(Box::new(asked)), Size { width: 0.0, height: 0.0 }, Default::default());
-    screen.page = page;
+    screen.page = tokens;
     screen.touch = touch;
     screen.theme = match theme.as_deref() {
         Some("dark") => Some(Appearance::Dark),
@@ -521,6 +562,30 @@ pub fn wheel(x: f32, y: f32, dx: f32, dy: f32) {
 #[wasm_bindgen]
 pub fn key(key: String, shift: bool, alt: bool, ctrl: bool, meta: bool) {
     input(Input::Key(crate::inspect::Key { key, shift, alt, ctrl, meta }));
+}
+
+/// What the frame's text input plugin says, as Flutter's engine calls its framework's `TextInputClient`.
+#[wasm_bindgen]
+pub fn text_input_client(method: &str, arguments: JsValue) {
+    if let Some(said) = data(&arguments, &mut Vec::new()).ok().and_then(|arguments| crate::editing::TextInputClient::from_call(method, &arguments)) {
+        input(Input::TextInputClient(said));
+    }
+}
+
+/// A screen reader pressed node `id`, gave it the keyboard, or moved to it, which shows it, as VoiceOver and
+/// TalkBack do on a phone (`platform::ios::a11y`).
+#[wasm_bindgen]
+pub fn act(id: f64, action: &str) {
+    let action = action.to_owned();
+    let _ = Native::get().map(|native| {
+        native.run(move |windows| {
+            windows.with(WINDOW, |screen| match action.as_str() {
+                "press" => drop(screen.press(id as u64)),
+                "focus" => screen.set_focused(Some(id as u64)),
+                _ => drop(screen.reveal(id as u64)),
+            });
+        })
+    });
 }
 
 /// The frame got the keyboard, or lost it.
