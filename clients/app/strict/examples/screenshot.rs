@@ -9,7 +9,7 @@
 //! core/ui's `record.js` does: `{ "<tool>": <its answer>, "<method>": <its result> }`. It draws as a window does, with
 //! Allo alone as the typeface, the sandbox's fixed clock and randomness, and our renderer drawing offscreen on
 //! whatever GPU Vulkan finds (`VK_ICD_FILENAMES=/usr/share/vulkan/icd.d/lvp_icd.json` picks Mesa's software Vulkan,
-//! lavapipe, where there's no GPU), or on Windows Direct3D 11's (WARP, Windows' own software one, where there's none). `--requests` gives it the inspector's requests first, one a line
+//! lavapipe, where there's no GPU), or on Windows Direct3D 12's (WARP, Windows' own software one, where there's none). `--requests` gives it the inspector's requests first, one a line
 //! (`strict::inspect`), as a strict window takes them on its socket, from a file or stdin (`-`), each answered on
 //! stdout, a frame drawn before each: `{"v":1,"id":1,"op":"tap","text":"Backups"}`. Its clock is paused: `clock`'s
 //! `step` moves it. `--touch` draws it for a finger, as a phone's window is (`pointer: coarse`).
@@ -124,7 +124,7 @@ fn main() -> anyhow::Result<()> {
     let gpu = std::time::Instant::now();
     let resident = || memory_stats::memory_stats().map_or(0, |memory| memory.physical_mem);
     let before = resident();
-    let context = Context::new(false)?;
+    let context = Context::new()?;
     let device = Size { width: DevicePixels((width * scale).round() as i32), height: DevicePixels((height * scale).round() as i32) };
     let atlas = std::sync::Arc::new(Atlas::new(&context));
     let mut renderer = Renderer::offscreen(&context, atlas, device);

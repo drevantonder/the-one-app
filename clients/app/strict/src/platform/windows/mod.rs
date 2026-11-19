@@ -1,5 +1,5 @@
-//! Windows' windows, in the launcher's process (`window`), each drawn by Direct3D 11 and DirectComposition, as GPUI's
-//! Windows platform draws them, and the windows' thread's message loop, which also runs the jobs the rest of the program
+//! Windows' windows, in the launcher's process (`window`), each drawn by wgpu on Direct3D 12 into a DirectComposition
+//! swap chain, and the windows' thread's message loop, which also runs the jobs the rest of the program
 //! sends it.
 
 mod keyboard;

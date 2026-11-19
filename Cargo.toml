@@ -32,11 +32,6 @@ debug = "line-tables-only"
 opt-level = 3
 debug = false
 
-# Blade with one change, until it's merged: an sRGB surface that offers no BGRA format, as Android's don't, gets an
-# RGBA swapchain (github.com/kvark/blade/pull/425, on the commit `strict` names).
-[patch."https://github.com/kvark/blade"]
-blade-graphics = { git = "https://github.com/drevantonder/blade", rev = "066b01fdd2ee612072750415160f9822075be70b" }
-
 # AccessKit's Android adapter with one change, until it's taken upstream: a heading is one to TalkBack
 # (`AccessibilityNodeInfo.setHeading`), so it moves between them; on accesskit_android 0.9.1's tag, with the AccessKit
 # it's built with there.

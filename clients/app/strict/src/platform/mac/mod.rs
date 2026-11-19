@@ -1,5 +1,5 @@
 //! A Mac's windows: AppKit's, made and changed on the main thread, which the launcher's event loop runs, while the
-//! strict thread lays them out and draws them, with Blade on Metal, as GPUI's `macos-blade` build drew.
+//! strict thread lays them out and draws them, with wgpu on Metal.
 
 mod events;
 mod window;

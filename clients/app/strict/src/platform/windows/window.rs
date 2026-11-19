@@ -87,6 +87,12 @@ impl rwh::HasDisplayHandle for NativeWindow {
 }
 
 impl NativeWindow {
+    /// What wgpu draws into: the window, by its raw handles.
+    pub fn surface(&self) -> anyhow::Result<wgpu::SurfaceTargetUnsafe> {
+        // Safety: a window's renderer is let go before the window is.
+        Ok(unsafe { wgpu::SurfaceTargetUnsafe::from_display_and_window(self, self)? })
+    }
+
     /// A computer's window has its surface from the start.
     pub fn has_surface(&self) -> bool {
         true

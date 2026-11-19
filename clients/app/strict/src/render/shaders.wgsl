@@ -1,7 +1,9 @@
 // Copied from Zed's GPUI (github.com/zed-industries/zed, crates/gpui/src/platform/blade/shaders.wgsl) at commit
 // 69e2130295c2649963eb639fc70b4f2ee8ea1624 (gpui 0.2.2 on crates.io), without its paths and video surfaces, which the
 // strict host doesn't draw, and with backdrops, inset shadows and transformed quads, shadows and images, which are
-// ours. Copyright 2022 - 2025 Zed Industries, Inc. Licensed under the Apache License, Version 2.0
+// ours; its bindings numbered as GPUI's wgpu shaders number them (crates/gpui_wgpu/src/shaders.wgsl): the frame's in
+// group 0, a batch's instances in group 1 (every pipeline's at binding 0, as each binds only its own), and the texture
+// it samples in group 2. Copyright 2022 - 2025 Zed Industries, Inc. Licensed under the Apache License, Version 2.0
 // (clients/app/strict/LICENSE-APACHE); this file is changed from the original.
 
 /* Functions useful for debugging:
@@ -69,11 +71,18 @@ struct GlobalParams {
     pad: u32,
 }
 
-var<uniform> globals: GlobalParams;
-var<uniform> gamma_ratios: vec4<f32>;
-var<uniform> grayscale_enhanced_contrast: f32;
-var t_sprite: texture_2d<f32>;
-var s_sprite: sampler;
+struct GammaParams {
+    gamma_ratios: vec4<f32>,
+    grayscale_enhanced_contrast: f32,
+    pad0: f32,
+    pad1: f32,
+    pad2: f32,
+}
+
+@group(0) @binding(0) var<uniform> globals: GlobalParams;
+@group(0) @binding(1) var<uniform> gamma_params: GammaParams;
+@group(2) @binding(0) var t_sprite: texture_2d<f32>;
+@group(2) @binding(1) var s_sprite: sampler;
 
 const M_PI_F: f32 = 3.1415926;
 const GRAYSCALE_FACTORS: vec3<f32> = vec3<f32>(0.2126, 0.7152, 0.0722);
@@ -492,7 +501,7 @@ struct Quad {
     border_widths: Edges,
     transformation: TransformationMatrix,
 }
-var<storage, read> b_quads: array<Quad>;
+@group(1) @binding(0) var<storage, read> b_quads: array<Quad>;
 
 struct QuadVarying {
     @builtin(position) position: vec4<f32>,
@@ -932,7 +941,7 @@ struct Shadow {
     outer: Bounds,
     outer_radii: Corners,
 }
-var<storage, read> b_shadows: array<Shadow>;
+@group(1) @binding(0) var<storage, read> b_shadows: array<Shadow>;
 
 struct ShadowVarying {
     @builtin(position) position: vec4<f32>,
@@ -1028,7 +1037,7 @@ struct Underline {
     thickness: f32,
     wavy: u32,
 }
-var<storage, read> b_underlines: array<Underline>;
+@group(1) @binding(0) var<storage, read> b_underlines: array<Underline>;
 
 struct UnderlineVarying {
     @builtin(position) position: vec4<f32>,
@@ -1094,7 +1103,7 @@ struct MonochromeSprite {
     tile: AtlasTile,
     transformation: TransformationMatrix,
 }
-var<storage, read> b_mono_sprites: array<MonochromeSprite>;
+@group(1) @binding(0) var<storage, read> b_mono_sprites: array<MonochromeSprite>;
 
 struct MonoSpriteVarying {
     @builtin(position) position: vec4<f32>,
@@ -1120,7 +1129,7 @@ fn vs_mono_sprite(@builtin(vertex_index) vertex_id: u32, @builtin(instance_index
 @fragment
 fn fs_mono_sprite(input: MonoSpriteVarying) -> @location(0) vec4<f32> {
     let sample = textureSample(t_sprite, s_sprite, input.tile_position).r;
-    let alpha_corrected = apply_contrast_and_gamma_correction(sample, input.color.rgb, grayscale_enhanced_contrast, gamma_ratios);
+    let alpha_corrected = apply_contrast_and_gamma_correction(sample, input.color.rgb, gamma_params.grayscale_enhanced_contrast, gamma_params.gamma_ratios);
 
     // Alpha clip after using the derivatives.
     if (any(input.clip_distances < vec4<f32>(0.0))) {
@@ -1144,7 +1153,7 @@ struct PolychromeSprite {
     tile: AtlasTile,
     transformation: TransformationMatrix,
 }
-var<storage, read> b_poly_sprites: array<PolychromeSprite>;
+@group(1) @binding(0) var<storage, read> b_poly_sprites: array<PolychromeSprite>;
 
 struct PolySpriteVarying {
     @builtin(position) position: vec4<f32>,
@@ -1199,7 +1208,7 @@ struct Backdrop {
     content_mask: Bounds,
     corner_radii: Corners,
 }
-var<storage, read> b_backdrops: array<Backdrop>;
+@group(1) @binding(0) var<storage, read> b_backdrops: array<Backdrop>;
 
 struct BlurParams {
     // One texel along the way this pass blurs, in the source's coordinates (0 to 1).
@@ -1208,7 +1217,7 @@ struct BlurParams {
     sigma: f32,
     pad: f32,
 }
-var<uniform> blur: BlurParams;
+@group(1) @binding(0) var<uniform> blur: BlurParams;
 
 struct BlurVarying {
     @builtin(position) position: vec4<f32>,

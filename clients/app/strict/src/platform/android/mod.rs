@@ -239,6 +239,12 @@ pub struct NativeWindow {
 }
 
 impl NativeWindow {
+    /// What wgpu draws into: its view's surface, by its raw handles.
+    pub fn surface(&self) -> anyhow::Result<wgpu::SurfaceTargetUnsafe> {
+        // Safety: a window's renderer is let go before the window is.
+        Ok(unsafe { wgpu::SurfaceTargetUnsafe::from_display_and_window(self, self)? })
+    }
+
     pub fn has_surface(&self) -> bool {
         self.surface.is_some()
     }

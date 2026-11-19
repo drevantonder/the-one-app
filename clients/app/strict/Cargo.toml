@@ -55,6 +55,9 @@ unicode-linebreak = "0.1"
 # Graphemes and words, which a caret steps and a double click selects by (`editing`).
 unicode-segmentation = "1"
 url = "2"
+# The GPU, by wgpu, as GPUI draws with it: each platform's own backend, named below (Vulkan on Linux and Android, Metal
+# on a Mac, Direct3D 12 on Windows), and the WGSL our shaders are written in, which WebGPU runs on the web.
+wgpu = { version = "30.0.2", default-features = false, features = ["std", "wgsl"] }
 # The typeface the UI library ships as WOFF2 (core/ui/src/Allo-Variable.woff2), which the text systems read as TTF.
 wuff = "0.2"
 
@@ -62,17 +65,12 @@ wuff = "0.2"
 # The memory the headless harness's `--measure` says drawing took.
 memory-stats = "1"
 
-# The GPU, as GPUI drew with it before it moved to wgpu: Vulkan on Linux and Android, Metal on a Mac (Windows draws with
-# Direct3D 11, as GPUI does there). From its repo at a commit: crates.io's 0.9 refuses a GPU without
-# VK_EXT_inline_uniform_block (many phones' and some laptops'), where this falls back to uniform buffers.
-[target.'cfg(not(target_os = "windows"))'.dependencies]
-blade-graphics = { git = "https://github.com/kvark/blade", rev = "3d86d537fe100a06a091850253f692e7ca8bceaf" }
-blade-macros = { git = "https://github.com/kvark/blade", rev = "3d86d537fe100a06a091850253f692e7ca8bceaf" }
-blade-util = { git = "https://github.com/kvark/blade", rev = "3d86d537fe100a06a091850253f692e7ca8bceaf" }
-
 [target.'cfg(any(target_os = "linux", target_os = "macos"))'.dependencies]
 # The windows' thread's event loop, as GPUI's Linux platform has it; a Mac's wakes it from AppKit's main thread.
 calloop = "0.14"
+
+[target.'cfg(any(target_os = "linux", target_os = "android"))'.dependencies]
+wgpu = { version = "30.0.2", default-features = false, features = ["vulkan"] }
 
 [target.'cfg(target_os = "linux")'.dependencies]
 cosmic-text = "0.19"
@@ -88,19 +86,14 @@ xim = { version = "0.6", features = ["x11rb-xcb", "x11rb-client"] }
 arboard = { version = "3", default-features = false }
 xkbcommon = { version = "0.8", default-features = false, features = ["x11"] }
 
-# Windows' windows, Direct3D 11, DirectComposition and DirectWrite, as GPUI's Windows platform has them.
+# Windows' windows and DirectWrite, as GPUI's Windows platform has them.
 [target.'cfg(target_os = "windows")'.dependencies]
+wgpu = { version = "30.0.2", default-features = false, features = ["dx12"] }
 windows = { version = "0.62", features = [
   "Win32_Foundation",
   "Win32_Globalization",
-  "Win32_Graphics_Direct3D",
-  "Win32_Graphics_Direct3D11",
-  "Win32_Graphics_Direct3D_Fxc",
-  "Win32_Graphics_DirectComposition",
   "Win32_Graphics_DirectWrite",
   "Win32_Graphics_Dwm",
-  "Win32_Graphics_Dxgi",
-  "Win32_Graphics_Dxgi_Common",
   "Win32_Graphics_Gdi",
   "Win32_System_Com",
   "Win32_System_LibraryLoader",
@@ -121,11 +114,12 @@ arboard = { version = "3", default-features = false }
 unicode-bidi = "0.3"
 
 [target.'cfg(target_os = "macos")'.dependencies]
+wgpu = { version = "30.0.2", default-features = false, features = ["metal"] }
 # Text as GPUI's Mac platform shapes and rasterizes it: Core Text and Core Graphics.
 core-foundation = "0.10"
 core-graphics = "0.24"
 core-text = "21"
-# AppKit's windows, on its main thread, by objc2's bindings, as Blade reaches Metal.
+# AppKit's windows, on its main thread, by objc2's bindings, as wgpu reaches Metal.
 dispatch2 = "0.3"
 objc2 = "0.6"
 objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "objc2-core-foundation", "objc2-quartz-core", "NSAccessibility", "NSAppearance", "NSApplication", "NSCursor", "NSPasteboard", "NSEvent", "NSGraphics", "NSPanel", "NSResponder", "NSRunningApplication", "NSTrackingArea", "NSView", "NSWindow", "NSWorkspace"] }

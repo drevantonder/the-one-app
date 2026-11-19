@@ -1,6 +1,6 @@
 // Copied from Zed's GPUI (github.com/zed-industries/zed, crates/gpui/src/platform.rs and platform/blade/blade_atlas.rs)
 // at commit 69e2130295c2649963eb639fc70b4f2ee8ea1624 (gpui 0.2.2 on crates.io), and cut down for the strict host: what
-// every atlas of glyphs and images keys and hands out (Blade's, `blade_atlas`, and Direct3D 11's, `directx_atlas`).
+// the atlas of glyphs and images (`wgpu_atlas`) keys and hands out.
 // Copyright 2022 - 2025 Zed Industries, Inc. Licensed under the Apache License, Version 2.0 (clients/app/strict/LICENSE-APACHE); this file is changed from the original.
 
 use crate::geometry::{Bounds, DevicePixels, Point, Size};

@@ -1,7 +1,7 @@
 // Copied from Zed's GPUI (github.com/zed-industries/zed, crates/gpui/src/platform/mac/window.rs, events.rs and
 // platform/blade/apple_compat.rs) at commit 69e2130295c2649963eb639fc70b4f2ee8ea1624 (gpui 0.2.2 on crates.io), and
 // cut down for the strict host, written on objc2's AppKit bindings in place of the deprecated `cocoa` crate: a window
-// with no title band and its traffic lights kept, its view's layer a CAMetalLayer Blade draws into (GPUI's
+// with no title band and its traffic lights kept, its view's layer a CAMetalLayer wgpu draws into (GPUI's
 // `macos-blade`), its size and Retina scale as AppKit says them, the mouse and the wheel, keys, and the window having
 // the keyboard. What's typed goes through Flutter's text input plugin (`text_input.mm`), in place of GPUI's
 // NSTextInputClient. A panel (a launcher's) is GPUI's pop-up: a non-activating NSPanel
@@ -14,7 +14,6 @@
 
 use std::cell::{Cell, RefCell};
 use std::ffi::{CStr, CString, c_char, c_void};
-use std::ptr::NonNull;
 use std::sync::{Arc, Mutex};
 
 use dispatch2::{DispatchQueue, MainThreadBound, run_on_main};
@@ -28,7 +27,6 @@ use objc2_app_kit::{
 };
 use objc2_foundation::{NSArray, NSNotification, NSObject, NSPoint, NSRect, NSSize, NSString};
 use objc2_quartz_core::{CAAutoresizingMask, CALayer, CAMetalLayer, kCAGravityTopLeft};
-use raw_window_handle as rwh;
 
 use super::events;
 use crate::Cursor;
@@ -76,27 +74,22 @@ pub struct NativeWindow {
     corner: f64,
     /// A window holds its delegate weakly.
     _delegate: MainThreadBound<Retained<Delegate>>,
-    /// Its view, for Blade's surface, which lives as long as the window: an address, as AppKit's objects are the
-    /// main thread's.
+    /// Its view, which its text input plugin is called on, and its view's layer, the CAMetalLayer wgpu draws into,
+    /// which live as long as the window: addresses, as AppKit's objects are the main thread's.
     view: usize,
+    layer: usize,
     shared: Arc<Shared>,
     cursor: Cell<Cursor>,
 }
 
-impl rwh::HasWindowHandle for NativeWindow {
-    fn window_handle(&self) -> Result<rwh::WindowHandle<'_>, rwh::HandleError> {
-        let view = NonNull::new(self.view as *mut c_void).ok_or(rwh::HandleError::Unavailable)?;
-        Ok(unsafe { rwh::WindowHandle::borrow_raw(rwh::AppKitWindowHandle::new(view).into()) })
-    }
-}
-
-impl rwh::HasDisplayHandle for NativeWindow {
-    fn display_handle(&self) -> Result<rwh::DisplayHandle<'_>, rwh::HandleError> {
-        Ok(unsafe { rwh::DisplayHandle::borrow_raw(rwh::AppKitDisplayHandle::new().into()) })
-    }
-}
-
 impl NativeWindow {
+    /// What wgpu draws into: its view's layer, taken on the main thread as the window was made, where wgpu would
+    /// take it from the view on the strict thread, which AppKit doesn't allow.
+    pub fn surface(&self) -> anyhow::Result<wgpu::SurfaceTargetUnsafe> {
+        anyhow::ensure!(self.layer != 0, "its view has no layer to draw into");
+        Ok(wgpu::SurfaceTargetUnsafe::CoreAnimationLayer(self.layer as *mut c_void))
+    }
+
     /// A computer's window has its surface from the start.
     pub fn has_surface(&self) -> bool {
         true
@@ -185,8 +178,10 @@ impl Display {
                 window.setFrameUsingName(&name);
                 window.setFrameAutosaveName(&name);
             }
+            let layer = view.layer().map_or(0, |layer| Retained::as_ptr(&layer) as usize);
             Ok(NativeWindow {
                 view: Retained::as_ptr(&view) as usize,
+                layer,
                 panel: options.panel.is_some(),
                 glass: MainThreadBound::new(RefCell::default(), main),
                 corner: options.panel.map_or(0.0, f64::from),
@@ -548,7 +543,7 @@ impl View {
         let view: Retained<View> = unsafe { msg_send![super(this), initWithFrame: frame] };
         let shared = Arc::as_ptr(&view.ivars().shared).cast_mut().cast();
         view.ivars().text_input.0.set(unsafe { text_input_new(Retained::as_ptr(&view).cast_mut().cast(), shared, said) });
-        // Layer-backed from the start, its layer the CAMetalLayer Blade draws into (`makeBackingLayer`).
+        // Layer-backed from the start, its layer the CAMetalLayer wgpu draws into (`makeBackingLayer`).
         view.setWantsLayer(true);
         view.setLayerContentsRedrawPolicy(NSViewLayerContentsRedrawPolicy::DuringViewResize);
         // The pointer, over it, whether or not its window has the keyboard, and as it leaves.

@@ -102,7 +102,7 @@ protocol). Find nodes by role and text, tap, type, `settle`, then `snap`, never 
   paused: `clock` `step` moves it.
 - On Windows (the Surface, `ssh surface`): build with `cargo xwin build --target x86_64-pc-windows-msvc` (the
   harness as `--example screenshot`, the app as `-p app`) and copy it to a folder of your own in `%TEMP%`; the harness
-  runs over ssh as it is (Direct3D 11 draws offscreen without a desktop). The app's windows need the logged-in
+  runs over ssh as it is (Direct3D 12 draws offscreen without a desktop). The app's windows need the logged-in
   session: start it there with a scheduled task (`schtasks /Create … /IT`, `conhost.exe --headless <a .cmd setting
   ONE_HOME>`), and a second `one.exe one:<app>` with the same `ONE_HOME`, even over ssh, hands it the link. A local
   network's edge is on this machine's localhost: `ssh -N -R <port>:localhost:<port> surface` puts it at the same

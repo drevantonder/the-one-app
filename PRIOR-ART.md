@@ -32,7 +32,7 @@ None of these is chosen. Each is named so it's weighed before anything like it i
 - **Our own renderer** (19 November 2026): strict screens on a computer and an Android phone are drawn by a renderer of
   ours for our closed set of primitives and tokens, with code copied in rather than depended on, so the repo stays MIT.
   Each copied file keeps its source's notice and says where it came from and at which upstream commit.
-  - **GPUI** (Zed, Apache-2.0): its scene, shaders, glyph atlas and renderers (Metal, DX11, Blade with Vulkan), its
+  - **GPUI** (Zed, Apache-2.0): its scene, shaders, glyph atlas and wgpu renderer, its
     text system (CoreText, DirectWrite, cosmic-text) and its desktop windows, input and panel code. Not its App,
     Entity and View layers, which Solid strict replaces, and not as a dependency.
   - **Taffy**: layout.
@@ -53,7 +53,11 @@ None of these is chosen. Each is named so it's weighed before anything like it i
     applies its mutations, in place of a batch of JSON, as React Native's old bridge had it. In QuickJS, for 11,000
     mutations (1,000 rows), JSON took 8.4 ms, a typed-array command buffer 1.5 ms and direct calls 1.05 ms (measured
     19 November 2026), so direct calls.
-  - Not used: wgpu, and Zed's `editor` crate, which is GPL-3.0.
+  - **wgpu** (19 November 2026): the GPU, one backend for every platform: Vulkan on Linux and Android, Metal on a Mac,
+    Direct3D 12 on Windows, from GPUI's WGSL shaders, as GPUI itself moved to it. It replaced Blade (Vulkan and Metal,
+    through our fork of it) and the Direct3D 11 renderer copied from GPUI: one backend to keep, not three, and the
+    same renderer and shaders run on the web later, as WebGPU in WASM.
+  - Not used: Zed's `editor` crate, which is GPL-3.0.
 - **Lynx** (ByteDance): native views on Android from JS. A spike on 19 November 2026 drew a strict screen in it with a
   cold start 35% faster than the web view and a fifth of its memory. Not chosen: Android uses our own renderer, and the
   web view until that works.

@@ -186,7 +186,7 @@ pub struct Windows {
 
 impl Windows {
     fn new(display: Display) -> anyhow::Result<Windows> {
-        let context = Context::new(true)?;
+        let context = Context::new()?;
         let atlas = Arc::new(Atlas::new(&context));
         let text = TextSystem::new(PlatformTextSystem::new(crate::FONT, crate::fonts()?, true));
         Ok(Windows { display, context, atlas, text, windows: HashMap::new(), next: 1 })
@@ -250,7 +250,7 @@ impl Windows {
         if !native.has_surface() {
             return Ok(None);
         }
-        Renderer::new(&self.context, self.atlas.clone(), native, native.device_size(), native.transparent()).map(Some)
+        Renderer::new(&self.context, self.atlas.clone(), native.surface()?, native.device_size(), native.transparent()).map(Some)
     }
 
     /// Whether a window holds something its person typed that its app hasn't taken (`Screen::typed`): any app's, and
@@ -498,7 +498,7 @@ impl Windows {
                     renderer.destroy();
                 }
                 if window.native.has_surface() {
-                    match Renderer::new(&self.context, self.atlas.clone(), &window.native, window.native.device_size(), window.native.transparent()) {
+                    match window.native.surface().and_then(|surface| Renderer::new(&self.context, self.atlas.clone(), surface, window.native.device_size(), window.native.transparent())) {
                         Ok(renderer) => window.renderer = Some(renderer),
                         Err(error) => log::error!("strict window {id} can't draw: {error:#}"),
                     }
