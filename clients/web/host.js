@@ -496,6 +496,10 @@ export const address = (view) => {
 /// nothing here: not this page, not another app, and not what this browser is signed in with.
 export const sandbox = "allow-scripts allow-forms"
 
+/// An app's page updated under it asks its person to reload it while it's on screen ("Updated · Reload"), as a web
+/// app in a browser offers its update.
+export const asksToReload = true
+
 /// A web address an app opens, in a tab of its own.
 /** @type {typeof import("../app/page/host.js").openLink} */
 export const openLink = (url) => void open(url, "_blank", "noopener")

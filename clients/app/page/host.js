@@ -19,6 +19,10 @@ export const address = (view) => `${location.protocol === "tauri:" ? "oneapp://"
 /// What an app's frame may do. Its address is its own, so it reaches nothing else there.
 export const sandbox = "allow-scripts allow-same-origin allow-forms"
 
+/// An app's page updated under it loads again by itself once it isn't in use, as a desktop app, a launcher (Raycast)
+/// or a phone's app updates silently: it never asks.
+export const asksToReload = false
+
 /// A web address an app opens: the window is sent there, and the app hands it to the device's own browser.
 /** @type {typeof import("./host.js").openLink} */
 export const openLink = (url) => location.assign(url)

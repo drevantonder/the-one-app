@@ -8,7 +8,7 @@
 // The launcher is an app too, which reaches this client from a server as every app's does: the app in the category
 // `launcher`, which a network has exactly one of. It's the one this page shows first, under every other, and it
 // opens the rest (`one/open`).
-import { address, haptic, invoke, listen, openLink, sandbox, setTheme } from "./host.js"
+import { address, asksToReload, haptic, invoke, listen, openLink, sandbox, setTheme } from "./host.js"
 /** @import { Context, Moved, Paged, Rect, Shown, Told, View } from "./host.js" */
 
 /// Reports what went wrong here to Telemetry, through the client, which keeps it until a server can be told: what
@@ -161,8 +161,10 @@ const { assign, createActor, enqueueActions, fromCallback, fromPromise, sendPare
 /// current until its app or the UI library is updated under it, which makes it stale. A stale page loads again by
 /// itself only at a boundary, as an iPhone updates an app while it's closed and a web app loads its new version on the
 /// next navigation: once it's off screen (another app over it, the window hidden, or the window showing something of
-/// its own over every app, as Update Required), or as it's opened again. On screen, it says so quietly, "Updated ·
-/// Reload", and loads again only once its person presses Reload: nothing is reloaded under them. One that's showing an
+/// its own over every app, as Update Required), or as it's opened again. Nothing is reloaded under its person: in the
+/// app, which updates itself as a desktop app and a phone's do, it loads again too once its window isn't in use, as
+/// another has the keyboard (`unused`), and in a browser it says so quietly, "Updated · Reload", and loads again once
+/// its person presses Reload (`asksToReload`). One that's showing an
 /// error loads again at once, as its old version meeting what's new is likely why, and there's nothing of theirs under
 /// it. A page that doesn't draw in 15 s on screen has failed, with Try Again, until it draws after all, as a page
 /// loaded again behind another app may only once it's shown, when it's current. A page has drawn as a browser's Largest
@@ -196,6 +198,7 @@ const pageMachine = setup({
   guards: {
     away: ({ context }) => !onScreen(context.view),
     front: ({ context }) => onScreen(context.view),
+    unused: () => !asksToReload && !document.hasFocus(),
     errored: ({ context }) => context.errored === true,
   },
   actions: {
@@ -242,9 +245,10 @@ const pageMachine = setup({
     stale: {
       always: [
         { guard: "away", target: "reloading" },
+        { guard: "unused", target: "reloading" },
         { guard: "errored", target: "reloading" },
       ],
-      on: { away: "reloading", opened: "reloading", reload: "reloading", errored: "reloading" },
+      on: { away: "reloading", unused: { guard: "unused", target: "reloading" }, opened: "reloading", reload: "reloading", errored: "reloading" },
     },
     reloading: {
       entry: ["clear", "load", "unwaited", "busy"],
@@ -587,6 +591,10 @@ const machine = setup({
     away: enqueueActions(({ enqueue, self }) => {
       for (const child of pages(self)) enqueue.sendTo(child, { type: "away" })
     }),
+    // Every page is told the window may not be in use, and each that's stale and works it out loads again.
+    unused: enqueueActions(({ enqueue, self }) => {
+      for (const child of pages(self)) enqueue.sendTo(child, { type: "unused" })
+    }),
     // A move goes on only while the window shows apps: otherwise what it shows covers them, and the move stops where
     // it was going, and what's shown changes at once.
     move: sendTo("move", ({ event }) => event),
@@ -616,6 +624,7 @@ const machine = setup({
     page: { actions: "page" },
     // The window hidden, every page is off screen; shown again, the one in front is on screen, where it shows apps.
     away: { actions: "away" },
+    unused: { actions: "unused" },
     seen: { actions: "seen" },
   },
   states: {
@@ -979,7 +988,7 @@ function reloadPage(view) {
 function notes() {
   const view = showing(here())
   const now = view && shown.getSnapshot().hasTag("pages") ? pageOf(view) : undefined
-  byId("update").hidden = !now?.matches("stale")
+  byId("update").hidden = !asksToReload || !now?.matches("stale")
   byId("page-problem").hidden = !now?.matches("failed")
   if (view && now?.matches("failed")) {
     byId("page-problem-heading").textContent = `${names.get(view.entrypoint) ?? "This app"} didn't open`
@@ -1937,6 +1946,9 @@ if (navigator.platform.startsWith("Mac")) byId("home-screen").title = "Home Scre
 dress()
 shown.subscribe(draw)
 shown.start()
+// The window isn't in use once another window, or another app, has the keyboard: not one of its own frames, which
+// takes it from this page too, but leaves it the document's (`hasFocus`).
+addEventListener("blur", () => setTimeout(() => shown.send({ type: "unused" })))
 await listen("session", ({ payload }) => hear(payload))
 await listen("title_bar", ({ payload }) => titled(payload))
 // Where the window starts: where its device is with its network, as the client says it (`Session`), and whether its

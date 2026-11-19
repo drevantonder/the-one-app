@@ -10,6 +10,8 @@ export declare const listen: Listen
 export declare const address: Address
 /** What an app's frame may do. */
 export declare const sandbox: string
+/** Whether a page whose app was updated under it asks its person to reload it ("Updated · Reload"), as a web app in a browser does, or loads again by itself once it isn't in use, as a desktop app or a phone's does. */
+export declare const asksToReload: boolean
 /** A web address an app opens. */
 export declare const openLink: (url: string) => void
 /** Plays a haptic an app asked for (`one/haptic`), where the device has them on. */
@@ -45,12 +47,13 @@ export interface View {
 }
 
 /** What moves an open app's page (`client.js`): it drew, didn't, showed an error, was loaded against a version that's
- * gone, went off screen, was opened again, or its person pressed Reload or Try Again. */
+ * gone, went off screen, its window may not be in use, it was opened again, or its person pressed Reload or Try Again. */
 export type Paged =
   | { type: "drawn" }
   | { type: "errored" }
   | { type: "stale" }
   | { type: "away" }
+  | { type: "unused" }
   | { type: "seen" }
   | { type: "opened" }
   | { type: "reload" }
@@ -135,6 +138,7 @@ export type Moved =
   | { type: "load"; view: View }
   | { type: "page"; key: string; paged: Paged }
   | { type: "away" }
+  | { type: "unused" }
   | { type: "seen" }
   | { type: "openAppStore" }
   | { type: "retry" }
