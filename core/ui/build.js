@@ -4,7 +4,7 @@
 // its views. SKILL.md is the UI library's skill, and skills/ are Solid's, as the version apps are
 // built with has them, Emil Kowalski's, pstack's and our design rules. build/ is how an app is built and checked against it: app.js and lint-app.js, with what they need to run, which a server
 // installs and runs on an app's source.
-import { cpSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs"
+import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { transform } from "lightningcss"
 import solid from "@solidjs/vite-plugin"
 import { build } from "vite"
@@ -14,7 +14,9 @@ import { $ } from "bun"
 const here = (path) => new URL(path, import.meta.url).pathname
 const text = (path) => readFileSync(here(path), "utf8")
 
-rmSync(here("dist"), { recursive: true, force: true })
+// Built afresh, but for dist/client itself, which Vite empties: a local network's edge serves it where it is, by a
+// link (core/edge/edge.js), and stops if what it serves goes.
+for (const made of existsSync(here("dist")) ? readdirSync(here("dist")) : []) if (made !== "client") rmSync(here(`dist/${made}`), { recursive: true, force: true })
 // The UI library's styles (src/styles.ts), made as each module is built, for both builds alike.
 const made = newMade()
 await build({

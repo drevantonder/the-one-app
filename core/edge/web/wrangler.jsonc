@@ -1,7 +1,7 @@
 {
   "name": "network-web",
   "compatibility_date": "2026-11-01",
-  "workers_dev": false,
-  // The web client as `edge.js` builds it: the app's own page, its own files and the UI library.
-  "assets": { "directory": "../../../clients/web/dist" }
+  "workers_dev": false
+  // Its assets are the web client as `edge.js` builds it, beside its copy of this: the app's own page, its own
+  // files and the UI library.
 }

@@ -17,10 +17,9 @@ __pycache__/
 # What Tauri writes as it builds
 /clients/app/gen/schemas/
 # What `wrangler dev` keeps, the secrets of the presigner and of an app's edge function as whoever deploys an
-# edge writes them, and the web client as it's built (each app's edge function is built in target/)
+# edge writes them (the web client and each app's edge function are built in target/)
 .wrangler/
 /core/edge/presigner/secrets
 /apps/*/edge/secrets
 /apps/*/edge/files/
-/clients/web/dist/
 /www/app-directory/seed.sql

@@ -26,7 +26,7 @@
 // for the network is given it as a tail consumer, so it hears what each did. The gateway only passes each on, and
 // the web client's are files; the presigner isn't either, since such a part is bound to it and so is deployed after.
 import { createPrivateKey, sign } from "node:crypto";
-import { cpSync, existsSync, mkdirSync, readdirSync, rmSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync, readdirSync, rmSync, symlinkSync } from "node:fs";
 import { basename, dirname, relative, resolve } from "node:path";
 import { $, Glob } from "bun";
 
@@ -64,19 +64,31 @@ const services = [
   { binding: "WEB", service: "network-web" },
 ];
 
+const built = `${root}/target/edge-${what}`;
+rmSync(built, { recursive: true, force: true });
+mkdirSync(built, { recursive: true });
+
 // The web client is the app's own page, the files its window is given (`clients/app/tauri.conf.json`), with the
 // web's files over them (`clients/web`), which answer what the page asks in a browser in place of the app's Rust half,
-// and the UI library, which an app's page finds at `/ui/client/`. The piece `web` serves what's built, `clients/web/dist`.
-const web = `${root}/clients/web`;
-rmSync(`${web}/dist`, { recursive: true, force: true });
+// and the UI library, which an app's page finds at `/ui/client/`. The piece `web` serves them from `<built>/web`. A
+// deploy's are copies; a local network's are links to where each is made (a `cp -s` farm), so it serves the page as
+// it is now, and the UI library as its code reloader last built it, through a rebase and a deploy alike.
+const web = `${built}/web`;
 const app = `${root}/clients/app`;
-for (const file of (await Bun.file(`${app}/tauri.conf.json`).json()).build.frontendDist) cpSync(`${app}/${file}`, `${web}/dist/${basename(file)}`);
-for (const file of readdirSync(web).filter((file) => !["dist", "node_modules"].includes(file))) cpSync(`${web}/${file}`, `${web}/dist/${file}`, { recursive: true });
+const pageFiles = (await Bun.file(`${app}/tauri.conf.json`).json()).build.frontendDist;
+const place = (/** @type {string} */ from, /** @type {string} */ to) => (what === "dev" ? symlinkSync(from, to) : cpSync(from, to, { recursive: true }));
+mkdirSync(`${web}/ui`, { recursive: true });
+for (const file of pageFiles) place(`${app}/${file}`, `${web}/${basename(file)}`);
+for (const file of readdirSync(`${root}/clients/web`).filter((file) => !["dist", "node_modules"].includes(file))) {
+  rmSync(`${web}/${file}`, { force: true });
+  place(`${root}/clients/web/${file}`, `${web}/${file}`);
+}
 // Its service worker is built, with what it imports, over its source.
-await $`bun install --frozen-lockfile && bun build sw.js --format iife --minify --outfile dist/sw.js`.cwd(web).quiet();
+rmSync(`${web}/sw.js`, { force: true });
+await $`bun install --frozen-lockfile && bun build sw.js --format iife --minify --outfile ${web}/sw.js`.cwd(`${root}/clients/web`).quiet();
 // Built here, so a deploy never ships whatever build of the UI library was left on disk.
 await $`bun install --frozen-lockfile && bun build.js`.cwd(`${root}/core/ui`).quiet();
-cpSync(`${root}/core/ui/dist/client`, `${web}/dist/ui/client`, { recursive: true });
+place(`${root}/core/ui/dist/client`, `${web}/ui/client`);
 // The app's own page, as its window has it, at `/page/`, which the app keeps and loads from its next start if it's
 // newer than its own and it runs on it (`clients/app/src/page.rs`), with what's said of it in `update.json`: its
 // version, the lowest build of the app it runs on (`clients/app/page/update.json`), and each file's SHA-256. As
@@ -88,21 +100,18 @@ cpSync(`${root}/core/ui/dist/client`, `${web}/dist/ui/client`, { recursive: true
 const version = (await $`sh ${root}/tooling/version`.text()).trim();
 {
   const files = {};
-  for (const file of (await Bun.file(`${app}/tauri.conf.json`).json()).build.frontendDist) {
-    cpSync(`${app}/${file}`, `${web}/dist/page/${basename(file)}`);
+  for (const file of pageFiles) {
+    cpSync(`${app}/${file}`, `${web}/page/${basename(file)}`);
     files[basename(file)] = new Bun.CryptoHasher("sha256").update(await Bun.file(`${app}/${file}`).bytes()).digest("hex");
   }
   const update = { version, ...(await Bun.file(`${app}/page/update.json`).json()), files };
   const said = Buffer.from(JSON.stringify(update));
-  await Bun.write(`${web}/dist/page/update.json`, said);
+  await Bun.write(`${web}/page/update.json`, said);
   const pageKey = process.env.PAGE_SIGNING_KEY || (await $`op read ${"op://van-tonder-nosudo/The One App page signing key/credential"}`.text()).trim();
   const key = createPrivateKey({ key: Buffer.from(pageKey, "base64"), format: "der", type: "pkcs8" });
-  await Bun.write(`${web}/dist/page/update.json.sig`, sign(null, said, key).toString("base64"));
+  await Bun.write(`${web}/page/update.json.sig`, sign(null, said, key).toString("base64"));
 }
 
-const built = `${root}/target/edge-${what}`;
-rmSync(built, { recursive: true, force: true });
-mkdirSync(built, { recursive: true });
 const paths = { ...PIECES };
 const parts = [];
 const workers = [];
@@ -156,8 +165,10 @@ await Bun.write(`${built}/gateway.jsonc`, JSON.stringify(gateway, null, 2));
 const gatewayConfig = relative(here, `${built}/gateway.jsonc`);
 
 const wrangler = (...args) => Bun.spawn(["bun", "x", "wrangler", ...args], { cwd: here, env: process.env, stdio: ["inherit", "inherit", "inherit"] }).exited;
+const webWorker = (await import(`${here}/web/wrangler.jsonc`)).default;
+await Bun.write(`${built}/web.jsonc`, JSON.stringify({ ...webWorker, assets: { directory: "web" } }, null, 2));
 const config = {
-  web: "web/wrangler.jsonc",
+  web: relative(here, `${built}/web.jsonc`),
   presigner: "presigner/wrangler.jsonc",
 };
 // The network's updater, which the relay is bound to, the relay and the MCP endpoint are told their tail parts in a
