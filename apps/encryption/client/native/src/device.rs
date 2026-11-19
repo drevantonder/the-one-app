@@ -266,6 +266,10 @@ async fn passkey_keys(
     let (Some(credential), Some(prf_key)) = (passkey["credential"].as_str(), passkey["prf_key"].as_str()) else {
         bail!("That passkey hasn't said yet whether it can unlock your key. Use it once to sign in.")
     };
+    // Its person checked the code the sign-in page showed them is this key's, so nobody else's is put in its place.
+    if inputs.get("code").and_then(Value::as_str) != Some(code(prf_key).as_str()) {
+        bail!("That isn't the code of the passkey your person checked, so your key wasn't encrypted to it. Set it up again, and check its code.")
+    }
     let to = data_encoding::HEXLOWER
         .decode(prf_key.as_bytes())
         .ok()
@@ -274,6 +278,16 @@ async fn passkey_keys(
     let (key, owner) = owner_key_of(client, subject).await?;
     let sealed = to_passkey(&to, &format!("one/encryption/1/passkey\n{owner}\n{credential}"), key.as_slice())?;
     Ok(json!({credential: {"prf_key": prf_key, "key": BASE64.encode(&sealed)}}).to_string())
+}
+
+/// A passkey's key, as its person checks it's the one they used, as Signal's safety numbers are: 20 digits in fours
+/// of five from its SHA-256, the same the sign-in page shows (`apps/sign-in/edge/page/passkey.ts`).
+fn code(key: &str) -> String {
+    use sha2::Digest;
+    let hash = sha2::Sha256::digest(format!("one/passkey/1/code\n{key}").as_bytes());
+    let number = hash[..9].iter().fold(0u128, |number, &byte| (number << 8) | u128::from(byte)) % 10u128.pow(20);
+    let digits = format!("{number:020}");
+    digits.as_bytes().chunks(5).map(|chunk| std::str::from_utf8(chunk).expect("digits")).collect::<Vec<_>>().join(" ")
 }
 
 /// Encrypts `data` to a passkey's key, for what `about` says, as `cipher::seal` does to a machine's: HPKE (RFC 9180),
