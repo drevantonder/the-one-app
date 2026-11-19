@@ -87,9 +87,10 @@ try {
   process.exit(1)
 }
 
-// Its styles, beside each page: as CSS for the web, and as the style table a native host's renderer draws with.
-for (const page of pages) {
-  const folder = join(out, dirname(page))
+// Its styles, beside each page and beside its modules: as CSS for the web, and as the style table a native host's
+// renderer draws with, which a host loads as it loads a module of the app for another's page (`Modules` in the
+// renderer's js.rs).
+for (const folder of new Set([out, ...pages.map((page) => join(out, dirname(page)))])) {
   writeFileSync(join(folder, "styles.css"), stylesCss(made))
   writeFileSync(join(folder, "styles.json"), JSON.stringify(stylesTable(made)))
 }

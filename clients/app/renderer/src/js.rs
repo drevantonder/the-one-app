@@ -11,7 +11,7 @@
 //! async runtime, which nothing here waits on: each call into the sandbox runs its jobs until none is left.
 
 use std::cell::RefCell;
-use std::collections::VecDeque;
+use std::collections::{HashSet, VecDeque};
 use std::path::PathBuf;
 use std::rc::Rc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -183,7 +183,8 @@ impl Sandbox {
             // Collected while it's idle (`collect`), not as it allocates.
             runtime.set_gc_threshold(MEMORY / 4).await;
             runtime.set_max_stack_size(STACK).await;
-            runtime.set_loader(Resolve, Modules { files, cache }).await;
+            let components = Arc::new(Mutex::new(HashSet::new()));
+            runtime.set_loader(Resolve { components: components.clone() }, Modules { files, cache, components, styled: HashSet::new() }).await;
             runtime.set_interrupt_handler(Some(Box::new(move || stop.load(Ordering::Relaxed)))).await;
             // QuickJS tells of a rejected promise with no handler as it's rejected, and again if one is added after.
             runtime
@@ -676,8 +677,12 @@ fn run<'js, T>(ctx: &Ctx<'js>, result: rquickjs::Result<T>) -> anyhow::Result<T>
 }
 
 /// Where an import is: beside what imports it, or from the network's root, where the UI library's renderer and
-/// components (`/ui/client/web.js` and `ui.js`) are the ones built for a native host (`/ui/client/native/`).
-struct Resolve;
+/// components (`/ui/client/web.js` and `ui.js`) are the ones built for a native host (`/ui/client/native/`). One of
+/// another app's modules, as `component` imports it (`/<app>/client/<name>.js`), is kept in `components`, by where it
+/// is, so it's drawn with its app's styles.
+struct Resolve {
+    components: Arc<Mutex<HashSet<String>>>,
+}
 
 impl Resolver for Resolve {
     fn resolve<'js>(&mut self, _: &Ctx<'js>, base: &str, name: &str, _: Option<ImportAttributes<'js>>) -> rquickjs::Result<String> {
@@ -685,15 +690,39 @@ impl Resolver for Resolve {
         let mut url = Url::parse(name).or_else(|_| Url::parse(base).and_then(|base| base.join(name))).map_err(|_| refused())?;
         if let Some(file @ ("web.js" | "ui.js")) = url.path().strip_prefix("/ui/client/") {
             url.set_path(&format!("/ui/client/native/{file}"));
+        } else if let ["", app, "client", file] = name.split('/').collect::<Vec<_>>()[..]
+            && app != "ui"
+            && file.ends_with(".js")
+        {
+            self.components.lock().expect("nothing panics holding it").insert(url.to_string());
         }
         Ok(url.into())
     }
 }
 
-/// Each module, read, and compiled once: its bytecode is kept by its address and what's in it.
+/// Each module, read, and compiled once: its bytecode is kept by its address and what's in it. Another app's module
+/// (`components`) is drawn with its app's styles, its `styles.json` beside it, loaded once for each folder (`styled`).
 struct Modules {
     files: Files,
     cache: Option<PathBuf>,
+    components: Arc<Mutex<HashSet<String>>>,
+    styled: HashSet<Url>,
+}
+
+impl Modules {
+    /// Loads the styles of the app whose module `url` is, if it's another app's and they aren't loaded yet.
+    fn style(&mut self, url: &Url) -> anyhow::Result<()> {
+        let table = url.join("styles.json")?;
+        if !self.components.lock().expect("nothing panics holding it").contains(url.as_str()) || !self.styled.insert(table.clone()) {
+            return Ok(());
+        }
+        let table = (self.files)(&table)?;
+        if serde_json::from_str::<serde_json::Value>(&table)?["tokens"].as_object().is_some_and(|tokens| !tokens.is_empty()) {
+            anyhow::bail!("its app's styles have tokens of their own (defineVars), which a native host draws only in that app's own page");
+        }
+        crate::load_styles(&table)?;
+        Ok(())
+    }
 }
 
 impl Loader for Modules {
@@ -701,6 +730,7 @@ impl Loader for Modules {
         let refused = |why: String| rquickjs::Error::new_loading_message(name, why);
         let url = Url::parse(name).map_err(|error| refused(error.to_string()))?;
         let source = (self.files)(&url).map_err(|error| refused(format!("{error:#}")))?;
+        self.style(&url).map_err(|error| refused(format!("its styles: {error:#}")))?;
         let kept = self.cache.as_ref().map(|cache| {
             let mut key = Sha256::new();
             key.update(name.as_bytes());
