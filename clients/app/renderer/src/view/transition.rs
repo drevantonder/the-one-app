@@ -271,8 +271,12 @@ impl Transitions {
                 continue;
             }
             let curve = match transition.spring {
-                // A spring turned keeps its speed, where it's a number in the same unit.
-                Some(spring) => Curve::Sprung { start: since, velocity: if alike(from, to) { velocity } else { 0.0 }, spring },
+                // A spring sets off at the speed its style says, of the way a second, or turned, keeps its speed, where
+                // it's a number in the same unit.
+                Some(spring) => {
+                    let said = transition.velocity.zip(number(from).zip(number(to))).map(|(velocity, (from, to))| f64::from(velocity * (to - from)));
+                    Curve::Sprung { start: since, velocity: said.unwrap_or(if alike(from, to) { velocity } else { 0.0 }), spring }
+                }
                 None => Curve::Eased { start: since, duration: transition.duration, easing: transition.easing },
             };
             let moving = Moving { from, to, curve };

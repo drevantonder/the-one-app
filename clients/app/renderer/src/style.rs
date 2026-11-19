@@ -497,6 +497,8 @@ pub struct Transition {
     pub duration: f32,
     pub easing: [f32; 4],
     pub spring: Option<crate::tokens::Spring>,
+    /// How fast a spring sets off, as a fraction of the way a second (`transitionVelocity`), where the style says.
+    pub velocity: Option<f32>,
 }
 
 #[derive(Default)]
@@ -852,7 +854,7 @@ fn computed(style: &Map<String, Value>, conditions: Conditions) -> Computed {
     let properties: Vec<String> = get("transitionProperty").and_then(Value::as_array).into_iter().flatten().filter_map(Value::as_str).map(str::to_owned).collect();
     let motion = get("transition").and_then(token_of).and_then(|(token, _)| table().motion(token, conditions));
     let transition = match motion {
-        Some(motion) if !properties.is_empty() && motion.duration > 0.0 => Some(Transition { properties, duration: motion.duration, easing: motion.easing, spring: motion.spring }),
+        Some(motion) if !properties.is_empty() && motion.duration > 0.0 => Some(Transition { properties, duration: motion.duration, easing: motion.easing, spring: motion.spring, velocity: number("transitionVelocity") }),
         _ => None,
     };
     Computed { layout, look, text, line_clamp: number("lineClamp").map(|lines| lines as usize), fixed, transition }
