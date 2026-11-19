@@ -106,6 +106,7 @@ const look = styles({
   // Red words on a red tint, as Raycast's: the colour says what it does, not how much it matters.
   destructive: { backgroundColor: { default: tokens.colour.redTint, hover: tokens.colour.redTint }, color: tokens.colour.red },
   square: { width: tokens.length.control, paddingInline: 0, flexShrink: 0 },
+  capsule: { borderRadius: tokens.radius.full },
   pulled: { marginEnd: negative(tokens.length.iconInset) },
   disabled: { opacity: 0.5, cursor: "default" },
   /** A menu's button, while its menu is open: one with no fill of its own shows it's the one. */
@@ -151,6 +152,7 @@ export function Spinner() {
 
 /** A `Button`'s props. */
 export interface ButtonProps {
+  shape?: "capsule"
   variant?: "default" | "secondary" | "outline" | "ghost" | "destructive"
   size?: "icon"
   loading?: boolean
@@ -174,7 +176,8 @@ export const BarEnd = createContext(false)
 
 /// `<Button onPress={save}>Save</Button>`: something to press. `variant` says how much it matters: one `default`
 /// to a view, then `secondary`, `outline` and `ghost`, and `destructive` for what can't be undone. `size="icon"`
-/// is square, for an icon alone (`<Icon name="plus" />`), named by `aria-label`. `loading` shows it's working and
+/// is square, for an icon alone (`<Icon name="plus" />`), named by `aria-label`. `shape="capsule"` rounds its ends
+/// fully, as SwiftUI's capsule border shape, for one that is a pill of its own (the Home Screen's owner pill). `loading` shows it's working and
 /// can't be pressed again. `style` places it, and changes nothing else of its look.
 export function Button(props: ButtonProps) {
   const button = createButton({
@@ -203,7 +206,7 @@ export function Button(props: ButtonProps) {
       aria-expanded={props["aria-expanded"]}
       autoFocus={props.autoFocus}
       onLayout={props.onLayout}
-      style={[look.button, props.variant && props.variant !== "default" && look[props.variant], props.size === "icon" && look.square, end && props.variant === "ghost" && props.size === "icon" && look.pulled, button.off() && look.disabled, props["aria-expanded"] === "true" && (props.variant === "outline" || props.variant === "ghost") && look.open, props.style]}
+      style={[look.button, props.variant && props.variant !== "default" && look[props.variant], props.size === "icon" && look.square, props.shape === "capsule" && look.capsule, end && props.variant === "ghost" && props.size === "icon" && look.pulled, button.off() && look.disabled, props["aria-expanded"] === "true" && (props.variant === "outline" || props.variant === "ghost") && look.open, props.style]}
     >
       <Show when={props.loading}>
         <Spinner />

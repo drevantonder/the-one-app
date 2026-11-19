@@ -78,7 +78,7 @@ export const Menu = {
     const [destructive, setDestructive] = createSignal<{ value: string; label: JSX.Element }>()
     return <Opened value={Object.assign(createMenu(props), { destructive, setDestructive })}>{props.children}</Opened>
   },
-  Trigger: (props: { variant?: ButtonProps["variant"]; size?: "icon"; "aria-label"?: string; children?: JSX.Element }) => {
+  Trigger: (props: { variant?: ButtonProps["variant"]; size?: "icon"; shape?: ButtonProps["shape"]; "aria-label"?: string; children?: JSX.Element }) => {
     const menu = useContext(Opened)!
     // In a row, the row opens it too.
     const row = useContext(RowMenu)
@@ -97,6 +97,7 @@ export const Menu = {
       <Button
         variant={props.variant ?? (words() ? "outline" : "ghost")}
         size={words() ? undefined : "icon"}
+        shape={props.shape}
         aria-label={props["aria-label"] ?? (words() ? undefined : messages.more)}
         aria-haspopup={trigger["aria-haspopup"]}
         aria-expanded={trigger["aria-expanded"]}

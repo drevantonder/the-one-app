@@ -248,6 +248,9 @@ export declare function createVelocityTracker(options?: { horizon?: number; stal
   velocity(now: number): number
   reset(): void
 }
+/** How far something let go at `velocity` (px/ms) goes on by itself, slowing as a phone's scrolling does: UIKit's
+ * normal deceleration rate unless `rate` says. Where it would carry on to is where a page lands, as an iPhone's do. */
+export declare function projected(velocity: number, rate?: number): number
 export declare function List(props: { listbox?: Listbox; label?: string; children?: Element }): Element
 /** How the lists in it are drawn (`ListStyle`): plain, inset grouped cards, or a window's sidebar. */
 export declare function ListStyle(props: { value: "plain" | "insetGrouped" | "sidebar"; children: Element }): Element
@@ -275,6 +278,8 @@ export declare function Spinner(): Element
 export type ButtonProps = {
   variant?: "default" | "secondary" | "outline" | "ghost" | "destructive"
   size?: "icon"
+  /** Its ends rounded fully, as SwiftUI's capsule: a button that is a pill of its own. */
+  shape?: "capsule"
   loading?: boolean
   disabled?: boolean
   "aria-label"?: string
@@ -358,7 +363,7 @@ export declare const Metadata: ((props: { children?: Element }) => Element) & { 
 
 export declare const Menu: {
   Root: (props: { open?: boolean; onOpenChange?: (open: boolean) => void; onSelect?: (value: string) => void; children?: Element }) => Element
-  Trigger: (props: { variant?: ButtonProps["variant"]; size?: "icon"; "aria-label"?: string; children?: Element }) => Element
+  Trigger: (props: { variant?: ButtonProps["variant"]; size?: "icon"; shape?: ButtonProps["shape"]; "aria-label"?: string; children?: Element }) => Element
   Positioner: (props: { children?: Element }) => Element
   Content: (props: { children?: Element }) => Element
   Item: (props: { value: string; destructive?: boolean; disabled?: boolean; children?: Element }) => Element

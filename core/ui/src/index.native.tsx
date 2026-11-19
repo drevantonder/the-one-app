@@ -3,7 +3,7 @@
 // (drawing-primitives/renderer.native.ts). The UI library's typecheck proves each takes what a page gives it
 // (check.ts).
 
-export { createVelocityTracker } from "./behavior-primitives/velocity.ts"
+export { createVelocityTracker, projected } from "./behavior-primitives/velocity.ts"
 export { createTheme, defineVars, negative, styles } from "./styles.ts"
 export { tokens } from "./tokens.ts"
 
