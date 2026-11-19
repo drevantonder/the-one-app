@@ -62,9 +62,9 @@ export const { render: mount, effect, memo, createComponent, createElement, crea
       if (typeof value === "function") node.handlers[event] = value as (event: object) => void
       else delete node.handlers[event]
       mutations.set(node.id, name as "onClick", typeof value === "function" ? true : null)
-    } else if (name === "style" && value && (Array.isArray(value) || "$id" in (value as object))) {
+    } else if (name === "style") {
       // Styles go by their ids, from the tables the host has (../renderer.ts's `Styles`), the last winning, each dynamic one's
-      // values after it.
+      // values after it. A falsy one is none, as React Native's is, so a page's `cond && look.x` says nothing.
       mutations.set(node.id, "style", flat(value as Styles).flatMap((style) => (style.$dynamic ? [style.$id, style.$dynamic] : [style.$id])))
     } else mutations.set(node.id, name as "role", (value ?? null) as never)
   },
