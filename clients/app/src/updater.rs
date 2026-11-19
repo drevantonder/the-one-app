@@ -8,7 +8,7 @@
 //! (`one.client.update.*`), as Telemetry shows.
 //!
 //! A computer's app takes a newer build of itself (on a device that's also a server, its server puts it in place as it
-//! takes it, `cli::serving`), or keeps a newer page, and starts again on it (`computer::restart`), its app windows
+//! restarts on it, `cli::serving`), or keeps a newer page, and starts again on it (`computer::restart`), its app windows
 //! opening again where they were. A phone's app reloads a newer page once it's off screen; its own builds come from
 //! its store (TestFlight). Either waits while a window on screen holds something its person typed and hasn't sent: in
 //! a web view a field typed in that still holds text, which its page says (`editing`, from `initialization-script.js`),
@@ -120,7 +120,7 @@ async fn take(latest: &str) {
     if cli::serving::count(latest) <= cli::serving::count(::client::BUILD) {
         return;
     }
-    // On a device that's also a server, its server puts it in place as it takes it, which is heard (`replaced`).
+    // On a device that's also a server, its server puts it in place as it restarts on it, which is heard (`replaced`).
     if cli::serving::server().is_none() {
         let _one = TAKING.lock().await;
         if !DUE.load(Ordering::Relaxed) {
