@@ -54,14 +54,14 @@ defmodule Containers.Podman do
   def handle_info(:updated, state), do: {:noreply, building(state)}
 
   def handle_info({:progress, progress}, state) do
-    if progress != state.progress, do: tell()
+    if progress != state.progress, do: OneCore.Service.changed(self())
     {:noreply, %{state | progress: progress}}
   end
 
   def handle_info({ref, result}, %{building: %Task{ref: ref}} = state) do
     Process.demonitor(ref, [:flush])
     for from <- state.waiting, do: GenServer.reply(from, result)
-    tell()
+    OneCore.Service.changed(self())
     {:noreply, %{state | building: nil, waiting: [], progress: nil}}
   end
 
@@ -91,18 +91,12 @@ defmodule Containers.Podman do
     e -> {:error, Exception.message(e)}
   end
 
-  # Tells every app watching that the desktop image's progress changed, so a screen waiting on it shows how far it is.
-  defp tell do
-    service = self()
-    for who <- Enum.take(OneCore.Service.acts_for(), 1), do: Task.start(fn -> OneCore.Service.app(service, who, :changed) end)
-  end
-
   @doc """
   Every container the One App made on this machine, with its labels, state, ports and when it was last used, and for
   one that exited, its exit code and when it did, as Podman says them.
   """
   def list(service) do
-    used = used(service)
+    used = OneCore.Service.used(service)
 
     for c <- podman_json!(service, ["ps", "--all", "--filter", "label=one.artifact", "--filter", "label=#{made_here()}", "--format", "json"]) do
       [podman_name | _] = c["Names"]
@@ -283,13 +277,13 @@ defmodule Containers.Podman do
 
     podman!(service, args)
     podman!(service, ["start", spec["id"]])
-    touch(service, spec["id"])
+    OneCore.Service.touch(service, spec["id"])
     :ok
   end
 
   def start(service, id) do
     podman!(service, ["start", id])
-    touch(service, id)
+    OneCore.Service.touch(service, id)
     :ok
   end
 
@@ -315,13 +309,13 @@ defmodule Containers.Podman do
 
   @doc "Runs `command` with `sh -c` in the container, in `dir`, for at most `timeout` seconds."
   def exec(service, id, command, dir, timeout) do
-    touch(service, id)
+    OneCore.Service.touch(service, id)
     run(service, ["exec"] ++ if(dir, do: ["--workdir", dir], else: []) ++ [id, "sh", "-c", command], timeout)
   end
 
   @doc "A file of the container, as base64, by `podman cp`, which reads a stopped container's too."
   def read_file(service, id, path) do
-    touch(service, id)
+    OneCore.Service.touch(service, id)
 
     within(service, fn folder ->
       podman!(service, ["cp", "#{id}:#{path}", folder])
@@ -334,7 +328,7 @@ defmodule Containers.Podman do
 
   @doc "Writes a file into the container, from base64, by `podman cp`. Its folder must be there."
   def write_file(service, id, path, data) do
-    touch(service, id)
+    OneCore.Service.touch(service, id)
 
     within(service, fn folder ->
       file = Path.join(folder, "file")
@@ -350,7 +344,7 @@ defmodule Containers.Podman do
   of any size is sent and none is ever whole in memory. Gives its size in bytes.
   """
   def upload(service, id, path, link, key) do
-    touch(service, id)
+    OneCore.Service.touch(service, id)
 
     within(service, fn folder ->
       podman!(service, ["cp", "#{id}:#{path}", folder], 600)
@@ -365,7 +359,7 @@ defmodule Containers.Podman do
   (base64), a chunk at a time. Its folder must be there. Gives its size in bytes.
   """
   def download(service, id, path, link, key) do
-    touch(service, id)
+    OneCore.Service.touch(service, id)
 
     within(service, fn folder ->
       file = Path.join(folder, "file")
@@ -387,7 +381,7 @@ defmodule Containers.Podman do
 
   @doc "A PNG of the X display the container's `DISPLAY` names, as base64, taken by ImageMagick's `import` in it."
   def screenshot(service, id) do
-    touch(service, id)
+    OneCore.Service.touch(service, id)
 
     case run(service, ["exec", id, "import", "-window", "root", "png:-"], 30, :raw) do
       %{exit: 0, stdout: png} -> Base.encode64(png)
@@ -415,7 +409,7 @@ defmodule Containers.Podman do
   Xvnc, takes any size, and its output is `VNC-0`. A mode already made is made again in vain, and that's let be.
   """
   def resize(service, id, width, height) do
-    touch(service, id)
+    OneCore.Service.touch(service, id)
     mode = "#{width}x#{height}"
 
     script =
@@ -432,7 +426,7 @@ defmodule Containers.Podman do
   the SDP answer.
   """
   def stream(service, id, request) do
-    touch(service, id)
+    OneCore.Service.touch(service, id)
     file = "/tmp/webrtc-stream-#{System.unique_integer([:positive])}.json"
 
     within(service, fn folder ->
@@ -448,13 +442,13 @@ defmodule Containers.Podman do
 
   @doc "Runs xdotool in the container, on its display, with `args` as its words, and gives what it printed."
   def xdotool(service, id, args) do
-    touch(service, id)
+    OneCore.Service.touch(service, id)
     podman!(service, ["exec", id, "xdotool" | args], 30)
   end
 
   @doc "Makes an HTTP request to a port the container published, from this machine, and gives the response."
   def request(service, id, port, method, path, headers, body) do
-    touch(service, id)
+    OneCore.Service.touch(service, id)
 
     host_port =
       case run(service, ["port", id, "#{port}/tcp"], 10) do
@@ -508,20 +502,6 @@ defmodule Containers.Podman do
 
   defp mount(%{"source" => source, "target" => target} = mount),
     do: "#{source}:#{target}" <> if(mount["read_only"], do: ":ro", else: "")
-
-  defp touch(service, id) do
-    folder = Path.join(OneCore.Service.folder(service), "used")
-    File.mkdir_p!(folder)
-    File.touch!(Path.join(folder, id))
-  end
-
-  defp used(service) do
-    folder = Path.join(OneCore.Service.folder(service), "used")
-
-    for file <- if(File.dir?(folder), do: File.ls!(folder), else: []), into: %{} do
-      {file, File.stat!(Path.join(folder, file), time: :posix).mtime * 1000}
-    end
-  end
 
   # Runs `fun` with a folder of its own, which is gone after.
   defp within(service, fun) do

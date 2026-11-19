@@ -80,7 +80,7 @@ defmodule Containers do
   @impl true
   def requires do
     %{
-      "core" => ">= 0.32.47",
+      "core" => ">= 0.32.109",
       "database" => "to keep your containers",
       "webrtc" => "to show a container's screen live"
     }
@@ -444,13 +444,11 @@ defmodule Containers do
   def call("list", _inputs, call), do: %{containers: listed(call)}
 
   def call("machines", _inputs, call) do
+    servers = Service.servers(call, Podman)
+
     machines =
-      for server <- Service.servers(call, Podman) do
-        case Service.seen(server) do
-          at when is_integer(at) -> %{machine: Service.name(server), on: false, last_on: at}
-          _ -> %{machine: Service.name(server), on: true, desktop: Service.call(call, Podman, :progress, [], server)}
-        end
-      end
+      for {m, server} <- Enum.zip(Service.machines(call, Podman), servers),
+          do: if(m.on, do: Map.put(m, :desktop, Service.call(call, Podman, :progress, [], server)), else: m)
 
     %{machines: machines}
   end
@@ -462,7 +460,7 @@ defmodule Containers do
     if Enum.any?(containers(call), &(&1.name == name)), do: raise("You have a container called #{name} already")
     servers = Service.servers(call, Podman)
     if servers == [], do: raise("No computer runs containers yet. Ask your network's admin to set one up.\n\n`install_service` runs Containers.Podman on one.")
-    {image, server} = image(call, inputs["image"], inputs["machine"] && machine(servers, inputs["machine"]))
+    {image, server} = image(call, inputs["image"], inputs["machine"] && Service.machine!(call, Podman, inputs["machine"]))
     server = server || hd(servers)
 
     id = Base.encode16(:crypto.strong_rand_bytes(4), case: :lower)
@@ -622,11 +620,7 @@ defmodule Containers do
   def call("stop_idle", _inputs, call) do
     idle = settings(call)["idle_hours"] * 3_600_000
 
-    stopped =
-      for server <- Service.servers(call, Podman),
-          not is_integer(Service.seen(server)),
-          name <- Service.call(call, Podman, :stop_idle, [idle], server),
-          do: %{machine: Service.name(server), name: name}
+    stopped = Service.stop_idle(call, Podman, idle)
 
     if stopped != [], do: Call.changed(call)
     %{stopped: stopped}
@@ -636,7 +630,7 @@ defmodule Containers do
   # the container is, and acted on with `screen`.
   @impl true
   def hook("computer-use.screens", _about, call) do
-    for server <- Service.servers(call, Podman), s <- each(call, server, :screens), reaches?(call, s) do
+    for {server, s} <- Service.each(call, Podman, :screens), reaches?(call, s) do
       %{
         "name" => s["name"],
         "description" => "#{s["description"]}, a container on #{Service.name(server)}",
@@ -753,30 +747,18 @@ defmodule Containers do
 
   # The containers this call may use, on every machine that's up.
   defp containers(call) do
-    for server <- Service.servers(call, Podman),
-        c <- each(call, server, :list),
+    for {server, c} <- Service.each(call, Podman, :list),
         reaches?(call, c),
         do: Map.merge(Map.new(c, fn {key, value} -> {String.to_atom(key), value} end), %{server: server, machine: Service.name(server)})
   end
 
   # The images this call may create from, or `:all` of them, with whose each is, on every machine that's up.
   defp images(call, which \\ :reached) do
-    for server <- Service.servers(call, Podman),
-        i <- each(call, server, :images),
+    for {server, i} <- Service.each(call, Podman, :images),
         which == :all or i["artifact"] == nil or (i["ours"] and reaches?(call, i)),
         do: Map.merge(Map.new(i, fn {key, value} -> {String.to_atom(key), value} end), %{server: server, machine: Service.name(server)})
   end
 
-  # A machine that's known to be off has nothing to list now: `machines` says which.
-  defp each(call, server, function) do
-    if is_integer(Service.seen(server)), do: [], else: Service.call(call, Podman, function, [], server)
-  end
-
   defp reaches?(call, %{artifact: artifact}), do: Call.reaches?(call, artifact)
   defp reaches?(call, %{"artifact" => artifact}), do: Call.reaches?(call, artifact)
-
-  defp machine(servers, name) do
-    Enum.find(servers, &(String.downcase(Service.name(&1) || "") == String.downcase(name))) ||
-      raise "No machine called #{name} runs containers. It's on #{Enum.map_join(servers, ", ", &Service.name/1)}."
-  end
 end
