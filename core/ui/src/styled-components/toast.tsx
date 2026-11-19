@@ -9,7 +9,7 @@ import { Sheet } from "./sheet.tsx"
 import { Details } from "./states.tsx"
 import { messages, readable, whole } from "../words.ts"
 import { styles } from "../styles.ts"
-import { duration, tokens } from "../tokens.ts"
+import { tokens } from "../tokens.ts"
 
 const look = styles({
   stack: {
@@ -37,19 +37,15 @@ const look = styles({
     font: tokens.type.medium,
     boxShadow: tokens.shadow.window,
     pointerEvents: "auto",
-    opacity: { default: 1, entering: 0 },
+    opacity: { default: 1, entering: 0, exiting: 0 },
     translateY: { default: 0, entering: tokens.grid[4] },
     transitionProperty: ["opacity", "translateY"],
     transition: tokens.motion.settle,
   },
   alone: { paddingEnd: tokens.grid[3] },
   rule: { width: tokens.length.hairline, alignSelf: "stretch", marginBlock: tokens.grid[2], backgroundColor: tokens.colour.quaternaryLabel },
-  leaving: { opacity: 0 },
   title: { flexShrink: 1, minWidth: 0, lineClamp: 1 },
 })
-
-/** How long a toast takes to fade as it goes. */
-const fading = duration(tokens.motion.settle)
 
 let toaster: ReturnType<typeof createToaster> | undefined
 
@@ -61,7 +57,7 @@ export async function toast(text: string | Error, { action }: { action?: { label
   const all = whole(text)
   if (all !== readable(all)) action ??= { label: messages.details, run: () => details(all) }
   if (!toaster) {
-    const made = (toaster = createRoot(() => createToaster(fading)))
+    const made = (toaster = createRoot(() => createToaster()))
     createRoot(() => <Toaster toaster={made} />)
   }
   toaster.show(readable(all), action)
@@ -74,7 +70,7 @@ function Toaster(props: { toaster: ReturnType<typeof createToaster> }) {
         <View style={look.stack}>
           <For each={props.toaster.toasts()} keyed={(one) => one.id}>
             {(one) => (
-              <View {...props.toaster.region()} style={[look.toast, !one().action && look.alone, one().leaving && look.leaving]}>
+              <View {...props.toaster.region()} style={[look.toast, !one().action && look.alone]}>
                 <Text style={look.title}>{one().title}</Text>
                 <Show when={one().action}>
                   {(action) => (

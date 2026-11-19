@@ -45,21 +45,20 @@ function createToastTimers(expire: (id: number) => void, now = () => Date.now())
   }
 }
 
-/** A toast: what it says, its one action, and whether it's on its way out. */
-export type Toast = { id: number; title: string; action?: { label: string; run: () => void }; leaving?: boolean }
+/** A toast: what it says, and its one action. */
+export type Toast = { id: number; title: string; action?: { label: string; run: () => void } }
 
 /** At most this many show at once; the oldest goes for a new one. */
 const MOST = 3
 
-/** `const toasts = createToaster(fading)`: the toasts, which `show` adds and `dismiss` takes away, fading for
- * `fading` milliseconds as they go; spread `region()` on what holds them. */
-export function createToaster(fading: number) {
+/** `const toasts = createToaster()`: the toasts, which `show` adds and `dismiss` takes away, which the host draws
+ * going (its style's `exiting`); spread `region()` on what holds them. */
+export function createToaster() {
   const [toasts, setToasts] = createSignal<Toast[]>([])
   let made = 0
   const dismiss = (id: number) => {
     timers.remove(id)
-    setToasts((now) => now.map((one) => (one.id === id ? { ...one, leaving: true } : one)))
-    setTimeout(() => setToasts((now) => now.filter((one) => one.id !== id)), fading)
+    setToasts((now) => now.filter((one) => one.id !== id))
   }
   const timers = createToastTimers(dismiss)
   // A page that isn't seen keeps its toasts until it is.
@@ -68,8 +67,7 @@ export function createToaster(fading: number) {
     toasts,
     dismiss,
     show: (title: string, action?: Toast["action"]) => {
-      const showing = toasts().filter((one) => !one.leaving)
-      if (showing.length >= MOST) dismiss(showing[0].id)
+      if (toasts().length >= MOST) dismiss(toasts()[0].id)
       const id = ++made
       setToasts((now) => [...now, { id, title, action }])
       timers.add(id, action ? 8000 : 4000)
