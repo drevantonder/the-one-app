@@ -140,9 +140,11 @@ async fn take(latest: &str) {
 async fn in_place() {
     let Ok(program) = crate::computer::program() else { return };
     let Ok(Some(there)) = tokio::task::spawn_blocking(move || cli::serving::build_of(&program)).await else { return };
-    if cli::serving::count(&there) > cli::serving::count(::client::BUILD) && !DUE.load(Ordering::Relaxed) {
+    // The system says each change to the program's folder, often several for one replacement: the first is taken.
+    if cli::serving::count(&there) > cli::serving::count(::client::BUILD) && !DUE.swap(true, Ordering::Relaxed) {
         report("one.client.update.due", json!({"one.build.next": there}));
-        due().await
+        WAITING.store(false, Ordering::Relaxed);
+        ready().await
     }
 }
 
