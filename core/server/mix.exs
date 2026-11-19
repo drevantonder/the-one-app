@@ -23,7 +23,7 @@ defmodule OneCore.MixProject do
         {:tz, "~> 0.28"},
         {:yaml_elixir, "~> 2.12"}
       ],
-      aliases: if(Mix.env() == :prod, do: [], else: [compile: [&nifs/1, "compile"]]),
+      aliases: if(Mix.env() == :prod, do: [], else: [compile: [&nifs/1, "compile", &cycles/1]]),
       # A server installed on a machine (`one serve on`) is this, as `tooling/release` builds it for each kind of machine:
       # the VM it runs on, ERTS, is the one `ONE_ERTS` names when it's built for another kind of machine than this.
       # It runs with no distribution (`rel/env.sh.eex`, `rel/env.bat.eex`): nothing reaches it as an Erlang node, so no cookie guards
@@ -57,6 +57,12 @@ defmodule OneCore.MixProject do
   # code, so it's where that VM finds them, in `priv/sandbox`.
   defp elixirc_paths(:dev), do: elixirc_paths(:prod) ++ [Path.expand("../../tooling/network.ex", __DIR__)]
   defp elixirc_paths(_env), do: ["lib", "priv/sandbox/manifest.ex", "priv/sandbox/redact.ex", "priv/sandbox/nif.ex"]
+
+  # One Core is in layers, as `mix xref graph --format cycles` shows them: what's low never calls up into what's
+  # above it, and what's above calls down. Most of it still calls back and forth in one cycle of 38 files, so a
+  # developer's build fails where a bigger one forms, as a module that calls up into it makes. Lower the number as
+  # that cycle shrinks.
+  def cycles(_args), do: Mix.Task.run("xref", ~w(graph --format cycles --min-cycle-size 39 --fail-above 0 --no-compile))
 
   # The NIFs, built for this machine with the rest of the Rust workspace, as `tooling/network` and its code reloader
   # run it: built as one, it has one set of features, so nothing in it is built twice or again for nothing. It's the
