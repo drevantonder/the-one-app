@@ -1521,10 +1521,10 @@ const resultsHeight = (owner: Owner | undefined, found: Listed[], words: string)
   const widgets = others ? HEADING + 12 + Math.ceil(others / 3) * (widget + 12) - 12 : 0
   return apps && widgets ? apps + 12 + widgets : apps || widgets || 80
 }
-/// How tall a launcher's App Library is, as `shelf` lays it out across it: its rows of categories, each a square with
+/// How tall a launcher's App Library is, `width` wide, as `shelf` lays it out across it: its rows of categories, each a square with
 /// its name under it, and Background Apps under them.
-const shelfHeight = (library: Category[]) => {
-  const laid = shelf(LIBRARY)
+const shelfHeight = (library: Category[], width: number) => {
+  const laid = shelf(width)
   const rows = Math.ceil(sorted(library, false).length / laid.across)
   return rows ? rows * (laid.category + 6 + 20) + (rows - 1) * 20 + (sorted(library, true).length ? 20 + 28 : 0) : 80
 }
@@ -1811,15 +1811,23 @@ function HomeScreen(props: { owners: Owner[] }) {
   /// shows whole.
   const pagesAcross = (owner: number) => ((pages()[owner]?.length ?? 1) > 1 || editingOwner(owner) || (halves(owner) && pages()[owner][0].some((placed) => placed.row > 3)) ? 2 : 1)
   const tallest = () => PILLS + room().height + PILLS
-  const card = createMemo(
-    () => {
-      if (showing() === "library") return { width: LIBRARY + 2 * INSET, height: Math.ceil(Math.min(tallest(), INSET + shelfHeight(props.owners[0]?.library ?? []) + PILLS)) }
-      if (showing() === "search") return { width: 2 * PAGE + 2 * INSET, height: Math.ceil(Math.min(tallest(), 2 * INSET + resultsHeight(props.owners[0], found(), query()))) }
-      const owner = state().context.at.owner
-      return { width: pagesAcross(owner) * PAGE + 2 * INSET, height: Math.ceil(PILLS + (halves(owner) ? halfHeight(room()) : room().height) + PILLS) }
-    },
-    { equals: (a, b) => a.width === b.width && a.height === b.height },
-  )
+  /// The card for what it shows, within `most`: the App Library and what's found, which scroll, as wide as fits, and
+  /// as tall as they are, to the most; Home's pages as they are.
+  const cardWithin = (most: { width: number; height: number }) => {
+    if (showing() === "library") {
+      const width = Math.min(LIBRARY, most.width - 2 * INSET)
+      return { width: width + 2 * INSET, height: Math.ceil(Math.min(tallest(), most.height, INSET + shelfHeight(props.owners[0]?.library ?? [], width) + PILLS)) }
+    }
+    if (showing() === "search") return { width: Math.min(2 * PAGE + 2 * INSET, most.width), height: Math.ceil(Math.min(tallest(), most.height, 2 * INSET + resultsHeight(props.owners[0], found(), query()))) }
+    const owner = state().context.at.owner
+    return { width: pagesAcross(owner) * PAGE + 2 * INSET, height: Math.ceil(PILLS + (halves(owner) ? halfHeight(room()) : room().height) + PILLS) }
+  }
+  const sized = { equals: (a: { width: number; height: number }, b: { width: number; height: number }) => a.width === b.width && a.height === b.height }
+  /// The card it shows, which the panel is asked to be large enough for.
+  const wanted = createMemo(() => cardWithin({ width: Infinity, height: Infinity }), sized)
+  /// The card as it's drawn, in the room the panel has: what it asked for, or where the panel isn't as large as it
+  /// asked, what fits, so the App Library is never cut off at its sides.
+  const card = createMemo(() => cardWithin({ width: viewport().width - 2 * MARGIN, height: viewport().height - CARD_TOP }), sized)
   const cardLeft = () => (viewport().width - card().width) / 2
   /// How far an owner's pages are moved along in the card, at `x`: there, and past Home's last screenful, on the way
   /// to the App Library, which cross-fades in, giving rather than sliding on.
@@ -1841,7 +1849,7 @@ function HomeScreen(props: { owners: Owner[] }) {
   let told = { width: 0, height: 0 }
   let shrinking: ReturnType<typeof setTimeout> | undefined
   createEffect(
-    () => launcher() && panelSize(transparent() ? { width: LIBRARY + 2 * INSET, height: tallest() } : card()),
+    () => launcher() && panelSize(transparent() ? { width: LIBRARY + 2 * INSET, height: tallest() } : wanted()),
     (size) => {
       if (!size) return
       clearTimeout(shrinking)
@@ -2462,7 +2470,7 @@ function HomeScreen(props: { owners: Owner[] }) {
           </View>
           {/* The App Library, in the same card, which grows to it as it cross-fades in. */}
           <View inert={showing() !== "library" || undefined} style={[looks.layer, looks.fading, showing() !== "library" && looks.inert, looks.fill(INSET, 0, 0), looks.faded(showing() === "library" ? 1 : 0, showing() === "library" ? 1 : 0.965)]}>
-            <Library owner={props.owners[0]} size={{ width: LIBRARY, height: tallest() - INSET - PILLS }} />
+            <Library owner={props.owners[0]} size={{ width: card().width - 2 * INSET, height: card().height - INSET - PILLS }} />
           </View>
           {/* What was typed found, as it's typed, and as it goes, what it last found. */}
           <View inert={showing() !== "search" || undefined} style={[looks.owner, looks.fading, showing() !== "search" && looks.inert, looks.fill(INSET, INSET, INSET), looks.drifted(showing() === "search" ? 1 : 0, showing() === "search" ? 0 : -8)]}>
