@@ -27,7 +27,7 @@ defmodule OneCore.Apps.Version.Description do
 
     tools =
       for tool <- version.tools,
-          do: Map.take(tool, [:name, :description, :inputs, :outputs, :read_only, :by_link, :ui, :task_support])
+          do: Map.take(tool, [:name, :description, :inputs, :outputs, :read_only, :by_link, :ui, :runtime_version, :task_support])
 
     version
     |> Map.take(Manifest.said() ++ @kept)

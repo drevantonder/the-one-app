@@ -429,8 +429,13 @@ defmodule OneCore.Mcp do
 
     running = Enum.sort(Apps.running(who))
 
+    # A tool's page is listed as an entrypoint's is, under its app's name, with the runtime version it says, but
+    # with no icon: it isn't an app on a device's list of them (`clients/app/src/shortcuts.rs`).
     uis =
-      Map.new(for {app, version} <- running, %{ui: ui} when is_binary(ui) <- version.tools, do: {{app, ui}, true})
+      Map.new(
+        for {app, version} <- running, %{ui: ui} = tool when is_binary(ui) <- version.tools,
+            do: {{app, ui}, %{name: version.title, runtime_version: tool[:runtime_version]}}
+      )
 
     %{files: files, code: code} = Entrypoint.library()
 
@@ -445,10 +450,7 @@ defmodule OneCore.Mcp do
 
         # An entrypoint's category goes as it is: a client opens the launcher first, and what the rest mean is the
         # launcher's. A page that's a tool's UI is an MCP App's page too.
-        case Enum.find(version.entrypoints, &(&1.page == path)) do
-          nil when is_map_key(uis, {app, path}) ->
-            resource
-
+        case Enum.find(version.entrypoints, &(&1.page == path)) || uis[{app, path}] do
           nil ->
             %{resource | mimeType: String.replace_suffix(resource.mimeType, ";profile=mcp-app", "")}
 
@@ -458,11 +460,11 @@ defmodule OneCore.Mcp do
           entrypoint ->
             Map.merge(resource, %{
               name: entrypoint.name,
-              icons: [%{src: entrypoint.icon}],
+              icons: if(entrypoint[:icon], do: [%{src: entrypoint.icon}], else: []),
               _meta:
                 Map.reject(
                   %{
-                    category: entrypoint.category,
+                    category: entrypoint[:category],
                     trusted: version.trusted,
                     runtimeVersion: entrypoint[:runtime_version]
                   },

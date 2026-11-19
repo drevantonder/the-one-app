@@ -91,7 +91,7 @@ defmodule OneCore.Entrypoint do
   end
 
   @doc """
-  Type checks an app's page against the UI library alone where one of the `version`'s entrypoints says its `runtime_version`, since a native
+  Type checks an app's page against the UI library alone where one of the `version`'s entrypoints or tools' pages says its `runtime_version`, since a native
   host draws it itself and an element of the DOM's or a Web API would break it only there (`core/ui/lint-app.js`,
   which the UI library's build holds). `{:ok, warnings}`, its warnings a line each (a raw colour or length in a style,
   which should be a token), or `{:error, why}` with the checker's own errors, a line each: file, line, column and
@@ -99,7 +99,7 @@ defmodule OneCore.Entrypoint do
   app isn't `trusted`.
   """
   def lint(files, version, trusted) do
-    if client?(files) and Enum.any?(version.entrypoints, & &1.runtime_version),
+    if client?(files) and Enum.any?(version.entrypoints ++ version.tools, & &1[:runtime_version]),
       do: type_check(files, trusted),
       else: {:ok, ""}
   end

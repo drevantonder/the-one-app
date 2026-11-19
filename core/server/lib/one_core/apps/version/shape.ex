@@ -30,6 +30,11 @@ defmodule OneCore.Apps.Version.Shape do
         "read_only" => %{"type" => "boolean", "description" => "true for a tool that only reads"},
         "by_link" => %{"type" => "boolean"},
         "ui" => %{"type" => "string", "description" => "a page of client/"},
+        "runtime_version" => %{
+          "type" => "integer",
+          "minimum" => 1,
+          "description" => "the runtime version its page (ui) needs of a native host (core/ui/src/drawing-primitives/renderer.ts)"
+        },
         "task_support" => %{"enum" => ["optional", "required"]}
       }
     },

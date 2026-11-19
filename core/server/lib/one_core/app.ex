@@ -405,7 +405,8 @@ defmodule OneCore.App do
     or keep the token so a restore just works and revoke it only once it's purged.
   - A tool with a page of its own, which shows what it does to a person, says it as `ui: "client/link.html"`. It's
     listed as an MCP App's tool names its UI (`_meta.ui.resourceUri`), so a host shows it, and that page needn't be
-    an app. One that isn't is named for what it does (`client/sign-in.html`), not `client/index.html`, an app's.
+    an app. One that isn't is named for what it does (`client/sign-in.html`), not `client/index.html`, an app's. It
+    says its `runtime_version` beside it, as an entrypoint does, for a native host to draw it.
   - An app is drawn on a home screen under its `name` and `icon`, natively on a computer, an iPhone and Android, and
     on the DOM in a browser. It's written in Solid 2.0 with the UI library, and its source is the folder `client/`:
     each `.html` there is a page, whose script is the app's, and the rest is whatever the app's made of. Its look is
