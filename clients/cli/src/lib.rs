@@ -7,6 +7,7 @@
 mod install;
 mod mcp;
 pub mod serving;
+mod system;
 mod tasks;
 
 use std::io::Write;
@@ -77,6 +78,10 @@ async fn run(args: Vec<String>) -> Result<ExitCode> {
     if args == ["--version"] {
         println!("one {} {}", client::BUILD, client::target());
         return Ok(ExitCode::SUCCESS);
+    }
+    // What the system keeps running for a server's services, which needs nothing of the network (`system`).
+    if args.first().is_some_and(|word| word == "system") {
+        return Ok(printed(system::run(&args[1..])?));
     }
     // A network is restored where there's none running.
     if args.first().is_some_and(|word| word == "restore") {

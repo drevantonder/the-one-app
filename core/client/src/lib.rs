@@ -16,6 +16,7 @@ mod resolve;
 mod rpc;
 pub mod serve;
 mod state;
+pub mod system;
 mod telemetry;
 mod transport;
 

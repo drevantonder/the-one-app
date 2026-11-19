@@ -296,11 +296,12 @@ async fn join(client: &Client, here: &Here, key: &str, who: &str) -> Result<()> 
         here.change(|record| record.current = Some(Pair { build, program: BUILD.to_owned() }))?;
     }
     here.change(joining(ServerMembershipStage::Installing))?;
-    system::install(here, key, &program()?, &unit_env(who.to_owned(), None).await?)?;
+    let server = kept(here, key, &program()?, unit_env(who.to_owned(), None).await?);
+    client::system::install(&server)?;
     here.change(joining(ServerMembershipStage::Starting))?;
     // The system starts `one serve run`, which makes it active once it answers by its key. Where it didn't, its log's
     // last lines say why, as undoing the join removes its folder, and a Mac's or Windows' log with it.
-    if let Err(error) = system::start(here, key).await {
+    if let Err(error) = system::start(here, &server).await {
         let log = fs::read_to_string(here.folder.join("server.log")).unwrap_or_default();
         let last: Vec<&str> = log.lines().rev().take(LAST).collect();
         ensure!(last.is_empty(), "{error:#}. Its last lines: {}", last.into_iter().rev().collect::<Vec<_>>().join(" | "));
@@ -315,8 +316,8 @@ async fn join(client: &Client, here: &Here, key: &str, who: &str) -> Result<()> 
 async fn undo_joining(client: &Client, here: &Here, key: &str) -> String {
     let mut left = Vec::new();
     // Joining that stopped before the system had it has nothing there to remove.
-    match system::installed(here, key) {
-        Ok(true) => left.extend(system::remove(here, key).err().map(|why| format!("the system still has it: {why:#}"))),
+    match client::system::installed(SERVER, key) {
+        Ok(true) => left.extend(client::system::remove(SERVER, key).err().map(|why| format!("the system still has it: {why:#}"))),
         Ok(false) => {}
         Err(why) => left.push(format!("the system may still have it: {why:#}")),
     }
@@ -352,7 +353,7 @@ async fn settled(client: &Client, here: &Here, start: bool) -> Result<Record> {
     let record = here.read()?;
     let key = here.key()?;
     match (record.server_membership, record.server_membership_stage) {
-        (ServerMembership::Joining, Some(ServerMembershipStage::Starting)) if system::installed(here, &key)? => {}
+        (ServerMembership::Joining, Some(ServerMembershipStage::Starting)) if client::system::installed(SERVER, &key)? => {}
         (ServerMembership::Joining, _) => {
             println!("Joining didn't finish, so this device isn't a server{}.", undo_joining(client, here, &key).await)
         }
@@ -384,6 +385,35 @@ async fn unit_env(who: String, #[cfg_attr(not(unix), expect(unused_variables))] 
     }
     Ok(env)
 }
+
+/// The server as the system keeps it running (`client::system`): `one serve run`, with its environment `env`, which is
+/// told on a Mac where to say it's running (`system::start`), and given on Windows as its arguments, which `main`
+/// takes, as a task has no environment of its own. It has `START` twice over to start: a pair being verified, then the
+/// one before it. Only `one serve run` is told to stop, and has the server drain first.
+fn kept(here: &Here, key: &str, program: &Path, env: Vec<(&str, String)>) -> client::system::Program {
+    #[allow(unused_mut)]
+    let mut env: Vec<(String, String)> = env.into_iter().map(|(name, value)| (name.to_owned(), value)).collect();
+    #[allow(unused_mut)]
+    let mut command = vec![program.display().to_string(), "serve".to_owned(), "run".to_owned()];
+    #[cfg(target_os = "macos")]
+    env.push(("NOTIFY_SOCKET".to_owned(), here.folder.join("ready").display().to_string()));
+    #[cfg(windows)]
+    command.extend(env.drain(..).map(|(name, value)| format!("{name}={value}")));
+    client::system::Program {
+        name: SERVER.to_owned(),
+        key: key.to_owned(),
+        description: "the One App's server, which `one serve off` removes.".to_owned(),
+        command,
+        env,
+        folder: here.folder.clone(),
+        desktop: false,
+        start_within: Some(2 * START + Duration::from_secs(30)),
+        stop_within: STOP + Duration::from_secs(10),
+    }
+}
+
+/// What the system knows this device's server by, with its key (`client::system::name`).
+const SERVER: &str = "server";
 
 /// The PATH its person has in a terminal on this machine, which their login shell sets. A server's services run
 /// programs a person installed (`git`, `go`, `rustc`, `swiftc`) wherever their shell finds them, which isn't on the
@@ -447,11 +477,11 @@ async fn leave(client: &Client, here: &Here, key: &str, lock: fs::File) -> Resul
     };
     // The system stops `one serve run`, which reads that it's leaving and has the server drain as it stops.
     here.change(leaving(ServerMembershipStage::Draining))?;
-    system::stop(here, key)?;
+    client::system::stop(SERVER, key)?;
     here.change(leaving(ServerMembershipStage::Deregistering))?;
     tool(client, "remove_server", json!({"key": key})).await?;
     here.change(leaving(ServerMembershipStage::Uninstalling))?;
-    system::remove(here, key)?;
+    client::system::remove(SERVER, key)?;
     drop(lock);
     Ok(fs::remove_dir_all(&here.folder)?)
 }
@@ -465,8 +495,9 @@ async fn undo_leaving(client: &Client, here: &Here, key: &str, start: bool) -> R
         record.server_membership_stage = None;
     })?;
     if start {
-        system::install(here, key, &program()?, &unit_env(who(client)?, None).await?)?;
-        system::start(here, key).await?;
+        let server = kept(here, key, &program()?, unit_env(who(client)?, None).await?);
+        client::system::install(&server)?;
+        system::start(here, &server).await?;
     }
     Ok(())
 }
@@ -555,7 +586,7 @@ async fn serve(client: &Arc<Client>, here: &Here, reports: &Reports) -> Result<(
     }
     // The system runs it as this build says to, from its next start. Where it can't be rewritten, as one changed by
     // hand may not be, it runs as it was set up rather than not at all.
-    if let Err(error) = system::install(here, &key, &program, &unit_env(who.clone(), env::var("PATH").ok()).await?) {
+    if let Err(error) = client::system::install(&kept(here, &key, &program, unit_env(who.clone(), env::var("PATH").ok()).await?)) {
         eprintln!("Couldn't rewrite how the system runs it, so it runs as it was set up: {error:#}");
     }
     let log = here.folder.join("server.log");
@@ -598,6 +629,8 @@ async fn serve(client: &Arc<Client>, here: &Here, reports: &Reports) -> Result<(
         .env("ONE_SERVER_HOME", here.folder.join("home"))
         .env("ONE_ADDRESS", &address)
         .env("ONE_SUBJECT", &who)
+        // The `one` that runs it, which its services ask to have the system keep a program running (`OneCore.System`).
+        .env("ONE_PROGRAM", &program)
         .env("ONE_DEVICE", client.key())
         .env("ONE_NAME", client::name())
         .env("ONE_SERVER_STATUS", record.told(ServerDaemonStatus::Starting).to_string())
@@ -1295,77 +1328,16 @@ fn linked(from: &Path, to: &Path) -> Result<()> {
     Ok(())
 }
 
-/// How the system keeps the server running, restarts it when it ends non-zero, and backs off one that keeps failing:
-/// a systemd user unit on Linux, which starts at boot where the user's processes linger and at their login
-/// otherwise. Each is named after the server's key, so a machine can serve more than one network. The unit's file
-/// is in the server's folder, and goes with it.
+/// What's the server's own of how the system keeps it running (`client::system`): on Linux, where systemd waits for it to
+/// say it's running (`Type=notify`) and keeps what it says in its journal.
 #[cfg(target_os = "linux")]
 mod system {
     use super::*;
 
-    fn name(key: &str) -> String {
-        format!("one-server-{}.service", &key[..12])
-    }
-
-    /// The file systemd reads the unit from, where it knows the unit: wherever it is, as a person may have put it
-    /// in their own folder of units by hand.
-    fn loaded(key: &str) -> Result<Option<PathBuf>> {
-        let done = std::process::Command::new("systemctl")
-            .args(["--user", "show", "-p", "FragmentPath", "--value", &name(key)])
-            .output()?;
-        let path = String::from_utf8_lossy(&done.stdout).trim().to_owned();
-        Ok((!path.is_empty()).then(|| PathBuf::from(path)))
-    }
-
-    /// Writes the unit, which takes effect from its next start: over the file systemd reads it from, or, new, in the
-    /// server's folder, enabled from there. It's restarted 10 s after it ends non-zero, and left failed after 10
-    /// starts in 10 minutes, a crash loop. A start has `START` twice over: a pair being verified, then the one before
-    /// it. Only `one serve run` is told to stop, and has the server drain first.
-    pub fn install(here: &Here, key: &str, program: &Path, env: &[(&str, String)]) -> Result<()> {
-        let loaded = loaded(key)?;
-        let unit = loaded.clone().unwrap_or_else(|| here.folder.join(name(key)));
-        let env: String = env.iter().map(|(name, value)| format!("Environment=\"{name}={value}\"\n")).collect();
-        fs::write(
-            &unit,
-            format!(
-                "[Unit]\nDescription=the One App's server\nStartLimitIntervalSec=600\nStartLimitBurst=10\n\n\
-                 [Service]\nType=notify\nExecStart=\"{}\" serve run\n{env}Restart=on-failure\nRestartSec=10\n\
-                 TimeoutStartSec={}\nKillMode=mixed\nTimeoutStopSec={}\n\n[Install]\nWantedBy=default.target\n",
-                program.display(),
-                2 * START.as_secs() + 30,
-                STOP.as_secs() + 10,
-            ),
-        )?;
-        if loaded.is_none() {
-            systemctl(&["enable", &unit.display().to_string()])?;
-        }
-        systemctl(&["daemon-reload"])
-    }
-
     /// Has systemd start it now, or again where it's running, with what it's run with now. That returns once the
     /// server answers by its key (`ready`), or failed to start.
-    pub async fn start(_here: &Here, key: &str) -> Result<()> {
-        systemctl(&["reset-failed", &name(key)]).ok();
-        systemctl(&["restart", &name(key)])
-    }
-
-    pub fn stop(_here: &Here, key: &str) -> Result<()> {
-        systemctl(&["stop", &name(key)])
-    }
-
-    /// Whether systemd has the unit, to start `one serve run` at the next boot.
-    pub fn installed(_here: &Here, key: &str) -> Result<bool> {
-        Ok(loaded(key)?.is_some())
-    }
-
-    /// Has systemd forget the unit: one in its own folder of units goes, and one in the server's folder goes with it.
-    pub fn remove(_here: &Here, key: &str) -> Result<()> {
-        let loaded = loaded(key)?;
-        systemctl(&["disable", "--now", &name(key)])?;
-        if let Some(unit) = loaded.filter(|unit| unit.exists()) {
-            fs::remove_file(unit)?;
-        }
-        systemctl(&["daemon-reload"])
+    pub async fn start(_here: &Here, server: &client::system::Program) -> Result<()> {
+        client::system::restart(server)
     }
 
     /// What the server says is in systemd's journal, which keeps it within its own bounds.
@@ -1386,96 +1358,30 @@ mod system {
         UnixDatagram::unbound()?.send_to_addr(b"READY=1", &address)?;
         Ok(())
     }
-
-    fn systemctl(args: &[&str]) -> Result<()> {
-        let done = std::process::Command::new("systemctl").arg("--user").args(args).output()?;
-        ensure!(done.status.success(), "systemd didn't: {}", String::from_utf8_lossy(&done.stderr).trim());
-        Ok(())
-    }
 }
 
-/// A LaunchAgent on a Mac, which starts at its person's login and is started again 10 s apart at the soonest when it
-/// ends non-zero. launchd has no limit on how long a start takes, which is why every start has `START` here.
+/// What's the server's own of how the system keeps it running (`client::system`) on a Mac, where launchd has no limit
+/// on how long a start takes, which is why every start has `START` here.
 #[cfg(target_os = "macos")]
 mod system {
     use std::os::unix::net::UnixDatagram;
 
     use super::*;
 
-    fn label(key: &str) -> String {
-        format!("app.theone.server.{}", &key[..12])
-    }
-
-    fn agent(key: &str) -> Result<PathBuf> {
-        Ok(dirs::home_dir().context("a home folder")?.join(format!("Library/LaunchAgents/{}.plist", label(key))))
-    }
-
-    fn domain() -> Result<String> {
-        let user = String::from_utf8(std::process::Command::new("id").arg("-u").output()?.stdout)?;
-        Ok(format!("gui/{}", user.trim()))
-    }
-
-    /// Writes the LaunchAgent, which launchd reads as it loads it: at `start` and each login. Its output is
-    /// `server.log` in the server's folder, and it says it's running on a socket there (`ready`).
-    pub fn install(here: &Here, key: &str, program: &Path, env: &[(&str, String)]) -> Result<()> {
-        let text = |text: &str| text.replace('&', "&amp;").replace('<', "&lt;");
-        let env: String = env
-            .iter()
-            .map(|(name, value)| (*name, value.clone()))
-            .chain([("NOTIFY_SOCKET", here.folder.join("ready").display().to_string())])
-            .map(|(name, value)| format!("<key>{name}</key><string>{}</string>", text(&value)))
-            .collect();
-        let log = text(&here.folder.join("server.log").display().to_string());
-        let agent = agent(key)?;
-        fs::create_dir_all(agent.parent().context("a folder")?)?;
-        fs::write(
-            &agent,
-            format!(
-                "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<plist version=\"1.0\"><dict>\
-                 <key>Label</key><string>{}</string>\
-                 <key>ProgramArguments</key><array><string>{}</string><string>serve</string><string>run</string></array>\
-                 <key>EnvironmentVariables</key><dict>{env}</dict>\
-                 <key>RunAtLoad</key><true/><key>KeepAlive</key><dict><key>SuccessfulExit</key><false/></dict>\
-                 <key>ThrottleInterval</key><integer>10</integer><key>ExitTimeOut</key><integer>{}</integer>\
-                 <key>StandardOutPath</key><string>{log}</string><key>StandardErrorPath</key><string>{log}</string>\
-                 </dict></plist>\n",
-                label(key),
-                text(&program.display().to_string()),
-                STOP.as_secs() + 10,
-            ),
-        )?;
-        Ok(())
-    }
-
-    /// Has launchd load the agent, which starts it, again where it's loaded. That returns once the server answers by
-    /// its key (`ready`).
-    pub async fn start(here: &Here, key: &str) -> Result<()> {
+    /// Has launchd load the agent, which starts it, again where it's loaded. That returns once the server says it's
+    /// running on a socket in its folder (`ready`), as its environment says.
+    pub async fn start(here: &Here, server: &client::system::Program) -> Result<()> {
         let ready = here.folder.join("ready");
-        let _ = stop(here, key);
         let _ = fs::remove_file(&ready);
         let socket = UnixDatagram::bind(&ready)?;
         socket.set_read_timeout(Some(2 * START))?;
-        launchctl(&["bootstrap", &domain()?, &agent(key)?.display().to_string()])?;
+        client::system::restart(server)?;
         let running = socket.recv(&mut [0; 16]);
         fs::remove_file(&ready)?;
         running.with_context(|| {
             format!("The server didn't start: its log is {}", here.folder.join("server.log").display())
         })?;
         Ok(())
-    }
-
-    pub fn stop(_here: &Here, key: &str) -> Result<()> {
-        launchctl(&["bootout", &format!("{}/{}", domain()?, label(key))])
-    }
-
-    /// Whether the LaunchAgent is there, to start `one serve run` at the next login.
-    pub fn installed(_here: &Here, key: &str) -> Result<bool> {
-        Ok(agent(key)?.exists())
-    }
-
-    pub fn remove(here: &Here, key: &str) -> Result<()> {
-        let _ = stop(here, key);
-        Ok(fs::remove_file(agent(key)?)?)
     }
 
     /// Keeps `server.log` under `LOG`, as launchd keeps no bounds of its own: past it, the log is `server.log.1`, in
@@ -1507,20 +1413,11 @@ mod system {
         let _ = UnixDatagram::unbound()?.send_to(b"READY=1", socket);
         Ok(())
     }
-
-    fn launchctl(args: &[&str]) -> Result<()> {
-        let done = std::process::Command::new("launchctl").args(args).output()?;
-        ensure!(done.status.success(), "launchd didn't: {}", String::from_utf8_lossy(&done.stderr).trim());
-        Ok(())
-    }
 }
 
-/// A scheduled task of its person's on Windows, which needs no administrator, as a program someone installs for
-/// themselves keeps running (Syncthing's way): a Windows service would need one, and would run apart from them.
-/// Task Scheduler starts it as they log on, in their session and with their environment, and restarts one that
-/// fails, 10 times a minute apart. Its restarting is only for a task that couldn't start, never for a program that
-/// ended non-zero, so it's also started each minute it isn't running. `one` asks for no console window as it's
-/// started there (`clients/app/build.rs`). What it says is `server.log` in the server's folder.
+/// What's the server's own of how the system keeps it running (`client::system`) on Windows, as its person's scheduled
+/// task. `one` asks for no console window as it's started there (`clients/app/build.rs`). What it says is `server.log`
+/// in the server's folder.
 #[cfg(windows)]
 mod system {
     use std::os::windows::io::AsRawHandle;
@@ -1535,85 +1432,24 @@ mod system {
 
     use super::*;
 
-    fn name(key: &str) -> String {
-        format!("the One App server {}", &key[..12])
-    }
-
     /// Where `start` hears that the server is running. A named pipe, as a task runs in its person's session, which
     /// isn't always the one `serve on` is run in.
     fn ready_pipe(key: &str) -> String {
         format!(r"\\.\pipe\one-server-{}-ready", &key[..12])
     }
 
-    /// Registers the task. A task has no environment of its own, so the server's is in its arguments, which
-    /// `one serve run` takes. It's its person's by their SID, as `whoami` gives it: their account's name needs
-    /// `USERDOMAIN`, which OpenSSH sets to `WORKGROUP`, and Task Scheduler finds no account by that.
-    pub fn install(here: &Here, key: &str, program: &Path, env: &[(&str, String)]) -> Result<()> {
-        let whoami = command("whoami").args(["/user", "/fo", "csv", "/nh"]).output()?;
-        let user = String::from_utf8(whoami.stdout)?;
-        let user = user.trim().rsplit(',').next().map(|sid| sid.trim_matches('"').to_owned());
-        let user = user.filter(|sid| sid.starts_with("S-")).context("whoami gave no SID")?;
-        let text = |text: &str| text.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;");
-        let arguments: String = env.iter().map(|(name, value)| format!(" \"{name}={value}\"")).collect();
-        let task = format!(
-            r#"<?xml version="1.0" encoding="UTF-16"?>
-<Task version="1.4" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">
-  <RegistrationInfo><Description>the One App's server, which `one serve off` removes.</Description></RegistrationInfo>
-  <Triggers>
-    <LogonTrigger><UserId>{user}</UserId></LogonTrigger>
-    <TimeTrigger><StartBoundary>2000-01-01T00:00:00</StartBoundary><Repetition><Interval>PT1M</Interval></Repetition></TimeTrigger>
-  </Triggers>
-  <Principals><Principal id="Author"><UserId>{user}</UserId><LogonType>InteractiveToken</LogonType><RunLevel>LeastPrivilege</RunLevel></Principal></Principals>
-  <Settings>
-    <MultipleInstancesPolicy>IgnoreNew</MultipleInstancesPolicy>
-    <DisallowStartIfOnBatteries>false</DisallowStartIfOnBatteries>
-    <StopIfGoingOnBatteries>false</StopIfGoingOnBatteries>
-    <ExecutionTimeLimit>PT0S</ExecutionTimeLimit>
-    <RestartOnFailure><Interval>PT1M</Interval><Count>10</Count></RestartOnFailure>
-    <Priority>5</Priority>
-  </Settings>
-  <Actions Context="Author"><Exec><Command>{}</Command><Arguments>serve run{}</Arguments><WorkingDirectory>{}</WorkingDirectory></Exec></Actions>
-</Task>
-"#,
-            text(&program.display().to_string()),
-            text(&arguments),
-            text(&here.folder.display().to_string()),
-        );
-        // Task Scheduler reads a task's XML as UTF-16.
-        let file = here.folder.join("task.xml");
-        let bytes: Vec<u8> = [0xFEFF].into_iter().chain(task.encode_utf16()).flat_map(u16::to_le_bytes).collect();
-        fs::write(&file, bytes)?;
-        let registered = schtasks(&["/create", "/tn", &name(key), "/xml", &file.display().to_string(), "/f"]);
-        fs::remove_file(&file)?;
-        registered
-    }
-
     /// Has Task Scheduler start it now. That returns once the server answers by its key (`ready`).
-    pub async fn start(here: &Here, key: &str) -> Result<()> {
-        let _ = stop(here, key);
-        let ready =
-            tokio::net::windows::named_pipe::ServerOptions::new().first_pipe_instance(true).create(ready_pipe(key))?;
-        schtasks(&["/run", "/tn", &name(key)])?;
+    pub async fn start(here: &Here, server: &client::system::Program) -> Result<()> {
+        let ready = tokio::net::windows::named_pipe::ServerOptions::new()
+            .first_pipe_instance(true)
+            .create(ready_pipe(&server.key))?;
+        client::system::restart(server)?;
         let log = here.folder.join("server.log");
         timeout(2 * START, ready.connect())
             .await
             .ok()
             .and_then(Result::ok)
             .with_context(|| format!("The server didn't start: its log is {}", log.display()))
-    }
-
-    pub fn stop(_here: &Here, key: &str) -> Result<()> {
-        schtasks(&["/end", "/tn", &name(key)])
-    }
-
-    /// Whether Task Scheduler has the task, to start `one serve run` at the next login.
-    pub fn installed(_here: &Here, key: &str) -> Result<bool> {
-        Ok(command("schtasks").args(["/query", "/tn", &name(key)]).output()?.status.success())
-    }
-
-    pub fn remove(here: &Here, key: &str) -> Result<()> {
-        let _ = stop(here, key);
-        schtasks(&["/delete", "/tn", &name(key), "/f"])
     }
 
     /// Has Task Scheduler start the task again as soon as this program has ended, as one ending to run a newer build
@@ -1624,7 +1460,7 @@ mod system {
         let script = format!(
             "Wait-Process -Id {} -ErrorAction SilentlyContinue; Start-ScheduledTask -TaskName '{}'",
             std::process::id(),
-            name(key)
+            client::system::name(SERVER, key)
         );
         let started = command("powershell")
             .args(["-NoProfile", "-NonInteractive", "-Command", &script])
@@ -1703,12 +1539,6 @@ mod system {
             Ok(job)
         }
     }
-
-    fn schtasks(args: &[&str]) -> Result<()> {
-        let done = command("schtasks").args(args).output()?;
-        ensure!(done.status.success(), "Task Scheduler didn't: {}", String::from_utf8_lossy(&done.stderr).trim());
-        Ok(())
-    }
 }
 
 /// A phone runs no server. Services on phones stay open for later.
@@ -1718,11 +1548,7 @@ mod system {
     use super::*;
 
     const NONE: &str = "A server runs on Linux, macOS and Windows, and this device is none of them.";
-    pub fn install(_: &Here, _: &str, _: &Path, _: &[(&str, String)]) -> Result<()> { bail!(NONE) }
-    pub async fn start(_: &Here, _: &str) -> Result<()> { bail!(NONE) }
-    pub fn stop(_: &Here, _: &str) -> Result<()> { bail!(NONE) }
-    pub fn installed(_: &Here, _: &str) -> Result<bool> { Ok(false) }
-    pub fn remove(_: &Here, _: &str) -> Result<()> { bail!(NONE) }
+    pub async fn start(_: &Here, _: &client::system::Program) -> Result<()> { bail!(NONE) }
     pub fn ready(_: &str) -> Result<()> { bail!(NONE) }
     pub fn bound(_: &Path) -> Result<()> { bail!(NONE) }
 }

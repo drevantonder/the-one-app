@@ -130,7 +130,7 @@ wait_for "The code reloader is running" "$folder/reloader.log" || { cat "$folder
 # Starts a server, and returns once it's running. One that isn't one of the network's yet says how to let it in,
 # which is then done as it says, and it's started again.
 start() {
-  (cd "$root/core/server" && exec elixir --sname "$(node_name "$1")" --cookie "$(cat "$folder/cookie")" -S \
+  (cd "$root/core/server" && ONE_PROGRAM=$one exec elixir --sname "$(node_name "$1")" --cookie "$(cat "$folder/cookie")" -S \
     mix network "$folder" "$1" --name "$1" --reloader "$(node_name reloader)" "${as[@]}" "${at_address[@]}") \
     >"$folder/$1.log" 2>&1 &
   started+=($!)
