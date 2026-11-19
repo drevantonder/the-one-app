@@ -64,6 +64,9 @@ const key = (entrypoint, subject) => `${subject ?? ""}|${entrypoint}`
 /// Each app's first app, by the app's name, among this user's: what a notification from it, or a `one:` link to it, opens.
 /** @type {Map<string, string>} */
 let first = new Map()
+/// Every file of every app listed, by `<app>/<path>`: what a link to a page can open.
+/** @type {Set<string>} */
+let files = new Set()
 /// Each app's name and icon, by its page, as this user's apps list them.
 /** @type {Map<string, string>} */
 let names = new Map()
@@ -916,6 +919,7 @@ function launcherIn(resources) {
   }
   // The last one set for an app is the one kept: its first.
   first = new Map(pages.toReversed().map(({ uri }) => [named(uri).split("/")[0], named(uri)]))
+  files = new Set(resources.map(({ uri }) => named(uri)))
   names = new Map(pages.map(({ uri, name }) => [named(uri), name ?? ""]))
   icons = new Map(pages.flatMap(({ uri, icons }) => (icons?.[0] ? [[named(uri), icons[0].src]] : [])))
   needs = new Map(pages.flatMap(({ uri, _meta }) => (typeof _meta?.runtimeVersion === "number" ? [[named(uri), _meta.runtimeVersion]] : [])))
@@ -1583,6 +1587,11 @@ addEventListener("message", async ({ source, data }) => {
 function go(link, subject, behind, from) {
   const [entrypoint, fragment] = link.split("#", 2)
   const page = entrypoint.includes("/") ? entrypoint : first.get(entrypoint)
+  // An app with no page of its own to open, or a page it no longer has, as one that moved into Settings (a link kept
+  // from before, an older phone's), opens Settings at that app (its own `#<app>`).
+  const app = entrypoint.split("/")[0]
+  if (files.size && (!page || !files.has(page)) && app !== "settings" && first.has("settings"))
+    return go(`settings#${app}${fragment ? `&${fragment}` : ""}`, subject, behind, from)
   if (!page) return false
   // On a computer, an app opens in its own window, and the Home Screen comes forward in its own.
   if (windows && key(page, subject) !== baseKey()) {
