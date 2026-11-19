@@ -121,6 +121,10 @@ arboard = { version = "3", default-features = false }
 # A Mac's and an iPhone's: the GPU, by wgpu on Metal, and the main thread's queue, by objc2's bindings.
 [target.'cfg(target_vendor = "apple")'.dependencies]
 wgpu = { version = "30.0.2", default-features = false, features = ["metal"] }
+# The face Core Text's cascade draws a character in that the fonts before it hadn't (`text::fallback`), as fontique
+# itself reaches Core Text.
+objc2-core-foundation = { version = "0.3", default-features = false, features = ["std", "CFCGTypes", "CFString"] }
+objc2-core-text = { version = "0.3", default-features = false, features = ["std", "CTFont"] }
 dispatch2 = "0.3"
 objc2 = "0.6"
 objc2-foundation = { version = "0.3", default-features = false, features = ["std", "objc2-core-foundation", "NSArray", "NSGeometry", "NSNotification", "NSObjCRuntime", "NSString"] }
@@ -135,7 +139,6 @@ objc2-app-kit = { version = "0.3", default-features = false, features = ["std", 
 # An iPhone's: a native screen is a tao window over the app's (`platform/ios`), on the main thread. Its QuickJS has
 # no prebuilt bindings in rquickjs-sys, so bindgen makes them against the iOS SDK's headers, as Android's.
 [target.'cfg(target_os = "ios")'.dependencies]
-objc2-core-foundation = { version = "0.3", default-features = false, features = ["std", "CFCGTypes"] }
 objc2-ui-kit = { version = "0.3", default-features = false, features = ["std", "objc2-core-foundation", "objc2-quartz-core", "UIAccessibility", "UIApplication", "UIGeometry", "UIInterface", "UIPasteboard", "UIResponder", "UITraitCollection", "UIView", "UIWindow"] }
 # Its windows, fingers, safe area and lifecycle: tao's, whose event loop the app (Tauri's) runs; winit can't run
 # beside it, as it starts only by calling UIApplicationMain itself.

@@ -13,8 +13,8 @@ use std::sync::Arc;
 
 use anyhow::{Context as _, Result};
 use parley::{
-    Alignment, AlignmentOptions, FontContext, FontData, FontFamily, FontFeature, FontFeatures, FontVariation, FontVariations, FontWeight,
-    Layout, LayoutContext, StyleProperty, WhiteSpaceCollapse, fontique, setting::Tag,
+    Alignment, AlignmentOptions, FontContext, FontData, FontFamily, FontFamilyName, FontFeature, FontFeatures, FontVariation, FontVariations,
+    FontWeight, GenericFamily, Layout, LayoutContext, StyleProperty, WhiteSpaceCollapse, fontique, setting::Tag,
 };
 use swash::scale::{Render, ScaleContext, Source, StrikeWith};
 use swash::zeno::{Format, Vector};
@@ -254,6 +254,9 @@ pub struct TextSystem {
     fonts: FontContext,
     layouts: LayoutContext<()>,
     family: String,
+    /// The faces the system said have a character none before them had, after its emoji face and its UI face
+    /// (`fallback`).
+    fallbacks: Vec<String>,
     shaped: HashMap<u64, Shaped>,
     faces: Vec<Face>,
     scaler: ScaleContext,
@@ -273,6 +276,7 @@ impl TextSystem {
             fonts: FontContext { collection, source_cache: fontique::SourceCache::default() },
             layouts: LayoutContext::new(),
             family: family.to_owned(),
+            fallbacks: Vec::new(),
             shaped: HashMap::new(),
             faces: Vec::new(),
             scaler: ScaleContext::new(),
@@ -324,7 +328,13 @@ impl TextSystem {
             if self.shaped.len() > 4096 {
                 self.shaped.clear();
             }
-            let layout = self.shape(text, style, fonts);
+            let mut layout = self.shape(text, style, fonts);
+            // A character no face had takes the face the system says has it, as a browser's does, from then on.
+            while let Some(family) = missing(&mut layout, text).and_then(fallback).filter(|family| !self.fallbacks.contains(family)) {
+                self.fallbacks.push(family);
+                self.shaped.clear();
+                layout = self.shape(text, style, fonts);
+            }
             let fonts = fonts.iter().map(|(range, style)| (range.clone(), style.key())).collect();
             self.shaped.insert(key, Shaped { text: text.to_owned(), style: style.key(), fonts, layout });
         }
@@ -339,7 +349,13 @@ impl TextSystem {
     /// lines are at least as tall as `style`'s font, as CSS's strut makes them.
     fn shape(&mut self, text: &str, style: &TextStyle, fonts: &[(Range<usize>, TextStyle)]) -> Layout<()> {
         let mut builder = self.layouts.ranged_builder(&mut self.fonts, text, 1.0, false);
-        builder.push_default(StyleProperty::FontFamily(FontFamily::named(&self.family)));
+        // What Allo hasn't is the system's emoji face's, in colour, and then its own UI face's, a symbol (↵, ✓) as
+        // much as a script, as CSS's `Allo, emoji, system-ui` has it, and then the faces the system said have what
+        // none of those did (`fallback`): fontique's own fallback goes by script, and a symbol's (Common) finds
+        // nothing on Apple's.
+        let mut family = vec![FontFamilyName::named(&self.family), FontFamilyName::Generic(GenericFamily::Emoji), FontFamilyName::Generic(GenericFamily::SystemUi)];
+        family.extend(self.fallbacks.iter().map(|name| FontFamilyName::named(name)));
+        builder.push_default(StyleProperty::FontFamily(FontFamily::List(family.into())));
         builder.push_default(StyleProperty::WhiteSpaceCollapse(WhiteSpaceCollapse::Preserve));
         for property in properties(style) {
             builder.push_default(property);
@@ -589,6 +605,34 @@ fn drawn(layout: &Layout<()>, text: &str, offset: usize, faces: &mut Vec<Face>) 
         });
     }
     lines
+}
+
+/// The first character of `text` no face had a glyph for, in `layout`, laid out as one line: what draws as nothing but
+/// a font's missing glyph.
+fn missing(layout: &mut Layout<()>, text: &str) -> Option<char> {
+    layout.break_all_lines(None);
+    let line = layout.lines().next()?;
+    line.runs().flat_map(|run| run.visual_clusters().collect::<Vec<_>>()).find_map(|cluster| {
+        let character = text[cluster.text_range()].chars().next()?;
+        (!character.is_whitespace() && !character.is_control() && cluster.glyphs().any(|glyph| glyph.id == 0)).then_some(character)
+    })
+}
+
+/// The family of the face the system draws `character` in where its UI font hasn't it, as Core Text's cascade finds
+/// it for a browser (`CTFontCreateForString`). Elsewhere fontique's fallback finds it.
+#[cfg(target_vendor = "apple")]
+fn fallback(character: char) -> Option<String> {
+    use objc2_core_foundation::{CFRange, CFString};
+    use objc2_core_text::{CTFont, CTFontUIFontType};
+    let text = CFString::from_str(&character.to_string());
+    let ui = unsafe { CTFont::new_ui_font_for_language(CTFontUIFontType::System, 0.0, None) }?;
+    let font = unsafe { ui.for_string(&text, CFRange { location: 0, length: text.length() }) };
+    Some(unsafe { font.family_name() }.to_string())
+}
+
+#[cfg(not(target_vendor = "apple"))]
+fn fallback(_: char) -> Option<String> {
+    None
 }
 
 /// The face a run's set in, and whether it's an emoji font's, kept so its glyphs are drawn as they were shaped.
