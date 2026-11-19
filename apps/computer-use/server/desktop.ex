@@ -5,8 +5,9 @@ defmodule ComputerUse.Desktop do
   computer's person's: only they, the user its server is for, or the network's owner use it.
 
   It runs Cua Driver (github.com/trycua/cua, MIT), the version pinned here, downloaded from its release and checked,
-  as a service of the person's session: on a Mac a launchd agent, on Linux a systemd user unit of the graphical
-  session, on Windows a scheduled task of theirs that starts as they log on. Its daemon (`cua-driver serve`) answers
+  in the person's session, kept running by the system as their server is (`OneCore.System`): on a Mac a LaunchAgent,
+  on Linux a systemd user unit of the graphical session, on Windows a scheduled task of theirs that starts as they
+  log on. Its daemon (`cua-driver serve`) answers
   MCP over HTTP on a port of the loopback of its own, with a bearer token kept in this service's folder, the same on
   every kind of computer. Each action is one of its tools, called there either with the whole display as its target
   (`scope: desktop`) and the person's own pointer and keyboard (`delivery_mode: foreground`), as a person uses them,
@@ -37,6 +38,8 @@ defmodule ComputerUse.Desktop do
 
   @helper "Computer Use for the One App.app"
   @id "app.theone.computer-use"
+  # What the system knows it by, with its server's key (`OneCore.System`).
+  @name "computer-use"
 
   # Where in System Settings → Privacy & Security each permission is turned on, the link that opens it there, and
   # what it's for.
@@ -412,7 +415,7 @@ defmodule ComputerUse.Desktop do
 
   @impl GenServer
   def init(_) do
-    {:ok, start(%{endpoint: nil, takes: nil, helper: nil, asked: MapSet.new()})}
+    {:ok, start(%{endpoint: nil, takes: nil, helper: nil, program: nil, driver: nil, asked: MapSet.new()})}
   end
 
   @impl GenServer
@@ -426,7 +429,7 @@ defmodule ComputerUse.Desktop do
   # so it reads what macOS allows now.
   def handle_call({:ask, permission}, _from, state) do
     if permission in state.asked do
-      launchctl(["kickstart", "-k", "#{domain()}/#{label()}"])
+      restarted(state)
       {:reply, :before, state}
     else
       System.cmd("open", ["-n", "-g", state.helper, "--args", "ask", permission])
@@ -442,62 +445,75 @@ defmodule ComputerUse.Desktop do
   @impl GenServer
   def code_change(_version, state, _extra), do: {:ok, start(state)}
 
-  # Removed from this computer, or its app uninstalled: Cua Driver stops, and its agent, unit or task goes, with its
-  # socket and its lock on a Mac or Linux. What's in the service's folder goes with it. Stopped any other way, as
-  # with its server, it keeps running.
+  # Removed from this computer, or its app uninstalled: Cua Driver stops, and the system forgets it, with its socket
+  # and its lock on a Mac or Linux. What's in the service's folder goes with it. Stopped any other way, as with its
+  # server, it keeps running.
   @impl GenServer
-  def terminate({:shutdown, :removed}, _state) do
-    case :os.type() do
-      {:unix, :darwin} ->
-        launchctl(["bootout", "#{domain()}/#{label()}"])
-        File.rm(Path.expand("~/Library/LaunchAgents/#{label()}.plist"))
-        for file <- [socket(), socket() <> ".lock"], do: File.rm(file)
-
-      {:unix, :linux} ->
-        name = "one-computer-use-#{key()}.service"
-        systemctl(["disable", "--now", name])
-        File.rm(Path.expand("~/.config/systemd/user/#{name}"))
-        systemctl(["daemon-reload"])
-        for file <- [socket(), socket() <> ".lock"], do: File.rm(file)
-
-      # Ending the task ends conhost, so Cua Driver is asked to stop first, as when its task is registered again.
-      {:win32, _} ->
-        name = "the One App Computer Use #{key()}"
-        driver = Path.join([OneCore.Service.folder(self()), "cua-driver-#{@cua}", "cua-driver.exe"])
-        if File.exists?(driver), do: System.cmd(driver, ["stop", "--socket", socket()], stderr_to_stdout: true)
-        schtasks(["/end", "/tn", name])
-        schtasks(["/delete", "/tn", name, "/f"])
-    end
-
+  def terminate({:shutdown, :removed}, state) do
+    stopped(state.driver)
+    OneCore.System.remove(@name, key())
+    for file <- [socket(), socket() <> ".lock"], do: File.rm(file)
     :ok
   end
 
   def terminate(_why, _state), do: :ok
 
-  # Cua Driver, downloaded if it isn't here yet, run as a service of the person's session: started now, or started
-  # again if what it runs changed.
+  # Cua Driver, downloaded if it isn't here yet, kept running by the system in the person's session: started now, or
+  # started again if what it runs changed. On a Mac it's the helper that's run, which runs Cua Driver.
   defp start(state) do
     folder = OneCore.Service.folder(self())
     driver = driver(folder)
     state = %{state | endpoint: endpoint(folder), takes: nil}
-    environment = environment(folder, state.endpoint)
 
-    case :os.type() do
-      {:unix, :darwin} ->
-        {helper, new?} = helper(folder)
-        loaded? = launch_agent(helper, driver, environment, folder)
-        if new? and not loaded?, do: launchctl(["kickstart", "-k", "#{domain()}/#{label()}"])
-        %{state | helper: helper}
+    {command, state, new?} =
+      case :os.type() do
+        {:unix, :darwin} ->
+          {helper, new?} = helper(folder)
+          {[Path.join([helper, "Contents", "MacOS", "helper"]), "run" | command(driver)], %{state | helper: helper}, new?}
 
-      {:unix, :linux} ->
-        systemd_unit(driver, environment)
-        state
+        _ ->
+          {command(driver), state, false}
+      end
 
-      {:win32, _} ->
-        scheduled_task(driver, environment, folder)
-        state
+    program = %{
+      name: @name,
+      key: key(),
+      description: "Computer Use for the One App: Cua Driver, on this computer's screen.",
+      command: command,
+      env: environment(folder, state.endpoint),
+      folder: folder,
+      desktop: true,
+      start_within: nil,
+      stop_within: 30_000
+    }
+
+    # A version before kept neither in its state, which a new one starts from (`code_change`).
+    state = Map.merge(state, %{program: program, driver: driver})
+
+    # Its task on Windows was "the One App Computer Use <key>" until 20 Nov 2026, which would start Cua Driver again
+    # each minute beside this: it goes, as each Windows server runs this once.
+    old = "the One App Computer Use #{key()}"
+
+    if match?({:win32, _}, :os.type()) and match?({_, 0}, System.cmd("schtasks", ["/query", "/tn", old], stderr_to_stdout: true)) do
+      stopped(driver)
+      System.cmd("schtasks", ["/end", "/tn", old], stderr_to_stdout: true)
+      System.cmd("schtasks", ["/delete", "/tn", old, "/f"], stderr_to_stdout: true)
     end
+
+    if OneCore.System.install(program) or new?, do: restarted(state), else: OneCore.System.start(program)
+
+    state
   end
+
+  # Cua Driver, started again as the system keeps it, asked to stop by its own `stop` first, as on Windows ending its
+  # task ends only conhost.
+  defp restarted(state) do
+    stopped(state.driver)
+    OneCore.System.restart(state.program)
+  end
+
+  defp stopped(nil), do: :ok
+  defp stopped(driver), do: System.cmd(driver, ["stop", "--socket", socket()], stderr_to_stdout: true)
 
   # The loopback port Cua Driver's MCP endpoint listens on, one the system gave free the first time, and the token it
   # takes, both kept in the service's folder.
@@ -569,14 +585,13 @@ defmodule ComputerUse.Desktop do
   # short path, as a socket's path is at most 104 bytes on a Mac.
   defp socket do
     case :os.type() do
-      {:unix, :darwin} -> Path.expand("~/Library/Caches/#{label()}.sock")
+      {:unix, :darwin} -> Path.expand("~/Library/Caches/#{@id}.#{key()}.sock")
       {:win32, _} -> "\\\\.\\pipe\\one-computer-use-#{key()}"
       _ -> Path.join(System.get_env("XDG_RUNTIME_DIR") || Path.expand("~/.cache"), "one-computer-use-#{key()}.sock")
     end
   end
 
   defp key, do: binary_part(OneCore.Service.server(), 0, 12)
-  defp label, do: "#{@id}.#{key()}"
 
   # The helper app, from this version's build of it, in the service's folder, where it stays as each version replaces
   # it, so macOS finds it where it was. Unpacked beside it and moved in whole; gives where it is, and whether it's new.
@@ -599,168 +614,6 @@ defmodule ComputerUse.Desktop do
 
     {helper, new?}
   end
-
-  # The launchd agent that starts the helper, which starts Cua Driver, in the person's session, and again if it
-  # stops. Loaded again when it changed, which starts it; gives whether it was.
-  defp launch_agent(helper, driver, environment, folder) do
-    plist = Path.expand("~/Library/LaunchAgents/#{label()}.plist")
-
-    xml = """
-    <?xml version="1.0" encoding="UTF-8"?>
-    <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-    <plist version="1.0">
-    <dict>
-      <key>Label</key><string>#{label()}</string>
-      <key>ProgramArguments</key>
-      <array>
-    #{Enum.map_join([Path.join([helper, "Contents", "MacOS", "helper"]), "run" | command(driver)], "\n", &"    <string>#{escape(&1)}</string>")}
-      </array>
-      <key>EnvironmentVariables</key>
-      <dict>
-    #{Enum.map_join(environment, "\n", fn {name, value} -> "    <key>#{name}</key><string>#{escape(value)}</string>" end)}
-      </dict>
-      <key>LimitLoadToSessionType</key><string>Aqua</string>
-      <key>ProcessType</key><string>Interactive</string>
-      <key>RunAtLoad</key><true/>
-      <key>KeepAlive</key><true/>
-      <key>StandardErrorPath</key><string>#{escape(Path.join(folder, "cua-driver.log"))}</string>
-    </dict>
-    </plist>
-    """
-
-    loaded? = match?({_, 0}, launchctl(["print", "#{domain()}/#{label()}"]))
-
-    if File.read(plist) == {:ok, xml} and loaded? do
-      false
-    else
-      File.mkdir_p!(Path.dirname(plist))
-      File.write!(plist, xml)
-      # Cua Driver takes as long as launchd lets it (20 s) to stop on SIGTERM, and until it has, `bootout` returns
-      # with the job still there and `bootstrap` fails as for a job loaded (5: Input/output error). So it's killed
-      # first, with its process group, which leaves nothing for `bootout` to wait for.
-      if loaded? do
-        launchctl(["kill", "SIGKILL", "#{domain()}/#{label()}"])
-        launchctl(["bootout", "#{domain()}/#{label()}"])
-      end
-
-      {output, status} = launchctl(["bootstrap", domain(), plist])
-      if status != 0, do: raise("launchd didn't start Computer Use for the One App: #{output}")
-      true
-    end
-  end
-
-  defp launchctl(arguments), do: System.cmd("launchctl", arguments, stderr_to_stdout: true)
-
-  defp domain do
-    {uid, 0} = System.cmd("id", ["-u"])
-    "gui/#{String.trim(uid)}"
-  end
-
-  defp escape(text), do: text |> String.replace("&", "&amp;") |> String.replace("<", "&lt;") |> String.replace(">", "&gt;")
-
-  # The systemd user unit that runs Cua Driver in the person's graphical session, started with it, and stopped with it.
-  # It's started now if there's a desktop to use: the session's, or the display this server has, which it's given.
-  defp systemd_unit(driver, environment) do
-    name = "one-computer-use-#{key()}.service"
-    display = for variable <- ~w(DISPLAY WAYLAND_DISPLAY XAUTHORITY), value = System.get_env(variable), do: {variable, value}
-
-    unit = """
-    [Unit]
-    Description=Computer Use for the One App: Cua Driver, on this computer's screen
-    PartOf=graphical-session.target
-    After=graphical-session.target
-
-    [Service]
-    ExecStart=#{Enum.map_join(command(driver), " ", &systemd_quote/1)}
-    #{Enum.map_join(environment ++ display, "\n", fn {name, value} -> "Environment=#{systemd_quote("#{name}=#{value}")}" end)}
-    Restart=on-failure
-    RestartSec=5
-
-    [Install]
-    WantedBy=graphical-session.target
-    """
-
-    path = Path.expand("~/.config/systemd/user/#{name}")
-    changed? = File.read(path) != {:ok, unit}
-    File.mkdir_p!(Path.dirname(path))
-    File.write!(path, unit)
-    systemctl(["daemon-reload"])
-    systemctl(["enable", name])
-
-    if display != [] or match?({_, 0}, systemctl(["is-active", "graphical-session.target"])) do
-      systemctl([if(changed?, do: "restart", else: "start"), name])
-    end
-  end
-
-  defp systemctl(arguments), do: System.cmd("systemctl", ["--user" | arguments], stderr_to_stdout: true)
-  defp systemd_quote(text), do: ~s("#{String.replace(text, ~s("), ~s(\\"))}")
-
-  # The scheduled task of its person's that runs Cua Driver in their session as they log on, as their server's own
-  # does (`one serve on`), needing no administrator: Task Scheduler starts it each minute it isn't running, and
-  # restarts one that couldn't start. A task has no environment of its own, so a batch file of the service's sets it
-  # and starts Cua Driver: conhost quotes the arguments it's given again, as C programs do, which cmd doesn't read, so
-  # nothing quoted inside them got through, and a path or value with a space broke. Cua Driver is a console program,
-  # which a task would show a console window for, so it's in a console with none, conhost's headless one. It runs as
-  # the person's limited user, as their server does: it can't use the windows of a program run as administrator,
-  # which Windows keeps from theirs. The task is theirs by their SID, as their server's is. Registered again when it
-  # or the batch file changed, after stopping the one running; then started, which does nothing while it runs.
-  defp scheduled_task(driver, environment, folder) do
-    name = "the One App Computer Use #{key()}"
-    {whoami, 0} = System.cmd("whoami", ["/user", "/fo", "csv", "/nh"])
-    user = whoami |> String.trim() |> String.split(",") |> List.last() |> String.trim(~s("))
-    windows = &String.replace(&1, "/", "\\")
-    # In UTF-8, as a person's folder may be named in any script, with a batch file's `%` written twice.
-    batch = &String.replace(&1, "%", "%%")
-    script = Path.join(folder, "cua-driver.cmd")
-
-    lines =
-      ["@chcp 65001 >nul"] ++
-        Enum.map(environment, fn {variable, value} -> ~s(@set "#{variable}=#{batch.(windows.(value))}") end) ++
-        ["@" <> Enum.map_join(List.update_at(command(driver), 0, windows), " ", &~s("#{batch.(&1)}"))]
-
-    text = Enum.join(lines, "\r\n") <> "\r\n"
-    run = ~s(--headless cmd.exe /d /c "#{windows.(script)}")
-
-    task = """
-    <?xml version="1.0" encoding="UTF-16"?>
-    <Task version="1.4" xmlns="http://schemas.microsoft.com/windows/2004/02/mit/task">
-      <RegistrationInfo><Description>Computer Use for the One App: Cua Driver, on this computer's screen.</Description></RegistrationInfo>
-      <Triggers>
-        <LogonTrigger><UserId>#{escape(user)}</UserId></LogonTrigger>
-        <TimeTrigger><StartBoundary>2000-01-01T00:00:00</StartBoundary><Repetition><Interval>PT1M</Interval></Repetition></TimeTrigger>
-      </Triggers>
-      <Principals><Principal id="Author"><UserId>#{escape(user)}</UserId><LogonType>InteractiveToken</LogonType><RunLevel>LeastPrivilege</RunLevel></Principal></Principals>
-      <Settings>
-        <MultipleInstancesPolicy>IgnoreNew</MultipleInstancesPolicy>
-        <DisallowStartIfOnBatteries>false</DisallowStartIfOnBatteries>
-        <StopIfGoingOnBatteries>false</StopIfGoingOnBatteries>
-        <ExecutionTimeLimit>PT0S</ExecutionTimeLimit>
-        <RestartOnFailure><Interval>PT1M</Interval><Count>10</Count></RestartOnFailure>
-        <Priority>5</Priority>
-      </Settings>
-      <Actions Context="Author"><Exec><Command>conhost.exe</Command><Arguments>#{escape(run)}</Arguments><WorkingDirectory>#{escape(folder)}</WorkingDirectory></Exec></Actions>
-    </Task>
-    """
-
-    registered = Path.join(folder, "task.xml")
-
-    if File.read(registered) != {:ok, task} or File.read(script) != {:ok, text} do
-      System.cmd(driver, ["stop", "--socket", socket()], stderr_to_stdout: true)
-      schtasks(["/end", "/tn", name])
-      File.write!(script, text)
-      # Task Scheduler reads a task's XML as UTF-16.
-      writing = registered <> ".utf16"
-      File.write!(writing, :unicode.characters_to_binary(task, :utf8, {:utf16, :little}) |> then(&(<<0xFF, 0xFE>> <> &1)))
-      {output, status} = schtasks(["/create", "/tn", name, "/xml", writing, "/f"])
-      File.rm!(writing)
-      if status != 0, do: raise("Task Scheduler didn't take Computer Use's task: #{output}")
-      File.write!(registered, task)
-    end
-
-    schtasks(["/run", "/tn", name])
-  end
-
-  defp schtasks(arguments), do: System.cmd("schtasks", arguments, stderr_to_stdout: true)
 
   defp command(driver) do
     embedded = if :os.type() == {:unix, :darwin}, do: ["--embedded", "--host-bundle-id", @id], else: []
