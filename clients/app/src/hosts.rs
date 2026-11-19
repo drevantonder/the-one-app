@@ -395,6 +395,35 @@ pub(crate) async fn file(address: &str) -> Result<Value, String> {
     Ok(json!({"kind": kind, "body": BASE64.encode(&file)}))
 }
 
+/// What an app's native window changes of this device (`client({ ... })` in the UI library), answered as the window
+/// page answers a web view's (`respond` in client.js): its person signs it out, a phone's push tries again, a phone's
+/// Settings page opens, it becomes a server or stops being one, or it takes its update.
+async fn change(args: &Value) -> Result<Value, String> {
+    use crate::*;
+    if args["leave"] == true {
+        return sign_out().await.map(|()| Value::Null);
+    }
+    if args["push"] == true {
+        return push().await;
+    }
+    if let Some(settings) = args.get("settings") {
+        #[cfg(target_os = "ios")]
+        if settings == "app" {
+            return settings().map(|()| json!({"message": ""}));
+        }
+        let _ = settings;
+        return Err("This device has no Settings to open here.".into());
+    }
+    if let Some(on) = args.get("serve") {
+        return serve(on == true).await.map(|message| json!({"message": message}));
+    }
+    if args["update"] == true {
+        return update().await.map(|message| json!({"message": if message.is_empty() { "Updating…".into() } else { message }}));
+    }
+    let changes: Vec<&String> = args.as_object().into_iter().flat_map(|args| args.keys()).collect();
+    Err(format!("This client changes no {}", changes.iter().map(|change| change.as_str()).collect::<Vec<_>>().join(", ")))
+}
+
 /// What the launcher's page (`main`) or an app's window (`label`) asks, by the page's commands (`invoke`).
 pub(crate) async fn command(label: &str, command: &str, args: Value) -> Result<Value, String> {
     use crate::*;
@@ -471,6 +500,7 @@ pub(crate) async fn command(label: &str, command: &str, args: Value) -> Result<V
             let body = BASE64.decode(args["body"].as_str().unwrap_or_default().as_bytes()).map_err(|error| error.to_string())?;
             upload_file(args["app"].as_str().unwrap_or_default(), body).await
         }
+        "change" => change(&args).await,
         "recovery_key" => recovery_key(text("subject")).await.map(Value::from),
         "recover" => recover(text("key").unwrap_or_default(), text("subject")).await.map(done),
         "close" => close(text("view").unwrap_or_default()).map(done),

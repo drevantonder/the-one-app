@@ -251,7 +251,7 @@ async fn window(started: Instant, entrypoint: &str, subject: Option<&str>, link:
     let name = listed.or_else(|| start["name"].as_str().map(str::to_owned)).unwrap_or_else(|| entrypoint.split('/').next().unwrap_or_default().to_owned());
 
     let fragment = link.split_once('#').map(|(_, fragment)| fragment.to_owned());
-    let state = State { chosen: chosen.clone(), trusted, entrypoint: entrypoint.to_owned(), view, next: 0, launcher, framed: false, fragment };
+    let state = State { chosen: chosen.clone(), trusted, entrypoint: entrypoint.to_owned(), subject: subject.map(str::to_owned), view, next: 0, launcher, framed: false, fragment };
     let (entrypoint, subject) = (entrypoint.to_owned(), subject.map(str::to_owned));
     #[cfg(mobile)]
     let link = link.to_owned();
@@ -468,7 +468,7 @@ async fn frame(window: Arc<OnceLock<WindowId>>, node: renderer::tree::Id, src: &
     let started = start(entrypoint, subject, src, false, Place::Frame(window.clone(), node), &module, page)?;
     let view = format!("{}|{entrypoint}", subject.unwrap_or_default());
     let fragment = src.split_once('#').map(|(_, fragment)| fragment.to_owned());
-    let state = State { chosen: None, trusted, entrypoint: entrypoint.to_owned(), view, next: 0, launcher: false, framed: true, fragment };
+    let state = State { chosen: None, trusted, entrypoint: entrypoint.to_owned(), subject: subject.map(str::to_owned), view, next: 0, launcher: false, framed: true, fragment };
     let src = src.to_owned();
     Native::get()?.run(move |windows| {
         let Some(id) = window.get() else { return };
@@ -585,6 +585,8 @@ struct State {
     fragment: Option<String>,
     trusted: bool,
     entrypoint: String,
+    /// Who it was opened for, a group or the network, or none for its person: whoever its requests are for.
+    subject: Option<String>,
     view: String,
     next: u64,
 }
@@ -692,13 +694,31 @@ fn respond(
                 let _ = to.send(json!({"id": "theme", "command": "theme", "args": {"theme": theme}}));
                 Some(Ok(json!({"theme": theme})))
             } else if changes.is_empty() {
-                // A computer's launcher's page lays itself out as one (`client().launcher` in home.tsx); a phone's is
-                // its Home Screen.
-                Some(Ok(json!({"theme": state.chosen, "launcher": state.launcher && cfg!(desktop), "mac": cfg!(target_os = "macos")})))
+                // What the client says of itself, as the window page answers (`respond` in client.js); a computer's
+                // launcher's page lays itself out as one (`client().launcher` in home.tsx), and a phone's is its Home
+                // Screen. Only Android's page pins shortcuts, and no native window does yet.
+                let mut client = crate::client().unwrap_or_else(|_| json!({}));
+                client["theme"] = json!(state.chosen);
+                client["launcher"] = json!(state.launcher && cfg!(desktop));
+                client["mac"] = json!(cfg!(target_os = "macos"));
+                client["pinsShortcuts"] = json!(false);
+                Some(Ok(client))
             } else {
-                Some(Err(json!({"code": -32000, "message": format!("A computer's native window can't change {} yet.", changes.iter().map(|change| change.as_str()).collect::<Vec<_>>().join(", "))})))
+                // The rest change the device, which the client does (`change` in hosts.rs), answered as it's heard.
+                state.next += 1;
+                let at = format!("m{}", state.next);
+                asked.lock().expect("nothing panics holding it").insert(at.clone(), Asked::Message(id));
+                let _ = to.send(json!({"id": at, "command": "change", "args": params}));
+                return None;
             }
         }
+        // A shortcut on the device's own home screen is Android's page's to pin, and a haptic its page's to play: a
+        // native window has neither yet, which it says, as a device without them does (client.js).
+        "one/pin-shortcut" => Some(Err(json!({"code": -32000, "message": "This device can't put that app on its home screen"}))),
+        "one/haptic" => Some(Err(json!({"code": -32000, "message": "This device plays no haptics"}))),
+        // A recovery key is shown and typed on the client's own page, never an app's: a native window has none of its
+        // own yet, which it says, rather than asking the network what only this device holds.
+        "one/recovery-key" => Some(Err(json!({"code": -32000, "message": "This window can't show or take a recovery key yet. Open it in the web client at your network's address."}))),
         method if method.starts_with("ui/") => Some(Err(json!({"code": -32601, "message": format!("This client has no {method}")}))),
         _ => None,
     };
@@ -722,6 +742,11 @@ fn respond(
             let mut params = params.clone();
             let mut meta = if state.trusted { params["_meta"].as_object().cloned().unwrap_or_default() } else { Default::default() };
             meta.insert("app".into(), json!(app));
+            // It asks for whoever its window was opened for, a group or the network, unless a trusted app's page says
+            // whom (`whom` in client.js).
+            if let Some(subject) = state.subject.as_ref().filter(|_| !meta.get("subject").is_some_and(Value::is_string)) {
+                meta.insert("subject".into(), json!(subject));
+            }
             params["_meta"] = Value::Object(meta);
             asked.lock().expect("nothing panics holding it").insert(at.clone(), Asked::Message(id));
             let _ = to.send(json!({"id": at, "command": "request", "args": {"view": state.view, "method": method, "params": params}}));
@@ -879,11 +904,19 @@ fn channel(
                             _ => screen.notice.take().filter(|notice| notice.action.is_some()),
                         }
                     })),
-                    // Its page, or the UI library it runs, was loaded against a version that's gone: "Updated", with
-                    // Reload, as over an app on a phone.
+                    // Its page, or the UI library it runs, was loaded against a version that's gone: it loads again by
+                    // itself once its window isn't in use, now if it isn't, as a desktop app or a phone's updates,
+                    // never under its person (adf8f19b8). A frame's page waits on the window it's in.
                     "stale" if payload.as_array().is_some_and(|stale| stale.iter().filter_map(Value::as_str).any(|host| host.split('.').next() == Some("ui") || host == app_host)) => {
-                        let reload = reload.clone();
-                        on(Box::new(move |screen| screen.notice = Some(renderer::Notice { text: "Updated".into(), action: Some(("Reload".into(), Box::new(reload))) })))
+                        let (reload, window) = (reload.clone(), window.clone());
+                        native.run(move |windows| {
+                            if let Some(id) = window.get() {
+                                windows.with(*id, |screen| match screen.active {
+                                    true => screen.when_unused.push(Box::new(reload)),
+                                    false => reload(),
+                                });
+                            }
+                        });
                     }
                     // Behind its servers, the launcher is the web launcher's, which says Update Required.
                     "behind" if launcher => computer::native(None),

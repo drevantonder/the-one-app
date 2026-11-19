@@ -119,10 +119,11 @@ impl Views {
     }
 
     /// One file a server listed: what kind it is, and what's in it, which is its text or, for a picture or a font,
-    /// base64 as MCP's `blob`. A set of an app's files never changes, so a file that's kept is never asked for
-    /// again.
-    async fn read(&self, resource: &str) -> anyhow::Result<(String, Vec<u8>)> {
-        let request = json!({"uri": resource});
+    /// base64 as MCP's `blob`. An app's is read for whoever it was listed for, `subject`, as a server finds the app
+    /// among theirs. A set of an app's files never changes, so a file that's kept is never asked for again.
+    async fn read(&self, resource: &str, subject: Option<&str>) -> anyhow::Result<(String, Vec<u8>)> {
+        let mut request = listing(subject);
+        request["uri"] = json!(resource);
         let read = match self.client.cached("resources/read", &request) {
             Some(read) => read,
             None => self.client.fresh("resources/read", &request).await?,
@@ -151,7 +152,7 @@ impl Views {
         // `<app>@<version>` is that version's file, as the edge has it for a browser: an icon a page shows, by what's
         // in it (`ui://icons/<sha256>/…`), which never changes.
         if let Some((name, code)) = name.split_once('@') {
-            return self.read(&format!("ui://{name}/{code}/{path}")).await;
+            return self.read(&format!("ui://{name}/{code}/{path}"), None).await;
         }
         let app = address.host_str().and_then(|host| host.strip_suffix(".localhost")).unwrap_or_default();
         // Android's and Windows' web views name the app after the scheme, in a host's name.
@@ -165,7 +166,7 @@ impl Views {
         if resources(&listed).any(|listed| listed == resource) {
             self.loaded.lock().expect("no view panics").entry(app.to_owned()).or_default().insert(resource.clone());
         }
-        self.read(&resource).await
+        self.read(&resource, subject.as_deref()).await
     }
 
     /// The open apps loaded against a version of their app, or a build of the UI library, that `changed` says

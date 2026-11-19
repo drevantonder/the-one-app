@@ -187,6 +187,9 @@ pub struct Screen {
     editing: Editing,
     /// Its window has the keyboard, so the caret shows.
     pub active: bool,
+    /// What's done once its window isn't in use, as it loses the keyboard: a page updated under it loads again then,
+    /// as a desktop app or a phone's updates, never under its person.
+    pub when_unused: Vec<Box<dyn FnOnce() + Send>>,
     /// What copy and paste use: the computer's, which the window gives it, or one of its own.
     pub clipboard: Box<dyn Clipboard>,
     /// How far each scrolling node (and the root, 0) has scrolled, along and down.
@@ -282,6 +285,7 @@ impl Screen {
             changed: None,
             asked,
             active: true,
+            when_unused: Vec::new(),
             clipboard: Box::new(editing::Memory::default()),
             scrolled: HashMap::new(),
             states: States::default(),
@@ -1479,6 +1483,11 @@ impl Screen {
         self.editing.blink = self.js.clock().now();
         if let Some(id) = self.focus.focused.filter(|id| !active && self.editing.fields.contains_key(id)) {
             self.edit(id, Field::finish_composition);
+        }
+        if !active {
+            for unused in self.when_unused.drain(..) {
+                unused();
+            }
         }
     }
 
