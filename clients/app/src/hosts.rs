@@ -129,6 +129,16 @@ pub fn close_all() {
     tell_all(json!({"quit": true}));
 }
 
+/// Has every app's window end but `kept`'s (`<subject>|<entrypoint>`): a phone's Home, which leaves its launcher.
+#[cfg(mobile)]
+pub fn close_all_but(kept: Option<&str>) {
+    for (key, host) in HOSTS.open.lock().expect("no host panics").iter() {
+        if let Some(to) = host.to.as_ref().filter(|_| Some(key.as_str()) != kept) {
+            let _ = to.send(json!({"quit": true}));
+        }
+    }
+}
+
 /// The apps whose windows are open, each as `open_window` opens it: its entrypoint and who it's for.
 #[cfg(desktop)]
 pub fn open_now() -> Vec<(String, Option<String>)> {

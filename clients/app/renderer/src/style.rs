@@ -12,6 +12,13 @@ use std::sync::RwLock;
 use serde_json::{Map, Value};
 
 use crate::Cursor;
+
+/// The one way a finger pans (`Look::touch_action`): along, or down.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum Pan {
+    X,
+    Y,
+}
 use crate::geometry::{Corners, Edges, Hsla, Rgba};
 use crate::text::TextStyle;
 use crate::tokens::{Conditions, Radius, Shadow, table};
@@ -43,6 +50,10 @@ pub struct Look {
     pub pointer_events: Option<bool>,
     /// Whether a press moves its window (`appRegion: "drag"`), or doesn't though what it's in does (`no-drag`).
     pub app_region: Option<bool>,
+    /// Which way a finger on it the device scrolls by itself where it listens for its pointer, as CSS's `touch-action`
+    /// (`auto`, `pan-x`, `pan-y`): the way it pans, or every way (`None` for `auto`, the default). Otherwise a node
+    /// that listens for its pointer keeps a finger that lands on it (`Screen::pans`).
+    pub touch_action: Option<Pan>,
     /// It's about to move, grow or fade (`willChange` names one of those), so it's drawn ahead as a layer of its own.
     pub will_change: bool,
     pub cursor: Option<Cursor>,
@@ -96,6 +107,7 @@ impl Default for Look {
             rotate: 0.0,
             z_index: 0,
             pointer_events: None,
+            touch_action: None,
             will_change: false,
             app_region: None,
             cursor: None,
@@ -530,6 +542,11 @@ fn computed(style: &Map<String, Value>, conditions: Conditions) -> Computed {
         z_index: number("zIndex").unwrap_or(0.0) as i32,
         pointer_events: word("pointerEvents").map(|events| events != "none"),
         app_region: word("appRegion").map(|region| region == "drag"),
+        touch_action: match word("touchAction") {
+            Some("pan-x") => Some(Pan::X),
+            Some("pan-y") => Some(Pan::Y),
+            _ => None,
+        },
         will_change: get("willChange").and_then(Value::as_array).into_iter().flatten().filter_map(Value::as_str).any(|property| matches!(property, "translateX" | "translateY" | "scale" | "opacity")),
         cursor: match word("cursor") {
             Some("pointer") => Some(Cursor::Pointer),

@@ -49,6 +49,13 @@ let runtimeVersion = 0
 /** @type {Map<string, number>} */
 let needs = new Map()
 const framed = new Set()
+/// On a phone, the launcher is drawn natively, as its root window, under every app's (`open_launcher`), where it can
+/// be; otherwise it's in a frame here, as an app that can't be is.
+let nativeLauncher = false
+/// Whether the native launcher was last told it shows, which it doesn't while an app in a frame here is in front, and
+/// whether something is open over its page, which back shuts first.
+let launcherShown = true
+let launcherOver = false
 /** @type {{ entrypoint: string, subject?: string, name?: string | null } | undefined} */
 let own
 /// The page under every other in this window: the launcher's, or in an app's own window, that app's.
@@ -1118,6 +1125,8 @@ function reveal(view, tapped) {
 function layer(at) {
   const view = showing(at)
   front = view
+  const home = !view || view.key === baseKey()
+  if (nativeLauncher && home !== launcherShown) invoke("launcher_shown", { shown: (launcherShown = home) })
   if (view) used(view)
   bar()
   for (const other of open.values()) {
@@ -1147,7 +1156,7 @@ function gestures() {
   if (on !== swiping || takes !== taking) invoke("navigation_gestures", { on, home: takes })
   swiping = on
   taking = takes
-  const back = !!view?.over || (!!view && view.entrypoint !== launcher)
+  const back = !!view?.over || (!!view && view.entrypoint !== launcher) || (nativeLauncher && launcherOver && (!view || view.key === baseKey()))
   if (back !== backs) globalThis.androidBack?.postMessage(String(back))
   backs = back
   rail()
@@ -1859,15 +1868,44 @@ function returned() {
 document.addEventListener("visibilitychange", returned)
 addEventListener("focus", returned)
 
-/// Shows the launcher, once this user's files have listed one: loaded, or loaded again where it was open.
+/// Shows the launcher, once this user's files have listed one: loaded, or loaded again where it was open, natively
+/// on a phone where it can be.
 function start() {
   const home = open.get(baseKey())
   if (home) page(home, { type: "retry" })
+  else if (nativeLauncher) on({ type: "drawn", key: baseKey() })
+  else if (phone && !own && runtimeVersion && (needs.get(launcher) ?? Infinity) <= runtimeVersion && !framed.has(baseKey())) openLauncher()
   else load(base(), own?.subject)
   // The app that was showing when the page was loaded again is gone, so the launcher shows.
   restart()
   show(null, 0)
 }
+
+/// Opens the launcher natively, as the phone's root window: drawn, it's the launcher here; or its frame is.
+function openLauncher() {
+  invoke("open_launcher", { entrypoint: launcher }).then(
+    (opened) => {
+      if (!opened) return framedLauncher()
+      nativeLauncher = launcherShown = true
+      on({ type: "drawn", key: baseKey() })
+    },
+    framedLauncher,
+  )
+}
+
+/// The launcher in a frame here, as it can't be drawn natively, or no longer can (`launcher`).
+function framedLauncher() {
+  nativeLauncher = false
+  framed.add(baseKey())
+  load(base(), own?.subject)
+  show(null, 0)
+}
+listen("launcher", ({ payload }) => {
+  if (payload?.native === false && nativeLauncher) framedLauncher()
+  if (typeof payload?.over === "boolean") (launcherOver = payload.over), gestures()
+})
+// The native launcher opens an app, or starts it as a finger lands on its icon, as its frame's page asks (`go`).
+listen("go", ({ payload }) => nativeLauncher && go(payload.link, payload.subject ?? undefined, payload.behind))
 
 /// Shows the App Store with no launcher under it, which its person installs one with. There's nothing to go back
 /// to from it.

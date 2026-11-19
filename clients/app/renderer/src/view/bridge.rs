@@ -173,6 +173,24 @@ impl Screen {
         self.selecting = None;
     }
 
+    /// The device's Back: what's open over its page shuts, as the page's Escape would (`notifications/one/back`).
+    /// → whether something was.
+    pub fn back(&mut self) -> bool {
+        if !self.over {
+            return false;
+        }
+        self.message(&serde_json::json!({"jsonrpc": "2.0", "method": "notifications/one/back"}));
+        true
+    }
+
+    /// A finger moved past the slop, keeping its moves (`pans`): it's no tap, so what it pressed isn't pressed, and
+    /// isn't clicked as it lifts, as a browser clicks only on a tap.
+    pub fn dragged(&mut self) {
+        if self.states.pressed.take().is_some() {
+            self.changed();
+        }
+    }
+
     /// Selects the word at `at` in the input there, as a finger held on it does; → whether there was one.
     pub fn select_word(&mut self, at: Point<f32>) -> bool {
         let Some(id) = self.under(at).into_iter().find(|id| self.fields.contains_key(id)) else { return false };

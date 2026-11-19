@@ -265,6 +265,9 @@ pub struct Screen {
     settling: Vec<(Instant, Box<dyn FnOnce(Value)>)>,
     /// How tall its page says its content is (`ui/notifications/size-changed`), which a frame showing it is drawn as.
     content_height: Option<f32>,
+    /// Something is open over its page (a sheet, a menu), as its page says (`notifications/one/over`): Back shuts that
+    /// first (`back`).
+    over: bool,
     /// The last error its JS threw, which is logged, as a browser's console has it, and the screen carries on.
     pub failed: Option<String>,
     /// What its page uses that this host can't draw (`tree::Mismatch`), which its window says in its place.
@@ -349,6 +352,7 @@ impl Screen {
             unanswered: HashMap::new(),
             settling: Vec::new(),
             content_height: None,
+            over: false,
             failed: None,
             mismatched: None,
         };
@@ -544,6 +548,9 @@ impl Screen {
                     // How tall its content is, as an MCP App tells its host, which a frame's page is drawn as.
                     if message["method"] == "ui/notifications/size-changed" {
                         self.content_height = message["params"]["height"].as_f64().map(|height| height as f32);
+                    }
+                    if message["method"] == "notifications/one/over" {
+                        self.over = message["params"]["over"] == true;
                     }
                     let Some(asked) = self.asked.as_mut() else { continue };
                     let (id, method, tool) = (message.get("id").map(Value::to_string), message["method"].as_str().map(str::to_owned), message["params"]["name"].as_str().map(str::to_owned));
@@ -993,6 +1000,9 @@ impl Screen {
             let rect = self.rects.get(&id).copied().unwrap_or(Rect { x: 0.0, y: 0.0, width: 0.0, height: 0.0 });
             let mut told = json!({
                 "clientX": at.x, "clientY": at.y, "pointerId": 1, "pointerType": if self.touch { "touch" } else { "mouse" }, "button": button,
+                // When, in milliseconds by the page's clock, as `performance.now()` says it: what a swipe's speed is
+                // worked out by.
+                "timeStamp": self.js.clock().now(),
                 "rect": {"x": rect.x, "y": rect.y, "width": rect.width, "height": rect.height},
             });
             if let Some((delta, phase)) = wheel {
@@ -1208,6 +1218,26 @@ impl Screen {
         let chain = self.under(at);
         self.pointer_event(&chain, "wheel", at, 0, Some((delta, phase)));
         self.pan(at, delta)
+    }
+
+    /// Whether a finger that landed at `at` and has moved `by` (its first move past the slop) pans, as a browser decides
+    /// by `touch-action`: from what it's on outwards, what can scroll that way scrolls; a node that listens for its
+    /// pointer keeps the finger, its moves its own, unless it says the device pans that way (`touchAction`); and with
+    /// neither, the device pans.
+    pub fn pans(&self, at: Point<f32>, by: Point<f32>) -> bool {
+        let along = by.x.abs() > by.y.abs();
+        for id in self.under(at) {
+            let Some(placed) = self.placed(id) else { continue };
+            if let Some((most_y, most_x, _)) = placed.scroll
+                && (if along { most_x } else { most_y }) > 0.0
+            {
+                return true;
+            }
+            if self.tree.nodes.get(&id).is_some_and(|node| node.listens("pointermove") || node.listens("pointerdown")) {
+                return placed.touch_action == Some(if along { style::Pan::X } else { style::Pan::Y });
+            }
+        }
+        true
     }
 
     /// A finger (or a screen reader) moved what's at `at` by `delta` pixels (down and right positive): the innermost
@@ -1665,6 +1695,8 @@ pub(crate) struct Placed {
     pub focus: Clicked,
     /// It scrolls: how far it can, down and along, and whether along is its way.
     pub scroll: Option<(f32, f32, bool)>,
+    /// Which way a finger on it pans, where it listens for its pointer (`Look::touch_action`).
+    pub touch_action: Option<style::Pan>,
 }
 
 /// A node's subtree as it was drawn at rest, kept while the node only moves, grows or fades, so each frame moves it
@@ -2497,7 +2529,7 @@ impl Painter<'_> {
             _ if (node.kind == Kind::Input && !node.is("disabled")) || button || tabindex.is_some() || node.kind == Kind::Frame => Clicked::Takes,
             _ => Clicked::Passes,
         };
-        let mut placed = Placed { parent, shown, pointer, cursor: look.cursor, pressable, input: node.kind == Kind::Input, focus, scroll: None };
+        let mut placed = Placed { parent, shown, pointer, cursor: look.cursor, pressable, input: node.kind == Kind::Input, focus, scroll: None, touch_action: look.touch_action };
         match node.kind {
             Kind::Text | Kind::RawText => {
                 let width = laid.content_box_width().max(1.0);
@@ -2784,7 +2816,7 @@ impl Painter<'_> {
             }
             for rect in rects {
                 let focus = if tabindex.is_some() { Clicked::Takes } else { Clicked::Passes };
-                let placed = Placed { parent: Some(parent), shown: rect.intersect(&mask), pointer, cursor: span.cursor, pressable, input: false, focus, scroll: None };
+                let placed = Placed { parent: Some(parent), shown: rect.intersect(&mask), pointer, cursor: span.cursor, pressable, input: false, focus, scroll: None, touch_action: None };
                 self.placed.push((span.id, placed));
             }
         }

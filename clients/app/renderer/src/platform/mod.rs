@@ -37,6 +37,10 @@ use ios::{Display, Handle, NativeWindow, appearance, clipboard, reduced_motion};
 /// A window, as the windows' thread names it.
 pub type WindowId = u64;
 
+/// Whether its windows can be a root window, under every other (`WindowOptions::root`): a phone's whose launcher is
+/// drawn natively. Android's are; an iPhone's are once its views stack so.
+pub const ROOTS: bool = cfg!(target_os = "android");
+
 /// Why the windows couldn't start, where they couldn't: a phone makes them as its first job comes, a job that's
 /// dropped then, so whoever sent it hears why here.
 static UNSTARTED: std::sync::Mutex<Option<String>> = std::sync::Mutex::new(None);
@@ -78,6 +82,9 @@ pub struct WindowOptions {
     pub panel: Option<f32>,
     /// A panel's file of where it was dragged to on each screen, which it's summoned at there again, as Raycast's is.
     pub places: Option<std::path::PathBuf>,
+    /// The window under every other, as a phone's launcher (its Home Screen) is: the system's Back doesn't close it,
+    /// and the apps' windows open over it. It's hidden while something else covers the screen (`Windows::hide`).
+    pub root: bool,
 }
 
 /// Where a panel was dragged to on each screen, by the screen's name as its platform gives it (`Input::Placed`): its
@@ -214,6 +221,8 @@ struct Window {
     tag: serde_json::Value,
     /// A panel's file of where it was dragged to on each screen (`WindowOptions::places`).
     places: Option<std::path::PathBuf>,
+    /// It's the root window (`WindowOptions::root`).
+    root: bool,
 }
 
 /// What a panel's file of places says, or nothing where it hasn't one yet.
@@ -295,6 +304,7 @@ impl Windows {
                 on_event: Box::new(on_event),
                 tag: options.tag,
                 places: options.places,
+                root: options.root,
             },
         );
         Ok(id)
@@ -427,6 +437,33 @@ impl Windows {
             screen.shown(false);
         }
         self.display.put_away(&window.parts[0].native, give_back);
+    }
+
+    /// The device's Back, on window `id`: what's open over its page shuts, or an app's window closes. The root window
+    /// leaves Back with nothing open over it to the system. → whether it took it.
+    pub fn back(&mut self, id: WindowId) -> bool {
+        let Some(window) = self.windows.get_mut(&id) else { return false };
+        if window.screen.as_mut().is_ok_and(Screen::back) {
+            window.dirty = true;
+            return true;
+        }
+        if window.root {
+            return false;
+        }
+        self.close(id);
+        true
+    }
+
+    /// Hides window `id`, or shows it again, as a phone's root window is while the page over it shows an app it
+    /// draws itself.
+    pub fn hide(&mut self, id: WindowId, hidden: bool) {
+        let Some(window) = self.windows.get_mut(&id) else { return };
+        if hidden {
+            self.display.put_away(&window.parts[0].native, false);
+        } else {
+            window.dirty = true;
+            self.display.show(&window.parts[0].native);
+        }
     }
 
     /// Whether panel `id` is showing.

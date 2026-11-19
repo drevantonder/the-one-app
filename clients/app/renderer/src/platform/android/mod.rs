@@ -192,7 +192,7 @@ impl Display {
         let view = java(|env, host| {
             let title = env.new_string(&options.title)?;
             let class: &JClass = host.as_obj().into();
-            let view = env.call_static_method(class, "open", "(JLjava/lang/String;)Lapp/theone/renderer/NativeView;", &[JValue::Long(id as i64), JValue::Object(&title)])?.l()?;
+            let view = env.call_static_method(class, "open", "(JLjava/lang/String;Z)Lapp/theone/renderer/NativeView;", &[JValue::Long(id as i64), JValue::Object(&title), JValue::Bool(options.root.into())])?.l()?;
             env.new_global_ref(view)
         })
         .ok_or_else(|| anyhow::anyhow!("the activity didn't make a view"))?;
@@ -215,9 +215,12 @@ impl Display {
 
     pub fn set_cursor(&self, _: &NativeWindow, _: crate::Cursor) {}
 
-    // A launcher's panel, which a phone has none of: its launcher is its page.
+    // A computer's launcher panel, which a phone has none of: its launcher is its root window (`WindowOptions::root`).
     pub fn summon(&self, _: &NativeWindow, _: &crate::platform::Places, _: Size<Pixels>) {}
-    pub fn put_away(&self, _: &NativeWindow, _: bool) {}
+    /// Hides the view, as a root window is while the page over it shows an app (`Windows::hide`).
+    pub fn put_away(&self, window: &NativeWindow, _: bool) {
+        java(|env, host| env.call_static_method(<&JClass>::from(host.as_obj()), "hide", "(Lapp/theone/renderer/NativeView;)V", &[JValue::Object(window.view.as_obj())]).map(drop));
+    }
     /// A part of a panel's page as a window of its own: which a phone has none of.
     pub fn open_part(&self, _: &NativeWindow, _: usize) -> anyhow::Result<NativeWindow> {
         anyhow::bail!("a panel's parts aren't windows of their own here")
@@ -361,6 +364,8 @@ fn keyboard(windows: &mut Windows, id: WindowId) {
 struct Touch {
     start: Point<f32>,
     last: Point<f32>,
+    /// It's moved past the slop, so it's decided whether it pans or is what it's on's (`Screen::pans`).
+    moved: bool,
     panning: bool,
     on_input: bool,
 }
@@ -494,8 +499,8 @@ pub extern "system" fn Java_app_theone_renderer_NativeView_nativeActive(_: JNIEn
 
 /// Back, with nothing of Android's own to close first: the app's screen closes, and what's under it shows.
 #[unsafe(no_mangle)]
-pub extern "system" fn Java_app_theone_renderer_NativeView_nativeBack(_: JNIEnv, _: JObject, id: jlong) {
-    with_windows(|windows| windows.close(id as WindowId));
+pub extern "system" fn Java_app_theone_renderer_NativeView_nativeBack(_: JNIEnv, _: JObject, id: jlong) -> jboolean {
+    with_windows(|windows| windows.back(id as WindowId)).unwrap_or(false).into()
 }
 
 /// A finger: `action` is MotionEvent's (0 down, 1 up, 2 move, 3 cancel), at `x`, `y` in device pixels. A finger
@@ -516,17 +521,20 @@ pub extern "system" fn Java_app_theone_renderer_NativeView_nativeTouch(_: JNIEnv
             match action {
                 0 => {
                     let on_input = screen.input_at(at);
-                    touches.insert(id, Touch { start: at, last: at, panning: false, on_input });
+                    touches.insert(id, Touch { start: at, last: at, moved: false, panning: false, on_input });
                     if !on_input {
                         screen.pointer_down(at, 0, false);
                     }
                 }
                 2 => {
                     let Some(touch) = touches.get_mut(&id) else { return };
-                    if !touch.panning && ((at.x - touch.start.x).abs() > slop / density || (at.y - touch.start.y).abs() > slop / density) {
-                        touch.panning = true;
-                        if !touch.on_input {
+                    if !touch.moved && ((at.x - touch.start.x).abs() > slop / density || (at.y - touch.start.y).abs() > slop / density) {
+                        touch.moved = true;
+                        touch.panning = touch.on_input || screen.pans(touch.start, point(at.x - touch.start.x, at.y - touch.start.y));
+                        if touch.panning && !touch.on_input {
                             screen.pointer_cancel(at);
+                        } else if !touch.panning {
+                            screen.dragged();
                         }
                     }
                     if touch.panning {

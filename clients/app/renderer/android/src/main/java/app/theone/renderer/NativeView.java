@@ -52,9 +52,9 @@ public final class NativeView extends SurfaceView implements SurfaceHolder.Callb
         post(() -> nativeAccessibility(id));
     }
 
-    /** Back: the window's app closes. */
-    void back() {
-        nativeBack(id);
+    /** Back: what's open over its page shuts, or its app's window closes; the root's takes Back only for the first. → whether it took it. */
+    boolean back() {
+        return nativeBack(id);
     }
 
     /** What Rust asks, done on the UI thread once Rust has returned. */
@@ -223,7 +223,7 @@ public final class NativeView extends SurfaceView implements SurfaceHolder.Callb
 
     private native void nativeSurface(long id, android.view.Surface surface, int width, int height);
     private native void nativeSurfaceDestroyed(long id);
-    private native void nativeBack(long id);
+    private native boolean nativeBack(long id);
     private native void nativeActive(long id, boolean active);
     private native void nativeTouch(long id, int action, float x, float y, float slop);
     private native void nativeLongPress(long id, float x, float y);

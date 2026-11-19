@@ -75,7 +75,7 @@ pub(crate) fn unopened(entrypoint: &str, why: String) {
     let name = entrypoint.split('/').next().unwrap_or_default().to_owned();
     let tag = json!({"entrypoint": entrypoint});
     native.run(move |windows| {
-        let options = WindowOptions { title: name.clone(), app_id: ::client::NAME.to_owned(), size: Size { width: Pixels(1024.0), height: Pixels(720.0) }, tag, panel: None, places: None };
+        let options = WindowOptions { title: name.clone(), app_id: ::client::NAME.to_owned(), size: Size { width: Pixels(1024.0), height: Pixels(720.0) }, tag, panel: None, places: None, root: false };
         if let Err(error) = windows.open(options, Err(format!("{name} didn't open: {why}")), |_| {}) {
             eprintln!("{name}'s window didn't open: {error:#}");
         }
@@ -170,9 +170,9 @@ async fn probe(entrypoint: &str, subject: Option<&str>, framed: bool) -> anyhow:
     Ok(Some(Page { module: page.join(&module)?, page, trusted, tables, name, icon }))
 }
 
-/// Opens the launcher's page natively, if it's of a version this program speaks, in a panel put away until
-/// it's summoned (`computer`). → its window, once it's open, or none for its page to be the web launcher's.
-#[cfg(desktop)]
+/// Opens the launcher's page natively, if it's of a version this program speaks: on a computer in a panel put away
+/// until it's summoned (`computer`), on a phone as its root window, under every app's. → its window, once it's open,
+/// or none for its page to be the web launcher's.
 pub(crate) async fn launcher(entrypoint: &str) -> Option<WindowId> {
     let (opened_to, opened) = tokio::sync::oneshot::channel();
     match window(Instant::now(), entrypoint, None, entrypoint, Kind::Launcher(Some(opened_to))).await {
@@ -189,7 +189,6 @@ pub(crate) async fn launcher(entrypoint: &str) -> Option<WindowId> {
 /// its window once it's open, or that it didn't.
 enum Kind {
     App,
-    #[cfg_attr(mobile, allow(dead_code))]
     Launcher(Option<tokio::sync::oneshot::Sender<Option<WindowId>>>),
 }
 
@@ -220,7 +219,7 @@ async fn window(started: Instant, entrypoint: &str, subject: Option<&str>, link:
     // couldn't start, says why there.
     let (opened_to, opened) = tokio::sync::oneshot::channel::<Result<(), String>>();
     native.run(move |windows| {
-        let (size, panel) = match launcher {
+        let (size, panel) = match launcher && cfg!(desktop) {
             true => ((computer::SIZE.width as f32, computer::SIZE.height as f32), Some(computer::CORNER)),
             false => ((1024.0, 720.0), None),
         };
@@ -231,7 +230,9 @@ async fn window(started: Instant, entrypoint: &str, subject: Option<&str>, link:
             tag: json!({"entrypoint": entrypoint, "subject": subject}),
             panel: panel.map(|corner| corner as f32),
             // The launcher's kept where it's dragged to, on each screen.
-            places: launcher.then(|| crate::app().shell.home().ok()).flatten().map(|home| home.join("launcher-places.json")),
+            places: (launcher && cfg!(desktop)).then(|| crate::app().shell.home().ok()).flatten().map(|home| home.join("launcher-places.json")),
+            // A phone's launcher is its Home Screen, under every app's window.
+            root: launcher && cfg!(mobile),
         };
         let app = entrypoint.split('/').next().unwrap_or_default().to_owned();
         let on_event = {
@@ -315,7 +316,7 @@ async fn window(started: Instant, entrypoint: &str, subject: Option<&str>, link:
                         }
                     });
                 }) });
-                if launcher {
+                if launcher && cfg!(desktop) {
                     // Its glass is the system's, under its page, where there's one; Linux has none, so it's a
                     // popover's colour (DESIGN.md, Launcher).
                     screen.panel = Some(renderer::Panel { corner: computer::CORNER as f32, fill: cfg!(target_os = "linux") });
@@ -455,10 +456,12 @@ const BAR: (f64, f64) = (52.0, 12.0);
 const BAR: (f64, f64) = (0.0, 0.0);
 
 /// What a native window asks of a computer's launcher (`crate::computer`), as a phone has it: its Home Screen is under
-/// every app's window, so Home closes them; a `one:` link opens in its page; and it has no launcher panel to size, put
-/// away or reload, as its launcher is its page's.
+/// every app's window, so Home closes them; a `one:` link opens in its page; and it has no launcher panel to size or
+/// put away. Its launcher is its root window, where it's drawn natively (`launcher`), or else its page's.
 #[cfg(mobile)]
-mod computer {
+pub(crate) mod computer {
+    use std::sync::Mutex;
+
     pub struct Size {
         pub width: f64,
         pub height: f64,
@@ -467,8 +470,32 @@ mod computer {
     pub const CORNER: f64 = 0.0;
     pub const NAME: &str = "";
 
+    /// The launcher's root window, while it's drawn natively, and its page.
+    static LAUNCHER: Mutex<Option<(renderer::platform::WindowId, String)>> = Mutex::new(None);
+
+    /// Opens the launcher's page `entrypoint` as the root window, under every app's. → whether it did; if not, its
+    /// page shows the web launcher.
+    pub async fn open(entrypoint: String) -> bool {
+        if !renderer::platform::ROOTS {
+            return false;
+        }
+        let Some(id) = super::launcher(&entrypoint).await else { return false };
+        *LAUNCHER.lock().expect("nothing panics holding it") = Some((id, entrypoint));
+        true
+    }
+
+    /// Hides the launcher's root window while the page shows an app over it, which it draws itself, or shows it.
+    pub fn shown(shown: bool) {
+        let Some((id, _)) = *LAUNCHER.lock().expect("nothing panics holding it") else { return };
+        if let Ok(native) = renderer::platform::Native::get() {
+            native.run(move |windows| windows.hide(id, !shown));
+        }
+    }
+
+    /// Home: every app's window closes, and the launcher's stays.
     pub fn summon() {
-        crate::hosts::close_all();
+        let launcher = LAUNCHER.lock().expect("nothing panics holding it").as_ref().map(|(_, entrypoint)| format!("|{entrypoint}"));
+        crate::hosts::close_all_but(launcher.as_deref());
     }
 
     pub fn again(link: Option<String>) {
@@ -479,8 +506,32 @@ mod computer {
 
     pub fn hide(_: bool) {}
     pub fn resize(_: Option<f64>, _: Option<f64>) {}
-    pub fn native(_: Option<renderer::platform::WindowId>) {}
-    pub fn reload_native() {}
+
+    /// The launcher can't be drawn natively after all (its page needs a newer host, or its servers are ahead): its
+    /// window closes, and the page shows the web launcher.
+    pub fn native(_: Option<renderer::platform::WindowId>) {
+        close();
+        crate::app().shell.emit("launcher", serde_json::json!({"native": false}));
+    }
+
+    /// Its page was updated: its window opens again on the new version.
+    pub fn reload_native() {
+        let Some(entrypoint) = close() else { return };
+        crate::spawn(async move {
+            if !open(entrypoint).await {
+                crate::app().shell.emit("launcher", serde_json::json!({"native": false}));
+            }
+        });
+    }
+
+    /// Closes the launcher's window. → its page.
+    fn close() -> Option<String> {
+        let (id, entrypoint) = LAUNCHER.lock().expect("nothing panics holding it").take()?;
+        if let Ok(native) = renderer::platform::Native::get() {
+            native.run(move |windows| windows.close(id));
+        }
+        Some(entrypoint)
+    }
 }
 
 /// What the window keeps of where it is.
@@ -530,6 +581,13 @@ fn respond(
         computer::resize(message["params"]["width"].as_f64(), message["params"]["height"].as_f64());
         return None;
     }
+    // A phone's launcher with something open over its page (a menu, a category): the page has Android's Back come to
+    // it, which shuts that (`notifications/one/back`), rather than leave the app.
+    #[cfg(mobile)]
+    if method == "notifications/one/over" && launcher {
+        crate::app().shell.emit("launcher", json!({"over": message["params"]["over"] == true}));
+        return None;
+    }
     // Any other notification needs no answer, and none is heard here yet.
     let id = message.get("id").cloned()?;
     let params = &message["params"];
@@ -567,6 +625,14 @@ fn respond(
                 }
                 Some(Ok(json!({})))
             }
+            // A phone's launcher opens it in the page, which draws it over the launcher, for whoever it's for, or with
+            // `behind` only starts it, as a finger lands on its icon (`go` in client.js).
+            #[cfg(mobile)]
+            url if url.starts_with("one:") && state.launcher => {
+                let go = json!({"link": &url["one:".len()..], "subject": params["subject"], "behind": params["behind"] == true});
+                crate::app().shell.emit("go", go);
+                Some(Ok(json!({})))
+            }
             url if url.starts_with("one:") => {
                 computer::again(Some(url.to_owned()));
                 Some(Ok(json!({})))
@@ -587,8 +653,9 @@ fn respond(
                 let _ = to.send(json!({"id": "theme", "command": "theme", "args": {"theme": theme}}));
                 Some(Ok(json!({"theme": theme})))
             } else if changes.is_empty() {
-                // The launcher's page lays itself out as a computer's launcher (`client().launcher` in home.tsx).
-                Some(Ok(json!({"theme": state.chosen, "launcher": state.launcher, "mac": cfg!(target_os = "macos")})))
+                // A computer's launcher's page lays itself out as one (`client().launcher` in home.tsx); a phone's is
+                // its Home Screen.
+                Some(Ok(json!({"theme": state.chosen, "launcher": state.launcher && cfg!(desktop), "mac": cfg!(target_os = "macos")})))
             } else {
                 Some(Err(json!({"code": -32000, "message": format!("A computer's native window can't change {} yet.", changes.iter().map(|change| change.as_str()).collect::<Vec<_>>().join(", "))})))
             }

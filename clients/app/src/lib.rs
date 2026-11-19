@@ -649,6 +649,21 @@ async fn open_window(entrypoint: String, subject: Option<String>, link: String) 
     hosts::open_window(entrypoint, subject, link).await
 }
 
+/// Opens the launcher's page natively, as the phone's root window, under every app's (`native::computer::open`).
+/// → whether it did; if not, the page shows the web launcher.
+#[cfg(mobile)]
+#[tauri::command]
+async fn open_launcher(entrypoint: String) -> bool {
+    native::computer::open(entrypoint).await
+}
+
+/// Whether the launcher's root window shows: not while the page shows an app over it, which it draws itself.
+#[cfg(mobile)]
+#[tauri::command]
+fn launcher_shown(shown: bool) {
+    native::computer::shown(shown);
+}
+
 #[cfg_attr(mobile, tauri::command)]
 fn opened(view: String, ms: u32) -> Result<(), String> {
     let views = views()?;
@@ -1242,6 +1257,8 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             apps,
             open_window,
+            open_launcher,
+            launcher_shown,
             request,
             refresh,
             upload,

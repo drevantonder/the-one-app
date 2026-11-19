@@ -19,6 +19,8 @@ public final class NativeHost {
     private static ComponentActivity activity;
     private static Runnable changed;
     private static final ArrayList<NativeView> open = new ArrayList<>();
+    /** The view under every other, as a phone's launcher's is: Back doesn't close it. */
+    private static NativeView root;
     private static OnBackPressedCallback back;
 
     private NativeHost() {}
@@ -34,7 +36,7 @@ public final class NativeHost {
         nativeAppearance(dark(context), reduced());
     }
 
-    /** Whether a native window is open, which Back closes. */
+    /** Whether a native window is open, which Back closes: an app's, over the launcher's. */
     public static boolean isOpen() {
         return !open.isEmpty();
     }
@@ -48,25 +50,48 @@ public final class NativeHost {
         return (context.getResources().getConfiguration().uiMode & Configuration.UI_MODE_NIGHT_MASK) == Configuration.UI_MODE_NIGHT_YES;
     }
 
-    static NativeView open(long id, String title) {
+    /**
+     * A window's view, over the page, or with `root` under every other window's. Every SurfaceView's surface is
+     * under the activity's window, in no order among those of a layer, so an app's is a media overlay's, the layer
+     * above, over the root's.
+     */
+    static NativeView open(long id, String title, boolean root) {
         NativeView view = new NativeView(activity, id);
         view.setContentDescription(title);
         // Hidden until its page has what it first asked for (`show`): a hidden SurfaceView has no surface yet.
         view.setVisibility(android.view.View.INVISIBLE);
         ViewGroup content = activity.findViewById(android.R.id.content);
-        content.addView(view, new ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
-        open.add(view);
-        // Added as the first window opens, after the activity's own, so it's asked first.
-        if (back == null) {
-            back = new OnBackPressedCallback(false) {
-                @Override public void handleOnBackPressed() {
-                    if (!open.isEmpty()) open.get(open.size() - 1).back();
-                }
-            };
-            activity.getOnBackPressedDispatcher().addCallback(activity, back);
+        ViewGroup.LayoutParams fill = new ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT);
+        if (root) {
+            NativeHost.root = view;
+            content.addView(view, open.isEmpty() ? content.getChildCount() : content.indexOfChild(open.get(0)), fill);
+            listen();
+            return view;
         }
+        view.setZOrderMediaOverlay(true);
+        content.addView(view, fill);
+        open.add(view);
+        listen();
         changed();
         return view;
+    }
+
+    /**
+     * Back goes to the newest window, else the root, from the first that opens: added after the activity's own, it's
+     * asked first. What it doesn't take (the root with nothing open over its page) goes on to the activity's.
+     */
+    private static void listen() {
+        if (back != null) return;
+        back = new OnBackPressedCallback(true) {
+            @Override public void handleOnBackPressed() {
+                NativeView to = open.isEmpty() ? root : open.get(open.size() - 1);
+                if (to != null && to.back()) return;
+                setEnabled(false);
+                activity.getOnBackPressedDispatcher().onBackPressed();
+                setEnabled(true);
+            }
+        };
+        activity.getOnBackPressedDispatcher().addCallback(activity, back);
     }
 
     /** Shows it, once Rust has let go of the windows: its surface comes as it's shown, which Rust draws on. */
@@ -74,14 +99,22 @@ public final class NativeHost {
         view.post(() -> view.setVisibility(android.view.View.VISIBLE));
     }
 
+    /** Hides it, as the root is while the page shows an app over it; `show` shows it again. */
+    static void hide(NativeView view) {
+        view.post(() -> view.setVisibility(android.view.View.INVISIBLE));
+    }
+
     static void close(NativeView view) {
         ViewGroup parent = (ViewGroup) view.getParent();
         if (parent != null) parent.removeView(view);
+        if (view == root) root = null;
         open.remove(view);
         changed();
     }
 
     static void activate(NativeView view) {
+        // The root stays under every other.
+        if (view == root) return;
         view.bringToFront();
         open.remove(view);
         open.add(view);
@@ -107,7 +140,7 @@ public final class NativeHost {
     }
 
     private static void changed() {
-        if (back != null) back.setEnabled(!open.isEmpty());
+        if (back != null) back.setEnabled(!open.isEmpty() || root != null);
         if (changed != null) changed.run();
     }
 
