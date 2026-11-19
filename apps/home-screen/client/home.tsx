@@ -14,14 +14,14 @@
 // whose snapshot is one signal here. It's written on the UI library's primitives, so a native host draws it as the DOM does.
 import { createEffect, createMemo, createSignal, Errored, For, Loading, onSettled, refresh, Show, untrack } from "solid-js"
 import { type WheelEventData, WheelGestures } from "wheel-gestures"
-import { Button, ScrollView, covers, createVelocityTracker, Empty, haptic, keydown, type Keyed, leave, link, type Pressed, Problem, type Rect, reducedMotion, render, safeArea, sizeChanged, Text, TextInput, View, viewport, visible, type Wheeled } from "ui"
+import { Button, ScrollView, covers, createVelocityTracker, haptic, keydown, link, type Pressed, Problem, type Rect, reducedMotion, render, safeArea, sizeChanged, View, viewport, visible, type Wheeled } from "ui"
 import { give, glide, jump, settle, spring, type Spring, stop, thrower } from "./pager.ts"
 import { ACROSS, at as gridAt, card as cardOf, cell as cellOf, GAP, group, INSET, launcherRoom, lefts, measure, PAGE, PILLS, SEARCH, SEARCH_HEIGHT, TOP_ROW } from "./layout.ts"
 import { type At, carries, type Drop, type Held, type Kind, nearest, pack, type Page, type Placed, shown, spans } from "./machine.ts"
-import { type Entrypoint, type Item, type Listed, type Widget as WidgetItem } from "./types.ts"
+import { type Entrypoint, type Widget as WidgetItem } from "./types.ts"
 import { looks } from "./looks.ts"
 import { home, state, seen, setSeen, setAlong, setRolled, editing, editingOwner, launcher, query, setQuery, chosenResult, setChosenResult, type Selected, selected, setSelected, room, setRoom, laidPage, kept, setKept, quietFor, finger, setLanding } from "./store.ts"
-import { type Owner, owners, badgeOf, findIn, type From, launch, draft, opens, press, opener, installedFor, keep } from "./owners.ts"
+import { type Owner, owners, findIn, type From, launch, draft, opens, press, opener, installedFor, keep } from "./owners.ts"
 import { Card, Count, Tile } from "./tiles.tsx"
 import { type Cell, HomePage } from "./pages.tsx"
 import { tween } from "./tween.ts"
@@ -31,6 +31,7 @@ import { Holding } from "./holding.tsx"
 import { Overview } from "./overview.tsx"
 import { Gallery, Asking, Refused, EditBar } from "./editing.tsx"
 import { OwnerPill, DotsPill } from "./pills.tsx"
+import { launcherKeys, LauncherSearch, Results, type Target } from "./launcher.tsx"
 
 /// How long the launcher, put away, stays where it was: Raycast's Pop to Root Search's default.
 const POP_TO_ROOT = 90_000
@@ -40,107 +41,6 @@ const CARD_TOP = SEARCH_HEIGHT + GAP
 
 // What's carried makes room where it rests this long, as an iPhone's does, not at every place it passes.
 const REST = 150
-
-/// The launcher's keys, wherever in it the keyboard is: with nothing typed, the arrow keys move the highlight over Home
-/// (`move`), Return opens what's highlighted, and Escape goes back from the App
-/// Library, then puts the launcher away; with something typed, the arrow keys choose among what's found, Return opens
-/// the one chosen, and Escape empties the search.
-const launcherKeys = (props: { move: (key: string) => boolean; open: () => void; toggleLibrary: () => void; library: () => boolean; found: () => number }) => (event: Keyed) => {
-  if (event.altKey || event.metaKey || event.ctrlKey) return
-  const typed = !!query().trim()
-  // What's open over it (a category, a held app's menu, the owners' list) has Escape and the arrows itself.
-  if (!state().matches("nothing")) return
-  if (event.key === "Enter") {
-    event.preventDefault()
-    props.open()
-  } else if (event.key === "Escape") {
-    // With something typed, the field empties itself.
-    if (query()) return
-    if (props.library()) props.toggleLibrary()
-    else void leave()
-  } else if (!typed) {
-    if (props.move(event.key)) event.preventDefault()
-  } else {
-    const by = ({ ArrowRight: 1, ArrowDown: 1, ArrowLeft: -1, ArrowUp: -1 } as Record<string, number>)[event.key]
-    if (!by) return
-    event.preventDefault()
-    setChosenResult((now) => Math.max(0, Math.min(props.found() - 1, now + by)))
-  }
-}
-
-/// The launcher's search, floating over its card: bare and large, with the keyboard as the launcher's summoned.
-function LauncherSearch() {
-  return (
-    <View style={looks.launcherSearch}>
-      <TextInput inputMode="search" enterKeyHint="search" placeholder="Search apps…" aria-label="Search apps" autoFocus value={query()} onChangeText={(text) => (setQuery(text), setChosenResult(0))} style={looks.bare} />
-    </View>
-  )
-}
-
-/// What the launcher's search found, in its card, as the Home Screen draws apps and widgets: under Apps, the widget of
-/// the app found first, where it has one, and beside it every app found, chosen for Return in turn; then, under
-/// Widgets, the other widgets whose name or app has what's typed. The pointer opens any of them.
-function Results(props: { owner: Owner; found: Listed[]; words: string }) {
-  const tile = 60
-  const lead = () => leadOf(props.owner, props.found)
-  const widgets = () => widgetsOf(props.owner, props.found, props.words)
-  const Heading = (inner: { children: string }) => <Text style={[looks.heading, looks.tall(HEADING)]}>{inner.children}</Text>
-  return (
-    <View style={looks.results}>
-      <Show when={props.found.length || widgets().length} fallback={<View style={looks.nothingFound}><Empty>No apps match.</Empty></View>}>
-        <Show when={props.found.length}>
-          <Heading>Apps</Heading>
-          <View style={looks.apps}>
-            <Show when={lead()}>
-              {(lead) => (
-                <View style={[looks.lead, looks.sized(2 * 76 + 8, 2 * 88 - 8)]}>
-                  <Card item={{ ...lead(), size: "2x2" }} owner={props.owner} />
-                </View>
-              )}
-            </Show>
-            <View style={looks.foundApps}>
-              <For each={props.found} keyed={(listed) => listed.entrypoint ?? listed.app}>
-                {(listed, at) => (
-                  <View onPointerMove={() => setChosenResult(at())} style={looks.result}>
-                    <Show when={chosenResult() === at()}>
-                      <View aria-hidden="true" style={looks.chosen} />
-                    </Show>
-                    <Tile name={listed().name} icon={listed().icon} size={tile} scale={1} badge={opens(listed()) ? badgeOf(opens(listed())!, props.owner) : undefined} onPress={(behind, from) => press(listed(), props.owner, behind, from)} />
-                  </View>
-                )}
-              </For>
-            </View>
-          </View>
-        </Show>
-        <Show when={widgets().length}>
-          <Heading>Widgets</Heading>
-          <View style={looks.widgets}>
-            <For each={widgets()} keyed={(one) => one.widget}>
-              {(one) => (
-                <View style={[looks.widgetCard, looks.sized(2 * 76 + 8, 2 * 88 - 8)]}>
-                  <Card item={{ ...one(), size: "2x2" }} owner={props.owner} />
-                </View>
-              )}
-            </For>
-          </View>
-        </Show>
-      </Show>
-    </View>
-  )
-}
-
-/// The widget of the app a search found first, where it has one, which leads what it found; and the other widgets whose
-/// name or app has what's typed.
-const leadOf = (owner: Owner | undefined, found: Listed[]) => owner?.widgets.find((one) => one.opens?.app === found[0]?.app && one.sizes.includes("2x2"))
-const widgetsOf = (owner: Owner | undefined, found: Listed[], words: string) => {
-  const typed = words.trim().toLowerCase()
-  const lead = leadOf(owner, found)
-  return (owner?.widgets ?? []).filter((one) => one !== lead && `${one.name} ${one.opens?.name ?? ""}`.toLowerCase().includes(typed))
-}
-const HEADING = 20
-
-/// What the launcher's Return opens: an app it found, or what's chosen on Home, with where it is on Home, if it's there.
-type Target = { item?: Item; listed?: Listed; place?: { page: number; index: number } }
 
 /// What's shown while `when` gives it, kept as it was for `ms` after, as it goes: what to show, and whether it's going.
 function lingering<T>(when: () => T | false | undefined | null, ms: number): [() => T | undefined, () => boolean] {
