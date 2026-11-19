@@ -37,6 +37,15 @@ use ios::{Display, Handle, NativeWindow, appearance, clipboard, reduced_motion};
 /// A window, as the windows' thread names it.
 pub type WindowId = u64;
 
+/// Why the windows couldn't start, where they couldn't: a phone makes them as its first job comes, a job that's
+/// dropped then, so whoever sent it hears why here.
+static UNSTARTED: std::sync::Mutex<Option<String>> = std::sync::Mutex::new(None);
+
+/// Why the windows couldn't start, if they couldn't.
+pub fn unstarted() -> Option<String> {
+    UNSTARTED.lock().unwrap_or_else(std::sync::PoisonError::into_inner).clone()
+}
+
 /// A job for the windows' thread.
 pub type Job = Box<dyn FnOnce(&mut Windows) + Send>;
 
@@ -230,10 +239,16 @@ const FRAME: std::time::Duration = std::time::Duration::from_micros(16_667);
 
 impl Windows {
     fn new(display: Display) -> anyhow::Result<Windows> {
-        let context = Context::new()?;
-        let atlas = Arc::new(Atlas::new(&context));
-        let text = TextSystem::new(crate::FONT, crate::fonts()?, true);
-        Ok(Windows { display, context, atlas, text, windows: HashMap::new(), next: 1, framed: std::time::Instant::now() })
+        let made = (|| {
+            let context = Context::new()?;
+            let atlas = Arc::new(Atlas::new(&context));
+            let text = TextSystem::new(crate::FONT, crate::fonts()?, true);
+            Ok(Windows { display, context, atlas, text, windows: HashMap::new(), next: 1, framed: std::time::Instant::now() })
+        })();
+        if let Err(error) = &made {
+            *UNSTARTED.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = Some(format!("{error:#}"));
+        }
+        made
     }
 
     /// Opens a window showing `screen`, which tells `on_event` what happens to it. It's shown once its app's JS

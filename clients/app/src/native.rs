@@ -52,7 +52,13 @@ pub(crate) async fn open(entrypoint: &str, subject: Option<&str>, link: &str) ->
     match window(started, entrypoint, subject, link, Kind::App).await {
         Ok(opened) => opened,
         Err(error) => {
+            // It opens in a web view, and Telemetry hears why.
             eprintln!("{entrypoint} opens in a web view: {error:#}");
+            if let Ok(views) = crate::views() {
+                let app = entrypoint.split('/').next().unwrap_or_default();
+                let took = started.elapsed().as_millis() as u64;
+                views.client.report(json!({"name": "one.client.native.open", "took": took, "error": format!("{error:#}"), "attributes": {"one.view": app}}));
+            }
             false
         }
     }
@@ -188,6 +194,9 @@ async fn window(started: Instant, entrypoint: &str, subject: Option<&str>, link:
     let fragment = link.split_once('#').map(|(_, fragment)| fragment.to_owned());
     let state = State { chosen: chosen.clone(), trusted, entrypoint: entrypoint.to_owned(), view, next: 0, launcher, framed: false, fragment };
     let (entrypoint, subject, link) = (entrypoint.to_owned(), subject.map(str::to_owned), link.to_owned());
+    // Whether it opened, as the windows' thread says: a job that's dropped, as a phone's is where its windows
+    // couldn't start, says why there.
+    let (opened_to, opened) = tokio::sync::oneshot::channel::<Result<(), String>>();
     native.run(move |windows| {
         let (size, panel) = match launcher {
             true => ((computer::SIZE.width as f32, computer::SIZE.height as f32), Some(computer::CORNER)),
@@ -290,17 +299,18 @@ async fn window(started: Instant, entrypoint: &str, subject: Option<&str>, link:
             }
             Err(error) => Err(error),
         };
-        match opened {
-            Ok(id) => drop(window.set(id)),
-            Err(error) => eprintln!("{entrypoint}'s window didn't open: {error:#}"),
-        }
+        let _ = opened_to.send(opened.map(|id| { let _ = window.set(id); }).map_err(|error| format!("{error:#}")));
         if let Kind::Launcher(told) = &mut kind
             && let Some(told) = told.take()
         {
             let _ = told.send(window.get().copied());
         }
     });
-    Ok(true)
+    match opened.await {
+        Ok(Ok(())) => Ok(true),
+        Ok(Err(why)) => anyhow::bail!("its window didn't open: {why}"),
+        Err(_) => anyhow::bail!("its device's native windows didn't start: {}", renderer::platform::unstarted().unwrap_or_else(|| "it didn't say why".into())),
+    }
 }
 
 /// Loads the design tokens and styles, which come with the UI library, as its pages' do, and a page's app's styles.
