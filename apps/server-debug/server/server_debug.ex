@@ -20,7 +20,7 @@ defmodule ServerDebug do
   def icon, do: "icon.svg"
 
   @impl true
-  def requires, do: %{"core" => ">= 0.22.18"}
+  def requires, do: %{"core" => ">= 0.29.60"}
 
   @impl true
   def tools do
@@ -210,7 +210,7 @@ defmodule ServerDebug do
   # The server to look on: the one asked for, or else this one if it runs the app, or else one that does. Another
   # runs this call instead, and it ends here with its answer.
   defp on!(call, inputs, %{name: name, at: at, version: version}) do
-    servers = if version.trusted, do: Servers.running(at), else: Servers.acting(at)
+    servers = if version.trusted, do: Apps.servers(at), else: Servers.acting(at)
 
     case inputs["server"] do
       nil ->
