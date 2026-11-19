@@ -98,7 +98,7 @@ tao = { version = "0.37", optional = true }
 # Opens a web address in the device's own browser, where a passkey works.
 open = { version = "5", optional = true }
 # Where a computer keeps a user's data and apps (`shortcuts`).
-dirs = { version = "6", optional = true }
+dirs = { version = "7", optional = true }
 # The launcher's shortcut, ⌥Space on a Mac (`computer::shortcut`).
 global-hotkey = { version = "0.7", optional = true }
 # Hears the app's own program replaced by a newer build, as its device's server or `one update` does (`updater`).

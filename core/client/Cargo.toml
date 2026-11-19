@@ -8,7 +8,7 @@ license.workspace = true
 [dependencies]
 anyhow.workspace = true
 data-encoding = "2"
-dirs = "6"
+dirs = "7"
 futures-util = { version = "0.3", default-features = false, features = ["alloc"] }
 # What this device is called, which its person is shown before they let it in.
 gethostname = "1"

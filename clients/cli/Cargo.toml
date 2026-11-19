@@ -9,7 +9,7 @@ license.workspace = true
 anyhow.workspace = true
 client = { path = "../../core/client" }
 data-encoding = "2"
-dirs = "6"
+dirs = "7"
 # Each build's signature, by the platform's key (`serving`).
 ed25519-dalek = "3"
 flate2 = "1"
