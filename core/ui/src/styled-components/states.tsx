@@ -1,14 +1,14 @@
-// An empty screen, what's coming, a problem, something under way and something starting: written once in strict, on
-// the primitives (#primitives), the same on the DOM and on a native host.
+// An empty screen, what's coming, a problem, something under way and something starting: written once on the
+// drawing primitives (#primitives), the same on the DOM and on a native host.
 import { createSignal, Show, useContext } from "solid-js"
 import type { JSX } from "@solidjs/web"
 import { Box, Scroll, Text } from "#primitives"
 import { copy } from "#bridge"
 import { Button, Icon, Spinner } from "./button.tsx"
 import { Middle } from "./screen.tsx"
-import { messages, readable, whole } from "./words.ts"
-import { styles } from "./styles.ts"
-import { tokens } from "./tokens.ts"
+import { messages, readable, whole } from "../words.ts"
+import { styles } from "../styles.ts"
+import { tokens } from "../tokens.ts"
 
 const look = styles({
   state: { gap: tokens.grid[4], maxWidth: tokens.length.readable, alignItems: "flex-start", font: tokens.type.medium },

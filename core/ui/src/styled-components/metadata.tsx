@@ -1,12 +1,12 @@
-// What something is, as label and value rows, as Raycast's Detail.Metadata: written once in strict, on the
+// What something is, as label and value rows, as Raycast's Detail.Metadata: written once on the drawing
 // primitives, the same on the DOM and on a native host.
 import { children, For, Show } from "solid-js"
 import type { JSX } from "@solidjs/web"
 import { Box, Text } from "#primitives"
 import { touch } from "#bridge"
 import { List, Row } from "./list.tsx"
-import { negative, styles } from "./styles.ts"
-import { tokens } from "./tokens.ts"
+import { negative, styles } from "../styles.ts"
+import { tokens } from "../tokens.ts"
 
 const look = styles({
   // On a computer, Raycast's: small rows on the window, every other one faintly striped, the label grey on the left

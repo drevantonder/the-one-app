@@ -36,8 +36,9 @@ await build({
   },
 })
 
-// The UI library a native host loads in their place (src/strict/native), as /ui/client/native/web.js, Solid's
-// universal renderer telling the host its mutations, and ui.js, the strict UI library drawn with it. A strict page's
+// The UI library a native host loads in their place (src/index.native.tsx and the `.native` files), as
+// /ui/client/native/web.js, Solid's universal renderer telling the host its mutations, and ui.js, the UI library drawn
+// with it. A page's
 // own bundle is the one built for the DOM: what it imports of web.js (`createComponent`, `memo`) both have.
 await build({
   configFile: false,
@@ -45,13 +46,13 @@ await build({
   base: "./",
   logLevel: "warn",
   plugins: [stylesPlugin(made), solid()],
-  resolve: { alias: { "@solidjs/web": here("src/strict/native/renderer.ts"), "#primitives": here("src/strict/native/primitives.tsx"), "#bridge": here("src/strict/native/bridge.ts") } },
+  resolve: { alias: { "@solidjs/web": here("src/drawing-primitives/renderer.native.ts"), "#primitives": here("src/drawing-primitives/primitives.native.tsx"), "#bridge": here("src/bridge.native.ts") } },
   build: {
     outDir: "dist/client/native",
     emptyOutDir: false,
     sourcemap: true,
     rolldownOptions: {
-      input: { web: here("src/strict/native/renderer.ts"), ui: here("src/strict/native/index.tsx") },
+      input: { web: here("src/drawing-primitives/renderer.native.ts"), ui: here("src/index.native.tsx") },
       // Both are the DOM build's, so the host runs one Solid and one reactive runtime, whose proxies the universal
       // renderer's views recognise.
       external: ["solid-js", "solid-js/internal"],
@@ -93,11 +94,11 @@ ${skill().join("\n")}`)
 
 // The UI library's types, for an app written in TypeScript: declarations only, unchecked (`bun run typecheck` checks).
 await $`${here("node_modules/.bin/tsc")} -p . --noEmit false --declaration --emitDeclarationOnly --noCheck --rewriteRelativeImportExtensions --rootDir src --outDir dist/types`.cwd(here("."))
-// And the UI library as a strict app's tsconfig names it (tsconfig.strict.json), which is declarations already.
-cpSync(here("src/strict/types"), here("dist/types/strict/types"), { recursive: true })
+// And the UI library as an app's page's tsconfig names it (tsconfig.strict.json), which is declarations already.
+cpSync(here("src/types"), here("dist/types/types"), { recursive: true })
 
-for (const file of ["app.js", "lint-strict.js", "tables.ts", "package.json", "bun.lock", "tsconfig.json", "tsconfig.strict.json", "src/tokens.ts", "src/styles.ts", "src/strict/renderer.ts"]) cpSync(here(file), here(`dist/build/${file}`))
-cpSync(here("src/strict/types"), here("dist/build/src/strict/types"), { recursive: true })
+for (const file of ["app.js", "lint-strict.js", "tables.ts", "package.json", "bun.lock", "tsconfig.json", "tsconfig.strict.json", "src/tokens.ts", "src/styles.ts", "src/drawing-primitives/renderer.ts"]) cpSync(here(file), here(`dist/build/${file}`))
+cpSync(here("src/types"), here("dist/build/src/types"), { recursive: true })
 
 // Solid's own skills, unchanged, and the cheatsheet its primer points to, beside it.
 cpSync(here("node_modules/solid-js/skills"), here("dist/skills"), { recursive: true })

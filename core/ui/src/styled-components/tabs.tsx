@@ -1,12 +1,12 @@
-// Tabs: a few views of one thing, one showing at a time, chosen in a segmented control. Written once in strict, on the
+// Tabs: a few views of one thing, one showing at a time, chosen in a segmented control. Written once on the drawing
 // primitives, the same on the DOM and on a native host.
 import { createContext, createSignal, onCleanup, Show, useContext } from "solid-js"
 import type { JSX } from "@solidjs/web"
 import { Box, Text } from "#primitives"
 import { direction } from "#bridge"
-import type { Keyed, Laid } from "./strict/types/ui.d.ts"
-import { styles } from "./styles.ts"
-import { tokens } from "./tokens.ts"
+import type { Keyed, Laid } from "../types/ui.d.ts"
+import { styles } from "../styles.ts"
+import { tokens } from "../tokens.ts"
 
 const look = styles({
   root: { gap: tokens.length.gutter, minWidth: 0 },

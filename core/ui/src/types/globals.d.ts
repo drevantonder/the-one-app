@@ -1,4 +1,4 @@
-// What a strict app's JS has beyond the language itself: what its sandbox, QuickJS on a native host
+// What an app's page's JS has beyond the language itself: what its sandbox, QuickJS on a native host
 // (clients/app/strict/src/js.rs), and a browser both have. That's ES2024 with ECMA-402's Intl, but DisplayNames,
 // DurationFormat, supportedValuesOf, formatRange and selectRange, which a native host's ICU4X doesn't make and
 // TypeScript's lib still declares; and the Web APIs a Worker has, the WinterTC Minimum Common API's (web-apis.d.ts),

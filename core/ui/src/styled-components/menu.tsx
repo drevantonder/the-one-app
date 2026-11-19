@@ -1,15 +1,15 @@
-// A menu: a button that opens a few things to do, over the page under it. Written once in strict, on the primitives,
+// A menu: a button that opens a few things to do, over the page under it. Written once on the drawing primitives,
 // the same on the DOM and on a native host.
 import { children, createContext, createEffect, createSignal, onCleanup, Show, useContext } from "solid-js"
 import type { JSX } from "@solidjs/web"
 import { Box, Layer, Text } from "#primitives"
 import { direction, touch, viewport } from "#bridge"
 import { Button, Icon, type ButtonProps } from "./button.tsx"
-import { messages } from "./words.ts"
+import { messages } from "../words.ts"
 import { Collect, collected } from "./collect.ts"
-import { styles } from "./styles.ts"
-import { tokens } from "./tokens.ts"
-import type { Laid, Located } from "./strict/types/ui.d.ts"
+import { styles } from "../styles.ts"
+import { tokens } from "../tokens.ts"
+import type { Laid, Located } from "../types/ui.d.ts"
 
 /** Where something's drawn, as a menu opens under it. */
 const rectOf = (event: Laid): At => {

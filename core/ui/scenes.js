@@ -16,7 +16,7 @@
 //
 // Each scene is drawn on the DOM in headless Chromium, in a frame a stand-in client answers, and on a native host by
 // its headless harness (clients/app/strict's `screenshot` example), each as a picture and its semantic tree as text
-// (src/strict/outline.ts). It says, scene by scene, whether the trees are the same and how much of the pictures
+// (src/drawing-primitives/outline.ts). It says, scene by scene, whether the trees are the same and how much of the pictures
 // differs, and keeps them all in `--out` to look at. A native host that can't draw a page yet (an older runtime
 // version) gives nothing, which it says. It says too how quickly the native host drew each (the harness's
 // `--measure`): its first frame, a frame when nothing changes, as its first field is typed in and as its first list
@@ -26,7 +26,7 @@ import { dirname, join, resolve } from "node:path"
 import { chromium } from "playwright-core"
 import { PNG } from "pngjs"
 import pixelmatch from "pixelmatch"
-import { outline } from "./src/strict/outline.ts"
+import { outline } from "./src/drawing-primitives/outline.ts"
 
 const here = (path) => new URL(path, import.meta.url).pathname
 const root = here("../../")
@@ -44,7 +44,7 @@ const harness = join(root, `target/${flag("--release") ? "release" : "debug"}/ex
 // The runtime version the UI library needs, and the native host's: a host whose version is older draws nothing of a
 // page written for this one, so there's nothing yet to compare.
 const speaks = (file, pattern) => Number(readFileSync(join(root, file), "utf8").match(pattern)?.[1])
-const needed = speaks("core/ui/src/strict/renderer.ts", /export const RUNTIME_VERSION = (\d+)/)
+const needed = speaks("core/ui/src/drawing-primitives/renderer.ts", /export const RUNTIME_VERSION = (\d+)/)
 const hosted = speaks("clients/app/strict/src/lib.rs", /pub const RUNTIME_VERSION: u32 = (\d+)/)
 
 if (!existsSync(here("dist/build/app.js"))) throw new Error("Build the UI library first: `bun build.js` in core/ui")

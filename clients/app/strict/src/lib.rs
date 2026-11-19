@@ -1,4 +1,4 @@
-//! A strict app drawn natively on a computer (`core/ui/src/strict/renderer.ts`): its bundle's JS runs in a QuickJS
+//! A strict app drawn natively on a computer (`core/ui/src/drawing-primitives/renderer.ts`): its bundle's JS runs in a QuickJS
 //! sandbox of its own, on a thread of its own (`js`), the mutations it calls build a tree (`tree`), and the screen (`view`) lays that tree out with
 //! Taffy and paints it with the UI library's design tokens (`tokens`) as a scene our renderer draws (`render`, copied
 //! from GPUI's), with text laid out by Parley (`text`), sending what the person does back as events.
@@ -22,7 +22,7 @@ pub use style::{colour, load_styles};
 pub use view::inspected::Reply;
 pub use view::{Appearance, Asked, Breadcrumb, Cursor, FONT, MakeFrame, Notice, Panel, Screen, TitleRow, fonts};
 
-/// This host's runtime version (`RUNTIME_VERSION` in core/ui/src/strict/renderer.ts). An entrypoint that needs a
+/// This host's runtime version (`RUNTIME_VERSION` in core/ui/src/drawing-primitives/renderer.ts). An entrypoint that needs a
 /// later one opens in a web view.
 pub const RUNTIME_VERSION: u32 = 5;
 

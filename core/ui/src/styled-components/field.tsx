@@ -1,15 +1,15 @@
 // What's typed in or chosen: a field around it, a line or lines of text, a search, a checkbox, a switch and radios,
-// written once in strict, on the primitives (#primitives), the same on the DOM and on a native host.
+// written once on the drawing primitives (#primitives), the same on the DOM and on a native host.
 import { createContext, createSignal, For, omit, Show, useContext } from "solid-js"
 import type { JSX } from "@solidjs/web"
 import { Box, EditableText, Path, Text } from "#primitives"
 import { touch } from "#bridge"
-import type { EditableTextProps, Keyed } from "./strict/primitives.tsx"
+import type { EditableTextProps, Keyed } from "../drawing-primitives/primitives.tsx"
 import { Icon } from "./button.tsx"
 import { ListStyle } from "./list.tsx"
-import { messages } from "./words.ts"
-import { styles, type Styles } from "./styles.ts"
-import { tokens } from "./tokens.ts"
+import { messages } from "../words.ts"
+import { styles, type Styles } from "../styles.ts"
+import { tokens } from "../tokens.ts"
 
 const look = styles({
   field: { gap: tokens.grid[2], minWidth: 0, font: tokens.type.medium, color: tokens.colour.label },

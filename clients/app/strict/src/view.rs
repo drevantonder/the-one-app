@@ -105,7 +105,7 @@ pub fn fonts() -> anyhow::Result<Vec<Vec<u8>>> {
 
 /// How long after its shortcut summoned a panel, or after it was last pressed again, the shortcut's key is still its:
 /// longer than a key's repeat delay, so one held repeats into nothing.
-/// The roles of what the DOM draws as a button, which Tab reaches (core/ui's strict/primitives.tsx `pressed`).
+/// The roles of what the DOM draws as a button, which Tab reaches (core/ui's drawing-primitives/primitives.tsx `pressed`).
 const BUTTON_ROLES: [&str; 9] = ["button", "menuitem", "tab", "checkbox", "radio", "switch", "option", "link", "combobox"];
 
 const SHORTCUT_HELD: std::time::Duration = std::time::Duration::from_millis(600);
@@ -2066,7 +2066,7 @@ impl Painter<'_> {
         }
         let pressable = (node.listens("click") || node.kind == Kind::Input) && !node.is("disabled") && !node.is("aria-disabled");
         // Tab reaches what the DOM's does: an input, what's pressed as a button is (a role the DOM draws as a
-        // `<button>`, core/ui's strict/primitives.tsx `pressed`), and what says its `tabindex`.
+        // `<button>`, core/ui's drawing-primitives/primitives.tsx `pressed`), and what says its `tabindex`.
         let tabindex = node.prop("tabindex").and_then(|index| index.as_i64().or_else(|| index.as_str()?.parse().ok()));
         // A text is never a `<button>` on the DOM, whatever its role: it's reached only by its `tabindex`.
         let button = node.kind != Kind::Text && node.listens("click") && node.str("role").is_some_and(|role| BUTTON_ROLES.contains(&role));

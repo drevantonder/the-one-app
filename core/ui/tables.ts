@@ -1,11 +1,11 @@
 // What the UI library's build makes of its tokens (src/tokens.ts) for each target: the web's CSS variables
-// (src/tokens.css, written here, never by hand) and a native host's token table (strict/renderer.ts's `Tokens`).
+// (src/tokens.css, written here, never by hand) and a native host's token table (drawing-primitives/renderer.ts's `Tokens`).
 import { createHash } from "node:crypto"
 import { existsSync, readFileSync, statSync } from "node:fs"
 import { dirname, join } from "node:path"
 import { converter, parse } from "culori"
 import { parseAst, type Plugin } from "vite"
-import { conditions, RUNTIME_VERSION, type Condition, type Rgba, type State, type Style as Entry2, type Styles as Table, type Token as Entry, type Tokens } from "./src/strict/renderer.ts"
+import { conditions, RUNTIME_VERSION, type Condition, type Rgba, type State, type Style as Entry2, type Styles as Table, type Token as Entry, type Tokens } from "./src/drawing-primitives/renderer.ts"
 import { negative } from "./src/styles.ts"
 import { legacy, tokens, type Token } from "./src/tokens.ts"
 

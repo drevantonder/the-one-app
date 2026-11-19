@@ -4,8 +4,8 @@
 import { Errored } from "solid-js"
 import type { JSX } from "@solidjs/web"
 import { render as draw } from "#primitives"
-import { Button } from "./button.tsx"
-import { Problem } from "./states.tsx"
+import { Button } from "./styled-components/button.tsx"
+import { Problem } from "./styled-components/states.tsx"
 import { messages } from "./words.ts"
 
 /// `render(() => <App />)`: draws an app's first screen, where its page is: the page itself on the web, the app's

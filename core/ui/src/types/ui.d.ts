@@ -1,13 +1,13 @@
-// The UI library as a strict app sees it (`tsconfig.strict.json` names it `ui`): the strict primitives, the
-// components that are strict, and what an app asks for in passing, each with only the props a native host draws
+// The UI library as an app's page sees it (`tsconfig.strict.json` names it `ui`): the drawing primitives, the
+// components drawn with them, and what an app asks for in passing, each with only the props a native host draws
 // too. Nothing here is the DOM's. The UI library's own typecheck proves its components take these (../check.ts),
-// so a strict app runs unchanged on the DOM. A component an app needs that isn't here yet is added here, with only
+// so a page runs unchanged on the DOM. A component an app needs that isn't here yet is added here, with only
 // the props every host can draw, and the check says whether the DOM's takes them.
 import type { Element } from "solid-js"
 import type { ListCollection } from "@zag-js/collection"
-import type { Ice, Props, Rect, Version1Style } from "../renderer.ts"
-import type { Look, Styled, Styles } from "../../styles.ts"
-import type { tokens as Tokens } from "../../tokens.ts"
+import type { Ice, Props, Rect, Version1Style } from "../drawing-primitives/renderer.ts"
+import type { Look, Styled, Styles } from "../styles.ts"
+import type { tokens as Tokens } from "../tokens.ts"
 
 export type { Element, Ice, Look, Rect, Styled, Styles }
 
@@ -15,7 +15,7 @@ export type { Element, Ice, Look, Rect, Styled, Styles }
 export type Style = Styles | Version1Style
 
 // Styles and tokens (../../styles.ts, ../../tokens.ts).
-export { createTheme, defineVars, styles, negative } from "../../styles.ts"
+export { createTheme, defineVars, styles, negative } from "../styles.ts"
 export declare const tokens: typeof Tokens
 
 /** What a node says it is, and its states, as ARIA has them. */

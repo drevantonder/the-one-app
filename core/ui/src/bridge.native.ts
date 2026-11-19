@@ -2,11 +2,11 @@
 // through the host, and what the client says of where the page is shown. The UI library's components import it as
 // `#bridge`, which is this in the native build and the DOM's in the DOM's.
 import { createSignal } from "solid-js"
-import { event } from "./renderer.ts"
-import type { Host, Sandbox } from "../calls.ts"
-import type { Event, Events } from "../renderer.ts"
-import type * as Strict from "../types/ui.d.ts"
-import { readable } from "../../words.ts"
+import { event } from "./drawing-primitives/renderer.native.ts"
+import type { Host, Sandbox } from "./calls.ts"
+import type { Event, Events } from "./drawing-primitives/renderer.ts"
+import type * as Page from "./types/ui.d.ts"
+import { readable } from "./words.ts"
 // The bridge, as the DOM's (../../bridge.ts): the JSON-RPC a page and its client say to each other, through the host.
 
 const host = (globalThis as { host?: Host }).host
@@ -14,7 +14,7 @@ const waiting = new Map<number, (response: { result?: unknown; error?: { message
 const listeners = new Set<() => void>()
 let requests = 0
 /** What listens for each key pressed (`keydown`). */
-const keys = new Set<(event: Strict.Keyed) => void>()
+const keys = new Set<(event: Page.Keyed) => void>()
 
 ;(globalThis as { ui?: Sandbox & Events }).ui = {
   // A key pressed where the keyboard is goes to what has it, then to what listens for every key (`keydown`).
@@ -47,15 +47,15 @@ function ask<T>(method: string, params: object): Promise<T> {
  * motion. */
 /** Whether the window names the app above it, which a first screen's title gives way to (the Screen's). */
 export const [breadcrumb, setBreadcrumb] = createSignal(false)
-const [connected, setConnected] = createSignal<ReturnType<typeof Strict.connection>>("online")
+const [connected, setConnected] = createSignal<ReturnType<typeof Page.connection>>("online")
 const [insets, setInsets] = createSignal({ top: 0, right: 0, bottom: 0, left: 0 })
 const [size, setSize] = createSignal({ width: 0, height: 0 })
 const [still, setStill] = createSignal(false)
 const [shown, setShown] = createSignal(true)
 interface Context {
   breadcrumb?: boolean
-  connection?: ReturnType<typeof Strict.connection>
-  safeAreaInsets?: ReturnType<typeof Strict.safeArea>
+  connection?: ReturnType<typeof Page.connection>
+  safeAreaInsets?: ReturnType<typeof Page.safeArea>
   containerDimensions?: { width: number; height: number }
   reducedMotion?: boolean
   /** The link the page was opened to: what follows `#` in a page's address on the DOM (`link()`). */
@@ -84,7 +84,7 @@ const greeted = ask<{ hostContext?: object }>("ui/initialize", { protocolVersion
   host?.post({ jsonrpc: "2.0", method: "ui/notifications/initialized", params: {} })
 })
 
-export const call: typeof Strict.call = async (tool, inputs = {}, { subject } = {}) => {
+export const call: typeof Page.call = async (tool, inputs = {}, { subject } = {}) => {
   await greeted
   const { content, isError } = await ask<{ content: { text?: string }[]; isError?: boolean }>("tools/call", { name: tool, arguments: inputs, ...(subject ? { _meta: { subject } } : {}) })
   const text = content.map(({ text }) => text ?? "").join("\n")
@@ -92,35 +92,35 @@ export const call: typeof Strict.call = async (tool, inputs = {}, { subject } = 
   return text
 }
 
-export const client = (async (change: Strict.ClientChange = {}) => {
+export const client = (async (change: Page.ClientChange = {}) => {
   await greeted
   return ask("one/client", change)
-}) as typeof Strict.client
-export const safeArea: typeof Strict.safeArea = () => insets()
-export const viewport: typeof Strict.viewport = () => size()
+}) as typeof Page.client
+export const safeArea: typeof Page.safeArea = () => insets()
+export const viewport: typeof Page.viewport = () => size()
 /** A native host says nothing yet of which way a page's words run, so they run left to right. */
-export const direction: typeof Strict.direction = () => "ltr"
+export const direction: typeof Page.direction = () => "ltr"
 /** Whether a finger points at it, as its host says (`deviceCapabilities.touch`): a phone's does, a computer's doesn't. */
 export const touch = () => fingered()
-export const reducedMotion: typeof Strict.reducedMotion = () => still()
+export const reducedMotion: typeof Page.reducedMotion = () => still()
 /** Whether the page is on screen, as its host says (`hostContext.visible`), as the DOM's `visibilityState` says it. */
-export const visible: typeof Strict.visible = () => shown()
-export const sizeChanged: typeof Strict.sizeChanged = async (size) => (await greeted, host?.post({ jsonrpc: "2.0", method: "ui/notifications/size-changed", params: size }))
-export const pinShortcut: typeof Strict.pinShortcut = async (entrypoint) => (await greeted, ask("one/pin-shortcut", { entrypoint }))
-export const open: typeof Strict.open = async (app, { subject, behind, from } = {}) => (await greeted, ask("ui/open-link", /^https?:/.test(app) ? { url: app } : { url: `one:${app}`, subject, behind, from }))
+export const visible: typeof Page.visible = () => shown()
+export const sizeChanged: typeof Page.sizeChanged = async (size) => (await greeted, host?.post({ jsonrpc: "2.0", method: "ui/notifications/size-changed", params: size }))
+export const pinShortcut: typeof Page.pinShortcut = async (entrypoint) => (await greeted, ask("one/pin-shortcut", { entrypoint }))
+export const open: typeof Page.open = async (app, { subject, behind, from } = {}) => (await greeted, ask("ui/open-link", /^https?:/.test(app) ? { url: app } : { url: `one:${app}`, subject, behind, from }))
 
-export const changed: typeof Strict.changed = (listener) => {
+export const changed: typeof Page.changed = (listener) => {
   listeners.add(listener)
   return () => void listeners.delete(listener)
 }
-export const covers: typeof Strict.covers = () => () => {}
-export const connection: typeof Strict.connection = () => connected()
+export const covers: typeof Page.covers = () => () => {}
+export const connection: typeof Page.connection = () => connected()
 /** Opening something is a step back closes, as the device's back closes what covers the page. */
 export const step = covers
 /** A native host draws no move between screens yet: the change is made at once. */
-export const go: typeof Strict.go = (change) => change()
+export const go: typeof Page.go = (change) => change()
 
-export const keydown: typeof Strict.keydown = (listener) => {
+export const keydown: typeof Page.keydown = (listener) => {
   keys.add(listener)
   return () => void keys.delete(listener)
 }
@@ -134,19 +134,19 @@ export function back(): void {
 export const copy = async (text: string): Promise<void> => (await greeted, void (await ask("one/copy", { text })))
 
 /** Hands text to the device's share sheet, or copies it where there's none, as its client does (`one/share`). */
-export const share: typeof Strict.share = async (text) => (await greeted, (await ask<{ done: "shared" | "copied" | null }>("one/share", { text })).done ?? undefined)
+export const share: typeof Page.share = async (text) => (await greeted, (await ask<{ done: "shared" | "copied" | null }>("one/share", { text })).done ?? undefined)
 
 /** Plays a haptic, as the DOM's does (`one/haptic`): a client without them says so, which is all there is to it. */
-export const haptic: typeof Strict.haptic = (kind) => void greeted.then(() => ask("one/haptic", { kind })).catch(() => {})
+export const haptic: typeof Page.haptic = (kind) => void greeted.then(() => ask("one/haptic", { kind })).catch(() => {})
 
 /** Tells the client the person is done with the app, as the DOM's does: MCP Apps' `request-teardown`. */
-export const leave: typeof Strict.leave = async () => (await greeted, host?.post({ jsonrpc: "2.0", method: "ui/notifications/request-teardown", params: {} }))
+export const leave: typeof Page.leave = async () => (await greeted, host?.post({ jsonrpc: "2.0", method: "ui/notifications/request-teardown", params: {} }))
 
 /** Has the client show its person their recovery key, or ask them for it, as the DOM's does (`one/recovery-key`). */
-export const showRecoveryKey: typeof Strict.showRecoveryKey = async ({ subject } = {}) => (await greeted, (await ask<{ done: boolean }>("one/recovery-key", { subject })).done)
-export const useRecoveryKey: typeof Strict.useRecoveryKey = async ({ subject } = {}) => (await greeted, (await ask<{ done: boolean }>("one/recovery-key", { typed: true, subject })).done)
+export const showRecoveryKey: typeof Page.showRecoveryKey = async ({ subject } = {}) => (await greeted, (await ask<{ done: boolean }>("one/recovery-key", { subject })).done)
+export const useRecoveryKey: typeof Page.useRecoveryKey = async ({ subject } = {}) => (await greeted, (await ask<{ done: boolean }>("one/recovery-key", { typed: true, subject })).done)
 
 /** What another app's client exports, from where the DOM's finds it: beside this app's page, under the client's root. */
-export const component: typeof Strict.component = (app, name) => import(/* @vite-ignore */ `/${app}/client/${name}.js`)
+export const component: typeof Page.component = (app, name) => import(/* @vite-ignore */ `/${app}/client/${name}.js`)
 /** The link the page was opened to, as its host says (`hostContext.link`), as it comes. */
-export const link: typeof Strict.link = () => opened()
+export const link: typeof Page.link = () => opened()

@@ -1,16 +1,16 @@
 // What's over the page, as a system's own: a sheet, up from the foot of a narrow window and in the middle of a wide
-// one, and an alert, a question that stops everything until it's answered. Written once in strict, on the
+// one, and an alert, a question that stops everything until it's answered. Written once on the drawing
 // primitives, the same on the DOM and on a native host: each a modal layer (#primitives' `Layer`) over the window.
 import { children, createEffect, createRoot, createSignal, onCleanup, Show } from "solid-js"
 import type { JSX } from "@solidjs/web"
 import { Box, Layer, Scroll, Text } from "#primitives"
 import { covers, touch, viewport } from "#bridge"
 import { Button, Icon } from "./button.tsx"
-import { messages } from "./words.ts"
+import { messages } from "../words.ts"
 import { Collect } from "./collect.ts"
-import { negative, styles } from "./styles.ts"
-import { duration, tokens } from "./tokens.ts"
-import type { Pressed } from "./strict/types/ui.d.ts"
+import { negative, styles } from "../styles.ts"
+import { duration, tokens } from "../tokens.ts"
+import type { Pressed } from "../types/ui.d.ts"
 
 /** How long what's over the page takes to go, in milliseconds: the travel pace's (tokens.ts). */
 const going = duration(tokens.motion.travel)

@@ -1,5 +1,5 @@
 //! An app's window drawn natively, where its entrypoint's page is in strict mode and needs a runtime version this
-//! program has (`runtimeVersion`, core/ui/src/strict/renderer.ts's `RUNTIME_VERSION`, `strict::RUNTIME_VERSION`):
+//! program has (`runtimeVersion`, core/ui/src/drawing-primitives/renderer.ts's `RUNTIME_VERSION`, `strict::RUNTIME_VERSION`):
 //! this process, the One App's, draws it on its strict thread (`strict::platform`) beside every other strict app's window, so another open
 //! app costs a few MB, and its JS runs in a QuickJS sandbox of its own, on a thread of its own. Any other app's window is a web view in a
 //! process of its own, as before (`host`), and so is a strict one that needs a later runtime version.
@@ -80,7 +80,7 @@ fn module_script(html: &str) -> Option<String> {
 }
 
 /// What a strict page is drawn with: the module it loads, whether its app is trusted, and the tables its styles
-/// come from: the UI library's tokens and styles and its app's styles (`Tokens` and `Styles` in core/ui/src/strict/renderer.ts).
+/// come from: the UI library's tokens and styles and its app's styles (`Tokens` and `Styles` in core/ui/src/drawing-primitives/renderer.ts).
 struct Page {
     /// Its page's address, which what it names by a relative address is from, and the module it loads.
     page: Url,

@@ -208,7 +208,7 @@ pub fn type_style(font: &str, conditions: Conditions) -> TypeStyle {
     TypeStyle { size, weight, tracking, line_height, tabular }
 }
 
-// The token table (`Tokens` in core/ui/src/strict/renderer.ts), which comes with the UI library as
+// The token table (`Tokens` in core/ui/src/drawing-primitives/renderer.ts), which comes with the UI library as
 // /ui/client/tokens.json. A host knows each kind of token and the conditions a value varies by, never a token's name.
 
 /// What a token's value may depend on, as the window is now, in the order they win.

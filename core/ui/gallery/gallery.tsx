@@ -1,4 +1,4 @@
-// Every component of the UI library in each of its states, as scenes (`<family>.scenes.tsx`): one strict page that
+// Every component of the UI library in each of its states, as scenes (`<family>.scenes.tsx`): one page that
 // draws them all, under their families, or the one its link names (`#Buttons/Variants`), alone, as the scenes'
 // runner (core/ui/scenes.js) draws each to compare the DOM's with a native host's; `#scenes` lists them for it.
 // Nothing here calls a tool.

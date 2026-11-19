@@ -1,10 +1,10 @@
 // The design tokens: every colour, length, radius, shadow, material, font, weight, type style and pace the UI library
 // and every app draw with, as typed values, each the same everywhere or varying by condition (dark, touch, phone,
-// reduced motion: strict/renderer.ts's `Condition`). This is their one source. `tokens` are by role, as Raycast's
+// reduced motion: drawing-primitives/renderer.ts's `Condition`). This is their one source. `tokens` are by role, as Raycast's
 // model has them (text at 100, 60, 40, 20 and 10%, a background, a selection, a loader, seven accents each with a
-// tint, a 4px grid, three radii, a window's shadow and edge, three sizes of text and a large title), and strict code
+// tint, a 4px grid, three radii, a window's shadow and edge, three sizes of text and a large title), and a page's code
 // names only those, so their values change here alone. `legacy` are what the UI library's components drawn with CSS
-// name, until each is written in strict. The UI library's build makes from it the web's
+// name, until each is written on the drawing primitives. The UI library's build makes from it the web's
 // CSS variables (tokens.css, which isn't edited by hand) and a native host's token table (/ui/client/tokens.json), and
 // a style names a token here by reference (`tokens.colour.mutedForeground`), never by its value.
 //
@@ -16,7 +16,7 @@
 //   pyftsubset allo.ttf --layout-features='*' --flavor=woff2 --output-file=Allo-Variable.woff2 --unicodes=U+0000-00FF,
 //     U+0131,U+0152-0153,U+02BB-02BC,U+02C6,U+02DA,U+02DC,U+0304,U+0308,U+0329,U+2000-206F,U+20AC,U+2122,U+2191,
 //     U+2193,U+2212,U+2215,U+FEFF,U+FFFD
-import type { Condition, Length, Varies } from "./strict/renderer.ts"
+import type { Condition, Length, Varies } from "./drawing-primitives/renderer.ts"
 
 /** A token of a kind, whose `value` a style never reads: it names the token, and the build resolves it. */
 export interface Token<Kind extends string = string> {
@@ -258,7 +258,7 @@ const weightRoles = {
   semibold: weights.title,
 }
 
-/** What the UI library's components drawn with CSS name, as their CSS variables, until each is written in strict. */
+/** What the UI library's components drawn with CSS name, as their CSS variables, until each is written on the drawing primitives. */
 export const legacy = {
   colour: named(colours, (key) => key),
   length: named(lengths, (key) => key),

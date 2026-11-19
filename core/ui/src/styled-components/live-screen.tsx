@@ -1,4 +1,4 @@
-// A screen as it is now, as a remote desktop app shows one: written once in strict, on the primitives (#primitives),
+// A screen as it is now, as a remote desktop app shows one: written once on the drawing primitives (#primitives),
 // the same on the DOM and on a native host. Its live video is the `Video` primitive, which a host draws, and its
 // pictures, where video can't connect, are an `Image` the page draws itself.
 import { createSignal, onCleanup, Show } from "solid-js"
@@ -8,12 +8,12 @@ import { Box, EditableText, Image, Layer, Text, Video } from "#primitives"
 import { client, safeArea, touch, viewport, visible } from "#bridge"
 import { BarEnd, Button, Icon } from "./button.tsx"
 import { Problem, Status } from "./states.tsx"
-import { fullScreen, mods, named } from "./strict/input.ts"
-import type { Ice } from "./strict/renderer.ts"
-import type { Keyed, Laid, Located, Pressed, Wheeled } from "./strict/types/ui.d.ts"
-import { messages } from "./words.ts"
-import { styles } from "./styles.ts"
-import { tokens } from "./tokens.ts"
+import { fullScreen, mods, named } from "../drawing-primitives/input.ts"
+import type { Ice } from "../drawing-primitives/renderer.ts"
+import type { Keyed, Laid, Located, Pressed, Wheeled } from "../types/ui.d.ts"
+import { messages } from "../words.ts"
+import { styles } from "../styles.ts"
+import { tokens } from "../tokens.ts"
 
 // The sizes a screen is resized to: no narrower than Chrome draws its window (500), and no bigger than Computer Use's
 // screens take.

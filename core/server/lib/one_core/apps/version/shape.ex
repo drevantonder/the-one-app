@@ -46,7 +46,7 @@ defmodule OneCore.Apps.Version.Shape do
         "runtime_version" => %{
           "type" => "integer",
           "minimum" => 1,
-          "description" => "the runtime version its strict page needs of a native host (core/ui/src/strict/renderer.ts)"
+          "description" => "the runtime version its strict page needs of a native host (core/ui/src/drawing-primitives/renderer.ts)"
         }
       }
     },

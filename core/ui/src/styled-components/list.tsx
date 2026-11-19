@@ -1,4 +1,4 @@
-// A list and its rows: written once in strict, on the primitives, the same on the DOM and on a native host.
+// A list and its rows: written once on the drawing primitives, the same on the DOM and on a native host.
 import { children, createContext, createEffect, createMemo, createSignal, flush, For, onCleanup, Show, useContext } from "solid-js"
 import type { JSX } from "@solidjs/web"
 import { Box, Text } from "#primitives"
@@ -6,11 +6,11 @@ import { direction, reducedMotion, touch, viewport } from "#bridge"
 import { Icon } from "./button.tsx"
 import { RowMenu, type RowMenu as Menu } from "./menu.tsx"
 import { Choose } from "./collect.ts"
-import { messages } from "./words.ts"
+import { messages } from "../words.ts"
 import type { Action } from "./actions.tsx"
-import { negative, styles } from "./styles.ts"
-import { duration, tokens } from "./tokens.ts"
-import type { Keyed, Located, Pressed } from "./strict/types/ui.d.ts"
+import { negative, styles } from "../styles.ts"
+import { duration, tokens } from "../tokens.ts"
+import type { Keyed, Located, Pressed } from "../types/ui.d.ts"
 
 const look = styles({
   list: {

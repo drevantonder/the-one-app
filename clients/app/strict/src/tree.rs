@@ -1,4 +1,4 @@
-//! The tree an app's mutations build (`Mutations` in core/ui/src/strict/renderer.ts), as React Native's mounting
+//! The tree an app's mutations build (`Mutations` in core/ui/src/drawing-primitives/renderer.ts), as React Native's mounting
 //! layer applies Fabric's, which the window draws and which is its semantic tree: each node's role, name, value,
 //! states and actions.
 
@@ -50,7 +50,7 @@ pub enum Length {
     Word(String),
 }
 
-/// Version 1's strict style subset (`Version1Style` in core/ui/src/strict/renderer.ts).
+/// Version 1's strict style subset (`Version1Style` in core/ui/src/drawing-primitives/renderer.ts).
 #[derive(Deserialize, Serialize, Default, Clone, Debug)]
 #[serde(rename_all = "camelCase", default)]
 pub struct Style {

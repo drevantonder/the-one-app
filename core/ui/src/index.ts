@@ -15,11 +15,11 @@
 /// as `"paths": { "ui": ["<there>/index.d.ts"] }`, and its build doesn't check them. A field's text is never set
 /// under 16px on a touch screen, where an iPhone zooms into it: the UI library's fields and its base styles keep every
 /// `<input>`, `<textarea>` and `<select>` at 16px or more there, and a field of another size sets `--text-field`.
-/// **Strict mode.** A strict page runs natively, on our renderer on a computer and Android, and unchanged on the DOM
-/// everywhere else (the web, an iPhone, MCP Apps). Every app's page is to be strict. A page is strict when its
-/// `tsconfig.json` is `{ "extends": "<ui>/tsconfig.strict.json", "include": ["**/*"] }` (in this repo
-/// `../../../core/ui/tsconfig.strict.json`) and its entrypoint says so, with the runtime version it needs:
-/// `%{page: "client/index.html", runtime_version: 4}`. It's written with the UI library alone: its components and the primitives,
+/// **A page.** An app's page runs natively, on our renderer on a computer and Android, and unchanged on the DOM
+/// everywhere else (the web, an iPhone, MCP Apps), where its `tsconfig.json` is `{ "extends":
+/// "<ui>/tsconfig.strict.json", "include": ["**/*"] }` (in this repo `../../../core/ui/tsconfig.strict.json`) and its
+/// entrypoint says so, with the runtime version it needs: `%{page: "client/index.html", runtime_version: 4}`; every
+/// app's page is to be one. It's written with the UI library alone: its components and the drawing primitives,
 /// `Box`, `Scroll` (a box whose content scrolls), `Text`, `Image`, `Path` (a vector shape), `EditableText` (bare text to
 /// type, which `Input` draws in a field's box), `Video` (a screen's live video, which `LiveScreen` draws) and `Frame`
 /// (another app's page, in a sandbox of its own, as an iframe is, which only a trusted app's page shows), each styled by
@@ -34,36 +34,36 @@
 /// DOM's (`<div>`, `<span>`, `<p>`), no `class`, no stylesheet, and no `document`, `window` or other DOM API. Its JS has
 /// the language with `Intl`, and the Web APIs a Worker has (`URL`, `TextEncoder`, `crypto`, `structuredClone`,
 /// `AbortController`, events, streams, timers) but `fetch`, as `call()` reaches the network, so an npm package that runs
-/// in a Worker runs in it (core/ui/src/strict/types/globals.d.ts says which). `render(() => <App />)` from `ui` draws
+/// in a Worker runs in it (core/ui/src/types/globals.d.ts says which). `render(() => <App />)` from `ui` draws
 /// the page, and a page that throws while drawing shows what failed and Try Again, as `<Errored>` would. Words are in a `Text`, or in a component that takes them (a
 /// `Row`'s `heading`). A press is `onClick={() => ...}`, what's typed `onInput={(event) =>
 /// setText(event.currentTarget.value)}`, Return in it `onAction={save}`, a key `onKeyDown={(event) => event.key ===
 /// "Escape" && close()}`, a switch's `onChange={(event) => set(event.currentTarget.checked)}`. `bun run lint:strict apps/<app>/client`, from the repo's
-/// root, checks a page, as a deploy does of one whose entrypoint says its `runtime_version` and refuses it with the errors. What a strict page may use is `core/ui/src/strict/types/ui.d.ts`: one that needs what isn't
-/// there adds it there, with only what every host can draw (`strict/renderer.ts`), and core/ui's `bun run typecheck` then says
+/// root, checks a page, as a deploy does of one whose entrypoint says its `runtime_version` and refuses it with the errors. What a page may use is `core/ui/src/types/ui.d.ts`: one that needs what isn't
+/// there adds it there, with only what every host can draw (`drawing-primitives/renderer.ts`), and core/ui's `bun run typecheck` then says
 /// whether the DOM's takes it. A page written for version 1 has one `style` object of token names instead.
 export { call, changed, client, component, connection, covers, direction, go, haptic, keydown, leave, link, open, pinShortcut, reducedMotion, safeArea, showRecoveryKey, sizeChanged, updateReady, upload, useRecoveryKey, viewport, visible } from "./bridge.ts"
 export { pace, share } from "./shared.ts"
 export { seen } from "./seen.ts"
 export { words } from "./words.ts"
-export { Button, Icon, Spinner } from "./button.tsx"
-export { Badge } from "./badge.tsx"
-export { Checkbox, Field, Input, RadioGroup, Search, Switch, Textarea, useField } from "./field.tsx"
+export { Button, Icon, Spinner } from "./styled-components/button.tsx"
+export { Badge } from "./styled-components/badge.tsx"
+export { Checkbox, Field, Input, RadioGroup, Search, Switch, Textarea, useField } from "./styled-components/field.tsx"
 export { createListCollection } from "./collection.ts"
-export { Select } from "./select.tsx"
-export { createListbox, List, ListStyle, Row, type Listbox } from "./list.tsx"
-export { Metadata } from "./metadata.tsx"
-export { History, Screen, Section, Split } from "./screen.tsx"
-export { LiveScreen } from "./live-screen.tsx"
-export { Menu } from "./menu.tsx"
-export { ActionBar, ActionPanel, Keys, type Action } from "./actions.tsx"
-export { Tabs } from "./tabs.tsx"
-export { Empty, Problem, Skeleton, Status, Steps } from "./states.tsx"
-export { Alert, confirm, Sheet } from "./sheet.tsx"
-export { SignIn } from "./sign-in.tsx"
-export { toast } from "./toast.tsx"
-export { Widget } from "./widget.tsx"
-export { Box, EditableText, Frame, Image, Layer, Path, Scroll, Text, Video } from "./strict/primitives.tsx"
+export { Select } from "./styled-components/select.tsx"
+export { createListbox, List, ListStyle, Row, type Listbox } from "./styled-components/list.tsx"
+export { Metadata } from "./styled-components/metadata.tsx"
+export { History, Screen, Section, Split } from "./styled-components/screen.tsx"
+export { LiveScreen } from "./styled-components/live-screen.tsx"
+export { Menu } from "./styled-components/menu.tsx"
+export { ActionBar, ActionPanel, Keys, type Action } from "./styled-components/actions.tsx"
+export { Tabs } from "./styled-components/tabs.tsx"
+export { Empty, Problem, Skeleton, Status, Steps } from "./styled-components/states.tsx"
+export { Alert, confirm, Sheet } from "./styled-components/sheet.tsx"
+export { SignIn } from "./styled-components/sign-in.tsx"
+export { toast } from "./styled-components/toast.tsx"
+export { Widget } from "./styled-components/widget.tsx"
+export { Box, EditableText, Frame, Image, Layer, Path, Scroll, Text, Video } from "./drawing-primitives/primitives.tsx"
 export { render } from "./render.tsx"
 export { createTheme, defineVars, negative, styles } from "./styles.ts"
 export { tokens } from "./tokens.ts"

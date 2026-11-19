@@ -1,5 +1,5 @@
-// JSX in a strict app: components only. There are no elements of the DOM's (`<div>`, `<span>`), so writing one is a
-// type error: a strict app draws with the UI library's primitives and components (ui.d.ts).
+// JSX in an app's page: components only. There are no elements of the DOM's (`<div>`, `<span>`), so writing one is a
+// type error: a page draws with the UI library's primitives and components (ui.d.ts).
 import type { Element as SolidElement } from "solid-js"
 
 export namespace JSX {

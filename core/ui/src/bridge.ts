@@ -4,7 +4,7 @@
 import { configureClientErrors, createSignal, flush, onSettled } from "solid-js"
 import { readable, reduced } from "./shared.ts"
 import type { JSX } from "@solidjs/web"
-import type { Client, ClientChange } from "./strict/types/ui.d.ts"
+import type { Client, ClientChange } from "./types/ui.d.ts"
 
 /** A JSON-RPC response, as a client answers what a page asked. */
 interface JsonRpcResponse {

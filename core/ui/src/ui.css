@@ -16,7 +16,7 @@
   color-scheme: light dark;
 }
 
-/* Where a strict style moves something along and down (`translateX`, `translateY`, styles.ts): each its own, never
+/* Where a style moves something along and down (`translateX`, `translateY`, styles.ts): each its own, never
    its parent's, so a part moved only down isn't also moved along as what it's in is. */
 @property --ui-x {
   syntax: "<length-percentage>";
@@ -134,7 +134,7 @@ html:has(.ui-dialog[open]) {
 }
 
 /* What every control of the UI library starts from, under what any of them says of itself. */
-:where(.ui-strict-box, .ui-dialog) button {
+:where(.ui-view, .ui-dialog) button {
   margin: 0;
   padding: 0;
   border: 0;
@@ -257,7 +257,7 @@ img {
   background: none;
   color: var(--secondary-label);
 }
-/* Red words on a red tint, as the strict Button's. */
+/* Red words on a red tint, as the Button's. */
 .ui-button[data-variant="destructive"] {
   --ring-color: var(--destructive);
   background: var(--red-tint);
@@ -501,7 +501,7 @@ img {
     padding-bottom: var(--gutter);
   }
 }
-/* An alert, as the strict one: glass, 26px corners, its words centred. */
+/* An alert, as Alert's: glass, 26px corners, its words centred. */
 .ui-dialog.alert {
   width: min(var(--alert), 100vw - 2rem);
   margin: auto;
@@ -638,16 +638,16 @@ html:has(.ui-sign-in) {
   scrollbar-gutter: auto;
 }
 
-/* The strict primitives (strict/primitives.tsx). A box is a flex column, as React Native's View and every native host's
+/* The drawing primitives (drawing-primitives/primitives.tsx). A box is a flex column, as React Native's View and every native host's
    is, with a border only where its style gives it a width; a box that's pressed is a bare button. A page written for
    version 1 has a text's type style by its `data-font`. */
-.ui-strict-box {
+.ui-view {
   display: flex;
   flex-direction: column;
   min-width: 0;
   border: 0 solid var(--border);
 }
-:where(button).ui-strict-box {
+:where(button).ui-view {
   appearance: none;
   margin: 0;
   padding: 0;
@@ -657,7 +657,7 @@ html:has(.ui-sign-in) {
   text-align: inherit;
 }
 /* What follows a pointer itself, a finger held on it, selects no text and opens no picture's menu (iOS's Share, Copy). */
-.ui-strict-box[data-follows] {
+.ui-view[data-follows] {
   -webkit-user-select: none;
   user-select: none;
   -webkit-touch-callout: none;
@@ -667,34 +667,34 @@ html[data-launcher],
 html[data-launcher] body {
   background: transparent;
 }
-button.ui-strict-box:focus-visible {
+button.ui-view:focus-visible {
   outline: 2px solid var(--ring);
   outline-offset: 2px;
 }
 /* What the keyboard is put on but never tabs to (a dialog as it opens, a menu) draws no ring of the browser's, as a
    native one has none. */
-.ui-strict-box[tabindex="-1"]:focus {
+.ui-view[tabindex="-1"]:focus {
   outline: none;
 }
 /* A page whose first part is drawn by the primitives is the window's height, as a native host's root is, and what's
    in it scrolls itself (a screen, a split's sides). */
-body:has(> .ui-strict-box) {
+body:has(> .ui-view) {
   display: flex;
   flex-direction: column;
   height: 100dvh;
 }
-.ui-strict-text {
+.ui-text {
   margin: 0;
 }
 /* What scrolls has no scrollbar drawn beside it, as on a phone and on a native host, which draw one over it as it
    moves. */
-.ui-strict-scroll {
+.ui-scroll-view {
   overflow-x: hidden;
   overflow-y: auto;
   scrollbar-width: none;
 }
 /* The device's own picker, see-through over what's drawn under it, at 16px so an iPhone doesn't zoom into it. */
-.ui-strict-picker {
+.ui-picker {
   appearance: none;
   margin: 0;
   border: 0;
@@ -713,7 +713,7 @@ body:has(> .ui-strict-box) {
     opacity: 0.5;
   }
 }
-.ui-strict-path {
+.ui-svg {
   display: block;
   flex: none;
   overflow: visible;
@@ -721,7 +721,7 @@ body:has(> .ui-strict-box) {
 }
 /* An editable text is the device's own field, bare: its box and type are its styles'. Its placeholder is the text's
    colour at 60%, as secondary text is. */
-.ui-strict-input {
+.ui-text-input {
   appearance: none;
   display: block;
   margin: 0;
@@ -733,45 +733,45 @@ body:has(> .ui-strict-box) {
   text-align: start;
   outline: 0;
 }
-.ui-strict-input::placeholder {
+.ui-text-input::placeholder {
   color: inherit;
   opacity: 0.6;
 }
-.ui-strict-input::-webkit-search-cancel-button, .ui-strict-input::-webkit-search-decoration {
+.ui-text-input::-webkit-search-cancel-button, .ui-text-input::-webkit-search-decoration {
   display: none;
 }
-textarea.ui-strict-input {
+textarea.ui-text-input {
   resize: none;
   /* As tall as what's typed, where the browser can. */
   field-sizing: content;
 }
 /* Another app's page, in a box of this one's, with no frame of its own drawn around it. */
-.ui-strict-frame {
+.ui-frame {
   display: block;
   min-width: 0;
   border: 0;
 }
-.ui-strict-image {
+.ui-image {
   display: block;
   min-width: 0;
   object-fit: contain;
 }
 /* A screen's live video: drawn as big as fits, in the middle, under a finger moving it alone. Its field, unseen but
    focused as it's pressed, is where what's typed goes, so a phone shows its keyboard. */
-.ui-strict-video {
+.ui-video {
   display: block;
   position: relative;
   touch-action: none;
   -webkit-user-select: none;
   user-select: none;
 }
-.ui-strict-video > video {
+.ui-video > video {
   display: block;
   width: 100%;
   height: 100%;
   object-fit: contain;
 }
-.ui-strict-video > input {
+.ui-video > input {
   position: absolute;
   inset-block-end: 0;
   inset-inline-start: 0;

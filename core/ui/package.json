@@ -3,7 +3,7 @@
   "private": true,
   "type": "module",
   "imports": {
-    "#primitives": "./src/strict/primitives.tsx",
+    "#primitives": "./src/drawing-primitives/primitives.tsx",
     "#bridge": "./src/bridge.ts"
   },
   "scripts": {

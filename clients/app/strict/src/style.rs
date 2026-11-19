@@ -1,6 +1,6 @@
 //! How a node looks and is laid out, from what its page says, resolved against the tokens (`tokens`): its layout as
 //! Taffy's style, its box (`Look`) and its text (`Text`), together `Computed`. A page written for version 2 names its
-//! styles by id (`Styles` in core/ui/src/strict/renderer.ts), each a style table's, merged in order, each property's
+//! styles by id (`Styles` in core/ui/src/drawing-primitives/renderer.ts), each a style table's, merged in order, each property's
 //! value by the node's state (`State`); one written for 1 sends one style object (`tree::Style`). The one place that
 //! knows how styles are written.
 
@@ -398,7 +398,7 @@ fn text_style(font: &str, tabular: bool, conditions: Conditions) -> TextStyle {
 
 // Version 2.
 
-/// A node's state, which a style's value may depend on, as `State` in core/ui/src/strict/renderer.ts has it.
+/// A node's state, which a style's value may depend on, as `State` in core/ui/src/drawing-primitives/renderer.ts has it.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 pub struct State {
     pub hover: bool,
@@ -649,7 +649,7 @@ fn align_content(word: &str) -> Option<AlignContent> {
     })
 }
 
-/// A resolved style's properties (`Properties` in core/ui/src/strict/renderer.ts) as layout, look and text.
+/// A resolved style's properties (`Properties` in core/ui/src/drawing-primitives/renderer.ts) as layout, look and text.
 fn computed(style: &Map<String, Value>, conditions: Conditions) -> Computed {
     let get = |name: &str| style.get(name).filter(|value| !value.is_null());
     let word = |name: &str| get(name).and_then(Value::as_str);

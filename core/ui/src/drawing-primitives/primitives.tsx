@@ -1,4 +1,4 @@
-// The strict primitives, as the DOM draws them: a box, a scroll, a text, an image, a path and an editable text, each a
+// The drawing primitives, as the DOM draws them: a box, a scroll, a text, an image, a path and an editable text, each a
 // plain element with the semantic props a native host's renderer has (renderer.ts). A native host draws
 // the same props from the mutations Solid's universal renderer tells it. A primitive's `style` is styles (../styles.ts),
 // drawn by their classes, or, on a page written for version 1, one style object, drawn as inline CSS.
@@ -8,7 +8,7 @@ import { frame, sized, tellDrawn, unframe } from "../bridge.ts"
 import { layer } from "./layer.ts"
 import type { Ice, Props, TextInputAction, Version1Style } from "./renderer.ts"
 import { fullScreen, mods, named, type Input } from "./input.ts"
-import type { Intersected, Laid, Located, Pressed, Wheeled } from "./types/ui.d.ts"
+import type { Intersected, Laid, Located, Pressed, Wheeled } from "../types/ui.d.ts"
 import { flat, web, type Styles } from "../styles.ts"
 
 /// `<Layer modal>…</Layer>`: what's drawn over the whole window, over the page and every layer before it, as a
@@ -27,7 +27,7 @@ export function Layer(props: { modal?: boolean; children?: JSX.Element }) {
   })
   return (
     <Portal mount={document.body}>
-      <div ref={box} {...drawn("ui-strict-box", layer)}>
+      <div ref={box} {...drawn("ui-view", layer)}>
         {props.children}
       </div>
     </Portal>
@@ -48,7 +48,7 @@ export interface PickerProps {
 /// `<select>`, see-through over its box, which the browser opens as its own.
 export function Picker(props: PickerProps) {
   return (
-    <select aria-label={props["aria-label"]} disabled={props.disabled} value={props.value ?? ""} onInput={(event) => props.onInput?.({ currentTarget: { value: event.currentTarget.value } })} {...drawn("ui-strict-picker", props.style)}>
+    <select aria-label={props["aria-label"]} disabled={props.disabled} value={props.value ?? ""} onInput={(event) => props.onInput?.({ currentTarget: { value: event.currentTarget.value } })} {...drawn("ui-picker", props.style)}>
       <For each={props.options}>{(option) => <option value={option.value} disabled={option.disabled} selected={option.value === props.value}>{option.label}</option>}</For>
     </select>
   )
@@ -191,7 +191,7 @@ export function Video(props: VideoProps) {
       onPointerDown={(event) => button(event, true)}
       onPointerUp={(event) => button(event, false)}
       onContextMenu={(event) => !props.watch && event.preventDefault()}
-      {...drawn("ui-strict-video", props.style)}
+      {...drawn("ui-video", props.style)}
     >
       <video
         ref={video}
@@ -285,7 +285,7 @@ const pressed = new Set(["button", "menuitem", "tab", "checkbox", "radio", "swit
 const chosen = new Set(["option"])
 
 /// `<Box style={{ flexDirection: "row", gap: "gutter", padding: 12, backgroundColor: "muted", borderRadius: "lg" }}>...</Box>`:
-/// a strict app's own layout, around anything else: a flex column unless its `style` says otherwise, as React Native's
+/// an app's own layout, around anything else: a flex column unless its `style` says otherwise, as React Native's
 /// View, styled from the design tokens only. With `onClick` and a role of what's pressed (`button`, `menuitem`,
 /// `option`, …) it's something to press, which the keyboard reaches too; any other `role` and `aria-…` say what it is
 /// to a screen reader and to an agent, as ARIA has them. A page moved by hand listens to its pointers too (`follows`).
@@ -302,7 +302,7 @@ export function Box(props: BoxProps) {
       ref={[moves.ref, (element: HTMLElement) => watched(element, props)]}
       data-scrolls={v1(props.style) && props.style.overflow === "scroll" ? "" : undefined}
       onMouseDown={(event: MouseEvent) => props.role && chosen.has(props.role) && event.preventDefault()}
-      {...drawn("ui-strict-box", props.style)}
+      {...drawn("ui-view", props.style)}
     >
       {props.children}
     </Dynamic>
@@ -321,7 +321,7 @@ export function Scroll(props: ScrollProps) {
   const own = omit(props, "style", "children", ...moved)
   const moves = movable(props)
   return (
-    <div {...own} {...moves} data-scrolls="" {...drawn("ui-strict-box ui-strict-scroll", props.style)}>
+    <div {...own} {...moves} data-scrolls="" {...drawn("ui-view ui-scroll-view", props.style)}>
       {props.children}
     </div>
   )
@@ -421,13 +421,13 @@ export interface TextProps extends Semantics {
 /// `<Text style={{ font: "title" }}>Recently Deleted</Text>`: words, in one of the type styles (`font`: `body`,
 /// `label`, `title`, `figure`, `subheadline`, `footnote`, `caption-1`, `caption-2`) and a token's `color`, or as
 /// what it's in has them. It runs on in a text it's in, and is a block in a box. `role="heading"` with `aria-level`
-/// makes it a heading; one inside another with `role="link"` and `onClick` is a link in its words. A strict app's words
+/// makes it a heading; one inside another with `role="link"` and `onClick` is a link in its words. An app's words
 /// are always in a `Text` or in a UI library component that takes them.
 export function Text(props: TextProps) {
   const own = omit(props, "style", "children")
   const tag = () => (props.role === "heading" ? `h${props["aria-level"] ?? 2}` : "span")
   return (
-    <Dynamic component={tag()} {...own} role={props.role === "heading" ? undefined : props.role} {...drawn("ui-strict-text", props.style)}>
+    <Dynamic component={tag()} {...own} role={props.role === "heading" ? undefined : props.role} {...drawn("ui-text", props.style)}>
       {props.children}
     </Dynamic>
   )
@@ -445,7 +445,7 @@ export interface ImageProps extends Pick<Semantics, "aria-hidden"> {
 /// `<Image src="icon.svg" alt="" style={{ width: 24, height: 24 }} />`: a picture, from a `data:` address or the app's
 /// own files, named by `alt`, scaled to fit its box.
 export function Image(props: ImageProps) {
-  return <img src={props.src} alt={props.alt} aria-hidden={props["aria-hidden"]} {...drawn("ui-strict-image", props.style)} />
+  return <img src={props.src} alt={props.alt} aria-hidden={props["aria-hidden"]} {...drawn("ui-image", props.style)} />
 }
 
 /** A frame's props: the page it shows, as a `one:` link names it after its scheme, for whoever it says. */
@@ -480,7 +480,7 @@ export function Frame(props: FrameProps) {
       }
     },
   )
-  const look = () => drawn("ui-strict-frame", props.style)
+  const look = () => drawn("ui-frame", props.style)
   // As tall as its page says, as the native host draws it, unless its style says how tall: an iframe's 150 until then.
   const tall = () => flat(props.style as Styles).some((one) => "height" in one)
   const style = () => ({ ...(look().style as Record<string, string | number> | undefined), ...(height() !== undefined && !tall() && { height: `${height()}px` }) })
@@ -505,7 +505,7 @@ export interface PathProps extends Pick<Semantics, "role" | "aria-label" | "aria
 /// `role="img"` with `aria-label` names one that says something.
 export function Path(props: PathProps) {
   return (
-    <svg viewBox={props.viewBox} preserveAspectRatio="none" role={props.role} aria-label={props["aria-label"]} aria-hidden={props["aria-hidden"] ?? (props.role ? undefined : "true")} {...drawn("ui-strict-path", props.style)}>
+    <svg viewBox={props.viewBox} preserveAspectRatio="none" role={props.role} aria-label={props["aria-label"]} aria-hidden={props["aria-hidden"] ?? (props.role ? undefined : "true")} {...drawn("ui-svg", props.style)}>
       <path d={props.d} vector-effect="non-scaling-stroke" />
     </svg>
   )
@@ -583,7 +583,7 @@ export function EditableText(props: EditableTextProps) {
       () => !!props.autofocus,
       (on) => void (on && requestAnimationFrame(() => element.isConnected && element.focus({ preventScroll: true }))),
     )
-  const looks = () => drawn("ui-strict-input", props.style)
+  const looks = () => drawn("ui-text-input", props.style)
   return (
     <Dynamic
       component={props.multiline ? "textarea" : "input"}
@@ -609,7 +609,7 @@ const spaces = new Set(["gap", "rowGap", "columnGap", "padding", "paddingInline"
 const sizes = new Set(["flexBasis", "width", "height", "minWidth", "minHeight", "maxWidth", "maxHeight"])
 const tokens: Record<string, string> = { gutter: "var(--gutter)", control: "var(--control)", icon: "var(--icon)", readable: "var(--readable)" }
 
-/** A strict style as CSS: its tokens as the custom properties they name, its pixels as `px`. Its `font` is the
+/** A version 1 style as CSS: its tokens as the custom properties they name, its pixels as `px`. Its `font` is the
  * element's `data-font` (ui.css). */
 export function css(style: Version1Style | undefined): JSX.CSSProperties | undefined {
   if (!style) return

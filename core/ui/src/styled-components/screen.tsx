@@ -1,4 +1,4 @@
-// A whole view of an app, a part of one, and a list beside what it opens: written once in strict, on the primitives
+// A whole view of an app, a part of one, and a list beside what it opens: written once on the drawing primitives
 // (#primitives), the same on the DOM and on a native host, which each say what's theirs (#bridge): their history,
 // their device's back and how they move between screens.
 import { children, createContext, createEffect, createSignal, onSettled, Show, useContext } from "solid-js"
@@ -6,12 +6,12 @@ import type { JSX } from "@solidjs/web"
 import { Box, Scroll, Text } from "#primitives"
 import { back as goBack, breadcrumb, covers, go, keydown, step, touch, viewport } from "#bridge"
 import { BarEnd, Button, Icon } from "./button.tsx"
-import { messages } from "./words.ts"
+import { messages } from "../words.ts"
 import { ActionBar, type Action } from "./actions.tsx"
 import { ListStyle } from "./list.tsx"
 import { Choose, Collect } from "./collect.ts"
-import { negative, styles } from "./styles.ts"
-import { tokens } from "./tokens.ts"
+import { negative, styles } from "../styles.ts"
+import { tokens } from "../tokens.ts"
 
 const look = styles({
   screen: { position: "relative", flexGrow: 1, flexShrink: 1, minHeight: 0, minWidth: 0 },

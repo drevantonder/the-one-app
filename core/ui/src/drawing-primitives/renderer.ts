@@ -1,4 +1,4 @@
-// How an app written in strict mode draws natively, on our renderer on a computer and Android: its JS runs in a
+// How an app's page draws natively, on our renderer on a computer and Android: its JS runs in a
 // sandbox of its own (rquickjs), and Solid's universal renderer (@solidjs/universal) tells the host what changes in its
 // tree as mutations, which the host applies and draws. What the person does comes back as events. On the web, iOS and
 // in MCP Apps the same app draws to the DOM instead, and none of this is used.
@@ -53,7 +53,7 @@ export type Id = number
  *   `ice` is a new connection, the last one closed. It sends `state`, `connected` as its data channel opens and `lost`
  *   as the channel closes or the connection fails, and `size`, the video's own, as it comes and changes. What the
  *   person does on it, unless it's `watch`ed, goes straight down the data channel as JSON, each where on the screen it
- *   is (its video's pixels), as core/ui/src/strict/input.ts has it (`Input`): the pointer as it moves, its buttons
+ *   is (its video's pixels), as core/ui/src/drawing-primitives/input.ts has it (`Input`): the pointer as it moves, its buttons
  *   down and up (1 to 3) and a wheel's steps (4 to 7) with the modifiers held, the keys that aren't text (as X names
  *   them), and what's typed or pasted, which takes a field of its own so a phone's keyboard comes up as it's pressed,
  *   or as its `autofocus` is set. The device's full screen keys (F11, ⌃⌘F) aren't sent: they go on as `keydown` to the node it's in. A host that
@@ -186,7 +186,7 @@ export interface Editing {
  * (a multiline input's Enter), `done`, `go`, `next`, `previous`, `search`, `send`. */
 export type TextInputAction = "newline" | "done" | "go" | "next" | "previous" | "search" | "send"
 
-/** Every node's props, as `set` takes them, named as a strict app's JSX names them, which are the DOM's. One semantic
+/** Every node's props, as `set` takes them, named as a page's JSX names them, which are the DOM's. One semantic
  * tree, which a screen reader and an agent both read: a node's role, its name (`aria-label`, or what a `text` says),
  * its value, its states (`aria-…`, `disabled`) and its actions (which `on…` it has), as ARIA has them and a
  * host maps them to AccessKit's. A listener is sent as `true` while there is one, `null` once there isn't. */
@@ -314,14 +314,14 @@ export interface Ice {
 /** A state that's so or not, as ARIA writes it. */
 export type Bool = "true" | "false"
 
-/** ARIA's roles a strict node may have. */
+/** ARIA's roles a node may have. */
 export type Role =
   | "alert" | "button" | "checkbox" | "dialog" | "group" | "heading" | "img" | "link" | "list" | "listitem" | "main"
   | "menu" | "menuitem" | "navigation" | "progressbar" | "radio" | "radiogroup" | "region" | "searchbox" | "separator"
   | "slider" | "status" | "switch" | "tab" | "tablist" | "tabpanel" | "textbox" | "toolbar" | "banner" | "alertdialog"
   | "listbox" | "option" | "combobox" | "form" | "tooltip"
 
-// Version 1's strict style subset, which a page written for 1 has as its `style`: CSS's own property names and values,
+// Version 1's style subset, which a page written for 1 has as its `style`: CSS's own property names and values,
 // as React Native takes them, limited to what every host draws, with colours, radii, sizes and type by the design
 // tokens' names, never a value of their own. Lengths are CSS pixels.
 

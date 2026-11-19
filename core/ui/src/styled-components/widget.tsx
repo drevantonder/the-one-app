@@ -1,14 +1,14 @@
-// A widget: a card of an app's, drawn from the parts a layout is made of. Written once in strict, on the primitives,
+// A widget: a card of an app's, drawn from the parts a layout is made of. Written once on the drawing primitives,
 // the same on the DOM and on a native host. It fills the cells a Home Screen page gives it, and what doesn't fit is cut
 // off, never scrolled. Its name is small and grey, low in its order. Colour is for what needs someone.
 import { createContext, createSignal, For, Match, Show, Switch as Which, useContext } from "solid-js"
 import type { JSX } from "@solidjs/web"
 import { Box, Image, Path, Text } from "#primitives"
-import type { Laid, Located, Rect } from "./strict/types/ui.d.ts"
+import type { Laid, Located, Rect } from "../types/ui.d.ts"
 import { Spinner } from "./button.tsx"
 import { Switch } from "./field.tsx"
-import { styles, type Styles } from "./styles.ts"
-import { tokens } from "./tokens.ts"
+import { styles, type Styles } from "../styles.ts"
+import { tokens } from "../tokens.ts"
 
 const look = styles({
   card: {

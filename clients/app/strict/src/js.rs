@@ -1,10 +1,10 @@
 //! An app's JS, in a QuickJS sandbox of its own (rquickjs), with the Web APIs a Worker has, the WinterTC Minimum Common
 //! API's, but the network's (`fetch`): AWS LLRT's implementations of them, the sandbox's own clock, timers and
-//! `console` (`prelude.js`), and `Intl` on ICU4X (`intl.js`, `intl.rs`); core/ui/src/strict/types/globals.d.ts says
-//! which. It talks with its host over two channels. What it draws is the renderer's (core/ui/src/strict/renderer.ts):
+//! `console` (`prelude.js`), and `Intl` on ICU4X (`intl.js`, `intl.rs`); core/ui/src/types/globals.d.ts says
+//! which. It talks with its host over two channels. What it draws is the renderer's (core/ui/src/drawing-primitives/renderer.ts):
 //! `globalThis.mutations` is the host's functions it calls with each mutation of its tree, with its values as they are,
 //! never JSON, as React Native's JSI calls its host, and the UI library's `ui.event` is called the same way with each
-//! event. What it asks its client is MCP Apps' JSON-RPC (core/ui/src/strict/calls.ts): `globalThis.host.post` and
+//! event. What it asks its client is MCP Apps' JSON-RPC (core/ui/src/calls.ts): `globalThis.host.post` and
 //! `ui.message`. Its page's module
 //! and what that imports are read by `Files`, and each runs as QuickJS's bytecode, compiled once and kept (`cache`), as
 //! QuickJS's own `qjsc` compiles a program ahead of time. What the Web APIs answer with a promise runs on rquickjs's
@@ -542,7 +542,7 @@ impl Shared {
     }
 }
 
-/// The host's functions the renderer calls with each mutation (`Mutations` in core/ui/src/strict/renderer.ts), each
+/// The host's functions the renderer calls with each mutation (`Mutations` in core/ui/src/drawing-primitives/renderer.ts), each
 /// kept to be applied once the sandbox's turn has run.
 fn mutations<'js>(ctx: &Ctx<'js>, posted: &Rc<RefCell<Vec<Posted>>>) -> rquickjs::Result<Object<'js>> {
     let mutations = Object::new(ctx.clone())?;

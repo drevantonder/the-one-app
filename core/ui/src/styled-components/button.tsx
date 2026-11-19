@@ -1,13 +1,13 @@
-// Something to press, a count or word beside something, an icon and a spinner: written once in strict, on the
+// Something to press, a count or word beside something, an icon and a spinner: written once on the drawing
 // primitives (#primitives), the same on the DOM and on a native host.
 import { children, createContext, Show, useContext } from "solid-js"
 import type { JSX } from "@solidjs/web"
 import { Box, Path, Text } from "#primitives"
-import { messages } from "./words.ts"
+import { messages } from "../words.ts"
 import { collected } from "./collect.ts"
-import { negative, styles, type Styles } from "./styles.ts"
-import { tokens } from "./tokens.ts"
-import type { Laid, Located } from "./strict/types/ui.d.ts"
+import { negative, styles, type Styles } from "../styles.ts"
+import { tokens } from "../tokens.ts"
+import type { Laid, Located } from "../types/ui.d.ts"
 import calendarBlank from "@phosphor-icons/core/assets/regular/calendar-blank.svg?raw"
 import caretLeft from "@phosphor-icons/core/assets/regular/caret-left.svg?raw"
 import caretRight from "@phosphor-icons/core/assets/regular/caret-right.svg?raw"

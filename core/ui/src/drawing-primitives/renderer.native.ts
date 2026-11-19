@@ -1,11 +1,11 @@
-// Solid's universal renderer for a native host: what a strict page draws, as mutations of its tree, each a direct call
+// Solid's universal renderer for a native host: what a page draws, as mutations of its tree, each a direct call
 // of the host's (`globalThis.mutations`, ../renderer.ts), and what the person does, from the host, to the handler it's
-// for. A native host loads it as `/ui/client/web.js`, in place of Solid's DOM renderer: a strict page's bundle, built
+// for. A native host loads it as `/ui/client/web.js`, in place of Solid's DOM renderer: a page's bundle, built
 // for the DOM, imports only what both have (`createComponent`, `memo`).
 import { createRenderer } from "@solidjs/universal"
 import { dynamicComponent, omit, type Component } from "solid-js"
-import type { Event, Mutations, Type } from "../renderer.ts"
-import { flat, type Styles } from "../../styles.ts"
+import type { Event, Mutations, Type } from "./renderer.ts"
+import { flat, type Styles } from "../styles.ts"
 
 /** A node as the sandbox keeps it: where it is in the tree, and the handlers the host's events go to, by the event's
  * name (`keydown` for `onKeyDown`). */
@@ -47,7 +47,7 @@ const types = new Set<Type>(["box", "scroll", "text", "image", "path", "input", 
 
 export const { render: mount, effect, memo, createComponent, createElement, createTextNode, insertNode, insert, spread, setProp, mergeProps, applyRef, ref } = createRenderer<Node>({
   createElement(tag) {
-    if (!types.has(tag as Type)) throw new Error(`A strict page draws a box, a scroll, a text, an image, a path, an input, a picker, a video or a frame, not a ${tag}`)
+    if (!types.has(tag as Type)) throw new Error(`A page draws a box, a scroll, a text, an image, a path, an input, a picker, a video or a frame, not a ${tag}`)
     return node(tag as Type)
   },
   // Solid hands over what the page wrote, a number too (`{count()}`), which the DOM makes text of itself.

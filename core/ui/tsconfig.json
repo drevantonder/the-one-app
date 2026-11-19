@@ -14,5 +14,5 @@
     "verbatimModuleSyntax": true
   },
   "include": ["src"],
-  "exclude": ["src/strict/types/globals.d.ts", "src/strict/types/jsx-runtime.d.ts"]
+  "exclude": ["src/types/globals.d.ts", "src/types/jsx-runtime.d.ts"]
 }

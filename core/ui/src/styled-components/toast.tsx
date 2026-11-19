@@ -1,14 +1,14 @@
-// A toast: one line about what just happened, at the foot of the window for a few seconds. Written once in strict, on
-// the primitives, the same on the DOM and on a native host: a layer over the window (#primitives' `Layer`), drawn
+// A toast: one line about what just happened, at the foot of the window for a few seconds. Written once on the drawing
+// primitives, the same on the DOM and on a native host: a layer over the window (#primitives' `Layer`), drawn
 // while there are toasts, so it's over whatever was open when the first came.
 import { createRoot, createSignal, For, Show } from "solid-js"
 import { Box, Layer, Text } from "#primitives"
 import { Button } from "./button.tsx"
 import { Sheet } from "./sheet.tsx"
 import { Details } from "./states.tsx"
-import { messages, readable, whole } from "./words.ts"
-import { styles } from "./styles.ts"
-import { duration, tokens } from "./tokens.ts"
+import { messages, readable, whole } from "../words.ts"
+import { styles } from "../styles.ts"
+import { duration, tokens } from "../tokens.ts"
 
 const look = styles({
   stack: {
