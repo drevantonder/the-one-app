@@ -39,8 +39,6 @@ const look = styles({
   // On a computer, a panel of glass over the window, as Raycast's.
   glass: { backgroundColor: tokens.colour.panel, backdropFilter: tokens.material.glass },
   shrunk: { opacity: 0, scale: 0.97 },
-  pulled: { transitionProperty: [] },
-  dragged: (translateY: number) => ({ translateY }),
   grabber: { alignSelf: "center", width: tokens.grid[10], height: tokens.length.grabber, marginTop: tokens.length.grabberGap, borderRadius: tokens.radius.full, backgroundColor: tokens.colour.quaternaryLabel },
   header: { flexDirection: "row", alignItems: "center", gap: tokens.grid[2], paddingBlock: tokens.grid[2], paddingStart: tokens.length.gutter, paddingEnd: tokens.grid[2] },
   heading: { flexGrow: 1, minWidth: 0, font: tokens.type.large, fontWeight: tokens.weight.semibold, lineClamp: 2 },
@@ -82,8 +80,8 @@ export function Sheet(props: { heading?: JSX.Element; open?: boolean; onClose?: 
           <View
             {...dialog.content("dialog")}
             aria-label={typeof props.heading === "string" ? props.heading : undefined}
-            {...pull.gesture}
-            style={[look.panel, wide() && look.floating, !touch() && look.glass, dialog.leaving() && (wide() ? look.shrunk : look.down), pull.down() !== undefined && look.pulled, pull.down() !== undefined && look.dragged(pull.down()!)]}
+            {...pull}
+            style={[look.panel, wide() && look.floating, !touch() && look.glass, dialog.leaving() && (wide() ? look.shrunk : look.down)]}
           >
             <Show when={!wide()}>
               <View aria-hidden="true" style={look.grabber} />

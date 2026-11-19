@@ -238,7 +238,7 @@ pub struct Transition {
     pub properties: Vec<String>,
     pub duration: f32,
     pub easing: [f32; 4],
-    pub spring: Option<crate::tokens::Spring>,
+    pub spring: Option<crate::motion::Spring>,
     /// How fast a spring sets off, as a fraction of the way a second (`transitionVelocity`), where the style says.
     pub velocity: Option<f32>,
 }

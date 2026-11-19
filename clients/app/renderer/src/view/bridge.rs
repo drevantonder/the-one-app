@@ -189,6 +189,7 @@ impl Screen {
     /// The pointer's press is taken from what it went down on, as a finger that pans what's under it: told as
     /// `pointercancel`, and nothing is pressed or being selected.
     pub fn pointer_cancel(&mut self, at: Point<f32>) {
+        self.drag_up(at, true);
         if let Some(captured) = self.captured.take() {
             let chain = self.chain_from(captured);
             self.pointer_event(&chain, "pointercancel", at, 0, None);

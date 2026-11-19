@@ -12,6 +12,7 @@ pub mod inspect;
 #[cfg(not(target_arch = "wasm32"))]
 mod intl;
 pub mod js;
+pub mod motion;
 pub mod platform;
 pub mod render;
 mod style;

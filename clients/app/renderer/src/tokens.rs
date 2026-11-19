@@ -7,6 +7,7 @@ use std::borrow::Cow;
 use std::collections::HashMap;
 
 use crate::geometry::Rgba;
+use crate::motion::Spring;
 
 /// What CSS has as 1rem, in hundredths of a pixel, where the device has no text size of its own.
 const REM: u16 = 1600;
@@ -305,45 +306,4 @@ pub struct Motion {
     pub duration: f32,
     pub easing: [f32; 4],
     pub spring: Option<Spring>,
-}
-
-/// A spring with a mass of 1, as SwiftUI's `.spring(duration:bounce:)` gives one: how stiff it is and how damped.
-#[derive(Clone, Copy, Debug, PartialEq)]
-pub struct Spring {
-    pub stiffness: f32,
-    pub damping: f32,
-}
-
-impl Spring {
-    /// SwiftUI's: `duration` in milliseconds, and `bounce` from 0, none, to 1 (below 0, more damped than none).
-    pub fn new(duration: f32, bounce: f32) -> Spring {
-        let response = (duration / 1000.0).max(0.01);
-        let fraction = if bounce >= 0.0 { 1.0 - bounce } else { 1.0 / (1.0 + bounce) };
-        Spring { stiffness: (2.0 * std::f32::consts::PI / response).powi(2), damping: 4.0 * std::f32::consts::PI * fraction / response }
-    }
-
-    /// Where something `from` past where it's going, moving at `velocity` (each a second), is `seconds` later, and how
-    /// fast it moves then: the damped spring's own solution, so it's the same at any frame rate.
-    pub fn at(&self, from: f64, velocity: f64, seconds: f64) -> (f64, f64) {
-        let (k, c, t) = (f64::from(self.stiffness), f64::from(self.damping), seconds);
-        let natural = k.sqrt();
-        let ratio = c / (2.0 * natural);
-        if (ratio - 1.0).abs() < 1e-4 {
-            let e = (-natural * t).exp();
-            let b = velocity + natural * from;
-            ((from + b * t) * e, (velocity - natural * b * t) * e)
-        } else if ratio < 1.0 {
-            let damped = natural * (1.0 - ratio * ratio).sqrt();
-            let (a, b) = (from, (velocity + ratio * natural * from) / damped);
-            let (e, (sin, cos)) = ((-ratio * natural * t).exp(), (damped * t).sin_cos());
-            (e * (a * cos + b * sin), e * ((b * damped - ratio * natural * a) * cos - (a * damped + ratio * natural * b) * sin))
-        } else {
-            let root = natural * (ratio * ratio - 1.0).sqrt();
-            let (r1, r2) = (-ratio * natural + root, -ratio * natural - root);
-            let a = (velocity - r2 * from) / (r1 - r2);
-            let b = from - a;
-            let (e1, e2) = ((r1 * t).exp(), (r2 * t).exp());
-            (a * e1 + b * e2, a * r1 * e1 + b * r2 * e2)
-        }
-    }
 }

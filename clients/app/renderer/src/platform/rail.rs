@@ -9,7 +9,8 @@
 
 use std::time::Instant;
 
-use crate::geometry::{Bounds, Point, Size};
+use crate::geometry::{Bounds, Point, Size, point};
+use crate::motion::{Spring, Velocity};
 
 /// How far through the pull its first part goes, where the window is a card, how small, and its corners' radius, in
 /// the card's points.
@@ -24,8 +25,8 @@ const PULLED: f32 = 0.18;
 const FLICKED: f32 = 0.6;
 /// How far a finger moves, in points, before it says which way it goes.
 const SAYS: f32 = 8.0;
-/// The spring's stiffness: one critically damped that lands in 400 ms from still, as the page's move's.
-const STIFFNESS: f32 = (27.0 * 400.0 / 400.0) * (27.0 * 400.0 / 400.0);
+/// The spring: critically damped, landing in 400 ms from still, as the page's move's.
+const SPRING: Spring = Spring { stiffness: 27.0 * 27.0, damping: 2.0 * 27.0 };
 
 /// Where a finger on a window is, as its platform says.
 #[derive(Clone, Copy, PartialEq)]
@@ -62,8 +63,8 @@ pub struct Pull {
     start: Point<f32>,
     /// It's come in far enough to say so, and the window follows it.
     pulling: bool,
-    /// How far in it is lately, in widths, and when.
-    recent: Vec<(Instant, f32)>,
+    /// How fast it's been coming in lately, in widths a second.
+    velocity_in: Velocity,
     /// Where the move is, 0 the app and 1 home, where it's going and how fast, once let go.
     p: f32,
     target: Option<f32>,
@@ -81,7 +82,7 @@ pub enum Pulled {
 
 impl Pull {
     pub fn new(finger: u64, start: Point<f32>) -> Pull {
-        Pull { finger, start, pulling: false, recent: Vec::new(), p: 0.0, target: None, velocity: 0.0, stepped: Instant::now() }
+        Pull { finger, start, pulling: false, velocity_in: Velocity::default(), p: 0.0, target: None, velocity: 0.0, stepped: Instant::now() }
     }
 
     pub fn finger(&self) -> u64 {
@@ -117,9 +118,7 @@ impl Pull {
         let inward = (-along / size.width).max(0.0);
         // It follows the finger, and past the card (`HELD`) slows to a stop, as a rubber band does.
         self.p = HELD * (inward / HELD).tanh();
-        let now = Instant::now();
-        self.recent.retain(|(then, _)| now.duration_since(*then).as_millis() <= 100);
-        self.recent.push((now, inward));
+        self.velocity_in.add(point(inward, 0.0), crate::motion::now());
         Pulled::Kept(Some(moved(self.p, size, icon, reduced)))
     }
 
@@ -129,14 +128,7 @@ impl Pull {
         if !self.pulling {
             return false;
         }
-        let (first, last) = (self.recent.first().copied(), self.recent.last().copied());
-        let (inward, velocity) = match (first, last) {
-            (Some((since, was)), Some((at, inward))) => {
-                let seconds = at.duration_since(since).as_secs_f32();
-                (inward, if seconds >= 0.02 { (inward - was) / seconds } else { 0.0 })
-            }
-            _ => (0.0, 0.0),
-        };
+        let (inward, velocity) = (self.velocity_in.last().map_or(0.0, |at| at.x), self.velocity_in.get(crate::motion::now()).x);
         let home = !cancelled && (inward >= PULLED || velocity > FLICKED);
         self.target = Some(if home { 1.0 } else { 0.0 });
         self.velocity = if home { velocity.max(0.0) } else { 0.0 };
@@ -156,21 +148,12 @@ impl Pull {
     }
 }
 
-/// Steps a critically damped spring at `p`, going `velocity` a second, `dt` seconds on toward `target`, as the page's
-/// moves have it (client.js's `spring`): → where it is, how fast it goes, and whether it's still there. A step late, as
-/// when the app was in the background, is taken as a frame's, so nothing jumps.
+/// Steps the rail's spring at `p`, going `velocity` a second, `dt` seconds on toward `target`, as the page's moves
+/// have it (client.js's `spring`): → where it is, how fast it goes, and whether it's still there. A step late, as when
+/// the app was in the background, is taken as a frame's, so nothing jumps.
 pub fn spring(p: f32, velocity: f32, target: f32, dt: f32) -> (f32, f32, bool) {
-    let dt = dt.min(1.0 / 30.0);
-    let (mut p, mut velocity) = (p, velocity);
-    let mut at = 0.0;
-    while at < dt {
-        let slice = (1.0 / 240.0f32).min(dt - at);
-        velocity += (-STIFFNESS * (p - target) - 2.0 * STIFFNESS.sqrt() * velocity) * slice;
-        p += velocity * slice;
-        at += slice;
-    }
-    let still = (p - target).abs() < 0.001 && velocity.abs() < 0.05;
-    if still { (target, 0.0, true) } else { (p, velocity, false) }
+    let (off, velocity) = SPRING.at(f64::from(p - target), f64::from(velocity), f64::from(dt.min(1.0 / 30.0)));
+    if Spring::arrived(off, velocity, 0.001) { (target, 0.0, true) } else { (target + off as f32, velocity as f32, false) }
 }
 
 /// The window at `p` of its way home, on a window `size` big, into `icon` where it opened from one, as the page's

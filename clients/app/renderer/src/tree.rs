@@ -102,6 +102,8 @@ impl Node {
             "layout" => "onLayout",
             "intersection" => "onIntersection",
             "drop" => "onDrop",
+            "dragstart" => "onDragStart",
+            "dragend" => "onDragEnd",
             _ => return false,
         };
         self.is(prop)

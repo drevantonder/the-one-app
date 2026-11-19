@@ -8,7 +8,7 @@ import { frame, sized, tellDrawn, unframe } from "../bridge.ts"
 import { layer as whole } from "./layer.ts"
 import type { Ice, Props, TextInputAction } from "./renderer.ts"
 import { fullScreen, mods, named, type Input } from "./input.ts"
-import type { Intersected, Laid, Located, Pressed, Wheeled } from "../types/ui.d.ts"
+import type { Dragged, Intersected, Laid, Located, Pressed, Wheeled } from "../types/ui.d.ts"
 import { flat, web, type Styles } from "../styles.ts"
 import { options } from "./props.ts"
 
@@ -313,6 +313,17 @@ interface Listens extends Semantics {
 export interface ViewProps extends Listens {
   /** Files dropped on it from the system. */
   onDrop?: (files: File[]) => void
+  /** Follows a pointer or a finger dragging it, as Motion's `drag`: along (`"x"`), down (`"y"`) or both (`true`),
+   * moved by the host where the input arrives, never by a turn of the page's JS. */
+  drag?: "x" | "y" | boolean
+  /** How far it may be dragged up, left, right and down from where its style puts it, in pixels; past that it gives
+   * as a rubber band, as loose as `dragElastic` (0 none, 1 loose, 0.5 if unsaid). */
+  dragConstraints?: { top?: number; left?: number; right?: number; bottom?: number }
+  dragElastic?: number
+  onDragStart?: () => void
+  /** Let go: how far it went and how fast it was going, in pixels a second. It springs from where it is, at that
+   * speed, to where its style puts it, which this may move. */
+  onDragEnd?: (event: Dragged) => void
   children?: JSX.Element
 }
 
@@ -428,7 +439,8 @@ const droppable = (props: ViewProps) => ({
 })
 
 /** What a page moved by hand listens for (renderer.ts's `Moved`), which `movable` draws. */
-const moved = ["onPointerDown", "onPointerMove", "onPointerUp", "onPointerCancel", "onContextMenu", "onWheel"] as const
+// A drag is a native host's (`drag`), which the DOM leaves where its style puts it.
+const moved = ["onPointerDown", "onPointerMove", "onPointerUp", "onPointerCancel", "onContextMenu", "onWheel", "drag", "dragConstraints", "dragElastic", "onDragStart", "onDragEnd"] as const
 
 /// A box's or a scroll's `ref` and `onContextMenu` for what it moves by hand: its pointers (`follows`), and a
 /// right-click or a touch held, in place of the device's own menu.

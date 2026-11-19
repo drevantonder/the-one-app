@@ -3,12 +3,14 @@
 //! or by its spring, which a change on the way turns from where it is at the speed it has, as SwiftUI's and Motion's do.
 //! A node that's just been added starts from its `entering` state's values, as from CSS's `@starting-style`. Where the
 //! person asked for less motion, what would slide, grow or turn goes straight to where it's going, and a node coming
-//! in fades in instead, as Apple's reduced motion has it.
+//! in fades in instead, as Apple's reduced motion has it. A node a finger or a pointer drags (`drag`, as Motion's) follows
+//! it here, where the input arrives, and let go, springs from where it is at the finger's speed to where its style
+//! puts it, wherever that's moved to meanwhile.
 
 use std::collections::{HashMap, HashSet};
 
-use crate::geometry::{Hsla, Rgba};
-use crate::tokens::Spring;
+use crate::geometry::{Hsla, Point, Rgba, Size};
+use crate::motion::Spring;
 use crate::style::{Computed, Offset};
 use crate::tree::Id;
 
@@ -230,7 +232,44 @@ pub(crate) struct Transitions {
     moving: HashMap<(Id, &'static str), Moving>,
     /// The nodes in the tree as it's drawn: one that isn't yet is entering.
     drawn: HashSet<Id>,
+    /// Each node dragged, while it's held and as it springs back once let go.
+    dragged: HashMap<Id, Dragged>,
 }
+
+/// A node dragged: how far from where its style puts it, along and down, held where the finger has it or springing
+/// back once let go.
+struct Dragged {
+    held: bool,
+    axes: [Axis; 2],
+    spring: Option<Spring>,
+}
+
+/// A dragged node's way along or down: how far it was from where its style puts it (`rest`, in pixels, as last
+/// drawn), and how fast it was going, at `start` on the screen's clock, from which its spring goes on.
+#[derive(Clone, Copy, Default)]
+struct Axis {
+    off: f64,
+    velocity: f64,
+    start: f64,
+    rest: Option<f32>,
+}
+
+impl Dragged {
+    /// How far from where it rests, and how fast, at `now`, along each way.
+    fn state(&self, now: f64) -> [(f64, f64); 2] {
+        self.axes.map(|axis| match (self.held, self.spring) {
+            (false, Some(spring)) => spring.at(axis.off, axis.velocity, ((now - axis.start) / 1000.0).max(0.0)),
+            _ => (axis.off, 0.0),
+        })
+    }
+
+    fn done(&self, now: f64) -> bool {
+        !self.held && self.spring.is_some() && self.state(now).iter().all(|(off, velocity)| Spring::arrived(*off, *velocity, 0.1))
+    }
+}
+
+/// How a node let go springs back where its style says nothing of how it moves: SwiftUI's default spring.
+const DRAGGED: Spring = Spring { stiffness: 157.9, damping: 25.13 };
 
 impl Transitions {
     /// Whether node `id` is being added this frame, so it starts from its `entering` state.
@@ -240,12 +279,19 @@ impl Transitions {
 
     /// Node `id`'s style as it's drawn at `now` (ms on the screen's clock): each property its transition names on its
     /// way from where it was, or from `entering`'s value for a node just added, to `computed`'s, setting off when it
-    /// changed (`since`). `reduced`: the person asked for less motion.
-    pub fn apply(&mut self, id: Id, computed: &mut Computed, entering: Option<&Computed>, now: f64, since: f64, reduced: bool) {
+    /// changed (`since`). `reduced`: the person asked for less motion. `size`: how big it was last laid out, which a
+    /// part of it it's moved by is of.
+    pub fn apply(&mut self, id: Id, computed: &mut Computed, entering: Option<&Computed>, now: f64, since: f64, reduced: bool, size: Size<f32>) {
         self.drawn.insert(id);
+        let dragged = self.drag(id, computed, now, size);
         let Some(transition) = computed.transition.clone() else { return };
         for (property, moves) in PROPERTIES {
             let key = (id, property);
+            // Where it's dragged, it's where the drag has it.
+            if dragged && matches!(property, "translateX" | "translateY") {
+                self.moving.remove(&key);
+                continue;
+            }
             let to = get(computed, property).filter(|_| transition.properties.iter().any(|named| named == property));
             let Some(to) = to else {
                 self.values.remove(&key);
@@ -293,8 +339,58 @@ impl Transitions {
         }
     }
 
+    /// Node `id` is dragged `offset` pixels, along and down, from where its style puts it, held there.
+    pub fn hold(&mut self, id: Id, offset: Point<f32>) {
+        let dragged = self.dragged.entry(id).or_insert(Dragged { held: true, axes: [Axis::default(); 2], spring: None });
+        dragged.held = true;
+        dragged.spring = None;
+        for (axis, by) in dragged.axes.iter_mut().zip([offset.x, offset.y]) {
+            axis.off = f64::from(by);
+            axis.velocity = 0.0;
+        }
+    }
+
+    /// Node `id` is let go at `now` going `velocity` pixels a second, along and down: it springs back from where it
+    /// is to where its style puts it.
+    pub fn release(&mut self, id: Id, velocity: Point<f32>, now: f64) {
+        let Some(dragged) = self.dragged.get_mut(&id).filter(|dragged| dragged.held) else { return };
+        dragged.held = false;
+        for (axis, speed) in dragged.axes.iter_mut().zip([velocity.x, velocity.y]) {
+            (axis.velocity, axis.start) = (f64::from(speed), now);
+        }
+    }
+
+    /// Draws node `id` where it's dragged: where its style puts it, in pixels, and how far it's held or springing
+    /// from there, its spring set off again from where it is where its style moved meanwhile, so it goes on at the
+    /// speed it had. → whether it's dragged.
+    fn drag(&mut self, id: Id, computed: &mut Computed, now: f64, size: Size<f32>) -> bool {
+        let Some(dragged) = self.dragged.get_mut(&id) else { return false };
+        if dragged.spring.is_none() && !dragged.held {
+            let transition = computed.transition.as_ref();
+            dragged.spring = Some(transition.and_then(|transition| transition.spring).or(transition.map(|transition| Spring::new(transition.duration, 0.0))).unwrap_or(DRAGGED));
+        }
+        // Where its style puts it is where it's let go to, not a change to move to once it's arrived.
+        for property in ["translateX", "translateY"] {
+            if let Some(styled) = get(computed, property) {
+                self.values.insert((id, property), styled);
+            }
+        }
+        let rests = [computed.look.translate.0.of(size.width), computed.look.translate.1.of(size.height)];
+        let state = dragged.state(now);
+        for ((axis, rest), (off, velocity)) in dragged.axes.iter_mut().zip(rests).zip(state) {
+            if let Some(was) = axis.rest.filter(|was| *was != rest && !dragged.held) {
+                (axis.off, axis.velocity, axis.start) = (off + f64::from(was - rest), velocity, now);
+            }
+            axis.rest = Some(rest);
+        }
+        let [(x, _), (y, _)] = dragged.state(now);
+        computed.look.translate = (Offset::Px(rests[0] + x as f32), Offset::Px(rests[1] + y as f32));
+        true
+    }
+
     /// Node `id` is no longer in the tree as it's drawn: put back, it enters again.
     pub fn forget(&mut self, id: Id) {
+        self.dragged.remove(&id);
         if self.drawn.remove(&id) {
             for (property, _) in PROPERTIES {
                 self.values.remove(&(id, property));
@@ -305,14 +401,14 @@ impl Transitions {
 
     /// The nodes with something on its way, which are styled again each frame until it's arrived.
     pub fn moving(&self) -> HashSet<Id> {
-        self.moving.keys().map(|(id, _)| *id).collect()
+        self.moving.keys().map(|(id, _)| *id).chain(self.dragged.keys().copied()).collect()
     }
 
     /// The nodes moving only by their own move, growth and fade (`translateX`, `translateY`, `scale`, `opacity`),
     /// which change nothing in them, so what's in them can be drawn once and moved (`view::Layer`).
     pub fn moving_whole(&self) -> HashSet<Id> {
         let whole = |property: &str| matches!(property, "translateX" | "translateY" | "scale" | "opacity");
-        let mut ids: HashSet<Id> = self.moving.keys().filter(|(_, property)| whole(property)).map(|(id, _)| *id).collect();
+        let mut ids: HashSet<Id> = self.moving.keys().filter(|(_, property)| whole(property)).map(|(id, _)| *id).chain(self.dragged.keys().copied()).collect();
         for (id, _) in self.moving.keys().filter(|(_, property)| !whole(property)) {
             ids.remove(id);
         }
@@ -322,11 +418,12 @@ impl Transitions {
     /// Ends a frame: forgets what's arrived. → whether anything's still moving.
     pub fn finish(&mut self, now: f64) -> bool {
         self.moving.retain(|_, moving| !moving.done(now));
-        !self.moving.is_empty()
+        self.dragged.retain(|_, dragged| !dragged.done(now));
+        !self.moving.is_empty() || !self.dragged.is_empty()
     }
 
     /// How many properties are still on their way, for the inspector's `settle`.
     pub fn len(&self) -> usize {
-        self.moving.len()
+        self.moving.len() + self.dragged.len()
     }
 }

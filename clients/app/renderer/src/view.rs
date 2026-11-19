@@ -25,6 +25,7 @@ use paint::*;
 pub(crate) use paint::{Decoded, Picture};
 
 mod bridge;
+mod drag;
 pub use bridge::TextInputConnection;
 mod frames;
 mod paint;
@@ -283,6 +284,8 @@ pub struct Screen {
     pub pulled: bool,
     /// The node a pointer's press went down on, which its moves and its end go to, wherever it goes.
     captured: Option<Id>,
+    /// What the press drags, if it's on a node that does.
+    drag: Option<drag::Drag>,
     /// What takes the pointer, as it was last painted, in the order painted, the topmost last.
     placed: Vec<(Id, Placed)>,
     /// Whether anything moved by itself in the last frame.
@@ -374,6 +377,7 @@ impl Screen {
             device: Box::new(()),
             chosen_files: Arc::default(),
             scrolled: HashMap::new(),
+            drag: None,
             states: States::default(),
             pointer: None,
             touch: false,
@@ -1317,6 +1321,7 @@ impl Screen {
             Some(captured) => self.chain_from(captured),
             None => chain,
         };
+        self.drag_moved(at);
         self.pointer_event(&target, "pointermove", at, 0, None);
         self.select_moved(at);
         // A press held in an input selects as it's dragged.
@@ -1398,6 +1403,9 @@ impl Screen {
         }
         let chain = self.under(at);
         self.captured = chain.first().copied();
+        if button == 0 {
+            self.drag_down(&chain, at);
+        }
         self.pointer_event(&chain, "pointerdown", at, button, None);
         if button == 2 {
             // On a field, it has the keyboard and the system's menu for text, its caret where the click was unless
@@ -1495,6 +1503,7 @@ impl Screen {
             Some(captured) => self.chain_from(captured),
             None => self.under(at),
         };
+        self.drag_up(at, false);
         self.pointer_event(&target, "pointerup", at, button, None);
         self.select_up();
         // What the pointer selected goes on the primary selection, as Linux's fields put it, never a password.
@@ -1540,6 +1549,12 @@ impl Screen {
                 if (finger < 0.0 && now < most) || (finger > 0.0 && now > 0.0) {
                     return true;
                 }
+            }
+            // What drags that way keeps the finger, and what drags the other doesn't.
+            match self.drags(id, by) {
+                Some(true) => return false,
+                Some(false) => continue,
+                None => {}
             }
             if self.tree.nodes.get(&id).is_some_and(|node| node.listens("pointermove") || node.listens("pointerdown")) {
                 return placed.touch_action == Some(if along { style::Pan::X } else { style::Pan::Y });

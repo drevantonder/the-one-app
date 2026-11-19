@@ -35,7 +35,7 @@ impl Screen {
         let answer = inspect::answer(&request.id, result);
         // What acts is told once the app's JS has run what it did, as a test's click resolves once its handlers have
         // run; what reads, at once.
-        let acts = matches!(request.op.as_str(), "tap" | "type" | "ime" | "key" | "scroll");
+        let acts = matches!(request.op.as_str(), "tap" | "type" | "ime" | "key" | "scroll" | "drag");
         match acts && self.js.busy() {
             true => self.replies.push((answer, reply)),
             false => reply(answer),
@@ -162,6 +162,26 @@ impl Screen {
                 let scrolled = self.scroll(crate::geometry::point(x, y), crate::geometry::point(dx, dy), phase).and_then(|id| self.scrolled.get(&id).copied()).unwrap_or_default();
                 json!({"scrolled": {"x": scrolled.x, "y": scrolled.y}})
             }
+            "drag" => {
+                let start = match request.selects() {
+                    true => self.rects.get(&inspect::one(&self.tree, request)?).map(|rect| rect.centre()).context("that node isn't drawn")?,
+                    false => request.point().context("say where to drag from: a node, by a selector, or a point, x and y")?,
+                };
+                let (dx, dy) = (request.f32("dx").unwrap_or(0.0), request.f32("dy").unwrap_or(0.0));
+                let steps = request.inputs.get("steps").and_then(Value::as_u64).unwrap_or(10).max(1);
+                let ms = request.f64("ms").unwrap_or(200.0).max(0.0);
+                let at = |part: f32| crate::geometry::point(start.0 + dx * part, start.1 + dy * part);
+                self.pointer_moved(at(0.0));
+                self.pointer_down(at(0.0), 0, false);
+                for step in 1..=steps {
+                    if self.js.clock().paused() {
+                        self.step(ms / steps as f64);
+                    }
+                    self.pointer_moved(at(step as f32 / steps as f32));
+                }
+                self.pointer_up(at(1.0), 0);
+                json!({"dragged": {"x": dx, "y": dy}})
+            }
             "clock" => {
                 let clock = self.js.clock().clone();
                 match request.inputs.get("pause").and_then(Value::as_bool) {
@@ -184,7 +204,7 @@ impl Screen {
                 }
                 json!({"time": clock.now(), "paused": clock.paused()})
             }
-            op => bail!("there's no op {op}: window, tree, query, snap, tap, type, ime, key, scroll, clock and settle are"),
+            op => bail!("there's no op {op}: window, tree, query, snap, tap, type, ime, key, scroll, drag, clock and settle are"),
         })
     }
 

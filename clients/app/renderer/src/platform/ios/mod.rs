@@ -687,8 +687,6 @@ define_class!(
 const SLOP: f32 = 10.0;
 /// How near the left edge a finger lands to drag the window, in points, as UINavigationController's back swipe.
 const EDGE: f32 = 20.0;
-/// How much of its speed a fling keeps each millisecond: UIScrollView's normal deceleration rate.
-const DECELERATION: f32 = 0.998;
 /// The speed, in points a second, below which a fling stops.
 const STOPPED: f32 = 20.0;
 
@@ -702,7 +700,7 @@ enum Phase {
 
 /// A finger: tao's id for it, where it landed, where it was last, whether it's panning, whether it landed on an input,
 /// which it presses only as it lifts, or stopped a fling, which it doesn't press at all, or came in from the left
-/// edge, which drags the window, and where it was lately, for how fast it was going as it lifts.
+/// edge, which drags the window, and how fast it's been going, for as it lifts.
 struct Touch {
     finger: u64,
     /// It came in from the left edge, which drags the window across, or with a screen of the page's over its first,
@@ -716,7 +714,7 @@ struct Touch {
     panning: bool,
     on_input: bool,
     stopped: bool,
-    lately: Vec<(Instant, Point<f32>)>,
+    velocity: crate::motion::Velocity,
 }
 
 /// A scroll carrying on after its finger let go: where the finger was, how fast it goes (points a second, along and
@@ -768,13 +766,11 @@ fn fling(windows: &mut Windows) {
         flings.borrow_mut().retain(|id, fling| {
             let Some(window) = windows.windows.get_mut(id) else { return false };
             let Ok(screen) = &mut window.screen else { return false };
-            let ms = now.duration_since(fling.stepped).as_secs_f32() * 1000.0;
+            let seconds = f64::from(now.duration_since(fling.stepped).as_secs_f32());
             fling.stepped = now;
-            // Its speed decays by DECELERATION each millisecond; it goes as far as the decay's integral over the step.
-            let decay = DECELERATION.powf(ms);
-            let travelled = (decay - 1.0) / DECELERATION.ln() / 1000.0;
-            let by = point(fling.velocity.x * travelled, fling.velocity.y * travelled);
-            fling.velocity = point(fling.velocity.x * decay, fling.velocity.y * decay);
+            let ((x, along), (y, down)) = (crate::motion::decay(f64::from(fling.velocity.x), seconds), crate::motion::decay(f64::from(fling.velocity.y), seconds));
+            let by = point(x as f32, y as f32);
+            fling.velocity = point(along as f32, down as f32);
             window.dirty = true;
             screen.pan(fling.at, by).is_some() && fling.velocity.x.hypot(fling.velocity.y) > STOPPED
         });
@@ -803,16 +799,16 @@ fn touch_at(screen: &mut crate::Screen, native: &NativeWindow, id: WindowId, fin
                 let pops = !caught && edge && covered == Some(false);
                 let on_input = !edge && screen.input_at(at);
                 let start = if caught { point(at.x - native.slid(), at.y) } else { at };
-                touches.insert(id, Touch { finger, edge, pops, start, last: at, moved: false, panning: false, on_input, stopped, lately: vec![(Instant::now(), at)] });
+                let mut velocity = crate::motion::Velocity::default();
+                velocity.add(at, crate::motion::now());
+                touches.insert(id, Touch { finger, edge, pops, start, last: at, moved: false, panning: false, on_input, stopped, velocity });
                 if !edge && !on_input && !stopped {
                     screen.pointer_down(at, 0, false);
                 }
             }
             Phase::Moved => {
                 let Some(touch) = touches.get_mut(&id) else { return };
-                let now = Instant::now();
-                touch.lately.push((now, at));
-                touch.lately.retain(|(when, _)| now.duration_since(*when) < Duration::from_millis(100));
+                touch.velocity.add(at, crate::motion::now());
                 if touch.pops {
                     return;
                 }
@@ -838,11 +834,11 @@ fn touch_at(screen: &mut crate::Screen, native: &NativeWindow, id: WindowId, fin
                 touch.last = at;
             }
             Phase::Up => {
-                let Some(touch) = touches.remove(&id) else { return };
-                // How fast it was going over its last tenth of a second, as UIScrollView's pan measures it.
-                let (now, first) = (Instant::now(), touch.lately[0]);
-                let seconds = now.duration_since(first.0).as_secs_f32().max(0.008);
-                let velocity = point((first.1.x - at.x) / seconds, (first.1.y - at.y) / seconds);
+                let Some(mut touch) = touches.remove(&id) else { return };
+                // How fast it was going, against the finger, as a pan scrolls.
+                touch.velocity.add(at, crate::motion::now());
+                let (now, going) = (Instant::now(), touch.velocity.get(crate::motion::now()));
+                let velocity = point(-going.x, -going.y);
                 // Over a screen of the page's, it goes back a screen, the app's window staying where it is.
                 if touch.pops {
                     if at.x - touch.start.x > native.size().width.0 / 3.0 || -velocity.x > 500.0 {

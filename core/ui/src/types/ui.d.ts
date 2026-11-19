@@ -36,6 +36,13 @@ export type Pressed = Located & {
   pointerType: "mouse" | "touch" | "pen"
   button: number
 }
+/** What a node dragged is told as it's let go, as Motion's `PanInfo`: how far it went from where it was pressed, and
+ * how fast it was going, in pixels a second, with where it's drawn. */
+export type Dragged = Laid & {
+  offset: { x: number; y: number }
+  velocity: { x: number; y: number }
+  canceled: boolean
+}
 /** Where a node is drawn, as it's laid out. */
 export type Laid = {
   currentTarget: { getBoundingClientRect(): Rect }
@@ -106,6 +113,17 @@ type Listens = Semantics & {
 export type ViewProps = Listens & {
   /** Files dropped on it from the system (a Finder's, an Explorer's). */
   onDrop?: (files: File[]) => void
+  /** Follows a pointer or a finger dragging it, as Motion's `drag`: along (`"x"`), down (`"y"`) or both (`true`),
+   * moved by the host where the input arrives, never by a turn of the page's JS. */
+  drag?: "x" | "y" | boolean
+  /** How far it may be dragged up, left, right and down from where its style puts it, in pixels; past that it gives
+   * as a rubber band, as loose as `dragElastic` (0 none, 1 loose, 0.5 if unsaid). */
+  dragConstraints?: { top?: number; left?: number; right?: number; bottom?: number }
+  dragElastic?: number
+  onDragStart?: () => void
+  /** Let go: how far it went and how fast it was going, in pixels a second. It springs from where it is, at that
+   * speed, to where its style puts it, which this may move. */
+  onDragEnd?: (event: Dragged) => void
 }
 export declare function View(props: ViewProps): Element
 

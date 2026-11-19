@@ -67,6 +67,12 @@ defmodule Inspector do
       ),
       op("scroll", false, "Scrolls the window by dx and dy CSS pixels, down and right positive.", %{dx: %{type: "number"}, dy: %{type: "number"}}),
       op(
+        "drag",
+        false,
+        "Drags from a node, by a selector, or a point, by dx and dy CSS pixels: the pointer goes down, moves in `steps` (10) even moves and comes up. With the clock paused, it's stepped `ms` (200) over them, so what's let go has their speed.",
+        Map.merge(Map.merge(@selector, @point), %{dx: %{type: "number"}, dy: %{type: "number"}, steps: %{type: "integer", minimum: 1}, ms: %{type: "number", minimum: 0}})
+      ),
+      op(
         "clock",
         false,
         "The app's clock, its Date, timers and the window's animations: `pause` true or false, `step` ms on, running each timer due at its own time, or `seek` to ms since it started. Gives its `time` and whether it's `paused`.",

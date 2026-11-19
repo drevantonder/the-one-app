@@ -311,6 +311,15 @@ export interface Props {
   onPointerCancel?: true
   onContextMenu?: true
   onWheel?: true
+  /** `box`, `scroll`: follows a pointer or a finger dragging it, as Motion's `drag`, moved by the host where the
+   * input arrives: past `dragConstraints` (pixels from where its style puts it) it gives as a rubber band, as loose as
+   * `dragElastic`; let go, it's told `dragend` (`offset`, `velocity` in pixels a second) and springs from there, at
+   * that speed, to where its style puts it. */
+  drag?: "x" | "y" | boolean
+  dragConstraints?: { top?: number; left?: number; right?: number; bottom?: number }
+  dragElastic?: number
+  onDragStart?: true
+  onDragEnd?: true
   onOffer?: true
   onState?: true
   onSize?: true

@@ -396,7 +396,8 @@ impl Painter<'_> {
         let mut computed = style::of(node, state, self.conditions);
         // What's just been added starts from its `entering` state, to move from.
         let entering = (computed.transition.is_some() && self.transitions.entering(id)).then(|| style::of(node, State { entering: true, ..state }, self.conditions));
-        self.transitions.apply(id, &mut computed, entering.as_ref(), self.time, self.since, self.conditions.reduced_motion);
+        let size = self.layout.kept.get(&id).and_then(|kept| self.layout.taffy.layout(kept.node).ok()).map_or(Size::default(), |laid| Size { width: laid.size.width, height: laid.size.height });
+        self.transitions.apply(id, &mut computed, entering.as_ref(), self.time, self.since, self.conditions.reduced_motion, size);
         let mut layout = computed.layout.clone();
         let mut look = computed.look.clone();
         // A `Text` inherits what it's in, as CSS does.
