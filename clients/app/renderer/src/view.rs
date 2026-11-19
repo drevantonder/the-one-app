@@ -686,6 +686,7 @@ impl Screen {
         let window = Bounds { origin: point(0.0, 0.0), size: Size { width: size.width.0, height: size.height.0 } };
         self.pictures.take();
         self.states.focused = self.focus.focused;
+        self.states.touch = self.touch;
         let now = self.js.clock().now();
         let caret = self.caret_shows();
         let hovering = |bounds: &Bounds<f32>| self.pointer.is_some_and(|at| bounds.contains(&at));
@@ -1794,12 +1795,18 @@ pub(crate) struct States {
     pub focused: Option<Id>,
     /// The keyboard came there by a key, so it shows (CSS's `:focus-visible`).
     pub focus_visible: bool,
+    /// The pointer is a finger, which a style's `hover` never is: that's a mouse's (`State` in the UI library), as the
+    /// DOM's styles hover only where `(hover: hover)`.
+    pub touch: bool,
 }
 
 impl States {
     /// What's in a different state from in `was`.
     fn changed(&self, was: &States) -> Vec<Id> {
         let mut changed: Vec<Id> = self.hovered.iter().filter(|id| !was.hovered.contains(id)).chain(was.hovered.iter().filter(|id| !self.hovered.contains(id))).copied().collect();
+        if self.touch != was.touch {
+            changed.extend(self.hovered.iter().copied());
+        }
         if self.pressed != was.pressed {
             changed.extend(self.pressed.into_iter().chain(was.pressed));
         }
@@ -1811,7 +1818,7 @@ impl States {
 
     fn of(&self, id: Id, input: bool) -> State {
         State {
-            hover: self.hovered.contains(&id),
+            hover: !self.touch && self.hovered.contains(&id),
             pressed: self.pressed == Some(id),
             focused: self.focused == Some(id) && (self.focus_visible || input),
             entering: false,
