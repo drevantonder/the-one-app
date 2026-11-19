@@ -123,7 +123,7 @@ defmodule OneCore.Mcp do
 
           with :ok <- speaks(version),
                :ok <- talks(method, params),
-               {:ok, principal, forwarded} <- User.asking(from, asking(method, meta(params)), method == "hooks/call"),
+               {:ok, principal, forwarded} <- User.asking(from, asking(method, meta(params)), question?(method, params)),
                :ok <- reloaded(meta(params)),
                {:ok, result} <- result(method, params, from, principal, forwarded) do
             JSON.encode!(%{jsonrpc: "2.0", id: id, result: complete(result, method, version)})
@@ -164,7 +164,7 @@ defmodule OneCore.Mcp do
         with {:ok, {by, _for}, false} <- User.asking(from, meta(params)) do
           said = if params["otlp"], do: %{"otlp" => List.wrap(params["otlp"])}, else: %{"records" => List.wrap(params["records"])}
           about = Map.merge(said, %{"device" => User.device(from, meta(params)), "who" => by})
-          Hooks.observe("measured", about, {nil, "network"})
+          Hooks.observe("measured", about, {nil, User.owner(by)})
         end
 
         ""
@@ -241,6 +241,11 @@ defmodule OneCore.Mcp do
 
   # Who a request is from and for, as it says. A task is only whoever started it's, so a client checking on one, or
   # answering or cancelling it, asks as themselves, whoever it runs for: that's what the task says, not the request.
+  # A hook that validates or mutates is asked a question, whose answer goes only to whoever asked
+  # (`OneCore.User.asking/3`).
+  defp question?("hooks/call", %{"kind" => kind}), do: kind in ["validate", "mutate"]
+  defp question?(_method, _params), do: false
+
   defp asking("tasks/" <> _method, %{"actor" => _actor} = meta), do: meta
   defp asking("tasks/" <> _method, meta), do: Map.delete(meta, "subject")
   defp asking(_method, meta), do: meta
@@ -304,14 +309,16 @@ defmodule OneCore.Mcp do
     between(forwarded, fn -> Services.run(app, service, params["function"], params["arguments"]) end)
   end
 
-  defp result("apps/call", %{"installed" => at, "app" => app} = params, _from, principal, forwarded) do
+  # An app's own functions and jobs are asked of it only by a server that runs it too: one acting for whoever it's
+  # installed for.
+  defp result("apps/call", %{"installed" => at, "app" => app} = params, from, principal, forwarded) do
     function = fn -> Calls.function(at, app, params["function"], params["arguments"], principal, true) end
 
-    between(forwarded, function)
+    between(Servers.acts_for?(from, at) && forwarded, function)
   end
 
-  defp result("apps/schedule", %{"installed" => at, "app" => app}, _from, {_actor, subject}, forwarded) do
-    between(forwarded, fn -> Calls.schedule(at, app, subject, true) end)
+  defp result("apps/schedule", %{"installed" => at, "app" => app}, from, {_actor, subject}, forwarded) do
+    between(Servers.acts_for?(from, at) && forwarded, fn -> Calls.schedule(at, app, subject, true) end)
   end
 
   defp result(
@@ -328,7 +335,7 @@ defmodule OneCore.Mcp do
   end
 
   defp result("tools/call", %{"name" => name} = params, from, {_actor, subject} = principal, forwarded) do
-    case caller(name, meta(params), principal) do
+    case caller(name, meta(params), principal, from) do
       {:ok, caller} ->
         request = %{mode: mode(params), tools: fn -> scripted(subject) end, call: called(from, principal, forwarded)}
 
@@ -601,16 +608,17 @@ defmodule OneCore.Mcp do
     own ++ apps
   end
 
-  # Which app called a tool is said only by a server, which `OneCore.User.asking/3` checked acts for whoever it
-  # asks for (a request that says its `actor`). A client calls as nobody's app, unless it says an app's page asked
+  # Which app called a tool is said only by a server that runs the apps of whoever it asks for, its subject: one
+  # acting for them (a request that says its `actor`). Any other server's call is its person's. A client calls as nobody's app, unless it says an app's page asked
   # (`app`, which the app's window says of each page: `clients/app/page/client.js`). A trusted app's page then calls
   # as its person does, since its server code may do anything they may. An untrusted app's calls as its server code
   # does in its sandbox (`OneCore.Sandbox`): its own app's tools as its person, the tools of the apps it requires as
   # itself, and nothing else. A client may say an app asked that didn't, which is its person's to do, and gives them
   # nothing they couldn't do themselves.
-  defp caller(_name, %{"actor" => _} = meta, _principal), do: {:ok, meta["caller"]}
+  defp caller(_name, %{"actor" => _} = meta, {_actor, subject}, from),
+    do: {:ok, if(Servers.acts_for?(from, User.owner(subject) || "network"), do: meta["caller"])}
 
-  defp caller(name, %{"app" => app}, {actor, subject}) when is_binary(app) do
+  defp caller(name, %{"app" => app}, {actor, subject}, _from) when is_binary(app) do
     # The app is whoever the page was opened for's, or for a trusted app, the person's own, asking for someone else.
     version = Apps.versions(Enum.uniq(Apps.chain(subject) ++ Apps.chain(actor)))[app]
     tool = Enum.find(Tools.tools(), &(&1.name == name))
@@ -635,7 +643,7 @@ defmodule OneCore.Mcp do
     end
   end
 
-  defp caller(_name, _meta, _principal), do: {:ok, nil}
+  defp caller(_name, _meta, _principal, _from), do: {:ok, nil}
 
   # Runs the call of `tool`, named `name`, by `run`. A tool made a task (`task_support`) is one for a person's client
   # that takes tasks, and refused to one that doesn't if it needs one. A script's calls are never tasks, since it

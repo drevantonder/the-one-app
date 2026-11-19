@@ -24,14 +24,16 @@ defmodule OneCore.User do
   @doc """
   Who a request is by and who it's for, its actor and its subject: `{:ok, {actor, subject}, forwarded}`, or
   `{:error, why}`. `from` is the key of whatever sent it, which its connection proved, or `nil` for what came in at
-  the network's address over the web. `said` is what the request says of itself, its `_meta`. `hook` is whether it asks an app's hook: a
-  moment on any of the network's servers is about whoever it's about, so each of them is believed about that,
-  where only one acting for someone is believed about what they asked for.
+  the network's address over the web. `said` is what the request says of itself, its `_meta`. `question` is whether
+  it asks an app's hook a question, one that validates or mutates, whose answer goes only to whoever asked: any of the
+  network's servers asks those as nobody, about whoever it's about, where only one acting for someone is believed
+  about what they asked for, or about what happened.
 
   - `actor` and `subject`, from a server acting for whoever asked, are who that server was asked by and for: it
-    passes on what it was asked, having decided it, and `forwarded` says so: `:to` from a server that couldn't run
-    it, and `true` from one that handed it to this one for what it holds (`OneCore.Call`). A scheduled job is asked
-    by nobody, so its `actor` is `nil`.
+    passes on what it was asked, and `forwarded` says so: `:to` from a server that couldn't run it, and `true` from
+    one that handed it to this one for what it holds (`OneCore.Call`). A scheduled job is asked by nobody, so its
+    `actor` is `nil`, and the server acts for its `subject`. A server is believed about who asked only: whether they
+    may ask for their subject, a group or the network, is asked here again, as it is of a device.
   - `link` is a sharing link, and whoever shows one is its holder.
   - `as` names a user to act as. It's for a network being built, to show who may do what with nobody signing
     in, and is refused unless the server's `:development` setting is on.
@@ -42,24 +44,27 @@ defmodule OneCore.User do
 
   Otherwise it's from whoever's device `from` is.
   """
-  def asking(from, meta, hook \\ false)
+  def asking(from, meta, question \\ false)
 
-  def asking(from, %{"actor" => actor} = meta, hook) when is_binary(actor) or is_nil(actor) do
-    whose = owner(actor || meta["subject"] || "") || "network"
+  def asking(from, %{"actor" => actor} = meta, question) when is_binary(actor) or is_nil(actor) do
+    subject = meta["subject"]
+    whose = owner(actor || subject || "") || "network"
+    asks = question and actor == nil and is_binary(from) and Servers.acts_for(from) != []
 
     cond do
-      not (Servers.acts_for?(from, whose) or (hook and is_binary(from) and Servers.acts_for(from) != [])) ->
+      not is_binary(subject) ->
+        {:error, "A server says who it asks for too"}
+
+      not (Servers.acts_for?(from, whose) or asks) ->
         {:error, "Only a server acting for #{whose} says it asks for them"}
 
-      is_binary(meta["subject"]) ->
-        {:ok, {actor, meta["subject"]}, if(meta["forwarded"] == "to", do: :to, else: meta["forwarded"] == true)}
-
       true ->
-        {:error, "A server says who it asks for too"}
+        with :ok <- if(actor, do: acts(actor, subject), else: :ok),
+             do: {:ok, {actor, subject}, if(meta["forwarded"] == "to", do: :to, else: meta["forwarded"] == true)}
     end
   end
 
-  def asking(from, meta, _hook) do
+  def asking(from, meta, _question) do
     with {:ok, actor} <- by(from, meta),
          :ok <- here(actor),
          subject = Map.get(meta, "subject", actor),
@@ -151,6 +156,13 @@ defmodule OneCore.User do
       with {:ok, who, _tag} <- Bucket.read("network/owner"), do: who, else: (:absent -> nil)
     end)
   end
+
+  @doc """
+  Whether `who` is the network's first owner as the bucket says now, uncached: for an app that writes down who owns
+  the network once told so (the hook `owner`), since any of the network's servers may tell it, and only this is
+  believed.
+  """
+  def first_owner?(who), do: is_binary(who) and match?({:ok, ^who, _tag}, Bucket.read("network/owner"))
 
   @doc """
   Whose `who` is, or who they are: the user, the group or the network that an artifact's name, or a who's, starts

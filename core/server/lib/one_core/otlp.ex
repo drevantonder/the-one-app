@@ -109,7 +109,7 @@ defmodule OneCore.Otlp do
 
   defp exported(signal, request, encode) do
     otlp = Base.encode64(IO.iodata_to_binary(encode.(request)))
-    Hooks.observe("exported", %{"signal" => signal, "otlp" => otlp}, {nil, "network"})
+    Hooks.observe("exported", %{"signal" => signal, "otlp" => otlp}, {nil, Servers.owner()})
   end
 
   # The SDK's resource, with which server this is, by its key and its machine's name, which it knows once it runs.

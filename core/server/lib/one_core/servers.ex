@@ -42,6 +42,12 @@ defmodule OneCore.Servers do
   def acts_for(key), do: Enum.filter(members(key), &(key in listed(&1)))
 
   @doc """
+  Who this server is for: its owner, as it acts for them, or the network for one of the network's. What happens on it
+  is about them, so it tells their apps, and the network's, as nobody (`OneCore.User.asking/3`).
+  """
+  def owner, do: List.first(acts_for(Server.key() || elem(OneCore.Iroh.key(Server.key_file()), 1))) || @network
+
+  @doc """
   Whether this server acts for `owner`: it's a member of this server that has it on their list, or the network
   is, which is everyone. It's asked while the server starts its apps too, before it's reached, whose key is
   then only in its file.
@@ -78,10 +84,10 @@ defmodule OneCore.Servers do
     Enum.uniq(own ++ if(owns_network?(owner), do: listed(@network), else: []))
   end
 
-  # Asked of the network's apps, as everything about the network is.
+  # Asked of the network's apps by this server, as nobody, as everything about the network is.
   defp owns_network?(owner) do
     about = %{"who" => owner, "relation" => "owner", "artifact" => @network}
-    Hooks.validate("reach", about, {owner, @network}) == :ok
+    Hooks.validate("reach", about, {nil, @network}) == :ok
   end
 
   @doc """

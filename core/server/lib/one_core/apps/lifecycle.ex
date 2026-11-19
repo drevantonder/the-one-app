@@ -572,7 +572,7 @@ defmodule OneCore.Apps.Lifecycle do
   defp covers?(@network, _who), do: true
 
   defp covers?("groups/" <> _ = group, "users/" <> _ = who),
-    do: Hooks.validate("reach", %{"who" => who, "relation" => "member", "artifact" => group}, {who, group}) == :ok
+    do: Hooks.validate("reach", %{"who" => who, "relation" => "member", "artifact" => group}, {nil, group}) == :ok
 
   defp covers?(_owner, _who), do: false
 
