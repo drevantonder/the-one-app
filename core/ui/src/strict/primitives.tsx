@@ -9,7 +9,7 @@ import { layer } from "./layer.ts"
 import type { Ice, Props, TextInputAction, Version1Style } from "./renderer.ts"
 import { fullScreen, mods, named, type Input } from "./input.ts"
 import type { Intersected, Laid, Located, Pressed, Wheeled } from "./types/ui.d.ts"
-import { web, type Styles } from "../styles.ts"
+import { flat, web, type Styles } from "../styles.ts"
 
 /// `<Layer modal>…</Layer>`: what's drawn over the whole window, over the page and every layer before it, as a
 /// sheet or a menu is: a box the window's size that lets presses through where nothing of its own is (what's in it
@@ -481,7 +481,9 @@ export function Frame(props: FrameProps) {
     },
   )
   const look = () => drawn("ui-strict-frame", props.style)
-  const style = () => ({ ...(look().style as Record<string, string | number> | undefined), ...(height() !== undefined && { "min-height": `${height()}px` }) })
+  // As tall as its page says, as the native host draws it, unless its style says how tall: an iframe's 150 until then.
+  const tall = () => flat(props.style as Styles).some((one) => "height" in one)
+  const style = () => ({ ...(look().style as Record<string, string | number> | undefined), ...(height() !== undefined && !tall() && { height: `${height()}px` }) })
   return (
     <Show when={shown()}>
       {(at) => <iframe src={at().url} sandbox={at().sandbox} title={props.title} allow="clipboard-write" class={look().class} style={style()} />}
