@@ -49,13 +49,26 @@ defmodule Telemetry.Store do
     rollups = for names <- hours, rollup = latest(names), do: rollup
     read = fn _name, data -> Rollup.decode(data) end
     rolled = Tracer.with_span("telemetry rollups", %{attributes: %{"one.blobs" => length(rollups)}}, do: Cache.read(call, rollups, read))
+    rolled = Enum.map(rolled, &elem(&1, 1))
     exports = Enum.flat_map(hours, &unrolled(&1, rolled))
     read = &Rollup.of(List.wrap(export(&1, &2)))
-    rolled ++ Tracer.with_span("telemetry exports", %{attributes: %{"one.blobs" => length(exports)}}, do: Cache.read(call, exports, read))
+    exports = Tracer.with_span("telemetry exports", %{attributes: %{"one.blobs" => length(exports)}}, do: Cache.read(call, exports, read))
+    rolled ++ Enum.map(exports, &elem(&1, 1))
   end
 
-  @doc "Every export kept of an hour that started after `from`, in nanoseconds since 1970, each laid flat and whole."
-  def whole(call, from), do: decode(call, Enum.reject(listed(call, from), &rollup?/1))
+  @doc """
+  Every export kept of an hour that started after `from`, in nanoseconds since 1970, that may hold the trace `id`,
+  each laid flat and whole: those of the hours whose rollups hold a span of it, as each that failed is, and of the
+  hour either side, or of every hour where none does.
+  """
+  def trace(call, from, id) do
+    hours = call |> listed(from) |> Enum.group_by(&Path.dirname/1)
+    rollups = for {_hour, names} <- hours, rollup = latest(names), do: rollup
+    rolled = Cache.read(call, rollups, fn _name, data -> Rollup.decode(data) end)
+    held = for {name, rollup} <- rolled, Enum.any?(rollup["spans"], &(&1["traceId"] == id)), at <- [-1, 0, 1], do: shifted(Path.dirname(name), at)
+    within = if held == [], do: Map.keys(hours), else: held
+    decode(call, for(hour <- Enum.uniq(within), name <- Map.get(hours, hour, []), not rollup?(name), do: name))
+  end
 
   defp listed(call, from) do
     since = hour(from - 3_600_000_000_000)
@@ -240,6 +253,13 @@ defmodule Telemetry.Store do
     [_, day, hour | _] = String.split(name, "/")
     {:ok, at, 0} = DateTime.from_iso8601("#{day}T#{hour}:00:00Z")
     DateTime.to_unix(at, :millisecond)
+  end
+
+  # The folder of the hour `by` hours from the folder `hour`.
+  defp shifted(hour, by) do
+    [_, day, h] = String.split(hour, "/")
+    {:ok, at, 0} = DateTime.from_iso8601("#{day}T#{h}:00:00Z")
+    hour((DateTime.to_unix(at) + by * 3600) * 1_000_000_000)
   end
 
   # The folder of the hour a time in nanoseconds since 1970 is in: `otlp/2026-11-15/07`.

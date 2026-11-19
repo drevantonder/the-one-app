@@ -12,8 +12,8 @@ defmodule Telemetry.Cache do
   @unused 600_000
 
   @doc """
-  Each of the blobs `names` that's there, as `read` gives it from its name and what's in it, reading from the bucket
-  only those not kept here, and keeping them.
+  Each of the blobs `names` that's there, by its name, as `read` gives it from its name and what's in it, reading from
+  the bucket only those not kept here, and keeping them.
   """
   def read(_call, [], _read), do: []
 
@@ -24,7 +24,7 @@ defmodule Telemetry.Cache do
     Tracer.set_attribute("one.read", length(missing))
     got = for {name, {:ok, data, _tag}} <- Enum.zip(missing, Artifact.read_all(call.own, missing)), into: %{}, do: {name, read.(name, data)}
     GenServer.cast(cache, {:keep, got})
-    for name <- names, value = Map.get_lazy(kept, name, fn -> got[name] end), do: value
+    for name <- names, value = Map.get_lazy(kept, name, fn -> got[name] end), do: {name, value}
   end
 
   # Each blob read, by its name, and when a look last asked for it.

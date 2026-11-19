@@ -467,7 +467,7 @@ defmodule Telemetry do
   def call("trace", %{"id" => id} = inputs, call) do
     if not (id =~ ~r/^[0-9a-f]{32}$/), do: raise("A trace's id is 32 lowercase hexadecimal digits.")
     to = System.os_time(:nanosecond)
-    batches = Store.whole(call, to - (inputs["hours"] || 24) * 3_600_000_000_000)
+    batches = Store.trace(call, to - (inputs["hours"] || 24) * 3_600_000_000_000, id)
 
     case Read.trace(batches, id, shown(call)) do
       [] -> raise "No trace #{id} in the last #{inputs["hours"] || 24} hours."
