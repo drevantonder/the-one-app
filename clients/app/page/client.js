@@ -1577,12 +1577,15 @@ addEventListener("message", async ({ source, data }) => {
   const view = [...open.values()].find(({ frame }) => frame.contentWindow === source) ?? frameOf(source, data)
   if (!view || typeof data?.method !== "string") return
   const { id, method, params = {} } = data
-  // A page in a frame is its frame's page's: it says how tall it is to that page, and logs its errors as its app's.
+  // An app's page, or a page in its frame, logs its errors as an MCP App logs to its host, and they're its app's,
+  // whatever it says.
+  const errored = id === undefined && method === "notifications/message" && params.level === "error"
+  if (errored) exception(params.data?.message, params.data?.file, params.data?.line, view.entrypoint.split("/")[0])
+  // A page in a frame is its frame's page's: it says how tall it is to that page.
   const child = [...nested].find(([, one]) => one === view)
   if (id === undefined && child) {
     const [frame, { in: hosting }] = child
     if (method === "ui/notifications/size-changed" && typeof params.height === "number") post(hosting, { method: "notifications/one/framed", params: { frame, height: params.height } })
-    if (method === "notifications/message" && params.level === "error") exception(params.data?.message, params.data?.file, params.data?.line, view.entrypoint.split("/")[0])
     return
   }
   if (id === undefined) {
@@ -1609,11 +1612,7 @@ addEventListener("message", async ({ source, data }) => {
       view.first = params.first
       gestures()
     }
-    // An app's page logs its errors as an MCP App logs to its host, and they're its app's, whatever it says.
-    if (method === "notifications/message" && params.level === "error") {
-      exception(params.data?.message, params.data?.file, params.data?.line, view.entrypoint.split("/")[0])
-      page(view, { type: "errored" })
-    }
+    if (errored) page(view, { type: "errored" })
     return
   }
   try {
