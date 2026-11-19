@@ -89,8 +89,15 @@ mkdir -p "$folder/bucket"
 RUSTFS_ENABLE_SCANNER=false RUSTFS_ENABLE_HEAL=false \
   RUSTFS_ACCESS_KEY=$access RUSTFS_SECRET_KEY=$secret rustfs server --address "$bucket" "$folder/bucket" >"$folder/bucket.log" 2>&1 &
 started+=($!)
-# Not `-o /dev/null`: curl retrying after an answer it wrote there truncates the file, and fails (23) on /dev/null.
-curl -s --retry 60 --retry-all-errors --retry-delay 1 "http://$bucket/" >/dev/null
+# Waits until `$2` answers, however long the process `$1` that serves it takes to start on a busy machine, and stops
+# if that process exits first, saying where its log `$3` is.
+answers() {
+  until curl -s -o /dev/null "$2"; do
+    kill -0 "$1" 2>/dev/null || { echo "It stopped as it started: $3 says why" >&2 && exit 1; }
+    sleep 1
+  done
+}
+answers "$!" "http://$bucket/" "$folder/bucket.log"
 (cd "$root/core/edge" && ACCESS=$access SECRET=$secret BUCKET=http://$bucket/network bun -e '
   import { AwsClient } from "aws4fetch";
   const { ACCESS: accessKeyId, SECRET: secretAccessKey, BUCKET } = process.env;
@@ -101,7 +108,7 @@ curl -s --retry 60 --retry-all-errors --retry-delay 1 "http://$bucket/" >/dev/nu
   WRANGLER_SEND_METRICS=false exec bun run dev --port "$gateway" \
   --inspector-port "$(free_port)" --persist-to "$folder/edge") >"$folder/edge.log" 2>&1 &
 started+=($!)
-curl -s --retry 60 --retry-all-errors --retry-delay 1 "http://localhost:$gateway/ping" >/dev/null
+answers "$!" "http://localhost:$gateway/ping" "$folder/edge.log"
 # A passkey is for a name, which on one machine is `localhost`.
 at_address=(--address "http://localhost:$gateway" --first "$first")
 
