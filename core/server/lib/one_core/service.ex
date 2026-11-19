@@ -77,6 +77,73 @@ defmodule OneCore.Service do
   """
   def seen(server), do: (Servers.presence(server) || %{})["last_seen"]
 
+  @doc """
+  The machines that run a service of this call's app, as an app's `machines` tool answers them: each by its name,
+  whether it's on, and when it was last seen where it's off.
+  """
+  def machines(%Call{} = call, service) do
+    for server <- servers(call, service) do
+      case seen(server) do
+        at when is_integer(at) -> %{machine: name(server), on: false, last_on: at}
+        _ -> %{machine: name(server), on: true}
+      end
+    end
+  end
+
+  @doc """
+  Calls `function` of a service of this call's app, as `call/5` does, on each of the servers running it that's on,
+  and gives each of what it gave with its server's key, `{server, item}`, for a function that gives a list: what
+  each machine has. A machine that's off has nothing to give now: `machines/2` says which.
+  """
+  def each(%Call{} = call, service, function, arguments \\ []) do
+    for server <- servers(call, service), not is_integer(seen(server)), item <- call(call, service, function, arguments, server),
+        do: {server, item}
+  end
+
+  @doc "The key of the server running a service of this call's app on the machine called `name`, whatever its case."
+  def machine!(%Call{} = call, service, name) do
+    servers = servers(call, service)
+
+    Enum.find(servers, &(String.downcase(name(&1) || "") == String.downcase(name))) ||
+      raise "No machine called #{name} runs #{service.called()}. They're on #{Enum.map_join(servers, ", ", &name/1)}."
+  end
+
+  @doc """
+  Calls the service's `stop_idle(service, idle)` on each of its machines that's on, which stops what it runs there
+  that's gone unused for `idle` ms (`used/1`) and gives their names, and gives each with its machine.
+  """
+  def stop_idle(%Call{} = call, service, idle) do
+    for {server, name} <- each(call, service, :stop_idle, [idle]), do: %{machine: name(server), name: name}
+  end
+
+  @doc """
+  Says the service's `id`, one of what it runs, was used now, as a file's time in its folder, `used/<id>`, which
+  `used/1` reads.
+  """
+  def touch(service, id) when is_pid(service) do
+    folder = Path.join(folder(service), "used")
+    File.mkdir_p!(folder)
+    File.touch!(Path.join(folder, id))
+  end
+
+  @doc "When each of what the service runs was last used, by its id, in milliseconds since 1970, as `touch/2` said."
+  def used(service) when is_pid(service) do
+    folder = Path.join(folder(service), "used")
+
+    for file <- if(File.dir?(folder), do: File.ls!(folder), else: []), into: %{} do
+      {file, File.stat!(Path.join(folder, file), time: :posix).mtime * 1000}
+    end
+  end
+
+  @doc """
+  Tells every client watching the service's app that what it shows changed, by calling the app's `changed(call)`
+  for the first of `acts_for/0`, which says so with `OneCore.Call.changed/1`, in a process of its own.
+  """
+  def changed(service) when is_pid(service) do
+    for who <- Enum.take(acts_for(), 1), do: Task.start(fn -> app(service, who, :changed) end)
+    :ok
+  end
+
   # The app whose service it is: this call's, or one whose code runs inside it, whose function this call is running.
   defp whose(%Call{app_artifact: app, loaded: loaded}, service) do
     under = Version.under(service)
