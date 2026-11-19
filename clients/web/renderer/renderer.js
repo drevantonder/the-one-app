@@ -6,7 +6,7 @@
 // any module loads.
 ;(async () => {
   const started = performance.now()
-  const page = new URL(location.hash.slice(1))
+  const page = new URL(location.hash.slice(1), location.href)
   /** What the page's own page is drawn as, where this can't: the DOM. */
   const unopened = (/** @type {unknown} */ why) => {
     console.warn("the renderer didn't open this page:", why)
