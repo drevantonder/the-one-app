@@ -250,7 +250,8 @@ impl Screen {
         for container in self.chain_from(id).into_iter().skip(1) {
             let Some(placed) = self.placed(container) else { continue };
             let Some((most, _, false)) = placed.scroll else { continue };
-            let (top, bottom) = (placed.shown.origin.y, placed.shown.origin.y + placed.shown.size.height);
+            // What the window keeps at its foot (a keyboard, a home indicator) covers what scrolls under it.
+            let (top, bottom) = (placed.shown.origin.y, (placed.shown.origin.y + placed.shown.size.height).min(self.room.height - self.insets.bottom));
             let (from, to) = (rect.y - moved, rect.y - moved + rect.height);
             let by = if to + ROOM > bottom { (to + ROOM - bottom).min(from - top) } else if from < top { from - top } else { 0.0 };
             let now = self.scrolled.entry(container).or_insert(point(0.0, 0.0));

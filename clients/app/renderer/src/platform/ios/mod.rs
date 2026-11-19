@@ -806,10 +806,15 @@ fn touch_at(screen: &mut crate::Screen, native: &NativeWindow, id: WindowId, fin
                 if touch.stopped {
                     return;
                 }
+                let was = screen.focused();
                 if touch.on_input {
                     screen.pointer_down(at, 0, false);
                 }
                 screen.pointer_up(at, 0);
+                // A tap in the field that has the keyboard brings it up again, if it went, as Android's does.
+                if touch.on_input && was.is_some() && screen.focused() == was {
+                    Display.text_input(native, &[TextInput::Show]);
+                }
             }
             Phase::Cancelled => {
                 let Some(touch) = touches.remove(&id) else { return };
