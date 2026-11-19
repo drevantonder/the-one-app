@@ -956,27 +956,60 @@ struct ShadowVarying {
     @location(4) local: vec2<f32>,
 }
 
+// A shadow, drawn as a frame (a triangle strip of ten vertices, round from its top left, each corner outside then
+// inside) around where it's surely clear: the box under a shadow outside it, or the middle of an inset one past its
+// blur and corners. Most of a large box's shadow is the box, which isn't drawn at all, rather than passed over.
 @vertex
 fn vs_shadow(@builtin(vertex_index) vertex_id: u32, @builtin(instance_index) instance_id: u32) -> ShadowVarying {
-    let unit_vertex = vec2<f32>(f32(vertex_id & 1u), 0.5 * f32(vertex_id & 2u));
-    var shadow = b_shadows[instance_id];
-
-    let margin = 3.0 * shadow.blur_radius;
-    // Set the bounds of the shadow and adjust its size based on the shadow's
-    // spread radius to achieve the spreading effect
-    shadow.bounds.origin -= vec2<f32>(margin);
-    shadow.bounds.size += 2.0 * vec2<f32>(margin);
-    // An inset shadow is drawn only inside its box.
+    let shadow = b_shadows[instance_id];
+    let bounds = shadow_bounds(shadow);
+    let corner = (vertex_id / 2u) % 4u;
+    let outer = vec2<f32>(f32(corner == 1u || corner == 2u), f32(corner >= 2u));
+    var hole: Bounds;
     if (shadow.inset != 0u) {
-        shadow.bounds = shadow.outer;
+        let radii = shadow.corner_radii;
+        let clear = 3.0 * shadow.blur_radius + max(max(radii.top_left, radii.top_right), max(radii.bottom_right, radii.bottom_left)) + 0.5;
+        hole = Bounds(shadow.bounds.origin + clear, shadow.bounds.size - 2.0 * clear);
+    } else {
+        let radii = shadow.outer_radii;
+        let clear = max(max(radii.top_left, radii.top_right), max(radii.bottom_right, radii.bottom_left)) + 0.5;
+        hole = Bounds(shadow.outer.origin + clear, shadow.outer.size - 2.0 * clear);
     }
+    // Where there's no hole inside what's drawn, the inside corners meet in its middle, and the frame is all of it.
+    let low = max(hole.origin, bounds.origin);
+    let high = min(hole.origin + hole.size, bounds.origin + bounds.size);
+    var inner = vec2<f32>(0.5);
+    if (all(high > low)) {
+        inner = (mix(low, high, outer) - bounds.origin) / bounds.size;
+    }
+    let unit_vertex = select(inner, outer, vertex_id % 2u == 0u);
+    return shadow_varying(unit_vertex, bounds, shadow, instance_id);
+}
 
+// A shadow drawn whole, a quad, as its tile is (`fs_shadow_coverage`).
+@vertex
+fn vs_shadow_whole(@builtin(vertex_index) vertex_id: u32, @builtin(instance_index) instance_id: u32) -> ShadowVarying {
+    let unit_vertex = vec2<f32>(f32(vertex_id & 1u), 0.5 * f32(vertex_id & 2u));
+    let shadow = b_shadows[instance_id];
+    return shadow_varying(unit_vertex, shadow_bounds(shadow), shadow, instance_id);
+}
+
+// Where a shadow's drawn: its box grown by its blur, or an inset one's box it's inside.
+fn shadow_bounds(shadow: Shadow) -> Bounds {
+    if (shadow.inset != 0u) {
+        return shadow.outer;
+    }
+    let margin = 3.0 * shadow.blur_radius;
+    return Bounds(shadow.bounds.origin - vec2<f32>(margin), shadow.bounds.size + 2.0 * vec2<f32>(margin));
+}
+
+fn shadow_varying(unit_vertex: vec2<f32>, bounds: Bounds, shadow: Shadow, instance_id: u32) -> ShadowVarying {
     var out = ShadowVarying();
-    out.position = to_device_position_transformed(unit_vertex, shadow.bounds, shadow.transformation);
-    out.local = unit_vertex * vec2<f32>(shadow.bounds.size) + shadow.bounds.origin;
+    out.position = to_device_position_transformed(unit_vertex, bounds, shadow.transformation);
+    out.local = unit_vertex * vec2<f32>(bounds.size) + bounds.origin;
     out.color = hsla_to_rgba(shadow.color);
     out.shadow_id = instance_id;
-    out.clip_distances = distance_from_clip_rect_transformed(unit_vertex, shadow.bounds, shadow.content_mask, shadow.transformation);
+    out.clip_distances = distance_from_clip_rect_transformed(unit_vertex, bounds, shadow.content_mask, shadow.transformation);
     return out;
 }
 

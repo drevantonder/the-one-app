@@ -173,7 +173,7 @@ impl WgpuPipelines {
         self.tiles.get_or_init(|| {
             let l = &self.layouts;
             // A tile holds how much of each point the blurred box covers, nothing else, and replaces what's there.
-            let coverage = l.pipeline_into(TILE_FORMAT, &l.instances, "vs_shadow", "fs_shadow_coverage", None, false);
+            let coverage = l.pipeline_into(TILE_FORMAT, &l.instances, "vs_shadow_whole", "fs_shadow_coverage", None, false);
             (coverage, l.pipeline(&l.instances, "vs_shadow", "fs_shadow_tile", Some(l.blend), true))
         })
     }
@@ -854,14 +854,14 @@ impl WgpuRenderer {
                 Some(((_, pipeline), (_, group))) => {
                     pass.set_pipeline(pipeline);
                     pass.set_bind_group(2, group, &[]);
-                    pass.draw(0..4, at as u32..at as u32 + 1);
+                    pass.draw(0..10, at as u32..at as u32 + 1);
                     at += 1;
                 }
                 None => {
                     // The run of those worked out where they're drawn.
                     let end = (at..shadows.len()).find(|one| tiles.is_some() && tiled(&shadows[*one]).is_some_and(|(key, _)| self.tiles.contains_key(&key))).unwrap_or(shadows.len());
                     pass.set_pipeline(&self.pipelines.shadows);
-                    pass.draw(0..4, at as u32..end as u32);
+                    pass.draw(0..10, at as u32..end as u32);
                     at = end;
                 }
             }
