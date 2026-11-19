@@ -135,6 +135,7 @@ export type Moved =
   | { type: "none"; only?: string }
   | { type: "tooOld" }
   | { type: "unchecked"; why: string }
+  | { type: "unnative"; why: string }
   | { type: "drawn"; key: string }
   | { type: "failed"; key: string; why: string }
   | { type: "load"; view: View }
@@ -151,7 +152,7 @@ export type Moved =
 /** Each command the page invokes: what it's given, and what it answers. */
 export interface Commands {
   /** Where the device is with its network as the window opens, whether its network answers, whether a phone hears taps on notifications, whether each app opens in a window of its own (a computer's), which app this window is if it's an app's own, where the window's title bar is over the page, which keeps it clear, if it's known yet (`title_bar` says it as it changes), and the Colour Mode chosen on the device, if one has been. */
-  start(): Told & { connection: Connection; taps?: boolean; open?: string | null; windows?: boolean; window?: { entrypoint: string; subject?: string; name?: string | null } | null; titleBar?: TitleBar; theme?: "light" | "dark" | null }
+  start(): Told & { connection: Connection; taps?: boolean; open?: string | null; windows?: boolean; window?: { entrypoint: string; subject?: string; name?: string | null } | null; titleBar?: TitleBar; theme?: "light" | "dark" | null; unnative?: string | null }
   /** The files a server lists for `subject`, and the apps whose open apps are out of date. */
   apps(args: { subject: string | undefined }): { resources: Resource[]; outdated: string[] }
   request(args: { view: string; method: string; params: Record<string, unknown> }): unknown

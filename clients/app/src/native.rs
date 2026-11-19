@@ -83,6 +83,7 @@ pub(crate) fn unopened(entrypoint: &str, why: String) {
 }
 
 /// Closes the window `shown`, once it's open.
+#[cfg(mobile)]
 fn close(shown: &OnceLock<WindowId>) {
     let Some(id) = shown.get().copied() else { return };
     if let Ok(native) = Native::get() {
@@ -170,19 +171,52 @@ async fn probe(entrypoint: &str, subject: Option<&str>, framed: bool) -> anyhow:
     Ok(Some(Page { module: page.join(&module)?, page, trusted, tables, name, icon }))
 }
 
-/// Opens the launcher's page natively, if it's of a version this program speaks: on a computer in a panel put away
-/// until it's summoned (`computer`), on a phone as its root window, under every app's. → its window, once it's open,
-/// or none for its page to be the web launcher's.
+/// Opens the launcher's page natively: on a computer in a panel put away until it's summoned (`computer`), on a phone
+/// as its root window, under every app's. → its window, once it's open. A computer's whose page this program can't
+/// draw, or that didn't open, is a panel that says why, and Telemetry hears it; where its native windows can't start,
+/// there's none, and the web launcher says so (`computer::unnative`). A phone's is its page's.
 pub(crate) async fn launcher(entrypoint: &str) -> Option<WindowId> {
+    let started = Instant::now();
     let (opened_to, opened) = tokio::sync::oneshot::channel();
-    match window(Instant::now(), entrypoint, None, entrypoint, Kind::Launcher(Some(opened_to))).await {
-        Ok(true) => opened.await.ok().flatten(),
-        Ok(false) => None,
-        Err(error) => {
-            eprintln!("the launcher is a web view's: {error:#}");
-            None
-        }
+    let why = match window(started, entrypoint, None, entrypoint, Kind::Launcher(Some(opened_to))).await {
+        Ok(true) => return opened.await.ok().flatten(),
+        Ok(false) => "this One App doesn't draw its page: it needs a newer One App".to_owned(),
+        Err(error) => format!("{error:#}"),
+    };
+    reported(entrypoint, started, &why);
+    unopened_launcher(why).await
+}
+
+/// A phone's launcher that isn't drawn natively is its page's.
+#[cfg(mobile)]
+async fn unopened_launcher(_: String) -> Option<WindowId> {
+    None
+}
+
+/// A panel that says why the Home Screen didn't open, or where this computer's native windows can't start, none.
+#[cfg(desktop)]
+async fn unopened_launcher(why: String) -> Option<WindowId> {
+    let said = format!("The Home Screen didn't open: {why}");
+    let (shown_to, shown) = tokio::sync::oneshot::channel();
+    if let Ok(native) = Native::get() {
+        native.run(move |windows| {
+            let options = WindowOptions {
+                title: NAME.to_owned(),
+                app_id: ::client::NAME.to_owned(),
+                size: Size { width: Pixels(computer::SIZE.width as f32), height: Pixels(computer::SIZE.height as f32) },
+                tag: json!({}),
+                panel: Some(computer::CORNER as f32),
+                places: crate::app().shell.home().ok().map(|home| home.join("launcher-places.json")),
+                root: false,
+            };
+            let _ = shown_to.send(windows.open(options, Err(said), |_| {}).ok());
+        });
     }
+    let id = shown.await.ok().flatten();
+    if id.is_none() {
+        computer::unnative(why);
+    }
+    id
 }
 
 /// What a native window is: an app's own, or the launcher, a panel the system summons, which tells whoever opens it
@@ -236,9 +270,9 @@ async fn window(started: Instant, entrypoint: &str, subject: Option<&str>, link:
         };
         let app = entrypoint.split('/').next().unwrap_or_default().to_owned();
         let on_event = {
-            let (to, app, entrypoint, shown) = (to.clone(), app.clone(), entrypoint.clone(), window.clone());
+            let (to, app, entrypoint) = (to.clone(), app.clone(), entrypoint.clone());
             #[cfg(mobile)]
-            let (subject, link) = (subject.clone(), link.clone());
+            let (subject, link, shown) = (subject.clone(), link.clone(), window.clone());
             move |event: Event| match event {
                 // How long it took to open, from being asked to, as a page tells the app's window it has drawn.
                 Event::Drawn => {
@@ -260,23 +294,22 @@ async fn window(started: Instant, entrypoint: &str, subject: Option<&str>, link:
                     let _ = to.send(json!({"id": "visible", "command": "visible", "args": {"onScreen": false}}));
                 }
                 Event::Closed => {}
-                // The launcher's is only its page's: one that didn't start is the web launcher's.
-                Event::Failed(why) if launcher => {
-                    eprintln!("the launcher is a web view's: its page didn't start: {why}");
-                    computer::native(None);
-                }
-                Event::Failed(why) => eprintln!("{entrypoint} didn't start: {why}"),
-                // The launcher whose page turns out to need what this host can't draw is the web launcher's.
-                Event::Mismatched(why) if launcher => {
-                    eprintln!("the launcher is a web view's: {why}");
-                    close(&shown);
-                    computer::native(None);
+                // A window whose page didn't start says so, and Telemetry hears why; a phone's launcher is then its
+                // page's.
+                Event::Failed(why) => {
+                    reported(&entrypoint, started, &why);
+                    #[cfg(mobile)]
+                    if launcher {
+                        computer::native(None);
+                    }
                 }
                 // A computer's window says why it didn't open, and Telemetry hears; a phone opens it in its page.
                 Event::Mismatched(why) => {
                     reported(&entrypoint, started, &why);
                     #[cfg(mobile)]
-                    {
+                    if launcher {
+                        computer::native(None);
+                    } else {
                         close(&shown);
                         let (entrypoint, subject, link) = (entrypoint.clone(), subject.clone(), link.clone());
                         if let Err(error) = crate::hosts::open_web_view(entrypoint.clone(), subject, link) {

@@ -622,6 +622,7 @@ const machine = setup({
   context: { connection: "connecting", starting: false, updateReady: false },
   entry: spawnChild("move", { id: "move" }),
   on: {
+    unnative: { target: ".native_failed", actions: assign({ why: ({ event }) => event.why }) },
     show: { actions: "place" },
     popped: { actions: "move" },
     session: { actions: "told" },
@@ -680,6 +681,8 @@ const machine = setup({
       entry: ["openAppStore", "seen"],
       on: { show: { actions: "move" }, ...fingers, listed: "opening", tooOld: "needs_updating" },
     },
+    // This computer's native windows couldn't start, so there's no Home Screen: it says why, and that's all.
+    native_failed: {},
     // A launcher that draws after all is shown, as an app's page that does is (`pageMachine`).
     launcher_failed: {
       tags: "pages",
@@ -760,6 +763,7 @@ function steps({ connection, starting }) {
 /** @param {import("xstate").SnapshotFrom<typeof machine>} now @returns {[string, string, string | undefined, string | undefined] | undefined} */
 function problemOf(now) {
   if (now.matches("launcher_failed")) return [`${baseName()} didn't open.`, "Try again in a moment.", now.context.why, "Try Again"]
+  if (now.matches("native_failed")) return [`${baseName()} can't open its windows on this device.`, "Its graphics didn't start.", now.context.why, undefined]
   if (now.matches("update_failed")) return ["Couldn't update", now.context.why ?? "", undefined, "Try Again"]
 }
 
@@ -2010,7 +2014,7 @@ await listen("title_bar", ({ payload }) => titled(payload))
 // Where the window starts: where its device is with its network, as the client says it (`Session`), and whether its
 // network answers (`Connection`), which it follows from then on. A phone's app hears a tap on a notification through
 // its push plugin.
-const { taps, testflight: fromTestflight, connection, open: link, windows: inWindows, runtimeVersion: drawn, window: ownWindow, titleBar: overTitleBar, theme: kept, ...told } = await invoke("start")
+const { taps, testflight: fromTestflight, connection, open: link, windows: inWindows, runtimeVersion: drawn, window: ownWindow, titleBar: overTitleBar, theme: kept, unnative, ...told } = await invoke("start")
 phone = Boolean(taps)
 testflight = Boolean(fromTestflight)
 windows = Boolean(inWindows)
@@ -2022,5 +2026,6 @@ heardTheme(kept)
 on({ type: "connection", connection })
 if (link) on({ type: "link", link })
 hear(told)
+if (unnative) on({ type: "unnative", why: unnative })
 invoke("visible", { onScreen: !document.hidden }).catch(() => {})
 if (taps) hearTaps()

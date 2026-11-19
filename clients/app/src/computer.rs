@@ -98,6 +98,21 @@ pub(crate) fn native(id: Option<renderer::platform::WindowId>) {
     tell(Told::Native(id))
 }
 
+/// Why this device's native windows couldn't start, where they couldn't: the web launcher says so in place of the
+/// Home Screen (`unnative` in its page's `start`).
+static UNNATIVE: Mutex<Option<String>> = Mutex::new(None);
+
+/// This device's native windows couldn't start, so there's no Home Screen: the web launcher says why.
+pub(crate) fn unnative(why: String) {
+    *UNNATIVE.lock().expect("nothing panics holding it") = Some(why);
+    tell(Told::Native(None))
+}
+
+/// Why this device's native windows couldn't start, if they couldn't (`unnative`).
+pub(crate) fn unnatived() -> Option<String> {
+    UNNATIVE.lock().expect("nothing panics holding it").clone()
+}
+
 /// The native launcher's page was updated: it opens again, on its new version.
 pub(crate) fn reload_native() {
     tell(Told::Reload)

@@ -411,6 +411,11 @@ pub(crate) async fn command(label: &str, command: &str, args: Value) -> Result<V
             if !launcher {
                 started["name"] = json!(text("entrypoint").and_then(|entrypoint| crate::shortcuts::name(&entrypoint)));
             }
+            // The web launcher says why there's no Home Screen, where this device's native windows can't start.
+            #[cfg(desktop)]
+            if launcher {
+                started["unnative"] = json!(computer::unnatived());
+            }
             Ok(started)
         }
         // An app opened from the launcher comes in front, and the launcher goes.
