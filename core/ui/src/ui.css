@@ -629,10 +629,6 @@ img {
   margin: 0;
   color: var(--muted-foreground);
 }
-.ui-sign-in .ui-button {
-  min-width: 12rem;
-  text-decoration: none;
-}
 /* It's the whole window, with nothing to scroll: its middle is the window's. */
 html:has(.ui-sign-in) {
   scrollbar-gutter: auto;

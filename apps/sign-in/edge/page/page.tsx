@@ -344,7 +344,7 @@ function shows(): Shows {
       if (how() === "away") return { heading: "Sign in on another device", button: shares ? "Share Link" : copied() ? "Copied" : "Copy Link", onSignIn: share, stop: "Back", onStop: () => setHow("passkey"), elsewhere: true }
       if (how() === "passkey") return { heading: "Sign in", note: "Check this code where you sign in", code: shown, problem: why, button: "Sign in", href: link.href, stop: "Use Another Device", onStop: () => setHow("away") }
       if (number() !== undefined)
-        return { heading: "Check your devices", note: "On another of your devices, open Devices and enter", code: String(number()), button: "Use a Passkey", onSignIn: () => setHow("passkey"), stop: "Back", onStop: () => setNumber() }
+        return { heading: "Check your devices", note: "On another of your devices, open Devices and enter", code: String(number()), status: "Waiting for approval…", quiet: true, button: "Use a Passkey Instead", onSignIn: () => setHow("passkey"), stop: "Back", onStop: () => setNumber() }
       return { heading: "Sign in", problem: why, button: "Continue", onSignIn: name, stop: "Use a Passkey", onStop: () => setHow("passkey"), asksWho: true }
     case "device":
       switch (now.stage) {
@@ -463,6 +463,7 @@ render(
       problem={shows().problem}
       status={shows().status}
       button={shows().button}
+      quiet={shows().quiet}
       href={shows().href}
       onSignIn={shows().onSignIn}
       stop={shows().stop}
@@ -481,13 +482,13 @@ render(
         </div>
       )}
       {shows().asksWho && (
-        <Field label="Who's signing in?">
-          <Input name="person" autoComplete="username" autoCapitalize="none" placeholder="Name or email" required value={person()} onChangeText={setPerson} />
+        <Field>
+          <Input name="person" aria-label="Who's signing in?" autoFocus autoComplete="username" autoCapitalize="none" placeholder="Name or email" required value={person()} onChangeText={setPerson} />
         </Field>
       )}
       {shows().asksName && !shows().done && (
-        <Field label="Your name">
-          <Input name="name" autoComplete="name" required value={called()} onChangeText={setCalled} />
+        <Field>
+          <Input name="name" aria-label="Your name" autoFocus autoComplete="name" placeholder="Your name" required value={called()} onChangeText={setCalled} />
         </Field>
       )}
     </SignIn>

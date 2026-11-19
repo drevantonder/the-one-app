@@ -9,12 +9,14 @@ import type { JSX } from "@solidjs/web"
 // they do, and stays until they have. `stop` is a second button, for saying no, which `onStop` does. `done` is
 // the one line that's left once they've answered. With `href` the button is a link to where signing in happens,
 // for a screen that can't ask itself. `status` is what's under way while there's nothing to press yet, a spinner
-// and one line where the buttons go. What else it asks, such as a `Field` for their name, goes in it, above
+// and one line where the buttons go; with `quiet` the button is one of two ways on while it's under way, an outline,
+// under the status, and not the one to press. Return in a field it asks does what the button does. What else it asks, such as a `Field` for their name, goes in it, above
 // the button.
 export function SignIn(props: {
   mark?: JSX.Element
   heading?: JSX.Element
   button?: JSX.Element
+  quiet?: boolean
   onSignIn?: () => unknown
   href?: string
   problem?: JSX.Element
@@ -43,7 +45,15 @@ export function SignIn(props: {
   }
 
   return (
-    <main class="ui-sign-in">
+    <main
+      class="ui-sign-in"
+      onKeyDown={(event) => {
+        if (event.key !== "Enter" || (event.target as HTMLElement).tagName !== "INPUT" || !props.button || props.status || props.quiet || working()) return
+        event.preventDefault()
+        if (props.href) location.assign(props.href)
+        else respond("sign-in", () => props.onSignIn?.())()
+      }}
+    >
       <Show when={props.mark}>
         <div class="mark">{props.mark}</div>
       </Show>
@@ -74,20 +84,16 @@ export function SignIn(props: {
             <span>{props.status}</span>
           </p>
         </Show>
-        <Show when={props.button && !props.status}>
+        <Show when={props.button && (!props.status || props.quiet)}>
           <div class="answers">
-            <Show
-              when={props.href}
-              fallback={
-                <Button loading={working() === "sign-in"} disabled={!!working()} onPress={respond("sign-in", () => props.onSignIn?.())}>
-                  {props.button}
-                </Button>
-              }
+            <Button
+              variant={props.quiet ? "outline" : "default"}
+              loading={working() === "sign-in"}
+              disabled={!!working()}
+              onPress={props.href ? () => location.assign(props.href!) : respond("sign-in", () => props.onSignIn?.())}
             >
-              <a class="ui-button press ring" data-variant="default" href={props.href}>
-                {props.button}
-              </a>
-            </Show>
+              {props.button}
+            </Button>
             <Show when={props.stop}>
               <Button variant="outline" loading={working() === "stop"} disabled={!!working()} onPress={respond("stop", () => props.onStop?.())}>
                 {props.stop}
