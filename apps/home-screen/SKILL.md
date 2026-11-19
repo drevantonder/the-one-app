@@ -38,11 +38,11 @@ Its words:
 
 An App Library groups apps by the categories the App Store does, an app's `metadata.category` (the skill
 building-apps), in that order. An entrypoint that's for something else than its app says one of them as its own
-`category`, as Sign-In's Devices says `Devices`. Admin, what other apps stand on, shows only to the network's owners.
+`category`. Admin, what other apps stand on, shows only to the network's owners.
 `launcher` is this one's.
 
 ## Who an app is for
 
-An app opens for whoever's Home Screen it's on, or whose App Library it's in. One about whoever opens it, as Vault,
-Devices and Notifications are, says `subject: "user"`: it's in the user's own App Library and opens for them,
+An app opens for whoever's Home Screen it's on, or whose App Library it's in. One about whoever opens it, as Settings
+and Notifications are, says `subject: "user"`: it's in the user's own App Library and opens for them,
 wherever its app is installed.

@@ -31,7 +31,7 @@ tools for the network (`ONE_SUBJECT=network`, and `subject: "network"` from an a
 - `restore` brings back what a backup holds that's gone from the network, by how its names start: `users/alice/`
   for a person, `users/alice/own/notes/` for what one app keeps for them (and `users/alice/made/notes/` for
   what it made them), or one blob's whole name. It changes nothing that's there, so it can't put a database back
-  to an earlier moment over what's there now. The Backups screen does the same, for a person, an app or a file.
+  to an earlier moment over what's there now. Settings › Backups does the same, for a person, an app or a file.
 - `remove` stops backing up to a destination. What's there stays.
 
 When the bucket itself is gone, the network is restored into an empty one on any machine, with no network running:
