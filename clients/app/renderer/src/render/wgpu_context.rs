@@ -5,6 +5,7 @@
 // (clients/app/renderer/LICENSE-APACHE); this file is changed from the original.
 
 use anyhow::Context as _;
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
 /// The GPU, shared by what draws: every window's surface and every offscreen texture, with the pipelines each format
@@ -15,6 +16,9 @@ pub struct WgpuContext {
     pub(crate) device: wgpu::Device,
     pub(crate) queue: wgpu::Queue,
     pub(crate) pipelines: Mutex<Vec<(wgpu::TextureFormat, bool, Arc<super::wgpu_renderer::WgpuPipelines>)>>,
+    /// Its device was lost (its GPU was reset, as a Windows driver's TDR resets it, or went), so nothing drawn with
+    /// it draws again: what draws makes everything again, on a new one (`Windows::recover`).
+    lost: Arc<AtomicBool>,
 }
 
 /// The one backend each platform draws with.
@@ -50,7 +54,18 @@ impl WgpuContext {
         }))
         .map_err(|error| anyhow::anyhow!("no GPU to draw with: {error}"))?;
         device.on_uncaptured_error(Arc::new(|error| log::error!("GPU error: {error}")));
-        Ok(Self { instance, adapter, device, queue, pipelines: Default::default() })
+        let lost = Arc::new(AtomicBool::new(false));
+        let told = lost.clone();
+        device.set_device_lost_callback(move |reason, message| {
+            log::error!("the GPU was lost ({reason:?}): {message}");
+            told.store(true, Ordering::Relaxed);
+        });
+        Ok(Self { instance, adapter, device, queue, pipelines: Default::default(), lost })
+    }
+
+    /// Whether its device was lost (`lost`).
+    pub fn lost(&self) -> bool {
+        self.lost.load(Ordering::Relaxed)
     }
 }
 

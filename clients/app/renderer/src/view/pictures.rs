@@ -100,6 +100,14 @@ impl Pictures {
         self.ready.clear();
     }
 
+    /// Forgets every picture put in the atlas, as the atlas is made again (its GPU was lost): each is decoded again as
+    /// it's next drawn.
+    pub(super) fn forget(&mut self) {
+        self.sizes.clear();
+        self.ready.clear();
+        self.latest.clear();
+    }
+
     /// An icon's path, drawn by `draw` in this frame the first time, as GPUI draws its paths in the frame: small, so a
     /// page's icons show with it.
     pub(super) fn now(&mut self, atlas: &Atlas, key: &str, draw: impl Fn() -> Option<Decoded>) -> Option<AtlasTile> {

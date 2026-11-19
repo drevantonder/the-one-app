@@ -588,6 +588,17 @@ impl Screen {
         self.changed.get_or_insert(now);
     }
 
+    /// Its GPU was lost, and what it drew with is made again: what it kept in the old atlas (its pictures, and the
+    /// layers drawn from them) goes, and it's all drawn afresh, its frames' pages too.
+    pub fn gpu_lost(&mut self) {
+        self.pictures.forget();
+        self.layers.clear();
+        self.seen = None;
+        for child in self.frames.values_mut() {
+            child.screen.gpu_lost();
+        }
+    }
+
     /// Where its page asked for the system's own material, as it was last drawn, which a panel's host puts under it.
     pub fn glass(&self) -> &[crate::platform::Glass] {
         &self.chrome.glass

@@ -614,8 +614,41 @@ impl Windows {
         self.windows.values().any(|window| window.on_screen() && (window.moving || window.screen.as_ref().is_ok_and(Screen::framing)))
     }
 
+    /// Makes what draws again, on a new GPU device, where the one it drew with was lost, as a browser makes a lost
+    /// WebGPU device's: the atlas and every window's renderer, each window drawn afresh (`Screen::gpu_lost`).
+    fn recover(&mut self) {
+        let made = Context::new().map(|context| {
+            let atlas = Arc::new(Atlas::new(&context));
+            (context, atlas)
+        });
+        let (context, atlas) = match made {
+            Ok(made) => made,
+            Err(error) => return log::error!("no GPU to draw with again yet: {error:#}"),
+        };
+        for window in self.windows.values_mut() {
+            for part in &mut window.parts {
+                part.renderer = None;
+                if part.native.has_surface() {
+                    match part.native.surface().and_then(|surface| Renderer::new(&context, atlas.clone(), surface, part.native.device_size(), part.native.transparent())) {
+                        Ok(renderer) => part.renderer = Some(renderer),
+                        Err(error) => log::error!("a native window can't draw: {error:#}"),
+                    }
+                }
+            }
+            if let Ok(screen) = &mut window.screen {
+                screen.gpu_lost();
+            }
+            window.dirty = true;
+        }
+        (self.context, self.atlas) = (context, atlas);
+        log::info!("drawing again on a new GPU device");
+    }
+
     /// After each turn of the loop: what the display said, timers that are due, then each window that changed drawn.
     fn turn(&mut self) {
+        if self.context.lost() {
+            self.recover();
+        }
         for (id, part, input) in self.display.events() {
             self.input(id, part, input);
         }
