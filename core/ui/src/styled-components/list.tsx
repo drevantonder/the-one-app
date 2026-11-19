@@ -30,7 +30,8 @@ const look = styles({
   // In grouped cards on a computer, as Raycast's Settings: the card is inset, and its lines between rows run from its
   // inset to its inset.
   groupedList: { width: "100%", maxWidth: tokens.length.readable, alignSelf: "center", paddingInline: tokens.grid[3] },
-  row: { position: "relative", flexDirection: "row", alignItems: "stretch", overflow: "hidden", borderTopWidth: tokens.length.hairline, borderColor: tokens.colour.quinaryLabel },
+  // A finger moving up or down on a row scrolls its list, as the device does it; only sideways is the row's, to swipe.
+  row: { position: "relative", flexDirection: "row", alignItems: "stretch", overflow: "hidden", borderTopWidth: tokens.length.hairline, borderColor: tokens.colour.quinaryLabel, touchAction: "pan-y" },
   flatRow: { borderTopWidth: 0, borderRadius: tokens.radius.medium },
   groupedInside: { minHeight: tokens.length.groupedRow, paddingInline: 0, paddingBlock: tokens.grid[1.5], gap: tokens.grid[2.5], backgroundColor: tokens.colour.transparent },
   sidebarInside: { minHeight: tokens.length.sidebarRow },
@@ -41,7 +42,7 @@ const look = styles({
   chosen: { backgroundColor: tokens.colour.selection },
   // Its row has no highlight of its own under the pointer: the pointer chooses it, which highlights the option.
   quiet: { backgroundColor: tokens.colour.transparent },
-  held: { userSelect: "none", touchAction: "pan-y" },
+  held: { userSelect: "none" },
   inside: {
     flexGrow: 1,
     flexShrink: 1,
