@@ -99,9 +99,10 @@ asc() {
   ' "$1"
 }
 
-# The network's app as its repo has it on the remote, which is what's built.
-git -C "$network" fetch -q origin HEAD
-identifier=$(git -C "$network" show FETCH_HEAD:app/tauri.conf.json | jq -r '.identifier // empty')
+# The network's app as its repo's main has it on the remote, which is what's built, whatever its checkout here has:
+# only its objects are read, never its files.
+git -C "$network" fetch -q origin main
+identifier=$(git -C "$network" show origin/main:app/tauri.conf.json | jq -r '.identifier // empty')
 identifier=${identifier:-$(jq -r .identifier clients/app/tauri.conf.json)}
 app=$(asc "/v1/apps?filter%5BbundleId%5D=$identifier" | jq -r '.data[0].id // empty')
 [[ -n $app ]] || { echo "App Store Connect has no app $identifier: its owner makes it on the website." >&2 && exit 1; }
@@ -131,7 +132,7 @@ fi
 
 echo "Building $build for TestFlight on the Mac, as $number"
 mac() { ssh -o ConnectTimeout=15 mac "zsh -lc $(printf %q "set -e; export PATH=\$HOME/.local/bin:\$HOME/.cargo/bin:\$PATH CARGO_BUILD_JOBS=4; $1")"; }
-git -C "$network" archive --format=tar FETCH_HEAD app |
+git -C "$network" archive --format=tar origin/main app |
   mac "rm -rf ~/scratch/testflight-network && mkdir -p ~/scratch/testflight-network && tar -x -C ~/scratch/testflight-network"
 mac "lockf -k ~/scratch/testflight.lock bash -c $(printf %q "set -e
   [[ -d ~/scratch/testflight ]] || git clone -q https://github.com/drevantonder/the-one-app.git ~/scratch/testflight

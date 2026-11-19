@@ -13,8 +13,9 @@ incremental `one` build took 12 minutes instead of 1 or 2), so don't use `taskpo
 simulators and Chrome had it above 200 with CPU to spare, so don't add to what uses its memory: shut down and delete a
 simulator you booted, and remove your `~/scratch/` checkout, when you're done.
 
-Work in a checkout of your own there under `~/scratch/`, at your commit, with the network's repo beside it (only its
-`app/` is read; copying that folder over is enough). Clone it whole, not `--depth 1`: the app's version and build
+Work in a checkout of your own there under `~/scratch/`, at your commit, with the network's `app/` beside it, as its
+repo's main has it on the remote (`git -C <the network's repo> fetch origin main && git -C <it> archive origin/main
+app`), never a checkout's files, which may be behind. Clone it whole, not `--depth 1`: the app's version and build
 number are `tooling/version`'s count of commits, so a shallow clone builds an app numbered 1.
 
 An app is a network's: the commands that build it are in that repo's `app/README.md`, and what they need in
