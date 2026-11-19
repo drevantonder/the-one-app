@@ -10,11 +10,8 @@ defmodule OneCore.Bucket.S3 do
   bucket that can't be reached `OneCore.Edge.Unreachable`.
   """
   @behaviour OneCore.Bucket
-  require Record
+  import SweetXml, only: [sigil_x: 2, parse: 1, xpath: 2, xpath: 3]
   alias OneCore.Edge
-
-  Record.defrecordp(:xml_element, :xmlElement, Record.extract(:xmlElement, from_lib: "xmerl/include/xmerl.hrl"))
-  Record.defrecordp(:xml_text, :xmlText, Record.extract(:xmlText, from_lib: "xmerl/include/xmerl.hrl"))
 
   @impl true
   def read(address, key) do
@@ -72,12 +69,13 @@ defmodule OneCore.Bucket.S3 do
   def list_tagged(address, prefix, next \\ nil) do
     case send_request(address, %{list: prefix, after: next}) do
       %{status: 200, body: listed} ->
-        {listed, _} = :xmerl_scan.string(:binary.bin_to_list(listed))
-        here = Enum.zip(texts(listed, ~c"/ListBucketResult/Contents/Key"), texts(listed, ~c"/ListBucketResult/Contents/ETag"))
+        listed = parse(listed)
+        here = xpath(listed, ~x"/ListBucketResult/Contents"l, key: ~x"./Key/text()"s, tag: ~x"./ETag/text()"s)
+        here = for %{key: key, tag: tag} <- here, do: {key, tag}
 
-        case texts(listed, ~c"/ListBucketResult/NextContinuationToken") do
-          [] -> here
-          [next] -> here ++ list_tagged(address, prefix, next)
+        case xpath(listed, ~x"/ListBucketResult/NextContinuationToken/text()"s) do
+          "" -> here
+          next -> here ++ list_tagged(address, prefix, next)
         end
 
       refused ->
@@ -93,22 +91,14 @@ defmodule OneCore.Bucket.S3 do
     end
   end
 
-  defp texts(xml, path) do
-    for element <- :xmerl_xpath.string(path, xml) do
-      for xml_text(value: text) <- xml_element(element, :content), into: "", do: List.to_string(text)
-    end
-  end
-
   # A blob's size is listed with its key.
   @impl true
   def size(address, key) do
     case send_request(address, %{list: key}) do
       %{status: 200, body: listed} ->
-        {listed, _} = :xmerl_scan.string(:binary.bin_to_list(listed))
-
-        case texts(listed, ~c"/ListBucketResult/Contents[Key='#{key}']/Size") do
-          [size] -> {:ok, String.to_integer(size)}
-          [] -> :absent
+        case xpath(listed, ~x"/ListBucketResult/Contents[Key='#{key}']/Size/text()"io) do
+          nil -> :absent
+          size -> {:ok, size}
         end
 
       refused ->

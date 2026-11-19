@@ -20,6 +20,7 @@ defmodule OneCore.MixProject do
         {:opentelemetry_exporter, "~> 1.11"},
         {:recon, "~> 2.5"},
         {:req, "~> 0.5"},
+        {:sweet_xml, "~> 0.7"},
         {:tz, "~> 0.28"},
         {:yaml_elixir, "~> 2.12"}
       ],
@@ -47,7 +48,7 @@ defmodule OneCore.MixProject do
   def application do
     [
       mod: {OneCore.Application, []},
-      extra_applications: [:logger, :crypto, :inets, :xmerl]
+      extra_applications: [:logger, :crypto, :inets]
     ]
   end
 
