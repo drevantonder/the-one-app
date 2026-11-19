@@ -175,9 +175,9 @@ impl Screen {
 
     /// Where the rail's line is drawn, while it shows (`rail`): iOS's home indicator on its side, 4 by 64 points, in the
     /// middle of the right edge, 6 in from what the safe area leaves, as the window page's is (client.css's `#line`).
-    /// It's away while something is open over the page (a sheet, a menu) and while it's pulled.
+    /// It's away while something is drawn over the page (a sheet, a menu: a layer) and while it's pulled.
     pub fn line(&self) -> Option<Bounds<f32>> {
-        if !self.rail || self.pulled || self.over {
+        if !self.rail || self.pulled || self.layer {
             return None;
         }
         Some(Bounds { origin: point(self.room.width - self.insets.right - 10.0, self.room.height / 2.0 - 32.0), size: Size { width: 4.0, height: 64.0 } })

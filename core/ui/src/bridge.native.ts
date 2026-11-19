@@ -131,8 +131,9 @@ export const covers: typeof Page.covers = (shut, { layer = true } = {}) => {
   }
 }
 export const connection: typeof Page.connection = () => connected()
-/** Opening something is a step back closes, as the device's back closes what covers the page. */
-export const step = covers
+/** Opening something is a step back closes, as the device's back closes what covers the page: a screen pushed over the
+ * last, which isn't drawn over the page as a sheet or a menu is (a layer), as the DOM's history step isn't one. */
+export const step = (close: () => void): (() => void) => covers(close, { layer: false })
 /** A native host draws no move between screens yet: the change is made at once. */
 export const go: typeof Page.go = (change) => change()
 

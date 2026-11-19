@@ -242,6 +242,9 @@ pub struct Screen {
     /// Something is open over its page (a sheet, a menu), as its page says (`notifications/one/over`): Back shuts that
     /// first (`back`).
     over: bool,
+    /// What's open over its page is drawn over it (a sheet, a menu), not only a screen of its own, which the rail's
+    /// line keeps out of the way of (`line`).
+    layer: bool,
     /// The last error its JS threw, which is logged, as a browser's console has it, and the screen carries on.
     pub failed: Option<String>,
     /// What its page uses that this host can't draw (`tree::Mismatch`), which its window says in its place.
@@ -311,6 +314,7 @@ impl Screen {
             settling: Vec::new(),
             content_height: None,
             over: false,
+            layer: false,
             failed: None,
             mismatched: None,
         };
@@ -509,6 +513,7 @@ impl Screen {
                     }
                     if message["method"] == "notifications/one/over" {
                         self.over = message["params"]["over"] == true;
+                        self.layer = message["params"]["layer"] == true;
                     }
                     let Some(asked) = self.asked.as_mut() else { continue };
                     let (id, method, tool) = (message.get("id").map(Value::to_string), message["method"].as_str().map(str::to_owned), message["params"]["name"].as_str().map(str::to_owned));
