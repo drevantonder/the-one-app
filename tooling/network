@@ -61,6 +61,9 @@ started=()
 trap 'for job in "${started[@]}"; do kill -- "-$job" 2>/dev/null || true; done; wait; rm -f "$folder/pid"' EXIT
 trap exit TERM INT HUP
 one=$root/target/debug/one
+# Its Erlang nodes' schedulers sleep when they've nothing to do, as RabbitMQ advises where a machine runs more than
+# one thing: by default each spins a while first, which on a machine many networks share takes CPU the others need.
+export ERL_FLAGS="+sbwt none +sbwtdcpu none +sbwtdio none ${ERL_FLAGS-}"
 
 [[ -e $root/target ]] || "$root/tooling/copy-build"
 (cd "$root/core/ui" && bun install --frozen-lockfile && bun build.js)
