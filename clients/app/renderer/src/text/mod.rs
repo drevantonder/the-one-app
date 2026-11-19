@@ -26,9 +26,9 @@ use crate::render::scene::{MonochromeSprite, PolychromeSprite, Scene, Transforma
 
 mod colr;
 
-/// How many positions between device pixels a glyph is rasterized at, along the line; across it, one, as text runs
-/// along whole pixels.
-pub(crate) const SUBPIXEL_VARIANTS_X: u8 = 4;
+/// How many positions between device pixels a glyph is rasterized at, along the line and across it, as GPUI does on a
+/// Mac: a text moving with its box by a fraction of a pixel moves with it, rather than stepping a pixel at a time.
+pub(crate) const SUBPIXEL_VARIANTS: u8 = 4;
 
 /// A face as a run was set in: its font, where it is on its variation axes, and whether it's emboldened.
 #[derive(Clone, Copy, Debug, PartialEq, Eq, Hash, Default)]
@@ -386,13 +386,17 @@ impl TextSystem {
             }
         }
         let font = swash::FontRef::from_index(data, index as usize).context("the font isn't one swash reads")?;
-        let mut scaler = self.scaler.builder(font).size(ppem).hint(true).normalized_coords(&face.coords).build();
+        // Unhinted, as Core Text and DirectWrite draw it, so a glyph at any size or place is its outline scaled and moved,
+        // and a text growing or moving with its box keeps its shape.
+        let mut scaler = self.scaler.builder(font).size(ppem).hint(false).normalized_coords(&face.coords).build();
         let sources: &[Source] = if params.is_emoji {
             &[Source::ColorOutline(0), Source::ColorBitmap(StrikeWith::BestFit), Source::Outline]
         } else {
             &[Source::Bitmap(StrikeWith::ExactSize), Source::Outline]
         };
-        let offset = Vector::new(params.subpixel_variant.x as f32 / SUBPIXEL_VARIANTS_X as f32 / params.scale_factor(), 0.0);
+        // In device pixels, the outline's y upward.
+        let variant = |at: u8| f32::from(at) / f32::from(SUBPIXEL_VARIANTS);
+        let offset = Vector::new(variant(params.subpixel_variant.x), -variant(params.subpixel_variant.y));
         let mut render = Render::new(sources);
         render.format(Format::Alpha).offset(offset);
         if face.embolden {
@@ -447,11 +451,14 @@ impl TextSystem {
         atlas: &Atlas,
         scene: &mut Scene,
     ) -> Result<()> {
+        // The nearest of the positions a glyph is rasterized at, from the device pixel it starts in.
         let glyph_origin = origin.scale(scale_factor);
-        let subpixel_variant = Point {
-            x: (glyph_origin.x.0.fract() * SUBPIXEL_VARIANTS_X as f32).floor() as u8,
-            y: 0,
+        let nearest = |at: f32| {
+            let steps = (at * f32::from(SUBPIXEL_VARIANTS)).round();
+            ((steps / f32::from(SUBPIXEL_VARIANTS)).floor(), steps.rem_euclid(f32::from(SUBPIXEL_VARIANTS)) as u8)
         };
+        let ((left, x), (top, y)) = (nearest(glyph_origin.x.0), nearest(glyph_origin.y.0));
+        let subpixel_variant = Point { x, y };
         let params = RenderGlyphParams {
             font_id,
             glyph_id: glyph.id,
@@ -478,7 +485,7 @@ impl TextSystem {
             })?
             .expect("the callback above only errors or returns Some");
         let bounds = Bounds {
-            origin: glyph_origin.map(|px| ScaledPixels(px.0.floor())) + raster_bounds.origin.map(Into::into),
+            origin: Point { x: ScaledPixels(left), y: ScaledPixels(top) } + raster_bounds.origin.map(Into::into),
             size: tile.bounds.size.map(Into::into),
         };
         if glyph.is_emoji {
