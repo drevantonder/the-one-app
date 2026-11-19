@@ -253,6 +253,13 @@ impl Display {
             window.setAcceptsMouseMovedEvents(true);
 
             let view = View::new(main, rect, shared.clone());
+            // An app's window takes files dropped from the Finder.
+            if options.panel.is_none() {
+                unsafe {
+                    let types: *mut AnyObject = msg_send![objc2::class!(NSArray), arrayWithObject: objc2_app_kit::NSPasteboardTypeFileURL];
+                    let () = msg_send![&*view, registerForDraggedTypes: types];
+                }
+            }
             match options.panel {
                 Some(corner) => unsafe { panel(&window, &view, rect, corner.into()) },
                 None => window.setContentView(Some(&view)),
@@ -595,6 +602,41 @@ define_class!(
     struct View;
 
     impl View {
+        // Files dragged from the Finder over an app's window may be dropped on it, as copies (NSDragOperationCopy).
+        #[unsafe(method(draggingEntered:))]
+        fn dragging_entered(&self, _sender: &AnyObject) -> usize {
+            1
+        }
+
+        #[unsafe(method(draggingUpdated:))]
+        fn dragging_updated(&self, _sender: &AnyObject) -> usize {
+            1
+        }
+
+        // Dropped, its files' URLs are the page's, where they were dropped.
+        #[unsafe(method(performDragOperation:))]
+        fn perform_drag_operation(&self, sender: &AnyObject) -> bool {
+            let (location, pasteboard): (NSPoint, *mut AnyObject) = unsafe { (msg_send![sender, draggingLocation], msg_send![sender, draggingPasteboard]) };
+            let point = self.convertPoint_fromView(location, None);
+            let at = Point { x: point.x as f32, y: (self.frame().size.height - point.y) as f32 };
+            let mut files = Vec::new();
+            unsafe {
+                let classes: *mut AnyObject = msg_send![objc2::class!(NSArray), arrayWithObject: objc2::class!(NSURL)];
+                let urls: *mut AnyObject = msg_send![pasteboard, readObjectsForClasses: classes, options: std::ptr::null::<AnyObject>()];
+                let count: usize = if urls.is_null() { 0 } else { msg_send![urls, count] };
+                for at in 0..count {
+                    let url: *mut AnyObject = msg_send![urls, objectAtIndex: at];
+                    let (file, path): (bool, *mut AnyObject) = (msg_send![url, isFileURL], msg_send![url, path]);
+                    let path: *const c_char = if file && !path.is_null() { msg_send![path, UTF8String] } else { std::ptr::null() };
+                    if !path.is_null() {
+                        files.push(std::path::PathBuf::from(CStr::from_ptr(path).to_string_lossy().into_owned()));
+                    }
+                }
+            }
+            self.ivars().shared.send(Input::Dropped(at, files));
+            true
+        }
+
         #[unsafe(method(acceptsFirstResponder))]
         fn accepts_first_responder(&self) -> bool {
             true

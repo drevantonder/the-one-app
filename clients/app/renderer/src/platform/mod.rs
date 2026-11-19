@@ -16,15 +16,15 @@ use crate::Screen;
 #[cfg(target_os = "linux")]
 mod linux;
 #[cfg(target_os = "linux")]
-use linux::{Display, Handle, NativeWindow, appearance, clipboard, reduced_motion};
+use linux::{Display, Handle, NativeWindow, appearance, clipboard, open_files, reduced_motion};
 #[cfg(target_os = "windows")]
 mod windows;
 #[cfg(target_os = "windows")]
-use windows::{Display, Handle, NativeWindow, appearance, clipboard, reduced_motion};
+use windows::{Display, Handle, NativeWindow, appearance, clipboard, open_files, reduced_motion};
 #[cfg(target_os = "macos")]
 mod mac;
 #[cfg(target_os = "macos")]
-use mac::{Display, Handle, NativeWindow, appearance, clipboard, reduced_motion};
+use mac::{Display, Handle, NativeWindow, appearance, clipboard, open_files, reduced_motion};
 #[cfg(target_os = "android")]
 mod android;
 /// The rail's home line over a phone's app windows, pulled home (`Windows::line`).
@@ -100,6 +100,27 @@ impl Frame {
         if let Err(error) = written {
             log::warn!("where the window was left isn't kept: {error}");
         }
+    }
+}
+
+/// What a computer does for a page itself: its own picker of files to open (`open_files`, each system's).
+#[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
+struct Computer;
+
+#[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
+impl crate::view::Device for Computer {
+    fn pick(&mut self, _: crate::tree::Id, _: crate::inspect::Rect, _: &serde_json::Value, _: Option<&str>) -> bool {
+        false
+    }
+    fn share(&mut self, _: &str) -> bool {
+        false
+    }
+    fn haptic(&mut self, _: &str) -> bool {
+        false
+    }
+    fn open_files(&mut self, accept: &[String], multiple: bool, chosen: Box<dyn FnOnce(Vec<std::path::PathBuf>) + Send>) -> bool {
+        open_files(accept, multiple, chosen);
+        true
     }
 }
 
@@ -351,6 +372,10 @@ impl Windows {
             {
                 screen.device = native.device(id);
                 screen.text_size = Some(text_size());
+            }
+            #[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
+            {
+                screen.device = Box::new(Computer);
             }
             if let Some(native) = Native::started() {
                 let native = std::sync::Mutex::new(native);
@@ -912,6 +937,7 @@ impl Windows {
             Input::Expose => {}
             // The system went light or dark: so do its own parts of the window, where its Colour Mode says nothing.
             Input::FullScreen(full) => screen.full_screen = full,
+            Input::Dropped(at, files) => screen.dropped(at, &files),
             Input::Appearance(appearance) => {
                 screen.appearance = appearance;
                 window.chrome = None;
@@ -1080,6 +1106,7 @@ impl Input {
             Input::Moved(at) => Input::Moved(moved(at)),
             Input::Down(at, button, shift) => Input::Down(moved(at), button, shift),
             Input::Up(at, button) => Input::Up(moved(at), button),
+            Input::Dropped(at, files) => Input::Dropped(moved(at), files),
             Input::Wheel(at, delta, phase) => Input::Wheel(moved(at), delta, phase),
             input => input,
         }
@@ -1099,6 +1126,9 @@ pub(crate) enum Input {
     Expose,
     /// The system went light or dark.
     Appearance(crate::Appearance),
+    /// Files were dropped on it from the system, at a point in it.
+    #[cfg_attr(not(any(target_os = "macos", target_os = "windows", target_os = "linux")), allow(dead_code))]
+    Dropped(crate::geometry::Point<f32>, Vec<std::path::PathBuf>),
     /// It went full screen, or came out of it.
     #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
     FullScreen(bool),

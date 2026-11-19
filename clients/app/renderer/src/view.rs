@@ -166,6 +166,12 @@ pub trait Device {
     fn share(&mut self, text: &str) -> bool;
     /// Plays a haptic, by iOS's name (`haptic` in the UI library).
     fn haptic(&mut self, kind: &str) -> bool;
+    /// Shows the device's own picker of files to open, of `accept`'s kinds (`.png`, `image/*`; any where it says
+    /// none), one or `multiple`, and tells `chosen` the files chosen (none where it was cancelled), on a thread of its
+    /// own (`pickFiles` in the UI library). → whether it has one.
+    fn open_files(&mut self, _accept: &[String], _multiple: bool, _chosen: Box<dyn FnOnce(Vec<std::path::PathBuf>) + Send>) -> bool {
+        false
+    }
 }
 
 impl Device for () {
@@ -189,6 +195,8 @@ pub struct Screen {
     replies: Vec<(Value, inspected::Reply)>,
     /// What wakes its window as its JS, or a frame's, posts what this hasn't applied.
     wake: Option<Arc<dyn Fn() + Send + Sync>>,
+    /// The files the device's picker chose, by what asked (`one/files`), until they're given to the page.
+    chosen_files: Arc<std::sync::Mutex<Vec<(Value, Vec<std::path::PathBuf>)>>>,
     /// Each frame's page, by the frame's node, and the pages asked for that haven't come (`frames`); what makes one,
     /// its host's; and whether this is a frame's page itself, and Tab took the keyboard out of it, back or on.
     frames: HashMap<Id, frames::Child>,
@@ -349,6 +357,7 @@ impl Screen {
             when_unused: Vec::new(),
             clipboard: Box::new(editing::Memory::default()),
             device: Box::new(()),
+            chosen_files: Arc::default(),
             scrolled: HashMap::new(),
             states: States::default(),
             pointer: None,
@@ -606,6 +615,11 @@ impl Screen {
         let posted;
         (posted, self.editing.heard) = self.js.take();
         let mut came = !posted.is_empty() || self.started.is_none() || self.pictures.take();
+        let chosen = std::mem::take(&mut *self.chosen_files.lock().unwrap_or_else(std::sync::PoisonError::into_inner));
+        for (id, files) in chosen {
+            self.js.send("message", json!({"jsonrpc": "2.0", "id": id, "result": {"files": files_told(&files)}}));
+            came = true;
+        }
         let mut cant = None;
         for child in self.frames.values_mut() {
             came |= child.screen.pump();
@@ -653,6 +667,22 @@ impl Screen {
                             if asked == "one/share" { json!({"done": "copied"}) } else { json!({}) }
                         };
                         self.js.send("message", json!({"jsonrpc": "2.0", "id": id, "result": result}));
+                        continue;
+                    }
+                    // The device's own picker of files, whose choice comes back as the page's next turn (`pump`); a device
+                    // without one says so.
+                    if let (Some(id), Some("one/files")) = (message.get("id"), method.as_deref()) {
+                        let accept: Vec<String> = message["params"]["accept"].as_array().into_iter().flatten().filter_map(|kind| kind.as_str().map(str::to_owned)).collect();
+                        let (chosen, wake, asked) = (self.chosen_files.clone(), self.wake.clone(), id.clone());
+                        let done = Box::new(move |files: Vec<std::path::PathBuf>| {
+                            chosen.lock().unwrap_or_else(std::sync::PoisonError::into_inner).push((asked, files));
+                            if let Some(wake) = wake {
+                                wake();
+                            }
+                        });
+                        if !self.device.open_files(&accept, message["params"]["multiple"] == true, done) {
+                            self.js.send("message", json!({"jsonrpc": "2.0", "id": id, "error": {"code": -32000, "message": "This device has no file picker"}}));
+                        }
                         continue;
                     }
                     // A haptic plays where the device has them, and a device without them says so, as a client does.
@@ -1690,6 +1720,14 @@ impl Screen {
         self.shortcut = key.map(|key| (key.to_owned(), web_time::Instant::now()));
     }
 
+    /// Files dropped on the window at `at` from the system (a Finder's, an Explorer's): what's under it that takes a
+    /// drop, the innermost, is told them (`drop`).
+    pub fn dropped(&mut self, at: Point<f32>, files: &[std::path::PathBuf]) {
+        if let Some(id) = self.under(at).into_iter().find(|id| self.tree.nodes.get(id).is_some_and(|node| node.listens("drop"))) {
+            self.tell(id, "drop", json!({"files": files_told(files)}));
+        }
+    }
+
     /// The system's menu for text a secondary click asked for, once.
     pub fn take_text_menu(&mut self) -> Option<TextMenu> {
         self.text_menu.take()
@@ -1826,6 +1864,16 @@ impl Screen {
             }
         }
     }
+}
+
+/// Files the device gave a page, as it's told them: each one's name, and its bytes as base64, the only way a file
+/// crosses its JSON channel. One that can't be read is left out, saying why.
+pub(crate) fn files_told(files: &[std::path::PathBuf]) -> Vec<Value> {
+    let told = |file: &std::path::PathBuf| -> anyhow::Result<Value> {
+        let name = file.file_name().map(|name| name.to_string_lossy().into_owned()).unwrap_or_default();
+        Ok(json!({"name": name, "body": data_encoding::BASE64.encode(&std::fs::read(file)?)}))
+    };
+    files.iter().filter_map(|file| told(file).map_err(|error| log::warn!("{} isn't given to its page: {error:#}", file.display())).ok()).collect()
 }
 
 /// Paints a screen that says only `words`, in the middle, in the muted colour, as a page's empty state does.

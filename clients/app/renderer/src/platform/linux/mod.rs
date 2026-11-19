@@ -78,3 +78,38 @@ pub(super) fn appearance_changes(to: calloop::channel::Sender<crate::Appearance>
 pub fn reduced_motion() -> bool {
     appearance_setting("reduced-motion") == Some(1)
 }
+
+/// Shows GTK's picker of files to open, the desktop portal's where there's one, of `accept`'s kinds (`.png`,
+/// `image/*`), on the app's GTK thread, and tells `chosen` the files chosen, none where it was cancelled or there's no
+/// GTK.
+pub fn open_files(accept: &[String], multiple: bool, chosen: Box<dyn FnOnce(Vec<std::path::PathBuf>) + Send>) {
+    use gtk::prelude::*;
+    let accept = accept.to_vec();
+    gtk::glib::MainContext::default().invoke(move || {
+        if !gtk::is_initialized_main_thread() {
+            return chosen(Vec::new());
+        }
+        let dialog = gtk::FileChooserNative::new(Some("Open"), None::<&gtk::Window>, gtk::FileChooserAction::Open, Some("Open"), Some("Cancel"));
+        dialog.set_select_multiple(multiple);
+        if !accept.is_empty() {
+            let filter = gtk::FileFilter::new();
+            for kind in &accept {
+                match kind.strip_prefix('.') {
+                    Some(extension) => filter.add_pattern(&format!("*.{extension}")),
+                    None => filter.add_mime_type(kind),
+                }
+            }
+            dialog.add_filter(filter);
+        }
+        // It's kept until it's answered.
+        let (kept, chosen) = (std::cell::RefCell::new(Some(dialog.clone())), std::cell::RefCell::new(Some(chosen)));
+        dialog.connect_response(move |dialog, response| {
+            let files = if response == gtk::ResponseType::Accept { dialog.filenames() } else { Vec::new() };
+            if let Some(chosen) = chosen.take() {
+                chosen(files);
+            }
+            kept.take();
+        });
+        dialog.show();
+    });
+}

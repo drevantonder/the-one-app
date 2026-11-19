@@ -56,6 +56,16 @@ x11rb::atom_manager! {
         _NET_WM_WINDOW_TYPE,
         _NET_WM_WINDOW_TYPE_DIALOG,
         _GTK_THEME_VARIANT,
+        XdndAware,
+        XdndEnter,
+        XdndPosition,
+        XdndStatus,
+        XdndLeave,
+        XdndDrop,
+        XdndFinished,
+        XdndSelection,
+        XdndActionCopy,
+        TEXT_URI_LIST: b"text/uri-list",
     }
 }
 
@@ -95,6 +105,8 @@ pub struct Display {
     framed: Cell<Option<std::time::Instant>>,
     /// The desktop went light or dark since its windows were last told (`appearance_changes`).
     appearance: Rc<Cell<Option<crate::Appearance>>>,
+    /// A drag from another app over a window (XDND's): its source, and where it is in the window, in points.
+    dragging: Cell<Option<(xproto::Window, xproto::Window, Point<f32>)>>,
     /// Each app window's file of where it was left (`WindowOptions::frame`), kept as it's moved or resized.
     frames: RefCell<HashMap<xproto::Window, std::path::PathBuf>>,
     /// What's said of a window on another thread (GTK's menu for text), and what was since the windows were last
@@ -300,6 +312,7 @@ impl Display {
             framed: Cell::new(None),
             appearance,
             frames: RefCell::default(),
+            dragging: Cell::new(None),
             told,
             tell,
         })
@@ -339,6 +352,8 @@ impl Display {
             if let Some(file) = &options.frame {
                 self.frames.borrow_mut().insert(x_window, file.clone());
             }
+            // Files can be dropped on it from another app (XDND, its version 5).
+            xcb.change_property32(xproto::PropMode::REPLACE, x_window, self.atoms.XdndAware, xproto::AtomEnum::ATOM, &[5])?;
             let smallest = crate::platform::SMALLEST;
             hints.min_size = Some(((smallest.width.0 * self.scale).round() as i32, (smallest.height.0 * self.scale).round() as i32));
             hints.set_normal_hints(&**xcb, x_window)?.check()?;
@@ -909,6 +924,32 @@ impl Display {
         self.windows.borrow().get(&x_window).copied()
     }
 
+    /// A drag from another app over an app's window, as XDND says it: it's told files may be dropped, and dropped,
+    /// what was is asked of it as `text/uri-list` (`SelectionNotify`).
+    fn xdnd(&self, event: &xproto::ClientMessageEvent, data: &[u32; 5]) {
+        let (window, source) = (event.window, data[0]);
+        if event.type_ == self.atoms.XdndPosition {
+            let root = self.xcb.setup().roots[self.screen].root;
+            let (x, y) = ((data[2] >> 16) as i16, (data[2] & 0xffff) as i16);
+            let Some(inside) = self.xcb.translate_coordinates(root, window, x, y).ok().and_then(|cookie| cookie.reply().ok()) else { return };
+            self.dragging.set(Some((window, source, self.at(inside.dst_x, inside.dst_y))));
+            self.xdnd_send(source, self.atoms.XdndStatus, [window, 1, 0, 0, self.atoms.XdndActionCopy]);
+        } else if event.type_ == self.atoms.XdndDrop {
+            let selection = (self.atoms.XdndSelection, self.atoms.TEXT_URI_LIST);
+            let _ = self.xcb.convert_selection(window, selection.0, selection.1, selection.0, data[2]);
+            let _ = self.xcb.flush();
+        } else if event.type_ == self.atoms.XdndLeave {
+            self.dragging.set(None);
+        }
+    }
+
+    /// Tells a drag's source `what` (`XdndStatus`, `XdndFinished`), as XDND has it.
+    fn xdnd_send(&self, source: xproto::Window, what: xproto::Atom, data: [u32; 5]) {
+        let message = xproto::ClientMessageEvent::new(32, source, what, data);
+        let _ = self.xcb.send_event(false, source, xproto::EventMask::NO_EVENT, message);
+        let _ = self.xcb.flush();
+    }
+
     fn at(&self, x: i16, y: i16) -> Point<f32> {
         Point { x: x as f32 / self.scale, y: y as f32 / self.scale }
     }
@@ -929,6 +970,22 @@ impl Display {
                     && let Some(id) = self.window(event.window)
                 {
                     out.push((id, Input::Close));
+                }
+                self.xdnd(&event, &data);
+            }
+            // What was dropped, as its source gives it: its files' URIs, one a line.
+            Event::SelectionNotify(event) if event.selection == self.atoms.XdndSelection => {
+                let Some((window, source, at)) = self.dragging.take().filter(|(window, _, _)| *window == event.requestor) else { return };
+                let reply = self.xcb.get_property(true, window, self.atoms.XdndSelection, xproto::AtomEnum::ANY, 0, u32::MAX).ok().and_then(|cookie| cookie.reply().ok());
+                let files: Vec<std::path::PathBuf> = reply
+                    .map(|reply| String::from_utf8_lossy(&reply.value).into_owned())
+                    .unwrap_or_default()
+                    .lines()
+                    .filter_map(|line| url::Url::parse(line.trim()).ok()?.to_file_path().ok())
+                    .collect();
+                self.xdnd_send(source, self.atoms.XdndFinished, [window, u32::from(!files.is_empty()), self.atoms.XdndActionCopy, 0, 0]);
+                if let Some(id) = self.window(window).filter(|_| !files.is_empty()) {
+                    out.push((id, Input::Dropped(at, files)));
                 }
             }
             Event::ConfigureNotify(event) => {

@@ -117,3 +117,23 @@ pub fn appearance() -> crate::Appearance {
     };
     if read.is_ok() && light == 0 { crate::Appearance::Dark } else { crate::Appearance::Light }
 }
+
+/// Shows the system's own picker of files to open, as rfd shows it, of `accept`'s kinds where they're extensions
+/// (`.png`), and tells `chosen` the files chosen, none where it was cancelled.
+pub fn open_files(accept: &[String], multiple: bool, chosen: Box<dyn FnOnce(Vec<std::path::PathBuf>) + Send>) {
+    let extensions: Vec<String> = accept.iter().filter_map(|kind| kind.strip_prefix('.')).map(str::to_owned).collect();
+    let mut dialog = rfd::AsyncFileDialog::new();
+    if !extensions.is_empty() {
+        dialog = dialog.add_filter("", &extensions);
+    }
+    std::thread::spawn(move || {
+        let files = futures_lite::future::block_on(async move {
+            if multiple {
+                dialog.pick_files().await.unwrap_or_default()
+            } else {
+                dialog.pick_file().await.into_iter().collect()
+            }
+        });
+        chosen(files.into_iter().map(|file| file.path().to_owned()).collect());
+    });
+}
