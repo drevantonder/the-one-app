@@ -122,7 +122,7 @@ dispatch2 = "0.3"
 objc2 = "0.6"
 objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "objc2-core-foundation", "objc2-quartz-core", "NSAccessibility", "NSAppearance", "NSApplication", "NSCursor", "NSPasteboard", "NSEvent", "NSGraphics", "NSPanel", "NSResponder", "NSRunningApplication", "NSTrackingArea", "NSView", "NSWindow", "NSWorkspace"] }
 objc2-foundation = { version = "0.3", default-features = false, features = ["std", "objc2-core-foundation", "NSArray", "NSGeometry", "NSNotification", "NSObjCRuntime", "NSString"] }
-objc2-quartz-core = { version = "0.3", default-features = false, features = ["std", "objc2-core-foundation", "CALayer", "CAMetalLayer"] }
+objc2-quartz-core = { version = "0.3", default-features = false, features = ["std", "objc2-core-foundation", "CALayer", "CAMetalLayer", "CATransaction"] }
 
 # Android: a native screen is a SurfaceView over the app's web view (`platform/android`), on the UI thread, whose
 # keyboard bridge (Flutter's) and accessibility delegate (AccessKit's) are Java that calls in through JNI.

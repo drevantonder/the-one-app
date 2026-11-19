@@ -65,10 +65,14 @@ fn apply_contrast_and_gamma_correction(sample: f32, color: vec3<f32>, enhanced_c
     return apply_alpha_correction(contrasted, brightness, gamma_ratios);
 }
 
+// The target's size, and where in the scene its top left is: a window's part draws its own box of the scene.
 struct GlobalParams {
     viewport_size: vec2<f32>,
+    origin: vec2<f32>,
     premultiplied_alpha: u32,
-    pad: u32,
+    pad0: u32,
+    pad1: u32,
+    pad2: u32,
 }
 
 struct GammaParams {
@@ -155,7 +159,7 @@ struct TransformationMatrix {
 }
 
 fn to_device_position_impl(position: vec2<f32>) -> vec4<f32> {
-    let device_position = position / globals.viewport_size * vec2<f32>(2.0, -2.0) + vec2<f32>(-1.0, 1.0);
+    let device_position = (position - globals.origin) / globals.viewport_size * vec2<f32>(2.0, -2.0) + vec2<f32>(-1.0, 1.0);
     return vec4<f32>(device_position, 0.0, 1.0);
 }
 
@@ -1078,7 +1082,7 @@ fn fs_underline(input: UnderlineVarying) -> @location(0) vec4<f32> {
 
     let half_thickness = underline.thickness * 0.5;
 
-    let st = (input.position.xy - underline.bounds.origin) / underline.bounds.size.y - vec2<f32>(0.0, 0.5);
+    let st = (input.position.xy + globals.origin - underline.bounds.origin) / underline.bounds.size.y - vec2<f32>(0.0, 0.5);
     let frequency = M_PI_F * WAVE_FREQUENCY * underline.thickness / underline.bounds.size.y;
     let amplitude = (underline.thickness * WAVE_HEIGHT_RATIO) / underline.bounds.size.y;
 
@@ -1283,7 +1287,7 @@ fn fs_backdrop(input: BackdropVarying) -> @location(0) vec4<f32> {
         return vec4<f32>(0.0);
     }
     let backdrop = b_backdrops[input.backdrop_id];
-    let distance = quad_sdf(input.position.xy, backdrop.bounds, backdrop.corner_radii);
+    let distance = quad_sdf(input.position.xy + globals.origin, backdrop.bounds, backdrop.corner_radii);
     // Saturated as CSS's `saturate()`: away from its luminance, by the factor.
     let luminance = dot(sample.rgb, GRAYSCALE_FACTORS);
     let color = vec4<f32>(clamp(mix(vec3<f32>(luminance), sample.rgb, backdrop.saturation), vec3<f32>(0.0), vec3<f32>(1.0)), 1.0);

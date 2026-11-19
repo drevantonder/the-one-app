@@ -545,9 +545,7 @@ fn respond(
                 Some(Ok(json!({"theme": theme})))
             } else if changes.is_empty() {
                 // The launcher's page lays itself out as a computer's launcher (`client().launcher` in home.tsx).
-                // `transparent`: the launcher's panel is see-through where its page draws nothing, so what its page draws
-                // floats over the desktop, on the system's glass where it asks for it (a Mac's).
-                Some(Ok(json!({"theme": state.chosen, "launcher": state.launcher, "mac": cfg!(target_os = "macos"), "transparent": state.launcher && cfg!(target_os = "macos")})))
+                Some(Ok(json!({"theme": state.chosen, "launcher": state.launcher, "mac": cfg!(target_os = "macos")})))
             } else {
                 Some(Err(json!({"code": -32000, "message": format!("A computer's native window can't change {} yet.", changes.iter().map(|change| change.as_str()).collect::<Vec<_>>().join(", "))})))
             }

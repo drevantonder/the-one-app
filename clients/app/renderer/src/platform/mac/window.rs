@@ -12,7 +12,7 @@
 // Copyright 2022 - 2025 Zed Industries, Inc. Licensed under the Apache License, Version 2.0
 // (clients/app/renderer/LICENSE-APACHE); this file is changed from the original.
 
-use std::cell::{Cell, RefCell};
+use std::cell::Cell;
 use std::ffi::{CStr, CString, c_char, c_void};
 use std::sync::{Arc, Mutex};
 
@@ -26,7 +26,7 @@ use objc2_app_kit::{
     NSWindowTitleVisibility,
 };
 use objc2_foundation::{NSArray, NSNotification, NSObject, NSPoint, NSRect, NSSize, NSString};
-use objc2_quartz_core::{CAAutoresizingMask, CALayer, CAMetalLayer, kCAGravityTopLeft};
+use objc2_quartz_core::{CAAutoresizingMask, CALayer, CAMetalLayer, CATransaction, kCAGravityTopLeft};
 
 use super::events;
 use crate::Cursor;
@@ -39,22 +39,26 @@ use crate::view::Phase;
 /// What AppKit said, queued for the native thread, which `ping` wakes.
 #[derive(Clone)]
 struct Queue {
-    inputs: Arc<Mutex<Vec<(WindowId, Input)>>>,
+    inputs: Arc<Mutex<Vec<(WindowId, usize, Input)>>>,
     ping: calloop::ping::Ping,
 }
 
 /// What a window's view and the native thread share.
 struct Shared {
     id: WindowId,
+    /// Which part of its window's page it is: 0 the window itself, the rest its child windows.
+    part: usize,
+    /// Its box of its page, in points, as it was last put (`Display::arrange`): where its page is, from where it is.
+    placed: Mutex<Option<crate::geometry::Bounds<f32>>>,
     queue: Queue,
     /// Its view's size in device pixels, and its scale, as AppKit last said.
     size: Mutex<(Size<DevicePixels>, f32)>,
     /// Its title row over its page, as its page was last drawn (`Screen::title_row`): held where nothing in it takes a
     /// press, it moves the window, as AppKit's title bar does.
-    title_row: Mutex<Option<crate::view::TitleRow>>,
+    title_row: Arc<Mutex<Option<crate::view::TitleRow>>>,
     /// A panel being dragged by a person, since a press in its title row and until it's summoned again: where it
     /// moves to is told (`Input::Placed`).
-    dragged: std::sync::atomic::AtomicBool,
+    dragged: Arc<std::sync::atomic::AtomicBool>,
 }
 
 /// A screen's name, by its frame, which a panel's places are kept by: the same screen in the same arrangement.
@@ -64,7 +68,7 @@ fn screen_name(screen: NSRect) -> String {
 
 impl Shared {
     fn send(&self, input: Input) {
-        self.queue.inputs.lock().expect("nothing panics holding it").push((self.id, input));
+        self.queue.inputs.lock().expect("nothing panics holding it").push((self.id, self.part, input));
         self.queue.ping.ping();
     }
 }
@@ -78,23 +82,34 @@ pub struct Display {
 
 pub struct NativeWindow {
     window: MainThreadBound<Retained<NSWindow>>,
-    /// A panel's: see-through where it isn't drawn, over its glass.
+    /// A panel's, or one of its parts': see-through where it isn't drawn, over its glass.
     panel: bool,
-    /// A panel's glass where its page asked for the system's material (`set_glass`), each under its part of the page,
-    /// and how round the panel's corners are where its glass is under the whole of it.
-    glass: MainThreadBound<RefCell<Vec<Retained<NSView>>>>,
-    corner: f64,
-    /// A window holds its delegate weakly.
-    _delegate: MainThreadBound<Retained<Delegate>>,
+    /// A window holds its delegate weakly; a panel's part has none.
+    _delegate: MainThreadBound<Option<Retained<Delegate>>>,
     /// Its view, which its text input plugin is called on, and its view's layer, the CAMetalLayer wgpu draws into,
     /// which live as long as the window: addresses, as AppKit's objects are the main thread's.
     view: usize,
     layer: usize,
+    /// Its window, as an address, for `Handle`.
+    address: usize,
     shared: Arc<Shared>,
     cursor: Cell<Cursor>,
 }
 
+/// A window as `Display::arrange` places it, on the main thread: its window and view, as addresses, and what it shares
+/// with its view.
+#[derive(Clone)]
+pub struct Handle {
+    window: usize,
+    view: usize,
+    shared: Arc<Shared>,
+}
+
 impl NativeWindow {
+    pub fn handle(&self) -> Handle {
+        Handle { window: self.address, view: self.view, shared: self.shared.clone() }
+    }
+
     /// What wgpu draws into: its view's layer, taken on the main thread as the window was made, where wgpu would
     /// take it from the view on the native thread, which AppKit doesn't allow.
     pub fn surface(&self) -> anyhow::Result<wgpu::SurfaceTargetUnsafe> {
@@ -145,7 +160,7 @@ impl Display {
             if first {
                 NSApplication::sharedApplication(main).setActivationPolicy(objc2_app_kit::NSApplicationActivationPolicy::Regular);
             }
-            let shared = Arc::new(Shared { id, queue, size: Mutex::new((Size::default(), 1.0)), title_row: Mutex::default(), dragged: Default::default() });
+            let shared = Arc::new(Shared { id, part: 0, placed: Mutex::default(), queue, size: Mutex::new((Size::default(), 1.0)), title_row: Arc::default(), dragged: Arc::default() });
             let rect = NSRect::new(NSPoint::new(0.0, 0.0), NSSize::new(options.size.width.0.into(), options.size.height.0.into()));
             let window = match options.panel {
                 // GPUI's pop-up: titled, so it can take the keyboard, with nothing of its title band shown.
@@ -199,11 +214,10 @@ impl Display {
             Ok(NativeWindow {
                 view: Retained::as_ptr(&view) as usize,
                 layer,
+                address: Retained::as_ptr(&window) as usize,
                 panel: options.panel.is_some(),
-                glass: MainThreadBound::new(RefCell::default(), main),
-                corner: options.panel.map_or(0.0, f64::from),
                 window: MainThreadBound::new(window, main),
-                _delegate: MainThreadBound::new(delegate, main),
+                _delegate: MainThreadBound::new(Some(delegate), main),
                 shared,
                 cursor: Cell::new(Cursor::Arrow),
             })
@@ -227,12 +241,13 @@ impl Display {
         });
     }
 
-    /// Shows a panel centred near the top of the screen the pointer is on, a fifth of the way down as Spotlight sits,
-    /// with the keyboard. It never activates the One App, so the app in front stays in front, and has the keyboard
-    /// back as it goes.
+    /// Shows a panel's page, `room` points, centred near the top of the screen the pointer is on, a fifth of the way
+    /// down as Spotlight sits, with the keyboard; its parts follow it (`arrange`). It never activates the One App, so
+    /// the app in front stays in front, and has the keyboard back as it goes.
     /// Where it was dragged to on that screen before (`places`), it's there, as Raycast's is, as much of it as fits.
-    pub fn summon(&self, window: &NativeWindow, places: &crate::platform::Places) {
+    pub fn summon(&self, window: &NativeWindow, places: &crate::platform::Places, room: Size<Pixels>) {
         window.shared.dragged.store(false, std::sync::atomic::Ordering::Relaxed);
+        let placed = *window.shared.placed.lock().expect("nothing panics holding it");
         window.window.get_on_main(|window| unsafe {
             let mouse: NSPoint = msg_send![objc2::class!(NSEvent), mouseLocation];
             let screens: Retained<NSArray<AnyObject>> = msg_send![objc2::class!(NSScreen), screens];
@@ -242,14 +257,16 @@ impl Display {
             });
             if let Some(screen) = on.or_else(|| screens.firstObject().map(|screen| frame_of(&screen))) {
                 let size = window.frame().size;
+                let (width, height) = (f64::from(room.width.0), f64::from(room.height.0));
+                let at = placed.map_or((0.0, 0.0), |placed| (f64::from(placed.origin.x), f64::from(placed.origin.y)));
                 let (x, top) = match places.get(&screen_name(screen)) {
                     Some(at) => (
                         (screen.origin.x + f64::from(at.x)).clamp(screen.origin.x, screen.origin.x + (screen.size.width - size.width).max(0.0)),
                         (screen.origin.y + screen.size.height - f64::from(at.y)).clamp(screen.origin.y + size.height.min(screen.size.height), screen.origin.y + screen.size.height),
                     ),
                     None => (
-                        screen.origin.x + (screen.size.width - size.width) / 2.0,
-                        screen.origin.y + screen.size.height - (screen.size.height * 0.2).min((screen.size.height - size.height).max(0.0)),
+                        screen.origin.x + (screen.size.width - width) / 2.0 + at.0,
+                        screen.origin.y + screen.size.height - (screen.size.height * 0.2).min((screen.size.height - height).max(0.0)) - at.1,
                     ),
                 };
                 window.setFrameTopLeftPoint(NSPoint::new(x, top));
@@ -258,58 +275,99 @@ impl Display {
         });
     }
 
-    /// Puts a panel away. The One App never came in front for it, so the app that had the keyboard has it again.
+    /// Puts a panel away, its parts with it, which are its children again as it shows (`arrange`). The One App never
+    /// came in front for it, so the app that had the keyboard has it again.
     pub fn put_away(&self, window: &NativeWindow, _give_back: bool) {
-        window.window.get_on_main(|window| window.orderOut(None));
-    }
-
-    /// Makes a window `size`, its top and its middle where they are.
-    pub fn resize(&self, window: &NativeWindow, size: Size<Pixels>) {
         window.window.get_on_main(|window| {
-            let frame = window.frame();
-            let (width, height) = (f64::from(size.width.0), f64::from(size.height.0));
-            let x = frame.origin.x + (frame.size.width - width) / 2.0;
-            let to = NSRect::new(NSPoint::new(x, frame.origin.y + frame.size.height - height), NSSize::new(width, height));
-            window.setFrame_display(to, true);
+            if let Some(children) = window.childWindows() {
+                for child in children.iter() {
+                    window.removeChildWindow(&child);
+                    child.orderOut(None);
+                }
+            }
+            window.orderOut(None);
         });
     }
 
-    /// Puts the system's glass under a panel's page where it asked for it (`regions`), as Liquid Glass shapes each of a
-    /// Mac's floating controls, and nowhere else: with none asked for, it's under the whole panel, as before a page
-    /// asked. A part that moves has its glass moved with it, frame by frame.
-    pub fn set_glass(&self, window: &NativeWindow, regions: &[crate::platform::Glass]) {
-        if !window.panel {
-            return;
-        }
-        let (views, corner) = (&window.glass, window.corner);
-        window.window.get_on_main(|window| unsafe {
-            let main = window.mtm();
-            let Some(content) = window.contentView() else { return };
-            let subviews = content.subviews();
-            // The whole panel's glass is first under the page, which is last.
-            let (Some(whole), Some(page)) = (subviews.firstObject(), subviews.lastObject()) else { return };
-            whole.setHidden(!regions.is_empty());
-            window.setHasShadow(regions.is_empty());
-            if let Some(layer) = page.layer() {
-                layer.setCornerRadius(if regions.is_empty() { corner } else { 0.0 });
+    /// A part of panel `parent`'s page as a window of its own, its `part`th: a child of the panel, so it moves, hides
+    /// and stacks with it, with the system's glass under it, rounded, and its own shadow. It never takes the keyboard,
+    /// which stays with the panel.
+    pub fn open_part(&self, parent: &NativeWindow, part: usize) -> anyhow::Result<NativeWindow> {
+        let (id, queue) = (parent.shared.id, self.queue.clone());
+        let (title_row, dragged) = (parent.shared.title_row.clone(), parent.shared.dragged.clone());
+        run_on_main(move |main| {
+            let shared = Arc::new(Shared { id, part, placed: Mutex::default(), queue, size: Mutex::new((Size::default(), 1.0)), title_row, dragged });
+            let rect = NSRect::new(NSPoint::new(0.0, 0.0), NSSize::new(1.0, 1.0));
+            // With no title band it can't become the key window, as NSPanel's borderless kind can't.
+            let style = NSWindowStyleMask::NonactivatingPanel;
+            let window: Retained<NSPanel> =
+                unsafe { msg_send![main.alloc::<NSPanel>(), initWithContentRect: rect, styleMask: style, backing: NSBackingStoreType::Buffered, defer: false] };
+            let window: Retained<NSWindow> = Retained::into_super(window);
+            unsafe { window.setReleasedWhenClosed(false) };
+            window.setAcceptsMouseMovedEvents(true);
+            let view = View::new(main, rect, shared.clone());
+            unsafe { panel(&window, &view, rect, 0.0) };
+            view.measure(&window);
+            let layer = view.layer().map_or(0, |layer| Retained::as_ptr(&layer) as usize);
+            Ok(NativeWindow {
+                view: Retained::as_ptr(&view) as usize,
+                layer,
+                address: Retained::as_ptr(&window) as usize,
+                panel: true,
+                window: MainThreadBound::new(window, main),
+                _delegate: MainThreadBound::new(None, main),
+                shared,
+                cursor: Cell::new(Cursor::Arrow),
+            })
+        })
+    }
+
+    /// Puts a panel's parts where its page is, each its box of the page (`placed`, the panel first) with its glass
+    /// rounded so, the page where it was (from where the panel is, and the box it had), and draws them (`draw`) as
+    /// they're put: on the main thread, in one Core Animation transaction, with each layer presenting in it, so each
+    /// window's frame and what's drawn in it come on screen together, frame by frame as a part grows.
+    pub fn arrange(&self, placed: &[(Handle, crate::geometry::Bounds<f32>, f32)], draw: &mut dyn FnMut()) {
+        struct Draw<'a>(*mut (dyn FnMut() + 'a));
+        // SAFETY: the main thread runs it while this thread waits for it, so it's used by one thread at a time.
+        unsafe impl Send for Draw<'_> {}
+        let draw = Draw(draw as *mut (dyn FnMut() + '_));
+        let placed: Vec<(Handle, crate::geometry::Bounds<f32>, f64)> = placed.iter().map(|(handle, bounds, radius)| (handle.clone(), *bounds, f64::from(*radius))).collect();
+        run_on_main(move |_| unsafe {
+            let draw = draw;
+            let Some((first, ..)) = placed.first() else { return (*draw.0)() };
+            CATransaction::begin();
+            let parent = &*(first.window as *const NSWindow);
+            // Until it's first put, the panel is its whole page.
+            let was = first.shared.placed.lock().expect("nothing panics holding it").map_or(Point { x: 0.0, y: 0.0 }, |placed| placed.origin);
+            let frame = parent.frame();
+            let (left, top) = (frame.origin.x - f64::from(was.x), frame.origin.y + frame.size.height + f64::from(was.y));
+            let visible = parent.isVisible();
+            for (at, (handle, bounds, radius)) in placed.iter().enumerate() {
+                let window = &*(handle.window as *const NSWindow);
+                let (x, y, w, h) = (f64::from(bounds.origin.x), f64::from(bounds.origin.y), f64::from(bounds.size.width), f64::from(bounds.size.height));
+                let to = NSRect::new(NSPoint::new(left + x, top - y - h), NSSize::new(w, h));
+                let now = window.frame();
+                if (now.origin.x, now.origin.y, now.size.width, now.size.height) != (to.origin.x, to.origin.y, to.size.width, to.size.height) {
+                    window.setFrame_display(to, false);
+                    window.invalidateShadow();
+                }
+                let view = &*(handle.view as *const View);
+                if let Some(layer) = view.layer() {
+                    layer.setCornerRadius(*radius);
+                }
+                if let Some(glass) = window.contentView().and_then(|content| content.subviews().firstObject()) {
+                    round(&glass, *radius);
+                }
+                if at > 0 && visible && window.parentWindow().is_none() {
+                    // NSWindowAbove.
+                    parent.addChildWindow_ordered(window, objc2_app_kit::NSWindowOrderingMode::Above);
+                }
             }
-            let mut views = views.get(main).borrow_mut();
-            while views.len() > regions.len() {
-                views.pop().expect("there's one").removeFromSuperview();
+            for (handle, bounds, _) in &placed {
+                *handle.shared.placed.lock().expect("nothing panics holding it") = Some(*bounds);
             }
-            while views.len() < regions.len() {
-                let glass = glass(NSRect::ZERO, 0.0);
-                // NSWindowBelow: under the page.
-                let () = msg_send![&*content, addSubview: &*glass, positioned: -1isize, relativeTo: &*page];
-                views.push(glass);
-            }
-            let height = content.frame().size.height;
-            for (view, region) in views.iter().zip(regions) {
-                let (x, y, w, h) = (f64::from(region.bounds.origin.x), f64::from(region.bounds.origin.y), f64::from(region.bounds.size.width), f64::from(region.bounds.size.height));
-                view.setFrame(NSRect::new(NSPoint::new(x, height - y - h), NSSize::new(w, h)));
-                view.setAlphaValue(f64::from(region.opacity));
-                round(view, f64::from(region.radius));
-            }
+            (*draw.0)();
+            CATransaction::commit();
         });
     }
 
@@ -354,8 +412,8 @@ impl Display {
 
     pub fn flush(&self) {}
 
-    /// What AppKit has said since it was last asked, by the window it's about.
-    pub fn events(&self) -> Vec<(WindowId, Input)> {
+    /// What AppKit has said since it was last asked, by the window and part it's about.
+    pub fn events(&self) -> Vec<(WindowId, usize, Input)> {
         std::mem::take(&mut *self.queue.inputs.lock().expect("nothing panics holding it"))
     }
 }
@@ -486,9 +544,13 @@ define_class!(
             let secondary = flags.contains(NSEventModifierFlags::Control);
             // What's empty in its title row is its title bar: it moves the window, and double-clicked does what the
             // person set in System Settings (Desktop & Dock, "Double-click a window's title bar to").
-            let at = self.at(event);
-            let moves = self.ivars().shared.title_row.lock().expect("nothing panics holding it").as_ref().is_some_and(|row| row.moves(at));
-            if moves && !secondary && let Some(window) = self.window() {
+            // Its title row is its page's: a panel's part's point, there, is further along by where the part is.
+            let (at, shared) = (self.at(event), &self.ivars().shared);
+            let by = shared.placed.lock().expect("nothing panics holding it").map_or(Point { x: 0.0, y: 0.0 }, |placed| placed.origin);
+            let at = Point { x: at.x + by.x, y: at.y + by.y };
+            let moves = shared.title_row.lock().expect("nothing panics holding it").as_ref().is_some_and(|row| row.moves(at));
+            // A panel's part is dragged by its panel, which it follows.
+            if moves && !secondary && let Some(window) = self.window().map(|window| window.parentWindow().unwrap_or(window)) {
                 // A panel has no zoom; it's only dragged.
                 let panel = window.isKindOfClass(objc2::class!(NSPanel));
                 if event.clickCount() == 2 && !panel {
@@ -716,8 +778,7 @@ unsafe fn panel(window: &NSWindow, view: &View, rect: NSRect, corner: f64) {
         let clear: *mut AnyObject = msg_send![objc2::class!(NSColor), clearColor];
         let () = msg_send![window, setBackgroundColor: clear];
         window.setHasShadow(true);
-        // A view that holds the panel's glass and the page over it, and the glass under parts of it its page asks for
-        // instead (`set_glass`), all following the window's size.
+        // A view that holds the panel's glass and the page over it, both following the window's size.
         let sizable = objc2_app_kit::NSAutoresizingMaskOptions::ViewWidthSizable | objc2_app_kit::NSAutoresizingMaskOptions::ViewHeightSizable;
         let main = window.mtm();
         let content = NSView::initWithFrame(main.alloc(), rect);
@@ -730,6 +791,11 @@ unsafe fn panel(window: &NSWindow, view: &View, rect: NSRect, corner: f64) {
         if let Some(layer) = view.layer() {
             layer.setCornerRadius(corner);
             layer.setMasksToBounds(true);
+            // Its frames come on screen with the Core Animation transaction they're drawn in (`Display::arrange`),
+            // which puts its window where it goes, so its frame and what's in it change together.
+            if let Ok(layer) = layer.downcast::<CAMetalLayer>() {
+                layer.setPresentsWithTransaction(true);
+            }
         }
     }
 }

@@ -85,7 +85,8 @@ impl Phase {
 }
 
 /// A panel's own background, which its window has no frame for (`WindowOptions::panel`): its corners' radius, and
-/// whether the host fills it with a popover's colour, where the system has no glass to draw under it (Linux).
+/// whether the host fills where its page asks for the system's glass with a popover's colour, where the system has
+/// none to draw under it (Linux).
 #[derive(Clone, Copy, Debug)]
 pub struct Panel {
     pub corner: f32,
@@ -695,7 +696,8 @@ impl Screen {
             window,
             modal: None,
             turn: TransformationMatrix::unit(),
-            glass: self.panel.filter(|panel| !panel.fill).map(|_| Vec::new()),
+            glass: self.panel.map(|_| Vec::new()),
+            fill: self.panel.filter(|panel| panel.fill).map(|_| colour("card", conditions.dark)),
             drag_regions: Vec::new(),
             kept_regions: Vec::new(),
             frames: &self.frames,
@@ -704,13 +706,9 @@ impl Screen {
         // The window, as a page's body: its root's background and text, scrolling what's taller than it.
         let version2 = self.tree.styled();
         let (body, background) = if version2 { Text::root(conditions) } else { (Text::body(conditions), Some(colour("background", conditions.dark))) };
-        match self.panel {
-            // A panel's background is the host's: a popover's colour, or nothing over the system's glass, rounded.
-            Some(panel) => {
-                let fill = if panel.fill { colour("card", conditions.dark) } else { Hsla::default() };
-                painter.quad(window, window, fill, Edges::default(), Hsla::default(), Corners::all(panel.corner), false, 1.0)
-            }
-            None => painter.quad(window, window, background.unwrap_or_default(), Edges::default(), Hsla::default(), Corners::default(), false, 1.0),
+        // A panel has no background of its own: what its page draws is over the system's glass, or the host's fill.
+        if self.panel.is_none() {
+            painter.quad(window, window, background.unwrap_or_default(), Edges::default(), Hsla::default(), Corners::default(), false, 1.0);
         }
         let root = painter.build(0, body, true);
         // What's no longer in the tree goes, unless it moved elsewhere in it.
@@ -1729,9 +1727,11 @@ struct Painter<'a> {
     modal: Option<Id>,
     /// How what's painted now is turned, in the window: the `rotate`s of what it's in.
     turn: TransformationMatrix,
-    /// Where the system's own material goes under the page, as a panel's glass on a Mac, if the host has one: what has
-    /// a material that's the system's is drawn on it rather than blurring what the page drew (`Glass`).
+    /// A panel's: where its page asks for the system's own material, each a window of its own over the system's glass
+    /// (`Glass`), rather than blurring what the page drew; and what the host fills them with where the system has no
+    /// glass (Linux).
     glass: Option<Vec<crate::platform::Glass>>,
+    fill: Option<Hsla>,
     /// Each frame's page, as it last drew itself, and where each frame was drawn now, in the window.
     frames: &'a HashMap<Id, frames::Child>,
     framed: Vec<(Id, Bounds<f32>)>,
@@ -2146,6 +2146,9 @@ impl Painter<'_> {
             if let (Some((_, _, true)), Some(glass)) = (look.material, self.glass.as_mut()) {
                 if opacity > 0.0 {
                     glass.push(crate::platform::Glass { bounds: bounds.intersect(&mask), radius: radii.top_left, opacity });
+                    if let Some(fill) = self.fill {
+                        self.quad(bounds, mask, fill, Edges::default(), Hsla::default(), radii, false, opacity);
+                    }
                 }
             } else if let Some((blur, saturate, _)) = look.material {
                 self.scene.insert_primitive(Backdrop {

@@ -136,7 +136,7 @@ fn main() -> anyhow::Result<()> {
     let mut frame = |screen: &mut Screen, read: bool| -> anyhow::Result<(u32, u32, Vec<u8>)> {
         screen.idle();
         screen.paint(size, scale, &mut text, renderer.sprite_atlas(), &mut scene);
-        renderer.draw(&scene);
+        renderer.draw(&scene, [0.0, 0.0]);
         if !read {
             return Ok((0, 0, Vec::new()));
         }
@@ -222,7 +222,7 @@ fn main() -> anyhow::Result<()> {
         let memory_mb = mb(resident().saturating_sub(before));
         let alone = resident();
         let mut second = Renderer::offscreen(&context, renderer.sprite_atlas().clone(), device);
-        second.draw(&scene);
+        second.draw(&scene, [0.0, 0.0]);
         second.read();
         let window_mb = mb(resident().saturating_sub(alone));
         second.destroy();

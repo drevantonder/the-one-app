@@ -42,7 +42,7 @@ use crate::platform::{Input, WindowId, WindowOptions};
 const WINDOW_CLASS_NAME: PCWSTR = w!("One::Native");
 
 /// What every native window's messages are turned into, by the window they're about, until `events` takes them.
-type Queue = Rc<RefCell<Vec<(WindowId, Input)>>>;
+type Queue = Rc<RefCell<Vec<(WindowId, usize, Input)>>>;
 
 pub struct Display {
     queue: Queue,
@@ -61,6 +61,8 @@ pub struct NativeWindow {
 /// What a window's procedure knows of it.
 struct State {
     id: WindowId,
+    /// Which part of its window's page it is: 0 the window itself, the rest a panel's parts.
+    part: usize,
     queue: Queue,
     cursor: Cell<HCURSOR>,
     /// Whether Windows tells it when the pointer leaves (`TrackMouseEvent`), until it does.
@@ -69,9 +71,26 @@ struct State {
     high_surrogate: Cell<Option<u16>>,
     /// Its text input plugin, Flutter's (`text_input.cc`).
     text_input: Plugin,
-    /// A panel's: where a press moves it, as its page says (`set_title_row`).
-    row: RefCell<Option<crate::view::TitleRow>>,
+    /// A panel's, and its parts': where a press moves it, as its page says (`set_title_row`).
+    row: Rc<RefCell<Option<crate::view::TitleRow>>>,
     panel: bool,
+    /// A panel's, or its part's: the top left of its box of the page, in points, as it was last put (`arrange`).
+    placed: Cell<Option<Point<f32>>>,
+    /// A panel's parts, which move with it.
+    parts: RefCell<Vec<HWND>>,
+}
+
+impl State {
+    /// Where point `at` of it is in its page.
+    fn in_page(&self, at: Point<f32>) -> Point<f32> {
+        let by = self.placed.get().unwrap_or(Point { x: 0.0, y: 0.0 });
+        Point { x: at.x + by.x, y: at.y + by.y }
+    }
+}
+
+/// What window `hwnd`'s procedure knows of it, while it's open.
+fn state(hwnd: HWND) -> Option<&'static State> {
+    unsafe { (GetWindowLongPtrW(hwnd, GWLP_USERDATA) as *const State).as_ref() }
 }
 
 impl rwh::HasWindowHandle for NativeWindow {
@@ -89,7 +108,18 @@ impl rwh::HasDisplayHandle for NativeWindow {
     }
 }
 
+/// A window as `Display::arrange` places it: its window and its scale.
+#[derive(Clone, Copy)]
+pub struct Handle {
+    hwnd: HWND,
+    scale: f32,
+}
+
 impl NativeWindow {
+    pub fn handle(&self) -> Handle {
+        Handle { hwnd: self.hwnd, scale: self.scale() }
+    }
+
     /// What wgpu draws into: the window, by its raw handles.
     pub fn surface(&self) -> anyhow::Result<wgpu::SurfaceTargetUnsafe> {
         // Safety: a window's renderer is let go before the window is.
@@ -136,13 +166,16 @@ impl Display {
     pub fn open(&self, id: WindowId, options: &WindowOptions) -> anyhow::Result<NativeWindow> {
         let state = Rc::new(State {
             id,
+            part: 0,
             queue: self.queue.clone(),
             cursor: Cell::new(self.cursor(Cursor::Arrow)),
             tracking: Cell::new(false),
             high_surrogate: Cell::new(None),
             text_input: Plugin(Cell::new(std::ptr::null_mut())),
-            row: RefCell::default(),
+            row: Rc::default(),
             panel: options.panel.is_some(),
+            placed: Cell::new(None),
+            parts: RefCell::default(),
         });
         let panel = options.panel.is_some();
         let style = if panel { WS_POPUP } else { WS_OVERLAPPEDWINDOW };
@@ -203,10 +236,11 @@ impl Display {
         })
     }
 
-    /// Shows a panel centred near the top of the monitor the pointer is on, a fifth of the way down its work area as
-    /// Spotlight sits, in front with the keyboard, keeping which window was in front.
-    /// Where it was dragged to on that monitor before (`places`), it's there, as much of it as fits.
-    pub fn summon(&self, window: &NativeWindow, places: &crate::platform::Places) {
+    /// Shows a panel's page, `room` points, centred near the top of the monitor the pointer is on, a fifth of the way
+    /// down its work area as Spotlight sits, in front with the keyboard, keeping which window was in front; its parts
+    /// follow it (`arrange`). Where it was dragged to on that monitor before (`places`), it's there, as much of it as
+    /// fits.
+    pub fn summon(&self, window: &NativeWindow, places: &crate::platform::Places, room: Size<Pixels>) {
         use windows::Win32::Graphics::Gdi::{GetMonitorInfoW, MONITOR_DEFAULTTONEAREST, MONITORINFO, MonitorFromPoint};
         unsafe {
             let mut pointer = POINT::default();
@@ -218,12 +252,14 @@ impl Display {
             let size = window.size.get();
             let (width, height) = (work.right - work.left, work.bottom - work.top);
             let scale = window.scale();
+            let page = ((room.width.0 * scale) as i32, (room.height.0 * scale) as i32);
+            let at = window.state.placed.get().map_or((0, 0), |at| ((at.x * scale) as i32, (at.y * scale) as i32));
             let (x, y) = match places.get(&screen_name(&work)) {
                 Some(at) => (
                     (work.left + (at.x * scale) as i32).clamp(work.left, work.left + (width - size.width.0).max(0)),
                     (work.top + (at.y * scale) as i32).clamp(work.top, work.top + (height - size.height.0).max(0)),
                 ),
-                None => (work.left + (width - size.width.0) / 2, work.top + (height / 5).min((height - size.height.0).max(0))),
+                None => (work.left + (width - page.0) / 2 + at.0, work.top + (height / 5).min((height - page.1).max(0)) + at.1),
             };
             let before = GetForegroundWindow();
             if before != window.hwnd {
@@ -234,9 +270,12 @@ impl Display {
         }
     }
 
-    /// Puts a panel away, and with `give_back`, brings the window that was in front before it back.
+    /// Puts a panel away, its parts with it, and with `give_back`, brings the window that was in front before it back.
     pub fn put_away(&self, window: &NativeWindow, give_back: bool) {
         unsafe {
+            for part in window.state.parts.borrow().iter() {
+                let _ = ShowWindow(*part, SW_HIDE);
+            }
             let _ = ShowWindow(window.hwnd, SW_HIDE);
             let before = window.before.replace(HWND::default());
             if give_back && !before.is_invalid() {
@@ -245,22 +284,86 @@ impl Display {
         }
     }
 
-    /// Makes a window `size`, its top left where it is.
-    pub fn resize(&self, window: &NativeWindow, size: Size<Pixels>) {
-        let scale = window.scale();
-        let (width, height) = ((size.width.0 * scale).round() as i32, (size.height.0 * scale).round() as i32);
-        // Its top and its middle stay where they are.
-        let mut at = RECT::default();
-        unsafe {
-            let _ = GetWindowRect(window.hwnd, &mut at);
-            let x = at.left + (at.right - at.left - width) / 2;
-            let _ = SetWindowPos(window.hwnd, None, x, at.top, width, height, SWP_NOZORDER | SWP_NOACTIVATE);
-        }
+    /// A part of panel `parent`'s page as a window of its own, its `part`th: owned by the panel, so it's above it and
+    /// out of the taskbar and Alt-Tab as the panel is, with Acrylic under it and round corners; it never takes the
+    /// keyboard, which stays with the panel, and moves with it (`arrange`).
+    pub fn open_part(&self, parent: &NativeWindow, part: usize) -> anyhow::Result<NativeWindow> {
+        let state = Rc::new(State {
+            id: parent.state.id,
+            part,
+            queue: self.queue.clone(),
+            cursor: Cell::new(self.cursor(Cursor::Arrow)),
+            tracking: Cell::new(false),
+            high_surrogate: Cell::new(None),
+            text_input: Plugin(Cell::new(std::ptr::null_mut())),
+            row: parent.state.row.clone(),
+            panel: true,
+            placed: Cell::new(None),
+            parts: RefCell::default(),
+        });
+        let ex_style = WS_EX_TOOLWINDOW | WS_EX_TOPMOST | WS_EX_NOACTIVATE | WS_EX_NOREDIRECTIONBITMAP;
+        let module = unsafe { GetModuleHandleW(None) }.ok().map(Into::into);
+        let hwnd = unsafe { CreateWindowExW(ex_style, WINDOW_CLASS_NAME, w!(""), WS_POPUP, 0, 0, 1, 1, Some(parent.hwnd), None, module, Some(Rc::as_ptr(&state) as *const _)) }
+            .context("CreateWindowExW failed")?;
+        glass(hwnd);
+        parent.state.parts.borrow_mut().push(hwnd);
+        Ok(NativeWindow { hwnd, size: Cell::new(Size { width: DevicePixels(1), height: DevicePixels(1) }), state, panel: true, before: Cell::new(HWND::default()) })
     }
 
-    /// Windows has no Acrylic of its own for part of a window: its panel is Acrylic all over, and what asks for the
-    /// system's material is blurred as any material.
-    pub fn set_glass(&self, _: &NativeWindow, _: &[crate::platform::Glass]) {}
+    /// Puts a panel's parts where its page is, each its box of the page (`placed`, the panel first), the page where it
+    /// was (from where the panel is, and the box it had), its parts shown while it is, and draws them (`draw`).
+    pub fn arrange(&self, placed: &[(Handle, crate::geometry::Bounds<f32>, f32)], draw: &mut dyn FnMut()) {
+        if let Some((first, ..)) = placed.first() {
+            let mut frame = RECT::default();
+            unsafe {
+                let _ = GetWindowRect(first.hwnd, &mut frame);
+            }
+            let scale = first.scale;
+            // Until it's first put, the panel is its whole page.
+            let was = state(first.hwnd).and_then(|state| state.placed.get()).unwrap_or(Point { x: 0.0, y: 0.0 });
+            let page = (frame.left - (was.x * scale).round() as i32, frame.top - (was.y * scale).round() as i32);
+            let shown = unsafe { IsWindowVisible(first.hwnd) }.as_bool();
+            for (handle, bounds, _) in placed {
+                if let Some(state) = state(handle.hwnd) {
+                    state.placed.set(Some(bounds.origin));
+                }
+            }
+            for (handle, bounds, _) in placed {
+                let (x, y) = (page.0 + (bounds.origin.x * scale).round() as i32, page.1 + (bounds.origin.y * scale).round() as i32);
+                let (width, height) = ((bounds.size.width * scale).round() as i32, (bounds.size.height * scale).round() as i32);
+                let mut now = RECT::default();
+                unsafe {
+                    let _ = GetWindowRect(handle.hwnd, &mut now);
+                }
+                let part = handle.hwnd != first.hwnd;
+                let show = part && shown && !unsafe { IsWindowVisible(handle.hwnd) }.as_bool();
+                if show || (now.left, now.top, now.right - now.left, now.bottom - now.top) != (x, y, width, height) {
+                    let flags = SWP_NOZORDER | SWP_NOACTIVATE | if show { SWP_SHOWWINDOW } else { SET_WINDOW_POS_FLAGS(0) };
+                    unsafe {
+                        let _ = SetWindowPos(handle.hwnd, None, x, y, width, height, flags);
+                    }
+                }
+            }
+        }
+        draw();
+    }
+
+    /// Moves panel `hwnd`'s parts with it, where it's moved to.
+    fn follow(hwnd: HWND, panel: &State) {
+        let Some(was) = panel.placed.get() else { return };
+        let mut frame = RECT::default();
+        unsafe {
+            let _ = GetWindowRect(hwnd, &mut frame);
+        }
+        let scale = unsafe { GetDpiForWindow(hwnd) } as f32 / USER_DEFAULT_SCREEN_DPI as f32;
+        let page = (frame.left - (was.x * scale).round() as i32, frame.top - (was.y * scale).round() as i32);
+        for part in panel.parts.borrow().iter() {
+            let Some(at) = state(*part).and_then(|state| state.placed.get()) else { continue };
+            unsafe {
+                let _ = SetWindowPos(*part, None, page.0 + (at.x * scale).round() as i32, page.1 + (at.y * scale).round() as i32, 0, 0, SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE);
+            }
+        }
+    }
 
     /// Puts a window opened hidden on the screen.
     pub fn show(&self, window: &NativeWindow) {
@@ -270,6 +373,9 @@ impl Display {
     }
 
     pub fn close(&self, window: &NativeWindow) {
+        if let Some(panel) = unsafe { GetWindow(window.hwnd, GW_OWNER) }.ok().and_then(state) {
+            panel.parts.borrow_mut().retain(|part| *part != window.hwnd);
+        }
         unsafe {
             SetWindowLongPtrW(window.hwnd, GWLP_USERDATA, 0);
             let _ = DestroyWindow(window.hwnd);
@@ -352,7 +458,7 @@ impl Display {
 
     /// What Windows has said since it was last asked, by the window it's about: every message waiting for this
     /// thread dispatched to its window's procedure, which turns it into input.
-    pub fn events(&self) -> Vec<(WindowId, Input)> {
+    pub fn events(&self) -> Vec<(WindowId, usize, Input)> {
         let mut msg = MSG::default();
         while unsafe { PeekMessageW(&mut msg, None, 0, 0, PM_REMOVE) }.as_bool() {
             unsafe {
@@ -408,14 +514,14 @@ extern "C" fn update_editing_state(state: *mut c_void, client: i32, text: *const
     let value = Value::from_flutter(&serde_json::json!({
         "text": text, "selectionBase": base, "selectionExtent": extent, "composingBase": composing_base, "composingExtent": composing_extent,
     }));
-    state.queue.borrow_mut().push((state.id, Input::TextInputClient(TextInputClient::UpdateEditingState(client as u64, value))));
+    state.queue.borrow_mut().push((state.id, state.part, Input::TextInputClient(TextInputClient::UpdateEditingState(client as u64, value))));
 }
 
 /// The plugin says input `client`'s action key was pressed.
 extern "C" fn perform_action(state: *mut c_void, client: i32, action: *const c_char) {
     let state = unsafe { &*state.cast::<State>() };
     let action = unsafe { CStr::from_ptr(action) }.to_string_lossy().into_owned();
-    state.queue.borrow_mut().push((state.id, Input::TextInputClient(TextInputClient::PerformAction(client as u64, action))));
+    state.queue.borrow_mut().push((state.id, state.part, Input::TextInputClient(TextInputClient::PerformAction(client as u64, action))));
 }
 
 fn cstring(text: &str) -> CString {
@@ -499,7 +605,7 @@ fn hiword(value: isize) -> i32 {
 
 /// What a message is as input, sent to the queue; → what the procedure answers, or `None` for Windows' own answer.
 fn handle_msg(hwnd: HWND, state: &State, msg: u32, wparam: WPARAM, lparam: LPARAM) -> Option<isize> {
-    let push = |input: Input| state.queue.borrow_mut().push((state.id, input));
+    let push = |input: Input| state.queue.borrow_mut().push((state.id, state.part, input));
     let scale = || unsafe { GetDpiForWindow(hwnd) } as f32 / USER_DEFAULT_SCREEN_DPI as f32;
     let at = |x: i32, y: i32| Point { x: x as f32 / scale(), y: y as f32 / scale() };
     match msg {
@@ -546,8 +652,17 @@ fn handle_msg(hwnd: HWND, state: &State, msg: u32, wparam: WPARAM, lparam: LPARA
             unsafe {
                 let _ = ScreenToClient(hwnd, &mut point);
             }
-            state.row.borrow().as_ref().is_some_and(|row| row.moves(at(point.x, point.y))).then_some(HTCAPTION as isize)
+            (state.part == 0 && state.row.borrow().as_ref().is_some_and(|row| row.moves(state.in_page(at(point.x, point.y))))).then_some(HTCAPTION as isize)
         }
+        // Its parts move with it.
+        WM_WINDOWPOSCHANGED if state.part == 0 && !state.parts.borrow().is_empty() => {
+            if unsafe { &*(lparam.0 as *const WINDOWPOS) }.flags.0 & SWP_NOMOVE.0 == 0 {
+                Display::follow(hwnd, state);
+            }
+            None
+        }
+        // A panel's part never takes the keyboard from it, clicked or not.
+        WM_MOUSEACTIVATE if state.part > 0 => Some(MA_NOACTIVATE as isize),
         // A panel a person moved is told where it was left, on which monitor.
         WM_EXITSIZEMOVE if state.panel => {
             use windows::Win32::Graphics::Gdi::{GetMonitorInfoW, MONITOR_DEFAULTTONEAREST, MONITORINFO, MonitorFromWindow};
@@ -564,6 +679,17 @@ fn handle_msg(hwnd: HWND, state: &State, msg: u32, wparam: WPARAM, lparam: LPARA
         WM_MOUSELEAVE => {
             state.tracking.set(false);
             push(Input::Left);
+            Some(0)
+        }
+        // Where a panel's page says a press moves it, a press on one of its parts moves the panel, by its caption.
+        WM_LBUTTONDOWN if state.part > 0 && state.row.borrow().as_ref().is_some_and(|row| row.moves(state.in_page(at(loword(lparam.0), hiword(lparam.0))))) => {
+            let panel = unsafe { GetWindow(hwnd, GW_OWNER) }.ok()?;
+            let mut point = POINT::default();
+            unsafe {
+                let _ = GetCursorPos(&mut point);
+                let _ = ReleaseCapture();
+                SendMessageW(panel, WM_NCLBUTTONDOWN, Some(WPARAM(HTCAPTION as usize)), Some(LPARAM(((point.y as u16 as isize) << 16) | point.x as u16 as isize)));
+            }
             Some(0)
         }
         WM_LBUTTONDOWN | WM_MBUTTONDOWN | WM_RBUTTONDOWN => {

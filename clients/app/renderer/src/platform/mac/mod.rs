@@ -4,7 +4,7 @@
 mod events;
 mod window;
 
-pub use window::{Display, NativeWindow};
+pub use window::{Display, Handle, NativeWindow};
 
 use objc2_app_kit::{NSAppearance, NSAppearanceNameAqua, NSAppearanceNameDarkAqua, NSApplication, NSPasteboard, NSPasteboardTypeString, NSWorkspace};
 use objc2_foundation::{NSArray, NSString};

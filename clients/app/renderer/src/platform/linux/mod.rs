@@ -4,7 +4,7 @@ mod keyboard;
 mod x11;
 mod xim_handler;
 
-pub use x11::{Display, NativeWindow};
+pub use x11::{Display, Handle, NativeWindow};
 
 /// The desktop's clipboard and primary selection, as arboard serves them, one for every window on this thread.
 struct Clipboard(std::rc::Rc<std::cell::RefCell<arboard::Clipboard>>);

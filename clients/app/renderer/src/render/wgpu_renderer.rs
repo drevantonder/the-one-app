@@ -16,8 +16,9 @@ use std::sync::{Arc, OnceLock};
 #[derive(Clone, Copy, Pod, Zeroable)]
 struct GlobalParams {
     viewport_size: [f32; 2],
+    origin: [f32; 2],
     premultiplied_alpha: u32,
-    pad: u32,
+    pad: [u32; 3],
 }
 
 #[repr(C)]
@@ -377,17 +378,23 @@ impl WgpuRenderer {
         self.push(bytes)
     }
 
-    pub fn draw(&mut self, scene: &Scene) {
+    /// Draws the box of `scene` whose top left is `origin`, in device pixels, as big as the target.
+    pub fn draw(&mut self, scene: &Scene, origin: [f32; 2]) {
         self.atlas.before_frame();
         let (frame, view, texture) = match &self.target {
             Target::Surface { surface, config } => {
+                // A surface its window has outgrown, or lost, is configured again and its frame taken from that, so the
+                // frame drawn as a window changes size isn't dropped.
                 let frame = match surface.get_current_texture() {
-                    wgpu::CurrentSurfaceTexture::Success(frame) | wgpu::CurrentSurfaceTexture::Suboptimal(frame) => frame,
                     wgpu::CurrentSurfaceTexture::Lost | wgpu::CurrentSurfaceTexture::Outdated => {
                         surface.configure(&self.device, config);
-                        return;
+                        surface.get_current_texture()
                     }
-                    wgpu::CurrentSurfaceTexture::Timeout | wgpu::CurrentSurfaceTexture::Occluded | wgpu::CurrentSurfaceTexture::Validation => return,
+                    taken => taken,
+                };
+                let frame = match frame {
+                    wgpu::CurrentSurfaceTexture::Success(frame) | wgpu::CurrentSurfaceTexture::Suboptimal(frame) => frame,
+                    _ => return,
                 };
                 let view = frame.texture.create_view(&wgpu::TextureViewDescriptor::default());
                 let texture = frame.texture.clone();
@@ -400,7 +407,7 @@ impl WgpuRenderer {
 
         // The frame's data: its globals, then each batch's instances, then each backdrop's blur's parameters.
         self.data.clear();
-        let globals = GlobalParams { viewport_size: [size.0 as f32, size.1 as f32], premultiplied_alpha: u32::from(self.premultiplied), pad: 0 };
+        let globals = GlobalParams { viewport_size: [size.0 as f32, size.1 as f32], origin, premultiplied_alpha: u32::from(self.premultiplied), pad: [0; 3] };
         let globals = self.push(bytemuck::bytes_of(&globals));
         let gamma = self.gamma;
         let gamma = self.push(bytemuck::bytes_of(&gamma));

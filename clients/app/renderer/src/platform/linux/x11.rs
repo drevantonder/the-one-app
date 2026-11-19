@@ -67,7 +67,12 @@ pub struct Display {
     cursors: cursor::Handle,
     loaded: RefCell<HashMap<Cursor, xproto::Cursor>>,
     scale: f32,
-    windows: RefCell<HashMap<xproto::Window, WindowId>>,
+    /// Each window's window and part (`Who`).
+    windows: RefCell<HashMap<xproto::Window, Who>>,
+    /// Each panel's window and its parts' (`arrange`): the panel's, and its box of the page, in points.
+    parts: RefCell<HashMap<xproto::Window, (xproto::Window, Point<f32>)>>,
+    /// The panels showing, whose parts are shown with them.
+    shown: RefCell<std::collections::HashSet<xproto::Window>>,
     /// Where a press moves each panel (`set_title_row`), and the panels a person is dragging, since a press there and
     /// until they're summoned again, which say where they're left (`Input::Placed`).
     rows: RefCell<HashMap<xproto::Window, crate::view::TitleRow>>,
@@ -78,6 +83,9 @@ pub struct Display {
     /// to the input method, which shows what it composes there.
     ime: RefCell<HashMap<xproto::Window, (i16, i16)>>,
 }
+
+/// Which window an event is for, and which of its parts: 0 the window itself, the rest a panel's parts.
+type Who = (WindowId, usize);
 
 pub struct NativeWindow {
     x_window: xproto::Window,
@@ -117,7 +125,18 @@ impl rwh::HasDisplayHandle for NativeWindow {
     }
 }
 
+/// A window as `Display::arrange` places it: its X window and its size now.
+#[derive(Clone, Copy)]
+pub struct Handle {
+    window: xproto::Window,
+    size: Size<DevicePixels>,
+}
+
 impl NativeWindow {
+    pub fn handle(&self) -> Handle {
+        Handle { window: self.x_window, size: self.size.get() }
+    }
+
     /// What wgpu draws into: the window, by its raw handles.
     pub fn surface(&self) -> anyhow::Result<wgpu::SurfaceTargetUnsafe> {
         // Safety: a window's renderer is let go before the window is.
@@ -221,6 +240,8 @@ impl Display {
             loaded: RefCell::default(),
             scale,
             windows: RefCell::default(),
+            parts: RefCell::default(),
+            shown: RefCell::default(),
             rows: RefCell::default(),
             dragged: RefCell::default(),
             xim: RefCell::new(xim),
@@ -229,39 +250,11 @@ impl Display {
     }
 
     pub fn open(&self, id: WindowId, options: &WindowOptions) -> anyhow::Result<NativeWindow> {
-        let xcb = &self.xcb;
-        let setup = &xcb.setup().roots[self.screen];
-        let x_window = xcb.generate_id()?;
         let width = (options.size.width.0 * self.scale).round() as u16;
         let height = (options.size.height.0 * self.scale).round() as u16;
-        // A panel is see-through at its rounded corners where a compositor draws windows over each other: a 32-bit
-        // visual, with a colormap of its own, as GPUI's transparent windows have.
-        let argb = options.panel.is_some().then(|| self.argb()).flatten();
-        let (depth, visual) = argb.unwrap_or((setup.root_depth, setup.root_visual));
-        let mut aux = xproto::CreateWindowAux::new();
-        if argb.is_some() {
-            let colormap = xcb.generate_id()?;
-            xcb.create_colormap(xproto::ColormapAlloc::NONE, colormap, setup.root, visual)?.check()?;
-            aux = aux.background_pixel(0).border_pixel(0).colormap(colormap);
-        } else {
-            aux = aux.background_pixel(setup.black_pixel);
-        }
-        let aux = aux
-            .event_mask(
-                xproto::EventMask::EXPOSURE
-                    | xproto::EventMask::STRUCTURE_NOTIFY
-                    | xproto::EventMask::FOCUS_CHANGE
-                    | xproto::EventMask::KEY_PRESS
-                    | xproto::EventMask::KEY_RELEASE
-                    | xproto::EventMask::BUTTON_PRESS
-                    | xproto::EventMask::BUTTON_RELEASE
-                    | xproto::EventMask::POINTER_MOTION
-                    | xproto::EventMask::LEAVE_WINDOW,
-            );
-        xcb.create_window(depth, x_window, setup.root, 0, 0, width, height, 0, xproto::WindowClass::INPUT_OUTPUT, visual, &aux)?
-        .check()
-        .context("X11 CreateWindow failed")?;
-        xcb.change_property32(xproto::PropMode::REPLACE, x_window, self.atoms._NET_WM_PID, xproto::AtomEnum::CARDINAL, &[std::process::id()])?;
+        let window = self.create((id, 0), width, height, options.panel.is_some(), false)?;
+        let x_window = window.x_window;
+        let xcb = &self.xcb;
         xcb.change_property8(xproto::PropMode::REPLACE, x_window, xproto::AtomEnum::WM_NAME, xproto::AtomEnum::STRING, options.title.as_bytes())?;
         xcb.change_property8(xproto::PropMode::REPLACE, x_window, self.atoms._NET_WM_NAME, self.atoms.UTF8_STRING, options.title.as_bytes())?;
         // WM_CLASS is the instance and the class, each ending in a NUL.
@@ -278,13 +271,53 @@ impl Display {
             self.hint(x_window, 0, 0, width, height)?;
         }
         xcb.flush()?;
-        self.windows.borrow_mut().insert(x_window, id);
-        let raw = RawWindow {
-            connection: xcb.get_raw_xcb_connection(),
-            screen_id: self.screen,
-            window_id: x_window,
-            visual_id: visual,
-        };
+        Ok(window)
+    }
+
+    /// A part of panel `parent`'s page as a window of its own, its `part`th: one the window manager leaves alone
+    /// (override-redirect), as a menu's is, so it never takes the keyboard, which stays with the panel, nor is in the
+    /// taskbar; it's put where its box of the page is, and moves with the panel (`arrange`).
+    pub fn open_part(&self, parent: &NativeWindow, part: usize) -> anyhow::Result<NativeWindow> {
+        let who = self.windows.borrow().get(&parent.x_window).copied().context("its panel is closed")?;
+        let window = self.create((who.0, part), 1, 1, true, true)?;
+        self.xcb.flush()?;
+        Ok(window)
+    }
+
+    /// An X window `width` by `height` device pixels for `who`: a panel's see-through at its rounded corners where a
+    /// compositor draws windows over each other, with a 32-bit visual and a colormap of its own, as GPUI's transparent
+    /// windows have; and with `override_redirect`, one the window manager leaves alone.
+    fn create(&self, who: Who, width: u16, height: u16, panel: bool, override_redirect: bool) -> anyhow::Result<NativeWindow> {
+        let xcb = &self.xcb;
+        let setup = &xcb.setup().roots[self.screen];
+        let x_window = xcb.generate_id()?;
+        let argb = panel.then(|| self.argb()).flatten();
+        let (depth, visual) = argb.unwrap_or((setup.root_depth, setup.root_visual));
+        let mut aux = xproto::CreateWindowAux::new().override_redirect(u32::from(override_redirect));
+        if argb.is_some() {
+            let colormap = xcb.generate_id()?;
+            xcb.create_colormap(xproto::ColormapAlloc::NONE, colormap, setup.root, visual)?.check()?;
+            aux = aux.background_pixel(0).border_pixel(0).colormap(colormap);
+        } else {
+            aux = aux.background_pixel(setup.black_pixel);
+        }
+        let aux = aux.event_mask(
+            xproto::EventMask::EXPOSURE
+                | xproto::EventMask::STRUCTURE_NOTIFY
+                | xproto::EventMask::FOCUS_CHANGE
+                | xproto::EventMask::KEY_PRESS
+                | xproto::EventMask::KEY_RELEASE
+                | xproto::EventMask::BUTTON_PRESS
+                | xproto::EventMask::BUTTON_RELEASE
+                | xproto::EventMask::POINTER_MOTION
+                | xproto::EventMask::LEAVE_WINDOW,
+        );
+        xcb.create_window(depth, x_window, setup.root, 0, 0, width, height, 0, xproto::WindowClass::INPUT_OUTPUT, visual, &aux)?
+            .check()
+            .context("X11 CreateWindow failed")?;
+        xcb.change_property32(xproto::PropMode::REPLACE, x_window, self.atoms._NET_WM_PID, xproto::AtomEnum::CARDINAL, &[std::process::id()])?;
+        self.windows.borrow_mut().insert(x_window, who);
+        let raw = RawWindow { connection: xcb.get_raw_xcb_connection(), screen_id: self.screen, window_id: x_window, visual_id: visual };
         Ok(NativeWindow {
             x_window,
             raw,
@@ -293,7 +326,7 @@ impl Display {
             cursor: Cell::new(Cursor::Arrow),
             transparent: argb.is_some(),
             before: Cell::new(x11rb::NONE),
-            panel: options.panel.is_some(),
+            panel,
         })
     }
 
@@ -349,19 +382,23 @@ impl Display {
             .unwrap_or(whole)
     }
 
-    /// Shows a panel centred near the top of the screen the pointer is on, a fifth of the way down as Spotlight sits,
-    /// never off the bottom of a short screen, and gives it the keyboard, keeping which window had it.
-    /// Where it was dragged to on that screen before (`places`), it's there, as much of it as fits.
-    pub fn summon(&self, window: &NativeWindow, places: &crate::platform::Places) {
+    /// Shows a panel's page, `room` points, centred near the top of the screen the pointer is on, a fifth of the way
+    /// down as Spotlight sits, never off the bottom of a short screen, and gives it the keyboard, keeping which window
+    /// had it; its parts follow it (`arrange`). Where it was dragged to on that screen before (`places`), it's there,
+    /// as much of it as fits.
+    pub fn summon(&self, window: &NativeWindow, places: &crate::platform::Places, room: Size<Pixels>) {
         self.dragged.borrow_mut().remove(&window.x_window);
+        self.shown.borrow_mut().insert(window.x_window);
         let size = window.size.get();
         let (left, top, width, height) = self.pointer_screen();
+        let page = ((room.width.0 * self.scale) as i32, (room.height.0 * self.scale) as i32);
+        let at = self.parts.borrow().get(&window.x_window).map_or((0, 0), |(_, at)| ((at.x * self.scale) as i32, (at.y * self.scale) as i32));
         let (x, y) = match places.get(&screen_name((left, top, width, height))) {
             Some(at) => (
                 (left + (at.x * self.scale) as i32).clamp(left, left + (width - size.width.0).max(0)),
                 (top + (at.y * self.scale) as i32).clamp(top, top + (height - size.height.0).max(0)),
             ),
-            None => (left + (width - size.width.0) / 2, top + (height / 5).min((height - size.height.0).max(0))),
+            None => (left + (width - page.0) / 2 + at.0, top + (height / 5).min((height - page.1).max(0)) + at.1),
         };
         let before = self.active();
         if before != window.x_window {
@@ -376,6 +413,11 @@ impl Display {
 
     /// Puts a panel away, and with `give_back`, makes the window that had the keyboard before it active again.
     pub fn put_away(&self, window: &NativeWindow, give_back: bool) {
+        self.shown.borrow_mut().remove(&window.x_window);
+        let parts: Vec<xproto::Window> = self.parts.borrow().iter().filter(|(_, (panel, _))| *panel == window.x_window).map(|(part, _)| *part).collect();
+        for part in parts {
+            let _ = self.xcb.unmap_window(part);
+        }
         let _ = self.xcb.unmap_window(window.x_window);
         let before = window.before.replace(x11rb::NONE);
         if give_back && before != x11rb::NONE {
@@ -384,17 +426,50 @@ impl Display {
         let _ = self.xcb.flush();
     }
 
-    /// Makes a window `size`, its top left where it is.
-    pub fn resize(&self, window: &NativeWindow, size: Size<Pixels>) {
-        let (width, height) = ((size.width.0 * self.scale).round() as u16, (size.height.0 * self.scale).round() as u16);
-        // Its middle stays where it is as it gets wider or narrower.
-        let mut changes = xproto::ConfigureWindowAux::new().width(u32::from(width)).height(u32::from(height));
-        if let Ok(Ok(at)) = self.xcb.get_geometry(window.x_window).map(|cookie| cookie.reply()) {
-            let x = i32::from(at.x) + (i32::from(at.width) - i32::from(width)) / 2;
-            let _ = self.hint(window.x_window, x, i32::from(at.y), width, height);
-            changes = changes.x(x);
+    /// Puts a panel's parts where its page is, each its box of the page (`placed`, the panel first), the page where it
+    /// was (from where the panel is, and the box it had), its parts shown while it is, and draws them (`draw`).
+    pub fn arrange(&self, placed: &[(Handle, crate::geometry::Bounds<f32>, f32)], draw: &mut dyn FnMut()) {
+        if let Some((first, ..)) = placed.first() {
+            let root = self.xcb.setup().roots[self.screen].root;
+            let now = self.xcb.translate_coordinates(first.window, root, 0, 0).ok().and_then(|cookie| cookie.reply().ok()).map_or((0, 0), |at| (i32::from(at.dst_x), i32::from(at.dst_y)));
+            // Until it's first put, the panel is its whole page.
+            let was = self.parts.borrow().get(&first.window).map_or(Point { x: 0.0, y: 0.0 }, |(_, at)| *at);
+            let page = (now.0 - (was.x * self.scale).round() as i32, now.1 - (was.y * self.scale).round() as i32);
+            let shown = self.shown.borrow().contains(&first.window);
+            for (handle, bounds, _) in placed {
+                let x = page.0 + (bounds.origin.x * self.scale).round() as i32;
+                let y = page.1 + (bounds.origin.y * self.scale).round() as i32;
+                let (width, height) = ((bounds.size.width * self.scale).round() as u16, (bounds.size.height * self.scale).round() as u16);
+                let at = self.parts.borrow_mut().insert(handle.window, (first.window, bounds.origin)).map(|(_, at)| at);
+                let moved = at != Some(bounds.origin) || (handle.size.width.0, handle.size.height.0) != (i32::from(width), i32::from(height));
+                if handle.window == first.window {
+                    if moved {
+                        let _ = self.hint(handle.window, x, y, width, height);
+                    }
+                } else if shown {
+                    let _ = self.xcb.map_window(handle.window);
+                }
+                if moved {
+                    let changes = xproto::ConfigureWindowAux::new().x(x).y(y).width(u32::from(width)).height(u32::from(height));
+                    let _ = self.xcb.configure_window(handle.window, &changes);
+                }
+            }
+            let _ = self.xcb.flush();
         }
-        let _ = self.xcb.configure_window(window.x_window, &changes);
+        draw();
+    }
+
+    /// Moves panel `panel`'s parts with it, where it's moved to.
+    fn follow(&self, panel: xproto::Window) {
+        let parts = self.parts.borrow();
+        let Some((_, was)) = parts.get(&panel) else { return };
+        let root = self.xcb.setup().roots[self.screen].root;
+        let Some(now) = self.xcb.translate_coordinates(panel, root, 0, 0).ok().and_then(|cookie| cookie.reply().ok()) else { return };
+        let page = (i32::from(now.dst_x) - (was.x * self.scale).round() as i32, i32::from(now.dst_y) - (was.y * self.scale).round() as i32);
+        for (part, (_, at)) in parts.iter().filter(|(part, (of, _))| *of == panel && **part != panel) {
+            let changes = xproto::ConfigureWindowAux::new().x(page.0 + (at.x * self.scale).round() as i32).y(page.1 + (at.y * self.scale).round() as i32);
+            let _ = self.xcb.configure_window(*part, &changes);
+        }
         let _ = self.xcb.flush();
     }
 
@@ -406,6 +481,8 @@ impl Display {
 
     pub fn close(&self, window: &NativeWindow) {
         self.windows.borrow_mut().remove(&window.x_window);
+        self.parts.borrow_mut().remove(&window.x_window);
+        self.shown.borrow_mut().remove(&window.x_window);
         self.ime.borrow_mut().remove(&window.x_window);
         let _ = self.xcb.destroy_window(window.x_window);
         let _ = self.xcb.flush();
@@ -445,7 +522,7 @@ impl Display {
     /// What the X server has said since it was last asked, by the window it's about. Each event goes by the input
     /// method first, which takes what's its own, and the keys of a window whose input takes typing go to it, which
     /// sends back what it doesn't compose.
-    pub fn events(&self) -> Vec<(WindowId, Input)> {
+    pub fn events(&self) -> Vec<(WindowId, usize, Input)> {
         let mut out = Vec::new();
         while let Ok(Some(event)) = self.xcb.poll_for_event() {
             let Some((mut ximc, mut handler)) = self.xim.borrow_mut().take() else {
@@ -475,11 +552,11 @@ impl Display {
                 }
             }
         }
-        out
+        out.into_iter().map(|((id, part), input)| (id, part, input)).collect()
     }
 
     /// What the input method said: a key it didn't take, what it committed, or what it's composing.
-    fn xim_told(&self, told: XimCallbackEvent, out: &mut Vec<(WindowId, Input)>) {
+    fn xim_told(&self, told: XimCallbackEvent, out: &mut Vec<(Who, Input)>) {
         match told {
             XimCallbackEvent::XimXEvent(event) => self.event(event, out),
             XimCallbackEvent::XimCommitEvent(window, text) => {
@@ -500,7 +577,7 @@ impl Display {
     /// its way, what it has so far shows in the input as what's being composed, and once it's done its letter is
     /// committed there; a sequence the key doesn't fit writes what it showed and starts again from the key. → whether
     /// the sequence took the key, so it's typed no other way.
-    fn compose(&self, id: WindowId, keysym: xkbc::Keysym, typed: String, out: &mut Vec<(WindowId, Input)>) -> bool {
+    fn compose(&self, id: Who, keysym: xkbc::Keysym, typed: String, out: &mut Vec<(Who, Input)>) -> bool {
         use xkbc::compose::{FeedResult, Status};
         let mut compose = self.compose.borrow_mut();
         let Some(compose) = compose.as_mut() else { return false };
@@ -572,7 +649,6 @@ impl Display {
 
     /// X11 has no material of the system's to put under a page: its panel is filled, and what asks for the system's
     /// is blurred as any material.
-    pub fn set_glass(&self, _: &NativeWindow, _: &[crate::platform::Glass]) {}
 
     /// Its title row over its page: none here, where the system's own title bar is above the page and moves the window.
     /// A panel moves where its page says (`appRegion`); an app's window has its window manager's frame.
@@ -646,7 +722,7 @@ impl Display {
         Some(Input::Placed(screen_name(screen), Point { x: (x - screen.0) as f32 / self.scale, y: (y - screen.1) as f32 / self.scale }))
     }
 
-    fn window(&self, x_window: xproto::Window) -> Option<WindowId> {
+    fn window(&self, x_window: xproto::Window) -> Option<Who> {
         self.windows.borrow().get(&x_window).copied()
     }
 
@@ -654,7 +730,7 @@ impl Display {
         Point { x: x as f32 / self.scale, y: y as f32 / self.scale }
     }
 
-    fn event(&self, event: Event, out: &mut Vec<(WindowId, Input)>) {
+    fn event(&self, event: Event, out: &mut Vec<(Who, Input)>) {
         match event {
             Event::ClientMessage(event) => {
                 let data = event.data.as_data32();
@@ -666,6 +742,7 @@ impl Display {
             }
             Event::ConfigureNotify(event) => {
                 if let Some(id) = self.window(event.window) {
+                    self.follow(event.window);
                     if self.dragged.borrow().contains(&event.window)
                         && let Some(placed) = self.placed(event.window)
                     {
@@ -689,12 +766,15 @@ impl Display {
                 // A press ends a dead key's sequence: the input writes what it showed, as GPUI's does.
                 self.end_compose();
                 let at = self.at(event.event_x, event.event_y);
-                // Where a panel's page says a press moves it, the window manager moves it, as a title bar's press does.
-                if event.detail == 1 && self.rows.borrow().get(&event.event).is_some_and(|row| row.moves(at)) {
-                    self.dragged.borrow_mut().insert(event.event);
+                // Where a panel's page says a press moves it, the window manager moves it, as a title bar's press does;
+                // a press on one of its parts, by its point in the page, moves the panel, which the part follows.
+                let (panel, by) = self.parts.borrow().get(&event.event).copied().unwrap_or((event.event, Point { x: 0.0, y: 0.0 }));
+                let in_page = Point { x: at.x + by.x, y: at.y + by.y };
+                if event.detail == 1 && self.rows.borrow().get(&panel).is_some_and(|row| row.moves(in_page)) {
+                    self.dragged.borrow_mut().insert(panel);
                     let root = self.xcb.setup().roots[self.screen].root;
                     let _ = self.xcb.ungrab_pointer(x11rb::CURRENT_TIME);
-                    let message = xproto::ClientMessageEvent::new(32, event.event, self.atoms._NET_WM_MOVERESIZE, [i32::from(event.root_x) as u32, i32::from(event.root_y) as u32, 8, 1, 1]);
+                    let message = xproto::ClientMessageEvent::new(32, panel, self.atoms._NET_WM_MOVERESIZE, [i32::from(event.root_x) as u32, i32::from(event.root_y) as u32, 8, 1, 1]);
                     let mask = xproto::EventMask::SUBSTRUCTURE_REDIRECT | xproto::EventMask::SUBSTRUCTURE_NOTIFY;
                     let _ = self.xcb.send_event(false, root, mask, message);
                     let _ = self.xcb.flush();

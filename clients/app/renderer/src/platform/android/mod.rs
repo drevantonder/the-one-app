@@ -131,7 +131,7 @@ fn with_windows<R>(f: impl FnOnce(&mut Windows) -> R) -> Option<R> {
         for id in windows.windows.keys().copied().collect::<Vec<_>>() {
             keyboard(windows, id);
             if let Some(window) = windows.windows.get_mut(&id)
-                && let (Some(a11y), Ok(screen)) = (window.native.a11y.as_mut(), &window.screen)
+                && let (Some(a11y), Ok(screen)) = (window.parts[0].native.a11y.as_mut(), &window.screen)
             {
                 a11y.update(screen);
             }
@@ -201,12 +201,15 @@ impl Display {
     pub fn set_cursor(&self, _: &NativeWindow, _: crate::Cursor) {}
 
     // A launcher's panel, which a phone has none of: its launcher is its page.
-    pub fn summon(&self, _: &NativeWindow, _: &crate::platform::Places) {}
+    pub fn summon(&self, _: &NativeWindow, _: &crate::platform::Places, _: Size<Pixels>) {}
     pub fn put_away(&self, _: &NativeWindow, _: bool) {}
-    pub fn resize(&self, _: &NativeWindow, _: Size<Pixels>) {}
-
-    /// An Android view has no panel.
-    pub fn set_glass(&self, _: &NativeWindow, _: &[crate::platform::Glass]) {}
+    /// A part of a panel's page as a window of its own: which a phone has none of.
+    pub fn open_part(&self, _: &NativeWindow, _: usize) -> anyhow::Result<NativeWindow> {
+        anyhow::bail!("a panel's parts aren't windows of their own here")
+    }
+    pub fn arrange(&self, _: &[(Handle, crate::geometry::Bounds<f32>, f32)], draw: &mut dyn FnMut()) {
+        draw();
+    }
 
     /// Its title row over its page: none here, where the system's own title bar is above the page and moves the window.
     pub fn set_title_row(&self, _: &NativeWindow, _: Option<crate::view::TitleRow>) {}
@@ -222,7 +225,7 @@ impl Display {
     pub fn flush(&self) {}
 
     /// What the views heard comes straight in through JNI (`input`), not queued here.
-    pub(crate) fn events(&self) -> Vec<(WindowId, Input)> {
+    pub(crate) fn events(&self) -> Vec<(WindowId, usize, Input)> {
         Vec::new()
     }
 }
@@ -238,7 +241,15 @@ pub struct NativeWindow {
     revealed: Option<(Id, Size<DevicePixels>)>,
 }
 
+/// A view as `Display::arrange` would place it, which a phone's never does.
+#[derive(Clone, Copy)]
+pub struct Handle;
+
 impl NativeWindow {
+    pub fn handle(&self) -> Handle {
+        Handle
+    }
+
     /// What wgpu draws into: its view's surface, by its raw handles.
     pub fn surface(&self) -> anyhow::Result<wgpu::SurfaceTargetUnsafe> {
         // Safety: a window's renderer is let go before the window is.
@@ -300,15 +311,15 @@ impl rwh::HasDisplayHandle for NativeWindow {
 fn keyboard(windows: &mut Windows, id: WindowId) {
     let Some(window) = windows.windows.get_mut(&id) else { return };
     let Ok(screen) = &mut window.screen else { return };
-    let revealing = screen.focused().filter(|_| screen.editing().is_some()).map(|focused| (focused, window.native.device_size()));
-    if revealing.is_some() && revealing != window.native.revealed {
-        window.native.revealed = revealing;
+    let revealing = screen.focused().filter(|_| screen.editing().is_some()).map(|focused| (focused, window.parts[0].native.device_size()));
+    if revealing.is_some() && revealing != window.parts[0].native.revealed {
+        window.parts[0].native.revealed = revealing;
         if revealing.is_some_and(|(focused, _)| screen.reveal(focused)) {
             window.dirty = true;
         }
     }
     let calls = screen.text_input(&mut window.text_input);
-    windows.display.text_input(&window.native, &calls);
+    windows.display.text_input(&window.parts[0].native, &calls);
 }
 
 /// A finger, as the view's MotionEvent says it, in logical pixels: where it landed, where it was last, whether it's
@@ -411,13 +422,13 @@ pub extern "system" fn Java_app_theone_renderer_NativeView_nativeSurface(env: JN
     with_windows(|windows| {
         let Some(window) = windows.windows.get_mut(&id) else { return };
         let size = Size { width: DevicePixels(width), height: DevicePixels(height) };
-        let same = window.native.surface.as_ref().zip(surface.as_ref()).is_some_and(|(now, new)| now.ptr() == new.ptr());
-        window.native.resized(size);
+        let same = window.parts[0].native.surface.as_ref().zip(surface.as_ref()).is_some_and(|(now, new)| now.ptr() == new.ptr());
+        window.parts[0].native.resized(size);
         if same {
-            return windows.input(id, Input::Resized(size));
+            return windows.input(id, 0, Input::Resized(size));
         }
-        window.native.surface = surface;
-        windows.input(id, Input::Surface);
+        window.parts[0].native.surface = surface;
+        windows.input(id, 0, Input::Surface);
     });
 }
 
@@ -426,9 +437,9 @@ pub extern "system" fn Java_app_theone_renderer_NativeView_nativeSurface(env: JN
 pub extern "system" fn Java_app_theone_renderer_NativeView_nativeSurfaceDestroyed(_: JNIEnv, _: JObject, id: jlong) {
     let id = id as WindowId;
     with_windows(|windows| {
-        windows.input(id, Input::SurfaceLost);
+        windows.input(id, 0, Input::SurfaceLost);
         if let Some(window) = windows.windows.get_mut(&id) {
-            window.native.surface = None;
+            window.parts[0].native.surface = None;
         }
     });
 }
@@ -461,7 +472,7 @@ pub extern "system" fn Java_app_theone_renderer_NativeView_nativeTouch(_: JNIEnv
     let id = id as WindowId;
     with_windows(|windows| {
         let Some(window) = windows.windows.get_mut(&id) else { return };
-        let density = window.native.density;
+        let density = window.parts[0].native.density;
         let at = point(x / density, y / density);
         let Ok(screen) = &mut window.screen else { return };
         window.dirty = true;
@@ -503,7 +514,7 @@ pub extern "system" fn Java_app_theone_renderer_NativeView_nativeTouch(_: JNIEnv
                     screen.pointer_up(at, 0);
                     // A tap in the field that has the keyboard brings it up again, if it went.
                     if touch.on_input && was.is_some() && screen.focused() == was {
-                        windows.display.text_input(&window.native, &[editing::TextInput::Show]);
+                        windows.display.text_input(&window.parts[0].native, &[editing::TextInput::Show]);
                     }
                 }
                 _ => {
@@ -523,7 +534,7 @@ pub extern "system" fn Java_app_theone_renderer_NativeView_nativeLongPress(_: JN
     let id = id as WindowId;
     with_windows(|windows| {
         let Some(window) = windows.windows.get_mut(&id) else { return };
-        let density = window.native.density;
+        let density = window.parts[0].native.density;
         let at = point(x / density, y / density);
         let Ok(screen) = &mut window.screen else { return };
         window.dirty = true;
@@ -532,7 +543,7 @@ pub extern "system" fn Java_app_theone_renderer_NativeView_nativeLongPress(_: JN
             screen.pointer_cancel(at);
         }
         if screen.select_word(at) {
-            return window.native.apply(json!({"menu": true}));
+            return window.parts[0].native.apply(json!({"menu": true}));
         }
         screen.pointer_down(at, 2, false);
         screen.pointer_up(at, 2);
@@ -624,7 +635,7 @@ pub extern "system" fn Java_app_theone_renderer_NativeView_nativeAccessibility(m
     let adapter = a11y::A11y::new(&mut env, &view, id);
     with_windows(|windows| {
         if let Some(window) = windows.windows.get_mut(&id) {
-            window.native.a11y = Some(adapter);
+            window.parts[0].native.a11y = Some(adapter);
         }
     });
 }

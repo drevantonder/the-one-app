@@ -7,7 +7,7 @@ mod window;
 
 use std::sync::mpsc;
 
-pub use window::{Display, NativeWindow};
+pub use window::{Display, Handle, NativeWindow};
 use windows::Win32::Foundation::{HANDLE, LPARAM, WPARAM};
 use windows::Win32::System::Registry::{HKEY_CURRENT_USER, RRF_RT_REG_DWORD, RegGetValueW};
 use windows::Win32::System::Threading::GetCurrentThreadId;

@@ -8,7 +8,7 @@
 use std::collections::HashMap;
 use std::sync::{Arc, OnceLock};
 
-use crate::geometry::{Pixels, Point, Size};
+use crate::geometry::{DevicePixels, Pixels, Point, Size};
 use crate::render::{Atlas, Context, Renderer};
 use crate::text::TextSystem;
 use crate::Screen;
@@ -16,19 +16,19 @@ use crate::Screen;
 #[cfg(target_os = "linux")]
 mod linux;
 #[cfg(target_os = "linux")]
-use linux::{Display, NativeWindow, appearance, clipboard, reduced_motion};
+use linux::{Display, Handle, NativeWindow, appearance, clipboard, reduced_motion};
 #[cfg(target_os = "windows")]
 mod windows;
 #[cfg(target_os = "windows")]
-use windows::{Display, NativeWindow, appearance, clipboard, reduced_motion};
+use windows::{Display, Handle, NativeWindow, appearance, clipboard, reduced_motion};
 #[cfg(target_os = "macos")]
 mod mac;
 #[cfg(target_os = "macos")]
-use mac::{Display, NativeWindow, appearance, clipboard, reduced_motion};
+use mac::{Display, Handle, NativeWindow, appearance, clipboard, reduced_motion};
 #[cfg(target_os = "android")]
 mod android;
 #[cfg(target_os = "android")]
-use android::{Display, NativeWindow, appearance, clipboard, reduced_motion};
+use android::{Display, Handle, NativeWindow, appearance, clipboard, reduced_motion};
 
 /// A window, as the windows' thread names it.
 pub type WindowId = u64;
@@ -71,9 +71,9 @@ pub struct WindowOptions {
 /// top left, in points from the screen's.
 pub type Places = HashMap<String, Point<f32>>;
 
-/// Where a page asked for the system's own material, as a panel's glass (a material token that's `system`): in the
-/// window's points, with its corners' radius and how opaque it's drawn. A host with that material puts it there,
-/// under the page, and none under the rest; one without has drawn it as any other material.
+/// Where a page asked for the system's own material (a material token that's `system`): in the page's points, with its
+/// corners' radius and how opaque it's drawn. On a panel each is a window of its own, the system's material its
+/// background (`Display::arrange`); elsewhere it's drawn as any other material.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Glass {
     pub bounds: crate::geometry::Bounds<f32>,
@@ -155,8 +155,23 @@ fn start() -> anyhow::Result<Native> {
 /// with what it asked for, or opens in a web view instead without having shown, as its page turns out to need.
 const SHOWN_WITHIN: std::time::Duration = std::time::Duration::from_millis(1000);
 
-struct Window {
+/// One of a window's native windows, each with a surface of its own: a window's only one, or each part of a panel's
+/// page that has the system's material (`Glass`), its search and its card, the first the panel itself and the rest its
+/// child windows, which move, hide and stack with it.
+struct Part {
     native: NativeWindow,
+    /// What draws it, once it has a surface: at once on a computer, as its view's is made on Android.
+    renderer: Option<Renderer>,
+    /// Its box of the page, in points.
+    bounds: crate::geometry::Bounds<f32>,
+    radius: f32,
+}
+
+struct Window {
+    /// Its native windows, the first the window itself.
+    parts: Vec<Part>,
+    /// How big its page is laid out, in points: a panel's as its page asks (`resize`), the rest their window's.
+    room: Size<Pixels>,
     /// When it was opened, hidden, and whether it's shown.
     opened: std::time::Instant,
     shown: bool,
@@ -167,13 +182,9 @@ struct Window {
     /// What it shows: its app's screen, or why its app didn't open.
     screen: Result<Screen, String>,
     title: String,
-    /// What draws it, once it has a surface: at once on a computer, as its view's is made on Android.
-    renderer: Option<Renderer>,
     scene: crate::render::scene::Scene,
     dirty: bool,
     drawn: bool,
-    /// Where the system's material was put under it last.
-    glass: Vec<Glass>,
     /// What its text input plugin was last told.
     text_input: crate::view::TextInputConnection,
     on_event: Box<dyn FnMut(Event)>,
@@ -225,10 +236,12 @@ impl Windows {
         let renderer = self.renderer(&native)?;
         let opened = std::time::Instant::now();
         let panel = options.panel.is_some();
+        let whole = crate::geometry::Bounds { origin: crate::geometry::point(0.0, 0.0), size: Size { width: options.size.width.0, height: options.size.height.0 } };
         self.windows.insert(
             id,
             Window {
-                native,
+                parts: vec![Part { native, renderer, bounds: whole, radius: options.panel.unwrap_or(0.0) }],
+                room: options.size,
                 opened,
                 shown: panel,
                 panel,
@@ -236,11 +249,9 @@ impl Windows {
                 summoned: None,
                 screen: Ok(screen),
                 title: options.title,
-                renderer,
                 scene: Default::default(),
                 dirty: true,
                 drawn: false,
-                glass: Vec::new(),
                 text_input: Default::default(),
                 on_event: Box::new(on_event),
                 tag: options.tag,
@@ -311,6 +322,7 @@ impl Windows {
         let Some(window) = self.windows.get_mut(&id) else {
             return reply(crate::inspect::answer(&request.id, Err(anyhow::anyhow!("there's no window {id} open"))));
         };
+        let (room, scale) = (window.room(), window.parts[0].native.scale());
         let Ok(screen) = &mut window.screen else {
             return reply(crate::inspect::answer(&request.id, Err(anyhow::anyhow!("its app didn't open"))));
         };
@@ -320,10 +332,11 @@ impl Windows {
         }
         // Painted afresh, as it is now: a window with no surface (Android's view while it's hidden) has drawn nothing,
         // and the scene it last drew may be older than what it shows.
-        let mut renderer = Renderer::offscreen(&self.context, self.atlas.clone(), window.native.device_size());
+        let device = Size { width: DevicePixels((room.width.0 * scale).round() as i32), height: DevicePixels((room.height.0 * scale).round() as i32) };
+        let mut renderer = Renderer::offscreen(&self.context, self.atlas.clone(), device);
         let mut scene = crate::render::scene::Scene::default();
-        screen.paint_afresh(window.native.size(), window.native.scale(), &mut self.text, &self.atlas, &mut scene);
-        renderer.draw(&scene);
+        screen.paint_afresh(room, scale, &mut self.text, &self.atlas, &mut scene);
+        renderer.draw(&scene, [0.0, 0.0]);
         let snapped = renderer.read().ok_or_else(|| anyhow::anyhow!("nothing was drawn")).and_then(|(width, height, rgba)| {
             let mut png = Vec::new();
             image::RgbaImage::from_raw(width, height, rgba)
@@ -338,7 +351,7 @@ impl Windows {
     /// Brings window `id` forward.
     pub fn activate(&mut self, id: WindowId) {
         if let Some(window) = self.windows.get(&id) {
-            self.display.activate(&window.native);
+            self.display.activate(&window.parts[0].native);
         }
     }
 
@@ -349,7 +362,7 @@ impl Windows {
     pub fn summon(&mut self, id: WindowId, asked: std::time::Instant, key: Option<&str>) {
         let Some(window) = self.windows.get_mut(&id) else { return };
         if window.visible {
-            return self.display.activate(&window.native);
+            return self.display.activate(&window.parts[0].native);
         }
         window.visible = true;
         window.dirty = true;
@@ -358,7 +371,7 @@ impl Windows {
             screen.shown(true);
             screen.summoned(key);
         }
-        self.display.summon(&window.native, &places(window.places.as_deref()));
+        self.display.summon(&window.parts[0].native, &places(window.places.as_deref()), window.room);
         // Drawn now, not on the loop's next turn, so its first frame is the one it shows with.
         self.turn();
     }
@@ -374,7 +387,7 @@ impl Windows {
         if let Ok(screen) = &mut window.screen {
             screen.shown(false);
         }
-        self.display.put_away(&window.native, give_back);
+        self.display.put_away(&window.parts[0].native, give_back);
     }
 
     /// Whether panel `id` is showing.
@@ -382,14 +395,14 @@ impl Windows {
         self.windows.get(&id).is_some_and(|window| window.visible)
     }
 
-    /// Makes window `id` `height` points tall, and `width` wide where it's said, its top and its middle where they are,
-    /// as a launcher grows and shrinks with what it shows.
+    /// Lays panel `id`'s page out `height` points tall, and `width` wide where it's said, as its page asks: its parts'
+    /// windows follow its page (`Display::arrange`).
     pub fn resize(&mut self, id: WindowId, width: Option<f32>, height: f32) {
         if let Some(window) = self.windows.get_mut(&id) {
-            let size = window.native.size();
+            let size = window.room;
             let width = width.unwrap_or(size.width.0);
             if (size.height.0 - height).abs() >= 0.5 || (size.width.0 - width).abs() >= 0.5 {
-                self.display.resize(&window.native, Size { width: Pixels(width), height: Pixels(height) });
+                window.room = Size { width: Pixels(width), height: Pixels(height) };
                 window.dirty = true;
             }
         }
@@ -398,10 +411,7 @@ impl Windows {
     /// Closes window `id`.
     pub fn close(&mut self, id: WindowId) {
         if let Some(mut window) = self.windows.remove(&id) {
-            if let Some(mut renderer) = window.renderer.take() {
-                renderer.destroy();
-            }
-            self.display.close(&window.native);
+            self.let_go(window.parts);
             (window.on_event)(Event::Closed);
         }
     }
@@ -416,8 +426,8 @@ impl Windows {
 
     /// After each turn of the loop: what the display said, timers that are due, then each window that changed drawn.
     fn turn(&mut self) {
-        for (id, input) in self.display.events() {
-            self.input(id, input);
+        for (id, part, input) in self.display.events() {
+            self.input(id, part, input);
         }
         for window in self.windows.values_mut() {
             if let Ok(screen) = &mut window.screen
@@ -439,10 +449,7 @@ impl Windows {
             self.windows.iter().filter_map(|(id, window)| Some((*id, window.screen.as_ref().ok()?.mismatched.clone()?))).collect();
         for (id, why) in mismatched {
             if let Some(mut window) = self.windows.remove(&id) {
-                if let Some(mut renderer) = window.renderer.take() {
-                    renderer.destroy();
-                }
-                self.display.close(&window.native);
+                self.let_go(window.parts);
                 (window.on_event)(Event::Mismatched(why));
             }
         }
@@ -453,44 +460,43 @@ impl Windows {
                     continue;
                 }
                 window.shown = true;
-                self.display.show(&window.native);
+                self.display.show(&window.parts[0].native);
             }
             // A panel put away is drawn as its page changes, never shown, so its text is shaped, its glyphs and
-            // pictures are in the atlas and its surface has had a frame by the time it's summoned, and the frame it
+            // pictures are in the atlas and its surfaces have had a frame by the time it's summoned, and the frame it
             // shows with is as quick as any after (26 to 52 ms on Linux's first summon after the app started, where
             // later ones take 7). What moves asks for no more frames while it's away. A window with no surface yet
             // (Android's view, until it's laid out) is drawn once it has one.
             if window.panel && !window.visible {
                 if std::mem::take(&mut window.dirty)
-                    && let (Ok(screen), Some(renderer)) = (&mut window.screen, window.renderer.as_mut())
+                    && let Ok(screen) = &mut window.screen
+                    && window.parts[0].renderer.is_some()
                 {
-                    renderer.update_drawable_size(window.native.device_size());
-                    screen.paint(window.native.size(), window.native.scale(), &mut self.text, &self.atlas, &mut window.scene);
-                    renderer.draw(&window.scene);
+                    screen.paint(window.room, window.parts[0].native.scale(), &mut self.text, &self.atlas, &mut window.scene);
+                    let glass = screen.glass.clone();
+                    window.arrange(&self.display, &self.context, &self.atlas, &glass);
                 }
                 continue;
             }
-            let Some(renderer) = window.renderer.as_mut().filter(|_| window.dirty) else { continue };
+            if !window.dirty || window.parts[0].renderer.is_none() {
+                continue;
+            }
             window.dirty = false;
-            let (size, scale) = (window.native.size(), window.native.scale());
-            renderer.update_drawable_size(window.native.device_size());
+            let (room, scale) = (window.room(), window.parts[0].native.scale());
             match &mut window.screen {
                 Ok(screen) => {
-                    screen.paint(size, scale, &mut self.text, &self.atlas, &mut window.scene);
+                    screen.paint(room, scale, &mut self.text, &self.atlas, &mut window.scene);
                     window.dirty = screen.take_again();
-                    if screen.glass != window.glass {
-                        window.glass = screen.glass.clone();
-                        self.display.set_glass(&window.native, &window.glass);
-                    }
                     let calls = screen.text_input(&mut window.text_input);
                     if !calls.is_empty() {
-                        self.display.text_input(&window.native, &calls);
+                        self.display.text_input(&window.parts[0].native, &calls);
                     }
-                    self.display.set_title_row(&window.native, screen.title_row());
+                    self.display.set_title_row(&window.parts[0].native, screen.title_row());
                 }
-                Err(why) => crate::view::paint_message(why, appearance(), size, scale, &mut self.text, &self.atlas, &mut window.scene),
+                Err(why) => crate::view::paint_message(why, appearance(), room, scale, &mut self.text, &self.atlas, &mut window.scene),
             }
-            renderer.draw(&window.scene);
+            let glass = window.screen.as_ref().map(|screen| screen.glass.clone()).unwrap_or_default();
+            window.arrange(&self.display, &self.context, &self.atlas, &glass);
             if !window.drawn {
                 window.drawn = true;
                 (window.on_event)(Event::Drawn);
@@ -502,29 +508,43 @@ impl Windows {
         self.display.flush();
     }
 
-    fn input(&mut self, id: WindowId, input: Input) {
+    /// Lets go of a window's parts: their renderers, then their native windows, the children first.
+    fn let_go(&self, parts: Vec<Part>) {
+        for mut part in parts.into_iter().rev() {
+            if let Some(mut renderer) = part.renderer.take() {
+                renderer.destroy();
+            }
+            self.display.close(&part.native);
+        }
+    }
+
+    /// What the display said happened to part `part` of window `id`, where it is in its page.
+    fn input(&mut self, id: WindowId, part: usize, input: Input) {
         if let Input::Close = input {
             return self.close(id);
         }
         let Some(window) = self.windows.get_mut(&id) else { return };
+        let Some(at) = window.parts.get(part).map(|part| part.bounds.origin) else { return };
+        let input = input.moved_by(at);
         window.dirty = true;
         match input {
-            Input::Resized(size) => return window.native.resized(size),
+            Input::Resized(size) => return window.parts[part].native.resized(size),
             // Its surface came, or a new one did: drawn on from now, a renderer for one that's gone let go first.
             Input::Surface => {
-                if let Some(mut renderer) = window.renderer.take() {
+                let part = &mut window.parts[part];
+                if let Some(mut renderer) = part.renderer.take() {
                     renderer.destroy();
                 }
-                if window.native.has_surface() {
-                    match window.native.surface().and_then(|surface| Renderer::new(&self.context, self.atlas.clone(), surface, window.native.device_size(), window.native.transparent())) {
-                        Ok(renderer) => window.renderer = Some(renderer),
+                if part.native.has_surface() {
+                    match part.native.surface().and_then(|surface| Renderer::new(&self.context, self.atlas.clone(), surface, part.native.device_size(), part.native.transparent())) {
+                        Ok(renderer) => part.renderer = Some(renderer),
                         Err(error) => log::error!("native window {id} can't draw: {error:#}"),
                     }
                 }
                 return;
             }
             Input::SurfaceLost => {
-                if let Some(mut renderer) = window.renderer.take() {
+                if let Some(mut renderer) = window.parts[part].renderer.take() {
                     renderer.destroy();
                 }
                 return;
@@ -539,7 +559,7 @@ impl Windows {
             Input::Moved(at) => {
                 screen.pointer_moved(at);
                 let cursor = screen.cursor(at);
-                self.display.set_cursor(&window.native, cursor);
+                self.display.set_cursor(&window.parts[part].native, cursor);
             }
             Input::Left => screen.pointer_left(),
             Input::Down(at, button, shift) => screen.pointer_down(at, button, shift),
@@ -580,7 +600,89 @@ impl Windows {
         // What it changed reaches the text input plugin at once, before its next key, not with the frame.
         let calls = screen.text_input(&mut window.text_input);
         if !calls.is_empty() {
-            self.display.text_input(&window.native, &calls);
+            self.display.text_input(&window.parts[0].native, &calls);
+        }
+    }
+}
+
+impl Window {
+    /// How big its page is laid out: a panel's as its page asked, the rest as big as their window.
+    fn room(&self) -> Size<Pixels> {
+        if self.panel { self.room } else { self.parts[0].native.size() }
+    }
+
+    /// Draws its scene into its parts, a panel's first made to follow its page: one part for each box its page asked
+    /// the system's material for (`glass`), or one for all of it until it has, each window's frame and what's drawn in
+    /// it put on screen together (`Display::arrange`). A display with no windows of a panel's own keeps one, as big
+    /// as its page.
+    fn arrange(&mut self, display: &Display, context: &Context, atlas: &Arc<Atlas>, glass: &[Glass]) {
+        let whole = crate::geometry::Bounds { origin: crate::geometry::point(0.0, 0.0), size: Size { width: self.room().width.0, height: self.room().height.0 } };
+        let corner = self.parts[0].radius;
+        let mut boxes: Vec<(crate::geometry::Bounds<f32>, f32)> = match self.panel {
+            true if !glass.is_empty() => glass.iter().map(|glass| (whole_points(glass.bounds), glass.radius)).collect(),
+            _ => vec![(whole, if self.panel { corner } else { 0.0 })],
+        };
+        while self.panel && self.parts.len() < boxes.len() {
+            let made = display.open_part(&self.parts[0].native, self.parts.len()).and_then(|native| {
+                let renderer = Renderer::new(context, atlas.clone(), native.surface()?, native.device_size(), native.transparent())?;
+                Ok(Part { native, renderer: Some(renderer), bounds: whole, radius: 0.0 })
+            });
+            match made {
+                Ok(part) => self.parts.push(part),
+                Err(error) => {
+                    log::debug!("a panel's parts are one window here: {error:#}");
+                    boxes = vec![(whole, corner)];
+                }
+            }
+        }
+        while self.parts.len() > boxes.len() {
+            let mut part = self.parts.pop().expect("there's one");
+            if let Some(mut renderer) = part.renderer.take() {
+                renderer.destroy();
+            }
+            display.close(&part.native);
+        }
+        for (part, (bounds, radius)) in self.parts.iter_mut().zip(&boxes) {
+            part.bounds = *bounds;
+            part.radius = *radius;
+        }
+        let scale = self.parts[0].native.scale();
+        let placed: Vec<(Handle, crate::geometry::Bounds<f32>, f32)> = self.parts.iter().map(|part| (part.native.handle(), part.bounds, part.radius)).collect();
+        let (parts, scene, panel) = (&mut self.parts, &self.scene, self.panel);
+        let mut draw = || {
+            for part in parts.iter_mut() {
+                let Some(renderer) = part.renderer.as_mut() else { continue };
+                // A panel's part is as big as it was just made (`Display::arrange`), which its window says later.
+                let size = |length: f32| DevicePixels((length * scale).round() as i32);
+                renderer.update_drawable_size(if panel { Size { width: size(part.bounds.size.width), height: size(part.bounds.size.height) } } else { part.native.device_size() });
+                renderer.draw(scene, [(part.bounds.origin.x * scale).round(), (part.bounds.origin.y * scale).round()]);
+            }
+        };
+        if self.panel {
+            display.arrange(&placed, &mut draw);
+        } else {
+            draw();
+        }
+    }
+}
+
+/// `bounds` with its edges on whole points, as a window's frame is.
+fn whole_points(bounds: crate::geometry::Bounds<f32>) -> crate::geometry::Bounds<f32> {
+    let (left, top) = (bounds.origin.x.round(), bounds.origin.y.round());
+    let (right, bottom) = ((bounds.origin.x + bounds.size.width).round(), (bounds.origin.y + bounds.size.height).round());
+    crate::geometry::Bounds { origin: crate::geometry::point(left, top), size: Size { width: right - left, height: bottom - top } }
+}
+
+impl Input {
+    /// The same, at `by` further along and down: a part's point, in its page.
+    fn moved_by(self, by: crate::geometry::Point<f32>) -> Input {
+        let moved = |at: crate::geometry::Point<f32>| crate::geometry::point(at.x + by.x, at.y + by.y);
+        match self {
+            Input::Moved(at) => Input::Moved(moved(at)),
+            Input::Down(at, button, shift) => Input::Down(moved(at), button, shift),
+            Input::Up(at, button) => Input::Up(moved(at), button),
+            Input::Wheel(at, delta, phase) => Input::Wheel(moved(at), delta, phase),
+            input => input,
         }
     }
 }
