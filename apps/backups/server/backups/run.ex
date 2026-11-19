@@ -110,10 +110,12 @@ defmodule Backups.Run do
         )
 
         query(db, "delete from problems where destination = ?", [destination["id"]])
-        query(db, "delete from runs where destination = ?", [id])
       end)
 
+      # The run holds `runs` until it has pruned, as restic holds its lock: a backup started meanwhile would send
+      # objects that no backup in `backups` holds yet, which pruning removes.
       gone = prune(call, opened, destination)
+      transaction(call, &query(&1, "delete from runs where destination = ?", [id]))
       OneCore.Call.changed(call)
 
       %{
