@@ -59,6 +59,8 @@ const looks = styles({
   owner: { position: "absolute", overflow: "hidden" },
   track: { position: "absolute", top: 0, start: 0, flexDirection: "row" },
   turning: { flexDirection: "row", transitionProperty: ["translateX"], transition: tokens.motion.snappy },
+  // Turned as a swipe left them, at its speed.
+  flung: (transitionVelocity: number) => ({ transitionProperty: ["translateX"], transition: tokens.motion.snappy, transitionVelocity }),
   layer: { position: "absolute", alignItems: "center" },
   row: { position: "absolute", start: 0, end: 0, alignItems: "center", justifyContent: "center" },
   inert: { pointerEvents: "none" },
@@ -1789,12 +1791,25 @@ function HomeScreen(props: { owners: Owner[] }) {
     const end = Math.max(0, homes(owner).length - 1) * PAGE
     return x > end ? end + give(x - end, PAGE) : x
   }
-  /// How far the arrow keys and the dots have turned an owner's pages in the card, in points, which the host's own
-  /// spring moves them by: a native host runs it beside its drawing, where a spring run in JavaScript a frame at a
-  /// time crosses to it every frame, on a timer of the page's that the display's frames don't drive, and judders.
-  /// Where the pages are is the rest, which follows the fingers, and the spring JavaScript runs as they lift.
+  /// How far an owner's pages have been turned in the card, in points, which the host's own spring moves them by, as
+  /// it draws: by the arrow keys and the dots, from rest, and as a swipe's fingers lift, at their speed (`flingOf`, of
+  /// the way a second). Where they are is the rest, which follows the fingers.
   const turns: [() => number, (x: number) => void][] = []
   const turnOf = (owner: number) => (turns[owner] ??= createSignal(0))
+  const flings: [() => number | undefined, (speed: number | undefined) => void][] = []
+  const flingOf = (owner: number) => (flings[owner] ??= createSignal<number | undefined>(undefined))
+  /// Whether the launcher's pages turn by the host's spring: unless they're to cross-fade.
+  const turnsByHost = () => untrack(launcher) && !untrack(reducedMotion)
+  /// Turns an owner's pages in the launcher to `to` by the host's spring, from where they're drawn, setting off at
+  /// `velocity`, in points a second, where a swipe left them moving.
+  const turn = (owner: number, to: number, velocity?: number) => {
+    const moving = sideways(owner)
+    stop(moving)
+    const by = untrack(() => trackX(owner, to) - trackX(owner, moving.value))
+    flingOf(owner)[1](velocity && by ? velocity / by : undefined)
+    turnOf(owner)[1](untrack(turnOf(owner)[0]) + by)
+    jump(moving, to)
+  }
   /// What was typed, kept a moment as it's emptied, while what it found fades.
   const [words] = lingering(() => query().trim() && query(), 400)
   const cardRect = () => ({ x: cardLeft(), y: CARD_TOP, width: card().width, height: card().height })
@@ -1973,13 +1988,7 @@ function HomeScreen(props: { owners: Owner[] }) {
     const roll = smooth && !untrack(launcher) ? glide : jump
     roll(down, at.owner * height())
     const [moving, to] = [sideways(at.owner), at.screen * pitch()]
-    // The launcher's turn by its host's spring, from where they're drawn, unless they're to cross-fade.
-    if (smooth && untrack(launcher) && !untrack(reducedMotion)) {
-      stop(moving)
-      const [turned, setTurned] = turnOf(at.owner)
-      setTurned(untrack(turned) + untrack(() => trackX(at.owner, to) - trackX(at.owner, moving.value)))
-      return jump(moving, to)
-    }
+    if (smooth && turnsByHost()) return turn(at.owner, to)
     if (smooth) glide(moving, to)
     else jump(moving, to)
   }
@@ -2118,7 +2127,8 @@ function HomeScreen(props: { owners: Owner[] }) {
     gesture.done = true
     const velocity = isEnding ? 0 : axisVelocity[0] * 1000
     const screen = settle(gesture.from, moving.value / pitch(), velocity, stops(gesture.owner))
-    glide(moving, screen * pitch(), velocity)
+    if (turnsByHost()) turn(gesture.owner, screen * pitch(), velocity)
+    else glide(moving, screen * pitch(), velocity)
     home.send({ type: "settled", at: { owner: gesture.owner, screen } })
   })
   const wheel = (event: Wheeled) => trackpad.feedWheel({ deltaX: event.deltaX, deltaY: event.deltaY, deltaMode: 0, timeStamp: event.timeStamp, momentum: event.momentum, phase: event.phase } as WheelEventData)
@@ -2391,7 +2401,7 @@ function HomeScreen(props: { owners: Owner[] }) {
                     style={[looks.owner, looks.rolling, !shown() && looks.inert, looks.at(INSET, PILLS, ACROSS * PAGE, room().height), looks.drifted(shown() ? 1 : 0, (index() - state().context.at.owner) * 40)]}
                   >
                     <View style={[looks.track, looks.slid(lead(index()) + turnOf(index())[0]() - trackX(index()), opacityOf(index())[0]())]}>
-                      <View style={[looks.turning, looks.shifted(-turnOf(index())[0]())]}>
+                      <View style={[looks.turning, flingOf(index())[0]() !== undefined && looks.flung(flingOf(index())[0]()!), looks.shifted(-turnOf(index())[0]())]}>
                         <For each={pages()[index()] ?? []} keyed={false}>
                           {(placed, at) => <Page page={at} placed={placed()} />}
                         </For>
