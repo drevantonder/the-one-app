@@ -141,3 +141,6 @@ export function lefts(room: Room, laid: Page, count: number) {
   const start = (room.width - (count * drawn + (count - 1) * room.gap)) / 2
   return Array.from({ length: count }, (_, at) => start + at * (drawn + room.gap))
 }
+
+/// Where the launcher's card's top is, under its search.
+export const CARD_TOP = SEARCH_HEIGHT + GAP

@@ -1,11 +1,22 @@
 // The computer's launcher: its keys, its search floating over its card, and what the search found.
-import { For, Show } from "solid-js"
-import { Empty, type Keyed, leave, Text, TextInput, View } from "ui"
+import { createEffect, createMemo, For, Show, untrack } from "solid-js"
+import { ScrollView, Empty, type Keyed, leave, sizeChanged, Text, TextInput, View, viewport, visible } from "ui"
+import { ACROSS, cell as cellOf, group, INSET, PAGE, PILLS, SEARCH, SEARCH_HEIGHT, CARD_TOP } from "./layout.ts"
+import { type At, type Placed } from "./machine.ts"
 import { type Item, type Listed } from "./types.ts"
 import { looks } from "./looks.ts"
-import { state, query, setQuery, chosenResult, setChosenResult } from "./store.ts"
-import { type Owner, badgeOf, opens, press } from "./owners.ts"
+import { home, state, launcher, query, setQuery, chosenResult, setChosenResult, type Selected, selected, setSelected, room, laidPage } from "./store.ts"
+import { type Owner, badgeOf, findIn, type From, launch, opens, press, opener } from "./owners.ts"
 import { Card, Tile } from "./tiles.tsx"
+import { type Cell, HomePage } from "./pages.tsx"
+import { Library } from "./library.tsx"
+import { OwnerPill, DotsPill } from "./pills.tsx"
+import { type Screens } from "./screens.ts"
+import { type Paging } from "./paging.ts"
+import { lingering } from "./lingering.ts"
+
+/// How long the launcher, put away, stays where it was: Raycast's Pop to Root Search's default.
+const POP_TO_ROOT = 90_000
 
 /// The launcher's keys, wherever in it the keyboard is: with nothing typed, the arrow keys move the highlight over Home
 /// (`move`), Return opens what's highlighted, and Escape goes back from the App
@@ -108,4 +119,217 @@ const widgetsOf = (owner: Owner | undefined, found: Listed[], words: string) => 
 const HEADING = 20
 
 /// What the launcher's Return opens: an app it found, or what's chosen on Home, with where it is on Home, if it's there.
-export type Target = { item?: Item; listed?: Listed; place?: { page: number; index: number } }
+type Target = { item?: Item; listed?: Listed; place?: { page: number; index: number } }
+
+export function createLauncher(props: { owners: Owner[] }, layout: Screens, paging: Paging) {
+  const { owned, pages, screens, library } = layout
+  const { card, cardLeft, pageAt } = paging
+  /// The launcher's card: what it shows, Home, the App Library or what was found, all in one card of one size, under
+  /// the search, in the middle of the room.
+  const showing = () => (query().trim() ? "search" : library() ? "library" : "home")
+  /// What was typed, kept a moment as it's emptied, while what it found fades.
+  const [words] = lingering(() => query().trim() && query(), 400)
+  const cardRect = () => ({ x: cardLeft(), y: CARD_TOP, width: card().width, height: card().height })
+  // The launcher's panel: its search and its card, as large as they are, which never changes; its host centres it.
+  createEffect(
+    () => launcher() && group(room()),
+    (size) => {
+      if (size) void sizeChanged({ width: Math.ceil(size.width), height: Math.ceil(size.height) })
+    },
+  )
+
+  /// In the launcher, what's on the screenful at `at`, as it's read: page by page, then row by row, and across each.
+  const ordered = (at: At): Selected[] => {
+    const screen = untrack(screens)[at.owner]?.[at.screen]
+    if (!screen || screen.kind !== "home") return []
+    return Array.from({ length: screen.count }, (_, page) => screen.from + page).flatMap((page) =>
+      [...(untrack(pages)[at.owner]?.[page] ?? [])].sort((a, b) => a.row - b.row || a.column - b.column).map((placed) => ({ owner: at.owner, page, index: placed.item.index })),
+    )
+  }
+  const placedOf = (chosen: Selected) => untrack(pages)[chosen.owner]?.[chosen.page]?.find((placed) => placed.item.index === chosen.index)
+  const same = (a: Selected | undefined, b: Selected | undefined) => a?.owner === b?.owner && a?.page === b?.page && a?.index === b?.index
+  /// What's chosen as a screenful shows: its first app, as Raycast chooses its first item, or a widget where it has none.
+  const first = (cells: Selected[]) => cells.find((cell) => !placedOf(cell)?.item.item.widget) ?? cells[0]
+  const choose = (cell: Selected | undefined) => setSelected(cell)
+  // Whatever moves the pages, the highlight stays on the screenful shown: on what it was on, if that's there.
+  createEffect(
+    () => launcher() && `${state().context.at.owner} ${state().context.at.screen} ${pages().length}`,
+    (on) => {
+      if (!on) return
+      const cells = ordered(home.getSnapshot().context.at)
+      if (!cells.some((cell) => same(cell, untrack(selected)))) choose(first(cells))
+    },
+  )
+  // Put away, the launcher is where it was if it's back within 90 seconds, what was typed too; after that it forgets
+  // it and comes back to Home's first page, as Raycast's Pop to Root Search does.
+  createEffect(
+    () => launcher() && !visible(),
+    (hidden) => {
+      if (!hidden) return
+      const back = setTimeout(() => {
+        setQuery("")
+        setChosenResult(0)
+        if (home.getSnapshot().matches("nothing") && home.getSnapshot().context.at.screen !== 0) home.send({ type: "go", screen: 0 })
+        choose(first(ordered(home.getSnapshot().context.at)))
+      }, POP_TO_ROOT)
+      return () => clearTimeout(back)
+    },
+    { defer: true },
+  )
+  /// What the launcher's search found: the apps of your App Library, whose names have what's typed in them.
+  const found = createMemo(() => findIn(props.owners[0]?.library ?? [], query(), false))
+  /// What the launcher's Return opens and its Actions are for: the app its search chose, or what's highlighted on Home.
+  const target = createMemo((): Target | undefined => {
+    if (query().trim()) {
+      const listed = found()[chosenResult()]
+      return listed && { listed, item: opens(listed) }
+    }
+    const now = selected()
+    const { at, screens } = state().context
+    if (!launcher() || !now || now.owner !== at.owner || screens[at.owner]?.[at.screen] !== "home") return
+    const cell = pages()[now.owner]?.[now.page]?.find(({ item }) => item.index === now.index)
+    return cell && { item: cell.item.item, place: { page: now.page, index: now.index } }
+  })
+  /// Where what's chosen on Home is drawn, which it grows out of as it opens.
+  const fromChosen = (chosen: Selected): From | undefined => {
+    const placed = placedOf(chosen)
+    if (!placed) return
+    const laid = untrack(laidPage)
+    const at = pageAt(chosen.owner, chosen.page)
+    const box = cellOf(laid, placed)
+    if (placed.item.item.widget) return { x: at.x + box.x * at.scale, y: at.y + box.y * at.scale, width: box.width * at.scale, height: box.height * at.scale, radius: 22 * at.scale }
+    const size = laid.tile * at.scale
+    return { x: at.x + box.x * at.scale + (box.width * at.scale - size) / 2, y: at.y + box.y * at.scale, width: size, height: size, radius: size * 0.225 }
+  }
+  /// Opens what the launcher's Return opens, growing out of its icon or widget.
+  const openTarget = () => {
+    const now = untrack(target)
+    if (now?.listed) return press(now.listed, owned()[0], false)
+    const opened = now?.item && opener(now.item)
+    const chosen = untrack(selected)
+    if (opened) launch(opened, owned()[home.getSnapshot().context.at.owner], false, chosen && fromChosen(chosen))
+  }
+  /// The launcher's arrow keys, with nothing typed: left and right move the highlight along what's on the pages shown,
+  /// and at either end turn the page, on to the App Library past the last; up and down move it up and down a page,
+  /// and past its top or bottom to the owner above or below.
+  const move = (key: string) => {
+    if (!["ArrowRight", "ArrowLeft", "ArrowUp", "ArrowDown"].includes(key)) return false
+    const snapshot = home.getSnapshot()
+    if (!snapshot.matches("nothing")) return true
+    const { at, screens } = snapshot.context
+    // Each move goes somewhere, or nowhere, as the step does.
+    const step = (to: { screen: 1 | -1 } | { owner: 1 | -1 }, last: boolean) => {
+      const before = new Set(ordered(at).map((cell) => cell.page))
+      home.send({ type: "step", ...to })
+      const now = home.getSnapshot().context.at
+      if (now.owner === at.owner && now.screen === at.screen) return
+      // Along an owner's pages, onto the page that's just come into view, as the launcher's turn one at a time.
+      const all = ordered(now)
+      const cells = now.owner === at.owner && all.some((cell) => !before.has(cell.page)) ? all.filter((cell) => !before.has(cell.page)) : all
+      choose(last ? cells.at(-1) : cells[0])
+    }
+    if (screens[at.owner]?.[at.screen] === "library") {
+      if (key === "ArrowLeft") step({ screen: -1 }, true)
+      return true
+    }
+    const cells = ordered(at)
+    const now = cells.findIndex((cell) => same(cell, untrack(selected)))
+    const current = cells[now]
+    if (!current) return choose(first(cells)), true
+    if (key === "ArrowRight" || key === "ArrowLeft") {
+      const next = cells[now + (key === "ArrowRight" ? 1 : -1)]
+      if (next) choose(next)
+      else step({ screen: key === "ArrowRight" ? 1 : -1 }, key === "ArrowLeft")
+      return true
+    }
+    // Up and down: the nearest row that way on the same page, and the nearest of what's on it across.
+    const placed = (cell: Selected) => placedOf(cell)!
+    const top = (cell: Selected) => placed(cell).row
+    const bottom = (cell: Selected) => placed(cell).row + placed(cell).height - 1
+    const middle = (cell: Selected) => placed(cell).column + (placed(cell).width - 1) / 2
+    const up = key === "ArrowUp"
+    const way = cells.filter((cell) => cell.page === current.page && (up ? bottom(cell) < top(current) : top(cell) > bottom(current)))
+    const row = up ? Math.max(...way.map(bottom)) : Math.min(...way.map(top))
+    const near = way.filter((cell) => (up ? bottom(cell) : top(cell)) === row).sort((a, b) => Math.abs(middle(a) - middle(current)) - Math.abs(middle(b) - middle(current)))[0]
+    if (near) choose(near)
+    else step({ owner: up ? -1 : 1 }, false)
+    return true
+  }
+  /// In the launcher, to the App Library, and from there back to the Home screenful it came from.
+  let before = 0
+  const toggleLibrary = () => {
+    const { at, screens } = home.getSnapshot().context
+    const library = screens[at.owner]?.indexOf("library") ?? -1
+    if (!home.getSnapshot().matches("nothing") || library < 0) return
+    if (at.screen === library) return home.send({ type: "go", screen: Math.min(before, library - 1) })
+    before = at.screen
+    home.send({ type: "go", screen: library })
+  }
+  return { showing, words, cardRect, found, openTarget, move, toggleLibrary }
+}
+
+/// The launcher's panel: its search, and its card with Home, the App Library or what was found in it.
+export function LauncherPanel(props: { owners: Owner[]; layout: Screens; paging: Paging; launching: Launching }) {
+  const { pages, laid } = props.layout
+  const { card, cardLeft, lead, trackX, turnOf, flingOf, opacityOf, wheel } = props.paging
+  const { showing, words } = props.launching
+  return (
+    <>
+        <View style={[looks.surface, looks.search, looks.at((viewport().width - SEARCH) / 2, 0, SEARCH, SEARCH_HEIGHT)]}>
+          <LauncherSearch />
+        </View>
+        <View onWheel={wheel} style={[looks.surface, looks.card, looks.at(0, CARD_TOP, card().width, card().height), looks.shifted(cardLeft())]}>
+          {/* Home: each owner's pages, the owner shown's in place, the others rolled above and below it, faded. */}
+          <View role="main" aria-label="Home" inert={showing() !== "home" || undefined} style={[looks.fading, looks.cover, showing() !== "home" && looks.inert, looks.faded(showing() === "home" ? 1 : 0, showing() === "home" ? 1 : 1.03)]}>
+            <For each={props.owners} keyed={(owner) => owner.key}>
+              {(owner, index) => {
+                const shown = () => index() === state().context.at.owner
+                const Page = (inner: { page: number; placed: Placed<Cell>[] }) => (
+                  <View style={[looks.slots, looks.rigid, looks.sized(PAGE, room().height)]}>
+                    <View style={[looks.absolute, looks.placedPage((laidPage().height * (room().scale - 1)) / 2, (laidPage().width * (room().scale - 1)) / 2, room().scale)]}>
+                      <HomePage owner={owner()} index={index()} page={inner.page} placed={inner.placed} laid={laidPage()} scale={room().scale} />
+                    </View>
+                  </View>
+                )
+                return (
+                  <View
+                    role="region"
+                    aria-label={owner().name}
+                    inert={!shown() || undefined}
+                    style={[looks.owner, looks.rolling, !shown() && looks.inert, looks.at(INSET, PILLS, ACROSS * PAGE, room().height), looks.drifted(shown() ? 1 : 0, (index() - state().context.at.owner) * 40)]}
+                  >
+                    <View style={[looks.track, looks.slid(lead(index()) + turnOf(index())[0]() - trackX(index()), opacityOf(index())[0]())]}>
+                      <View style={[looks.turning, flingOf(index())[0]() !== undefined && looks.flung(flingOf(index())[0]()!), looks.shifted(-turnOf(index())[0]())]}>
+                        <For each={pages()[index()] ?? []} keyed={false}>
+                          {(placed, at) => <Page page={at} placed={placed()} />}
+                        </For>
+                      </View>
+                    </View>
+                  </View>
+                )
+              }}
+            </For>
+          </View>
+          {/* The App Library, in the same card, cross-fading in, scrolling what's taller. */}
+          <View inert={showing() !== "library" || undefined} style={[looks.layer, looks.fading, showing() !== "library" && looks.inert, looks.fill(INSET, 0, 0), looks.faded(showing() === "library" ? 1 : 0, showing() === "library" ? 1 : 0.965)]}>
+            <Library owner={props.owners[0]} size={{ width: card().width - 2 * INSET, height: card().height - INSET - PILLS }} />
+          </View>
+          {/* What was typed found, as it's typed, and as it goes, what it last found. */}
+          <View inert={showing() !== "search" || undefined} style={[looks.owner, looks.fading, showing() !== "search" && looks.inert, looks.at(INSET, INSET, card().width - 2 * INSET, card().height - 2 * INSET), looks.drifted(showing() === "search" ? 1 : 0, showing() === "search" ? 0 : -8)]}>
+            <ScrollView style={looks.cover}>
+              <Show when={words()}>{(typed) => <Results owner={props.owners[0]} found={findIn(props.owners[0]?.library ?? [], typed(), false)} words={typed()} />}</Show>
+            </ScrollView>
+          </View>
+          {/* Whose pages they are at the top, as a phone has it, and their dots at the foot, with the App Library's glyph. */}
+          <View inert={showing() !== "home" || undefined} style={[looks.row, looks.fading, showing() !== "home" && looks.inert, looks.top(0), looks.tall(PILLS), looks.opacity(showing() === "home" ? (state().matches("editing") ? 0.6 : 1) : 0)]}>
+            <OwnerPill owners={props.owners} />
+          </View>
+          <View inert={showing() === "search" || undefined} style={[looks.row, looks.fading, showing() === "search" && looks.inert, looks.bottom(0), looks.tall(PILLS), looks.opacity(showing() === "search" ? 0 : 1)]}>
+            <DotsPill owners={props.owners} laid={laid().screens} pages={(owner) => pages()[owner]?.length ?? 1} />
+          </View>
+        </View>
+    </>
+  )
+}
+
+export type Launching = ReturnType<typeof createLauncher>
