@@ -15,7 +15,7 @@
 import { createEffect, createMemo, createSignal, Errored, flush, For, Loading, onSettled, refresh, Show, untrack } from "solid-js"
 import { type WheelEventData, WheelGestures } from "wheel-gestures"
 import { createActor } from "xstate"
-import { Badge, Button, call, changed, client, confirm, covers, type Element, Empty, haptic, Icon, type IconName, Image, keydown, type Keyed, type Layout, leave, link, List, type Located, Menu, negative, open, pinShortcut, Pressable, type Pressed, type PressableProps, Problem, type Rect, reducedMotion, render, Row, safeArea, Search, Sheet, sizeChanged, Spinner, type Style, styles, Text, TextInput, toast, tokens, View, viewport, visible, type Wheeled, Widget } from "ui"
+import { Badge, Button, call, changed, client, confirm, covers, type Element, Empty, haptic, Icon, type IconName, Image, keydown, type Keyed, type Layout, leave, link, List, type Located, Menu, negative, open, pinShortcut, Pressable, type Pressed, type PressableProps, Problem, type Rect, reducedMotion, render, Row, safeArea, Search, Sheet, sizeChanged, Spinner, styles, Text, TextInput, toast, tokens, View, viewport, visible, type Wheeled, Widget } from "ui"
 import { give, glide, jump, settle, speed, spring, type Spring, stop } from "./pager.ts"
 import { at as gridAt, BAR, type Box as Place, cell as cellOf, DOTS, GAP, grid, halfHeight, INSET, launcherRoom, lefts, LIBRARY, MARGIN, measure, PAGE, page as pageOf, type Page as Laid, panelSize, PILLS, type Room, SEARCH, SEARCH_HEIGHT, TOP_ROW } from "./layout.ts"
 import { type At, carries, type Drop, type Editing, fitted, type Held, type Kind, machine, nearest, pack, type Page, type Placed, shown, spans } from "./machine.ts"
@@ -1063,14 +1063,6 @@ const opener = (item: Item): Entrypoint | undefined => (item.widget ? ((item as 
 /// Whether an app opens on an owner's pages: it's installed for them, or for everyone.
 const installedFor = (item: Entrypoint, owner: Owner) => owner.apps.some((one) => one.app === item.app)
 
-/// Where an app is on an owner's pages, if it's there: which of the pages shown, and where on it.
-const placeOf = (owner: Owner, item: Entrypoint) => {
-  const name = theirs(item, owner)
-  for (const [page, at] of shown(owner.pages).entries()) {
-    const index = owner.pages[at].items.findIndex((other) => !other.widget && other.entrypoint === name)
-    if (index >= 0) return { page, index }
-  }
-}
 /// Whether an app can be added to an owner's pages from the App Library: whoever's adding arranges them, it opens
 /// there, and it isn't on them already, even on a page they hide.
 const addable = (item: Item, owner: Owner) =>
