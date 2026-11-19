@@ -8,6 +8,8 @@ license.workspace = true
 [dependencies]
 anyhow.workspace = true
 bytemuck = { version = "1", features = ["derive"] }
+# How a colour moving to another is mixed: through Oklch, as CSS Color 4 does (Linebender's).
+color = "0.3.3"
 data-encoding = "2"
 # Where glyphs and images are packed into the atlas's textures.
 etagere = "0.2"

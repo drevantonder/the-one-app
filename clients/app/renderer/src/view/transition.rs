@@ -35,7 +35,9 @@ impl Value {
             (Value::Px(a), Value::Percent(0.0)) => Value::Px(between(a, 0.0)),
             (Value::Px(a), Value::Px(b)) => Value::Px(between(a, b)),
             (Value::Percent(a), Value::Percent(b)) => Value::Percent(between(a, b)),
-            // No colour is the other's, clear, as CSS's `transparent` moves.
+            // Through Oklch, premultiplied, its hue the shorter way round, as CSS Color 4 mixes colours, so a blue
+            // going to a red passes through neither grey nor a muddy middle; no colour is the other's, clear, as CSS's
+            // `transparent` moves.
             (Value::Colour(a), Value::Colour(b)) => {
                 let (a, b) = match (a, b) {
                     (None, None) => return Some(Value::Colour(None)),
@@ -43,7 +45,9 @@ impl Value {
                     (None, Some(b)) => (Rgba { a: 0.0, ..b }, b),
                     (Some(a), Some(b)) => (a, b),
                 };
-                Value::Colour(Some(Rgba { r: between(a.r, b.r), g: between(a.g, b.g), b: between(a.b, b.b), a: between(a.a, b.a) }))
+                let dynamic = |c: Rgba| color::DynamicColor::from_alpha_color(color::AlphaColor::<color::Srgb>::new([c.r, c.g, c.b, c.a]));
+                let [r, g, b, a] = dynamic(a).interpolate(dynamic(b), color::ColorSpaceTag::Oklch, color::HueDirection::Shorter).eval(part).to_alpha_color::<color::Srgb>().components;
+                Value::Colour(Some(Rgba { r: r.clamp(0.0, 1.0), g: g.clamp(0.0, 1.0), b: b.clamp(0.0, 1.0), a: a.clamp(0.0, 1.0) }))
             }
             _ => return None,
         })
@@ -434,3 +438,4 @@ impl Transitions {
         self.moving.len() + self.dragged.len()
     }
 }
+
