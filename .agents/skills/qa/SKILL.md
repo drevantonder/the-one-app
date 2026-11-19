@@ -123,7 +123,9 @@ An emulator with the AVD `one-phone` (Android 36, x86_64, KVM) is set up here:
     adb install -r <the APK `cargo tauri android build` says it made>
     adb exec-out screencap -p > <scratch>/<name>.png
 
-How to build the APK is in `clients/app/README.md`. In a worktree that hasn't built yet, run `tooling/copy-build --android` first
+How to build the APK is in `clients/app/README.md`. Rust alone checks for Android with the NDK's compilers on `PATH`:
+`PATH=~/Android/Sdk/ndk/<version>/toolchains/llvm/prebuilt/linux-x86_64/bin:$PATH cargo check -p strict --target
+x86_64-linux-android`. In a worktree that hasn't built yet, run `tooling/copy-build --android` first
 (Cargo's Android target, Gradle's build folders and the generated project come from the worktree that built an APK last, so the
 build is about a minute, not minutes); sccache and `~/.gradle` are already shared by every worktree. A new AVD's Chrome asks to
 sign in and about notifications the first time it opens, and ignores its command-line file (`--disable-fre`) on a phone that

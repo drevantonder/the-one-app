@@ -149,8 +149,6 @@ ndk-sys = "0.6"
 swash = "0.2"
 # The scripts Android's fallback fonts are chosen by, cosmic-text's own (`Fallback::script_fallback`).
 unicode-script = "0.5"
-# Android has no prebuilt bindings in rquickjs-sys, so bindgen makes them against the NDK's headers.
-rquickjs = { version = "0.14", features = ["bindgen"] }
 
 [build-dependencies]
 # Flutter's text input plugins (flutter/), as its engine builds them: a Mac's Objective-C++, Windows' C++.

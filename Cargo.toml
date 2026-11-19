@@ -46,5 +46,6 @@ accesskit_consumer = { git = "https://github.com/drevantonder/accesskit", rev = 
 accesskit_android = { git = "https://github.com/drevantonder/accesskit", rev = "688806ffef103203be0546844661724041a5505c" }
 # QuickJS-NG with one change, until it's merged: a Proxy's getOwnPropertyDescriptor trap that answers with an accessor
 # gives an accessor, not `{ value: undefined }` (github.com/quickjs-ng/quickjs/pull/1658), so Solid's spread draws the
-# children of merged props; on the commit rquickjs-sys 0.14.0 vendors.
-rquickjs-sys = { git = "https://github.com/drevantonder/rquickjs", rev = "ee54619e28e2520c156a1109d291c639b3c8e6da" }
+# children of merged props; on the commit rquickjs-sys 0.14.0 vendors. It also ships bindings for Android, which
+# rquickjs doesn't, so an Android build runs no bindgen (which needs libclang and the NDK's sysroot).
+rquickjs-sys = { git = "https://github.com/drevantonder/rquickjs", rev = "b57d6e6e70f012c75a4e60e5fb7b420f95b1fe65" }
