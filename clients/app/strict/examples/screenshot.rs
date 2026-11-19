@@ -26,7 +26,7 @@ use serde_json::{Value, json};
 use strict::geometry::{DevicePixels, Pixels, Size};
 use strict::js::{Clock, Files, Thread};
 use strict::render::{Atlas, Context, Renderer, scene::Scene};
-use strict::text::{PlatformTextSystem, TextSystem};
+use strict::text::TextSystem;
 use strict::{Appearance, Screen};
 use url::Url;
 
@@ -93,7 +93,7 @@ fn main() -> anyhow::Result<()> {
     }
 
     let started = std::time::Instant::now();
-    let mut text = TextSystem::new(PlatformTextSystem::new(strict::FONT, strict::fonts()?, false));
+    let mut text = TextSystem::new(strict::FONT, strict::fonts()?, false);
     let js = Thread::start(&page, files, None, Clock::fixed())?;
     // What the page asks its client, answered from `answers`, as record.js answers it.
     let asked: strict::Asked = Box::new(move |message, _| {

@@ -32,9 +32,14 @@ None of these is chosen. Each is named so it's weighed before anything like it i
 - **Our own renderer** (19 November 2026): strict screens on a computer and an Android phone are drawn by a renderer of
   ours for our closed set of primitives and tokens, with code copied in rather than depended on, so the repo stays MIT.
   Each copied file keeps its source's notice and says where it came from and at which upstream commit.
-  - **GPUI** (Zed, Apache-2.0): its scene, shaders, glyph atlas and wgpu renderer, its
-    text system (CoreText, DirectWrite, cosmic-text) and its desktop windows, input and panel code. Not its App,
-    Entity and View layers, which Solid strict replaces, and not as a dependency.
+  - **GPUI** (Zed, Apache-2.0): its scene, shaders, glyph atlas and wgpu renderer and its desktop windows, input and
+    panel code. Not its App, Entity and View layers, which Solid strict replaces, and not as a dependency.
+  - **Parley** (Linebender, as a dependency): text, the same on every platform and on the web, with fontique finding
+    fonts and swash rasterizing glyphs. It replaced GPUI's three text systems (Core Text, DirectWrite, cosmic-text),
+    which each measured a little differently and broke lines differently from the DOM (19 November 2026: of 347
+    texts in the scenes, Core Text broke 39 where the DOM didn't), so one text system gives the same widths
+    everywhere (344 of 347 as the DOM breaks them, within 0.42 px on average, on Linux, Windows and a Mac), and is
+    what the web's renderer will use.
   - **Taffy**: layout.
   - **Rune** (anomalyco/rune, MIT): its text editing model (cursor, selection, bidi, undo, IME composition), and the
     design of its inspector. Rune itself as the renderer was set aside: weak IME on Windows and Linux, and it takes no

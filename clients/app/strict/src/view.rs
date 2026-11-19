@@ -96,7 +96,7 @@ pub enum Cursor {
 /// file has, which a stylesheet's `@font-face` calls "Allo".
 pub const FONT: &str = "Allo Variable";
 
-/// The typeface, from the UI library's WOFF2, as TrueType, which the text systems read.
+/// The typeface, from the UI library's WOFF2, as TrueType, which the text system reads.
 pub fn fonts() -> anyhow::Result<Vec<Vec<u8>>> {
     let ttf = wuff::decompress_woff2(include_bytes!("../../../../core/ui/src/Allo-Variable.woff2"))
         .map_err(|error| anyhow::anyhow!("Allo didn't decode: {error:?}"))?;

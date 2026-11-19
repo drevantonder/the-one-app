@@ -10,7 +10,7 @@ use std::sync::{Arc, OnceLock};
 
 use crate::geometry::{Pixels, Size};
 use crate::render::{Atlas, Context, Renderer};
-use crate::text::{PlatformTextSystem, TextSystem};
+use crate::text::TextSystem;
 use crate::Screen;
 
 #[cfg(target_os = "linux")]
@@ -188,7 +188,7 @@ impl Windows {
     fn new(display: Display) -> anyhow::Result<Windows> {
         let context = Context::new()?;
         let atlas = Arc::new(Atlas::new(&context));
-        let text = TextSystem::new(PlatformTextSystem::new(crate::FONT, crate::fonts()?, true));
+        let text = TextSystem::new(crate::FONT, crate::fonts()?, true);
         Ok(Windows { display, context, atlas, text, windows: HashMap::new(), next: 1 })
     }
 

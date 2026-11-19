@@ -18,9 +18,13 @@ parking_lot = "0.12"
 raw-window-handle = "0.6"
 # Its `text`, an SVG's `<text>`, drawn in Allo (`view::svg`).
 resvg = { version = "0.47", default-features = false, features = ["text"] }
-# A COLRv1 emoji (Android's emoji font, and Linux's Noto Color Emoji), which swash doesn't draw: skrifa walks its paint
-# graph and tiny-skia (resvg's) rasterizes it, as Chrome's Skia does (`text::colr`); swash's own version of skrifa.
-skrifa = "0.44"
+# Text, the same everywhere (`text`): Parley lays it out (HarfRust shapes it, ICU4X breaks its lines) in fonts fontique
+# finds, the system's where `system` is on, which every target but the web has; swash rasterizes its glyphs, and a
+# COLRv1 emoji (Android's, Linux's Noto Color Emoji), which swash doesn't draw, skrifa walks the paint graph of and
+# tiny-skia (resvg's) rasterizes, as Chrome's Skia does (`text::colr`), at Parley's version of skrifa.
+parley = { version = "0.13", default-features = false, features = ["std"] }
+skrifa = "0.49"
+swash = "0.2"
 # QuickJS, with its module loader: a page's module imports the UI library's. Its async runtime runs what the Web APIs
 # below answer with a promise.
 rquickjs = { version = "0.14", features = ["loader", "futures"] }
@@ -38,12 +42,13 @@ futures-lite = "2"
 sys-locale = "0.3"
 iana-time-zone = "0.1"
 # Intl, as ECMA-402 says (intl.rs, intl.js), formatted by ICU4X with the data for English built in, as Boa formats
-# it: its experimental crate formats currencies, percentages and relative times, its `unstable` field bag mirrors
+# it: its experimental crate formats currencies, percentages and relative times, its `unstable` field set builder takes
 # ECMA-402's date options, and each time zone's rules are jiff's.
-icu = { version = "2.4", features = ["compiled_data", "unstable"] }
-icu_datetime = { version = "2.4", features = ["unstable_jiff_0_2"] }
-icu_experimental = { version = "0.7", features = ["compiled_data"] }
-icu_provider = "2.4"
+# ICU4X 2.3, the version Parley 0.13 pins: move back to 2.4 (and its field bag in `intl::fields`) once Parley does.
+icu = { version = "~2.3", features = ["compiled_data", "unstable"] }
+icu_datetime = { version = "~2.3", features = ["unstable_jiff_0_2"] }
+icu_experimental = { version = "0.6", features = ["compiled_data"] }
+icu_provider = "~2.3"
 fixed_decimal = { version = "0.7", features = ["ryu"] }
 tinystr = "0.8"
 writeable = "0.6"
@@ -52,19 +57,21 @@ serde = { version = "1", features = ["derive"] }
 serde_json.workspace = true
 sha2 = "0.11"
 taffy = "0.15"
-unicode-linebreak = "0.1"
 # Graphemes and words, which a caret steps and a double click selects by (`editing`).
 unicode-segmentation = "1"
 url = "2"
 # The GPU, by wgpu, as GPUI draws with it: each platform's own backend, named below (Vulkan on Linux and Android, Metal
 # on a Mac, Direct3D 12 on Windows), and the WGSL our shaders are written in, which WebGPU runs on the web.
 wgpu = { version = "30.0.2", default-features = false, features = ["std", "wgsl"] }
-# The typeface the UI library ships as WOFF2 (core/ui/src/Allo-Variable.woff2), which the text systems read as TTF.
+# The typeface the UI library ships as WOFF2 (core/ui/src/Allo-Variable.woff2), which the text system reads as TTF.
 wuff = "0.2"
 
 [dev-dependencies]
 # The memory the headless harness's `--measure` says drawing took.
 memory-stats = "1"
+
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+parley = { version = "0.13", features = ["system"] }
 
 [target.'cfg(any(target_os = "linux", target_os = "macos"))'.dependencies]
 # The windows' thread's event loop, as GPUI's Linux platform has it; a Mac's wakes it from AppKit's main thread.
@@ -74,10 +81,8 @@ calloop = "0.14"
 wgpu = { version = "30.0.2", default-features = false, features = ["vulkan"] }
 
 [target.'cfg(target_os = "linux")'.dependencies]
-cosmic-text = "0.19"
 # The desktop's light or dark, from its portal, through libdbus, as tao reads the desktop.
 dbus = "0.9"
-swash = "0.2"
 x11rb = { version = "0.14", features = ["allow-unsafe-code", "xkb", "cursor", "resource_manager", "randr"] }
 # The input method (ibus, fcitx: Chinese, Japanese, Korean), through XIM over x11rb, as GPUI's X11 platform has it,
 # but xim-rs's own release, whose compound text decodes Chinese and Korean, where GPUI's fork's has only Japanese.
@@ -87,13 +92,12 @@ xim = { version = "0.6", features = ["x11rb-xcb", "x11rb-client"] }
 arboard = { version = "3", default-features = false }
 xkbcommon = { version = "0.8", default-features = false, features = ["x11"] }
 
-# Windows' windows and DirectWrite, as GPUI's Windows platform has them.
+# Windows' windows, as GPUI's Windows platform has them.
 [target.'cfg(target_os = "windows")'.dependencies]
 wgpu = { version = "30.0.2", default-features = false, features = ["dx12"] }
 windows = { version = "0.62", features = [
   "Win32_Foundation",
   "Win32_Globalization",
-  "Win32_Graphics_DirectWrite",
   "Win32_Graphics_Dwm",
   "Win32_Graphics_Gdi",
   "Win32_System_Com",
@@ -111,23 +115,15 @@ windows-core = "0.62"
 windows-numerics = "0.3"
 # The clipboard, as arboard serves it, as on Linux.
 arboard = { version = "3", default-features = false }
-# Which way a line runs, by its first strong character, as cosmic-text says it on Linux.
-unicode-bidi = "0.3"
 
 [target.'cfg(target_os = "macos")'.dependencies]
 wgpu = { version = "30.0.2", default-features = false, features = ["metal"] }
-# Text as GPUI's Mac platform shapes and rasterizes it: Core Text and Core Graphics.
-core-foundation = "0.10"
-core-graphics = "0.24"
-core-text = "21"
 # AppKit's windows, on its main thread, by objc2's bindings, as wgpu reaches Metal.
 dispatch2 = "0.3"
 objc2 = "0.6"
 objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "objc2-core-foundation", "objc2-quartz-core", "NSAccessibility", "NSAppearance", "NSApplication", "NSCursor", "NSPasteboard", "NSEvent", "NSGraphics", "NSPanel", "NSResponder", "NSRunningApplication", "NSTrackingArea", "NSView", "NSWindow", "NSWorkspace"] }
 objc2-foundation = { version = "0.3", default-features = false, features = ["std", "objc2-core-foundation", "NSArray", "NSGeometry", "NSNotification", "NSObjCRuntime", "NSString"] }
 objc2-quartz-core = { version = "0.3", default-features = false, features = ["std", "objc2-core-foundation", "CALayer", "CAMetalLayer"] }
-# Which way a line runs, by its first strong character, as on Windows.
-unicode-bidi = "0.3"
 
 # Android: a strict screen is a SurfaceView over the app's web view (`platform/android`), on the UI thread, whose
 # keyboard bridge (Flutter's) and accessibility delegate (AccessKit's) are Java that calls in through JNI.
@@ -136,14 +132,10 @@ unicode-bidi = "0.3"
 accesskit = "0.25"
 accesskit_android = { version = "0.9.1", features = ["embedded-dex"] }
 android_logger = "0.15"
-cosmic-text = "0.19"
 jni = "0.21"
 libc = "0.2"
 ndk = { version = "0.9", features = ["rwh_06"] }
 ndk-sys = "0.6"
-swash = "0.2"
-# The scripts Android's fallback fonts are chosen by, cosmic-text's own (`Fallback::script_fallback`).
-unicode-script = "0.5"
 
 [build-dependencies]
 # Flutter's text input plugins (flutter/), as its engine builds them: a Mac's Objective-C++, Windows' C++.

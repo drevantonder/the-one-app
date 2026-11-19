@@ -9,10 +9,9 @@ use std::sync::OnceLock;
 use fixed_decimal::{Decimal, FloatPrecision, SignDisplay, SignedRoundingMode, UnsignedRoundingMode};
 use icu::collator::options::{AlternateHandling, CaseLevel, CollatorOptions, Strength};
 use icu::collator::{Collator, CollatorBorrowed};
-use icu::datetime::fieldbag::{DateTimeFieldBag, field};
 use icu::datetime::fieldsets::builder::{DateFields, FieldSetBuilder, ZoneStyle};
 use icu::datetime::fieldsets::enums::CompositeFieldSet;
-use icu::datetime::options::{Length, TimePrecision};
+use icu::datetime::options::{Alignment, Length, SubsecondDigits, TimePrecision, YearStyle};
 use icu::datetime::DateTimeFormatter;
 use icu::decimal::options::{DecimalFormatterOptions, GroupingStrategy};
 use icu::decimal::{CompactDecimalFormatter, DecimalFormatter};
@@ -556,8 +555,10 @@ impl Dates {
         let zone = zone(&ctx, &options.time_zone)?;
         let fields = match (&options.date_style, &options.time_style) {
             (None, None) => fields(&options),
-            (date, time) => styles(date.as_deref(), time.as_deref()).build_composite().map_err(|error| range(&ctx, format!("{error:?}")))?,
-        };
+            (date, time) => styles(date.as_deref(), time.as_deref()),
+        }
+        .build_composite()
+        .map_err(|error| range(&ctx, format!("{error:?}")))?;
         let formatter = DateTimeFormatter::try_new((&locale).into(), fields).map_err(|error| range(&ctx, error))?;
         Ok(Dates { formatter, zone, locale })
     }
@@ -575,9 +576,10 @@ impl Dates {
     /// The hour cycle its locale shows hours in: `h12`, `h23`, `h11` or `h24`.
     #[qjs(rename = "hourCycle")]
     pub fn hour_cycle(&self, ctx: Ctx<'_>) -> Result<String> {
-        let mut bag = DateTimeFieldBag::default();
-        bag.hour = Some(field::Hour::Numeric);
-        let hours = DateTimeFormatter::try_new((&self.locale).into(), bag.to_composite_field_set()).map_err(|error| range(&ctx, error))?;
+        let mut builder = FieldSetBuilder::new();
+        builder.time_precision = Some(TimePrecision::Hour);
+        let hours = builder.build_composite().map_err(|error| range(&ctx, format!("{error:?}")))?;
+        let hours = DateTimeFormatter::try_new((&self.locale).into(), hours).map_err(|error| range(&ctx, error))?;
         let at = |hour: i8| hours.format(&jiff::civil::date(2026, 1, 1).at(hour, 0, 0, 0).to_zoned(jiff::tz::TimeZone::UTC).expect("a valid time")).to_string();
         let (midnight, afternoon) = (at(0), at(13));
         Ok(match (afternoon.contains("13"), midnight.contains("12"), midnight.contains("24")) {
@@ -597,45 +599,55 @@ impl Dates {
     }
 }
 
-/// ECMA-402's fields, as ICU4X's field bag, which mirrors them.
-fn fields(options: &DateOptions) -> CompositeFieldSet {
-    use field::*;
-    let width = |value: &Option<String>| value.as_deref().map(|value| value == "2-digit");
-    let mut bag = DateTimeFieldBag::default();
-    bag.era = options.era.as_deref().map(|era| match era {
-        "long" => Era::Long,
-        "narrow" => Era::Narrow,
-        _ => Era::Short,
+/// ECMA-402's fields, as ICU4X's field set: the fields asked for, their text as long as the longest asked for (a
+/// month or weekday `long` is CLDR's long, `short` or `narrow` its medium, numbers alone its short), padded where a
+/// number is `2-digit`, as ICU4X 2.3, which Parley's line breaking needs, has no field bag for each field's width.
+fn fields(options: &DateOptions) -> FieldSetBuilder {
+    let has = |value: &Option<String>| value.is_some();
+    let (year, month, day, weekday) = (has(&options.year) || has(&options.era), has(&options.month), has(&options.day), has(&options.weekday));
+    let texts = [&options.month, &options.weekday, &options.era];
+    let mut builder = FieldSetBuilder::new();
+    builder.length = Some(if texts.iter().any(|text| text.as_deref() == Some("long")) {
+        Length::Long
+    } else if texts.iter().any(|text| matches!(text.as_deref(), Some("short" | "narrow"))) {
+        Length::Medium
+    } else {
+        Length::Short
     });
-    bag.year = width(&options.year).map(|two| if two { Year::TwoDigit } else { Year::Numeric });
-    bag.month = options.month.as_deref().map(|month| match month {
-        "2-digit" => Month::TwoDigit,
-        "long" => Month::Long,
-        "short" => Month::Short,
-        "narrow" => Month::Narrow,
-        _ => Month::Numeric,
+    builder.date_fields = match (year, month, day, weekday) {
+        (false, false, false, false) => None,
+        (false, false, true, false) => Some(DateFields::D),
+        (false, true, true, false) => Some(DateFields::MD),
+        (true, _, true, false) => Some(DateFields::YMD),
+        (false, false, true, true) => Some(DateFields::DE),
+        (false, true, true, true) => Some(DateFields::MDE),
+        (true, _, true, true) | (true, _, false, true) | (false, true, false, true) => Some(DateFields::YMDE),
+        (false, false, false, true) => Some(DateFields::E),
+        (false, true, false, false) => Some(DateFields::M),
+        (true, true, false, false) => Some(DateFields::YM),
+        (true, false, false, false) => Some(DateFields::Y),
+    };
+    builder.year_style = year.then(|| match (&options.era, options.year.as_deref()) {
+        (Some(_), _) => YearStyle::WithEra,
+        (_, Some("2-digit")) => YearStyle::Auto,
+        _ => YearStyle::Full,
     });
-    bag.day = width(&options.day).map(|two| if two { Day::TwoDigit } else { Day::Numeric });
-    bag.weekday = options.weekday.as_deref().map(|weekday| match weekday {
-        "long" => Weekday::Long,
-        "narrow" => Weekday::Narrow,
-        _ => Weekday::Short,
+    builder.time_precision = match (&options.hour, &options.minute, &options.second, options.fractional_second_digits) {
+        (_, _, _, Some(digits)) => Some(TimePrecision::Subsecond(SubsecondDigits::try_from_int(digits.clamp(1, 3) as u8).expect("1 to 3"))),
+        (_, _, Some(_), None) => Some(TimePrecision::Second),
+        (_, Some(_), None, None) => Some(TimePrecision::Minute),
+        (Some(_), None, None, None) => Some(TimePrecision::Hour),
+        _ => None,
+    };
+    let padded = [&options.month, &options.day, &options.hour].iter().any(|value| value.as_deref() == Some("2-digit"));
+    builder.alignment = padded.then_some(Alignment::Column);
+    builder.zone_style = options.time_zone_name.as_deref().map(|name| match name {
+        "long" | "longGeneric" => ZoneStyle::SpecificLong,
+        "shortOffset" => ZoneStyle::LocalizedOffsetShort,
+        "longOffset" => ZoneStyle::LocalizedOffsetLong,
+        _ => ZoneStyle::SpecificShort,
     });
-    bag.hour = width(&options.hour).map(|two| if two { Hour::TwoDigit } else { Hour::Numeric });
-    bag.minute = width(&options.minute).map(|two| if two { Minute::TwoDigit } else { Minute::Numeric });
-    bag.second = width(&options.second).map(|two| if two { Second::TwoDigit } else { Second::Numeric });
-    bag.fractional_second_digits = options.fractional_second_digits.map(|digits| match digits {
-        1 => FractionalSecondDigits::F1,
-        2 => FractionalSecondDigits::F2,
-        _ => FractionalSecondDigits::F3,
-    });
-    bag.time_zone_name = options.time_zone_name.as_deref().map(|name| match name {
-        "long" | "longGeneric" => TimeZoneName::LongSpecific,
-        "shortOffset" => TimeZoneName::ShortOffset,
-        "longOffset" => TimeZoneName::LongOffset,
-        _ => TimeZoneName::ShortSpecific,
-    });
-    bag.to_composite_field_set()
+    builder
 }
 
 /// ECMA-402's `dateStyle` and `timeStyle`, as CLDR's lengths.
@@ -712,7 +724,7 @@ impl Relative {
         let locale = locale(&ctx, &tag)?;
         let prefs = (&locale).into();
         let mut options = RelativeTimeFormatterOptions::default();
-        options.numeric = Some(if numeric == "auto" { Numeric::Auto } else { Numeric::Always });
+        options.numeric = if numeric == "auto" { Numeric::Auto } else { Numeric::Always };
         use RelativeTimeFormatter as F;
         let formatter = match (style.as_str(), unit.as_str()) {
             ("short", "second") => F::try_new_short_second(prefs, options),
