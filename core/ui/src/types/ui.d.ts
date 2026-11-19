@@ -259,8 +259,6 @@ export declare function Row(props: {
   end?: Element
   /** Pressed, with where it's drawn; Return in a listbox opens it with none. As React Native's `onPress`. */
   onPress?: (event?: Located) => void
-  /** @deprecated `onPress`'s old name, while apps move to it. */
-  onClick?: (event?: Located) => void
   current?: boolean
   control?: Element
   action?: Element
@@ -286,8 +284,6 @@ export type ButtonProps = {
   autofocus?: boolean
   /** What pressing it does, as React Native's `onPress`. */
   onPress?: (event: Located) => void
-  /** @deprecated `onPress`'s old name, while apps move to it. */
-  onClick?: (event: Located) => void
   onLayout?: (event: Laid) => void
   /** Where it sits in what it's in, the only part of its look a caller changes. */
   style?: Styles<"marginTop" | "marginBottom" | "marginStart" | "marginEnd" | "alignSelf" | "flexGrow">

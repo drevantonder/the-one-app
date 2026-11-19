@@ -159,8 +159,6 @@ export interface ButtonProps {
   autofocus?: boolean
   /** What pressing it does, as React Native's `onPress`. */
   onPress?: (event: Located) => void
-  /** `onPress`'s old name, while apps move to it. */
-  onClick?: (event: Located) => void
   /** Told where it's drawn as it's laid out, as a menu's button is, which its menu opens under. */
   onLayout?: (event: Laid) => void
   /** Where it sits in what it's in, the only part of its look a caller changes. */
@@ -185,7 +183,7 @@ export function Button(props: ButtonProps) {
       return props.loading
     },
     get onPress() {
-      return props.onPress ?? props.onClick
+      return props.onPress
     },
   })
   // What it says, made once: words in a text, or what it's given (an icon) as it is.
@@ -194,7 +192,7 @@ export function Button(props: ButtonProps) {
   // In a computer's screen's bar, it's one of the screen's actions, in its footer and its action panel, and draws
   // nothing there itself.
   const words = () => inside.toArray().filter((part) => typeof part === "string").join(" ") || props["aria-label"] || ""
-  if (collected(() => ({ label: words(), onAction: () => (props.onPress ?? props.onClick)?.(undefined as never), destructive: props.variant === "destructive", disabled: button.off() }))) return null
+  if (collected(() => ({ label: words(), onAction: () => props.onPress?.(undefined as never), destructive: props.variant === "destructive", disabled: button.off() }))) return null
   return (
     <Pressable
       {...button.root()}

@@ -334,8 +334,6 @@ type RowProps = {
   end?: JSX.Element
   /** What pressing it does, as React Native's `onPress`. */
   onPress?: (event?: Located) => void
-  /** `onPress`'s old name, while apps move to it. */
-  onClick?: (event?: Located) => void
   current?: boolean
   control?: JSX.Element
   action?: JSX.Element
@@ -357,8 +355,7 @@ function Drawn(props: RowProps) {
     },
   })
   // What a press that was a swipe, a held press, or put the row back would otherwise do as it lifts: open the row.
-  const onPress = () => props.onPress ?? props.onClick
-  const pressed = (event: Located) => !hold.swallows(event) && !swipe.swallows(event) && onPress()?.(event)
+  const pressed = (event: Located) => !hold.swallows(event) && !swipe.swallows(event) && props.onPress?.(event)
 
   // On a computer, what it can do is the screen's action panel's while it's chosen: under the pointer, as Raycast's
   // rows are, or open beside the list. Open, then its menu's items.
@@ -366,7 +363,7 @@ function Drawn(props: RowProps) {
   const inListbox = useContext(InListbox)
   const choose = useContext(Choose)
   const actions = (): Action[] => [
-    ...(onPress() ? [{ label: messages.open, onAction: () => onPress()!() }] : []),
+    ...(props.onPress ? [{ label: messages.open, onAction: () => props.onPress!() }] : []),
     ...(menu()?.items() ?? []).map((item) => ({ label: item.label, destructive: item.destructive, disabled: item.disabled, onAction: () => menu()!.select(item.value) })),
   ]
   const chosen = () => choose?.set(actions, actions().length ? actions : undefined)
@@ -382,7 +379,7 @@ function Drawn(props: RowProps) {
   const sidebar = () => !touch() && style === "sidebar"
   // A row that opens something says so with a chevron, as iOS's Settings does, but not in a computer's sidebar, whose
   // rows open beside it, or a plain list's.
-  const opens = () => !!onPress() && style !== "plain" && (touch() || style === "insetGrouped") && !props.destructive
+  const opens = () => !!props.onPress && style !== "plain" && (touch() || style === "insetGrouped") && !props.destructive
   const inside = () => (
     <>
       <Show when={props.start}>
@@ -418,7 +415,7 @@ function Drawn(props: RowProps) {
           <View style={[look.control, moving()]}>{props.control}</View>
         </Show>
         <Show
-          when={onPress()}
+          when={props.onPress}
           fallback={<View style={[look.inside, !touch() && look.flatInside, grouped() && look.groupedInside, sidebar() && look.sidebarInside, !!props.control && look.after, moving()]}>{inside()}</View>}
         >
           <Pressable role={inListbox ? undefined : "button"} aria-current={props.current ? "true" : undefined} onPress={pressed} style={[look.inside, !touch() && look.flatInside, grouped() && look.groupedInside, sidebar() && look.sidebarInside, look.pressable, inListbox && look.quiet, !!props.control && look.after, moving()]}>
