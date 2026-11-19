@@ -77,7 +77,10 @@ None of these is chosen. Each is named so it's weighed before anything like it i
 - **Blitz**: an HTML and CSS renderer in Rust. Not chosen.
 - **Vercel's UI SDK** (`@ui-sdk`, Apache-2.0, 0.1.0 beta, 12 November 2026): behaviours with no look of their own
   (popups, selection, keyboard, focus) for React, Vue, Svelte, Solid and Web Components, made for agents to build
-  with. Considered for the UI the clients share, and not chosen.
+  with. Not depended on as a package (its DOM parts don't run on a native host); instead, its behaviours and headless
+  components are copied into `core/ui/src/behavior-primitives/` and `core/ui/src/headless-components/` (with
+  `core/ui/src/UI-SDK-LICENSE.txt` kept and DOM parts replaced by our host's primitives and bridge, as
+  `core/ui/AGENTS.md` says).
 - **Ark UI** (`@ark-ui/solid`) and **Zag**'s machines: not used. Ark's `6.0.0-next.0` still imports `solid-js/web`, which
   Solid 2.0 removed, so it doesn't build on Solid 2.0 (tried 14 November 2026), and Zag's machines need the DOM, which a
   native host doesn't have. The UI library's components are its own, and no Zag package is used.

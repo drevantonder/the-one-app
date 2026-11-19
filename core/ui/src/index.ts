@@ -11,7 +11,11 @@
 /// DOM in a browser and in MCP Apps. Its `tsconfig.json` is `{ "extends": "<ui>/tsconfig.app.json",
 /// "include": ["**/*"] }` (in this repo `../../../core/ui/tsconfig.app.json`; a deploy checks it against its server's
 /// own copy), and its entrypoint names it with the runtime version it needs, the one native hosts have now:
-/// `%{page: "client/index.html", runtime_version: 5}`. It's written with the UI library alone: its components and the drawing primitives,
+/// `%{page: "client/index.html", runtime_version: 5}`. It's written with the UI library alone: start with its styled
+/// components (`styled-components/`), and where an app needs a look of its own with standard behaviour and
+/// accessibility, build on its headless components and behaviours (`createListbox`, `createVelocityTracker`,
+/// `projected`; others in `core/ui/src/headless-components/` and `behavior-primitives/` can be exported through
+/// `types/ui.d.ts` and `index.ts` as an app needs them) over the drawing primitives,
 /// named and shaped as React Native's core components and their props: `View`, `Pressable` (a view that's pressed),
 /// `ScrollView` (a view whose content scrolls), `Text`, `Image`, `TextInput` (bare text to type, which `Input` draws in
 /// a field's box), `Modal` and `Portal` (what's drawn over the page), react-native-svg's `Svg` and `Path` (a vector
