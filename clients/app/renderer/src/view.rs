@@ -897,6 +897,9 @@ impl Screen {
         let first = chain.iter().find_map(|id| self.placed(*id).map(|placed| (*id, placed.focus)).filter(|(_, focus)| *focus != Clicked::Passes));
         match first {
             Some((_, Clicked::Keeps)) => {}
+            // A click on what takes no keyboard leaves it with what has it by its `autofocus`, as a native app's field
+            // keeps it while what's around it is clicked, and a launcher's search while its card is.
+            None if self.focused.is_some_and(|id| self.tree.nodes.get(&id).is_some_and(|node| node.is("autofocus"))) => {}
             first => self.focus(first.map(|(id, _)| id)),
         }
     }
