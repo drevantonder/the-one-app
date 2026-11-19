@@ -196,9 +196,13 @@ pub struct Screen {
     /// back to as it goes, as the DOM's `<dialog>` does.
     modals: Vec<(Id, Option<Id>)>,
     /// Each input's editing, as it's typed, ahead of the app setting it back, and the editing state its app last
-    /// set, which replaces it only as it changes.
+    /// set, which replaces it only as it changes, and only once the app has heard the input's last edit: the number of
+    /// the call that told it (`edits`), which its JS had run (`heard`) when it set it. One set before that answers an
+    /// older edit and would undo what's been typed since, as React Native's `mostRecentEventCount` keeps from doing.
     fields: HashMap<Id, Field>,
     set: HashMap<Id, editing::Value>,
+    edits: HashMap<Id, u64>,
+    heard: u64,
     /// Where each input's text was last drawn, for the pointer and the moves that depend on how it wraps.
     drawn: HashMap<Id, Drawn>,
     /// The input the pointer's held press selects in, and the last press, to count a double or triple click.
@@ -307,6 +311,8 @@ impl Screen {
             modals: Vec::new(),
             fields: HashMap::new(),
             set: HashMap::new(),
+            edits: HashMap::new(),
+            heard: 0,
             drawn: HashMap::new(),
             selecting: None,
             last_press: None,
@@ -479,7 +485,8 @@ impl Screen {
     /// Applies what the app's JS has posted since it was last asked, all at once, as it's one turn's or more, and
     /// answers what it asked that the host answers at once. → whether anything came.
     pub fn pump(&mut self) -> bool {
-        let posted = self.js.take();
+        let posted;
+        (posted, self.heard) = self.js.take();
         let mut came = !posted.is_empty() || self.started.is_none();
         let mut cant = None;
         for child in self.frames.values_mut() {
@@ -1418,6 +1425,7 @@ impl Screen {
         let Some(value) = self.fields.get(&id).map(Field::value).filter(|value| *value != before) else { return };
         if self.tree.nodes.get(&id).is_some_and(|node| node.listens("input")) {
             self.tell(id, "input", json!({"editing": value, "value": value.text}));
+            self.edits.insert(id, self.js.sent());
         }
     }
 
@@ -1436,6 +1444,7 @@ impl Screen {
         let input = |id: &Id| tree.nodes.get(id).is_some_and(|node| node.kind == Kind::Input);
         self.fields.retain(|id, _| input(id));
         self.set.retain(|id, _| input(id));
+        self.edits.retain(|id, _| input(id));
         self.drawn.retain(|id, _| input(id));
         for id in tree.inputs() {
             let node = &tree.nodes[&id];
@@ -1454,7 +1463,9 @@ impl Screen {
                 }),
             };
             if let Some(set) = set.filter(|set| self.set.get(&id) != Some(set)) {
-                field.set(&set);
+                if self.edits.get(&id).is_none_or(|told| *told <= self.heard) {
+                    field.set(&set);
+                }
                 self.set.insert(id, set);
             }
         }

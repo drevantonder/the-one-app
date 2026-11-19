@@ -461,10 +461,17 @@ impl Thread {
         }
     }
 
-    /// What it's given its host since this was last asked: what it did with what it was sent, a batch at a time.
-    pub fn take(&self) -> Vec<Posted> {
+    /// What it's given its host since this was last asked: what it did with what it was sent, a batch at a time, and
+    /// how many of the calls it was sent it had run by then (`sent`).
+    pub fn take(&self) -> (Vec<Posted>, u64) {
         self.shared.waiting.store(false, Ordering::Release);
-        self.shared.posts().posted.drain(..).collect()
+        let mut posts = self.shared.posts();
+        (posts.posted.drain(..).collect(), posts.ran)
+    }
+
+    /// How many calls it's been sent: the last one's number.
+    pub fn sent(&self) -> u64 {
+        self.sent
     }
 
     /// Calls `wake`, from its thread, as it posts what its window hasn't taken: at once if it already has.
