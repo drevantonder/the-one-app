@@ -60,7 +60,7 @@ const look = styles({
   heading: { font: tokens.type.small, color: tokens.colour.secondaryLabel, userSelect: "none" },
   touchHeading: { paddingInline: tokens.grid[4] },
   // Above a card in grouped cards: the group's name, as Raycast's Settings heads one, in line with the card's words.
-  groupedHeading: { font: tokens.type.medium, fontWeight: tokens.weight.medium, color: tokens.colour.label, paddingInline: tokens.grid[3], paddingTop: tokens.grid[2] },
+  groupedHeading: { font: tokens.type.medium, fontWeight: tokens.weight.medium, color: tokens.colour.label, paddingInline: tokens.grid[3], paddingTop: tokens.grid[2], paddingBottom: tokens.grid[1] },
   // Grouped cards keep a readable width in the middle of what they're in, as Raycast's Settings' do.
   groupedSection: { width: "100%", maxWidth: tokens.length.readable, alignSelf: "center" },
   split: { flexGrow: 1, flexShrink: 1, minHeight: 0, minWidth: 0, position: "relative" },
@@ -76,6 +76,9 @@ const look = styles({
   sidebar: { flexBasis: tokens.length.sidebar, minWidth: tokens.length.sidebar, maxWidth: tokens.length.sidebar },
   detail: { flexGrow: 1, flexShrink: 1 },
 })
+
+/** How far a screen with a large title is scrolled when that's gone under its bar, in CSS pixels. */
+const LARGE = 56
 
 /** How wide a split's list is beside what it opens (tokens.length.columnMin, 38%, tokens.length.column), and how
  * wide it has to be for both, in CSS pixels. */
@@ -93,10 +96,15 @@ const Leave = createContext<() => void>(goBack)
 /** Whether it's in a split's detail beside its list, where a screen has nowhere to go back to. A split in that detail
  * whose own detail is pushed over its list has a Back again, to that list. */
 const InDetail = createContext<() => boolean>(() => false)
+type Went = { back?: () => void; forward?: () => void } | null
+/** Where the window's Back and Forward go, read as it changes. */
+const Went = createContext<() => Went>(() => null)
 /// `<History value={{ back, forward }}>`: where a window's Back and Forward go, as macOS's System Settings keeps them:
-/// the screens in it draw them in their bar, each greyed where it goes nowhere. A split pushing a screen over its list
-/// starts again, its Back going back to the list.
-export const History = createContext<{ back?: () => void; forward?: () => void } | null>(null)
+/// the screens in it draw them in their bar, each greyed where it goes nowhere, as `value` changes. A split pushing a
+/// screen over its list starts again, its Back going back to the list.
+export function History(props: { value: Went; children?: JSX.Element }) {
+  return <Went value={() => props.value}>{props.children}</Went>
+}
 /** Which of the window's edges a screen's bar reaches, where its title row's controls and breadcrumb are: a split's
  * list beside what it opens reaches the start, and what it opens the end. */
 const Edge = createContext<() => { start: boolean; end: boolean }>(() => ({ start: true, end: true }))
@@ -109,8 +117,9 @@ export const Middle = createContext<() => boolean>(() => false)
 /// `onBack`, as the device's own back gesture does: a screen with `back` says where it goes, but in a split's detail,
 /// which it closes. A split's list closes what's open beside it first. An
 /// app's first screen has no Back: the window's rail, its title bar's Home on a computer, and the device's back leave
-/// the app. Where the window's breadcrumb names the app, its first screen's heading gives way to it.
-export function Screen(props: { heading?: JSX.Element; action?: JSX.Element; back?: boolean; onBack?: () => void; children?: JSX.Element }) {
+/// the app. Where the window's breadcrumb names the app, its first screen's heading gives way to it. With `largeTitle`
+/// the screen draws its name large itself, as iOS's App Store's pages do, and the bar's shows once that has scrolled away.
+export function Screen(props: { heading?: JSX.Element; action?: JSX.Element; back?: boolean; onBack?: () => void; largeTitle?: boolean; children?: JSX.Element }) {
   const opened = useContext(Opened)
   const leave = useContext(Leave)
   const inDetail = useContext(InDetail)
@@ -123,14 +132,18 @@ export function Screen(props: { heading?: JSX.Element; action?: JSX.Element; bac
   // The device's own back calls a Back of the screen's own, as a tap on it does.
   createEffect(() => !!props.back && !!props.onBack, (now) => (now ? covers(back, { layer: false }) : undefined))
   const backed = () => !!props.back && !inDetail()
-  const history = useContext(History)
+  const history = useContext(Went)
   const style = useContext(ListStyle)
   const edge = useContext(Edge)
   // Only an app's first screen, which has no Back, gives way to the breadcrumb.
-  const named = () => !!props.back || !breadcrumb()
+  const [scrolled, setScrolled] = createSignal(0)
+  const named = () => (!!props.back || !breadcrumb()) && (!props.largeTitle || scrolled() > LARGE)
   // On a computer, as Raycast's: the bar's buttons and menus' items are the screen's actions, in the footer's pills and
   // its action panel (⌘K), after what the row chosen can do; under a finger they stay in the bar.
   const computer = !touch()
+  // Its action panel is where a list's rows and the bar's buttons go on a computer; a window of grouped cards has none,
+  // as Raycast's Settings window has none, so they stay in the bar and on their rows.
+  const panelled = computer && style === "plain"
   const [bar, setBar] = createSignal<Action[]>([])
   const [chosen, setChosen] = createSignal<{ row: object; actions: () => Action[] }>()
   const collect = (action: Action) => {
@@ -142,32 +155,30 @@ export function Screen(props: { heading?: JSX.Element; action?: JSX.Element; bac
     clear: (row: object) => chosen()?.row === row && setChosen(undefined),
   }
   const actions = () => [...(chosen()?.actions() ?? []).map((action) => ({ ...action, section: action.section ?? "chosen" })), ...bar()]
-  // Raycast's command windows, whose lists are plain, have the footer; its Settings window, a sidebar and grouped
-  // cards, has none.
-  const footed = () => computer && style === "plain" && actions().length > 0
+  const footed = () => panelled && actions().length > 0
   return (
     <View style={look.screen}>
       <View role="banner" style={[look.bar, computer && look.titleRow]}>
         <View style={[look.row, computer && edge().start && look.atStart, computer && edge().end && look.atEnd]}>
-          <Show when={backed() || (computer && history)}>
-            <View role="group" style={[look.pill, !computer && look.round]}>
+          <Show when={backed() || (computer && history())}>
+            <View role="group" style={[look.pill, !(computer && history()) && look.round]}>
               <Pressable
                 role="button"
                 aria-label={messages.back}
-                aria-disabled={backed() || history?.back ? undefined : "true"}
-                onPress={() => (backed() ? back() : history?.back?.())}
-                style={[look.pillButton, !(backed() || history?.back) && look.pillOff]}
+                aria-disabled={backed() || history()?.back ? undefined : "true"}
+                onPress={() => (backed() ? back() : history()?.back?.())}
+                style={[look.pillButton, !(backed() || history()?.back) && look.pillOff]}
               >
                 <Icon name="caret-left" along />
               </Pressable>
-              <Show when={computer}>
+              <Show when={computer && history()}>
                 <View style={look.pillLine} />
                 <Pressable
                   role="button"
                   aria-label={messages.forward}
-                  aria-disabled={!backed() && history?.forward ? undefined : "true"}
-                  onPress={() => !backed() && history?.forward?.()}
-                  style={[look.pillButton, (backed() || !history?.forward) && look.pillOff]}
+                  aria-disabled={!backed() && history()?.forward ? undefined : "true"}
+                  onPress={() => !backed() && history()?.forward?.()}
+                  style={[look.pillButton, (backed() || !history()?.forward) && look.pillOff]}
                 >
                   <Icon name="caret-right" along />
                 </Pressable>
@@ -179,17 +190,17 @@ export function Screen(props: { heading?: JSX.Element; action?: JSX.Element; bac
           </Heading>
           <Show when={props.action}>
             <BarEnd value={true}>
-              <Collect value={computer ? collect : null}>
+              <Collect value={panelled ? collect : null}>
                 <View style={look.action}>{props.action}</View>
               </Collect>
             </BarEnd>
           </Show>
         </View>
       </View>
-      <ScrollView role="main" style={look.main}>
+      <ScrollView role="main" style={look.main} onScroll={props.largeTitle ? (event) => setScrolled(event.currentTarget.scrollTop) : undefined}>
         <View style={look.safe}>
           <View style={[look.parts, footed() && look.footed]}>
-            <Choose value={computer ? choose : null}>
+            <Choose value={panelled ? choose : null}>
               <Middle value={() => false}>{props.children}</Middle>
             </Choose>
           </View>
@@ -243,9 +254,11 @@ const open: (() => void)[] = []
 /// calls `onClose`, and the app sets `open` false.
 export function Split(props: { open?: boolean; onClose?: () => void; detail?: JSX.Element; children?: JSX.Element }) {
   const room = useContext(Room)
-  const history = useContext(History)
+  const history = useContext(Went)
   const edge = useContext(Edge)
-  const beside = () => room() >= wide
+  // What a split in another's detail opens is pushed over its list, as a window's page of settings opens what's in it.
+  const inDetail = useContext(InDetail)
+  const beside = () => room() >= wide && !inDetail()
   // A sidebar's list is a sidebar's width (`ListStyle`), and the detail has the rest.
   const sidebar = useContext(ListStyle) === "sidebar"
   const listWidth = () => (sidebar ? sidebarWidth : Math.min(column, Math.max(columnMin, room() * 0.38)))
@@ -264,8 +277,9 @@ export function Split(props: { open?: boolean; onClose?: () => void; detail?: JS
   })
 
   // Open, it's what the device's back closes: beside its list as it closes a sheet, pushed over the list as a step
-  // back through the history, which a device's gesture shows as the whole page going back.
-  createEffect(() => (props.open ? (beside() ? "beside" : "over") : ""), (how) => {
+  // back through the history, which a device's gesture shows as the whole page going back. A sidebar's choice beside it
+  // is no more closed than macOS's is by Escape.
+  createEffect(() => (props.open ? (beside() ? (sidebar ? "" : "beside") : "over") : ""), (how) => {
     if (!how) return
     open.push(close)
     const done = how === "beside" ? covers(close, { layer: false }) : step(close)
@@ -287,7 +301,7 @@ export function Split(props: { open?: boolean; onClose?: () => void; detail?: JS
         <Room value={() => (beside() ? room() - listWidth() - 1 : room())}>
           <Edge value={() => ({ start: edge().start && !beside(), end: edge().end })}>
           <Leave value={close}>
-            <History value={beside() ? history : null}>
+            <History value={beside() ? history() : null}>
             <InDetail value={beside}>
               <Middle value={beside}>{props.detail}</Middle>
             </InDetail>

@@ -30,13 +30,16 @@ const look = styles({
   // Every row draws the line above it, and the list hides the first's.
   rows: { marginTop: negative(tokens.length.hairline) },
   flatRows: { marginTop: 0 },
-  // In grouped cards on a computer, as Raycast's Settings: the card is inset, and its lines between rows run from its
-  // inset to its inset.
-  groupedList: { width: "100%", maxWidth: tokens.length.readable, alignSelf: "center", paddingInline: tokens.grid[3] },
+  // In grouped cards on a computer, as Raycast's Settings: the row open is a rounded highlight inside the card, as macOS's
+  // lists draw one, and the line between rows runs from the words' inset to the card's other.
+  groupedList: { width: "100%", maxWidth: tokens.length.readable, alignSelf: "center" },
+  rule: { position: "absolute", top: 0, start: tokens.grid[3], end: tokens.grid[3], height: tokens.length.hairline, backgroundColor: tokens.colour.quinaryLabel },
+  groupedRow: { borderTopWidth: 0 },
+  highlight: { position: "absolute", top: tokens.grid[0.5], bottom: tokens.grid[0.5], start: tokens.grid[1.5], end: tokens.grid[1.5], borderRadius: tokens.radius.medium, backgroundColor: tokens.colour.selection },
   // A finger moving up or down on a row scrolls its list, as the device does it; only sideways is the row's, to swipe.
   row: { position: "relative", flexDirection: "row", alignItems: "stretch", overflow: "hidden", borderTopWidth: tokens.length.hairline, borderColor: tokens.colour.quinaryLabel, touchAction: "pan-y" },
   flatRow: { borderTopWidth: 0, borderRadius: tokens.radius.medium },
-  groupedInside: { minHeight: tokens.length.groupedRow, paddingInline: 0, paddingBlock: tokens.grid[1.5], gap: tokens.grid[2.5], backgroundColor: tokens.colour.transparent },
+  groupedInside: { minHeight: tokens.length.groupedRow, paddingInline: tokens.grid[3], paddingBlock: tokens.grid[1.5], gap: tokens.grid[2.5], backgroundColor: tokens.colour.transparent },
   sidebarInside: { minHeight: tokens.length.sidebarRow },
   wraps: { flexWrap: "wrap" },
   current: { backgroundColor: tokens.colour.selection },
@@ -68,8 +71,8 @@ const look = styles({
   words: { flexGrow: 1, flexShrink: 1, minWidth: 0 },
   // On a computer the grey words follow the heading on its line, as Raycast's subtitle does.
   flatWords: { flexDirection: "row", alignItems: "baseline", gap: tokens.grid[2] },
-  heading: { font: tokens.type.medium, fontWeight: tokens.weight.medium, lineClamp: 1 },
-  flatHeading: { flexShrink: 0, maxWidth: "70%", fontWeight: tokens.weight.regular },
+  heading: { font: tokens.type.medium, fontWeight: tokens.weight.medium, lineClamp: 2 },
+  flatHeading: { flexShrink: 0, maxWidth: "70%", fontWeight: tokens.weight.regular, lineClamp: 1 },
   text: { font: tokens.type.medium, color: tokens.colour.secondaryLabel, lineClamp: 2 },
   // Under its heading in grouped cards and a sidebar, as Raycast's Settings draws a row's subtitle.
   groupedHeading: { fontWeight: tokens.weight.regular },
@@ -364,7 +367,7 @@ function Drawn(props: RowProps) {
   const choose = useContext(Choose)
   const actions = (): Action[] => [
     ...(props.onPress ? [{ label: messages.open, onAction: () => props.onPress!() }] : []),
-    ...(menu()?.items() ?? []).map((item) => ({ label: item.label, destructive: item.destructive, disabled: item.disabled, onAction: () => menu()!.select(item.value) })),
+    ...(menu()?.items() ?? []).map((item) => ({ label: item.label, destructive: item.destructive, disabled: item.disabled, menu: true, onAction: () => menu()!.select(item.value) })),
   ]
   const chosen = () => choose?.set(actions, actions().length ? actions : undefined)
   if (choose) {
@@ -409,8 +412,14 @@ function Drawn(props: RowProps) {
         {...together(hold.gesture, swipe.gesture)}
         onContextMenu={(event) => menu()?.open(at(event))}
         onPointerEnter={chosen}
-        style={[look.row, !touch() && !grouped() && look.flatRow, !!props.action && look.wraps, props.current && look.current, !!menu() && look.held]}
+        style={[look.row, !touch() && !grouped() && look.flatRow, grouped() && look.groupedRow, !!props.action && look.wraps, props.current && !grouped() && look.current, !!menu() && look.held]}
       >
+        <Show when={grouped()}>
+          <View style={look.rule} />
+          <Show when={props.current}>
+            <View style={look.highlight} />
+          </Show>
+        </Show>
         <Show when={props.control}>
           <View style={[look.control, moving()]}>{props.control}</View>
         </Show>

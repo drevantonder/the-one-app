@@ -22,6 +22,8 @@ export interface Action {
   destructive?: boolean
   disabled?: boolean
   section?: string
+  /** Whether it's an item of a menu, which the panel lists but Return never does: a menu holds what's beside the main thing. */
+  menu?: boolean
 }
 
 const look = styles({
@@ -124,9 +126,10 @@ const ask = () => {
   client().then((said) => setMac(!!said.mac), () => {})
 }
 
-/** How a key's shown: ⌘ or Ctrl, ↵, ⇧ and the rest as a Mac's menus show them, a letter in capitals. */
+/** How a key's shown: ⌘ or Ctrl, ⇧ and the rest as a Mac's menus show them, a letter in capitals; Return, which fonts
+ * don't all have a glyph for, is an icon (`Keys`). */
 const shown = (key: string): string =>
-  ({ mod: mac() ? "⌘" : "Ctrl", enter: "↵", shift: "⇧", alt: mac() ? "⌥" : "Alt", ctrl: mac() ? "⌃" : "Ctrl", escape: "esc", backspace: "⌫", delete: "⌦", tab: "⇥", up: "↑", down: "↓", left: "←", right: "→" })[key.toLowerCase()] ?? key.toUpperCase()
+  ({ mod: mac() ? "⌘" : "Ctrl", shift: "⇧", alt: mac() ? "⌥" : "Alt", ctrl: mac() ? "⌃" : "Ctrl", escape: "esc", backspace: "⌫", delete: "⌦", tab: "⇥", up: "↑", down: "↓", left: "←", right: "→" })[key.toLowerCase()] ?? key.toUpperCase()
 
 /** Whether a key pressed is these keys. */
 const pressed = (keys: string[], event: Keyed) => {
@@ -140,12 +143,18 @@ const pressed = (keys: string[], event: Keyed) => {
 }
 
 /// `<Keys keys={["mod", "K"]} />`: keys, as chips, as Raycast shows them beside what they do: `mod` is ⌘ on a Mac
-/// and Ctrl on a PC, `enter` ↵, `shift` ⇧, a letter in capitals.
+/// and Ctrl on a PC, `enter` ↵ (an icon), `shift` ⇧, a letter in capitals.
 export function Keys(props: { keys: string[] }) {
   onSettled(ask)
   return (
     <View aria-hidden="true" style={look.keys}>
-      <For each={props.keys}>{(key) => <Text style={look.key}>{shown(key)}</Text>}</For>
+      <For each={props.keys}>
+        {(key) => (
+          <View style={look.key}>
+            {key.toLowerCase() === "enter" ? <Icon name="arrow-elbow-down-left" /> : <Text>{shown(key)}</Text>}
+          </View>
+        )}
+      </For>
     </View>
   )
 }
@@ -238,7 +247,7 @@ export function ActionPanel(props: { open: boolean; onOpenChange: (open: boolean
 export function ActionBar(props: { start?: JSX.Element; actions?: Action[] }) {
   const [open, setOpen] = createSignal(false)
   const actions = () => props.actions ?? []
-  const primary = () => actions().find((action) => !action.disabled)
+  const primary = () => actions().find((action) => !action.disabled && !action.menu)
   // The first that can be done is Return's unless it says otherwise.
   const keysOf = (action: Action) => action.keys ?? (action.label === primary()?.label ? ["enter"] : [])
   onSettled(ask)

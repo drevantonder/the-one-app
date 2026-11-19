@@ -3,10 +3,9 @@
 import { children, createContext, createSignal, onCleanup, Show, useContext } from "solid-js"
 import type { JSX } from "@solidjs/web"
 import { Modal, Pressable, Text, View } from "#primitives"
-import { touch } from "#bridge"
 import { Button, Icon, type ButtonProps } from "./button.tsx"
 import { messages } from "../words.ts"
-import { Collect, collected } from "./collect.ts"
+import { Choose, Collect, collected } from "./collect.ts"
 import { createMenu, type At, type MenuEntry, type MenuProps } from "../headless-components/menu.ts"
 import { styles } from "../styles.ts"
 import { tokens } from "../tokens.ts"
@@ -87,9 +86,10 @@ export const Menu = {
       row({ open: menu.open, items: menu.items, destructive: menu.destructive, select: menu.select })
       onCleanup(() => row(undefined))
     }
-    // On a computer its items are the action panel's, the screen's in its bar or the row's where it's chosen, and a
-    // right-click on the row opens it: it draws no button there. Under a finger it's the ⋯ it always was.
-    if (useContext(Collect) || (row && !touch())) return null
+    // Where the screen has an action panel, as a plain list's does on a computer, its items are the panel's, the
+    // screen's in its bar or the row's where it's chosen, and a right-click on the row opens it: it draws no button
+    // there. Anywhere else it's the ⋯ it always was.
+    if (useContext(Collect) || (row && useContext(Choose))) return null
     const inside = children(() => props.children)
     const words = () => inside.toArray().length > 0 && props.size !== "icon"
     const trigger = menu.trigger()
@@ -139,7 +139,7 @@ export const Menu = {
     const inside = children(() => props.children)
     const entry = { value: props.value, label: inside.toArray().filter((part) => typeof part === "string").join(" "), disabled: !!props.disabled, destructive: !!props.destructive }
     onCleanup(menu.add(entry))
-    collected(() => ({ label: entry.label, onAction: () => menu.select(props.value), destructive: entry.destructive, disabled: entry.disabled }))
+    collected(() => ({ label: entry.label, onAction: () => menu.select(props.value), destructive: entry.destructive, disabled: entry.disabled, menu: true }))
     return (
       <Pressable {...menu.item(() => entry)} style={[look.item, props.destructive && look.destructive, props.disabled && look.disabled]}>
         {inside.toArray().map((part) => (typeof part === "string" ? <Text>{part}</Text> : part))}

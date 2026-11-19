@@ -224,7 +224,7 @@ export declare function TextInput(props: TextInputProps): Element
 
 export declare function render(code: () => Element): () => void
 
-export declare function Screen(props: { heading?: Element; action?: Element; back?: boolean; onBack?: () => void; children?: Element }): Element
+export declare function Screen(props: { heading?: Element; action?: Element; back?: boolean; onBack?: () => void; largeTitle?: boolean; children?: Element }): Element
 export declare function Section(props: { heading?: Element; children?: Element }): Element
 export declare function Split(props: { open?: boolean; onClose?: () => void; detail?: Element; children?: Element }): Element
 /** Where a window's Back and Forward go (`History`), which its screens draw in their bar. */
@@ -263,7 +263,7 @@ export declare function Row(props: {
 }): Element
 
 export type IconName =
-  | "calendar-blank" | "caret-down" | "caret-left" | "caret-right" | "caret-up-down" | "check" | "copy" | "corners-in"
+  | "arrow-elbow-down-left" | "calendar-blank" | "caret-down" | "caret-left" | "caret-right" | "caret-up-down" | "check" | "copy" | "corners-in"
   | "corners-out" | "device-mobile" | "devices" | "dots-three" | "file" | "gear-six" | "globe" | "hard-drives" | "magnifying-glass" | "minus" | "minus-circle"
   | "paperclip" | "pencil-simple" | "plus" | "plus-circle" | "robot" | "squares-four" | "trash" | "warning-circle" | "x"
 export declare function Icon(props: { name: IconName; along?: boolean }): Element
@@ -346,7 +346,7 @@ export declare function Sheet(props: { heading?: Element; open?: boolean; onClos
 
 /** Something that can be done, as the action panel lists it: what it says, what does it, the keys that do it too
  * (`["mod", "enter"]`), an icon, whether it can't be undone, whether it can't be done now, and its section. */
-export type Action = { label: string; onAction: () => void; keys?: string[]; icon?: IconName; destructive?: boolean; disabled?: boolean; section?: string }
+export type Action = { label: string; onAction: () => void; keys?: string[]; icon?: IconName; destructive?: boolean; disabled?: boolean; section?: string; menu?: boolean }
 export declare function Keys(props: { keys: string[] }): Element
 export declare function ActionPanel(props: { open: boolean; onOpenChange: (open: boolean) => void; actions: Action[] }): Element
 export declare function ActionBar(props: { start?: Element; actions?: Action[] }): Element

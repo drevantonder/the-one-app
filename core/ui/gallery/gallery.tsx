@@ -11,6 +11,7 @@ import images from "./images.scenes.tsx"
 import lists from "./lists.scenes.tsx"
 import live from "./live.scenes.tsx"
 import over from "./over.scenes.tsx"
+import screens from "./screens.scenes.tsx"
 import states from "./states.scenes.tsx"
 import styling from "./styling.scenes.tsx"
 import tabs from "./tabs.scenes.tsx"
@@ -25,7 +26,7 @@ const look = styles({
   alone: { padding: tokens.grid[4], gap: tokens.grid[4] },
 })
 
-const scenes: Scenes = { ...text, ...images, ...buttons, ...lists, ...fields, ...states, ...tabs, ...widgets, ...over, ...actions, ...live, ...styling }
+const scenes: Scenes = { ...text, ...images, ...buttons, ...lists, ...fields, ...states, ...tabs, ...widgets, ...over, ...actions, ...live, ...styling, ...screens }
 const draw = (scene: Scene) => (typeof scene === "function" ? scene() : scene.render())
 const named = () => {
   const to = link()
