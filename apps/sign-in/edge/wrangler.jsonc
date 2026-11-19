@@ -6,6 +6,8 @@
   // Its accounts: who has signed in, their passkeys, and the devices and assistants they let act as them. Its tables
   // are made by its migrations, which the edge's deploy applies (`generate.ts` writes Better Auth's).
   "d1_databases": [{ "binding": "DB", "database_name": "network-sign-in", "migrations_dir": "migrations" }],
+  // Its people, passkeys and devices are kept in the bucket every ten minutes, where they changed (`keep` in `auth.ts`).
+  "triggers": { "crons": ["*/10 * * * *"] },
   // Which version of it is deployed, which a discovery document cached from another is told from by (`worker.ts`).
   "version_metadata": { "binding": "VERSION" },
   // The apps that use this network's passkeys, and open the links of its listed in APP_LINKS, which iOS and Android

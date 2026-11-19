@@ -7,7 +7,7 @@
 import { env, WorkerEntrypoint } from "cloudflare:workers";
 import { requireMcpAuth } from "@better-auth/mcp";
 import { bytesToHex } from "@noble/hashes/utils.js";
-import { asked, assistant, at, BELIEVED, browserDevice, who, type Ask, type Auth } from "./auth.ts";
+import { asked, assistant, at, BELIEVED, browserDevice, keep, who, type Ask, type Auth } from "./auth.ts";
 
 export default {
   async fetch(request: Request, _env, ctx) {
@@ -19,6 +19,9 @@ export default {
     if (url.pathname === "/sign-in/ask") return ask(request, auth, url);
     if (url.pathname.startsWith("/sign-in/auth/") || url.pathname.startsWith("/.well-known/")) return auth.handler(request);
     return env.ASSETS.fetch(request);
+  },
+  async scheduled() {
+    await keep();
   },
 } satisfies ExportedHandler;
 

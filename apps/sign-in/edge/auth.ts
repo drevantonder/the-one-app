@@ -30,7 +30,7 @@ declare global {
       VERSION: WorkerVersionMetadata;
       OWN: {
         write(name: string, data: string): Promise<boolean>;
-        update(name: string, change: (was: string | null) => string): Promise<string>;
+        update(name: string, change: (was: string | null) => string | Promise<string>): Promise<string>;
         remove(name: string): Promise<void>;
       };
       NETWORK: {
@@ -165,6 +165,41 @@ async function secret() {
   const kept = await env.DB.prepare("select secret from secret").first<{ secret: string }>();
   if (!kept) throw new Error("The sign-in database has no secret: its migrations haven't been applied (`bun edge.js deploy`)");
   return kept.secret;
+}
+
+/**
+ * The tables that say who's in the network and what lets them in: its people, their passkeys, with each one's
+ * encrypted key, and their devices. They're kept in this app's own artifact as `accounts.json` (`keep`), so a backup
+ * of the bucket holds them (the Backups app). Sessions, tokens and the secret that signs them aren't: after a loss,
+ * people sign in again with their passkeys.
+ */
+const KEPT = ["user", "passkey", "device"] as const;
+
+/**
+ * Keeps the database's people, passkeys and devices in the bucket, as `KEPT` says, writing only what changed. A
+ * database with nobody in it, as one made anew after the old was lost, is given back what was kept, which is how a
+ * network restored from a backup gets its people back. The edge calls this every ten minutes (`wrangler.jsonc`).
+ */
+export async function keep() {
+  const anyone = await env.DB.prepare("select 1 from user limit 1").first();
+  await env.OWN.update("accounts.json", async (was) => {
+    if (!anyone && was) {
+      const kept: Record<string, Record<string, unknown>[]> = JSON.parse(was);
+      await env.DB.batch(
+        KEPT.flatMap((table) =>
+          kept[table].map((row) => {
+            const columns = Object.keys(row);
+            const sql = `insert into "${table}" (${columns.map((column) => `"${column}"`).join(", ")}) values (${columns.map(() => "?").join(", ")})`;
+            return env.DB.prepare(sql).bind(...Object.values(row));
+          }),
+        ),
+      );
+      console.log(`Gave sign-in's database back its ${kept.user.length} people, as kept in the bucket`);
+      return was;
+    }
+    const rows = await env.DB.batch(KEPT.map((table) => env.DB.prepare(`select * from "${table}" order by id`)));
+    return JSON.stringify(Object.fromEntries(KEPT.map((table, at) => [table, rows[at].results])));
+  });
 }
 
 /** Tells every server that whose a device is has changed, so each asks again. */
