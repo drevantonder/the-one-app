@@ -1,5 +1,6 @@
-// Ours, in place of Flutter's FlutterCodecs.h and FlutterChannels.h, for what FlutterTextInputPlugin uses of them: a
-// method channel whose calls go to and come from the native host's Rust as JSON (`platform/mac/text_input.mm`).
+// Ours, in place of Flutter's FlutterCodecs.h and FlutterChannels.h, for what its text input plugins use of them: a
+// method channel whose calls go to and come from the native host's Rust as JSON (`platform/mac/text_input.mm`), and
+// the method calls an iPhone's plugin takes (`platform/ios/text_input.mm`).
 
 #import <Foundation/Foundation.h>
 

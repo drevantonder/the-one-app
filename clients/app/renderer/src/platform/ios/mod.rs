@@ -3,7 +3,9 @@
 //! `CAMetalLayer` wgpu draws into. The app hands each of tao's events to `event`, on the main thread, which
 //! runs the jobs sent to the windows' thread (`Native::run`), with tao's event loop at hand to open windows in, and
 //! gives each window what tao says of it: a finger, its size and safe area, the app going to the background and back.
-//! What tao doesn't say is heard on the view itself: the system going light or dark (`traitCollectionDidChange:`).
+//! What tao doesn't say is heard on the view itself: the system going light or dark (`traitCollectionDidChange:`), and
+//! the keyboard coming and going, which its page keeps clear of as it does the safe area. Typing goes through Flutter's
+//! iOS text input plugin (`text_input.mm`), which the screen speaks Flutter's text input calls to, as on every platform.
 //!
 //! A finger is the pointer, as a phone's browser has it: a tap presses, and one that moves further than
 //! UIScrollView's slop pans what scrolls under it, which carries on as it's let go, slowing as a UIScrollView
@@ -18,22 +20,25 @@ use std::time::{Duration, Instant};
 
 use dispatch2::{DispatchQueue, DispatchTime};
 use objc2::rc::Retained;
+use std::ffi::{CStr, CString, c_char, c_void};
+
 use objc2::runtime::{AnyClass, NSObjectProtocol};
-use objc2::{ClassType, MainThreadMarker, MainThreadOnly, define_class, msg_send};
+use objc2::{ClassType, MainThreadMarker, MainThreadOnly, define_class, msg_send, sel};
 use objc2_core_foundation::CGAffineTransform;
-use objc2_foundation::NSString;
+use objc2_foundation::{NSNotification, NSNotificationCenter, NSString};
 use objc2_quartz_core::CAMetalLayer;
 use objc2_ui_kit::{
     UIAccessibilityIsReduceMotionEnabled, UIApplication, UIPasteboard,
-    UITraitCollection, UITraitEnvironment, UIUserInterfaceStyle, UIView, UIWindow,
+    UIKeyboardDidChangeFrameNotification, UIKeyboardDidHideNotification, UITraitCollection, UITraitEnvironment,
+    UIUserInterfaceStyle, UIView, UIViewController, UIWindow,
 };
 use tao::event::{Event, TouchPhase, WindowEvent};
 use tao::event_loop::EventLoopWindowTarget;
 use tao::platform::ios::{WindowBuilderExtIOS, WindowExtIOS};
 
-use super::{Job, WindowId, WindowOptions, Windows};
+use super::{Input, Job, WindowId, WindowOptions, Windows};
 use crate::Appearance;
-use crate::editing;
+use crate::editing::{self, TextInput, TextInputClient};
 use crate::geometry::{DevicePixels, Edges, Pixels, Point, Size, point};
 
 /// Where a job is sent: the queue `event` runs, and what wakes tao's event loop to run it.
@@ -132,6 +137,8 @@ thread_local! {
     /// Each finger on a window, and each window's scroll carrying on after its finger let go.
     static TOUCHES: RefCell<HashMap<WindowId, Touch>> = RefCell::new(HashMap::new());
     static FLINGS: RefCell<HashMap<WindowId, Fling>> = RefCell::new(HashMap::new());
+    /// What each window's text input plugin said, until the windows hear it: it can say it while they're in use.
+    static SAID: RefCell<Vec<(WindowId, TextInputClient)>> = const { RefCell::new(Vec::new()) };
 }
 
 /// One of tao's events, on the main thread: the jobs waiting run, and a native window hears what's said of it. →
@@ -218,9 +225,13 @@ fn with_windows<R>(f: impl FnOnce(&mut Windows) -> R) -> Option<R> {
                 window.dirty = true;
             }
         }
+        for (id, said) in SAID.with(|said| std::mem::take(&mut *said.borrow_mut())) {
+            windows.input(id, 0, Input::TextInputClient(said));
+        }
         let result = f(windows);
-        // Its page keeps clear of what its safe area leaves out, as tao says it now: the first tao says, as the window
-        // is made, comes before it's one of these.
+        // Its page keeps clear of what its safe area and the keyboard leave out, as they are now: the first tao says,
+        // as the window is made, comes before it's one of these. The field the keyboard came up for shows whole above
+        // it.
         for window in windows.windows.values_mut() {
             let insets = window.parts[0].native.insets();
             if let Ok(screen) = &mut window.screen
@@ -228,6 +239,9 @@ fn with_windows<R>(f: impl FnOnce(&mut Windows) -> R) -> Option<R> {
             {
                 screen.insets = insets;
                 window.dirty = true;
+                if let Some(focused) = screen.focused() {
+                    screen.reveal(focused);
+                }
             }
         }
         fling(windows);
@@ -275,7 +289,14 @@ impl Display {
         IDS.with(|ids| ids.borrow_mut().insert(window.id(), id));
         VIEWS.with(|views| views.borrow_mut().insert(view, id));
         let layer = Retained::as_ptr(&ui_view.layer()) as usize;
-        Ok(NativeWindow { window, layer, behind })
+        let controller = window.ui_view_controller().cast::<UIViewController>();
+        let text_input = Plugin(unsafe { text_input_new(controller, id as *mut c_void, said) });
+        // The keyboard came, went or changed: what it covers is read from the view's keyboard guide.
+        let center = NSNotificationCenter::defaultCenter();
+        for name in unsafe { [UIKeyboardDidChangeFrameNotification, UIKeyboardDidHideNotification] } {
+            unsafe { center.addObserver_selector_name_object(ui_view.as_ref(), sel!(keyboardChanged:), Some(name), None) };
+        }
+        Ok(NativeWindow { window, layer, behind, text_input })
     }
 
     pub fn close(&self, native: &NativeWindow) {
@@ -316,9 +337,13 @@ impl Display {
     /// Its title row over its page: none, where the system's status bar is above the page.
     pub fn set_title_row(&self, _: &NativeWindow, _: Option<crate::view::TitleRow>) {}
 
-    /// Flutter's text input calls, which no keyboard takes yet: an iPhone's window doesn't type until its bridge is
-    /// Flutter's (`FlutterTextInputPlugin`), so its apps open natively only where they're asked to.
-    pub fn text_input(&self, _: &NativeWindow, _: &[crate::editing::TextInput]) {}
+    /// Tells window `native`'s text input plugin what its screen says (`editing::TextInput`).
+    pub fn text_input(&self, native: &NativeWindow, calls: &[TextInput]) {
+        for (method, arguments) in calls.iter().map(TextInput::call) {
+            let (method, arguments) = (cstring(method), cstring(&arguments.to_string()));
+            unsafe { text_input_call(native.text_input.0, method.as_ptr(), arguments.as_ptr()) };
+        }
+    }
 
     pub fn flush(&self) {}
 
@@ -344,6 +369,7 @@ pub struct NativeWindow {
     window: tao::window::Window,
     layer: usize,
     behind: Option<Retained<UIWindow>>,
+    text_input: Plugin,
 }
 
 /// A window as `Display::arrange` would place it, which a phone's never does.
@@ -401,7 +427,8 @@ impl NativeWindow {
     pub fn resized(&self, _: Size<DevicePixels>) {}
 
     /// What its safe area leaves out (the status bar, the Dynamic Island, the home indicator), as tao says it: the
-    /// room between its inner rectangle and its outer one, in points.
+    /// room between its inner rectangle and its outer one, in points; and at its bottom what the keyboard covers, as
+    /// its view's keyboard guide says it, where that's more.
     fn insets(&self) -> Edges<f32> {
         let scale = self.window.scale_factor();
         let (Ok(inner), Ok(outer)) = (self.window.inner_position(), self.window.outer_position()) else { return Edges::default() };
@@ -411,7 +438,9 @@ impl NativeWindow {
         let right = outer_size.width as f64 - inner_size.width as f64 - left;
         let bottom = outer_size.height as f64 - inner_size.height as f64 - top;
         let points = |pixels: f64| (pixels / scale).max(0.0) as f32;
-        Edges { top: points(top), right: points(right), bottom: points(bottom), left: points(left) }
+        let view = unsafe { &*(self.window.ui_view() as *const UIView) };
+        let keyboard = (view.bounds().size.height - view.keyboardLayoutGuide().layoutFrame().origin.y).max(0.0) as f32;
+        Edges { top: points(top), right: points(right), bottom: points(bottom).max(keyboard), left: points(left) }
     }
 }
 
@@ -430,6 +459,12 @@ define_class!(
         #[unsafe(method(layerClass))]
         fn layer_class() -> &'static AnyClass {
             CAMetalLayer::class()
+        }
+
+        /// The keyboard came, went or changed (`Display::open`): its window's insets are read again.
+        #[unsafe(method(keyboardChanged:))]
+        fn keyboard_changed(&self, _: &NSNotification) {
+            wake();
         }
 
         /// The system went light or dark: tao doesn't say it on an iPhone.
@@ -590,3 +625,33 @@ fn touch_at(screen: &mut crate::Screen, native: &NativeWindow, id: WindowId, fin
     }
 }
 
+
+/// A window's text input plugin (`text_input.mm`): Flutter's, as a C interface.
+struct Plugin(*mut c_void);
+
+impl Drop for Plugin {
+    fn drop(&mut self) {
+        unsafe { text_input_free(self.0) };
+    }
+}
+
+unsafe extern "C" {
+    fn text_input_new(controller: *mut UIViewController, context: *mut c_void, send: extern "C" fn(*mut c_void, *const c_char, *const c_char)) -> *mut c_void;
+    fn text_input_free(plugin: *mut c_void);
+    fn text_input_call(plugin: *mut c_void, method: *const c_char, arguments: *const c_char);
+}
+
+/// What window `context`'s text input plugin says, as Flutter's text input channel's method calls, for its screen,
+/// once the windows aren't in use.
+extern "C" fn said(context: *mut c_void, method: *const c_char, arguments: *const c_char) {
+    let method = unsafe { CStr::from_ptr(method) }.to_string_lossy();
+    let arguments: serde_json::Value = serde_json::from_slice(unsafe { CStr::from_ptr(arguments) }.to_bytes()).unwrap_or_default();
+    if let Some(said) = TextInputClient::from_call(&method, &arguments) {
+        SAID.with(|queue| queue.borrow_mut().push((context as WindowId, said)));
+        wake();
+    }
+}
+
+fn cstring(text: &str) -> CString {
+    CString::new(text.replace('\0', "")).expect("no NUL in it")
+}

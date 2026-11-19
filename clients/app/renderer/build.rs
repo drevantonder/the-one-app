@@ -1,5 +1,5 @@
-//! A Mac's and Windows' text input is Flutter's (`flutter/`, the plugin and its `TextInputModel`), built here with the
-//! `cc` crate as Flutter's engine builds it, with the window's side of it (`src/platform/<os>/text_input.*`).
+//! A Mac's, an iPhone's and Windows' text input is Flutter's (`flutter/`, the plugin and its `TextInputModel`), built
+//! here with the `cc` crate as Flutter's engine builds it, with the window's side of it (`src/platform/<os>/text_input.*`).
 //!
 //! The X11 window (`platform/linux/x11.rs`) links xkbcommon's X11 half by its unversioned name (`libxkbcommon-x11.so`), which a Linux
 //! distribution ships only in its development package (Debian's and Ubuntu's `libxkbcommon-x11-dev`), while the library
@@ -11,6 +11,10 @@ fn main() {
     println!("cargo::rerun-if-changed=flutter");
     match std::env::var("CARGO_CFG_TARGET_OS").as_deref() {
         Ok("macos") => text_input("src/platform/mac/text_input.mm", &["flutter/flutter/shell/platform/darwin/macos/framework/Source/FlutterTextInputPlugin.mm"]),
+        Ok("ios") => text_input(
+            "src/platform/ios/text_input.mm",
+            &["flutter/flutter/shell/platform/darwin/ios/framework/Source/FlutterTextInputPlugin.mm", "flutter/flutter/fml/platform/darwin/string_range_sanitization.mm"],
+        ),
         Ok("windows") => text_input(
             "src/platform/windows/text_input.cc",
             &["flutter/flutter/shell/platform/windows/text_input_plugin.cc", "flutter/flutter/shell/platform/windows/text_input_manager.cc"],
@@ -26,10 +30,20 @@ fn text_input(ours: &str, plugin: &[&str]) {
     let common = ["flutter/flutter/fml/string_conversion.cc", "flutter/flutter/shell/platform/common/text_input_model.cc", "flutter/flutter/shell/platform/common/text_editing_delta.cc"];
     let mut build = cc::Build::new();
     build.cpp(true).std("c++20").include("flutter").files(common).files(plugin).file(ours).warnings(false);
-    if std::env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("macos") {
+    let os = std::env::var("CARGO_CFG_TARGET_OS").unwrap_or_default();
+    if os == "macos" {
         build.flag("-fobjc-arc");
         println!("cargo::rustc-link-lib=framework=Cocoa");
         println!("cargo::rustc-link-lib=framework=QuartzCore");
+    } else if os == "ios" {
+        // What the iOS plugin has of Flutter's engine that Swift makes there, and ICU's one call, which the system's
+        // ICU answers (`src/platform/ios/include`).
+        println!("cargo::rerun-if-changed=src/platform/ios/include");
+        build.flag("-fobjc-arc").include("src/platform/ios/include");
+        // FlutterMacros.h's, which mark what Flutter's framework exports and check it's built with ARC, as it is.
+        build.define("FLUTTER_DARWIN_EXPORT", Some("")).define("FLUTTER_ASSERT_ARC", Some(""));
+        println!("cargo::rustc-link-lib=framework=UIKit");
+        println!("cargo::rustc-link-lib=icucore");
     } else {
         // std::wstring_convert, which Flutter's fml converts UTF-8 and UTF-16 with, is deprecated in C++17; and
         // MSVC's library, which cargo-xwin brings, asks for a newer clang than a Linux machine may have.

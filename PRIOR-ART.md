@@ -48,7 +48,8 @@ None of these is chosen. Each is named so it's weighed before anything like it i
   - **Flutter's text input plugins** (BSD-3, 19 November 2026): typing on every platform goes through Flutter's own
     bridge, which keeps the input's editing state itself and speaks Flutter's text input protocol (set client, editing
     state, caret and marked text rects, editable transform, actions) with our editing model: Android's
-    `TextInputPlugin`, the Mac's `FlutterTextInputPlugin` (Objective-C, in place of GPUI's `NSTextInputClient`) and
+    `TextInputPlugin`, the Mac's `FlutterTextInputPlugin` (Objective-C, in place of GPUI's `NSTextInputClient`), the
+    iPhone's `FlutterTextInputPlugin` (Objective-C, with its keyboard, autocorrection and Password AutoFill) and
     Windows' `TextInputPlugin` with its IMM32 `TextInputManager` (C++, in place of GPUI's), with its shared
     `TextInputModel`, built with the `cc` crate and their engine connections replaced by a small C interface. Linux
     keeps GPUI's XIM: Flutter's GTK plugin needs GTK's input method context, which our X11 window hasn't.
