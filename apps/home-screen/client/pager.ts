@@ -1,10 +1,11 @@
 // Paging as a phone's Home Screen pages, by hand rather than by the browser's scroll snapping. On an iPhone, WebKit's
 // snapping creeps for most of a second after a flick, turns a page on any slow release short of half way, and has no
 // give at the first and last owner. Here, while a finger is down the pages are the finger, one to one, and past the
-// ends they give with resistance; once it lifts, a spring seeded with the finger's speed takes them to a page: the
-// next if it was flicked or dragged past half way, else back where they were. A finger that lands while they move
+// ends they give with resistance; once it lifts, a spring seeded with the finger's speed takes them to a page: the one
+// its motion would have carried them nearest to, as an iPhone's Home Screen decides, so a short quick flick and a slow
+// drag past half way both turn it. A finger that lands while they move
 // catches them where they are. For whoever asked for less motion, they cross-fade to where they're going instead.
-import { createVelocityTracker, reducedMotion } from "ui"
+import { createVelocityTracker, projected, reducedMotion } from "ui"
 
 /** One axis of the pages: where they are, in points, where they're going, and how fast. `draw` puts them there, and
  * `fade`, where it's given, how opaque they are as they cross-fade. */
@@ -22,8 +23,6 @@ export const spring = (draw: (value: number) => void, fade?: (opacity: number) =
 // lands, it doesn't wobble.
 const STIFFNESS = 322
 const DAMPING = 2 * Math.sqrt(STIFFNESS)
-/// A finger moving faster than this, in points a second, as it lifts, has flicked.
-const FLICK = 300
 
 const moving = new Set<Spring>()
 let last = 0
@@ -99,10 +98,10 @@ export function stop(one: Spring) {
 export const give = (over: number, size: number) => (over * size * 0.55) / (size + 0.55 * Math.abs(over))
 
 /// The page the pages go to as a finger lifts, from `from`, the one they were on when it landed: they're at `at`, in
-/// pages, moving at `velocity` points a second. A flick goes on the way it was going; otherwise the nearest. One page
-/// at most, as a phone's.
-export function settle(from: number, at: number, velocity: number, pages: number) {
-  const to = Math.abs(velocity) > FLICK ? (velocity > 0 ? Math.ceil(at) : Math.floor(at)) : Math.round(at)
+/// pages of `size` points, moving at `velocity` points a second. The page nearest where its motion would carry them,
+/// one at most, as a phone's.
+export function settle(from: number, at: number, velocity: number, pages: number, size: number) {
+  const to = Math.round(at + projected(velocity / 1000) / size)
   return Math.max(0, Math.min(pages - 1, from - 1 > to ? from - 1 : Math.min(from + 1, to)))
 }
 

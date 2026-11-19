@@ -151,40 +151,45 @@ export function createPaging(props: { owners: Owner[] }, layout: Screens) {
       stop(sideways(owner))
       swipe = { id: event.pointerId, x: event.clientX, y: event.clientY, owner, from: 0, base: 0, moves: createVelocityTracker() }
     },
-    onPointerMove: (event: Pressed) => {
-      finger.pointer = { x: event.clientX, y: event.clientY }
-      if (!swipe || event.pointerId !== swipe.id) return
-      if (!swipe.axis) {
-        const [dx, dy] = [event.clientX - swipe.x, event.clientY - swipe.y]
-        if (Math.hypot(dx, dy) < 10) return
-        const axis = Math.abs(dx) > Math.abs(dy) ? "x" : "y"
-        // A hold that began has the finger, and up and down is the page's own where it scrolls, and nobody's while
-        // editing, but a second finger's while something's carried: an app, which goes to another owner, not a widget.
-        const free = home.getSnapshot().matches("nothing") || home.getSnapshot().matches({ category: "closing" }) || home.getSnapshot().matches({ editing: "still" }) || (carrying() && swipe.id !== finger.carrier)
-        const vertical = carrying() ? !home.getSnapshot().context.held?.item?.widget : !home.getSnapshot().matches("editing")
-        const refused = !free || (axis === "y" && (!vertical || kindOf(swipe.owner) !== "home"))
-        // Either way the pages go on: all of them, or the way the finger doesn't swipe, which it takes at once below.
-        slide(home.getSnapshot().context.at, true)
-        if (refused) return void (swipe = undefined)
-        const moving = axis === "x" ? sideways(swipe.owner) : down
-        const size = axis === "x" ? pitch() : height()
-        Object.assign(swipe, { axis, x: event.clientX, y: event.clientY, base: moving.value, from: Math.round(moving.value / size) })
-      }
-      const x = swipe.axis === "x"
-      const moved = x ? -(event.clientX - swipe.x) : -(event.clientY - swipe.y)
-      const end = x ? (reach(swipe.owner) - 1) * pitch() : (owned().length - 1) * height()
-      const size = x ? pitch() : height()
-      const value = swipe.base + moved
-      swipe.moves.add(event.timeStamp, value)
-      jump(x ? sideways(swipe.owner) : down, value < 0 ? give(value, size) : value > end ? end + give(value - end, size) : value)
-    },
+    onPointerMove: (event: Pressed) => follow(event, true),
     onPointerUp: (event: Pressed) => lift(event, false),
     onPointerCancel: (event: Pressed) => lift(event, true),
   }
+  /// The pages follow a finger, its moves `tracked` for how fast it goes as it lifts.
+  const follow = (event: Pressed, tracked: boolean) => {
+    finger.pointer = { x: event.clientX, y: event.clientY }
+    if (!swipe || event.pointerId !== swipe.id) return
+    if (!swipe.axis) {
+      const [dx, dy] = [event.clientX - swipe.x, event.clientY - swipe.y]
+      if (Math.hypot(dx, dy) < 10) return
+      const axis = Math.abs(dx) > Math.abs(dy) ? "x" : "y"
+      // A hold that began has the finger, and up and down is the page's own where it scrolls, and nobody's while
+      // editing, but a second finger's while something's carried: an app, which goes to another owner, not a widget.
+      const free = home.getSnapshot().matches("nothing") || home.getSnapshot().matches({ category: "closing" }) || home.getSnapshot().matches({ editing: "still" }) || (carrying() && swipe.id !== finger.carrier)
+      const vertical = carrying() ? !home.getSnapshot().context.held?.item?.widget : !home.getSnapshot().matches("editing")
+      const refused = !free || (axis === "y" && (!vertical || kindOf(swipe.owner) !== "home"))
+      // Either way the pages go on: all of them, or the way the finger doesn't swipe, which it takes at once below.
+      slide(home.getSnapshot().context.at, true)
+      if (refused) return void (swipe = undefined)
+      const moving = axis === "x" ? sideways(swipe.owner) : down
+      const size = axis === "x" ? pitch() : height()
+      Object.assign(swipe, { axis, x: event.clientX, y: event.clientY, base: moving.value, from: Math.round(moving.value / size) })
+    }
+    const x = swipe.axis === "x"
+    const moved = x ? -(event.clientX - swipe.x) : -(event.clientY - swipe.y)
+    const end = x ? (reach(swipe.owner) - 1) * pitch() : (owned().length - 1) * height()
+    const size = x ? pitch() : height()
+    const value = swipe.base + moved
+    if (tracked) swipe.moves.add(event.timeStamp, value)
+    jump(x ? sideways(swipe.owner) : down, value < 0 ? give(value, size) : value > end ? end + give(value - end, size) : value)
+  }
   const lift = (event: Pressed, cancelled: boolean) => {
     if (!swipe || event.pointerId !== swipe.id) return
-    // Where the finger lifted is where it last was: moves come once a frame, so the last may be short of it.
-    if (!cancelled && swipe.axis) swipes.onPointerMove(event)
+    // Where the finger lifted is where it last was: moves come once a frame, so the last may be short of it. Its lift
+    // is no move of its own, as Android's VelocityTracker ignores ACTION_UP: it's at the last move's place, later, and
+    // taken as one it read a quick swipe as stopping, which went back rather than on (19 Nov, on an iPhone: a lift
+    // 35 ms after its last move made 670 points a second read -290).
+    if (!cancelled && swipe.axis) follow(event, false)
     const done = swipe
     swipe = undefined
     // A finger that didn't swipe lets go of the pages it caught, and a second finger's tap on an app stacks it on
@@ -200,13 +205,13 @@ export function createPaging(props: { owners: Owner[] }, layout: Screens) {
     const { at } = home.getSnapshot().context
     if (done.axis === "x") {
       const moving = sideways(done.owner)
-      const screen = settle(done.from, moving.value / pitch(), velocity, reach(done.owner))
+      const screen = settle(done.from, moving.value / pitch(), velocity, reach(done.owner), pitch())
       glide(moving, screen * pitch(), velocity)
       // What's carried goes to the page swiped to, as it does held at the edge; there the finger places it.
       if (carrying() && screen !== at.screen) home.send({ type: "flip", by: screen > at.screen ? 1 : -1 })
       else home.send({ type: "settled", at: { owner: done.owner, screen } })
     } else {
-      const owner = settle(done.from, down.value / height(), velocity, owned().length)
+      const owner = settle(done.from, down.value / height(), velocity, owned().length, height())
       glide(down, owner * height(), velocity)
       const by = owner > at.owner ? 1 : -1
       if (carrying() && owner !== at.owner) home.send({ type: "flip", owner: by, editing: draft(owned()[owner], owner) })
@@ -262,7 +267,7 @@ export function createPaging(props: { owners: Owner[] }, layout: Screens) {
     }
     gesture.done = true
     const velocity = isEnding ? 0 : axisVelocity[0] * 1000
-    const screen = settle(gesture.from, moving.value / pitch(), velocity, stops(gesture.owner))
+    const screen = settle(gesture.from, moving.value / pitch(), velocity, stops(gesture.owner), pitch())
     if (turnsByHost()) turn(gesture.owner, screen * pitch(), velocity)
     else glide(moving, screen * pitch(), velocity)
     home.send({ type: "settled", at: { owner: gesture.owner, screen } })
