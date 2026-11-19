@@ -114,8 +114,8 @@ const look = styles({
   field: { width: "100%", font: tokens.type.medium, color: tokens.colour.label },
 })
 
-/** The action bars drawn, the last the one that hears the keys. */
-const bars: object[] = []
+/** The action bars drawn, the last the one that hears the keys, and the only one that's drawn: a window has one foot. */
+const [bars, setBars] = createSignal<object[]>([])
 
 /** Whether it's a Mac, whose keys are ⌘ where a PC's are Ctrl, as its client says. */
 const [mac, setMac] = createSignal(false)
@@ -251,15 +251,16 @@ export function ActionBar(props: { start?: JSX.Element; actions?: Action[] }) {
   // The first that can be done is Return's unless it says otherwise.
   const keysOf = (action: Action) => action.keys ?? (action.label === primary()?.label ? ["enter"] : [])
   onSettled(ask)
-  // Only the one drawn last hears the keys: in a list beside what it opens, what's open's.
+  // Only the one drawn last hears the keys, and is drawn: in a list beside what it opens, what's open's.
   const me = {}
   onSettled(() => {
-    bars.push(me)
-    return () => void bars.splice(bars.indexOf(me), 1)
+    setBars((now) => [...now, me])
+    return () => setBars((now) => now.filter((one) => one !== me))
   })
+  const last = () => bars().at(-1) === me
   onSettled(() =>
     keydown((event) => {
-      if (!actions().length || bars.at(-1) !== me) return
+      if (!actions().length || !last()) return
       if (pressed(["mod", "k"], event)) return void (event.preventDefault(), setOpen(!open()))
       if (open()) return
       const action = actions().find((one) => !one.disabled && keysOf(one).length && pressed(keysOf(one), event))
@@ -267,7 +268,7 @@ export function ActionBar(props: { start?: JSX.Element; actions?: Action[] }) {
     }),
   )
   return (
-    <>
+    <Show when={last()}>
       <View role="toolbar" style={look.bar}>
         <Show when={props.start}>
           <View style={[look.pill, look.start]}>{props.start}</View>
@@ -291,6 +292,6 @@ export function ActionBar(props: { start?: JSX.Element; actions?: Action[] }) {
         </Show>
       </View>
       <ActionPanel open={open()} onOpenChange={setOpen} actions={actions()} />
-    </>
+    </Show>
   )
 }
