@@ -651,7 +651,8 @@ impl Painter<'_> {
         self.intersections.extend(&layer.intersections);
         self.drag_regions.extend(layer.drag_regions.iter().map(|(id, bounds)| (*id, moved(*bounds).intersect(&mask))));
         self.kept_regions.extend(layer.kept_regions.iter().map(|bounds| moved(*bounds).intersect(&mask)));
-        if let Some(glass) = self.glass.as_mut().filter(|_| opacity > 0.0) {
+        // A layer fading has no glass of the system's, which can't fade (`paint`).
+        if let Some(glass) = self.glass.as_mut().filter(|_| opacity >= 1.0) {
             glass.extend(layer.glass.iter().map(|pane| crate::platform::Glass { bounds: moved(pane.bounds).intersect(&mask), radius: pane.radius * grown, opacity: pane.opacity * opacity }));
         }
         self.wanted.extend(layer.wanted.iter().cloned());
@@ -814,17 +815,17 @@ impl Painter<'_> {
                 Some(false) => self.kept_regions.push(bounds.intersect(&mask)),
                 None => {}
             }
-            if let (Some((_, _, true)), Some(glass)) = (look.material, self.glass.as_mut()) {
-                if opacity > 0.0 {
-                    glass.push(crate::platform::Glass { bounds: bounds.intersect(&mask), radius: radii.top_left, opacity });
-                    if let Some(fill) = self.fill {
-                        self.quad(bounds, mask, fill, Edges::default(), Hsla::default(), radii, false, opacity);
-                    }
+            // The system's own glass is a pane of its own under the page, which can't fade: what's fading is drawn
+            // with the renderer's own, which does, as it goes (an owner pill fading off with its pages).
+            if let (Some((_, _, true)), Some(glass)) = (look.material, self.glass.as_mut().filter(|_| opacity >= 1.0)) {
+                glass.push(crate::platform::Glass { bounds: bounds.intersect(&mask), radius: radii.top_left, opacity });
+                if let Some(fill) = self.fill {
+                    self.quad(bounds, mask, fill, Edges::default(), Hsla::default(), radii, false, opacity);
                 }
             } else if let Some((blur, saturate, _)) = look.material {
                 self.scene.insert_primitive(Backdrop {
                     order: 0,
-                    pad: 0,
+                    opacity,
                     blur: ScaledPixels(blur * transform.scale * self.scale),
                     saturation: saturate,
                     bounds: bounds.scale_to(self.scale),

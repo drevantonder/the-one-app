@@ -1274,7 +1274,7 @@ fn fs_poly_sprite(input: PolySpriteVarying) -> @location(0) vec4<f32> {
 
 struct Backdrop {
     order: u32,
-    pad: u32,
+    opacity: f32,
     blur: f32,
     saturation: f32,
     bounds: Bounds,
@@ -1360,7 +1360,7 @@ fn fs_backdrop(input: BackdropVarying) -> @location(0) vec4<f32> {
     // Saturated as CSS's `saturate()`: away from its luminance, by the factor.
     let luminance = dot(sample.rgb, GRAYSCALE_FACTORS);
     let color = vec4<f32>(clamp(mix(vec3<f32>(luminance), sample.rgb, backdrop.saturation), vec3<f32>(0.0), vec3<f32>(1.0)), 1.0);
-    return blend_color(color, saturate(0.5 - distance));
+    return blend_color(color, saturate(0.5 - distance) * backdrop.opacity);
 }
 
 // --- rasters (ours: a layer drawn once into a texture of its own, and drawn as that, as a compositor draws one) --- //

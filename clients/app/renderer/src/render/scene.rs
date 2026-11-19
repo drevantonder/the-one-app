@@ -580,7 +580,8 @@ impl From<PolychromeSprite> for Primitive {
 #[repr(C)]
 pub(crate) struct Backdrop {
     pub order: DrawOrder,
-    pub pad: u32,
+    /// How much of the blur shows over what's behind, as what it's on fades.
+    pub opacity: f32,
     pub blur: ScaledPixels,
     pub saturation: f32,
     pub bounds: Bounds<ScaledPixels>,
