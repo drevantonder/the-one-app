@@ -1637,7 +1637,11 @@ struct Kept {
 
 impl Default for Retained {
     fn default() -> Retained {
-        Retained { taffy: TaffyTree::new(), kept: HashMap::new(), fixed: HashSet::new(), conditions: None }
+        // Laid out in fractions of a point, as GPUI's and Flutter's layouts are, not rounded to whole points: what grows
+        // or moves by its layout (a card's width) moves its contents with it smoothly, a frame at a time.
+        let mut taffy = TaffyTree::new();
+        taffy.disable_rounding();
+        Retained { taffy, kept: HashMap::new(), fixed: HashSet::new(), conditions: None }
     }
 }
 
