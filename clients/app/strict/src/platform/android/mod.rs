@@ -29,7 +29,7 @@ use super::{Input, Job, WindowId, WindowOptions, Windows};
 use crate::geometry::{DevicePixels, Pixels, Point, Size, point};
 use crate::tree::Id;
 use crate::Appearance;
-use crate::editing::{self, Composing, Selection};
+use crate::editing::{self, Composing, Selection, TextInputClient};
 
 /// Where a job is sent: the UI thread's queue, and the file that wakes its looper.
 #[derive(Clone)]
@@ -182,7 +182,7 @@ impl Display {
         })
         .ok_or_else(|| anyhow::anyhow!("the activity didn't make a view"))?;
         let density = java(|env, host| env.call_static_method(<&JClass>::from(host.as_obj()), "density", "()F", &[])?.f()).unwrap_or(1.0);
-        Ok(NativeWindow { view, surface: None, device: Cell::new(Size { width: DevicePixels(1), height: DevicePixels(1) }), density, a11y: None, keyboard: None, revealed: None })
+        Ok(NativeWindow { view, surface: None, device: Cell::new(Size { width: DevicePixels(1), height: DevicePixels(1) }), density, a11y: None, revealed: None })
     }
 
     pub fn close(&self, window: &NativeWindow) {
@@ -211,8 +211,13 @@ impl Display {
     /// Its title row over its page: none here, where the system's own title bar is above the page and moves the window.
     pub fn set_title_row(&self, _: &NativeWindow, _: Option<crate::view::TitleRow>) {}
 
-    /// Android's text input plugin is told by `keyboard`, as its view's calls change the screen.
-    pub fn text_input(&self, _: &NativeWindow, _: &[crate::editing::TextInput]) {}
+    /// Tells window `window`'s text input plugin (`TextInputPlugin`, through `StrictView.apply`) Flutter's method calls.
+    pub fn text_input(&self, window: &NativeWindow, calls: &[crate::editing::TextInput]) {
+        for call in calls {
+            let (method, args) = call.call();
+            window.apply(json!({"method": method, "args": args}));
+        }
+    }
 
     pub fn flush(&self) {}
 
@@ -229,8 +234,6 @@ pub struct NativeWindow {
     device: Cell<Size<DevicePixels>>,
     density: f32,
     a11y: Option<a11y::A11y>,
-    /// The field the keyboard is for and its state as the keyboard last had it, so only a change is sent.
-    keyboard: Option<(Id, editing::Value)>,
     /// The field last scrolled into view, and the size the window was then.
     revealed: Option<(Id, Size<DevicePixels>)>,
 }
@@ -286,31 +289,20 @@ impl rwh::HasDisplayHandle for NativeWindow {
     }
 }
 
-/// Tells window `id`'s view what the keyboard is to do: show for a field that now has the keyboard, take a state the
-/// app gave its field, or hide, as the screen's focus and editing state have changed since it was last told.
+/// Tells window `id`'s text input plugin what changed since it was told (`Screen::text_input`), and shows the input
+/// with the keyboard whole, as it takes the keyboard and as the keyboard coming up makes the window shorter.
 fn keyboard(windows: &mut Windows, id: WindowId) {
     let Some(window) = windows.windows.get_mut(&id) else { return };
     let Ok(screen) = &mut window.screen else { return };
-    let field = screen.focused().zip(screen.editing());
-    let told = window.native.keyboard.clone();
-    let command = match (&field, &told) {
-        (Some((focused, editing)), Some((was, sent))) if focused == was => (editing != sent).then(|| json!({"state": editing})),
-        (Some((focused, editing)), _) => Some(json!({"focus": screen.field(*focused), "state": editing})),
-        (None, Some(_)) => Some(json!({"blur": true})),
-        (None, None) => None,
-    };
-    // The field shows whole, as it takes the keyboard and as the keyboard coming up makes the window shorter.
-    let revealing = field.as_ref().map(|(focused, _)| (*focused, window.native.device_size()));
+    let revealing = screen.focused().filter(|_| screen.editing().is_some()).map(|focused| (focused, window.native.device_size()));
     if revealing.is_some() && revealing != window.native.revealed {
         window.native.revealed = revealing;
         if revealing.is_some_and(|(focused, _)| screen.reveal(focused)) {
             window.dirty = true;
         }
     }
-    window.native.keyboard = field;
-    if let Some(command) = command {
-        window.native.apply(command);
-    }
+    let calls = screen.text_input(&mut window.text_input);
+    windows.display.text_input(&window.native, &calls);
 }
 
 /// A finger, as the view's MotionEvent says it, in logical pixels: where it landed, where it was last, whether it's
@@ -505,7 +497,7 @@ pub extern "system" fn Java_app_theone_strict_StrictView_nativeTouch(_: JNIEnv, 
                     screen.pointer_up(at, 0);
                     // A tap in the field that has the keyboard brings it up again, if it went.
                     if touch.on_input && was.is_some() && screen.focused() == was {
-                        window.native.apply(json!({"show": true}));
+                        windows.display.text_input(&window.native, &[editing::TextInput::Show]);
                     }
                 }
                 _ => {
@@ -566,10 +558,7 @@ pub extern "system" fn Java_app_theone_strict_StrictView_nativeEditingState(
             composing: (composing_start >= 0 && composing_end > composing_start).then(|| Composing { start: at(composing_start), end: at(composing_end) }),
             text,
         };
-        let field = field as Id;
-        screen.set_editing(field, &value);
-        // What the keyboard has, so it isn't told it again.
-        window.native.keyboard = screen.focused().filter(|focused| *focused == field).zip(screen.editing());
+        screen.text_input_client(&mut window.text_input, TextInputClient::UpdateEditingState(field as Id, value));
         window.dirty = true;
     });
 }
@@ -581,7 +570,7 @@ pub extern "system" fn Java_app_theone_strict_StrictView_nativeAction(mut env: J
     with_windows(|windows| {
         let Some(window) = windows.windows.get_mut(&(id as WindowId)) else { return };
         let Ok(screen) = &mut window.screen else { return };
-        screen.action(field as Id, &action);
+        screen.text_input_client(&mut window.text_input, TextInputClient::PerformAction(field as Id, action));
         window.dirty = true;
     });
 }
@@ -596,7 +585,11 @@ pub extern "system" fn Java_app_theone_strict_StrictView_nativeFields<'local>(en
             screen
                 .inputs()
                 .into_iter()
-                .filter_map(|input| screen.field(input))
+                .filter_map(|input| {
+                    let (field, value) = (screen.field(input)?, screen.value(input)?);
+                    let configuration = editing::configuration(&field, &value);
+                    Some(json!({"id": input, "configuration": configuration, "label": field["label"], "rect": field["rect"], "text": value.text}))
+                })
                 .collect(),
         ))
     })

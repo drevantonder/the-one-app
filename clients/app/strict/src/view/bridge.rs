@@ -21,6 +21,8 @@ pub struct TextInputConnection {
     client: Option<Id>,
     value: Option<editing::Value>,
     caret: Option<Bounds<f32>>,
+    /// Where the input is in the window, as its transform said.
+    origin: Point<f32>,
 }
 
 impl Screen {
@@ -37,15 +39,15 @@ impl Screen {
             *connection = TextInputConnection::default();
             if let (Some(id), Some(field), Some(value)) = (typing, typing.and_then(|id| self.field(id)), self.editing()) {
                 let rect = self.rects.get(&id).copied().unwrap_or(Rect { x: 0.0, y: 0.0, width: 0.0, height: 0.0 });
-                // Its own coordinates are the window's: the caret is told where it is in the window.
-                let identity = [1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0];
+                // From the input's own coordinates to the window's: where it is.
+                let transform = [1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, rect.x, rect.y, 0.0, 1.0];
                 calls.extend([
                     TextInput::SetClient(id, editing::configuration(&field, &value)),
-                    TextInput::SetEditableSizeAndTransform { width: rect.width, height: rect.height, transform: identity },
+                    TextInput::SetEditableSizeAndTransform { width: rect.width, height: rect.height, transform },
                     TextInput::SetEditingState(value.clone()),
                     TextInput::Show,
                 ]);
-                (connection.client, connection.value) = (Some(id), Some(value));
+                (connection.client, connection.value, connection.origin) = (Some(id), Some(value), point(rect.x, rect.y));
             }
         }
         if connection.client.is_none() {
@@ -56,7 +58,9 @@ impl Screen {
             calls.push(TextInput::SetEditingState(value.clone().expect("checked")));
             connection.value = value;
         }
-        let caret = self.caret_rect();
+        // In the input's own coordinates.
+        let origin = connection.origin;
+        let caret = self.caret_rect().map(|caret| Bounds { origin: point(caret.origin.x - origin.x, caret.origin.y - origin.y), size: caret.size });
         if connection.caret != caret {
             if let Some(caret) = caret {
                 calls.extend([TextInput::SetCaretRect(caret), TextInput::SetMarkedTextRect(caret)]);
@@ -74,9 +78,8 @@ impl Screen {
                 self.set_editing(client, &value);
                 connection.value = Some(value);
             }
-            // A newline action has typed its line break; any other is the Enter key, which the page hears.
-            TextInputClient::PerformAction(client, action) if connection.client == Some(client) && action != "TextInputAction.newline" => {
-                self.key(&crate::inspect::Key { key: "Enter".into(), shift: false, alt: false, ctrl: false, meta: false });
+            TextInputClient::PerformAction(client, action) if connection.client == Some(client) => {
+                self.action(client, action.trim_start_matches("TextInputAction."));
             }
             _ => {}
         }
@@ -96,6 +99,11 @@ impl Screen {
     /// composing), or a password manager filled it: taken as it is, and its app told.
     pub fn set_editing(&mut self, id: Id, value: &editing::Value) {
         self.edit(id, |field| field.keyboard(value));
+    }
+
+    /// Input `id`'s editing state.
+    pub fn value(&self, id: Id) -> Option<editing::Value> {
+        self.fields.get(&id).map(editing::Field::value)
     }
 
     /// The inputs, in the order Tab goes, as last painted.

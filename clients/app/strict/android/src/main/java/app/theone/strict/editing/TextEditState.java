@@ -46,16 +46,14 @@ public class TextEditState {
     this.composingEnd = composingEnd;
   }
 
-  /** The protocol's `Editing`: text, selection (base, extent) and composing (start, end, or null). */
+  /** Flutter's TextEditState.fromJson: its TextEditingValue's JSON, -1 where there's no composing range. */
   public static TextEditState fromJson(JSONObject state) {
-    JSONObject selection = state.optJSONObject("selection");
-    JSONObject composing = state.optJSONObject("composing");
     return new TextEditState(
         state.optString("text"),
-        selection == null ? -1 : selection.optInt("base", -1),
-        selection == null ? -1 : selection.optInt("extent", -1),
-        composing == null ? -1 : composing.optInt("start", -1),
-        composing == null ? -1 : composing.optInt("end", -1));
+        state.optInt("selectionBase", -1),
+        state.optInt("selectionExtent", -1),
+        state.optInt("composingBase", -1),
+        state.optInt("composingExtent", -1));
   }
 
   public boolean hasSelection() {

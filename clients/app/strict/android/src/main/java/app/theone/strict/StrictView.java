@@ -20,13 +20,14 @@ import android.view.inputmethod.InputConnection;
 import app.theone.strict.editing.InputConnectionAdaptor;
 import app.theone.strict.editing.TextEditState;
 import app.theone.strict.editing.TextInputPlugin;
+import org.json.JSONArray;
 import org.json.JSONObject;
 
 /**
  * A strict app's window: a surface the strict crate draws on (`strict::platform::android`), by its window's id. It
  * passes on what a finger does, bridges the keyboard (TextInputPlugin, from Flutter's embedder) and autofill, and does
- * what Rust asks of it (`command`): bring the keyboard up for a field, give it the field's state, hide it, or show the
- * Cut, Copy and Paste menu.
+ * what Rust asks of it (`command`): Flutter's text input method calls (`TextInput.setClient`, `setEditingState`,
+ * `show`…), or showing the Cut, Copy and Paste menu.
  */
 public final class StrictView extends SurfaceView implements SurfaceHolder.Callback, TextInputPlugin.Framework {
     private static final String TAG = "strict";
@@ -35,8 +36,6 @@ public final class StrictView extends SurfaceView implements SurfaceHolder.Callb
     private float downX, downY;
     private final Runnable longPress = this::longPress;
     private ActionMode menu;
-    /** The field the keyboard is for, as Rust last described it. */
-    private JSONObject field;
 
     StrictView(Context context, long id) {
         super(context);
@@ -63,23 +62,44 @@ public final class StrictView extends SurfaceView implements SurfaceHolder.Callb
     private void apply(String command) {
         try {
             JSONObject c = new JSONObject(command);
-            if (c.has("focus")) {
-                field = c.getJSONObject("focus");
-                input.setTextInputClient(field.getInt("id"), field, TextEditState.fromJson(c.getJSONObject("state")));
-                input.showTextInput(this);
-            } else if (c.has("state") && input.isTextEditor()) {
-                input.setTextInputEditingState(this, TextEditState.fromJson(c.getJSONObject("state")));
-            }
-            if (c.optBoolean("show") && input.isTextEditor()) input.showTextInput(this);
-            if (c.optBoolean("blur")) {
-                if (menu != null) menu.finish();
-                input.hideTextInput(this);
-                input.clearTextInputClient();
-                field = null;
-            }
             if (c.optBoolean("menu")) showMenu();
+            textInput(c.optString("method"), c.opt("args"));
         } catch (Exception e) {
             Log.e(TAG, "command " + command, e);
+        }
+    }
+
+    /** Flutter's text input channel's method calls, as its TextInputPlugin takes them from its TextInputChannel. */
+    private void textInput(String method, Object args) throws org.json.JSONException {
+        switch (method) {
+            case "TextInput.setClient": {
+                JSONArray client = (JSONArray) args;
+                input.setTextInputClient(client.getInt(0), client.getJSONObject(1));
+                break;
+            }
+            case "TextInput.setEditingState":
+                input.setTextInputEditingState(this, TextEditState.fromJson((JSONObject) args));
+                break;
+            case "TextInput.setEditableSizeAndTransform": {
+                JSONObject size = (JSONObject) args;
+                JSONArray transform = size.getJSONArray("transform");
+                double[] matrix = new double[16];
+                for (int i = 0; i < 16; i++) matrix[i] = transform.getDouble(i);
+                input.setEditableSizeAndTransform(size.getDouble("width"), size.getDouble("height"), matrix);
+                break;
+            }
+            case "TextInput.show":
+                if (input.isTextEditor()) input.showTextInput(this);
+                break;
+            case "TextInput.hide":
+                input.hideTextInput(this);
+                break;
+            case "TextInput.clearClient":
+                if (menu != null) menu.finish();
+                input.clearTextInputClient();
+                break;
+            default:
+                break;
         }
     }
 
@@ -154,7 +174,7 @@ public final class StrictView extends SurfaceView implements SurfaceHolder.Callb
             }
             @Override public void onDestroyActionMode(ActionMode mode) { menu = null; }
             @Override public void onGetContentRect(ActionMode mode, View view, Rect outRect) {
-                Rect rect = input.rectOf(field);
+                Rect rect = input.clientRect();
                 if (rect != null) outRect.set(rect);
             }
         }, ActionMode.TYPE_FLOATING);

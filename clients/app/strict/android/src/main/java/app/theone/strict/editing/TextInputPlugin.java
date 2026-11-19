@@ -1,10 +1,10 @@
 // From Flutter's Android embedder (BSD-3-Clause, LICENSE-FLUTTER beside this file),
 // engine/src/flutter/shell/platform/android/io/flutter/plugin/editing/TextInputPlugin.java at flutter/flutter
 // 4d19bda07ae859c5d3a205e3a61619ff485a1182.
-// Changed: its framework is the renderer (`Framework`), not Flutter's TextInputChannel; a field's configuration is
-// the renderer's input props (type, inputmode, autocomplete, action, autocapitalize, spellcheck, multiline) as
-// Chrome reads them, not Flutter's TextInputConfiguration, with its place in CSS pixels; every field on the screen is in the autofill structure (as a browser's
-// form is), not only those in the focused field's AutofillGroup; no platform views or Scribe.
+// Changed: its framework is the renderer (`Framework`), not Flutter's TextInputChannel, and Flutter's
+// TextInputConfiguration is read from its JSON as it comes; every field on the screen is in the autofill structure
+// (as a browser's form is), each with its configuration, label and place (`Framework.fields`), not only those in the
+// focused field's AutofillGroup; no platform views or Scribe.
 
 // Copyright 2013 The Flutter Authors. All rights reserved.
 // Use of this source code is governed by a BSD-style license that can be
@@ -63,80 +63,108 @@ public class TextInputPlugin implements ListenableEditingState.EditingStateWatch
     afm = view.getContext().getSystemService(AutofillManager.class);
   }
 
-  // The renderer's input props as Android's input type, as Chrome reads an <input>'s, in the shape of Flutter's
-  // inputTypeFromTextInputType.
+  // Flutter's inputTypeFromTextInputType, reading its TextInputConfiguration.
   private static int inputTypeFrom(JSONObject config) {
-    String type = config.optString("type", "text");
-    String mode = config.optString("inputmode", "");
-    if (mode.equals("numeric")) return InputType.TYPE_CLASS_NUMBER;
-    if (mode.equals("decimal") || type.equals("number")) return InputType.TYPE_CLASS_NUMBER | InputType.TYPE_NUMBER_FLAG_DECIMAL;
-    if (mode.equals("tel") || type.equals("tel")) return InputType.TYPE_CLASS_PHONE;
-    if (mode.equals("email")) type = "email";
-    if (mode.equals("url")) type = "url";
-    boolean obscureText = type.equals("password");
-    boolean spellcheck = config.optBoolean("spellcheck", true);
+    JSONObject inputType = config.optJSONObject("inputType");
+    String type = inputType == null ? "TextInputType.text" : inputType.optString("name", "TextInputType.text");
+    boolean obscureText = config.optBoolean("obscureText");
+    boolean autocorrect = config.optBoolean("autocorrect", true);
+    boolean enableSuggestions = config.optBoolean("enableSuggestions", true);
+    String textCapitalization = config.optString("textCapitalization", "TextCapitalization.none");
+    if (type.equals("TextInputType.datetime")) {
+      return InputType.TYPE_CLASS_DATETIME;
+    } else if (type.equals("TextInputType.number")) {
+      int textType = InputType.TYPE_CLASS_NUMBER;
+      if (inputType.optBoolean("signed")) {
+        textType |= InputType.TYPE_NUMBER_FLAG_SIGNED;
+      }
+      if (inputType.optBoolean("decimal")) {
+        textType |= InputType.TYPE_NUMBER_FLAG_DECIMAL;
+      }
+      return textType;
+    } else if (type.equals("TextInputType.phone")) {
+      return InputType.TYPE_CLASS_PHONE;
+    } else if (type.equals("TextInputType.none")) {
+      return InputType.TYPE_NULL;
+    }
+
     int textType = InputType.TYPE_CLASS_TEXT;
-    boolean autocorrect = spellcheck;
-    if (type.equals("email")) {
+    if (type.equals("TextInputType.multiline")) {
+      textType |= InputType.TYPE_TEXT_FLAG_MULTI_LINE;
+    } else if (type.equals("TextInputType.emailAddress")) {
       textType |= InputType.TYPE_TEXT_VARIATION_EMAIL_ADDRESS;
-      autocorrect = false;
-    } else if (type.equals("url")) {
+    } else if (type.equals("TextInputType.url")) {
       textType |= InputType.TYPE_TEXT_VARIATION_URI;
-      autocorrect = false;
-    } else if ("name".equals(config.optString("autocomplete"))) {
+    } else if (type.equals("TextInputType.visiblePassword")) {
+      textType |= InputType.TYPE_TEXT_VARIATION_VISIBLE_PASSWORD;
+    } else if (type.equals("TextInputType.name")) {
       textType |= InputType.TYPE_TEXT_VARIATION_PERSON_NAME;
     }
 
     if (obscureText) {
+      // Note: both required. Some devices ignore TYPE_TEXT_FLAG_NO_SUGGESTIONS.
       textType |= InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS;
       textType |= InputType.TYPE_TEXT_VARIATION_PASSWORD;
     } else {
       if (autocorrect) textType |= InputType.TYPE_TEXT_FLAG_AUTO_CORRECT;
-      if (!spellcheck) {
+      if (!enableSuggestions) {
+        // Note: both required. Some devices ignore TYPE_TEXT_FLAG_NO_SUGGESTIONS.
         textType |= InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS;
+        textType |= InputType.TYPE_TEXT_VARIATION_VISIBLE_PASSWORD;
       }
     }
 
-    String capitalize = config.optString("autocapitalize", obscureText || type.equals("email") || type.equals("url") ? "none" : "sentences");
-    if (capitalize.equals("characters")) {
+    if (textCapitalization.equals("TextCapitalization.characters")) {
       textType |= InputType.TYPE_TEXT_FLAG_CAP_CHARACTERS;
-    } else if (capitalize.equals("words")) {
+    } else if (textCapitalization.equals("TextCapitalization.words")) {
       textType |= InputType.TYPE_TEXT_FLAG_CAP_WORDS;
-    } else if (capitalize.equals("sentences") || capitalize.equals("on")) {
+    } else if (textCapitalization.equals("TextCapitalization.sentences")) {
       textType |= InputType.TYPE_TEXT_FLAG_CAP_SENTENCES;
     }
 
-    if (config.optBoolean("multiline")) {
-      textType |= InputType.TYPE_TEXT_FLAG_MULTI_LINE;
-    }
     return textType;
   }
 
+  // Flutter's inputActionFromTextInputAction.
   private static int actionFrom(JSONObject config) {
-    switch (config.optString("action", "done")) {
-      case "next": return EditorInfo.IME_ACTION_NEXT;
-      case "go": return EditorInfo.IME_ACTION_GO;
-      case "search": return EditorInfo.IME_ACTION_SEARCH;
-      case "send": return EditorInfo.IME_ACTION_SEND;
-      case "previous": return EditorInfo.IME_ACTION_PREVIOUS;
-      case "newline": return EditorInfo.IME_ACTION_NONE;
+    switch (config.optString("inputAction", "TextInputAction.done")) {
+      case "TextInputAction.newline": return EditorInfo.IME_ACTION_NONE;
+      case "TextInputAction.none": return EditorInfo.IME_ACTION_NONE;
+      case "TextInputAction.unspecified": return EditorInfo.IME_ACTION_UNSPECIFIED;
+      case "TextInputAction.go": return EditorInfo.IME_ACTION_GO;
+      case "TextInputAction.search": return EditorInfo.IME_ACTION_SEARCH;
+      case "TextInputAction.send": return EditorInfo.IME_ACTION_SEND;
+      case "TextInputAction.next": return EditorInfo.IME_ACTION_NEXT;
+      case "TextInputAction.previous": return EditorInfo.IME_ACTION_PREVIOUS;
       default: return EditorInfo.IME_ACTION_DONE;
     }
   }
 
-  /** An HTML autocomplete token as Android's autofill hints. */
-  private static String[] hintsFrom(String autocomplete) {
-    switch (autocomplete == null ? "" : autocomplete) {
-      case "username": return new String[] {View.AUTOFILL_HINT_USERNAME};
-      case "current-password": return new String[] {View.AUTOFILL_HINT_PASSWORD};
-      case "new-password": return new String[] {"newPassword"};
-      case "email": return new String[] {View.AUTOFILL_HINT_EMAIL_ADDRESS};
-      case "name": return new String[] {View.AUTOFILL_HINT_NAME};
-      case "tel": return new String[] {View.AUTOFILL_HINT_PHONE};
-      case "postal-code": return new String[] {View.AUTOFILL_HINT_POSTAL_CODE};
-      case "one-time-code": return new String[] {"smsOTPCode"};
-      default: return new String[0];
+  /** A configuration's autofill hints, as TextInputChannel's translateAutofillHint has Flutter's as Android's. */
+  private static String[] hintsFrom(JSONObject config) {
+    JSONObject autofill = config.optJSONObject("autofill");
+    JSONArray hints = autofill == null ? null : autofill.optJSONArray("hints");
+    if (hints == null) return new String[0];
+    String[] android = new String[hints.length()];
+    for (int i = 0; i < hints.length(); i++) {
+      String hint = hints.optString(i);
+      switch (hint) {
+        case "username": android[i] = View.AUTOFILL_HINT_USERNAME; break;
+        case "password": android[i] = View.AUTOFILL_HINT_PASSWORD; break;
+        case "email": android[i] = View.AUTOFILL_HINT_EMAIL_ADDRESS; break;
+        case "name": android[i] = "personName"; break;
+        case "telephoneNumber": android[i] = View.AUTOFILL_HINT_PHONE; break;
+        case "postalCode": android[i] = View.AUTOFILL_HINT_POSTAL_CODE; break;
+        case "oneTimeCode": android[i] = "smsOTPCode"; break;
+        default: android[i] = hint;
+      }
     }
+    return android;
+  }
+
+  /** Where the field with the keyboard is in the view, in its pixels, as its transform said. */
+  public Rect clientRect() {
+    return lastClientRect == null ? null : new Rect(lastClientRect);
   }
 
   /** A field's place in the view, in its pixels, from its `rect` in CSS pixels. */
@@ -158,7 +186,6 @@ public class TextInputPlugin implements ListenableEditingState.EditingStateWatch
     outAttrs.imeOptions = EditorInfo.IME_FLAG_NO_FULLSCREEN;
     int enterAction = actionFrom(configuration);
     outAttrs.imeOptions |= enterAction;
-    outAttrs.hintText = configuration.optString("label", null);
     InputConnectionAdaptor connection = new InputConnectionAdaptor(view, client, this, mEditable, outAttrs);
     outAttrs.initialSelStart = mEditable.getSelectionStart();
     outAttrs.initialSelEnd = mEditable.getSelectionEnd();
@@ -185,22 +212,36 @@ public class TextInputPlugin implements ListenableEditingState.EditingStateWatch
     mImm.hideSoftInputFromWindow(view.getApplicationWindowToken(), 0);
   }
 
-  /** Flutter's setTextInputClient, then setTextInputEditingState. */
-  public void setTextInputClient(int id, JSONObject configuration, TextEditState state) {
+  /** Flutter's setTextInputClient: its editing state comes next (`setTextInputEditingState`). */
+  public void setTextInputClient(int id, JSONObject configuration) {
     notifyViewExited();
     this.configuration = configuration;
     client = id;
 
     mEditable.removeEditingStateListener(this);
-    mEditable = new ListenableEditingState(state, mView);
-    mLastKnownFrameworkTextEditingState = state;
-    lastClientRect = rectOf(configuration);
+    mEditable = new ListenableEditingState(null, mView);
+    mLastKnownFrameworkTextEditingState = null;
+    lastClientRect = null;
 
     mRestartInputPending = true;
     mEditable.addEditingStateListener(this);
-    mImm.restartInput(mView);
-    mRestartInputPending = false;
-    notifyViewEntered();
+  }
+
+  /** Flutter's saveEditableSizeAndTransform, for an affine `matrix`: where the field is, which autofill shows at. */
+  public void setEditableSizeAndTransform(double width, double height, double[] matrix) {
+    double minX = Double.MAX_VALUE, minY = Double.MAX_VALUE, maxX = -Double.MAX_VALUE, maxY = -Double.MAX_VALUE;
+    for (double[] corner : new double[][] {{0, 0}, {width, 0}, {width, height}, {0, height}}) {
+      double x = matrix[0] * corner[0] + matrix[4] * corner[1] + matrix[12];
+      double y = matrix[1] * corner[0] + matrix[5] * corner[1] + matrix[13];
+      minX = Math.min(minX, x);
+      maxX = Math.max(maxX, x);
+      minY = Math.min(minY, y);
+      maxY = Math.max(maxY, y);
+    }
+    float density = mView.getResources().getDisplayMetrics().density;
+    boolean first = lastClientRect == null;
+    lastClientRect = new Rect((int) (minX * density), (int) (minY * density), (int) Math.ceil(maxX * density), (int) Math.ceil(maxY * density));
+    if (first) notifyViewEntered();
   }
 
   private static boolean composingChanged(TextEditState before, TextEditState after) {
@@ -276,15 +317,15 @@ public class TextInputPlugin implements ListenableEditingState.EditingStateWatch
   public void performEditorAction(int clientId, int actionCode) {
     String action;
     switch (actionCode) {
-      case EditorInfo.IME_ACTION_NEXT: action = "next"; break;
-      case EditorInfo.IME_ACTION_GO: action = "go"; break;
-      case EditorInfo.IME_ACTION_SEARCH: action = "search"; break;
-      case EditorInfo.IME_ACTION_SEND: action = "send"; break;
-      case EditorInfo.IME_ACTION_PREVIOUS: action = "previous"; break;
-      case EditorInfo.IME_ACTION_NONE: action = "newline"; break;
-      default: action = "done";
+      case EditorInfo.IME_ACTION_NEXT: action = "TextInputAction.next"; break;
+      case EditorInfo.IME_ACTION_GO: action = "TextInputAction.go"; break;
+      case EditorInfo.IME_ACTION_SEARCH: action = "TextInputAction.search"; break;
+      case EditorInfo.IME_ACTION_SEND: action = "TextInputAction.send"; break;
+      case EditorInfo.IME_ACTION_PREVIOUS: action = "TextInputAction.previous"; break;
+      case EditorInfo.IME_ACTION_NONE: action = "TextInputAction.newline"; break;
+      default: action = "TextInputAction.done";
     }
-    if (afm != null && (action.equals("go") || action.equals("done") || action.equals("send"))) {
+    if (afm != null && (actionCode == EditorInfo.IME_ACTION_GO || actionCode == EditorInfo.IME_ACTION_DONE || actionCode == EditorInfo.IME_ACTION_SEND)) {
       // Flutter's TextInput.finishAutofillContext: the form is done, so a password manager may offer to save.
       afm.commit();
     }
@@ -328,8 +369,9 @@ public class TextInputPlugin implements ListenableEditingState.EditingStateWatch
     final AutofillId parentId = structure.getAutofillId();
     for (int i = 0; i < fields.length(); i++) {
       JSONObject field = fields.optJSONObject(i);
+      JSONObject config = field.optJSONObject("configuration");
       final int autofillId = field.optInt("id");
-      String[] hints = hintsFrom(field.optString("autocomplete", null));
+      String[] hints = hintsFrom(config);
 
       structure.addChildCount(1);
       final ViewStructure child = structure.newChild(i);
@@ -340,7 +382,7 @@ public class TextInputPlugin implements ListenableEditingState.EditingStateWatch
       child.setAutofillType(View.AUTOFILL_TYPE_TEXT);
       child.setVisibility(View.VISIBLE);
       child.setClassName("android.widget.EditText");
-      child.setInputType(inputTypeFrom(field));
+      child.setInputType(inputTypeFrom(config));
       String label = field.optString("label", null);
       if (label != null) {
         child.setHint(label);

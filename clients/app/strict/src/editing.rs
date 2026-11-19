@@ -136,7 +136,7 @@ impl TextInput {
 pub enum TextInputClient {
     /// Input `client`'s whole editing state is now this.
     UpdateEditingState(u64, Value),
-    /// Its action key was pressed (`TextInputAction.done`…), as an input method's Return says it.
+    /// Its action key was pressed (`TextInputAction.done`…): its app hears it (`Screen::action`).
     PerformAction(u64, String),
 }
 
@@ -163,6 +163,7 @@ pub fn configuration(field: &serde_json::Value, value: &Value) -> serde_json::Va
         ("url", _) | (_, "url") => "url",
         ("tel", _) | (_, "tel") => "phone",
         ("number", _) | (_, "numeric" | "decimal") => "number",
+        _ if prop("autocomplete") == "name" => "name",
         _ => "text",
     };
     let hint = match prop("autocomplete").split_whitespace().last().unwrap_or_default() {
@@ -173,12 +174,16 @@ pub fn configuration(field: &serde_json::Value, value: &Value) -> serde_json::Va
         "email" => Some("email"),
         "name" => Some("name"),
         "tel" => Some("telephoneNumber"),
+        "postal-code" => Some("postalCode"),
         _ => None,
     };
+    // As Chrome has it: a password, an address or a link isn't capitalized or corrected unless it says so.
+    let literal = prop("type") == "password" || matches!(kind, "emailAddress" | "url");
     let capitalization = match prop("autocapitalize") {
         "characters" => "characters",
         "words" => "words",
         "sentences" | "on" => "sentences",
+        "" if !literal => "sentences",
         _ => "none",
     };
     let checked = field["spellcheck"] != false;
@@ -187,7 +192,7 @@ pub fn configuration(field: &serde_json::Value, value: &Value) -> serde_json::Va
         "inputType": {"name": format!("TextInputType.{kind}"), "signed": null, "decimal": prop("inputmode") == "decimal"},
         "inputAction": format!("TextInputAction.{}", field["action"].as_str().unwrap_or("done")),
         "obscureText": prop("type") == "password",
-        "autocorrect": checked,
+        "autocorrect": checked && !literal,
         "enableSuggestions": checked,
         "readOnly": field["readonly"] == true,
         "textCapitalization": format!("TextCapitalization.{capitalization}"),
