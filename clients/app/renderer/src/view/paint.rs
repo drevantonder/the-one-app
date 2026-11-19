@@ -388,6 +388,24 @@ impl Painter<'_> {
         self.layout.kept[&id].node
     }
 
+    /// Where each node that moves as it's laid out again is laid out now, in the window, as it would be unscrolled, so
+    /// what's scrolled doesn't move it: each that's moved goes there from where it was (`Transitions::laid_out`).
+    pub(super) fn laid_out(&mut self) {
+        let moves: Vec<(Id, Option<String>)> = self.tree.moves_layout().map(|(id, shared)| (id, shared.map(str::to_owned))).collect();
+        for (id, shared) in moves {
+            let Some(laid) = self.layout.kept.get(&id).and_then(|kept| self.layout.taffy.layout(kept.node).ok()).copied() else { continue };
+            let mut origin = point(laid.location.x, laid.location.y);
+            let mut at = id;
+            while let Some(parent) = self.tree.parent(at).filter(|_| !self.layout.kept.get(&at).is_some_and(|kept| self.layout.leaf(kept.node).fixed)) {
+                let Some(above) = self.layout.kept.get(&parent).and_then(|kept| self.layout.taffy.layout(kept.node).ok()) else { break };
+                origin = point(origin.x + above.location.x, origin.y + above.location.y);
+                at = parent;
+            }
+            let bounds = Bounds { origin, size: Size { width: laid.size.width, height: laid.size.height } };
+            self.transitions.laid_out(id, shared.as_deref(), bounds, self.time, self.frame, self.conditions.reduced_motion);
+        }
+    }
+
     /// Styles `id` again, in `state`, inheriting `inherited`, telling Taffy only what's different. → the text it
     /// passes on.
     pub(super) fn restyle(&mut self, id: Id, inherited: Text, state: State, root: bool) -> Text {
@@ -763,6 +781,11 @@ impl Painter<'_> {
         let tree = self.tree;
         let node = &tree.nodes[&id];
         let laid_out = Bounds { origin: point(offset.x + laid.location.x, offset.y + laid.location.y), size: Size { width: laid.size.width, height: laid.size.height } };
+        // On its way from where it was laid out, its box is drawn between, and what's in it moves with it.
+        let laid_out = match self.transitions.flip(id, self.time) {
+            Some([x, y, wider, taller]) => Bounds { origin: point(laid_out.origin.x + x, laid_out.origin.y + y), size: Size { width: (laid_out.size.width + wider).max(0.0), height: (laid_out.size.height + taller).max(0.0) } },
+            None => laid_out,
+        };
         // Its own move and growth, around its middle, which moves nothing around it.
         let centre = point(laid_out.origin.x + laid_out.size.width / 2.0, laid_out.origin.y + laid_out.size.height / 2.0);
         let translate = point(look.translate.0.of(laid_out.size.width), look.translate.1.of(laid_out.size.height));

@@ -1039,7 +1039,10 @@ impl Screen {
         });
         match measured {
             Err(error) => log::error!("its layout failed: {error}"),
-            Ok(()) => painter.paint(root, point(0.0, 0.0), Transform::NONE, window, 1.0, None, true),
+            Ok(()) => {
+                painter.laid_out();
+                painter.paint(root, point(0.0, 0.0), Transform::NONE, window, 1.0, None, true)
+            }
         }
         // The window's breadcrumb, over its page.
         let hovering = |bounds: &Bounds<f32>| self.pointer.is_some_and(|at| bounds.contains(&at));

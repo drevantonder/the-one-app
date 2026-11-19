@@ -120,6 +120,13 @@ export type ViewProps = Listens & {
    * as a rubber band, as loose as `dragElastic` (0 none, 1 loose, 0.5 if unsaid). */
   dragConstraints?: { top?: number; left?: number; right?: number; bottom?: number }
   dragElastic?: number
+  /** Moves from where it was laid out to where it is as that changes, as Motion's `layout`: a list reordered, a card
+   * grown. The host draws it on its way, by a spring, with no layout again each frame. */
+  layout?: boolean
+  /** What it shares its place with, as Motion's `layoutId` and SwiftUI's `matchedGeometryEffect`: one drawn where
+   * another with the same id was a moment ago goes there from it (a tab's pill sliding to the tab chosen, an icon
+   * growing into its window). */
+  layoutId?: string
   onDragStart?: () => void
   /** Let go: how far it went and how fast it was going, in pixels a second. It springs from where it is, at that
    * speed, to where its style puts it, which this may move. */

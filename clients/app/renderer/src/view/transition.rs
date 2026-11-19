@@ -9,7 +9,7 @@
 
 use std::collections::{HashMap, HashSet};
 
-use crate::geometry::{Hsla, Point, Rgba, Size};
+use crate::geometry::{Bounds, Hsla, Point, Rgba, Size};
 use crate::motion::Spring;
 use crate::style::{Computed, Offset};
 use crate::tokens::{Radius, Shadow};
@@ -315,6 +315,27 @@ pub(crate) struct Transitions {
     dragged: HashMap<Id, Dragged>,
     /// The nodes moving by their keyframes (`Look::animation`), which are styled again each frame they're drawn.
     animated: HashSet<Id>,
+    /// Where each node that moves as it's laid out again (`layout`) was laid out last, in the window, unscrolled, and
+    /// each such node on its way from where it was to there; and where what shares a place (`layoutId`) was last laid
+    /// out, by what and in which frame.
+    laid: HashMap<Id, Bounds<f32>>,
+    flips: HashMap<Id, Flip>,
+    shared: HashMap<String, (Id, Bounds<f32>, u64)>,
+}
+
+/// A node on its way from where it was laid out to where it is, as Motion's layout animations and the FLIP technique:
+/// how far from it its box is drawn, along, down, wider and taller, and how fast that was going at `start`.
+struct Flip {
+    off: [f64; 4],
+    velocity: [f64; 4],
+    start: f64,
+}
+
+impl Flip {
+    fn state(&self, now: f64) -> [(f64, f64); 4] {
+        let seconds = ((now - self.start) / 1000.0).max(0.0);
+        std::array::from_fn(|at| DRAGGED.at(self.off[at], self.velocity[at], seconds))
+    }
 }
 
 /// A node dragged: how far from where its style puts it, along and down, held where the finger has it or springing
@@ -452,6 +473,28 @@ impl Transitions {
         }
     }
 
+    /// Node `id`, which moves as it's laid out again, is laid out at `laid` in `frame`: where that's moved from where it
+    /// was, or, new, from where what it shares its place with (`shared`) was in the frame before, it's drawn going
+    /// there from where it's drawn now, at the speed it has. `reduced`: it jumps.
+    pub fn laid_out(&mut self, id: Id, shared: Option<&str>, laid: Bounds<f32>, now: f64, frame: u64, reduced: bool) {
+        let was = self.laid.insert(id, laid).or_else(|| shared.and_then(|key| self.shared.get(key)).filter(|(owner, _, seen)| *owner != id && seen + 1 >= frame).map(|(_, bounds, _)| *bounds));
+        if let Some(key) = shared {
+            self.shared.insert(key.to_owned(), (id, laid, frame));
+        }
+        let Some(was) = was.filter(|was| *was != laid && !reduced) else { return };
+        let now_at = self.flips.get(&id).map(|flip| flip.state(now)).unwrap_or_default();
+        let to = [laid.origin.x, laid.origin.y, laid.size.width, laid.size.height];
+        let from = [was.origin.x, was.origin.y, was.size.width, was.size.height];
+        let off = std::array::from_fn(|at| f64::from(from[at] - to[at]) + now_at[at].0);
+        let velocity = std::array::from_fn(|at| now_at[at].1);
+        self.flips.insert(id, Flip { off, velocity, start: now });
+    }
+
+    /// How far from where it's laid out node `id` is drawn at `now`, on its way there: along, down, wider and taller.
+    pub fn flip(&self, id: Id, now: f64) -> Option<[f32; 4]> {
+        self.flips.get(&id).map(|flip| flip.state(now).map(|(off, _)| off as f32))
+    }
+
     /// Node `id` is dragged `offset` pixels, along and down, from where its style puts it, held there.
     pub fn hold(&mut self, id: Id, offset: Point<f32>) {
         let dragged = self.dragged.entry(id).or_insert(Dragged { held: true, axes: [Axis::default(); 2], spring: None });
@@ -511,6 +554,8 @@ impl Transitions {
     /// Node `id` is no longer in the tree as it's drawn: put back, it enters again.
     pub fn forget(&mut self, id: Id) {
         self.dragged.remove(&id);
+        self.laid.remove(&id);
+        self.flips.remove(&id);
         self.animated.remove(&id);
         if self.drawn.remove(&id) {
             for (property, _) in PROPERTIES {
@@ -522,7 +567,7 @@ impl Transitions {
 
     /// The nodes with something on its way, which are styled again each frame until it's arrived.
     pub fn moving(&self) -> HashSet<Id> {
-        self.moving.keys().map(|(id, _)| *id).chain(self.dragged.keys().copied()).chain(self.animated.iter().copied()).collect()
+        self.moving.keys().map(|(id, _)| *id).chain(self.dragged.keys().copied()).chain(self.animated.iter().copied()).chain(self.flips.keys().copied()).collect()
     }
 
     /// The nodes moving only by their own move, growth and fade (`translateX`, `translateY`, `scale`, `opacity`),
@@ -540,12 +585,13 @@ impl Transitions {
     pub fn finish(&mut self, now: f64) -> bool {
         self.moving.retain(|_, moving| !moving.done(now));
         self.dragged.retain(|_, dragged| !dragged.done(now));
-        !self.moving.is_empty() || !self.dragged.is_empty() || !self.animated.is_empty()
+        self.flips.retain(|_, flip| !flip.state(now).iter().all(|(off, velocity)| Spring::arrived(*off, *velocity, 0.1)));
+        !self.moving.is_empty() || !self.dragged.is_empty() || !self.animated.is_empty() || !self.flips.is_empty()
     }
 
     /// How many properties are still on their way, for the inspector's `settle`.
     pub fn len(&self) -> usize {
-        self.moving.len() + self.dragged.len()
+        self.moving.len() + self.dragged.len() + self.flips.len()
     }
 }
 

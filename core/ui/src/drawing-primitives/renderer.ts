@@ -320,6 +320,10 @@ export interface Props {
   dragElastic?: number
   onDragStart?: true
   onDragEnd?: true
+  /** `box`, `scroll`: moves from where it was laid out to where it is as that changes, by a spring the host draws
+   * (Motion's `layout`), and from where what has the same `layoutId` was a moment ago, where it's new. */
+  layout?: boolean
+  layoutId?: string
   onOffer?: true
   onState?: true
   onSize?: true

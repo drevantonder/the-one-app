@@ -136,6 +136,8 @@ pub struct Tree {
     /// the page has dropped meanwhile goes with it.
     leaving: HashSet<Id>,
     dropped: HashSet<Id>,
+    /// What moves from where it was laid out to where it's laid out now as that changes (`layout`, `layoutId`).
+    moves_layout: HashSet<Id>,
 }
 
 impl Default for Tree {
@@ -148,6 +150,7 @@ impl Default for Tree {
             layout: HashSet::new(),
             leaving: HashSet::new(),
             dropped: HashSet::new(),
+            moves_layout: HashSet::new(),
         }
     }
 }
@@ -241,7 +244,18 @@ impl Tree {
         self.nodes.get(&id).is_some_and(|node| node.styles.as_ref().is_some_and(|styles| crate::style::exits(styles)) || node.children.iter().any(|child| self.exits(*child)))
     }
 
+    /// What moves from where it was laid out as that changes, as Motion's `layout`, and with what it shares its place
+    /// with (`layoutId`), as Motion's and SwiftUI's `matchedGeometryEffect`.
+    pub fn moves_layout(&self) -> impl Iterator<Item = (Id, Option<&str>)> + '_ {
+        self.moves_layout.iter().filter_map(|id| {
+            let node = self.nodes.get(id)?;
+            let shared = node.str("layoutId");
+            (node.is("layout") || shared.is_some()).then_some((*id, shared))
+        })
+    }
+
     fn forget(&mut self, id: Id) {
+        self.moves_layout.remove(&id);
         self.detach(id);
         self.nodes.remove(&id);
         self.inputs.remove(&id);
@@ -300,6 +314,7 @@ impl Tree {
                     match name.as_str() {
                         "autofocus" => drop(self.autofocus.insert(id)),
                         "onLayout" => drop(self.layout.insert(id)),
+                        "layout" | "layoutId" => drop(self.moves_layout.insert(id)),
                         _ => {}
                     }
                     match name.as_str() {
