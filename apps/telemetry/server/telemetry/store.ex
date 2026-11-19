@@ -12,6 +12,8 @@ defmodule Telemetry.Store do
     (`prune/1`): protobuf's messages put one after the other are one message holding all of theirs, so it's still one
     export request. It holds every export of its hour up to `to`, so one left over by a tidying that stopped partway
     is let go, not put in again.
+  - `otlp/<day>/<hour>/hour-<to>-<bytes>.rollup` is that hour rolled up (`Telemetry.Rollup`), once it's put together,
+    of every export of its hour up to `to`: what a look over hours reads of it, but a trace.
 
   Its size is in its name, so listing them says how much is kept. What's older than `days/0`, and the oldest hours
   past `most_bytes/0`, are let go. What was kept before it was OTLP, under `batches/`, isn't read, and is let go as
@@ -19,7 +21,7 @@ defmodule Telemetry.Store do
   """
   require Logger
   require OpenTelemetry.Tracer, as: Tracer
-  alias Telemetry.Otlp
+  alias Telemetry.{Otlp, Rollup}
   alias OneCore.Artifact
 
   @days 14
@@ -37,12 +39,31 @@ defmodule Telemetry.Store do
     :ok = Artifact.write(own, "#{hour(to)}/#{to}-#{source}-#{byte_size(otlp)}.#{signal}", otlp)
   end
 
-  @doc "Every export kept of an hour that started after `from`, in nanoseconds since 1970, each laid flat."
+  @doc """
+  What's kept of each hour that started after `from`, in nanoseconds since 1970, laid flat: an hour that's rolled up
+  as its rollup (`Telemetry.Rollup`), and any other as its exports, all that `Telemetry.Read` reads but a trace whole.
+  """
   def read(call, from) do
+    {rollups, names} =
+      call
+      |> listed(from)
+      |> Enum.group_by(&Path.dirname/1)
+      |> Enum.map(fn {_hour, names} -> if rollup = rollup(names), do: {[rollup], []}, else: {[], exports(names)} end)
+      |> Enum.unzip()
+
+    rollups = List.flatten(rollups)
+    read = Tracer.with_span("telemetry rollups", %{attributes: %{"one.blobs" => length(rollups)}}, do: Artifact.read_all(call.own, rollups))
+    since = hour(System.os_time(:nanosecond) - 3_600_000_000_000)
+    for({:ok, data, _tag} <- read, do: Rollup.decode(data)) ++ Telemetry.Exports.cuts(call, List.flatten(names), since)
+  end
+
+  @doc "Every export kept of an hour that started after `from`, in nanoseconds since 1970, each laid flat and whole."
+  def whole(call, from), do: decode(call, exports(listed(call, from)))
+
+  defp listed(call, from) do
     since = hour(from - 3_600_000_000_000)
     listed = Tracer.with_span("telemetry list", do: Artifact.list(call.own, "otlp/"))
-    names = for name <- listed, Path.dirname(name) > since, do: name
-    decode(call, names)
+    for name <- listed, Path.dirname(name) > since, do: name
   end
 
   @doc """
@@ -66,7 +87,7 @@ defmodule Telemetry.Store do
   end
 
   @doc "The exports kept as `names`, each by its name, as they're kept: OTLP's protobuf."
-  def raw(call, names), do: for({name, {:ok, data, _tag}} <- Enum.zip(names, read_all(call, names)), do: {name, data})
+  def raw(call, names), do: for({name, {:ok, data, _tag}} <- Enum.zip(names, Artifact.read_all(call.own, names)), do: {name, data})
 
   @doc "The signal an export kept as `name` is of, `traces`, `metrics` or `logs`, or `nil` for one kept before OTLP."
   def signal("otlp/" <> _ = name), do: String.trim_leading(Path.extname(name), ".")
@@ -99,7 +120,20 @@ defmodule Telemetry.Store do
           hour >= oldest,
           hour < hour(now - 600_000_000_000),
           Enum.any?(names, &(not hour?(&1))) do
-        for {signal, names} <- Enum.group_by(names, &Path.extname/1), do: together(own, hour, signal, names)
+        for {signal, names} <- Enum.group_by(exports(names), &Path.extname/1), do: together(own, hour, signal, names)
+        hour
+      end
+
+    # Each hour that's put together is rolled up, after all it holds, one at a time.
+    rolled_up =
+      for {hour, names} <- Enum.group_by(Artifact.list(own, "otlp/"), &Path.dirname/1),
+          hour >= oldest,
+          hour < hour(now - 600_000_000_000),
+          rollup(names) == nil do
+        exports = exports(names)
+        batches = for {name, {:ok, data, _tag}} <- Enum.zip(exports, Artifact.read_all(own, exports)), batch = export(name, data), do: batch
+        data = Rollup.encode(Rollup.of(batches))
+        :ok = Artifact.write(own, "#{hour}/hour-#{Enum.max(Enum.map(exports, &to_of/1))}-#{byte_size(data)}.rollup", data)
         hour
       end
 
@@ -109,7 +143,7 @@ defmodule Telemetry.Store do
     let_go = old ++ over
     for {_hour, names} <- let_go, name <- names, do: Artifact.remove(own, name)
 
-    %{put_together: length(put_together), let_go: length(let_go)}
+    %{put_together: length(put_together), rolled_up: length(rolled_up), let_go: length(let_go)}
   end
 
   # An hour's exports of a signal as one blob, after what it held already: an export it holds isn't added again.
@@ -145,24 +179,15 @@ defmodule Telemetry.Store do
 
   # Each kept export laid flat, by its signal. One that isn't OTLP, as a device may send anything, is passed over.
   defp decode(call, names) do
-    read = Tracer.with_span("telemetry fetch", %{attributes: %{"one.blobs" => length(names)}}, do: read_all(call, names))
+    read = Tracer.with_span("telemetry fetch", %{attributes: %{"one.blobs" => length(names)}}, do: Artifact.read_all(call.own, names))
 
     Tracer.with_span "telemetry decode", %{attributes: %{"one.bytes" => Enum.sum(for {:ok, data, _tag} <- read, do: byte_size(data))}} do
       for {name, {:ok, data, _tag}} <- Enum.zip(names, read), batch = export(name, data), do: batch
     end
   end
 
-  # The blobs `names`, in order, as `OneCore.Artifact.read_all/2` gives them. The exports of hours not yet put
-  # together, many small ones that every look reads again, are kept between calls (`Telemetry.Exports`) for this hour
-  # and the last.
-  defp read_all(call, names) do
-    {hours, exports} = Enum.split_with(names, &hour?/1)
-    since = hour(System.os_time(:nanosecond) - 3_600_000_000_000)
-    read = Map.new(Enum.zip(hours, Artifact.read_all(call.own, hours)) ++ Enum.zip(exports, Telemetry.Exports.read(call, exports, since)))
-    Enum.map(names, &read[&1])
-  end
-
-  defp export(name, data) do
+  @doc "The export kept as `name`, laid flat, or `nil` where it isn't OTLP."
+  def export(name, data) do
     Otlp.decode(signal(name), data)
   rescue
     ErlangError ->
@@ -170,6 +195,15 @@ defmodule Telemetry.Store do
       nil
   end
 
+  # The rollup of an hour, by the names kept in it, where one holds every export there, or `nil`.
+  defp rollup(names) do
+    {rollups, exports} = Enum.split_with(names, &rollup?/1)
+    rollup = Enum.max_by(rollups, &to_of/1, fn -> nil end)
+    if rollup && Enum.all?(exports, &(to_of(&1) <= to_of(rollup))), do: rollup
+  end
+
+  defp exports(names), do: Enum.reject(names, &rollup?/1)
+  defp rollup?(name), do: Path.extname(name) == ".rollup"
   defp folder(name), do: name |> Path.dirname() |> String.replace_prefix("batches/", "otlp/")
   defp hour?(name), do: String.starts_with?(Path.basename(name), "hour-")
   defp to_of(name), do: name |> Path.basename() |> String.trim_leading("hour-") |> String.split("-") |> hd() |> String.to_integer()

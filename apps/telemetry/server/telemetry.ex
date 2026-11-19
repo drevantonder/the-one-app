@@ -393,15 +393,16 @@ defmodule Telemetry do
       %{
         name: "prune",
         description:
-          "Puts each hour that's over into one blob, and lets go of what's older than #{Store.days()} days or past #{div(Store.most_bytes(), 1024 * 1024)} MB. The clock calls it every hour",
+          "Puts each hour that's over into one blob, and rolls it up, and lets go of what's older than #{Store.days()} days or past #{div(Store.most_bytes(), 1024 * 1024)} MB. The clock calls it every hour",
         inputs: %{type: "object", properties: %{}},
         outputs: %{
           type: "object",
           properties: %{
             put_together: %{type: "integer", description: "How many hours were put into one blob each"},
+            rolled_up: %{type: "integer", description: "How many hours were rolled up, for looks over hours to read"},
             let_go: %{type: "integer", description: "How many hours were let go"}
           },
-          required: ["put_together", "let_go"]
+          required: ["put_together", "rolled_up", "let_go"]
         }
       }
     ]
@@ -457,7 +458,8 @@ defmodule Telemetry do
 
   def call("trace", %{"id" => id} = inputs, call) do
     if not (id =~ ~r/^[0-9a-f]{32}$/), do: raise("A trace's id is 32 lowercase hexadecimal digits.")
-    {batches, _from, _to} = read(call, inputs["hours"] || 24)
+    to = System.os_time(:nanosecond)
+    batches = Store.whole(call, to - (inputs["hours"] || 24) * 3_600_000_000_000)
 
     case Read.trace(batches, id, shown(call)) do
       [] -> raise "No trace #{id} in the last #{inputs["hours"] || 24} hours."
