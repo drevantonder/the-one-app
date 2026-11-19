@@ -116,14 +116,19 @@ defmodule Telemetry.Read do
     Enum.sort_by(tools, & &1.p95, :desc) ++ Enum.sort_by(opens, & &1.p95, :desc)
   end
 
+  @minute 60_000_000_000
+
   defp tool(point), do: {point["attributes"]["one.app"], point["attributes"]["one.tool"]}
 
   defp over_time(points, from, to, step) do
     for {_at, within} <- steps(points, from, to, step), do: if(within == [], do: nil, else: quantiles(added(within)).p95)
   end
 
-  # Each step's start from `from` to `to`, and the points in it: those after its start, up to its end.
+  # Each step's start from `from` to `to`, and the points in it: those after its start, up to its end. Steps start on
+  # a whole minute and are whole minutes, as a rollup adds a metric's points up by the minute they end
+  # (`Telemetry.Rollup`), so none is split.
   defp steps(points, from, to, step) do
+    {from, step} = {from - rem(from, @minute), step + rem(@minute - rem(step, @minute), @minute)}
     within = Enum.group_by(for(p <- points, p["time"] > from, do: p), &div(&1["time"] - from - 1, step))
     for {at, index} <- Enum.with_index(from..to//step), do: {at, Map.get(within, index, [])}
   end

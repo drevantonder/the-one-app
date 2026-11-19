@@ -4,7 +4,8 @@ defmodule Telemetry.Rollup do
   `Telemetry.Read` needs of it but a trace whole, in the shape `Telemetry.Otlp` lays exports out in, so a look over
   hours reads one small blob for each rather than every export, decoded.
 
-  - Data points of a metric with the same attributes are added up minute by minute, whichever server they're from.
+  - Data points of a metric with the same attributes are added up by the minute they end in, after its start and up
+    to its end, as `Telemetry.Read` steps through them, whichever server they're from.
   - The spans kept are those that failed or were refused, and the clients' spans of the traces they're in, which say
     who asked; their events go.
   - The log lines kept are the warnings and errors logged outside a call.
@@ -41,7 +42,7 @@ defmodule Telemetry.Rollup do
       "metrics" =>
         batches
         |> Enum.flat_map(& &1["metrics"])
-        |> Enum.group_by(&{&1["name"], &1["attributes"], div(&1["time"], 60_000_000_000)})
+        |> Enum.group_by(&{&1["name"], &1["attributes"], div(&1["time"] - 1, 60_000_000_000)})
         |> Enum.map(fn {_minute, points} -> points |> Read.added() |> Map.delete("server") end)
     }
   end
