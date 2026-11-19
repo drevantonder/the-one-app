@@ -16,6 +16,7 @@ use std::{env, fs};
 
 use anyhow::{Context, Result, bail};
 use client::Client;
+use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
 /// Where an installer says it installed an app, for the directory of apps (`www/app-directory/README.md`).
@@ -130,40 +131,24 @@ fn git(folder: &Path, args: &[&str]) -> Result<String> {
 }
 
 /// An app as `apps.lock` records it, by its name there.
-#[derive(Clone)]
+#[derive(Clone, Serialize, Deserialize)]
 struct Locked {
     source: String,
+    #[serde(rename = "ref")]
     reference: Option<String>,
     commit: String,
     hash: String,
+    #[serde(rename = "for")]
     of: String,
     /// The apps it requires, as the server said when it was installed, which come before it.
+    #[serde(default)]
     requires: Vec<String>,
 }
 
-impl Locked {
-    fn json(&self) -> Value {
-        json!({
-            "source": self.source, "ref": self.reference, "commit": self.commit, "hash": self.hash, "for": self.of,
-            "requires": self.requires,
-        })
-    }
-
-    fn read(locked: &Value) -> Option<Self> {
-        Some(Self {
-            source: locked["source"].as_str()?.to_owned(),
-            reference: locked["ref"].as_str().map(str::to_owned),
-            commit: locked["commit"].as_str()?.to_owned(),
-            hash: locked["hash"].as_str()?.to_owned(),
-            of: locked["for"].as_str()?.to_owned(),
-            requires: locked["requires"]
-                .as_array()
-                .into_iter()
-                .flatten()
-                .filter_map(|name| name.as_str().map(str::to_owned))
-                .collect(),
-        })
-    }
+#[derive(Deserialize)]
+struct Lock {
+    #[serde(default)]
+    apps: BTreeMap<String, Locked>,
 }
 
 /// The lock file, where this is run in a network's repo: a folder with `apps/` or an `apps.lock`.
@@ -173,18 +158,12 @@ fn lock_file() -> Option<PathBuf> {
 
 fn read_lock(file: &Path) -> Result<BTreeMap<String, Locked>> {
     let Ok(text) = fs::read_to_string(file) else { return Ok(BTreeMap::new()) };
-    let lock: Value = serde_json::from_str(&text).with_context(|| format!("{} isn't JSON", file.display()))?;
-    let apps = lock["apps"].as_object().into_iter().flatten();
-    apps
-        .map(|(name, lock)| {
-            Locked::read(lock).map(|locked| (name.clone(), locked)).with_context(|| format!("{LOCK} says {name} wrong"))
-        })
-        .collect()
+    let lock: Lock = serde_json::from_str(&text).with_context(|| format!("{} says an app wrong", file.display()))?;
+    Ok(lock.apps)
 }
 
 fn write_lock(file: &Path, locked: &BTreeMap<String, Locked>) -> Result<()> {
-    let apps: serde_json::Map<String, Value> = locked.iter().map(|(name, it)| (name.clone(), it.json())).collect();
-    let text = serde_json::to_string_pretty(&json!({"version": 1, "apps": apps}))?;
+    let text = serde_json::to_string_pretty(&json!({"version": 1, "apps": locked}))?;
     Ok(fs::write(file, text + "\n")?)
 }
 
