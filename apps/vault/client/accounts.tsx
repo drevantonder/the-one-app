@@ -257,16 +257,11 @@ async function unlockWithPasskey() {
   }
 }
 
-/// Has this device, which holds its person's key, encrypt it to each of their passkeys that can unlock it and doesn't
-/// yet (`sign-in_encrypt_for_passkeys`), as a passkey's first used or the key's first made.
-const encryptForPasskeys = () => own() && security().holds && call("sign-in_encrypt_for_passkeys").catch(toast)
-
 /// What's missing before the Vault works, atop the list: one box, saying what and the one thing that fixes it.
 function Readiness() {
   const setUp = async () => {
     if (!(await does("encryption_approve", {}))) return
     await showRecoveryKey({ subject: whose() })
-    if (own()) await call("sign-in_encrypt_for_passkeys").catch(toast)
   }
   return (
     <Choose>
@@ -717,7 +712,6 @@ function RequestAlert() {
 /// asking to be; the recovery key; and the servers that can open it.
 function SecurityScreen() {
   const others = () => security().devices.filter((device) => device.device !== security().device)
-  createEffect(() => own() && security().holds, (holds) => void (holds && encryptForPasskeys()))
   const choose = (server: string, on: boolean) => {
     const servers = security().servers.filter((chosen) => chosen !== server)
     return does("vault_grant", { servers: on ? [...servers, server] : servers })
