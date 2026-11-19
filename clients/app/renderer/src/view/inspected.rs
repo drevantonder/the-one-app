@@ -212,7 +212,8 @@ impl Screen {
         self.idle();
         let mut left = ms;
         loop {
-            let frame = self.framing().then(|| ((clock.now() / FRAME).floor() + 1.0) * FRAME - clock.now());
+            // The next frame's, at least a microsecond on, so a clock a hair short of one isn't stepped by nothing.
+            let frame = self.framing().then(|| FRAME - clock.now().rem_euclid(FRAME)).map(|next| if next < 0.001 { next + FRAME } else { next });
             let Some(next) = self.js.due().into_iter().chain(frame).reduce(f64::min).filter(|next| *next <= left) else { break };
             let framed = frame == Some(next);
             let next = next.max(0.0);
