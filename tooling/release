@@ -154,7 +154,7 @@ part=server
 
 # A network's iPhone app goes to TestFlight beside its computers' clients, where its native code changed
 # (`tooling/testflight`), built from the network's repo, which ONE_NETWORK_REPO names (Agent Memory says where it is).
-# The release ends once it's there, and fails if it doesn't get there.
+# The release ends once Apple has taken the upload, and fails if it doesn't.
 iphone=
 if [[ $part == client && " ${wanted[*]} " == *" client "* && -z $dry ]]; then
   if [[ -z ${ONE_NETWORK_REPO:-} ]]; then

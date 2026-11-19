@@ -86,8 +86,9 @@ The owner's phone takes the One App from TestFlight, which updates it by itself;
 TestFlight. `tooling/testflight <the network's repo>` publishes main, as `tooling/release client` does whenever the
 phone's native code changed: it archives unsigned (`--archive-only --no-sign`), signs each target ad hoc with its own
 entitlements, which the export keeps, exports it with the App Store profiles and Apple Distribution
-(`xcodebuild -exportArchive`), uploads with the API key, and waits for Apple's processing, after which the internal
-group "The One App" has the build (`hasAccessToAllBuilds`) and its testers take it automatically.
+(`xcodebuild -exportArchive`) and uploads with the API key. Apple processes it by itself in a few minutes, which
+nothing waits for: then the internal group "The One App" has the build (`hasAccessToAllBuilds`) and its testers take
+it automatically. App Store Connect's `processingState` says where it is, and Apple emails if it rejects it.
 
 ## Mistakes already made
 

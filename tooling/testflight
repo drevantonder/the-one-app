@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # Builds a network's iPhone app at the commit checked out, which is on main, signs it for the App Store, uploads it to
-# TestFlight, whose internal group has every build, and waits until Apple has processed it, when its testers' phones
-# take it by themselves (the `iphone` skill says how each step is done, and why):
+# TestFlight, whose internal group has every build, and ends once Apple has taken the upload: Apple processes it in a
+# few minutes by itself, and its testers' phones take it then, as App Store Connect says (`processingState`), with
+# nothing here waiting for that (the `iphone` skill says how each step is done, and why):
 #
 #     tooling/testflight <the network's repo>
 #
@@ -128,12 +129,4 @@ mac "lockf -k ~/scratch/testflight.lock bash -c $(printf %q "set -e
   [[ -d ~/scratch/testflight ]] || git clone -q https://github.com/drevantonder/the-one-app.git ~/scratch/testflight
   cd ~/scratch/testflight && git fetch -q origin $commit && git reset -q --hard $commit
   nice -n 19 taskpolicy -d throttle tooling/testflight --on-mac")" <<<"$ASC_KEY"
-echo "Uploaded $number; waiting for Apple to process it"
-
-# Apple tells of a processed build only by a webhook to a server of one's own, so this asks every 30 s, as fastlane's
-# pilot does, for up to an hour.
-until [[ $(asc "/v1/builds?filter%5Bapp%5D=$app&filter%5Bversion%5D=$number&fields%5Bbuilds%5D=processingState" | jq -r '.data[0].attributes.processingState // empty') == VALID ]]; do
-  ((SECONDS < 3600)) || { echo "Apple hasn't processed $number within an hour" >&2 && exit 1; }
-  sleep 30
-done
-echo "TestFlight has $number ($build): its testers' phones take it by themselves"
+echo "Uploaded $number ($build): Apple processes it, then its testers' phones take it by themselves"
