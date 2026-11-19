@@ -28,7 +28,7 @@ defmodule Telemetry do
   @impl true
   def requires,
     do: %{
-      "core" => ">= 0.29.4",
+      "core" => ">= 0.30.0",
       "database" => "to keep its schedule and its alerts"
     }
 

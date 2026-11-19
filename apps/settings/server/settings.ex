@@ -17,7 +17,7 @@ defmodule Settings do
   def entrypoints, do: [%{page: "client/index.html", category: "settings", subject: "user", badge: "badge", runtime_version: 4}]
 
   @impl true
-  def requires, do: %{"core" => ">= 0.27.40"}
+  def requires, do: %{"core" => ">= 0.30.0"}
 
   @impl true
   def offers do
