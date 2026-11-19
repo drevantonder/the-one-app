@@ -386,6 +386,12 @@ impl Windows {
             {
                 screen.device = Box::new(Computer);
             }
+            // An app's window on Linux is unframed, its title row a GNOME header bar with the desktop's window buttons.
+            #[cfg(target_os = "linux")]
+            if screen.breadcrumb.is_some() {
+                screen.window_buttons = linux::button_layout();
+                self.display.unframe(&native);
+            }
             if let Some(native) = Native::started() {
                 let native = std::sync::Mutex::new(native);
                 screen.on_post(Arc::new(move || native.lock().unwrap_or_else(std::sync::PoisonError::into_inner).run(move |windows| windows.posted(id))));
@@ -966,7 +972,17 @@ impl Windows {
                     self.display.text_menu(&window.parts[part].native, menu);
                 }
             }
-            Input::Up(at, button) => screen.pointer_up(at, button),
+            Input::Up(at, button) => {
+                screen.pointer_up(at, button);
+                // Its own window buttons do what they say (an unframed Linux window's).
+                #[cfg(target_os = "linux")]
+                match screen.take_window_button() {
+                    Some(crate::WindowButton::Close) => return self.close(id),
+                    Some(crate::WindowButton::Minimize) => self.display.minimize(&window.parts[0].native),
+                    Some(crate::WindowButton::Maximize) => self.display.toggle_maximized(window.parts[0].native.x_window()),
+                    None => {}
+                }
+            }
             Input::Wheel(at, delta, phase) => drop(screen.scroll(at, delta, phase)),
             Input::Key(key) => drop(screen.key(&key)),
             Input::Ime(ime) => screen.ime(ime),

@@ -48,6 +48,32 @@ fn appearance_setting(key: &str) -> Option<u64> {
     value.0.as_u64()
 }
 
+/// The window buttons an unframed window has at its header bar's start and at its end, in order, as the desktop sets
+/// them (GNOME's `button-layout`, `appmenu:minimize,maximize,close`, through its portal), or all three at the end where
+/// it says nothing.
+pub fn button_layout() -> (Vec<crate::WindowButton>, Vec<crate::WindowButton>) {
+    use dbus::arg::{RefArg, Variant};
+    let read = || -> Option<String> {
+        let connection = dbus::blocking::Connection::new_session().ok()?;
+        let portal = connection.with_proxy("org.freedesktop.portal.Desktop", "/org/freedesktop/portal/desktop", std::time::Duration::from_millis(500));
+        let (value,): (Variant<Box<dyn RefArg>>,) = portal.method_call("org.freedesktop.portal.Settings", "ReadOne", ("org.gnome.desktop.wm.preferences", "button-layout")).ok()?;
+        value.0.as_str().map(str::to_owned)
+    };
+    let layout = read().unwrap_or_else(|| ":minimize,maximize,close".to_owned());
+    let side = |side: &str| {
+        side.split(',')
+            .filter_map(|button| match button.trim() {
+                "close" => Some(crate::WindowButton::Close),
+                "minimize" => Some(crate::WindowButton::Minimize),
+                "maximize" => Some(crate::WindowButton::Maximize),
+                _ => None,
+            })
+            .collect()
+    };
+    let (start, end) = layout.split_once(':').unwrap_or(("", &layout));
+    (side(start), side(end))
+}
+
 /// Light or dark: `color-scheme`'s 1 is dark, 2 light, 0 no preference.
 pub fn appearance() -> crate::Appearance {
     match appearance_setting("color-scheme") {

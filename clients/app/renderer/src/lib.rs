@@ -22,7 +22,7 @@ pub(crate) mod view;
 
 pub use style::load_styles;
 pub use view::inspected::Reply;
-pub use view::{Appearance, Asked, Breadcrumb, Cursor, FONT, MakeFrame, Notice, Panel, Screen, TitleRow, fonts};
+pub use view::{Appearance, Asked, Breadcrumb, Cursor, FONT, MakeFrame, Notice, Panel, Screen, TitleRow, WindowButton, fonts};
 
 /// This host's runtime version (`RUNTIME_VERSION` in core/ui/src/drawing-primitives/renderer.ts). An entrypoint that needs a
 /// later one isn't drawn: a computer's window says so, and a phone opens it in its page.

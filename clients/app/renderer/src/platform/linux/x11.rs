@@ -66,6 +66,9 @@ x11rb::atom_manager! {
         XdndSelection,
         XdndActionCopy,
         TEXT_URI_LIST: b"text/uri-list",
+        WM_CHANGE_STATE,
+        _NET_WM_STATE_MAXIMIZED_VERT,
+        _NET_WM_STATE_MAXIMIZED_HORZ,
     }
 }
 
@@ -81,7 +84,7 @@ pub struct Display {
     composed: RefCell<String>,
     xkb_device: i32,
     cursors: cursor::Handle,
-    loaded: RefCell<HashMap<Cursor, xproto::Cursor>>,
+    loaded: RefCell<HashMap<&'static str, xproto::Cursor>>,
     scale: f32,
     /// Each window's window and part (`Who`).
     windows: RefCell<HashMap<xproto::Window, Who>>,
@@ -105,6 +108,14 @@ pub struct Display {
     framed: Cell<Option<std::time::Instant>>,
     /// The desktop went light or dark since its windows were last told (`appearance_changes`).
     appearance: Rc<Cell<Option<crate::Appearance>>>,
+    /// Each app window with no frame of the window manager's (`unframe`), with its size in device pixels; the edge
+    /// of one the pointer is at, which resizes it (`EDGES`); a press held in a title row, where it was on the screen,
+    /// which moves its window once it's dragged a few pixels, as GTK's does; and the last press there, by its time,
+    /// for a double click.
+    unframed: RefCell<HashMap<xproto::Window, (u16, u16)>>,
+    edge: Cell<Option<(xproto::Window, usize)>>,
+    title_held: Cell<Option<(xproto::Window, i16, i16)>>,
+    title_pressed: Cell<Option<(xproto::Window, u32)>>,
     /// A drag from another app over a window (XDND's): its source, and where it is in the window, in points.
     dragging: Cell<Option<(xproto::Window, xproto::Window, Point<f32>)>>,
     /// Each app window's file of where it was left (`WindowOptions::frame`), kept as it's moved or resized.
@@ -118,12 +129,16 @@ pub struct Display {
 /// Which window an event is for, and which of its parts: 0 the window itself, the rest a panel's parts.
 type Who = (WindowId, usize);
 
+/// An unframed window's edges and corners, from the top left round, as EWMH numbers its resizes, each with the
+/// pointer's shape there, by the cursor theme's names.
+const EDGES: [(u32, &str); 8] = [(0, "top_left_corner"), (1, "top_side"), (2, "top_right_corner"), (3, "right_side"), (4, "bottom_right_corner"), (5, "bottom_side"), (6, "bottom_left_corner"), (7, "left_side")];
+
 pub struct NativeWindow {
     x_window: xproto::Window,
     raw: RawWindow,
     size: Cell<Size<DevicePixels>>,
     scale: f32,
-    cursor: Cell<Cursor>,
+    cursor: Cell<&'static str>,
     /// A panel's: whether it has a 32-bit visual, see-through where it's drawn so, and the window that was active
     /// before it was summoned, to give the keyboard back to.
     transparent: bool,
@@ -181,6 +196,11 @@ impl NativeWindow {
 
     pub fn device_size(&self) -> Size<DevicePixels> {
         self.size.get()
+    }
+
+    /// Its X11 window.
+    pub fn x_window(&self) -> xproto::Window {
+        self.x_window
     }
 
     pub fn size(&self) -> Size<Pixels> {
@@ -313,6 +333,10 @@ impl Display {
             appearance,
             frames: RefCell::default(),
             dragging: Cell::new(None),
+            unframed: RefCell::default(),
+            edge: Cell::new(None),
+            title_held: Cell::new(None),
+            title_pressed: Cell::new(None),
             told,
             tell,
         })
@@ -411,7 +435,7 @@ impl Display {
             raw,
             size: Cell::new(Size { width: DevicePixels(width as i32), height: DevicePixels(height as i32) }),
             scale: self.scale,
-            cursor: Cell::new(Cursor::Arrow),
+            cursor: Cell::new("default"),
             transparent: argb.is_some(),
             before: Cell::new(x11rb::NONE),
             panel,
@@ -593,6 +617,7 @@ impl Display {
     }
 
     pub fn close(&self, window: &NativeWindow) {
+        self.unframed.borrow_mut().remove(&window.x_window);
         self.frames.borrow_mut().remove(&window.x_window);
         self.windows.borrow_mut().remove(&window.x_window);
         self.parts.borrow_mut().remove(&window.x_window);
@@ -614,6 +639,64 @@ impl Display {
         let message = xproto::ClientMessageEvent::new(32, x_window, self.atoms._NET_ACTIVE_WINDOW, data);
         let _ = self.xcb.send_event(false, root, xproto::EventMask::SUBSTRUCTURE_REDIRECT | xproto::EventMask::SUBSTRUCTURE_NOTIFY, message);
         let _ = self.xcb.flush();
+    }
+
+    /// An app's window with no frame of the window manager's: its page's title row is its header bar, as a GNOME app's
+    /// is (client-side decorations), with the desktop's window buttons (`button_layout`), moving it, and its edges
+    /// resizing it.
+    pub fn unframe(&self, window: &NativeWindow) {
+        let _ = self.xcb.change_property32(xproto::PropMode::REPLACE, window.x_window, self.atoms._MOTIF_WM_HINTS, self.atoms._MOTIF_WM_HINTS, &[2, 0, 0, 0, 0]);
+        let size = window.size.get();
+        self.unframed.borrow_mut().insert(window.x_window, (size.width.0.max(0) as u16, size.height.0.max(0) as u16));
+        let _ = self.xcb.flush();
+    }
+
+    /// Minimizes an app's window, as its Minimize button does (ICCCM's iconic state).
+    pub fn minimize(&self, window: &NativeWindow) {
+        let message = xproto::ClientMessageEvent::new(32, window.x_window, self.atoms.WM_CHANGE_STATE, [3, 0, 0, 0, 0]);
+        self.to_window_manager(message);
+    }
+
+    /// Maximizes an app's window, or makes it as it was, as its Maximize button and a double click on its header bar
+    /// do (EWMH's toggle of both maximized states).
+    pub fn toggle_maximized(&self, x_window: xproto::Window) {
+        let message = xproto::ClientMessageEvent::new(32, x_window, self.atoms._NET_WM_STATE, [2, self.atoms._NET_WM_STATE_MAXIMIZED_VERT, self.atoms._NET_WM_STATE_MAXIMIZED_HORZ, 1, 0]);
+        self.to_window_manager(message);
+    }
+
+    /// Asks the window manager to move or resize `x_window` from where a press was, on the screen, in direction
+    /// `direction` (EWMH's: 0 to 7 the edges and corners from the top left, 8 a move).
+    fn move_or_resize(&self, x_window: xproto::Window, (x, y): (i16, i16), direction: u32) {
+        let _ = self.xcb.ungrab_pointer(x11rb::CURRENT_TIME);
+        let message = xproto::ClientMessageEvent::new(32, x_window, self.atoms._NET_WM_MOVERESIZE, [i32::from(x) as u32, i32::from(y) as u32, direction, 1, 1]);
+        self.to_window_manager(message);
+    }
+
+    /// A message to the window manager, as EWMH sends one: to the root window.
+    fn to_window_manager(&self, message: xproto::ClientMessageEvent) {
+        let root = self.xcb.setup().roots[self.screen].root;
+        let mask = xproto::EventMask::SUBSTRUCTURE_REDIRECT | xproto::EventMask::SUBSTRUCTURE_NOTIFY;
+        let _ = self.xcb.send_event(false, root, mask, message);
+        let _ = self.xcb.flush();
+    }
+
+    /// Which of an unframed window's edges, as `EDGES` has them, a point in it is at, if any.
+    fn edge_at(&self, x_window: xproto::Window, x: i16, y: i16) -> Option<usize> {
+        let (width, height) = *self.unframed.borrow().get(&x_window)?;
+        let near = (6.0 * self.scale).round() as i32;
+        let (x, y, width, height) = (i32::from(x), i32::from(y), i32::from(width), i32::from(height));
+        let (left, right, top, bottom) = (x < near, x >= width - near, y < near, y >= height - near);
+        Some(match (top, bottom, left, right) {
+            (true, _, true, _) => 0,
+            (true, _, _, true) => 2,
+            (true, ..) => 1,
+            (_, true, true, _) => 6,
+            (_, true, _, true) => 4,
+            (_, true, ..) => 5,
+            (_, _, true, _) => 7,
+            (_, _, _, true) => 3,
+            _ => return None,
+        })
     }
 
     /// Its window manager's frame is drawn light or dark as `theme` says, as a GTK window's (`_GTK_THEME_VARIANT`,
@@ -672,15 +755,19 @@ impl Display {
     }
 
     pub fn set_cursor(&self, window: &NativeWindow, cursor: Cursor) {
-        if window.cursor.replace(cursor) == cursor {
+        // At an unframed window's edge, it's the edge's, which resizes it.
+        let name = match self.edge.get().filter(|(at, _)| *at == window.x_window) {
+            Some((_, edge)) => EDGES[edge].1,
+            None => match cursor {
+                Cursor::Arrow => "default",
+                Cursor::Pointer => "pointer",
+                Cursor::Text => "text",
+            },
+        };
+        if window.cursor.replace(name) == name {
             return;
         }
-        let name = match cursor {
-            Cursor::Arrow => "default",
-            Cursor::Pointer => "pointer",
-            Cursor::Text => "text",
-        };
-        let loaded = *self.loaded.borrow_mut().entry(cursor).or_insert_with(|| self.cursors.load_cursor(&*self.xcb, name).unwrap_or(x11rb::NONE));
+        let loaded = *self.loaded.borrow_mut().entry(name).or_insert_with(|| self.cursors.load_cursor(&*self.xcb, name).unwrap_or(x11rb::NONE));
         let _ = self.xcb.change_window_attributes(window.x_window, &xproto::ChangeWindowAttributesAux::new().cursor(loaded));
     }
 
@@ -848,10 +935,10 @@ impl Display {
     /// X11 has no material of the system's to put under a page: its panel is filled, and what asks for the system's
     /// is blurred as any material.
 
-    /// Its title row over its page: none here, where the system's own title bar is above the page and moves the window.
-    /// A panel moves where its page says (`appRegion`); an app's window has its window manager's frame.
+    /// Its title row over its page, which moves it: a panel's where its page says (`appRegion`), and an unframed app
+    /// window's, its header bar (`unframe`); a framed one has its window manager's title bar.
     pub fn set_title_row(&self, window: &NativeWindow, row: Option<crate::view::TitleRow>) {
-        if !window.panel {
+        if !window.panel && !self.unframed.borrow().contains_key(&window.x_window) {
             return;
         }
         match row {
@@ -992,6 +1079,9 @@ impl Display {
                 if let Some(id) = self.window(event.window) {
                     self.follow(event.window);
                     self.placed_at(event.window, event.width, event.height);
+                    if let Some(size) = self.unframed.borrow_mut().get_mut(&event.window) {
+                        *size = (event.width, event.height);
+                    }
                     if self.dragged.borrow().contains(&event.window)
                         && let Some(placed) = self.placed(event.window)
                     {
@@ -1006,6 +1096,17 @@ impl Display {
                 }
             }
             Event::MotionNotify(event) => {
+                if self.unframed.borrow().contains_key(&event.event) {
+                    self.edge.set(self.edge_at(event.event, event.event_x, event.event_y).map(|edge| (event.event, edge)));
+                }
+                // A press held in a title row and dragged moves its window.
+                if let Some((window, x, y)) = self.title_held.get()
+                    && (i32::from(event.root_x) - i32::from(x)).abs().max((i32::from(event.root_y) - i32::from(y)).abs()) > 4
+                {
+                    self.title_held.set(None);
+                    self.dragged.borrow_mut().insert(window);
+                    return self.move_or_resize(window, (x, y), 8);
+                }
                 if let Some(id) = self.window(event.event) {
                     out.push((id, Input::Moved(self.at(event.event_x, event.event_y))));
                 }
@@ -1019,14 +1120,20 @@ impl Display {
                 // a press on one of its parts, by its point in the page, moves the panel, which the part follows.
                 let (panel, by) = self.parts.borrow().get(&event.event).copied().unwrap_or((event.event, Point { x: 0.0, y: 0.0 }));
                 let in_page = Point { x: at.x + by.x, y: at.y + by.y };
+                // An unframed window's edge resizes it, as its window manager's frame would.
+                if event.detail == 1
+                    && let Some(edge) = self.edge_at(event.event, event.event_x, event.event_y)
+                {
+                    return self.move_or_resize(event.event, (event.root_x, event.root_y), edge as u32);
+                }
                 if event.detail == 1 && self.rows.borrow().get(&panel).is_some_and(|row| row.moves(in_page)) {
-                    self.dragged.borrow_mut().insert(panel);
-                    let root = self.xcb.setup().roots[self.screen].root;
-                    let _ = self.xcb.ungrab_pointer(x11rb::CURRENT_TIME);
-                    let message = xproto::ClientMessageEvent::new(32, panel, self.atoms._NET_WM_MOVERESIZE, [i32::from(event.root_x) as u32, i32::from(event.root_y) as u32, 8, 1, 1]);
-                    let mask = xproto::EventMask::SUBSTRUCTURE_REDIRECT | xproto::EventMask::SUBSTRUCTURE_NOTIFY;
-                    let _ = self.xcb.send_event(false, root, mask, message);
-                    let _ = self.xcb.flush();
+                    // A double click on a header bar maximizes it, or makes it as it was, as GNOME's does.
+                    let again = self.title_pressed.replace(Some((panel, event.time))).is_some_and(|(was, time)| was == panel && event.time.wrapping_sub(time) < 400);
+                    if again && self.unframed.borrow().contains_key(&panel) {
+                        self.title_pressed.set(None);
+                        return self.toggle_maximized(panel);
+                    }
+                    self.title_held.set(Some((panel, event.root_x, event.root_y)));
                     return;
                 }
                 // Buttons 1 to 3 are the main, middle and secondary; 4 and 5 the wheel's turns, up and down, 6 and 7
@@ -1042,6 +1149,9 @@ impl Display {
                 }
             }
             Event::ButtonRelease(event) => {
+                if event.detail == 1 && self.title_held.take().is_some() {
+                    return;
+                }
                 if (1..=3).contains(&event.detail)
                     && let Some(id) = self.window(event.event)
                 {

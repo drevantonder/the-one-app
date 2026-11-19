@@ -1216,6 +1216,30 @@ impl Painter<'_> {
         (home, x + name.size().width.ceil())
     }
 
+    /// One of the window's own buttons (`WindowButton`), as a GNOME header bar's: a round button, lit under the
+    /// pointer, with its symbol in the label's colour.
+    pub(super) fn window_button(&mut self, kind: super::WindowButton, bounds: Bounds<f32>, hovered: bool) {
+        let conditions = self.conditions;
+        let window = self.window;
+        let colour = |id: &str| colour_token(id, conditions);
+        let fill = if hovered { colour("quaternary-label") } else { colour("quinary-label") };
+        self.quad(bounds, window, fill, Edges::default(), Hsla::default(), Corners::all(bounds.size.width / 2.0), false, 1.0);
+        let (middle, ink) = (point(bounds.origin.x + bounds.size.width / 2.0, bounds.origin.y + bounds.size.height / 2.0), colour("label"));
+        let line = |width: f32, height: f32, y: f32| Bounds { origin: point(middle.x - width / 2.0, middle.y + y - height / 2.0), size: Size { width, height } };
+        match kind {
+            super::WindowButton::Minimize => self.quad(line(8.0, 1.5, 3.0), window, ink, Edges::default(), Hsla::default(), Corners::default(), false, 1.0),
+            super::WindowButton::Maximize => self.quad(line(8.0, 8.0, 0.0), window, Hsla::default(), Edges { top: 1.5, right: 1.5, bottom: 1.5, left: 1.5 }, ink, Corners::all(1.0), false, 1.0),
+            super::WindowButton::Close => {
+                let was = self.turn;
+                for degrees in [45.0, -45.0] {
+                    self.turn = TransformationMatrix::rotation(degrees, [middle.x, middle.y]).then(&was);
+                    self.quad(line(11.0, 1.5, 0.0), window, ink, Edges::default(), Hsla::default(), Corners::default(), false, 1.0);
+                }
+                self.turn = was;
+            }
+        }
+    }
+
     /// The window's notice over the top of its page (`Notice`), `top` points down: a pill of the foreground's colour
     /// with its words in the background's, as a toast, centred, and its action after them, highlighted under the
     /// pointer. → where its action is.

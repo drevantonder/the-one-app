@@ -103,6 +103,15 @@ pub struct Panel {
 /// What the window says over its page of where the page is, as a phone's app says it over an app (DESIGN.md, App
 /// windows): its network not answering ("Reconnecting…"), or its page updated ("Updated", with Reload). A pill at its
 /// top, over the page, with its one action.
+/// One of a window's own buttons, which a window with no frame of the system's draws in its title row (a GNOME header
+/// bar's), on the side and in the order its desktop sets.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum WindowButton {
+    Close,
+    Minimize,
+    Maximize,
+}
+
 /// The system's own menu for text in a field a secondary click was on, where it was, in points of the page, and what
 /// of it can be done: as every system's fields have (`Screen::take_text_menu`), whose choice comes back as its key.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -219,6 +228,10 @@ pub struct Screen {
     pub page: u32,
     /// What its window says above it, on a computer.
     pub breadcrumb: Option<Breadcrumb>,
+    /// Its own window buttons, at its title row's start and at its end, where it has no frame of the system's
+    /// (`WindowButton`), and the one last pressed, until its window does what it says.
+    pub window_buttons: (Vec<WindowButton>, Vec<WindowButton>),
+    window_button: Option<WindowButton>,
     /// Its window is full screen, where a Mac hides its traffic lights, so its breadcrumb starts at its edge.
     pub full_screen: bool,
     /// The system's menu for text a secondary click asked for, until its window shows it.
@@ -345,6 +358,8 @@ impl Screen {
             breadcrumb: None,
             full_screen: false,
             text_menu: None,
+            window_buttons: (Vec::new(), Vec::new()),
+            window_button: None,
             panel: None,
             notice: None,
             visible: true,
@@ -743,7 +758,7 @@ impl Screen {
     /// The conditions its tokens' values vary by, as its window is now.
     fn conditions(&self) -> Conditions {
         let insets = [self.insets.top, self.insets.right, self.insets.bottom, self.insets.left].map(|inset| inset.round().max(0.0) as u16);
-        let title_bar = [self.chrome.title_start, if self.chrome.title_start > 0 { 16 } else { 0 }];
+        let title_bar = [self.chrome.title_start, if self.chrome.title_end > 0 { self.chrome.title_end } else if self.chrome.title_start > 0 { 16 } else { 0 }];
         let (phone, rem) = match self.text_size {
             Some(size) => (true, (size * 100.0).round() as u16),
             None => (false, Conditions::default().rem),
@@ -1024,12 +1039,31 @@ impl Screen {
         let edge = self.full_screen.then_some(EDGE);
         // What's under the pointer, or has the keyboard by Tab, is lit.
         let keyed = |id: Id| self.states.focus_visible && self.focus.focused == Some(id);
-        let crumb = self.breadcrumb.as_ref().map(|crumb| painter.breadcrumb(crumb, edge.unwrap_or(crumb.start), self.insets.top, self.chrome.home.as_ref().is_some_and(hovering) || keyed(HOME)));
+        // Its own window buttons, as a header bar's: at the title row's start, before the breadcrumb, and at its end,
+        // which the page's top bar stops short of.
+        const BUTTON: f32 = 24.0;
+        const EDGE_GAP: f32 = 12.0;
+        let (starts, ends) = &self.window_buttons;
+        let mut buttons = Vec::new();
+        for (at, kind) in starts.iter().enumerate() {
+            buttons.push((*kind, Bounds { origin: point(EDGE_GAP + at as f32 * (BUTTON + 8.0), (self.insets.top - BUTTON) / 2.0), size: Size { width: BUTTON, height: BUTTON } }));
+        }
+        for (at, kind) in ends.iter().rev().enumerate() {
+            buttons.push((*kind, Bounds { origin: point(window.size.width - EDGE_GAP - BUTTON - at as f32 * (BUTTON + 8.0), (self.insets.top - BUTTON) / 2.0), size: Size { width: BUTTON, height: BUTTON } }));
+        }
+        for (kind, bounds) in &buttons {
+            painter.window_button(*kind, *bounds, hovering(bounds) || self.chrome.pressing_button == Some(*kind));
+        }
+        self.chrome.buttons = buttons;
+        let after_buttons = (!starts.is_empty()).then(|| EDGE_GAP + starts.len() as f32 * (BUTTON + 8.0));
+        let crumb = self.breadcrumb.as_ref().map(|crumb| painter.breadcrumb(crumb, edge.or(after_buttons).unwrap_or(crumb.start), self.insets.top, self.chrome.home.as_ref().is_some_and(hovering) || keyed(HOME)));
         let home = crumb.map(|(home, _)| home);
-        // The page's top bar starts after it, which it's laid out again for once it's moved.
+        // The page's top bar starts after it, and ends before the buttons at the end, which it's laid out again for
+        // once either moves.
         let start = crumb.map_or(0, |(_, end)| (end + 12.0).ceil() as u16);
-        if start != self.chrome.title_start {
-            self.chrome.title_start = start;
+        let end = if ends.is_empty() { 0 } else { (EDGE_GAP + ends.len() as f32 * (BUTTON + 8.0) + 4.0).ceil() as u16 };
+        if (start, end) != (self.chrome.title_start, self.chrome.title_end) {
+            (self.chrome.title_start, self.chrome.title_end) = (start, end);
             self.again = true;
         }
         self.chrome.action = self.notice.as_ref().and_then(|notice| painter.notice(notice, self.insets.top, self.chrome.action.as_ref().is_some_and(hovering) || keyed(NOTICE_ACTION)));
@@ -1344,6 +1378,12 @@ impl Screen {
     /// selection); the middle one in an input pastes the primary selection there, as on Linux; the secondary is a
     /// `contextmenu` too.
     pub fn pointer_down(&mut self, at: Point<f32>, button: u8, shift: bool) {
+        // The window's own buttons are the window's, not its page's.
+        if let Some((kind, _)) = self.chrome.buttons.iter().find(|(_, bounds)| bounds.contains(&at)) {
+            self.chrome.pressing_button = (button == 0).then_some(*kind);
+            self.changed();
+            return;
+        }
         // The breadcrumb's Home is the window's, not its page's, and so is its notice's action.
         if self.chrome.home.is_some_and(|home| home.contains(&at)) {
             self.chrome.pressing_home = button == 0;
@@ -1425,6 +1465,13 @@ impl Screen {
     /// A button came up at `at`: what it went down on is told, and with the main one a press, if it's still over
     /// what was pressed.
     pub fn pointer_up(&mut self, at: Point<f32>, button: u8) {
+        if let Some(kind) = self.chrome.pressing_button.take() {
+            if self.chrome.buttons.iter().any(|(was, bounds)| *was == kind && bounds.contains(&at)) {
+                self.window_button = Some(kind);
+            }
+            self.changed();
+            return;
+        }
         if std::mem::take(&mut self.chrome.pressing_action) {
             if self.chrome.action.is_some_and(|action| action.contains(&at))
                 && let Some((_, action)) = self.notice.as_mut().and_then(|notice| notice.action.as_mut())
@@ -1739,6 +1786,11 @@ impl Screen {
         }
     }
 
+    /// The window button last pressed, once, for its window to do.
+    pub fn take_window_button(&mut self) -> Option<WindowButton> {
+        self.window_button.take()
+    }
+
     /// The system's menu for text a secondary click asked for, once.
     pub fn take_text_menu(&mut self) -> Option<TextMenu> {
         self.text_menu.take()
@@ -1815,6 +1867,7 @@ impl Screen {
         let mut taken: Vec<Bounds<f32>> = self.placed.iter().filter(|(id, placed)| takes(id, placed) && inside(*id, placed)).map(|(_, placed)| placed.shown).collect();
         taken.extend(self.chrome.kept_regions.iter().copied());
         taken.extend(self.chrome.home);
+        taken.extend(self.chrome.buttons.iter().map(|(_, bounds)| *bounds));
         taken.extend(self.chrome.action);
         Some(TitleRow { height, taken, regions: self.chrome.drag_regions.iter().map(|(_, bounds)| *bounds).collect() })
     }
@@ -1991,6 +2044,9 @@ struct Editing {
 #[derive(Default)]
 struct Chrome {
     title_start: u16,
+    title_end: u16,
+    buttons: Vec<(WindowButton, Bounds<f32>)>,
+    pressing_button: Option<WindowButton>,
     glass: Vec<crate::platform::Glass>,
     drag_regions: Vec<(Id, Bounds<f32>)>,
     kept_regions: Vec<Bounds<f32>>,
