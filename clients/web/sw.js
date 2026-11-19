@@ -9,6 +9,7 @@ import { Chacha20Poly1305 } from "@hpke/chacha20poly1305"
 import { CipherSuite, HkdfSha256 } from "@hpke/core"
 import { DhkemX25519HkdfSha256 } from "@hpke/dhkem-x25519"
 import { ed25519 } from "@noble/curves/ed25519.js"
+import { bytesToHex as hex } from "@noble/curves/utils.js"
 import { get, set } from "idb-keyval"
 
 const worker = /** @type {ServiceWorkerGlobalScope} */ (/** @type {unknown} */ (self))
@@ -23,8 +24,6 @@ async function key() {
   if (!secret) await set("notification key", (secret = ed25519.utils.randomSecretKey()))
   return secret
 }
-/** @param {Uint8Array} bytes */
-const hex = (bytes) => Array.from(bytes, (byte) => byte.toString(16).padStart(2, "0")).join("")
 
 const suite = new CipherSuite({ kem: new DhkemX25519HkdfSha256(), kdf: new HkdfSha256(), aead: new Chacha20Poly1305() })
 
