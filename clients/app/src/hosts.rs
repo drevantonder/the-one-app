@@ -406,12 +406,12 @@ async fn change(args: &Value) -> Result<Value, String> {
     if args["push"] == true {
         return push().await;
     }
-    if let Some(settings) = args.get("settings") {
+    if let Some(which) = args.get("settings") {
         #[cfg(target_os = "ios")]
-        if settings == "app" {
+        if which == "app" {
             return settings().map(|()| json!({"message": ""}));
         }
-        let _ = settings;
+        let _ = which;
         return Err("This device has no Settings to open here.".into());
     }
     if let Some(on) = args.get("serve") {
