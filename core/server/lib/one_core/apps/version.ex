@@ -25,7 +25,7 @@ defmodule OneCore.Apps.Version do
   one's `name`, the `tool` that answers its layout, and the `sizes` it comes in.
 
   `services` lists its services: each one's `name`, which is its module's as the app wrote it, what it's `called`
-  where a person reads it, and what it `needs` of a machine. `hooks` names the hooks it hooks into, `offers` lists the
+  where a person reads it, what it `needs` of a machine, and the `os` it runs on, as npm's `os` names them, or `nil` for any. `hooks` names the hooks it hooks into, `offers` lists the
   hooks it offers, each one's `name`, `kind` and `description`, and `jobs` lists its scheduled jobs: each one's `tool`,
   the `inputs` it's called with, and `every` how many seconds. `requires` names the other apps it needs, each with
   why, and `core` the lowest version of the platform it runs on, as an Elixir requirement (`>= 0.15.0`), or `nil` for

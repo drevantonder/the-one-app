@@ -555,6 +555,8 @@ defmodule OneCore.App do
         end
       end
 
+  - A service that runs on some systems only says which in `os/0`, as npm's `os` field in package.json does:
+    `def os, do: ["darwin"]`. Settings shows it only on servers of those systems, and a server of another refuses it.
   - A service runs on each server whose owner installed it there: the `services` tool lists every service with
     what it needs, and `install_service` runs one on a server. The server starts it, starts it again whenever it
     stops, and stops it when the app is removed. `init/1` is given nothing, and raises if the machine lacks

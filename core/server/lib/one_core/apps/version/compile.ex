@@ -235,18 +235,20 @@ defmodule OneCore.Apps.Version.Compile do
         process? = &(GenServer in Version.behaviours(&1) or :gen_statem in Version.behaviours(&1))
 
         with {:ok, description, services} <- said(app, services) do
-          if Enum.all?(services, fn {module, called, needs} ->
-               process?.(module) and is_binary(needs) and is_binary(called)
+          if Enum.all?(services, fn {module, called, needs, os} ->
+               process?.(module) and is_binary(needs) and is_binary(called) and
+                 (is_nil(os) or (is_list(os) and Enum.all?(os, &is_binary/1)))
              end) do
             services =
-              for {module, called, needs} <- services,
-                  do: %{name: Version.own_name(module), called: called, needs: needs}
+              for {module, called, needs, os} <- services,
+                  do: %{name: Version.own_name(module), called: called, needs: needs, os: os}
 
             Checks.checked(under, app, description, services, rest, skills)
           else
             {:error,
              "A service says `use GenServer` or `@behaviour :gen_statem`, its needs/0 gives what it needs of a " <>
-               "machine, and its called/0 what it's called, each as text"}
+               "machine, and its called/0 what it's called, each as text, and its os/0, if it has one, the systems it " <>
+               "runs on, as a list of text"}
           end
         end
 
@@ -257,7 +259,7 @@ defmodule OneCore.Apps.Version.Compile do
 
   # What the app and its services say of themselves, by their own functions, which may raise.
   defp said(app, services) do
-    {:ok, Manifest.said(app), for(module <- services, do: {module, module.called(), module.needs()})}
+    {:ok, Manifest.said(app), for(module <- services, do: {module, module.called(), module.needs(), if(function_exported?(module, :os, 0), do: module.os())})}
   rescue
     error ->
       functions = Enum.map_join(Manifest.said(), ", ", &"#{&1}/0")

@@ -686,6 +686,11 @@ defmodule OneCore.Tools.Definitions do
                 service: %{type: "string"},
                 called: %{type: "string", description: "What it's called where a person reads it"},
                 needs: %{type: "string", description: "What it needs of a machine"},
+                os: %{
+                  type: ["array", "null"],
+                  items: %{type: "string"},
+                  description: "The systems it runs on, as npm's os field names them: darwin, linux, win32. Null for any"
+                },
                 servers: %{type: "array", items: %{type: "string"}, description: "The keys of the servers running it"}
               },
               required: ["app", "service", "called", "needs", "servers"]

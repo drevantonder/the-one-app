@@ -36,8 +36,8 @@ defmodule OneCore.Services do
 
   @doc """
   The services of the apps something that runs for `who` finds, as the bucket has them now: each one's
-  `app`, its `service` name, what it's `called` where a person reads it, what it `needs` of a machine, and the
-  `servers` that run it.
+  `app`, its `service` name, what it's `called` where a person reads it, what it `needs` of a machine, the `os` it
+  runs on (`nil` for any), and the `servers` that run it.
   """
   def list(who) do
     reload(who)
@@ -45,7 +45,7 @@ defmodule OneCore.Services do
 
     for {app, version} <- Enum.sort(Apps.running(who)), service <- version.services do
       servers = Enum.filter(acting, &({version.artifact, service.name} in Servers.installed(&1)))
-      %{app: app, service: service.name, called: service.called, needs: service.needs, servers: servers}
+      %{app: app, service: service.name, called: service.called, needs: service.needs, os: Map.get(service, :os), servers: servers}
     end
   end
 
@@ -141,11 +141,25 @@ defmodule OneCore.Services do
   @doc "The folder on this machine that is a service's own."
   def folder(app, service), do: Path.join([Server.home(), "services", app, service])
 
+  # The system this server runs on, as npm's `os` names it.
+  defp system do
+    case :os.type() do
+      {:win32, _} -> "win32"
+      {:unix, name} -> Atom.to_string(name)
+    end
+  end
+
+  defp runs_here(%{os: [_ | _] = os}, service) do
+    if system() in os, do: :ok, else: {:error, "#{service} runs on #{Enum.join(os, ", ")}, and this server runs on #{system()}"}
+  end
+
+  defp runs_here(_service, _name), do: :ok
+
   defp known(app, service) do
     with %{services: services} <- Apps.version(app) do
       cond do
         Enum.any?(services, &(&1.name == service)) ->
-          :ok
+          runs_here(Enum.find(services, &(&1.name == service)), service)
 
         services == [] ->
           {:error, "#{app} has no services"}

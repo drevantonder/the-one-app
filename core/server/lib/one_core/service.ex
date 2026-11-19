@@ -19,6 +19,13 @@ defmodule OneCore.Service do
   @callback called() :: String.t()
 
   @doc """
+  The operating systems the service runs on, as npm's `os` field in package.json names them (`"darwin"`, `"linux"`,
+  `"win32"`). Left out, it runs on any. Settings shows it only on servers of these, and a server of another refuses it.
+  """
+  @callback os() :: [String.t()]
+  @optional_callbacks os: 0
+
+  @doc """
   Calls a function of a service of this call's app, on a machine that runs it, and gives its answer. The
   function is called with the service's process and then `arguments`. Arguments and answer are what JSON can hold,
   as they arrive wherever the service runs.
