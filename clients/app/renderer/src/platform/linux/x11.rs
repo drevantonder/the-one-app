@@ -449,9 +449,10 @@ impl Display {
         let page = ((room.width.0 * self.scale) as i32, (room.height.0 * self.scale) as i32);
         let at = self.parts.borrow().get(&window.x_window).map_or((0, 0), |(_, at)| ((at.x * self.scale) as i32, (at.y * self.scale) as i32));
         let (x, y) = match places.get(&screen_name((left, top, width, height))) {
-            Some(at) => (
-                (left + (at.x * self.scale) as i32).clamp(left, left + (width - size.width.0).max(0)),
-                (top + (at.y * self.scale) as i32).clamp(top, top + (height - size.height.0).max(0)),
+            // Where it was dragged to, its search and its card kept whole in what the desktop's panels leave clear.
+            Some(kept) => (
+                (left + (kept.x * self.scale) as i32).clamp(work_left + at.0, work_left + at.0 + (work_width - page.0).max(0)),
+                (top + (kept.y * self.scale) as i32).clamp(work_top + at.1, work_top + at.1 + (work_height - page.1).max(0)),
             ),
             // Its search and its card, as one, in the middle of what the monitor has clear of the desktop's panels.
             None => (work_left + (work_width - page.0) / 2 + at.0, work_top + ((work_height - page.1) / 2).max(0) + at.1),

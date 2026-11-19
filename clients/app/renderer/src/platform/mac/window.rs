@@ -336,13 +336,15 @@ impl Display {
             });
             if let Some(on) = on.or_else(|| screens.firstObject()) {
                 let (screen, visible): (NSRect, NSRect) = (frame_of(&on), msg_send![&*on, visibleFrame]);
-                let size = window.frame().size;
                 let (width, height) = (f64::from(room.width.0), f64::from(room.height.0));
                 let at = placed.map_or((0.0, 0.0), |placed| (f64::from(placed.origin.x), f64::from(placed.origin.y)));
                 let (x, top) = match places.get(&screen_name(screen)) {
-                    Some(at) => (
-                        (screen.origin.x + f64::from(at.x)).clamp(screen.origin.x, screen.origin.x + (screen.size.width - size.width).max(0.0)),
-                        (screen.origin.y + screen.size.height - f64::from(at.y)).clamp(screen.origin.y + size.height.min(screen.size.height), screen.origin.y + screen.size.height),
+                    // Where it was dragged to, its search and its card kept whole in what the menu bar and the Dock
+                    // leave clear.
+                    Some(kept) => (
+                        (screen.origin.x + f64::from(kept.x)).clamp(visible.origin.x + at.0, visible.origin.x + at.0 + (visible.size.width - width).max(0.0)),
+                        (screen.origin.y + screen.size.height - f64::from(kept.y))
+                            .clamp(visible.origin.y + height.min(visible.size.height) - at.1, visible.origin.y + visible.size.height - at.1),
                     ),
                     // Its search and its card, as one, in the middle of what the menu bar and the Dock leave clear.
                     None => (

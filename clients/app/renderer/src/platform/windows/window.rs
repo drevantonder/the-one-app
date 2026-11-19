@@ -315,15 +315,15 @@ impl Display {
             let mut info = MONITORINFO { cbSize: size_of::<MONITORINFO>() as u32, ..Default::default() };
             let _ = GetMonitorInfoW(monitor, &mut info);
             let work = info.rcWork;
-            let size = window.size.get();
             let (width, height) = (work.right - work.left, work.bottom - work.top);
             let scale = window.scale();
             let page = ((room.width.0 * scale) as i32, (room.height.0 * scale) as i32);
             let at = window.state.placed.get().map_or((0, 0), |at| ((at.x * scale) as i32, (at.y * scale) as i32));
             let (x, y) = match places.get(&screen_name(&work)) {
-                Some(at) => (
-                    (work.left + (at.x * scale) as i32).clamp(work.left, work.left + (width - size.width.0).max(0)),
-                    (work.top + (at.y * scale) as i32).clamp(work.top, work.top + (height - size.height.0).max(0)),
+                // Where it was dragged to, its search and its card kept whole in the work area.
+                Some(kept) => (
+                    (work.left + (kept.x * scale) as i32).clamp(work.left + at.0, work.left + at.0 + (width - page.0).max(0)),
+                    (work.top + (kept.y * scale) as i32).clamp(work.top + at.1, work.top + at.1 + (height - page.1).max(0)),
                 ),
                 // Its search and its card, as one, in the middle of the monitor's work area, clear of the taskbar.
                 None => (work.left + (width - page.0) / 2 + at.0, work.top + ((height - page.1) / 2).max(0) + at.1),
