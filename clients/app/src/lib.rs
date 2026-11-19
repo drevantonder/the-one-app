@@ -910,6 +910,8 @@ async fn opens() {
         }
     };
     eprintln!("the client opened {} ms after the app started", app.started.elapsed().as_millis());
+    #[cfg(desktop)]
+    computer::opened();
     // A move into or out of being a server that the machine went off during is settled as the app opens, whether or
     // not the system still has the server to start (`cli::serving::settle`).
     #[cfg(desktop)]

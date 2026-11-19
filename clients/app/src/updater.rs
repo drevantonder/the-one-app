@@ -57,7 +57,7 @@ pub fn looked() {
 }
 
 /// Says what it decided to Telemetry, as `name`.
-fn report(name: &str, attributes: Value) {
+pub(crate) fn report(name: &str, attributes: Value) {
     eprintln!("{name} {attributes}");
     if let Ok(views) = crate::views() {
         views.client.report(json!({"name": name, "attributes": attributes}));
