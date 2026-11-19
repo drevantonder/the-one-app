@@ -285,6 +285,21 @@ fn with_windows<R>(f: impl FnOnce(&mut Windows) -> R) -> Option<R> {
                 }
             }
         }
+        // Each window is as light or dark as its Colour Mode says, so what iOS draws over it (the status bar, the
+        // keyboard, a menu, the share sheet) is too.
+        for window in windows.windows.values() {
+            if let Ok(screen) = &window.screen {
+                let style = match screen.theme {
+                    Some(Appearance::Dark) => UIUserInterfaceStyle::Dark,
+                    Some(Appearance::Light) => UIUserInterfaceStyle::Light,
+                    None => UIUserInterfaceStyle::Unspecified,
+                };
+                let ui_window = window.parts[0].native.ui_window();
+                if ui_window.overrideUserInterfaceStyle() != style {
+                    ui_window.setOverrideUserInterfaceStyle(style);
+                }
+            }
+        }
         fling(windows);
         slide(windows);
         windows.turn();
