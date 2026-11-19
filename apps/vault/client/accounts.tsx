@@ -6,7 +6,24 @@
 // one box atop the list, with the one thing that fixes it. A request is an alert, as a system's permission prompt is.
 // It's written as the UI library's skill says, so it runs on a native host as it does on the DOM.
 import { createEffect, createMemo, createSignal, Errored, For, Loading, Match, refresh, Show, Switch as Choose, untrack } from "solid-js"
-import { Alert, Button, call, changed, Checkbox, component, confirm, createListCollection, Empty, Field, Frame, Image, Input, link, List, open as opening, Problem, Row, Screen, Section, Select, Sheet, showRecoveryKey, Skeleton, Spinner, Split, Switch, Text, toast, useRecoveryKey, View } from "ui"
+import { Alert, Button, call, changed, Checkbox, component, confirm, createListCollection, Empty, Field, Frame, Image, Input, link, List, open as opening, Problem, Row, Screen, Section, Select, Sheet, showRecoveryKey, Skeleton, Spinner, Split, styles, Switch, Text, toast, tokens, useRecoveryKey, View } from "ui"
+
+const look = styles({
+  fill: { flexGrow: 1, alignSelf: "stretch" },
+  heading: { flexDirection: "row", alignItems: "center", gap: tokens.grid[2.5], minWidth: 0 },
+  status: { flexDirection: "row", alignItems: "center", gap: tokens.grid[3] },
+  grows: { flexGrow: 1, flexShrink: 1, minWidth: 0 },
+  shrinks: { flexShrink: 1, minWidth: 0 },
+  wrong: { color: tokens.colour.red },
+  note: { color: tokens.colour.secondaryLabel },
+  line: { flexDirection: "row", alignItems: "center", gap: tokens.grid[1.5] },
+  /// An app's icon, or an item's picture, at the start of its row: its flat tile, as on the Home Screen.
+  tile: { width: tokens.grid[8], height: tokens.grid[8], borderRadius: tokens.radius.medium },
+  small: { width: tokens.grid[4], height: tokens.grid[4], borderRadius: tokens.radius.small },
+  inline: { flexDirection: "row", alignItems: "center", gap: tokens.grid[1], minWidth: 0 },
+  /// A dot that says something needs its person.
+  dot: { width: tokens.grid[2], height: tokens.grid[2], flexShrink: 0, borderRadius: tokens.radius.full, backgroundColor: tokens.colour.orange },
+})
 
 /** A field of an item: a secret one has no value here. */
 interface ItemField {
@@ -208,9 +225,6 @@ function enter() {
   setSecure(true)
 }
 
-/// An app's icon, or an item's picture, at the start of its row: its flat tile, as on the Home Screen.
-const tile = { width: 32, height: 32, borderRadius: "md" } as const
-
 /// An item's picture at the start of its row: its app's icon, or its first letter on a colour its name picks, as
 /// Passwords' tiles are.
 function Tile(props: { item: Item }) {
@@ -222,7 +236,7 @@ function Tile(props: { item: Item }) {
     const drawn = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32"><rect width="32" height="32" style="fill:oklch(0.55 0.13 ${hue})"/><text x="16" y="16" dy="0.35em" text-anchor="middle" font-family="system-ui, sans-serif" font-size="16" font-weight="600" fill="#fff">${first}</text></svg>`
     return `data:image/svg+xml,${encodeURIComponent(drawn)}`
   }
-  return <Image src={typeOf(props.item)?.icon ?? letter()} alt="" style={tile} />
+  return <Image src={typeOf(props.item)?.icon ?? letter()} alt="" style={look.tile} />
 }
 
 /// Asks a trusted device to let this one hold the key.
@@ -351,7 +365,7 @@ function Detail(props: { item: Item }) {
     return type?.component && !type.trusted ? `${type.app}/client/${type.component}.html#${encodeURIComponent(shown(props.item))}` : undefined
   }
   return (
-    <Show when={drawn()} keyed fallback={<Show when={framed()} keyed fallback={<ItemScreen item={props.item} />}>{(src) => <Frame src={src} subject={whose()} title={shown(props.item)} style={{ flexGrow: 1, alignSelf: "stretch" }} />}</Show>}>
+    <Show when={drawn()} keyed fallback={<Show when={framed()} keyed fallback={<ItemScreen item={props.item} />}>{(src) => <Frame src={src} subject={whose()} title={shown(props.item)} style={look.fill} />}</Show>}>
       {(type) => (
         <Errored fallback={(error) => <Problem heading={`Can't show ${shown(props.item)}`} text={error() as Error} />}>
           <Loading fallback={<Skeleton rows={4} />}>
@@ -400,7 +414,7 @@ function ItemScreen(props: { item: Item }) {
   return (
     <Screen
       heading={
-        <View style={{ flexDirection: "row", alignItems: "center", gap: 10, minWidth: 0 }}>
+        <View style={look.heading}>
           <Tile item={item()} />
           <Text>{shown(item())}</Text>
         </View>
@@ -409,8 +423,8 @@ function ItemScreen(props: { item: Item }) {
     >
       <Show when={item().status}>
         {(status) => (
-          <View style={{ flexDirection: "row", alignItems: "center", gap: 12 }}>
-            <View style={{ flexGrow: 1, flexShrink: 1, minWidth: 0 }}>
+          <View style={look.status}>
+            <View style={look.grows}>
               <Line status={status()} />
             </View>
             <Fix item={item()} />
@@ -420,7 +434,7 @@ function ItemScreen(props: { item: Item }) {
       <Section heading="Details">
         <List>
           <For each={item().fields}>
-            {(field) => <Row heading={label(field.name)} end={<Text style={field.secret ? { color: "muted-foreground" } : undefined}>{field.secret ? "••••••••" : field.value}</Text>} onPress={() => setSheet({ kind: "field", item: item(), field })} />}
+            {(field) => <Row heading={label(field.name)} end={<Text style={field.secret && look.note}>{field.secret ? "••••••••" : field.value}</Text>} onPress={() => setSheet({ kind: "field", item: item(), field })} />}
           </For>
           <Show when={item().added}>{(added) => <Row heading="Added by an agent" text={whence(added())} />}</Show>
         </List>
@@ -560,7 +574,7 @@ function AddSheet() {
     <Sheet heading={section() ? `Add ${titled(section()!.replace(/s$/, ""))}` : ""} open={!!section()} onClose={shut}>
       <List>
         <For each={types()} keyed={(type) => type.id}>
-          {(type) => <Row start={<Image src={type().icon ?? ""} alt="" style={tile} />} heading={titled(type().name)} onPress={() => (shut(), create(type()))} />}
+          {(type) => <Row start={<Image src={type().icon ?? ""} alt="" style={look.tile} />} heading={titled(type().name)} onPress={() => (shut(), create(type()))} />}
         </For>
       </List>
     </Sheet>
@@ -691,7 +705,7 @@ function RequestAlert() {
           </For>
         </Show>
         <Show when={problem()}>
-          <Text role="alert" style={{ color: "destructive" }}>
+          <Text role="alert" style={look.wrong}>
             {problem()}
           </Text>
         </Show>
@@ -755,7 +769,7 @@ function SecurityScreen() {
           </Section>
         </Show>
         <Section heading="Servers">
-          <Text style={{ color: "muted-foreground" }}>{`A server that can open ${whom()} Vault runs what uses its secrets.${security().holds ? "" : " Choosing them takes a trusted device."}`}</Text>
+          <Text style={look.note}>{`A server that can open ${whom()} Vault runs what uses its secrets.${security().holds ? "" : " Choosing them takes a trusted device."}`}</Text>
           <List>
             <For each={security().may}>
               {(server) => (
@@ -773,18 +787,15 @@ function SecurityScreen() {
   )
 }
 
-/// A dot that says something needs its person.
-const dot = { width: 8, height: 8, flexShrink: 0, borderRadius: "full", backgroundColor: "warning" } as const
-
 /// What its app says an item is in, in a row's grey line or atop its screen: a spinner and what's under way, or a
 /// dot and why. Ready is nothing: fine is silent.
 function Line(props: { status: Status }) {
   return (
-    <View style={{ flexDirection: "row", alignItems: "center", gap: 6 }}>
-      <Show when={props.status.state === "busy"} fallback={<View aria-hidden="true" style={dot} />}>
+    <View style={look.line}>
+      <Show when={props.status.state === "busy"} fallback={<View aria-hidden="true" style={look.dot} />}>
         <Spinner />
       </Show>
-      <Text style={{ flexShrink: 1, minWidth: 0 }}>{props.status.message}</Text>
+      <Text style={look.shrinks}>{props.status.message}</Text>
     </View>
   )
 }
@@ -811,20 +822,18 @@ const fixable = (item: Item) => item.status?.state === "needs_action" && !!item.
 
 /// Where a client reads an icon the server gave as `ui://icons/<sha256>/…`: beside this page's own files.
 const src = (icon: string) => icon.replace(/^ui:\/\/([^/]+)\/([^/]+)\//, "../../$1@$2/")
-const small = { width: 16, height: 16, borderRadius: "sm" } as const
-const inline = { flexDirection: "row", alignItems: "center", gap: 4, minWidth: 0 } as const
 
 /// A password's or key's grey line: what it is, and who uses it, each app by its icon and name, or agents.
 function UsedBy(props: { item: Item }) {
   const apps = () => props.item.access.filter((who) => who !== "agents").map((name) => contents().apps.find((app) => app.name === name) ?? { name, title: name, icon: null })
   const what = () => props.item.fields.find((field) => field.secret)?.name
   return (
-    <View style={inline}>
+    <View style={look.inline}>
       <Text>{[what() && label(what()!), apps().length ? "used by" : props.item.access.includes("agents") ? "agents may use it" : "used by nothing yet"].filter(Boolean).join(" · ")}</Text>
       <For each={apps()}>
         {(app, at) => (
-          <View style={inline}>
-            <Show when={app.icon}>{(icon) => <Image src={src(icon())} alt="" style={small} />}</Show>
+          <View style={look.inline}>
+            <Show when={app.icon}>{(icon) => <Image src={src(icon())} alt="" style={look.small} />}</Show>
             <Text>{`${app.title}${at() < apps().length - 1 ? "," : ""}`}</Text>
           </View>
         )}
@@ -854,11 +863,11 @@ function Banner(props: { request: Request }) {
   return (
     <List>
       <Row
-        start={<Show when={icon()}>{(icon) => <Image src={src(icon())} alt="" style={tile} />}</Show>}
+        start={<Show when={icon()}>{(icon) => <Image src={src(icon())} alt="" style={look.tile} />}</Show>}
         heading={`${asker(props.request)} asks for ${props.request.title}`}
         text={props.request.why ?? undefined}
         action={
-          <View style={inline}>
+          <View style={look.inline}>
             <Button variant="ghost" onPress={() => does("vault_answer", { id: props.request.id, decline: true })}>Don't Allow</Button>
             <Button variant="outline" onPress={() => setAsking(props.request)}>Choose…</Button>
           </View>
@@ -932,8 +941,8 @@ export default function Accounts() {
               {(section) => (
                 <Section
                   heading={
-                    <View style={inline}>
-                      <Show when={typeIn(section)?.icon}>{(icon) => <Image src={icon()} alt="" style={small} />}</Show>
+                    <View style={look.inline}>
+                      <Show when={typeIn(section)?.icon}>{(icon) => <Image src={icon()} alt="" style={look.small} />}</Show>
                       <Text>{section}</Text>
                     </View>
                   }
@@ -960,7 +969,7 @@ export default function Accounts() {
             </For>
           </Show>
           <List>
-            <Row heading="Security" end={security().readiness !== "ready" ? <View role="img" aria-label="Needs you" style={dot} /> : undefined} current={secure()} onPress={enter} />
+            <Row heading="Security" end={security().readiness !== "ready" ? <View role="img" aria-label="Needs you" style={look.dot} /> : undefined} current={secure()} onPress={enter} />
           </List>
         </Screen>
       </Split>

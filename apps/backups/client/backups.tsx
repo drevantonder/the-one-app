@@ -2,7 +2,13 @@
 // what's wrong; how often they're made and which are kept. A destination opens beside the list with its backups,
 // Restore, Check and Stop Backing Up Here. Backups are the network's, so every call is for the network.
 import { createMemo, createSignal, Errored, For, Loading, Match, refresh, Show, Switch } from "solid-js"
-import { Button, call, changed, confirm, createListCollection, Empty, Field, Input, List, Problem, RadioGroup, Row, Screen, Section, Select, Sheet, since, size, Skeleton, Split, Status, Text, toast, View } from "ui"
+import { Button, call, changed, confirm, createListCollection, Empty, Field, Input, List, Problem, RadioGroup, Row, Screen, Section, Select, Sheet, since, size, Skeleton, Split, Status, styles, Text, toast, tokens, View } from "ui"
+
+const look = styles({
+  buttons: { flexDirection: "row", flexWrap: "wrap", gap: tokens.length.gutter, maxWidth: tokens.length.readable },
+  note: { color: tokens.colour.secondaryLabel },
+  warns: { color: tokens.colour.red },
+})
 
 /** A backup made to a destination. */
 interface Backup {
@@ -143,7 +149,7 @@ function Opened(props: { destination: Destination }) {
           </List>
         </Section>
       </Show>
-      <View style={{ flexDirection: "row", flexWrap: "wrap", gap: "gutter", maxWidth: "readable" }}>
+      <View style={look.buttons}>
         <Show when={destination().backups.length}>
           <Button variant="secondary" onPress={() => setRestoring(destination())}>Restore</Button>
           <Button variant="outline" loading={working() === "check"} onPress={check}>Check</Button>
@@ -287,7 +293,7 @@ function Restore(props: { destination: Destination }) {
           <Input autoCapitalize="none" autoCorrect={false} spellCheck={false} value={file()} onChangeText={setFile} onSubmitEditing={restore} required />
         </Field>
       </Show>
-      <Text style={{ color: "muted-foreground", font: "body" }}>Only what's gone comes back. Nothing that's there now changes.</Text>
+      <Text style={look.note}>Only what's gone comes back. Nothing that's there now changes.</Text>
       <Button loading={working() === "restore"} onPress={restore}>Restore</Button>
     </>
   )
@@ -306,7 +312,7 @@ function Backups(props: { all: All }) {
           <Show when={destinations().length} fallback={<Empty action={<Button onPress={() => setAdding(true)}>Add Destination</Button>}>Nothing is backed up yet.</Empty>}>
             <List>
               <For each={destinations()} keyed={(destination) => destination.name}>
-                {(destination) => <Row heading={destination().name} text={<Text style={{ color: warns(destination()) ? "destructive" : undefined }}>{about(destination())}</Text>} current={open() === destination().name} onPress={() => setOpen(destination().name)} />}
+                {(destination) => <Row heading={destination().name} text={<Text style={warns(destination()) && look.warns}>{about(destination())}</Text>} current={open() === destination().name} onPress={() => setOpen(destination().name)} />}
               </For>
               <Row heading="Add Destination" onPress={() => setAdding(true)} />
             </List>

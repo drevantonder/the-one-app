@@ -2,7 +2,13 @@
 // in it and the pages it visited last, as it was last saved, and updating it yourself: its browser, drawn here, which
 // you click and type on as you would Chrome, then save. `Summary` is its row's line in the Vault's list.
 import { createMemo, createSignal, For, Loading, refresh, Show } from "solid-js"
-import { Button, call, changed, confirm, Empty, Field, Image, Input, List, LiveScreen, Menu, Problem, Row, Screen, Section, Sheet, since, Status, Steps, Text, toast, View } from "ui"
+import { Button, call, changed, confirm, Empty, Field, Image, Input, List, LiveScreen, Menu, Problem, Row, Screen, Section, Sheet, since, Status, Steps, styles, Text, toast, tokens, View } from "ui"
+
+const look = styles({
+  note: { color: tokens.colour.secondaryLabel },
+  buttons: { flexDirection: "row", gap: tokens.grid[2] },
+  extension: { width: tokens.grid[6], height: tokens.grid[6] },
+})
 
 /** A profile, as `chrome-profiles_list` answers it. */
 interface Profile {
@@ -112,9 +118,9 @@ function Updating(props: { profile: Profile; subject?: string }) {
         />
       </Show>
       <Show when={u().state !== "failed" && !(u().state === "ready" && u().why)}>
-        <Text style={{ color: "muted-foreground" }}>Use it as you would Chrome: sign in to any sites you like. It's saved by itself at {time(u().until)}.</Text>
+        <Text style={look.note}>Use it as you would Chrome: sign in to any sites you like. It's saved by itself at {time(u().until)}.</Text>
       </Show>
-      <View style={{ flexDirection: "row", gap: 8 }}>
+      <View style={look.buttons}>
         <Show when={u().state !== "failed" && !u().why}>
           <Button loading={busy() === "save" || u().state === "saving"} disabled={u().state !== "ready" || !!busy()} onPress={() => finish("save")}>
             Save
@@ -198,7 +204,7 @@ export default function ChromeProfile(props: Props) {
               <Show when={p().extensions.length} fallback={<Empty>No extensions.</Empty>}>
                 <List>
                   <For each={p().extensions} keyed={(e) => e.id}>
-                    {(e) => <Row start={<Image src={e().icon ?? ""} alt="" style={{ width: 24, height: 24 }} />} heading={e().name} />}
+                    {(e) => <Row start={<Image src={e().icon ?? ""} alt="" style={look.extension} />} heading={e().name} />}
                   </For>
                 </List>
               </Show>
