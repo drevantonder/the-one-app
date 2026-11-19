@@ -23,8 +23,12 @@ pub async fn draw(canvas: web_sys::HtmlCanvasElement, font: Vec<u8>, text: Strin
         desired_maximum_frame_latency: 2,
         alpha_mode: wgpu::CompositeAlphaMode::Auto,
         view_formats: vec![],
+        color_space: wgpu::SurfaceColorSpace::Auto,
     });
-    let frame = surface.get_current_texture().map_err(|e| error(&format!("{e:?}")))?;
+    let frame = match surface.get_current_texture() {
+        wgpu::CurrentSurfaceTexture::Success(frame) | wgpu::CurrentSurfaceTexture::Suboptimal(frame) => frame,
+        _ => return Err(JsValue::from_str("no frame to draw into")),
+    };
     let view = frame.texture.create_view(&Default::default());
     let mut encoder = device.create_command_encoder(&Default::default());
     renderer::draw(&device, &queue, &mut encoder, &view, format, [width, height], &font, &text).map_err(|e| error(&e))?;
@@ -56,7 +60,7 @@ fn lay_out(font: &[u8], text: &str) -> parley::Layout<[f32; 4]> {
 
 #[cfg(feature = "hybrid")]
 mod renderer {
-    use vello_common::kurbo::{Affine, Rect, RoundedRect};
+    use vello_common::kurbo::{Affine, Rect, RoundedRect, Shape};
     pub fn draw(device: &wgpu::Device, queue: &wgpu::Queue, encoder: &mut wgpu::CommandEncoder, view: &wgpu::TextureView, format: wgpu::TextureFormat, [width, height]: [u32; 2], font: &[u8], text: &str) -> Result<(), String> {
         let (width, height) = (width as u16, height as u16);
         let (mut renderer, mut resources) = vello_gpu::Renderer::new(device, queue, &vello_gpu::RenderTargetConfig { format, width, height });
