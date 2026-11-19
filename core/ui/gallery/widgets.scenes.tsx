@@ -1,9 +1,10 @@
-import { type Layout, type Scenes, View, Widget } from "ui"
+import { type Layout, type Scenes, styles, View, Widget } from "ui"
 
 // Each in a box a Home Screen cell's size: 2x2, 4x2 and 4x4.
-const cells = { "2x2": { width: 170, height: 170 }, "4x2": { width: 352, height: 170 }, "4x4": { width: 352, height: 370 } } as const
+const cells = { "2x2": [170, 170], "4x2": [352, 170], "4x4": [352, 370] } as const
+const look = styles({ cell: (width: number, height: number) => ({ width, height }) })
 const cell = (size: keyof typeof cells, name: string, layout?: Layout, problem?: string) => () => (
-  <View style={cells[size]}>
+  <View style={look.cell(cells[size][0], cells[size][1])}>
     <Widget name={name} size={size} layout={layout} problem={problem} onCall={async () => {}} onOpen={() => {}} />
   </View>
 )

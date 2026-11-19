@@ -514,7 +514,7 @@ export interface ImageProps extends Pick<Semantics, "aria-hidden"> {
   style?: Styles
 }
 
-/// `<Image src="icon.svg" alt="" style={{ width: 24, height: 24 }} />`: a picture, from a `data:` address or the app's
+/// `<Image src="icon.svg" alt="" style={look.icon} />`: a picture, from a `data:` address or the app's
 /// own files, named by `alt`, scaled to fit its box.
 export function Image(props: ImageProps) {
   return <img src={props.src} alt={props.alt} aria-hidden={props["aria-hidden"]} {...drawn("ui-image", props.style)} />
