@@ -371,8 +371,9 @@ defmodule OneCore.App do
     app (`category: "Devices"`); One Core passes it to the launcher as it is, which otherwise places it by its app's. One
     Core knows one more, `launcher`: the app every client opens first, which draws the rest. A network has exactly one, installed
     for the network, so installing a second is refused, and so is uninstalling it; deploying another as its new
-    version replaces it. A client knows one more, `app-store`: the App Store, which installs and removes apps, which it
-    opens itself where there's no launcher yet.
+    version replaces it. A client knows two more: `app-store`, the App Store, which installs and removes apps, which it
+    opens itself where there's no launcher yet; and `settings`, where apps' settings are, which a link to an app with
+    no page of its own opens at that app.
   - An entrypoint may say its `subject`, who it's opened for, which One Core passes to the launcher as it is too:
     `subject: "user"` is an entrypoint about whoever opens it, as Vault and Devices are, which is opened for them wherever
     it's installed. Without one, it's opened for whoever it's installed for, or whose page it's on.
