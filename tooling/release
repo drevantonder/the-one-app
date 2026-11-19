@@ -19,7 +19,8 @@
 # the same files, and Linux's `one` and Windows', with the MSVC toolchain cargo-xwin downloads. A Mac's `one` needs
 # its system's frameworks: from Linux, it's built on a Mac (`tooling/on-mac`: GitHub's runner, or the owner's), from
 # the same commit with the same Rust, and published with the rest. A server release and a client release run at once,
-# each in a checkout of its own, and a second of the same kind waits for the first. One published while the network's
+# each in a checkout of its own, and one that asks for both publishes what both built as one update; a second of the
+# same kind waits for the first. One published while the network's
 # update of the one before is under way takes its place there. A build the network has published from this commit, or
 # from a newer one, which has this one's changes, covers it: it's left as it is, so a release that finishes late
 # doesn't undo a newer one, and one of this commit is published again, so a network that didn't hear of it does. That's
@@ -76,18 +77,73 @@ export BUILD_SIGNING_KEY
 [[ -n $dry ]] || [[ $(base64 -d <<<"${BUILD_SIGNING_KEY:-}" 2>/dev/null | openssl pkey -inform DER -pubout -outform DER 2>/dev/null |
   tail -c 32 | xxd -p -c 64) == "$key" ]] || { echo "BUILD_SIGNING_KEY isn't the platform's build signing key." >&2 && exit 1; }
 
+# Publishes the builds in each of the folders given, in one `one publish`: the network gives a link for each file it
+# doesn't have yet, which is sent there, and once it has them all, they're the latest, as one update.
+publish() {
+  echo "Publishing to the network"
+  ONE=$(command -v one) BUILD=$build bun -e '
+    const { ONE, BUILD, BUILD_SIGNING_KEY } = process.env;
+    const { readdirSync } = require("node:fs");
+    const { createPrivateKey, sign } = require("node:crypto");
+    const key = createPrivateKey({ key: Buffer.from(BUILD_SIGNING_KEY, "base64"), format: "der", type: "pkcs8" });
+    const files = process.argv.slice(1).flatMap((out) => readdirSync(out).filter((file) => /\.(gz|exe)$/.test(file)).map((file) => `${out}/${file}`));
+    const builds = await Promise.all(files.map(async (path) => {
+      const bytes = await Bun.file(path).bytes();
+      const [, what, kind] = path.split("/").pop().match(/^(server-runtime|server-code|server|one-setup|one-cli|one)-?(.*?)(\.tar\.gz|\.gz|\.exe)$/);
+      // A runtime and a client are told by what they were built from, which the network keeps with them.
+      const from = Bun.file(path.replace(/(\.tar\.gz|\.gz|\.exe)$/, ".inputs"));
+      const inputs = (await from.exists()) ? { inputs: (await from.text()).trim() } : {};
+      const name = kind ? `${what}/${kind}` : what;
+      const sha256 = new Bun.CryptoHasher("sha256").update(bytes).digest("hex");
+      const signature = sign(null, Buffer.from(`${name} ${BUILD} ${sha256}`), key).toString("base64");
+      return { path, name, build: BUILD, ...inputs, sha256, signature, size: bytes.length };
+    }));
+    const publish = () => {
+      const published = Bun.spawnSync([ONE, "publish", "--builds", JSON.stringify(builds.map(({ path, ...build }) => build))], { stderr: "inherit" });
+      if (published.exitCode !== 0) process.exit(1);
+      return JSON.parse(published.stdout.toString());
+    };
+    let published = publish();
+    if (published.send) {
+      await Promise.all(builds.filter(({ name }) => published.send[name]).map(async ({ path, name }) => {
+        const { method, url, headers } = published.send[name];
+        const sent = await fetch(url, { method, headers, body: Bun.file(path) });
+        if (!sent.ok) throw new Error(`${name} wasn'"'"'t sent: ${sent.status}`);
+      }));
+      published = publish();
+    }
+    if (published.send) throw new Error("The network didn'"'"'t take them");
+    for (const { name, size } of builds) console.log(`${name}  ${BUILD}  ${(size / 1e6).toFixed(1)} MB`);
+  ' "$@"
+}
+
 # Servers and clients share nothing but the network they publish to, so each is its own release, with its own lock and
-# checkout (below), and one that asks for both runs the two at once.
+# checkout (below), and one that asks for both builds the two at once. What they build is published together, as one
+# update, so a server takes the server build and the `one` that runs it as one pair: published apart, a server took the
+# new `one` alone, put in place beside the one running it, and then the server build as though its `one` hadn't changed
+# (19 Nov). Each says where its builds are once they're built (`ONE_RELEASE_PAIR`), and says nothing where it built none.
 want_servers=() want_clients=()
 for want in "${wanted[@]}"; do
   case $want in server | server/*) want_servers+=("$want") ;; *) want_clients+=("$want") ;; esac
 done
 if ((${#want_servers[@]} && ${#want_clients[@]})); then
-  "$0" ${dry:+--dry-run} "${want_servers[@]}" > >(sed 's/^/server: /') 2>&1 &
+  pair=$(mktemp -d) && trap 'rm -rf "$pair"' EXIT
+  ONE_RELEASE_PAIR=$pair "$0" ${dry:+--dry-run} "${want_servers[@]}" > >(sed 's/^/server: /') 2>&1 &
   server=$!
-  "$0" ${dry:+--dry-run} "${want_clients[@]}" > >(sed 's/^/client: /') 2>&1 &
+  ONE_RELEASE_PAIR=$pair "$0" ${dry:+--dry-run} "${want_clients[@]}" > >(sed 's/^/client: /') 2>&1 &
   client=$!
+  # Each has built once it says where, or has ended; the iPhone's app goes on to TestFlight after.
+  for part in server client; do
+    pid=${!part}
+    until [[ -e $pair/$part ]] || ! kill -0 "$pid" 2>/dev/null; do sleep 1; done
+  done
+  built=($(cat "$pair"/server "$pair"/client 2>/dev/null))
   status=0
+  if ((${#built[@]})); then
+    build=$(tooling/version)
+    publish "${built[@]}" || status=1
+    echo "The network's servers take $build by themselves (\`one builds\` says how far), and a device with \`one update\`."
+  fi
   wait "$server" || status=1
   wait "$client" || status=1
   exit $status
@@ -504,42 +560,11 @@ for pack in "${packing[@]}"; do wait "$pack" || { echo "A server wasn't packed."
 
 for client in "${clients[@]}"; do wait "$client" || { echo "A client wasn't built." >&2 && exit 1; }; done
 
-# Publishes what was built: the network gives a link for each file it doesn't have yet, which is sent there, and
-# once it has them all, they're the latest.
-if ((${#mine[@]})); then
-  echo "Publishing to the network"
-  ONE=$(command -v one) OUT=$out BUILD=$build bun -e '
-    const { ONE, OUT, BUILD, BUILD_SIGNING_KEY } = process.env;
-    const { readdirSync } = require("node:fs");
-    const { createPrivateKey, sign } = require("node:crypto");
-    const key = createPrivateKey({ key: Buffer.from(BUILD_SIGNING_KEY, "base64"), format: "der", type: "pkcs8" });
-    const builds = await Promise.all(readdirSync(OUT).filter((file) => /\.(gz|exe)$/.test(file)).map(async (file) => {
-      const bytes = await Bun.file(`${OUT}/${file}`).bytes();
-      const [, what, kind] = file.match(/^(server-runtime|server-code|server|one-setup|one-cli|one)-?(.*?)(\.tar\.gz|\.gz|\.exe)$/);
-      // A runtime and a client are told by what they were built from, which the network keeps with them.
-      const from = Bun.file(`${OUT}/${file.replace(/(\.tar\.gz|\.gz|\.exe)$/, ".inputs")}`);
-      const inputs = (await from.exists()) ? { inputs: (await from.text()).trim() } : {};
-      const name = kind ? `${what}/${kind}` : what;
-      const sha256 = new Bun.CryptoHasher("sha256").update(bytes).digest("hex");
-      const signature = sign(null, Buffer.from(`${name} ${BUILD} ${sha256}`), key).toString("base64");
-      return { file, name, build: BUILD, ...inputs, sha256, signature, size: bytes.length };
-    }));
-    const publish = () => {
-      const published = Bun.spawnSync([ONE, "publish", "--builds", JSON.stringify(builds.map(({ file, ...build }) => build))], { stderr: "inherit" });
-      if (published.exitCode !== 0) process.exit(1);
-      return JSON.parse(published.stdout.toString());
-    };
-    let published = publish();
-    if (published.send) {
-      await Promise.all(builds.filter(({ name }) => published.send[name]).map(async ({ file, name }) => {
-        const { method, url, headers } = published.send[name];
-        const sent = await fetch(url, { method, headers, body: Bun.file(`${OUT}/${file}`) });
-        if (!sent.ok) throw new Error(`${name} wasn'"'"'t sent: ${sent.status}`);
-      }));
-      published = publish();
-    }
-    if (published.send) throw new Error("The network didn'"'"'t take them");
-    for (const { name, size } of builds) console.log(`${name}  ${BUILD}  ${(size / 1e6).toFixed(1)} MB`);
-  '
+# Publishes what was built, or with the other part's, says where it is for the release that asked for both.
+if [[ -n ${ONE_RELEASE_PAIR:-} ]]; then
+  ! ((${#mine[@]})) || { echo "$out" >"$ONE_RELEASE_PAIR/$part.writing" && mv "$ONE_RELEASE_PAIR/$part.writing" "$ONE_RELEASE_PAIR/$part"; }
+  echo "Built: published with the $([[ $part == server ]] && echo clients || echo server) as one update"
+else
+  ! ((${#mine[@]})) || publish "$out"
+  echo "The network's servers take $build by themselves (\`one builds\` says how far), and a device with \`one update\`."
 fi
-echo "The network's servers take $build by themselves (\`one builds\` says how far), and a device with \`one update\`."
