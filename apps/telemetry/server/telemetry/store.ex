@@ -21,7 +21,7 @@ defmodule Telemetry.Store do
   """
   require Logger
   require OpenTelemetry.Tracer, as: Tracer
-  alias Telemetry.{Otlp, Rollup}
+  alias Telemetry.{Cache, Otlp, Rollup}
   alias OneCore.Artifact
 
   @days 14
@@ -52,9 +52,10 @@ defmodule Telemetry.Store do
       |> Enum.unzip()
 
     rollups = List.flatten(rollups)
-    read = Tracer.with_span("telemetry rollups", %{attributes: %{"one.blobs" => length(rollups)}}, do: Artifact.read_all(call.own, rollups))
-    since = hour(System.os_time(:nanosecond) - 3_600_000_000_000)
-    for({:ok, data, _tag} <- read, do: Rollup.decode(data)) ++ Telemetry.Exports.cuts(call, List.flatten(names), since)
+    exports = List.flatten(names)
+
+    Tracer.with_span("telemetry rollups", %{attributes: %{"one.blobs" => length(rollups)}}, do: Cache.read(call, rollups, fn _name, data -> Rollup.decode(data) end)) ++
+      Tracer.with_span("telemetry exports", %{attributes: %{"one.blobs" => length(exports)}}, do: Cache.read(call, exports, &Rollup.cut(List.wrap(export(&1, &2)))))
   end
 
   @doc "Every export kept of an hour that started after `from`, in nanoseconds since 1970, each laid flat and whole."

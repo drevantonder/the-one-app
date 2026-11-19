@@ -432,6 +432,8 @@ defmodule Telemetry do
 
   @impl true
   def call("overview", inputs, call) do
+    # How much is kept is listed as what's kept is read.
+    retention = Task.async(fn -> Store.retention(call.own) end)
     {batches, from, to} = read(call, inputs["hours"] || 24)
 
     %{
@@ -442,7 +444,7 @@ defmodule Telemetry do
       spending: Read.spending(batches),
       calls: Read.calls(batches, from, to),
       names: names(call),
-      retention: Store.retention(call.own)
+      retention: Task.await(retention)
     }
   end
 
