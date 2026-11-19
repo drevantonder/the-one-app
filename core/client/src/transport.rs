@@ -95,18 +95,20 @@ pub async fn endpoint(key: SecretKey, network: Option<&Network>, port: u16) -> R
 }
 
 /// Where `endpoint` is reached, as another is told it: its key, the machine's addresses on its networks, and the
-/// relay at its network's address, which it's told now, before the endpoint has connected there. Another on this
-/// machine reaches it with no network too.
+/// relay at its network's address, which it's told now, before the endpoint has connected there. With no network,
+/// whatever reaches it is on this machine, by its loopback address. With one, it isn't told that: on another machine
+/// that's another machine's.
 pub fn address(endpoint: &Endpoint, network: Option<&Network>) -> Result<EndpointAddr> {
-    let here = endpoint.bound_sockets().into_iter().filter(SocketAddr::is_ipv4);
-    let address = here.fold(endpoint.addr(), |address, socket| {
-        address.with_ip_addr(SocketAddr::from((Ipv4Addr::LOCALHOST, socket.port())))
-    });
     match network {
         Some(Network { address: at, .. }) => {
-            Ok(address.with_relay_url(at.parse().with_context(|| format!("{at} isn't an address"))?))
+            Ok(endpoint.addr().with_relay_url(at.parse().with_context(|| format!("{at} isn't an address"))?))
         }
-        None => Ok(address),
+        None => {
+            let here = endpoint.bound_sockets().into_iter().filter(SocketAddr::is_ipv4);
+            Ok(here.fold(endpoint.addr(), |address, socket| {
+                address.with_ip_addr(SocketAddr::from((Ipv4Addr::LOCALHOST, socket.port())))
+            }))
+        }
     }
 }
 
