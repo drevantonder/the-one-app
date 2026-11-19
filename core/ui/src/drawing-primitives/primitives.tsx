@@ -11,7 +11,6 @@ import { fullScreen, mods, named, type Input } from "./input.ts"
 import type { Intersected, Laid, Located, Pressed, Wheeled } from "../types/ui.d.ts"
 import { flat, web, type Styles } from "../styles.ts"
 import { options } from "./props.ts"
-import { box, textInput, type BoxProps, type EditableTextProps, type OldText } from "./upgraded.ts"
 
 /// `<Modal visible={open()}>…</Modal>`: what's drawn over the whole window while it's `visible` (unless it says, it
 /// is), over the page and everything over it before, with everything else inert: nothing else is pressed, focused or
@@ -370,9 +369,6 @@ export function Pressable(props: PressableProps) {
   )
 }
 
-/** A view or a pressable by its name before, with its props before, until every page says `View` or `Pressable`. */
-export const Box = (props: BoxProps) => Pressable(box(props))
-
 /** A scroll view's props. */
 export interface ScrollViewProps extends ViewProps {
   onScroll?: (event: Scrolled) => void
@@ -491,13 +487,13 @@ export interface TextProps extends Semantics {
 /// and a token's `color`, or as what it's in has them. It runs on in a text it's in, and is a block in a view, as React
 /// Native's Text. `role="heading"` with `aria-level` makes it a heading; one inside another with `role="link"` and
 /// `onPress` is a link in its words. An app's words are always in a `Text` or in a UI library component that takes them.
-export function Text(props: TextProps & OldText) {
-  const own = merge(omit(props, "style", "children", "onPress", "tabIndex", "onClick", "tabindex"), {
+export function Text(props: TextProps) {
+  const own = merge(omit(props, "style", "children", "onPress", "tabIndex"), {
     get onClick() {
-      return props.onPress ?? props.onClick
+      return props.onPress
     },
     get tabindex() {
-      return props.tabIndex ?? props.tabindex
+      return props.tabIndex
     },
   })
   const tag = () => (props.role === "heading" ? `h${props["aria-level"] ?? 2}` : "span")
@@ -654,8 +650,7 @@ const actions: Record<EnterKeyHint, TextInputAction> = { enter: "newline", done:
 /// says otherwise. What a page drawn on the DOM gives it besides (`pattern`, a form's `name`) reaches the element. A
 /// `readOnly` one is all selected as it's focused, to copy. Its text runs the way its first strong character does
 /// (`dir="auto"`), so Hebrew or Arabic starts at the right.
-export function TextInput(input: TextInputProps) {
-  const props = textInput(input)
+export function TextInput(props: TextInputProps) {
   const own = omit(props as TextInputProps & { class?: string }, "style", "class", "multiline", "enterKeyHint", "autoCorrect", "autoFocus", "onSubmitEditing", "onKeyDown", "onFocus", "onChangeText", "inputMode", "secureTextEntry", "readOnly", "autoCapitalize", "spellCheck", "autoComplete")
   const action = (): TextInputAction => (props.enterKeyHint ? actions[props.enterKeyHint] : props.multiline ? "newline" : "done")
   const keyed = (event: KeyboardEvent) => {
@@ -706,9 +701,6 @@ export function TextInput(input: TextInputProps) {
     />
   )
 }
-
-/** A text input by its name before, with its props before, until every page says `TextInput`. */
-export const EditableText = (props: EditableTextProps) => TextInput(props as TextInputProps)
 
 const colours = new Set(["backgroundColor", "color", "borderColor"])
 const offsets = new Set(["top", "right", "bottom", "left"])

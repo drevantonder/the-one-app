@@ -9,7 +9,6 @@ import type { Mutations, Type } from "./renderer.ts"
 import type * as Page from "../types/ui.d.ts"
 import type { PickerProps } from "./primitives.tsx"
 import { options, renamed } from "./props.ts"
-import { box, textInput } from "./upgraded.ts"
 import { styles } from "../styles.ts"
 
 /** A primitive: a node of its type, with its props. */
@@ -30,14 +29,12 @@ export const Pressable: typeof Page.Pressable = (props) =>
     }),
   )
 export const View: typeof Page.View = (props) => Pressable(props)
-export const Box: typeof Page.Box = (props) => Pressable(box(props) as Page.PressableProps)
 
 const scroll = primitive("scroll")
 export const ScrollView: typeof Page.ScrollView = (props) => scroll(renamed(props, ["tabIndex", "autoFocus"], { tabindex: (it) => it.tabIndex, autofocus: (it) => it.autoFocus }))
 
 const text = primitive("text")
-export const Text: typeof Page.Text = (props) =>
-  text(renamed(props as Page.TextProps & { onClick?: unknown; tabindex?: 0 | -1 }, ["onPress", "tabIndex", "onClick", "tabindex"], { onClick: (it) => it.onPress ?? it.onClick, tabindex: (it) => it.tabIndex ?? it.tabindex }))
+export const Text: typeof Page.Text = (props) => text(renamed(props, ["onPress", "tabIndex"], { onClick: (it) => it.onPress, tabindex: (it) => it.tabIndex }))
 
 export const Image: typeof Page.Image = primitive("image")
 
@@ -62,9 +59,8 @@ export const Path: typeof Page.Path = (props) => {
 
 /** A text input: its `value` is its editing state as the app sets it, the caret at its end, and the rest its props
  * as the host names them. */
-export const TextInput: typeof Page.TextInput = (input) => {
-  const props = textInput(input)
-  return primitive("input")(
+export const TextInput: typeof Page.TextInput = (props) =>
+  primitive("input")(
     renamed(props, ["value", "inputMode", "secureTextEntry", "enterKeyHint", "onSubmitEditing", "onChangeText", "readOnly", "autoFocus", "autoCapitalize", "autoCorrect", "spellCheck", "autoComplete"], {
       editing: (it) => (it.value === undefined ? undefined : { text: it.value, selection: { base: it.value.length, extent: it.value.length }, composing: null }),
       type: (it) => (it.multiline ? undefined : it.secureTextEntry ? "password" : it.inputMode && ["email", "url", "tel", "search"].includes(it.inputMode) ? it.inputMode : undefined),
@@ -80,8 +76,6 @@ export const TextInput: typeof Page.TextInput = (input) => {
       autocomplete: (it) => it.autoComplete,
     }),
   )
-}
-export const EditableText: typeof Page.EditableText = (props) => TextInput(props as Page.TextInputProps)
 
 /** The device's own picker (renderer.ts's `picker`), which the UI library's Select draws under a finger, as
  * @react-native-picker/picker's: its options from its items. */

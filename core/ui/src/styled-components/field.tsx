@@ -5,7 +5,6 @@ import type { JSX } from "@solidjs/web"
 import { Path, Pressable, Svg, Text, TextInput, View } from "#primitives"
 import { touch } from "#bridge"
 import type { Keyed, TextInputProps } from "../drawing-primitives/primitives.tsx"
-import { textInput, type EditableTextProps } from "../drawing-primitives/upgraded.ts"
 import { Icon } from "./button.tsx"
 import { ListStyle } from "./list.tsx"
 import { messages } from "../words.ts"
@@ -150,9 +149,8 @@ export function Field(props: FieldProps) {
   )
 }
 
-/** An `Input`'s props: a text input's, in a field's box, with styles of its own over it: a big typed number's. Until
- * every page says `TextInput`'s props, it takes those before too (`EditableTextProps`). */
-export interface InputProps extends Omit<TextInputProps & EditableTextProps, "style" | "multiline"> {
+/** An `Input`'s props: a text input's, in a field's box, with styles of its own over it: a big typed number's. */
+export interface InputProps extends Omit<TextInputProps, "style" | "multiline"> {
   style?: Styles
 }
 
@@ -201,8 +199,7 @@ function Boxed(props: InputProps & { multiline?: boolean; own?: Styles }) {
 /// `<Search placeholder="Search notes" aria-label="Search notes" value={words()} onChangeText={setWords} />`:
 /// what's typed to find something in a list: a field with a magnifier and, once there's text, a button that clears
 /// it. Escape clears it too. The list it narrows is the app's.
-export function Search(input: Omit<InputProps, "type" | "inputMode" | "style">) {
-  const props = textInput(input)
+export function Search(props: Omit<InputProps, "inputMode" | "style">) {
   const sidebar = useContext(ListStyle) === "sidebar"
   const [own, setOwn] = createSignal("")
   const text = () => props.value ?? own()

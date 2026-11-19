@@ -118,10 +118,6 @@ export type PressableProps = ViewProps & {
 }
 export declare function Pressable(props: PressableProps): Element
 
-/** A view or a pressable by its name before, with its props before (`onClick`, `tabindex`, `autofocus`), until every
- * page says `View` or `Pressable`. */
-export declare function Box(props: Omit<PressableProps, "onPress" | "tabIndex" | "autoFocus"> & { onClick?: (event: Located) => void; tabindex?: 0 | -1; autofocus?: boolean }): Element
-
 export type ScrollViewProps = ViewProps & {
   onScroll?: (event: Scrolled) => void
 }
@@ -132,9 +128,6 @@ export type TextProps = Semantics & {
   /** Pressed where its words are, as an inline link (`role="link"`), reached by Tab with a `tabIndex`. */
   tabIndex?: 0 | -1
   onPress?: (event: Located) => void
-  /** `onPress` and `tabIndex` by their names before, until every page says those. */
-  onClick?: (event: Located) => void
-  tabindex?: 0 | -1
   children?: Element
 }
 export declare function Text(props: TextProps): Element
@@ -229,30 +222,6 @@ export type TextInputProps = Pick<Semantics, "role" | "aria-label" | "aria-descr
 }
 export declare function TextInput(props: TextInputProps): Element
 
-/** What an editable text's `onInput` was told: what's in it now. */
-export type Typed = {
-  currentTarget: { value: string }
-}
-/** What an input's action key does, a phone keyboard's Done, Go, Next, Search or Send, or a new line. */
-export type TextInputAction = Exclude<Props["action"], undefined>
-
-/** A text input's props by their names before, until every page says `TextInput`'s. */
-export type EditableTextProps = Omit<TextInputProps, "inputMode" | "secureTextEntry" | "enterKeyHint" | "readOnly" | "autoFocus" | "autoCapitalize" | "autoCorrect" | "spellCheck" | "autoComplete" | "onChangeText" | "onSubmitEditing"> & {
-  type?: Props["type"]
-  inputmode?: Props["inputmode"]
-  action?: TextInputAction
-  readonly?: boolean
-  autofocus?: boolean
-  autocapitalize?: Props["autocapitalize"]
-  autocorrect?: boolean
-  spellcheck?: boolean
-  autocomplete?: string
-  onInput?: (event: Typed) => void
-  onAction?: (event: { action: TextInputAction }) => void
-}
-/** A text input by its name before, until every page says `TextInput`. */
-export declare function EditableText(props: EditableTextProps): Element
-
 // The components.
 
 // Props are types, not interfaces, so the DOM's components, which take any `data-` attribute too, take them.
@@ -322,14 +291,13 @@ export declare function Status(props: { heading: Element; text?: Element; over?:
 export declare function Steps(props: { steps: Element[]; at: number; text?: Element }): Element
 
 export declare function Field(props: { label?: Element; hint?: Element; error?: string; disabled?: boolean; children?: Element }): Element
-/** An `Input`'s props: a text input's, in a field's box, with styles of its own over it. Until every page says
- * `TextInput`'s props, it takes those before too (`EditableTextProps`). */
-export type InputProps = Omit<TextInputProps & EditableTextProps, "style" | "multiline"> & {
+/** An `Input`'s props: a text input's, in a field's box, with styles of its own over it. */
+export type InputProps = Omit<TextInputProps, "style" | "multiline"> & {
   style?: Styles
 }
 export declare function Input(props: InputProps): Element
 export declare function Textarea(props: Omit<InputProps, "style">): Element
-export declare function Search(props: Omit<InputProps, "type" | "inputMode" | "style">): Element
+export declare function Search(props: Omit<InputProps, "inputMode" | "style">): Element
 /** What a `Checkbox`'s or a `Switch`'s `onChange` is told: whether it's ticked now. */
 export type Ticked = {
   currentTarget: { checked: boolean }
