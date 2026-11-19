@@ -1,1 +1,1 @@
-{ "extends": "../../../core/ui/tsconfig.strict.json", "include": ["**/*"] }
+{ "extends": "../../../core/ui/tsconfig.app.json", "include": ["**/*"] }

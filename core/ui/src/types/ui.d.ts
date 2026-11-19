@@ -1,4 +1,4 @@
-// The UI library as an app's page sees it (`tsconfig.strict.json` names it `ui`): the drawing primitives, the
+// The UI library as an app's page sees it (`tsconfig.app.json` names it `ui`): the drawing primitives, the
 // components drawn with them, and what an app asks for in passing, each with only the props a native host draws
 // too. Nothing here is the DOM's. The UI library's own typecheck proves its components take these (../check.ts),
 // so a page runs unchanged on the DOM. A component an app needs that isn't here yet is added here, with only

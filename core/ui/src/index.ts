@@ -17,7 +17,7 @@
 /// `<input>`, `<textarea>` and `<select>` at 16px or more there, and a field of another size sets `--text-field`.
 /// **A page.** An app's page runs natively, on our renderer on a computer and Android, and unchanged on the DOM
 /// everywhere else (the web, an iPhone, MCP Apps), where its `tsconfig.json` is `{ "extends":
-/// "<ui>/tsconfig.strict.json", "include": ["**/*"] }` (in this repo `../../../core/ui/tsconfig.strict.json`) and its
+/// "<ui>/tsconfig.app.json", "include": ["**/*"] }` (in this repo `../../../core/ui/tsconfig.app.json`) and its
 /// entrypoint says so, with the runtime version it needs: `%{page: "client/index.html", runtime_version: 4}`; every
 /// app's page is to be one. It's written with the UI library alone: its components and the drawing primitives,
 /// named and shaped as React Native's core components and their props: `View`, `Pressable` (a view that's pressed),
@@ -39,7 +39,7 @@
 /// the page, and a page that throws while drawing shows what failed and Try Again, as `<Errored>` would. Words are in a `Text`, or in a component that takes them (a
 /// `Row`'s `heading`). A press is a `Pressable`'s `onPress={() => ...}` (a `Button`'s and a `Row`'s `onClick`), what's
 /// typed `onChangeText={setText}`, Return in it `onSubmitEditing={save}`, a key `onKeyDown={(event) => event.key ===
-/// "Escape" && close()}`, a switch's `onChange={(event) => set(event.currentTarget.checked)}`. `bun run lint:strict apps/<app>/client`, from the repo's
+/// "Escape" && close()}`, a switch's `onChange={(event) => set(event.currentTarget.checked)}`. `bun run lint:app apps/<app>/client`, from the repo's
 /// root, checks a page, as a deploy does of one whose entrypoint says its `runtime_version` and refuses it with the errors. What a page may use is `core/ui/src/types/ui.d.ts`: one that needs what isn't
 /// there adds it there, with only what every host can draw (`drawing-primitives/renderer.ts`), and core/ui's `bun run typecheck` then says
 /// whether the DOM's takes it. A page written for version 1 has one `style` object of token names instead.

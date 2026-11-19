@@ -1,7 +1,7 @@
 {
   // An app's page's: its tsconfig.json extends this, with `"include": ["**/*"]`. A page is written against the
   // UI library alone (src/types): no DOM, no element of the DOM's, no stylesheet, and of the Web APIs only
-  // those a Worker has too (globals.d.ts), so it runs on a native host and on the DOM alike. `bun run lint:strict <its folder>` checks it.
+  // those a Worker has too (globals.d.ts), so it runs on a native host and on the DOM alike. `bun run lint:app <its folder>` checks it.
   "compilerOptions": {
     "target": "es2024",
     "module": "esnext",

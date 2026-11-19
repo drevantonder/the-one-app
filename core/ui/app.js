@@ -32,7 +32,7 @@ try {
     configFile: false,
     root: source,
     // Its TypeScript is read as the UI library's is, whatever the app's own tsconfig.json says for its editor: an
-    // app's extends one of the UI library's (tsconfig.strict.json), which isn't beside it where a server builds it.
+    // app's extends one of the UI library's (tsconfig.app.json), which isn't beside it where a server builds it.
     tsconfig: fileURLToPath(new URL("tsconfig.json", import.meta.url)),
     // Its files find each other wherever the client serves the app.
     base: "./",

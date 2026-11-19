@@ -2,7 +2,7 @@
 // is the one stylesheet, ui.js every component, solid.js and web.js are Solid, native/ what a native host loads in place
 // of web.js and ui.js, internal.js is Solid's internals (`solid-js/internal`), which Solid's universal renderer reads with
 // its views. SKILL.md is the UI library's skill, and skills/ are Solid's, as the version apps are
-// built with has them, Emil Kowalski's, pstack's, Modern Web Guidance and our design rules. build/ is how an app is built and checked against it: app.js and lint-strict.js, with what they need to run, which a server
+// built with has them, Emil Kowalski's, pstack's, Modern Web Guidance and our design rules. build/ is how an app is built and checked against it: app.js and lint-app.js, with what they need to run, which a server
 // installs and runs on an app's source.
 import { cpSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { transform } from "lightningcss"
@@ -94,10 +94,10 @@ ${skill().join("\n")}`)
 
 // The UI library's types, for an app written in TypeScript: declarations only, unchecked (`bun run typecheck` checks).
 await $`${here("node_modules/.bin/tsc")} -p . --noEmit false --declaration --emitDeclarationOnly --noCheck --rewriteRelativeImportExtensions --rootDir src --outDir dist/types`.cwd(here("."))
-// And the UI library as an app's page's tsconfig names it (tsconfig.strict.json), which is declarations already.
+// And the UI library as an app's page's tsconfig names it (tsconfig.app.json), which is declarations already.
 cpSync(here("src/types"), here("dist/types/types"), { recursive: true })
 
-for (const file of ["app.js", "lint-strict.js", "tables.ts", "package.json", "bun.lock", "tsconfig.json", "tsconfig.strict.json", "src/tokens.ts", "src/styles.ts", "src/drawing-primitives/renderer.ts"]) cpSync(here(file), here(`dist/build/${file}`))
+for (const file of ["app.js", "lint-app.js", "tables.ts", "package.json", "bun.lock", "tsconfig.json", "tsconfig.app.json", "src/tokens.ts", "src/styles.ts", "src/drawing-primitives/renderer.ts"]) cpSync(here(file), here(`dist/build/${file}`))
 cpSync(here("src/types"), here("dist/build/src/types"), { recursive: true })
 
 // Solid's own skills, unchanged, and the cheatsheet its primer points to, beside it.

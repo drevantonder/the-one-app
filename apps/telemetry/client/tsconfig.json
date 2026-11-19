@@ -1,4 +1,4 @@
 {
-  "extends": "../../../core/ui/tsconfig.strict.json",
+  "extends": "../../../core/ui/tsconfig.app.json",
   "include": ["**/*"]
 }

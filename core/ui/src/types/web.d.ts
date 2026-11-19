@@ -1,4 +1,4 @@
-// What an app's page may use of `@solidjs/web` (`tsconfig.strict.json` names it): a component chosen as it runs, which
+// What an app's page may use of `@solidjs/web` (`tsconfig.app.json` names it): a component chosen as it runs, which
 // both the DOM's and a native host's have. Nothing else of it, which is the DOM's.
 import type { Component, ComponentProps, Element } from "solid-js"
 

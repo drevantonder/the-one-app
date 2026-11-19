@@ -1,6 +1,6 @@
 {
   "private": true,
   "scripts": {
-    "lint:strict": "bun core/ui/lint-strict.js"
+    "lint:app": "bun core/ui/lint-app.js"
   }
 }
