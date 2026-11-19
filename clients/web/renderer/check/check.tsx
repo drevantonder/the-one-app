@@ -1,8 +1,9 @@
 // The renderer's gate on a person's own devices (`clients/web/renderer/check.html` hosts it): a page drawn by the
-// renderer with what each check needs, typing with suggestions, dictation, a password manager, a passkey and a screen
-// reader, and two buttons each, which say to the check's host how it went.
-import { createSignal, For } from "solid-js"
-import { Button, Field, Input, render, Screen, Section, Tabs, Text, Textarea, View } from "ui"
+// renderer with what each check needs, typing with suggestions, dictation, a password manager and a passkey, and two
+// buttons each, which say to the check's host how it went. (Screen readers wait: Andre, 20 Nov, "we don't have
+// accessibility requirements yet".)
+import { createSignal } from "solid-js"
+import { Button, Field, Input, render, Screen, Section, Text, Textarea, View } from "ui"
 
 /** Says how a check went, to the page's host, which tells Telemetry. */
 const say = (check: string, worked: boolean, note?: string) =>
@@ -20,21 +21,32 @@ function Verdict(props: { check: string }) {
   )
 }
 
-// A passkey is offered as the passkey field takes the keyboard, as a site's sign-in offers one (WebAuthn's
-// conditional mediation): which one was picked is said, and nothing signs in.
+/// What became of the passkey offered, as the page shows it.
+const [offered, setOffered] = createSignal("")
+
+// A passkey is offered once the passkey field has the keyboard, so its real field is there for the browser or a
+// password manager's extension (1Password's takes WebAuthn over in Chrome) to offer it in, as a site's sign-in does
+// (WebAuthn's conditional mediation): which one was picked is told, and nothing signs in. A request that ends without
+// one is shown with what it means, not counted: the person's buttons say whether it was offered.
+let asked = false
 async function offerPasskey() {
-  if (!(await PublicKeyCredential.isConditionalMediationAvailable?.())) return say("passkey", false, "this browser offers no passkeys in a field")
+  if (asked) return
+  asked = true
+  if (!(await PublicKeyCredential.isConditionalMediationAvailable?.())) return setOffered("This browser offers no passkeys in a field.")
+  setOffered("Offered: pick your passkey from the field's suggestions.")
   try {
     const challenge = crypto.getRandomValues(new Uint8Array(32))
     const picked = await navigator.credentials.get({ mediation: "conditional", publicKey: { challenge, rpId: location.hostname, userVerification: "preferred" } } as CredentialRequestOptions)
-    say("passkey", !!picked, picked ? "a passkey was picked from the field's suggestions" : "nothing was picked")
+    if (picked) say("passkey", true, "a passkey was picked from the field's suggestions")
+    setOffered(picked ? "Picked. Nothing signs in." : "Nothing was picked.")
   } catch (error) {
-    say("passkey", false, String(error))
+    // NotAllowedError is WebAuthn's for a request dismissed, timed out, or that the device or extension had no
+    // passkey for (this network's, at this address) to offer.
+    const name = (error as Error)?.name
+    setOffered(name === "NotAllowedError" ? "It ended without a passkey: dismissed, timed out, or none here for this address in your browser or password manager." : `It didn't ask: ${String(error)}`)
+    asked = false
   }
 }
-offerPasskey()
-
-const TABS = ["One", "Two", "Three"]
 
 function Check() {
   const [typed, setTyped] = createSignal("")
@@ -42,11 +54,10 @@ function Check() {
   const [user, setUser] = createSignal("")
   const [password, setPassword] = createSignal("")
   const [passkey, setPasskey] = createSignal("")
-  const [tab, setTab] = createSignal(TABS[0])
   return (
     <Screen heading="Renderer Check">
       <Section heading="1. Typing with suggestions">
-        <Text>Type a sentence with a typo. The keyboard's suggestions show, and picking one or autocorrect changes the word.</Text>
+        <Text>Type a sentence with a typo. Safari, on a Mac and an iPhone, offers suggestions and autocorrect in a web field; Chrome on a Mac offers none in any web field, so there it worked if what's typed shows, with its caret, and a press, a drag and a double click select it.</Text>
         <Field label="Words"><Input value={typed()} onChangeText={setTyped} /></Field>
         <Verdict check="typing" />
       </Section>
@@ -63,20 +74,8 @@ function Check() {
       </Section>
       <Section heading="4. Passkey">
         <Text>Tap the field: your passkey for this network is offered above the keyboard (or under the field on a Mac). Pick it.</Text>
-        <Field label="Passkey"><Input autoComplete="username webauthn" autoCapitalize="none" autoCorrect={false} value={passkey()} onChangeText={setPasskey} /></Field>
+        <Field label="Passkey" hint={offered()}><Input autoComplete="username webauthn" autoCapitalize="none" autoCorrect={false} value={passkey()} onChangeText={setPasskey} onFocus={offerPasskey} /></Field>
         <Verdict check="passkey-offered" />
-      </Section>
-      <Section heading="5. VoiceOver">
-        <Text>Turn VoiceOver on. Swipe through this section: it reads each heading, tab and button, and double-tapping a tab selects it.</Text>
-        <Tabs.Root value={tab()} onValueChange={setTab}>
-          <Tabs.List>
-            <For each={TABS}>{(name) => <Tabs.Trigger value={name}>{name}</Tabs.Trigger>}</For>
-            <Tabs.Indicator />
-          </Tabs.List>
-        </Tabs.Root>
-        <Text>{`Selected: ${tab()}`}</Text>
-        <For each={TABS}>{(name) => <Button variant="outline" onPress={() => setTab(name)}>{`Choose ${name}`}</Button>}</For>
-        <Verdict check="voiceover" />
       </Section>
     </Screen>
   )
