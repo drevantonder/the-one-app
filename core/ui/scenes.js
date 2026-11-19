@@ -15,7 +15,8 @@
 // refusal. A method of the client's (`ui/initialize`, `one/client`) is answered as it's named too. It's 1 January 2026,
 // 00:00 UTC, as a native host's harness has it, so a fixture's times are said from then.
 //
-// Each scene is drawn on the DOM in headless Chromium, in a frame a stand-in client answers, and on a native host by
+// Each scene is drawn on the DOM in headless Chromium, in a frame a stand-in client answers, by our renderer there too
+// (its web frame, clients/web/renderer, on Chromium's WebGPU), and on a native host by
 // its headless harness (clients/app/renderer's `screenshot` example), each as a picture and its semantic tree as text
 // (src/drawing-primitives/outline.ts). It says, scene by scene, whether the trees are the same and how much of the pictures
 // differs, and keeps them all in `--out` to look at. A native host that can't draw a page yet (an older runtime
@@ -99,9 +100,10 @@ render(() => ListStyle({ value: "insetGrouped", get children() { return Shown({}
   }
 }
 
-/// A stand-in client for a page in a frame: it answers what the page asks from `answers`, as a client would.
-const host = (page, link, answers, [width, height], touch) => `<!doctype html><meta charset="utf-8"><style>html,body{margin:0;background:transparent}iframe{border:0;width:${width}px;height:${height}px;display:block}</style>
-<iframe id="page" src="/${page}${link ? `#${encodeURIComponent(link)}` : ""}"></iframe>
+/// A stand-in client for a page in a frame: it answers what the page asks from `answers`, as a client would. The frame
+/// is the page's own, or `src`, the renderer's frame that draws it (`web`).
+const host = (page, link, answers, [width, height], touch, src = `/${page}${link ? `#${encodeURIComponent(link)}` : ""}`) => `<!doctype html><meta charset="utf-8"><style>html,body{margin:0;background:transparent}iframe{border:0;width:${width}px;height:${height}px;display:block}</style>
+<iframe id="page" src="${src}"></iframe>
 <script>
 const answers = ${JSON.stringify(answers)}
 window.pending = 0
@@ -130,6 +132,7 @@ function server(built, target) {
       const url = new URL(request.url)
       if (url.pathname === "/host.html") return new Response(pages.get(url.searchParams.get("scene")), { headers: { "content-type": "text/html" } })
       const path = decodeURIComponent(url.pathname)
+      if (path.startsWith("/renderer/")) return new Response(Bun.file(join(rendererFrame, path.slice("/renderer/".length) || "index.html")))
       const file = path.startsWith("/ui/client/") ? Bun.file(here("dist/client") + path.slice("/ui/client".length)) : [join(built, path), join(target, path)].map((one) => Bun.file(one)).find((one) => one.size)
       return file?.size ? new Response(file) : new Response("Not found", { status: 404 })
     },
@@ -137,6 +140,8 @@ function server(built, target) {
   return {
     url: (key) => `http://localhost:${listener.port}/host.html?scene=${encodeURIComponent(key)}`,
     host: (key, scene) => pages.set(key, host(scene.page, scene.link, scene.answers, scene.size, !!scene.touch)),
+    // The renderer's frame, drawing the page at its address here.
+    hostWeb: (key, scene) => pages.set(key, host(scene.page, scene.link, scene.answers, scene.size, !!scene.touch, `/renderer/?runtime=${needed}#/${scene.page}${scene.link ? `#${encodeURIComponent(scene.link)}` : ""}`)),
     stop: () => listener.stop(true),
   }
 }
@@ -188,6 +193,26 @@ async function dom(browser, serve, key, scene, folder) {
   writeFileSync(join(folder, "dom.txt"), tree)
   await page.close()
   return { tree, problems }
+}
+
+/// A scene drawn by our renderer on the web, in headless Chromium's WebGPU, as `web.png`, once its first frame is drawn
+/// and what moves as it opens has settled, on the native harness's clock, language and time zone. A scene with taps
+/// isn't drawn yet: they find what to press in its ARIA tree, which it hasn't yet.
+async function web(browser, serve, key, scene, folder) {
+  if (scene.taps.length) return { missing: "a scene with taps isn't drawn on the web until it has an ARIA tree to find them in" }
+  const page = await browser.newPage({ viewport: { width: scene.size[0], height: scene.size[1] }, deviceScaleFactor: 2, hasTouch: scene.touch, colorScheme: dark ? "dark" : "light", locale: "en-US", timezoneId: "UTC" })
+  const problems = []
+  page.on("pageerror", (error) => problems.push(String(error)))
+  page.on("console", (message) => message.type() === "warning" && !message.text().includes("preferred by this device") && problems.push(message.text()))
+  await page.clock.setFixedTime(new Date(Date.UTC(2026, 0, 1)))
+  serve.hostWeb(`${key} (web)`, scene)
+  await page.goto(serve.url(`${key} (web)`))
+  const frame = await (await page.waitForSelector("#page")).contentFrame()
+  const drawn = await frame.waitForFunction(() => "drawn" in document.documentElement.dataset, null, { timeout: 20000 }).then(() => true, () => false)
+  await page.waitForTimeout(1000)
+  if (drawn) await page.screenshot({ path: join(folder, "web.png") })
+  await page.close()
+  return drawn ? { problems } : { missing: `it drew nothing${problems.length ? `: ${problems.join("; ")}` : ""}` }
 }
 
 /// A scene drawn by a native host's headless harness, or nothing where it hasn't been built or can't draw the page.
@@ -256,6 +281,13 @@ function compared(said, them, treeA, treeB, pictureA, pictureB, diff) {
 // Text laid out by its fonts' own advances, as Chrome lays it out on a Mac, Windows, an iPhone and Android: Linux's
 // headless Chrome hints by default, rounding each glyph's advance to a whole pixel, which no device people use does.
 const browser = await chromium.launch({ args: ["--font-render-hinting=none"] })
+// Our renderer on the web, on WebGPU, which a machine with no GPU has only as SwiftShader's, and whose canvas is put on
+// the page only when the page is composited on the GPU too (ANGLE on SwiftShader), at a phone's two pixels a point.
+const webgpu = await chromium.launch({ args: ["--font-render-hinting=none", "--enable-unsafe-webgpu", "--enable-unsafe-swiftshader", "--enable-gpu", "--use-gl=angle", "--use-angle=swiftshader", "--use-webgpu-adapter=opengles", "--force-device-scale-factor=2"] })
+// The renderer's frame, built once for every scene drawn on the web (clients/web/renderer/build.js).
+const rendererFrame = join(out, "renderer")
+const framed = Bun.spawnSync(["bun", join(root, "clients/web/renderer/build.js"), rendererFrame])
+if (framed.exitCode !== 0) throw new Error(`The renderer's frame didn't build: ${framed.stderr}`)
 const report = []
 for (const target of targets) {
   const name = target.endsWith("core/ui/gallery") ? "gallery" : target.split("/").at(-1)
@@ -290,11 +322,17 @@ for (const target of targets) {
     mkdirSync(folder, { recursive: true })
     const shown = await dom(browser, serve, `${name}/${scene.name}`, scene, folder).catch((error) => ({ problems: [String(error)] }))
     const drawn = native(built, scene, folder)
+    const onWeb = await web(webgpu, serve, `${name}/${scene.name}`, scene, folder).catch((error) => ({ missing: String(error) }))
     const said = [`${name} · ${scene.name}`]
     if (shown.problems.length) said.push(`  DOM: ${shown.problems.join("; ")}`)
     if (drawn.missing) said.push(`  native: ${drawn.missing}`)
     else if (shown.tree !== undefined) compared(said, "DOM and native", shown.tree, drawn.tree, join(folder, "dom.png"), join(folder, "native.png"), join(folder, "diff.png"))
     if (drawn.measured) said.push(`  native: ${timings(drawn.measured)}`)
+    if (onWeb.missing) said.push(`  web: ${onWeb.missing}`)
+    else if (!drawn.missing) {
+      const part = differs(join(folder, "native.png"), join(folder, "web.png"), join(folder, "web-diff.png"))
+      said.push(`  native and web: pictures ${part === undefined ? "aren't the same size" : `${(part * 100).toFixed(1)}% different${part > 0.02 ? " (over 2%)" : ""}`}`)
+    }
     const before = against && join(against, name, folder.split("/").at(-1))
     // What changed is our renderer's, where it drew the scene both times, and the DOM's where it didn't.
     const [kind, tree] = drawn.tree !== undefined && before && existsSync(join(before, "native.png")) ? ["native", drawn.tree] : ["dom", shown.tree]
@@ -307,4 +345,5 @@ for (const target of targets) {
   serve.stop()
 }
 await browser.close()
+await webgpu.close()
 console.log(report.join("\n"))

@@ -41,7 +41,7 @@
     const canvas = /** @type {HTMLCanvasElement} */ (document.querySelector("canvas"))
     const sized = (/** @type {number} */ width, /** @type {number} */ height) => [Math.max(1, Math.round(width)), Math.max(1, Math.round(height))]
     ;[canvas.width, canvas.height] = sized(innerWidth * devicePixelRatio, innerHeight * devicePixelRatio)
-    await renderer.open(canvas, tables, page.searchParams.get("theme"), matchMedia("(pointer: coarse)").matches, {
+    await renderer.open(canvas, devicePixelRatio, tables, page.searchParams.get("theme"), matchMedia("(pointer: coarse)").matches, {
       post: (/** @type {object} */ message) => parent.postMessage(message, "*"),
       cursor: (/** @type {string} */ cursor) => void (canvas.style.cursor = cursor),
       // Its first frame, marked on the frame's own element for whoever measures it.
@@ -52,10 +52,11 @@
       unopened,
     })
     addEventListener("message", ({ source, data }) => source === parent && renderer.message(data))
-    // The canvas as the DOM says it is, in device pixels, and what happens on it.
+    // The canvas as the DOM says it is, in device pixels, and how many to a CSS pixel (the display's and the zoom),
+    // and what happens on it.
     new ResizeObserver(([entry]) => {
       const [box] = entry.devicePixelContentBoxSize ?? [{ inlineSize: entry.contentRect.width * devicePixelRatio, blockSize: entry.contentRect.height * devicePixelRatio }]
-      renderer.resized(...sized(box.inlineSize, box.blockSize))
+      if (entry.contentRect.width) renderer.resized(...sized(box.inlineSize, box.blockSize), box.inlineSize / entry.contentRect.width)
     }).observe(canvas)
     const pointer = (/** @type {string} */ kind) => (/** @type {PointerEvent} */ event) => renderer.pointer(kind, event.offsetX, event.offsetY, event.button, event.shiftKey)
     canvas.addEventListener("pointermove", pointer("move"))

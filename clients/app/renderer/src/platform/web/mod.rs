@@ -42,6 +42,9 @@ thread_local! {
     static SOON: Cell<bool> = const { Cell::new(false) };
     /// What the DOM said happened to the canvas, for the windows' next turn (`Display::events`).
     static EVENTS: RefCell<Vec<(WindowId, usize, Input)>> = const { RefCell::new(Vec::new()) };
+    /// How many device pixels the canvas has to a CSS pixel, as the frame last said it (`resized`): the display's, and
+    /// the page's zoom.
+    static SCALE: Cell<f32> = const { Cell::new(1.0) };
     /// A frame asked for (`request_frame`), and when the browser last showed one.
     static ASKED: Cell<bool> = const { Cell::new(false) };
     static FRAMED: Cell<Option<web_time::Instant>> = const { Cell::new(None) };
@@ -259,12 +262,12 @@ pub struct Display;
 
 impl Display {
     pub fn open(&self, _: WindowId, _: &WindowOptions) -> anyhow::Result<NativeWindow> {
-        let (canvas, size, scale) = HOST.with_borrow(|host| {
+        let (canvas, size) = HOST.with_borrow(|host| {
             let canvas = host.as_ref().map(|host| host.canvas.clone()).ok_or_else(|| anyhow::anyhow!("no canvas"))?;
             let size = Size { width: DevicePixels(canvas.width() as i32), height: DevicePixels(canvas.height() as i32) };
-            anyhow::Ok((canvas, size, web_sys::window().map_or(1.0, |window| window.device_pixel_ratio() as f32)))
+            anyhow::Ok((canvas, size))
         })?;
-        Ok(NativeWindow { canvas, device: Cell::new(size), scale })
+        Ok(NativeWindow { canvas, device: Cell::new(size) })
     }
 
     pub fn close(&self, _: &NativeWindow) {}
@@ -323,11 +326,10 @@ impl Display {
     }
 }
 
-/// The page's canvas: its size in device pixels, as the frame last said it, and how many of them to a CSS pixel.
+/// The page's canvas: its size in device pixels, as the frame last said it.
 pub struct NativeWindow {
     canvas: web_sys::HtmlCanvasElement,
     device: Cell<Size<DevicePixels>>,
-    scale: f32,
 }
 
 #[derive(Clone, Copy)]
@@ -356,11 +358,11 @@ impl NativeWindow {
 
     pub fn size(&self) -> Size<Pixels> {
         let device = self.device.get();
-        Size { width: Pixels(device.width.0 as f32 / self.scale), height: Pixels(device.height.0 as f32 / self.scale) }
+        Size { width: Pixels(device.width.0 as f32 / self.scale()), height: Pixels(device.height.0 as f32 / self.scale()) }
     }
 
     pub fn scale(&self) -> f32 {
-        self.scale
+        SCALE.get()
     }
 
     pub fn resized(&self, size: Size<DevicePixels>) {
@@ -372,12 +374,13 @@ impl NativeWindow {
 
 // What the frame's JS calls: `renderer.js`, as it opens the page and as the DOM tells it what happens on the canvas.
 
-/// Opens the page's window on `canvas`, drawn with the design tokens and styles in `tables` (the UI library's tokens
+/// Opens the page's window on `canvas`, `scale` device pixels to a CSS pixel, drawn with the design tokens and styles in `tables` (the UI library's tokens
 /// and styles, and its app's styles), in `theme` (`dark`, `light`, or as the device is), as the frame's JS (`calls`)
 /// is told what it says of itself. The page's module is imported after, and says it ran (`started`).
 #[wasm_bindgen]
-pub async fn open(canvas: web_sys::HtmlCanvasElement, tables: Vec<String>, theme: Option<String>, touch: bool, calls: JsValue) -> Result<(), JsError> {
+pub async fn open(canvas: web_sys::HtmlCanvasElement, scale: f32, tables: Vec<String>, theme: Option<String>, touch: bool, calls: JsValue) -> Result<(), JsError> {
     console_log();
+    SCALE.set(scale);
     let media = |query: &str| web_sys::window().and_then(|window| window.match_media(query).ok().flatten()).is_some_and(|list| list.matches());
     HOST.set(Some(Host { canvas, calls, dark: media("(prefers-color-scheme: dark)"), reduced_motion: media("(prefers-reduced-motion: reduce)") }));
     let page = load(&tables).map_err(|error| JsError::new(&format!("{error:#}")))?;
@@ -489,9 +492,10 @@ fn input(input: Input) {
     soon();
 }
 
-/// The canvas is `width` by `height` device pixels now.
+/// The canvas is `width` by `height` device pixels now, `scale` of them to a CSS pixel.
 #[wasm_bindgen]
-pub fn resized(width: u32, height: u32) {
+pub fn resized(width: u32, height: u32, scale: f32) {
+    SCALE.set(scale);
     input(Input::Resized(Size { width: DevicePixels(width as i32), height: DevicePixels(height as i32) }));
 }
 
