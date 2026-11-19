@@ -391,7 +391,7 @@ defmodule OneCore.Call do
 
   @doc """
   Has a server that runs the apps installed for `owner` run this call, since this one doesn't
-  (`OneCore.Servers.runs?/1`). It ends here with that server's answer, or raises saying whose servers run it and
+  (`OneCore.Apps.runs?/1`). It ends here with that server's answer, or raises saying whose servers run it and
   that none is on.
   """
   def run_elsewhere(%__MODULE__{} = call, owner),
@@ -400,7 +400,7 @@ defmodule OneCore.Call do
   @doc "Has a server that runs the apps installed for `owner` run what was asked of this one, `what`, as `run_elsewhere/2` does."
   def run_elsewhere(ask, principal, forwarded, owner, what) do
     if forwarded, do: throw({__MODULE__, :forwarding_loop})
-    servers = Servers.running(owner)
+    servers = OneCore.Apps.servers(owner)
     elsewhere(ask, principal, servers -- [Server.key()])
     raise Servers.off(what, owner, servers)
   end

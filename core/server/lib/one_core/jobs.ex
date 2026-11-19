@@ -11,7 +11,7 @@ defmodule OneCore.Jobs do
   """
   use GenServer
   require Logger
-  alias OneCore.{Apps, Edge, Servers}
+  alias OneCore.{Apps, Edge}
   alias OneCore.Apps.{Calls, Installed}
 
   def start_link(_), do: GenServer.start_link(__MODULE__, nil, name: __MODULE__)
@@ -62,7 +62,7 @@ defmodule OneCore.Jobs do
   defp asked(clock, scheduled, at, now) do
     for {owner, name, jobs, trusted, own} <- scheduled,
         Enum.any?(jobs, &(div(now, &1.every) > div(at, &1.every))),
-        Servers.runs?(owner, trusted),
+        Apps.runs?(owner, trusted),
         subject <- [owner | if(own == :subject, do: Installed.subjects(owner, name), else: [])] do
       Task.Supervisor.start_child(OneCore.Asks, fn -> Calls.schedule(owner, name, subject) end)
     end

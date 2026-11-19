@@ -101,7 +101,7 @@ defmodule OneCore.Service do
 
   @doc """
   Who the service that asks runs for on its server, each as `app/4` takes it: everyone its app was installed
-  for, a user, a group or the network, whose apps its server runs (`OneCore.Servers.runs?/1`), and where it keeps
+  for, a user, a group or the network, whose apps its server runs (`OneCore.Apps.runs?/1`), and where it keeps
   each person's data apart, each who keeps something with it (`OneCore.Apps.Installed.subjects/2`). Whoever the server
   is for comes first, as its owner chose them, so a service that's for one of them at a time, its machine's person,
   takes the first.
@@ -112,7 +112,7 @@ defmodule OneCore.Service do
 
     whos =
       for at <- Apps.installed_for(app),
-          Servers.runs?(at),
+          Apps.runs?(at),
           {name, %Version{artifact: ^app} = version} <- Apps.versions([at]),
           who <- [at | if(version.own == :subject, do: Installed.subjects(at, name), else: [])],
           uniq: true,

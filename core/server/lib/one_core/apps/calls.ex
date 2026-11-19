@@ -3,12 +3,12 @@ defmodule OneCore.Apps.Calls do
   Calling an app: one of its tools, a function of it for a service of its own, its `hook/3` at a hook, or having its
   scheduled jobs called. A call runs on the version of the app that was latest when it began, and those of the
   apps it requires whose code runs inside it, which stay loaded until it ends (`OneCore.Apps.run/3`). It runs on a
-  server that runs the apps of whoever the app was installed for (`OneCore.Servers.runs?/1`): this one, or one
+  server that runs the apps of whoever the app was installed for (`OneCore.Apps.runs?/1`): this one, or one
   it's passed on to.
   """
   require Logger
   alias ExJsonSchema.Validator.Error
-  alias OneCore.{Artifact, Call, Hooks, Apps, Sandbox, Server, Servers, Tasks, User}
+  alias OneCore.{Artifact, Call, Hooks, Apps, Sandbox, Server, Tasks, User}
   alias OpenTelemetryAPIExperimental.Histogram
   require OpenTelemetry.Tracer, as: Tracer
   require Histogram
@@ -480,7 +480,7 @@ defmodule OneCore.Apps.Calls do
   defp called(at, name, versions, ask, principal, forwarded) do
     call = new_call(at, name, versions, ask, principal, forwarded)
 
-    if Servers.runs?(at, versions[name].trusted),
+    if Apps.runs?(at, versions[name].trusted),
       do: call,
       else: Call.run_elsewhere(call, at)
   end
@@ -490,7 +490,7 @@ defmodule OneCore.Apps.Calls do
   defp new_call(at, name, versions, ask, {actor, subject}, forwarded) do
     whose = whose(at, versions[name], subject)
 
-    if whose != at and Servers.runs?(at, versions[name].trusted), do: Installed.subject(at, name, whose)
+    if whose != at and Apps.runs?(at, versions[name].trusted), do: Installed.subject(at, name, whose)
 
     own = "#{whose}/own/#{name}"
 

@@ -438,7 +438,7 @@ defmodule OneCore.Apps.Deploy do
     stale =
       for %{app: artifact} <- if(newest?(), do: deployed(), else: []),
           whose = Store.whose(artifact),
-          Servers.runs?(whose, Store.trusted?(artifact)),
+          Apps.runs?(whose, Store.trusted?(artifact)),
           built_with(artifact) not in [nil, code],
           do: {whose, artifact}
 

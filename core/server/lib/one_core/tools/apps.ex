@@ -2,7 +2,7 @@ defmodule OneCore.Tools.Apps do
   @moduledoc "One Core's own tools that deploy, install, update and remove apps, and read and upload to them, as `OneCore.Tools` calls them. "
   import OneCore.Tools.Helpers
 
-  alias OneCore.{Artifact, Bucket, Call, Hooks, Apps, Servers, User}
+  alias OneCore.{Artifact, Bucket, Call, Hooks, Apps, User}
 
   alias OneCore.Apps.{Installed, Calls, Deploy, Lifecycle, Requires, Store, Update, Version}
 
@@ -537,17 +537,17 @@ defmodule OneCore.Tools.Apps do
   defp requires(version), do: version.requires
 
   # Has a server that runs an app installed for `owner`, `trusted` or not, run this call, if this one doesn't, since
-  # what it deploys or installs runs there (`OneCore.Servers.runs?/2`): a trusted app on a server that runs their
+  # what it deploys or installs runs there (`OneCore.Apps.runs?/2`): a trusted app on a server that runs their
   # apps, and an untrusted one on any acting for them.
   defp runs(owner, trusted, forward) do
     cond do
-      Servers.runs?(owner, trusted) ->
+      Apps.runs?(owner, trusted) ->
         true
 
       not trusted ->
         forward.(owner)
 
-      Servers.running(owner) == [] ->
+      Apps.servers(owner) == [] ->
         raise "An app for #{owner} needs a server of their own, since its code runs there and never on the network's. " <>
                 "Set one up in Devices, ask whoever may install apps for everyone to install it for everyone, " <>
                 "or deploy it untrusted (trusted: false), to run in a sandbox, which any of the network's servers " <>

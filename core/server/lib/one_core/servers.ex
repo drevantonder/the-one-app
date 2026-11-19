@@ -57,26 +57,7 @@ defmodule OneCore.Servers do
     Enum.any?(acts_for(key), &(&1 in [owner, @network]))
   end
 
-  @doc """
-  Whether this server runs the apps installed for `owner`: it acts for them as one of their own servers, not
-  only as one of the network's, or it's the network's and they are, or own, the network. Who owns the network is
-  what the apps that validate `reach` say.
-  """
-  def runs?(owner) do
-    cond do
-      owner == @network -> here?(@network)
-      owner in acts_for(Server.key()) -> true
-      true -> here?(@network) and owns_network?(owner)
-    end
-  end
-
-  @doc """
-  Whether this server runs an app installed for `owner`, which is `trusted` or not: a trusted one where it runs the
-  apps installed for them (`runs?/1`), and an untrusted one, in a sandbox, wherever it acts for them (`here?/1`).
-  """
-  def runs?(owner, trusted), do: if(trusted, do: runs?(owner), else: here?(owner))
-
-  @doc "The keys of the servers that run the apps installed for `owner`, as `runs?/1` says of each, the first first."
+  @doc "What `OneCore.Apps.servers/1` is, as an app that doesn't require it yet calls it."
   def running(@network), do: listed(@network)
 
   def running(owner) do

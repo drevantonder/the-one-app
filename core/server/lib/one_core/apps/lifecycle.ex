@@ -202,7 +202,7 @@ defmodule OneCore.Apps.Lifecycle do
     move(owner, name, {:stage, "fetching"})
     stage("Getting #{title}'s code")
 
-    case Store.version(artifact, code, Servers.runs?(owner), trusted) do
+    case Store.version(artifact, code, Apps.runs?(owner), trusted) do
       {:ok, version} ->
         # What it's installed for holds it once it runs; this lets go of it however installing ends.
         try do
@@ -270,7 +270,7 @@ defmodule OneCore.Apps.Lifecycle do
   def required(owner) do
     for {name, version} <- Apps.versions([owner]),
         Requires.missing(owner, version.artifact, version.requires) != [],
-        Servers.runs?(owner, version.trusted),
+        Apps.runs?(owner, version.trusted),
         reduce: {:ok, []} do
       {:ok, also} ->
         with {:ok, more} <- requirements(owner, name, version.artifact, nil), do: {:ok, also ++ more}
@@ -783,7 +783,7 @@ defmodule OneCore.Apps.Lifecycle do
   it's trusted. An app as everyone's deployed apps list it (`OneCore.Apps.Deploy.deployed/0`) says whether it's
   trusted, which isn't read again.
   """
-  def takes?(%{app: artifact, trusted: trusted}), do: Servers.runs?(Store.whose(artifact), trusted)
+  def takes?(%{app: artifact, trusted: trusted}), do: Apps.runs?(Store.whose(artifact), trusted)
   def takes?(artifact), do: takes?(%{app: artifact, trusted: Store.trusted?(artifact)})
 
   defp installed?(artifact),
