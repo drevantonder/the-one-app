@@ -265,7 +265,10 @@ pub async fn on(client: &Client) -> Result<String> {
     let key = here.key()?;
     let who = who(client)?;
     match here.read()?.server_membership {
-        ServerMembership::Active => return Ok(format!("This device is a server for {who} already. Its key: {key}")),
+        ServerMembership::Active => {
+            let registered = registered(&here, &key, &who).await?;
+            return Ok(format!("This device is a server for {who} already, and {registered}. Its key: {key}"));
+        }
         ServerMembership::Leaving => {
             undo_leaving(client, &here, &key, true).await?;
             return Ok(format!("This device is a server for {who} again. Its key: {key}"));
@@ -278,6 +281,21 @@ pub async fn on(client: &Client) -> Result<String> {
         return Err(error.context(format!("This device isn't a server{left}")));
     }
     Ok(format!("This device is a server for {who} now, and starts whenever it does. Its key: {key}\n{address}"))
+}
+
+/// Writes again how the system runs this device's server, which is one already, as this build says to, and has the
+/// system run it, which does nothing where it runs: what `one serve run` does as it starts, for a server whose
+/// registration it couldn't rewrite itself, as one an administrator made. Says whether it changed.
+async fn registered(here: &Here, key: &str, who: &str) -> Result<&'static str> {
+    let server = kept(here, key, &program()?, unit_env(who.to_owned(), None).await?);
+    let changed = client::system::install(&server)
+        .map_err(|error| anyhow::anyhow!("{error:#}\nThen `one serve on` again, as yourself, registers it as yours."))?;
+    client::system::start(&server)?;
+    Ok(if changed {
+        "the system runs it as this build says to from its next start (its registration changed)"
+    } else {
+        "the system runs it as this build says to (its registration is unchanged)"
+    })
 }
 
 async fn join(client: &Client, here: &Here, key: &str, who: &str) -> Result<()> {
@@ -584,13 +602,13 @@ async fn serve(client: &Arc<Client>, here: &Here, reports: &Reports) -> Result<(
         println!("This device isn't a server: `one serve on` makes it one.");
         return Ok(());
     }
+    let log = here.folder.join("server.log");
+    system::bound(&log)?;
     // The system runs it as this build says to, from its next start. Where it can't be rewritten, as one changed by
-    // hand may not be, it runs as it was set up rather than not at all.
+    // hand or an administrator's may not be, it runs as it was set up rather than not at all, and its log says why.
     if let Err(error) = client::system::install(&kept(here, &key, &program, unit_env(who.clone(), env::var("PATH").ok()).await?)) {
         eprintln!("Couldn't rewrite how the system runs it, so it runs as it was set up: {error:#}");
     }
-    let log = here.folder.join("server.log");
-    system::bound(&log)?;
 
     // A download cut short, as this program or the server stopped, is one that failed: it's up to date again on what
     // it was on. A build being checked when they stopped wasn't kept, and the server starts on the one it was on.

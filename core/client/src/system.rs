@@ -348,12 +348,20 @@ mod imp {
         let bytes: Vec<u8> = [0xFEFF].into_iter().chain(task.encode_utf16()).flat_map(u16::to_le_bytes).collect();
         let registered = program.folder.join("task.xml");
         changed |= written(&registered, &bytes)?;
-        if changed || !installed(name)? {
+        let there = installed(name)?;
+        if changed || !there {
             let created = schtasks(&["/create", "/tn", name, "/xml", &registered.display().to_string(), "/f"]);
-            if created.is_err() {
+            if let Err(error) = created {
                 fs::remove_file(&registered)?;
+                // A task an administrator registered, as one made over ssh is, only an administrator may replace.
+                ensure!(
+                    !there,
+                    "Task Scheduler didn't replace the task \"{name}\" that's there ({error:#}). Where an administrator \
+                     registered it, only one may: in PowerShell run as administrator, `schtasks /delete /tn \"{name}\" \
+                     /f`, which leaves what it runs running."
+                );
+                return Err(error);
             }
-            created?;
         }
         Ok(changed)
     }
