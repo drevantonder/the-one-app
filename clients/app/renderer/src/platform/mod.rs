@@ -881,6 +881,7 @@ impl Windows {
             Input::Resized(_) | Input::Surface | Input::SurfaceLost => {}
             Input::Expose => {}
             // The system went light or dark: so do its own parts of the window, where its Colour Mode says nothing.
+            Input::FullScreen(full) => screen.full_screen = full,
             Input::Appearance(appearance) => {
                 screen.appearance = appearance;
                 window.chrome = None;
@@ -1059,8 +1060,10 @@ pub(crate) enum Input {
     SurfaceLost,
     Expose,
     /// The system went light or dark.
-    #[cfg_attr(target_os = "linux", allow(dead_code))]
     Appearance(crate::Appearance),
+    /// It went full screen, or came out of it.
+    #[cfg_attr(not(target_os = "macos"), allow(dead_code))]
+    FullScreen(bool),
     Close,
     Moved(crate::geometry::Point<f32>),
     Left,

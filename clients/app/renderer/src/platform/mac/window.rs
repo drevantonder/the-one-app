@@ -1015,6 +1015,17 @@ define_class!(
             self.ivars().send(Input::Focus(false));
         }
 
+        // Full screen, a Mac hides the traffic lights, so the breadcrumb starts at the window's edge.
+        #[unsafe(method(windowWillEnterFullScreen:))]
+        fn window_will_enter_full_screen(&self, _notification: &NSNotification) {
+            self.ivars().send(Input::FullScreen(true));
+        }
+
+        #[unsafe(method(windowWillExitFullScreen:))]
+        fn window_will_exit_full_screen(&self, _notification: &NSNotification) {
+            self.ivars().send(Input::FullScreen(false));
+        }
+
         // AppKit lays the title bar out again as the window changes size, and out of full screen.
         #[unsafe(method(windowDidResize:))]
         fn window_did_resize(&self, notification: &NSNotification) {

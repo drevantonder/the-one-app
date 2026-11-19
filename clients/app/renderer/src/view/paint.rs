@@ -1158,14 +1158,14 @@ impl Painter<'_> {
     /// A window's breadcrumb over the top of its page (`Breadcrumb`), in a computer's own size, as shadcn's: Home light,
     /// highlighted under the pointer (`hovered`); a muted /; then the app's icon and its name in semibold. → where
     /// Home is, and where the breadcrumb ends.
-    pub(super) fn breadcrumb(&mut self, crumb: &Breadcrumb, bar: f32, hovered: bool) -> (Bounds<f32>, f32) {
+    pub(super) fn breadcrumb(&mut self, crumb: &Breadcrumb, start: f32, bar: f32, hovered: bool) -> (Bounds<f32>, f32) {
         let conditions = self.conditions;
         let window = self.window;
         let colour = |id: &str| colour_token(id, conditions);
         let (home_style, app_style) = chrome_type(conditions);
         let middle = bar / 2.0;
         let (icon, gap, pad) = (16.0, 6.0, 6.0);
-        let mut x = crumb.start;
+        let mut x = start;
         // Home, with the ring.
         let home_words = self.text.paragraph("Home", &home_style, &[], None, None);
         let home = Bounds { origin: point(x, middle - 11.0), size: Size { width: pad + icon + gap + home_words.size().width.ceil() + pad, height: 22.0 } };

@@ -52,7 +52,8 @@ pub struct Breadcrumb {
     pub ring: String,
     pub icon: Option<String>,
     pub name: String,
-    /// How far in from the window's start it begins, in the band its top inset keeps clear.
+    /// How far in from the window's start it begins, in the band its top inset keeps clear, past a Mac's traffic
+    /// lights; full screen, where the Mac hides them, it begins at the window's edge (`Screen::full_screen`).
     pub start: f32,
     pub home: Box<dyn FnMut()>,
 }
@@ -133,6 +134,8 @@ const BUTTON_ROLES: [&str; 9] = ["button", "menuitem", "tab", "checkbox", "radio
 
 /// The page itself, as an event's node: what a key is told to, once, for what listens to every key (`keydown()`).
 const PAGE: Id = 0;
+/// How far in from a full-screen window's edge its breadcrumb starts, in points.
+const EDGE: f32 = 12.0;
 const SHORTCUT_HELD: std::time::Duration = std::time::Duration::from_millis(600);
 
 /// What a phone does for its page itself, which its window doesn't draw (DESIGN.md: "its pickers and its share
@@ -190,6 +193,8 @@ pub struct Screen {
     pub page: u32,
     /// What its window says above it, on a computer.
     pub breadcrumb: Option<Breadcrumb>,
+    /// Its window is full screen, where a Mac hides its traffic lights, so its breadcrumb starts at its edge.
+    pub full_screen: bool,
     /// Its window is a panel, whose background the host draws, under its page's.
     pub panel: Option<Panel>,
     /// What the window says over its page.
@@ -310,6 +315,7 @@ impl Screen {
             text_size: None,
             page: 0,
             breadcrumb: None,
+            full_screen: false,
             panel: None,
             notice: None,
             visible: true,
@@ -928,7 +934,8 @@ impl Screen {
         }
         // The window's breadcrumb, over its page.
         let hovering = |bounds: &Bounds<f32>| self.pointer.is_some_and(|at| bounds.contains(&at));
-        let crumb = self.breadcrumb.as_ref().map(|crumb| painter.breadcrumb(crumb, self.insets.top, self.chrome.home.as_ref().is_some_and(hovering)));
+        let edge = self.full_screen.then_some(EDGE);
+        let crumb = self.breadcrumb.as_ref().map(|crumb| painter.breadcrumb(crumb, edge.unwrap_or(crumb.start), self.insets.top, self.chrome.home.as_ref().is_some_and(hovering)));
         let home = crumb.map(|(home, _)| home);
         // The page's top bar starts after it, which it's laid out again for once it's moved.
         let start = crumb.map_or(0, |(_, end)| (end + 12.0).ceil() as u16);
