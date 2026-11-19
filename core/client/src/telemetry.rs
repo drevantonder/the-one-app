@@ -7,11 +7,14 @@
 //! answered, and never a secret.
 
 use std::collections::HashMap;
+use std::env;
 use std::fs;
 use std::io::Write;
 use std::path::PathBuf;
+use std::sync::Arc;
 use std::time::{Duration, SystemTime};
 
+use anyhow::Result;
 use data_encoding::BASE64;
 use opentelemetry::logs::{AnyValue, LogRecord, Logger, LoggerProvider, Severity};
 use opentelemetry::metrics::{Histogram, Meter, MeterProvider};
@@ -26,14 +29,16 @@ use opentelemetry_sdk::metrics::{PeriodicReader, SdkMeterProvider};
 use opentelemetry_sdk::trace::{SdkTracer, SdkTracerProvider, SimpleSpanProcessor, SpanData, SpanProcessor};
 use serde_json::{Value, json};
 
+use crate::{Client, BUILD, name};
+
 /// What a client's exports are kept in until a server is told: a line of JSON each, `{"signal", "otlp"}` with the
 /// export request in base64, in its home folder, which every client of the device adds to, and past this many bytes
 /// no more.
-pub(crate) const REPORTS: &str = "reports";
+const REPORTS: &str = "reports";
 const REPORTS_MOST: u64 = 512 * 1024;
 
 /// How long a request takes before its span is kept though it was answered.
-pub(crate) const SLOW: Duration = Duration::from_secs(2);
+const SLOW: Duration = Duration::from_secs(2);
 
 /// The buckets a duration in milliseconds is counted in, as a server's are (`OneCore.Otlp.buckets/0`).
 const BUCKETS: [f64; 16] =
@@ -44,7 +49,7 @@ pub(crate) struct Telemetry {
     traces: SdkTracerProvider,
     metrics: SdkMeterProvider,
     logs: SdkLoggerProvider,
-    pub(crate) tracer: SdkTracer,
+    tracer: SdkTracer,
     meter: Meter,
     logger: opentelemetry_sdk::logs::SdkLogger,
     histograms: std::sync::Mutex<HashMap<String, Histogram<f64>>>,
@@ -53,7 +58,7 @@ pub(crate) struct Telemetry {
 impl Telemetry {
     /// The providers, exporting to `home`'s reports, saying `resource` of the client: which it is (`service.name`),
     /// its build, its device's name and its operating system.
-    pub(crate) fn new(home: PathBuf, resource: &serde_json::Map<String, Value>) -> Self {
+    fn new(home: PathBuf, resource: &serde_json::Map<String, Value>) -> Self {
         let resource = Resource::builder_empty().with_attributes(attributes(resource)).build();
         let kept = Kept(home);
         let spans = opentelemetry_otlp::SpanExporter::builder().with_http().with_http_client(kept.clone()).build();
@@ -74,7 +79,7 @@ impl Telemetry {
     /// Records `record`, as Telemetry's tool `record` takes one: with a `value`, a number of a histogram's; with
     /// `took`, in milliseconds, a span of something that ended now, with an `error` if it failed; and otherwise a
     /// log line, an error if it has an `error`.
-    pub(crate) fn record(&self, record: &Value) {
+    fn record(&self, record: &Value) {
         let name = record["name"].as_str().unwrap_or("record").to_owned();
         let said = record["attributes"].as_object().map(attributes).unwrap_or_default();
         let error = record["error"].as_str().map(short);
@@ -185,7 +190,7 @@ impl HttpClient for Kept {
 }
 
 /// Keeps `line` in `home`'s reports, for whichever client of the device next reaches a server.
-pub(crate) fn keep(home: &std::path::Path, line: &Value) {
+fn keep(home: &std::path::Path, line: &Value) {
     let file = home.join(REPORTS);
     if fs::metadata(&file).is_ok_and(|metadata| metadata.len() > REPORTS_MOST) {
         return;
@@ -222,4 +227,103 @@ fn attributes(said: &serde_json::Map<String, Value>) -> Vec<KeyValue> {
 
 fn short(text: &str) -> String {
     text.chars().take(1000).collect()
+}
+
+/// What a client tells a server of what it reported, for the apps that hear `measured`.
+const MEASURED: &str = "notifications/one/measured";
+
+/// What a client says of itself in what it reports, until it says more (`Client::report`).
+pub(crate) fn resource() -> serde_json::Map<String, Value> {
+    serde_json::Map::from_iter([
+        ("service.name".to_owned(), json!("cli")),
+        ("service.version".to_owned(), json!(BUILD)),
+        ("os.type".to_owned(), json!(env::consts::OS)),
+    ])
+}
+
+impl Client {
+    /// This client's OpenTelemetry SDK, made with what it says of itself the first time it records something.
+    pub(crate) fn telemetry(&self) -> &Telemetry {
+        self.telemetry.get_or_init(|| {
+            let mut resource = self.resource.write().expect("no report panics");
+            resource.entry("host.name").or_insert_with(|| json!(name()));
+            Telemetry::new(self.home.clone(), &resource)
+        })
+    }
+
+    /// Keeps `record` for Telemetry, as from this client, and tells a server once one answers, with whatever else
+    /// this device's clients kept: so what went wrong while nothing could be reached is told once something can. A
+    /// record is Telemetry's (its tool `record`): a `name` and `attributes`, and a `value`, or how long something
+    /// `took` with its `error` if it failed, or else a log line, with an `error` if it is one. Names, sizes and
+    /// outcomes only: never what anyone wrote, was given or answered, and never a secret.
+    pub fn report(&self, record: Value) {
+        self.telemetry().record(&record);
+        if self.state.borrow().connection().answers() {
+            self.send_soon();
+        }
+    }
+
+    /// Which client this is, as what it reports says: OpenTelemetry's `service.name`, such as `app`. It's `cli`
+    /// unless said, and an MCP client's says which it is as it starts.
+    pub fn service(&self, name: &str) {
+        self.resource.write().expect("no report panics").insert("service.name".into(), json!(name));
+    }
+
+    /// Reports a panic of this program's when it happens, so it's told next time any of its device's clients
+    /// reaches a server, if not before.
+    pub(crate) fn panics(&self) {
+        static HOOKED: std::sync::Once = std::sync::Once::new();
+        let Some(me) = self.me.upgrade() else { return };
+        let me = Arc::downgrade(&me);
+        HOOKED.call_once(move || {
+            let before = std::panic::take_hook();
+            std::panic::set_hook(Box::new(move |panic| {
+                let message = panic.payload_as_str().unwrap_or("panicked");
+                let mut record = json!({"name": "exception", "error": message.lines().next().unwrap_or(message),
+                    "attributes": {"exception.type": "panic"}});
+                if let Some(at) = panic.location() {
+                    record["attributes"]["code.file.path"] = json!(at.file());
+                    record["attributes"]["code.line.number"] = json!(at.line());
+                }
+                if let Some(me) = me.upgrade() {
+                    me.telemetry().record(&record);
+                }
+                before(panic)
+            }));
+        });
+    }
+
+    /// Tells a server what was reported, soon after it's asked something else, and never in the way of that.
+    pub(crate) fn send_soon(&self) {
+        if let Some(me) = self.me.upgrade()
+            && self.home.join(REPORTS).exists()
+        {
+            self.runtime.spawn(async move { me.send_reports().await });
+        }
+    }
+
+    /// Tells a server, in one batch, what this device's clients reported and kept (`report`), for the apps that
+    /// hear `measured`. What it can't tell is kept again for next time. Telling reports nothing itself.
+    pub(crate) async fn send_reports(&self) {
+        let _one = self.sending.lock().await;
+        // The kept exports are this run's to tell once it has moved them: other clients keep theirs anew.
+        let sending = self.home.join(format!("{}.{}", REPORTS, self.link().endpoint.id()));
+        if fs::rename(self.home.join(REPORTS), &sending).is_err() {
+            return;
+        }
+        let stored = fs::read_to_string(&sending).unwrap_or_default();
+        let _ = fs::remove_file(&sending);
+        // A line a client before OpenTelemetry's SDK kept, a record, is let go.
+        let exports: Vec<Value> = stored
+            .lines()
+            .filter_map(|line| serde_json::from_str::<Value>(line).ok())
+            .filter(|line| line["signal"].is_string())
+            .collect();
+        let notification = json!({"jsonrpc": "2.0", "method": MEASURED, "params": {"otlp": exports}});
+        if !exports.is_empty() && self.ask(notification.to_string().as_bytes()).await.is_err() {
+            for export in &exports {
+                keep(&self.home, export);
+            }
+        }
+    }
 }
