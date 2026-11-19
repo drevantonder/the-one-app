@@ -266,6 +266,8 @@ function Crumbs(props: { repo: string; path: string; folder?: boolean }) {
   )
 }
 
+/// The branch open, and where there's more than one, the way to another, which starts at its top: the folder or file open
+/// may not be there.
 function Branch(props: { about: About; branch: string }) {
   const name = () => <Text style={look.strong}>{props.branch}</Text>
   return (
@@ -278,7 +280,7 @@ function Branch(props: { about: About; branch: string }) {
         </View>
       }
     >
-      <Menu.Root onSelect={(value) => setRef(value)}>
+      <Menu.Root onSelect={(value) => (setRef(value), setAt({ tab: "code", path: "" }))}>
         <Menu.Trigger variant="outline" aria-label={`Branch: ${props.branch}`}>
           <Branchy /> {props.branch} <Icon name="caret-up-down" />
         </Menu.Trigger>
@@ -304,7 +306,7 @@ interface Tree {
 function Code(props: { repo: string; about: About; branch: string }) {
   const tree = createMemo(() => (at().file ? null : json<Tree>("git-repos_tree", { repo: props.repo, ref: props.branch, path: at().path })))
   return (
-    <Show when={!at().file} fallback={<File repo={props.repo} branch={props.branch} path={at().file!} />}>
+    <Show when={!at().file} fallback={<File repo={props.repo} about={props.about} branch={props.branch} path={at().file!} />}>
       <Show when={!tree()!.empty} fallback={<Empty>Nothing's been pushed yet. Clone it, commit and push.</Empty>}>
         <View style={look.page}>
           <View style={look.bar}>
@@ -499,16 +501,18 @@ function Span(props: { token: Token }) {
 }
 
 /// A file, its lines numbered.
-function File(props: { repo: string; branch: string; path: string }) {
+function File(props: { repo: string; about: About; branch: string; path: string }) {
   const file = createMemo(() => json<{ text?: string | null; size: number; binary?: boolean }>("git-repos_file", { repo: props.repo, ref: props.branch, path: props.path }))
   const lines = () => file().text!.replace(/\n$/, "").split("\n")
+  // Back goes to the folder it's in.
+  const folder = () => props.path.split("/").slice(0, -1).join("/")
   return (
     <View style={look.page}>
       <View style={look.bar}>
-        <View style={look.branch}>
-          <Branchy />
-          <Text style={look.strong}>{props.branch}</Text>
-        </View>
+        <Button variant="ghost" onPress={() => to({ tab: "code", path: folder() }, true)}>
+          <Icon name="caret-left" along /> {folder().split("/").pop() || short(props.repo)}
+        </Button>
+        <Branch about={props.about} branch={props.branch} />
         <Crumbs repo={props.repo} path={props.path} />
       </View>
       <View style={look.card}>
