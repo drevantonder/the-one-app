@@ -644,7 +644,7 @@ fn round(hwnd: HWND, width: i32, height: i32, radius: i32) {
 }
 
 /// Behind the caption buttons is the page's background (`--background`), and the buttons light or dark, as the
-/// system is, as an app window's web view has them (`title_bar` in the app's client).
+/// system is.
 fn colour_frame(hwnd: HWND) {
     let dark = super::appearance() == crate::Appearance::Dark;
     let (immersive, colour) = (BOOL::from(dark), COLORREF(if dark { 0x000a_0a0a } else { 0x00ff_ffff }));

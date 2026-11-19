@@ -40,7 +40,6 @@ mod discard;
 pub mod host;
 mod hosts;
 #[cfg(desktop)]
-mod title_bar;
 mod native;
 
 pub(crate) mod page;

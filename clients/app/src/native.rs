@@ -52,14 +52,42 @@ pub(crate) async fn open(entrypoint: &str, subject: Option<&str>, link: &str) ->
     let started = Instant::now();
     window(started, entrypoint, subject, link, Kind::App).await.map_err(|error| {
         let why = format!("{error:#}");
-        eprintln!("{entrypoint} didn't open: {why}");
-        if let Ok(views) = crate::views() {
-            let app = entrypoint.split('/').next().unwrap_or_default();
-            let took = started.elapsed().as_millis() as u64;
-            views.client.report(json!({"name": "one.client.native.open", "took": took, "error": why, "attributes": {"one.view": app}}));
-        }
+        reported(entrypoint, started, &why);
         why
     })
+}
+
+/// Tells Telemetry an app's window didn't open, and why, as it's said in the window, where it could open one.
+pub(crate) fn reported(entrypoint: &str, started: Instant, why: &str) {
+    eprintln!("{entrypoint} didn't open: {why}");
+    if let Ok(views) = crate::views() {
+        let app = entrypoint.split('/').next().unwrap_or_default();
+        let took = started.elapsed().as_millis() as u64;
+        views.client.report(json!({"name": "one.client.native.open", "took": took, "error": why, "attributes": {"one.view": app}}));
+    }
+}
+
+/// Opens a window for `entrypoint` that says only why its page isn't there: one this program can't draw, or that
+/// didn't open, as Telemetry hears (`open`).
+#[cfg(desktop)]
+pub(crate) fn unopened(entrypoint: &str, why: String) {
+    let Ok(native) = Native::get() else { return };
+    let name = entrypoint.split('/').next().unwrap_or_default().to_owned();
+    let tag = json!({"entrypoint": entrypoint});
+    native.run(move |windows| {
+        let options = WindowOptions { title: name.clone(), app_id: ::client::NAME.to_owned(), size: Size { width: Pixels(1024.0), height: Pixels(720.0) }, tag, panel: None, places: None };
+        if let Err(error) = windows.open(options, Err(format!("{name} didn't open: {why}")), |_| {}) {
+            eprintln!("{name}'s window didn't open: {error:#}");
+        }
+    });
+}
+
+/// Closes the window `shown`, once it's open.
+fn close(shown: &OnceLock<WindowId>) {
+    let Some(id) = shown.get().copied() else { return };
+    if let Ok(native) = Native::get() {
+        native.run(move |windows| windows.close(id));
+    }
 }
 
 /// Where an app's file is for its page: `oneapp://<app>[.<subject, last part first>].localhost/<path>`, as a web
@@ -185,7 +213,9 @@ async fn window(started: Instant, entrypoint: &str, subject: Option<&str>, link:
 
     let fragment = link.split_once('#').map(|(_, fragment)| fragment.to_owned());
     let state = State { chosen: chosen.clone(), trusted, entrypoint: entrypoint.to_owned(), view, next: 0, launcher, framed: false, fragment };
-    let (entrypoint, subject, link) = (entrypoint.to_owned(), subject.map(str::to_owned), link.to_owned());
+    let (entrypoint, subject) = (entrypoint.to_owned(), subject.map(str::to_owned));
+    #[cfg(mobile)]
+    let link = link.to_owned();
     // Whether it opened, as the windows' thread says: a job that's dropped, as a phone's is where its windows
     // couldn't start, says why there.
     let (opened_to, opened) = tokio::sync::oneshot::channel::<Result<(), String>>();
@@ -205,7 +235,9 @@ async fn window(started: Instant, entrypoint: &str, subject: Option<&str>, link:
         };
         let app = entrypoint.split('/').next().unwrap_or_default().to_owned();
         let on_event = {
-            let (to, app, entrypoint, subject, link) = (to.clone(), app.clone(), entrypoint.clone(), subject.clone(), link.clone());
+            let (to, app, entrypoint, shown) = (to.clone(), app.clone(), entrypoint.clone(), window.clone());
+            #[cfg(mobile)]
+            let (subject, link) = (subject.clone(), link.clone());
             move |event: Event| match event {
                 // How long it took to open, from being asked to, as a page tells the app's window it has drawn.
                 Event::Drawn => {
@@ -236,13 +268,19 @@ async fn window(started: Instant, entrypoint: &str, subject: Option<&str>, link:
                 // The launcher whose page turns out to need what this host can't draw is the web launcher's.
                 Event::Mismatched(why) if launcher => {
                     eprintln!("the launcher is a web view's: {why}");
+                    close(&shown);
                     computer::native(None);
                 }
+                // A computer's window says why it didn't open, and Telemetry hears; a phone opens it in its page.
                 Event::Mismatched(why) => {
-                    eprintln!("{entrypoint} opens in a web view: {why}");
-                    let (entrypoint, subject, link) = (entrypoint.clone(), subject.clone(), link.clone());
-                    if let Err(error) = crate::hosts::open_web_view(entrypoint.clone(), subject, link) {
-                        eprintln!("{entrypoint}: {error}");
+                    reported(&entrypoint, started, &why);
+                    #[cfg(mobile)]
+                    {
+                        close(&shown);
+                        let (entrypoint, subject, link) = (entrypoint.clone(), subject.clone(), link.clone());
+                        if let Err(error) = crate::hosts::open_web_view(entrypoint.clone(), subject, link) {
+                            eprintln!("{entrypoint}: {error}");
+                        }
                     }
                 }
             }
@@ -287,7 +325,7 @@ async fn window(started: Instant, entrypoint: &str, subject: Option<&str>, link:
                     let ring = format!("data:image/png;base64,{}", BASE64.encode(include_bytes!("../../../icons/Logo.png")));
                     screen.breadcrumb = Some(renderer::Breadcrumb { ring, icon, name: name.clone(), start: BAR.1 as f32, home: Box::new(computer::summon) });
                 }
-                windows.open(options, screen, on_event)
+                windows.open(options, Ok(screen), on_event)
             }
             Err(error) => Err(error),
         };
@@ -404,13 +442,14 @@ async fn frame(window: Arc<OnceLock<WindowId>>, node: renderer::tree::Id, src: &
     Ok(())
 }
 
-/// The row at a window's top that its breadcrumb is in, with its page's top bar after it (a unified toolbar), and where
-/// the breadcrumb starts in it: a Mac's title bar, after its traffic lights over the page (`title_bar`); elsewhere the
-/// same height, under the window's own frame.
+/// The row at a window's top that its breadcrumb is in, with its page's top bar after it (a unified toolbar), 52
+/// points, as macOS's System Settings and Raycast have it, and where the breadcrumb starts in it: on a Mac 8 points
+/// after its traffic lights over the page, three of 14 points, 20 apart, from 20 points in, as AppKit puts them in a
+/// unified toolbar; elsewhere the same height, under the window's own frame.
 #[cfg(target_os = "macos")]
-const BAR: (f64, f64) = (crate::title_bar::MAC.height, crate::title_bar::MAC.start);
+const BAR: (f64, f64) = (52.0, 20.0 + 2.0 * 20.0 + 14.0 + 8.0);
 #[cfg(all(desktop, not(target_os = "macos")))]
-const BAR: (f64, f64) = (crate::title_bar::HEIGHT, 12.0);
+const BAR: (f64, f64) = (52.0, 12.0);
 /// A phone's window has none: the activity keeps the page clear of the system's bars (`MainActivity`).
 #[cfg(mobile)]
 const BAR: (f64, f64) = (0.0, 0.0);

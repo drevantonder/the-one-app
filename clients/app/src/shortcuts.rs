@@ -594,24 +594,6 @@ pub fn name(entrypoint: &str) -> Option<String> {
     kept.iter().flatten().find(|shortcut| shortcut.entrypoint == entrypoint).map(|shortcut| shortcut.name.clone())
 }
 
-/// The program an app's window runs (`hosts`): on a Mac its bundle's, so macOS knows it as that app, and otherwise
-/// this one.
-#[cfg(desktop)]
-pub fn program(entrypoint: &str) -> anyhow::Result<std::path::PathBuf> {
-    #[cfg(target_os = "macos")]
-    {
-        let kept = KEPT.lock().expect("no keep panics").clone().unwrap_or_default();
-        if let Some(shortcut) = kept.iter().find(|shortcut| shortcut.entrypoint == entrypoint) {
-            let program = device::bundle(&device::folder()?, &shortcut.name).join("Contents/MacOS/one");
-            if program.exists() {
-                return Ok(program);
-            }
-        }
-    }
-    let _ = entrypoint;
-    Ok(std::env::current_exe()?)
-}
-
 /// Where this user's data is (Linux's `~/.local/share`, Windows' roaming AppData), as Tauri said it.
 #[cfg(any(windows, target_os = "linux"))]
 fn data_dir() -> anyhow::Result<std::path::PathBuf> {

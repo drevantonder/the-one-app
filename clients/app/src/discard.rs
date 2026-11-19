@@ -32,9 +32,6 @@ pub(crate) struct Discarding<P> {
     away: Option<Instant>,
     /// Where its web view keeps its data, if not where wry does.
     data_directory: Option<std::path::PathBuf>,
-    /// Where in a Linux window its page goes, if not in the window's own box.
-    #[cfg(target_os = "linux")]
-    parent: Option<gtk::Container>,
 }
 
 /// A web view, and the web context it was made in, which goes with it: WebKitGTK keeps a custom scheme's handler in
@@ -52,17 +49,9 @@ impl<P: Page> Discarding<P> {
             loaded: None,
             away: None,
             data_directory,
-            #[cfg(target_os = "linux")]
-            parent: None,
         };
         discarding.load(window)?;
         Ok(discarding)
-    }
-
-    /// Has the page load in `parent` from now on, where the window has moved it (a GNOME header bar's overlay).
-    #[cfg(target_os = "linux")]
-    pub(crate) fn load_in(&mut self, parent: gtk::Container) {
-        self.parent = Some(parent);
     }
 
     /// Its web view, unless it's discarded.
@@ -131,8 +120,6 @@ impl<P: Page> Discarding<P> {
 
     fn load(&mut self, window: &Window) -> anyhow::Result<()> {
         let mut context = Box::new(wry::WebContext::new(self.data_directory.clone()));
-        // WebDriver drives it as it does Tauri's windows, which tauri-driver says by this.
-        context.set_allows_automation(std::env::var("TAURI_WEBVIEW_AUTOMATION").as_deref() == Ok("true"));
         let builder = self.page.make(wry::WebViewBuilder::new_with_web_context(&mut context));
         #[cfg(windows)]
         let webview = builder.build(window)?;
@@ -146,12 +133,7 @@ impl<P: Page> Discarding<P> {
             use gtk::prelude::*;
             use tao::platform::unix::WindowExtUnix;
             use wry::WebViewBuilderExtUnix;
-            match &self.parent {
-                Some(parent) => builder.build_gtk(parent)?,
-                None => builder.build_gtk(
-                    window.default_vbox().expect("tao gives a window a box").upcast_ref::<gtk::Container>(),
-                )?,
-            }
+            builder.build_gtk(window.default_vbox().expect("tao gives a window a box").upcast_ref::<gtk::Container>())?
         };
         self.page.loaded(&webview);
         self.loaded = Some(Loaded { webview, _context: context });

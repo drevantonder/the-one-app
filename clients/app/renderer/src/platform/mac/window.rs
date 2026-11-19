@@ -808,7 +808,6 @@ define_class!(
 
 /// Where its traffic lights are in its title row, 52 points tall as its page's top bar is (a unified toolbar), as
 /// AppKit puts them in one: the first's left edge, and how far below the window's top they start, in the middle of it.
-/// The app's web view windows put theirs in the same place (`title_bar::LIGHTS`).
 const LIGHTS: (f64, f64) = (20.0, (52.0 - 14.0) / 2.0);
 
 /// Puts `window`'s traffic lights where a unified toolbar has them (`LIGHTS`): their title bar container as tall as

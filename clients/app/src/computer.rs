@@ -9,9 +9,9 @@
 //! Where the Home Screen's page is of a version this program speaks, the launcher is drawn natively, in a
 //! panel of this process's own (`renderer::launcher`), as every app's native window is, and it shows within a frame of
 //! being summoned. Otherwise, and while the device signs in or needs updating, which its page doesn't show, it's a
-//! window and a web view (tao and wry), as a web view's app window is: its page is the window's own (`page/`), which
-//! shows the Home Screen, and asks what it asks of the app (`hosts::command`) through the same bridge an app's window
-//! has (`host-initialization-script.js`). Put away a while, it discards its page (`discard`).
+//! window and a web view (tao and wry): its page is the window's own (`page/`), which shows the Home Screen, and asks
+//! what it asks of the app (`hosts::command`) through its bridge (`host-initialization-script.js`). Put away a while,
+//! it discards its page (`discard`).
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
@@ -297,8 +297,8 @@ fn launcher(home: std::path::PathBuf, link: Option<String>, started: std::time::
     }
     let _shortcut = shortcut(&home);
     // Started again as it updated, the app windows that were open open again.
-    // The windows open before it updated, once it's signed in: before, an app's page can't be read, and each would open
-    // in a web view of its own. The launcher, open as the native one is, isn't an app's window.
+    // The windows open before it updated, once it's signed in: before, an app's page can't be read. The launcher, open
+    // as the native one is, isn't an app's window.
     if let Some(reopen) = std::env::var("ONE_REOPEN").ok().and_then(|reopen| serde_json::from_str::<Vec<(String, Option<String>)>>(&reopen).ok()) {
         crate::spawn(async move {
             crate::signed_in().await;

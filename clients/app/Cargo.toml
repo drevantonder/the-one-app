@@ -15,7 +15,7 @@ path = "src/main.rs"
 
 # The window, which is all of the program but its CLI and MCP. A Linux machine with no screen has a build without
 # it (`cargo build --no-default-features`), which needs none of GTK or WebKitGTK there. A phone's window is Tauri's;
-# a computer's is a window and a web view alone (tao and wry, which Tauri is built on), as each app's own is (`computer`).
+# a computer's launcher, while it signs in, is a window and a web view alone (tao and wry, which Tauri is built on) (`computer`).
 [features]
 default = ["window"]
 window = [
@@ -93,8 +93,8 @@ encryption_client = { path = "../../apps/encryption/client/native", optional = t
 notifications_client = { path = "../../apps/notifications/client/native", optional = true }
 computer_use_client = { path = "../../apps/computer-use/client/native", optional = true }
 
-# A computer's windows, the launcher's and each app's own (`computer`, `host`): a window and a web view alone, Tauri's
-# own libraries, at the versions Tauri uses.
+# A computer's web launcher, as it signs in (`computer`): a window and a web view alone, Tauri's own libraries, at the
+# versions Tauri uses.
 [target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
 wry = { version = "0.57", optional = true }
 tao = { version = "0.37", optional = true }

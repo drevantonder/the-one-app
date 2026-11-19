@@ -104,7 +104,7 @@ impl Node {
     }
 }
 
-/// What a page uses that this host can't draw yet, so its window opens in a web view instead, and why.
+/// What a page uses that this host can't draw yet, which its window says in its place, and why.
 #[derive(Debug)]
 pub struct Mismatch(pub String);
 

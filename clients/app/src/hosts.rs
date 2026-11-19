@@ -139,28 +139,19 @@ pub fn open_now() -> Vec<(String, Option<String>)> {
         .collect()
 }
 
-/// Opens an app in its own window, at `link` (`<app>/<page>[#<fragment>]`, as a `one:` link says it), or brings its
-/// window forward there if it's open: drawn here if its page is of a version this program speaks
-/// (`renderer`), otherwise in a web view in a process of its own. With `ONE_WEB_VIEW` set in this program's environment,
-/// every app is a web view, as an agent wants one to compare its DOM with the native window (`tooling/window.py`).
+/// Opens an app in its own window, drawn here (`renderer`), at `link` (`<app>/<page>[#<fragment>]`, as a `one:` link
+/// says it), or brings its window forward there if it's open. One whose page this program can't draw, or that didn't
+/// open, is a window that says so, and Telemetry hears why (`native::open`).
 #[cfg(desktop)]
 pub fn open_window(entrypoint: String, subject: Option<String>, link: String) -> Result<(), String> {
-    open(entrypoint, subject, link, true)
-}
-
-/// Opens an app's window again in a web view, as `open_window` does one that isn't drawn natively, in place of its native
-/// window: one whose page uses what this program doesn't draw yet.
-#[cfg(desktop)]
-pub fn open_web_view(entrypoint: String, subject: Option<String>, link: String) -> Result<(), String> {
-    HOSTS.open.lock().expect("no host panics").remove(&format!("{}|{entrypoint}", subject.as_deref().unwrap_or_default()));
-    open(entrypoint, subject, link, false)
+    open(entrypoint, subject, link)
 }
 
 /// Opens an app's native window again, in place of the one it had, as it reloads its page.
 #[cfg(desktop)]
 pub fn reopen(entrypoint: String, subject: Option<String>, link: String) -> Result<(), String> {
     forget(&entrypoint, subject.as_deref());
-    open(entrypoint, subject, link, true)
+    open(entrypoint, subject, link)
 }
 
 /// Opens an app's native window again over the page, in place of the one it had, as it reloads its page.
@@ -217,7 +208,7 @@ pub fn open_web_view(entrypoint: String, subject: Option<String>, link: String) 
 }
 
 #[cfg(desktop)]
-fn open(entrypoint: String, subject: Option<String>, link: String, native: bool) -> Result<(), String> {
+fn open(entrypoint: String, subject: Option<String>, link: String) -> Result<(), String> {
     let key = format!("{}|{entrypoint}", subject.as_deref().unwrap_or_default());
     #[cfg(target_os = "macos")]
     {
@@ -234,45 +225,19 @@ fn open(entrypoint: String, subject: Option<String>, link: String, native: bool)
     }
     open.insert(key.clone(), Host { to: None, link: None });
     drop(open);
-    #[cfg(any(target_os = "linux", target_os = "macos", windows))]
-    if native && std::env::var_os("ONE_WEB_VIEW").is_none() {
-        crate::spawn(async move {
-            if crate::native::open(&entrypoint, subject.as_deref(), &link).await != Ok(true)
-                && let Err(error) = process(&key, &entrypoint, subject.as_deref(), &link)
-            {
-                eprintln!("{error}");
-                HOSTS.open.lock().expect("no host panics").remove(&key);
+    crate::spawn(async move {
+        let started = std::time::Instant::now();
+        let why = match crate::native::open(&entrypoint, subject.as_deref(), &link).await {
+            Ok(true) => return,
+            Ok(false) => {
+                let why = "this One App doesn't draw its page: it needs a newer One App, or the app has no such page".to_owned();
+                crate::native::reported(&entrypoint, started, &why);
+                why
             }
-        });
-        return Ok(());
-    }
-    #[cfg(not(any(target_os = "linux", target_os = "macos", windows)))]
-    let _ = native;
-    process(&key, &entrypoint, subject.as_deref(), &link).inspect_err(|_| drop(HOSTS.open.lock().expect("no host panics").remove(&key)))
-}
-
-/// Starts app `entrypoint`'s window in a web view, in a process of its own.
-#[cfg(desktop)]
-fn process(key: &str, entrypoint: &str, subject: Option<&str>, link: &str) -> Result<(), String> {
-    let mut command = std::process::Command::new(crate::shortcuts::program(entrypoint).map_err(|error| error.to_string())?);
-    // Started here, it's a web view; started by the system, it asks this program to open it (`host`).
-    command.env("ONE_APP", entrypoint).env("ONE_OPEN", link).env("ONE_WEB_VIEW", "1").stdin(std::process::Stdio::null());
-    // A window of its own, and no console's.
-    #[cfg(windows)]
-    std::os::windows::process::CommandExt::creation_flags(&mut command, 0x0800_0000); // CREATE_NO_WINDOW
-    match subject {
-        Some(subject) => command.env("ONE_SUBJECT", subject),
-        None => command.env_remove("ONE_SUBJECT"),
-    };
-    let mut child = command.spawn().map_err(|error| format!("{entrypoint} didn't open: {error}"))?;
-    let key = key.to_owned();
-    // It's waited for, so it's gone once it ends; one that never said hello is forgotten then.
-    std::thread::spawn(move || {
-        let _ = child.wait();
-        let mut open = HOSTS.open.lock().expect("no host panics");
-        if open.get(&key).is_some_and(|host| host.to.is_none()) {
-            open.remove(&key);
-        }
+            Err(why) => why,
+        };
+        HOSTS.open.lock().expect("no host panics").remove(&key);
+        crate::native::unopened(&entrypoint, why);
     });
     Ok(())
 }

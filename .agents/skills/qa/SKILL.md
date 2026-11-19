@@ -45,56 +45,13 @@ isn't the goal. A native host that hasn't the runtime version the UI library nee
 
 ### Which to use
 
-An app's page the renderer supports opens as a native window, with no WebKit inspector; any other opens in a web
-view. Native → the inspector (Native windows, below). Web view → `tooling/window.py`
-(Desktop, next), which has the launcher open every app in a web view (`ONE_WEB_VIEW=1`, which the launcher honours,
-for any window you start yourself). A screen's states with no network → `bun scenes.js` (above): before against after.
-Either picture of a local network's screen takes seconds; neither hangs: `window.py` fails in `timeout` seconds
-saying what the app said.
-
-### Desktop (Linux), a web view, by WebDriver
-
-`tooling/window.py` gives a Selenium session on the window a `one:` link opens, the Home Screen's or an app's own,
-in a web view, drawn and still. Start a network (`local-network`), then write a throwaway script:
-
-    import sys; sys.path.insert(0, "tooling")
-    from window import opened, settled, frame
-    from selenium.webdriver.support.ui import WebDriverWait
-    named = lambda text: f"//*[text()[normalize-space()='{text}']]"
-    with opened("one:settings#vault/accounts", log="<scratch>/window.log") as driver:  # 390×844, or size=(w, h)
-        frame(driver)
-        driver.find_element("xpath", named("All")).click()
-        WebDriverWait(driver, 10).until(lambda d: d.find_elements("xpath", named("GitHub")))
-        settled(driver)
-        driver.save_screenshot("<scratch>/vault.png")
-
-and run it in a desktop of its own, so nothing is shared with other agents and nothing is left running:
-
-    ONE_HOME=<folder>/client ONE_AS=owner dbus-run-session -- xvfb-run -a -s "-screen 0 1280x900x24" \
-      sh -c 'exec uv run -q --with selenium python3 "$@" 2>&1' _ <script> 2>/dev/null
-
-`window.py` starts `openbox` in that desktop, as a person's has a window manager: without one the launcher loses its focus as it resizes and puts itself away, and a hidden window draws nothing, so the picture never comes. A picture takes about a second; an app's first open after the UI library is built again, 10 to 15 s. Without
-`dbus-run-session` GTK waits half a minute for a desktop that isn't there, and its own noise is what `2>/dev/null`
-drops.
-
-- Open the screen by its link, the same one a person's link or notification opens: `one:<app>` (its first page),
-  `one:<app>/<page>` (a page by its file, `one:settings/client/index.html`), and a fragment the app follows,
-  `one:home-screen#library`. Click only for what the change is about.
-- Wait for state, never a time: after a click, `WebDriverWait` for what it shows, then `settled`, which waits for
-  what moves to end, in the window and in the app's frame.
-- An app's elements are in its frame (`frame`); `settled` leaves you in the window, for the picture. An element's
-  own screenshot inside a frame comes out black. The Home Screen's window is never narrower than 700 px.
-- A hold is `ActionChains(driver).click_and_hold(…).pause(1).release()`; WebKit's driver's right-click opens no menu.
-- Touch isn't WebKitGTK's: its driver sends a touch pointer as a mouse, and one finger at most. Touch and a second
-  finger are Chromium's, so Android's (below) or Chrome's: CDP's `Input.dispatchTouchEvent` with a `touchPoints`
-  entry per finger, or in Chrome W3C Actions with one `pointerType: "touch"` pointer per finger in one action.
-- What the app says, and every page's console, Solid's dev warnings too, is in `log`, as `CONSOLE WARN …` (a debug
-  build only), and when each window drew, as `<app> opened in … ms`. WebKitGTK here has no WebDriver BiDi.
+On a computer every app's page opens as a native window: drive it with the inspector (Native windows, below). A
+screen's states with no network → `bun scenes.js` (above): before against after.
 
 ### Native windows
 
-An app's window (its entrypoint's `runtime_version`) is drawn natively on Linux and Windows by the launcher's process, not in a web
-view, so WebDriver doesn't reach it: drive it with the inspector, which every native window answers (`clients/app/renderer/src/inspect.rs` is its
+An app's window is drawn natively by the launcher's process, so WebDriver doesn't reach it: drive it with the
+inspector, which every native window answers (`clients/app/renderer/src/inspect.rs` is its
 protocol). Find nodes by role and text, tap, type, `settle`, then `snap`, never a sleep:
 
 - Offscreen, the same on every run, with no network: `bun dist/build/app.js apps/<app>/client <out>` in `core/ui`
@@ -110,8 +67,10 @@ protocol). Find nodes by role and text, tap, type, `settle`, then `snap`, never 
   address there. Its screen is often locked: `computer-use screenshot` with the window's `pid` and `window_id`
   still pictures it. Delete the folder, the tasks and the debug build's `%LOCALAPPDATA%\app.theone.client.dev` after.
 - In the app on a local network (about 9 s to a picture): install the Inspector once (`one install --app
-  network/apps/inspector`), start `openbox` and `one one:<app>` in a desktop of your own (as Desktop above does, with
-  `ONE_HOME` and `ONE_AS` set), then call its tools as that user: `one inspector windows`, `one inspector tap --text
+  network/apps/inspector`), start `openbox` and `one one:<app>` in a desktop of your own, so nothing is shared with
+  other agents and nothing is left running (`ONE_HOME=<folder>/client ONE_AS=owner dbus-run-session -- xvfb-run -a -s
+  "-screen 0 1280x900x24" sh -c 'openbox & one one:<app>'`: without a window manager the launcher loses its focus as it
+  resizes and puts itself away, and without `dbus-run-session` GTK waits half a minute), then call its tools as that user: `one inspector windows`, `one inspector tap --text
   …`, `one inspector settle`, `one inspector snap > <scratch>/<name>.png` (stdout is the PNG, the window's own size,
   1024×720 at first). They reach the window through the launcher, as an agent on another device does: it draws every
   native window itself.
@@ -159,9 +118,6 @@ steps of 50 px look like a velocity bug in any gesture.
 
 ## Mistakes already made
 
-- Driving an app's window with `tauri-driver`, or with a WebKitWebDriver session that starts the app: each window
-  is a process of its own, and only the first one takes the inspector port WebDriver gave, so the session was the
-  Home Screen's, hidden, and hung. `tooling/window.py` says how it reaches the right one.
 - Pictures in the web client (`clients/web`) in Chrome: a browser signs in with a passkey and holds nobody's key, so
   the Vault and what's encrypted don't open there as they do in the app.
 

@@ -55,7 +55,7 @@ pub enum Event {
     Drawn,
     /// It was closed: by the person, or by `close`.
     Closed,
-    /// Its page uses what this host can't draw, so it's closed, to open in a web view: why.
+    /// Its page uses what this host can't draw, which it says in its place: why.
     Mismatched(String),
     /// Its page's module didn't run, so it says only that its app didn't open: why.
     Failed(String),
@@ -169,7 +169,7 @@ fn start() -> anyhow::Result<Native> {
 }
 
 /// How long a window waits to show for its page to hear back from what it first asked, so it shows its first frame
-/// with what it asked for, or opens in a web view instead without having shown, as its page turns out to need.
+/// with what it asked for, or says why it didn't open, as its page turns out to need.
 const SHOWN_WITHIN: std::time::Duration = std::time::Duration::from_millis(1000);
 
 /// One of a window's native windows, each with a surface of its own: a window's only one, or each part of a panel's
@@ -254,18 +254,21 @@ impl Windows {
     /// Opens a window showing `screen`, which tells `on_event` what happens to it. It's shown once its app's JS
     /// has started and heard back from what it first asked, or has waited long enough (`SHOWN_WITHIN`), and drawn
     /// as that posts what it changed.
-    pub fn open(&mut self, options: WindowOptions, mut screen: Screen, on_event: impl FnMut(Event) + 'static) -> anyhow::Result<WindowId> {
+    /// Opens a window of `screen`, or one that says only why its page isn't there, as one whose page didn't start does.
+    pub fn open(&mut self, options: WindowOptions, mut screen: Result<Screen, String>, on_event: impl FnMut(Event) + 'static) -> anyhow::Result<WindowId> {
         let id = self.next;
         self.next += 1;
         let native = self.display.open(id, &options)?;
-        screen.appearance = appearance();
-        screen.reduced_motion = reduced_motion();
-        if let Some(clipboard) = clipboard() {
-            screen.clipboard = clipboard;
-        }
-        if let Some(native) = Native::started() {
-            let native = std::sync::Mutex::new(native);
-            screen.on_post(Arc::new(move || native.lock().unwrap_or_else(std::sync::PoisonError::into_inner).run(move |windows| windows.posted(id))));
+        if let Ok(screen) = &mut screen {
+            screen.appearance = appearance();
+            screen.reduced_motion = reduced_motion();
+            if let Some(clipboard) = clipboard() {
+                screen.clipboard = clipboard;
+            }
+            if let Some(native) = Native::started() {
+                let native = std::sync::Mutex::new(native);
+                screen.on_post(Arc::new(move || native.lock().unwrap_or_else(std::sync::PoisonError::into_inner).run(move |windows| windows.posted(id))));
+            }
         }
         let renderer = self.renderer(&native)?;
         let opened = std::time::Instant::now();
@@ -282,7 +285,7 @@ impl Windows {
                 panel,
                 visible: false,
                 summoned: None,
-                screen: Ok(screen),
+                screen,
                 title: options.title,
                 scene: Default::default(),
                 dirty: true,
@@ -503,11 +506,11 @@ impl Windows {
                 (window.on_event)(Event::Failed(why));
             }
         }
-        let mismatched: Vec<(WindowId, String)> =
-            self.windows.iter().filter_map(|(id, window)| Some((*id, window.screen.as_ref().ok()?.mismatched.clone()?))).collect();
-        for (id, why) in mismatched {
-            if let Some(mut window) = self.windows.remove(&id) {
-                self.let_go(window.parts);
+        // A window whose page uses what this host can't draw says so, and why.
+        for window in self.windows.values_mut() {
+            if let Some(why) = window.screen.as_ref().ok().and_then(|screen| screen.mismatched.clone()) {
+                window.screen = Err(format!("{} didn't open: {why}", window.title));
+                window.dirty = true;
                 (window.on_event)(Event::Mismatched(why));
             }
         }
