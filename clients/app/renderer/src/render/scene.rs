@@ -202,7 +202,7 @@ impl Scene {
         }
         all.extend(other.backdrops.iter().map(|backdrop| {
             let mut backdrop = backdrop.clone();
-            (backdrop.bounds, backdrop.content_mask, backdrop.corner_radii, backdrop.blur) = (moved(&backdrop.bounds), masked(&backdrop.content_mask), corners(&backdrop.corner_radii), px(backdrop.blur));
+            (backdrop.bounds, backdrop.content_mask, backdrop.corner_radii, backdrop.blur, backdrop.opacity) = (moved(&backdrop.bounds), masked(&backdrop.content_mask), corners(&backdrop.corner_radii), px(backdrop.blur), backdrop.opacity * opacity);
             (backdrop.order, backdrop.into())
         }));
         all.sort_by_key(|(order, _)| *order);
