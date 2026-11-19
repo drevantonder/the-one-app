@@ -249,7 +249,7 @@
       }
     }
   },
-  "Users & Groups": {
+  "People & Groups": {
     "answers": {
       "sign-in_everyone": {
         "people": [
@@ -305,7 +305,7 @@
     "component": "people"
   },
   "Group": {
-    "like": "Users & Groups",
+    "like": "People & Groups",
     "taps": [
       "Family"
     ]
