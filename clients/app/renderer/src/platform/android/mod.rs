@@ -188,6 +188,9 @@ fn java<R>(f: impl FnOnce(&mut JNIEnv, &GlobalRef) -> jni::errors::Result<R>) ->
 pub struct Display;
 
 impl Display {
+    /// A phone's window covers the one it's a sheet of already.
+    pub fn attach(&self, _sheet: &NativeWindow, _owner: &NativeWindow) {}
+
     pub fn open(&self, id: WindowId, options: &WindowOptions) -> anyhow::Result<NativeWindow> {
         let view = java(|env, host| {
             let title = env.new_string(&options.title)?;

@@ -93,6 +93,9 @@ pub struct WindowOptions {
     /// Where on the screen it opened from, in points: its app's icon on the Home Screen, which pulled home by the
     /// rail's line it goes back into (`Windows::line`).
     pub icon: Option<crate::geometry::Bounds<f32>>,
+    /// The window it's a sheet of, as the system attaches one (`Display::attach`): over it, and modal to it, until it
+    /// closes. A phone's covers the app it's over already.
+    pub owner: Option<WindowId>,
 }
 
 /// Where a panel was dragged to on each screen, by the screen's name as its platform gives it (`Input::Placed`): its
@@ -293,6 +296,9 @@ impl Windows {
         let id = self.next;
         self.next += 1;
         let native = self.display.open(id, &options)?;
+        if let Some(owner) = options.owner.and_then(|owner| self.windows.get(&owner)) {
+            self.display.attach(&native, &owner.parts[0].native);
+        }
         if let Ok(screen) = &mut screen {
             // A phone's app window has the rail's home line; its Home Screen doesn't.
             screen.rail = cfg!(any(target_os = "android", target_os = "ios")) && !options.root;

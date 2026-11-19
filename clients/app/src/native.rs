@@ -75,7 +75,7 @@ pub(crate) fn unopened(entrypoint: &str, why: String) {
     let name = entrypoint.split('/').next().unwrap_or_default().to_owned();
     let tag = json!({"entrypoint": entrypoint});
     native.run(move |windows| {
-        let options = WindowOptions { title: name.clone(), app_id: ::client::NAME.to_owned(), size: Size { width: Pixels(1024.0), height: Pixels(720.0) }, tag, panel: None, places: None, root: false, icon: None };
+        let options = WindowOptions { title: name.clone(), app_id: ::client::NAME.to_owned(), size: Size { width: Pixels(1024.0), height: Pixels(720.0) }, tag, panel: None, places: None, root: false, icon: None, owner: None };
         if let Err(error) = windows.open(options, Err(format!("{name} didn't open: {why}")), |_| {}) {
             eprintln!("{name}'s window didn't open: {error:#}");
         }
@@ -225,6 +225,7 @@ async fn unopened_launcher(why: String) -> Option<WindowId> {
                 places: crate::app().shell.home().ok().map(|home| home.join("launcher-places.json")),
                 root: false,
                 icon: None,
+                owner: None,
             };
             let _ = shown_to.send(windows.open(options, Err(said), |_| {}).ok());
         });
@@ -252,6 +253,8 @@ enum Kind {
 struct Sheet {
     typed: bool,
     subject: Option<String>,
+    /// The window of the app that asked, which it's a sheet of (`WindowOptions::owner`).
+    owner: Option<WindowId>,
     done: Arc<Mutex<Option<tokio::sync::oneshot::Sender<bool>>>>,
 }
 
@@ -263,10 +266,10 @@ pub(crate) const RECOVERY: &str = "oneapp://client.localhost/client/recovery.js"
 /// client's own over the app that asked, which is told only whether they saw it or the device is in now: no app's
 /// page is handed a recovery key, as an Apple device shows one in its own system's UI and never in an app.
 /// It's boxed, as a window it opens asks the client what a window's page asks it (`hosts::command`), which opens this.
-pub(crate) fn recovery(typed: bool, subject: Option<String>) -> std::pin::Pin<Box<dyn Future<Output = Result<bool, String>> + Send>> {
+pub(crate) fn recovery(typed: bool, subject: Option<String>, owner: Option<WindowId>) -> std::pin::Pin<Box<dyn Future<Output = Result<bool, String>> + Send>> {
     Box::pin(async move {
         let (done_to, done) = tokio::sync::oneshot::channel();
-        let sheet = Sheet { typed, subject, done: Arc::new(Mutex::new(Some(done_to))) };
+        let sheet = Sheet { typed, subject, owner, done: Arc::new(Mutex::new(Some(done_to))) };
         let started = Instant::now();
         window(started, "client/recovery.js", None, "", Kind::Sheet(sheet)).await.map_err(|error| format!("{error:#}"))?;
         Ok(done.await.unwrap_or(false))
@@ -304,7 +307,7 @@ async fn window(started: Instant, entrypoint: &str, subject: Option<&str>, link:
     let name = listed.or_else(|| start["name"].as_str().map(str::to_owned)).unwrap_or_else(|| entrypoint.split('/').next().unwrap_or_default().to_owned());
 
     let fragment = link.split_once('#').map(|(_, fragment)| fragment.to_owned());
-    let state = State { chosen: chosen.clone(), trusted, entrypoint: entrypoint.to_owned(), subject: subject.map(str::to_owned), view, next: 0, launcher, framed: false, fragment, sheet: sheet.clone().map(|sheet| (sheet, window.clone())) };
+    let state = State { chosen: chosen.clone(), trusted, entrypoint: entrypoint.to_owned(), subject: subject.map(str::to_owned), view, next: 0, launcher, framed: false, fragment, sheet: sheet.clone(), window: window.clone() };
     let (entrypoint, subject) = (entrypoint.to_owned(), subject.map(str::to_owned));
     #[cfg(mobile)]
     let link = link.to_owned();
@@ -328,6 +331,8 @@ async fn window(started: Instant, entrypoint: &str, subject: Option<&str>, link:
             // A phone's launcher is its Home Screen, under every app's window.
             root: launcher && cfg!(mobile),
             icon: from,
+            // The recovery key window is a sheet of the app's that asked, as the system attaches one.
+            owner: sheet.as_ref().and_then(|sheet| sheet.owner),
         };
         let app = entrypoint.split('/').next().unwrap_or_default().to_owned();
         let on_event = {
@@ -541,7 +546,7 @@ async fn frame(window: Arc<OnceLock<WindowId>>, node: renderer::tree::Id, src: &
     let started = start(entrypoint, subject, src, false, Place::Frame(window.clone(), node), &module, page)?;
     let view = format!("{}|{entrypoint}", subject.unwrap_or_default());
     let fragment = src.split_once('#').map(|(_, fragment)| fragment.to_owned());
-    let state = State { chosen: None, trusted, entrypoint: entrypoint.to_owned(), subject: subject.map(str::to_owned), view, next: 0, launcher: false, framed: true, fragment, sheet: None };
+    let state = State { chosen: None, trusted, entrypoint: entrypoint.to_owned(), subject: subject.map(str::to_owned), view, next: 0, launcher: false, framed: true, fragment, sheet: None, window: window.clone() };
     let src = src.to_owned();
     Native::get()?.run(move |windows| {
         let Some(id) = window.get() else { return };
@@ -657,8 +662,10 @@ struct State {
     entrypoint: String,
     /// Who it was opened for, a group or the network, or none for its person: whoever its requests are for.
     subject: Option<String>,
-    /// It's the client's recovery key window (`recovery`), with the window it's in.
-    sheet: Option<(Sheet, Arc<OnceLock<WindowId>>)>,
+    /// It's the client's recovery key window (`recovery`).
+    sheet: Option<Sheet>,
+    /// The window it's in, once it's open.
+    window: Arc<OnceLock<WindowId>>,
     view: String,
     next: u64,
 }
@@ -797,14 +804,14 @@ fn respond(
             state.next += 1;
             let at = format!("m{}", state.next);
             asked.lock().expect("nothing panics holding it").insert(at.clone(), Asked::Message(id));
-            let _ = to.send(json!({"id": at, "command": "recovery", "args": {"typed": params["typed"] == true, "subject": subject}}));
+            let _ = to.send(json!({"id": at, "command": "recovery", "args": {"typed": params["typed"] == true, "subject": subject, "owner": state.window.get()}}));
             return None;
         }
         // What the recovery key window asks, which only it may: what it's for, the key it shows, the key it was given,
         // and that it's done, which closes it.
         method if method == "one/recovery" || method.starts_with("one/recovery/") => match &state.sheet {
             None => Some(Err(json!({"code": -32601, "message": format!("Only the client's own page asks {method}")}))),
-            Some((sheet, window)) => match method {
+            Some(sheet) => match method {
                 "one/recovery" => Some(Ok(json!({"typed": sheet.typed}))),
                 "one/recovery/key" | "one/recovery/recover" => {
                     let (command, args) = match method {
@@ -822,7 +829,7 @@ fn respond(
                     if let Some(told) = sheet.done.lock().expect("nothing panics holding it").take() {
                         let _ = told.send(params["done"] == true);
                     }
-                    let window = window.clone();
+                    let window = state.window.clone();
                     if let Ok(native) = Native::get() {
                         native.run(move |windows| {
                             if let Some(id) = window.get() {

@@ -150,7 +150,7 @@ objc2-core-video = { version = "0.3", default-features = false, features = ["std
 
 # AppKit's windows, on its main thread.
 [target.'cfg(target_os = "macos")'.dependencies]
-objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "objc2-core-foundation", "objc2-quartz-core", "NSAccessibility", "NSAppearance", "NSApplication", "NSCursor", "NSPasteboard", "NSEvent", "NSGraphics", "NSPanel", "NSResponder", "NSRunningApplication", "NSTrackingArea", "NSView", "NSWindow", "NSWorkspace"] }
+objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "objc2-core-foundation", "objc2-quartz-core", "NSAccessibility", "NSAppearance", "NSApplication", "NSCursor", "NSPasteboard", "NSEvent", "NSGraphics", "NSPanel", "NSResponder", "NSRunningApplication", "NSTrackingArea", "NSView", "NSWindow", "NSWorkspace", "block2"] }
 
 # An iPhone's: a native screen is a tao window over the app's (`platform/ios`), on the main thread. Its QuickJS has
 # no prebuilt bindings in rquickjs-sys, so bindgen makes them against the iOS SDK's headers, as Android's.

@@ -66,6 +66,8 @@ pub struct NativeWindow {
     /// A panel's: the window that was in front before it was summoned, to give the keyboard back to.
     panel: bool,
     before: Cell<HWND>,
+    /// The window it's a sheet of (`attach`), which it's modal to while it's open.
+    owner: Cell<HWND>,
 }
 
 /// What a window's procedure knows of it.
@@ -273,7 +275,28 @@ impl Display {
             state,
             panel,
             before: Cell::new(HWND::default()),
+            owner: Cell::new(HWND::default()),
         })
+    }
+
+    /// Makes `sheet` a modal dialog of `owner`'s, as Win32's are: owned by it, so it's over it and out of the taskbar,
+    /// centred on it, with no minimize or maximize; its owner takes no input while it's shown (`show`, `close`).
+    pub fn attach(&self, sheet: &NativeWindow, owner: &NativeWindow) {
+        use windows::Win32::UI::WindowsAndMessaging::{GWL_EXSTYLE, GWL_STYLE, GWLP_HWNDPARENT, GetWindowLongPtrW, GetWindowRect, SWP_FRAMECHANGED, WS_MAXIMIZEBOX, WS_MINIMIZEBOX};
+        sheet.owner.set(owner.hwnd);
+        unsafe {
+            SetWindowLongPtrW(sheet.hwnd, GWLP_HWNDPARENT, owner.hwnd.0 as isize);
+            let style = GetWindowLongPtrW(sheet.hwnd, GWL_STYLE) & !((WS_MINIMIZEBOX.0 | WS_MAXIMIZEBOX.0) as isize);
+            SetWindowLongPtrW(sheet.hwnd, GWL_STYLE, style);
+            let ex_style = GetWindowLongPtrW(sheet.hwnd, GWL_EXSTYLE) & !(WS_EX_APPWINDOW.0 as isize);
+            SetWindowLongPtrW(sheet.hwnd, GWL_EXSTYLE, ex_style);
+            let (mut over, mut own) = (RECT::default(), RECT::default());
+            let _ = GetWindowRect(owner.hwnd, &mut over);
+            let _ = GetWindowRect(sheet.hwnd, &mut own);
+            let (width, height) = (own.right - own.left, own.bottom - own.top);
+            let (x, y) = (over.left + (over.right - over.left - width) / 2, over.top + (over.bottom - over.top - height) / 2);
+            let _ = SetWindowPos(sheet.hwnd, None, x, y, 0, 0, SWP_NOSIZE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED);
+        }
     }
 
     /// Shows a panel's page, `room` points, centred near the top of the monitor the pointer is on, a fifth of the way
@@ -349,7 +372,7 @@ impl Display {
             .context("CreateWindowExW failed")?;
         glass(hwnd);
         parent.state.parts.borrow_mut().push(hwnd);
-        Ok(NativeWindow { hwnd, size: Cell::new(Size { width: DevicePixels(1), height: DevicePixels(1) }), state, panel: true, before: Cell::new(HWND::default()) })
+        Ok(NativeWindow { hwnd, size: Cell::new(Size { width: DevicePixels(1), height: DevicePixels(1) }), state, panel: true, before: Cell::new(HWND::default()), owner: Cell::new(HWND::default()) })
     }
 
     /// Puts a panel's parts where its page is, each its box of the page (`placed`, the panel first), the page where it
@@ -410,7 +433,11 @@ impl Display {
 
     /// Puts a window opened hidden on the screen.
     pub fn show(&self, window: &NativeWindow) {
+        use windows::Win32::UI::Input::KeyboardAndMouse::EnableWindow;
         unsafe {
+            if !window.owner.get().is_invalid() {
+                let _ = EnableWindow(window.owner.get(), false);
+            }
             let _ = ShowWindow(window.hwnd, SW_SHOWNORMAL);
         }
     }
@@ -420,6 +447,10 @@ impl Display {
             panel.parts.borrow_mut().retain(|part| *part != window.hwnd);
         }
         unsafe {
+            // Its owner takes input again before it goes, so the keyboard goes back to it, as a modal dialog's does.
+            if !window.owner.get().is_invalid() {
+                let _ = windows::Win32::UI::Input::KeyboardAndMouse::EnableWindow(window.owner.get(), true);
+            }
             SetWindowLongPtrW(window.hwnd, GWLP_USERDATA, 0);
             let _ = DestroyWindow(window.hwnd);
         }

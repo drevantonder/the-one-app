@@ -299,6 +299,9 @@ impl Thread {
 pub struct Display;
 
 impl Display {
+    /// A page's canvas is its one window.
+    pub fn attach(&self, _sheet: &NativeWindow, _owner: &NativeWindow) {}
+
     pub fn open(&self, _: WindowId, _: &WindowOptions) -> anyhow::Result<NativeWindow> {
         let (canvas, size) = HOST.with_borrow(|host| {
             let canvas = host.as_ref().map(|host| host.canvas.clone()).ok_or_else(|| anyhow::anyhow!("no canvas"))?;
@@ -534,7 +537,7 @@ pub async fn open(canvas: web_sys::HtmlCanvasElement, scale: f32, page: String, 
         _ => None,
     };
     let _ = Native::get();
-    let options = WindowOptions { title: String::new(), app_id: String::new(), size: Size::default(), tag: Value::Null, panel: None, places: None, root: false, icon: None };
+    let options = WindowOptions { title: String::new(), app_id: String::new(), size: Size::default(), tag: Value::Null, panel: None, places: None, root: false, icon: None, owner: None };
     // Its first frame is told, for how long it took, and a page this can't draw is drawn as its own page instead.
     let on_event = |event| match event {
         super::Event::Drawn => call("drawn", &JsValue::UNDEFINED),

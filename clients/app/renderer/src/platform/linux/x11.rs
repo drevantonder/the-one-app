@@ -52,6 +52,9 @@ x11rb::atom_manager! {
         _NET_WM_MOVERESIZE,
         _NET_WORKAREA,
         _MOTIF_WM_HINTS,
+        _NET_WM_STATE_MODAL,
+        _NET_WM_WINDOW_TYPE,
+        _NET_WM_WINDOW_TYPE_DIALOG,
     }
 }
 
@@ -505,6 +508,16 @@ impl Display {
     }
 
     /// Puts a window opened hidden on the screen.
+    /// Makes `sheet` a dialog of `owner`'s, as GTK's modal dialogs are: transient for it, which the window manager keeps
+    /// it over and centres it on, and modal to it (EWMH's dialog type and modal state), before it's first shown.
+    pub fn attach(&self, sheet: &NativeWindow, owner: &NativeWindow) {
+        let xcb = &self.xcb;
+        let _ = xcb.change_property32(xproto::PropMode::REPLACE, sheet.x_window, xproto::AtomEnum::WM_TRANSIENT_FOR, xproto::AtomEnum::WINDOW, &[owner.x_window]);
+        let _ = xcb.change_property32(xproto::PropMode::REPLACE, sheet.x_window, self.atoms._NET_WM_WINDOW_TYPE, xproto::AtomEnum::ATOM, &[self.atoms._NET_WM_WINDOW_TYPE_DIALOG]);
+        let _ = xcb.change_property32(xproto::PropMode::REPLACE, sheet.x_window, self.atoms._NET_WM_STATE, xproto::AtomEnum::ATOM, &[self.atoms._NET_WM_STATE_MODAL]);
+        let _ = xcb.flush();
+    }
+
     pub fn show(&self, window: &NativeWindow) {
         let _ = self.xcb.map_window(window.x_window);
         let _ = self.xcb.flush();

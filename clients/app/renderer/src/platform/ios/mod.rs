@@ -313,6 +313,9 @@ fn schedule(due: Option<Duration>) {
 pub struct Display;
 
 impl Display {
+    /// A phone's window covers the one it's a sheet of already.
+    pub fn attach(&self, _sheet: &NativeWindow, _owner: &NativeWindow) {}
+
     pub fn open(&self, id: WindowId, options: &WindowOptions) -> anyhow::Result<NativeWindow> {
         let main = MainThreadMarker::new().ok_or_else(|| anyhow::anyhow!("a native window opens on the main thread"))?;
         let build = BUILD.with(Cell::get).ok_or_else(|| anyhow::anyhow!("a native window opens as tao's event loop runs"))?;

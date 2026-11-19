@@ -505,7 +505,7 @@ pub(crate) async fn command(label: &str, command: &str, args: Value) -> Result<V
             upload_file(args["app"].as_str().unwrap_or_default(), body).await
         }
         "change" => change(&args).await,
-        "recovery" => crate::native::recovery(args["typed"] == true, text("subject")).await.map(|done| json!({"done": done})),
+        "recovery" => crate::native::recovery(args["typed"] == true, text("subject"), args["owner"].as_u64()).await.map(|done| json!({"done": done})),
         "recovery_key" => recovery_key(text("subject")).await.map(Value::from),
         "recover" => recover(text("key").unwrap_or_default(), text("subject")).await.map(done),
         "close" => close(text("view").unwrap_or_default()).map(done),

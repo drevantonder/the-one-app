@@ -103,6 +103,8 @@ pub struct NativeWindow {
     address: usize,
     shared: Arc<Shared>,
     cursor: Cell<Cursor>,
+    /// The window it's a sheet of (`attach`), which it's shown on as AppKit's sheets are.
+    owner: std::cell::RefCell<Option<MainThreadBound<Retained<NSWindow>>>>,
 }
 
 /// A window as `Display::arrange` places it, on the main thread: its window and view, as addresses, and what it shares
@@ -277,17 +279,33 @@ impl Display {
                 _delegate: MainThreadBound::new(Some(delegate), main),
                 shared,
                 cursor: Cell::new(Cursor::Arrow),
+                owner: std::cell::RefCell::default(),
             })
         })
     }
 
-    /// Puts a window opened hidden on the screen, in front.
+    /// Makes `sheet` a sheet of `owner`'s, shown on it as AppKit's sheets are (`beginSheet`) once it's first shown.
+    pub fn attach(&self, sheet: &NativeWindow, owner: &NativeWindow) {
+        let owner = &owner.window;
+        let owner = run_on_main(|main| MainThreadBound::new(owner.get(main).clone(), main));
+        *sheet.owner.borrow_mut() = Some(owner);
+    }
+
+    /// Puts a window opened hidden on the screen, in front: a sheet on its window.
     pub fn show(&self, window: &NativeWindow) {
-        self.activate(window);
+        let sheet = &window.window;
+        match &*window.owner.borrow() {
+            Some(owner) => run_on_main(|main| owner.get(main).beginSheet_completionHandler(sheet.get(main), None)),
+            None => self.activate(window),
+        }
     }
 
     pub fn close(&self, window: &NativeWindow) {
         let last = !window.panel && self.apps.fetch_sub(1, std::sync::atomic::Ordering::Relaxed) == 1;
+        if let Some(owner) = window.owner.borrow_mut().take() {
+            let sheet = &window.window;
+            run_on_main(|main| owner.get(main).endSheet(sheet.get(main)));
+        }
         window.window.get_on_main(|window| {
             window.setDelegate(None);
             window.close();
@@ -382,6 +400,7 @@ impl Display {
                 _delegate: MainThreadBound::new(None, main),
                 shared,
                 cursor: Cell::new(Cursor::Arrow),
+                owner: std::cell::RefCell::default(),
             })
         })
     }
