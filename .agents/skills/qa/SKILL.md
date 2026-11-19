@@ -66,12 +66,15 @@ protocol). Find nodes by role and text, tap, type, `settle`, then `snap`, never 
   network's edge is on this machine's localhost: `ssh -N -R <port>:localhost:<port> surface` puts it at the same
   address there. Its screen is often locked: `computer-use screenshot` with the window's `pid` and `window_id`
   still pictures it. Delete the folder, the tasks and the debug build's `%LOCALAPPDATA%\app.theone.client.dev` after.
-- In the app on a local network (about 9 s to a picture): install the Inspector once (`one install --app
-  network/apps/inspector`), start `openbox` and `one one:<app>` in a desktop of your own, so nothing is shared with
-  other agents and nothing is left running (`ONE_HOME=<folder>/client ONE_AS=owner dbus-run-session -- xvfb-run -a -s
-  "-screen 0 1280x900x24" sh -c 'openbox & one one:<app>'`: without a window manager the launcher loses its focus as it
-  resizes and puts itself away, and without `dbus-run-session` GTK waits half a minute), then call its tools as that user: `one inspector windows`, `one inspector tap --text
-  …`, `one inspector settle`, `one inspector snap > <scratch>/<name>.png` (stdout is the PNG, the window's own size,
+- In the app on a local network (about 9 s to a picture), with your worktree's build, `target/debug/one` (the
+  `one` on your PATH is the live release, which hasn't your change; the app and the CLI are that one program):
+  install the Inspector once (`target/debug/one install --app network/apps/inspector`), start `openbox` and
+  `target/debug/one one:<app>` in a desktop of your own, so nothing is shared with other agents and nothing is left
+  running (`ONE_HOME=<folder>/client ONE_AS=owner dbus-run-session -- xvfb-run -a -s "-screen 0 1280x900x24" sh -c
+  'openbox & target/debug/one one:<app>'`: without a window manager the launcher loses its focus as it resizes and
+  puts itself away, and without `dbus-run-session` GTK waits half a minute), then call its tools as that user:
+  `target/debug/one inspector windows`, `… inspector tap --text …`, `… inspector settle`, `… inspector snap >
+  <scratch>/<name>.png` (stdout is the PNG, the window's own size,
   1024×720 at first). They reach the window through the launcher, as an agent on another device does: it draws every
   native window itself.
 

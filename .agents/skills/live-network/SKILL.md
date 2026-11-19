@@ -27,8 +27,9 @@ them: they hold this device's token.
 
 `one builds` lists each server with its `build`, whether it's `server_ready` (`server_membership` active and
 `server_daemon_status` running) or its `server_ready_reason` (`joining`, `starting`, `draining`, or `stopped` with
-`last_seen`), its `build` and the `runtime` it runs on, and its `server_update_status`: `downloading`, then
-`verifying`, whose `server_update_stage` is `checking`, then `starting` the new build and `one` in its place (it
-hands its work to another and stops), and `up_to_date` once they're kept. If they don't answer, it goes back to the pair before by
+`last_seen`), its `build` and the `runtime` it runs on, and its `server_update_status`: `downloading`, whose
+`server_update_stage` is `checking` once it's downloaded (the build is started to check it), then `checked`, waiting
+for the network's update to say go, then `verifying`, whose stage is `starting` the new build and `one` in its place
+(it hands its work to another and stops), and `up_to_date` once they're kept. If they don't answer, it goes back to the pair before by
 itself and says why in `went_back`: read its log, not the network's. A
 server neither ready nor coming back after a few minutes is broken; say so, and don't release over it.

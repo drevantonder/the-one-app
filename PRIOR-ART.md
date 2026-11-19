@@ -28,8 +28,8 @@ None of these is chosen. Each is named so it's weighed before anything like it i
 ## What the clients could be built with
 
 - **Expo**: phone apps, and it can send them updates without a store release. No desktop apps. Not chosen.
-- **Tauri**: desktop and phone apps from one codebase. What the app as it runs today uses. Chosen on 14 November 2026. From 19 November 2026 it stays the iPhone's shell, and the web view a host falls back to for a page that isn't drawn natively or needs a newer host.
-- **Our own renderer** (19 November 2026): native screens on a computer and an Android phone are drawn by a renderer of
+- **Tauri**: desktop and phone apps from one codebase. What the app as it runs today uses. Chosen on 14 November 2026. From 19 November 2026 it stays the phones' shell (an iPhone's and Android's), and the web view a phone falls back to for a page that needs a newer host; a computer's app has none of it.
+- **Our own renderer** (19 November 2026): native screens on a computer, an iPhone and an Android phone are drawn by a renderer of
   ours for our closed set of primitives and tokens, with code copied in rather than depended on, so the repo stays MIT.
   Each copied file keeps its source's notice and says where it came from and at which upstream commit.
   - **GPUI** (Zed, Apache-2.0): its scene, shaders, glyph atlas and wgpu renderer and its desktop windows, input and
@@ -67,7 +67,7 @@ None of these is chosen. Each is named so it's weighed before anything like it i
     Direct3D 12 on Windows, from GPUI's WGSL shaders, as GPUI itself moved to it. It replaced Blade (Vulkan and Metal,
     through our fork of it) and the Direct3D 11 renderer copied from GPUI: one backend to keep, not three, and the
     same renderer and shaders run on the web later, as WebGPU in WASM.
-  - **tao** (19 November 2026): an iPhone's strict windows, with their fingers, safe areas and lifecycle, are tao's,
+  - **tao** (19 November 2026): an iPhone's native windows, with their fingers, safe areas and lifecycle, are tao's,
     in the event loop Tauri runs for the app, which hands them its events (a wry plugin). winit was the first choice
     and can't be used there: its UIKit backend starts only by calling `UIApplicationMain` itself, which tao already has.
   - Not used: Zed's `editor` crate, which is GPL-3.0.
@@ -80,8 +80,7 @@ None of these is chosen. Each is named so it's weighed before anything like it i
   with. Considered for the UI the clients share, and not chosen.
 - **Ark UI** (`@ark-ui/solid`) and **Zag**'s machines: not used. Ark's `6.0.0-next.0` still imports `solid-js/web`, which
   Solid 2.0 removed, so it doesn't build on Solid 2.0 (tried 14 November 2026), and Zag's machines need the DOM, which a
-  native host doesn't have. The UI library's components are its own; only Zag's list collection (`@zag-js/collection`,
-  a data structure with no DOM) is used.
+  native host doesn't have. The UI library's components are its own, and no Zag package is used.
 - **Asuka** (`egoist/asuka`, MIT, v0.1.0, 13 November 2026): apps in Go drawn with each platform's own widgets. Set
   aside: it's compiled, so an app's entrypoint couldn't arrive from a server, and its widgets are each platform's own look.
 - **What an app's JS runs with on a native host** (18 November 2026, measured): the WinterTC Minimum Common API.
