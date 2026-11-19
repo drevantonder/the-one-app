@@ -153,6 +153,25 @@ chose the same: an app's code on a server is free, and which servers act for who
 - **Elixir WebRTC** for reaching by key: browsers would reach a home server directly and shells would need no
   networking code. Set aside: reaching by key would be ours to add, its relay can't be a Worker, the first connection
   is slower, and large transfers over data channels are its weak spot.
+- **redb, or SQLite, for what a client keeps** (19 November 2026): a client's folder is shared by every program of
+  it at once, the app, each `one` and each `one mcp` (257 on one Linux machine that day) and an iPhone's notification
+  extension. redb lets one process open its file: a second gets `DatabaseAlreadyOpen`. SQLite takes many, but holding
+  its lock in an iPhone's App Group gets the app killed as it's suspended (`0xdead10cc`), and it would replace about
+  30 lines. A file per answer, written whole and renamed, is what many programs at once need.
+- **DuckDB for reading Telemetry** (19 November 2026): through `duckdbex` and the `otlp` community extension it reads
+  the OTLP protobuf kept, an hour's exports one after the other too: 200,000 spans, 13.6 MB, in 157 ms. Set aside: what
+  `Telemetry.Read` gives is ours either way, error kinds, who a call was from, quantiles from explicit buckets, so it
+  would shrink by about a third, not most; `Telemetry.Alerts` reads the same exports, so `Telemetry.Otlp` stays; a
+  blob goes through its artifact's codec, so it would be written to a file for DuckDB on every look; and it adds DuckDB's
+  C++ to every server, with no build of `duckdbex` for Windows and the extension fetched at run time. Telemetry's
+  slow looks that day were spent passing the call between servers, which DuckDB doesn't touch. Worth it once more is
+  kept than a server reads in memory.
+- **restic and kopia for Backups** (19 November 2026): both back up files on a disk, or one stream, into a repository
+  they reach with its own keys. A network's bucket isn't files: a server reaches it only through the edge's short-lived
+  links, one blob at a time, so either would need the bucket mounted with its keys, or a snapshot of their own per
+  blob. Both encrypt with a password of their own beside the Encryption app's keys, and restore to a disk, so `one
+  restore` would need their program, that password, and a second step into the bucket. Backups already sends each
+  blob only once, by what's in it, and reads only blobs whose tag changed.
 
 ## Chosen
 
@@ -203,6 +222,8 @@ chose the same: an app's code on a server is free, and which servers act for who
 - Left open until the rest lands: what starts a network's cloud server when no other server answers for a user or
   group. It's a big choice, and fewer other things should be moving first.
 - A server can keep a copy of what a server acting for an artifact's owner answered it.
+- If search reaches past tools to what apps keep, it's SQLite's FTS5, which the database app's SQLite has built in,
+  not more of `OneCore.Search`'s ranking in memory.
 - To test first: an app in Tauri's web view on a mid-priced Android phone, opening, scrolling and going back: 2 to 3
   days.
 - To test first: a phone on mobile data reaching a home server: how often directly, and how long the first connection
