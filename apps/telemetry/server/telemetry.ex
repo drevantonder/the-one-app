@@ -194,6 +194,7 @@ defmodule Telemetry do
                   name: %{type: "string"},
                   depth: %{type: "integer", description: "How far under the trace's first span"},
                   server: %{type: ["string", "null"], description: "The server, or the client it's from"},
+                  client: %{type: "boolean", description: "Whether it's a client's span (an app, the CLI, an assistant), not a server's"},
                   start: number.("Milliseconds after the trace began"),
                   took: number.("In milliseconds"),
                   outcome: %{type: "string", enum: ~w(ok error)},

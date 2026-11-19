@@ -168,6 +168,7 @@ defmodule Telemetry.Read do
             name: span["name"],
             depth: depth.(span),
             server: from(span) || span["server"],
+            client: from(span) != nil,
             start: ms(span["start"] - began),
             took: took(span),
             outcome: if(failed?(span), do: "error", else: "ok"),

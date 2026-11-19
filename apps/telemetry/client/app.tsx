@@ -12,7 +12,8 @@ const look = styles({
   bar: (height: `${number}%`) => ({ flexGrow: 1, flexBasis: 0, height, minHeight: tokens.length.hairline }),
   sparkBar: { backgroundColor: tokens.colour.label },
   calls: { gap: tokens.grid[2], maxWidth: tokens.length.readable },
-  chart: { flexDirection: "row", alignItems: "flex-end", gap: tokens.grid[0.5], height: sizes.chart },
+  chart: { flexDirection: "row", alignItems: "flex-end", gap: tokens.grid[0.5], height: sizes.chart, borderBottomWidth: tokens.length.hairline, borderColor: tokens.colour.quaternaryLabel },
+  axis: { flexDirection: "row", justifyContent: "space-between" },
   callsBar: { borderRadius: tokens.radius.small, overflow: "hidden" },
   grows: (flexGrow: number) => ({ flexGrow, flexBasis: 0 }),
   fine: { backgroundColor: tokens.colour.label, opacity: 0.22 },
@@ -21,7 +22,10 @@ const look = styles({
   readableNote: { color: tokens.colour.secondaryLabel, maxWidth: tokens.length.readable },
   wrong: { color: tokens.colour.red },
   spans: { gap: tokens.grid[3], maxWidth: tokens.length.readable },
-  span: (paddingStart: number) => ({ gap: tokens.grid[1], paddingStart }),
+  span: { gap: tokens.grid[1] },
+  // A span's words are indented under its parent's; its track is the whole width, so every start lines up.
+  indent: (paddingStart: number) => ({ paddingStart }),
+  message: { maxWidth: tokens.length.readable },
   spanHeading: { flexDirection: "row", justifyContent: "space-between", gap: tokens.length.gutter },
   took: { color: tokens.colour.secondaryLabel },
   track: { flexDirection: "row", height: tokens.grid[1.5], borderRadius: tokens.radius.full, backgroundColor: tokens.colour.quinaryLabel, overflow: "hidden" },
@@ -69,7 +73,7 @@ interface Spent {
 
 /** What `telemetry_overview` answers for the range picked. */
 interface Overview {
-  calls: { calls: number; failed: number }[]
+  calls: { at: number; calls: number; failed: number }[]
   failing: Failure[]
   slowest: Slowest[]
   spending: Spent[]
@@ -82,6 +86,8 @@ interface Overview {
 interface Span {
   name: string
   server: string
+  /** Whether a client's, a phone's app or the CLI, rather than a server's. */
+  client?: boolean
   start: number
   took: number
   depth: number
@@ -118,7 +124,8 @@ const alerts = createMemo(() => call("telemetry_alerts", {}).then((text): Alerts
 changed(() => (refresh(overview), refresh(alerts)))
 
 /// What's open beside the list: a failure's trace, `{ trace }`, or a slow tool or app, `{ slow }`.
-const [open, setOpen] = createSignal<{ trace?: string; where?: string; slow?: Slowest & { key: string } }>()
+const [open, setOpen] = createSignal<{ failure?: Failure; slow?: Slowest & { key: string } }>()
+const keyOf = (failure: Failure) => `${failure.where}|${failure.message}`
 
 const compact = new Intl.NumberFormat(undefined, { notation: "compact", maximumFractionDigits: 1 })
 const count = (n?: number) => compact.format(n ?? 0)
@@ -137,7 +144,7 @@ const dollars = (cost: number) => cost.toLocaleString(undefined, { style: "curre
 /// A span's name as a person reads it: its app's title, then its tool.
 /// One Core's own tools are named by themselves.
 function named(where: string, names: Record<string, string>) {
-  const [app, ...rest] = where.split(" ")
+  const [app, ...rest] = where.replace(/^tools\/call (?=[^ ]+_)/, "").replace(/^([^ _]+)_/, "$1 ").split(" ")
   if (!rest.length) return where
   return app === "one" ? rest.join(" ") : `${names[app] ?? app} › ${rest.join(" ")}`
 }
@@ -175,6 +182,12 @@ function Calls(props: { steps: Overview["calls"] }) {
           )}
         </For>
       </View>
+      <Show when={props.steps.length}>
+        <View style={look.axis}>
+          <Text style={look.footnote}>{since(props.steps[0].at, "narrow")}</Text>
+          <Text style={look.footnote}>Now</Text>
+        </View>
+      </Show>
       <Text style={look.note}>
         {many(all(), "call")}<Show when={failed()}> · <Text style={look.wrong}>{count(failed())} failed</Text></Show>
       </Text>
@@ -183,39 +196,63 @@ function Calls(props: { steps: Overview["calls"] }) {
 }
 
 /// A trace whole, as a waterfall: each span under the one it's in, where it started and how long it took.
-function Trace(props: { id: string; where: string; names: Record<string, string> }) {
+function Trace(props: { id: string; names: Record<string, string> }) {
   const trace = createMemo(() => call("telemetry_trace", { id: props.id, hours: 336 }).then((text): { spans: Span[] } => JSON.parse(text)))
   const total = () => Math.max(...trace().spans.map((s) => s.start + s.took), 0.001)
-  const servers = () => new Set(trace().spans.map((s) => s.server)).size
+  // A client's span is no server: the app or the CLI that asked.
+  const servers = () => new Set(trace().spans.filter((s) => !s.client).map((s) => s.server)).size
   return (
-    <Screen heading={named(props.where, props.names)} back>
-      <Errored fallback={(error) => <Problem heading="Can't show this trace" text={error() as Error} />}>
-        <Loading fallback={<Skeleton rows={4} />}>
-          <Text style={look.readableNote}>
-            {took(total())}
-            <Show when={servers() > 1}> across {servers()} servers</Show>
-          </Text>
-          <View role="list" style={look.spans}>
-            <For each={trace().spans}>
-              {(span) => (
-                <View role="listitem" style={look.span(span.depth * 12)}>
-                  <View style={look.spanHeading}>
-                    <Text style={span.outcome === "error" && look.wrong}>{named(span.name, props.names)}</Text>
-                    <Text style={look.took}>{took(span.took)}</Text>
-                  </View>
-                  <View aria-hidden="true" style={look.track}>
-                    <View style={look.width(`${(span.start / total()) * 100}%`)} />
-                    <View style={[look.width(`${(span.took / total()) * 100}%`), look.tookBar, span.outcome === "error" && look.wrongFill]} />
-                  </View>
-                  <Show when={servers() > 1 || span.message}>
-                    <Text style={[look.footnote, span.outcome === "error" && look.wrong]}>{[servers() > 1 && span.server, span.message].filter(Boolean).join(" · ")}</Text>
-                  </Show>
+    <Errored fallback={(error) => <Problem heading="Can't show this trace" text={error() as Error} />}>
+      <Loading fallback={<Skeleton rows={4} />}>
+        <Text style={look.readableNote}>
+          {took(total())}
+          <Show when={servers() > 1}> across {servers()} servers</Show>
+        </Text>
+        <View role="list" style={look.spans}>
+          <For each={trace().spans}>
+            {(span) => (
+              <View role="listitem" style={look.span}>
+                <View style={[look.spanHeading, look.indent(span.depth * 12)]}>
+                  <Text style={span.outcome === "error" && look.wrong}>{named(span.name, props.names)}</Text>
+                  <Text style={look.took}>{took(span.took)}</Text>
                 </View>
-              )}
-            </For>
-          </View>
-        </Loading>
-      </Errored>
+                <View aria-hidden="true" style={look.track}>
+                  <View style={look.width(`${(span.start / total()) * 100}%`)} />
+                  <View style={[look.width(`${(span.took / total()) * 100}%`), look.tookBar, span.outcome === "error" && look.wrongFill]} />
+                </View>
+                <Show when={(servers() > 1 && !span.client) || span.client || span.message}>
+                  <Text style={[look.footnote, look.indent(span.depth * 12), span.outcome === "error" && look.wrong]}>{[(servers() > 1 || span.client) && span.server, span.message].filter(Boolean).join(" · ")}</Text>
+                </Show>
+              </View>
+            )}
+          </For>
+        </View>
+      </Loading>
+    </Errored>
+  )
+}
+
+/// A failure: its whole message, where and how often it happened, and the trace it was in where there is one.
+function Failed(props: { failure: Failure; names: Record<string, string> }) {
+  const failure = () => props.failure
+  return (
+    <Screen heading={failure().span ? named(failure().where, props.names) : failure().where} back>
+      <Text style={[look.message, look.wrong]}>{failure().message || "Failed"}</Text>
+      <List>
+        <Show when={failure().from}>{(from) => <Row heading="On" end={from()} />}</Show>
+        <Row heading="Times" end={count(failure().count)} />
+        <Row heading="Last" end={since(failure().at)} />
+        <Show when={failure().took != null && failure().took! >= 1000}>
+          <Row heading="Took" end={took(failure().took)} />
+        </Show>
+      </List>
+      <Show when={failure().trace}>
+        {(id) => (
+          <Section heading="Trace">
+            <Trace id={id()} names={props.names} />
+          </Section>
+        )}
+      </Show>
     </Screen>
   )
 }
@@ -279,17 +316,19 @@ function Telemetry(props: { all: Overview }) {
   const slowest = () => all().slowest.map((slow) => ({ ...slow, key: slow.view ? `open|${slow.view}` : `${slow.app}|${slow.tool}` }))
   const opened = () => {
     const shown = open()
-    return shown?.slow ? { slow: slowest().find((slow) => slow.key === shown.slow!.key) ?? shown.slow } : shown
+    if (shown?.slow) return { slow: slowest().find((slow) => slow.key === shown.slow!.key) ?? shown.slow }
+    if (shown?.failure) return { failure: failing().find((failure) => keyOf(failure) === keyOf(shown.failure!)) ?? shown.failure }
+    return shown
   }
   return (
     <Split
       open={!!opened()}
       onClose={() => setOpen()}
       detail={
-        <Show when={opened()} fallback={<Show when={failing().length}><Empty>Pick a failure to see its trace.</Empty></Show>}>
+        <Show when={opened()} fallback={<Show when={failing().length || slowest().length}><Empty>{failing().length ? "Pick a failure to see what happened." : "Pick a tool to see how long it takes."}</Empty></Show>}>
           {(shown) => (
-            <Show when={shown().trace} fallback={<Slow slow={shown().slow!} />}>
-              {(id) => <Trace id={id()} where={shown().where!} names={all().names} />}
+            <Show when={shown().failure} fallback={<Slow slow={shown().slow!} />}>
+              {(failure) => <Failed failure={failure()} names={all().names} />}
             </Show>
           )}
         </Show>
@@ -327,10 +366,10 @@ function Telemetry(props: { all: Overview }) {
                   <Row
                     start={<View style={look.wrong}><Icon name="warning-circle" /></View>}
                     heading={failure().span ? named(failure().where, all().names) : failure().where}
-                    text={[failure().from, failure().message || "Failed", failure().took != null && failure().took! >= 1000 && `for ${took(failure().took)}`].filter(Boolean).join(" · ")}
+                    text={failure().message || "Failed"}
                     end={`${failure().count > 1 ? `${many(failure().count, "time")} · ` : ""}${since(failure().at, "narrow")}`}
-                    current={open()?.trace === failure().trace}
-                    onPress={failure().trace ? () => setOpen({ trace: failure().trace, where: failure().where }) : undefined}
+                    current={!!open()?.failure && keyOf(open()!.failure!) === keyOf(failure())}
+                    onPress={() => setOpen({ failure: failure() })}
                   />
                 )}
               </For>
