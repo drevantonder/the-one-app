@@ -263,9 +263,9 @@ fn launcher(home: std::path::PathBuf, link: Option<String>, started: std::time::
     crate::begin(Computer, started);
     crate::page::load(&home);
 
+    menu_events();
     #[cfg(target_os = "macos")]
     let _menu = menu();
-    #[cfg(any(target_os = "macos", windows))]
     let _ring = ring();
 
     let window = WindowBuilder::new().with_title(crate::page::NAME).with_inner_size(SIZE).with_decorations(false).with_resizable(false).with_visible(false).with_always_on_top(true);
@@ -944,26 +944,31 @@ fn menu() -> muda::Menu {
     menu
 }
 
-/// The ring in a Mac's menu bar, as Raycast's is there, and in Windows' notification area, as a running app that has
-/// no window of its own is there. Its menu has Open, Settings… and Quit: on a Mac a click opens it, as Raycast's and every menu bar
-/// icon's does; on Windows a click shows the launcher or puts it away, and a right-click opens the menu, as a
-/// notification-area icon's does. A Mac's is a template, drawn as the menu bar's other icons are.
-#[cfg(any(target_os = "macos", windows))]
-fn ring() -> Option<tray_icon::TrayIcon> {
-    use tray_icon::menu::{Menu, MenuEvent, MenuItem, PredefinedMenuItem};
-    use tray_icon::{Icon, TrayIconBuilder};
-    #[cfg(windows)]
-    use tray_icon::{MouseButton, MouseButtonState, TrayIconEvent};
-    // The menu bar's items too (`menu`).
+/// What's chosen in a menu, every one muda makes: the ring's and the menu bar's (`ring`, `menu`), and a window's own,
+/// a field's menu for text, which its window does (`renderer::platform::menu_chosen`).
+fn menu_events() {
+    use tray_icon::menu::MenuEvent;
     MenuEvent::set_event_handler(Some(|event: MenuEvent| match event.id.0.as_str() {
         "open" => tell(Told::Summon),
         "settings" => tell(Told::Open("settings".to_owned())),
         "quit" => tell(Told::Quit),
-        _ => {}
+        id => drop(renderer::platform::menu_chosen(id)),
     }));
+}
+
+/// The ring in a Mac's menu bar, as Raycast's is there, in Windows' notification area, as a running app that has no
+/// window of its own is there, and in a Linux desktop's panel. Its menu has Open, Settings… and Quit: on a Mac a click
+/// opens it, as Raycast's and every menu bar icon's does; on Windows a click shows the launcher or puts it away, and a
+/// right-click opens the menu, as a notification-area icon's does. A Mac's is a template, drawn as the menu bar's
+/// other icons are.
+fn ring() -> Option<tray_icon::TrayIcon> {
+    use tray_icon::menu::{Menu, MenuItem, PredefinedMenuItem};
+    use tray_icon::{Icon, TrayIconBuilder};
+    #[cfg(windows)]
+    use tray_icon::{MouseButton, MouseButtonState, TrayIconEvent};
     #[cfg(target_os = "macos")]
     let picture = include_bytes!("../../../icons/MenuBarIcon@2x.png");
-    #[cfg(windows)]
+    #[cfg(not(target_os = "macos"))]
     let picture = include_bytes!("../../../icons/AppIcon@2x.png");
     let picture = resvg::tiny_skia::Pixmap::decode_png(picture).ok()?;
     let icon = Icon::from_rgba(picture.data().to_vec(), picture.width(), picture.height()).ok()?;

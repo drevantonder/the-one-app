@@ -120,10 +120,6 @@ pub struct Display {
     dragging: Cell<Option<(xproto::Window, xproto::Window, Point<f32>)>>,
     /// Each app window's file of where it was left (`WindowOptions::frame`), kept as it's moved or resized.
     frames: RefCell<HashMap<xproto::Window, std::path::PathBuf>>,
-    /// What's said of a window on another thread (GTK's menu for text), and what was since the windows were last
-    /// told.
-    told: Rc<RefCell<Vec<(xproto::Window, Input)>>>,
-    tell: calloop::channel::Sender<(xproto::Window, Input)>,
 }
 
 /// Which window an event is for, and which of its parts: 0 the window itself, the rest a panel's parts.
@@ -297,17 +293,6 @@ impl Display {
                 }
             })
             .map_err(|error| anyhow::anyhow!("no source for the desktop's appearance: {error}"))?;
-        // What's said of a window on another thread (GTK's) is done on the loop's.
-        let (tell, telling) = calloop::channel::channel();
-        let told = Rc::new(RefCell::new(Vec::new()));
-        let heard = told.clone();
-        handle
-            .insert_source(telling, move |event, _, _| {
-                if let calloop::channel::Event::Msg(said) = event {
-                    heard.borrow_mut().push(said);
-                }
-            })
-            .map_err(|error| anyhow::anyhow!("no source for what other threads say: {error}"))?;
         Ok(Display {
             xcb,
             screen,
@@ -337,8 +322,6 @@ impl Display {
             edge: Cell::new(None),
             title_held: Cell::new(None),
             title_pressed: Cell::new(None),
-            told,
-            tell,
         })
     }
 
@@ -711,34 +694,24 @@ impl Display {
         };
     }
 
-    /// Shows GTK's menu for text where a field was right-clicked (`TextMenu`), as a GNOME app's fields have, on the
-    /// app's GTK thread, where there is one: its choice is its key.
+    /// Shows GTK's menu for text where a field was right-clicked (`TextMenu`), as a GNOME app's fields have, as muda
+    /// makes it, on the app's GTK thread, where there is one: its choice is its key (`menu_chosen`).
     pub fn text_menu(&self, window: &NativeWindow, menu: crate::view::TextMenu) {
         use gtk::prelude::*;
-        let (tell, x_window) = (self.tell.clone(), window.x_window);
+        use muda::ContextMenu;
+        thread_local! {
+            // The menu showing, kept as long as it shows: its GTK menu is muda's.
+            static SHOWN: RefCell<Option<muda::Menu>> = const { RefCell::new(None) };
+        }
+        let Some((id, _)) = self.window(window.x_window) else { return };
         gtk::glib::MainContext::default().invoke(move || {
             if !gtk::is_initialized_main_thread() {
                 return;
             }
-            let shown = gtk::Menu::new();
-            let items = [("Cu_t", "x", menu.cut), ("_Copy", "c", menu.copy), ("_Paste", "v", menu.paste), ("", "", true), ("Select _All", "a", menu.select_all)];
-            for (title, key, enabled) in items {
-                if title.is_empty() {
-                    shown.append(&gtk::SeparatorMenuItem::new());
-                    continue;
-                }
-                let item = gtk::MenuItem::with_mnemonic(title);
-                item.set_sensitive(enabled);
-                let tell = tell.clone();
-                item.connect_activate(move |_| {
-                    let key = crate::inspect::Key { key: key.to_owned(), shift: false, alt: false, ctrl: true, meta: false };
-                    let _ = tell.send((x_window, Input::Key(key)));
-                });
-                shown.append(&item);
-            }
-            shown.show_all();
+            let shown = super::super::text_menu_of(menu, id);
             #[allow(deprecated)]
-            shown.popup_easy(3, gtk::current_event_time());
+            shown.gtk_context_menu().popup_easy(3, gtk::current_event_time());
+            SHOWN.with(|kept| kept.replace(Some(shown)));
         });
     }
 
@@ -827,11 +800,6 @@ impl Display {
                     *self.xim.borrow_mut() = None;
                     self.event(event, &mut out);
                 }
-            }
-        }
-        for (x_window, input) in self.told.borrow_mut().drain(..) {
-            if let Some(who) = self.window(x_window) {
-                out.push((who, input));
             }
         }
         if let Some(now) = self.appearance.take() {

@@ -92,6 +92,10 @@ web-sys = { version = "0.3", features = ["console", "CanvasRenderingContext2d", 
 # The windows' thread's event loop, as GPUI's Linux platform has it; a Mac's wakes it from AppKit's main thread.
 calloop = "0.14"
 
+# A field's menu for text (`text_menu`), as each system shows a menu, as Tauri's muda makes it.
+[target.'cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))'.dependencies]
+muda = { version = "0.20", default-features = false, features = ["gtk3"] }
+
 [target.'cfg(any(target_os = "linux", target_os = "android"))'.dependencies]
 wgpu = { version = "30.0.2", default-features = false, features = ["vulkan"] }
 
@@ -109,8 +113,8 @@ xim = { version = "0.6", features = ["x11rb-xcb", "x11rb-client"] }
 # X11 clipboard is adapted from it.
 arboard = { version = "3", default-features = false }
 xkbcommon = { version = "0.8", default-features = false, features = ["x11"] }
-# GTK's menu for text, as a GNOME app's fields have, and its picker of files to open (the desktop portal's, where
-# there's one), on the app's GTK thread (tao's).
+# GTK's picker of files to open (the desktop portal's, where there's one), and the menus muda makes, on the app's GTK
+# thread (tao's).
 gtk = "0.18"
 
 # Windows' windows, as GPUI's Windows platform has them.
@@ -158,7 +162,7 @@ objc2-core-video = { version = "0.3", default-features = false, features = ["std
 [target.'cfg(target_os = "macos")'.dependencies]
 # A Mac's own picker of files to open (NSOpenPanel), as rfd shows it.
 rfd = { version = "0.18", default-features = false }
-objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "objc2-core-foundation", "objc2-quartz-core", "NSAccessibility", "NSAppearance", "NSApplication", "NSCursor", "NSPasteboard", "NSEvent", "NSGraphics", "NSMenu", "NSMenuItem", "NSPanel", "NSResponder", "NSRunningApplication", "NSTrackingArea", "NSView", "NSWindow", "NSWorkspace", "block2"] }
+objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "objc2-core-foundation", "objc2-quartz-core", "NSAccessibility", "NSAppearance", "NSApplication", "NSCursor", "NSPasteboard", "NSEvent", "NSGraphics", "NSPanel", "NSResponder", "NSRunningApplication", "NSTrackingArea", "NSView", "NSWindow", "NSWorkspace", "block2"] }
 
 # An iPhone's: a native screen is a tao window over the app's (`platform/ios`), on the main thread. Its QuickJS has
 # no prebuilt bindings in rquickjs-sys, so bindgen makes them against the iOS SDK's headers, as Android's.

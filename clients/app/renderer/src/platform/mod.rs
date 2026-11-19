@@ -112,6 +112,35 @@ impl Frame {
     }
 }
 
+/// A field's menu for text, Cut, Copy, Paste and Select All, as muda makes a menu each system shows its own way
+/// (`Display::text_menu`), for window `window`: each item's id names the window and its key (`menu_chosen`).
+#[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
+fn text_menu_of(menu: crate::view::TextMenu, window: WindowId) -> muda::Menu {
+    use muda::accelerator::{Accelerator, Code, Modifiers};
+    use muda::{Menu, MenuItem, PredefinedMenuItem};
+    let command = if cfg!(target_os = "macos") { Modifiers::META } else { Modifiers::CONTROL };
+    let item = |title: &str, key: &str, code: Code, enabled: bool| MenuItem::with_id(format!("one-text:{window}:{key}"), title, enabled, Some(Accelerator::new(command, code)));
+    let (cut, copy, paste, all) = (
+        item("Cu&t", "x", Code::KeyX, menu.cut),
+        item("&Copy", "c", Code::KeyC, menu.copy),
+        item("&Paste", "v", Code::KeyV, menu.paste),
+        item("Select &All", "a", Code::KeyA, menu.select_all),
+    );
+    Menu::with_items(&[&cut, &copy, &paste, &PredefinedMenuItem::separator(), &all]).unwrap_or_default()
+}
+
+/// What was chosen in a menu of a window's own (`text_menu_of`), by muda's id, which the app's menu events hand on:
+/// its window is told its key, as pressed there. → whether it was one of those.
+#[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
+pub fn menu_chosen(id: &str) -> bool {
+    let Some((window, key)) = id.strip_prefix("one-text:").and_then(|rest| rest.split_once(':')) else { return false };
+    let (Ok(window), Some(native)) = (window.parse::<WindowId>(), Native::started()) else { return true };
+    let mac = cfg!(target_os = "macos");
+    let key = crate::inspect::Key { key: key.to_owned(), shift: false, alt: false, ctrl: !mac, meta: mac };
+    native.run(move |windows| windows.input(window, 0, Input::Key(key)));
+    true
+}
+
 /// What a computer does for a page itself: its own picker of files to open (`open_files`, each system's).
 #[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
 struct Computer;

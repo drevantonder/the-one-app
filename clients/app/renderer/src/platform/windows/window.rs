@@ -492,28 +492,14 @@ impl Display {
         }
     }
 
-    /// Shows Windows' menu for text where a field was right-clicked (`TextMenu`), whose choice is its key.
+    /// Shows Windows' menu for text where a field was right-clicked (`TextMenu`), as muda shows a context menu: its
+    /// choice is its key (`menu_chosen`).
     pub fn text_menu(&self, window: &NativeWindow, menu: crate::view::TextMenu) {
-        let items = [(menu.cut, "x", w!("Cu&t\tCtrl+X")), (menu.copy, "c", w!("&Copy\tCtrl+C")), (menu.paste, "v", w!("&Paste\tCtrl+V")), (menu.select_all, "a", w!("Select &All\tCtrl+A"))];
-        let chosen = unsafe {
-            let Ok(popup) = CreatePopupMenu() else { return };
-            for (at, (enabled, _, title)) in items.iter().enumerate() {
-                if at == 3 {
-                    let _ = AppendMenuW(popup, MF_SEPARATOR, 0, None);
-                }
-                let _ = AppendMenuW(popup, if *enabled { MF_STRING } else { MF_STRING | MF_GRAYED }, at + 1, *title);
-            }
-            let scale = window.scale();
-            let mut at = POINT { x: (menu.at.x * scale).round() as i32, y: (menu.at.y * scale).round() as i32 };
-            let _ = windows::Win32::Graphics::Gdi::ClientToScreen(window.hwnd, &mut at);
-            let chosen = TrackPopupMenu(popup, TPM_RETURNCMD | TPM_RIGHTBUTTON, at.x, at.y, None, window.hwnd, None);
-            let _ = DestroyMenu(popup);
-            chosen.0 as usize
-        };
-        if let Some((_, key, _)) = chosen.checked_sub(1).and_then(|at| items.get(at)) {
-            let key = crate::inspect::Key { key: (*key).to_owned(), shift: false, alt: false, ctrl: true, meta: false };
-            self.queue.borrow_mut().push((window.state.id, window.state.part, Input::Key(key)));
-        }
+        use muda::ContextMenu;
+        let shown = super::super::text_menu_of(menu, window.state.id);
+        let at = muda::dpi::LogicalPosition::new(f64::from(menu.at.x), f64::from(menu.at.y));
+        // SAFETY: the window's own, on its thread.
+        unsafe { shown.show_context_menu_for_hwnd(window.hwnd.0 as isize, Some(at.into())) };
     }
 
     /// Its frame's caption buttons are drawn light or dark as `theme` says, or as Windows is.

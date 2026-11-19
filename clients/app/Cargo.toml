@@ -133,6 +133,8 @@ muda = { version = "0.20", optional = true }
 objc2-foundation = { version = "0.3", default-features = false, features = ["std", "objc2-core-foundation", "NSGeometry"], optional = true }
 
 [target.'cfg(target_os = "linux")'.dependencies]
+# Its ring, as a StatusNotifierItem over D-Bus, as KDE's and GNOME's (with its extension) panels show one, Wayland's too.
+tray-icon = { version = "0.25", optional = true, default-features = false, features = ["ksni"] }
 webkit2gtk = { version = "=2.0.2", features = ["v2_38"], optional = true }
 # Ctrl-Q and Ctrl-W, as a Linux app's window has them (`linux_keys`).
 gtk = { version = "0.18", optional = true }
