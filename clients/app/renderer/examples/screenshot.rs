@@ -133,8 +133,8 @@ fn main() -> anyhow::Result<()> {
     let first_frame = std::cell::Cell::new(None);
     let worst_paint = std::cell::Cell::new(std::time::Duration::ZERO);
     // A frame drawn, and with `read`, waited for and read back: drawn again once the pictures it decodes in the
-    // background are ready, as a window is woken to.
-    let mut frame = |screen: &mut Screen, read: bool| -> anyhow::Result<(u32, u32, Vec<u8>)> {
+    // background are ready, as a window is woken to. → its pixels, if read, and what it cost (`Screen::cost`).
+    let mut frame = |screen: &mut Screen, read: bool| -> anyhow::Result<(u32, u32, Vec<u8>, Value)> {
         loop {
             screen.idle();
             let painting = std::time::Instant::now();
@@ -145,18 +145,19 @@ fn main() -> anyhow::Result<()> {
             }
         }
         renderer.draw(&scene, [0.0, 0.0]);
+        let cost = screen.cost(&renderer);
         // The first frame is read back too, which `first_frame_ms` is until.
         if !read && first_frame.get().is_some() {
-            return Ok((0, 0, Vec::new()));
+            return Ok((0, 0, Vec::new(), cost));
         }
-        let read = renderer.read().ok_or_else(|| anyhow::anyhow!("nothing was drawn"))?;
+        let (width, height, rgba) = renderer.read().ok_or_else(|| anyhow::anyhow!("nothing was drawn"))?;
         first_frame.set(first_frame.get().or(Some(gpu.elapsed())));
-        Ok(read)
+        Ok((width, height, rgba, cost))
     };
     for line in requests.lines().filter(|line| !line.trim().is_empty()) {
         let request = renderer::inspect::Request::parse(line);
         // A frame is drawn before each, and read back only for a picture, as a window's is never read.
-        let (w, h, rgba) = frame(&mut screen, request.as_ref().is_ok_and(|request| request.op == "snap"))?;
+        let (w, h, rgba, _) = frame(&mut screen, request.as_ref().is_ok_and(|request| request.op == "snap"))?;
         let request = match request {
             Ok(request) => request,
             Err(refused) => {
@@ -165,10 +166,22 @@ fn main() -> anyhow::Result<()> {
             }
         };
         if request.op == "snap" {
-            let mut png = Vec::new();
-            image::RgbaImage::from_raw(w, h, rgba).expect("the frame's size").write_to(&mut std::io::Cursor::new(&mut png), image::ImageFormat::Png)?;
-            let snapped = json!({"png": data_encoding::BASE64.encode(&png), "width": w, "height": h});
-            println!("{}", renderer::inspect::answer(&request.id, Ok(snapped)));
+            println!("{}", renderer::inspect::answer(&request.id, renderer::inspect::png(w, h, rgba)));
+            continue;
+        }
+        // Each of its frames drawn as the window draws one, and read back unless it says `snap: false`.
+        if request.op == "profile" {
+            let snaps = request.inputs.get("snap").and_then(Value::as_bool) != Some(false);
+            let profiled = screen.profile(&request, &mut |screen| {
+                let (w, h, rgba, mut cost) = frame(screen, snaps)?;
+                if snaps {
+                    for (name, value) in renderer::inspect::png(w, h, rgba)?.as_object().into_iter().flatten() {
+                        cost[name] = value.clone();
+                    }
+                }
+                Ok(cost)
+            });
+            println!("{}", renderer::inspect::answer(&request.id, profiled));
             continue;
         }
         let answered = std::rc::Rc::new(std::cell::RefCell::new(None));
@@ -184,7 +197,7 @@ fn main() -> anyhow::Result<()> {
         let answer = answered.borrow_mut().take();
         println!("{}", answer.unwrap_or_else(|| json!({"error": "it didn't answer"})));
     }
-    let (w, h, rgba) = frame(&mut screen, true)?;
+    let (w, h, rgba, _) = frame(&mut screen, true)?;
     let drawn = started.elapsed();
     // What it told the page as it drew (where each node is, what's in sight) has run, for its tree.
     screen.idle();

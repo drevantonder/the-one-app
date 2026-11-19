@@ -21,6 +21,13 @@
 //!   `style` and `class` it was given, its colours and lengths `resolved` from the design tokens, `source`, the
 //!   `file:line` of the JSX that made it, where its build says, and an input's `editing` state as the host has it.
 //! - `snap` → `{png, width, height}`: the window as drawn, a PNG in base64, at its scale.
+//! - `profile` (`at`, ms from now, in order: `[0, 80, 200, 400]` unless given; `snap`: false for no pictures) →
+//!   `{frames, time, paused}`: the clock paused and stepped to each time, as `clock` steps it, and the frame there
+//!   drawn, each `{at, mutations, layout_ms, paint_ms, draws, atlas, png, width, height}`: the mutations its JS made
+//!   that it applied since the frame before, how long laying it out took and painting it all told (styling, layout and
+//!   its scene), its draw calls, and its glyph and picture atlas's `tiles`, `textures`, `bytes` and how much of them
+//!   is `filled`. The first is painted whole, the rest as the window paints a frame, from what changed; one where
+//!   nothing changed costs nothing. The clock stays paused.
 //! - `tap` (a selector, or a point) → `{tapped, editing}`: the pointer moves to the point, or the node's middle, and
 //!   presses there as a mouse does, so what takes it is what a person's press reaches, as the window drew it (what
 //!   doesn't take the pointer, `pointerEvents: "none"`, and what's clipped away are passed over): an input takes the
@@ -162,6 +169,15 @@ pub fn answer(id: &Value, result: anyhow::Result<Value>) -> Value {
         Ok(result) => json!({"v": VERSION, "id": id, "result": result}),
         Err(error) => json!({"v": VERSION, "id": id, "error": format!("{error:#}")}),
     }
+}
+
+/// A picture as `snap` gives it: a PNG, in base64, of `rgba`, `width` by `height` pixels.
+pub fn png(width: u32, height: u32, rgba: Vec<u8>) -> anyhow::Result<Value> {
+    let mut png = Vec::new();
+    image::RgbaImage::from_raw(width, height, rgba)
+        .context("its pixels don't fill it")?
+        .write_to(&mut std::io::Cursor::new(&mut png), image::ImageFormat::Png)?;
+    Ok(json!({"png": data_encoding::BASE64.encode(&png), "width": width, "height": height}))
 }
 
 /// Each node's semantics as `Tree::semantics` gives them, by its id, without its children.

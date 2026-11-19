@@ -56,6 +56,45 @@ defmodule Inspector do
         inputs: %{type: "object", properties: %{device: @device, window: @window}},
         outputs: %{type: "object", properties: %{mimeType: %{type: "string"}, size: %{type: "integer"}}, required: ["mimeType"]}
       },
+      %{
+        name: "profile",
+        read_only: false,
+        description:
+          "Steps what moves on the paused clock and draws the frame at each time in `at` (ms from now: 0, 80, 200, 400 unless given), with a picture of each and what it cost: the JS mutations applied since the frame before, layout and paint time, draw calls and the glyph atlas's use. For checking an animation or a slow screen; the clock stays paused.",
+        inputs: %{
+          type: "object",
+          properties: %{
+            at: %{type: "array", items: %{type: "number", minimum: 0}, description: "ms from now, in order"},
+            snap: %{type: "boolean", description: "false for no pictures"},
+            device: @device,
+            window: @window
+          }
+        },
+        outputs: %{
+          type: "object",
+          properties: %{
+            frames: %{
+              type: "array",
+              items: %{
+                type: "object",
+                properties: %{
+                  at: %{type: "number", description: "ms from when it started"},
+                  mutations: %{type: "integer", description: "the JS's mutations applied since the frame before"},
+                  layout_ms: %{type: "number", description: "laying out its tree"},
+                  paint_ms: %{type: "number", description: "styling, laying out and painting it, all told"},
+                  draws: %{type: "integer", description: "its GPU draw calls"},
+                  atlas: %{type: "object", description: "the glyph and picture atlas: its tiles, textures, bytes on the GPU, and how much of them is filled, 0 to 1"},
+                  width: %{type: "integer"},
+                  height: %{type: "integer"}
+                }
+              }
+            },
+            time: %{type: "number", description: "the clock's time after, in ms"},
+            paused: %{type: "boolean"}
+          },
+          required: ["frames"]
+        }
+      },
       op("tap", false, "Presses a node, by a selector, or what's at a point, as a finger does: an input takes the keyboard, and what listens for click gets one. Gives `tapped`, the node that took it.", Map.merge(@selector, @point)),
       op("type", false, "Types text into an input, by a selector, or the one with the keyboard, a character at a time. Gives the node and its `value`.", Map.put(@selector, :text, %{type: "string", description: "what to type; with a selector, `text` is what's typed, so pick the input by `role`, `name`, `key` or `node`"}), ["text"]),
       op(
@@ -126,6 +165,8 @@ defmodule Inspector do
     case ask(device, tool, Map.delete(inputs, "device")) do
       {:ok, %{"isError" => true, "content" => content}} -> raise Enum.map_join(content, "\n", & &1["text"])
       {:ok, %{"content" => [%{"type" => "image", "data" => data}]}} -> {:blob, "image/png", Base.decode64!(data)}
+      # What it says, with each frame's picture after it, as an agent sees pictures.
+      {:ok, %{"structuredContent" => result, "content" => [_ | pictures]}} when pictures != [] -> {:content, result, pictures}
       {:ok, %{"structuredContent" => result}} -> result
       {:error, why} -> raise why
     end

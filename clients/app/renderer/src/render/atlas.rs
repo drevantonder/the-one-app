@@ -69,6 +69,19 @@ impl Atlas {
         self.0.lock().generation
     }
 
+    /// What it holds, for the inspector's `profile`: its `tiles` (glyphs and pictures), its `textures`, the `bytes`
+    /// they take on the GPU, and how much of them its tiles fill (`filled`, 0 to 1).
+    pub fn usage(&self) -> serde_json::Value {
+        let lock = self.0.lock();
+        let textures: Vec<&AtlasTexture> = lock.storage.monochrome_textures.iter().chain(&lock.storage.polychrome_textures).collect();
+        let size = |texture: &AtlasTexture| texture.allocator.size().area() as u64;
+        let bytes: u64 = textures.iter().map(|texture| size(texture) * u64::from(texture.bytes_per_pixel)).sum();
+        let area: u64 = textures.iter().map(|texture| size(texture)).sum();
+        let filled: u64 = textures.iter().map(|texture| texture.allocator.allocated_space() as u64).sum();
+        let filled = if area == 0 { 0.0 } else { (filled as f64 / area as f64 * 1000.0).round() / 1000.0 };
+        serde_json::json!({"tiles": lock.tiles_by_key.len(), "textures": textures.len(), "bytes": bytes, "filled": filled})
+    }
+
     /// The view of texture `id`, which a batch of sprites samples.
     pub(crate) fn view(&self, id: AtlasTextureId) -> wgpu::TextureView {
         self.0.lock().storage[id].view.clone()

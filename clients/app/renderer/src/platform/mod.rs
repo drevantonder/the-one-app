@@ -520,8 +520,8 @@ impl Windows {
         out
     }
 
-    /// Answers an inspector's request of window `id`: `snap` drawn again offscreen, as it was last drawn, and read
-    /// back, and the rest by its screen.
+    /// Answers an inspector's request of window `id`: `snap` and `profile`, whose frames are drawn again offscreen,
+    /// and read back, and the rest by its screen.
     pub fn inspect(&mut self, id: WindowId, request: crate::inspect::Request, reply: crate::Reply) {
         let Some(window) = self.windows.get_mut(&id) else {
             return reply(crate::inspect::answer(&request.id, Err(anyhow::anyhow!("there's no window {id} open"))));
@@ -531,25 +531,40 @@ impl Windows {
             return reply(crate::inspect::answer(&request.id, Err(anyhow::anyhow!("its app didn't open"))));
         };
         window.dirty = true;
-        if request.op != "snap" {
+        if !matches!(request.op.as_str(), "snap" | "profile") {
             return screen.inspect(request, reply);
         }
         // Painted afresh, as it is now: a window with no surface (Android's view while it's hidden) has drawn nothing,
-        // and the scene it last drew may be older than what it shows.
+        // and the scene it last drew may be older than what it shows. Each of a profile's frames after the first is
+        // painted as the window paints one, from what changed.
         let device = Size { width: DevicePixels((room.width.0 * scale).round() as i32), height: DevicePixels((room.height.0 * scale).round() as i32) };
         let mut renderer = Renderer::offscreen(&self.context, self.atlas.clone(), device);
         let mut scene = crate::render::scene::Scene::default();
-        screen.paint_afresh(room, scale, &mut self.text, &self.atlas, &mut scene);
-        renderer.draw(&scene, [0.0, 0.0]);
-        let snapped = renderer.read().ok_or_else(|| anyhow::anyhow!("nothing was drawn")).and_then(|(width, height, rgba)| {
-            let mut png = Vec::new();
-            image::RgbaImage::from_raw(width, height, rgba)
-                .ok_or_else(|| anyhow::anyhow!("its pixels don't fill it"))?
-                .write_to(&mut std::io::Cursor::new(&mut png), image::ImageFormat::Png)?;
-            Ok(serde_json::json!({"png": data_encoding::BASE64.encode(&png), "width": width, "height": height}))
-        });
+        let (text, atlas) = (&mut self.text, &self.atlas);
+        let snaps = request.op == "snap" || request.inputs.get("snap").and_then(serde_json::Value::as_bool) != Some(false);
+        let mut afresh = true;
+        let mut draw = |screen: &mut Screen| -> anyhow::Result<serde_json::Value> {
+            if std::mem::take(&mut afresh) {
+                screen.paint_afresh(room, scale, text, atlas, &mut scene);
+            } else {
+                screen.paint(room, scale, text, atlas, &mut scene);
+            }
+            renderer.draw(&scene, [0.0, 0.0]);
+            let mut frame = screen.cost(&renderer);
+            if snaps {
+                let (width, height, rgba) = renderer.read().ok_or_else(|| anyhow::anyhow!("nothing was drawn"))?;
+                for (name, value) in crate::inspect::png(width, height, rgba)?.as_object().into_iter().flatten() {
+                    frame[name] = value.clone();
+                }
+            }
+            Ok(frame)
+        };
+        let answered = match request.op.as_str() {
+            "snap" => draw(screen),
+            _ => screen.profile(&request, &mut draw),
+        };
         renderer.destroy();
-        reply(crate::inspect::answer(&request.id, snapped))
+        reply(crate::inspect::answer(&request.id, answered))
     }
 
     /// Brings window `id` forward.

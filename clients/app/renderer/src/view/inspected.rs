@@ -224,7 +224,7 @@ impl Screen {
                 }
                 json!({"time": clock.now(), "paused": clock.paused()})
             }
-            op => bail!("there's no op {op}: window, tree, query, snap, tap, type, ime, key, scroll, drag, clock and settle are"),
+            op => bail!("there's no op {op}: window, tree, query, snap, profile, tap, type, ime, key, scroll, drag, clock and settle are"),
         })
     }
 
@@ -244,6 +244,47 @@ impl Screen {
             self.click(pressed, None);
         }
         Ok(pressed)
+    }
+
+    /// The inspector's `profile`: the clock paused, then stepped to each time `at` says (ms from now, in order; 0, 80,
+    /// 200 and 400 unless it says), and the frame there drawn by `draw`, as the window draws one, with what it cost
+    /// (`cost`). The clock stays paused, as `clock` leaves it.
+    pub fn profile(&mut self, request: &Request, draw: &mut dyn FnMut(&mut Screen) -> anyhow::Result<Value>) -> anyhow::Result<Value> {
+        let at: Vec<f64> = match request.inputs.get("at") {
+            None => vec![0.0, 80.0, 200.0, 400.0],
+            Some(at) => serde_json::from_value(at.clone()).context("say `at` as a list of ms from now: [0, 80, 200, 400]")?,
+        };
+        if at.windows(2).any(|pair| pair[1] < pair[0]) || at.first().is_some_and(|first| *first < 0.0) {
+            bail!("the clock goes forward only: say `at` in order, from 0");
+        }
+        let clock = self.js.clock().clone();
+        clock.pause();
+        self.idle();
+        let start = clock.now();
+        let mut frames = Vec::new();
+        for ms in at {
+            self.step(start + ms - clock.now());
+            let mut frame = draw(self)?;
+            frame["at"] = json!(ms);
+            frames.push(frame);
+        }
+        // The window's own scene is older than what was drawn here, so its next frame is painted afresh.
+        self.seen = None;
+        Ok(json!({"frames": frames, "time": clock.now(), "paused": true}))
+    }
+
+    /// What the frame painted last cost, as `profile` says it: the mutations its JS made that it applied since the
+    /// frame before (`mutations`), how long it took to lay out (`layout_ms`) and to style, lay out and paint all told
+    /// (`paint_ms`), and, as `renderer` drew it, its draw calls (`draws`) and what its atlas holds (`atlas`).
+    pub fn cost(&self, renderer: &crate::render::renderer::Renderer) -> Value {
+        let ms = |time: Duration| (time.as_secs_f64() * 100_000.0).round() / 100.0;
+        json!({
+            "mutations": self.cost.mutations,
+            "layout_ms": ms(self.cost.layout),
+            "paint_ms": ms(self.cost.paint),
+            "draws": renderer.draws(),
+            "atlas": renderer.sprite_atlas().usage(),
+        })
     }
 
     /// Moves the clock on by `ms`, paused, running each timer due in that time at its own time, in order, each once

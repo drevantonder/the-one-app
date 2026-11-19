@@ -351,6 +351,8 @@ pub struct Renderer {
     blurred: std::collections::HashMap<u64, (wgpu::TextureView, bool)>,
     /// Each atlas texture's bind group, as of the atlas's having made so many textures.
     atlas_groups: std::cell::RefCell<(u64, std::collections::HashMap<super::atlas::AtlasTextureId, wgpu::BindGroup>)>,
+    /// How many draw calls the last frame made (`draws`).
+    draws: std::cell::Cell<u32>,
 }
 
 /// The frame's batches' instances: the bind group of its data, and each batch's offset in it.
@@ -499,6 +501,7 @@ impl Renderer {
             rasters: Default::default(),
             blurred: Default::default(),
             atlas_groups: Default::default(),
+            draws: Default::default(),
         }
     }
 
@@ -512,6 +515,16 @@ impl Renderer {
             surface.configure(&self.device, config);
             self.size = size;
         }
+    }
+
+    /// How many draw calls the last frame made: each batch, shadow tile, raster and blur pass drawn, but what was kept
+    /// of the frames before (`Kept`), as a GPU profiler counts them.
+    pub fn draws(&self) -> u32 {
+        self.draws.get()
+    }
+
+    fn drew(&self) {
+        self.draws.set(self.draws.get() + 1);
     }
 
     pub fn sprite_atlas(&self) -> &Arc<Atlas> {
@@ -541,6 +554,7 @@ impl Renderer {
     /// Draws the box of `scene` whose top left is `origin`, in device pixels, as big as the target.
     pub fn draw(&mut self, scene: &Scene, origin: [f32; 2]) -> bool {
         self.atlas.before_frame();
+        self.draws.set(0);
         let (frame, view, texture) = match &self.target {
             Target::Surface { surface, config } => {
                 // A surface its window has outgrown, or lost, is configured again and its frame taken from that, so the
@@ -797,6 +811,7 @@ impl Renderer {
                     pass.set_bind_group(1, &instances.group, &[instances.offsets[at]]);
                     pass.set_bind_group(2, group, &[]);
                     pass.draw(0..4, 0..1);
+                    self.drew();
                 }
                 continue;
             }
@@ -812,6 +827,7 @@ impl Renderer {
                     pass.set_bind_group(1, &instances.group, &[instances.offsets[at]]);
                     pass.set_bind_group(2, &self.texture(blurred), &[]);
                     pass.draw(0..4, *one as u32..*one as u32 + 1);
+                    self.drew();
                     continue;
                 }
             };
@@ -821,6 +837,7 @@ impl Renderer {
                 pass.set_bind_group(2, &self.atlas_group(id), &[]);
             }
             pass.draw(0..4, 0..count as u32);
+            self.drew();
         }
     }
 
@@ -908,6 +925,7 @@ impl Renderer {
                     pass.set_pipeline(pipeline);
                     pass.set_bind_group(2, group, &[]);
                     pass.draw(0..10, at as u32..at as u32 + 1);
+                    self.drew();
                     at += 1;
                 }
                 None => {
@@ -915,6 +933,7 @@ impl Renderer {
                     let end = (at..shadows.len()).find(|one| tiles.is_some() && tiled(&shadows[*one]).is_some_and(|(key, _)| self.tiles.contains_key(&key))).unwrap_or(shadows.len());
                     pass.set_pipeline(&self.pipelines.shadows);
                     pass.draw(0..10, at as u32..end as u32);
+                    self.drew();
                     at = end;
                 }
             }
@@ -955,6 +974,7 @@ impl Renderer {
             pass.set_bind_group(0, &globals, &[]);
             pass.set_bind_group(1, instances, &[instance.0 as u32]);
             pass.draw(0..4, 0..1);
+            self.drew();
         }
         let group = self.texture(&view);
         self.tiles.insert(key, (texture, group));
@@ -1073,6 +1093,7 @@ impl Renderer {
             pass.set_bind_group(1, &params, &[]);
             pass.set_bind_group(2, &texture, &[]);
             pass.draw(0..4, 0..1);
+            self.drew();
         }
         let Some(behind) = blur.behind else { return down.clone() };
         // Kept in a texture of its own, as the next backdrop blurs into the same ones.

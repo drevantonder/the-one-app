@@ -1247,6 +1247,20 @@ impl ::client::DeviceTools for Inspector {
                     "content": [{"type": "image", "mimeType": "image/png", "data": answer["result"]["png"]}],
                     "structuredContent": {"width": answer["result"]["width"], "height": answer["result"]["height"]},
                 }),
+                // Each frame's picture is an image after what it cost, as a tool's answer with pictures has them.
+                None if tool == "profile" => {
+                    let mut result = answer["result"].take();
+                    let pictures: Vec<Value> = result["frames"]
+                        .as_array_mut()
+                        .into_iter()
+                        .flatten()
+                        .filter_map(|frame| frame.as_object_mut()?.remove("png"))
+                        .map(|png| json!({"type": "image", "mimeType": "image/png", "data": png}))
+                        .collect();
+                    let mut content = vec![json!({"type": "text", "text": result.to_string()})];
+                    content.extend(pictures);
+                    json!({"content": content, "structuredContent": result})
+                }
                 None => {
                     let result = answer["result"].take();
                     json!({"content": [{"type": "text", "text": result.to_string()}], "structuredContent": result})

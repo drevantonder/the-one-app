@@ -24,6 +24,11 @@ else.
 - `settle` waits until the app has heard back from whatever it asked and its timers are done, and says what's still
   pending if its `deadline` passes first. Settle after an action before you read or snap.
 - `snap` takes a PNG of the window. `clock` pauses, steps or seeks the app's clock, for what moves or waits on time.
+- `profile` checks what moves, and what's slow: it pauses the clock, steps it to each time in `at` (ms from now, 0,
+  80, 200 and 400 unless you say), and gives a picture of each frame there with what it cost: the JS `mutations`
+  applied since the frame before, `layout_ms` and `paint_ms` (styling, layout and painting all told), GPU `draws`
+  and the glyph `atlas`'s use. Tap what starts the motion, then profile at once. A frame where nothing changed costs
+  nothing. The clock stays paused: resume it with `clock`.
 
 A device is its person's: you inspect only theirs. Tapping and typing act as they would, so don't send, buy or delete
 there unless they asked.

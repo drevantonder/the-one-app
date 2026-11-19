@@ -338,6 +338,18 @@ pub struct Screen {
     /// What its page uses that this host can't draw (`tree::Mismatch`), or that it refused, which its window says in
     /// its place.
     pub mismatched: Option<String>,
+    /// What the frame painted last cost, for the inspector's `profile` (`Cost`).
+    cost: Cost,
+}
+
+/// What a frame cost: the mutations its JS made that it applied, since the frame before (`applied` counts them as they
+/// come), and how long laying its tree out and painting it all took, as a browser's performance panel says a frame's.
+#[derive(Clone, Copy, Default)]
+pub(crate) struct Cost {
+    pub mutations: u64,
+    applied: u64,
+    pub layout: Duration,
+    pub paint: Duration,
 }
 
 impl Screen {
@@ -417,6 +429,7 @@ impl Screen {
             layer: false,
             failed: None,
             mismatched: None,
+            cost: Cost::default(),
         };
         screen.pump();
         screen
@@ -675,7 +688,10 @@ impl Screen {
                 Posted::Mutation(_) if self.mismatched.is_some() => {}
                 Posted::Mutation(mutation) => match self.tree.apply([mutation]) {
                     Err(error) => self.mismatched = Some(format!("{error:#}")),
-                    Ok(()) => self.changed(),
+                    Ok(()) => {
+                        self.cost.applied += 1;
+                        self.changed();
+                    }
                 },
                 Posted::Message(message) => {
                     let Ok(message) = serde_json::from_str::<Value>(&message) else { continue };
@@ -818,7 +834,12 @@ impl Screen {
     pub fn paint(&mut self, size: Size<Pixels>, scale: f32, text: &mut TextSystem, atlas: &Atlas, scene: &mut Scene) {
         self.tell_room(size);
         self.paint_frames(scale, text, atlas);
-        let Some(plan) = self.plan(size, scale) else { return };
+        let started = Instant::now();
+        // A frame that changes nothing costs nothing: the scene drawn last is kept.
+        let Some(plan) = self.plan(size, scale) else {
+            (self.cost.mutations, self.cost.layout, self.cost.paint) = (0, Duration::ZERO, Duration::ZERO);
+            return;
+        };
         scene.clear();
         let drawn = self.draw(&plan, text, atlas, scene);
         let modal = drawn.modal;
@@ -829,6 +850,8 @@ impl Screen {
         scene.finish();
         self.settle_focus(modal);
         self.tell_placed(intersections);
+        self.cost.paint = started.elapsed();
+        self.cost.mutations = std::mem::take(&mut self.cost.applied);
     }
 
     /// The page is told when its room, its motion or its insets change, as a frame's host tells an MCP App.
@@ -1021,6 +1044,7 @@ impl Screen {
         painter.layout.place_fixed(painter.tree);
         let available = taffy::geometry::Size { width: AvailableSpace::Definite(window.size.width), height: AvailableSpace::Definite(window.size.height) };
         let Painter { layout, text, .. } = &mut painter;
+        let laying_out = Instant::now();
         let measured = layout.taffy.compute_layout_with_measure(root, available, |input, _, leaf, style| {
             // A node with nothing under it is its style's size, or its padding and border around what it measures (a
             // text's words, an input's lines), as CSS has them; `space` is the room for that content, inside them.
@@ -1044,6 +1068,7 @@ impl Screen {
                 taffy::geometry::Size { width: size.width.ceil(), height: size.height }
             })
         });
+        self.cost.layout = laying_out.elapsed();
         match measured {
             Err(error) => log::error!("its layout failed: {error}"),
             Ok(()) => {
