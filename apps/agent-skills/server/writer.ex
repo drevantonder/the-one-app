@@ -17,11 +17,6 @@ defmodule AgentSkills.Writer do
   @every 60_000
   @marker ".agent-skills"
 
-  # The skills the One App as it was before wrote, whose tools are gone: folders of these names that it marked with
-  # this file. It removed them by the same names and mark when they were no longer offered.
-  @before "the-one-app"
-  @before_marker ".synced-one"
-
   @impl OneCore.Service
   def called, do: "Agent Skills' writer on this machine"
 
@@ -162,7 +157,7 @@ defmodule AgentSkills.Writer do
 
     for name <- File.ls!(root),
         not Map.has_key?(state.skills, name),
-        ours?(Path.join(root, name), network) or before?(root, name),
+        ours?(Path.join(root, name), network),
         reduce: state do
       state ->
         File.rm_rf!(Path.join(root, name))
@@ -177,7 +172,7 @@ defmodule AgentSkills.Writer do
     ours = ours?(folder, network)
 
     cond do
-      File.exists?(folder) and not ours and not before?(root, name) ->
+      File.exists?(folder) and not ours ->
         log_once(state, "left #{folder} alone: it isn't a skill Agent Skills wrote")
 
       ours and same?(folder, files) ->
@@ -210,11 +205,6 @@ defmodule AgentSkills.Writer do
   end
 
   defp ours?(folder, network), do: File.read(Path.join(folder, @marker)) == {:ok, marker(network)}
-
-  defp before?(root, name),
-    do:
-      (name == @before or String.starts_with?(name, @before <> "-")) and
-        File.regular?(Path.join([root, name, @before_marker]))
 
   defp marker(network) do
     "Agent Skills writes this skill for #{network.address}, from what its app says, and keeps it current. Delete this file to take the folder over.\n"
