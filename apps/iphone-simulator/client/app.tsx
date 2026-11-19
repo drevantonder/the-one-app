@@ -1,6 +1,6 @@
 // iPhone Simulator: your simulators on every Mac, and one of them live, to use as an iPhone, start, stop or remove.
 import { createMemo, createSignal, Errored, For, Loading, Match, refresh, Show, Switch } from "solid-js"
-import { Button, call, changed, confirm, Empty, List, LiveScreen, Menu, Problem, render, Row, Screen, Skeleton, Split, Status, Steps, toast } from "ui"
+import { Button, call, changed, confirm, Empty, List, LiveScreen, Menu, Problem, render, Row, Screen, since, Skeleton, Split, Status, Steps, toast } from "ui"
 
 /** A simulator, as `iphone-simulator_list` answers it. */
 interface Simulator {
@@ -13,14 +13,6 @@ interface Simulator {
   last_used: number
 }
 
-const ago = new Intl.RelativeTimeFormat(undefined, { numeric: "auto" })
-/// How long ago `at` was, in the largest unit that's whole: "2 hours ago".
-function since(at: number) {
-  const minutes = Math.round((at - Date.now()) / 60_000)
-  if (minutes > -60) return ago.format(Math.min(minutes, -1), "minute")
-  if (minutes > -48 * 60) return ago.format(Math.round(minutes / 60), "hour")
-  return ago.format(Math.round(minutes / (24 * 60)), "day")
-}
 /** A simulator's state, as the service keeps it (simulator.ex's `@steps`). */
 type State = "stopped" | "starting" | "running" | "stopping" | "removing" | "gone"
 const SAYS: Record<State, string> = { stopped: "Stopped", starting: "Starting", running: "Running", stopping: "Stopping", removing: "Removing", gone: "Gone from Xcode" }

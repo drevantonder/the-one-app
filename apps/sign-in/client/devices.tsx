@@ -8,7 +8,7 @@
 // each stage. Above them all are the devices waiting to sign in as whoever's looking, each let in by typing the
 // number it shows, as Microsoft Authenticator has it, or blocked.
 import { createMemo, createSignal, Errored, For, Loading, refresh, Show } from "solid-js"
-import { Badge, Button, call, changed, client, confirm, type Element, Empty, Field, haptic, Icon, Input, link, List, Problem, Row, Screen, Section, seen, Sheet, Skeleton, Spinner, Split, Steps, styles, Switch, Text, toast, tokens, View } from "ui"
+import { Badge, Button, call, changed, client, confirm, type Element, Empty, Field, haptic, Icon, Input, link, List, Problem, Row, Screen, Section, seen, Sheet, since, Skeleton, Spinner, Split, Steps, styles, Switch, Text, toast, tokens, View } from "ui"
 import { on } from "./mine.tsx"
 
 /** A build a machine is on, as `builds` answers it. */
@@ -364,12 +364,6 @@ function Detail(props: { thing: Thing; all: All; groups?: Groups }) {
 /// What kind of thing a device is, as About says it.
 const kinds = { app: "the One App", assistant: "Assistant", browser: "Browser", server: "Server" }
 
-/// When a device named whoever's looking, as a person says it: just now, or how long ago.
-const named = (at: string) => {
-  const minutes = Math.round((Date.now() - new Date(at).getTime()) / 60_000)
-  return minutes < 1 ? "Just now" : new Intl.RelativeTimeFormat(undefined, { numeric: "auto" }).format(-minutes, "minute")
-}
-
 /// The device waiting to sign in that's being answered, by its request: tapping its row, or a notification's link to
 /// it (`#waiting=<request>`), opens it.
 const [answering, setAnswering] = createSignal<string | undefined>(() => /(?:^|&)waiting=([^&]+)/.exec(link() ?? "")?.[1])
@@ -461,7 +455,7 @@ function Things(props: { all: All; groups?: Groups }) {
                 {(device) => (
                   <Row
                     heading={`${device().name} · the One App`}
-                    text={[named(device().at), device().place && `near ${device().place}`].filter(Boolean).join(" · ")}
+                    text={[since(device().at), device().place && `near ${device().place}`].filter(Boolean).join(" · ")}
                     current={answering() === device().request}
                     onPress={() => setAnswering(device().request)}
                   />

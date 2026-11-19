@@ -2,7 +2,7 @@
 // a browser that isn't woken by them says so first, and why, and a browser turns them on here. Which apps may notify you
 // is in Settings (settings.tsx).
 import { createMemo, Errored, For, Loading, refresh, Show } from "solid-js"
-import { call, changed, client, confirm, Empty, List, Menu, open, Problem, render, Row, Screen, Section, Skeleton, Text, toast } from "ui"
+import { call, changed, client, confirm, Empty, List, Menu, open, Problem, render, Row, Screen, Section, since, Skeleton, Text, toast } from "ui"
 import { type Push, PushState } from "./push.tsx"
 
 /** A notification, as `notifications_inbox` answers it. */
@@ -37,15 +37,6 @@ const inbox = createMemo(async () => {
   return { notifications, apps, push, settings: settings === true }
 })
 changed(() => refresh(inbox))
-
-/// How long ago, as a person says it: "now", "5 min", "3 h", then the day.
-function ago(at: string) {
-  const minutes = Math.round((Date.now() - new Date(at).getTime()) / 60_000)
-  if (minutes < 1) return "now"
-  if (minutes < 60) return `${minutes} min`
-  if (minutes < 24 * 60) return `${Math.round(minutes / 60)} h`
-  return new Date(at).toLocaleDateString(undefined, { day: "numeric", month: "short" })
-}
 
 /// Does something to the inbox, and says what the server said if it wouldn't.
 async function change(tool: string, input = {}) {
@@ -95,7 +86,7 @@ function Inbox(props: { inbox: Inbox }) {
                 <Row
                   heading={<Text style={{ font: notification.read ? "body" : "label" }}>{notification.title}</Text>}
                   text={[notification.from, notification.text].filter(Boolean).join(" · ")}
-                  end={ago(notification.at)}
+                  end={since(notification.at, "narrow")}
                   onPress={() => tapped(notification)}
                 />
               )}

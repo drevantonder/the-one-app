@@ -2,7 +2,7 @@
 // in it and the pages it visited last, as it was last saved, and updating it yourself: its browser, drawn here, which
 // you click and type on as you would Chrome, then save. `Summary` is its row's line in the Vault's list.
 import { createMemo, createSignal, For, Loading, refresh, Show } from "solid-js"
-import { Button, call, changed, confirm, Empty, Field, Image, Input, List, LiveScreen, Menu, Problem, Row, Screen, Section, Sheet, Status, Steps, Text, toast, View } from "ui"
+import { Button, call, changed, confirm, Empty, Field, Image, Input, List, LiveScreen, Menu, Problem, Row, Screen, Section, Sheet, since, Status, Steps, Text, toast, View } from "ui"
 
 /** A profile, as `chrome-profiles_list` answers it. */
 interface Profile {
@@ -25,16 +25,6 @@ interface Props {
 type State = "starting" | "opening" | "ready" | "saving" | "discarding" | "failed"
 // What a profile's row says while it's being updated.
 const SAYS: Record<State, string> = { starting: "Starting", opening: "Starting", ready: "Updating", saving: "Saving", discarding: "Closing", failed: "Couldn't start" }
-
-/// How long ago `at` was, in the largest unit that's whole: "2 hours ago". (Not Intl's: a native page's JS has none on a
-/// native host.)
-function since(at: number) {
-  const minutes = Math.max(1, Math.round((Date.now() - at) / 60_000))
-  const ago = (count: number, unit: string) => `${count} ${unit}${count === 1 ? "" : "s"} ago`
-  if (minutes < 60) return ago(minutes, "minute")
-  if (minutes < 48 * 60) return ago(Math.round(minutes / 60), "hour")
-  return ago(Math.round(minutes / (24 * 60)), "day")
-}
 /// A time of day, as "3:45 pm".
 const time = (at: number) => {
   const date = new Date(at)

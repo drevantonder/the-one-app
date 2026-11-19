@@ -3,7 +3,7 @@
 // closes. A file and a commit open in the repo's place, with Back.
 import { createMemo, createSignal, Errored, For, Loading, refresh, Show } from "solid-js"
 import { marked, type Token, type Tokens } from "marked"
-import { Button, call, changed, confirm, createListCollection, Empty, Field, go, Icon, Image, Input, List, Menu, Pressable, Problem, render, Row, Screen, Section, Select, share, Sheet, Skeleton, Split, Tabs, Text, toast, View } from "ui"
+import { Button, call, changed, confirm, createListCollection, Empty, Field, go, Icon, Image, Input, List, Menu, Pressable, Problem, render, Row, Screen, Section, Select, share, Sheet, since, size, Skeleton, Split, Tabs, Text, toast, View } from "ui"
 import type { Style } from "ui"
 
 /** A commit, as the tools answer it. */
@@ -45,25 +45,6 @@ const [adding, setAdding] = createSignal(false)
 
 /// Who something is, as its name's last part: users/alice is alice.
 const short = (name: unknown) => String(name ?? "").split("/").pop()!
-/// How long ago `at` was, as people say it: "2 hours ago", or its date once it's long ago. (Not Intl's: a
-/// native page's JS has none on a native host.)
-const months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
-function since(at: number) {
-  const minutes = Math.round((Date.now() - at) / 60_000)
-  const ago = (count: number, unit: string) => `${plural(count, unit)} ago`
-  if (minutes < 1) return "just now"
-  if (minutes < 60) return ago(minutes, "minute")
-  if (minutes < 48 * 60) return ago(Math.round(minutes / 60), "hour")
-  if (minutes < 60 * 24 * 60) return ago(Math.round(minutes / (24 * 60)), "day")
-  const date = new Date(at)
-  return `${date.getDate()} ${months[date.getMonth()]} ${date.getFullYear()}`
-}
-const units = ["bytes", "KB", "MB", "GB"]
-function size(bytes: number) {
-  let n = bytes, unit = 0
-  while (n >= 1000 && unit < units.length - 1) (n /= 1000), unit++
-  return `${n >= 100 || unit === 0 ? Math.round(n) : n.toFixed(1)} ${units[unit]}`
-}
 const plural = (count: number, one: string) => `${count} ${one}${count === 1 ? "" : "s"}`
 
 // TODO: the UI library's Icon has no folder or git-branch (Phosphor's, drawn here from their SVGs in a mid grey, which

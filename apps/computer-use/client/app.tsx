@@ -1,6 +1,6 @@
 // Computer Use: the screens your agents can use, and one of them as it is now, with who last used it and for what.
 import { createEffect, createMemo, createSignal, Errored, For, Loading, refresh, Show } from "solid-js"
-import { Button, call, changed, client, Empty, List, LiveScreen, Problem, render, Row, Screen, Section, Skeleton, Split, visible } from "ui"
+import { Button, call, changed, client, Empty, List, LiveScreen, Problem, render, Row, Screen, Section, since, Skeleton, Split, visible } from "ui"
 
 /** A screen agents can use, as `computer-use_screens` answers it. */
 interface AgentScreen {
@@ -12,14 +12,6 @@ interface AgentScreen {
   used?: { doing?: string; by?: string; at: number }
 }
 
-const ago = new Intl.RelativeTimeFormat(undefined, { numeric: "auto" })
-/// How long ago `at` was, in the largest unit that's whole: "2 minutes ago".
-function since(at: number) {
-  const minutes = Math.round((at - Date.now()) / 60_000)
-  if (minutes > -60) return ago.format(Math.min(minutes, -1), "minute")
-  if (minutes > -48 * 60) return ago.format(Math.round(minutes / 60), "hour")
-  return ago.format(Math.round(minutes / (24 * 60)), "day")
-}
 const address = (screen: AgentScreen) => `${screen.app}/${screen.name}`
 const name = (who?: string) => who?.split("/").pop()
 const usage = (used: AgentScreen["used"]) => (used ? `${used.doing ?? "Used"} · ${since(used.at)}` : "Not used yet")

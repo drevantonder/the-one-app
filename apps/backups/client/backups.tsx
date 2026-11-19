@@ -2,7 +2,7 @@
 // what's wrong; how often they're made and which are kept. A destination opens beside the list with its backups,
 // Restore, Check and Stop Backing Up Here. Backups are the network's, so every call is for the network.
 import { createMemo, createSignal, Errored, For, Loading, Match, refresh, Show, Switch } from "solid-js"
-import { Button, call, changed, confirm, createListCollection, Empty, Field, Input, List, Problem, RadioGroup, Row, Screen, Section, Select, Sheet, Skeleton, Split, Status, Text, toast, View } from "ui"
+import { Button, call, changed, confirm, createListCollection, Empty, Field, Input, List, Problem, RadioGroup, Row, Screen, Section, Select, Sheet, since, size, Skeleton, Split, Status, Text, toast, View } from "ui"
 
 /** A backup made to a destination. */
 interface Backup {
@@ -40,22 +40,7 @@ const network = { subject: "network" }
 const backups = createMemo(() => call("backups_destinations", {}, network).then((text): All => JSON.parse(text)))
 changed(() => refresh(backups))
 
-const ago = new Intl.RelativeTimeFormat(undefined, { numeric: "auto" })
-/// How long ago `at` was, in the largest unit that's whole: "2 hours ago".
-function since(at: number) {
-  const minutes = Math.round((at - Date.now()) / 60_000)
-  if (minutes > -1) return "just now"
-  if (minutes > -60) return ago.format(minutes, "minute")
-  if (minutes > -48 * 60) return ago.format(Math.round(minutes / 60), "hour")
-  return ago.format(Math.round(minutes / (24 * 60)), "day")
-}
 const when = (at: number) => new Date(at).toLocaleString(undefined, { weekday: "short", day: "numeric", month: "short", hour: "numeric", minute: "2-digit" })
-const units = ["bytes", "KB", "MB", "GB", "TB"]
-function size(bytes: number) {
-  let n = bytes, unit = 0
-  while (n >= 1000 && unit < units.length - 1) (n /= 1000), unit++
-  return `${n >= 100 || unit === 0 ? Math.round(n) : n.toFixed(1)} ${units[unit]}`
-}
 /// How long something took: "40 ms", "14 s", "3 min".
 const took = (ms: number) => (ms < 1000 ? `${ms} ms` : ms < 60_000 ? `${Math.round(ms / 1000)} s` : `${Math.round(ms / 60_000)} min`)
 /// A name as relation tuples say it, short: "users/andre" is "andre".

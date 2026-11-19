@@ -3,7 +3,7 @@
 // what's slowest and what AI cost, over the range picked above them, and last what's kept. A failure opens its trace beside the list, as a waterfall; a slow tool opens how
 // long it took over time. What's fine is silent: with nothing failing, there's no Failing.
 import { createMemo, createSignal, Errored, For, Loading, refresh, Show } from "solid-js"
-import { call, changed, Empty, Icon, List, Problem, render, Row, Screen, Section, Skeleton, Split, Tabs, Text, View } from "ui"
+import { call, changed, Empty, Icon, List, Problem, render, Row, Screen, Section, since, size, Skeleton, Split, Tabs, Text, View } from "ui"
 
 /** A slow tool, or an app slow to open, as `telemetry_overview` answers it. */
 interface Slowest {
@@ -96,15 +96,6 @@ const [open, setOpen] = createSignal<{ trace?: string; where?: string; slow?: Sl
 
 const compact = new Intl.NumberFormat(undefined, { notation: "compact", maximumFractionDigits: 1 })
 const count = (n?: number) => compact.format(n ?? 0)
-const ago = new Intl.RelativeTimeFormat(undefined, { numeric: "auto", style: "short" })
-/// How long ago `at` was, in the largest unit that's whole.
-function since(at: number) {
-  const minutes = Math.round((at - Date.now()) / 60_000)
-  if (minutes > -1) return "just now"
-  if (minutes > -60) return ago.format(minutes, "minute")
-  if (minutes > -48 * 60) return ago.format(Math.round(minutes / 60), "hour")
-  return ago.format(Math.round(minutes / (24 * 60)), "day")
-}
 /// How long something took: "0.4 ms", "12 ms", "1.2 s", "3 min".
 function took(ms?: number | null) {
   if (ms == null) return "–"
@@ -112,12 +103,6 @@ function took(ms?: number | null) {
   if (ms < 1000) return `${Math.round(ms)} ms`
   if (ms < 60_000) return `${(ms / 1000).toFixed(ms < 10_000 ? 1 : 0)} s`
   return `${Math.round(ms / 60_000)} min`
-}
-const units = ["bytes", "KB", "MB", "GB"]
-function size(bytes: number) {
-  let n = bytes, unit = 0
-  while (n >= 1000 && unit < units.length - 1) (n /= 1000), unit++
-  return `${n >= 100 || unit === 0 ? Math.round(n) : n.toFixed(1)} ${units[unit]}`
 }
 /// The host of an address, `https://host/path` as `host`.
 const host = (address: string) => address.replace(/^[a-z][a-z0-9+.-]*:\/\//i, "").replace(/[/?#].*$/, "")
@@ -300,7 +285,7 @@ function Telemetry(props: { all: Overview }) {
                     start={<View style={{ color: alert().state === "resolved" ? undefined : "destructive" }}><Icon name={alert().state === "resolved" ? "check" : "warning-circle"} /></View>}
                     heading={alert().title}
                     text={alert().text ?? undefined}
-                    end={alert().ended ? `Resolved ${since(alert().ended!)}` : since(alert().began)}
+                    end={alert().ended ? `Resolved ${since(alert().ended!, "narrow")}` : since(alert().began, "narrow")}
                   />
                 )}
               </For>
@@ -317,7 +302,7 @@ function Telemetry(props: { all: Overview }) {
                     start={<View style={{ color: "destructive" }}><Icon name="warning-circle" /></View>}
                     heading={failure().span ? named(failure().where, all().names) : failure().where}
                     text={[failure().from, failure().message || "Failed", failure().took != null && failure().took! >= 1000 && `for ${took(failure().took)}`].filter(Boolean).join(" · ")}
-                    end={`${failure().count > 1 ? `${many(failure().count, "time")} · ` : ""}${since(failure().at)}`}
+                    end={`${failure().count > 1 ? `${many(failure().count, "time")} · ` : ""}${since(failure().at, "narrow")}`}
                     current={open()?.trace === failure().trace}
                     onPress={failure().trace ? () => setOpen({ trace: failure().trace, where: failure().where }) : undefined}
                   />
