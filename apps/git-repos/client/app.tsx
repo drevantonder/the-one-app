@@ -3,7 +3,7 @@
 // closes. A file and a commit open in the repo's place, with Back.
 import { createMemo, createSignal, Errored, For, Loading, refresh, Show } from "solid-js"
 import { marked, type Token, type Tokens } from "marked"
-import { Button, call, changed, confirm, Empty, Field, go, Icon, Image, Input, List, Menu, Pressable, Problem, render, Row, Screen, Section, Select, share, Sheet, since, size, Skeleton, Split, styles, Tabs, Text, toast, tokens, View } from "ui"
+import { Button, call, changed, confirm, Empty, Field, go, Icon, Image, Input, List, Menu, Pressable, Problem, render, Row, ScrollView, Screen, Section, Select, share, Sheet, since, size, Skeleton, Split, styles, Tabs, Text, toast, tokens, View } from "ui"
 
 /** A commit, as the tools answer it. */
 interface Commit {
@@ -84,7 +84,8 @@ const look = styles({
   title: { font: tokens.type.title },
   footnote: { font: tokens.type.caption, color: tokens.colour.secondaryLabel },
   quiet: { color: tokens.colour.secondaryLabel },
-  removed: { color: tokens.colour.red },
+  removed: { backgroundColor: tokens.colour.redTint },
+  added: { backgroundColor: tokens.colour.greenTint },
   oneLine: { lineClamp: 1 },
   shrinks: { flexGrow: 1, flexShrink: 1 },
   crumbs: { flexDirection: "row", flexWrap: "wrap", alignItems: "center", gap: tokens.grid[1] },
@@ -103,10 +104,11 @@ const look = styles({
   rule: { borderBottomWidth: tokens.length.hairline, borderColor: tokens.colour.quinaryLabel },
   tableRow: { flexDirection: "row", gap: tokens.grid[4], paddingBlock: tokens.grid[1.5], borderBottomWidth: tokens.length.hairline, borderColor: tokens.colour.quinaryLabel },
   cell: { flexGrow: 1, flexBasis: 0 },
-  lines: { paddingBlock: tokens.grid[2] },
+  scroll: { flexDirection: "row" },
+  lines: { flexGrow: 1, flexShrink: 0, paddingBlock: tokens.grid[2] },
   line: { flexDirection: "row", gap: tokens.grid[4], paddingInline: tokens.grid[4] },
   number: { width: tokens.grid[8], flexShrink: 0, textAlign: "end" },
-  lineText: { flexShrink: 1, color: tokens.colour.label },
+  lineText: { flexShrink: 0, color: tokens.colour.label, fontFamily: tokens.font.mono, whiteSpace: "nowrap" },
   message: { padding: tokens.grid[4] },
   messageMore: { paddingBottom: tokens.grid[2] },
 })
@@ -522,26 +524,27 @@ function File(props: { repo: string; branch: string; path: string }) {
   )
 }
 
-// TODO: code is in a proportional font that wraps, its indentation kept as no-break spaces, its added and removed lines
-// tinted by their text only: restore the mono type style, no wrapping with sideways scrolling, and the diff tints
-// (`diff-add`, `diff-del`) in the UI library's contract.
+// Whitespace is kept as no-break spaces, which a host that collapses it leaves alone.
 const kept = (text: string) => text.replace(/^[ \t]+/, (space) => space.replace(/\t/g, "    ").replace(/ /g, "\u00a0")) || "\u00a0"
 
-/// Lines of code, each with its number where it has one.
-function Lines(props: { lines: { text: string; number?: number; removed?: boolean; muted?: boolean }[] }) {
+/// Lines of code, each with its number where it has one, in the device's monospace on one line each: wider than the
+/// card, they scroll sideways. A diff's added and removed lines are tinted across the card.
+function Lines(props: { lines: { text: string; number?: number; added?: boolean; removed?: boolean; muted?: boolean }[] }) {
   return (
-    <View style={look.lines}>
-      <For each={props.lines}>
-        {(line) => (
-          <View style={look.line}>
-            <Show when={line.number}>
-              <Text style={[look.footnote, look.number]}>{line.number}</Text>
-            </Show>
-            <Text style={[look.footnote, look.lineText, line.removed ? look.removed : line.muted && look.quiet]}>{kept(line.text)}</Text>
-          </View>
-        )}
-      </For>
-    </View>
+    <ScrollView style={look.scroll}>
+      <View style={look.lines}>
+        <For each={props.lines}>
+          {(line) => (
+            <View style={[look.line, line.added && look.added, line.removed && look.removed]}>
+              <Show when={line.number}>
+                <Text style={[look.footnote, look.number]}>{line.number}</Text>
+              </Show>
+              <Text style={[look.footnote, look.lineText, line.muted && look.quiet]}>{kept(line.text)}</Text>
+            </View>
+          )}
+        </For>
+      </View>
+    </ScrollView>
   )
 }
 
@@ -570,7 +573,7 @@ function CommitScreen(props: { repo: string; sha: string }) {
   const commit = createMemo(() => json<Commit & { message: string; diff: string }>("git-repos_commit", { repo: props.repo, sha: props.sha }))
   const line = (text: string) => {
     if (/^(\+\+\+|---|diff |index )/.test(text) || text.startsWith("@@")) return { text, muted: true }
-    return { text, removed: text[0] === "-" }
+    return { text, added: text[0] === "+", removed: text[0] === "-" }
   }
   const more = () => commit().message.split("\n").slice(1).join("\n").trim()
   return (
@@ -600,7 +603,10 @@ function PullRequests(props: { repo: string; pushes: boolean }) {
   const pullRequests = createMemo(() => json<{ pull_requests: PullRequest[] }>("git-repos_pull_requests", { repo: props.repo }).then(({ pull_requests }) => pull_requests))
   const open = () => pullRequests().filter((one) => one.state === "open")
   const closed = () => pullRequests().filter((one) => one.state !== "open")
-  const merge = (one: PullRequest) => does("git-repos_merge", { repo: props.repo, pull_request: one.name }).then((said): unknown => said && (toast(`Merged into ${one.into}.`), refresh(pullRequests)))
+  const merge = async (one: PullRequest) => {
+    if (!(await confirm({ heading: `Merge ${one.title}?`, text: `${plural(one.commits.length, "commit")} into ${one.into}.`, action: "Merge" }))) return
+    if (await does("git-repos_merge", { repo: props.repo, pull_request: one.name })) (toast(`Merged into ${one.into}.`), refresh(pullRequests))
+  }
   const close = async (one: PullRequest) => (await confirm({ heading: `Close ${one.title}?`, text: "It stays listed as closed.", action: "Close" })) && (await does("git-repos_close", { repo: props.repo, pull_request: one.name })) && refresh(pullRequests)
   const line = (one: PullRequest) => `${short(one.by)} · into ${one.into} · ${plural(one.commits.length, "commit")} · ${since(one.at)}`
   return (
