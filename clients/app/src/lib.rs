@@ -39,7 +39,6 @@ mod discard;
 #[cfg(desktop)]
 pub mod host;
 mod hosts;
-#[cfg(desktop)]
 mod native;
 
 pub(crate) mod page;
