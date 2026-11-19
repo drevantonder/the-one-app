@@ -263,8 +263,8 @@ async function filled(params) {
 }
 
 /// Whether asking `method` only reads. A tool does when the server's list of tools says so.
-/** @param {string} view @param {string} method @param {Record<string, unknown>} params */
-async function reads(view, method, params) {
+/** @param {string} method @param {Record<string, unknown>} params */
+async function reads(method, params) {
   if (["tools/list", "resources/list", "resources/read"].includes(method)) return true
   if (method !== "tools/call") return false
   return (await (tools ?? listTools())).some((/** @type {{ name: string, annotations?: { readOnlyHint?: boolean } }} */ tool) => tool.name === params.name && tool.annotations?.readOnlyHint === true)
@@ -419,7 +419,7 @@ const commands = {
     return { ...listed, outdated: outdated(subject, listed.resources) }
   },
   async request({ view, method, params }) {
-    if (await reads(view, method, params)) return read(view, method, params)
+    if (await reads(method, params)) return read(view, method, params)
     const response = await mcp(method, params)
     // A server tells every client it's connected to that something changed. A browser isn't connected, so it
     // invalidates every open app's cached reads and refetches them in the background.

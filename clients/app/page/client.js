@@ -559,7 +559,7 @@ const machine = setup({
   },
   actions: {
     told: assign({ told: ({ event, context }) => (event.type === "session" ? event.told : context.told) }),
-    connection: assign(({ event, context }) => {
+    connection: assign(({ event }) => {
       if (event.type !== "connection") return {}
       for (const view of open.values()) post(view, { method: "ui/notifications/host-context-changed", params: { connection: event.connection } })
       return { connection: event.connection }
