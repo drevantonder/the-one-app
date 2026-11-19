@@ -6,15 +6,14 @@ defmodule Vault.Fetch do
   """
 
   @doc """
-  Makes a web request with `{{<field>}}` filled in from `fields` wherever it's written: in the URL, a header or
-  the body (escaped, in a JSON one, as a JSON string's text), only to one of `hosts`, so what's asked with an item goes nowhere else. `secret` names the fields that
-  are secret, which are blotted out of what the site answers. Gives `%{status: ..., headers: ..., body: ...}`. A
-  redirect is answered as it is, not followed: it may lead to another site.
+  Makes a web request with `{{<field>}}` filled in from `fields` wherever it's written: in the URL (percent-encoded,
+  so a value is only ever text within it), a header or the body (escaped, in a JSON one, as a JSON string's text),
+  only to one of `hosts`, so what's asked with an item goes nowhere else: where it goes is checked once it's filled
+  in, as it's sent. `secret` names the fields that are secret, which are blotted out of what the site answers, which
+  it's asked to send uncompressed so they can be. Gives `%{status: ..., headers: ..., body: ...}`. A redirect is
+  answered as it is, not followed: it may lead to another site.
   """
   def request(request, fields, secret, hosts) do
-    uri = URI.parse(request.url)
-    site = site!(uri)
-
     used =
       Enum.uniq(
         Enum.flat_map(
@@ -25,11 +24,19 @@ defmodule Vault.Fetch do
 
     for field <- used, not is_map_key(fields, field), do: raise("It has no field named #{field}.")
 
-    if not to?(request.url, hosts), do: raise("It's used only with #{listed(hosts)}, and that's #{site}.")
-
     fill = fn text, as -> Regex.replace(~r/\{\{([A-Za-z0-9_]+)\}\}/, text, fn _all, field -> as.(fields[field]) end) end
     plain = &fill.(&1, fn value -> value end)
-    headers = for {name, value} <- request[:headers] || %{}, do: {plain.(name), plain.(value)}
+    url = fill.(request.url, &URI.encode(&1, fn char -> URI.char_unreserved?(char) end))
+    site = site!(URI.parse(url))
+    if URI.parse(url).userinfo, do: raise("A request names nobody before its site, as user@ would.")
+    if not to?(url, hosts), do: raise("It's used only with #{listed(hosts)}, and that's #{site}.")
+
+    # Asked for as it is, never compressed: what it says back is looked through for secrets.
+    headers =
+      for {name, value} <- request[:headers] || %{}, String.downcase(name) != "accept-encoding",
+          do: {plain.(name), plain.(value)}
+
+    headers = [{"accept-encoding", "identity"} | headers]
     method = (request[:method] || "get") |> to_string() |> String.downcase() |> method!()
 
     # In a JSON body a value is written inside a string, so it's escaped as a JSON string's text is.
@@ -40,7 +47,7 @@ defmodule Vault.Fetch do
 
     case Req.request(
            method: method,
-           url: plain.(request.url),
+           url: url,
            headers: headers,
            body: body,
            redirect: false,
@@ -50,6 +57,9 @@ defmodule Vault.Fetch do
            decode_body: false,
            receive_timeout: (request[:timeout] || 15) * 1000
          ) do
+      {:ok, %{headers: %{"content-encoding" => [encoding | _]}}} when encoding != "identity" ->
+        raise "#{site} answered #{encoding}-compressed, asked not to, so what it said can't be looked through for secrets."
+
       {:ok, response} ->
         blotted = secret |> Enum.flat_map(&forms(fields[&1])) |> Enum.uniq() |> Enum.sort_by(&(-byte_size(&1)))
         blot = fn text -> Enum.reduce(blotted, text, &String.replace(&2, &1, "[secret]")) end
@@ -61,10 +71,13 @@ defmodule Vault.Fetch do
     end
   end
 
-  @doc "Whether a request to `url` goes to one of `hosts`: its site's name, or its host's."
+  @doc """
+  Whether a request to `url` goes to one of `hosts`: its site's name, its host with the port if it isn't its scheme's
+  own, and no user before it (`user@`), which would name someone at a site rather than where it goes.
+  """
   def to?(url, hosts) do
     uri = URI.parse(url)
-    site!(uri) in hosts or uri.host in hosts
+    uri.userinfo == nil and site!(uri) in hosts
   end
 
   # A secret as a site may say it back: as it is, escaped in a JSON string, URL-encoded, or in base64, padded or
