@@ -91,7 +91,7 @@ defmodule Vault.Access do
   end
 
   @doc "Shares someone's Vault with the app making a call, before it has an item there: the tuple it reaches it by."
-  def reach(call), do: share(call, "share", Store.theirs(call), call.who)
+  def reach(call), do: share(call, "share", Store.theirs(call), call.app_artifact)
 
   # A relation tuple is the permissions app's to write, as whoever asked.
   defp share(call, tool, artifact, who) do

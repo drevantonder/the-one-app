@@ -41,7 +41,7 @@ defmodule Vault do
   @impl true
   def requires do
     %{
-      "core" => ">= 0.27.35",
+      "core" => ">= 0.30.0",
       "encryption" => "to keep your secrets from whoever runs the bucket",
       "database" => "to keep your items",
       "notifications" => "to tell you when an agent saves something to your Vault"
@@ -664,7 +664,7 @@ defmodule Vault do
     db = Store.reached(call)
 
     Store.quietly("Reading #{field}", fn ->
-      found = Access.may!(Items.find!(call, db, item), {:app, call.who})
+      found = Access.may!(Items.find!(call, db, item), {:app, call.app_artifact})
       Items.fields(found)[field] || raise "#{found["name"]} has no field named #{field}."
     end)
   end
@@ -675,7 +675,7 @@ defmodule Vault do
   """
   def values(%Call{} = call, item) do
     db = Store.reached(call)
-    Store.quietly("Reading #{item}", fn -> Items.fields(Access.may!(Items.find!(call, db, item), {:app, call.who})) end)
+    Store.quietly("Reading #{item}", fn -> Items.fields(Access.may!(Items.find!(call, db, item), {:app, call.app_artifact})) end)
   end
 
   @doc """
@@ -689,7 +689,7 @@ defmodule Vault do
     db = Store.reached(call)
 
     Store.quietly("Keeping #{item}", fn ->
-      Items.write!(call, db, item, Items.kept_by(call, call.who, item, hosts), {:app, call.who}, fn record ->
+      Items.write!(call, db, item, Items.kept_by(call, call.app_artifact, item, hosts), {:app, call.app_artifact}, fn record ->
         Enum.reduce(fields, record, fn {name, value}, record -> Items.put_field(record, name, value, true) end)
       end)
 
@@ -706,7 +706,7 @@ defmodule Vault do
     db = Store.reached(call)
 
     Store.quietly("Deleting #{item}", fn ->
-      if found = Items.find(call, db, item), do: delete!(call, db, Access.may!(found, {:app, call.who}))
+      if found = Items.find(call, db, item), do: delete!(call, db, Access.may!(found, {:app, call.app_artifact}))
       :ok
     end)
   end
@@ -719,7 +719,7 @@ defmodule Vault do
     db = Store.reached(call)
 
     Store.quietly("Renaming #{item}", fn ->
-      Store.rename(call, db, Access.may!(Items.find!(call, db, item), {:app, call.who}), to)
+      Store.rename(call, db, Access.may!(Items.find!(call, db, item), {:app, call.app_artifact}), to)
       :ok
     end)
   end
@@ -738,7 +738,7 @@ defmodule Vault do
     db = Store.reached(call)
 
     Store.quietly("Changing #{item}", fn ->
-      Items.status!(call, db, Items.find!(call, db, item), call.who, state, message, action)
+      Items.status!(call, db, Items.find!(call, db, item), call.app_artifact, state, message, action)
       Call.changed(call)
       :ok
     end)
@@ -761,7 +761,7 @@ defmodule Vault do
     {blob, key} = {Base.encode16(:crypto.strong_rand_bytes(16), case: :lower), Base.encode64(:crypto.strong_rand_bytes(32))}
 
     Store.quietly("Keeping #{name} of #{item}", fn ->
-      found = Access.may!(Items.find!(call, db, item), {:app, call.who})
+      found = Access.may!(Items.find!(call, db, item), {:app, call.app_artifact})
       path = "#{found["id"]}/contents/#{blob}"
       size = send.(%{"link" => Store.link(db, path, :write), "key" => key})
       kept = %{"blob" => path, "key" => key, "size" => size, "at" => Store.now()}
@@ -782,7 +782,7 @@ defmodule Vault do
     db = Store.reached(call)
 
     Store.quietly("Reading #{name} of #{item}", fn ->
-      found = Access.may!(Items.find!(call, db, item), {:app, call.who})
+      found = Access.may!(Items.find!(call, db, item), {:app, call.app_artifact})
 
       if kept = found["contents"][name],
         do: receive.(%{"link" => Store.link(db, kept["blob"], :read), "key" => kept["key"], "size" => kept["size"]})
@@ -798,7 +798,7 @@ defmodule Vault do
   def items(%Call{} = call) do
     if Call.reaches?(call, Store.theirs(call), "editor") do
       db = Store.reached(call)
-      used_by(db, Items.all(call, db), call.who)
+      used_by(db, Items.all(call, db), call.app_artifact)
     else
       []
     end

@@ -5,7 +5,7 @@ defmodule ServerDebug.Probe do
   # Core's. What it's told of the app is `scope`:
   #
   # - `subject`: whose calls it looks at, the only ones it shows.
-  # - `who`: the app, as the Logger metadata of a process running a call of it says (`OneCore.Apps.Calls`), or
+  # - `app_artifact`: the app, as the Logger metadata of a process running a call of it says (`OneCore.Apps.Calls`), or
   #   `nil` in a VM that runs no other app's calls.
   # - `own`: whether a process is one of the app's own, kept between calls, where those may be shown; `nil` if not.
   # - `label`: what one of those is, as the app wrote its module. `module`: a module of the app by that name.
@@ -52,7 +52,7 @@ defmodule ServerDebug.Probe do
   end
 
   defp called?(metadata, scope),
-    do: metadata[:subject] == scope.subject and (scope.who == nil or metadata[:who] == scope.who)
+    do: metadata[:subject] == scope.subject and (scope.app_artifact == nil or metadata[:app_artifact] == scope.app_artifact)
 
   defp metadata(dictionary) do
     case List.keyfind(dictionary, :"$logger_metadata$", 0) do
@@ -261,7 +261,7 @@ defmodule ServerDebug.Probe do
   # A follow: what the app says to Logger, every level, as it runs for `subject`, kept for whoever follows it until
   # they read it, for `minutes` or until it has heard `lines`. Reading it again goes on from there.
   defp logs(request, scope) do
-    name = {:global, {__MODULE__.Follow, request["follower"], scope.who, scope.subject}}
+    name = {:global, {__MODULE__.Follow, request["follower"], scope.app_artifact, scope.subject}}
 
     if request["stop"] do
       with pid when is_pid(pid) <- GenServer.whereis(name), do: GenServer.stop(pid)
@@ -291,7 +291,7 @@ defmodule ServerDebug.Probe do
 
   defp heard?(meta, scope) do
     callers = Process.get(:"$callers")
-    mine?(meta[:pid] || self(), Map.take(meta, [:subject, :who]), callers, scope)
+    mine?(meta[:pid] || self(), Map.take(meta, [:subject, :app_artifact]), callers, scope)
   end
 
   defp message({:string, text}), do: IO.chardata_to_string(text)

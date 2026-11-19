@@ -20,7 +20,7 @@ defmodule ServerDebug do
   def icon, do: "icon.svg"
 
   @impl true
-  def requires, do: %{"core" => ">= 0.29.60"}
+  def requires, do: %{"core" => ">= 0.30.0"}
 
   @impl true
   def tools do
@@ -270,11 +270,11 @@ defmodule ServerDebug do
 
     Probe.run(request, %{
       subject: target.whose,
-      who: artifact,
+      app_artifact: artifact,
       own: if(own?, do: &(label.(&1) != nil)),
       label: label,
       module: &(Version.module(version, &1) || raise("#{target.name} has no module #{&1}")),
-      calls: {OneCore.Apps.Calls, :running, [%{who: artifact, subject: target.whose}, :_]},
+      calls: {OneCore.Apps.Calls, :running, [%{app_artifact: artifact, subject: target.whose}, :_]},
       name: &Version.own_names(&1, version)
     })
   end
