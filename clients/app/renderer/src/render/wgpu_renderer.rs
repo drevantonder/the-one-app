@@ -83,10 +83,11 @@ impl Layouts {
         };
         let layout = |entries: &[wgpu::BindGroupLayoutEntry]| device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor { label: None, entries });
         let globals = layout(&[uniform(0), uniform(1)]);
+        // A batch's instances are at an offset of their own in the frame's data, which one bind group of it gives.
         let instances = layout(&[wgpu::BindGroupLayoutEntry {
             binding: 0,
             visibility,
-            ty: wgpu::BindingType::Buffer { ty: wgpu::BufferBindingType::Storage { read_only: true }, has_dynamic_offset: false, min_binding_size: None },
+            ty: wgpu::BindingType::Buffer { ty: wgpu::BufferBindingType::Storage { read_only: true }, has_dynamic_offset: true, min_binding_size: None },
             count: None,
         }]);
         let blur_params = layout(&[uniform(0)]);
@@ -279,6 +280,17 @@ pub struct WgpuRenderer {
     /// What the last frame drew, batch by batch (`Drawn`), and what of the frames before was the same and is kept.
     last: Drawn,
     kept: Option<Kept>,
+    /// The bind group of the frame's data for its batches' instances, each at its offset, and how much of the data
+    /// from there it binds; made again only as the data's buffer is, or a batch needs more.
+    instances: Option<(wgpu::Buffer, u64, wgpu::BindGroup)>,
+    /// Each atlas texture's bind group, as of the atlas's having made so many textures.
+    atlas_groups: std::cell::RefCell<(u64, std::collections::HashMap<super::atlas::AtlasTextureId, wgpu::BindGroup>)>,
+}
+
+/// The frame's batches' instances: the bind group of its data, and each batch's offset in it.
+struct Instances {
+    group: wgpu::BindGroup,
+    offsets: Vec<u32>,
 }
 
 /// What a frame drew: each batch, as a hash of what it is (its kind, texture and instances), and what they were drawn
@@ -414,6 +426,8 @@ impl WgpuRenderer {
             tiles: Default::default(),
             last: Drawn::default(),
             kept: None,
+            instances: None,
+            atlas_groups: Default::default(),
         }
     }
 
@@ -556,6 +570,10 @@ impl WgpuRenderer {
                 }
             }
         }
+        // What a batch's instances bind is as much as the largest needs, from its offset, so one bind group serves all.
+        let largest = instances.iter().chain(planned.iter().map(|(.., instance)| instance)).map(|(_, length)| *length).max().unwrap_or(4);
+        let window = self.instances.as_ref().map_or(0, |(_, window, _)| *window).max(largest.next_power_of_two().max(256));
+        self.data.resize(self.data.len() + window as usize, 0);
         self.write_data();
         let buffer = self.buffer.clone().expect("written above");
         let binding = |(offset, size): (u64, u64)| wgpu::BindingResource::Buffer(wgpu::BufferBinding { buffer: &buffer, offset, size: wgpu::BufferSize::new(size) });
@@ -564,22 +582,22 @@ impl WgpuRenderer {
             layout: &self.pipelines.layouts.globals,
             entries: &[wgpu::BindGroupEntry { binding: 0, resource: binding(globals) }, wgpu::BindGroupEntry { binding: 1, resource: binding(gamma) }],
         });
-        let instances: Vec<wgpu::BindGroup> = instances
-            .into_iter()
-            .map(|range| {
-                self.device.create_bind_group(&wgpu::BindGroupDescriptor {
-                    label: None,
-                    layout: &self.pipelines.layouts.instances,
-                    entries: &[wgpu::BindGroupEntry { binding: 0, resource: binding(range) }],
-                })
-            })
-            .collect();
+        if self.instances.as_ref().is_none_or(|(bound, bound_window, _)| *bound != buffer || *bound_window != window) {
+            let group = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
+                label: None,
+                layout: &self.pipelines.layouts.instances,
+                entries: &[wgpu::BindGroupEntry { binding: 0, resource: binding((0, window)) }],
+            });
+            self.instances = Some((buffer.clone(), window, group));
+        }
+        let group = self.instances.as_ref().expect("made above").2.clone();
+        let instances = Instances { group, offsets: instances.iter().map(|(offset, _)| *offset as u32).collect() };
 
         // The frame is drawn in runs of batches, one pass each, broken at each backdrop, which blurs what's drawn
         // before it.
         let mut encoder = self.device.create_command_encoder(&wgpu::CommandEncoderDescriptor::default());
         for (key, (width, height), globals, instance) in planned {
-            self.draw_tile(&mut encoder, &buffer, key, (width, height), globals, gamma, instance);
+            self.draw_tile(&mut encoder, &buffer, &instances.group, key, (width, height), globals, gamma, instance);
         }
         // The frame starts from what's kept, where it starts as that did, and is drawn only from there; or what's the
         // same as the last frame's start, two frames running, is kept now, where it's worth more than its copy.
@@ -649,7 +667,7 @@ impl WgpuRenderer {
         load: wgpu::LoadOp<wgpu::Color>,
         globals: &wgpu::BindGroup,
         batches: &[PrimitiveBatch<'_>],
-        instances: &[wgpu::BindGroup],
+        instances: &Instances,
         run: &[usize],
         blurred: Option<(wgpu::TextureView, usize)>,
     ) {
@@ -669,28 +687,28 @@ impl WgpuRenderer {
         pass.set_bind_group(0, globals, &[]);
         for &at in run {
             if let PrimitiveBatch::Shadows(shadows) = &batches[at] {
-                self.draw_shadows(&mut pass, shadows, &instances[at]);
+                self.draw_shadows(&mut pass, shadows, &instances.group, instances.offsets[at]);
                 continue;
             }
             let (pipeline, texture, count) = match &batches[at] {
                 PrimitiveBatch::Quads(quads) => (&self.pipelines.quads, None, quads.len()),
                 PrimitiveBatch::Shadows(_) => unreachable!("drawn above"),
                 PrimitiveBatch::Underlines(underlines) => (&self.pipelines.underlines, None, underlines.len()),
-                PrimitiveBatch::MonochromeSprites { texture_id, sprites } => (&self.pipelines.mono_sprites, Some(self.atlas.view(*texture_id)), sprites.len()),
-                PrimitiveBatch::PolychromeSprites { texture_id, sprites } => (&self.pipelines.poly_sprites, Some(self.atlas.view(*texture_id)), sprites.len()),
+                PrimitiveBatch::MonochromeSprites { texture_id, sprites } => (&self.pipelines.mono_sprites, Some(*texture_id), sprites.len()),
+                PrimitiveBatch::PolychromeSprites { texture_id, sprites } => (&self.pipelines.poly_sprites, Some(*texture_id), sprites.len()),
                 PrimitiveBatch::Backdrops(_) => {
                     let Some((blurred, one)) = &blurred else { continue };
                     pass.set_pipeline(&self.pipelines.backdrops().0);
-                    pass.set_bind_group(1, &instances[at], &[]);
+                    pass.set_bind_group(1, &instances.group, &[instances.offsets[at]]);
                     pass.set_bind_group(2, &self.texture(blurred), &[]);
                     pass.draw(0..4, *one as u32..*one as u32 + 1);
                     continue;
                 }
             };
             pass.set_pipeline(pipeline);
-            pass.set_bind_group(1, &instances[at], &[]);
-            if let Some(view) = texture {
-                pass.set_bind_group(2, &self.texture(&view), &[]);
+            pass.set_bind_group(1, &instances.group, &[instances.offsets[at]]);
+            if let Some(id) = texture {
+                pass.set_bind_group(2, &self.atlas_group(id), &[]);
             }
             pass.draw(0..4, 0..count as u32);
         }
@@ -708,7 +726,7 @@ impl WgpuRenderer {
         globals: &wgpu::BindGroup,
         buffer: &wgpu::Buffer,
         batches: &[PrimitiveBatch<'_>],
-        instances: &[wgpu::BindGroup],
+        instances: &Instances,
         blurs: &[Vec<Blur>],
         range: std::ops::Range<usize>,
     ) {
@@ -732,9 +750,9 @@ impl WgpuRenderer {
     }
 
     /// Draws a batch of shadows, each from its tile where it has one, else worked out where it's drawn, in runs.
-    fn draw_shadows(&self, pass: &mut wgpu::RenderPass<'_>, shadows: &[Shadow], instances: &wgpu::BindGroup) {
+    fn draw_shadows(&self, pass: &mut wgpu::RenderPass<'_>, shadows: &[Shadow], instances: &wgpu::BindGroup, offset: u32) {
         let tiles = self.pipelines.tiles.get();
-        pass.set_bind_group(1, instances, &[]);
+        pass.set_bind_group(1, instances, &[offset]);
         let mut at = 0;
         while at < shadows.len() {
             let tile = tiles.zip(tiled(&shadows[at]).and_then(|(key, _)| self.tiles.get(&key)));
@@ -759,7 +777,7 @@ impl WgpuRenderer {
     /// Draws a shadow's tile, `size`, from its box alone (`instance`, with the frame's `globals` and `gamma` of its
     /// own), and keeps it, as `key`'s. A window's shadows are few and keep their tiles; past 64 they're made again.
     #[allow(clippy::too_many_arguments)]
-    fn draw_tile(&mut self, encoder: &mut wgpu::CommandEncoder, buffer: &wgpu::Buffer, key: TileKey, (width, height): (u32, u32), globals: (u64, u64), gamma: (u64, u64), instance: (u64, u64)) {
+    fn draw_tile(&mut self, encoder: &mut wgpu::CommandEncoder, buffer: &wgpu::Buffer, instances: &wgpu::BindGroup, key: TileKey, (width, height): (u32, u32), globals: (u64, u64), gamma: (u64, u64), instance: (u64, u64)) {
         if self.tiles.len() >= 64 {
             self.tiles.clear();
         }
@@ -780,11 +798,6 @@ impl WgpuRenderer {
             layout: &self.pipelines.layouts.globals,
             entries: &[wgpu::BindGroupEntry { binding: 0, resource: binding(globals) }, wgpu::BindGroupEntry { binding: 1, resource: binding(gamma) }],
         });
-        let instances = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: None,
-            layout: &self.pipelines.layouts.instances,
-            entries: &[wgpu::BindGroupEntry { binding: 0, resource: binding(instance) }],
-        });
         {
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: None,
@@ -798,11 +811,21 @@ impl WgpuRenderer {
             });
             pass.set_pipeline(&self.pipelines.tiles().0);
             pass.set_bind_group(0, &globals, &[]);
-            pass.set_bind_group(1, &instances, &[]);
+            pass.set_bind_group(1, instances, &[instance.0 as u32]);
             pass.draw(0..4, 0..1);
         }
         let group = self.texture(&view);
         self.tiles.insert(key, (texture, group));
+    }
+
+    /// An atlas texture's bind group, kept till the atlas makes another texture (which may be in its place).
+    fn atlas_group(&self, id: super::atlas::AtlasTextureId) -> wgpu::BindGroup {
+        let mut groups = self.atlas_groups.borrow_mut();
+        let made = self.atlas.made();
+        if groups.0 != made {
+            *groups = (made, Default::default());
+        }
+        groups.1.entry(id).or_insert_with(|| self.texture(&self.atlas.view(id))).clone()
     }
 
     /// A bind group of `view` and the sampler, for a pass to sample.

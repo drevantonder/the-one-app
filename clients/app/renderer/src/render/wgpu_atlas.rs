@@ -30,6 +30,8 @@ struct WgpuAtlasState {
     /// How many times what's in it has changed: a frame whose sprites are the same bytes as another's, with this the
     /// same too, looks the same.
     generation: u64,
+    /// How many textures it has made, whose bind groups a renderer keeps (`WgpuRenderer::atlas_group`).
+    made: u64,
 }
 
 impl WgpuAtlas {
@@ -42,12 +44,18 @@ impl WgpuAtlas {
             tiles_by_key: Default::default(),
             uploads: Vec::new(),
             generation: 0,
+            made: 0,
         }))
     }
 
     /// Writes what's been added since the last frame into its textures, before the frame that draws it.
     pub fn before_frame(&self) {
         self.0.lock().flush();
+    }
+
+    /// How many textures it has made (`WgpuAtlasState::made`).
+    pub(crate) fn made(&self) -> u64 {
+        self.0.lock().made
     }
 
     /// How many times what's in it has changed (`WgpuAtlasState::generation`).
@@ -108,6 +116,7 @@ impl WgpuAtlasState {
             view_formats: &[],
         });
         let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+        self.made += 1;
         let list = &mut self.storage[kind];
         let index = list.free_list.pop();
         let atlas_texture = WgpuAtlasTexture {
