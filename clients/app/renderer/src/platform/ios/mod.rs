@@ -6,7 +6,7 @@
 //! What tao doesn't say is heard on the view itself: the system going light or dark (`traitCollectionDidChange:`), and
 //! the keyboard coming and going, which its page keeps clear of as it does the safe area. Typing goes through Flutter's
 //! iOS text input plugin (`text_input.mm`), which the screen speaks Flutter's text input calls to, as on every platform,
-//! and VoiceOver reads its semantic tree through Flutter's iOS semantics objects (`a11y`).
+//! and VoiceOver reads its semantic tree through AccessKit's iOS adapter (`a11y`).
 //!
 //! A finger is the pointer, as a phone's browser has it: a tap presses, and one that moves further than
 //! UIScrollView's slop pans what scrolls under it, which carries on as it's let go, slowing as a UIScrollView
@@ -274,21 +274,12 @@ fn with_windows<R>(f: impl FnOnce(&mut Windows) -> R) -> Option<R> {
                 window.dirty = true;
             }
         }
-        let mut dismissed = Vec::new();
         for (id, window) in windows.windows.iter_mut() {
             let Ok(screen) = &mut window.screen else { continue };
-            for (node, action) in a11y::take(*id) {
-                if action == a11y::DISMISS {
-                    dismissed.push(*id);
-                    continue;
-                }
-                a11y::act(screen, node, action);
+            for request in a11y::take(*id) {
+                super::a11y::act(screen, &request);
                 window.dirty = true;
             }
-        }
-        // VoiceOver's two-finger scrub goes back, as Back does: what's open shuts, or the app's window closes.
-        for id in dismissed {
-            windows.back(id);
         }
         let result = f(windows);
         // Its page keeps clear of what its safe area and the keyboard leave out, as they are now: the first tao says,
@@ -327,8 +318,7 @@ fn with_windows<R>(f: impl FnOnce(&mut Windows) -> R) -> Option<R> {
         for window in windows.windows.values() {
             if let Ok(screen) = &window.screen {
                 let native = &window.parts[0].native;
-                let size = native.window.outer_size();
-                native.a11y.update(screen, (size.width as f32, size.height as f32), native.scale());
+                native.a11y.update(screen, native.scale());
             }
         }
         // A fling or a slide takes a step each frame the display shows, as UIScrollView's deceleration does.
@@ -388,7 +378,7 @@ impl Display {
         unsafe { device_status_bar(view as *mut c_void, id as *mut c_void, status_bar_tapped) };
         let controller = window.ui_view_controller().cast::<UIViewController>();
         let text_input = Plugin(unsafe { text_input_new(controller, id as *mut c_void, said) });
-        let a11y = a11y::A11y::new(ui_view, text_input.0, id);
+        let a11y = a11y::A11y::new(view as *mut c_void, id);
         // The keyboard came, went or changed: what it covers is read from the view's keyboard guide. A screen reader
         // started or stopped: it's given the tree, or isn't.
         let center = NSNotificationCenter::defaultCenter();

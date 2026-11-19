@@ -809,25 +809,7 @@ pub extern "system" fn Java_app_theone_renderer_NativeView_nativeAccessibilityDr
         let Ok(screen) = &mut window.screen else { return };
         window.dirty = true;
         for request in a11y::take(id) {
-            let Some(node) = a11y::target(&request) else { continue };
-            match request.action {
-                accesskit::Action::Click => drop(screen.press(node)),
-                accesskit::Action::Focus => screen.set_focused(Some(node)),
-                accesskit::Action::ShowContextMenu => {
-                    if let Some(rect) = screen.rect(node) {
-                        let at = point(rect.x + rect.width / 2.0, rect.y + rect.height / 2.0);
-                        screen.pointer_down(at, 2, false);
-                        screen.pointer_up(at, 2);
-                    }
-                }
-                accesskit::Action::ScrollDown | accesskit::Action::ScrollUp => {
-                    if let Some(rect) = screen.rect(node) {
-                        let by = rect.height * 0.8 * if request.action == accesskit::Action::ScrollDown { 1.0 } else { -1.0 };
-                        screen.pan(point(rect.x + rect.width / 2.0, rect.y + rect.height / 2.0), point(0.0, by));
-                    }
-                }
-                _ => {}
-            }
+            super::a11y::act(screen, &request);
         }
     });
 }

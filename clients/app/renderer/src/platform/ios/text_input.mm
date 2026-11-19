@@ -256,11 +256,6 @@ void* text_input_new(UIViewController* controller, void* context, TextInputSend 
   return (__bridge_retained void*)[[TextInput alloc] initWithController:controller context:context send:send];
 }
 
-// The plugin's view, which has the keyboard while a field does, and which a screen reader reads that field through.
-UIView<UITextInput>* text_input_view(void* input) {
-  return ((__bridge TextInput*)input).plugin.textInputView;
-}
-
 void text_input_free(void* input) {
   TextInput* text_input = (__bridge_transfer TextInput*)input;
   [text_input.plugin reset];

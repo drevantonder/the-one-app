@@ -166,6 +166,10 @@ objc2-core-video = { version = "0.3", default-features = false, features = ["std
 rfd = { version = "0.18", default-features = false }
 objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "objc2-core-foundation", "objc2-quartz-core", "NSAccessibility", "NSAppearance", "NSApplication", "NSCursor", "NSPasteboard", "NSEvent", "NSGraphics", "NSPanel", "NSResponder", "NSRunningApplication", "NSTrackingArea", "NSView", "NSWindow", "NSWorkspace", "block2"] }
 
+# A phone's screen reader reads a native screen's semantic tree as AccessKit's (`platform/a11y`).
+[target.'cfg(any(target_os = "android", target_os = "ios"))'.dependencies]
+accesskit = "0.25"
+
 # An iPhone's: a native screen is a tao window over the app's (`platform/ios`), on the main thread. Its QuickJS has
 # no prebuilt bindings in rquickjs-sys, so bindgen makes them against the iOS SDK's headers, as Android's.
 [target.'cfg(target_os = "ios")'.dependencies]
@@ -174,6 +178,8 @@ objc2-ui-kit = { version = "0.3", default-features = false, features = ["std", "
 # beside it, as it starts only by calling UIApplicationMain itself.
 tao = { version = "0.37", default-features = false }
 rquickjs = { version = "0.14", features = ["bindgen"] }
+# VoiceOver reads its screen's AccessKit tree through AccessKit's iOS adapter, which subclasses its view.
+accesskit_ios = "0.2.2"
 # Its display's frames, by a display link (`Display::frame`).
 objc2-quartz-core = { version = "0.3", default-features = false, features = ["CADisplayLink", "CAFrameRateRange"] }
 
@@ -181,7 +187,6 @@ objc2-quartz-core = { version = "0.3", default-features = false, features = ["CA
 # keyboard bridge (Flutter's) and accessibility delegate (AccessKit's) are Java that calls in through JNI.
 [target.'cfg(target_os = "android")'.dependencies]
 # Its Java delegate, prebuilt, loaded from memory: the app needs no Java of AccessKit's.
-accesskit = "0.25"
 accesskit_android = { version = "0.9.1", features = ["embedded-dex"] }
 android_logger = "0.15"
 jni = "0.21"

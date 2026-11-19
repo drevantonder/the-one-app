@@ -1,6 +1,5 @@
 //! A Mac's, an iPhone's and Windows' text input is Flutter's (`flutter/`, the plugin and its `TextInputModel`), built
-//! here with the `cc` crate as Flutter's engine builds it, with the window's side of it (`src/platform/<os>/text_input.*`),
-//! and so is an iPhone's screen reader's (Flutter's iOS semantics objects, with `src/platform/ios/accessibility.mm`).
+//! here with the `cc` crate as Flutter's engine builds it, with the window's side of it (`src/platform/<os>/text_input.*`).
 //!
 //! The X11 window (`platform/linux/x11.rs`) links xkbcommon's X11 half by its unversioned name (`libxkbcommon-x11.so`), which a Linux
 //! distribution ships only in its development package (Debian's and Ubuntu's `libxkbcommon-x11-dev`), while the library
@@ -13,14 +12,10 @@ fn main() {
     match std::env::var("CARGO_CFG_TARGET_OS").as_deref() {
         Ok("macos") => text_input(&["src/platform/mac/text_input.mm"], &["flutter/flutter/shell/platform/darwin/macos/framework/Source/FlutterTextInputPlugin.mm"]),
         Ok("ios") => text_input(
-            &["src/platform/ios/text_input.mm", "src/platform/ios/accessibility.mm", "src/platform/ios/device.mm"],
+            &["src/platform/ios/text_input.mm", "src/platform/ios/device.mm"],
             &[
                 "flutter/flutter/shell/platform/darwin/ios/framework/Source/FlutterTextInputPlugin.mm",
                 "flutter/flutter/fml/platform/darwin/string_range_sanitization.mm",
-                "flutter/flutter/shell/platform/darwin/ios/framework/Source/SemanticsObject.mm",
-                "flutter/flutter/shell/platform/darwin/ios/framework/Source/FlutterSemanticsScrollView.mm",
-                "flutter/flutter/shell/platform/darwin/ios/framework/Source/TextInputSemanticsObject.mm",
-                "flutter/flutter/lib/ui/semantics/semantics_node.cc",
             ],
         ),
         Ok("windows") => text_input(

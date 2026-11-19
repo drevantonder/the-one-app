@@ -27,6 +27,9 @@ mod mac;
 use mac::{Display, Handle, NativeWindow, appearance, clipboard, open_files, reduced_motion};
 #[cfg(target_os = "android")]
 mod android;
+/// A native screen's semantic tree as AccessKit's, for each phone's screen reader.
+#[cfg(any(target_os = "android", target_os = "ios"))]
+pub(crate) mod a11y;
 /// The rail's home line over a phone's app windows, pulled home (`Windows::line`).
 #[cfg_attr(not(any(target_os = "android", target_os = "ios")), allow(dead_code))]
 pub(crate) mod rail;
