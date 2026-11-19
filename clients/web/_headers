@@ -9,3 +9,6 @@
 # the renderer, from here, as from elsewhere, its origin being its own.
 /renderer/*
   Access-Control-Allow-Origin: *
+# The renderer's WebAssembly, named by what's in it (clients/web/renderer/build.js), so kept for good.
+/renderer/web_renderer_bg-*
+  Cache-Control: public, max-age=31536000, immutable
