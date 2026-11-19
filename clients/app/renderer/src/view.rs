@@ -340,6 +340,9 @@ pub struct Screen {
     pub mismatched: Option<String>,
     /// What the frame painted last cost, for the inspector's `profile` (`Cost`).
     cost: Cost,
+    /// The call its JS was sent last that answered what it asked (`Thread::sent`), which it has run once it's started
+    /// (`starting`).
+    heard: u64,
 }
 
 /// What a frame cost: the mutations its JS made that it applied, since the frame before (`applied` counts them as they
@@ -430,6 +433,7 @@ impl Screen {
             failed: None,
             mismatched: None,
             cost: Cost::default(),
+            heard: 0,
         };
         screen.pump();
         screen
@@ -468,6 +472,12 @@ impl Screen {
     /// again once it's waited for them (`idle`).
     pub fn decoding(&self) -> bool {
         self.pictures.pending() > 0 || self.frames.values().any(|child| child.screen.decoding())
+    }
+
+    /// Whether its app is starting: it hasn't heard back from what it asked (`waiting`), or its JS hasn't yet run
+    /// the answers, so what it draws of them is on its way.
+    pub fn starting(&self) -> bool {
+        self.waiting() || !self.js.ran(self.heard)
     }
 
     /// Whether its app's JS, or a frame's, has something it was sent to run yet, or hasn't started.
@@ -574,14 +584,14 @@ impl Screen {
     /// Tells the app a message from its client: an answer to what it asked (`Asked`), or a notification.
     pub fn message(&mut self, message: &Value) {
         let mut message = message.clone();
-        if message.get("method").is_none()
-            && let Some(asked) = self.unanswered.remove(&message["id"].to_string())
-            && asked.method == "ui/initialize"
-            && message["result"].is_object()
-        {
+        let asked = if message.get("method").is_none() { self.unanswered.remove(&message["id"].to_string()) } else { None };
+        if asked.as_ref().is_some_and(|asked| asked.method == "ui/initialize") && message["result"].is_object() {
             self.place(&mut message);
         }
         self.js.send("message", message);
+        if asked.is_some() {
+            self.heard = self.js.sent();
+        }
     }
 
     /// Adds to the client's answer to `ui/initialize` what only the window knows of where the page is, whether it
@@ -680,6 +690,8 @@ impl Screen {
             self.started = self.js.started();
         }
         let appearance = self.theme.unwrap_or(self.appearance);
+        // What's sent it here is what answers what it asked.
+        let answering = self.js.sent();
         for posted in posted {
             match posted {
                 Posted::Threw(error) => self.threw(error),
@@ -759,6 +771,9 @@ impl Screen {
                     }
                 }
             }
+        }
+        if self.js.sent() > answering {
+            self.heard = self.js.sent();
         }
         if came {
             // What says `autofocus` takes the keyboard as it says so, as an active menu item does.

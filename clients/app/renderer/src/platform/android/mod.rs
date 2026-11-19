@@ -579,6 +579,10 @@ pub extern "system" fn Java_app_theone_renderer_NativeView_nativeActive(_: JNIEn
             }
             window.dirty = true;
         }
+        // Its frame is kept as it goes behind, which it shows as it opens again.
+        if active == 0 {
+            windows.keep_snapshot(id as WindowId);
+        }
     });
 }
 

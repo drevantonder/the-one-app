@@ -89,6 +89,12 @@ impl Scene {
         }
     }
 
+    /// Draws raster `id`'s image (`Renderer::picture`) over `bounds`, as it is.
+    pub fn picture(&mut self, id: u32, bounds: Bounds<ScaledPixels>) {
+        let transformation = TransformationMatrix::unit();
+        self.insert_primitive(Raster { order: 0, raster: id, opacity: 1.0, pad: 0, bounds, content_mask: ContentMask { bounds }, transformation });
+    }
+
     /// Draws `recording` in this scene as an image of it, drawn once, grown `scale` times and moved `by` (`p ↦
     /// p·scale + by`), `opacity` as opaque, and cut to `mask`, as a compositor draws a layer: as `splice` draws it,
     /// and as cheaply as one picture however much is in it.

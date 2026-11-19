@@ -517,6 +517,31 @@ impl Renderer {
         }
     }
 
+    /// Keeps `rgba`, `width` by `height` pixels as raster `id`'s image, a frame drawn before (a window's snapshot,
+    /// `platform::WindowOptions::snapshot`), which a scene draws by `Scene::picture` and which goes once a frame
+    /// doesn't.
+    pub fn picture(&mut self, id: u32, width: u32, height: u32, rgba: &[u8]) {
+        let size = wgpu::Extent3d { width, height, depth_or_array_layers: 1 };
+        let texture = self.device.create_texture(&wgpu::TextureDescriptor {
+            label: None,
+            size,
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: OFFSCREEN_FORMAT,
+            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+            view_formats: &[],
+        });
+        self.queue.write_texture(
+            texture.as_image_copy(),
+            rgba,
+            wgpu::TexelCopyBufferLayout { offset: 0, bytes_per_row: Some(width * 4), rows_per_image: None },
+            size,
+        );
+        let bound = self.texture(&texture.create_view(&wgpu::TextureViewDescriptor::default()));
+        self.rasters.insert(id, (texture, bound));
+    }
+
     /// How many draw calls the last frame made: each batch, shadow tile, raster and blur pass drawn, but what was kept
     /// of the frames before (`Kept`), as a GPU profiler counts them.
     pub fn draws(&self) -> u32 {
@@ -710,7 +735,7 @@ impl Renderer {
         for (recording, globals, offsets) in rastering {
             self.draw_raster(&mut encoder, &buffer, &instances.group, &recording, globals, gamma, &offsets);
         }
-        self.rasters.retain(|id, _| scene.recordings.iter().any(|recording| recording.id == *id));
+        self.rasters.retain(|id, _| scene.recordings.iter().any(|recording| recording.id == *id) || scene.rasters.iter().any(|raster| raster.raster == *id));
         // The frame starts from what's kept, where it starts as that did, and is drawn only from there; or what's the
         // same as the last frame's start, two frames running, is kept now, where it's worth more than its copy.
         let copies = texture.usage().contains(wgpu::TextureUsages::COPY_DST);

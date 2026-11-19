@@ -87,7 +87,7 @@ pub(crate) fn unopened(entrypoint: String, subject: Option<String>, link: String
         let Ok(native) = Native::get() else { return };
         let tag = json!({"entrypoint": entrypoint});
         native.run(move |windows| {
-            let options = WindowOptions { title: name.clone(), app_id: ::client::NAME.to_owned(), size: Size { width: Pixels(1024.0), height: Pixels(720.0) }, tag, panel: None, places: None, frame: None, root: false, icon: None, owner: None };
+            let options = WindowOptions { title: name.clone(), app_id: ::client::NAME.to_owned(), size: Size { width: Pixels(1024.0), height: Pixels(720.0) }, tag, panel: None, places: None, frame: None, root: false, icon: None, owner: None, snapshot: None };
             if let Err(error) = windows.open(options, Err(said), |_| {}) {
                 eprintln!("{name}'s window didn't open: {error:#}");
             }
@@ -242,6 +242,7 @@ async fn unopened_launcher(why: String) -> Option<WindowId> {
                 root: false,
                 icon: None,
                 owner: None,
+                snapshot: None,
             };
             let _ = shown_to.send(windows.open(options, Err(said), |_| {}).ok());
         });
@@ -329,6 +330,8 @@ async fn window(started: Instant, entrypoint: &str, subject: Option<&str>, link:
         Kind::Launcher(_) | Kind::Sheet(_) | Kind::Unopened(_) => None,
     };
     let tokens_page = load(&tables)?;
+    // An app's window, and a phone's Home Screen, shows its last frame as it opens again.
+    let snapshot = (app_window || (launcher && cfg!(mobile))).then(|| snapshot_file(entrypoint, subject, &module, &tables)).flatten();
     let native = Native::get()?;
     let window: Arc<OnceLock<WindowId>> = Arc::default();
     let begun = start(entrypoint, subject, link, launcher, Place::Window(window.clone()), &module, page)?;
@@ -371,6 +374,7 @@ async fn window(started: Instant, entrypoint: &str, subject: Option<&str>, link:
             icon: from,
             // The recovery key window is a sheet of the app's that asked, as the system attaches one.
             owner: sheet.as_ref().and_then(|sheet| sheet.owner),
+            snapshot,
         };
         let app = entrypoint.split('/').next().unwrap_or_default().to_owned();
         let on_event = {
@@ -506,6 +510,30 @@ async fn window(started: Instant, entrypoint: &str, subject: Option<&str>, link:
 
 /// Where an app's window is kept where it was left (`WindowOptions::frame`): a computer's app window's, by its app,
 /// its page and who it's for.
+/// Where a window's last frame is kept (`WindowOptions::snapshot`), named by whose it is, their network, what it shows
+/// for whom (`entrypoint`, `subject`) and its page's build (its `module`, the UI library's `tables` and this program's),
+/// so it's never shown to another person, or by another build. None while no one's signed in. They all go as the
+/// device signs out (`forget_snapshots`).
+fn snapshot_file(entrypoint: &str, subject: Option<&str>, module: &Url, tables: &[String]) -> Option<std::path::PathBuf> {
+    use sha2::{Digest, Sha256};
+    let client = &crate::views().ok()?.client;
+    let who = client.who()?;
+    let address = client.address().unwrap_or_default();
+    let mut hash = Sha256::new();
+    for part in [who.as_str(), &address, entrypoint, subject.unwrap_or_default(), module.as_str(), ::client::BUILD].into_iter().chain(tables.iter().map(String::as_str)) {
+        hash.update(part.as_bytes());
+        hash.update([0]);
+    }
+    Some(crate::app().shell.home().ok()?.join("snapshots").join(data_encoding::HEXLOWER.encode(&hash.finalize())))
+}
+
+/// Every window's last frame goes, as no one's signed in on the device.
+pub(crate) fn forget_snapshots() {
+    if let Ok(home) = crate::app().shell.home() {
+        let _ = std::fs::remove_dir_all(home.join("snapshots"));
+    }
+}
+
 fn frame_file(launcher: bool, sheet: bool, entrypoint: &str, subject: Option<&str>) -> Option<std::path::PathBuf> {
     #[cfg(desktop)]
     if !launcher && !sheet {

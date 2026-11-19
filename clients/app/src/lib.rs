@@ -482,7 +482,9 @@ fn reconnect() -> Result<(), String> {
 /// theirs goes, and the window follows it to the sign-in page.
 #[cfg_attr(mobile, tauri::command)]
 async fn sign_out() -> Result<(), String> {
-    views()?.client.sign_out().await.map_err(|error| format!("{error:#}"))
+    views()?.client.sign_out().await.map_err(|error| format!("{error:#}"))?;
+    native::forget_snapshots();
+    Ok(())
 }
 
 /// Where this device is with its network (`state`), as the window's page asks once it has opened, which waits for the
@@ -1080,6 +1082,7 @@ async fn follows(client: Arc<Client>) {
         // A device that isn't in its network lists none of its apps.
         if moved && matches!(now, State::SignIn { .. }) {
             shortcuts::keep(Vec::new());
+            native::forget_snapshots();
         }
         // The page was told where it is as it started (`start`), and hears each change from there.
         if starts_again {

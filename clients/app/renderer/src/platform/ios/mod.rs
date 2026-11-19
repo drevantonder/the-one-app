@@ -229,6 +229,10 @@ fn heard(windows: &mut Windows, id: WindowId, event: &WindowEvent<'_>) {
         WindowEvent::Resumed => screen.activate(true),
         _ => {}
     }
+    // Its frame is kept as the app goes to the background, which it shows as it opens again, as iOS's snapshot is.
+    if matches!(event, WindowEvent::Suspended) {
+        windows.keep_snapshot(id);
+    }
 }
 
 /// Does `f` to the windows, made now if they aren't yet, steps each window sliding from the edge, draws what changed,

@@ -316,6 +316,10 @@ impl Thread {
         STARTED.with_borrow(Option::is_none) || RAN.get() < self.sent
     }
 
+    pub fn ran(&self, call: u64) -> bool {
+        STARTED.with_borrow(Option::is_some) && RAN.get() >= call
+    }
+
     /// A browser's JS can't be waited on: what it was sent runs once this turn ends.
     pub fn wait(&self) {}
 
@@ -701,7 +705,7 @@ pub async fn open(canvas: web_sys::HtmlCanvasElement, scale: f32, page: String, 
         _ => None,
     };
     let _ = Native::get();
-    let options = WindowOptions { title: String::new(), app_id: String::new(), size: Size::default(), tag: Value::Null, panel: None, places: None, frame: None, root: false, icon: None, owner: None };
+    let options = WindowOptions { title: String::new(), app_id: String::new(), size: Size::default(), tag: Value::Null, panel: None, places: None, frame: None, root: false, icon: None, owner: None, snapshot: None };
     // Its first frame is told, for how long it took, and a page this can't draw is drawn as its own page instead.
     let on_event = |event| match event {
         super::Event::Drawn => call("drawn", &JsValue::UNDEFINED),

@@ -33,6 +33,7 @@ pub(crate) mod a11y;
 /// The rail's home line over a phone's app windows, pulled home (`Windows::line`).
 #[cfg_attr(not(any(target_os = "android", target_os = "ios")), allow(dead_code))]
 pub(crate) mod rail;
+mod snapshot;
 #[cfg(target_os = "android")]
 use android::{Display, Handle, NativeWindow, appearance, clipboard, reduced_motion, text_size};
 #[cfg(target_os = "ios")]
@@ -194,6 +195,11 @@ pub struct WindowOptions {
     /// The window it's a sheet of, as the system attaches one (`Display::attach`): over it, and modal to it, until it
     /// closes. A phone's covers the app it's over already.
     pub owner: Option<WindowId>,
+    /// Where its frame is kept as it's left (it loses the keyboard, the app goes to the background, it closes), which
+    /// it shows as it opens again, while its page starts and hears back from what it first asks, as iOS shows an app's
+    /// last snapshot as it launches (`snapshot`). Whoever opens it names it by whose it is and its app's build, so it
+    /// never shows another person's, or another build's.
+    pub snapshot: Option<std::path::PathBuf>,
 }
 
 /// Where a panel was dragged to on each screen, by the screen's name as its platform gives it (`Input::Placed`): its
@@ -347,6 +353,11 @@ struct Window {
     #[cfg_attr(not(any(target_os = "android", target_os = "ios")), allow(dead_code))]
     icon: Option<crate::geometry::Bounds<f32>>,
     pull: Option<rail::Pull>,
+    /// Where its frame is kept (`WindowOptions::snapshot`), and the one kept, as RGBA rows its size, shown until its
+    /// page has started and heard back, and whether its renderer has it yet.
+    snapshot: Option<std::path::PathBuf>,
+    picture: Option<Vec<u8>>,
+    pictured: bool,
 }
 
 /// What a panel's file of places says, or nothing where it hasn't one yet.
@@ -431,6 +442,8 @@ impl Windows {
         }
         let renderer = self.renderer(&native)?;
         let opened = web_time::Instant::now();
+        let device = native.device_size();
+        let picture = options.snapshot.as_deref().filter(|_| screen.is_ok()).and_then(|stem| snapshot::read(stem, (device.width.0 as u32, device.height.0 as u32)));
         let panel = options.panel.is_some();
         let whole = crate::geometry::Bounds { origin: crate::geometry::point(0.0, 0.0), size: Size { width: options.size.width.0, height: options.size.height.0 } };
         self.windows.insert(
@@ -460,6 +473,9 @@ impl Windows {
                 root: options.root,
                 icon: options.icon,
                 pull: None,
+                snapshot: options.snapshot,
+                picture,
+                pictured: false,
             },
         );
         Ok(id)
@@ -744,6 +760,7 @@ impl Windows {
 
     /// Closes window `id`.
     pub fn close(&mut self, id: WindowId) {
+        self.keep_snapshot(id);
         if let Some(mut window) = self.windows.remove(&id) {
             self.let_go(window.parts);
             (window.on_event)(Event::Closed);
@@ -754,7 +771,7 @@ impl Windows {
     /// enough.
     fn due(&self) -> Option<std::time::Duration> {
         let screens = self.windows.values().filter_map(|window| window.screen.as_ref().ok()?.due());
-        let showing = self.windows.values().filter(|window| !window.shown).map(|window| SHOWN_WITHIN.saturating_sub(window.opened.elapsed()));
+        let showing = self.windows.values().filter(|window| !window.shown || window.picture.is_some()).map(|window| SHOWN_WITHIN.saturating_sub(window.opened.elapsed()));
         // Where the display says nothing of its frames, the next is a 60 Hz display's.
         let frame = (self.framing() && !self.display.paced()).then(|| FRAME.saturating_sub(self.framed.elapsed()));
         // A pull's spring steps at a 120 Hz display's frames.
@@ -867,9 +884,11 @@ impl Windows {
             }
         }
         for window in self.windows.values_mut() {
-            // A new window shows once its page has heard back from what it asked, or has waited long enough.
+            // A new window shows once its page has heard back from what it asked, or has waited long enough: at once
+            // where it has a snapshot, which it shows until then.
+            let starting = window.screen.as_ref().is_ok_and(Screen::starting) && window.opened.elapsed() < SHOWN_WITHIN;
             if !window.shown {
-                if window.screen.as_ref().is_ok_and(Screen::waiting) && window.opened.elapsed() < SHOWN_WITHIN {
+                if starting && window.picture.is_none() {
                     continue;
                 }
                 window.shown = true;
@@ -891,22 +910,42 @@ impl Windows {
                 }
                 continue;
             }
+            // Its snapshot, while it fits the window, until its page has started; then what its page draws.
+            let device = window.parts[0].native.device_size();
+            let (width, height) = (device.width.0 as u32, device.height.0 as u32);
+            if window.picture.as_ref().is_some_and(|picture| !starting || picture.len() != (width * height * 4) as usize) {
+                window.picture = None;
+                window.dirty = true;
+            }
             if !window.dirty || window.parts[0].renderer.is_none() {
                 continue;
             }
             window.dirty = false;
             let (room, scale) = (window.room(), window.parts[0].native.scale());
-            match &mut window.screen {
-                Ok(screen) => {
-                    screen.paint(room, scale, &mut self.text, &self.atlas, &mut window.scene);
-                    window.moving = screen.take_again();
-                    let calls = screen.text_input(&mut window.text_input);
-                    if !calls.is_empty() {
-                        self.display.text_input(&window.parts[0].native, &calls);
-                    }
-                    self.display.set_title_row(&window.parts[0].native, screen.title_row());
+            if let Some(picture) = &window.picture {
+                if !std::mem::replace(&mut window.pictured, true)
+                    && let Some(renderer) = &mut window.parts[0].renderer
+                {
+                    renderer.picture(snapshot::RASTER, width, height, picture);
                 }
-                Err(why) => crate::view::paint_message(why, appearance(), room, scale, &mut self.text, &self.atlas, &mut window.scene),
+                window.scene.clear();
+                let px = crate::geometry::ScaledPixels;
+                let whole = crate::geometry::Bounds { origin: Point { x: px(0.0), y: px(0.0) }, size: Size { width: px(width as f32), height: px(height as f32) } };
+                window.scene.picture(snapshot::RASTER, whole);
+                window.scene.finish();
+            } else {
+                match &mut window.screen {
+                    Ok(screen) => {
+                        screen.paint(room, scale, &mut self.text, &self.atlas, &mut window.scene);
+                        window.moving = screen.take_again();
+                        let calls = screen.text_input(&mut window.text_input);
+                        if !calls.is_empty() {
+                            self.display.text_input(&window.parts[0].native, &calls);
+                        }
+                        self.display.set_title_row(&window.parts[0].native, screen.title_row());
+                    }
+                    Err(why) => crate::view::paint_message(why, appearance(), room, scale, &mut self.text, &self.atlas, &mut window.scene),
+                }
             }
             let glass = window.screen.as_ref().map(|screen| screen.glass().to_vec()).unwrap_or_default();
             if !window.arrange(&self.display, &self.context, &self.atlas, &glass) {
@@ -927,6 +966,26 @@ impl Windows {
         }
         self.display.request_frame(self.framing());
         self.display.flush();
+    }
+
+    /// Keeps window `id`'s frame as its snapshot (`WindowOptions::snapshot`), drawn afresh offscreen as it is now,
+    /// where it shows what its page drew: not its snapshot, nor a page still starting.
+    pub(crate) fn keep_snapshot(&mut self, id: WindowId) {
+        let Some(window) = self.windows.get_mut(&id) else { return };
+        let (room, scale) = (window.room(), window.parts[0].native.scale());
+        let (Some(stem), Ok(screen)) = (&window.snapshot, &mut window.screen) else { return };
+        if !window.drawn || window.picture.is_some() || screen.starting() {
+            return;
+        }
+        let device = Size { width: DevicePixels((room.width.0 * scale).round() as i32), height: DevicePixels((room.height.0 * scale).round() as i32) };
+        let mut renderer = Renderer::offscreen(&self.context, self.atlas.clone(), device);
+        let mut scene = crate::render::scene::Scene::default();
+        screen.paint_afresh(room, scale, &mut self.text, &self.atlas, &mut scene);
+        renderer.draw(&scene, [0.0, 0.0]);
+        if let Some((width, height, rgba)) = renderer.read() {
+            snapshot::keep(stem, width, height, rgba);
+        }
+        renderer.destroy();
     }
 
     /// Lets go of a window's parts: their renderers, then their native windows, the children first.
@@ -1048,6 +1107,7 @@ impl Windows {
                 screen.activate(active);
                 if !active {
                     (window.on_event)(Event::Unfocused);
+                    return self.keep_snapshot(id);
                 }
             }
             // Dragged somewhere on a screen, a panel is summoned there on that screen from now on.
