@@ -884,7 +884,7 @@ fn menu() -> muda::Menu {
 }
 
 /// The ring in a Mac's menu bar, as Raycast's is there, and in Windows' notification area, as a running app that has
-/// no window of its own is there. Its menu has Open and Quit: on a Mac a click opens it, as Raycast's and every menu bar
+/// no window of its own is there. Its menu has Open, Settings… and Quit: on a Mac a click opens it, as Raycast's and every menu bar
 /// icon's does; on Windows a click shows the launcher or puts it away, and a right-click opens the menu, as a
 /// notification-area icon's does. A Mac's is a template, drawn as the menu bar's other icons are.
 #[cfg(any(target_os = "macos", windows))]
@@ -900,10 +900,13 @@ fn ring() -> Option<tray_icon::TrayIcon> {
     let picture = resvg::tiny_skia::Pixmap::decode_png(picture).ok()?;
     let icon = Icon::from_rgba(picture.data().to_vec(), picture.width(), picture.height()).ok()?;
     let open = MenuItem::with_id("open", format!("Open {}", crate::page::NAME), true, None);
+    // Settings…, the Settings app's window, as Raycast's menu has its own settings.
+    let settings = MenuItem::with_id("settings", "Settings…", true, None);
     let quit = MenuItem::with_id("quit", format!("Quit {}", crate::page::NAME), true, None);
-    let menu = Menu::with_items(&[&open, &PredefinedMenuItem::separator(), &quit]).ok()?;
+    let menu = Menu::with_items(&[&open, &settings, &PredefinedMenuItem::separator(), &quit]).ok()?;
     MenuEvent::set_event_handler(Some(|event: MenuEvent| match event.id.0.as_str() {
         "open" => tell(Told::Summon),
+        "settings" => tell(Told::Open("settings".to_owned())),
         "quit" => tell(Told::Quit),
         _ => {}
     }));
