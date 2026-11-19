@@ -55,8 +55,14 @@ defmodule Telemetry.Alerts do
       text text, began integer not null, last integer not null, ended integer
     )
     """,
+    # Kept in its place, since statements already run are counted by position: a kind's mute, dropped below.
+    "create table muted (kind text primary key) without rowid",
     # Where a copy of what's kept is sent (`Telemetry.Forward`).
-    "create table forward (id integer primary key check (id = 1), endpoint text not null, who text not null, item text not null, headers text not null)"
+    "create table forward (id integer primary key check (id = 1), endpoint text not null, who text not null, item text not null, headers text not null)",
+    # Alerts that were told, and a kind's mute, from when it notified people.
+    "update alerts set state = 'firing' where state = 'notified'",
+    "update alerts set state = 'resolved' where state = 'resolving'",
+    "drop table muted"
   ]
 
   @kinds %{
