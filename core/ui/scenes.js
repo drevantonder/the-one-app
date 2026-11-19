@@ -255,7 +255,7 @@ function native(built, scene, folder, used) {
   if (scene.page.startsWith(`${COMPONENTS}/`)) {
     for (const entry of readdirSync(join(built, COMPONENTS))) if (!entry.endsWith(".html")) symlinkSync(join(built, COMPONENTS, entry), join(at, entry))
   } else symlinkSync(join(built, "assets"), join(at, "assets"))
-  for (const app of scene.uses) {
+  for (const app of scene.uses ?? []) {
     mkdirSync(join(at, app))
     symlinkSync(used.get(app), join(at, app, "client"))
   }
