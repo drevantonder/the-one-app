@@ -235,12 +235,56 @@ pub fn run() {
         Ok(home) => home,
         Err(error) => return eprintln!("{error:#}"),
     };
+    keep_log(&home);
     // Started again by itself as it updates (`Told::Restart`), it doesn't hand over to the one that's ending.
     if std::env::var_os("ONE_RESTARTED").is_none() && hosts::again(&home, link.as_deref()) {
         return;
     }
     if let Err(error) = launcher(home, link.and_then(|link| crate::link(&link)), started) {
         eprintln!("{error:#}");
+    }
+}
+
+/// What it says (`eprintln!`) goes to its own log, `app.log` in its home, the one before as `app.log.1`, where nothing
+/// it was started from keeps it: an app opened from the Dock, the Start menu or a desktop's launcher says it to nowhere,
+/// so how one that stopped ended was never known (20 Nov). Started from a terminal or into a file, as a person or an
+/// agent reading it starts it, it's left there. Started again as it updates, it carries on in the same log.
+fn keep_log(home: &std::path::Path) {
+    if !says_to_nowhere() {
+        return;
+    }
+    let log = home.join("app.log");
+    // Each start from nowhere begins a new one past 8 MB, as `server.log` is kept.
+    if std::fs::metadata(&log).is_ok_and(|log| log.len() > 8 << 20) {
+        let _ = std::fs::rename(&log, log.with_extension("log.1"));
+    }
+    let Ok(file) = std::fs::OpenOptions::new().create(true).append(true).open(&log) else { return };
+    #[cfg(unix)]
+    {
+        use std::os::fd::AsRawFd;
+        // Standard error is the log's from now on, for this program and what it starts.
+        unsafe { libc::dup2(file.as_raw_fd(), libc::STDERR_FILENO) };
+    }
+    #[cfg(windows)]
+    {
+        use std::os::windows::io::IntoRawHandle;
+        let handle = windows::Win32::Foundation::HANDLE(file.into_raw_handle());
+        let _ = unsafe { windows::Win32::System::Console::SetStdHandle(windows::Win32::System::Console::STD_ERROR_HANDLE, handle) };
+    }
+}
+
+/// Whether its standard error goes nowhere: to `/dev/null`, or on Windows, a windowed program's none.
+fn says_to_nowhere() -> bool {
+    #[cfg(unix)]
+    {
+        let mut stat: libc::stat = unsafe { std::mem::zeroed() };
+        let null = std::fs::metadata("/dev/null").map(|null| std::os::unix::fs::MetadataExt::rdev(&null)).ok();
+        let unread = unsafe { libc::fstat(libc::STDERR_FILENO, &mut stat) } != 0;
+        unread || Some(stat.st_rdev as u64) == null && (stat.st_mode & libc::S_IFMT) == libc::S_IFCHR
+    }
+    #[cfg(windows)]
+    {
+        unsafe { windows::Win32::System::Console::GetStdHandle(windows::Win32::System::Console::STD_ERROR_HANDLE) }.is_ok_and(|handle| handle.is_invalid() || handle.0.is_null())
     }
 }
 

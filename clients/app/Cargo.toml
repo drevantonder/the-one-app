@@ -119,11 +119,15 @@ resvg = { version = "0.47", default-features = false, optional = true }
 # and its icon file; and a window's title bar, with Windows' own caption buttons over the page (`title_bar`).
 [target.'cfg(windows)'.dependencies]
 ico = { version = "0.6", optional = true }
-windows = { version = "0.62", features = ["Win32_Foundation", "Win32_Graphics_Dwm", "Win32_Graphics_Gdi", "Win32_System_Com", "Win32_System_Com_StructuredStorage", "Win32_System_Registry", "Win32_System_Variant", "Win32_Storage_EnhancedStorage", "Win32_UI_Controls", "Win32_UI_HiDpi", "Win32_UI_Shell", "Win32_UI_Shell_PropertiesSystem", "Win32_UI_WindowsAndMessaging"], optional = true }
+windows = { version = "0.62", features = ["Win32_Foundation", "Win32_Graphics_Dwm", "Win32_Graphics_Gdi", "Win32_System_Com", "Win32_System_Console", "Win32_System_Com_StructuredStorage", "Win32_System_Registry", "Win32_System_Variant", "Win32_Storage_EnhancedStorage", "Win32_UI_Controls", "Win32_UI_HiDpi", "Win32_UI_Shell", "Win32_UI_Shell_PropertiesSystem", "Win32_UI_WindowsAndMessaging"], optional = true }
 
 # The ring in a Mac's menu bar and Windows' notification area that summons the launcher (`computer::ring`).
 [target.'cfg(any(target_os = "macos", windows))'.dependencies]
 tray-icon = { version = "0.25", optional = true }
+
+# What a computer's app says goes to its own log where nothing it was started from keeps it (`computer::keep_log`).
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
 
 [target.'cfg(target_vendor = "apple")'.dependencies]
 objc2 = { version = "0.6", optional = true }
