@@ -144,31 +144,63 @@ defmodule OneCore.Bucket do
     end
   end
 
+  # A blob every server may read, which a network has from its first server on: reading it is asking whether the
+  # bucket answers at all.
+  @probed "network/servers"
+
+  @doc """
+  Whether the bucket answers, asked past `bucket_fuse`: what a blown fuse is reset by (`OneCore.Bucket.Fuse`). An
+  answer of any kind is one, a refusal or the bucket's own error too: only not reaching it isn't.
+  """
+  def answers? do
+    backend(:read, [@probed])
+    true
+  rescue
+    Edge.Unreachable -> false
+    _answered -> true
+  end
+
   defmodule Fuse do
     @moduledoc """
-    `bucket_fuse`, `:fuse`'s circuit breaker for the bucket: `ok`, and `blown` once a call fails, after which it's
-    `ok` again for the next try once `@reset` has passed. Whoever installs it says what's done each time it goes from
-    `blown` back to `ok` (`install/1`), once: `:fuse` tells this handler of each, one at a time. A server that
-    couldn't reach the bucket may have missed being told something meanwhile, so it looks again then.
+    `bucket_fuse`, `:fuse`'s circuit breaker for the bucket, as Resilience4j's and the AWS SDKs' are: `ok`, and
+    `blown` once calls fail too often, after which one call at a time asks whether the bucket answers again
+    (`OneCore.Bucket.answers?/0`), every `@probe`, and nothing else is let through until one does (half-open). Then
+    it's `ok`, and whoever installed it is told (`install/1`): a server that couldn't reach the bucket may have
+    missed being told something meanwhile, so it looks again then.
+
+    The probe holds the fuse blown with `:fuse.circuit_disable/1` while it asks, which stops `:fuse`'s own timer
+    from letting every call through at once while the bucket may still be away, and `:fuse.circuit_enable/1` closes
+    it.
     """
     @behaviour :gen_event
+    require Logger
 
-    # A call that fails has already been sent again: a read by Req up to three more times, a write by `OneCore.Bucket`
-    # twice, so a call failing at all is too many failures. One whose bucket couldn't be reached took 7 to 30 seconds
-    # to say so, so one every 15 seconds is all that waits while it's away.
-    @reset 15_000
+    # A call that fails has already been sent again: a read by Req up to three more times, a write by
+    # `OneCore.Bucket` twice. One such failure is a request that met a connection closing, or a server's own network
+    # dropping for a moment, and the next call is answered. So the fuse blows only on more than `@failures` within
+    # `@within` milliseconds, a rate that only a bucket that's away keeps up.
+    @failures 4
+    @within 10_000
+
+    # How often, in milliseconds, a blown fuse asks whether the bucket answers. Its own timer is as long, though the
+    # probe stops it first: `:fuse` takes no fuse without one.
+    @probe 5_000
 
     @doc "Installs `bucket_fuse`, and this handler of what it does, which runs `back` in a process of its own each time it's `ok` again."
     def install(back) do
-      :ok = :fuse.install(:bucket_fuse, {{:standard, 0, @reset}, {:reset, @reset}})
+      :ok = :fuse.install(:bucket_fuse, {{:standard, @failures, @within}, {:reset, @probe}})
       :ok = :fuse_event.add_handler(__MODULE__, {:ok, back})
     end
 
     @impl true
     def init(state), do: {:ok, state}
 
+    # Holding it blown blows it again, which is heard here too, as `:blown` while it's `:blown` already.
     @impl true
-    def handle_event({:bucket_fuse, :blown}, {_was, back}), do: {:ok, {:blown, back}}
+    def handle_event({:bucket_fuse, :blown}, {:ok, back}) do
+      Task.start(&probe/0)
+      {:ok, {:blown, back}}
+    end
 
     def handle_event({:bucket_fuse, :ok}, {:blown, back}) do
       Task.start(back)
@@ -179,5 +211,16 @@ defmodule OneCore.Bucket do
 
     @impl true
     def handle_call(_request, state), do: {:ok, :ok, state}
+
+    defp probe do
+      :ok = :fuse.circuit_disable(:bucket_fuse)
+      Logger.warning("The bucket can't be reached: nothing is asked of it until it answers, which is asked every #{div(@probe, 1000)} s")
+      asked()
+    end
+
+    defp asked do
+      Process.sleep(@probe)
+      if OneCore.Bucket.answers?(), do: :ok = :fuse.circuit_enable(:bucket_fuse), else: asked()
+    end
   end
 end
