@@ -401,9 +401,24 @@ function AppPage(props: { app: App }) {
   )
 }
 
+/// What a link names, as Settings opens it: a section, Updates or an app's page as they are; an app by its name alone
+/// (`#sign-in`, as a link to one of its pages from before it moved into Settings is), its first section after the
+/// person's row, or else its page.
+function resolved(id: string) {
+  if (id === "updates" || id.startsWith("app:") || added().some((one) => one.id === id && one.in === "settings")) return id
+  const theirs = sidebar(added()).filter((one) => one.app === id)
+  const section = theirs.find((one) => one.group !== "you") ?? theirs[0]
+  if (section) return section.id
+  const app = apps().find((one) => one.name === id)
+  return app ? `app:${app.for}:${app.name}` : id
+}
+
 function Settings() {
   // Beside the sidebar, the first section shows until another is chosen, as Raycast's Settings opens on General.
-  const shown = () => open() ?? (beside() ? (sidebar(added()).find((one) => one.group !== "you")?.id ?? "updates") : undefined)
+  const shown = () => {
+    const id = open()
+    return id ? resolved(id) : beside() ? (sidebar(added()).find((one) => one.group !== "you")?.id ?? "updates") : undefined
+  }
   // Back and Forward go through what was open beside the sidebar, as macOS's System Settings' do.
   const [past, setPast] = createSignal<string[]>([])
   const [future, setFuture] = createSignal<string[]>([])
