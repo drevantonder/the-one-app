@@ -58,6 +58,10 @@ export const findIn = (library: Category[], words: string, background: boolean) 
     .sort((a, b) => rank(a.name) - rank(b.name) || a.name.localeCompare(b.name))
 }
 
+/// Everything an App Library has whose name has `words` in it: the apps with a screen of their own, then the
+/// background apps, each in `findIn`'s order, which is the order the launcher's search chooses among them in.
+export const findAll = (library: Category[], words: string) => [...findIn(library, words, false), ...findIn(library, words, true)]
+
 /** Where an icon or a widget is drawn, with how round its corners are there, which an app grows out of. */
 export type From = Rect & { radius: number }
 

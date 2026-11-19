@@ -6,7 +6,7 @@ import { type At, type Placed } from "./machine.ts"
 import { type Item, type Listed } from "./types.ts"
 import { looks } from "./looks.ts"
 import { home, state, launcher, query, setQuery, chosenResult, setChosenResult, type Selected, selected, setSelected, room, laidPage } from "./store.ts"
-import { type Owner, badgeOf, findIn, type From, launch, opens, press, opener } from "./owners.ts"
+import { type Owner, badgeOf, findAll, type From, launch, opens, press, opener } from "./owners.ts"
 import { Card, Tile } from "./tiles.tsx"
 import { type Cell, HomePage } from "./pages.tsx"
 import { Library } from "./library.tsx"
@@ -18,9 +18,28 @@ import { lingering } from "./lingering.ts"
 /// How long the launcher, put away, stays where it was: Raycast's Pop to Root Search's default.
 const POP_TO_ROOT = 90_000
 
+/// Where each found app is drawn, by its place in what was found, as it's laid out: which Up and Down move between.
+const slots = new Map<number, { x: number; y: number }>()
+
+/// The found app a row above or below `from` (`by` -1 or 1): in the nearest row that way, the one nearest across; the one
+/// it's on where there is none.
+const rowOf = (from: number, by: -1 | 1, count: number) => {
+  const here = slots.get(from)
+  if (!here) return from
+  let found: number | undefined
+  let [down, across] = [Infinity, Infinity]
+  for (let at = 0; at < count; at++) {
+    const place = slots.get(at)
+    if (!place || (place.y - here.y) * by < 1) continue
+    const [away, aside] = [(place.y - here.y) * by, Math.abs(place.x - here.x)]
+    if (away < down - 1 || (away < down + 1 && aside < across)) [found, down, across] = [at, away, aside]
+  }
+  return found ?? from
+}
+
 /// The launcher's keys, wherever in it the keyboard is: with nothing typed, the arrow keys move the highlight over Home
 /// (`move`), Return opens what's highlighted, and Escape goes back from the App
-/// Library, then puts the launcher away; with something typed, the arrow keys choose among what's found, Return opens
+/// Library, then puts the launcher away; with something typed, Left and Right choose among what's found, Up and Down a row above or below, Return opens
 /// the one chosen, and Escape empties the search.
 export const launcherKeys = (props: { move: (key: string) => boolean; open: () => void; toggleLibrary: () => void; library: () => boolean; found: () => number }) => (event: Keyed) => {
   if (event.altKey || event.metaKey || event.ctrlKey) return
@@ -38,10 +57,10 @@ export const launcherKeys = (props: { move: (key: string) => boolean; open: () =
   } else if (!typed) {
     if (props.move(event.key)) event.preventDefault()
   } else {
-    const by = ({ ArrowRight: 1, ArrowDown: 1, ArrowLeft: -1, ArrowUp: -1 } as Record<string, number>)[event.key]
-    if (!by) return
+    const [along, vertical] = [({ ArrowRight: 1, ArrowLeft: -1 } as Record<string, 1 | -1>)[event.key], ({ ArrowDown: 1, ArrowUp: -1 } as Record<string, 1 | -1>)[event.key]]
+    if (!along && !vertical) return
     event.preventDefault()
-    setChosenResult((now) => Math.max(0, Math.min(props.found() - 1, now + by)))
+    setChosenResult((now) => (along ? Math.max(0, Math.min(props.found() - 1, now + along)) : rowOf(now, vertical, props.found())))
   }
 }
 
@@ -61,11 +80,28 @@ export function Results(props: { owner: Owner; found: Listed[]; words: string })
   const tile = 60
   const lead = () => leadOf(props.owner, props.found)
   const widgets = () => widgetsOf(props.owner, props.found, props.words)
+  // What's found is the apps with a screen first, then the background apps, as `findAll` has them.
+  const apps = () => props.found.filter((listed) => listed.entrypoint)
+  const background = () => props.found.filter((listed) => !listed.entrypoint)
   const Heading = (inner: { children: string }) => <Text style={[looks.heading, looks.tall(HEADING)]}>{inner.children}</Text>
+  // Each found app, `from` being how many were found before it, where Return and the arrow keys count it, and where it
+  // is, which Up and Down read.
+  const Found = (inner: { list: Listed[]; from: number }) => (
+    <For each={inner.list} keyed={(listed) => listed.entrypoint ?? listed.app}>
+      {(listed, at) => (
+        <View onPointerMove={() => setChosenResult(inner.from + at())} onLayout={(event) => slots.set(inner.from + at(), event.currentTarget.getBoundingClientRect())} style={looks.result}>
+          <Show when={chosenResult() === inner.from + at()}>
+            <View aria-hidden="true" style={looks.chosen} />
+          </Show>
+          <Tile name={listed().name} icon={listed().icon} size={tile} scale={1} badge={opens(listed()) ? badgeOf(opens(listed())!, props.owner) : undefined} onPress={(behind, from) => press(listed(), props.owner, behind, from)} />
+        </View>
+      )}
+    </For>
+  )
   return (
     <View style={looks.results}>
       <Show when={props.found.length || widgets().length} fallback={<View style={looks.nothingFound}><Empty>No apps match.</Empty></View>}>
-        <Show when={props.found.length}>
+        <Show when={apps().length}>
           <Heading>Apps</Heading>
           <View style={looks.apps}>
             <Show when={lead()}>
@@ -76,17 +112,14 @@ export function Results(props: { owner: Owner; found: Listed[]; words: string })
               )}
             </Show>
             <View style={looks.foundApps}>
-              <For each={props.found} keyed={(listed) => listed.entrypoint ?? listed.app}>
-                {(listed, at) => (
-                  <View onPointerMove={() => setChosenResult(at())} style={looks.result}>
-                    <Show when={chosenResult() === at()}>
-                      <View aria-hidden="true" style={looks.chosen} />
-                    </Show>
-                    <Tile name={listed().name} icon={listed().icon} size={tile} scale={1} badge={opens(listed()) ? badgeOf(opens(listed())!, props.owner) : undefined} onPress={(behind, from) => press(listed(), props.owner, behind, from)} />
-                  </View>
-                )}
-              </For>
+              <Found list={apps()} from={0} />
             </View>
+          </View>
+        </Show>
+        <Show when={background().length}>
+          <Heading>Background Apps</Heading>
+          <View style={looks.foundApps}>
+            <Found list={background()} from={apps().length} />
           </View>
         </Show>
         <Show when={widgets().length}>
@@ -176,8 +209,8 @@ export function createLauncher(props: { owners: Owner[] }, layout: Screens, pagi
     },
     { defer: true },
   )
-  /// What the launcher's search found: the apps of your App Library, whose names have what's typed in them.
-  const found = createMemo(() => findIn(props.owners[0]?.library ?? [], query(), false))
+  /// What the launcher's search found: the apps of your App Library, background ones last, whose names have what's typed in them.
+  const found = createMemo(() => findAll(props.owners[0]?.library ?? [], query()))
   /// What the launcher's Return opens and its Actions are for: the app its search chose, or what's highlighted on Home.
   const target = createMemo((): Target | undefined => {
     if (query().trim()) {
@@ -317,7 +350,7 @@ export function LauncherPanel(props: { owners: Owner[]; layout: Screens; paging:
           {/* What was typed found, as it's typed, and as it goes, what it last found. */}
           <View inert={showing() !== "search" || undefined} style={[looks.owner, looks.fading, showing() !== "search" && looks.inert, looks.at(INSET, INSET, card().width - 2 * INSET, card().height - 2 * INSET), looks.drifted(showing() === "search" ? 1 : 0, showing() === "search" ? 0 : -8)]}>
             <ScrollView style={looks.cover}>
-              <Show when={words()}>{(typed) => <Results owner={props.owners[0]} found={findIn(props.owners[0]?.library ?? [], typed(), false)} words={typed()} />}</Show>
+              <Show when={words()}>{(typed) => <Results owner={props.owners[0]} found={findAll(props.owners[0]?.library ?? [], typed())} words={typed()} />}</Show>
             </ScrollView>
           </View>
           {/* Whose pages they are at the top, as a phone has it, and their dots at the foot, with the App Library's glyph. */}
