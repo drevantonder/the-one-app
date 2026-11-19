@@ -86,11 +86,11 @@ for (const file of readdirSync(`${root}/clients/web`).filter((file) => !["dist",
 // Its service worker is built, with what it imports, over its source.
 rmSync(`${web}/sw.js`, { force: true });
 await $`bun install --frozen-lockfile && bun build sw.js --format iife --minify --outfile ${web}/sw.js`.cwd(`${root}/clients/web`).quiet();
-// The renderer's frame, with the renderer built for it as WebAssembly, built here as the UI library is.
-await $`bun build.js ${web}/renderer`.cwd(`${root}/clients/web/renderer`).quiet();
 // Built here, so a deploy never ships whatever build of the UI library was left on disk.
 await $`bun install --frozen-lockfile && bun build.js`.cwd(`${root}/core/ui`).quiet();
 place(`${root}/core/ui/dist/client`, `${web}/ui/client`);
+// The renderer's frame, with the renderer built for it as WebAssembly, and its check page, built with the UI library.
+await $`bun build.js ${web}/renderer`.cwd(`${root}/clients/web/renderer`).quiet();
 // The app's own page, as its window has it, at `/page/`, which the app keeps and loads from its next start if it's
 // newer than its own and it runs on it (`clients/app/src/page.rs`), with what's said of it in `update.json`: its
 // version, the lowest build of the app it runs on (`clients/app/page/update.json`), and each file's SHA-256. As

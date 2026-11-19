@@ -1,0 +1,21 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; frame-src 'self'; connect-src 'self'; base-uri 'none'">
+  <title>Renderer check</title>
+  <style>
+    html, body { margin: 0; height: 100%; font: 14px system-ui; color-scheme: light dark; background: Canvas; color: CanvasText; }
+    body { display: flex; flex-direction: column; }
+    p { margin: 0; padding: 8px 16px; }
+    iframe { flex: 1; border: 0; width: 100%; }
+  </style>
+  <script src="check.js" defer></script>
+</head>
+<body>
+  <p id="said" role="status">Each check you answer goes to your network's Telemetry.</p>
+  <!-- The page drawn by the renderer, at this address, so a passkey and a password manager are this network's. -->
+  <iframe id="page" title="Renderer check" allow="publickey-credentials-get; clipboard-write"></iframe>
+</body>
+</html>

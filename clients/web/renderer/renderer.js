@@ -7,9 +7,19 @@
 ;(async () => {
   const started = performance.now()
   const page = new URL(location.hash.slice(1), location.href)
+  /// What happened, said once of each kind to the frame's client, which may tell Telemetry (check.js): the first
+  /// frame, the edits its real field had, a screen reader's presses.
+  /** @type {Set<string>} */
+  const said = new Set()
+  const seen = (/** @type {string} */ kind, /** @type {unknown} */ value = true) => {
+    if (said.has(kind)) return
+    said.add(kind)
+    parent.postMessage({ jsonrpc: "2.0", method: "notifications/one/seen", params: { [kind]: value } }, "*")
+  }
   /** What the page's own page is drawn as, where this can't: the DOM. */
   const unopened = (/** @type {unknown} */ why) => {
     console.warn("the renderer didn't open this page:", why)
+    seen("unopened", String(why))
     location.replace(page)
   }
   try {
@@ -31,6 +41,7 @@
     const tables = await Promise.all(["/ui/client/tokens.json", "/ui/client/styles.json", "styles.json"].map(async (table) => (await fetch(new URL(table, base))).text()))
     const [renderer, { textInput }, { semantics }] = await Promise.all([import("./web_renderer.js"), import("./text-input.js"), import("./semantics.js")])
     await renderer.default()
+    // A page built with this renderer's own UI library (check/) names none.
     const needs = Number(new URLSearchParams(location.search).get("runtime"))
     if (!(needs <= renderer.runtime_version())) throw new Error(`it needs runtime version ${needs}`)
     // What the page's JS draws through, and asks its client through, as a native host's sandbox has them.
@@ -40,8 +51,8 @@
     })
     const canvas = /** @type {HTMLCanvasElement} */ (document.querySelector("canvas"))
     // Typing, through a real field (text-input.js), and what a screen reader reads (semantics.js).
-    const typing = textInput((method, args) => renderer.text_input_client(method, args))
-    const spoken = semantics(/** @type {HTMLElement} */ (document.getElementById("semantics")), (id, action) => renderer.act(id, action))
+    const typing = textInput((method, args) => renderer.text_input_client(method, args), (edit) => seen(`edit:${edit}`))
+    const spoken = semantics(/** @type {HTMLElement} */ (document.getElementById("semantics")), (id, action) => (seen(`screen reader:${action}`), renderer.act(id, action)))
     const sized = (/** @type {number} */ width, /** @type {number} */ height) => [Math.max(1, Math.round(width)), Math.max(1, Math.round(height))]
     ;[canvas.width, canvas.height] = sized(innerWidth * devicePixelRatio, innerHeight * devicePixelRatio)
     await renderer.open(canvas, devicePixelRatio, base.href, tables, page.searchParams.get("theme"), matchMedia("(pointer: coarse)").matches, {
@@ -52,6 +63,7 @@
       // Its first frame, marked on the frame's own element for whoever measures it.
       drawn: () => {
         document.documentElement.dataset.drawn = String(Math.round(performance.now()))
+        seen("first frame ms", Math.round(performance.now()))
         console.info(`first frame ${Math.round(performance.now() - started)} ms after the frame's script, ${Math.round(performance.now())} ms after it was opened`)
       },
       unopened,

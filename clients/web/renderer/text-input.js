@@ -28,14 +28,24 @@ const KEYBOARDS = { "TextInputType.emailAddress": ["email", "email"], "TextInput
 /** Flutter's action keys as the DOM's `enterkeyhint` has them. */
 const ACTIONS = { "TextInputAction.go": "go", "TextInputAction.search": "search", "TextInputAction.send": "send", "TextInputAction.next": "next", "TextInputAction.previous": "previous", "TextInputAction.newline": "enter" }
 
+/** Whether a password manager filled `element`, as CSS's `:autofill` says, or WebKit's older name for it. */
+const filled = (/** @type {Element} */ element) => {
+  try {
+    return element.matches(":autofill")
+  } catch {
+    return element.matches(":-webkit-autofill")
+  }
+}
+
 /** See-through, where the field is drawn, with nothing of its own showing: the renderer draws the text and caret. */
 const UNSEEN = "position:absolute;top:0;left:0;margin:0;padding:0;border:0;outline:none;resize:none;overflow:hidden;background:transparent;color:transparent;caret-color:transparent;text-shadow:none;transform-origin:0 0 0;font-size:16px;white-space:pre;opacity:1"
 
 /**
- * The plugin: `call` is Flutter's text input channel to it, and `said(method, args)` is it to the renderer.
- * @param {(method: string, args: unknown[]) => void} said
+ * The plugin: `call` is Flutter's text input channel to it, and `said(method, args)` is it to the renderer. `edited` hears
+ * each kind of edit the field has (the DOM's `inputType`, `autofill` where a password manager filled it, `composition`).
+ * @param {(method: string, args: unknown[]) => void} said @param {(edit: string) => void} [edited]
  */
-export function textInput(said) {
+export function textInput(said, edited = () => {}) {
   /** @type {number | null} */
   let client = null
   /** @type {any} */
@@ -131,8 +141,11 @@ export function textInput(said) {
           form = grouped(field, configuration)
           document.body.append(form ?? field)
           const element = field
-          element.addEventListener("input", tell)
-          element.addEventListener("compositionstart", () => ((composingFrom = element.selectionStart ?? 0), (composing = "")))
+          element.addEventListener("input", (event) => {
+            edited(filled(element) ? "autofill" : (/** @type {InputEvent} */ (event).inputType ?? "input"))
+            tell()
+          })
+          element.addEventListener("compositionstart", () => ((composingFrom = element.selectionStart ?? 0), (composing = ""), edited("composition")))
           element.addEventListener("compositionupdate", (event) => ((composing = event.data ?? ""), tell()))
           element.addEventListener("compositionend", () => ((composingFrom = -1), (composing = ""), tell()))
           document.addEventListener("selectionchange", tell)
