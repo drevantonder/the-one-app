@@ -58,6 +58,14 @@ public final class NativeView extends SurfaceView implements SurfaceHolder.Callb
         fling = new OverScroller(context);
         input = new TextInputPlugin(this, this);
         getHolder().addCallback(this);
+        // It draws under the system's bars, the display's cutout and the keyboard, as an edge-to-edge app does, told
+        // where they are.
+        androidx.core.view.ViewCompat.setOnApplyWindowInsetsListener(this, (view, insets) -> {
+            int kept = androidx.core.view.WindowInsetsCompat.Type.systemBars() | androidx.core.view.WindowInsetsCompat.Type.displayCutout() | androidx.core.view.WindowInsetsCompat.Type.ime();
+            androidx.core.graphics.Insets covered = insets.getInsets(kept);
+            nativeInsets(id, covered.left, covered.top, covered.right, covered.bottom);
+            return insets;
+        });
         setFocusable(true);
         setFocusableInTouchMode(true);
         setImportantForAutofill(IMPORTANT_FOR_AUTOFILL_YES);
@@ -151,6 +159,8 @@ public final class NativeView extends SurfaceView implements SurfaceHolder.Callb
     /** Whether its window has the keyboard as it's put in it, which no focus change says. */
     @Override protected void onAttachedToWindow() {
         super.onAttachedToWindow();
+        // What covers it, which a view put in after the window's insets went out isn't told by itself.
+        androidx.core.view.ViewCompat.requestApplyInsets(this);
         post(() -> nativeActive(id, hasWindowFocus()));
     }
 
@@ -301,6 +311,8 @@ public final class NativeView extends SurfaceView implements SurfaceHolder.Callb
     private native void nativeLongPress(long id, float x, float y);
 
     private native void nativePicked(long id, long node, String value);
+
+    private native void nativeInsets(long id, int left, int top, int right, int bottom);
     private native void nativeEditingState(long id, int field, String text, int base, int extent, int composingStart, int composingEnd);
     private native void nativeAction(long id, int field, String action);
     private native String nativeFields(long id);

@@ -23,6 +23,7 @@ import androidx.core.graphics.drawable.IconCompat
 import androidx.core.net.toUri
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
+import androidx.core.view.children
 import androidx.webkit.WebSettingsCompat
 import androidx.webkit.WebViewCompat
 import androidx.webkit.WebViewFeature
@@ -40,11 +41,15 @@ class MainActivity : TauriActivity() {
   override fun onCreate(savedInstanceState: Bundle?) {
     dress()
     super.onCreate(savedInstanceState)
+    // The web view keeps clear of the bars and the keyboard; a native window draws under them, told where they are
+    // (`NativeView`).
     ViewCompat.setOnApplyWindowInsetsListener(findViewById(android.R.id.content)) { view, insets ->
       val kept = WindowInsetsCompat.Type.systemBars() or WindowInsetsCompat.Type.displayCutout() or WindowInsetsCompat.Type.ime()
       val clear = insets.getInsets(kept)
-      view.setPadding(clear.left, clear.top, clear.right, clear.bottom)
-      WindowInsetsCompat.CONSUMED
+      for (child in (view as android.view.ViewGroup).children) {
+        if (child !is app.theone.renderer.NativeView) child.setPadding(clear.left, clear.top, clear.right, clear.bottom)
+      }
+      insets
     }
     // An app's window is a view over the web view, drawn natively, which Back closes (`NativeHost`).
     NativeHost.attach(this) { gate?.pass() }

@@ -26,7 +26,7 @@ use raw_window_handle as rwh;
 use serde_json::{Value, json};
 
 use super::{Input, Job, WindowId, WindowOptions, Windows};
-use crate::geometry::{DevicePixels, Pixels, Point, Size, point};
+use crate::geometry::{DevicePixels, Edges, Pixels, Point, Size, point};
 use crate::tree::Id;
 use crate::Appearance;
 use crate::editing::{self, Composing, Selection, TextInputClient};
@@ -294,8 +294,8 @@ pub struct NativeWindow {
     device: Cell<Size<DevicePixels>>,
     density: f32,
     a11y: Option<a11y::A11y>,
-    /// The field last scrolled into view, and the size the window was then.
-    revealed: Option<(Id, Size<DevicePixels>)>,
+    /// The field last scrolled into view, and the size and insets the window had then.
+    revealed: Option<(Id, Size<DevicePixels>, Edges<f32>)>,
 }
 
 /// A view as `Display::arrange` would place it, which a phone's never does.
@@ -378,6 +378,24 @@ impl crate::view::Device for Device {
     }
 }
 
+/// What the system's bars, the display's cutout and the keyboard cover of window `id`'s view, in device pixels at
+/// each edge, which it draws under, as an edge-to-edge app does: its page keeps clear of them as its safe area.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_app_theone_renderer_NativeView_nativeInsets(_: JNIEnv, _: JObject, id: jlong, left: jint, top: jint, right: jint, bottom: jint) {
+    let id = id as WindowId;
+    with_windows(|windows| {
+        let Some(window) = windows.windows.get_mut(&id) else { return };
+        let density = window.parts[0].native.density;
+        let Ok(screen) = &mut window.screen else { return };
+        let insets = Edges { top: top as f32 / density, right: right as f32 / density, bottom: bottom as f32 / density, left: left as f32 / density };
+        if screen.insets != insets {
+            screen.insets = insets;
+            window.dirty = true;
+            keyboard(windows, id);
+        }
+    });
+}
+
 /// Android's picker chose `value` for picker node `node` of window `id`.
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_app_theone_renderer_NativeView_nativePicked(mut env: JNIEnv, _: JObject, id: jlong, node: jlong, value: JString) {
@@ -400,14 +418,14 @@ impl rwh::HasDisplayHandle for NativeWindow {
 }
 
 /// Tells window `id`'s text input plugin what changed since it was told (`Screen::text_input`), and shows the input
-/// with the keyboard whole, as it takes the keyboard and as the keyboard coming up makes the window shorter.
+/// with the keyboard whole, as it takes the keyboard and as the keyboard coming up covers more of the window.
 fn keyboard(windows: &mut Windows, id: WindowId) {
     let Some(window) = windows.windows.get_mut(&id) else { return };
     let Ok(screen) = &mut window.screen else { return };
-    let revealing = screen.focused().filter(|_| screen.editing().is_some()).map(|focused| (focused, window.parts[0].native.device_size()));
+    let revealing = screen.focused().filter(|_| screen.editing().is_some()).map(|focused| (focused, window.parts[0].native.device_size(), screen.insets));
     if revealing.is_some() && revealing != window.parts[0].native.revealed {
         window.parts[0].native.revealed = revealing;
-        if revealing.is_some_and(|(focused, _)| screen.reveal(focused)) {
+        if revealing.is_some_and(|(focused, _, _)| screen.reveal(focused)) {
             window.dirty = true;
         }
     }
