@@ -10,12 +10,12 @@ use std::sync::{Arc, Mutex};
 
 /// The GPU, shared by what draws: every window's surface and every offscreen texture, with the pipelines each format
 /// of target draws with, compiled once for every window.
-pub struct WgpuContext {
+pub struct Context {
     pub(crate) instance: wgpu::Instance,
     pub(crate) adapter: wgpu::Adapter,
     pub(crate) device: wgpu::Device,
     pub(crate) queue: wgpu::Queue,
-    pub(crate) pipelines: Mutex<Vec<(wgpu::TextureFormat, bool, Arc<super::wgpu_renderer::WgpuPipelines>)>>,
+    pub(crate) pipelines: Mutex<Vec<(wgpu::TextureFormat, bool, Arc<super::renderer::Pipelines>)>>,
     /// Its device was lost (its GPU was reset, as a Windows driver's TDR resets it, or went), so nothing drawn with
     /// it draws again: what draws makes everything again, on a new one (`Windows::recover`).
     lost: Arc<AtomicBool>,
@@ -32,7 +32,7 @@ const BACKENDS: wgpu::Backends = if cfg!(target_arch = "wasm32") {
     wgpu::Backends::VULKAN
 };
 
-impl WgpuContext {
+impl Context {
     #[cfg(not(target_arch = "wasm32"))]
     pub fn new() -> anyhow::Result<Self> {
         futures_lite::future::block_on(Self::create())

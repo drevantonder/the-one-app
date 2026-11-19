@@ -26,7 +26,7 @@ use std::path::PathBuf;
 use serde_json::{Value, json};
 use renderer::geometry::{DevicePixels, Pixels, Size};
 use renderer::js::{Clock, Files, Thread};
-use renderer::render::{Atlas, Context, Renderer, scene::Scene};
+use renderer::render::{atlas::Atlas, context::Context, renderer::Renderer, scene::Scene};
 use renderer::text::TextSystem;
 use renderer::{Appearance, Screen};
 use url::Url;

@@ -7,8 +7,7 @@ use std::hash::{Hash, Hasher};
 use std::sync::{Arc, Condvar, Mutex};
 
 use crate::geometry::{DevicePixels, Size};
-use crate::render::Atlas;
-use crate::render::atlas::{AtlasKey, AtlasTile};
+use crate::render::atlas::{Atlas, AtlasKey, AtlasTile};
 
 use super::{Decoded, Picture};
 

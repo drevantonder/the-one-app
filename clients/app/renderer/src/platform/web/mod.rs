@@ -89,17 +89,17 @@ const WINDOW: WindowId = 1;
 
 /// A new GPU device, where the one drawn with was lost (`Windows::recover`): → it, once the browser has given it, having
 /// been asked for the first time this is asked.
-pub fn recover() -> Option<anyhow::Result<crate::render::Context>> {
+pub fn recover() -> Option<anyhow::Result<crate::render::context::Context>> {
     thread_local! {
         static ASKING: Cell<bool> = const { Cell::new(false) };
-        static CAME: RefCell<Option<anyhow::Result<crate::render::Context>>> = const { RefCell::new(None) };
+        static CAME: RefCell<Option<anyhow::Result<crate::render::context::Context>>> = const { RefCell::new(None) };
     }
     if let Some(made) = CAME.take() {
         return Some(made);
     }
     if !ASKING.replace(true) {
         wasm_bindgen_futures::spawn_local(async {
-            CAME.set(Some(crate::render::Context::create().await));
+            CAME.set(Some(crate::render::context::Context::create().await));
             ASKING.set(false);
             soon();
         });
@@ -619,7 +619,7 @@ struct Video {
 
 /// Video `id`'s latest frame, in its tile of the atlas, written there as it came, and its size, drawn in `content`,
 /// `device` pixels, which its next frames are asked at.
-pub(crate) fn video(id: crate::tree::Id, content: crate::geometry::Bounds<f32>, device: Size<u32>, atlas: &crate::render::Atlas) -> Option<(crate::render::atlas::AtlasTile, Size<u32>)> {
+pub(crate) fn video(id: crate::tree::Id, content: crate::geometry::Bounds<f32>, device: Size<u32>, atlas: &crate::render::atlas::Atlas) -> Option<(crate::render::atlas::AtlasTile, Size<u32>)> {
     VIDEOS.with_borrow_mut(|videos| {
         let video = videos.entry(id).or_default();
         video.drawn = [content.origin.x, content.origin.y, content.size.width, content.size.height, device.width as f32, device.height as f32];
@@ -693,7 +693,7 @@ pub async fn open(canvas: web_sys::HtmlCanvasElement, scale: f32, page: String, 
     let media = |query: &str| web_sys::window().and_then(|window| window.match_media(query).ok().flatten()).is_some_and(|list| list.matches());
     HOST.set(Some(Host { canvas, calls, dark: media("(prefers-color-scheme: dark)"), reduced_motion: media("(prefers-reduced-motion: reduce)") }));
     let tokens = load(&tables).map_err(|error| JsError::new(&format!("{error:#}")))?;
-    let context = crate::render::Context::create().await.map_err(|error| JsError::new(&format!("{error:#}")))?;
+    let context = crate::render::context::Context::create().await.map_err(|error| JsError::new(&format!("{error:#}")))?;
     let mut windows = Windows::made(Display, Ok(context)).map_err(|error| JsError::new(&format!("{error:#}")))?;
     let mut screen = Screen::new(Thread::new(Clock::real()), Some(Box::new(asked)), room, Default::default());
     screen.page = tokens;

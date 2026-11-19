@@ -9,7 +9,7 @@ use std::collections::HashMap;
 use std::sync::{Arc, OnceLock};
 
 use crate::geometry::{DevicePixels, Pixels, Point, Size};
-use crate::render::{Atlas, Context, Renderer};
+use crate::render::{atlas::Atlas, context::Context, renderer::Renderer};
 use crate::text::TextSystem;
 use crate::Screen;
 

@@ -20,8 +20,7 @@ use swash::scale::{Render, ScaleContext, Source, StrikeWith};
 use swash::zeno::{Format, Vector};
 
 use crate::geometry::{Bounds, ContentMask, DevicePixels, Hsla, Pixels, Point, ScaledPixels, Size, point, size};
-use crate::render::Atlas;
-use crate::render::atlas::AtlasKey;
+use crate::render::atlas::{Atlas, AtlasKey};
 use crate::render::scene::{MonochromeSprite, PolychromeSprite, Scene, TransformationMatrix};
 
 #[cfg(target_arch = "wasm32")]

@@ -6,8 +6,8 @@
 // (clients/app/renderer/LICENSE-APACHE); this file is changed from the original.
 
 use super::scene::{PrimitiveBatch, Recording, Scene, Shadow};
-use super::wgpu_atlas::WgpuAtlas;
-use super::wgpu_context::WgpuContext;
+use super::atlas::Atlas;
+use super::context::Context;
 use crate::geometry::{DevicePixels, Size};
 use bytemuck::{Pod, Zeroable};
 use std::sync::{Arc, OnceLock};
@@ -39,7 +39,7 @@ struct BlurParams {
 
 /// The pipelines a format of target draws with, and the layouts of what they bind: the frame's globals (group 0), a
 /// batch's instances or a blur's parameters (group 1), and the texture a batch samples (group 2).
-pub(crate) struct WgpuPipelines {
+pub(crate) struct Pipelines {
     layouts: Layouts,
     quads: wgpu::RenderPipeline,
     shadows: wgpu::RenderPipeline,
@@ -209,7 +209,7 @@ fn side_by_side<const N: usize>(compile: [Compile; N]) -> [wgpu::RenderPipeline;
     std::thread::scope(|scope| compile.map(|compile| scope.spawn(compile)).map(|compiling| compiling.join().expect("compiling a pipeline doesn't panic")))
 }
 
-impl WgpuPipelines {
+impl Pipelines {
     fn new(device: &wgpu::Device, queue: &wgpu::Queue, format: wgpu::TextureFormat, premultiplied: bool) -> Self {
         let layouts = Layouts::new(device, queue, format, premultiplied);
         let (l, blend) = (&layouts, Some(layouts.blend));
@@ -245,12 +245,12 @@ impl WgpuPipelines {
     }
 
     /// The pipelines for targets of `format`, compiled the first time a renderer draws to one.
-    fn shared(context: &WgpuContext, format: wgpu::TextureFormat, premultiplied: bool) -> Arc<WgpuPipelines> {
+    fn shared(context: &Context, format: wgpu::TextureFormat, premultiplied: bool) -> Arc<Pipelines> {
         let mut compiled = context.pipelines.lock().expect("nothing panics holding it");
         if let Some((_, _, pipelines)) = compiled.iter().find(|(f, p, _)| *f == format && *p == premultiplied) {
             return pipelines.clone();
         }
-        let pipelines = Arc::new(WgpuPipelines::new(&context.device, &context.queue, format, premultiplied));
+        let pipelines = Arc::new(Pipelines::new(&context.device, &context.queue, format, premultiplied));
         compiled.push((format, premultiplied, pipelines.clone()));
         // The rest compiled in the background where there are threads; on the web, as each is first drawn.
         #[cfg(not(target_arch = "wasm32"))]
@@ -315,11 +315,11 @@ struct BackdropTextures {
     levels: [[Option<(wgpu::Texture, wgpu::TextureView)>; 3]; LEVELS],
 }
 
-pub struct WgpuRenderer {
+pub struct Renderer {
     device: wgpu::Device,
     queue: wgpu::Queue,
     target: Target,
-    pipelines: Arc<WgpuPipelines>,
+    pipelines: Arc<Pipelines>,
     /// The format of the target, which the pipelines and a backdrop's textures are for, and whether what's drawn
     /// into it is premultiplied by its alpha.
     format: wgpu::TextureFormat,
@@ -330,7 +330,7 @@ pub struct WgpuRenderer {
     /// The frame's globals, its batches' instances and its blurs' parameters, written once a frame.
     data: Vec<u8>,
     buffer: Option<wgpu::Buffer>,
-    atlas: Arc<WgpuAtlas>,
+    atlas: Arc<Atlas>,
     sampler: wgpu::Sampler,
     gamma: GammaParams,
     /// What a backdrop blurs: the frame as drawn so far, halved and halved again, then blurred one way and the other.
@@ -375,11 +375,11 @@ struct Kept {
     drawn: Drawn,
 }
 
-impl WgpuRenderer {
+impl Renderer {
     /// A renderer for a window, drawing into `target`, its surface as its platform gives it.
     pub fn new(
-        context: &WgpuContext,
-        atlas: Arc<WgpuAtlas>,
+        context: &Context,
+        atlas: Arc<Atlas>,
         target: super::SurfaceTarget,
         size: Size<DevicePixels>,
         transparent: bool,
@@ -445,7 +445,7 @@ impl WgpuRenderer {
     }
 
     /// A renderer that draws offscreen, `size` device pixels, read back by `read`.
-    pub fn offscreen(context: &WgpuContext, atlas: Arc<WgpuAtlas>, size: Size<DevicePixels>) -> Self {
+    pub fn offscreen(context: &Context, atlas: Arc<Atlas>, size: Size<DevicePixels>) -> Self {
         let (width, height) = extent(size);
         let texture = context.device.create_texture(&wgpu::TextureDescriptor {
             label: None,
@@ -470,7 +470,7 @@ impl WgpuRenderer {
     }
 
     /// A renderer drawing into `target`, from `atlas`, which every renderer on the context shares.
-    fn with_target(context: &WgpuContext, atlas: Arc<WgpuAtlas>, target: Target, format: wgpu::TextureFormat, premultiplied: bool, size: (u32, u32)) -> Self {
+    fn with_target(context: &Context, atlas: Arc<Atlas>, target: Target, format: wgpu::TextureFormat, premultiplied: bool, size: (u32, u32)) -> Self {
         let limits = context.device.limits();
         let sampler = context.device.create_sampler(&wgpu::SamplerDescriptor {
             mag_filter: wgpu::FilterMode::Linear,
@@ -481,7 +481,7 @@ impl WgpuRenderer {
             device: context.device.clone(),
             queue: context.queue.clone(),
             target,
-            pipelines: WgpuPipelines::shared(context, format, premultiplied),
+            pipelines: Pipelines::shared(context, format, premultiplied),
             format,
             premultiplied,
             size,
@@ -514,7 +514,7 @@ impl WgpuRenderer {
         }
     }
 
-    pub fn sprite_atlas(&self) -> &Arc<WgpuAtlas> {
+    pub fn sprite_atlas(&self) -> &Arc<Atlas> {
         &self.atlas
     }
 
@@ -1121,7 +1121,7 @@ impl WgpuRenderer {
 
 /// Where a backdrop's blur's parameters are in the frame's data, and at which level it's blurred.
 struct Blur {
-    /// What was drawn before it, by which a blur of it is kept (`WgpuRenderer::blurred`).
+    /// What was drawn before it, by which a blur of it is kept (`Renderer::blurred`).
     behind: Option<u64>,
     level: usize,
     shrink: (u64, u64),

@@ -1085,7 +1085,7 @@ fn fs_shadow(input: ShadowVarying) -> @location(0) vec4<f32> {
     return blend_color_dithered(input.color, shadow_coverage(input.local, shadow) * saturate(0.5 + outside), input.position.xy);
 }
 
-// A shadow's tile: how much of each point its box covers, blurred, alone (`tiled` in wgpu_renderer.rs).
+// A shadow's tile: how much of each point its box covers, blurred, alone (`tiled` in renderer.rs).
 @fragment
 fn fs_shadow_coverage(input: ShadowVarying) -> @location(0) vec4<f32> {
     return vec4<f32>(shadow_coverage(input.local, b_shadows[input.shadow_id]));
