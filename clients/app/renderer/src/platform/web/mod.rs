@@ -451,6 +451,54 @@ pub(crate) fn path(d: &str, view_box: &str, device: Size<u32>, fill: Option<Stri
     Some(bgra(device, pixels))
 }
 
+/// The face the browser draws what no face of the renderer's has in: its UI's, which falls back to its emoji's.
+const BROWSER_FONT: &str = "system-ui, sans-serif";
+
+/// A 2D canvas of `width` by `height`, its text in the browser's face at `size` pixels.
+fn canvas(width: u32, height: u32, size: f32) -> Option<web_sys::OffscreenCanvasRenderingContext2d> {
+    let canvas = web_sys::OffscreenCanvas::new(width.max(1), height.max(1)).ok()?;
+    let context: web_sys::OffscreenCanvasRenderingContext2d = canvas.get_context("2d").ok()??.dyn_into().ok()?;
+    context.set_font(&format!("{size}px {BROWSER_FONT}"));
+    Some(context)
+}
+
+/// How wide `text` is in the browser's face, in ems, and whether the browser draws it in colour (an emoji's) or in
+/// one, as a symbol, which is then drawn in its text's colour (`text::browser`).
+pub(crate) fn measure(text: &str) -> (f32, bool) {
+    const SIZE: f32 = 100.0;
+    let Some(context) = canvas(1, 1, SIZE) else { return (0.0, false) };
+    let advance = context.measure_text(text).map_or(0.0, |metrics| metrics.width() as f32 / SIZE);
+    // Drawn in black and in red: one that's the same both times has colours of its own, as an emoji (a grey one too).
+    let colored = match (glyph_in(text, 32.0, "#000"), glyph_in(text, 32.0, "#f00")) {
+        (Some(black), Some(red)) => !black.4.is_empty() && black.4 == red.4,
+        _ => false,
+    };
+    (advance, colored)
+}
+
+/// `text` as the browser's canvas draws it at `size` pixels, in black where it has no colour of its own: where it is
+/// from its pen (left, and top above the baseline), its size, and its pixels, RGBA, straight.
+pub(crate) fn glyph(text: &str, size: f32) -> Option<(i32, i32, u32, u32, Vec<u8>)> {
+    glyph_in(text, size, "#000")
+}
+
+/// `text` drawn as `glyph` says, in `colour` where it has none of its own.
+fn glyph_in(text: &str, size: f32, colour: &str) -> Option<(i32, i32, u32, u32, Vec<u8>)> {
+    let metrics = canvas(1, 1, size)?.measure_text(text).ok()?;
+    let left = (-metrics.actual_bounding_box_left()).floor() as i32;
+    let right = metrics.actual_bounding_box_right().ceil() as i32;
+    let (ascent, descent) = (metrics.actual_bounding_box_ascent().ceil() as i32, metrics.actual_bounding_box_descent().ceil() as i32);
+    let (width, height) = ((right - left).max(0) as u32, (ascent + descent).max(0) as u32);
+    if width == 0 || height == 0 {
+        return Some((0, 0, 0, 0, Vec::new()));
+    }
+    let context = canvas(width, height, size)?;
+    context.set_fill_style_str(colour);
+    context.fill_text(text, f64::from(-left), f64::from(ascent)).ok()?;
+    let pixels = context.get_image_data(0.0, 0.0, f64::from(width), f64::from(height)).ok()?.data().0;
+    Some((left, ascent, width, height, pixels))
+}
+
 /// The browser's straight RGBA as the atlas's BGRA.
 fn bgra(size: Size<u32>, mut pixels: Vec<u8>) -> crate::view::Decoded {
     for pixel in pixels.chunks_exact_mut(4) {

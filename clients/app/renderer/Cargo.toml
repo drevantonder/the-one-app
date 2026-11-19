@@ -86,7 +86,7 @@ wgpu = { version = "30.0.2", default-features = false, features = ["webgpu"] }
 wasm-bindgen = "=0.2.130"
 wasm-bindgen-futures = "0.4"
 js-sys = "0.3"
-web-sys = { version = "0.3", features = ["console", "CanvasRenderingContext2d", "DomMatrix2dInit", "Headers", "HtmlCanvasElement", "HtmlImageElement", "ImageData", "MediaQueryList", "OffscreenCanvas", "OffscreenCanvasRenderingContext2d", "Path2d", "Response", "Window"] }
+web-sys = { version = "0.3", features = ["console", "CanvasRenderingContext2d", "DomMatrix2dInit", "Headers", "HtmlCanvasElement", "HtmlImageElement", "ImageData", "MediaQueryList", "OffscreenCanvas", "OffscreenCanvasRenderingContext2d", "Path2d", "TextMetrics", "Response", "Window"] }
 
 [target.'cfg(any(target_os = "linux", target_os = "macos"))'.dependencies]
 # The windows' thread's event loop, as GPUI's Linux platform has it; a Mac's wakes it from AppKit's main thread.

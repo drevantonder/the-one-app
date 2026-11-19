@@ -24,6 +24,8 @@ use crate::render::Atlas;
 use crate::render::atlas::AtlasKey;
 use crate::render::scene::{MonochromeSprite, PolychromeSprite, Scene, TransformationMatrix};
 
+#[cfg(target_arch = "wasm32")]
+mod browser;
 #[cfg(not(target_arch = "wasm32"))]
 mod colr;
 
@@ -333,7 +335,7 @@ impl TextSystem {
             }
             let mut layout = self.shape(text, style, fonts);
             // A character no face had takes the face the system says has it, as a browser's does, from then on.
-            while let Some(family) = missing(&mut layout, text).and_then(fallback).filter(|family| !self.fallbacks.contains(family)) {
+            while let Some(family) = missing(&mut layout, text).and_then(|(at, character)| self.fallback(text, at, character)).filter(|family| !self.fallbacks.contains(family)) {
                 self.fallbacks.push(family);
                 self.shaped.clear();
                 layout = self.shape(text, style, fonts);
@@ -344,6 +346,27 @@ impl TextSystem {
         let layout = &mut self.shaped.get_mut(&key).expect("shaped above").layout;
         layout.break_all_lines(width);
         drawn(layout, text, offset, &mut self.faces)
+    }
+
+    /// The family of a face that has the character of `text` at byte `at`, which none it's tried had: the system's
+    /// (`fallback`), or on the web, where the system's faces aren't ours to read, one of the browser's (`browser`),
+    /// which replaces the one before it.
+    fn fallback(&mut self, text: &str, at: usize, character: char) -> Option<String> {
+        #[cfg(target_arch = "wasm32")]
+        {
+            let _ = character;
+            let (family, font) = browser::cover(text, at)?;
+            let blob = fontique::Blob::new(Arc::new(font));
+            browser::registered(blob.id());
+            self.fonts.collection.register_fonts(blob, None);
+            self.fallbacks.retain(|family| !browser::is_family(family));
+            Some(family)
+        }
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            let _ = (text, at);
+            fallback(character)
+        }
     }
 
     /// `text` shaped in `style`, each of `fonts` in its own: Allo at its weight and its size on its optical size axis,
@@ -412,6 +435,21 @@ impl TextSystem {
         let face = &self.faces[params.font_id.0];
         let (data, index) = (face.font.data.data(), face.font.index);
         let ppem = params.font_size() * params.scale_factor();
+        // One of the browser's glyphs, drawn by its canvas.
+        #[cfg(target_arch = "wasm32")]
+        if let Some((text, colored)) = browser::glyph(face.font.data.id(), params.glyph_id.0) {
+            let (left, top, width, height, rgba) = crate::platform::web::glyph(&text, ppem).context("the browser didn't draw it")?;
+            let mut image = swash::scale::image::Image::new();
+            image.placement = swash::zeno::Placement { left, top, width, height };
+            if colored {
+                image.content = swash::scale::image::Content::Color;
+                image.data = rgba;
+            } else {
+                image.content = swash::scale::image::Content::Mask;
+                image.data = rgba.chunks_exact(4).map(|pixel| pixel[3]).collect();
+            }
+            return Ok(image);
+        }
         // A COLRv1 emoji, which only a system's emoji face is: the web has none of its own.
         #[cfg(not(target_arch = "wasm32"))]
         if params.is_emoji {
@@ -592,6 +630,9 @@ fn drawn(layout: &Layout<()>, text: &str, offset: usize, faces: &mut Vec<Face>) 
                     if !newline {
                         let position = point(Pixels(x + glyph.x), Pixels(glyph.y));
                         let index = range.start + offset;
+                        // One of the browser's glyphs is an emoji's where the browser draws it in colour.
+                        #[cfg(target_arch = "wasm32")]
+                        let emoji = emoji || browser::glyph(run.font().data.id(), glyph.id).is_some_and(|(_, colored)| colored);
                         glyphs.push((font_id, size, ShapedGlyph { id: GlyphId(glyph.id), position, index, end: end + offset, advance: glyph.advance, rtl: run.is_rtl(), is_emoji: emoji }));
                     }
                     x += glyph.advance;
@@ -614,12 +655,12 @@ fn drawn(layout: &Layout<()>, text: &str, offset: usize, faces: &mut Vec<Face>) 
 
 /// The first character of `text` no face had a glyph for, in `layout`, laid out as one line: what draws as nothing but
 /// a font's missing glyph.
-fn missing(layout: &mut Layout<()>, text: &str) -> Option<char> {
+fn missing(layout: &mut Layout<()>, text: &str) -> Option<(usize, char)> {
     layout.break_all_lines(None);
     let line = layout.lines().next()?;
     line.runs().flat_map(|run| run.visual_clusters().collect::<Vec<_>>()).find_map(|cluster| {
         let character = text[cluster.text_range()].chars().next()?;
-        (!character.is_whitespace() && !character.is_control() && cluster.glyphs().any(|glyph| glyph.id == 0)).then_some(character)
+        (!character.is_whitespace() && !character.is_control() && cluster.glyphs().any(|glyph| glyph.id == 0)).then_some((cluster.text_range().start, character))
     })
 }
 
@@ -635,7 +676,7 @@ fn fallback(character: char) -> Option<String> {
     Some(unsafe { font.family_name() }.to_string())
 }
 
-#[cfg(not(target_vendor = "apple"))]
+#[cfg(not(any(target_vendor = "apple", target_arch = "wasm32")))]
 fn fallback(_: char) -> Option<String> {
     None
 }
