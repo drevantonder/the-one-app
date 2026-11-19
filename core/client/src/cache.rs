@@ -8,10 +8,10 @@
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::time::SystemTime;
-use std::{fs, process};
+use std::fs;
+use std::io::Write;
 
 use anyhow::{Context, Result, bail};
 use futures_util::future::join_all;
@@ -108,11 +108,11 @@ impl Client {
 /// Writes a file whole, under a name no other write has, then gives it its name: another ask, or another program
 /// of this client, may be reading it or keeping the same thing.
 pub(crate) fn write(file: &Path, bytes: &[u8]) -> Result<()> {
-    fs::create_dir_all(file.parent().context("what's kept is kept in a folder")?)?;
-    static WRITES: AtomicU64 = AtomicU64::new(0);
-    let writing = file.with_extension(format!("{}-{}", process::id(), WRITES.fetch_add(1, Ordering::Relaxed)));
-    fs::write(&writing, bytes)?;
-    fs::rename(writing, file)?;
+    let folder = file.parent().context("what's kept is kept in a folder")?;
+    fs::create_dir_all(folder)?;
+    let mut writing = tempfile::NamedTempFile::new_in(folder)?;
+    writing.write_all(bytes)?;
+    writing.persist(file)?;
     Ok(())
 }
 

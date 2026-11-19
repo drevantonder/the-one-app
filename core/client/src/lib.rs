@@ -1885,8 +1885,6 @@ fn resource() -> serde_json::Map<String, Value> {
     ])
 }
 
-/// Why a server refused what it was asked, as the person asking is told, if it did: a JSON-RPC error, or a tool's.
-/// A refusal is short, and a long answer isn't read twice to find it isn't one.
 /// Whether `message` asks what a server answers whatever version asks it, as it's how a client catches up: the list
 /// of tools, which builds there are, downloading one, updating, and following an update's task (`talks` in
 /// `OneCore.Mcp`).
@@ -1911,6 +1909,8 @@ fn left_behind(response: &[u8]) -> Option<String> {
         .then(|| error["message"].as_str().unwrap_or("This app needs updating").to_owned())
 }
 
+/// Why a server refused what it was asked, as the person asking is told, if it did: a JSON-RPC error, or a tool's.
+/// A refusal is short, and a long answer isn't read twice to find it isn't one.
 fn refused(response: &[u8]) -> Option<String> {
     if response.len() > 16 << 10 {
         return None;
