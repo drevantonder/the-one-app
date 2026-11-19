@@ -308,6 +308,9 @@ async fn built(client: &Client, of: &str, name: &str, app: &Path) -> Result<()> 
 }
 
 /// Checks `name` can be deployed from `folder` for `of`, reads its files, and builds the `deploy` tool's arguments.
+/// `trusted` says whether it's trusted, or untrusted and runs in a sandbox; left out, it's as the version before was,
+/// or for a new one as where it came from says. With `new` it's made where one by that name is installed for someone
+/// else `of` is in, as `deploy`'s `new` says.
 #[expect(clippy::too_many_arguments, reason = "each says something of the one deploy")]
 async fn prepare_deploy(
     client: &Client,
@@ -381,26 +384,6 @@ async fn finish_deploy(
         of: of.to_owned(),
         requires,
     })
-}
-
-/// Deploys the app `name` from a repo's copy, checked out at `commit`, as `of`'s own, and gives it as locked.
-/// `trusted` says whether it's trusted, or untrusted and runs in a sandbox; left out, it's as the version before was,
-/// or for a new one as where it came from says. With `new` it's made where one by that name is installed for someone
-/// else `of` is in, as `deploy`'s `new` says.
-#[expect(clippy::too_many_arguments, reason = "each says something of the one deploy")]
-async fn deploy(
-    client: &Client,
-    of: &str,
-    name: &str,
-    folder: &Path,
-    from: &Source,
-    commit: &str,
-    trusted: Option<bool>,
-    new: bool,
-) -> Result<Locked> {
-    let payload = prepare_deploy(client, of, name, folder, from, commit, trusted, new).await?;
-    let answer = call(client, Some(of), "deploy", payload).await?;
-    finish_deploy(client, of, name, from, commit, &answer).await
 }
 
 /// Installs apps from a checked-out repo, resolving each app's missing `requires` transitively from the server's
@@ -667,7 +650,9 @@ pub async fn locked(client: &Client) -> Result<ExitCode> {
             if it.requires.iter().any(|required| required != name && waiting.contains_key(required)) {
                 continue;
             }
-            let now = deploy(client, &it.of, name, &folder, &source, &commit, None, false).await?;
+            let payload = prepare_deploy(client, &it.of, name, &folder, &source, &commit, None, false).await?;
+            let answer = call(client, Some(&it.of), "deploy", payload).await?;
+            let now = finish_deploy(client, &it.of, name, &source, &commit, &answer).await?;
             if now.hash != it.hash {
                 println!(
                     "{name}'s files hash differently from what {LOCK} says, from the same commit: a NIF built again does."

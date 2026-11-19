@@ -498,7 +498,8 @@ pub async fn update(client: &Client) -> Result<String> {
     if one["build"] == BUILD {
         return Ok(format!("This device is on the latest build already: {BUILD}"));
     }
-    take_program(one, &env::current_exe()?).await?;
+    let program = env::current_exe()?;
+    put(&fetched_program(one, &program).await?, &program)?;
     Ok(format!("This device is on the build {} now.", one["build"].as_str().unwrap_or_default()))
 }
 
@@ -1070,12 +1071,6 @@ fn latest_pair(builds: &Map<String, Value>, current: &Pair) -> Option<Pair> {
 /// to go with it.
 fn latest(builds: &Map<String, Value>) -> Option<&str> {
     builds.get("server-runtime").and(builds.get("server-code")).and_then(|code| code["build"].as_str())
-}
-
-/// Replaces the program `program` with the build `one`, once it has said it's that build. What runs now runs on, and
-/// the next start is the new one.
-async fn take_program(one: &Value, program: &Path) -> Result<()> {
-    put(&fetched_program(one, program).await?, program)
 }
 
 /// Downloads the build `one` of the program `program` beside it, and gives where, once it has said it's that build.
