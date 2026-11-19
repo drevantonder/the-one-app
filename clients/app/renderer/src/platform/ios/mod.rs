@@ -233,7 +233,7 @@ fn heard(windows: &mut Windows, id: WindowId, event: &WindowEvent<'_>) {
 }
 
 /// Does `f` to the windows, made now if they aren't yet, steps each fling, draws what changed, and asks to be woken
-/// when the next timer, or the next step of a fling, is due. A call that comes while the windows are in use (UIKit
+/// when the next timer is due, and for the display's next frame while a fling runs. A call that comes while the windows are in use (UIKit
 /// calling back into a view as Rust changes it) is dropped.
 fn with_windows<R>(f: impl FnOnce(&mut Windows) -> R) -> Option<R> {
     WINDOWS.with(|windows| {
@@ -331,20 +331,19 @@ fn with_windows<R>(f: impl FnOnce(&mut Windows) -> R) -> Option<R> {
                 native.a11y.update(screen, (size.width as f32, size.height as f32), native.scale());
             }
         }
-        let flinging = FLINGS.with(|flings| !flings.borrow().is_empty()) || SLIDES.with(|slides| !slides.borrow().is_empty());
-        let due = windows.due();
-        schedule(if flinging { Some(due.map_or(FRAME, |due| due.min(FRAME))) } else { due });
+        // A fling or a slide takes a step each frame the display shows, as UIScrollView's deceleration does.
+        if FLINGS.with(|flings| !flings.borrow().is_empty()) || SLIDES.with(|slides| !slides.borrow().is_empty()) {
+            Display.request_frame(true);
+        }
+        schedule(windows.due());
         Some(result)
     })
 }
 
-/// A frame at 120 Hz, which a fling steps at.
-const FRAME: Duration = Duration::from_micros(8_333);
-
 /// Which wake is the latest asked for (`schedule`): an older one does nothing.
 static SCHEDULED: AtomicU64 = AtomicU64::new(0);
 
-/// Has tao's event loop woken when `due`, or not at all: what's due fires, and each fling takes a step.
+/// Has tao's event loop woken when `due`, or not at all: what's due fires.
 fn schedule(due: Option<Duration>) {
     let scheduled = SCHEDULED.fetch_add(1, Ordering::Relaxed) + 1;
     let Some(due) = due else { return };
