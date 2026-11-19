@@ -21,7 +21,7 @@ defmodule SignIn do
   def icon, do: "client/security.svg"
 
   @impl true
-  def requires, do: %{"core" => ">= 0.29.4"}
+  def requires, do: %{"core" => ">= 0.29.52"}
 
   # Nothing looks into it as it runs (`server-debug`): what it's given and keeps are what people sign in with.
   @impl true
@@ -382,10 +382,10 @@ defmodule SignIn do
 
   # Only a network that has an address and isn't being built has people sign in. One being built acts as whoever a
   # client says, so its first owner joins nowhere. One who has joined is given no link to join by again.
-  def hook("owner", %{"who" => "users/" <> name}, _call) do
+  def hook("owner", %{"who" => "users/" <> name = who}, _call) do
     signs_in = Application.get_env(:one_core, :address) && !Application.get_env(:one_core, :development, false)
 
-    with true <- signs_in,
+    with true <- signs_in and OneCore.User.first_owner?(who),
          %{"link" => link} <- ask(%{ask: "owner", who: name}),
          do: Logger.info(joins(name, link))
 

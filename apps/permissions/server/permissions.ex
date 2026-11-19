@@ -48,7 +48,7 @@ defmodule Permissions do
   def own, do: :installed
 
   @impl true
-  def requires, do: %{"core" => ">= 0.22.18", "database" => "to keep who may reach what"}
+  def requires, do: %{"core" => ">= 0.29.52", "database" => "to keep who may reach what"}
 
   @impl true
   def tools do
@@ -226,11 +226,15 @@ defmodule Permissions do
   # written as One Core makes them.
   @impl true
   def hook("owner", %{"who" => who}, call) do
-    transaction(call, fn db ->
-      query(db, "insert or ignore into tuples (artifact, relation, who) values ('network', 'owner', ?)", [who])
-    end)
+    if OneCore.User.first_owner?(who) do
+      transaction(call, fn db ->
+        query(db, "insert or ignore into tuples (artifact, relation, who) values ('network', 'owner', ?)", [who])
+      end)
 
-    :ok
+      :ok
+    else
+      {:refuse, "#{who} isn't the network's first owner"}
+    end
   end
 
   def hook("reach", %{"who" => who, "relation" => "member", "artifact" => of}, call) do
