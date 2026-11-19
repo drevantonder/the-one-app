@@ -130,9 +130,10 @@ const WRONG_CODES = { max: 5, window: 15 * 60 };
 const ASKS_FOR = 5 * 60;
 /**
  * How many times devices may name one person, and over how long, in seconds: each is a notification on all their
- * devices. Naming anyone at all is limited by the address it's asked from too (`rateLimit` in `devices`).
+ * devices. `max` from one address, and `everywhere` from all of them. Naming anyone at all is limited by the address
+ * it's asked from too (`rateLimit` in `devices`).
  */
-const NAMED = { max: 5, window: 15 * 60 };
+const NAMED = { max: 5, everywhere: 20, window: 15 * 60 };
 
 const sha256 = async (text: string) => bytesToHex(new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(text))));
 
@@ -359,9 +360,13 @@ const devices = () => ({
         const where = said.includes("@") ? [{ field: "email", value: said }, { field: "emailVerified", value: true }] : [{ field: "name", value: said }];
         const [user] = said ? await adapter.findMany<User>({ model: "user", where }) : [];
         if (!user) throw new APIError("NOT_FOUND", { message: `Nobody in this network goes by ${said || "that"}.` });
-        const named = await limit(adapter, `named/${user.id}`, NAMED);
-        if (named.count >= NAMED.max) throw new APIError("TOO_MANY_REQUESTS", { message: `${said} was asked too many times. Try again in ${named.minutes} minutes.` });
-        await named.again();
+        // Asked from one place a few times, and from everywhere a few times more, as a sign-in's push prompts are
+        // limited: so asking them over and over from elsewhere neither floods their devices nor stops them asking.
+        const ip = ctx.request?.headers.get("cf-connecting-ip") ?? "";
+        const [here, everywhere] = await Promise.all([limit(adapter, `named/${user.id}/${ip}`, NAMED), limit(adapter, `named/${user.id}`, NAMED)]);
+        const asked = here.count >= NAMED.max ? here : everywhere.count >= NAMED.everywhere ? everywhere : undefined;
+        if (asked) throw new APIError("TOO_MANY_REQUESTS", { message: `${said} was asked too many times. Try again in ${asked.minutes} minutes.` });
+        await Promise.all([here.again(), everywhere.again()]);
         const cf = (ctx.request as { cf?: { city?: string; region?: string; country?: string } } | undefined)?.cf;
         const set = {
           person: user.id,
