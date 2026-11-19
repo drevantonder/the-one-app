@@ -61,8 +61,10 @@ const look = styles({
   touchHeading: { paddingInline: tokens.grid[4] },
   // Above a card in grouped cards: the group's name, as Raycast's Settings heads one, in line with the card's words.
   groupedHeading: { font: tokens.type.medium, fontWeight: tokens.weight.medium, color: tokens.colour.label, paddingInline: tokens.grid[3], paddingTop: tokens.grid[2], paddingBottom: tokens.grid[1] },
-  // Grouped cards keep a readable width in the middle of what they're in, as Raycast's Settings' do.
-  groupedSection: { width: "100%", maxWidth: tokens.length.readable, alignSelf: "center" },
+  // What's in a screen of grouped cards keeps a readable width in the middle of the window, as Raycast's Settings' does,
+  // so a note, a field or a button is in line with the cards.
+  column: { flexGrow: 1, gap: tokens.length.gutter },
+  groupedColumn: { width: "100%", maxWidth: tokens.length.readable, alignSelf: "center" },
   split: { flexGrow: 1, flexShrink: 1, minHeight: 0, minWidth: 0, position: "relative" },
   beside: { flexDirection: "row" },
   pane: { minHeight: 0, minWidth: 0, overflow: "hidden", backgroundColor: tokens.colour.background },
@@ -200,9 +202,11 @@ export function Screen(props: { heading?: JSX.Element; action?: JSX.Element; bac
       <ScrollView role="main" style={look.main} onScroll={props.largeTitle ? (event) => setScrolled(event.currentTarget.scrollTop) : undefined}>
         <View style={look.safe}>
           <View style={[look.parts, footed() && look.footed]}>
-            <Choose value={panelled ? choose : null}>
-              <Middle value={() => false}>{props.children}</Middle>
-            </Choose>
+            <View style={[look.column, (style === "insetGrouped" || (style === "sidebar" && touch())) && look.groupedColumn]}>
+              <Choose value={panelled ? choose : null}>
+                <Middle value={() => false}>{props.children}</Middle>
+              </Choose>
+            </View>
           </View>
         </View>
       </ScrollView>
@@ -233,7 +237,7 @@ export function Section(props: { heading?: JSX.Element; children?: JSX.Element }
   const style = useContext(ListStyle)
   const grouped = () => style === "insetGrouped" || (style === "sidebar" && touch())
   return (
-    <View style={[look.section, grouped() && look.groupedSection]}>
+    <View style={look.section}>
       <Show when={props.heading}>
         <Heading level={2} style={[look.heading, touch() && look.touchHeading, grouped() && look.groupedHeading]}>
           {props.heading}

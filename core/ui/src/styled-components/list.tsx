@@ -32,7 +32,7 @@ const look = styles({
   flatRows: { marginTop: 0 },
   // In grouped cards on a computer, as Raycast's Settings: the row open is a rounded highlight inside the card, as macOS's
   // lists draw one, and the line between rows runs from the words' inset to the card's other.
-  groupedList: { width: "100%", maxWidth: tokens.length.readable, alignSelf: "center" },
+  groupedList: { width: "100%" },
   rule: { position: "absolute", top: 0, start: tokens.grid[3], end: tokens.grid[3], height: tokens.length.hairline, backgroundColor: tokens.colour.quinaryLabel },
   groupedRow: { borderTopWidth: 0 },
   highlight: { position: "absolute", top: tokens.grid[0.5], bottom: tokens.grid[0.5], start: tokens.grid[1.5], end: tokens.grid[1.5], borderRadius: tokens.radius.medium, backgroundColor: tokens.colour.selection },
