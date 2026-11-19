@@ -4,7 +4,7 @@ defmodule OneCore.Mcp do
   whatever reaches it, and the tools it lists are One Core's own and those of the apps installed for whoever asks
   and for the network.
 
-  Every request is from someone and for someone, which `OneCore.User.asking/2` says, and an app's tool runs for
+  Every request is from someone and for someone, which `OneCore.Mcp.Principal.asking/3` says, and an app's tool runs for
   them.
 
   Servers ask each other the same way, and four things only a server acting for whoever it asks for may ask: to call a
@@ -52,6 +52,7 @@ defmodule OneCore.Mcp do
   }
 
   alias OneCore.Call.State
+  alias OneCore.Mcp.Principal
   alias OneCore.Apps.{Calls, Icons, Store, Version}
 
   # The rules every agent is told first, here and in the network's `/llms.txt` (`core/edge/mcp/mcp.ts`).
@@ -123,7 +124,7 @@ defmodule OneCore.Mcp do
 
           with :ok <- speaks(version),
                :ok <- talks(method, params),
-               {:ok, principal, forwarded} <- User.asking(from, asking(method, meta(params)), question?(method, params)),
+               {:ok, principal, forwarded} <- Principal.asking(from, asking(method, meta(params)), question?(method, params)),
                :ok <- reloaded(meta(params)),
                {:ok, result} <- result(method, params, from, principal, forwarded) do
             JSON.encode!(%{jsonrpc: "2.0", id: id, result: complete(result, method, version)})
@@ -161,7 +162,7 @@ defmodule OneCore.Mcp do
       # A client saying what it measured of itself, as from the device and person its request proves it is, which
       # is all that's believed of who said it.
       {:ok, %{"method" => "notifications/one/measured", "params" => %{} = params}} ->
-        with {:ok, {by, _for}, false} <- User.asking(from, meta(params)) do
+        with {:ok, {by, _for}, false} <- Principal.asking(from, meta(params)) do
           said = if params["otlp"], do: %{"otlp" => List.wrap(params["otlp"])}, else: %{"records" => List.wrap(params["records"])}
           about = Map.merge(said, %{"device" => User.device(from, meta(params)), "who" => by})
           Hooks.observe("measured", about, {nil, User.owner(by)})
@@ -230,7 +231,7 @@ defmodule OneCore.Mcp do
   # Which client asked (`OneCore.Call.client/1`): the device it's from, whether it came in at the network's address
   # over the web, and the name and title its MCP client says it goes by in each request from MCP's 2026-07-28. A
   # server passing on what it was asked says which client asked it, which is believed as it's believed about who
-  # asked (`OneCore.User.asking/3`).
+  # asked (`OneCore.Mcp.Principal.asking/3`).
   defp client(_from, %{"actor" => _actor, "client" => %{} = client}), do: client
 
   defp client(from, meta) do
@@ -242,7 +243,7 @@ defmodule OneCore.Mcp do
   # Who a request is from and for, as it says. A task is only whoever started it's, so a client checking on one, or
   # answering or cancelling it, asks as themselves, whoever it runs for: that's what the task says, not the request.
   # A hook that validates or mutates is asked a question, whose answer goes only to whoever asked
-  # (`OneCore.User.asking/3`).
+  # (`OneCore.Mcp.Principal.asking/3`).
   defp question?("hooks/call", %{"kind" => kind}), do: kind in ["validate", "mutate"]
   defp question?(_method, _params), do: false
 

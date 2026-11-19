@@ -43,7 +43,7 @@ defmodule OneCore.Servers do
 
   @doc """
   Who this server is for: its owner, as it acts for them, or the network for one of the network's. What happens on it
-  is about them, so it tells their apps, and the network's, as nobody (`OneCore.User.asking/3`).
+  is about them, so it tells their apps, and the network's, as nobody (`OneCore.Mcp.Principal.asking/3`).
   """
   def owner, do: List.first(acts_for(Server.key() || elem(OneCore.Iroh.key(Server.key_file()), 1))) || @network
 
