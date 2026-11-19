@@ -230,6 +230,8 @@ function declarations(property: string, value: any): string {
       return `rotate:${value}deg`
     case "backdropFilter":
       return `-webkit-backdrop-filter:${plain};backdrop-filter:${plain}`
+    case "appRegion":
+      return `-webkit-app-region:${plain};app-region:${plain}`
     case "lineClamp":
       return `display:-webkit-box;-webkit-box-orient:vertical;-webkit-line-clamp:${value};overflow:hidden`
     case "userSelect":

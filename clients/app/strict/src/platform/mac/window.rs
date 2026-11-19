@@ -52,6 +52,14 @@ struct Shared {
     /// Its title row over its page, as its page was last drawn (`Screen::title_row`): held where nothing in it takes a
     /// press, it moves the window, as AppKit's title bar does.
     title_row: Mutex<Option<crate::view::TitleRow>>,
+    /// A panel being dragged by a person, since a press in its title row and until it's summoned again: where it
+    /// moves to is told (`Input::Placed`).
+    dragged: std::sync::atomic::AtomicBool,
+}
+
+/// A screen's name, by its frame, which a panel's places are kept by: the same screen in the same arrangement.
+fn screen_name(screen: NSRect) -> String {
+    format!("{}x{}+{}+{}", screen.size.width, screen.size.height, screen.origin.x, screen.origin.y)
 }
 
 impl Shared {
@@ -137,7 +145,7 @@ impl Display {
             if first {
                 NSApplication::sharedApplication(main).setActivationPolicy(objc2_app_kit::NSApplicationActivationPolicy::Regular);
             }
-            let shared = Arc::new(Shared { id, queue, size: Mutex::new((Size::default(), 1.0)), title_row: Mutex::default() });
+            let shared = Arc::new(Shared { id, queue, size: Mutex::new((Size::default(), 1.0)), title_row: Mutex::default(), dragged: Default::default() });
             let rect = NSRect::new(NSPoint::new(0.0, 0.0), NSSize::new(options.size.width.0.into(), options.size.height.0.into()));
             let window = match options.panel {
                 // GPUI's pop-up: titled, so it can take the keyboard, with nothing of its title band shown.
@@ -222,7 +230,9 @@ impl Display {
     /// Shows a panel centred near the top of the screen the pointer is on, a fifth of the way down as Spotlight sits,
     /// with the keyboard. It never activates the One App, so the app in front stays in front, and has the keyboard
     /// back as it goes.
-    pub fn summon(&self, window: &NativeWindow) {
+    /// Where it was dragged to on that screen before (`places`), it's there, as Raycast's is, as much of it as fits.
+    pub fn summon(&self, window: &NativeWindow, places: &crate::platform::Places) {
+        window.shared.dragged.store(false, std::sync::atomic::Ordering::Relaxed);
         window.window.get_on_main(|window| unsafe {
             let mouse: NSPoint = msg_send![objc2::class!(NSEvent), mouseLocation];
             let screens: Retained<NSArray<AnyObject>> = msg_send![objc2::class!(NSScreen), screens];
@@ -232,8 +242,16 @@ impl Display {
             });
             if let Some(screen) = on.or_else(|| screens.firstObject().map(|screen| frame_of(&screen))) {
                 let size = window.frame().size;
-                let x = screen.origin.x + (screen.size.width - size.width) / 2.0;
-                let top = screen.origin.y + screen.size.height - (screen.size.height * 0.2).min((screen.size.height - size.height).max(0.0));
+                let (x, top) = match places.get(&screen_name(screen)) {
+                    Some(at) => (
+                        (screen.origin.x + f64::from(at.x)).clamp(screen.origin.x, screen.origin.x + (screen.size.width - size.width).max(0.0)),
+                        (screen.origin.y + screen.size.height - f64::from(at.y)).clamp(screen.origin.y + size.height.min(screen.size.height), screen.origin.y + screen.size.height),
+                    ),
+                    None => (
+                        screen.origin.x + (screen.size.width - size.width) / 2.0,
+                        screen.origin.y + screen.size.height - (screen.size.height * 0.2).min((screen.size.height - size.height).max(0.0)),
+                    ),
+                };
                 window.setFrameTopLeftPoint(NSPoint::new(x, top));
             }
             window.makeKeyAndOrderFront(None);
@@ -471,7 +489,14 @@ define_class!(
             let at = self.at(event);
             let moves = self.ivars().shared.title_row.lock().expect("nothing panics holding it").as_ref().is_some_and(|row| row.moves(at));
             if moves && !secondary && let Some(window) = self.window() {
-                if event.clickCount() == 2 { double_clicked(&window) } else { window.performWindowDragWithEvent(event) }
+                // A panel has no zoom; it's only dragged.
+                let panel = window.isKindOfClass(objc2::class!(NSPanel));
+                if event.clickCount() == 2 && !panel {
+                    double_clicked(&window)
+                } else {
+                    self.ivars().shared.dragged.store(panel, std::sync::atomic::Ordering::Relaxed);
+                    window.performWindowDragWithEvent(event)
+                }
                 return;
             }
             self.ivars().secondary.set(secondary);
@@ -684,7 +709,8 @@ unsafe fn panel(window: &NSWindow, view: &View, rect: NSRect, corner: f64) {
         let () = msg_send![window, setCollectionBehavior: (1usize << 0) | (1 << 4) | (1 << 6) | (1 << 8)];
         // NSStatusWindowLevel, as Spotlight's.
         let () = msg_send![window, setLevel: 25isize];
-        let () = msg_send![window, setMovable: false];
+        // It moves only by what its page says moves it (`appRegion`), as Raycast's is dragged by its own.
+        let () = msg_send![window, setMovable: true];
         let () = msg_send![window, setHidesOnDeactivate: false];
         window.setOpaque(false);
         let clear: *mut AnyObject = msg_send![objc2::class!(NSColor), clearColor];
@@ -767,6 +793,22 @@ define_class!(
         #[unsafe(method(windowDidBecomeKey:))]
         fn window_did_become_key(&self, _notification: &NSNotification) {
             self.ivars().send(Input::Focus(true));
+        }
+
+        // A panel dragged by a person is told where it was left on its screen.
+        #[unsafe(method(windowDidMove:))]
+        fn window_did_move(&self, notification: &NSNotification) {
+            if !self.ivars().dragged.load(std::sync::atomic::Ordering::Relaxed) {
+                return;
+            }
+            let window: *mut AnyObject = unsafe { msg_send![notification, object] };
+            let screen: *mut AnyObject = if window.is_null() { std::ptr::null_mut() } else { unsafe { msg_send![window, screen] } };
+            if screen.is_null() {
+                return;
+            }
+            let (frame, on): (NSRect, NSRect) = unsafe { (msg_send![window, frame], msg_send![screen, frame]) };
+            let at = Point { x: (frame.origin.x - on.origin.x) as f32, y: (on.origin.y + on.size.height - (frame.origin.y + frame.size.height)) as f32 };
+            self.ivars().send(Input::Placed(screen_name(on), at));
         }
 
         #[unsafe(method(windowDidResignKey:))]

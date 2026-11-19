@@ -69,6 +69,9 @@ struct State {
     high_surrogate: Cell<Option<u16>>,
     /// Its text input plugin, Flutter's (`text_input.cc`).
     text_input: Plugin,
+    /// A panel's: where a press moves it, as its page says (`set_title_row`).
+    row: RefCell<Option<crate::view::TitleRow>>,
+    panel: bool,
 }
 
 impl rwh::HasWindowHandle for NativeWindow {
@@ -138,6 +141,8 @@ impl Display {
             tracking: Cell::new(false),
             high_surrogate: Cell::new(None),
             text_input: Plugin(Cell::new(std::ptr::null_mut())),
+            row: RefCell::default(),
+            panel: options.panel.is_some(),
         });
         let panel = options.panel.is_some();
         let style = if panel { WS_POPUP } else { WS_OVERLAPPEDWINDOW };
@@ -200,7 +205,8 @@ impl Display {
 
     /// Shows a panel centred near the top of the monitor the pointer is on, a fifth of the way down its work area as
     /// Spotlight sits, in front with the keyboard, keeping which window was in front.
-    pub fn summon(&self, window: &NativeWindow) {
+    /// Where it was dragged to on that monitor before (`places`), it's there, as much of it as fits.
+    pub fn summon(&self, window: &NativeWindow, places: &crate::platform::Places) {
         use windows::Win32::Graphics::Gdi::{GetMonitorInfoW, MONITOR_DEFAULTTONEAREST, MONITORINFO, MonitorFromPoint};
         unsafe {
             let mut pointer = POINT::default();
@@ -211,8 +217,14 @@ impl Display {
             let work = info.rcWork;
             let size = window.size.get();
             let (width, height) = (work.right - work.left, work.bottom - work.top);
-            let x = work.left + (width - size.width.0) / 2;
-            let y = work.top + (height / 5).min((height - size.height.0).max(0));
+            let scale = window.scale();
+            let (x, y) = match places.get(&screen_name(&work)) {
+                Some(at) => (
+                    (work.left + (at.x * scale) as i32).clamp(work.left, work.left + (width - size.width.0).max(0)),
+                    (work.top + (at.y * scale) as i32).clamp(work.top, work.top + (height - size.height.0).max(0)),
+                ),
+                None => (work.left + (width - size.width.0) / 2, work.top + (height / 5).min((height - size.height.0).max(0))),
+            };
             let before = GetForegroundWindow();
             if before != window.hwnd {
                 window.before.set(before);
@@ -291,8 +303,13 @@ impl Display {
         })
     }
 
-    /// Its title row over its page: none here, where the system's own title bar is above the page and moves the window.
-    pub fn set_title_row(&self, _: &NativeWindow, _: Option<crate::view::TitleRow>) {}
+    /// Where a press moves it: a panel's page says where (`appRegion`); an app's window has the system's own title bar
+    /// above its page, which moves it.
+    pub fn set_title_row(&self, window: &NativeWindow, row: Option<crate::view::TitleRow>) {
+        if window.panel {
+            *window.state.row.borrow_mut() = row;
+        }
+    }
 
     /// Tells window `window`'s text input plugin what the screen says (`editing::TextInput`), its method calls decoded.
     /// Its input method is on while an input takes typing, and off while none does.
@@ -467,6 +484,11 @@ unsafe extern "system" fn window_procedure(hwnd: HWND, msg: u32, wparam: WPARAM,
     }
 }
 
+/// A monitor's name, by where its work area is and how large, which a panel's places are kept by.
+fn screen_name(work: &RECT) -> String {
+    format!("{}x{}+{}+{}", work.right - work.left, work.bottom - work.top, work.left, work.top)
+}
+
 fn loword(value: isize) -> i32 {
     (value & 0xffff) as i16 as i32
 }
@@ -517,6 +539,27 @@ fn handle_msg(hwnd: HWND, state: &State, msg: u32, wparam: WPARAM, lparam: LPARA
             }
             push(Input::Moved(at(loword(lparam.0), hiword(lparam.0))));
             Some(0)
+        }
+        // Where a panel's page says a press moves it, the press is on its caption, which Windows moves it by.
+        WM_NCHITTEST if state.panel => {
+            let mut point = POINT { x: loword(lparam.0), y: hiword(lparam.0) };
+            unsafe {
+                let _ = ScreenToClient(hwnd, &mut point);
+            }
+            state.row.borrow().as_ref().is_some_and(|row| row.moves(at(point.x, point.y))).then_some(HTCAPTION as isize)
+        }
+        // A panel a person moved is told where it was left, on which monitor.
+        WM_EXITSIZEMOVE if state.panel => {
+            use windows::Win32::Graphics::Gdi::{GetMonitorInfoW, MONITOR_DEFAULTTONEAREST, MONITORINFO, MonitorFromWindow};
+            let mut info = MONITORINFO { cbSize: size_of::<MONITORINFO>() as u32, ..Default::default() };
+            let mut frame = RECT::default();
+            unsafe {
+                let _ = GetMonitorInfoW(MonitorFromWindow(hwnd, MONITOR_DEFAULTTONEAREST), &mut info);
+                let _ = GetWindowRect(hwnd, &mut frame);
+            }
+            let work = info.rcWork;
+            push(Input::Placed(screen_name(&work), Point { x: (frame.left - work.left) as f32 / scale(), y: (frame.top - work.top) as f32 / scale() }));
+            None
         }
         WM_MOUSELEAVE => {
             state.tracking.set(false);

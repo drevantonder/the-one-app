@@ -247,6 +247,8 @@ pub struct Look {
     /// Whether it takes the pointer, as its style says (`pointerEvents`), or as what it's in does (`None`), as CSS's
     /// `pointer-events` is inherited: a layer that says `none` lets presses through, and what in it says `auto` takes them.
     pub pointer_events: Option<bool>,
+    /// Whether a press moves its window (`appRegion: "drag"`), or doesn't though what it's in does (`no-drag`).
+    pub app_region: Option<bool>,
     pub cursor: Option<Cursor>,
     /// A path's paint, where it says, and its stroke's width.
     pub fill: Paint,
@@ -298,6 +300,7 @@ impl Default for Look {
             rotate: 0.0,
             z_index: 0,
             pointer_events: None,
+            app_region: None,
             cursor: None,
             fill: Paint::Current,
             stroke: Paint::None,
@@ -328,6 +331,7 @@ pub fn look(style: &Style, conditions: Conditions) -> Look {
         rotate: style.rotate.unwrap_or(0.0),
         z_index: style.z_index.unwrap_or(0.0) as i32,
         pointer_events: style.pointer_events.as_deref().map(|events| events != "none"),
+        app_region: None,
         ..Look::default()
     }
 }
@@ -806,6 +810,7 @@ fn computed(style: &Map<String, Value>, conditions: Conditions) -> Computed {
         rotate: number("rotate").unwrap_or(0.0),
         z_index: number("zIndex").unwrap_or(0.0) as i32,
         pointer_events: word("pointerEvents").map(|events| events != "none"),
+        app_region: word("appRegion").map(|region| region == "drag"),
         cursor: match word("cursor") {
             Some("pointer") => Some(Cursor::Pointer),
             Some("text") => Some(Cursor::Text),

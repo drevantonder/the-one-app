@@ -199,6 +199,8 @@ async fn window(started: Instant, entrypoint: &str, subject: Option<&str>, link:
             size: Size { width: Pixels(size.0), height: Pixels(size.1) },
             tag: json!({"entrypoint": entrypoint, "subject": subject}),
             panel: panel.map(|corner| corner as f32),
+            // The launcher's kept where it's dragged to, on each screen.
+            places: launcher.then(|| crate::app().shell.home().ok()).flatten().map(|home| home.join("launcher-places.json")),
         };
         let app = entrypoint.split('/').next().unwrap_or_default().to_owned();
         let on_event = {

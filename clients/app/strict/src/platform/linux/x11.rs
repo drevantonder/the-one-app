@@ -48,6 +48,7 @@ x11rb::atom_manager! {
         _NET_WM_STATE_ABOVE,
         _NET_WM_STATE_SKIP_TASKBAR,
         _NET_WM_STATE_SKIP_PAGER,
+        _NET_WM_MOVERESIZE,
         _MOTIF_WM_HINTS,
     }
 }
@@ -67,6 +68,10 @@ pub struct Display {
     loaded: RefCell<HashMap<Cursor, xproto::Cursor>>,
     scale: f32,
     windows: RefCell<HashMap<xproto::Window, WindowId>>,
+    /// Where a press moves each panel (`set_title_row`), and the panels a person is dragging, since a press there and
+    /// until they're summoned again, which say where they're left (`Input::Placed`).
+    rows: RefCell<HashMap<xproto::Window, crate::view::TitleRow>>,
+    dragged: RefCell<std::collections::HashSet<xproto::Window>>,
     /// The input method's connection, where there's an XIM server (ibus, fcitx), and what it's told.
     xim: RefCell<Option<(X11rbClient<Rc<XCBConnection>>, XimHandler)>>,
     /// Each window whose input with the keyboard takes typing, by where its caret is, in device pixels: its keys go
@@ -84,6 +89,7 @@ pub struct NativeWindow {
     /// before it was summoned, to give the keyboard back to.
     transparent: bool,
     before: Cell<xproto::Window>,
+    panel: bool,
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -144,6 +150,11 @@ impl NativeWindow {
     pub fn transparent(&self) -> bool {
         self.transparent
     }
+}
+
+/// A monitor's name, by where it is and how large, which a panel's places are kept by.
+fn screen_name((left, top, width, height): (i32, i32, i32, i32)) -> String {
+    format!("{width}x{height}+{left}+{top}")
 }
 
 /// Drops what the input method is composing, as GPUI's fork of xim-rs's `reset_ic` asks.
@@ -210,6 +221,8 @@ impl Display {
             loaded: RefCell::default(),
             scale,
             windows: RefCell::default(),
+            rows: RefCell::default(),
+            dragged: RefCell::default(),
             xim: RefCell::new(xim),
             ime: RefCell::default(),
         })
@@ -280,6 +293,7 @@ impl Display {
             cursor: Cell::new(Cursor::Arrow),
             transparent: argb.is_some(),
             before: Cell::new(x11rb::NONE),
+            panel: options.panel.is_some(),
         })
     }
 
@@ -315,11 +329,18 @@ impl Display {
 
     /// The bounds of the screen the pointer is on, in device pixels (RandR's monitors), or the whole root window's.
     fn pointer_screen(&self) -> (i32, i32, i32, i32) {
+        let root = &self.xcb.setup().roots[self.screen];
+        let Some(pointer) = self.xcb.query_pointer(root.root).ok().and_then(|cookie| cookie.reply().ok()) else {
+            return (0, 0, i32::from(root.width_in_pixels), i32::from(root.height_in_pixels));
+        };
+        self.screen_at(i32::from(pointer.root_x), i32::from(pointer.root_y))
+    }
+
+    /// The monitor point `x`, `y` is on, as RandR says, or the whole screen: its left, top, width and height.
+    fn screen_at(&self, x: i32, y: i32) -> (i32, i32, i32, i32) {
         use x11rb::protocol::randr::ConnectionExt as _;
         let root = &self.xcb.setup().roots[self.screen];
         let whole = (0, 0, i32::from(root.width_in_pixels), i32::from(root.height_in_pixels));
-        let Some(pointer) = self.xcb.query_pointer(root.root).ok().and_then(|cookie| cookie.reply().ok()) else { return whole };
-        let (x, y) = (i32::from(pointer.root_x), i32::from(pointer.root_y));
         let monitors = self.xcb.randr_get_monitors(root.root, true).ok().and_then(|cookie| cookie.reply().ok()).map(|reply| reply.monitors).unwrap_or_default();
         monitors
             .iter()
@@ -330,11 +351,18 @@ impl Display {
 
     /// Shows a panel centred near the top of the screen the pointer is on, a fifth of the way down as Spotlight sits,
     /// never off the bottom of a short screen, and gives it the keyboard, keeping which window had it.
-    pub fn summon(&self, window: &NativeWindow) {
+    /// Where it was dragged to on that screen before (`places`), it's there, as much of it as fits.
+    pub fn summon(&self, window: &NativeWindow, places: &crate::platform::Places) {
+        self.dragged.borrow_mut().remove(&window.x_window);
         let size = window.size.get();
         let (left, top, width, height) = self.pointer_screen();
-        let x = left + (width - size.width.0) / 2;
-        let y = top + (height / 5).min((height - size.height.0).max(0));
+        let (x, y) = match places.get(&screen_name((left, top, width, height))) {
+            Some(at) => (
+                (left + (at.x * self.scale) as i32).clamp(left, left + (width - size.width.0).max(0)),
+                (top + (at.y * self.scale) as i32).clamp(top, top + (height - size.height.0).max(0)),
+            ),
+            None => (left + (width - size.width.0) / 2, top + (height / 5).min((height - size.height.0).max(0))),
+        };
         let before = self.active();
         if before != window.x_window {
             window.before.set(before);
@@ -547,7 +575,16 @@ impl Display {
     pub fn set_glass(&self, _: &NativeWindow, _: &[crate::platform::Glass]) {}
 
     /// Its title row over its page: none here, where the system's own title bar is above the page and moves the window.
-    pub fn set_title_row(&self, _: &NativeWindow, _: Option<crate::view::TitleRow>) {}
+    /// A panel moves where its page says (`appRegion`); an app's window has its window manager's frame.
+    pub fn set_title_row(&self, window: &NativeWindow, row: Option<crate::view::TitleRow>) {
+        if !window.panel {
+            return;
+        }
+        match row {
+            Some(row) => drop(self.rows.borrow_mut().insert(window.x_window, row)),
+            None => drop(self.rows.borrow_mut().remove(&window.x_window)),
+        }
+    }
 
     /// The input with window `window`'s keyboard takes typing, its caret at `caret` (in the window's logical pixels),
     /// or none does: the input method's keys and where it shows what it composes, as GPUI's `update_ime_position`.
@@ -600,6 +637,15 @@ impl Display {
         }
     }
 
+    /// A panel dragged by a person: where it's been left, on which screen.
+    fn placed(&self, x_window: xproto::Window) -> Option<Input> {
+        let root = self.xcb.setup().roots[self.screen].root;
+        let at = self.xcb.translate_coordinates(x_window, root, 0, 0).ok()?.reply().ok()?;
+        let (x, y) = (i32::from(at.dst_x), i32::from(at.dst_y));
+        let screen = self.screen_at(x, y);
+        Some(Input::Placed(screen_name(screen), Point { x: (x - screen.0) as f32 / self.scale, y: (y - screen.1) as f32 / self.scale }))
+    }
+
     fn window(&self, x_window: xproto::Window) -> Option<WindowId> {
         self.windows.borrow().get(&x_window).copied()
     }
@@ -620,6 +666,11 @@ impl Display {
             }
             Event::ConfigureNotify(event) => {
                 if let Some(id) = self.window(event.window) {
+                    if self.dragged.borrow().contains(&event.window)
+                        && let Some(placed) = self.placed(event.window)
+                    {
+                        out.push((id, placed));
+                    }
                     out.push((id, Input::Resized(Size { width: DevicePixels(event.width as i32), height: DevicePixels(event.height as i32) })));
                 }
             }
@@ -638,6 +689,17 @@ impl Display {
                 // A press ends a dead key's sequence: the input writes what it showed, as GPUI's does.
                 self.end_compose();
                 let at = self.at(event.event_x, event.event_y);
+                // Where a panel's page says a press moves it, the window manager moves it, as a title bar's press does.
+                if event.detail == 1 && self.rows.borrow().get(&event.event).is_some_and(|row| row.moves(at)) {
+                    self.dragged.borrow_mut().insert(event.event);
+                    let root = self.xcb.setup().roots[self.screen].root;
+                    let _ = self.xcb.ungrab_pointer(x11rb::CURRENT_TIME);
+                    let message = xproto::ClientMessageEvent::new(32, event.event, self.atoms._NET_WM_MOVERESIZE, [i32::from(event.root_x) as u32, i32::from(event.root_y) as u32, 8, 1, 1]);
+                    let mask = xproto::EventMask::SUBSTRUCTURE_REDIRECT | xproto::EventMask::SUBSTRUCTURE_NOTIFY;
+                    let _ = self.xcb.send_event(false, root, mask, message);
+                    let _ = self.xcb.flush();
+                    return;
+                }
                 // Buttons 1 to 3 are the main, middle and secondary; 4 and 5 the wheel's turns, up and down, 6 and 7
                 // sideways; a notch is 3 lines of 16 px. X11 says no trackpad's phase.
                 let notch = |x: f32, y: f32| Input::Wheel(at, Point { x, y }, None);

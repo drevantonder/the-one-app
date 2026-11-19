@@ -201,7 +201,7 @@ impl Display {
     pub fn set_cursor(&self, _: &NativeWindow, _: crate::Cursor) {}
 
     // A launcher's panel, which a phone has none of: its launcher is its page.
-    pub fn summon(&self, _: &NativeWindow) {}
+    pub fn summon(&self, _: &NativeWindow, _: &crate::platform::Places) {}
     pub fn put_away(&self, _: &NativeWindow, _: bool) {}
     pub fn resize(&self, _: &NativeWindow, _: Size<Pixels>) {}
 

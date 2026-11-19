@@ -103,6 +103,9 @@ export interface Look {
   strokeWidth: number
   cursor: Properties["cursor"]
   pointerEvents: Properties["pointerEvents"]
+  /** Where a press moves the window rather than reaching the page, as CSS's `app-region` (Chromium's, Electron's):
+   * `drag` for a window with no title bar of its own, a launcher's panel, and `no-drag` for what's in it that isn't. */
+  appRegion: "drag" | "no-drag"
   touchAction: Properties["touchAction"]
   userSelect: Properties["userSelect"]
   transitionProperty: (keyof Properties)[]

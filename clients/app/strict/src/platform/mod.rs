@@ -8,7 +8,7 @@
 use std::collections::HashMap;
 use std::sync::{Arc, OnceLock};
 
-use crate::geometry::{Pixels, Size};
+use crate::geometry::{Pixels, Point, Size};
 use crate::render::{Atlas, Context, Renderer};
 use crate::text::TextSystem;
 use crate::Screen;
@@ -63,7 +63,13 @@ pub struct WindowOptions {
     /// and the window switcher, with rounded corners of this many points where the system draws them see-through.
     /// It's opened hidden, shown only as it's summoned (`Windows::summon`), and goes as it loses the keyboard.
     pub panel: Option<f32>,
+    /// A panel's file of where it was dragged to on each screen, which it's summoned at there again, as Raycast's is.
+    pub places: Option<std::path::PathBuf>,
 }
+
+/// Where a panel was dragged to on each screen, by the screen's name as its platform gives it (`Input::Placed`): its
+/// top left, in points from the screen's.
+pub type Places = HashMap<String, Point<f32>>;
 
 /// Where a page asked for the system's own material, as a panel's glass (a material token that's `system`): in the
 /// window's points, with its corners' radius and how opaque it's drawn. A host with that material puts it there,
@@ -172,6 +178,14 @@ struct Window {
     text_input: crate::view::TextInputConnection,
     on_event: Box<dyn FnMut(Event)>,
     tag: serde_json::Value,
+    /// A panel's file of where it was dragged to on each screen (`WindowOptions::places`).
+    places: Option<std::path::PathBuf>,
+}
+
+/// What a panel's file of places says, or nothing where it hasn't one yet.
+fn places(file: Option<&std::path::Path>) -> Places {
+    let read = file.and_then(|file| std::fs::read(file).ok()).and_then(|bytes| serde_json::from_slice::<HashMap<String, [f32; 2]>>(&bytes).ok());
+    read.unwrap_or_default().into_iter().map(|(screen, [x, y])| (screen, Point { x, y })).collect()
 }
 
 /// Every strict window, on the windows' thread.
@@ -230,6 +244,7 @@ impl Windows {
                 text_input: Default::default(),
                 on_event: Box::new(on_event),
                 tag: options.tag,
+                places: options.places,
             },
         );
         Ok(id)
@@ -343,7 +358,7 @@ impl Windows {
             screen.shown(true);
             screen.summoned(key);
         }
-        self.display.summon(&window.native);
+        self.display.summon(&window.native, &places(window.places.as_deref()));
         // Drawn now, not on the loop's next turn, so its first frame is the one it shows with.
         self.turn();
     }
@@ -549,6 +564,17 @@ impl Windows {
                 return;
             }
             Input::Focus(active) => screen.activate(active),
+            // Dragged somewhere on a screen, a panel is summoned there on that screen from now on.
+            Input::Placed(on, at) => {
+                if let Some(file) = &window.places {
+                    let mut kept = places(Some(file));
+                    kept.insert(on, at);
+                    let kept: HashMap<&String, [f32; 2]> = kept.iter().map(|(screen, at)| (screen, [at.x, at.y])).collect();
+                    if let Err(error) = serde_json::to_vec(&kept).map_err(anyhow::Error::from).and_then(|bytes| Ok(std::fs::write(file, bytes)?)) {
+                        log::warn!("where the panel was dragged to isn't kept: {error}");
+                    }
+                }
+            }
             Input::Close => {}
         }
         // What it changed reaches the text input plugin at once, before its next key, not with the frame.
@@ -591,6 +617,9 @@ pub(crate) enum Input {
     /// What its text input plugin says.
     #[cfg_attr(target_os = "linux", allow(dead_code))]
     TextInputClient(crate::editing::TextInputClient),
+    /// A panel was dragged to `at` on the screen named the first, in points from its top left (`Places`).
+    #[cfg_attr(target_os = "android", allow(dead_code))]
+    Placed(String, crate::geometry::Point<f32>),
     /// The window got the keyboard, or lost it.
     Focus(bool),
 }

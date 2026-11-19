@@ -52,18 +52,20 @@ pub struct Breadcrumb {
     pub home: Box<dyn FnMut()>,
 }
 
-/// A window's title row over its page, its top bar's (`Screen::title_row`): how tall it is, and where in it a press is
-/// its page's; anywhere else in it moves the window.
+/// Where a press moves a window rather than reaching its page (`Screen::title_row`): its title row over its page, its
+/// top bar's, `height` tall, and what its page says moves it (`appRegion: "drag"`, `regions`), but where in them a
+/// press is its page's (`taken`).
 #[derive(Clone, Debug, Default, PartialEq)]
 pub struct TitleRow {
     pub height: f32,
     pub taken: Vec<Bounds<f32>>,
+    pub regions: Vec<Bounds<f32>>,
 }
 
 impl TitleRow {
     /// Whether a press at `at` moves the window.
     pub fn moves(&self, at: Point<f32>) -> bool {
-        at.y < self.height && !self.taken.iter().any(|bounds| bounds.contains(&at))
+        (at.y < self.height || self.regions.iter().any(|region| region.contains(&at))) && !self.taken.iter().any(|bounds| bounds.contains(&at))
     }
 }
 
@@ -161,6 +163,9 @@ pub struct Screen {
     pub panel: Option<Panel>,
     /// Where its page asked for the system's own material, as it was last drawn, which a panel's host puts under it.
     pub glass: Vec<crate::platform::Glass>,
+    /// Where its page says a press moves its window, and where in that it doesn't, as it was last drawn (`appRegion`).
+    drag_regions: Vec<(Id, Bounds<f32>)>,
+    kept_regions: Vec<Bounds<f32>>,
     /// What the window says over its page, and where its action was drawn and whether it's pressed.
     pub notice: Option<Notice>,
     action: Option<Bounds<f32>>,
@@ -279,6 +284,8 @@ impl Screen {
             title_start: 0,
             panel: None,
             glass: Vec::new(),
+            drag_regions: Vec::new(),
+            kept_regions: Vec::new(),
             notice: None,
             action: None,
             pressing_action: false,
@@ -683,6 +690,8 @@ impl Screen {
             modal: None,
             turn: TransformationMatrix::unit(),
             glass: self.panel.filter(|panel| !panel.fill).map(|_| Vec::new()),
+            drag_regions: Vec::new(),
+            kept_regions: Vec::new(),
             frames: &self.frames,
             framed: Vec::new(),
         };
@@ -747,6 +756,8 @@ impl Screen {
         }
         self.action = self.notice.as_ref().and_then(|notice| painter.notice(notice, self.insets.top, self.action.as_ref().is_some_and(hovering)));
         self.glass = painter.glass.take().unwrap_or_default();
+        self.drag_regions = std::mem::take(&mut painter.drag_regions);
+        self.kept_regions = std::mem::take(&mut painter.kept_regions);
         let (placed, mut tab_order, rects, animating, modal, wanted, intersections, framed) =
             (painter.placed, painter.tab_order, painter.rects, painter.animating, painter.modal, painter.wanted, painter.intersections, painter.framed);
         // Each frame's page is drawn in the room it had now from the next frame, if that's changed.
@@ -1330,15 +1341,21 @@ impl Screen {
 
     /// Its title row, where its window has one over its page (a unified toolbar): how tall it is, and where in it
     /// something takes a press, which the rest of it doesn't, so the window moves held there, as a title bar does.
+    /// What its page says moves the window (`appRegion`) is part of it too, with or without a title row.
     pub fn title_row(&self) -> Option<TitleRow> {
-        self.breadcrumb.as_ref()?;
-        let height = self.insets.top;
-        let row = |bounds: &Bounds<f32>| bounds.origin.y < height;
-        let mut taken: Vec<Bounds<f32>> =
-            self.placed.iter().filter(|(_, placed)| (placed.pressable || placed.input) && row(&placed.shown)).map(|(_, placed)| placed.shown).collect();
+        let height = if self.breadcrumb.is_some() { self.insets.top } else { 0.0 };
+        if height == 0.0 && self.drag_regions.is_empty() {
+            return None;
+        }
+        // What takes a press, or a hold, in the row or in what moves the window, keeps it: a button, an input, what's
+        // held to edit it. What's under them isn't in them.
+        let inside = |id: Id, placed: &Placed| placed.shown.origin.y < height || self.drag_regions.iter().any(|(region, _)| self.within(id, *region));
+        let takes = |id: &Id, placed: &Placed| placed.pressable || placed.input || self.tree.nodes.get(id).is_some_and(|node| node.listens("pointerdown"));
+        let mut taken: Vec<Bounds<f32>> = self.placed.iter().filter(|(id, placed)| takes(id, placed) && inside(*id, placed)).map(|(_, placed)| placed.shown).collect();
+        taken.extend(self.kept_regions.iter().copied());
         taken.extend(self.home);
         taken.extend(self.action);
-        Some(TitleRow { height, taken })
+        Some(TitleRow { height, taken, regions: self.drag_regions.iter().map(|(_, bounds)| *bounds).collect() })
     }
 
     /// Does `change` to input `id`'s editing, and tells its app what changed.
@@ -1658,6 +1675,9 @@ struct Painter<'a> {
     /// Each frame's page, as it last drew itself, and where each frame was drawn now, in the window.
     frames: &'a HashMap<Id, frames::Child>,
     framed: Vec<(Id, Bounds<f32>)>,
+    /// Where what's drawn says a press moves the window, and where what's in that says it doesn't (`appRegion`).
+    drag_regions: Vec<(Id, Bounds<f32>)>,
+    kept_regions: Vec<Bounds<f32>>,
 }
 
 /// Everything outside the tree that a frame shows: its size and scale, the conditions, each node's state, how far
@@ -2057,6 +2077,11 @@ impl Painter<'_> {
         if !root {
             for shadow in look.shadows.iter().rev().filter(|shadow| !shadow.inset) {
                 self.shadow(shadow, bounds, radii, transform.scale, mask, opacity);
+            }
+            match look.app_region {
+                Some(true) => self.drag_regions.push((id, bounds.intersect(&mask))),
+                Some(false) => self.kept_regions.push(bounds.intersect(&mask)),
+                None => {}
             }
             if let (Some((_, _, true)), Some(glass)) = (look.material, self.glass.as_mut()) {
                 if opacity > 0.0 {

@@ -48,7 +48,8 @@ const looks = styles({
   bare: { flexGrow: 1, height: tokens.length.control, font: tokens.type.large, color: tokens.colour.label },
   // The launcher's search and its card, each a surface of the system's glass floating over the desktop, with a
   // window's shadow and edge.
-  surface: { position: "absolute", overflow: "hidden", borderRadius: tokens.radius.window, backgroundColor: tokens.colour.veil, backdropFilter: tokens.material.window, boxShadow: tokens.shadow.window },
+  // Held where nothing in them takes a press, they move the panel, as Raycast's is dragged.
+  surface: { position: "absolute", overflow: "hidden", borderRadius: tokens.radius.window, backgroundColor: tokens.colour.veil, backdropFilter: tokens.material.window, boxShadow: tokens.shadow.window, appRegion: "drag" },
   // The card changes size by a spring, which a change on the way turns, and what's in it is carried with it.
   card: { transitionProperty: ["width", "height", "translateX"], transition: tokens.motion.snappy },
   // Home, the App Library and what was found cross-fade in the card; an owner's pages roll up and down.
