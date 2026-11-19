@@ -24,8 +24,8 @@ async function told(check, worked, note) {
   const attributes = { "one.check": check, "user_agent.name": browser, "os.type": os, "one.check.edits": edits, "one.check.screen_reader": read, "service.name": "web" }
   const records = [{ name: "one.client.web.check", value: worked ? 1 : 0, attributes, time: Date.now() }]
   if (!worked) records.push({ name: "one.client.web.check", error: `${check} didn't work on ${browser} (${os}): ${note ?? "said so"}; seen ${JSON.stringify(seen)}`, attributes: { ...attributes, "user_agent.original": navigator.userAgent }, time: Date.now() })
-  const sent = await fetch("/mcp", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ jsonrpc: "2.0", method: "notifications/one/measured", params: { records } }) }).catch(() => undefined)
-  said.textContent = sent?.ok ? `Sent “${check}”: ${worked ? "it worked" : "it didn't"}.` : sent?.status === 401 ? "Sign in to your network in this browser first, then come back." : "It couldn't be sent: is this device online?"
+  const sent = await send(records)
+  if (sent?.status !== 401) said.textContent = sent?.ok ? `Sent “${check}”: ${worked ? "it worked" : "it didn't"}.` : "It couldn't be sent: is this device online?"
 }
 
 /// How long each step of the frame's start took, in ms from its script (`took`, renderer.js), as a metric of each
@@ -36,7 +36,18 @@ function started(took) {
   const records = Object.entries(took)
     .filter(([, ms]) => typeof ms === "number")
     .map(([step, ms]) => ({ name: "one.client.web.start", value: ms, attributes: { "one.step": step, "user_agent.name": browser, "os.type": os, "service.name": "web" }, time: Date.now() }))
-  fetch("/mcp", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ jsonrpc: "2.0", method: "notifications/one/measured", params: { records } }) }).catch(() => {})
+  // That it drew at all, as a check of its own (`opened`), which a browser that can't draw says too (`unopened`).
+  records.push({ name: "one.client.web.check", value: 1, attributes: { "one.check": "opened", "user_agent.name": browser, "os.type": os, "service.name": "web" }, time: Date.now() })
+  send(records)
+}
+
+/// Sends `records` to Telemetry, saying on the page where this browser isn't signed in at this address, which is where
+/// they'd go.
+/** @param {object[]} records */
+async function send(records) {
+  const sent = await fetch("/mcp", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ jsonrpc: "2.0", method: "notifications/one/measured", params: { records } }) }).catch(() => undefined)
+  if (sent?.status === 401) said.textContent = "Sign in to your network in this browser first (open its address and sign in), then come back: nothing you answer here can be sent until then."
+  return sent
 }
 
 addEventListener("message", ({ source, data }) => {
@@ -45,6 +56,8 @@ addEventListener("message", ({ source, data }) => {
   if (data.method === "notifications/one/seen") {
     Object.assign(seen, data.params)
     if (data.params.took) started(data.params.took)
+    // The renderer couldn't draw here (no WebGPU, or what it said), so the page is its DOM, which tells nothing.
+    if (data.params.unopened) told("opened", false, data.params.unopened)
   }
   else if (data.method === "notifications/one/checked") told(data.params.check, !!data.params.worked, data.params.note)
   else if (data.method === "ui/initialize") reply({ result: { hostContext: { theme: matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light", deviceCapabilities: { touch: matchMedia("(pointer: coarse)").matches, hover: matchMedia("(hover: hover)").matches } } } })
