@@ -322,6 +322,17 @@ impl Display {
 
     pub fn flush(&self) {}
 
+    /// Whether it says when the display shows each frame: not yet (a CADisplayLink would), so frames come at 60 Hz.
+    pub fn paced(&self) -> bool {
+        false
+    }
+
+    pub fn request_frame(&self, _: bool) {}
+
+    pub fn frame(&self) -> Option<std::time::Instant> {
+        None
+    }
+
     /// What tao says of a window comes in through `event`, not queued here.
     pub(crate) fn events(&self) -> Vec<(WindowId, usize, super::Input)> {
         Vec::new()
