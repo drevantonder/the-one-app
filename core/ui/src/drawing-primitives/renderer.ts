@@ -218,6 +218,9 @@ export interface Props {
   "aria-busy"?: Bool
   "aria-current"?: Bool
   "aria-invalid"?: Bool
+  /** A live region, whose words a screen reader reads as they change, without its focus moving: `polite` once it's
+   * idle, `assertive` at once. A `status` is a polite one and an `alert` an assertive one unless it says otherwise. */
+  "aria-live"?: "polite" | "assertive" | "off"
   /** A dialog that holds the keyboard and the screen reader while it's open, with what's behind it inert. */
   "aria-modal"?: Bool
   /** What a press opens, as ARIA's. */

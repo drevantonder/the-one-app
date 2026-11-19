@@ -439,13 +439,23 @@ impl Tree {
             .or_else(|| (node.str("role") == Some("button") || node.str("role") == Some("radio")).then(|| self.label(id)));
         let actions: Vec<&str> =
             ["click", "input", "focus", "blur"].into_iter().filter(|event| node.listens(event)).collect();
-        if role.is_none() && actions.is_empty() && node.str("aria-label").is_none() {
+        // A live region, whose words a screen reader reads as they change: as it says, or as its role is one (ARIA's
+        // `status` is polite, its `alert` assertive).
+        let live = node.str("aria-live").map(str::to_owned).or_else(|| match role.as_deref() {
+            Some("status" | "log") => Some("polite".into()),
+            Some("alert") => Some("assertive".into()),
+            _ => None,
+        });
+        if role.is_none() && actions.is_empty() && node.str("aria-label").is_none() && live.is_none() {
             return children;
         }
         let mut out = Map::new();
         out.insert("id".into(), json!(id));
         if let Some(role) = role {
             out.insert("role".into(), json!(role));
+        }
+        if let Some(live) = live.filter(|live| live != "off") {
+            out.insert("live".into(), json!(live));
         }
         if let Some(name) = name.filter(|name| !name.is_empty()) {
             out.insert("name".into(), json!(name));

@@ -6,7 +6,7 @@
 
 use std::sync::Mutex;
 
-use accesskit::{Action, ActionRequest, Node, NodeId, Rect, Role, Toggled, TreeId, TreeInfo, TreeUpdate};
+use accesskit::{Action, ActionRequest, Live, Node, NodeId, Rect, Role, Toggled, TreeId, TreeInfo, TreeUpdate};
 use accesskit_android::InjectingAdapter;
 use jni::objects::{GlobalRef, JObject};
 use jni::{JNIEnv, JavaVM};
@@ -154,8 +154,21 @@ fn add(semantic: &Value, screen: &Screen, density: f64, out: &mut Vec<(NodeId, N
         role = Role::Button;
     }
     let mut out_node = Node::new(role);
+    // A live region (a toast, an announcement) is read as its words change, without the screen reader's focus
+    // moving: AccessKit's adapter says so as its name changes, so it's named by all it says.
+    let live = match semantic["live"].as_str() {
+        Some("assertive") => Some(Live::Assertive),
+        Some("polite") => Some(Live::Polite),
+        _ => None,
+    };
+    if let Some(live) = live {
+        out_node.set_live(live);
+    }
     // A clickable row is read whole, by what it says, as a button's words are.
-    let name = semantic["name"].as_str().map(str::to_owned).or_else(|| (role == Role::Button).then(|| words(semantic)).filter(|words| !words.is_empty()));
+    let name = semantic["name"]
+        .as_str()
+        .map(str::to_owned)
+        .or_else(|| (role == Role::Button || live.is_some()).then(|| words(semantic)).filter(|words| !words.is_empty()));
     // Words are a label's value, as AccessKit has them (`label_comes_from_value`); anything else is named by its label.
     match name {
         Some(name) if role == Role::Label => out_node.set_value(name),
