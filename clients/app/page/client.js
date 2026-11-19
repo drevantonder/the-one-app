@@ -33,6 +33,9 @@ const byId = (id) => /** @type {HTMLElement} */ (document.getElementById(id))
 /// which installs one where there's none: the app in the category `app-store`, if there is one.
 let launcher = ""
 let appStore = ""
+/// Where an app's settings are: the app in the category `settings`, if there is one, which a link to an app with no
+/// page of its own opens at that app.
+let settings = ""
 /// On a computer, each app opens in a window of its own, as the computer's own app (`windows`, `hosts.rs`): the
 /// Home Screen's window shows the launcher alone, and an app's own window shows that app (`own`), each where the
 /// launcher is in a phone's. Either opens every other app in its own window.
@@ -945,6 +948,7 @@ function launcherIn(resources) {
   needs = new Map(pages.flatMap(({ uri, _meta }) => (typeof _meta?.runtimeVersion === "number" ? [[named(uri), _meta.runtimeVersion]] : [])))
   const found = (/** @type {string} */ category) => pages.find(({ _meta }) => _meta?.category === category)?.uri
   appStore = found("app-store") ? named(/** @type {string} */ (found("app-store"))) : ""
+  settings = found("settings") ? named(/** @type {string} */ (found("settings"))) : ""
   const home = found("launcher") ? named(/** @type {string} */ (found("launcher"))) : ""
   // The launcher's app opens the launcher, as `one:home-screen` does.
   if (home) first.set(home.split("/")[0], home)
@@ -1640,11 +1644,10 @@ addEventListener("message", async ({ source, data }) => {
 function go(link, subject, behind, from) {
   const [entrypoint, fragment] = link.split("#", 2)
   const page = entrypoint.includes("/") ? entrypoint : first.get(entrypoint)
-  // An app with no page of its own to open, or a page it no longer has, as one that moved into Settings (a link kept
-  // from before, an older phone's), opens Settings at that app (its own `#<app>`).
-  const app = entrypoint.split("/")[0]
-  if (files.size && (!page || !files.has(page)) && app !== "settings" && first.has("settings"))
-    return go(`settings#${app}${fragment ? `&${fragment}` : ""}`, subject, behind, from)
+  // An app with no page of its own to open, or a page it no longer has (a link kept from before, an older phone's),
+  // opens where its settings are, at that app (its own `#<app>`).
+  if (files.size && (!page || !files.has(page)) && settings && page !== settings)
+    return go(`${settings}#${entrypoint.split("/")[0]}${fragment ? `&${fragment}` : ""}`, subject, behind, from)
   if (!page) return false
   // On a computer, an app opens in its own window, and the Home Screen comes forward in its own.
   if (windows && key(page, subject) !== baseKey()) {
