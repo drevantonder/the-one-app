@@ -44,10 +44,6 @@ use web::{Display, Handle, NativeWindow, appearance, clipboard, reduced_motion};
 /// A window, as the windows' thread names it.
 pub type WindowId = u64;
 
-/// Whether its windows can be a root window, under every other (`WindowOptions::root`): a phone's whose launcher is
-/// drawn natively. Android's are; an iPhone's are once its views stack so.
-pub const ROOTS: bool = cfg!(target_os = "android");
-
 /// Why the windows couldn't start, where they couldn't: a phone makes them as its first job comes, a job that's
 /// dropped then, so whoever sent it hears why here.
 static UNSTARTED: std::sync::Mutex<Option<String>> = std::sync::Mutex::new(None);

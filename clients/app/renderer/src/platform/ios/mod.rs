@@ -34,7 +34,7 @@ use objc2_ui_kit::{
     UIAccessibilityIsReduceMotionEnabled, UIAccessibilitySwitchControlStatusDidChangeNotification,
     UIAccessibilityVoiceOverStatusDidChangeNotification, UIApplication, UIPasteboard,
     UIKeyboardDidChangeFrameNotification, UIKeyboardDidHideNotification, UITraitCollection, UITraitEnvironment,
-    UIColor, UIUserInterfaceStyle, UIView, UIViewAutoresizing, UIViewController, UIWindow,
+    UIColor, UIUserInterfaceStyle, UIView, UIViewAutoresizing, UIViewController, UIWindow, UIWindowLevelNormal,
 };
 use tao::event::{Event, TouchPhase, WindowEvent};
 use tao::event_loop::EventLoopWindowTarget;
@@ -351,7 +351,10 @@ impl Display {
         } {
             unsafe { center.addObserver_selector_name_object(ui_view.as_ref(), sel!(changed:), Some(name), None) };
         }
-        Ok(NativeWindow { window, card, layer, behind, a11y, text_input })
+        // The root window, the Home Screen, is over the app's own (its page), under every app's window, as Android's is.
+        let level = unsafe { UIWindowLevelNormal } + if options.root { 1.0 } else { 2.0 };
+        unsafe { &*(window.ui_window() as *const UIWindow) }.setWindowLevel(level);
+        Ok(NativeWindow { window, card, layer, behind, a11y, text_input, root: options.root })
     }
 
     pub fn close(&self, native: &NativeWindow) {
@@ -379,9 +382,12 @@ impl Display {
 
     pub fn set_cursor(&self, _: &NativeWindow, _: crate::Cursor) {}
 
-    // A launcher's panel, which a phone has none of: its launcher is its page.
+    // A computer's launcher panel, which a phone has none of: its launcher is its root window (`WindowOptions::root`).
     pub fn summon(&self, _: &NativeWindow, _: &crate::platform::Places, _: Size<Pixels>) {}
-    pub fn put_away(&self, _: &NativeWindow, _: bool) {}
+    /// Hides the window, as a root window is while the page over it shows an app (`Windows::hide`); `show` shows it.
+    pub fn put_away(&self, native: &NativeWindow, _: bool) {
+        native.window.set_visible(false);
+    }
     /// A part of a panel's page as a window of its own: which a phone has none of.
     pub fn open_part(&self, _: &NativeWindow, _: usize) -> anyhow::Result<NativeWindow> {
         anyhow::bail!("a panel's parts aren't windows of their own here")
@@ -463,6 +469,8 @@ pub struct NativeWindow {
     behind: Option<Retained<UIWindow>>,
     a11y: a11y::A11y,
     text_input: Plugin,
+    /// It's the root window (`WindowOptions::root`).
+    root: bool,
 }
 
 /// A window as `Display::arrange` would place it, which a phone's never does.
@@ -723,7 +731,8 @@ fn touch_at(screen: &mut crate::Screen, native: &NativeWindow, id: WindowId, fin
                 let stopped = FLINGS.with(|flings| flings.borrow_mut().remove(&id)).is_some();
                 // One that lands as the window springs from the edge takes it where it is.
                 let caught = SLIDES.with(|slides| slides.borrow_mut().remove(&id)).is_some();
-                let edge = caught || at.x < EDGE;
+                // The root window, the Home Screen, has nothing to go back to.
+                let edge = caught || (!native.root && at.x < EDGE);
                 let on_input = !edge && screen.input_at(at);
                 let start = if caught { point(at.x - native.slid(), at.y) } else { at };
                 touches.insert(id, Touch { finger, edge, start, last: at, moved: false, panning: false, on_input, stopped, lately: vec![(Instant::now(), at)] });

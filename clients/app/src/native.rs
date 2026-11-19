@@ -589,9 +589,6 @@ pub(crate) mod computer {
     /// Opens the launcher's page `entrypoint` as the root window, under every app's. → whether it did; if not, its
     /// page shows the web launcher.
     pub async fn open(entrypoint: String) -> bool {
-        if !renderer::platform::ROOTS {
-            return false;
-        }
         let Some(id) = super::launcher(&entrypoint).await else { return false };
         *LAUNCHER.lock().expect("nothing panics holding it") = Some((id, entrypoint));
         true
