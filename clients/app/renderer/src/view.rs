@@ -640,7 +640,7 @@ impl Screen {
         let caret = self.caret_shows();
         // A frame where nothing it shows has changed keeps the scene it drew, and costs nothing.
         let hovering = |bounds: &Bounds<f32>| self.pointer.is_some_and(|at| bounds.contains(&at));
-        let mut fields: Vec<_> = self.fields.iter().map(|(id, field)| (*id, field.display(), field.value(), field.placed())).collect();
+        let mut fields: Vec<_> = self.fields.iter().map(|(id, field)| (*id, field.display(), field.value(), field.placed(), field.upstream())).collect();
         fields.sort_by_key(|(id, ..)| *id);
         let seen = Seen {
             size: (window.size, scale),
@@ -993,7 +993,8 @@ impl Screen {
             && let (Some(field), Some(drawn)) = (self.fields.get_mut(&id), self.drawn.get(&id))
         {
             let before = field.value();
-            field.drag(drawn.index_at(at));
+            let (index, upstream) = drawn.hit(at);
+            field.drag(index, upstream);
             self.edited(id, before);
         }
     }
@@ -1096,8 +1097,8 @@ impl Screen {
 
     /// Input `id` pressed at `at`, `clicks` times in a row, or with Shift held.
     fn press_input(&mut self, id: Id, at: Point<f32>, clicks: u8, shift: bool) {
-        let index = self.drawn.get(&id).map_or(usize::MAX, |drawn| drawn.index_at(at));
-        self.edit(id, |field| field.press(index.min(field.display().len()), clicks, shift));
+        let (index, upstream) = self.drawn.get(&id).map_or((usize::MAX, false), |drawn| drawn.hit(at));
+        self.edit(id, |field| field.press(index.min(field.display().len()), upstream, clicks, shift));
     }
 
     /// A button came up at `at`: what it went down on is told, and with the main one a press, if it's still over
@@ -1401,7 +1402,7 @@ impl Screen {
         let id = self.focused?;
         let field = self.fields.get(&id).filter(|field| !field.secure && !field.readonly)?;
         let drawn = self.drawn.get(&id)?;
-        let (line, x) = field.placed().unwrap_or_else(|| editing::Layout::caret(drawn, field.caret()));
+        let (line, x) = field.placed().unwrap_or_else(|| editing::Layout::caret(drawn, field.caret(), field.upstream()));
         let height = drawn.paragraph.line_height * drawn.grown;
         Some(Bounds { origin: point(drawn.origin.x + (x - drawn.scroll.x) * drawn.grown, drawn.origin.y + line as f32 * height), size: Size { width: drawn.grown, height } })
     }
@@ -1779,7 +1780,7 @@ struct Seen {
     conditions: Conditions,
     states: States,
     scrolled: HashMap<Id, Point<f32>>,
-    fields: Vec<(Id, String, editing::Value, Option<(usize, f32)>)>,
+    fields: Vec<(Id, String, editing::Value, Option<(usize, f32)>, bool)>,
     caret: bool,
     hovering: (bool, bool),
     notice: Option<(String, Option<String>)>,
@@ -2360,7 +2361,7 @@ impl Painter<'_> {
         let (caret_line, caret_x) = match field.and_then(Field::placed) {
             Some(placed) if !empty => placed,
             _ => {
-                let (line, x) = paragraph.caret(field.map_or(0, Field::caret));
+                let (line, x) = paragraph.caret(field.map_or(0, Field::caret), field.is_some_and(Field::upstream));
                 (line, x + offset(line))
             }
         };
@@ -2368,7 +2369,7 @@ impl Painter<'_> {
         // it hasn't the keyboard; several scroll down and up to keep the caret's line in its box as it moves, as a
         // `<textarea>`, and by the wheel (`Screen::scroll`, which keeps how far in `scrolled`) without its moving.
         let mut scroll = self.drawn.get(&id).map_or(point(0.0, 0.0), |drawn| drawn.scroll);
-        let seen = (focused, field.map_or(0, Field::caret), shown.len());
+        let seen = (focused, field.map_or(0, Field::caret), field.is_some_and(Field::upstream), shown.len());
         let moved = self.drawn.get(&id).is_none_or(|drawn| drawn.seen != seen);
         let mut most = None;
         if !multiline {
@@ -2418,7 +2419,7 @@ impl Painter<'_> {
                 self.quad(bounds, clip, text.color, Edges::default(), Hsla::default(), Corners::default(), false, opacity);
             }
         }
-        self.drawn.insert(id, Drawn { paragraph, words, empty, origin, offsets, grown, scroll, seen });
+        self.drawn.insert(id, Drawn { paragraph, empty, origin, offsets, grown, scroll, seen });
         most
     }
 
@@ -2698,7 +2699,6 @@ const BLINK_STOPS: f64 = 10_000.0;
 /// it has scrolled, along one line or down several. Its `Layout` is the paragraph's, unscrolled.
 pub(crate) struct Drawn {
     paragraph: Paragraph,
-    words: String,
     empty: bool,
     origin: Point<f32>,
     offsets: Vec<f32>,
@@ -2706,28 +2706,35 @@ pub(crate) struct Drawn {
     scroll: Point<f32>,
     /// Whether it had the keyboard, where its caret was and how long its text was, to scroll to the caret only as
     /// it moves.
-    seen: (bool, usize, usize),
+    seen: (bool, usize, bool, usize),
 }
 
 impl Drawn {
     /// The byte of its display text nearest to `at`, in the window.
     fn index_at(&self, at: Point<f32>) -> usize {
+        self.hit(at).0
+    }
+
+    /// The byte of its display text nearest to `at`, in the window, and whether the caret there is upstream: at the
+    /// end of the line `at` is on, where it wraps with no space to hang.
+    fn hit(&self, at: Point<f32>) -> (usize, bool) {
         if self.empty {
-            return 0;
+            return (0, false);
         }
         let y = (at.y - self.origin.y) / self.grown;
         let line = ((y / self.paragraph.line_height).floor().max(0.0) as usize).min(self.paragraph.lines.len().saturating_sub(1));
         let x = (at.x - self.origin.x) / self.grown + self.scroll.x;
-        editing::Layout::index_on(self, line, x).unwrap_or(0)
+        let index = editing::Layout::index_on(self, line, x).unwrap_or(0);
+        (index, self.paragraph.caret(index, false).0 != line)
     }
 }
 
 impl editing::Layout for Drawn {
-    fn caret(&self, index: usize) -> (usize, f32) {
+    fn caret(&self, index: usize, upstream: bool) -> (usize, f32) {
         if self.empty {
             return (0, 0.0);
         }
-        let (line, x) = self.paragraph.caret(index);
+        let (line, x) = self.paragraph.caret(index, upstream);
         (line, x + self.offsets.get(line).copied().unwrap_or(0.0))
     }
 
@@ -2738,20 +2745,12 @@ impl editing::Layout for Drawn {
         self.paragraph.index_on(line, x - self.offsets.get(line).copied().unwrap_or(0.0))
     }
 
-    fn line_edge(&self, index: usize, end: bool) -> usize {
-        if self.empty {
-            return 0;
-        }
-        let at = self.paragraph.line_of(index);
-        let Some(line) = self.paragraph.lines.get(at) else { return index };
-        if !end {
-            return line.start;
-        }
-        // A line that wraps ends before the space it hangs, so its end is on it.
-        let wraps = self.paragraph.lines.get(at + 1).is_some_and(|next| next.start == line.end);
-        match self.words[..line.end].chars().next_back() {
-            Some(last) if wraps && last.is_whitespace() => line.end - last.len_utf8(),
-            _ => line.end,
+    fn line_edge(&self, line: usize, end: bool) -> usize {
+        match self.paragraph.lines.get(line) {
+            _ if self.empty => 0,
+            Some(_) if end => self.paragraph.end(line),
+            Some(drawn) => drawn.start,
+            None => 0,
         }
     }
 

@@ -1,7 +1,7 @@
 // The text editing model from Rune (github.com/anomalyco/rune, crates/rune/src/edit.rs, edit/input.rs,
 // edit/caret_motion.rs, edit/history.rs, edit/ime.rs and runtime/selection/{click,selectable}.rs) at commit
 // 78efd4a7876b5478dd72033ce6fd2b2f13ab9f9a, cut down to plain text for the renderer's `input`: a caret and a
-// selection, grapheme and word steps, undo and redo grouped as Chromium's editor groups them, an input method's
+// selection, grapheme and word steps, undo and redo grouped by word, as macOS's and Flutter's fields group them, an input method's
 // composition, a password's mask, and pointer selection by character, word and line. Not its rich text (marks,
 // blocks, pills), its visual (bidi) arrow motion, or its parley layouts: a field's layout is ours (`Layout`).
 // Copyright (c) 2026 Anomaly. Licensed under the MIT License:
@@ -245,12 +245,13 @@ impl Clipboard for Memory {
 /// it's drawn: up and down, a line's ends, and the arrows across text that runs both ways. Along a line is from where
 /// its paragraph starts, in its own pixels.
 pub trait Layout {
-    /// The line byte `index` is on, and how far along it the caret before it is drawn.
-    fn caret(&self, index: usize) -> (usize, f32);
+    /// The line byte `index` is on, and how far along it the caret before it is drawn: where a line wraps with no
+    /// space to hang, at the end of the line before when `upstream`, as Flutter's `TextAffinity.upstream`.
+    fn caret(&self, index: usize, upstream: bool) -> (usize, f32);
     /// The byte nearest to `x` along line `line`, or `None` if there's no such line.
     fn index_on(&self, line: usize, x: f32) -> Option<usize>;
-    /// Where the line byte `index` is on begins or ends.
-    fn line_edge(&self, index: usize, end: bool) -> usize;
+    /// Where line `line` begins or ends: a line that wraps ends before the spaces it hangs.
+    fn line_edge(&self, line: usize, end: bool) -> usize;
     /// Text runs right to left somewhere in it, so the arrows move across it as it's drawn.
     fn bidi(&self) -> bool;
     /// Line `line`'s paragraph runs right to left.
@@ -303,6 +304,10 @@ pub struct Field {
     /// Where an arrow across text that runs both ways left the caret, `(focus, line, x)`, which is where it's drawn
     /// while the focus is still there: one of the byte's two places where runs meet.
     place: Option<(usize, usize, f32)>,
+    /// Where a line wraps with no space to hang (a long word, Chinese), the caret is at the end of the line before,
+    /// not the start of the next, as Flutter's `TextAffinity.upstream`: put there by End, or a press past a line's
+    /// end, or Up and Down to a line's end. Anything else puts it at the start of the next.
+    upstream: bool,
     /// What the press that started a pointer's selection selects by, and the range it began on, which a drag keeps
     /// whole.
     unit: Unit,
@@ -341,6 +346,17 @@ fn prev_backspace(s: &str, i: usize) -> usize {
 
 fn next_char(s: &str, i: usize) -> usize {
     s[i..].graphemes(true).next().map_or(i, |g| i + g.len())
+}
+
+/// Byte `i`, or the start of the grapheme it's inside, so the caret is never in an emoji, a flag or a letter and its
+/// accent, wherever a press or a layout puts it.
+fn grapheme(s: &str, i: usize) -> usize {
+    let i = s.floor_char_boundary(i);
+    let mut cursor = unicode_segmentation::GraphemeCursor::new(i, s.len(), true);
+    match cursor.is_boundary(s, 0) {
+        Ok(false) => cursor.prev_boundary(s, 0).ok().flatten().unwrap_or(0),
+        _ => i,
+    }
 }
 
 /// Byte `index` of `text` as UTF-16 code units, as JS counts it.
@@ -410,13 +426,20 @@ impl Field {
         self.history = History::default();
         self.column = None;
         self.place = None;
+        self.upstream = false;
     }
 
     /// The whole editing state a text input plugin says (Flutter's `updateEditingState`): its text, selection, and
     /// what it composes, which is in that text, taken as it is. A change to the text outside a composition is recorded
     /// to undo, as Flutter's `UndoHistory` records what its engine says: typing joins the open step, as a key's does.
     pub fn keyboard(&mut self, value: &Value) {
-        let before = self.snapshot();
+        // What it was before a composition began, which what the composition ends with is recorded against: an input
+        // method composing over a word already typed (Android's keyboards, as a word is backspaced into) takes it out
+        // of the text while it composes.
+        let before = match self.history.composing.take() {
+            Some(before) => before,
+            None => self.snapshot(),
+        };
         let at = |units: usize| byte(&value.text, units);
         match value.composing.filter(|composing| composing.start < composing.end) {
             Some(composing) => {
@@ -434,15 +457,23 @@ impl Field {
         }
         self.column = None;
         self.place = None;
-        if self.preedit.is_none() && before.text != self.text && !self.secure {
+        self.upstream = false;
+        if self.preedit.is_some() {
+            self.history.composing = Some(before);
+        } else if before.text != self.text && !self.secure {
             let kind = match self.text.len() < before.text.len() {
                 true => EditKind::Delete,
                 false if self.text.matches('\n').count() > before.text.matches('\n').count() => EditKind::LineBreak,
                 false => EditKind::Text,
             };
-            let into_empty = before.text.is_empty();
-            self.history.record(before, self.snapshot(), kind, into_empty);
+            let word = kind == EditKind::Text && starts_word(&before.text, &self.text);
+            self.history.record(before, self.snapshot(), kind, word);
         }
+    }
+
+    /// Where a line wraps with no space to hang, the caret is at the end of the line before (`upstream`).
+    pub fn upstream(&self) -> bool {
+        self.upstream && self.preedit.is_none()
     }
 
     /// The selection as ordered byte offsets.
@@ -563,6 +594,7 @@ impl Field {
     }
 
     fn set_focus(&mut self, i: usize, extend: bool) {
+        let i = grapheme(&self.text, i);
         self.focus = i;
         if !extend {
             self.anchor = i;
@@ -576,17 +608,18 @@ impl Field {
         }
         self.column = None;
         self.place = None;
+        self.upstream = false;
         if &self.text[a..b] == s {
             (self.anchor, self.focus) = (a + s.len(), a + s.len());
             return;
         }
         let before = self.snapshot();
-        let into_empty = self.text.is_empty();
+        let word = kind == EditKind::Text && self.text[..a].ends_with(char::is_whitespace) && !s.starts_with(char::is_whitespace);
         self.text.replace_range(a..b, s);
         (self.anchor, self.focus) = (a + s.len(), a + s.len());
         if !self.secure {
             let after = self.snapshot();
-            self.history.record(before, after, kind, into_empty);
+            self.history.record(before, after, kind, word);
         }
     }
 
@@ -597,6 +630,7 @@ impl Field {
     fn restore(&mut self, to: &Snapshot) {
         self.text = to.text.clone();
         self.place = None;
+        self.upstream = false;
         (self.anchor, self.focus) = (to.anchor, to.focus);
     }
 
@@ -656,12 +690,14 @@ impl Field {
 
     /// A pointer pressed at byte `at` of its display text, `clicks` times in a row (a double click selects a word, a
     /// triple its line), or with Shift held extending the selection there. What's composed is written first.
-    pub fn press(&mut self, at: usize, clicks: u8, shift: bool) {
+    /// `upstream` where it's past the end of a line that wraps with no space to hang, so the caret shows there.
+    pub fn press(&mut self, at: usize, upstream: bool, clicks: u8, shift: bool) {
         self.finish_composition();
         self.history.run = Run::Closed;
         self.column = None;
         self.place = None;
-        let at = self.to_model(at);
+        let at = grapheme(&self.text, self.to_model(at));
+        self.upstream = upstream && clicks <= 1;
         if shift {
             self.unit = Unit::Char;
             self.origin = (self.anchor, self.anchor);
@@ -679,8 +715,9 @@ impl Field {
 
     /// The pressed pointer moved over byte `at` of its display text: the selection runs from where the press began,
     /// by what it selects by.
-    pub fn drag(&mut self, at: usize) {
-        let at = self.unit_at(self.to_model(at), self.unit);
+    pub fn drag(&mut self, at: usize, upstream: bool) {
+        self.upstream = upstream && self.unit == Unit::Char;
+        let at = self.unit_at(grapheme(&self.text, self.to_model(at)), self.unit);
         (self.anchor, self.focus) =
             if at.0 < self.origin.0 { (self.origin.1, at.0) } else { (self.origin.0, at.1.max(self.origin.1)) };
     }
@@ -792,18 +829,21 @@ impl Field {
         }
     }
 
-    /// Where the line the focus is on begins or ends, as it's drawn.
-    fn line_edge(&self, layout: Option<&dyn Layout>, end: bool) -> usize {
+    /// Where the line the focus is on (`upstream` or not) begins or ends, as it's drawn, and whether the caret's
+    /// there upstream: the end of a line that wraps with no space to hang.
+    fn line_edge(&self, layout: Option<&dyn Layout>, upstream: bool, end: bool) -> (usize, bool) {
         if self.secure && !self.multiline {
-            return if end { self.text.len() } else { 0 };
+            return (if end { self.text.len() } else { 0 }, false);
         }
         if let Some(layout) = layout {
-            return self.to_model(layout.line_edge(self.to_display(self.focus), end));
+            let line = layout.caret(self.to_display(self.focus), upstream).0;
+            let edge = layout.line_edge(line, end);
+            return (self.to_model(edge), layout.caret(edge, false).0 != line);
         }
         if end {
-            self.text[self.focus..].find('\n').map_or(self.text.len(), |i| self.focus + i)
+            (self.text[self.focus..].find('\n').map_or(self.text.len(), |i| self.focus + i), false)
         } else {
-            self.text[..self.focus].rfind('\n').map_or(0, |i| i + 1)
+            (self.text[..self.focus].rfind('\n').map_or(0, |i| i + 1), false)
         }
     }
 
@@ -823,12 +863,12 @@ impl Field {
     /// crosses; at the line's edge it goes on to the next line the way its paragraph runs, so Left leaves a
     /// right-to-left line forward. A word goes by the text's order, forward where the arrow points the way the
     /// paragraph runs. A selection collapses to the end drawn further that way, as Notepad's and Word's do.
-    fn move_visually(&mut self, layout: &dyn Layout, place: Option<(usize, usize, f32)>, right: bool, word: bool, extend: bool) {
-        let (line, x) = place.filter(|place| place.0 == self.focus).map_or_else(|| layout.caret(self.to_display(self.focus)), |(_, line, x)| (line, x));
+    fn move_visually(&mut self, layout: &dyn Layout, place: Option<(usize, usize, f32)>, upstream: bool, right: bool, word: bool, extend: bool) {
+        let (line, x) = place.filter(|place| place.0 == self.focus).map_or_else(|| layout.caret(self.to_display(self.focus), upstream), |(_, line, x)| (line, x));
         let forward = right != layout.rtl(line);
         let (a, b) = self.range();
         if !extend && a != b {
-            let (to_a, to_b) = (layout.caret(self.to_display(a)), layout.caret(self.to_display(b)));
+            let (to_a, to_b) = (layout.caret(self.to_display(a), false), layout.caret(self.to_display(b), false));
             let to = if to_a.0 == to_b.0 { if (to_a.1 <= to_b.1) == right { b } else { a } } else if forward { b } else { a };
             (self.anchor, self.focus) = (to, to);
             return;
@@ -849,9 +889,9 @@ impl Field {
             // At the line's edge it goes on to the next line or the one before, the way its paragraph runs, and
             // stays on the first's or the last's.
             None => {
-                let edge = self.to_model(layout.line_edge(self.to_display(self.focus), forward));
+                let edge = self.to_model(layout.line_edge(line, forward));
                 let to = if forward { next_char(&self.text, edge) } else { prev_char(&self.text, edge) };
-                if to != edge && layout.caret(self.to_display(to)).0 != line {
+                if to != edge && layout.caret(self.to_display(to), false).0 != line {
                     self.set_focus(to, extend);
                 }
             }
@@ -875,6 +915,7 @@ impl Field {
         // Any key but Up and Down lets the column go, and any key the caret's place.
         let column = self.column.take();
         let place = self.place.take();
+        let upstream = std::mem::take(&mut self.upstream);
         // Typing, deleting and line breaks join the open undo step; any other key closes it.
         let typed = key.key.chars().count() == 1 && !command && !key.ctrl && !key.meta;
         if !typed && !matches!(key.key.as_str(), "Backspace" | "Delete" | "Enter") {
@@ -927,10 +968,15 @@ impl Field {
             "ArrowLeft" | "ArrowRight" => {
                 let right = key.key == "ArrowRight";
                 match layout.filter(|layout| !line && !self.secure && layout.bidi()) {
-                    Some(layout) => self.move_visually(layout, place, right, word, shift),
+                    Some(layout) => self.move_visually(layout, place, upstream, right, word, shift),
                     None => {
                         let i = match (line, word, right) {
-                            (true, _, _) => self.line_edge(layout, right),
+                            (true, _, _) => {
+                                let (edge, up) = self.line_edge(layout, upstream, right);
+                                self.move_h(edge, shift, right);
+                                self.upstream = up;
+                                return out;
+                            }
                             (false, true, true) => self.next_word(self.focus),
                             (false, true, false) => self.prev_word(self.focus),
                             (false, false, true) => next_char(&self.text, self.focus),
@@ -944,23 +990,26 @@ impl Field {
             // the text's ends.
             "Home" | "End" => {
                 let end = key.key == "End";
-                let i =
-                    if mac || key.ctrl { if end { self.text.len() } else { 0 } } else { self.line_edge(layout, end) };
+                let (i, up) =
+                    if mac || key.ctrl { (if end { self.text.len() } else { 0 }, false) } else { self.line_edge(layout, upstream, end) };
                 self.set_focus(i, shift);
+                self.upstream = up;
             }
             "ArrowUp" | "ArrowDown" | "PageUp" | "PageDown" => {
                 let down = matches!(key.key.as_str(), "ArrowDown" | "PageDown");
                 let n = self.text.len();
                 let page = key.key.starts_with("Page");
                 let mut kept = None;
+                let mut up = false;
                 let i = match layout {
                     Some(layout) if !line && !page && self.multiline && !self.secure => {
-                        let (at, x) = layout.caret(self.to_display(self.focus));
+                        let (at, x) = layout.caret(self.to_display(self.focus), upstream);
                         let goal = column.unwrap_or(x);
-                        match at.checked_add_signed(if down { 1 } else { -1 }).and_then(|to| layout.index_on(to, goal))
-                        {
-                            Some(j) => {
+                        let to = at.checked_add_signed(if down { 1 } else { -1 });
+                        match to.and_then(|to| Some((to, layout.index_on(to, goal)?))) {
+                            Some((to, j)) => {
                                 kept = Some(goal);
+                                up = layout.caret(j, false).0 != to;
                                 self.to_model(j)
                             }
                             None if down => n,
@@ -972,6 +1021,7 @@ impl Field {
                 };
                 self.set_focus(i.min(n), shift);
                 self.column = kept;
+                self.upstream = up;
             }
             _ if command => match key.key.to_lowercase().as_str() {
                 "z" if shift => self.redo(),
@@ -1026,19 +1076,22 @@ struct Snapshot {
 const HISTORY_STEPS: usize = 128;
 const HISTORY_BYTES: usize = 1024 * 1024;
 
-/// Undo and redo: each step the document before and after it, typing runs joined as Chromium's editor joins them
+/// Undo and redo: each step the document before and after it, typing joined a word at a time
 /// (`step`), bounded in steps and bytes but always keeping its newest step.
 #[derive(Default)]
 struct History {
     undo: VecDeque<(Snapshot, Snapshot)>,
     redo: Vec<(Snapshot, Snapshot)>,
     run: Run,
+    /// What it was before the composition a text input plugin says it has began (`Field::keyboard`).
+    composing: Option<Snapshot>,
 }
 
 impl History {
-    fn record(&mut self, before: Snapshot, after: Snapshot, kind: EditKind, into_empty: bool) {
+    /// `word` where typed text starts a word, after a space: a step of its own.
+    fn record(&mut self, before: Snapshot, after: Snapshot, kind: EditKind, word: bool) {
         self.redo.clear();
-        match step(&mut self.run, kind, into_empty) {
+        match step(&mut self.run, kind, word) {
             Record::Join if !self.undo.is_empty() => self.undo.back_mut().expect("not empty").1 = after,
             _ => self.undo.push_back((before, after)),
         }
@@ -1052,8 +1105,9 @@ impl History {
 }
 
 /// The undo step the last edit leaves open for the next to join, as a browser's editor keeps its typing command
-/// open. A caret move, a pointer selection, a focus change, undo, redo and any edit but typing close it. Pauses and
-/// word boundaries don't: Chromium's textarea undoes a whole typing run in one step.
+/// open. A caret move, a pointer selection, a focus change, undo, redo and any edit but typing close it, and so does
+/// a word typed after a space, which starts a step of its own: typing undoes a word at a time, as macOS's and
+/// Flutter's fields do. An input method's composition is no step: what it commits is typing.
 #[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
 enum Run {
     #[default]
@@ -1086,17 +1140,24 @@ enum Record {
     Push,
 }
 
-/// Steps the open run with an edit of `kind`; `into_empty` when typed text lands in a field that held nothing. The
-/// first character typed into an empty field is a step of its own, so undoing a typed message leaves that character,
-/// then empties the field.
-fn step(run: &mut Run, kind: EditKind, into_empty: bool) -> Record {
+/// Steps the open run with an edit of `kind`; `word` when it's typed text starting a word, after a space.
+fn step(run: &mut Run, kind: EditKind, word: bool) -> Record {
     let (record, next) = match (*run, kind) {
         (_, EditKind::Other) => (Record::Push, Run::Closed),
         (_, EditKind::DeleteRun) | (Run::Closed | Run::Inserting, EditKind::Delete) => (Record::Push, Run::Deleting),
         (Run::Deleting, EditKind::Delete) => (Record::Join, Run::Deleting),
         (Run::Closed, EditKind::Text | EditKind::LineBreak) => (Record::Push, Run::Inserting),
+        (Run::Inserting | Run::Deleting, EditKind::Text) if word => (Record::Push, Run::Inserting),
         (Run::Inserting | Run::Deleting, EditKind::Text | EditKind::LineBreak) => (Record::Join, Run::Inserting),
     };
-    *run = if kind == EditKind::Text && into_empty { Run::Closed } else { next };
+    *run = next;
     record
+}
+
+/// Whether `after` is `before` with text typed that starts a word: inserted after a space, beginning with something
+/// that isn't one.
+fn starts_word(before: &str, after: &str) -> bool {
+    let at = before.bytes().zip(after.bytes()).take_while(|(a, b)| a == b).count();
+    let at = before.floor_char_boundary(at.min(before.len())).min(after.floor_char_boundary(at));
+    before[..at].ends_with(char::is_whitespace) && !after[at..].starts_with(char::is_whitespace)
 }

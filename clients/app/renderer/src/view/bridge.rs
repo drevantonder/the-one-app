@@ -169,7 +169,7 @@ impl Screen {
         let Some(id) = self.under(at).into_iter().find(|id| self.fields.contains_key(id)) else { return false };
         self.focus(Some(id));
         let index = self.drawn.get(&id).map_or(usize::MAX, |drawn| drawn.index_at(at));
-        self.edit(id, |field| field.press(index.min(field.display().len()), 2, false));
+        self.edit(id, |field| field.press(index.min(field.display().len()), false, 2, false));
         true
     }
 

@@ -111,6 +111,8 @@ pub struct Line {
     /// Where it is in the paragraph's text, in bytes.
     pub start: usize,
     pub end: usize,
+    /// How many bytes of spaces it hangs past its end, where it wraps after them.
+    pub hangs: usize,
     /// Its paragraph runs right to left.
     pub rtl: bool,
 }
@@ -135,8 +137,13 @@ impl Paragraph {
 
     /// Where the caret goes before byte `index`: its line, and how far along it, in the line's own drawing. Where
     /// the text runs right to left the caret before a character is at its glyph's right.
-    pub fn caret(&self, index: usize) -> (usize, f32) {
-        let at = self.line_of(index);
+    /// Where a line wraps with no space to hang, `upstream` puts it at the end of that line, not the start of the
+    /// next, as Flutter's `TextAffinity.upstream`.
+    pub fn caret(&self, index: usize, upstream: bool) -> (usize, f32) {
+        let mut at = self.line_of(index);
+        if upstream && at > 0 && self.lines[at].start == index && self.lines[at - 1].end == index {
+            at -= 1;
+        }
         let Some(line) = self.lines.get(at) else { return (0, 0.0) };
         let x = match line.glyphs.iter().find(|(_, _, glyph)| glyph.index <= index && index < glyph.end.max(glyph.index + 1)) {
             Some((_, _, glyph)) if glyph.rtl => glyph.position.x.0 + glyph.advance,
@@ -156,8 +163,9 @@ impl Paragraph {
     /// nearer to `x`, which in a right-to-left run is its end on its left.
     pub fn index_on(&self, at: usize, x: f32) -> Option<usize> {
         let line = self.lines.get(at)?;
-        // A line that wraps ends before the spaces it hangs, so a caret at its end is still on it.
-        let last = if at + 1 < self.lines.len() { line.end.saturating_sub(1).max(line.start) } else { line.end };
+        // A line that wraps ends before the spaces it hangs, so a caret at its end is still on it; one that wraps
+        // with none (a long word, Chinese) ends where the next starts, where the caret is upstream.
+        let last = self.end(at);
         let sides = |glyph: &ShapedGlyph| if glyph.rtl { (glyph.end, glyph.index) } else { (glyph.index, glyph.end) };
         let mut nearest = (f32::INFINITY, if line.rtl { line.start } else { last });
         for (_, _, glyph) in &line.glyphs {
@@ -173,6 +181,13 @@ impl Paragraph {
             }
         }
         Some(nearest.1.min(last))
+    }
+
+    /// Where line `at` ends: before the spaces it hangs, where it wraps.
+    pub fn end(&self, at: usize) -> usize {
+        let Some(line) = self.lines.get(at) else { return 0 };
+        let wraps = self.lines.get(at + 1).is_some_and(|next| next.start == line.end);
+        if wraps { line.end - line.hangs } else { line.end }
     }
 
     /// The byte nearest to a point inside the paragraph.
@@ -565,6 +580,7 @@ fn drawn(layout: &Layout<()>, text: &str, offset: usize, faces: &mut Vec<Face>) 
             descent,
             start: range.start + offset,
             end: end + offset,
+            hangs: end - range.start - text[range.start..end].trim_end().len(),
             rtl,
         });
     }
