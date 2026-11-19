@@ -1925,19 +1925,20 @@ function openAppStore() {
 /// Follows where the device is with its network as the client says it (`State`), as it moves: each move of its
 /// session heard once and in order (the page may hear one as it opens before `start` has said where it was), whether
 /// its network answers, and its servers saying it's behind them, after which it asks them nothing more and says only
-/// that it needs updating. A client that's behind was answered, so it's online.
+/// that it needs updating. Being behind isn't a move of whether its network answers: Update Required asks again as
+/// its network answers after it didn't, not as another window's Try Again is answered.
 let heard = -1
 let heardBehind = false
 /** @param {State} state */
 function hear(state) {
-  const connection = state.connection === "behind" ? "online" : state.connection
-  if (connection !== shown.getSnapshot().context.connection) on({ type: "connection", connection })
+  const behind = state.connection === "behind"
+  if (!behind && state.connection !== shown.getSnapshot().context.connection) on({ type: "connection", connection: state.connection })
   if (state.seq > heard) {
     heard = state.seq
     on({ type: "session", told: state })
   }
-  if (state.connection === "behind" && !heardBehind) on({ type: "tooOld" })
-  heardBehind = state.connection === "behind"
+  if (behind && !heardBehind) on({ type: "tooOld" })
+  heardBehind = behind
 }
 
 /// A window whose title bar is over the page (`titleBar`), as a Mac's with no title band is: the page keeps its
