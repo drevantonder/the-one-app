@@ -12,21 +12,33 @@ use std::collections::{HashMap, HashSet};
 use crate::geometry::{Hsla, Point, Rgba, Size};
 use crate::motion::Spring;
 use crate::style::{Computed, Offset};
+use crate::tokens::{Radius, Shadow};
 use crate::tree::Id;
 
-/// A property's value, as it moves.
-#[derive(Clone, Copy, Debug, PartialEq)]
+/// A property's value, as it moves: a number, a length, a colour, the shadows under it, or what shows through it
+/// (`Look::material`).
+#[derive(Clone, Debug, PartialEq)]
 enum Value {
     Number(f32),
     Px(f32),
     Percent(f32),
     Colour(Option<Rgba>),
+    Shadows(Vec<Shadow>),
+    Material(Option<(f32, f32, bool)>),
+}
+
+/// Two colours `part` of the way from one to the other: through Oklch, premultiplied, its hue the shorter way round, as
+/// CSS Color 4 mixes colours, so a blue going to a red passes through neither grey nor a muddy middle.
+fn mix_colour(a: Rgba, b: Rgba, part: f32) -> Rgba {
+    let dynamic = |c: Rgba| color::DynamicColor::from_alpha_color(color::AlphaColor::<color::Srgb>::new([c.r, c.g, c.b, c.a]));
+    let [r, g, b, a] = dynamic(a).interpolate(dynamic(b), color::ColorSpaceTag::Oklch, color::HueDirection::Shorter).eval(part).to_alpha_color::<color::Srgb>().components;
+    Rgba { r: r.clamp(0.0, 1.0), g: g.clamp(0.0, 1.0), b: b.clamp(0.0, 1.0), a: a.clamp(0.0, 1.0) }
 }
 
 impl Value {
-    fn mix(self, to: Value, part: f32) -> Option<Value> {
+    fn mix(&self, to: &Value, part: f32) -> Option<Value> {
         let between = |from: f32, to: f32| from + (to - from) * part;
-        Some(match (self, to) {
+        Some(match (self.clone(), to.clone()) {
             (Value::Number(a), Value::Number(b)) => Value::Number(between(a, b)),
             // Nothing is nothing in either unit, as CSS has `0` move to `100%`.
             (Value::Px(0.0), Value::Percent(b)) => Value::Percent(between(0.0, b)),
@@ -35,9 +47,7 @@ impl Value {
             (Value::Px(a), Value::Percent(0.0)) => Value::Px(between(a, 0.0)),
             (Value::Px(a), Value::Px(b)) => Value::Px(between(a, b)),
             (Value::Percent(a), Value::Percent(b)) => Value::Percent(between(a, b)),
-            // Through Oklch, premultiplied, its hue the shorter way round, as CSS Color 4 mixes colours, so a blue
-            // going to a red passes through neither grey nor a muddy middle; no colour is the other's, clear, as CSS's
-            // `transparent` moves.
+            // No colour is the other's, clear, as CSS's `transparent` moves.
             (Value::Colour(a), Value::Colour(b)) => {
                 let (a, b) = match (a, b) {
                     (None, None) => return Some(Value::Colour(None)),
@@ -45,9 +55,44 @@ impl Value {
                     (None, Some(b)) => (Rgba { a: 0.0, ..b }, b),
                     (Some(a), Some(b)) => (a, b),
                 };
-                let dynamic = |c: Rgba| color::DynamicColor::from_alpha_color(color::AlphaColor::<color::Srgb>::new([c.r, c.g, c.b, c.a]));
-                let [r, g, b, a] = dynamic(a).interpolate(dynamic(b), color::ColorSpaceTag::Oklch, color::HueDirection::Shorter).eval(part).to_alpha_color::<color::Srgb>().components;
-                Value::Colour(Some(Rgba { r: r.clamp(0.0, 1.0), g: g.clamp(0.0, 1.0), b: b.clamp(0.0, 1.0), a: a.clamp(0.0, 1.0) }))
+                Value::Colour(Some(mix_colour(a, b, part)))
+            }
+            // Shadow by shadow, the fewer made up with the other's, clear and nowhere, as CSS's `box-shadow` moves; an
+            // inset one and one under it don't move into each other.
+            (Value::Shadows(a), Value::Shadows(b)) => {
+                let none = |other: &Shadow| Shadow { x: 0.0, y: 0.0, blur: 0.0, spread: 0.0, colour: Rgba { a: 0.0, ..other.colour }, inset: other.inset };
+                let mut mixed = Vec::new();
+                for at in 0..a.len().max(b.len()) {
+                    let (one, other) = match (a.get(at), b.get(at)) {
+                        (Some(one), Some(other)) => (*one, *other),
+                        (Some(one), None) => (*one, none(one)),
+                        (None, Some(other)) => (none(other), *other),
+                        (None, None) => unreachable!("at is within the longer"),
+                    };
+                    if one.inset != other.inset {
+                        return None;
+                    }
+                    mixed.push(Shadow {
+                        x: between(one.x, other.x),
+                        y: between(one.y, other.y),
+                        blur: between(one.blur, other.blur),
+                        spread: between(one.spread, other.spread),
+                        colour: mix_colour(one.colour, other.colour, part),
+                        inset: one.inset,
+                    });
+                }
+                Value::Shadows(mixed)
+            }
+            // What shows through blurs in from none, as CSS's `backdrop-filter` moves from `none`; on its way, it's the
+            // renderer's own blur, which fades as the system's can't, and the system's once it's there.
+            (Value::Material(a), Value::Material(b)) => {
+                let (one, other) = match (a, b) {
+                    (None, None) => return Some(Value::Material(None)),
+                    (Some(one), None) => (one, (0.0, 1.0, false)),
+                    (None, Some(other)) => ((0.0, 1.0, false), other),
+                    (Some(one), Some(other)) => (one, other),
+                };
+                Value::Material(Some((between(one.0, other.0), between(one.1, other.1), if part >= 1.0 { other.2 } else { false })))
             }
             _ => return None,
         })
@@ -55,7 +100,7 @@ impl Value {
 }
 
 /// The properties that move, and whether each moves something (which reduced motion doesn't), as against fading.
-const PROPERTIES: [(&str, bool); 10] = [
+const PROPERTIES: [(&str, bool); 16] = [
     ("opacity", false),
     ("scale", true),
     ("rotate", true),
@@ -66,6 +111,12 @@ const PROPERTIES: [(&str, bool); 10] = [
     ("backgroundColor", false),
     ("borderColor", false),
     ("color", false),
+    ("borderTopStartRadius", false),
+    ("borderTopEndRadius", false),
+    ("borderBottomEndRadius", false),
+    ("borderBottomStartRadius", false),
+    ("boxShadow", false),
+    ("backdropFilter", false),
 ];
 
 fn get(computed: &Computed, property: &str) -> Option<Value> {
@@ -79,6 +130,10 @@ fn get(computed: &Computed, property: &str) -> Option<Value> {
         taffy::style::ExpandedDimension::Percent(part) => Some(Value::Percent(part)),
         _ => None,
     };
+    let radius = |radius: Radius| match radius {
+        Radius::Px(px) => Value::Px(px),
+        Radius::Percent(percent) => Value::Percent(percent),
+    };
     Some(match property {
         "opacity" => Value::Number(look.opacity),
         "scale" => Value::Number(look.scale),
@@ -90,6 +145,12 @@ fn get(computed: &Computed, property: &str) -> Option<Value> {
         "backgroundColor" => Value::Colour(look.background.map(Rgba::from)),
         "borderColor" => Value::Colour(Some(Rgba::from(look.border_color))),
         "color" => Value::Colour(computed.text.color.map(Rgba::from)),
+        "borderTopStartRadius" => radius(look.radii.top_left),
+        "borderTopEndRadius" => radius(look.radii.top_right),
+        "borderBottomEndRadius" => radius(look.radii.bottom_right),
+        "borderBottomStartRadius" => radius(look.radii.bottom_left),
+        "boxShadow" => Value::Shadows(look.shadows.clone()),
+        "backdropFilter" => Value::Material(look.material),
         _ => return None,
     })
 }
@@ -99,12 +160,17 @@ fn set(computed: &mut Computed, property: &str, value: Value) {
     let offset = |value: Value| match value {
         Value::Percent(percent) => Offset::Percent(percent),
         Value::Px(px) | Value::Number(px) => Offset::Px(px),
-        Value::Colour(_) => Offset::Px(0.0),
+        _ => Offset::Px(0.0),
     };
     let size = |value: Value| match value {
         Value::Percent(part) => taffy::style::Dimension::percent(part),
         Value::Px(px) | Value::Number(px) => taffy::style::Dimension::length(px),
-        Value::Colour(_) => taffy::style::Dimension::auto(),
+        _ => taffy::style::Dimension::auto(),
+    };
+    let radius = |value: Value| match value {
+        Value::Percent(percent) => Radius::Percent(percent),
+        Value::Px(px) | Value::Number(px) => Radius::Px(px),
+        _ => Radius::Px(0.0),
     };
     match (property, value) {
         ("opacity", Value::Number(number)) => look.opacity = number,
@@ -117,6 +183,12 @@ fn set(computed: &mut Computed, property: &str, value: Value) {
         ("backgroundColor", Value::Colour(colour)) => look.background = colour.map(Hsla::from),
         ("borderColor", Value::Colour(colour)) => look.border_color = colour.map(Hsla::from).unwrap_or_default(),
         ("color", Value::Colour(colour)) => computed.text.color = colour.map(Hsla::from),
+        ("borderTopStartRadius", value) => look.radii.top_left = radius(value),
+        ("borderTopEndRadius", value) => look.radii.top_right = radius(value),
+        ("borderBottomEndRadius", value) => look.radii.bottom_right = radius(value),
+        ("borderBottomStartRadius", value) => look.radii.bottom_left = radius(value),
+        ("boxShadow", Value::Shadows(shadows)) => look.shadows = shadows,
+        ("backdropFilter", Value::Material(material)) => look.material = material,
         _ => {}
     }
 }
@@ -136,21 +208,21 @@ enum Curve {
 }
 
 /// A value's number, where it's one: what a spring moves in its own unit.
-fn number(value: Value) -> Option<f32> {
-    match value {
+fn number(value: &Value) -> Option<f32> {
+    match *value {
         Value::Number(number) | Value::Px(number) | Value::Percent(number) => Some(number),
-        Value::Colour(_) => None,
+        _ => None,
     }
 }
 
 /// Whether two values are numbers in the same unit, which a spring moves between, keeping its speed.
-fn alike(a: Value, b: Value) -> bool {
+fn alike(a: &Value, b: &Value) -> bool {
     matches!((a, b), (Value::Number(_), Value::Number(_)) | (Value::Px(_), Value::Px(_)) | (Value::Percent(_), Value::Percent(_)))
 }
 
 /// Of a value this close to where it's going, and moving no faster than ten times this a second, a spring has arrived:
 /// a thousandth of a scale or an opacity, a tenth of a pixel.
-fn near(value: Value) -> f64 {
+fn near(value: &Value) -> f64 {
     match value {
         Value::Px(_) => 0.1,
         Value::Percent(_) => 0.01,
@@ -159,12 +231,12 @@ fn near(value: Value) -> f64 {
 }
 
 /// `value`'s unit, at `number`.
-fn with(value: Value, number: f32) -> Value {
+fn with(value: &Value, number: f32) -> Value {
     match value {
         Value::Number(_) => Value::Number(number),
         Value::Px(_) => Value::Px(number),
         Value::Percent(_) => Value::Percent(number),
-        colour => colour,
+        other => other.clone(),
     }
 }
 
@@ -174,19 +246,19 @@ impl Moving {
         match self.curve {
             Curve::Eased { start, duration, easing } => {
                 let part = ((now - start) / f64::from(duration.max(1.0))).clamp(0.0, 1.0) as f32;
-                (self.from.mix(self.to, ease(easing, part)).unwrap_or(self.to), 0.0)
+                (self.from.mix(&self.to, ease(easing, part)).unwrap_or_else(|| self.to.clone()), 0.0)
             }
             Curve::Sprung { start, velocity, spring } => {
                 let seconds = ((now - start) / 1000.0).max(0.0);
-                match (number(self.from), number(self.to)) {
-                    (Some(from), Some(to)) if alike(self.from, self.to) => {
+                match (number(&self.from), number(&self.to)) {
+                    (Some(from), Some(to)) if alike(&self.from, &self.to) => {
                         let (off, speed) = spring.at(f64::from(from - to), velocity, seconds);
-                        (with(self.to, (f64::from(to) + off) as f32), speed)
+                        (with(&self.to, (f64::from(to) + off) as f32), speed)
                     }
-                    // Colours, or a number between units, by how far the spring has gone, from rest.
+                    // Colours, shadows, or a number between units, by how far the spring has gone, from rest.
                     _ => {
                         let (off, _) = spring.at(1.0, 0.0, seconds);
-                        (self.from.mix(self.to, (1.0 - off as f32).clamp(0.0, 1.0)).unwrap_or(self.to), 0.0)
+                        (self.from.mix(&self.to, (1.0 - off as f32).clamp(0.0, 1.0)).unwrap_or_else(|| self.to.clone()), 0.0)
                     }
                 }
             }
@@ -200,14 +272,17 @@ impl Moving {
     fn done(&self, now: f64) -> bool {
         match self.curve {
             Curve::Eased { start, duration, .. } => now - start >= f64::from(duration),
-            Curve::Sprung { .. } => {
-                let (at, speed) = self.state(now);
-                let close = near(self.to);
-                match (number(at), number(self.to)) {
-                    (Some(at), Some(to)) => f64::from((at - to).abs()) < close && speed.abs() < close * 10.0,
-                    _ => at == self.to,
+            Curve::Sprung { start, velocity, spring } => match (number(&self.from), number(&self.to)) {
+                (Some(_), Some(_)) if alike(&self.from, &self.to) => {
+                    let (at, speed) = self.state(now);
+                    number(&at).zip(number(&self.to)).is_some_and(|(at, to)| Spring::arrived(f64::from(at - to), speed, near(&self.to)))
                 }
-            }
+                // What a spring moves by how far it's gone has arrived where it has.
+                _ => {
+                    let (off, speed) = spring.at(1.0, if alike(&self.from, &self.to) { velocity } else { 0.0 }, ((now - start) / 1000.0).max(0.0));
+                    Spring::arrived(off, speed, 0.001)
+                }
+            },
         }
     }
 }
@@ -302,7 +377,7 @@ impl Transitions {
                 self.moving.remove(&key);
                 continue;
             };
-            let was = self.values.insert(key, to);
+            let was = self.values.insert(key, to.clone());
             // What it's drawn as now, and how fast it's going: where a move has it, else where it was going, else where
             // it entered from, at rest.
             let (from, velocity) = match self.moving.get(&key) {
@@ -316,7 +391,7 @@ impl Transitions {
                     None => continue,
                 },
             };
-            if from == to || from.mix(to, 0.0).is_none() || (reduced && moves) {
+            if from == to || from.mix(&to, 0.0).is_none() || (reduced && moves) {
                 self.moving.remove(&key);
                 continue;
             }
@@ -324,8 +399,8 @@ impl Transitions {
                 // A spring sets off at the speed its style says, of the way a second, or turned, keeps its speed, where
                 // it's a number in the same unit.
                 Some(spring) => {
-                    let said = transition.velocity.zip(number(from).zip(number(to))).map(|(velocity, (from, to))| f64::from(velocity * (to - from)));
-                    Curve::Sprung { start: since, velocity: said.unwrap_or(if alike(from, to) { velocity } else { 0.0 }), spring }
+                    let said = transition.velocity.zip(number(&from).zip(number(&to))).map(|(velocity, (from, to))| f64::from(velocity * (to - from)));
+                    Curve::Sprung { start: since, velocity: said.unwrap_or(if alike(&from, &to) { velocity } else { 0.0 }), spring }
                 }
                 None => Curve::Eased { start: since, duration: transition.duration, easing: transition.easing },
             };
@@ -378,7 +453,7 @@ impl Transitions {
         let px = |value: Value, size: f32| match value {
             Value::Px(px) | Value::Number(px) => Some(px),
             Value::Percent(percent) => Some(size * percent / 100.0),
-            Value::Colour(_) => None,
+            _ => None,
         };
         let mut styled = [None; 2];
         for ((property, along), was) in [("translateX", size.width), ("translateY", size.height)].into_iter().zip(&mut styled) {

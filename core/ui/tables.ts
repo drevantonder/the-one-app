@@ -174,7 +174,9 @@ function written(style: Record<string, any>): Entry2 {
   const out: Record<string, unknown> = {}
   for (const [property, value] of Object.entries(style)) {
     const by = byState(value)
-    const made = by ? Object.fromEntries(Object.entries(by).map(([state, value]) => [state, referenced(value)])) : referenced(value)
+    // What moves names a shorthand by what it's written out as (`borderRadius`, its four corners).
+    const moves = property === "transitionProperty" && Array.isArray(value) ? value.flatMap((one: string) => longhands[one] ?? [one]) : value
+    const made = by ? Object.fromEntries(Object.entries(by).map(([state, value]) => [state, referenced(value)])) : referenced(moves)
     for (const one of longhands[property] ?? [property]) out[one] = made
   }
   return out as Entry2
