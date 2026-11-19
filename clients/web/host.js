@@ -308,7 +308,7 @@ function outdated(subject, resources) {
 /// How many moves of its session this browser has told the page of.
 let told = 0
 /// Asks the network's address whether this browser is signed in, as it opens: → where it is with its network, as the
-/// app's client says a device's session (`Session` in core/client), and, while it's to sign in, where it does.
+/// app's client says a device's session (`State` in core/client), and, while it's to sign in, where it does.
 /** @returns {Promise<Omit<import("../app/page/host.js").Told, "seq">>} */
 async function opened() {
   let response
@@ -397,7 +397,7 @@ const NO_KEY = "A browser can't hold your key. Use the app on your phone or comp
 const OPEN = "open"
 /** @type {{ [Command in keyof Commands]?: (...args: Parameters<Commands[Command]>) => ReturnType<Commands[Command]> | Promise<ReturnType<Commands[Command]>> }} */
 const commands = {
-  /// Where this browser is with its network, as the app's client says a device's session (`Session` in core/client):
+  /// Where this browser is with its network, as the app's client says a device's session (`State` in core/client):
   /// signed in here, or sent to sign in, and whether its network answers. A browser keeps nothing of a network's, so
   /// with its address not answering it's still opening, and asks again by itself (`tryAgain`).
   /// What the address it was opened at links to (`/?open=<one: link>`, as a request's link in Vault leads here) is

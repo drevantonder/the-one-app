@@ -205,45 +205,83 @@ impl AuthorizationServer {
     }
 }
 
-/// Where a device is with its network, from when its client opens: what every client shows, the app's window a
-/// page for each and the CLI and MCP a line. Whether its network answers is beside it (`Connection`). It moves only
-/// as `moves_to` says, and only by its client's own steps (`sessions`, `Client::admit`).
+/// Where a client is with its network, from when it opens: whether its device is in its network, and whether its
+/// network answers. It's what every client shows, the app's window a page for each and a banner over its apps, and the
+/// CLI and MCP a line. It's one state, so what can't be together never is: a device showing a code has been answered,
+/// and only one that's in asks servers, which may say it's behind them. It moves only as `moves_to` says, and only by
+/// its client's own steps (`Client::moved`).
 #[derive(Clone, Debug, PartialEq, Serialize)]
 #[serde(tag = "state", rename_all = "camelCase")]
-pub enum Session {
+pub enum State {
     /// Asking its network's address for its token, or for a code to be let in by, which it asks again while its
-    /// network doesn't answer (`reconnecting`).
-    Opening,
+    /// network doesn't answer (`reconnecting`). Its connection is never `Online` or `Behind`: once the address
+    /// answers, it's in or it shows a code.
+    Opening { connection: Connection },
     /// In its network: it asks its servers, as whoever it signed in as.
-    SignedIn,
+    SignedIn { connection: Connection },
     /// Not in its network: it never was, or its network's address says it was taken out since, which a server's
     /// word alone never decides. It shows `code`, and is in once its person approves it where they sign in. What it
     /// kept stays until someone else signs in on it (`NetworkConfig::store_token`). `why` says why it's out, if
-    /// it says: its last code was denied or expired, or it was removed.
+    /// it says: its last code was denied or expired, or it was removed. Its network gave it the code, so it answers.
     SignIn { code: Box<DeviceAuthorization>, why: Option<NotApproved> },
 }
 
-impl Session {
-    /// Whether a device in this state moves to `next`: the only moves there are.
-    fn moves_to(&self, next: &Session) -> bool {
-        use Session::*;
-        matches!(
-            (self, next),
-            // It's given its token, or a code to be let in by, or carries on with the token it has.
-            (Opening, SignedIn | SignIn { .. })
+impl State {
+    /// Whether a client in this state moves to `next`: the only moves there are.
+    fn moves_to(&self, next: &State) -> bool {
+        use Connection::*;
+        use State::*;
+        match (self, next) {
+            // It's given its token, or a code to be let in by, or carries on with the token it has where its network's
+            // address doesn't answer.
+            (Opening { .. }, SignedIn { connection: Online | Offline } | SignIn { .. }) => true,
+            // Its network's address didn't answer, or it asks again.
+            (Opening { connection: was }, Opening { connection: now }) => {
+                !matches!(now, Online | Behind(_)) && was.moves_to(now)
+            }
             // Its network's address says it's nobody's now, or its person signed out on it.
-            | (SignedIn, SignIn { .. } | Opening)
+            (SignedIn { .. }, SignIn { .. } | Opening { connection: Connecting }) => true,
+            (SignedIn { connection: was }, SignedIn { connection: now }) => was.moves_to(now),
             // Its person approved it, or its code was denied or expired, which it asks about again.
-            | (SignIn { .. }, Opening)
-        )
+            (SignIn { .. }, Opening { connection: Connecting }) => true,
+            _ => false,
+        }
+    }
+
+    /// Whether its network answers: one showing a code was answered.
+    pub fn connection(&self) -> Connection {
+        match self {
+            Self::Opening { connection } | Self::SignedIn { connection } => connection.clone(),
+            Self::SignIn { .. } => Connection::Online,
+        }
+    }
+
+    /// The same state with its network's answer `connection`, where it has one.
+    fn with(&self, connection: Connection) -> Option<State> {
+        match self {
+            Self::Opening { .. } => Some(Self::Opening { connection }),
+            Self::SignedIn { .. } => Some(Self::SignedIn { connection }),
+            Self::SignIn { .. } => None,
+        }
+    }
+
+    /// Whether it's where `other` is with its network, its device in, out with the same code, or asking which,
+    /// whatever its network answers.
+    pub fn same_session(&self, other: &State) -> bool {
+        use State::*;
+        match (self, other) {
+            (Opening { .. }, Opening { .. }) | (SignedIn { .. }, SignedIn { .. }) => true,
+            (SignIn { .. }, SignIn { .. }) => self == other,
+            _ => false,
+        }
     }
 }
 
-impl std::fmt::Display for Session {
+impl std::fmt::Display for State {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::Opening => f.write_str("Opening…"),
-            Self::SignedIn => f.write_str("Signed in."),
+            Self::Opening { .. } => f.write_str("Opening…"),
+            Self::SignedIn { .. } => f.write_str("Signed in."),
             Self::SignIn { code, why: Some(NotApproved::Removed) } => {
                 write!(f, "This device was removed from your network. Open this where you sign in, and check it shows {}:\n{}", code.code, code.link)
             }
@@ -255,15 +293,14 @@ impl std::fmt::Display for Session {
     }
 }
 
-/// Whether a client reaches its network, beside its session (`Session`): what every client shows, the app's window
-/// as it opens and as a banner over its apps, and the CLI and MCP as a line. Its network answers where what the
-/// client asks of it is answered: its address, while the device asks to be let in, and its servers from then on. It
-/// moves only as `moves_to` says, and only by its client's own steps (`Client::answered`, `reconnecting`). Whether it
-/// lost its network is which state it's in: asking again after it did is `Reconnecting`, never `Connecting`.
-#[derive(Clone, Copy, Debug, PartialEq, Eq, Serialize)]
-#[serde(rename_all = "camelCase")]
+/// Whether a client's network answers, as its state has it (`State`). Its network answers where what the client asks
+/// of it is answered: its address, while the device asks to be let in, and its servers from then on. Whether it lost
+/// its network is which one it is: asking again after it did is `Reconnecting`, never `Connecting`. It's said to a
+/// page as its name (`online`), and a client that's behind is online.
+#[derive(Clone, Debug, PartialEq, Eq, Serialize)]
+#[serde(into = "&'static str")]
 pub enum Connection {
-    /// Asking, and not answered yet, as the client opens.
+    /// Asking, and not answered yet, as the client opens, or as it asks to be let in again.
     Connecting,
     /// Its network answered the last thing asked.
     Online,
@@ -272,21 +309,46 @@ pub enum Connection {
     Offline,
     /// Asking again after its network didn't answer, and not answered yet.
     Reconnecting,
+    /// Its servers answer, but refused it for being on a version before theirs that doesn't talk with them
+    /// (`OneCore.Mcp`), saying why: from then on it asks only what brings it up to date (`updates`), as an app that
+    /// requires an update does nothing but offer it, rather than being refused again for everything it asks. It's
+    /// behind until a server talks with it again, which it asks afresh as it reconnects and as its person tries again
+    /// (`retry`): a reason kept from before is never taken for a server's answer now.
+    Behind(String),
 }
 
 impl Connection {
-    /// Whether a client in this state moves to `next`: the only moves there are.
+    /// Whether a client whose network answers this way moves to `next`: the only moves there are.
     fn moves_to(&self, next: &Connection) -> bool {
         use Connection::*;
         matches!(
             (self, next),
             // It was answered, or wasn't.
-            (Connecting | Reconnecting, Online | Offline)
+            (Connecting | Reconnecting | Offline, Online | Behind(_))
+            | (Connecting | Reconnecting, Offline)
             // It tries again.
             | (Offline, Reconnecting)
-            // It lost its network.
-            | (Online, Offline)
+            // It lost its network, or a server says it's behind it.
+            | (Online, Offline | Behind(_))
+            // It lost its network, or a server talks with it again, or its person tries again.
+            | (Behind(_), Offline | Online)
         )
+    }
+
+    /// Whether its network answered the last thing asked.
+    pub fn answers(&self) -> bool {
+        matches!(self, Self::Online | Self::Behind(_))
+    }
+}
+
+impl From<Connection> for &'static str {
+    fn from(connection: Connection) -> Self {
+        match connection {
+            Connection::Connecting => "connecting",
+            Connection::Online | Connection::Behind(_) => "online",
+            Connection::Offline => "offline",
+            Connection::Reconnecting => "reconnecting",
+        }
     }
 }
 
@@ -297,6 +359,7 @@ impl std::fmt::Display for Connection {
             Self::Reconnecting => "Reconnecting to your network…",
             Self::Online => "Online.",
             Self::Offline => "Can't reach your network. Check this device is online, then try again.",
+            Self::Behind(why) => why,
         })
     }
 }
@@ -976,8 +1039,8 @@ pub struct Client {
     key: SecretKey,
     /// Its network's address, if it has one: a network on one machine has none.
     address: Option<String>,
-    /// Where its device is with its network, which only `moved` changes.
-    session: watch::Sender<Session>,
+    /// Where it is with its network, which only `moved` changes.
+    state: watch::Sender<State>,
     /// One ask of the network's address for this device's token at a time (`admit`), however many find at once that
     /// it may be nobody's.
     admitting: Mutex<()>,
@@ -994,14 +1057,6 @@ pub struct Client {
     says: Vec<(&'static str, String)>,
     /// Whether this client is to hear what changes, so its servers are to tell it.
     watching: AtomicBool,
-    /// Whether its network answers, which only `connection_moved` changes.
-    connection: watch::Sender<Connection>,
-    /// Why a server refused it for being on a version before the server's that doesn't talk with it (`OneCore.Mcp`),
-    /// once one has: from then on it asks only what brings it up to date (`updates`), as an app that requires an
-    /// update does nothing but offer it, rather than being refused again for everything it asks. It's behind until a
-    /// server talks with it again, which it asks afresh as it reconnects and as its person tries again (`retry`):
-    /// a reason kept from before is never taken for a server's answer now.
-    behind: watch::Sender<Option<String>>,
     /// What the native code of the apps the program ships with fills in of a tool's inputs (`resolve`).
     resolvers: Vec<Arc<dyn InputResolver>>,
     /// The tools of the device's own that the native code of the apps the program ships with answers a server.
@@ -1058,7 +1113,7 @@ impl Link {
 impl Client {
     /// Opens the client kept in `home`, which fills in of a tool's inputs what One Core does and what `resolvers` do,
     /// and answers a server's call of `tools`, the device's own. It opens whether or not its device is in its network:
-    /// where that is, is its `session`, which it moves on by itself from here (`sessions`). Only a home it can't read
+    /// where that is, is its `state`, which it moves on by itself from here (`sessions`). Only a home it can't read
     /// is an error.
     pub async fn open(
         home: impl Into<PathBuf>,
@@ -1081,15 +1136,19 @@ impl Client {
         // anything is asked with it, as no server takes it, and carries on with it if its network doesn't answer.
         // One with none asks for one, and while it's nobody's, for a code to be let in by. A network on one machine
         // has no address, and whatever started it says who this acts as.
-        let (network, who, session) = match &config {
-            None => (None, None, Session::SignedIn),
+        let connection = Connection::Connecting;
+        let (network, who, state) = match &config {
+            None => (None, None, State::SignedIn { connection }),
             Some(config) => match &config.token {
                 Some(token) => {
                     let network = Network { address: config.address.clone(), token: token.clone() };
-                    let session = if config.ends() > SystemTime::now() { Session::SignedIn } else { Session::Opening };
-                    (Some(network), config.who.clone(), session)
+                    let state = match config.ends() > SystemTime::now() {
+                        true => State::SignedIn { connection },
+                        false => State::Opening { connection },
+                    };
+                    (Some(network), config.who.clone(), state)
                 }
-                None => (None, None, Session::Opening),
+                None => (None, None, State::Opening { connection }),
             },
         };
         let link = Link::run(&key, network, who).await?;
@@ -1098,15 +1157,15 @@ impl Client {
         let notifications = broadcast::channel(16).0;
         let endpoint = link.endpoint.clone();
         let link = std::sync::RwLock::new(link);
-        let (watching, connection) = (AtomicBool::new(false), watch::Sender::new(Connection::Connecting));
+        let watching = AtomicBool::new(false);
         let listed = std::sync::Mutex::default();
         let listing = Mutex::default();
         let reach = Mutex::default();
         let resource = Arc::new(std::sync::RwLock::new(resource()));
         let address = config.map(|config| config.address);
         let client = Arc::new_cyclic(|me| Self {
-            home, key, address, session: watch::Sender::new(session), admitting: Mutex::default(),
-            again: Arc::default(), link, reach, notifications, says, watching, connection, behind: watch::Sender::new(None), resolvers, tools,
+            home, key, address, state: watch::Sender::new(state), admitting: Mutex::default(),
+            again: Arc::default(), link, reach, notifications, says, watching, resolvers, tools,
             listed, listing, resource, telemetry: Arc::default(), sending: Mutex::default(), unanswered: std::sync::Mutex::default(),
             me: me.clone(), runtime: tokio::runtime::Handle::current(),
         });
@@ -1120,38 +1179,60 @@ impl Client {
         Ok(client)
     }
 
-    /// Where this device is with its network, as that changes.
-    pub fn session(&self) -> watch::Receiver<Session> {
-        self.session.subscribe()
+    /// Where this client is with its network, as that changes (`State`). Whether its network answers is found out by
+    /// asking: nothing is said over a connection to learn it.
+    pub fn state(&self) -> watch::Receiver<State> {
+        self.state.subscribe()
     }
 
-    /// Moves this device's session to `next`, if that's a move there is from where it is (`Session::moves_to`).
-    /// Gives whether it moved.
-    fn moved(&self, next: Session) -> bool {
-        self.session.send_if_modified(|now| {
-            let moves = now.moves_to(&next);
-            if moves {
-                *now = next;
+    /// Moves this client to where `next` says from where it is, if it says and that's a move there is
+    /// (`State::moves_to`), and once its network answers again after it didn't for longer than a person is shown
+    /// nothing of it, reports how long it didn't. Gives whether it moved.
+    fn moved(&self, next: impl FnOnce(&State) -> Option<State>) -> bool {
+        let mut answers = None;
+        let moved = self.state.send_if_modified(|now| {
+            let Some(next) = next(now).filter(|next| now.moves_to(next)) else { return false };
+            answers = Some(next.connection());
+            *now = next;
+            true
+        });
+        let mut since = self.unanswered.lock().expect("no ask panics");
+        match answers {
+            Some(Connection::Offline) => drop(since.get_or_insert_with(|| (Instant::now(), self.offline()))),
+            Some(connection) if connection.answers() => {
+                if let Some((since, offline)) = since.take().filter(|(since, _)| since.elapsed() > UNNOTICED) {
+                    let took = since.elapsed().as_secs_f64() * 1000.0;
+                    self.report(match offline {
+                        true => json!({"name": "one.client.unanswered", "took": took, "attributes": {"one.outcome": "offline"}}),
+                        false => json!({"name": "one.client.unanswered", "took": took, "error": "No server is answering"}),
+                    })
+                }
             }
-            moves
-        })
+            _ => {}
+        }
+        moved
+    }
+
+    /// Moves whether its network answers to `next`, where its state has that.
+    fn connection_moved(&self, next: Connection) -> bool {
+        self.moved(|now| now.with(next))
     }
 
     /// Has a client whose network didn't answer ask it again now, as the device says it's back online or its app is
     /// in front again, rather than when it next would (`reconnecting`). One that's answered asks nothing.
     pub fn reconnect(&self) {
-        if *self.connection.borrow() == Connection::Offline {
+        if self.state.borrow().connection() == Connection::Offline {
             self.again.notify_one();
         }
     }
 
     /// Asks its network again now, as its person does by trying again: where it didn't answer, and where a server
-    /// refused it for being behind (`behind`), which it's no longer taken to be until a server refuses it again, as
-    /// one updated or rolled back since may talk with it. What it asks is the list of its files, as itself, which a
+    /// refused it for being behind (`Connection::Behind`), which it's no longer taken to be until a server refuses it
+    /// again, as one updated or rolled back since may talk with it. What it asks is the list of its files, as itself, which a
     /// server refuses while it's behind: it answers once it has, failing with why where it wasn't answered.
     pub async fn retry(&self) -> Result<()> {
         self.reconnect();
-        self.behind.send_replace(None);
+        self.moved(|now| matches!(now.connection(), Connection::Behind(_)).then(|| now.with(Connection::Online)).flatten());
         self.fresh("resources/list", &json!({})).await.map(drop)
     }
 
@@ -1162,7 +1243,7 @@ impl Client {
         let mut config = self.config().context("A device signs out of a network with an address")?;
         (config.token, config.who) = (None, None);
         config.keep(&self.home)?;
-        self.moved(Session::Opening);
+        self.moved(|_| Some(State::Opening { connection: Connection::Connecting }));
         Ok(())
     }
 
@@ -1173,20 +1254,23 @@ impl Client {
         Some(NetworkConfig::read(&self.home).unwrap_or_else(|| NetworkConfig::at(address)))
     }
 
-    /// Asks its network's address for this device's token, one ask at a time, while its session is still `from`,
-    /// and moves the session on by what that says (`Session::moves_to`): in, with the token, or out, with a code to be
-    /// let in by. Only the address says a device is nobody's, never a server alone, and an address that doesn't
-    /// answer takes nothing from one that's in: it carries on with the token it has, and one with none stays
-    /// opening, while its network is offline (`Connection`). `why` is why it asks for a new code, if it does: its
+    /// Asks its network's address for this device's token, one ask at a time, while it's still where `from` is with
+    /// its network (`State::same_session`), and moves it on by what that says (`State::moves_to`): in, with the
+    /// token, or out, with a code to be let in by. Only the address says a device is nobody's, never a server alone,
+    /// and an address that doesn't answer takes nothing from one that's in: it carries on with the token it has, and
+    /// one with none stays opening, while its network is offline. `why` is why it asks for a new code, if it does: its
     /// last one was denied or expired. Gives how long until it asks again, while it's in.
-    async fn admit(&self, from: &Session, why: Option<NotApproved>) -> Duration {
+    async fn admit(&self, from: &State, why: Option<NotApproved>) -> Duration {
         let _one = self.admitting.lock().await;
-        let Some(mut config) = self.config().filter(|_| *self.session.borrow() == *from) else { return AGAIN };
+        let Some(mut config) = self.config().filter(|_| self.state.borrow().same_session(from)) else { return AGAIN };
         let failed = match config.admit(&self.key, &self.home).await {
             Ok(true) => match self.relink(&config).await {
                 Ok(()) => {
-                    self.moved(Session::SignedIn);
-                    self.answered(true);
+                    // Its address answered, which says nothing of whether its servers talk with it.
+                    self.moved(|now| match now.connection() {
+                        Connection::Behind(why) => now.with(Connection::Behind(why)),
+                        _ => Some(State::SignedIn { connection: Connection::Online }),
+                    });
                     self.rewatch().await;
                     return config.left();
                 }
@@ -1196,8 +1280,7 @@ impl Client {
                 let removed = config.who.is_some().then_some(NotApproved::Removed);
                 match config.device_code(&self.key, &self.home).await {
                     Ok(code) => {
-                        self.moved(Session::SignIn { code: Box::new(code), why: why.or(removed) });
-                        self.answered(true);
+                        self.moved(|_| Some(State::SignIn { code: Box::new(code), why: why.or(removed) }));
                         return AGAIN;
                     }
                     Err(error) => error,
@@ -1207,26 +1290,29 @@ impl Client {
         };
         let failed = failed.context(format!("Couldn't join the network at {}", config.address));
         // A device that's in carries on with the token it has, and asks again soon.
-        if *from == Session::SignedIn || config.token.is_some() {
-            self.moved(Session::SignedIn);
-        } else {
+        let signed_in = matches!(from, State::SignedIn { .. }) || config.token.is_some();
+        if !signed_in {
             self.report(json!({"name": "one.client.join", "error": format!("{failed:#}")}));
         }
-        self.answered(false);
+        let connection = Connection::Offline;
+        self.moved(|now| match signed_in {
+            true => Some(State::SignedIn { connection }),
+            false => now.with(connection),
+        });
         AGAIN
     }
 
-    /// Asks for this device's next token while it's in. A server gives one to a device that's someone's. One that
-    /// can't be reached, as where the token this has ended, is asked at the network's address, which also says
-    /// whether the device is nobody's now (`admit`). Gives how long until it asks again.
-    async fn renew(&self) -> Duration {
+    /// Asks for this device's next token while it's in, as it was `now`. A server gives one to a device that's
+    /// someone's. One that can't be reached, as where the token this has ended, is asked at the network's address,
+    /// which also says whether the device is nobody's now (`admit`). Gives how long until it asks again.
+    async fn renew(&self, now: &State) -> Duration {
         let Some(mut config) = self.config() else { return AGAIN };
         // No server takes a token that has ended, so that's asked at the address straight away.
         let given = match config.ends() > SystemTime::now() {
             true => self.request("one/token", json!({"build": device_info()})).await.ok(),
             false => None,
         };
-        let Some(given) = given else { return self.admit(&Session::SignedIn, None).await };
+        let Some(given) = given else { return self.admit(now, None).await };
         let _one = self.admitting.lock().await;
         let renewed = async {
             config.store_token(&given, &self.home)?;
@@ -1268,7 +1354,7 @@ impl Client {
 
     /// Whose device this is, while it's in its network: the user it signed in as.
     pub fn who(&self) -> Option<String> {
-        if *self.session.borrow() != Session::SignedIn {
+        if !matches!(*self.state.borrow(), State::SignedIn { .. }) {
             return None;
         }
         self.link().who
@@ -1294,56 +1380,6 @@ impl Client {
         self.link.read().expect("no renewal panics").clone()
     }
 
-    /// Whether its network answers, as that changes (`Connection`). It's found out by asking: nothing is said over
-    /// a connection to learn it.
-    pub fn connection(&self) -> watch::Receiver<Connection> {
-        self.connection.subscribe()
-    }
-
-    /// Why its servers refused it for being behind them, once one has, until one talks with it again (`behind`).
-    pub fn behind(&self) -> watch::Receiver<Option<String>> {
-        self.behind.subscribe()
-    }
-
-    /// Moves whether its network answers to `next`, if that's a move there is from where it is
-    /// (`Connection::moves_to`), and once it answers again after it didn't for longer than a person is shown nothing
-    /// of it, reports how long it didn't. Gives whether it moved.
-    fn connection_moved(&self, next: Connection) -> bool {
-        let moved = self.connection.send_if_modified(|now| {
-            let moves = now.moves_to(&next);
-            if moves {
-                *now = next;
-            }
-            moves
-        });
-        let mut since = self.unanswered.lock().expect("no ask panics");
-        match next {
-            Connection::Offline if moved => drop(since.get_or_insert_with(|| (Instant::now(), self.offline()))),
-            Connection::Online if moved => {
-                // Back, it asks its servers afresh whether they talk with it, as one may have been updated meanwhile.
-                self.behind.send_replace(None);
-                if let Some((since, offline)) = since.take().filter(|(since, _)| since.elapsed() > UNNOTICED) {
-                    let took = since.elapsed().as_secs_f64() * 1000.0;
-                    self.report(match offline {
-                        true => json!({"name": "one.client.unanswered", "took": took, "attributes": {"one.outcome": "offline"}}),
-                        false => json!({"name": "one.client.unanswered", "took": took, "error": "No server is answering"}),
-                    })
-                }
-            }
-            _ => {}
-        }
-        moved
-    }
-
-    /// Says whether its network answered what was just asked. What's asked while it's offline leaves it offline
-    /// until it's tried again (`reconnecting`), and an answer to it is a try that was answered.
-    fn answered(&self, answered: bool) {
-        if answered {
-            self.connection_moved(Connection::Reconnecting);
-        }
-        self.connection_moved(if answered { Connection::Online } else { Connection::Offline });
-    }
-
     /// Says whether this client is to hear what changes, as the app does while it runs, to every server acting for
     /// its user. While it is, each tells it when something changed, and keeps telling it once it starts again. A
     /// server that isn't up now is told when it's next asked anything, and one that isn't told the app has gone
@@ -1351,7 +1387,7 @@ impl Client {
     /// next endpoint (`relink`), and once a server answers again after none did, as one that's new may not have heard.
     pub async fn watch(&self, watching: bool) {
         self.watching.store(watching, Ordering::Relaxed);
-        if *self.session.borrow() != Session::SignedIn {
+        if !matches!(*self.state.borrow(), State::SignedIn { .. }) {
             return;
         }
         let Ok(Some(servers)) = self.servers(false).await else { return };
@@ -1426,27 +1462,19 @@ impl Client {
     /// as MCP's progress notifications. A request is asked for them with a `progressToken` of its own where it
     /// carries none, since they're what keeps a long one from being taken for a server that went away.
     pub async fn ask_notified(&self, message: &[u8], notified: impl Fn(&[u8])) -> Result<Vec<u8>> {
-        // Only a device that's in asks its servers. One that's opening is asked once it's in or isn't, unless its
-        // network doesn't answer, which leaves it unable to say which.
-        let (mut session, mut connection) = (self.session.subscribe(), self.connection.subscribe());
+        // Only a device that's in asks its servers, and behind them, nothing they'd refuse it for that. One that's
+        // opening is asked once it's in or isn't, unless its network doesn't answer, which leaves it unable to say
+        // which.
+        let mut state = self.state.subscribe();
         loop {
-            let offline = *connection.borrow_and_update() == Connection::Offline;
-            match &*session.borrow_and_update() {
-                Session::SignedIn => break,
-                Session::Opening if offline => bail!("{}", Connection::Offline),
-                Session::Opening => {}
+            match &*state.borrow_and_update() {
+                State::SignedIn { connection: Connection::Behind(why) } if !updates(message) => bail!("{why}"),
+                State::SignedIn { .. } => break,
+                State::Opening { connection: Connection::Offline } => bail!("{}", Connection::Offline),
+                State::Opening { .. } => {}
                 out => bail!("{out}"),
             }
-            tokio::select! {
-                changed = session.changed() => changed?,
-                changed = connection.changed() => changed?,
-            }
-        }
-        // Behind its servers, it asks them nothing they'd refuse it for that.
-        if let Some(why) = self.behind.borrow().clone()
-            && !updates(message)
-        {
-            bail!("{why}")
+            state.changed().await?;
         }
         // A request is read once on its way out: for what this device fills in of it, what it says of itself, and
         // the span it is of a trace (`span`).
@@ -1489,14 +1517,17 @@ impl Client {
             }
         };
         let response = request.await;
-        self.answered(response.is_ok());
         // Refused for being behind, it's behind; answered what only a server it talks with answers, it isn't.
-        if let Ok(response) = &response
-            && !updates(&message)
-        {
-            let why = left_behind(response);
-            self.behind.send_if_modified(|now| now.is_some() != why.is_some() && { *now = why; true });
-        }
+        self.moved(|now| {
+            now.with(match &response {
+                Err(_) => Connection::Offline,
+                Ok(response) if !updates(&message) => left_behind(response).map_or(Connection::Online, Connection::Behind),
+                Ok(_) => match now.connection() {
+                    Connection::Behind(why) => Connection::Behind(why),
+                    _ => Connection::Online,
+                },
+            })
+        });
         if let Some(mut span) = span {
             use opentelemetry::trace::{Span, Status};
             let refused = match &response {
@@ -1540,12 +1571,16 @@ impl Client {
         if response["error"]["code"] != NOBODY || self.address.is_none() {
             return bytes;
         }
-        self.admit(&Session::SignedIn, None).await;
-        let session = self.session.borrow().clone();
-        if !matches!(session, Session::SignIn { .. }) {
+        let now = self.state.borrow().clone();
+        if !matches!(now, State::SignedIn { .. }) {
             return bytes;
         }
-        response["error"]["message"] = json!(session.to_string());
+        self.admit(&now, None).await;
+        let now = self.state.borrow().clone();
+        if !matches!(now, State::SignIn { .. }) {
+            return bytes;
+        }
+        response["error"]["message"] = json!(now.to_string());
         response.to_string().into_bytes()
     }
 
@@ -1648,7 +1683,7 @@ impl Client {
     /// outcomes only: never what anyone wrote, was given or answered, and never a secret.
     pub fn report(&self, record: Value) {
         self.telemetry().record(&record);
-        if *self.connection.borrow() == Connection::Online {
+        if self.state.borrow().connection().answers() {
             self.send_soon();
         }
     }
@@ -1969,10 +2004,11 @@ async fn answer(client: std::sync::Weak<Client>, connection: iroh::endpoint::Con
     }
 }
 
-/// Moves a device's session on (`Session`), for as long as its client is open: asks for its token while it's
-/// opening, renews it while it's in, and waits for its person to approve it while it shows a code. One whose network
-/// didn't answer as it opened is asked about again as its network is (`reconnecting`). A server saying the device is
-/// nobody's asks the address too (`Client::taken_out`), through the same `admit`.
+/// Moves a device on where it is with its network (`State`), for as long as its client is open: asks for its token
+/// while it's opening, renews it while it's in, and waits for its person to approve it while it shows a code. One
+/// whose network didn't answer as it opened is asked about again as its network is (`reconnecting`). A server saying
+/// the device is nobody's asks the address too (`Client::taken_out`), through the same `admit`. Each waits for the
+/// device to be in or out, not for what its network answers meanwhile.
 async fn sessions(client: std::sync::Weak<Client>) {
     // Why it asks for a new code, when it does: its last one was denied or expired.
     let mut why = None;
@@ -1980,22 +2016,23 @@ async fn sessions(client: std::sync::Weak<Client>) {
     let mut renews = None;
     loop {
         let Some(open) = client.upgrade() else { return };
-        let mut session = open.session.subscribe();
-        let now = session.borrow_and_update().clone();
+        let mut state = open.state.subscribe();
+        let now = state.borrow_and_update().clone();
+        let moved = |state: &State| !state.same_session(&now);
         match &now {
-            Session::Opening => {
+            State::Opening { .. } => {
                 renews = Some(open.admit(&now, why.take()).await);
                 drop(open);
-                if session.changed().await.is_err() {
+                if state.wait_for(moved).await.is_err() {
                     return;
                 }
             }
-            Session::SignedIn => {
+            State::SignedIn { .. } => {
                 // A network on one machine has no token to renew. One a new build hasn't renewed yet is renewed now,
                 // which says so.
                 let Some(config) = open.config() else {
                     drop(open);
-                    if session.changed().await.is_err() {
+                    if state.wait_for(moved).await.is_err() {
                         return;
                     }
                     continue;
@@ -2005,20 +2042,20 @@ async fn sessions(client: std::sync::Weak<Client>) {
                 drop(open);
                 tokio::select! {
                     _ = sleep(left) => {}
-                    changed = session.changed() => if changed.is_err() { return } else { continue },
+                    changed = state.wait_for(moved) => if changed.is_err() { return } else { continue },
                 }
                 let Some(open) = client.upgrade() else { return };
-                renews = Some(open.renew().await);
+                renews = Some(open.renew(&now).await);
             }
-            Session::SignIn { code, .. } => {
+            State::SignIn { code, .. } => {
                 drop(open);
                 let answered = tokio::select! {
                     answered = code.wait_for_approval() => answered,
-                    changed = session.changed() => if changed.is_err() { return } else { continue },
+                    changed = state.wait_for(moved) => if changed.is_err() { return } else { continue },
                 };
                 let Some(open) = client.upgrade() else { return };
                 why = answered.err();
-                open.moved(Session::Opening);
+                open.moved(|_| Some(State::Opening { connection: Connection::Connecting }));
             }
         }
     }
@@ -2033,29 +2070,29 @@ async fn sessions(client: std::sync::Weak<Client>) {
 async fn reconnecting(client: std::sync::Weak<Client>) {
     const FIRST: Duration = Duration::from_secs(1);
     const MOST: Duration = Duration::from_secs(3);
-    let Some((mut connection, tried)) = client.upgrade().map(|client| (client.connection(), client.again.clone())) else {
+    let Some((mut state, tried)) = client.upgrade().map(|client| (client.state(), client.again.clone())) else {
         return;
     };
     // Where it was when it last looked: answered after `Offline` or `Reconnecting`, it's back.
-    let (mut again, mut was) = (FIRST, *connection.borrow());
+    let (mut again, mut was) = (FIRST, state.borrow().connection());
     loop {
-        let now = *connection.borrow_and_update();
-        let before = std::mem::replace(&mut was, now);
-        if now == Connection::Offline {
+        let now = state.borrow_and_update().clone();
+        let before = std::mem::replace(&mut was, now.connection());
+        if now.connection() == Connection::Offline {
             tokio::select! {
                 _ = sleep(again.mul_f64(0.5 + fastrand::f64() / 2.0)) => {}
                 _ = tried.notified() => {}
-                changed = connection.changed() => if changed.is_err() { return } else { continue },
+                changed = state.changed() => if changed.is_err() { return } else { continue },
             }
             again = (again * 2).min(MOST);
             let Some(client) = client.upgrade() else { return };
-            let session = client.session.borrow().clone();
-            match session {
-                Session::Opening => {
+            let now = client.state.borrow().clone();
+            match now {
+                State::Opening { .. } => {
                     client.connection_moved(Connection::Reconnecting);
-                    client.admit(&session, None).await;
+                    client.admit(&now, None).await;
                 }
-                Session::SignedIn if client.watching.load(Ordering::Relaxed) => {
+                State::SignedIn { .. } if client.watching.load(Ordering::Relaxed) => {
                     client.connection_moved(Connection::Reconnecting);
                     let _ = client.request("ping", json!({})).await;
                 }
@@ -2063,14 +2100,14 @@ async fn reconnecting(client: std::sync::Weak<Client>) {
             }
             continue;
         }
-        if now == Connection::Online && matches!(before, Connection::Offline | Connection::Reconnecting) {
+        if now.connection().answers() && matches!(before, Connection::Offline | Connection::Reconnecting) {
             again = FIRST;
             let Some(client) = client.upgrade() else { return };
             if client.watching.load(Ordering::Relaxed) {
                 client.watch(true).await;
             }
         }
-        if connection.changed().await.is_err() {
+        if state.changed().await.is_err() {
             return;
         }
     }

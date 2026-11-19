@@ -73,7 +73,7 @@ export interface Resource {
 }
 
 /**
- * Where a device is with its network, as the client says it (`Session` in core/client): opening, in, or not in with
+ * Where a device is with its network, as the client says it (`State` in core/client): opening, in, or not in with
  * the code it's let in by.
  */
 export type Session =

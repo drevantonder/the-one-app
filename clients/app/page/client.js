@@ -521,7 +521,7 @@ const moveMachine = setup({
 /// What the window shows, one state at a time: while it opens, until it can start the launcher; the launcher, once
 /// it has drawn; signing in, where the device isn't in its network; why there's no launcher to show, with Apps to
 /// install one; and an update, which is all it shows once a server has refused this client for being behind it
-/// (`behind` from core/client), as an app that requires an update does. Only `on` moves it, by the moves `machine`
+/// (`Connection::Behind` in core/client), as an app that requires an update does. Only `on` moves it, by the moves `machine`
 /// has, and a move that isn't there is refused. A link to an app (`one:`) is kept until the launcher has drawn, and
 /// then opened over it. While it opens or updates, the window is busy (`aria-busy`). Whether its network answers is
 /// the client's (`Connection` in core/client), which the window follows and never decides: it says it as it opens,
@@ -2011,7 +2011,7 @@ shown.start()
 addEventListener("blur", () => setTimeout(() => shown.send({ type: "unused" })))
 await listen("session", ({ payload }) => hear(payload))
 await listen("title_bar", ({ payload }) => titled(payload))
-// Where the window starts: where its device is with its network, as the client says it (`Session`), and whether its
+// Where the window starts: where its device is with its network, as the client says it (`State`), and whether its
 // network answers (`Connection`), which it follows from then on. A phone's app hears a tap on a notification through
 // its push plugin.
 const { taps, testflight: fromTestflight, connection, open: link, windows: inWindows, runtimeVersion: drawn, window: ownWindow, titleBar: overTitleBar, theme: kept, unnative, ...told } = await invoke("start")

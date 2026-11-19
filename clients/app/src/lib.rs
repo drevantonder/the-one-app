@@ -1,6 +1,6 @@
 //! The app: a window on One Core in a client (`core/client`). Its own page (`page`) draws nothing of its own but its
 //! device's session, whether its network answers, and what's under way or wrong with it: it holds the frames. The
-//! window always opens there, and follows the client's session (`Session`) and connection (`Connection`): a device
+//! window always opens there, and follows where the client is with its network (`State`): a device
 //! that isn't in its network is sent on to the network's sign-in page, with the code it's let in by, until its person
 //! has let it in. Each app is a page of its app's, drawn in a frame of its own, which
 //! reaches nothing here but the bridge the window's page gives it: what an app asks comes to `ask`. The launcher
@@ -20,7 +20,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::time::Instant;
 
-use ::client::{Client, Connection, Session, Subscription};
+use ::client::{Client, Connection, State, Subscription};
 use data_encoding::BASE64;
 use serde_json::{Value, json};
 use url::Url;
@@ -246,7 +246,7 @@ pub(crate) struct App {
     shell: Box<dyn Shell>,
     /// Where this device is with its network, as the window follows it (`follows`), with how many moves it has
     /// made: nothing until the client has opened, and a client that couldn't open at all is still opening.
-    start: tokio::sync::watch::Sender<Option<(u64, Session)>>,
+    start: tokio::sync::watch::Sender<Option<(u64, State)>>,
     /// The Colour Mode chosen on this device, as the last page to choose it said, for each page that opens after
     /// (`start`), and told to every page that's open.
     chosen: Mutex<Option<Option<Theme>>>,
@@ -500,8 +500,7 @@ async fn start() -> Result<Value, String> {
     if let Some(theme) = *app.chosen.lock().expect("nothing panics holding it") {
         told["theme"] = json!(theme);
     }
-    let connection = views().ok().map(|views| *views.client.connection().borrow());
-    told["connection"] = json!(connection.unwrap_or(Connection::Offline));
+    told["connection"] = json!(session.connection());
     told["open"] = json!(app.shell.opened_at());
     Ok(told)
 }
@@ -510,7 +509,7 @@ async fn start() -> Result<Value, String> {
 #[cfg(desktop)]
 pub(crate) async fn signed_in() {
     let mut session = app().start.subscribe();
-    let _ = session.wait_for(|now| matches!(now, Some((_, Session::SignedIn)))).await;
+    let _ = session.wait_for(|now| matches!(now, Some((_, State::SignedIn { .. })))).await;
 }
 
 /// Whether this is an iPhone's app installed from TestFlight, which updates it, as Apple tells it: its App Store
@@ -577,9 +576,9 @@ fn open_link(url: String) {
 /// What the window's page is told of where this device is now: its session, the session's place in the order the
 /// page hears them in, and while the device is signing in, where the window goes: the network's sign-in page with its
 /// code, told it's in the app (`&app`), which has no passkeys, and why it shows a new code, if it says.
-fn told(seq: u64, session: &Session) -> Value {
+fn told(seq: u64, session: &State) -> Value {
     let link = match session {
-        Session::SignIn { code, why } => code.link.parse::<Url>().ok().map(|mut link| {
+        State::SignIn { code, why } => code.link.parse::<Url>().ok().map(|mut link| {
             link.query_pairs_mut().append_key_only("app");
             if let Some(why) = why {
                 link.query_pairs_mut().append_pair("why", why.why());
@@ -893,7 +892,8 @@ async fn opens() {
         Ok(client) => client,
         Err(error) => {
             eprintln!("{error:#}");
-            app.start.send_modify(|now| *now = Some((now.as_ref().map_or(0, |(seq, _)| seq + 1), Session::Opening)));
+            let state = State::Opening { connection: Connection::Offline };
+            app.start.send_modify(|now| *now = Some((now.as_ref().map_or(0, |(seq, _)| seq + 1), state)));
             return app.shell.reload();
         }
     };
@@ -925,22 +925,6 @@ async fn opens() {
     // A newer build or page, which it's kept on from now on (`updater`).
     updater::start();
 
-    // The window follows whether its network answers, which is what the last thing asked found, and once it answers
-    // again, every view asks again, so it picks up what it missed where it was.
-    let mut connection = client.connection();
-    spawn(async move {
-        while connection.changed().await.is_ok() {
-            let now = *connection.borrow_and_update();
-            eprintln!("this client's connection: {now:?}");
-            app.shell.emit("connection", json!(now));
-            if now == Connection::Online {
-                // What it missed: what every view was answered, and a newer build or page (`updater`).
-                spawn(updater::caught_up());
-                views.refresh(None).await
-            }
-        }
-    });
-
     // Where a phone is with its push is what this device says of itself (`client`), so its views ask again as it
     // moves, as Notifications shows it.
     let mut push = notifications::pushes();
@@ -949,18 +933,6 @@ async fn opens() {
             let shown: Vec<_> = views.subscriptions.lock().expect("no view panics").keys().cloned().collect();
             for view in shown.iter().filter(|view| *view != "client") {
                 app.shell.emit("changed", json!(view));
-            }
-        }
-    });
-
-    // A server refused this client for being behind it: the window says only that it needs updating, as an app that
-    // requires an update does.
-    let mut behind = client.behind();
-    spawn(async move {
-        while behind.changed().await.is_ok() {
-            if let Some(why) = behind.borrow_and_update().clone() {
-                eprintln!("this client is behind its servers: {why}");
-                app.shell.emit("behind", json!(why));
             }
         }
     });
@@ -1048,8 +1020,8 @@ pub extern "system" fn Java_app_theone_client_Notifications_wake<'local>(
     let woken = tauri::async_runtime::block_on(async {
         let watching = async {
             let client = open(home).await?;
-            let mut session = client.session();
-            session.wait_for(|session| !matches!(session, Session::Opening)).await?;
+            let mut state = client.state();
+            state.wait_for(|state| !matches!(state, State::Opening { .. })).await?;
             client.watch(true).await;
             anyhow::Ok(())
         };
@@ -1062,37 +1034,68 @@ pub extern "system" fn Java_app_theone_client_Notifications_wake<'local>(
     }
 }
 
-/// Has the window follow the client's session as it moves (`Session`). The window's own page draws each state but
-/// one, and hears each move (`session`). The one is signing in, which is the network's own sign-in page with this
-/// device's code: a web view has no passkeys, so the page is told it's in the app (`&app`), and shows the code, and
-/// its button opens the link in the device's own browser. The window goes there from its own page as it opens, and
-/// is brought back to its own page once the device has moved on, which asks where it is then. A device that leaves
-/// its network, or is found to be out of it, starts the window again at its own page, as a web app goes back to its
-/// start once its person is signed out, which opens from there.
+/// Has the window follow where the client is with its network as that moves (`State`), as the window's page hears it:
+/// its session, each move of which the page hears in order (`session`), whether its network answers (`connection`),
+/// and its servers refusing it for being behind them (`behind`). The page draws each session but one. The one is
+/// signing in, which is the network's own sign-in page with this device's code: a web view has no passkeys, so the
+/// page is told it's in the app (`&app`), and shows the code, and its button opens the link in the device's own
+/// browser. The window goes there from its own page as it opens, and is brought back to its own page once the device
+/// has moved on, which asks where it is then. A device that leaves its network, or is found to be out of it, starts
+/// the window again at its own page, as a web app goes back to its start once its person is signed out, which opens
+/// from there. Once its network answers again, every view asks again, so it picks up what it missed where it was; and
+/// behind its servers, the window says only that it needs updating, as an app that requires an update does.
 async fn follows(client: Arc<Client>) {
     let app = app();
-    let mut session = client.session();
+    let mut state = client.state();
     loop {
-        let now = session.borrow_and_update().clone();
-        let seq = app.start.borrow().as_ref().map_or(0, |(seq, _)| seq + 1);
-        eprintln!("this device's session: {now:?}");
-        let was = app.start.send_replace(Some((seq, now.clone())));
-        let starts_again = match (&was, &now) {
-            (Some((_, Session::SignIn { .. })), _) => true,
-            (Some((_, Session::SignedIn)), Session::Opening) => true,
-            (Some(_), Session::SignIn { .. }) => true,
-            _ => false,
+        let now = state.borrow_and_update().clone();
+        let was = app.start.borrow().clone();
+        let seq = match &was {
+            Some((seq, was)) if was.same_session(&now) => *seq,
+            Some((seq, _)) => seq + 1,
+            None => 0,
         };
-        // A device that isn't in its network lists none of its apps.
-        if matches!(now, Session::SignIn { .. }) {
-            shortcuts::keep(Vec::new());
+        app.start.send_replace(Some((seq, now.clone())));
+        let was = was.map(|(_, was)| was);
+        if was.as_ref().is_none_or(|was| !was.same_session(&now)) {
+            eprintln!("this device's session: {now:?}");
+            let starts_again = match (&was, &now) {
+                (Some(State::SignIn { .. }), _) => true,
+                (Some(State::SignedIn { .. }), State::Opening { .. }) => true,
+                (Some(_), State::SignIn { .. }) => true,
+                _ => false,
+            };
+            // A device that isn't in its network lists none of its apps.
+            if matches!(now, State::SignIn { .. }) {
+                shortcuts::keep(Vec::new());
+            }
+            if starts_again {
+                app.shell.reload();
+            } else {
+                app.shell.emit("session", told(seq, &now));
+            }
         }
-        if starts_again {
-            app.shell.reload();
-        } else {
-            app.shell.emit("session", told(seq, &now));
+        // The page was told the connection as it started (`start`), and hears each change of what it's told from there.
+        let (connection, before) = (now.connection(), was.map(|was| was.connection()));
+        if let Some(before) = before.clone().filter(|before| json!(before) != json!(connection)) {
+            eprintln!("this client's connection: {connection:?}");
+            app.shell.emit("connection", json!(connection));
+            if connection.answers()
+                && !before.answers()
+                && let Some(views) = app.views.get()
+            {
+                // What it missed: what every view was answered, and a newer build or page (`updater`).
+                spawn(updater::caught_up());
+                spawn(views.refresh(None));
+            }
         }
-        if session.changed().await.is_err() {
+        if let Connection::Behind(why) = &connection
+            && !matches!(before, Some(Connection::Behind(_)))
+        {
+            eprintln!("this client is behind its servers: {why}");
+            app.shell.emit("behind", json!(why));
+        }
+        if state.changed().await.is_err() {
             return;
         }
     }
@@ -1111,7 +1114,7 @@ pub(crate) fn stays(to: &str) -> bool {
     let own = ["tauri", "oneapp", "about", "data", "blob"].contains(&to.scheme())
         || to.host_str().is_some_and(|host| host.ends_with(".localhost"));
     let start = match &*app().start.borrow() {
-        Some((_, Session::SignIn { code, .. })) => {
+        Some((_, State::SignIn { code, .. })) => {
             code.link.parse::<Url>().is_ok_and(|start| (start.origin(), start.path()) == (to.origin(), to.path()))
         }
         _ => false,

@@ -156,8 +156,9 @@ pub async fn listen(client: Arc<Client>, identifier: &str, tapped: impl Fn(Strin
     let mut latest = None;
     loop {
         // Behind its servers, it's refused for asking, so it stops asking until they talk with it again
-        // (`Client::behind`), as once it's updated or they are.
-        if client.behind().borrow().is_some() && client.behind().wait_for(Option::is_none).await.is_err() {
+        // (`Connection::Behind`), as once it's updated or they are.
+        let talks = |state: &client::State| !matches!(state.connection(), client::Connection::Behind(_));
+        if client.state().wait_for(talks).await.is_err() {
             return;
         }
         match (latest, inbox(&client, latest.unwrap_or(0)).await) {
@@ -247,15 +248,16 @@ pub fn opens(tapped: &Value) -> Option<&str> {
 /// Notifications capability) says why it isn't woken, and still shows the inbox.
 #[cfg(any(target_os = "android", target_os = "ios"))]
 pub async fn listen(app: AppHandle, client: Arc<Client>) {
-    use client::{Connection, Session};
+    use client::State;
     use tauri_plugin_notifications::NotificationsExt;
 
     let notifications = app.notifications();
-    let (mut connection, mut session, mut heard) = (client.connection(), client.session(), TOKEN.subscribe());
+    let (mut state, mut heard) = (client.state(), TOKEN.subscribe());
     // The token the network was last given, and whether it's to be given again whatever it's at.
     let (mut given, mut again) = (None, true);
     loop {
-        if *session.borrow_and_update() == Session::SignedIn {
+        let mut now = state.borrow_and_update().clone();
+        if matches!(now, State::SignedIn { .. }) {
             match allowed(&notifications).await {
                 Err(why) => moved(Push::Failed { why }),
                 Ok(false) => moved(Push::Denied),
@@ -277,16 +279,16 @@ pub async fn listen(app: AppHandle, client: Arc<Client>) {
         // Until something it registered may have changed.
         again = loop {
             tokio::select! {
-                // Signed in again, after it was out of its network, it registers again.
-                changed = session.changed() => {
+                // Signed in again, after it was out of its network, it registers again, and so it does once a server
+                // answers, as it does again after the network was lost, which may take what failed, or may hold
+                // nothing of this phone.
+                changed = state.changed() => {
                     let Ok(()) = changed else { return };
-                    break *session.borrow() == Session::SignedIn;
-                }
-                // A server answers, as it does again after the network was lost, which may take what failed, or may
-                // hold nothing of this phone.
-                changed = connection.changed() => {
-                    let Ok(()) = changed else { return };
-                    if *connection.borrow_and_update() == Connection::Online {
+                    let was = std::mem::replace(&mut now, state.borrow_and_update().clone());
+                    if !now.same_session(&was) {
+                        break matches!(now, State::SignedIn { .. });
+                    }
+                    if now.connection().answers() && !was.connection().answers() {
                         break true;
                     }
                 }

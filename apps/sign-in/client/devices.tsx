@@ -201,7 +201,7 @@ const updateNow = (who?: string) => call("update", {}, { subject: who })
 
 /// Takes a device out once its person has said so. Taking this one out is signing out: what it kept of theirs goes,
 /// and the client opens again where a device that isn't in does. Another that's taken out shows its person where to
-/// sign in when it's next on, and keeps what it kept of theirs until someone else signs in on it (`Session` in
+/// sign in when it's next on, and keeps what it kept of theirs until someone else signs in on it (`State` in
 /// core/client).
 async function remove(device: Thing) {
   const question = device.here
