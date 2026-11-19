@@ -247,7 +247,7 @@ fn open(entrypoint: String, subject: Option<String>, link: String) -> Result<(),
             Err(why) => why,
         };
         HOSTS.open.lock().expect("no host panics").remove(&key);
-        crate::native::unopened(&entrypoint, why);
+        crate::native::unopened(entrypoint, subject, link, why);
     });
     Ok(())
 }
@@ -394,6 +394,9 @@ pub(crate) async fn file(address: &str) -> Result<Value, String> {
     // The client's own page is in this program, not the network's.
     if address == crate::native::RECOVERY {
         return Ok(json!({"kind": "text/javascript", "body": BASE64.encode(include_bytes!("recovery.js"))}));
+    }
+    if address == crate::native::UNOPENED {
+        return Ok(json!({"kind": "text/javascript", "body": BASE64.encode(include_bytes!("unopened.js"))}));
     }
     let (kind, file) = crate::views()?.file(address).await.map_err(|error| format!("{error:#}"))?;
     Ok(json!({"kind": kind, "body": BASE64.encode(&file)}))

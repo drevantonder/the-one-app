@@ -67,23 +67,35 @@ pub(crate) fn reported(entrypoint: &str, started: Instant, why: &str) {
     }
 }
 
-/// Opens a window for `entrypoint` that says only why its page isn't there: one this program can't draw, or that
-/// didn't open, as Telemetry hears (`open`).
-#[cfg(desktop)]
-pub(crate) fn unopened(entrypoint: &str, why: String) {
-    let Ok(native) = Native::get() else { return };
-    let name = entrypoint.split('/').next().unwrap_or_default().to_owned();
-    let tag = json!({"entrypoint": entrypoint});
-    native.run(move |windows| {
-        let options = WindowOptions { title: name.clone(), app_id: ::client::NAME.to_owned(), size: Size { width: Pixels(1024.0), height: Pixels(720.0) }, tag, panel: None, places: None, root: false, icon: None, owner: None };
-        if let Err(error) = windows.open(options, Err(format!("{name} didn't open: {why}")), |_| {}) {
-            eprintln!("{name}'s window didn't open: {error:#}");
+/// Opens a window for `entrypoint`, at `link`, for `subject`, that says only why its page isn't there, as Telemetry
+/// hears (`open`): one this program can't draw, or that didn't open. It's the problem box DESIGN.md has, with Try
+/// Again, on the client's own page (`UNOPENED`); where that can't be drawn either, as with no UI library to draw it
+/// with, it's said in words alone.
+pub(crate) fn unopened(entrypoint: String, subject: Option<String>, link: String, why: String) {
+    crate::spawn(async move {
+        let listed = crate::hosts::command("native", "apps", json!({"subject": subject})).await.unwrap_or_default();
+        let name = listed_page(&listed, &entrypoint).and_then(|page| page["name"].as_str()).filter(|name| !name.contains('/')).map(str::to_owned);
+        let name = name.unwrap_or_else(|| entrypoint.split('/').next().unwrap_or_default().to_owned());
+        let said = format!("{name} didn't open: {why}");
+        // It's the app's window, as its client knows it, so the app opened again brings it forward.
+        let unopened = Unopened { entrypoint: entrypoint.clone(), subject: subject.clone(), link: link.clone(), name: name.clone(), why };
+        match window(Instant::now(), &entrypoint, subject.as_deref(), &link, Kind::Unopened(unopened)).await {
+            Ok(true) => return,
+            Ok(false) => {}
+            Err(error) => eprintln!("{entrypoint}'s problem didn't open: {error:#}"),
         }
+        let Ok(native) = Native::get() else { return };
+        let tag = json!({"entrypoint": entrypoint});
+        native.run(move |windows| {
+            let options = WindowOptions { title: name.clone(), app_id: ::client::NAME.to_owned(), size: Size { width: Pixels(1024.0), height: Pixels(720.0) }, tag, panel: None, places: None, root: false, icon: None, owner: None };
+            if let Err(error) = windows.open(options, Err(said), |_| {}) {
+                eprintln!("{name}'s window didn't open: {error:#}");
+            }
+        });
     });
 }
 
 /// Closes the window `shown`, once it's open.
-#[cfg(mobile)]
 fn close(shown: &OnceLock<WindowId>) {
     let Some(id) = shown.get().copied() else { return };
     if let Ok(native) = Native::get() {
@@ -126,17 +138,20 @@ struct Page {
     icon: Option<String>,
 }
 
+/// `entrypoint`'s page as the apps `listed` list it, if they do.
+fn listed_page<'a>(listed: &'a Value, entrypoint: &str) -> Option<&'a Value> {
+    let (app, path) = entrypoint.split_once('/').unwrap_or((entrypoint, ""));
+    listed["resources"].as_array().into_iter().flatten().find(|resource| {
+        let uri = resource["uri"].as_str().unwrap_or_default();
+        uri.strip_prefix(&format!("ui://{app}/")).and_then(|rest| rest.split_once('/')).is_some_and(|(_, page)| page == path)
+    })
+}
+
 /// Whether `entrypoint`'s page is needs a runtime version this program has, its tables too, and if it is, what
 /// it's drawn with.
 async fn probe(entrypoint: &str, subject: Option<&str>, framed: bool) -> anyhow::Result<Option<Page>> {
     let listed = crate::hosts::command("native", "apps", json!({"subject": subject})).await.map_err(|error| anyhow::anyhow!(error))?;
-    let (app, path) = entrypoint.split_once('/').unwrap_or((entrypoint, ""));
-    let Some(resource) = listed["resources"].as_array().into_iter().flatten().find(|resource| {
-        let uri = resource["uri"].as_str().unwrap_or_default();
-        uri.strip_prefix(&format!("ui://{app}/")).and_then(|rest| rest.split_once('/')).is_some_and(|(_, page)| page == path)
-    }) else {
-        return Ok(None);
-    };
+    let Some(resource) = listed_page(&listed, entrypoint) else { return Ok(None) };
     // A page in a frame that names no runtime version (a component's, which no entrypoint names) is tried: one that
     // isn't drawn natively doesn't start, and the page the frame's in opens in a web view instead.
     let needed = resource["_meta"]["runtimeVersion"].as_u64();
@@ -177,14 +192,14 @@ async fn tables(addresses: &[Url]) -> anyhow::Result<Option<Vec<String>>> {
     Ok(Some(tables))
 }
 
-/// The client's own page (`RECOVERY`), drawn with the UI library as an app's page is, which it loads as one does, and
-/// no styles of its own.
-async fn client_page() -> anyhow::Result<Page> {
-    let module = Url::parse(RECOVERY)?;
+/// A page of the client's own (`RECOVERY`, `UNOPENED`), called `name`, drawn with the UI library as an app's page is,
+/// which it loads as one does, and no styles of its own.
+async fn client_page(address: &str, name: &str) -> anyhow::Result<Page> {
+    let module = Url::parse(address)?;
     let Some(tables) = tables(&[module.join("/ui/client/tokens.json")?, module.join("/ui/client/styles.json")?]).await? else {
         anyhow::bail!("the UI library needs a newer runtime than this program's")
     };
-    Ok(Page { page: module.clone(), module, trusted: false, tables, name: Some("Recovery Key".into()), icon: None })
+    Ok(Page { page: module.clone(), module, trusted: false, tables, name: Some(name.to_owned()), icon: None })
 }
 
 /// Opens the launcher's page natively: on a computer in a panel put away until it's summoned (`computer`), on a phone
@@ -245,6 +260,18 @@ enum Kind {
     Launcher(Option<tokio::sync::oneshot::Sender<Option<WindowId>>>),
     /// The client's own, over an app's, where a recovery key is shown or typed (`recovery`).
     Sheet(Sheet),
+    /// The client's own, in place of an app's that didn't open (`unopened`).
+    Unopened(Unopened),
+}
+
+/// An app's window that didn't open: its entrypoint, who and where it was opened for, its app's name, and why.
+#[derive(Clone)]
+pub(crate) struct Unopened {
+    entrypoint: String,
+    subject: Option<String>,
+    link: String,
+    name: String,
+    why: String,
 }
 
 /// What the client's recovery key window is for: showing the key of this device's person, or of `subject`, a group or
@@ -261,6 +288,8 @@ struct Sheet {
 /// The client's own page, which only the recovery key window shows: its JS, the client's and no app's, at an address
 /// of its own (`hosts::file`).
 pub(crate) const RECOVERY: &str = "oneapp://client.localhost/client/recovery.js";
+/// The client's own page in an app's window that didn't open, its JS too (`hosts::file`).
+pub(crate) const UNOPENED: &str = "oneapp://client.localhost/client/unopened.js";
 
 /// Shows its person the recovery key, theirs or `subject`'s, or with `typed` asks them for it, in a window of the
 /// client's own over the app that asked, which is told only whether they saw it or the device is in now: no app's
@@ -278,7 +307,8 @@ pub(crate) fn recovery(typed: bool, subject: Option<String>, owner: Option<Windo
 
 async fn window(started: Instant, entrypoint: &str, subject: Option<&str>, link: &str, mut kind: Kind) -> anyhow::Result<bool> {
     let page = match &kind {
-        Kind::Sheet(_) => Some(client_page().await?),
+        Kind::Sheet(_) => Some(client_page(RECOVERY, "Recovery Key").await?),
+        Kind::Unopened(unopened) => Some(client_page(UNOPENED, &unopened.name).await?),
         _ => probe(entrypoint, subject, false).await?,
     };
     let Some(Page { page, module, trusted, tables, name: listed, icon }) = page else { return Ok(false) };
@@ -287,9 +317,15 @@ async fn window(started: Instant, entrypoint: &str, subject: Option<&str>, link:
         Kind::Sheet(sheet) => Some(sheet.clone()),
         _ => None,
     };
+    let unopened = match &kind {
+        Kind::Unopened(unopened) => Some(unopened.clone()),
+        _ => None,
+    };
+    // An app's own window, which says why in a window of the client's own if its page doesn't start (`unopened`).
+    let app_window = matches!(kind, Kind::App(_));
     let from = match kind {
         Kind::App(from) => from,
-        Kind::Launcher(_) | Kind::Sheet(_) => None,
+        Kind::Launcher(_) | Kind::Sheet(_) | Kind::Unopened(_) => None,
     };
     let tokens_page = load(&tables)?;
     let native = Native::get()?;
@@ -307,9 +343,8 @@ async fn window(started: Instant, entrypoint: &str, subject: Option<&str>, link:
     let name = listed.or_else(|| start["name"].as_str().map(str::to_owned)).unwrap_or_else(|| entrypoint.split('/').next().unwrap_or_default().to_owned());
 
     let fragment = link.split_once('#').map(|(_, fragment)| fragment.to_owned());
-    let state = State { chosen: chosen.clone(), trusted, entrypoint: entrypoint.to_owned(), subject: subject.map(str::to_owned), view, next: 0, launcher, framed: false, fragment, sheet: sheet.clone(), window: window.clone() };
+    let state = State { chosen: chosen.clone(), trusted, entrypoint: entrypoint.to_owned(), subject: subject.map(str::to_owned), view, next: 0, launcher, framed: false, fragment, sheet: sheet.clone(), unopened, window: window.clone() };
     let (entrypoint, subject) = (entrypoint.to_owned(), subject.map(str::to_owned));
-    #[cfg(mobile)]
     let link = link.to_owned();
     // Whether it opened, as the windows' thread says: a job that's dropped, as a phone's is where its windows
     // couldn't start, says why there.
@@ -337,7 +372,6 @@ async fn window(started: Instant, entrypoint: &str, subject: Option<&str>, link:
         let app = entrypoint.split('/').next().unwrap_or_default().to_owned();
         let on_event = {
             let (to, app, entrypoint, sheet) = (to.clone(), app.clone(), entrypoint.clone(), sheet.clone());
-            #[cfg(mobile)]
             let (subject, link, shown) = (subject.clone(), link.clone(), window.clone());
             move |event: Event| match event {
                 // How long it took to open, from being asked to, as a page tells the app's window it has drawn.
@@ -368,18 +402,30 @@ async fn window(started: Instant, entrypoint: &str, subject: Option<&str>, link:
                         let _ = told.send(false);
                     }
                 }
-                // A window whose page didn't start says so, and Telemetry hears why; a phone's launcher is then its
-                // page's.
+                // A window whose page didn't start says so, and Telemetry hears why: an app's in the client's own
+                // window with its problem box in its place (`unopened`), and a phone's launcher is then its page's.
                 Event::Failed(why) => {
                     reported(&entrypoint, started, &why);
                     #[cfg(mobile)]
                     if launcher {
                         computer::native(None);
                     }
+                    if app_window {
+                        close(&shown);
+                        crate::hosts::forget(&entrypoint, subject.as_deref());
+                        self::unopened(entrypoint.clone(), subject.clone(), link.clone(), why);
+                    }
                 }
-                // A computer's window says why it didn't open, and Telemetry hears; a phone opens it in its page.
+                // A computer's window says why it didn't open, as one that didn't start does, and Telemetry hears; a
+                // phone opens it in its page.
                 Event::Mismatched(why) => {
                     reported(&entrypoint, started, &why);
+                    #[cfg(desktop)]
+                    if app_window {
+                        close(&shown);
+                        crate::hosts::forget(&entrypoint, subject.as_deref());
+                        self::unopened(entrypoint.clone(), subject.clone(), link.clone(), why);
+                    }
                     #[cfg(mobile)]
                     if launcher {
                         computer::native(None);
@@ -546,7 +592,7 @@ async fn frame(window: Arc<OnceLock<WindowId>>, node: renderer::tree::Id, src: &
     let started = start(entrypoint, subject, src, false, Place::Frame(window.clone(), node), &module, page)?;
     let view = format!("{}|{entrypoint}", subject.unwrap_or_default());
     let fragment = src.split_once('#').map(|(_, fragment)| fragment.to_owned());
-    let state = State { chosen: None, trusted, entrypoint: entrypoint.to_owned(), subject: subject.map(str::to_owned), view, next: 0, launcher: false, framed: true, fragment, sheet: None, window: window.clone() };
+    let state = State { chosen: None, trusted, entrypoint: entrypoint.to_owned(), subject: subject.map(str::to_owned), view, next: 0, launcher: false, framed: true, fragment, sheet: None, unopened: None, window: window.clone() };
     let src = src.to_owned();
     Native::get()?.run(move |windows| {
         let Some(id) = window.get() else { return };
@@ -664,6 +710,8 @@ struct State {
     subject: Option<String>,
     /// It's the client's recovery key window (`recovery`).
     sheet: Option<Sheet>,
+    /// It's the client's window in place of an app's that didn't open (`unopened`).
+    unopened: Option<Unopened>,
     /// The window it's in, once it's open.
     window: Arc<OnceLock<WindowId>>,
     view: String,
@@ -854,8 +902,21 @@ fn respond(
                 _ => Some(Err(json!({"code": -32601, "message": format!("This window doesn't ask {method}")}))),
             },
         },
-        // The recovery key window asks nothing else: it's no app's, and calls no tool.
-        method if state.sheet.is_some() && !method.starts_with("ui/") && method != "ping" && method != "one/client" => {
+        // What the window of an app that didn't open asks, which only it may: what it says, and to open the app again,
+        // in its place.
+        method if method == "one/unopened" || method == "one/unopened/retry" => match &state.unopened {
+            None => Some(Err(json!({"code": -32601, "message": format!("Only the client's own page asks {method}")}))),
+            Some(unopened) if method == "one/unopened" => Some(Ok(json!({"name": unopened.name, "why": unopened.why}))),
+            Some(unopened) => {
+                close(&state.window);
+                if let Err(error) = crate::hosts::reopen(unopened.entrypoint.clone(), unopened.subject.clone(), unopened.link.clone()) {
+                    eprintln!("{} didn't open again: {error}", unopened.entrypoint);
+                }
+                Some(Ok(json!({})))
+            }
+        },
+        // The client's own windows ask nothing else: they're no app's, and call no tool.
+        method if (state.sheet.is_some() || state.unopened.is_some()) && !method.starts_with("ui/") && method != "ping" && method != "one/client" => {
             Some(Err(json!({"code": -32601, "message": format!("This window doesn't ask {method}")})))
         }
         method if method.starts_with("ui/") => Some(Err(json!({"code": -32601, "message": format!("This client has no {method}")}))),
