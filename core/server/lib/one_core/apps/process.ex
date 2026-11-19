@@ -120,7 +120,7 @@ defmodule OneCore.Apps.Process do
          {:ok, held, module} <- held(app, name, key) do
       :proc_lib.init_ack({:ok, self()})
       # What it logs is its app's, as a call's is (`OneCore.Apps.Calls.running/2`), for no call in particular.
-      Logger.metadata(app_artifact: app, who: app)
+      Logger.metadata(app_artifact: app)
       process = %{app: app, name: name, key: key, held: held, module: module}
       registered = {:via, Registry, registered}
 

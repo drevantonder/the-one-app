@@ -482,7 +482,7 @@ defmodule OneCore.Apps.Calls do
   """
   def running(%Call{} = call, fun) do
     was = Logger.metadata()
-    Logger.metadata(app_artifact: call.app_artifact, who: call.app_artifact, installed: call.installed, subject: call.subject)
+    Logger.metadata(app_artifact: call.app_artifact, installed: call.installed, subject: call.subject)
 
     try do
       fun.()
@@ -520,7 +520,6 @@ defmodule OneCore.Apps.Calls do
       actor: actor,
       app: name,
       app_artifact: versions[name].artifact,
-      who: versions[name].artifact,
       request: ask,
       loaded:
         for({other, version} <- versions, other != name, into: %{}, do: {other, {version.artifact, version.app}}),

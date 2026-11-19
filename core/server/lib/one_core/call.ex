@@ -29,7 +29,7 @@ defmodule OneCore.Call do
   alias OneCore.Call.State
   alias OneCore.Apps.{Calls, Version}
 
-  @enforce_keys [:own, :installed, :folder, :server, :subject, :actor, :app, :app_artifact, :who, :request, :loaded, :forwarded]
+  @enforce_keys [:own, :installed, :folder, :server, :subject, :actor, :app, :app_artifact, :request, :loaded, :forwarded]
   defstruct [
     :own,
     :installed,
@@ -40,8 +40,6 @@ defmodule OneCore.Call do
     :caller,
     :app,
     :app_artifact,
-    # The old name of `app_artifact`, which goes once Vault and Server Debug read that.
-    :who,
     :request,
     :loaded,
     :forwarded,

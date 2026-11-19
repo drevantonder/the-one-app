@@ -197,7 +197,6 @@ defmodule OneCore.Sandbox do
       actor: nil,
       app: name,
       app_artifact: version.artifact,
-      who: version.artifact,
       request: nil,
       loaded: %{},
       forwarded: false
