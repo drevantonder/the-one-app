@@ -207,6 +207,8 @@ function parse(body: string): Ask | null {
   if (named.length !== 1) return null;
   const [operation] = named;
   const key = ask[operation];
+  // A replace names the version it replaces: `*`, any version, would be a write that overwrites blind.
+  if (operation === "replace" && !(typeof ask.tag === "string" && ask.tag !== "" && ask.tag.trim() !== "*")) return null;
   return isBlob(key, operation === "list") ? { operation, key, tag: ask.tag, after: ask.after } : null;
 }
 
