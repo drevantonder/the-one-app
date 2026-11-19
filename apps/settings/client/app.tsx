@@ -47,7 +47,7 @@ interface App {
 
 /** The network's update, as `builds`' `network` says it. */
 interface NetworkUpdate {
-  network_update_status: "up_to_date" | "preparing" | "updating_edge" | "loading" | "restarting" | "held"
+  network_update_status: "up_to_date" | "preparing" | "restarting" | "held"
   build: string | null
   done: number
   of: number

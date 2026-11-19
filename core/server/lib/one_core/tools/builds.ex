@@ -94,7 +94,7 @@ defmodule OneCore.Tools.Builds do
                     type: ["object", "null"],
                     description:
                       "The network's update, as its updater says, if its edge has one: `network_update_status` (up_to_date, " <>
-                        "preparing, updating_edge, loading, restarting or held), the `build` it takes every server to, how many " <>
+                        "preparing, restarting or held), the `build` it takes every server to, how many " <>
                         "are `done` `of` those taking part, what it's `waiting_for` (quiet: a lone server that restarts waits " <>
                         "for no calls a while, or Update Now), why it's `held`, the servers `skipped` as asleep or gone, " <>
                         "those `behind` its build, and when each step was reached, in ms after the build was published (`timings`)"

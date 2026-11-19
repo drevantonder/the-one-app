@@ -293,7 +293,6 @@ defmodule OneCore.Release do
       {"up_to_date", _} -> "Up to date · #{version}"
       {"held", _} -> "Update failed · #{update["held"]["name"] || "a server"}: #{update["held"]["why"]}"
       {_, "quiet"} -> "Waiting for a quiet moment · #{version}"
-      {"updating_edge", _} -> "Updating… the edge, then #{update["of"]} servers"
       _ -> "Updating… #{update["done"]} of #{update["of"]}"
     end
   end

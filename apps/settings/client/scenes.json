@@ -412,7 +412,7 @@
     "answers": {
       "builds": {
         "network": {
-          "network_update_status": "loading",
+          "network_update_status": "restarting",
           "build": "0.26.91+3810.abc",
           "done": 1,
           "of": 4,
