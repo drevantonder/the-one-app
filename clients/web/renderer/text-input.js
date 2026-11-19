@@ -43,9 +43,13 @@ const UNSEEN = "position:absolute;top:0;left:0;margin:0;padding:0;border:0;outli
 /**
  * The plugin: `call` is Flutter's text input channel to it, and `said(method, args)` is it to the renderer. `edited` hears
  * each kind of edit the field has (the DOM's `inputType`, `autofill` where a password manager filled it, `composition`).
+ * `pointed` is given what the pointer does on the field, as it lies over where the field's drawn: a press, a drag and a
+ * double click are the renderer's, which places the caret and selects by its own text, while a right click is the
+ * field's, so the browser's own menu (Cut, Copy, Paste, Select All, a password manager's) works on it.
  * @param {(method: string, args: unknown[]) => void} said @param {(edit: string) => void} [edited]
+ * @param {(event: PointerEvent | WheelEvent) => void} [pointed]
  */
-export function textInput(said, edited = () => {}) {
+export function textInput(said, edited = () => {}, pointed = () => {}) {
   /** @type {number | null} */
   let client = null
   /** @type {any} */
@@ -87,6 +91,10 @@ export function textInput(said, edited = () => {}) {
     const multiline = config.inputType?.name === "TextInputType.multiline"
     const element = /** @type {HTMLInputElement | HTMLTextAreaElement} */ (document.createElement(multiline ? "textarea" : "input"))
     element.style.cssText = UNSEEN
+    // Its own selection is unseen too: the renderer draws the field's (index.html's `.field`).
+    element.className = "field"
+    for (const type of ["pointerdown", "pointermove", "pointerup"]) element.addEventListener(type, (event) => event.button !== 2 && (event.preventDefault(), pointed(event)))
+    element.addEventListener("wheel", (event) => (event.preventDefault(), pointed(event)), { passive: false })
     const [inputmode, type] = KEYBOARDS[config.inputType?.name] ?? ["text", "text"]
     if (!multiline) /** @type {HTMLInputElement} */ (element).type = config.obscureText ? "password" : type
     element.inputMode = config.obscureText ? "text" : inputmode

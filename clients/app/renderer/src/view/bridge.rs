@@ -21,7 +21,8 @@ pub struct TextInputConnection {
     client: Option<Id>,
     value: Option<editing::Value>,
     caret: Option<Bounds<f32>>,
-    /// Where the input is in the window, as its transform said.
+    /// Where the input is in the window, as its size and transform last said.
+    rect: Option<Rect>,
     origin: Point<f32>,
 }
 
@@ -38,9 +39,6 @@ impl Screen {
             }
             *connection = TextInputConnection::default();
             if let (Some(id), Some(field), Some(value)) = (typing, typing.and_then(|id| self.field(id)), self.editing()) {
-                let rect = self.rects.get(&id).copied().unwrap_or(Rect { x: 0.0, y: 0.0, width: 0.0, height: 0.0 });
-                // From the input's own coordinates to the window's: where it is.
-                let transform = [1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, rect.x, rect.y, 0.0, 1.0];
                 // An input with an autofill hint is in a group with every other on the screen, which a password manager
                 // fills together, as Flutter's `TextInputConfiguration.fields`.
                 let mut configuration = editing::configuration(&field, &value);
@@ -55,15 +53,22 @@ impl Screen {
                 }
                 calls.extend([
                     TextInput::SetClient(id, configuration),
-                    TextInput::SetEditableSizeAndTransform { width: rect.width, height: rect.height, transform },
                     TextInput::SetEditingState(value.clone()),
                     TextInput::Show,
                 ]);
-                (connection.client, connection.value, connection.origin) = (Some(id), Some(value), point(rect.x, rect.y));
+                (connection.client, connection.value) = (Some(id), Some(value));
             }
         }
-        if connection.client.is_none() {
-            return calls;
+        let Some(client) = connection.client else { return calls };
+        // Where it is, as it opens and each time it moves (a sheet sliding up, what it's in scrolled): its size and
+        // the transform from its own coordinates to the window's, where a platform puts what's typed through (the web's
+        // real field, an input method's window), before it's shown.
+        let rect = self.rects.get(&client).copied().unwrap_or(Rect { x: 0.0, y: 0.0, width: 0.0, height: 0.0 });
+        if connection.rect != Some(rect) {
+            let transform = [1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, rect.x, rect.y, 0.0, 1.0];
+            let show = calls.iter().position(|call| matches!(call, TextInput::Show)).unwrap_or(calls.len());
+            calls.insert(show, TextInput::SetEditableSizeAndTransform { width: rect.width, height: rect.height, transform });
+            (connection.rect, connection.origin) = (Some(rect), point(rect.x, rect.y));
         }
         let value = self.editing();
         if value.is_some() && connection.value != value {

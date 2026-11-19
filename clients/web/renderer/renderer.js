@@ -62,7 +62,9 @@
     })
     const canvas = /** @type {HTMLCanvasElement} */ (document.querySelector("canvas"))
     // Typing, through a real field (text-input.js), and what a screen reader reads (semantics.js).
-    const typing = textInput((method, args) => renderer.text_input_client(method, args), (edit) => seen(`edit:${edit}`))
+    // What the pointer does on the field typed in is the canvas's, as it would be with no field over it.
+    const pointed = (/** @type {PointerEvent | WheelEvent} */ event) => canvas.dispatchEvent(event instanceof WheelEvent ? new WheelEvent(event.type, event) : new PointerEvent(event.type, event))
+    const typing = textInput((method, args) => renderer.text_input_client(method, args), (edit) => seen(`edit:${edit}`), pointed)
     const spoken = semantics(/** @type {HTMLElement} */ (document.getElementById("semantics")), (id, action) => (seen(`screen reader:${action}`), renderer.act(id, action)))
     const sized = (/** @type {number} */ width, /** @type {number} */ height) => [Math.max(1, Math.round(width)), Math.max(1, Math.round(height))]
     ;[canvas.width, canvas.height] = sized(innerWidth * devicePixelRatio, innerHeight * devicePixelRatio)
@@ -93,7 +95,7 @@
     canvas.addEventListener("pointerdown", (event) => {
       event.preventDefault()
       if (document.activeElement !== typing.field) canvas.focus({ preventScroll: true })
-      canvas.setPointerCapture(event.pointerId)
+      if (event.isTrusted) canvas.setPointerCapture(event.pointerId)
       pointer("down")(event)
     })
     // What a press gives the keyboard is focused in the press itself, which is when a phone brings up its keyboard.
