@@ -988,15 +988,20 @@ fn fs_shadow(input: ShadowVarying) -> @location(0) vec4<f32> {
     }
 
     let shadow = b_shadows[input.shadow_id];
-    var alpha = shadow_coverage(input.local, shadow);
+    let outside = quad_sdf(input.local, shadow.outer, shadow.outer_radii);
     if (shadow.inset != 0u) {
         // Inside its box, where its own box isn't.
-        alpha = saturate(0.5 - quad_sdf(input.local, shadow.outer, shadow.outer_radii)) * (1.0 - alpha);
-    } else {
-        // Outside its box, as CSS draws a shadow: a box with no fill of its own, a field's, shows none of it.
-        alpha *= saturate(0.5 + quad_sdf(input.local, shadow.outer, shadow.outer_radii));
+        if (outside >= 0.5) {
+            return vec4<f32>(0.0);
+        }
+        return blend_color(input.color, saturate(0.5 - outside) * (1.0 - shadow_coverage(input.local, shadow)));
     }
-    return blend_color(input.color, alpha);
+    // Outside its box, as CSS draws a shadow: a box with no fill of its own, a field's, shows none of it. Most of
+    // what a large box's shadow covers is the box, which is passed over before its blur is worked out.
+    if (outside <= -0.5) {
+        return vec4<f32>(0.0);
+    }
+    return blend_color(input.color, shadow_coverage(input.local, shadow) * saturate(0.5 + outside));
 }
 
 // How much of `point` a shadow's box covers, blurred.
