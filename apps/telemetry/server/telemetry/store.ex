@@ -18,6 +18,7 @@ defmodule Telemetry.Store do
   it ages.
   """
   require Logger
+  require OpenTelemetry.Tracer, as: Tracer
   alias Telemetry.Otlp
   alias OneCore.Artifact
 
@@ -39,7 +40,8 @@ defmodule Telemetry.Store do
   @doc "Every export kept of an hour that started after `from`, in nanoseconds since 1970, each laid flat."
   def read(call, from) do
     since = hour(from - 3_600_000_000_000)
-    names = for name <- Artifact.list(call.own, "otlp/"), Path.dirname(name) > since, do: name
+    listed = Tracer.with_span("telemetry list", do: Artifact.list(call.own, "otlp/"))
+    names = for name <- listed, Path.dirname(name) > since, do: name
     decode(call, names)
   end
 
@@ -143,7 +145,11 @@ defmodule Telemetry.Store do
 
   # Each kept export laid flat, by its signal. One that isn't OTLP, as a device may send anything, is passed over.
   defp decode(call, names) do
-    for {name, {:ok, data, _tag}} <- Enum.zip(names, read_all(call, names)), batch = export(name, data), do: batch
+    read = Tracer.with_span("telemetry fetch", %{attributes: %{"one.blobs" => length(names)}}, do: read_all(call, names))
+
+    Tracer.with_span "telemetry decode", %{attributes: %{"one.bytes" => Enum.sum(for {:ok, data, _tag} <- read, do: byte_size(data))}} do
+      for {name, {:ok, data, _tag}} <- Enum.zip(names, read), batch = export(name, data), do: batch
+    end
   end
 
   # The blobs `names`, in order, as `OneCore.Artifact.read_all/2` gives them. The exports of hours not yet put
