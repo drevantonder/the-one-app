@@ -139,10 +139,19 @@ impl Screen {
     }
 
     /// Input `id`'s action key was pressed on the keyboard (`next`, `done`, `go`…): its app hears it if it listens for
-    /// `action`; if not, `next` and `previous` move the keyboard, as a browser's form does.
+    /// `action` (`onSubmitEditing`, as Return is on the DOM); if not, `next` and `previous` move the keyboard, as a
+    /// browser's form does. Under a finger, a key that ends the editing (Done, Go, Search, Send) puts the keyboard
+    /// away once its app has heard it, as Flutter's text fields have it by default and iOS's own do.
     pub fn action(&mut self, id: Id, action: &str) {
         if self.tree.nodes.get(&id).is_some_and(|node| node.listens("action")) {
-            return self.tell(id, "action", json!({"action": action}));
+            self.tell(id, "action", json!({"action": action}));
+            if self.touch && matches!(action, "done" | "go" | "search" | "send") && self.focused == Some(id) {
+                self.focus(None);
+            }
+            return;
+        }
+        if self.touch && matches!(action, "done" | "go" | "search" | "send") {
+            return self.focus(None);
         }
         let inputs = self.inputs();
         let at = inputs.iter().position(|input| *input == id);
