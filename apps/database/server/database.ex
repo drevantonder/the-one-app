@@ -69,10 +69,11 @@ defmodule Database do
   # `gone` where it said at once that it wouldn't, and `connected` where the relay still reached it.
   defp taken_over(call, lease, server) do
     began = System.monotonic_time(:millisecond)
-    if server, do: Call.forward_to(call, server, @reach)
-    if server && System.monotonic_time(:millisecond) - began < @waited, do: Call.forward_to(call, server, @reach)
+    first = if server, do: Call.forward_to(call, server, @reach)
+    again = if server && System.monotonic_time(:millisecond) - began < @waited, do: Call.forward_to(call, server, @reach)
     waited = System.monotonic_time(:millisecond) - began
-    took = :gen_statem.call(lease, {:take_over, server})
+    # One that answered it would pass the call on in turn is there, and can't run it: it isn't asked of the relay.
+    took = :gen_statem.call(lease, {:take_over, server, :forwarding_loop in [first, again]})
     app = Lease.app(call.own)
     holder = server && (OneCore.Servers.name(server) || server)
 

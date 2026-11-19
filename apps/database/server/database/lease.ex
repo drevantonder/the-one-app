@@ -138,7 +138,7 @@ defmodule Database.Lease do
   # otherwise it has learnt who holds it now. Only what was logged after the last entry it read is read, which is one
   # request: every call passed to a holder that's gone asks this, one after another, and each waits for the ones
   # before. One that isn't up takes nothing, and says so.
-  def handle_event({:call, from}, {:take_over, server}, {:following, server}, data) do
+  def handle_event({:call, from}, {:take_over, server, cannot_run}, {:following, server}, data) do
     entries = Log.since(data.artifact, data.number)
     data = %{data | number: data.number + length(entries)}
 
@@ -148,7 +148,7 @@ defmodule Database.Lease do
           not OneCore.Server.up?() ->
             {:keep_state_and_data, {:reply, from, :not_up}}
 
-          OneCore.Servers.answers?(server) ->
+          not cannot_run and staying?(server) ->
             {:keep_state_and_data, {:reply, from, :connected}}
 
           true ->
@@ -171,7 +171,7 @@ defmodule Database.Lease do
   end
 
   # Another holds it now, or this server does: the call is asked again, and goes there.
-  def handle_event({:call, from}, {:take_over, _server}, _state, _data),
+  def handle_event({:call, from}, {:take_over, _server, _cannot_run}, _state, _data),
     do: {:keep_state_and_data, {:reply, from, :ok}}
 
   # Anything else is asked with what wraps the artifact of the call that asks.
@@ -408,6 +408,10 @@ defmodule Database.Lease do
     if wrote == :ok, do: Counter.add(:"one.database.lease.moves", 1, %{"one.app" => app(data.artifact), "one.reason" => why})
     look(data)
   end
+
+  # Whether `server` answers the relay and is staying: one the relay says isn't ready, as one draining to restart, is
+  # leaving, and hands its lease on as it stops.
+  defp staying?(server), do: OneCore.Servers.answers?(server) and OneCore.Servers.presence_again(server)["server_ready"] != false
 
   @doc """
   Makes what a lease is measured by, OpenTelemetry's instruments, where they aren't yet: how long a call waited on
