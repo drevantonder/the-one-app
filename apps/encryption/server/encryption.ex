@@ -327,7 +327,7 @@ defmodule Encryption do
 
   # The first key written is the owner's key from then on: what a device hands over is kept only if it's that one.
   def call("approve", %{"device" => device, "key" => given} = inputs, call) do
-    key = key(call)
+    key = key(owner!(call, call.subject))
 
     with {:ok, %{"check" => check, "slot" => slot}} when is_binary(check) and is_binary(slot) <- JSON.decode(given),
          true <- device =~ ~r/^[0-9a-f]{64}$/ do
@@ -367,13 +367,15 @@ defmodule Encryption do
   def call("ask", _inputs, _call), do: raise(@on_a_device)
 
   def call("revoke", %{"device" => device}, call) do
-    key = key(call)
+    key = key(owner!(call, call.subject))
     if not (device =~ ~r/^[0-9a-f]{64}$/), do: raise("A device is named by its key.")
     for prefix <- ["devices/", "asking/"], do: Artifact.remove(key, prefix <> device)
     %{device: device}
   end
 
   # Where an owner's key is kept, encrypted to each of their devices. It's theirs alone: nobody asks for a user.
+  # Who holds a group's or the network's key is its owners' to say, as which servers open what's theirs is
+  # (`owner!/2`): approve and revoke ask that first. Anyone it's for reads what their own device holds.
   defp key(%Call{subject: subject, actor: actor} = call) do
     if String.starts_with?(subject, "users/") and actor != subject, do: raise("#{subject}'s key is theirs alone.")
     Call.make(call, "key")
