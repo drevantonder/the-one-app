@@ -36,6 +36,10 @@ use android::{Display, Handle, NativeWindow, appearance, clipboard, reduced_moti
 pub mod ios;
 #[cfg(target_os = "ios")]
 use ios::{Display, Handle, NativeWindow, appearance, clipboard, reduced_motion};
+#[cfg(target_arch = "wasm32")]
+pub mod web;
+#[cfg(target_arch = "wasm32")]
+use web::{Display, Handle, NativeWindow, appearance, clipboard, reduced_motion};
 
 /// A window, as the windows' thread names it.
 pub type WindowId = u64;
@@ -123,6 +127,8 @@ type Sender = windows::Sender;
 type Sender = android::Sender;
 #[cfg(target_os = "ios")]
 type Sender = ios::Sender;
+#[cfg(target_arch = "wasm32")]
+type Sender = web::Sender;
 
 impl Native {
     /// The windows' thread, started the first time it's asked for.
@@ -147,6 +153,8 @@ use windows::start;
 use android::start;
 #[cfg(target_os = "ios")]
 use ios::start;
+#[cfg(target_arch = "wasm32")]
+use web::start;
 
 #[cfg(any(target_os = "linux", target_os = "macos"))]
 fn start() -> anyhow::Result<Native> {
@@ -208,12 +216,12 @@ struct Window {
     /// would have been summoned: its page asks as it first opens, which is after it first shows.
     placing: bool,
     /// When it was opened, hidden, and whether it's shown.
-    opened: std::time::Instant,
+    opened: web_time::Instant,
     shown: bool,
     /// A panel's: whether it's showing, and since when it was asked to, until its frame is drawn.
     panel: bool,
     visible: bool,
-    summoned: Option<std::time::Instant>,
+    summoned: Option<web_time::Instant>,
     /// What it shows: its app's screen, or why its app didn't open.
     screen: Result<Screen, String>,
     title: String,
@@ -255,19 +263,25 @@ pub struct Windows {
     windows: HashMap<WindowId, Window>,
     next: WindowId,
     /// When the display last showed a frame, as its platform says, or the loop's own clock stood in for it.
-    framed: std::time::Instant,
+    framed: web_time::Instant,
 }
 
 /// How often frames come where a platform says nothing of its display's: a 60 Hz display's.
 const FRAME: std::time::Duration = std::time::Duration::from_micros(16_667);
 
 impl Windows {
+    #[cfg(not(target_arch = "wasm32"))]
     fn new(display: Display) -> anyhow::Result<Windows> {
+        Self::made(display, Context::new())
+    }
+
+    /// Its windows, drawn with `context`, the GPU, where there is one.
+    fn made(display: Display, context: anyhow::Result<Context>) -> anyhow::Result<Windows> {
         let made = (|| {
-            let context = Context::new()?;
+            let context = context?;
             let atlas = Arc::new(Atlas::new(&context));
             let text = TextSystem::new(crate::FONT, crate::fonts()?, true);
-            Ok(Windows { display, context, atlas, text, windows: HashMap::new(), next: 1, framed: std::time::Instant::now() })
+            Ok(Windows { display, context, atlas, text, windows: HashMap::new(), next: 1, framed: web_time::Instant::now() })
         })();
         if let Err(error) = &made {
             *UNSTARTED.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = Some(format!("{error:#}"));
@@ -297,7 +311,7 @@ impl Windows {
             }
         }
         let renderer = self.renderer(&native)?;
-        let opened = std::time::Instant::now();
+        let opened = web_time::Instant::now();
         let panel = options.panel.is_some();
         let whole = crate::geometry::Bounds { origin: crate::geometry::point(0.0, 0.0), size: Size { width: options.size.width.0, height: options.size.height.0 } };
         self.windows.insert(
@@ -428,7 +442,7 @@ impl Windows {
     /// it shows; the window that had the keyboard is kept, to give it back (`put_away`). `asked` is when it was asked
     /// to, which its `Shown` says how long after.
     /// `key` is the key its shortcut ends with, where its shortcut summoned it (`Screen::summoned`).
-    pub fn summon(&mut self, id: WindowId, asked: std::time::Instant, key: Option<&str>) {
+    pub fn summon(&mut self, id: WindowId, asked: web_time::Instant, key: Option<&str>) {
         let Some(window) = self.windows.get_mut(&id) else { return };
         if window.visible {
             return self.display.activate(&window.parts[0].native);
@@ -657,7 +671,7 @@ impl Windows {
         // The display showed a frame: what moves on a window on screen is drawn again, and its page's
         // `requestAnimationFrame` runs, told when, as a browser's does once a frame.
         let framing = self.framing();
-        let shown = self.display.frame().or_else(|| (framing && !self.display.paced() && self.framed.elapsed() >= FRAME).then(std::time::Instant::now));
+        let shown = self.display.frame().or_else(|| (framing && !self.display.paced() && self.framed.elapsed() >= FRAME).then(web_time::Instant::now));
         if let Some(at) = shown {
             self.framed = at;
             for window in self.windows.values_mut().filter(|window| window.on_screen()) {
@@ -969,7 +983,7 @@ impl Input {
 }
 
 /// What the display says happened to a window.
-#[cfg_attr(any(target_os = "android", target_os = "ios"), allow(dead_code))]
+#[cfg_attr(any(target_os = "android", target_os = "ios", target_arch = "wasm32"), allow(dead_code))]
 pub(crate) enum Input {
     Resized(Size<crate::geometry::DevicePixels>),
     /// It has a surface to draw on, or a new one (Android's view's).

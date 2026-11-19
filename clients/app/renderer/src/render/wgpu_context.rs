@@ -21,8 +21,10 @@ pub struct WgpuContext {
     lost: Arc<AtomicBool>,
 }
 
-/// The one backend each platform draws with.
-const BACKENDS: wgpu::Backends = if cfg!(target_vendor = "apple") {
+/// The one backend each platform draws with: the browser's WebGPU on the web.
+const BACKENDS: wgpu::Backends = if cfg!(target_arch = "wasm32") {
+    wgpu::Backends::BROWSER_WEBGPU
+} else if cfg!(target_vendor = "apple") {
     wgpu::Backends::METAL
 } else if cfg!(target_os = "windows") {
     wgpu::Backends::DX12
@@ -31,7 +33,13 @@ const BACKENDS: wgpu::Backends = if cfg!(target_vendor = "apple") {
 };
 
 impl WgpuContext {
+    #[cfg(not(target_arch = "wasm32"))]
     pub fn new() -> anyhow::Result<Self> {
+        futures_lite::future::block_on(Self::create())
+    }
+
+    /// The GPU, once it's said it's there, which the web asks with a promise and a native host waits for.
+    pub async fn create() -> anyhow::Result<Self> {
         let mut descriptor = wgpu::InstanceDescriptor::new_without_display_handle();
         descriptor.backends = BACKENDS;
         // Objects unnamed: some Vulkan drivers, as Android's emulator's, crash naming them with VK_EXT_debug_utils.
@@ -40,8 +48,9 @@ impl WgpuContext {
         // own (WS_EX_NOREDIRECTIONBITMAP) and what isn't drawn on a panel is see-through.
         descriptor.backend_options.dx12.presentation_system = wgpu::Dx12SwapchainKind::DxgiFromVisual;
         let instance = wgpu::Instance::new(descriptor.with_env());
-        let adapter = futures_lite::future::block_on(adapter(&instance))?;
-        let (device, queue) = futures_lite::future::block_on(adapter.request_device(&wgpu::DeviceDescriptor {
+        let adapter = adapter(&instance).await?;
+        let (device, queue) = adapter
+            .request_device(&wgpu::DeviceDescriptor {
             label: None,
             required_features: wgpu::Features::empty(),
             // Direct3D 12 makes room for this many descriptors up front (1,000,000 unless said, ~100 MB on an
@@ -51,7 +60,8 @@ impl WgpuContext {
             // A window's textures are small: memory kept low, not allocated in large blocks ahead.
             memory_hints: wgpu::MemoryHints::MemoryUsage,
             trace: wgpu::Trace::Off,
-        }))
+        })
+        .await
         .map_err(|error| anyhow::anyhow!("no GPU to draw with: {error}"))?;
         device.on_uncaptured_error(Arc::new(|error| log::error!("GPU error: {error}")));
         let lost = Arc::new(AtomicBool::new(false));

@@ -149,22 +149,32 @@ impl Layouts {
     }
 }
 
+#[cfg(not(target_arch = "wasm32"))]
+type Compile<'a> = &'a (dyn Fn() -> wgpu::RenderPipeline + Sync);
+#[cfg(target_arch = "wasm32")]
+type Compile<'a> = &'a dyn Fn() -> wgpu::RenderPipeline;
+
+/// Compiles each pipeline at once, as each takes its compiler a while (Direct3D's most): on threads of their own, but
+/// on the web, which has none here and compiles in the browser's GPU process anyway, one after another.
+fn side_by_side<const N: usize>(compile: [Compile; N]) -> [wgpu::RenderPipeline; N] {
+    #[cfg(target_arch = "wasm32")]
+    return compile.map(|compile| compile());
+    #[cfg(not(target_arch = "wasm32"))]
+    std::thread::scope(|scope| compile.map(|compile| scope.spawn(compile)).map(|compiling| compiling.join().expect("compiling a pipeline doesn't panic")))
+}
+
 impl WgpuPipelines {
     fn new(device: &wgpu::Device, format: wgpu::TextureFormat, premultiplied: bool) -> Self {
         let layouts = Layouts::new(device, format, premultiplied);
         let (l, blend) = (&layouts, Some(layouts.blend));
-        // Compiled side by side, as each takes its compiler a while (Direct3D's most).
-        let [quads, shadows, underlines, mono_sprites, poly_sprites, rasters] = std::thread::scope(|scope| {
-            [
-                scope.spawn(|| l.pipeline(&l.instances, "vs_quad", "fs_quad", blend, false)),
-                scope.spawn(|| l.pipeline(&l.instances, "vs_shadow", "fs_shadow", blend, false)),
-                scope.spawn(|| l.pipeline(&l.instances, "vs_underline", "fs_underline", blend, false)),
-                scope.spawn(|| l.pipeline(&l.instances, "vs_mono_sprite", "fs_mono_sprite", blend, true)),
-                scope.spawn(|| l.pipeline(&l.instances, "vs_poly_sprite", "fs_poly_sprite", blend, true)),
-                scope.spawn(|| l.pipeline(&l.instances, "vs_raster", "fs_raster", Some(wgpu::BlendState::PREMULTIPLIED_ALPHA_BLENDING), true)),
-            ]
-            .map(|compiling| compiling.join().expect("compiling a pipeline doesn't panic"))
-        });
+        let [quads, shadows, underlines, mono_sprites, poly_sprites, rasters] = side_by_side([
+            &|| l.pipeline(&l.instances, "vs_quad", "fs_quad", blend, false),
+            &|| l.pipeline(&l.instances, "vs_shadow", "fs_shadow", blend, false),
+            &|| l.pipeline(&l.instances, "vs_underline", "fs_underline", blend, false),
+            &|| l.pipeline(&l.instances, "vs_mono_sprite", "fs_mono_sprite", blend, true),
+            &|| l.pipeline(&l.instances, "vs_poly_sprite", "fs_poly_sprite", blend, true),
+            &|| l.pipeline(&l.instances, "vs_raster", "fs_raster", Some(wgpu::BlendState::PREMULTIPLIED_ALPHA_BLENDING), true),
+        ]);
         Self { layouts, quads, shadows, underlines, mono_sprites, poly_sprites, rasters, backdrops: OnceLock::new(), tiles: OnceLock::new() }
     }
 
@@ -182,12 +192,9 @@ impl WgpuPipelines {
     fn backdrops(&self) -> &(wgpu::RenderPipeline, wgpu::RenderPipeline) {
         self.backdrops.get_or_init(|| {
             let l = &self.layouts;
-            std::thread::scope(|scope| {
-                let backdrops = scope.spawn(|| l.pipeline(&l.instances, "vs_backdrop", "fs_backdrop", Some(l.blend), true));
-                // Each pass of a blur replaces what's in its target.
-                let blur = l.pipeline(&l.blur_params, "vs_blur", "fs_blur", None, true);
-                (backdrops.join().expect("compiling a pipeline doesn't panic"), blur)
-            })
+            // Each pass of a blur replaces what's in its target.
+            let [backdrops, blur] = side_by_side([&|| l.pipeline(&l.instances, "vs_backdrop", "fs_backdrop", Some(l.blend), true), &|| l.pipeline(&l.blur_params, "vs_blur", "fs_blur", None, true)]);
+            (backdrops, blur)
         })
     }
 
@@ -199,11 +206,15 @@ impl WgpuPipelines {
         }
         let pipelines = Arc::new(WgpuPipelines::new(&context.device, format, premultiplied));
         compiled.push((format, premultiplied, pipelines.clone()));
-        let compiling = pipelines.clone();
-        std::thread::spawn(move || {
-            compiling.backdrops();
-            compiling.tiles();
-        });
+        // The rest compiled in the background where there are threads; on the web, as each is first drawn.
+        #[cfg(not(target_arch = "wasm32"))]
+        {
+            let compiling = pipelines.clone();
+            std::thread::spawn(move || {
+                compiling.backdrops();
+                compiling.tiles();
+            });
+        }
         pipelines
     }
 }
@@ -323,12 +334,15 @@ impl WgpuRenderer {
     pub fn new(
         context: &WgpuContext,
         atlas: Arc<WgpuAtlas>,
-        target: wgpu::SurfaceTargetUnsafe,
+        target: super::SurfaceTarget,
         size: Size<DevicePixels>,
         transparent: bool,
     ) -> anyhow::Result<Self> {
         // Safety: a window's renderer is let go before its window is.
+        #[cfg(not(target_arch = "wasm32"))]
         let surface = unsafe { context.instance.create_surface_unsafe(target) }?;
+        #[cfg(target_arch = "wasm32")]
+        let surface = context.instance.create_surface(target)?;
         let capabilities = surface.get_capabilities(&context.adapter);
         // 8 bits a channel, unconverted: the shaders blend in sRGB, as the DOM does. BGRA where the surface has it,
         // as most do, else RGBA, as Android's.

@@ -1,0 +1,21 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <!-- What an app's page may load and reach, as its own page's (`core/edge/mcp/mcp.ts`): what's at this address, and
+       nothing it can send anywhere else; the renderer is WebAssembly, and the import map the page's modules are
+       resolved by is written here (renderer.js). -->
+  <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval'; connect-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; base-uri 'none'">
+  <style>
+    html, body { margin: 0; height: 100%; overflow: hidden; background: Canvas; color-scheme: light dark; }
+    canvas { display: block; width: 100%; height: 100%; touch-action: none; outline: none; }
+  </style>
+  <!-- From its opaque origin, this address is another: the renderer it imports is found beside it once it's a CORS
+       request. -->
+  <script src="renderer.js" crossorigin></script>
+</head>
+<body>
+  <canvas tabindex="0"></canvas>
+</body>
+</html>

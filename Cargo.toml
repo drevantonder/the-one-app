@@ -2,7 +2,7 @@
 # client and its server's NIFs, the clients, and the native code of the apps the One App ships with.
 [workspace]
 resolver = "3"
-members = ["core/client", "core/server/nif/*", "clients/cli", "clients/app", "clients/app/renderer", "apps/*/server/nif/*", "apps/*/server/bin/*", "apps/*/client/native"]
+members = ["core/client", "core/server/nif/*", "clients/cli", "clients/app", "clients/app/renderer", "clients/web/renderer", "apps/*/server/nif/*", "apps/*/server/bin/*", "apps/*/client/native"]
 # Programs of apps' that aren't Rust: Computer Use's helper app for a Mac is Swift (`tooling/mac-helper`).
 exclude = ["apps/computer-use/server/bin/helper"]
 
@@ -20,6 +20,17 @@ tokio = { version = "1", features = ["fs", "io-std", "io-util", "macros", "proce
 
 [profile.release]
 strip = true
+
+# The web client's renderer (`clients/web/renderer`), which every browser downloads: as small as it can be made, at a
+# little of its speed.
+[profile.web]
+inherits = "release"
+opt-level = "s"
+# wasm-bindgen reads the features it was built with from what strip takes; wasm-opt strips after it.
+strip = false
+lto = true
+codegen-units = 1
+panic = "abort"
 
 # What's built to work on (`cargo build`, and so `tooling/network`) is the debug build: what changed is built again
 # incrementally and unoptimized, in seconds where a release build of `one` takes half a minute after every commit,

@@ -5,3 +5,7 @@
 # An app's page has an origin of its own (`host.js`), and loads the UI library from here as one from elsewhere.
 /ui/*
   Access-Control-Allow-Origin: *
+# The renderer's frame (`renderer/`), whose page says what it may load, as an app's own page does, and which loads
+# the renderer, from here, as from elsewhere, its origin being its own.
+/renderer/*
+  Access-Control-Allow-Origin: *

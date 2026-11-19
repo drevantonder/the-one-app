@@ -4,7 +4,8 @@
 
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
-use std::time::{Duration, Instant};
+use std::time::Duration;
+use web_time::Instant;
 
 use serde_json::{Value, json};
 use taffy::prelude::{AvailableSpace, NodeId, TaffyTree};
@@ -222,7 +223,7 @@ pub struct Screen {
     /// What the last frame showed, which a frame that would show the same doesn't paint again.
     seen: Option<Seen>,
     /// The key of the shortcut that summoned it, and when it was last pressed (`summoned`).
-    shortcut: Option<(String, std::time::Instant)>,
+    shortcut: Option<(String, web_time::Instant)>,
     /// Where each node listening for `layout` was last told it is.
     laid_out: HashMap<Id, Rect>,
     /// Whether each node listening for `intersection` was last told it's near the window.
@@ -412,10 +413,25 @@ impl Screen {
 
     /// Tells the app a message from its client: an answer to what it asked (`Asked`), or a notification.
     pub fn message(&mut self, message: &Value) {
-        if message.get("method").is_none() {
-            self.unanswered.remove(&message["id"].to_string());
+        let mut message = message.clone();
+        if message.get("method").is_none()
+            && let Some(asked) = self.unanswered.remove(&message["id"].to_string())
+            && asked.method == "ui/initialize"
+            && message["result"].is_object()
+        {
+            self.place(&mut message);
         }
-        self.js.send("message", message.clone());
+        self.js.send("message", message);
+    }
+
+    /// Adds to the client's answer to `ui/initialize` what only the window knows of where the page is, whether it
+    /// answered at once (`Asked`) or later, as a browser's frame's client does.
+    fn place(&mut self, answer: &mut Value) {
+        answer["result"]["hostContext"]["containerDimensions"] = json!({"width": self.room.width, "height": self.room.height});
+        answer["result"]["hostContext"]["reducedMotion"] = json!(self.reduced_motion);
+        answer["result"]["hostContext"]["safeAreaInsets"] = self.safe_area();
+        answer["result"]["hostContext"]["visible"] = json!(self.visible);
+        self.told = Some((self.room, self.reduced_motion, self.insets));
     }
 
     /// Logs what the app's JS threw, as a browser's console does, and carries on.
@@ -532,11 +548,7 @@ impl Screen {
                     match asked(message, appearance) {
                         // What only the window knows of where the page is, which it adds to its client's answer.
                         Some(mut answer) if method.as_deref() == Some("ui/initialize") && answer["result"].is_object() => {
-                            answer["result"]["hostContext"]["containerDimensions"] = json!({"width": self.room.width, "height": self.room.height});
-                            answer["result"]["hostContext"]["reducedMotion"] = json!(self.reduced_motion);
-                            answer["result"]["hostContext"]["safeAreaInsets"] = self.safe_area();
-                            answer["result"]["hostContext"]["visible"] = json!(self.visible);
-                            self.told = Some((self.room, self.reduced_motion, self.insets));
+                            self.place(&mut answer);
                             self.js.send("message", answer);
                         }
                         Some(answer) => self.js.send("message", answer),
@@ -1344,7 +1356,7 @@ impl Screen {
         // the page's: it types nothing and presses nothing (`summoned`).
         if let Some((held, since)) = self.shortcut.take() {
             if key.key == held && since.elapsed() < SHORTCUT_HELD {
-                self.shortcut = Some((held, std::time::Instant::now()));
+                self.shortcut = Some((held, web_time::Instant::now()));
                 return focused;
             }
         }
@@ -1484,7 +1496,7 @@ impl Screen {
     /// It was summoned by a shortcut that ends with `key` (as the DOM's `KeyboardEvent.key` names it): that key, still
     /// held as it shows or pressed again right after, is the shortcut's (`key`).
     pub fn summoned(&mut self, key: Option<&str>) {
-        self.shortcut = key.map(|key| (key.to_owned(), std::time::Instant::now()));
+        self.shortcut = key.map(|key| (key.to_owned(), web_time::Instant::now()));
     }
 
     /// Its window got or lost the keyboard: the caret shows only while it has it, and an input losing it keeps what

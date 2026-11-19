@@ -4,10 +4,12 @@
 //! from GPUI's), with text laid out by Parley (`text`), sending what the person does back as events.
 //! An agent or a test reads and drives it with the inspector (`inspect`).
 
+#[cfg(not(target_arch = "wasm32"))]
 mod clone;
 pub mod editing;
 pub mod geometry;
 pub mod inspect;
+#[cfg(not(target_arch = "wasm32"))]
 mod intl;
 pub mod js;
 pub mod platform;

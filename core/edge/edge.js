@@ -79,13 +79,15 @@ const pageFiles = (await Bun.file(`${app}/tauri.conf.json`).json()).build.fronte
 const place = (/** @type {string} */ from, /** @type {string} */ to) => (what === "dev" ? symlinkSync(from, to) : cpSync(from, to, { recursive: true }));
 mkdirSync(`${web}/ui`, { recursive: true });
 for (const file of pageFiles) place(`${app}/${file}`, `${web}/${basename(file)}`);
-for (const file of readdirSync(`${root}/clients/web`).filter((file) => !["dist", "node_modules"].includes(file))) {
+for (const file of readdirSync(`${root}/clients/web`).filter((file) => !["dist", "node_modules", "renderer"].includes(file))) {
   rmSync(`${web}/${file}`, { force: true });
   place(`${root}/clients/web/${file}`, `${web}/${file}`);
 }
 // Its service worker is built, with what it imports, over its source.
 rmSync(`${web}/sw.js`, { force: true });
 await $`bun install --frozen-lockfile && bun build sw.js --format iife --minify --outfile ${web}/sw.js`.cwd(`${root}/clients/web`).quiet();
+// The renderer's frame, with the renderer built for it as WebAssembly, built here as the UI library is.
+await $`bun build.js ${web}/renderer`.cwd(`${root}/clients/web/renderer`).quiet();
 // Built here, so a deploy never ships whatever build of the UI library was left on disk.
 await $`bun install --frozen-lockfile && bun build.js`.cwd(`${root}/core/ui`).quiet();
 place(`${root}/core/ui/dist/client`, `${web}/ui/client`);

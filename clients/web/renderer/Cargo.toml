@@ -1,0 +1,12 @@
+[package]
+name = "web-renderer"
+description = "The renderer (clients/app/renderer) as the web client draws an app's page with it: WebAssembly, on the browser's WebGPU, built by wasm-bindgen."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+renderer = { path = "../../app/renderer" }

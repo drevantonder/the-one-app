@@ -4,7 +4,7 @@
 
 use std::collections::{HashMap, HashSet};
 use std::hash::{Hash, Hasher};
-use std::sync::{Arc, Condvar, Mutex, OnceLock, mpsc};
+use std::sync::{Arc, Condvar, Mutex};
 
 use crate::geometry::{DevicePixels, Size};
 use crate::render::Atlas;
@@ -14,8 +14,15 @@ use super::{Decoded, Picture};
 
 type Job = Box<dyn FnOnce() + Send>;
 
-/// The threads pictures decode on, as many as the computer has cores, shared by every screen.
+/// The threads pictures decode on, as many as the computer has cores, shared by every screen; on the web, which has none
+/// here, the screen's own, at once.
+#[cfg(target_arch = "wasm32")]
 fn run(job: Job) {
+    job();
+}
+#[cfg(not(target_arch = "wasm32"))]
+fn run(job: Job) {
+    use std::sync::{OnceLock, mpsc};
     static JOBS: OnceLock<Mutex<mpsc::Sender<Job>>> = OnceLock::new();
     let jobs = JOBS.get_or_init(|| {
         let (send, receive) = mpsc::channel::<Job>();

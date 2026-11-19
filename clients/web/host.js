@@ -289,13 +289,27 @@ async function refresh(view) {
   )
 }
 
+/// The runtime version each entrypoint a server last listed needs to be drawn by the renderer, by its subject and
+/// entrypoint (`<subject>|<entrypoint>`), where it names one (`runtime_version`).
+/** @type {Map<string, number>} */
+const runtimes = new Map()
+/// Whether this browser draws apps' pages with the renderer, on its WebGPU, while the DOM's are the default: opened
+/// with `?renderer=webgpu` it does from then on, and `?renderer=dom` stops it.
+const RENDERER = "renderer"
+const chosenRenderer = new URLSearchParams(location.search).get(RENDERER)
+if (chosenRenderer) localStorage.setItem(RENDERER, chosenRenderer)
+const drawn = localStorage.getItem(RENDERER) === "webgpu"
 /// The version of each app a server last listed, by the subject it's listed for.
 /** @type {Map<string | undefined, Map<string, string>>} */
 const versions = new Map()
 /// The open apps for `subject` whose apps have a new version since the last list, each as its address names it
 /// (`<app>[.<subject, last part first>]`).
-/** @param {string | undefined} subject @param {{ uri: string }[]} resources */
+/** @param {string | undefined} subject @param {{ uri: string, _meta?: { runtimeVersion?: number } }[]} resources */
 function outdated(subject, resources) {
+  for (const { uri, _meta } of resources) {
+    const [app, , ...page] = uri.slice("ui://".length).split("/")
+    if (_meta?.runtimeVersion) runtimes.set(`${subject ?? ""}|${app}/${page.join("/")}`, _meta.runtimeVersion)
+  }
   const now = new Map(resources.map(({ uri }) => /** @type {[string, string]} */ (uri.slice("ui://".length).split("/", 2))))
   const was = versions.get(subject)
   versions.set(subject, now)
@@ -491,7 +505,10 @@ export const invoke = (command, ...args) => {
 export const address = (view) => {
   const [app, ...page] = view.entrypoint.split("/")
   const version = versions.get(view.subject)?.get(app)
-  return `${apps}/${view.host}/${version ? `${app}@${version}` : app}/${page.join("/")}`
+  const at = `${apps}/${view.host}/${version ? `${app}@${version}` : app}/${page.join("/")}`
+  // One drawn by the renderer is its frame (`renderer/`), which loads the page's own and says what it needs.
+  const runtime = drawn && runtimes.get(`${view.subject ?? ""}|${view.entrypoint}`)
+  return runtime ? `${location.origin}/renderer/?runtime=${runtime}#${at}` : at
 }
 
 /// What an app's frame may do. Its address is this page's, so it's given an origin of its own, which reaches

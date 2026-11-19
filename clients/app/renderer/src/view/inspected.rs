@@ -1,6 +1,7 @@
 //! What the inspector (`crate::inspect`) asks of a drawn screen: where it drew each node and how it takes input. What's read from the tree alone is `inspect`'s.
 
-use std::time::{Duration, Instant};
+use std::time::Duration;
+use web_time::Instant;
 
 use anyhow::{Context as _, bail};
 use serde_json::{Value, json};
@@ -220,7 +221,7 @@ impl Screen {
             clock.advance(next);
             left -= next;
             if framed {
-                self.frame(std::time::Instant::now());
+                self.frame(web_time::Instant::now());
             }
             self.js.fire();
             self.idle();
