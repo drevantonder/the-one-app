@@ -67,6 +67,7 @@ export ERL_FLAGS="+sbwt none +sbwtdcpu none +sbwtdio none ${ERL_FLAGS-}"
 
 [[ -e $root/target ]] || "$root/tooling/copy-build"
 (cd "$root/core/ui" && bun install --frozen-lockfile && bun build.js)
+(cd "$root/core/codemode" && bun install --frozen-lockfile && bun run build)
 # Each server compiles what changed as it starts (`mix network`), the Rust workspace too: `one`, and the NIFs
 # (`core/server/mix.exs`).
 (cd "$root/core/server" && mix deps.get)

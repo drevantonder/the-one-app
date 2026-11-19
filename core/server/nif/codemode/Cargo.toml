@@ -1,0 +1,20 @@
+[package]
+name = "codemode"
+description = "The server's NIF that runs a code mode script, in a QuickJS sandbox of its own."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+# A NIF has no tests of its own: it's only whole inside the VM that loads it, where the server's tests use it.
+[lib]
+crate-type = ["cdylib"]
+test = false
+doctest = false
+
+[dependencies]
+rquickjs = "0.14"
+rustler = "0.39"
+# The Web APIs OpenCode's interpreter and Effect use, as the app renderer has them (`clients/app/renderer`): AWS LLRT's,
+# from its repo at a release (v0.10.0-beta).
+llrt_crypto = { git = "https://github.com/awslabs/llrt", rev = "b7ccc1487be185ac65fa4355e022bf9eea4df076" }
+llrt_util = { git = "https://github.com/awslabs/llrt", rev = "b7ccc1487be185ac65fa4355e022bf9eea4df076" }

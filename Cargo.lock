@@ -1094,6 +1094,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "codemode"
+version = "0.1.0"
+dependencies = [
+ "llrt_crypto",
+ "llrt_util",
+ "rquickjs",
+ "rustler",
+]
+
+[[package]]
 name = "codespan-reporting"
 version = "0.13.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"

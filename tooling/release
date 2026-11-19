@@ -419,11 +419,14 @@ fetched() {
 }
 
 if ((${#servers[@]})); then
-  # The servers' NIFs, for the kinds of machine they're built for, and the UI library, each while the rest gets ready.
+  # The servers' NIFs, for the kinds of machine they're built for, the UI library, and code mode's interpreter, bundled
+  # into One Core's priv/, each while the rest gets ready.
   tooling/nifs "${servers[@]}" &
   nifs=$!
   (cd core/ui && bun install --frozen-lockfile >/dev/null && bun build.js >/dev/null) &
   ui=$!
+  (cd core/codemode && bun install --frozen-lockfile >/dev/null && bun run build >/dev/null) &
+  codemode=$!
   otp=$(erl -noshell -eval '{ok, V} = file:read_file(filename:join([code:root_dir(), "releases", erlang:system_info(otp_release), "OTP_VERSION"])), io:put_chars(string:trim(V)), halt().')
   bun=$(bun --version)
   # What strips the VM's debugging symbols, for any kind of machine: Rust's own LLVM tools.
@@ -439,6 +442,7 @@ if ((${#servers[@]})); then
     jq -r --arg z "MinGit-$mingit-64-bit.zip" '.assets[] | select(.name == $z) | .digest | ltrimstr("sha256:")')
   wait "$nifs" || { echo "The servers' NIFs weren't built." >&2 && exit 1; }
   wait "$ui" || { echo "The UI library wasn't built." >&2 && exit 1; }
+  wait "$codemode" || { echo "Code mode's interpreter wasn't bundled." >&2 && exit 1; }
 fi
 
 packing=() code=()

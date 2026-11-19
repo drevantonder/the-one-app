@@ -1,73 +1,64 @@
 // Runs one code mode script, for MCP's execute and `one run`, with OpenCode's interpreter: a JavaScript subset with no
-// eval, network, files or timers, that reaches the world only through `tools`. Each tool call goes back to whatever
-// started this, the CLI (`clients/cli/src/codemode.rs`) or a server (`OneCore.CodeMode`), which runs it as the person,
-// as any MCP call; this side only asks. Its limits and how its result reads are here, so both say the same.
+// eval, network, files or timers, that reaches the world only through `tools`. It runs bundled (`bun run build`) in a
+// server's QuickJS sandbox (`core/server/nif/codemode`), which gives `__say` and calls `run` once with the script, then
+// `reply` with each call's answer. Each tool call goes back to the server (`OneCore.CodeMode`), which runs it as the
+// person, as any MCP call; this side only asks. Its limits and how its result reads are here.
 //
-// stdin: first { code, tools: [{ name, app, description, input, output }], namespaces: { <app>: what it's for } }, then
-// { reply, ok | error } for each call. stdout: { call, name, input } for each call, then { done: { ok, text } }.
+// run({ code, tools: [{ name, app, description, input, output }], namespaces: { <app>: what it's for } }) gives
+// { ok, text }. __say({ call, name, input }) for each call; reply({ reply, ok | error }) answers it.
 import { CodeMode, Namespace, Tool, toolError } from "@opencode/codemode"
 import { Effect } from "effect"
-import { createInterface } from "node:readline"
 
 // No limit on its time or its calls, as OpenCode's Core has it: it runs until it's done, or whatever started it stops
 // it. What it gives back is kept to 60 KB, which an agent's client takes whole (Claude Code keeps 25,000 tokens of an
 // MCP tool's answer).
 const limits = { maxOutputBytes: 60_000 }
 
-const lines = createInterface({ input: process.stdin, crlfDelay: Infinity })[Symbol.asyncIterator]()
-
-const { code, tools: list, namespaces = {} } = JSON.parse((await lines.next()).value)
 const waiting = new Map()
-;(async () => {
-  for await (const line of lines) {
-    if (!line.trim()) continue
-    const { reply, ok, error } = JSON.parse(line)
-    const call = waiting.get(reply)
-    waiting.delete(reply)
-    if (call) error === undefined ? call.resolve(ok) : call.reject(error)
-  }
-  // Whatever started it has gone, so nothing is left to answer its calls or hear what it came to.
-  process.exit(1)
-})()
-
 let next = 0
-const say = (message) => process.stdout.write(JSON.stringify(message) + "\n")
 const call = (name, input) =>
   new Promise((resolve, reject) => {
     const id = ++next
     waiting.set(id, { resolve, reject })
-    say({ call: id, name, input })
+    __say(JSON.stringify({ call: id, name, input }))
   })
 
-// An app's tool is tools.<app>.<tool>, in a namespace that says what the app is for, which the script's
-// `search()` ranks by as One Core's `search` does (`OneCore.Search`), and One Core's own is tools.<name>.
-const tools = {}
-const apps = {}
-for (const t of list) {
-  const tool = Tool.make({
-    description: t.description ?? "",
-    input: t.input ?? { type: "object" },
-    // What it answers, so a signature says its type. A tool that says nothing of it answers unknown.
-    output: t.output ?? {},
-    execute: (input) => Effect.tryPromise({ try: () => call(t.name, input), catch: (e) => toolError(String(e)) }),
-  })
-  if (t.app) (apps[t.app] ??= {})[t.name.slice(t.app.length + 1)] = tool
-  else tools[t.name] = tool
+globalThis.reply = (line) => {
+  const { reply, ok, error } = JSON.parse(line)
+  const call = waiting.get(reply)
+  waiting.delete(reply)
+  if (call) error === undefined ? call.resolve(ok) : call.reject(error)
 }
-for (const [app, its] of Object.entries(apps))
-  tools[app] = Namespace.make({ description: namespaces[app] ?? "", tools: its })
 
-const result = await Effect.runPromise(CodeMode.make({ tools, limits }).execute(code))
+globalThis.run = async ({ code, tools: list, namespaces = {} }) => {
+  // An app's tool is tools.<app>.<tool>, in a namespace that says what the app is for, which the script's
+  // `search()` ranks by as One Core's `search` does (`OneCore.Search`), and One Core's own is tools.<name>.
+  const tools = {}
+  const apps = {}
+  for (const t of list) {
+    const tool = Tool.make({
+      description: t.description ?? "",
+      input: t.input ?? { type: "object" },
+      // What it answers, so a signature says its type. A tool that says nothing of it answers unknown.
+      output: t.output ?? {},
+      execute: (input) => Effect.tryPromise({ try: () => call(t.name, input), catch: (e) => toolError(String(e)) }),
+    })
+    if (t.app) (apps[t.app] ??= {})[t.name.slice(t.app.length + 1)] = tool
+    else tools[t.name] = tool
+  }
+  for (const [app, its] of Object.entries(apps))
+    tools[app] = Namespace.make({ description: namespaces[app] ?? "", tools: its })
 
-// What it returned, or what went wrong, with what it logged.
-let text = result.ok
-  ? typeof result.value === "string"
-    ? result.value
-    : JSON.stringify(result.value)
-  : `${result.error?.kind ?? "Error"}: ${result.error?.message ?? ""}`
-if (result.logs?.length) text += `\n\nLogged:\n${result.logs.join("\n")}`
-for (const warning of result.warnings ?? []) text += `\n\nWarning: ${warning.message}`
-if (result.truncated) text += `\n\n(cut at ${limits.maxOutputBytes / 1000} KB: return less)`
+  const result = await Effect.runPromise(CodeMode.make({ tools, limits }).execute(code))
 
-say({ done: { ok: result.ok, text } })
-process.exit(0)
+  // What it returned, or what went wrong, with what it logged.
+  let text = result.ok
+    ? typeof result.value === "string"
+      ? result.value
+      : JSON.stringify(result.value)
+    : `${result.error?.kind ?? "Error"}: ${result.error?.message ?? ""}`
+  if (result.logs?.length) text += `\n\nLogged:\n${result.logs.join("\n")}`
+  for (const warning of result.warnings ?? []) text += `\n\nWarning: ${warning.message}`
+  if (result.truncated) text += `\n\n(cut at ${limits.maxOutputBytes / 1000} KB: return less)`
+  return { ok: result.ok, text }
+}

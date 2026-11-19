@@ -196,7 +196,7 @@ defmodule OneCore.Entrypoint do
     end
   end
 
-  @doc "The Bun an app is built with, and a code mode script runs under (`OneCore.CodeMode`): `OneCore.Programs`."
+  @doc "The Bun an app is built with: `OneCore.Programs`."
   def bun, do: OneCore.Programs.path(:bun)
 
   # An app's own packages, which it names in its package.json, and none for an app that names none.

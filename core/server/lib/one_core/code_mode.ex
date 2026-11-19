@@ -1,8 +1,8 @@
 defmodule OneCore.CodeMode do
   @moduledoc """
   Code mode's `execute` and `call` over the web, as Executor has them. `execute` runs a short script that calls tools,
-  by OpenCode's interpreter under this server's Bun (`core/codemode/run.js`), where nothing but `tools` reaches the
-  world. Each call it makes comes back here and is run as whoever asked, exactly as their MCP call would be, its
+  by OpenCode's interpreter in a QuickJS sandbox of the server's own (`OneCore.CodeMode.Runner`), where nothing but
+  `tools` reaches the world. Each call it makes comes back here and is run as whoever asked, exactly as their MCP call would be, its
   inputs checked against what the tool takes. `call` makes one call or several at once with no script. Every client
   has both run here, `one mcp --code` too, and no device fills in a script's inputs: a secret comes from its person
   through the Vault's `request`, and what needs a device's own key is a plain tool on that device.
@@ -14,20 +14,14 @@ defmodule OneCore.CodeMode do
   It runs until its script is done, with no limit on its time or its calls, as OpenCode's Core has it. It's cancelled
   as any call is (`OneCore.Call.State`): by `notifications/cancelled`, or `tasks/cancel` when it runs as an MCP task.
   Its caller going away cancels it too, unless it's a task, which outlives its caller's connection by design. Stopping,
-  its runner is killed, and every call it started that's still in flight is cancelled and awaited, so none ends after
+  its runner is stopped, and every call it started that's still in flight is cancelled and awaited, so none ends after
   whoever asked was told it stopped. What it gives back says which of its calls finished and which were cancelled.
   """
-  alias OneCore.{Entrypoint, Server}
   alias OneCore.Call.State
+  alias OneCore.CodeMode.Runner
 
   # The processes a run started, whose ends it hears of as messages while it traps exits.
   @pids :"$one_codemode_run"
-
-  @runner Path.expand("../../../codemode", __DIR__)
-  @external_resource Path.join(@runner, "package.json")
-  @external_resource Path.join(@runner, "bun.lock")
-  @external_resource Path.join(@runner, "run.js")
-  @files Map.new(~w(package.json bun.lock run.js), &{&1, File.read!(Path.join(@runner, &1))})
 
   @doc """
   `call`'s answer: each of `calls` run at once by `call`, given a tool's name and inputs as `run/4`'s is, `named`
@@ -80,56 +74,43 @@ defmodule OneCore.CodeMode do
   logged and which of its calls finished and which were cancelled.
   """
   def run(code, tools, namespaces, call) do
-    with {:ok, bun} <- Entrypoint.bun(),
-         {:ok, folder} <- runner(bun) do
-      port =
-        Port.open({:spawn_executable, bun}, [
-          :binary,
-          :exit_status,
-          :stderr_to_stdout,
-          {:line, 1_048_576},
-          {:cd, folder},
-          {:args, ["run.js"]},
-          {:env, [{~c"DO_NOT_TRACK", ~c"1"}]}
-        ])
+    tag = System.unique_integer()
+    # The interpreter, bundled as this server's build has it (`core/codemode`).
+    bundle = File.read!(Application.app_dir(:one_core, "priv/codemode.js"))
+    runner = Runner.start(bundle, JSON.encode!(%{code: code, tools: tools, namespaces: namespaces}), tag)
 
-      Port.command(port, JSON.encode!(%{code: code, tools: tools, namespaces: namespaces}) <> "\n")
+    # What it starts is linked to it, so a run that's killed takes its calls with it, and they end as messages
+    # here meanwhile, as its caller's going does.
+    trapping = Process.flag(:trap_exit, true)
 
-      # What it starts is linked to it, so a run that's killed takes its calls with it, and they end as messages
-      # here meanwhile, as its caller's going does.
-      trapping = Process.flag(:trap_exit, true)
+    run = %{codemode_run: :running, runner: runner, tag: tag, call: call, calls: %{}, ended: []}
 
-      run = %{codemode_run: :running, port: port, call: call, calls: %{}, ended: [], part: "", output: []}
-
-      try do
-        listen(run)
-      after
-        stop(port)
-        Process.flag(:trap_exit, trapping)
-        flushed([port | Process.get(@pids, [])])
-        Process.delete(@pids)
-      end
+    try do
+      listen(run)
+    after
+      Runner.stop(runner)
+      Process.flag(:trap_exit, trapping)
+      flushed(Process.get(@pids, []))
+      told(tag)
+      Process.delete(@pids)
     end
   end
 
-  # Running: each line from the runner is a call to run, which runs beside the others, or what the script came to.
-  defp listen(%{codemode_run: :running, port: port} = run) do
+  # Running: the runner tells of each call to run, which runs beside the others, or what the script came to.
+  defp listen(%{codemode_run: :running, runner: runner, tag: tag} = run) do
     receive do
-      {^port, {:data, {:noeol, more}}} ->
-        listen(%{run | part: run.part <> more})
+      {:codemode, ^tag, {:call, line}} ->
+        %{"call" => id, "name" => name} = request = JSON.decode!(line)
+        listen(started(run, id, name, request["input"]))
 
-      {^port, {:data, {:eol, more}}} ->
-        line = run.part <> more
-        run = %{run | part: ""}
+      {:codemode, ^tag, {:done, ok, text}} ->
+        stopping(run, {if(ok, do: :ok, else: :error), text}, nil)
 
-        case JSON.decode(line) do
-          {:ok, %{"call" => id, "name" => name} = request} -> listen(started(run, id, name, request["input"]))
-          {:ok, %{"done" => %{"ok" => ok, "text" => text}}} -> stopping(run, {if(ok, do: :ok, else: :error), text}, nil)
-          _ -> listen(%{run | output: [line | run.output]})
-        end
+      {:codemode, ^tag, {:exit, why}} ->
+        stopping(run, {:error, "The script stopped without an answer: " <> why}, nil)
 
       {ref, {result, _stopped}} when is_map_key(run.calls, ref) ->
-        Port.command(port, JSON.encode!(Map.put(result, :reply, run.calls[ref].id)) <> "\n")
+        Runner.reply(runner, JSON.encode!(Map.put(result, :reply, run.calls[ref].id)))
         listen(ended(run, ref, :finished))
 
       # A call whose process ended without answering, as one does when a process it's linked to crashes, failed: the
@@ -137,12 +118,8 @@ defmodule OneCore.CodeMode do
       {:DOWN, ref, :process, _pid, why} when is_map_key(run.calls, ref) ->
         State.finish(run.calls[ref].call)
         failed = %{error: "It ended without an answer: " <> Exception.format_exit(why), reply: run.calls[ref].id}
-        Port.command(port, JSON.encode!(failed) <> "\n")
+        Runner.reply(runner, JSON.encode!(failed))
         listen(ended(run, ref, :unanswered))
-
-      {^port, {:exit_status, _}} ->
-        why = "The script stopped without an answer: " <> Enum.join(Enum.reverse(run.output), "\n")
-        stopping(run, {:error, why}, nil)
 
       # Its own process is stopped outright once its grace is over, so it gives its calls a little less.
       {State, :cancelled, _id} ->
@@ -155,7 +132,7 @@ defmodule OneCore.CodeMode do
 
       # What started it is stopping, and it stops with it, once its calls have.
       {:EXIT, from, why} ->
-        if from == port or from in Process.get(@pids, []) do
+        if from in Process.get(@pids, []) do
           listen(run)
         else
           stopping(run, {:error, "It was stopped."}, nil)
@@ -196,12 +173,12 @@ defmodule OneCore.CodeMode do
     %{run | calls: calls, ended: [{name, how} | run.ended]}
   end
 
-  # Stopping: the runner is killed, so the script calls nothing more, and each call still in flight is cancelled and
+  # Stopping: the runner is stopped, so the script calls nothing more, and each call still in flight is cancelled and
   # awaited, until `until` if the run has to end by then: what hasn't ended is stopped outright. How each ended is what
   # it gave: one with its answer finished, however late it was cancelled.
   defp stopping(run, result, until) do
     run = %{run | codemode_run: :stopping}
-    stop(run.port)
+    Runner.stop(run.runner)
     for {_ref, %{call: call}} <- run.calls, do: State.cancel(call, "The script it was called from stopped.")
     ended = for {ref, %{pid: pid, call: call, name: name}} <- run.calls, do: {name, awaited(ref, pid, call, until)}
     stopped(%{run | codemode_run: :stopped, calls: %{}}, result, Enum.reverse(run.ended) ++ ended)
@@ -238,6 +215,15 @@ defmodule OneCore.CodeMode do
       after
         0 -> :ok
       end
+    end
+  end
+
+  # What a runner said as it was stopped, which nothing hears now.
+  defp told(tag) do
+    receive do
+      {:codemode, ^tag, _} -> told(tag)
+    after
+      0 -> :ok
     end
   end
 
@@ -311,45 +297,4 @@ defmodule OneCore.CodeMode do
   end
 
   defp texts(content), do: content |> Enum.filter(&(&1["type"] == "text")) |> Enum.map_join("\n", & &1["text"])
-
-  defp stop(port) do
-    case Port.info(port, :os_pid) do
-      {:os_pid, pid} ->
-        Port.close(port)
-        System.cmd("kill", ["-9", to_string(pid)], stderr_to_stdout: true)
-
-      nil ->
-        :ok
-    end
-  end
-
-  # The runner's folder, its packages installed with Bun, made whole beside it and moved in, so a folder that's
-  # there is ready. Each set of its files has its own.
-  defp runner(bun) do
-    code = Base.encode16(:crypto.hash(:sha256, :erlang.term_to_binary(@files)), case: :lower)
-    folder = Path.join([Server.home(), "codemode", binary_part(code, 0, 16)])
-
-    if File.exists?(Path.join(folder, "node_modules/@opencode/codemode")) do
-      {:ok, folder}
-    else
-      writing = folder <> "." <> Base.encode16(:crypto.strong_rand_bytes(8), case: :lower)
-
-      try do
-        File.mkdir_p!(writing)
-        for {name, text} <- @files, do: File.write!(Path.join(writing, name), text)
-
-        case System.cmd(bun, ~w(install --frozen-lockfile --production), cd: writing, stderr_to_stdout: true) do
-          {_, 0} ->
-            # Another script may have made it meanwhile, which is as good.
-            with {:error, _} <- File.rename(writing, folder), do: :ok
-            {:ok, folder}
-
-          {output, _} ->
-            {:error, "Code mode's packages didn't install:\n#{String.trim(output)}"}
-        end
-      after
-        File.rm_rf!(writing)
-      end
-    end
-  end
 end

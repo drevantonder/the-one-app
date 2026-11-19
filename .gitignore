@@ -9,6 +9,8 @@ __pycache__/
 # One Core's Rust NIFs as they're built for the server to load and for each kind of machine beside their source, a
 # app's NIFs and programs as they're built beside their source
 /core/server/priv/native/
+# Code mode's interpreter, bundled (`core/codemode`)
+/core/server/priv/codemode.js
 /core/server/nif/*/*.so
 /apps/*/server/nif/*/*.so
 /apps/*/server/bin/*/linux-*

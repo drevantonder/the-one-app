@@ -1,7 +1,10 @@
 {
-  "description": "Code mode: the interpreter a script runs in (run.js), for MCP's execute and `one run`, which reaches the world only through the person's tools.",
+  "description": "Code mode: the interpreter a script runs in (run.js), for MCP's execute and `one run`, which reaches the world only through the person's tools. Bundled into one script, which a server runs in its QuickJS sandbox: One Core's priv/codemode.js.",
   "private": true,
   "type": "module",
+  "scripts": {
+    "build": "bun build run.js --target=browser --format=iife --minify --outfile=../server/priv/codemode.js"
+  },
   "dependencies": {
     "@opencode/codemode": "2.3.0",
     "effect": "4.1.0"
