@@ -1,6 +1,6 @@
 // Draws every scene on the DOM and on a native host, and compares the two: `bun scenes.js [<folder>…] [--out <dir>]
 // [--against <dir>] [--dark] [--size <width>x<height>] [--release]` in core/ui, after `bun build.js` (and, for the native half, `cargo build -p renderer
-// --example screenshot`, `--release` too for `--release`, whose timings are a shipped build's). `--against` compares each scene's DOM drawing with an earlier run's too, kept in that
+// --example screenshot`, `--release` too for `--release`, whose timings are a shipped build's). `--against` compares each scene with an earlier run's too, our renderer's drawing where both have one (the DOM's where not), kept in that
 // `--out`: what a change did to how things look, drawn before it (on main) and after.
 //
 // A folder is the gallery (core/ui/gallery, its scenes the components': `*.scenes.tsx`) or an app's (apps/<app>,
@@ -8,8 +8,9 @@
 // scenes are what each screen shows, by name, and what it's given to show it, as the tools' answers a client would
 // give (record.js's answers): `{ "Inbox": { "answers": { "notifications_inbox": { … } } } }`, with any of `page` (its
 // page, `client/index.html` unless said, and a link after `#`), `component` (a component its client exports, drawn alone, in
-// place of a page, as another app's page draws it), `taps` (what's pressed first, by what each is named or
-// says), `size` (`[390, 844]`, a phone's, unless said), `touch` (a finger points at it, as on a phone), and `like` (another scene's name, as Storybook's args are a
+// place of a page, as another app's page draws it), `taps` (what's done first: pressed by what each is named or
+// says, or `{ role, name }`; a point pressed, `{ x, y }`; a key, `{ key }` as the DOM names it, with `ctrl`, `shift`, `alt`
+// or `meta` held; or text typed where the keyboard is, `{ type }`), `size` (`[390, 844]`, a phone's, unless said), `touch` (a finger points at it, as on a phone), and `like` (another scene's name, as Storybook's args are a
 // component's: this is that scene, with its own taps, and its answers in place of that one's, tool by tool). An answer `{ "$error": "Couldn't reach it" }` is a tool's
 // refusal. A method of the client's (`ui/initialize`, `one/client`) is answered as it's named too. It's 1 January 2026,
 // 00:00 UTC, as a native host's harness has it, so a fixture's times are said from then.
@@ -151,6 +152,13 @@ const settle = (frame) =>
 
 /// Presses what's named or says `name`, or what has `role` and is named `name`, as a person would.
 async function tap(frame, name) {
+  const page = frame.page()
+  if (name.key) return page.keyboard.press([...["ctrl", "shift", "alt", "meta"].filter((held) => name[held]).map((held) => ({ ctrl: "Control", shift: "Shift", alt: "Alt", meta: "Meta" })[held]), name.key].join("+"))
+  if (name.type) return page.keyboard.type(name.type)
+  if (name.x !== undefined) {
+    const at = await page.locator("#page").boundingBox()
+    return page.mouse.click(at.x + name.x, at.y + name.y)
+  }
   if (typeof name === "object") return frame.getByRole(name.role, { name: name.name, exact: true }).first().click()
   const found = await frame.evaluateHandle((name) => {
     const all = [...document.querySelectorAll("*")].filter((element) => element.checkVisibility?.() !== false)
@@ -200,7 +208,7 @@ function native(built, scene, folder) {
   writeFileSync(join(folder, "answers.json"), JSON.stringify(answers))
   // The harness's clock stands still, so what moves as the page opens and after each tap is moved on to where it
   // settles, as the DOM's is, and what's laid out once it's drawn (onLayout) is drawn again.
-  const requests = [{ op: "clock", step: 1000 }, ...scene.taps.flatMap((tap) => [{ op: "tap", ...(typeof tap === "object" ? tap : { name: tap }) }, { op: "clock", step: 1000 }])].map((request, at) => JSON.stringify({ v: 1, id: at + 1, ...request })).join("\n")
+  const requests = [{ op: "clock", step: 1000 }, ...scene.taps.flatMap((tap) => [tap.key ? { op: "key", ...tap } : tap.type ? { op: "type", text: tap.type } : { op: "tap", ...(typeof tap === "object" ? tap : { name: tap }) }, { op: "clock", step: 1000 }])].map((request, at) => JSON.stringify({ v: 1, id: at + 1, ...request })).join("\n")
   const run = Bun.spawnSync(
     [harness, at, join(folder, "native.png"), join(folder, "native.json"), "--ui", here("dist/client"), "--answers", join(folder, "answers.json"), "--size", `${scene.size[0]}x${scene.size[1]}`, "--scale", "2", "--measure", ...(dark ? ["--dark"] : []), ...(scene.touch ? ["--touch"] : []), ...(requests ? ["--requests", "-"] : [])],
     { stdin: requests ? new TextEncoder().encode(requests) : undefined, env: { ...process.env, VK_ICD_FILENAMES: process.env.VK_ICD_FILENAMES ?? "/usr/share/vulkan/icd.d/lvp_icd.json" } },
@@ -288,8 +296,10 @@ for (const target of targets) {
     else if (shown.tree !== undefined) compared(said, "DOM and native", shown.tree, drawn.tree, join(folder, "dom.png"), join(folder, "native.png"), join(folder, "diff.png"))
     if (drawn.measured) said.push(`  native: ${timings(drawn.measured)}`)
     const before = against && join(against, name, folder.split("/").at(-1))
-    if (shown.tree === undefined) {
-    } else if (before && existsSync(join(before, "dom.png"))) compared(said, "before and now", readFileSync(join(before, "dom.txt"), "utf8"), shown.tree, join(before, "dom.png"), join(folder, "dom.png"), join(folder, "changed.png"))
+    // What changed is our renderer's, where it drew the scene both times, and the DOM's where it didn't.
+    const [kind, tree] = drawn.tree !== undefined && before && existsSync(join(before, "native.png")) ? ["native", drawn.tree] : ["dom", shown.tree]
+    if (tree === undefined) {
+    } else if (before && existsSync(join(before, `${kind}.png`))) compared(said, `before and now (${kind === "dom" ? "DOM" : "native"})`, readFileSync(join(before, `${kind}.txt`), "utf8"), tree, join(before, `${kind}.png`), join(folder, `${kind}.png`), join(folder, "changed.png"))
     else if (before) said.push("  before and now: no scene of this name before")
     said.push(`  ${folder}`)
     report.push(said.join("\n"))
