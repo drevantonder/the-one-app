@@ -92,8 +92,8 @@ export function OwnerPill(props: { owners: Owner[] }) {
   return (
     <Menu.Root
       open={state().matches("listing")}
-      onOpenChange={({ open }) => (open ? state().matches("nothing") && home.send({ type: "list" }) : state().matches("listing") && home.send({ type: "dismiss" }))}
-      onSelect={({ value }) => home.send({ type: "pick", owner: Number(value) })}
+      onOpenChange={(open) => (open ? state().matches("nothing") && home.send({ type: "list" }) : state().matches("listing") && home.send({ type: "dismiss" }))}
+      onSelect={(value) => home.send({ type: "pick", owner: Number(value) })}
     >
       <Menu.Trigger variant="secondary" aria-label={props.owners[at()]?.name}>
         <View style={looks.ownerRow}>

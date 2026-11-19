@@ -13,7 +13,7 @@ export default function Appearance() {
         <Field label="Colour Mode" hint="For every app on this device.">
           <RadioGroup
             value={mode()}
-            onChange={choose}
+            onValueChange={choose}
             options={[
               { value: "device", label: "As this device is" },
               { value: "light", label: "Light" },

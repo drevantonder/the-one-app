@@ -108,7 +108,7 @@ function Deleted(props: { items: Item[] }) {
                 text={<Text style={!!item().why && look.wrong}>{about(item())}</Text>}
                 end={
                   <Show when={item().state === "deleted"} fallback={<Spinner />}>
-                    <Menu.Root onSelect={({ value }) => (value === "restore" ? restore(item()) : purge(item()))}>
+                    <Menu.Root onSelect={(value) => (value === "restore" ? restore(item()) : purge(item()))}>
                       <Menu.Trigger aria-label={`More for ${heading(item())}`} />
                       <Menu.Positioner>
                         <Menu.Content>

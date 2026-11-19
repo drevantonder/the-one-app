@@ -193,7 +193,7 @@ function PersonRow(props: { person: Person; all: All }) {
       onPress={props.person.who === props.all.me ? () => setNaming(true) : undefined}
       end={
         <Show when={mayRemove()}>
-          <Menu.Root onSelect={({ value }) => value === "remove" && remove(props.person, props.all)}>
+          <Menu.Root onSelect={(value) => value === "remove" && remove(props.person, props.all)}>
             <Menu.Trigger aria-label={`More for ${props.all.named(props.person.who)}`} />
             <Menu.Positioner>
               <Menu.Content>

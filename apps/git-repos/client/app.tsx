@@ -195,7 +195,7 @@ function Repo(props: { repo: string }) {
         <View style={look.actions}>
           <Button onPress={clone}>Clone</Button>
           <Show when={about().owns}>
-            <Menu.Root onSelect={({ value }) => value === "remove" && remove()}>
+            <Menu.Root onSelect={(value) => value === "remove" && remove()}>
               <Menu.Trigger />
               <Menu.Positioner>
                 <Menu.Content>
@@ -276,7 +276,7 @@ function Branch(props: { about: About; branch: string }) {
         </View>
       }
     >
-      <Menu.Root onSelect={({ value }) => setRef(value)}>
+      <Menu.Root onSelect={(value) => setRef(value)}>
         <Menu.Trigger variant="outline" aria-label={`Branch: ${props.branch}`}>
           <Branchy /> {props.branch} <Icon name="caret-up-down" />
         </Menu.Trigger>

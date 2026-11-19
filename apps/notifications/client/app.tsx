@@ -62,7 +62,7 @@ async function clearAll() {
 }
 
 const More = () => (
-  <Menu.Root onSelect={({ value }) => (value === "read" ? change("notifications_read") : clearAll())}>
+  <Menu.Root onSelect={(value) => (value === "read" ? change("notifications_read") : clearAll())}>
     <Menu.Trigger />
     <Menu.Positioner>
       <Menu.Content>

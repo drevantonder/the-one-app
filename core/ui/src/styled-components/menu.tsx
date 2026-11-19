@@ -65,7 +65,7 @@ const look = styles({
   label: { paddingInline: tokens.grid[2], paddingBlock: tokens.grid[1], color: tokens.colour.secondaryLabel, font: tokens.type.small, fontWeight: tokens.weight.medium },
 })
 
-/// `<Menu.Root onSelect={({ value }) => value === "delete" && remove()}>`, then `<Menu.Trigger />`, then
+/// `<Menu.Root onSelect={(value) => value === "delete" && remove()}>`, then `<Menu.Trigger />`, then
 /// `<Menu.Positioner><Menu.Content>` around `<Menu.Item value="rename">Rename</Menu.Item>`s, a `<Menu.Separator />`
 /// between groups, `<Menu.Group label="Install for">` around some under a small heading, and `<Menu.Item
 /// value="delete" destructive>Delete</Menu.Item>`: a button that opens a few things to do, under it, over the page. The

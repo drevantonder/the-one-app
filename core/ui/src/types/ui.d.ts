@@ -320,8 +320,6 @@ export declare function RadioGroup(props: {
   options: { value: string; label: Element; disabled?: boolean }[]
   disabled?: boolean
   onValueChange?: (value: string) => void
-  /** The old name of `onValueChange`, which goes once the Home Screen's appearance page uses that. */
-  onChange?: (value: string) => void
 }): Element
 
 /** What a select chooses from, and what it's told of what's chosen, as React Native's `Picker` has them. */
@@ -356,7 +354,7 @@ export declare function ActionBar(props: { start?: Element; actions?: Action[] }
 export declare const Metadata: ((props: { children?: Element }) => Element) & { Label: (props: { title: Element; text?: Element }) => Element }
 
 export declare const Menu: {
-  Root: (props: { open?: boolean; onOpenChange?: (details: { open: boolean }) => void; onSelect?: (details: { value: string }) => void; children?: Element }) => Element
+  Root: (props: { open?: boolean; onOpenChange?: (open: boolean) => void; onSelect?: (value: string) => void; children?: Element }) => Element
   Trigger: (props: { variant?: ButtonProps["variant"]; size?: "icon"; "aria-label"?: string; children?: Element }) => Element
   Positioner: (props: { children?: Element }) => Element
   Content: (props: { children?: Element }) => Element

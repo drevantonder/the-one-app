@@ -172,7 +172,7 @@ function Rename(props: Props & { asking: boolean; done: () => void }) {
 export default function ChromeProfile(props: Props) {
   const profile = useProfile(props)
   const [asking, setAsking] = createSignal(false)
-  const act = async ({ value }: { value: string }) => {
+  const act = async (value: string) => {
     if (value === "rename") return setAsking(true)
     const yes = await confirm({ heading: `Delete ${props.item}?`, text: "It's in Recently Deleted for 30 days, then gone, with everything signed in on it.", action: "Delete", destructive: true })
     if (yes) await call("chrome-profiles_remove", { profile: props.item }, { subject: props.subject }).then(() => props.close?.()).catch(toast)

@@ -107,13 +107,11 @@ export interface RadioGroupProps {
   options: { value: string; label: JSX.Element; disabled?: boolean }[]
   disabled?: boolean
   onValueChange?: (value: string) => void
-  /** The old name of `onValueChange`, which goes once the Home Screen's appearance page uses that. */
-  onChange?: (value: string) => void
 }
 
 /** `const radios = createRadioGroup(props, field)`: which is checked, and the props of the group and each radio. */
 export function createRadioGroup(props: RadioGroupProps, field: FieldContext | null) {
-  const [chosen, choose] = createControllableSignal<string>({ value: () => props.value, onChange: (value) => (props.onValueChange ?? props.onChange)?.(value) })
+  const [chosen, choose] = createControllableSignal<string>({ value: () => props.value, onChange: (value) => props.onValueChange?.(value) })
   const off = (option: RadioGroupProps["options"][number]) => !!props.disabled || !!option.disabled || !!field?.disabled()
   const roving = createRovingFocus({ items: () => props.options.filter((option) => !off(option)).map((option) => ({ key: option.value, preferred: option.value === chosen() })), orientation: "both", loop: true, remember: false })
   return {

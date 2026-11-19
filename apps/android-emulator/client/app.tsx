@@ -49,7 +49,7 @@ function Detail(props: { emulator: Emulator }) {
       onBack={() => setOpen()}
       action={
         <Show when={actions().length}>
-          <Menu.Root onSelect={({ value }) => act(value)}>
+          <Menu.Root onSelect={(value) => act(value)}>
             <Menu.Trigger aria-label={`More for ${e().name}`} />
             <Menu.Positioner>
               <Menu.Content>

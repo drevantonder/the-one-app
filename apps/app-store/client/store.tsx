@@ -293,7 +293,7 @@ function Get(props: { all: Owners; listed: Listed }) {
           </Button>
         }
       >
-        <Menu.Root onSelect={({ value }) => install(left().find((owner) => owner.who === value)!, props.listed)}>
+        <Menu.Root onSelect={(value) => install(left().find((owner) => owner.who === value)!, props.listed)}>
           <Menu.Trigger variant="default">Get</Menu.Trigger>
           <Menu.Positioner>
             <Menu.Content>
@@ -355,7 +355,7 @@ function Where(props: { market: Market; all: Owners; owner: Owner; listed: Liste
             </Match>
           </Switch>
           <Show when={may()}>
-          <Menu.Root onSelect={({ value }) => (value === "uninstall" ? uninstall(props.market, props.owner, now()) : trust(props.market, props.owner, now()))}>
+          <Menu.Root onSelect={(value) => (value === "uninstall" ? uninstall(props.market, props.owner, now()) : trust(props.market, props.owner, now()))}>
             <Menu.Trigger />
             <Menu.Positioner>
               <Menu.Content>

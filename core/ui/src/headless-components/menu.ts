@@ -29,13 +29,13 @@ const rectOf = (event: Laid | Located): At => {
 /** A `Menu.Root`'s props. */
 export interface MenuProps {
   open?: boolean
-  onOpenChange?: (details: { open: boolean }) => void
-  onSelect?: (details: { value: string }) => void
+  onOpenChange?: (open: boolean) => void
+  onSelect?: (value: string) => void
 }
 
 /** `const menu = createMenu(props)`: one menu's state, and the props of each of its parts. */
 export function createMenu(props: MenuProps) {
-  const [shown, setShown] = createControllableSignal<boolean>({ value: () => props.open, defaultValue: () => false, onChange: (open) => props.onOpenChange?.({ open }) })
+  const [shown, setShown] = createControllableSignal<boolean>({ value: () => props.open, defaultValue: () => false, onChange: (open) => props.onOpenChange?.(open) })
   // Where it was opened (a row held), else under its trigger, wherever that's drawn now.
   const [where, setWhere] = createSignal<At>()
   const [trigger, setTrigger] = createSignal<At>()
@@ -50,7 +50,7 @@ export function createMenu(props: MenuProps) {
     setShown(!!to)
   }
   const close = () => open(undefined)
-  const select = (value: string) => (close(), props.onSelect?.({ value }))
+  const select = (value: string) => (close(), props.onSelect?.(value))
   const layer = createDismissable({ open: () => !!at(), onDismiss: close })
   // Opened, the keyboard is on its first item; closed, it's measured again as it next opens.
   createEffect(
