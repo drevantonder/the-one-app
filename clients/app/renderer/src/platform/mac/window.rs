@@ -59,6 +59,11 @@ struct Shared {
     /// A panel being dragged by a person, since a press in its title row and until it's summoned again: where it
     /// moves to is told (`Input::Placed`).
     dragged: Arc<std::sync::atomic::AtomicBool>,
+    /// A panel's: whether it's showing (`summon`), and whether its parts are its child windows while it does.
+    shown: std::sync::atomic::AtomicBool,
+    attached: std::sync::atomic::AtomicBool,
+    /// Whether its layer presents with Core Animation's transaction, as it does the frame its window changes size.
+    synced: std::sync::atomic::AtomicBool,
 }
 
 /// A screen's name, by its frame, which a panel's places are kept by: the same screen in the same arrangement.
@@ -160,7 +165,7 @@ impl Display {
             if first {
                 NSApplication::sharedApplication(main).setActivationPolicy(objc2_app_kit::NSApplicationActivationPolicy::Regular);
             }
-            let shared = Arc::new(Shared { id, part: 0, placed: Mutex::default(), queue, size: Mutex::new((Size::default(), 1.0)), title_row: Arc::default(), dragged: Arc::default() });
+            let shared = Arc::new(Shared { id, part: 0, placed: Mutex::default(), queue, size: Mutex::new((Size::default(), 1.0)), title_row: Arc::default(), dragged: Arc::default(), shown: Default::default(), attached: Default::default(), synced: Default::default() });
             let rect = NSRect::new(NSPoint::new(0.0, 0.0), NSSize::new(options.size.width.0.into(), options.size.height.0.into()));
             let window = match options.panel {
                 // GPUI's pop-up: titled, so it can take the keyboard, with nothing of its title band shown.
@@ -247,6 +252,7 @@ impl Display {
     /// Where it was dragged to on that screen before (`places`), it's there, as Raycast's is, as much of it as fits.
     pub fn summon(&self, window: &NativeWindow, places: &crate::platform::Places, room: Size<Pixels>) {
         window.shared.dragged.store(false, std::sync::atomic::Ordering::Relaxed);
+        window.shared.shown.store(true, std::sync::atomic::Ordering::Relaxed);
         let placed = *window.shared.placed.lock().expect("nothing panics holding it");
         window.window.get_on_main(|window| unsafe {
             let mouse: NSPoint = msg_send![objc2::class!(NSEvent), mouseLocation];
@@ -282,6 +288,8 @@ impl Display {
     /// Puts a panel away, its parts with it, which are its children again as it shows (`arrange`). The One App never
     /// came in front for it, so the app that had the keyboard has it again.
     pub fn put_away(&self, window: &NativeWindow, _give_back: bool) {
+        window.shared.shown.store(false, std::sync::atomic::Ordering::Relaxed);
+        window.shared.attached.store(false, std::sync::atomic::Ordering::Relaxed);
         window.window.get_on_main(|window| {
             if let Some(children) = window.childWindows() {
                 for child in children.iter() {
@@ -300,7 +308,7 @@ impl Display {
         let (id, queue) = (parent.shared.id, self.queue.clone());
         let (title_row, dragged) = (parent.shared.title_row.clone(), parent.shared.dragged.clone());
         run_on_main(move |main| {
-            let shared = Arc::new(Shared { id, part, placed: Mutex::default(), queue, size: Mutex::new((Size::default(), 1.0)), title_row, dragged });
+            let shared = Arc::new(Shared { id, part, placed: Mutex::default(), queue, size: Mutex::new((Size::default(), 1.0)), title_row, dragged, shown: Default::default(), attached: Default::default(), synced: Default::default() });
             let rect = NSRect::new(NSPoint::new(0.0, 0.0), NSSize::new(1.0, 1.0));
             // With no title band it can't become the key window, as NSPanel's borderless kind can't.
             let style = NSWindowStyleMask::NonactivatingPanel;
@@ -328,9 +336,19 @@ impl Display {
 
     /// Puts a panel's parts where its page is, each its box of the page (`placed`, the panel first) with its glass
     /// rounded so, the page where it was (from where the panel is, and the box it had), and draws them (`draw`) as
-    /// they're put: on the main thread, in one Core Animation transaction, with each layer presenting in it, so each
-    /// window's frame and what's drawn in it come on screen together, frame by frame as a part grows.
+    /// they're put: on the main thread, in one Core Animation transaction, with a layer whose window changes size
+    /// presenting in it, so its frame and what's drawn in it come on screen together. Where nothing moves, and the
+    /// parts of a panel showing are its children, they're drawn here, without waiting on the main thread.
     pub fn arrange(&self, placed: &[(Handle, crate::geometry::Bounds<f32>, f32)], draw: &mut dyn FnMut()) {
+        let still = placed.iter().all(|(handle, bounds, _)| {
+            *handle.shared.placed.lock().expect("nothing panics holding it") == Some(*bounds) && !handle.shared.synced.load(std::sync::atomic::Ordering::Relaxed)
+        });
+        let attached = placed.first().is_none_or(|(first, ..)| {
+            placed.len() == 1 || !first.shared.shown.load(std::sync::atomic::Ordering::Relaxed) || first.shared.attached.load(std::sync::atomic::Ordering::Relaxed)
+        });
+        if still && attached {
+            return draw();
+        }
         struct Draw<'a>(*mut (dyn FnMut() + 'a));
         // SAFETY: the main thread runs it while this thread waits for it, so it's used by one thread at a time.
         unsafe impl Send for Draw<'_> {}
@@ -358,6 +376,13 @@ impl Display {
                 let view = &*(handle.view as *const View);
                 if let Some(layer) = view.layer() {
                     layer.setCornerRadius(*radius);
+                    // A window that changes size this frame shows its new frame of drawing with the transaction, so the
+                    // two change together; any other's comes as it's drawn, without the main thread waiting on its GPU.
+                    let resized = (now.size.width, now.size.height) != (to.size.width, to.size.height);
+                    if let Ok(layer) = layer.downcast::<CAMetalLayer>() {
+                        layer.setPresentsWithTransaction(resized);
+                    }
+                    handle.shared.synced.store(resized, std::sync::atomic::Ordering::Relaxed);
                 }
                 if let Some(glass) = window.contentView().and_then(|content| content.subviews().firstObject()) {
                     round(&glass, *radius);
@@ -370,6 +395,7 @@ impl Display {
             for (handle, bounds, _) in &placed {
                 *handle.shared.placed.lock().expect("nothing panics holding it") = Some(*bounds);
             }
+            first.shared.attached.store(visible, std::sync::atomic::Ordering::Relaxed);
             (*draw.0)();
             CATransaction::commit();
         });
@@ -795,11 +821,6 @@ unsafe fn panel(window: &NSWindow, view: &View, rect: NSRect, corner: f64) {
         if let Some(layer) = view.layer() {
             layer.setCornerRadius(corner);
             layer.setMasksToBounds(true);
-            // Its frames come on screen with the Core Animation transaction they're drawn in (`Display::arrange`),
-            // which puts its window where it goes, so its frame and what's in it change together.
-            if let Ok(layer) = layer.downcast::<CAMetalLayer>() {
-                layer.setPresentsWithTransaction(true);
-            }
         }
     }
 }
