@@ -357,7 +357,7 @@ export class NetworkUpdater extends DurableObject<UpdaterEnv> {
 /**
  * Says what the update is now, as it changes, in the line Telemetry's Tail Worker keeps as a span
  * (`apps/telemetry/edge/worker.ts`): `network update`, from when its build was published to now, with its status,
- * build and how far it is, and as an error, which server held it and why, so Telemetry tells the network's owner.
+ * build and how far it is, and as an error, which server held it and why, so Telemetry raises an alert.
  */
 function said(state: State, status: ReturnType<NetworkUpdater["status"]>) {
   const held = status.held && `${status.held.name ?? status.held.server.slice(0, 8)}: ${status.held.why}`;
