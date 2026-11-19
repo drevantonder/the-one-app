@@ -297,12 +297,19 @@ fn launcher(home: std::path::PathBuf, link: Option<String>, started: std::time::
     }
     let _shortcut = shortcut(&home);
     // Started again as it updated, the app windows that were open open again.
+    // The windows open before it updated, once it's signed in: before, an app's page can't be read, and each would open
+    // in a web view of its own. The launcher, open as the native one is, isn't an app's window.
     if let Some(reopen) = std::env::var("ONE_REOPEN").ok().and_then(|reopen| serde_json::from_str::<Vec<(String, Option<String>)>>(&reopen).ok()) {
-        for (entrypoint, subject) in reopen {
-            if let Err(error) = hosts::open_window(entrypoint.clone(), subject, entrypoint) {
-                eprintln!("{error}");
+        crate::spawn(async move {
+            crate::signed_in().await;
+            let listed = hosts::command("main", "apps", json!({})).await.unwrap_or_default();
+            let launcher = crate::native::pages(&listed).find(|(_, meta)| meta["category"] == "launcher").map(|(page, _)| page);
+            for (entrypoint, subject) in reopen.into_iter().filter(|(entrypoint, _)| Some(entrypoint) != launcher.as_ref()) {
+                if let Err(error) = hosts::open_window(entrypoint.clone(), subject, entrypoint) {
+                    eprintln!("{error}");
+                }
             }
-        }
+        });
     }
     eprintln!("the window was made {} ms after the app started", started.elapsed().as_millis());
 

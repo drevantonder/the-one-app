@@ -519,6 +519,13 @@ async fn start() -> Result<Value, String> {
     Ok(told)
 }
 
+/// Once the device is signed in to its network, which it's told only once its views are open (`follows`).
+#[cfg(desktop)]
+pub(crate) async fn signed_in() {
+    let mut session = app().start.subscribe();
+    let _ = session.wait_for(|now| matches!(now, Some((_, Session::SignedIn)))).await;
+}
+
 /// Whether this is an iPhone's app installed from TestFlight, which updates it, as Apple tells it: its App Store
 /// receipt is the sandbox's. A build installed from a Mac has none, and an App Store one is `receipt`.
 fn testflight() -> bool {
