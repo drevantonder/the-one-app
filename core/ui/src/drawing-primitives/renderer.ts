@@ -62,8 +62,14 @@ export type Id = number
  *   is: its own JS in a sandbox of its own, asking its client as its own app, as tall as it says its content is
  *   (`ui/notifications/size-changed`) where its style says no height, and taking the pointer, the keyboard and Tab
  *   as any box does. Only a trusted app's page shows one. A host that doesn't draw it says so (`Mutations.frame`).
+ * - `list`: a column of `count` rows of which the page gives only those the host asks for, each a node with its
+ *   `index`, as UIKit's collection view and Android's RecyclerView hold only those near the window: it's as tall as all
+ *   of them, the host laying out those it has in their order and holding the room of the rest, as tall as those it has
+ *   drawn are on average (`estimate` until it's drawn one), and as it's scrolled, it says `range` with the rows a
+ *   window either side of what shows (`first`, and `last`, which isn't one), so a fling finds them drawn. A host that
+ *   doesn't draw it says so (`Mutations.list`), and the page draws every row in a `box`.
  * A `raw-text` outside a `text` is drawn as if in one. */
-export type Type = "box" | "scroll" | "text" | "image" | "path" | "input" | "picker" | "video" | "frame" | "raw-text"
+export type Type = "box" | "scroll" | "text" | "image" | "path" | "input" | "picker" | "video" | "frame" | "list" | "raw-text"
 
 /** What a native host gives an app's sandbox, as `globalThis.mutations`, before it loads the app's page: a function for
  * each mutation of its tree, called as Solid's renderer makes it, in order. The host applies what a turn of the
@@ -89,6 +95,8 @@ export interface Mutations {
   video?: boolean
   /** Whether it draws a `frame`, as `video`. */
   frame?: boolean
+  /** Whether it draws a `list`. */
+  list?: boolean
 }
 
 /** What the UI library gives the host, as `globalThis.ui` (with calls.ts's `Sandbox`), once it's loaded. */
@@ -117,6 +125,9 @@ export interface Event {
   scrollLeft?: number
   /** `intersection`'s: whether it's near the window now. */
   isIntersecting?: boolean
+  /** A `list`'s `range`: the rows it needs, from `first` to `last`, which isn't one. */
+  first?: number
+  last?: number
   /** When it happened, in milliseconds on the host's own clock, which `requestAnimationFrame` is on too. */
   timeStamp?: number
   /** A pointer's, `contextmenu`'s and `click`'s: where it is in the window, in CSS pixels. */
@@ -165,7 +176,7 @@ export interface Rect {
  * accessibility actions too: `click` is AccessKit's `Click`, `input` its `SetValue`, `focus` and `blur` its `Focus`
  * and `Blur`, `scroll` its `ScrollIntoView` and `ScrollDown`. `drop` is files dropped on it from the system (a
  * Finder's, an Explorer's), each its `name` and its bytes as base64 (`body`), under `files`. */
-export type EventName = "click" | "input" | "action" | "focus" | "blur" | "keydown" | "pointerenter" | "pointerleave" | "scroll" | "layout" | "intersection" | "drop" | Moved | Streamed
+export type EventName = "click" | "input" | "action" | "focus" | "blur" | "keydown" | "pointerenter" | "pointerleave" | "scroll" | "layout" | "intersection" | "range" | "drop" | Moved | Streamed
 
 /** What a `video` tells its page of its stream: `offer`, `state` and `size`. */
 export type Streamed = "offer" | "state" | "size"
@@ -245,6 +256,11 @@ export interface Props {
   subject?: string
   /** `image`: what it shows, its accessible name. Empty for one that's only how it looks. */
   alt?: string
+  /** `list`: how many rows it has, and how tall one is taken to be until it has drawn one, in CSS pixels. */
+  count?: number
+  estimate?: number
+  /** A row of a `list`: which it is, from 0. */
+  index?: number
   /** `path`: its shape, as SVG's path data. */
   d?: string
   /** `path`: the box its `d` is drawn in, as SVG's `viewBox`: `"0 0 256 256"`. */

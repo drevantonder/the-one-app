@@ -7,7 +7,7 @@ export { createVelocityTracker, projected } from "./behavior-primitives/velocity
 export { createTheme, defineVars, negative, styles } from "./styles.ts"
 export { tokens } from "./tokens.ts"
 
-export { Frame, Image, Modal, Path, Portal, Pressable, ScrollView, Svg, Text, TextInput, Video, View } from "./drawing-primitives/primitives.native.tsx"
+export { Frame, Image, Modal, Path, Portal, Pressable, ScrollView, Svg, Text, TextInput, Video, View, VirtualizedList } from "./drawing-primitives/primitives.native.tsx"
 export { render } from "./render.tsx"
 export { Checkbox, Field, Input, RadioGroup, Search, Switch, Textarea } from "./styled-components/field.tsx"
 export { Select } from "./styled-components/select.tsx"

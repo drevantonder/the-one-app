@@ -2,7 +2,7 @@
 // plain element with the semantic props a native host's renderer has (renderer.ts). A native host draws
 // the same props from the mutations Solid's universal renderer tells it. A primitive's `style` is styles (../styles.ts),
 // drawn by their classes.
-import { createEffect, createSignal, For, merge, omit, onCleanup, onSettled, Show } from "solid-js"
+import { createEffect, createMemo, createSignal, For, merge, omit, onCleanup, onSettled, Repeat, Show } from "solid-js"
 import { Dynamic, Portal as Inserted, render as mount, type JSX } from "@solidjs/web"
 import { frame, sized, tellDrawn, unframe } from "../bridge.ts"
 import { layer as whole } from "./layer.ts"
@@ -409,6 +409,96 @@ export function ScrollView(props: ScrollViewProps) {
   return (
     <div {...own} {...moves} data-scrolls="" {...drawn("ui-view ui-scroll-view", props.style)}>
       {props.children}
+    </div>
+  )
+}
+
+export interface VirtualizedListProps<T> extends Semantics {
+  style?: Styles
+  /** The rows' items, each drawn by `renderItem` as it comes near the window. */
+  data: readonly T[]
+  /** A row: its item, and which it is, from 0. */
+  renderItem: (info: { item: T; index: number }) => JSX.Element
+  /** How tall a row is taken to be until one's drawn, in CSS pixels, as FlashList's. */
+  estimatedItemSize?: number
+}
+
+/** How many rows a list draws before it knows where it is: a window's. */
+const FIRST_ROWS = 24
+
+/// `<VirtualizedList data={notes()} estimatedItemSize={38} renderItem={({ item }) => <Row heading={item.text} />} />`:
+/// a long list, of which only the rows near the window are drawn, as React Native's VirtualizedList (FlatList's) and
+/// FlashList draw them: those a window either side of what shows, each as it comes into that and gone as it leaves it,
+/// the room of the rest held as tall as the drawn ones are on average (`estimatedItemSize` until one is), so a list of
+/// 10,000 is as quick as one of 20. A native host owns where it is (renderer.ts's `list`); here the page does, from
+/// where it's drawn as anything scrolls. A row is its item's, by its index: what changes in `data` changes the row.
+export function VirtualizedList<T>(props: VirtualizedListProps<T>) {
+  let box: HTMLDivElement | undefined
+  /** How tall each row drawn was, by its index. */
+  const heights = new Map<number, number>()
+  const [measured, setMeasured] = createSignal(0)
+  const [range, setRange] = createSignal({ first: 0, last: FIRST_ROWS })
+  /** Where each row starts, and where the last ends. */
+  const offsets = createMemo(() => {
+    measured()
+    const drawn = [...heights.values()]
+    const estimate = drawn.length ? drawn.reduce((sum, height) => sum + height, 0) / drawn.length : (props.estimatedItemSize ?? 38)
+    const at = [0]
+    for (let row = 0; row < props.data.length; row++) at.push(at[row] + (heights.get(row) ?? estimate))
+    return at
+  })
+  const shown = () => {
+    const last = Math.min(range().last, props.data.length)
+    const first = Math.min(range().first, last)
+    return { first, last, top: offsets()[first], bottom: offsets().at(-1)! - offsets()[last] }
+  }
+  /// The rows a window either side of what shows of it.
+  const ask = () => {
+    if (!box) return
+    const top = box.getBoundingClientRect().top
+    const starts = offsets()
+    const count = starts.length - 1
+    const from = -top - innerHeight
+    const to = -top + 2 * innerHeight
+    let first = 0
+    while (first < count && starts[first + 1] <= from) first++
+    let last = first
+    while (last < count && starts[last] < to) last++
+    if (first !== range().first || last !== range().last) setRange({ first, last })
+  }
+  const sized = new ResizeObserver((entries) => {
+    for (const entry of entries) heights.set(Number((entry.target as HTMLElement).dataset.index), entry.borderBoxSize[0]?.blockSize ?? entry.contentRect.height)
+    setMeasured((times) => times + 1)
+    ask()
+  })
+  addEventListener("scroll", ask, { capture: true, passive: true })
+  addEventListener("resize", ask)
+  onSettled(ask)
+  onCleanup(() => (sized.disconnect(), removeEventListener("scroll", ask, { capture: true }), removeEventListener("resize", ask)))
+  const own = omit(props, "style", "data", "renderItem", "estimatedItemSize")
+  return (
+    <div {...own} ref={(element: HTMLDivElement) => (box = element)} {...drawn("ui-view", props.style)}>
+      <div style={{ height: `${shown().top}px`, "flex-shrink": 0 }} />
+      <Repeat count={shown().last - shown().first} from={shown().first}>
+        {(index) => (
+          <div
+            class="ui-view"
+            data-index={index}
+            ref={(element: HTMLDivElement) => {
+              sized.observe(element)
+              onCleanup(() => sized.unobserve(element))
+            }}
+          >
+            {props.renderItem({
+              get item() {
+                return props.data[index]
+              },
+              index,
+            })}
+          </div>
+        )}
+      </Repeat>
+      <div style={{ height: `${shown().bottom}px`, "flex-shrink": 0 }} />
     </div>
   )
 }

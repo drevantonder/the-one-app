@@ -147,6 +147,14 @@ export type ScrollViewProps = ViewProps & {
 }
 export declare function ScrollView(props: ScrollViewProps): Element
 
+export type VirtualizedListProps<T> = Semantics & {
+  style?: Styles
+  data: readonly T[]
+  renderItem: (info: { item: T; index: number }) => Element
+  estimatedItemSize?: number
+}
+export declare function VirtualizedList<T>(props: VirtualizedListProps<T>): Element
+
 export type TextProps = Semantics & {
   style?: Styles
   /** Pressed where its words are, as an inline link (`role="link"`), reached by Tab with a `tabIndex`. */
@@ -277,6 +285,8 @@ export declare function createVelocityTracker(options?: { horizon?: number; stal
  * normal deceleration rate unless `rate` says. Where it would carry on to is where a page lands, as an iPhone's do. */
 export declare function projected(velocity: number, rate?: number): number
 export declare function List(props: { listbox?: Listbox; label?: string; children?: Element }): Element
+export declare function List<T>(props: { listbox?: Listbox; label?: string; each: readonly T[]; keyed?: undefined; children: (item: T, index: () => number) => Element }): Element
+export declare function List<T>(props: { listbox?: Listbox; label?: string; each: readonly T[]; keyed: (item: T) => unknown; children: (item: () => T, index: () => number) => Element }): Element
 /** How the lists in it are drawn (`ListStyle`): plain, inset grouped cards, or a window's sidebar. */
 export declare function ListStyle(props: { value: "plain" | "insetGrouped" | "sidebar"; children: Element }): Element
 export declare function Row(props: {

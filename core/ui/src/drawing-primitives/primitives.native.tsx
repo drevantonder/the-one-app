@@ -2,7 +2,7 @@
 // (renderer.ts's `Props`), which Solid's universal renderer tells the host as mutations (renderer.native.ts). The UI
 // library's components import them as `#primitives`, which is these in the native build and the DOM's (primitives.tsx)
 // in the DOM's, so each component is the same code on both.
-import { createContext, merge, omit, onCleanup, Show, useContext, type Element } from "solid-js"
+import { createContext, createSignal, merge, omit, onCleanup, Repeat, Show, useContext, type Element } from "solid-js"
 import { createElement, detach, insert, insertNode, render as draw, root, spread, unsupported } from "./renderer.native.ts"
 import { layer } from "./layer.ts"
 import type { Mutations, Type } from "./renderer.ts"
@@ -116,6 +116,50 @@ export const Frame: typeof Page.Frame = (props) => {
   if ((globalThis as { mutations?: Mutations }).mutations?.frame) return primitive("frame")(props)
   unsupported("Frame")
   throw new Error("Frame isn't drawn by this native host (core/ui/src/drawing-primitives/renderer.ts's `frame`)")
+}
+
+/** How many rows a `list` has before its host first asks for some: a window's. */
+const FIRST_ROWS = 24
+
+/** A list of rows of which only those near the window are drawn, as the host asks for them (renderer.ts's `list`): the
+ * host lays them out and owns where it is, and the page draws only the rows it's asked for, each as its index comes
+ * into the range and gone as it leaves it. A host that doesn't draw one draws every row in a box. */
+export const VirtualizedList: typeof Page.VirtualizedList = (props) => {
+  const rest = () => omit(props, "data", "renderItem", "estimatedItemSize")
+  const row = (index: number) => props.renderItem({ get item() { return props.data[index] }, index })
+  if (!(globalThis as { mutations?: Mutations }).mutations?.list) {
+    const node = createElement("box")
+    spread(node, rest())
+    insert(node, () => <Repeat count={props.data.length}>{row}</Repeat>)
+    return node as unknown as Element
+  }
+  const [range, setRange] = createSignal({ first: 0, last: FIRST_ROWS })
+  const last = () => Math.min(range().last, props.data.length)
+  const first = () => Math.min(range().first, last())
+  const node = createElement("list")
+  spread(
+    node,
+    merge(rest(), {
+      get count() {
+        return props.data.length
+      },
+      get estimate() {
+        return props.estimatedItemSize
+      },
+      onRange: (event: { first: number; last: number }) => setRange({ first: event.first, last: event.last }),
+    }),
+  )
+  insert(node, () => (
+    <Repeat count={last() - first()} from={first()}>
+      {(index) => {
+        const box = createElement("box")
+        spread(box, { index })
+        insert(box, () => row(index))
+        return box as unknown as Element
+      }}
+    </Repeat>
+  ))
+  return node as unknown as Element
 }
 
 export const render: typeof Page.render = (code) => draw(code as never)

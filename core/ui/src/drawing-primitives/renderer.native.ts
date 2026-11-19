@@ -43,11 +43,11 @@ function node(type: Type, value?: string): Node {
   return made
 }
 
-const types = new Set<Type>(["box", "scroll", "text", "image", "path", "input", "picker", "video", "frame"])
+const types = new Set<Type>(["box", "scroll", "text", "image", "path", "input", "picker", "video", "frame", "list"])
 
 export const { render: mount, effect, memo, createComponent, createElement, createTextNode, insertNode, insert, spread, setProp, mergeProps, applyRef, ref } = createRenderer<Node>({
   createElement(tag) {
-    if (!types.has(tag as Type)) throw new Error(`A page draws a box, a scroll, a text, an image, a path, an input, a picker, a video or a frame, not a ${tag}`)
+    if (!types.has(tag as Type)) throw new Error(`A page draws a box, a scroll, a text, an image, a path, an input, a picker, a video, a frame or a list, not a ${tag}`)
     return node(tag as Type)
   },
   // Solid hands over what the page wrote, a number too (`{count()}`), which the DOM makes text of itself.

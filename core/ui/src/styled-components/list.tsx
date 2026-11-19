@@ -1,8 +1,8 @@
 // A list and its rows: written once on the drawing primitives, the same on the DOM and on a native host.
-import { children, createContext, createEffect, createMemo, createSignal, flush, For, onCleanup, Show, useContext } from "solid-js"
+import { children, createContext, createEffect, createSignal, For, onCleanup, Show, useContext } from "solid-js"
 import type { JSX } from "@solidjs/web"
-import { Pressable, Text, View } from "#primitives"
-import { direction, reducedMotion, touch, viewport } from "#bridge"
+import { Pressable, Text, View, VirtualizedList } from "#primitives"
+import { direction, reducedMotion, touch } from "#bridge"
 import { Icon } from "./button.tsx"
 import { RowMenu, type RowMenu as Menu } from "./menu.tsx"
 import { Choose } from "./collect.ts"
@@ -88,7 +88,7 @@ const look = styles({
   swipe: { position: "absolute", top: 0, bottom: 0, end: 0, alignItems: "center", justifyContent: "center", overflow: "hidden", backgroundColor: tokens.colour.red, color: tokens.colour.onAccent, cursor: "pointer" },
   chevron: { flexShrink: 0, color: tokens.colour.tertiaryLabel },
   // A row coming or going: it opens up where it goes, or closes up, fading as it does.
-  // How tall a part that isn't drawn is, held as it was.
+  // How tall a row coming or going is held, as it opens up or closes up.
   tall: (height: number) => ({ height }),
   moved: (translateX: number) => ({ translateX }),
   swiped: (width: number) => ({ width }),
@@ -100,27 +100,74 @@ const look = styles({
 /** How long a row takes to open up or close up, in milliseconds: the settle pace's (tokens.ts). */
 const settle = duration(tokens.motion.settle)
 
-/** A row as the list draws it: coming (its height opening up from none), there, or going (closing up), and the
- * height it's held at while it does. */
-type Slot = {
-  node: JSX.Element
+/** A row as the list draws it: what it shows (a row's node, or an item), coming (its height opening up from none),
+ * there, or going (closing up), and the height it's held at while it does. */
+type Slot<X> = {
+  value: () => X
+  setValue: (value: X) => void
+  key: unknown
   state: () => State
   setState: (state: State) => void
   to: () => number | undefined
   setTo: (to: number | undefined) => void
   height?: number
-  /** Whether its row is drawn, and whether it's waiting to be (`List`). */
-  drawn: () => boolean
-  setDrawn: (drawn: boolean) => void
-  waiting?: boolean
 }
 type State = "coming" | "there" | "going"
 
-const slot = (node: JSX.Element, state: State, to?: number): Slot => {
+const slot = <X,>(value: X, key: unknown, state: State, to?: number): Slot<X> => {
   const [now, setState] = createSignal(state)
   const [held, setTo] = createSignal(to)
-  const [drawn, setDrawn] = createSignal(false)
-  return { node, state: now, setState, to: held, setTo, drawn, setDrawn }
+  const [shown, setShown] = createSignal({ value })
+  return { value: () => shown().value, setValue: (value) => void setShown({ value }), key, state: now, setState, to: held, setTo }
+}
+
+/** The rows of `values`, each by its `key`, as they come and go: a row added to a list that has some opens up where it
+ * goes, and one taken out closes up where it was, at the settle pace (one that's taken out keeps its place, before the
+ * row that followed it, until it's closed up); a list first filled, or changed in any other way, is a plain swap.
+ * Whoever asked for less motion sees a new row fade in, and one taken out just go. */
+function createSlots<X>(values: () => readonly X[], key: (value: X) => unknown) {
+  const [slots, setSlots] = createSignal<Slot<X>[]>([])
+  createEffect(
+    () => [...values()],
+    (next) => {
+      const before = slots().filter((one) => one.state() !== "going")
+      const keys = next.map(key)
+      const kept = new Set(keys)
+      const gone = before.filter((one) => !kept.has(one.key))
+      const had = new Set(before.map((one) => one.key))
+      const come = keys.filter((one) => !had.has(one))
+      // First filled, or some gone and some come (a row changed, another list's rows): a plain swap.
+      const plain = !before.length || (gone.length > 0 && come.length > 0)
+      const still = reducedMotion()
+      const was = new Map(before.map((one) => [one.key, one]))
+      const made: Slot<X>[] = next.map((value, at) => {
+        const kept = was.get(keys[at])
+        if (!kept) return slot(value, keys[at], plain ? "there" : "coming", plain || still ? undefined : 0)
+        kept.setValue(value)
+        return kept
+      })
+      if (!plain && !still)
+        for (const one of gone) {
+          const after = before.slice(before.indexOf(one) + 1).find((other) => kept.has(other.key))
+          const at = after ? made.findIndex((other) => other.key === after.key) : made.length
+          one.setState("going")
+          one.setTo(one.height)
+          made.splice(at, 0, one)
+          requestAnimationFrame(() => requestAnimationFrame(() => one.setTo(0)))
+          setTimeout(() => setSlots((now) => now.filter((other) => other !== one)), settle)
+        }
+      setSlots(made)
+    },
+  )
+  /// A row's height as it's laid out: a coming one opens up to it, then is as tall as it is.
+  const laid = (one: Slot<X>, height: number) => {
+    if (one.state() === "coming" && one.height === undefined) {
+      requestAnimationFrame(() => requestAnimationFrame(() => one.setTo(height)))
+      setTimeout(() => (one.setState("there"), one.setTo(undefined)), settle)
+    }
+    if (one.state() !== "going") one.height = height
+  }
+  return { slots, laid }
 }
 
 /// `<ListStyle value="insetGrouped">…</ListStyle>`: how the lists in it are drawn, as SwiftUI's `listStyle` is. `plain`,
@@ -134,165 +181,73 @@ export const ListStyle = createContext<"plain" | "insetGrouped" | "sidebar">("pl
 /** Whether a row is an option of a listbox, which its list's slot is for it. */
 const InListbox = createContext(false)
 
-/** What a list tells each row in it: whether it's drawn, by the node the row is, as the part of the list it's in comes
- * near the window and goes from it. */
-type Drawing = Map<unknown, (drawn: boolean) => void>
-const Drawing = createContext<Drawing>()
-
-/** How many rows a list draws or doesn't together, how many of those coming near the window it draws in a frame and
- * for how long at most (at least one), and how tall a row not drawn yet is held, until one is: a row's on a computer. */
-const CHUNK = 8
-const PER_FRAME = 3
-const BUDGET = 4
-const ROW = 38
-
-/// `<List><For each={notes()}>{(note) => <Row heading={note.text} />}</For></List>`: things of one kind, one under
-/// another, in one group that stops at a readable width however wide the room is. With no rows it shows nothing. A
-/// row added to a list that has some opens up where it goes, and one taken out closes up, the rest making room or
-/// closing the gap, at the settle pace; for whoever asked for less motion a new row fades in and one taken out just
-/// goes. A list that changes in any other way (filled, a row changed for another) just shows what it's given. A long
-/// list draws only its rows near the window, as React Native's FlatList and UIKit's table views do: 16 at a time, as
-/// they come near it, the rest held at the height they were, or a row's, until they do.
-export function List(props: { listbox?: Listbox; label?: string; children?: JSX.Element }) {
+/// `<List><Row heading="Notes" /><Row heading="Reminders" /></List>`: things of one kind, one under another, in one
+/// group that stops at a readable width however wide the room is. With no rows it shows nothing.
+/// `<List each={notes()} keyed={(note) => note.id}>{(note) => <Row heading={note.text} />}</List>`: a row for each
+/// item, as `For` draws them, drawn only as it comes near the window, as UIKit's and Android's lists and FlashList
+/// draw them (`VirtualizedList`), so 10,000 are as quick as 20. A row added to a list that has some opens up where it
+/// goes, and one taken out closes up, the rest making room or closing the gap, at the settle pace; for whoever asked
+/// for less motion a new row fades in and one taken out just goes. A list that changes in any other way (filled, a
+/// row changed for another) just shows what it's given. Its rows are its items, by `keyed` (as `For`'s), by
+/// themselves where it says none.
+export function List<T>(props: { listbox?: Listbox; label?: string; each?: readonly T[]; keyed?: (item: T) => unknown; children?: JSX.Element | ((item: any, index: () => number) => JSX.Element) }) {
   const style = useContext(ListStyle)
   // On a computer a plain list and a sidebar are rows on the window; grouped cards are cards there too.
   const flat = () => !touch() && style !== "insetGrouped"
   const grouped = () => !touch() && style === "insetGrouped"
-  const drawing: Drawing = new Map()
-  const rows = children(() => (
-    <Drawing value={drawing}>
-      <InListbox value={!!props.listbox}>{props.children}</InListbox>
-    </Drawing>
-  ))
-  const [slots, setSlots] = createSignal<Slot[]>([])
+  const each = props.each !== undefined
+  const rows = each ? undefined : children(() => <InListbox value={!!props.listbox}>{props.children as JSX.Element}</InListbox>)
+  const values = (): readonly unknown[] => (each ? (props.each ?? []) : rows!.toArray())
+  const { slots, laid } = createSlots(values, (value) => (each && props.keyed ? props.keyed(value as T) : value))
   createEffect(() => slots().filter((one) => one.state() !== "going").length, (count) => void (props.listbox && insides.get(props.listbox)!.rows(count)))
-  createEffect(
-    () => rows.toArray(),
-    (next) => {
-      const before = slots().filter((one) => one.state() !== "going")
-      const kept = new Set(next)
-      const gone = before.filter((one) => !kept.has(one.node))
-      const had = new Set(before.map((one) => one.node))
-      const come = next.filter((node) => !had.has(node))
-      // First filled, or some gone and some come (a row changed, another list's rows): a plain swap.
-      const plain = !before.length || (gone.length > 0 && come.length > 0)
-      const still = reducedMotion()
-      const was = new Map(before.map((one) => [one.node, one]))
-      const made: Slot[] = next.map((node) => was.get(node) ?? slot(node, plain ? "there" : "coming", plain || still ? undefined : 0))
-      // What's going keeps its place, before the row that followed it, until it's closed up.
-      if (!plain && !still)
-        for (const one of gone) {
-          const after = before.slice(before.indexOf(one) + 1).find((other) => kept.has(other.node))
-          const at = after ? made.findIndex((other) => other.node === after.node) : made.length
-          one.setState("going")
-          one.setTo(one.height)
-          made.splice(at, 0, one)
-          requestAnimationFrame(() => requestAnimationFrame(() => one.setTo(0)))
-          setTimeout(() => setSlots((now) => now.filter((other) => other !== one)), settle)
-        }
-      setSlots(made)
-    },
-  )
-  /// A row's height as it's laid out: a coming one opens up to it, then is as tall as it is.
-  const laid = (one: Slot, height: number) => {
-    if (!one.drawn()) return
-    if (one.state() === "coming" && one.height === undefined) {
-      requestAnimationFrame(() => requestAnimationFrame(() => one.setTo(height)))
-      setTimeout(() => (one.setState("there"), one.setTo(undefined)), settle)
-    }
-    if (one.state() !== "going") one.height = height
-    tall = height
-  }
-  let tall = ROW
-  /// Draws a row, or puts it away. What comes near the window as it's scrolled is drawn for a few milliseconds a
-  /// frame, those nearest it first, as React Native's FlatList draws in batches and React's scheduler in slices, so a
-  /// frame stays within its time; it's near the window half a window ahead, so it's drawn before it shows.
-  const draw = (one: Slot, now: boolean) => {
-    one.waiting = false
-    one.setDrawn(now)
-    drawing.get(one.node)?.(now)
-  }
-  let waiting: Slot[] = []
-  const next = () => {
-    const until = performance.now() + BUDGET
-    waiting = waiting.filter((one) => one.waiting)
-    // Each drawn as it's set (`flush`), so the time it took is what's counted.
-    for (let drawn = 0; waiting.length && drawn < PER_FRAME && (!drawn || performance.now() < until); drawn++) {
-      draw(waiting.shift()!, true)
-      flush()
-    }
-    if (waiting.length) requestAnimationFrame(next)
-  }
-  const wait = (ones: Slot[]) => {
-    if (!ones.length) return
-    if (!waiting.length) requestAnimationFrame(next)
-    for (const one of ones) one.waiting = true
-    waiting.push(...ones)
-  }
-  /// Where each part of the list drawn starts, so one coming near above them is drawn from its foot up.
-  const shown = new Set<number>()
-  /// Each part of the list, by where it starts: drawn as it comes near the window (those that fill it at once), and
-  /// held at its height while it's far from it; the one chosen in a listbox stays drawn.
-  const chunks = createMemo(() => Array.from({ length: Math.ceil(slots().length / CHUNK) }, (_, at) => at * CHUNK))
-  const Chunk = (chunk: { start: number }) => {
-    const mine = () => slots().slice(chunk.start, chunk.start + CHUNK)
-    const [near, setNear] = createSignal(chunk.start < Math.ceil(viewport().height / 32))
-    const chosen = () => !!props.listbox && Math.floor(props.listbox.chosen() / CHUNK) * CHUNK === chunk.start
-    const drawn = () => near() || chosen()
-    // What fills the window as the list fills, and a row added to a part that's drawn, is drawn at once; a part
-    // that comes near as it's scrolled, a few rows a frame. What isn't a Row of the UI library's is drawn as it comes.
-    let was: boolean | undefined
-    createEffect(
-      () => [drawn(), mine()] as const,
-      ([now, ones]) => {
-        const scrolled = now && was === false && !chosen()
-        was = now
-        if (!now) {
-          shown.delete(chunk.start)
-          return ones.forEach((one) => draw(one, false))
-        }
-        const coming = ones.filter((one) => !one.drawn() && !one.waiting)
-        const later = coming.filter((one) => scrolled && drawing.has(one.node))
-        coming.filter((one) => !later.includes(one)).forEach((one) => draw(one, true))
-        wait([...shown].some((start) => start > chunk.start) ? later.reverse() : later)
-        shown.add(chunk.start)
-      },
-    )
+  /// A row, held as it opens up or closes up, and as a listbox's option, by where it is in the list.
+  const slotted = (one: Slot<unknown>, at: () => number) => {
+    // As `For` gives its rows: an item by itself, or one by its key as an accessor, as it changes.
+    const row = props.children as (item: T | (() => T), index: () => number) => JSX.Element
+    const node = each ? row(props.keyed ? (one.value as () => T) : (one.value() as T), at) : (one.value() as JSX.Element)
+    const measured = (event: { currentTarget: { getBoundingClientRect(): { height: number } } }) => laid(one, event.currentTarget.getBoundingClientRect().height)
     return (
-      <View onIntersection={(event) => setNear(event.isIntersecting)} style={[!drawn() && look.tall(mine().reduce((sum, one) => sum + (one.height ?? tall), 0))]}>
-        <Show when={drawn()}>
-          <For each={mine()}>{(one, at) => slotted(one, () => chunk.start + at())}</For>
+      <View style={[look.slot, one.state() === "coming" && look.entering, one.state() === "going" && look.leaving, one.to() !== undefined && look.tall(one.to()!)]}>
+        <Show when={props.listbox} fallback={<View onLayout={measured}>{node}</View>}>
+          {(listbox) => (
+            <View
+              role="option"
+              id={insides.get(listbox())!.option(at())}
+              aria-selected={listbox().chosen() === at() ? "true" : "false"}
+              onPointerEnter={() => listbox().choose(at())}
+              onLayout={measured}
+              style={[look.option, listbox().chosen() === at() && look.chosen]}
+            >
+              {node}
+            </View>
+          )}
         </Show>
       </View>
     )
   }
-  const slotted = (one: Slot, at: () => number) => (
-              <View style={[look.slot, one.state() === "coming" && look.entering, one.state() === "going" && look.leaving, one.to() !== undefined && look.tall(one.to()!), !one.drawn() && look.tall(one.height ?? tall)]}>
-                <Show
-                  when={props.listbox}
-                  fallback={<View onLayout={(event) => laid(one, event.currentTarget.getBoundingClientRect().height)}>{one.node}</View>}
-                >
-                  {(listbox) => (
-                    <View
-                      role="option"
-                      id={insides.get(listbox())!.option(at())}
-                      aria-selected={listbox().chosen() === at() ? "true" : "false"}
-                      onPointerEnter={() => listbox().choose(at())}
-                      onLayout={(event) => laid(one, event.currentTarget.getBoundingClientRect().height)}
-                      style={[look.option, listbox().chosen() === at() && look.chosen]}
-                    >
-                      {one.node}
-                    </View>
-                  )}
-                </Show>
-              </View>
-  )
   return (
     <Show when={slots().length}>
       <View role={props.listbox ? "listbox" : "list"} id={props.listbox?.id} aria-label={props.label} style={[look.list, flat() && look.flat, grouped() && look.groupedList]}>
-        <View style={[look.rows, flat() && look.flatRows]}>
-          <For each={chunks()}>{(start) => <Chunk start={start} />}</For>
-        </View>
+        <Show
+          when={each}
+          fallback={
+            <View style={[look.rows, flat() && look.flatRows]}>
+              <For each={slots()}>{(one, at) => slotted(one, at)}</For>
+            </View>
+          }
+        >
+          <InListbox value={!!props.listbox}>
+            <VirtualizedList
+              style={[look.rows, flat() && look.flatRows]}
+              data={slots()}
+              renderItem={(row) => (
+                <Show when={row.item} keyed>
+                  {(one) => slotted(one, () => row.index)}
+                </Show>
+              )}
+            />
+          </InListbox>
+        </Show>
       </View>
     </Show>
   )
@@ -300,35 +255,6 @@ export function List(props: { listbox?: Listbox; label?: string; children?: JSX.
 
 /// How far aside a row stays to show its destructive item.
 const SHOWN = 88
-
-/// `<Row heading="Remove Device…" destructive onPress={remove} />` is a row that does something destructive, its
-/// heading red, as iOS's Settings has one at the foot of a page.
-/// `<Row heading="Coffee with Sam" text="Meals · 12 Nov" />`: one thing in a list: its `heading`, up to two grey lines
-/// of `text`, what it starts with (`start`, an icon) and what it ends with (`end`: an amount, a switch). With
-/// `onPress` the whole row is pressed and opens in place. `current` marks the one that's open beside the list, in a
-/// split. `control` is a control before all of it, pressed apart from the row, as a checkbox that picks rows is, and
-/// `action` a button after all of it, pressed apart from the row, as Sign In is for an account that needs it; an action
-/// that would leave the words narrower than a menu goes under them. A ⋯ `Menu` in its `end` opens on a long press or a
-/// right-click on the row too, and its `destructive` item (Delete, Remove) shows as a finger swipes the row toward
-/// its start, as a phone's lists do: pressed, or swiped most of the way, it's done.
-export function Row(props: RowProps): JSX.Element {
-  // In a list, its part of the list draws it as it comes near the window (`List`); until then, and once it's far from
-  // it again, it's an empty box, made in a moment however long the list. The one open beside the list is always drawn.
-  const drawing = useContext(Drawing)
-  if (!drawing) return <Drawn {...props} />
-  const [drawn, setDrawn] = createSignal(false)
-  // The node it is, as its list has it, by which the list draws it.
-  const [row] = children(() => (
-    <View>
-      <Show when={drawn() || props.current}>
-        <Drawn {...props} />
-      </Show>
-    </View>
-  )).toArray()
-  drawing.set(row, setDrawn)
-  onCleanup(() => drawing.delete(row))
-  return row
-}
 
 type RowProps = {
   heading?: JSX.Element
@@ -343,8 +269,17 @@ type RowProps = {
   destructive?: boolean
 }
 
-/// A row, drawn.
-function Drawn(props: RowProps) {
+/// `<Row heading="Remove Device…" destructive onPress={remove} />` is a row that does something destructive, its
+/// heading red, as iOS's Settings has one at the foot of a page.
+/// `<Row heading="Coffee with Sam" text="Meals · 12 Nov" />`: one thing in a list: its `heading`, up to two grey lines
+/// of `text`, what it starts with (`start`, an icon) and what it ends with (`end`: an amount, a switch). With
+/// `onPress` the whole row is pressed and opens in place. `current` marks the one that's open beside the list, in a
+/// split. `control` is a control before all of it, pressed apart from the row, as a checkbox that picks rows is, and
+/// `action` a button after all of it, pressed apart from the row, as Sign In is for an account that needs it; an action
+/// that would leave the words narrower than a menu goes under them. A ⋯ `Menu` in its `end` opens on a long press or a
+/// right-click on the row too, and its `destructive` item (Delete, Remove) shows as a finger swipes the row toward
+/// its start, as a phone's lists do: pressed, or swiped most of the way, it's done.
+export function Row(props: RowProps): JSX.Element {
   const [menu, setMenu] = createSignal<Menu>()
   const at = (event: Located) => ({ x: event.clientX, y: event.clientY, width: 0, height: 0 })
   // Held, its menu opens where it was held; swiped toward its start by a finger, its destructive item shows.
