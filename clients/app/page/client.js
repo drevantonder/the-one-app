@@ -53,6 +53,8 @@ const framed = new Set()
 let own
 /// The page under every other in this window: the launcher's, or in an app's own window, that app's.
 const base = () => own?.entrypoint ?? launcher
+/// What the page under every other is called where the window says it's opening it, or that it didn't open.
+const baseName = () => (own ? names.get(own.entrypoint) || "This app" : "Home Screen")
 /// A computer's launcher (`computer.rs`): this page in a panel the system summons, whose app is the launcher alone.
 /// It's put away as an app opens from it, on Escape, and once the launcher is done with it (`leave`).
 const panel = () => windows && !own
@@ -744,17 +746,17 @@ const onScreen = (view) => !document.hidden && shown.getSnapshot().hasTag("pages
 /// network answers. With a launcher kept from before, it's starting that alone.
 /** @param {Context} context @returns {{ steps: string[], at: number, text?: string }} */
 function steps({ connection, starting }) {
-  if (starting && connection !== "online") return { steps: ["Opening Home Screen"], at: 0 }
+  if (starting && connection !== "online") return { steps: [`Opening ${baseName()}`], at: 0 }
   const reached = connection === "offline" || connection === "reconnecting" ? "Can't reach your network" : "Connecting to your network"
   const at = starting || connection === "online" ? 1 : 0
-  return { steps: [reached, "Opening Home Screen"], at, text: at === 0 && reached !== "Connecting to your network" ? "Check this device is online." : undefined }
+  return { steps: [reached, `Opening ${baseName()}`], at, text: at === 0 && reached !== "Connecting to your network" ? "Check this device is online." : undefined }
 }
 
 /// What each problem says: its heading, its one sentence, what's behind it for Show Details, and the button that
 /// fixes it, if there is one.
 /** @param {import("xstate").SnapshotFrom<typeof machine>} now @returns {[string, string, string | undefined, string | undefined] | undefined} */
 function problemOf(now) {
-  if (now.matches("launcher_failed")) return ["Home Screen didn't open.", "Try again in a moment.", now.context.why, "Try Again"]
+  if (now.matches("launcher_failed")) return [`${baseName()} didn't open.`, "Try again in a moment.", now.context.why, "Try Again"]
   if (now.matches("update_failed")) return ["Couldn't update", now.context.why ?? "", undefined, "Try Again"]
 }
 
@@ -1000,7 +1002,7 @@ function notes() {
   byId("page-problem").hidden = !unopened && !now?.matches("failed")
   const failed = unopened ?? (view && now?.matches("failed") ? { entrypoint: view.entrypoint, why: now.context.why } : undefined)
   if (failed) {
-    byId("page-problem-heading").textContent = `${names.get(failed.entrypoint) ?? "This app"} didn't open`
+    byId("page-problem-heading").textContent = `${names.get(failed.entrypoint) || "This app"} didn't open`
     byId("page-problem-details-text").textContent = failed.why ?? ""
   }
 }
