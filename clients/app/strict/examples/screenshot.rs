@@ -16,8 +16,9 @@
 //! `--measure` says, on stderr after the rest, how quickly it draws, as a line `measured {…}`: its first
 //! frame (`first_frame_ms`, from the GPU's start to the frame read back), a frame's time when nothing changes
 //! (`idle_ms`), as its first text field takes a character a frame (`typing_ms`) and as its first list scrolls
-//! (`scrolling_ms`), each where it has one, and the memory drawing took (`memory_mb`: the GPU, its atlas and the
-//! renderer, as the process's resident set grew).
+//! (`scrolling_ms`), each where it has one, the memory drawing took (`memory_mb`: the GPU, its atlas and the
+//! renderer, as the process's resident set grew), and what a second window of its size adds (`window_mb`: a renderer
+//! of its own, drawing the same frame, the GPU and the atlas shared).
 
 use std::path::PathBuf;
 
@@ -217,10 +218,17 @@ fn main() -> anyhow::Result<()> {
         };
         let ms = |ms: Option<f64>| ms.map(|ms| (ms * 100.0).round() / 100.0);
         let first_frame_ms = first_frame.get().map(|first| first.as_secs_f64() * 1000.0);
-        let memory_mb = (resident().saturating_sub(before) as f64 / 1e5).round() / 10.0;
+        let mb = |bytes: usize| (bytes as f64 / 1e5).round() / 10.0;
+        let memory_mb = mb(resident().saturating_sub(before));
+        let alone = resident();
+        let mut second = Renderer::offscreen(&context, renderer.sprite_atlas().clone(), device);
+        second.draw(&scene);
+        second.read();
+        let window_mb = mb(resident().saturating_sub(alone));
+        second.destroy();
         eprintln!(
             "measured {}",
-            json!({"first_frame_ms": ms(first_frame_ms), "idle_ms": ms(idle), "typing_ms": ms(typing), "scrolling_ms": ms(scrolling), "memory_mb": memory_mb})
+            json!({"first_frame_ms": ms(first_frame_ms), "idle_ms": ms(idle), "typing_ms": ms(typing), "scrolling_ms": ms(scrolling), "memory_mb": memory_mb, "window_mb": window_mb})
         );
     }
     renderer.destroy();

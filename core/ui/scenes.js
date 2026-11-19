@@ -20,7 +20,7 @@
 // differs, and keeps them all in `--out` to look at. A native host that can't draw a page yet (an older runtime
 // version) gives nothing, which it says. It says too how quickly the native host drew each (the harness's
 // `--measure`): its first frame, a frame when nothing changes, as its first field is typed in and as its first list
-// scrolls, and the memory drawing took, to compare a change's before and after.
+// scrolls, the memory drawing took and what a second window adds, to compare a change's before and after.
 import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs"
 import { dirname, join, resolve } from "node:path"
 import { chromium } from "playwright-core"
@@ -217,8 +217,8 @@ function native(built, scene, folder) {
 }
 
 /// How quickly the native host drew a scene, as a line.
-const timings = ({ first_frame_ms, idle_ms, typing_ms, scrolling_ms, memory_mb }) =>
-  [`first frame ${first_frame_ms} ms`, `frame ${idle_ms} ms idle`, typing_ms != null && `${typing_ms} ms typing`, scrolling_ms != null && `${scrolling_ms} ms scrolling`, `${memory_mb} MB`].filter(Boolean).join(", ")
+const timings = ({ first_frame_ms, idle_ms, typing_ms, scrolling_ms, memory_mb, window_mb }) =>
+  [`first frame ${first_frame_ms} ms`, `frame ${idle_ms} ms idle`, typing_ms != null && `${typing_ms} ms typing`, scrolling_ms != null && `${scrolling_ms} ms scrolling`, `${memory_mb} MB`, `${window_mb} MB a window more`].filter(Boolean).join(", ")
 
 /// How much of two pictures differs, from 0 to 1, where they're the same size, with where in `diff`.
 function differs(one, other, diff) {
