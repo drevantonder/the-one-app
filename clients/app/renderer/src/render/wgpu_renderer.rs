@@ -276,6 +276,25 @@ pub struct WgpuRenderer {
     backdrop: Option<BackdropTextures>,
     /// Each shadow's tile, drawn the first frame it's in, with what binds it (`tiled`).
     tiles: std::collections::HashMap<TileKey, (wgpu::Texture, wgpu::BindGroup)>,
+    /// What the last frame drew, batch by batch (`Drawn`), and what of the frames before was the same and is kept.
+    last: Drawn,
+    kept: Option<Kept>,
+}
+
+/// What a frame drew: each batch, as a hash of what it is (its kind, texture and instances), and what they were drawn
+/// over (the frame's size and origin, and the atlas's generation).
+#[derive(Default, PartialEq)]
+struct Drawn {
+    over: u64,
+    batches: Vec<u64>,
+}
+
+/// The start of a frame that's the same as the frames before it, drawn once into a texture of its own, as a
+/// compositor keeps a layer: a frame starts as a copy of it and draws only what follows. What stays the same as the
+/// rest moves (a launcher's card under its turning pages, a page under a sheet sliding up), shadows, blurs and all.
+struct Kept {
+    texture: wgpu::Texture,
+    drawn: Drawn,
 }
 
 impl WgpuRenderer {
@@ -319,7 +338,9 @@ impl WgpuRenderer {
         let config = wgpu::SurfaceConfiguration {
             // A backdrop blurs what's drawn so far, read from the frame where the surface lets a shader read it
             // (Vulkan's), else copied out of it (`blur_behind`).
+            // A frame starts as a copy of what's kept of the frames before, where the surface lets it be copied into.
             usage: wgpu::TextureUsages::RENDER_ATTACHMENT
+                | (capabilities.usages & wgpu::TextureUsages::COPY_DST)
                 | if capabilities.usages.contains(wgpu::TextureUsages::TEXTURE_BINDING) {
                     wgpu::TextureUsages::TEXTURE_BINDING
                 } else {
@@ -352,7 +373,7 @@ impl WgpuRenderer {
             sample_count: 1,
             dimension: wgpu::TextureDimension::D2,
             format: OFFSCREEN_FORMAT,
-            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC | wgpu::TextureUsages::TEXTURE_BINDING,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC | wgpu::TextureUsages::COPY_DST | wgpu::TextureUsages::TEXTURE_BINDING,
             view_formats: &[],
         });
         let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
@@ -391,6 +412,8 @@ impl WgpuRenderer {
             gamma: GammaParams { gamma_ratios: gamma_ratios(1.8), grayscale_enhanced_contrast: 1.0, pad: [0.0; 3] },
             backdrop: None,
             tiles: Default::default(),
+            last: Drawn::default(),
+            kept: None,
         }
     }
 
@@ -455,7 +478,6 @@ impl WgpuRenderer {
             Target::Offscreen { texture, view, .. } => (None, view.clone(), texture.clone()),
         };
         let size = (texture.width(), texture.height());
-        let blurrable = texture.usage().intersects(wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_SRC);
 
         // The frame's data: its globals, then each batch's instances, then each backdrop's blur's parameters.
         self.data.clear();
@@ -475,6 +497,29 @@ impl WgpuRenderer {
                 PrimitiveBatch::Backdrops(backdrops) => self.push_instances(backdrops),
             })
             .collect();
+        // What each batch is, and what of the frame's start is the same as the last's.
+        let drawn = {
+            use std::hash::{Hash, Hasher};
+            let hash = |hashing: &dyn Fn(&mut std::collections::hash_map::DefaultHasher)| {
+                let mut hasher = std::collections::hash_map::DefaultHasher::new();
+                hashing(&mut hasher);
+                hasher.finish()
+            };
+            let over = hash(&|hasher| (size, origin.map(f32::to_bits), self.atlas.generation()).hash(hasher));
+            let batches = batches
+                .iter()
+                .zip(&instances)
+                .map(|(batch, (offset, length))| {
+                    let texture = match batch {
+                        PrimitiveBatch::MonochromeSprites { texture_id, .. } | PrimitiveBatch::PolychromeSprites { texture_id, .. } => Some(*texture_id),
+                        _ => None,
+                    };
+                    let bytes = &self.data[*offset as usize..(*offset + *length) as usize];
+                    hash(&|hasher| (std::mem::discriminant(batch), texture, bytes).hash(hasher))
+                })
+                .collect();
+            Drawn { over, batches }
+        };
         let blurs: Vec<Vec<Blur>> = batches
             .iter()
             .map(|batch| match batch {
@@ -536,22 +581,42 @@ impl WgpuRenderer {
         for (key, (width, height), globals, instance) in planned {
             self.draw_tile(&mut encoder, &buffer, key, (width, height), globals, gamma, instance);
         }
-        let mut load = wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT);
-        let mut run: Vec<usize> = Vec::new();
-        for (at, batch) in batches.iter().enumerate() {
-            let PrimitiveBatch::Backdrops(backdrops) = batch else {
-                run.push(at);
-                continue;
-            };
-            self.draw_run(&mut encoder, &view, load, &globals, &batches, &instances, &run, None);
-            run.clear();
-            load = wgpu::LoadOp::Load;
-            for (one, blur) in (0..backdrops.len()).zip(&blurs[at]) {
-                let blurred = blurrable.then(|| self.blur_behind(&mut encoder, &texture, &view, &globals, &buffer, blur));
-                self.draw_run(&mut encoder, &view, wgpu::LoadOp::Load, &globals, &batches, &instances, &[at], blurred.map(|view| (view, one)));
+        // The frame starts from what's kept, where it starts as that did, and is drawn only from there; or what's the
+        // same as the last frame's start, two frames running, is kept now, where it's worth more than its copy.
+        let copies = texture.usage().contains(wgpu::TextureUsages::COPY_DST);
+        let same = |kept: &Drawn| kept.over == drawn.over && drawn.batches.starts_with(&kept.batches);
+        if !copies || self.kept.as_ref().is_some_and(|kept| !same(&kept.drawn)) {
+            self.kept = None;
+        }
+        if copies && self.kept.is_none() && self.last.over == drawn.over {
+            let start = drawn.batches.iter().zip(&self.last.batches).take_while(|(now, last)| now == last).count();
+            // A shadow's or a blur's pixels cost more than copying the frame; anything else is drawn again.
+            let worth = batches[..start].iter().any(|batch| matches!(batch, PrimitiveBatch::Shadows(_) | PrimitiveBatch::Backdrops(_)));
+            if worth {
+                let made = self.device.create_texture(&wgpu::TextureDescriptor {
+                    label: None,
+                    size: wgpu::Extent3d { width: size.0, height: size.1, depth_or_array_layers: 1 },
+                    mip_level_count: 1,
+                    sample_count: 1,
+                    dimension: wgpu::TextureDimension::D2,
+                    format: self.format,
+                    usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_SRC,
+                    view_formats: &[],
+                });
+                let made_view = made.create_view(&wgpu::TextureViewDescriptor::default());
+                self.draw_batches(&mut encoder, &made, &made_view, &globals, &buffer, &batches, &instances, &blurs, 0..start);
+                self.kept = Some(Kept { texture: made, drawn: Drawn { over: drawn.over, batches: drawn.batches[..start].to_vec() } });
             }
         }
-        self.draw_run(&mut encoder, &view, load, &globals, &batches, &instances, &run, None);
+        let from = match &self.kept {
+            Some(kept) => {
+                encoder.copy_texture_to_texture(kept.texture.as_image_copy(), texture.as_image_copy(), wgpu::Extent3d { width: size.0, height: size.1, depth_or_array_layers: 1 });
+                kept.drawn.batches.len()
+            }
+            None => 0,
+        };
+        self.draw_batches(&mut encoder, &texture, &view, &globals, &buffer, &batches, &instances, &blurs, from..batches.len());
+        self.last = drawn;
 
         self.queue.submit([encoder.finish()]);
         if let Some(frame) = frame {
@@ -629,6 +694,41 @@ impl WgpuRenderer {
             }
             pass.draw(0..4, 0..count as u32);
         }
+    }
+
+    /// Draws `range` of the frame's batches into `texture` (`view` of it), in runs, one pass each, broken at each
+    /// backdrop, which blurs what's drawn before it. From the first batch, it's cleared first; from a later one, it
+    /// already has what's drawn before.
+    #[allow(clippy::too_many_arguments)]
+    fn draw_batches(
+        &mut self,
+        encoder: &mut wgpu::CommandEncoder,
+        texture: &wgpu::Texture,
+        view: &wgpu::TextureView,
+        globals: &wgpu::BindGroup,
+        buffer: &wgpu::Buffer,
+        batches: &[PrimitiveBatch<'_>],
+        instances: &[wgpu::BindGroup],
+        blurs: &[Vec<Blur>],
+        range: std::ops::Range<usize>,
+    ) {
+        let blurrable = texture.usage().intersects(wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_SRC);
+        let mut load = if range.start == 0 { wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT) } else { wgpu::LoadOp::Load };
+        let mut run: Vec<usize> = Vec::new();
+        for at in range {
+            let PrimitiveBatch::Backdrops(backdrops) = &batches[at] else {
+                run.push(at);
+                continue;
+            };
+            self.draw_run(encoder, view, load, globals, batches, instances, &run, None);
+            run.clear();
+            load = wgpu::LoadOp::Load;
+            for (one, blur) in (0..backdrops.len()).zip(&blurs[at]) {
+                let blurred = blurrable.then(|| self.blur_behind(encoder, texture, view, globals, buffer, blur));
+                self.draw_run(encoder, view, wgpu::LoadOp::Load, globals, batches, instances, &[at], blurred.map(|view| (view, one)));
+            }
+        }
+        self.draw_run(encoder, view, load, globals, batches, instances, &run, None);
     }
 
     /// Draws a batch of shadows, each from its tile where it has one, else worked out where it's drawn, in runs.

@@ -27,6 +27,9 @@ struct WgpuAtlasState {
     storage: WgpuAtlasStorage,
     tiles_by_key: HashMap<AtlasKey, AtlasTile>,
     uploads: Vec<PendingUpload>,
+    /// How many times what's in it has changed: a frame whose sprites are the same bytes as another's, with this the
+    /// same too, looks the same.
+    generation: u64,
 }
 
 impl WgpuAtlas {
@@ -38,12 +41,18 @@ impl WgpuAtlas {
             storage: WgpuAtlasStorage::default(),
             tiles_by_key: Default::default(),
             uploads: Vec::new(),
+            generation: 0,
         }))
     }
 
     /// Writes what's been added since the last frame into its textures, before the frame that draws it.
     pub fn before_frame(&self) {
         self.0.lock().flush();
+    }
+
+    /// How many times what's in it has changed (`WgpuAtlasState::generation`).
+    pub(crate) fn generation(&self) -> u64 {
+        self.0.lock().generation
     }
 
     /// The view of texture `id`, which a batch of sprites samples.
@@ -122,6 +131,7 @@ impl WgpuAtlasState {
     }
 
     fn flush(&mut self) {
+        self.generation += u64::from(!self.uploads.is_empty());
         for upload in self.uploads.drain(..) {
             let texture = &self.storage[upload.id];
             self.queue.write_texture(
