@@ -26,7 +26,7 @@ defmodule OneCore.App do
   to the server: `tools/0`, `call/3`, `entrypoints/0`, `icon/0`, `widgets/0`, `jobs/0` and
   `requires/0`; `OneCore.Artifact`'s functions but `link`;
   `OneCore.Call`'s `tool` (with `on_behalf_of`), `make`, `reach`, `reaches?`, `member?`, `owns?`, `apps`, `deployed`, `process`,
-  `forward_to`, `changed`, `stage` and `ask`; `OneCore.App.file/2`; `OneCore.Nif`; `Logger`; and hooks it observes or collects. The apps
+  `forward_to`, `changed`, `stage` and `ask`; `OneCore.App.file/2`; `OneCore.Nif`; `Logger`; and hooks it observes, and collects that say it may (`untrusted: true`). The apps
   it requires whose code runs inside it run in its VM too, as it, `database` among them, where their code can run
   there. It has no services, no hooks it mutates or validates, no other apps' functions but those (it calls the
   tools of the apps it requires), no programs, no network and no website, and no files but its `folder`, which goes
@@ -336,7 +336,9 @@ defmodule OneCore.App do
 
   An app that knows which app it needs calls it (`OneCore.Call.tool/4`, `OneCore.Call.app/2`). One that can't
   know who will answer offers a hook instead, and whoever wants to hooks into it. `offers/0` lists them, each with a
-  `name`, a `kind` (`:observe`, `:mutate`, `:validate` or `:collect`) and a `description`, and `OneCore.Call.run_hook/3` runs one,
+  `name`, a `kind` (`:observe`, `:mutate`, `:validate` or `:collect`) and a `description`, and for a collect whose
+  parts it only reads as data, `untrusted: true`, which an untrusted app may answer too (no other hook asks one but
+  to observe). `OneCore.Call.run_hook/3` runs one,
   as One Core runs its own of that kind, for whoever the call runs for. Another app hooks into it by its full name,
   the app's name and the hook's, in its `hooks/0`, and before the offering app is installed it's never run:
 
@@ -650,8 +652,8 @@ defmodule OneCore.App do
   def skill(versions) do
     offered =
       for {name, version} <- Enum.sort(versions),
-          %{name: hook, kind: kind, description: about} <- version.offers,
-          do: {"#{name}.#{hook}", kind, about}
+          %{name: hook, kind: kind, description: about} = offer <- version.offers,
+          do: {"#{name}.#{hook}", kind, about <> if(offer[:untrusted], do: " An untrusted app may answer it.", else: "")}
 
     """
     ---

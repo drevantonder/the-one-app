@@ -25,6 +25,8 @@ defmodule Settings do
       %{
         name: "sections",
         kind: :collect,
+        # An untrusted app's part is only data, drawn by its own page in a frame.
+        untrusted: true,
         description:
           "What an app adds to Settings, and where. It's about nothing. An app answers with a list, each a map: " <>
             "`component`, a Solid component its client exports (client/package.json's `exports`, as ./<component>), " <>

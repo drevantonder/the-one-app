@@ -336,10 +336,13 @@ defmodule OneCore.Apps.Calls do
       ask = {"hooks/call", %{installed: at, app: name, kind: kind, hook: hook, about: about}}
       call = called(at, name, versions, ask, principal, forwarded)
 
-      # An untrusted app observes and collects: what it answers a collect is only its own part, which the app that
-      # offered the hook reads as data, as a trusted app's. It mutates and validates nothing, which would change or
-      # refuse what others do.
-      if hook in version.hooks and observes?(call, about) and (kind in [:observe, :collect] or version.trusted),
+      # An untrusted app observes, and answers the collects whose app says it may (`Hooks.untrusted?/2`). It
+      # mutates and validates nothing, which would change or refuse what others do, and answers no other collect,
+      # whose app may act on what it's given (Google's scopes a person grants, a screen agents type into).
+      {_actor, subject} = principal
+
+      if hook in version.hooks and observes?(call, about) and
+           (version.trusted or kind == :observe or (kind == :collect and Hooks.untrusted?(hook, Apps.chain(subject)))),
         do:
           {:ok,
            Hooks.check_result(

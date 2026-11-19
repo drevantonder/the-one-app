@@ -118,7 +118,13 @@ defmodule OneCore.Hooks do
   end
 
   @doc "The kind of the hook `hook` that an app installed for `owner` offers, by its full name, or `nil` for none."
-  def offered(hook, owner), do: elem(installed(owner), 1)[hook]
+  def offered(hook, owner), do: with({kind, _untrusted} <- elem(installed(owner), 1)[hook], do: kind)
+
+  @doc """
+  Whether an untrusted app may answer `hook`: a collect that an app installed for one of `owners` offers saying so
+  (`untrusted: true`), where what it answers is only its own part, read as data. None of One Core's hooks is.
+  """
+  def untrusted?(hook, owners), do: Enum.any?(owners, &match?({:collect, true}, elem(installed(&1), 1)[hook]))
 
   # The hooks that the apps installed for an owner hook into, each with those apps' names, and the kinds of the
   # hooks they offer, by their full names. An owner this server hasn't looked at is looked at first.

@@ -531,9 +531,9 @@ defmodule OneCore.Apps do
       offered =
         for {name, artifact} <- installed,
             %Version{offers: offers} <- [running[artifact]],
-            %{name: hook, kind: kind} <- offers,
+            %{name: hook, kind: kind} = offer <- offers,
             into: %{},
-            do: {"#{name}.#{hook}", kind}
+            do: {"#{name}.#{hook}", {kind, Map.get(offer, :untrusted, false)}}
 
       :ets.insert(Hooks, {at, hooking, offered})
     end

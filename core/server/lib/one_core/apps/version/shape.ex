@@ -70,7 +70,8 @@ defmodule OneCore.Apps.Version.Shape do
       "properties" => %{
         "name" => @name,
         "kind" => %{"enum" => ["observe", "mutate", "validate", "collect"]},
-        "description" => @text
+        "description" => @text,
+        "untrusted" => %{"type" => "boolean", "description" => "true for a collect an untrusted app may answer too"}
       }
     },
     jobs: %{

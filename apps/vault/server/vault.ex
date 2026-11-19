@@ -55,6 +55,8 @@ defmodule Vault do
       %{
         name: "types",
         kind: :collect,
+        # An untrusted app's part is only data, drawn by its own page in a frame.
+        untrusted: true,
         description:
           "The kinds of item an app keeps in its people's Vaults, which the Vault lists and opens as the app says. " <>
             "It's about nothing. An app with item types answers with its list of them, each a map: `name`, one item " <>
