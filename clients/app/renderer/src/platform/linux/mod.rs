@@ -56,6 +56,24 @@ pub fn appearance() -> crate::Appearance {
     }
 }
 
+/// Says each time the desktop goes light or dark, as its portal signals (`SettingChanged`), for as long as the app
+/// runs.
+pub(super) fn appearance_changes(to: calloop::channel::Sender<crate::Appearance>) {
+    use dbus::arg::{RefArg, Variant};
+    let Ok(connection) = dbus::blocking::Connection::new_session() else { return };
+    let rule = dbus::message::MatchRule::new_signal("org.freedesktop.portal.Settings", "SettingChanged");
+    let changed = move |(namespace, key, value): (String, String, Variant<Box<dyn RefArg>>), _: &dbus::blocking::Connection, _: &dbus::Message| {
+        if namespace != "org.freedesktop.appearance" || key != "color-scheme" {
+            return true;
+        }
+        to.send(if value.0.as_u64() == Some(1) { crate::Appearance::Dark } else { crate::Appearance::Light }).is_ok()
+    };
+    if let Err(error) = connection.add_match(rule, changed) {
+        return log::warn!("the desktop going light or dark isn't heard: {error}");
+    }
+    while connection.process(std::time::Duration::from_secs(3600)).is_ok() {}
+}
+
 /// Whether the person asked for less motion: `reduced-motion`'s 1, 0 being no preference.
 pub fn reduced_motion() -> bool {
     appearance_setting("reduced-motion") == Some(1)

@@ -93,6 +93,8 @@ pub struct Display {
     present: Option<xproto::Window>,
     asked: Cell<bool>,
     framed: Cell<Option<std::time::Instant>>,
+    /// The desktop went light or dark since its windows were last told (`appearance_changes`).
+    appearance: Rc<Cell<Option<crate::Appearance>>>,
 }
 
 /// Which window an event is for, and which of its parts: 0 the window itself, the rest a panel's parts.
@@ -245,6 +247,18 @@ impl Display {
                 Ok(calloop::PostAction::Continue)
             })
             .map_err(|error| anyhow::anyhow!("Failed to initialize X11 event source: {error}"))?;
+        // The desktop going light or dark reaches every window as it does, as its portal says.
+        let (to, changes) = calloop::channel::channel();
+        std::thread::spawn(move || super::appearance_changes(to));
+        let appearance = Rc::new(Cell::new(None));
+        let heard = appearance.clone();
+        handle
+            .insert_source(changes, move |event, _, _| {
+                if let calloop::channel::Event::Msg(now) = event {
+                    heard.set(Some(now));
+                }
+            })
+            .map_err(|error| anyhow::anyhow!("no source for the desktop's appearance: {error}"))?;
         Ok(Display {
             xcb,
             screen,
@@ -267,6 +281,7 @@ impl Display {
             present,
             asked: Cell::new(false),
             framed: Cell::new(None),
+            appearance,
         })
     }
 
@@ -553,11 +568,16 @@ impl Display {
         let _ = self.xcb.flush();
     }
 
-    /// Its window manager's frame is drawn light or dark as `theme` says, or as the desktop is, as a GTK window's
-    /// (`_GTK_THEME_VARIANT`, which GNOME's and KDE's read).
+    /// Its window manager's frame is drawn light or dark as `theme` says, as a GTK window's (`_GTK_THEME_VARIANT`,
+    /// which GNOME's and KDE's read), or with none, as the desktop is.
     pub fn set_appearance(&self, window: &NativeWindow, theme: Option<crate::Appearance>) {
-        let variant = if theme.unwrap_or_else(super::appearance) == crate::Appearance::Dark { "dark" } else { "light" };
-        let _ = self.xcb.change_property8(xproto::PropMode::REPLACE, window.x_window, self.atoms._GTK_THEME_VARIANT, self.atoms.UTF8_STRING, variant.as_bytes());
+        let _ = match theme {
+            Some(theme) => {
+                let variant = if theme == crate::Appearance::Dark { "dark" } else { "light" };
+                self.xcb.change_property8(xproto::PropMode::REPLACE, window.x_window, self.atoms._GTK_THEME_VARIANT, self.atoms.UTF8_STRING, variant.as_bytes())
+            }
+            None => self.xcb.delete_property(window.x_window, self.atoms._GTK_THEME_VARIANT),
+        };
     }
 
     pub fn set_cursor(&self, window: &NativeWindow, cursor: Cursor) {
@@ -630,6 +650,9 @@ impl Display {
                     self.event(event, &mut out);
                 }
             }
+        }
+        if let Some(now) = self.appearance.take() {
+            out.extend(self.windows.borrow().values().filter(|who| who.1 == 0).map(|who| (*who, Input::Appearance(now))));
         }
         out.into_iter().map(|((id, part), input)| (id, part, input)).collect()
     }

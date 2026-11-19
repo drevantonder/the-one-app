@@ -880,7 +880,11 @@ impl Windows {
         match input {
             Input::Resized(_) | Input::Surface | Input::SurfaceLost => {}
             Input::Expose => {}
-            Input::Appearance(appearance) => screen.appearance = appearance,
+            // The system went light or dark: so do its own parts of the window, where its Colour Mode says nothing.
+            Input::Appearance(appearance) => {
+                screen.appearance = appearance;
+                window.chrome = None;
+            }
             Input::Moved(at) => {
                 screen.pointer_moved(at);
                 let cursor = screen.cursor(at);
