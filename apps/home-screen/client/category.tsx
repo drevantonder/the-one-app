@@ -3,7 +3,8 @@ import { covers, keydown, Pressable, type Rect, reducedMotion, Text, View, viewp
 import { type Entrypoint } from "./types.ts"
 import { looks } from "./looks.ts"
 import { home, state, windowWidth } from "./store.ts"
-import { type Owner, badgeOf, press } from "./owners.ts"
+import { type Owner, badgeOf, opens, press } from "./owners.ts"
+import { holds } from "./holds.ts"
 import { Tile } from "./tiles.tsx"
 import { tween } from "./tween.ts"
 import { openedCategory, places } from "./library.tsx"
@@ -60,11 +61,15 @@ export function OpenCategory(props: { owner: Owner; opened: string; within?: Rec
         <View style={[looks.inPanel, looks.at((shape().width - panel().width) / 2, (shape().height - panel().height) / 2, panel().width, panel().height)]}>
           <View style={[looks.opened, looks.opacity(Math.max(0, (t() - 0.3) / 0.7))]}>
             <For each={category()?.entrypoints ?? []} keyed={(entrypoint) => entrypoint.entrypoint ?? entrypoint.app}>
-              {(entrypoint) => (
-                <View style={looks.tall(88)}>
-                  <Tile name={entrypoint().name} icon={entrypoint().icon} size={tile()} scale={1} badge={badgeOf(entrypoint() as Entrypoint, props.owner)} onPress={(behind, from) => phase() === "open" && press(entrypoint(), props.owner, behind, from)} />
-                </View>
-              )}
+              {(entrypoint) => {
+                // What's held here is an app of the App Library, as there: its menu, or carried onto Home's pages.
+                const held = holds(() => ({ item: opens(entrypoint()), listed: entrypoint(), page: 0, index: -1, from: "library" }), () => true)
+                return (
+                  <View style={looks.tall(88)}>
+                    <Tile name={entrypoint().name} icon={entrypoint().icon} size={tile()} scale={1} badge={badgeOf(entrypoint() as Entrypoint, props.owner)} holds={held} onPress={(behind, from) => phase() === "open" && press(entrypoint(), props.owner, behind, from)} />
+                  </View>
+                )
+              }}
             </For>
           </View>
         </View>

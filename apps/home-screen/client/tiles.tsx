@@ -5,6 +5,7 @@ import { Badge, call, changed, Icon, Image, type Layout, type Located, Pressable
 import { type Widget as WidgetItem, src } from "./types.ts"
 import { corner } from "./layout.ts"
 import { looks } from "./looks.ts"
+import { type Holds } from "./holds.ts"
 import { state, tapping } from "./store.ts"
 import { json, type Owner, type From, launch } from "./owners.ts"
 
@@ -68,7 +69,7 @@ export const Count = (props: { count?: number }) => (
 
 /// An icon with its name under it, `size` across, drawn `scale` times larger. The app starts as a finger lands on it,
 /// and shows as the finger lifts, unless the finger held it, growing out of its icon.
-export function Tile(props: { name: string; icon: string; size: number; scale: number; badge?: number; onPress?: (behind: boolean, from?: From) => void }) {
+export function Tile(props: { name: string; icon: string; size: number; scale: number; badge?: number; onPress?: (behind: boolean, from?: From) => void; holds?: Holds }) {
   const from = (event: Located): From => {
     const tile = event.currentTarget.getBoundingClientRect()
     const size = props.size * props.scale
@@ -79,7 +80,11 @@ export function Tile(props: { name: string; icon: string; size: number; scale: n
       role="button"
       aria-label={props.name}
       aria-description={props.badge ? `${props.badge} waiting` : undefined}
-      onPointerDown={(event) => event.button === 0 && props.onPress?.(true)}
+      {...props.holds}
+      onPointerDown={(event) => {
+        if (event.button === 0) props.onPress?.(true)
+        props.holds?.onPointerDown?.(event)
+      }}
       onPress={(event) => tapping() && props.onPress?.(false, from(event))}
       style={looks.tileBox}
     >

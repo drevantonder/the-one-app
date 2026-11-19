@@ -11,7 +11,7 @@ const HOLD = 450
 const LONGER = 800
 
 /** What the Home Screen's gestures listen for on what they're given. */
-type Holds = Pick<PressableProps, "onPointerDown" | "onPointerMove" | "onPointerUp" | "onPointerCancel" | "onContextMenu">
+export type Holds = Pick<PressableProps, "onPointerDown" | "onPointerMove" | "onPointerUp" | "onPointerCancel" | "onContextMenu">
 
 /// Watches a finger or a mouse on what it's given, for the Home Screen's gestures: a press held still is a hold, as is
 /// a right-click; a press that moves while editing, or once held, lifts it, and so does one held still a while longer
@@ -42,7 +42,7 @@ export function holds(held: () => Held | undefined, arranges: () => boolean, men
   }
   const hold = (event: Located) => {
     const what = held()
-    if (!menu() || !what || !home.getSnapshot().matches("nothing")) return
+    if (!menu() || !what || !(home.getSnapshot().matches("nothing") || home.getSnapshot().matches({ category: "open" }))) return
     fired = !!start
     if (!what.item && !what.listed) return arranges() && home.send({ type: "edit", editing: pending() })
     home.send({ type: "hold", held: { ...what, rect: event.currentTarget.getBoundingClientRect() } })

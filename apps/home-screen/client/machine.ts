@@ -462,7 +462,7 @@ export const machine = setup({
       exit: "forget",
       states: {
         opening: { on: { zoomed: "open", close: "closing" } },
-        open: { on: { close: "closing" } },
+        open: { on: { close: "closing", hold: { target: "#home.holding", actions: "hold" } } },
         closing: { on: { zoomed: "#home.nothing", open: "opening" } },
       },
     },
