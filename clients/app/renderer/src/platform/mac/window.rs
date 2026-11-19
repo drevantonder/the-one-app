@@ -248,6 +248,7 @@ impl Display {
             window.setTabbingMode(NSWindowTabbingMode::Disallowed);
             if options.panel.is_none() {
                 unsafe { place_lights(&window) };
+                window.setContentMinSize(NSSize::new(crate::platform::SMALLEST.width.0.into(), crate::platform::SMALLEST.height.0.into()));
             }
             window.setAcceptsMouseMovedEvents(true);
 

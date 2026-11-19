@@ -76,6 +76,10 @@ pub enum Event {
     Quit,
 }
 
+/// The smallest an app's window can be made, in points, as every desktop app has one: its title row's window
+/// controls, breadcrumb and Back and Forward still fit beside its title.
+pub const SMALLEST: Size<Pixels> = Size { width: Pixels(480.0), height: Pixels(320.0) };
+
 pub struct WindowOptions {
     pub title: String,
     /// The window's class, which the desktop groups windows by (X11's `WM_CLASS`, Wayland's app id).

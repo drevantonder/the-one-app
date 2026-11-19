@@ -742,6 +742,18 @@ fn handle_msg(hwnd: HWND, state: &State, msg: u32, wparam: WPARAM, lparam: LPARA
             Some(0)
         }
         WM_ERASEBKGND => Some(1),
+        // An app's window is made no smaller than its smallest.
+        WM_GETMINMAXINFO if !state.panel => {
+            let info = unsafe { &mut *(lparam.0 as *mut MINMAXINFO) };
+            let smallest = crate::platform::SMALLEST;
+            let mut frame = RECT { left: 0, top: 0, right: (smallest.width.0 * scale()).round() as i32, bottom: (smallest.height.0 * scale()).round() as i32 };
+            unsafe {
+                let style = WINDOW_STYLE(GetWindowLongW(hwnd, GWL_STYLE) as u32);
+                let _ = AdjustWindowRectExForDpi(&mut frame, style, false, WINDOW_EX_STYLE(GetWindowLongW(hwnd, GWL_EXSTYLE) as u32), GetDpiForWindow(hwnd));
+            }
+            info.ptMinTrackSize = POINT { x: frame.right - frame.left, y: frame.bottom - frame.top };
+            Some(0)
+        }
         WM_CLOSE => {
             push(Input::Close);
             Some(0)

@@ -289,6 +289,12 @@ impl Display {
             let state = [self.atoms._NET_WM_STATE_ABOVE, self.atoms._NET_WM_STATE_SKIP_TASKBAR, self.atoms._NET_WM_STATE_SKIP_PAGER];
             xcb.change_property32(xproto::PropMode::REPLACE, x_window, self.atoms._NET_WM_STATE, xproto::AtomEnum::ATOM, &state)?;
             self.hint(x_window, 0, 0, width, height)?;
+        } else {
+            // An app's window is made no smaller than its smallest (ICCCM's WM_NORMAL_HINTS).
+            let mut hints = x11rb::properties::WmSizeHints::new();
+            let smallest = crate::platform::SMALLEST;
+            hints.min_size = Some(((smallest.width.0 * self.scale).round() as i32, (smallest.height.0 * self.scale).round() as i32));
+            hints.set_normal_hints(&**xcb, x_window)?.check()?;
         }
         xcb.flush()?;
         Ok(window)
