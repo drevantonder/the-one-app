@@ -53,7 +53,7 @@ forward.
 Any release mixes with what's live, a breaking one too, since a release that changes the wire speaks the protocol
 before beside its own. Release the servers first, then the edge from the commit they run, then the clients; an app
 that requires the new platform is deployed once every server is on it. `tooling/release` refuses a build that speaks
-no protocol a server, the edge or a device seen in the last 90 days does, naming which: drop an old protocol only
+no protocol a server, the edge or a device that talks with them does, naming which: drop an old protocol only
 once none of them speaks only it. Devices are otherwise not waited for, since their people update them.
 
 | Changed | Release |

@@ -8,8 +8,7 @@ defmodule OneCore.Protocol do
   MCP refuses a protocol version it doesn't speak (-32022). A release's version, and the `!`s that move it, decide nothing here.
 
   A change to what crosses the wire raises `newest`, the newer part speaking the older protocol beside it; `oldest`
-  is raised in a change of its own, once no part seen in 90 days speaks only an older one (`tooling/release` refuses
-  it before then).
+  is raised in a change of its own, once every part has the newer build (`tooling/release` refuses it before then).
   """
   @external_resource path = Path.expand("../../../protocol.json", __DIR__)
   @range path |> File.read!() |> JSON.decode!()

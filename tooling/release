@@ -184,21 +184,21 @@ survey() {
   done
   names=($(printf '%s\n' "${names[@]}" | sort -u))
 
-  # A release only while every server, the edge and every device seen in the last 90 days that talks with a server
-  # now speaks a protocol it does (`OneCore.Protocol`), so one that drops an old protocol waits until nothing still in
-  # use speaks only that. A part that says none speaks none (`OneCore.Protocol.of/1`).
-  behind=$(jq -r --argjson mine "$(cat core/protocol.json)" --argjson since "$((($(date +%s) - 90 * 86400) * 1000))" '
+  # A release only while every server, the edge and every device that talks with a server now speaks a protocol it
+  # does (`OneCore.Protocol`), so one that drops an old protocol waits until every part has the newer build. A part
+  # that says none speaks none (`OneCore.Protocol.of/1`).
+  behind=$(jq -r --argjson mine "$(cat core/protocol.json)" '
     def overlaps($b): . != null and $b != null and .oldest <= $b.newest and $b.oldest <= .newest;
     def talks: overlaps($mine);
     def named: if . == null then "none" elif .oldest == .newest then "\(.oldest)" else "\(.oldest) to \(.newest)" end;
     [.servers[] | .protocol] as $servers
     | [(.servers[] | select(.protocol | talks | not) | "\(.name) (protocol \(.protocol | named))"),
      (select(.edge != null and (.edge_protocol | talks | not)) | "the edge (protocol \(.edge_protocol | named))"),
-     (.devices[] | select(.connected or (.last_seen // 0) > $since) | .protocol as $its
+     (.devices[] | .protocol as $its
        | select(($its | talks | not) and any($servers[]; . as $server | $its | overlaps($server)))
        | "\(.name) (protocol \(.protocol | named), on \(.build))")]
     | join(", ")' <<<"$builds")
-  [[ -z $behind ]] || { echo "$build speaks protocol $(jq -r 'if .oldest == .newest then "\(.oldest)" else "\(.oldest) to \(.newest)" end' core/protocol.json), which $behind, still in use, doesn't: keep the protocol they speak until none seen in 90 days does." >&2 && exit 1; }
+  [[ -z $behind ]] || { echo "$build speaks protocol $(jq -r 'if .oldest == .newest then "\(.oldest)" else "\(.oldest) to \(.newest)" end' core/protocol.json), which $behind, doesn't: keep the protocol they speak until they have the newer build." >&2 && exit 1; }
 
   mine=() notes=()
   # Which are built here, and which are published already.

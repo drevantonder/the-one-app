@@ -55,7 +55,7 @@ before choosing.
 - Parts of the platform talk where the protocols they speak overlap, whatever their versions, as MCP's
   `protocolVersion` has it: `core/protocol.json`, said in every request (`OneCore.Protocol`). A change to what crosses
   the wire between parts raises its `newest`, with the newer part speaking the older beside it; `oldest` goes up in a
-  change of its own once no part seen in 90 days speaks only the older (`tooling/release` refuses it before then).
+  change of its own once every part has the newer build (`tooling/release` refuses it before then).
 - An app's `requires` says the lowest core it needs, `"core" => ">= 0.20.0"`, as Android's `minSdkVersion` does, and
   runs on every version after.
 - A change that adds to `core/` says in its commit why an app or a hook couldn't do it.
