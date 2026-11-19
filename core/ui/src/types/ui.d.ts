@@ -392,9 +392,15 @@ export declare function Widget(props: {
 // (`alone`: something over the page), how big its window is (`size`, a phone's 390 × 844 unless said) and whether a
 // finger points at it (`touch`). Its name is its family's and its own: "Buttons/Variants".
 export type Scene = (() => Element) | { render: () => Element; taps?: Tap[]; alone?: boolean; size?: [number, number]; touch?: boolean }
-/** What's pressed: what it's named or says, or that and its role where a name alone is two things (a field's label
- * and its select). */
-export type Tap = string | { role: string; name: string }
+/** What's done, in order (core/ui/scenes.js runs them): pressed by what it's named or says, or that and its role
+ * where a name alone is two things (a field's label and its select); a point pressed; a key as the DOM names it, with
+ * any of `ctrl`, `shift`, `alt` or `meta` held; or text typed where the keyboard is. */
+export type Tap =
+  | string
+  | { role: string; name: string }
+  | { x: number; y: number }
+  | { key: string; ctrl?: boolean; shift?: boolean; alt?: boolean; meta?: boolean }
+  | { type: string }
 export type Scenes = Record<string, Scene>
 
 // What an app asks for in passing.
