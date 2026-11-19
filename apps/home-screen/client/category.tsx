@@ -17,7 +17,7 @@ export function OpenCategory(props: { owner: Owner; opened: string; within?: Rec
   const category = () => openedCategory(props.owner.library, props.opened)
   const phase = () => (state().matches({ category: "opening" }) ? "opening" : state().matches({ category: "open" }) ? "open" : "closing")
   const close = () => !state().matches({ category: "closing" }) && home.send({ type: "close" })
-  const zoom = tween(300, () => home.send({ type: "zoomed" }))
+  const zoom = tween(300, () => home.send({ type: "zoomed" }), phase() === "opening" ? 0 : 1)
   createEffect(createMemo(phase), (now) => {
     if (now !== "open") zoom.to(now === "opening" ? 1 : 0)
   })

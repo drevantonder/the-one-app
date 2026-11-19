@@ -789,5 +789,14 @@
         "theme": "dark"
       }
     }
+  },
+  "Launcher, a category open": {
+    "like": "Launcher, App Library",
+    "taps": [
+      {
+        "role": "group",
+        "name": "Productivity"
+      }
+    ]
   }
 }
