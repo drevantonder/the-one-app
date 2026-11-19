@@ -19,7 +19,7 @@ export { call, changed, client, component, connection, covers, direction, leave,
 // The components, as the DOM's look and read: the same roles and names, from the design tokens.
 
 export { Badge, Button, Icon, Spinner } from "./styled-components/button.tsx"
-export { seen } from "./seen.ts"
+export { seen, since, size } from "./format.ts"
 
 export { History, Screen, Section, Split } from "./styled-components/screen.tsx"
 export { Empty, Problem, Skeleton, Status, Steps } from "./styled-components/states.tsx"

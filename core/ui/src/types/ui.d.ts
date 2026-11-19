@@ -423,6 +423,8 @@ export declare function useRecoveryKey(options?: Subject): Promise<boolean>
 export declare function go(change: () => void, options?: { back?: boolean }): void
 export declare function share(text: string): Promise<"shared" | "copied" | undefined>
 export declare function seen(at: string | number | Date): string
+export declare function since(at: string | number | Date, style?: "long" | "narrow"): string
+export declare function size(bytes: number): string
 export declare function haptic(kind: "light" | "medium" | "heavy" | "rigid" | "soft" | "selection" | "success" | "warning" | "error"): void
 export declare function connection(): "connecting" | "online" | "offline" | "reconnecting"
 /** Whether this page is shown, as it changes: not while its person is in another app, as their device's Settings. */

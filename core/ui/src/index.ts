@@ -45,7 +45,7 @@
 /// whether the DOM's takes it. A page written for version 1 has one `style` object of token names instead.
 export { call, changed, client, component, connection, covers, direction, go, haptic, keydown, leave, link, open, pinShortcut, reducedMotion, safeArea, showRecoveryKey, sizeChanged, updateReady, upload, useRecoveryKey, viewport, visible } from "./bridge.ts"
 export { pace, share } from "./shared.ts"
-export { seen } from "./seen.ts"
+export { seen, since, size } from "./format.ts"
 export { words } from "./words.ts"
 export { Button, Icon, Spinner } from "./styled-components/button.tsx"
 export { Badge } from "./styled-components/badge.tsx"
