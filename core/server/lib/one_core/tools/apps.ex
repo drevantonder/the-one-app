@@ -632,16 +632,15 @@ defmodule OneCore.Tools.Apps do
 
   defp record!(owner, name), do: Installed.read(owner)[name] || raise("#{name} isn't installed for #{owner}.")
 
-  # The app `name` is for `owner`, whose update whoever asked may take: whoever installed it, someone who may
-  # install where it's used, or an editor of it. Its update is deployed where it is: on a server of whoever the app
-  # is, which runs their apps where it's trusted.
-  defp updates!({actor, _subject} = principal, owner, name, forward) do
-    record = record!(owner, name)
-    app = record["app"]
+  # The app `name` is for `owner`, whose update whoever asked may take: someone who may install for whoever's the app
+  # is, or an editor of it, since its update is for everyone who has it, not only for whoever installed this copy.
+  # Its update is deployed where it is: on a server of whoever the app is, which runs their apps where it's trusted.
+  defp updates!(principal, owner, name, forward) do
+    app = record!(owner, name)["app"]
     whose = Store.whose(app)
     runs(whose, Store.trusted?(app), forward)
 
-    if record["by"] != actor and reaches(principal, owner, "installer") != :ok,
+    if reaches(principal, whose, "installer") != :ok,
       do: reaches!(principal, app, "editor")
 
     app
