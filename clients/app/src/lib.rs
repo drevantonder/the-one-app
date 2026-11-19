@@ -459,9 +459,10 @@ async fn retry() -> Result<(), String> {
         spawn(opens());
         return Ok(());
     };
+    // A computer's launcher, which was the web one for being behind, is native again.
+    #[cfg(desktop)]
     let behind = matches!(views.client.state().borrow().connection(), Connection::Behind(_));
     views.client.retry().await.map_err(|error| error.to_string())?;
-    // A computer's launcher, which was the web one for being behind, is native again.
     #[cfg(desktop)]
     if behind {
         computer::talks();
