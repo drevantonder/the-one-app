@@ -6723,6 +6723,7 @@ dependencies = [
  "etagere",
  "fixed_decimal",
  "futures-lite",
+ "gtk",
  "iana-time-zone",
  "icu",
  "icu_datetime",

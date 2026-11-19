@@ -191,6 +191,9 @@ impl Screen {
     /// Presses node `id`, as a finger or a pointer would: what takes the press is it or what it's in, an input
     /// taking the keyboard, and what listens for `click` getting one. → what took it.
     pub(crate) fn press(&mut self, id: Id) -> anyhow::Result<Id> {
+        if self.press_chrome(id) {
+            return Ok(id);
+        }
         let mut at = Some(id);
         while let Some(node) = at.filter(|node| !inspect::pressable(&self.tree, *node)) {
             at = self.tree.parent(node).filter(|parent| *parent != 0);

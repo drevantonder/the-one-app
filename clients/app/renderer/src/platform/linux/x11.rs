@@ -95,6 +95,12 @@ pub struct Display {
     framed: Cell<Option<std::time::Instant>>,
     /// The desktop went light or dark since its windows were last told (`appearance_changes`).
     appearance: Rc<Cell<Option<crate::Appearance>>>,
+    /// Each app window's file of where it was left (`WindowOptions::frame`), kept as it's moved or resized.
+    frames: RefCell<HashMap<xproto::Window, std::path::PathBuf>>,
+    /// What's said of a window on another thread (GTK's menu for text), and what was since the windows were last
+    /// told.
+    told: Rc<RefCell<Vec<(xproto::Window, Input)>>>,
+    tell: calloop::channel::Sender<(xproto::Window, Input)>,
 }
 
 /// Which window an event is for, and which of its parts: 0 the window itself, the rest a panel's parts.
@@ -259,6 +265,17 @@ impl Display {
                 }
             })
             .map_err(|error| anyhow::anyhow!("no source for the desktop's appearance: {error}"))?;
+        // What's said of a window on another thread (GTK's) is done on the loop's.
+        let (tell, telling) = calloop::channel::channel();
+        let told = Rc::new(RefCell::new(Vec::new()));
+        let heard = told.clone();
+        handle
+            .insert_source(telling, move |event, _, _| {
+                if let calloop::channel::Event::Msg(said) = event {
+                    heard.borrow_mut().push(said);
+                }
+            })
+            .map_err(|error| anyhow::anyhow!("no source for what other threads say: {error}"))?;
         Ok(Display {
             xcb,
             screen,
@@ -282,12 +299,17 @@ impl Display {
             asked: Cell::new(false),
             framed: Cell::new(None),
             appearance,
+            frames: RefCell::default(),
+            told,
+            tell,
         })
     }
 
     pub fn open(&self, id: WindowId, options: &WindowOptions) -> anyhow::Result<NativeWindow> {
-        let width = (options.size.width.0 * self.scale).round() as u16;
-        let height = (options.size.height.0 * self.scale).round() as u16;
+        // An app's window opens where it was left, as big.
+        let left = options.frame.as_deref().and_then(crate::platform::Frame::read);
+        let width = left.map_or((options.size.width.0 * self.scale).round() as u16, |left| left.width.clamp(1, i32::from(u16::MAX)) as u16);
+        let height = left.map_or((options.size.height.0 * self.scale).round() as u16, |left| left.height.clamp(1, i32::from(u16::MAX)) as u16);
         let window = self.create((id, 0), width, height, options.panel.is_some(), false)?;
         let x_window = window.x_window;
         let xcb = &self.xcb;
@@ -308,6 +330,15 @@ impl Display {
         } else {
             // An app's window is made no smaller than its smallest (ICCCM's WM_NORMAL_HINTS).
             let mut hints = x11rb::properties::WmSizeHints::new();
+            // Where it was left is its own top left, not its frame's.
+            if let Some(left) = left {
+                hints.position = Some((x11rb::properties::WmSizeHintsSpecification::UserSpecified, left.x, left.y));
+                hints.win_gravity = Some(xproto::Gravity::STATIC);
+                xcb.configure_window(x_window, &xproto::ConfigureWindowAux::new().x(left.x).y(left.y))?;
+            }
+            if let Some(file) = &options.frame {
+                self.frames.borrow_mut().insert(x_window, file.clone());
+            }
             let smallest = crate::platform::SMALLEST;
             hints.min_size = Some(((smallest.width.0 * self.scale).round() as i32, (smallest.height.0 * self.scale).round() as i32));
             hints.set_normal_hints(&**xcb, x_window)?.check()?;
@@ -547,6 +578,7 @@ impl Display {
     }
 
     pub fn close(&self, window: &NativeWindow) {
+        self.frames.borrow_mut().remove(&window.x_window);
         self.windows.borrow_mut().remove(&window.x_window);
         self.parts.borrow_mut().remove(&window.x_window);
         self.shown.borrow_mut().remove(&window.x_window);
@@ -579,6 +611,49 @@ impl Display {
             }
             None => self.xcb.delete_property(window.x_window, self.atoms._GTK_THEME_VARIANT),
         };
+    }
+
+    /// Shows GTK's menu for text where a field was right-clicked (`TextMenu`), as a GNOME app's fields have, on the
+    /// app's GTK thread, where there is one: its choice is its key.
+    pub fn text_menu(&self, window: &NativeWindow, menu: crate::view::TextMenu) {
+        use gtk::prelude::*;
+        let (tell, x_window) = (self.tell.clone(), window.x_window);
+        gtk::glib::MainContext::default().invoke(move || {
+            if !gtk::is_initialized_main_thread() {
+                return;
+            }
+            let shown = gtk::Menu::new();
+            let items = [("Cu_t", "x", menu.cut), ("_Copy", "c", menu.copy), ("_Paste", "v", menu.paste), ("", "", true), ("Select _All", "a", menu.select_all)];
+            for (title, key, enabled) in items {
+                if title.is_empty() {
+                    shown.append(&gtk::SeparatorMenuItem::new());
+                    continue;
+                }
+                let item = gtk::MenuItem::with_mnemonic(title);
+                item.set_sensitive(enabled);
+                let tell = tell.clone();
+                item.connect_activate(move |_| {
+                    let key = crate::inspect::Key { key: key.to_owned(), shift: false, alt: false, ctrl: true, meta: false };
+                    let _ = tell.send((x_window, Input::Key(key)));
+                });
+                shown.append(&item);
+            }
+            shown.show_all();
+            #[allow(deprecated)]
+            shown.popup_easy(3, gtk::current_event_time());
+        });
+    }
+
+    /// An app's window is where it is on the screen, `width` by `height`, as it's moved or resized, which it keeps
+    /// (`WindowOptions::frame`).
+    fn placed_at(&self, x_window: xproto::Window, width: u16, height: u16) {
+        let Some(file) = self.frames.borrow().get(&x_window).cloned() else { return };
+        let root = self.xcb.setup().roots[self.screen].root;
+        let Some(at) = self.xcb.translate_coordinates(x_window, root, 0, 0).ok().and_then(|cookie| cookie.reply().ok()) else { return };
+        let now = crate::platform::Frame { x: i32::from(at.dst_x), y: i32::from(at.dst_y), width: i32::from(width), height: i32::from(height), maximized: false };
+        if crate::platform::Frame::read(&file) != Some(now) {
+            now.write(&file);
+        }
     }
 
     pub fn set_cursor(&self, window: &NativeWindow, cursor: Cursor) {
@@ -650,6 +725,11 @@ impl Display {
                     *self.xim.borrow_mut() = None;
                     self.event(event, &mut out);
                 }
+            }
+        }
+        for (x_window, input) in self.told.borrow_mut().drain(..) {
+            if let Some(who) = self.window(x_window) {
+                out.push((who, input));
             }
         }
         if let Some(now) = self.appearance.take() {
@@ -854,6 +934,7 @@ impl Display {
             Event::ConfigureNotify(event) => {
                 if let Some(id) = self.window(event.window) {
                     self.follow(event.window);
+                    self.placed_at(event.window, event.width, event.height);
                     if self.dragged.borrow().contains(&event.window)
                         && let Some(placed) = self.placed(event.window)
                     {

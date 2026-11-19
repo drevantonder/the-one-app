@@ -109,6 +109,8 @@ xim = { version = "0.6", features = ["x11rb-xcb", "x11rb-client"] }
 # X11 clipboard is adapted from it.
 arboard = { version = "3", default-features = false }
 xkbcommon = { version = "0.8", default-features = false, features = ["x11"] }
+# GTK's menu for text, as a GNOME app's fields have, on the app's GTK thread (tao's).
+gtk = "0.18"
 
 # Windows' windows, as GPUI's Windows platform has them.
 [target.'cfg(target_os = "windows")'.dependencies]
@@ -150,7 +152,7 @@ objc2-core-video = { version = "0.3", default-features = false, features = ["std
 
 # AppKit's windows, on its main thread.
 [target.'cfg(target_os = "macos")'.dependencies]
-objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "objc2-core-foundation", "objc2-quartz-core", "NSAccessibility", "NSAppearance", "NSApplication", "NSCursor", "NSPasteboard", "NSEvent", "NSGraphics", "NSPanel", "NSResponder", "NSRunningApplication", "NSTrackingArea", "NSView", "NSWindow", "NSWorkspace", "block2"] }
+objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "objc2-core-foundation", "objc2-quartz-core", "NSAccessibility", "NSAppearance", "NSApplication", "NSCursor", "NSPasteboard", "NSEvent", "NSGraphics", "NSMenu", "NSMenuItem", "NSPanel", "NSResponder", "NSRunningApplication", "NSTrackingArea", "NSView", "NSWindow", "NSWorkspace", "block2"] }
 
 # An iPhone's: a native screen is a tao window over the app's (`platform/ios`), on the main thread. Its QuickJS has
 # no prebuilt bindings in rquickjs-sys, so bindgen makes them against the iOS SDK's headers, as Android's.

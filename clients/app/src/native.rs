@@ -87,7 +87,7 @@ pub(crate) fn unopened(entrypoint: String, subject: Option<String>, link: String
         let Ok(native) = Native::get() else { return };
         let tag = json!({"entrypoint": entrypoint});
         native.run(move |windows| {
-            let options = WindowOptions { title: name.clone(), app_id: ::client::NAME.to_owned(), size: Size { width: Pixels(1024.0), height: Pixels(720.0) }, tag, panel: None, places: None, root: false, icon: None, owner: None };
+            let options = WindowOptions { title: name.clone(), app_id: ::client::NAME.to_owned(), size: Size { width: Pixels(1024.0), height: Pixels(720.0) }, tag, panel: None, places: None, frame: None, root: false, icon: None, owner: None };
             if let Err(error) = windows.open(options, Err(said), |_| {}) {
                 eprintln!("{name}'s window didn't open: {error:#}");
             }
@@ -238,6 +238,7 @@ async fn unopened_launcher(why: String) -> Option<WindowId> {
                 tag: json!({}),
                 panel: Some(computer::CORNER as f32),
                 places: crate::app().shell.home().ok().map(|home| home.join("launcher-places.json")),
+                frame: None,
                 root: false,
                 icon: None,
                 owner: None,
@@ -363,6 +364,8 @@ async fn window(started: Instant, entrypoint: &str, subject: Option<&str>, link:
             panel: panel.map(|corner| corner as f32),
             // The launcher's kept where it's dragged to, on each screen.
             places: (launcher && cfg!(desktop)).then(|| crate::app().shell.home().ok()).flatten().map(|home| home.join("launcher-places.json")),
+            // An app's window opens where it was left, as each computer's apps do.
+            frame: frame_file(launcher, sheet.is_some(), &entrypoint, subject.as_deref()),
             // A phone's launcher is its Home Screen, under every app's window.
             root: launcher && cfg!(mobile),
             icon: from,
@@ -499,6 +502,17 @@ async fn window(started: Instant, entrypoint: &str, subject: Option<&str>, link:
         Ok(Err(why)) => anyhow::bail!("its window didn't open: {why}"),
         Err(_) => anyhow::bail!("its device's native windows didn't start: {}", renderer::platform::unstarted().unwrap_or_else(|| "it didn't say why".into())),
     }
+}
+
+/// Where an app's window is kept where it was left (`WindowOptions::frame`): a computer's app window's, by its app,
+/// its page and who it's for.
+fn frame_file(launcher: bool, sheet: bool, entrypoint: &str, subject: Option<&str>) -> Option<std::path::PathBuf> {
+    #[cfg(desktop)]
+    if !launcher && !sheet {
+        return crate::app().shell.home().ok().map(|home| home.join("windows").join(format!("{}.json", crate::shortcuts::app_id(entrypoint, subject))));
+    }
+    let _ = (launcher, sheet, entrypoint, subject);
+    None
 }
 
 /// Loads the design tokens and styles, which come with the UI library, as its pages' do, and a page's app's styles.

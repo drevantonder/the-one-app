@@ -486,6 +486,32 @@ impl Display {
         });
     }
 
+    /// Shows a Mac's menu for text where a field was Control-clicked or right-clicked (`TextMenu`): its items are the
+    /// Edit menu's actions, which the view takes as their keys (`cut:`, `copy:`, `paste:`, `selectAll:`).
+    pub fn text_menu(&self, window: &NativeWindow, menu: crate::view::TextMenu) {
+        let view = window.view;
+        DispatchQueue::main().exec_async(move || {
+            let main = MainThreadMarker::new().expect("the main queue is the main thread's");
+            // SAFETY: the window's view, which lives as long as the window, on the main thread.
+            let view: &NSView = unsafe { &*(view as *const NSView) };
+            let shown = objc2_app_kit::NSMenu::new(main);
+            shown.setAutoenablesItems(false);
+            let items = [("Cut", objc2::sel!(cut:), "x", menu.cut), ("Copy", objc2::sel!(copy:), "c", menu.copy), ("Paste", objc2::sel!(paste:), "v", menu.paste), ("", objc2::sel!(selectAll:), "", true), ("Select All", objc2::sel!(selectAll:), "a", menu.select_all)];
+            for (title, action, key, enabled) in items {
+                if title.is_empty() {
+                    shown.addItem(&objc2_app_kit::NSMenuItem::separatorItem(main));
+                    continue;
+                }
+                let item = unsafe { objc2_app_kit::NSMenuItem::initWithTitle_action_keyEquivalent(main.alloc(), &NSString::from_str(title), Some(action), &NSString::from_str(key)) };
+                item.setEnabled(enabled);
+                shown.addItem(&item);
+            }
+            let (x, y) = (f64::from(menu.at.x), f64::from(menu.at.y));
+            let at = NSPoint::new(x, if view.isFlipped() { y } else { view.bounds().size.height - y });
+            shown.popUpMenuPositioningItem_atLocation_inView(None, at, Some(view));
+        });
+    }
+
     /// Its title bar and glass are drawn light or dark as `theme` says (Aqua, Dark Aqua), or as the Mac is.
     pub fn set_appearance(&self, window: &NativeWindow, theme: Option<crate::Appearance>) {
         window.window.get_on_main(move |window| {

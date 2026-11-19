@@ -102,6 +102,17 @@ pub struct Panel {
 /// What the window says over its page of where the page is, as a phone's app says it over an app (DESIGN.md, App
 /// windows): its network not answering ("Reconnecting…"), or its page updated ("Updated", with Reload). A pill at its
 /// top, over the page, with its one action.
+/// The system's own menu for text in a field a secondary click was on, where it was, in points of the page, and what
+/// of it can be done: as every system's fields have (`Screen::take_text_menu`), whose choice comes back as its key.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct TextMenu {
+    pub at: Point<f32>,
+    pub cut: bool,
+    pub copy: bool,
+    pub paste: bool,
+    pub select_all: bool,
+}
+
 pub struct Notice {
     pub text: String,
     pub action: Option<(String, Box<dyn FnMut()>)>,
@@ -134,6 +145,12 @@ const BUTTON_ROLES: [&str; 9] = ["button", "menuitem", "tab", "checkbox", "radio
 
 /// The page itself, as an event's node: what a key is told to, once, for what listens to every key (`keydown()`).
 const PAGE: Id = 0;
+/// The window's own nodes beside its page's, as Tab and the inspector reach them: its breadcrumb's Home, its notice
+/// and the notice's action (`Screen::semantics`).
+pub const HOME: Id = u64::MAX - 1;
+pub const NOTICE: Id = u64::MAX - 2;
+pub const NOTICE_ACTION: Id = u64::MAX - 3;
+
 /// How far in from a full-screen window's edge its breadcrumb starts, in points.
 const EDGE: f32 = 12.0;
 const SHORTCUT_HELD: std::time::Duration = std::time::Duration::from_millis(600);
@@ -195,6 +212,8 @@ pub struct Screen {
     pub breadcrumb: Option<Breadcrumb>,
     /// Its window is full screen, where a Mac hides its traffic lights, so its breadcrumb starts at its edge.
     pub full_screen: bool,
+    /// The system's menu for text a secondary click asked for, until its window shows it.
+    text_menu: Option<TextMenu>,
     /// Its window is a panel, whose background the host draws, under its page's.
     pub panel: Option<Panel>,
     /// What the window says over its page.
@@ -316,6 +335,7 @@ impl Screen {
             page: 0,
             breadcrumb: None,
             full_screen: false,
+            text_menu: None,
             panel: None,
             notice: None,
             visible: true,
@@ -421,9 +441,36 @@ impl Screen {
         }
     }
 
-    /// The semantic tree, as an agent and a screen reader read it, each frame's page's in its place.
+    /// The semantic tree, as an agent and a screen reader read it, each frame's page's in its place, after the
+    /// window's own: its breadcrumb's Home and its notice, while they're drawn.
     pub fn semantics(&self) -> Value {
-        json!(self.grafted(self.tree.semantics(0)))
+        let mut out = Vec::new();
+        if self.chrome.home.is_some() {
+            out.push(json!({"id": HOME, "role": "button", "name": "Home", "description": "Home Screen", "actions": ["click"]}));
+        }
+        if let Some(notice) = &self.notice {
+            let action = notice.action.as_ref().filter(|_| self.chrome.action.is_some());
+            let children: Vec<Value> = action.map(|(label, _)| json!({"id": NOTICE_ACTION, "role": "button", "name": label, "actions": ["click"]})).into_iter().collect();
+            out.push(json!({"id": NOTICE, "role": "status", "live": "polite", "name": notice.text, "children": children}));
+        }
+        out.extend(self.grafted(self.tree.semantics(0)));
+        json!(out)
+    }
+
+    /// Presses the window's own node `id` (`HOME`, `NOTICE_ACTION`), as a click on it does. → whether it's one.
+    pub(crate) fn press_chrome(&mut self, id: Id) -> bool {
+        match id {
+            HOME => match self.breadcrumb.as_mut() {
+                Some(crumb) => (crumb.home)(),
+                None => return false,
+            },
+            NOTICE_ACTION => match self.notice.as_mut().and_then(|notice| notice.action.as_mut()) {
+                Some((_, action)) => action(),
+                None => return false,
+            },
+            _ => return false,
+        }
+        true
     }
 
     /// Whether the app hasn't started yet, or is waiting to hear back from its client about something it asked.
@@ -935,7 +982,9 @@ impl Screen {
         // The window's breadcrumb, over its page.
         let hovering = |bounds: &Bounds<f32>| self.pointer.is_some_and(|at| bounds.contains(&at));
         let edge = self.full_screen.then_some(EDGE);
-        let crumb = self.breadcrumb.as_ref().map(|crumb| painter.breadcrumb(crumb, edge.unwrap_or(crumb.start), self.insets.top, self.chrome.home.as_ref().is_some_and(hovering)));
+        // What's under the pointer, or has the keyboard by Tab, is lit.
+        let keyed = |id: Id| self.states.focus_visible && self.focus.focused == Some(id);
+        let crumb = self.breadcrumb.as_ref().map(|crumb| painter.breadcrumb(crumb, edge.unwrap_or(crumb.start), self.insets.top, self.chrome.home.as_ref().is_some_and(hovering) || keyed(HOME)));
         let home = crumb.map(|(home, _)| home);
         // The page's top bar starts after it, which it's laid out again for once it's moved.
         let start = crumb.map_or(0, |(_, end)| (end + 12.0).ceil() as u16);
@@ -943,7 +992,7 @@ impl Screen {
             self.chrome.title_start = start;
             self.again = true;
         }
-        self.chrome.action = self.notice.as_ref().and_then(|notice| painter.notice(notice, self.insets.top, self.chrome.action.as_ref().is_some_and(hovering)));
+        self.chrome.action = self.notice.as_ref().and_then(|notice| painter.notice(notice, self.insets.top, self.chrome.action.as_ref().is_some_and(hovering) || keyed(NOTICE_ACTION)));
         // The rail's line, over everything: dark over a light page and light over a dark one, as iOS's home
         // indicator is, the page's own label colour.
         if let Some(line) = line {
@@ -995,6 +1044,11 @@ impl Screen {
             tab_order.retain(|id| self.within(*id, modal));
         }
         tab_order.retain(|id| !self.tree.inert(*id));
+        // The window's own Home and notice action come first, as they're first in it, unless a modal holds the keyboard.
+        if modal.is_none() {
+            let chrome = [(HOME, self.chrome.home.is_some()), (NOTICE_ACTION, self.chrome.action.is_some())];
+            tab_order.splice(0..0, chrome.into_iter().filter(|(_, drawn)| *drawn).map(|(id, _)| id));
+        }
         self.focus.tab_order = tab_order;
         self.rects = rects;
         self.animating = animating || moving;
@@ -1261,6 +1315,26 @@ impl Screen {
         self.captured = chain.first().copied();
         self.pointer_event(&chain, "pointerdown", at, button, None);
         if button == 2 {
+            // On a field, it has the keyboard and the system's menu for text, its caret where the click was unless
+            // that's in what's selected, as every system's fields have.
+            if let Some(input) = self.pressed_in(&chain).filter(|id| self.editing.fields.contains_key(id)) {
+                self.focus(Some(input));
+                let (index, _) = self.editing.drawn.get(&input).map_or((usize::MAX, false), |drawn| drawn.hit(at));
+                let field = &self.editing.fields[&input];
+                let (start, end) = field.range();
+                if !(start..end).contains(&index) {
+                    self.press_input(input, at, 1, false);
+                }
+                let field = &self.editing.fields[&input];
+                let selected = !field.selected().is_empty();
+                self.text_menu = Some(TextMenu {
+                    at,
+                    cut: selected && !field.secure && !field.readonly,
+                    copy: selected && !field.secure,
+                    paste: !field.readonly,
+                    select_all: !field.value().text.is_empty(),
+                });
+            }
             return self.pointer_event(&chain, "contextmenu", at, button, None);
         }
         let pressed = self.pressed_in(&chain);
@@ -1517,7 +1591,7 @@ impl Screen {
         // Enter or Space on a button presses it alone, as every system's does: the page's `preventDefault` would come
         // too late to stop the press, so the page isn't told of it too (a launcher opening its chosen app behind it).
         let plain = !key.ctrl && !key.meta && !key.alt;
-        let presses = plain && matches!(key.key.as_str(), "Enter" | " ") && focused.is_some_and(|id| !self.editing.fields.contains_key(&id) && self.tree.nodes.get(&id).is_some_and(|node| node.listens("click")));
+        let presses = plain && matches!(key.key.as_str(), "Enter" | " ") && focused.is_some_and(|id| matches!(id, HOME | NOTICE_ACTION) || (!self.editing.fields.contains_key(&id) && self.tree.nodes.get(&id).is_some_and(|node| node.listens("click"))));
         if !presses {
             self.tell(PAGE, "keydown", key.told());
         }
@@ -1532,6 +1606,7 @@ impl Screen {
             });
         } else if self.editing.fields.contains_key(&id) {
             self.type_key(id, key);
+        } else if presses && self.press_chrome(id) {
         } else if matches!(key.key.as_str(), "Enter" | " ") && self.tree.nodes.get(&id).is_some_and(|node| node.listens("click")) {
             self.click(id, None)
         }
@@ -1600,6 +1675,11 @@ impl Screen {
     /// held as it shows or pressed again right after, is the shortcut's (`key`).
     pub fn summoned(&mut self, key: Option<&str>) {
         self.shortcut = key.map(|key| (key.to_owned(), web_time::Instant::now()));
+    }
+
+    /// The system's menu for text a secondary click asked for, once.
+    pub fn take_text_menu(&mut self) -> Option<TextMenu> {
+        self.text_menu.take()
     }
 
     /// Its window got or lost the keyboard: the caret shows only while it has it, and an input losing it keeps what

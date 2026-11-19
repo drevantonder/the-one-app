@@ -76,6 +76,33 @@ pub enum Event {
     Quit,
 }
 
+/// Where an app's window was left on the screen and how big, in device pixels, and whether it was maximized, as its
+/// `frame` file keeps it.
+#[cfg(any(target_os = "windows", target_os = "linux"))]
+#[derive(serde::Serialize, serde::Deserialize, Clone, Copy, Debug, PartialEq)]
+pub(crate) struct Frame {
+    pub x: i32,
+    pub y: i32,
+    pub width: i32,
+    pub height: i32,
+    #[serde(default)]
+    pub maximized: bool,
+}
+
+#[cfg(any(target_os = "windows", target_os = "linux"))]
+impl Frame {
+    pub fn read(file: &std::path::Path) -> Option<Frame> {
+        serde_json::from_slice(&std::fs::read(file).ok()?).ok()
+    }
+
+    pub fn write(&self, file: &std::path::Path) {
+        let written = file.parent().map_or(Ok(()), std::fs::create_dir_all).and_then(|()| std::fs::write(file, serde_json::to_vec(self).unwrap_or_default()));
+        if let Err(error) = written {
+            log::warn!("where the window was left isn't kept: {error}");
+        }
+    }
+}
+
 /// The smallest an app's window can be made, in points, as every desktop app has one: its title row's window
 /// controls, breadcrumb and Back and Forward still fit beside its title.
 pub const SMALLEST: Size<Pixels> = Size { width: Pixels(480.0), height: Pixels(320.0) };
@@ -93,6 +120,9 @@ pub struct WindowOptions {
     pub panel: Option<f32>,
     /// A panel's file of where it was dragged to on each screen, which it's summoned at there again, as Raycast's is.
     pub places: Option<std::path::PathBuf>,
+    /// An app window's file of where it was left and how big (`Frame`), which it opens as again, where the system
+    /// keeps none itself (Windows, Linux; a Mac keeps it in its defaults).
+    pub frame: Option<std::path::PathBuf>,
     /// The window under every other, as a phone's launcher (its Home Screen) is: the system's Back doesn't close it,
     /// and the apps' windows open over it. It's hidden while something else covers the screen (`Windows::hide`).
     pub root: bool,
@@ -892,7 +922,15 @@ impl Windows {
                 self.display.set_cursor(&window.parts[part].native, cursor);
             }
             Input::Left => screen.pointer_left(),
-            Input::Down(at, button, shift) => screen.pointer_down(at, button, shift),
+            Input::Down(at, button, shift) => {
+                screen.pointer_down(at, button, shift);
+                // The system's own menu for text, where it was clicked in this part.
+                if let Some(mut menu) = screen.take_text_menu() {
+                    let origin = window.parts[part].bounds.origin;
+                    menu.at = crate::geometry::point(menu.at.x - origin.x, menu.at.y - origin.y);
+                    self.display.text_menu(&window.parts[part].native, menu);
+                }
+            }
             Input::Up(at, button) => screen.pointer_up(at, button),
             Input::Wheel(at, delta, phase) => drop(screen.scroll(at, delta, phase)),
             Input::Key(key) => drop(screen.key(&key)),

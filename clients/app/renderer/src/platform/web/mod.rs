@@ -320,6 +320,9 @@ impl Display {
     pub fn show(&self, _: &NativeWindow) {}
     pub fn activate(&self, _: &NativeWindow) {}
 
+    /// A browser has its own menu for text.
+    pub fn text_menu(&self, _: &NativeWindow, _: crate::view::TextMenu) {}
+
     /// A page has none of the system's own parts to draw light or dark.
     pub fn set_appearance(&self, _: &NativeWindow, _: Option<crate::Appearance>) {}
 
@@ -666,7 +669,7 @@ pub async fn open(canvas: web_sys::HtmlCanvasElement, scale: f32, page: String, 
         _ => None,
     };
     let _ = Native::get();
-    let options = WindowOptions { title: String::new(), app_id: String::new(), size: Size::default(), tag: Value::Null, panel: None, places: None, root: false, icon: None, owner: None };
+    let options = WindowOptions { title: String::new(), app_id: String::new(), size: Size::default(), tag: Value::Null, panel: None, places: None, frame: None, root: false, icon: None, owner: None };
     // Its first frame is told, for how long it took, and a page this can't draw is drawn as its own page instead.
     let on_event = |event| match event {
         super::Event::Drawn => call("drawn", &JsValue::UNDEFINED),

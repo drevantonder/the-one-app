@@ -433,6 +433,9 @@ impl Display {
 
     pub fn set_cursor(&self, _: &NativeWindow, _: crate::Cursor) {}
 
+    /// A phone's field has its own menu for text, by its own touch and hold.
+    pub fn text_menu(&self, _: &NativeWindow, _: crate::view::TextMenu) {}
+
     /// A phone's window has none of the system's own parts to draw light or dark.
     pub fn set_appearance(&self, _: &NativeWindow, _: Option<crate::Appearance>) {}
 

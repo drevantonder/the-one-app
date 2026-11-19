@@ -68,7 +68,10 @@ pub struct NativeWindow {
     before: Cell<HWND>,
     /// The window it's a sheet of (`attach`), which it's modal to while it's open.
     owner: Cell<HWND>,
+    /// Whether it was maximized where it was left, which it shows as again.
+    maximized: bool,
 }
+
 
 /// What a window's procedure knows of it.
 struct State {
@@ -94,6 +97,8 @@ struct State {
     parts: RefCell<Vec<HWND>>,
     /// The Colour Mode its frame is drawn in, where its page says one (`set_appearance`).
     theme: Cell<Option<crate::Appearance>>,
+    /// An app window's file of where it was left (`WindowOptions::frame`), kept as it's moved, resized or maximized.
+    frame: Option<std::path::PathBuf>,
 }
 
 impl State {
@@ -221,6 +226,7 @@ impl Display {
             shape: Cell::new((0, 0, 0)),
             parts: RefCell::default(),
             theme: Cell::new(None),
+            frame: options.frame.clone(),
         });
         let panel = options.panel.is_some();
         let style = if panel { WS_POPUP } else { WS_OVERLAPPEDWINDOW };
@@ -272,6 +278,17 @@ impl Display {
         unsafe {
             let _ = GetClientRect(hwnd, &mut client);
         }
+        // An app's window opens where it was left, as big, and maximized if it was, as Windows' own apps keep their
+        // placement.
+        let left = options.frame.as_deref().and_then(crate::platform::Frame::read);
+        if let Some(left) = left {
+            let mut placement = WINDOWPLACEMENT { length: size_of::<WINDOWPLACEMENT>() as u32, ..Default::default() };
+            placement.showCmd = SW_HIDE.0 as u32;
+            placement.rcNormalPosition = RECT { left: left.x, top: left.y, right: left.x + left.width, bottom: left.y + left.height };
+            unsafe {
+                let _ = SetWindowPlacement(hwnd, &placement);
+            }
+        }
         Ok(NativeWindow {
             hwnd,
             size: Cell::new(Size { width: DevicePixels(client.right - client.left), height: DevicePixels(client.bottom - client.top) }),
@@ -279,6 +296,7 @@ impl Display {
             panel,
             before: Cell::new(HWND::default()),
             owner: Cell::new(HWND::default()),
+            maximized: left.is_some_and(|left| left.maximized),
         })
     }
 
@@ -369,6 +387,7 @@ impl Display {
             shape: Cell::new((0, 0, 0)),
             parts: RefCell::default(),
             theme: Cell::new(None),
+            frame: None,
         });
         let ex_style = WS_EX_TOOLWINDOW | WS_EX_TOPMOST | WS_EX_NOACTIVATE | WS_EX_NOREDIRECTIONBITMAP;
         let module = unsafe { GetModuleHandleW(None) }.ok().map(Into::into);
@@ -376,7 +395,7 @@ impl Display {
             .context("CreateWindowExW failed")?;
         glass(hwnd);
         parent.state.parts.borrow_mut().push(hwnd);
-        Ok(NativeWindow { hwnd, size: Cell::new(Size { width: DevicePixels(1), height: DevicePixels(1) }), state, panel: true, before: Cell::new(HWND::default()), owner: Cell::new(HWND::default()) })
+        Ok(NativeWindow { hwnd, size: Cell::new(Size { width: DevicePixels(1), height: DevicePixels(1) }), state, panel: true, before: Cell::new(HWND::default()), owner: Cell::new(HWND::default()), maximized: false })
     }
 
     /// Puts a panel's parts where its page is, each its box of the page (`placed`, the panel first), the page where it
@@ -442,7 +461,7 @@ impl Display {
             if !window.owner.get().is_invalid() {
                 let _ = EnableWindow(window.owner.get(), false);
             }
-            let _ = ShowWindow(window.hwnd, SW_SHOWNORMAL);
+            let _ = ShowWindow(window.hwnd, if window.maximized { SW_SHOWMAXIMIZED } else { SW_SHOWNORMAL });
         }
     }
 
@@ -466,6 +485,30 @@ impl Display {
                 let _ = ShowWindow(window.hwnd, SW_RESTORE);
             }
             let _ = SetForegroundWindow(window.hwnd);
+        }
+    }
+
+    /// Shows Windows' menu for text where a field was right-clicked (`TextMenu`), whose choice is its key.
+    pub fn text_menu(&self, window: &NativeWindow, menu: crate::view::TextMenu) {
+        let items = [(menu.cut, "x", w!("Cu&t\tCtrl+X")), (menu.copy, "c", w!("&Copy\tCtrl+C")), (menu.paste, "v", w!("&Paste\tCtrl+V")), (menu.select_all, "a", w!("Select &All\tCtrl+A"))];
+        let chosen = unsafe {
+            let Ok(popup) = CreatePopupMenu() else { return };
+            for (at, (enabled, _, title)) in items.iter().enumerate() {
+                if at == 3 {
+                    let _ = AppendMenuW(popup, MF_SEPARATOR, 0, None);
+                }
+                let _ = AppendMenuW(popup, if *enabled { MF_STRING } else { MF_STRING | MF_GRAYED }, at + 1, *title);
+            }
+            let scale = window.scale();
+            let mut at = POINT { x: (menu.at.x * scale).round() as i32, y: (menu.at.y * scale).round() as i32 };
+            let _ = windows::Win32::Graphics::Gdi::ClientToScreen(window.hwnd, &mut at);
+            let chosen = TrackPopupMenu(popup, TPM_RETURNCMD | TPM_RIGHTBUTTON, at.x, at.y, None, window.hwnd, None);
+            let _ = DestroyMenu(popup);
+            chosen.0 as usize
+        };
+        if let Some((_, key, _)) = chosen.checked_sub(1).and_then(|at| items.get(at)) {
+            let key = crate::inspect::Key { key: (*key).to_owned(), shift: false, alt: false, ctrl: true, meta: false };
+            self.queue.borrow_mut().push((window.state.id, window.state.part, Input::Key(key)));
         }
     }
 
@@ -717,6 +760,21 @@ fn screen_name(work: &RECT) -> String {
     format!("{}x{}+{}+{}", work.right - work.left, work.bottom - work.top, work.left, work.top)
 }
 
+/// Keeps where an app's window is, its placement as it is when not maximized and whether it is, in its frame file.
+fn keep_frame(hwnd: HWND, state: &State) {
+    let Some(file) = &state.frame else { return };
+    let mut placement = WINDOWPLACEMENT { length: size_of::<WINDOWPLACEMENT>() as u32, ..Default::default() };
+    if unsafe { GetWindowPlacement(hwnd, &mut placement) }.is_err() || !unsafe { IsWindowVisible(hwnd) }.as_bool() {
+        return;
+    }
+    let normal = placement.rcNormalPosition;
+    let maximized = placement.showCmd == SW_SHOWMAXIMIZED.0 as u32;
+    let now = crate::platform::Frame { x: normal.left, y: normal.top, width: normal.right - normal.left, height: normal.bottom - normal.top, maximized };
+    if crate::platform::Frame::read(file) != Some(now) {
+        now.write(file);
+    }
+}
+
 fn loword(value: isize) -> i32 {
     (value & 0xffff) as i16 as i32
 }
@@ -735,7 +793,16 @@ fn handle_msg(hwnd: HWND, state: &State, msg: u32, wparam: WPARAM, lparam: LPARA
             if wparam.0 as u32 != SIZE_MINIMIZED {
                 push(Input::Resized(Size { width: DevicePixels(loword(lparam.0)), height: DevicePixels(hiword(lparam.0)) }));
             }
+            // Maximized or back, it's kept as it is.
+            if matches!(wparam.0 as u32, SIZE_MAXIMIZED | SIZE_RESTORED) {
+                keep_frame(hwnd, state);
+            }
             Some(0)
+        }
+        // Moved or resized by a person, it's kept where it was left.
+        WM_EXITSIZEMOVE if !state.panel => {
+            keep_frame(hwnd, state);
+            None
         }
         WM_DPICHANGED => {
             // Where Windows suggests, at the new DPI, which sends WM_SIZE.

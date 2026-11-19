@@ -249,7 +249,12 @@ impl Screen {
 
     /// Where node `id` was drawn in the last frame.
     pub fn rect(&self, id: Id) -> Option<Rect> {
-        self.rects.get(&id).copied()
+        let chrome = match id {
+            super::HOME => self.chrome.home,
+            super::NOTICE_ACTION => self.chrome.action,
+            _ => return self.rects.get(&id).copied(),
+        };
+        chrome.map(|bounds| Rect { x: bounds.origin.x, y: bounds.origin.y, width: bounds.size.width, height: bounds.size.height })
     }
 
     /// Scrolls what node `id` is in, the innermost first, so it shows whole: the input with the keyboard, as the
