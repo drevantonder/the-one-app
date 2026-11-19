@@ -15,6 +15,7 @@ defmodule Telemetry do
   thing it keeps in its database.
   """
   @behaviour OneCore.App
+  require OpenTelemetry.Tracer, as: Tracer
   alias Telemetry.{Alerts, Buffer, Forward, Otlp, Read, Record, Store}
   alias OneCore.Call
 
@@ -433,19 +434,29 @@ defmodule Telemetry do
   @impl true
   def call("overview", inputs, call) do
     # How much is kept is listed as what's kept is read.
-    retention = Task.async(fn -> Store.retention(call.own) end)
-    {batches, from, to} = read(call, inputs["hours"] || 24)
+    within = OpenTelemetry.Ctx.get_current()
 
-    %{
-      from: div(from, 1_000_000),
-      to: div(to, 1_000_000),
-      failing: Read.errors(batches, shown(call)) |> Enum.take(20),
-      slowest: Read.slowest(batches, from, to, names(call)) |> Enum.take(12),
-      spending: Read.spending(batches),
-      calls: Read.calls(batches, from, to),
-      names: names(call),
-      retention: Task.await(retention)
-    }
+    retention =
+      Task.async(fn ->
+        OpenTelemetry.Ctx.attach(within)
+        Tracer.with_span("telemetry retention", do: Store.retention(call.own))
+      end)
+
+    {batches, from, to} = read(call, inputs["hours"] || 24)
+    {shown, names} = {shown(call), names(call)}
+
+    Tracer.with_span "telemetry aggregate" do
+      %{
+        from: div(from, 1_000_000),
+        to: div(to, 1_000_000),
+        failing: Read.errors(batches, shown) |> Enum.take(20),
+        slowest: Read.slowest(batches, from, to, names) |> Enum.take(12),
+        spending: Read.spending(batches),
+        calls: Read.calls(batches, from, to),
+        names: names
+      }
+    end
+    |> Map.put(:retention, Task.await(retention))
   end
 
   def call("errors", inputs, call) do
@@ -510,7 +521,7 @@ defmodule Telemetry do
   # Whose a call was is shown to the network's owners, and to whoever it was: to anyone else, how the network is
   # doing is open, and who did what isn't.
   defp shown(%Call{actor: actor} = call) do
-    owner = actor != nil and Call.owns?(%{call | subject: "network"})
+    owner = actor != nil and Tracer.with_span("telemetry owns", do: Call.owns?(%{call | subject: "network"}))
     fn whose -> owner or whose == OneCore.User.owner(actor || "") end
   end
 
