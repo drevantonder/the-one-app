@@ -38,7 +38,7 @@ It draws every scene, or those of the folders named, on the DOM in headless Chro
 `bunx playwright-core install chromium` fetches where it's missing) and on a native host by its headless harness
 (`cargo build -p renderer --example screenshot`). What counts is **what changed since `--against`** on our renderer
 (`changed.png`): a tree that changed, or pictures more than 2% apart, is looked at. A difference that's meant is said
-in the commit; one that isn't is fixed. Our renderer is the reference, judged against DESIGN.md and its mockups, not
+in the commit; one that isn't is fixed. Our renderer is the reference, judged against DESIGN.md (Raycast-inspired), not
 the browser: it will draw the web too. Until it does, browsers, MCP hosts and older phones still show the DOM, so a
 large DOM-vs-native difference it reports (`dom.png`, `native.png`, `diff.png`) is worth a look, but matching the DOM
 isn't the goal. A native host that hasn't the runtime version the UI library needs draws nothing, which it says.
