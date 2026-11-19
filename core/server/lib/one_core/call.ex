@@ -17,7 +17,7 @@ defmodule OneCore.Call do
     behalf of. One Core sets it from whose call made the call, wherever it runs, never from what's asked. A tool
     called by a person, an app or an agent has none: `nil`.
 
-  The rest is One Core's: the app's name where it was installed and the app as a who, what was asked of it, the
+  The rest is One Core's: the app's name where it was installed and the app as its artifact's name (`app_artifact`), what was asked of it, the
   apps it requires whose code runs inside it (`loaded`), whether another server passed it on, and the state it's in
   (`OneCore.Call.State`).
 
@@ -29,7 +29,7 @@ defmodule OneCore.Call do
   alias OneCore.Call.State
   alias OneCore.Apps.{Calls, Version}
 
-  @enforce_keys [:own, :installed, :folder, :server, :subject, :actor, :app, :who, :request, :loaded, :forwarded]
+  @enforce_keys [:own, :installed, :folder, :server, :subject, :actor, :app, :app_artifact, :who, :request, :loaded, :forwarded]
   defstruct [
     :own,
     :installed,
@@ -39,6 +39,8 @@ defmodule OneCore.Call do
     :actor,
     :caller,
     :app,
+    :app_artifact,
+    # The old name of `app_artifact`, which goes once Vault and Server Debug read that.
     :who,
     :request,
     :loaded,
@@ -104,7 +106,7 @@ defmodule OneCore.Call do
   def tool(%__MODULE__{actor: actor, subject: subject} = call, app, tool, inputs, options \\ []) do
     caller =
       case Keyword.fetch(options, :on_behalf_of) do
-        :error -> call.who
+        :error -> call.app_artifact
         {:ok, caller} when caller == call.caller and caller != nil -> caller
         {:ok, _} -> raise "#{call.app} acts on behalf only of the app that called it, and #{inspect(call.caller)} did"
       end
@@ -184,7 +186,7 @@ defmodule OneCore.Call do
     if not (is_binary(id) and id =~ ~r/^[A-Za-z0-9_-]+\z/),
       do: raise(ArgumentError, "an id is letters, digits, _ and -")
 
-    %Artifact{prefix: "#{subject}/made/#{app}/#{id}/", reached: {call.who, {actor, subject}, "owner"}}
+    %Artifact{prefix: "#{subject}/made/#{app}/#{id}/", reached: {call.app_artifact, {actor, subject}, "owner"}}
   end
 
   @doc """
@@ -204,7 +206,7 @@ defmodule OneCore.Call do
     # Its blobs are whoever's it is, whom this server may not act for. One that does runs the call.
     owner = User.owner(name) || "network"
     if not Servers.here?(owner), do: forward(call, owner)
-    %Artifact{prefix: name <> "/", reached: {call.who, {actor, subject}, relation}}
+    %Artifact{prefix: name <> "/", reached: {call.app_artifact, {actor, subject}, relation}}
   end
 
   @doc "Whether `reach/3` would give the artifact: whether this call may reach it as `relation`."
@@ -228,7 +230,7 @@ defmodule OneCore.Call do
         match?(["own" | _], kind) -> nil
         kind == ["made", app] and String.starts_with?(name, subject <> "/") -> []
         kind == ["made", app] -> [asking]
-        true -> [asking, call.who]
+        true -> [asking, call.app_artifact]
       end
 
     if about == nil do
@@ -365,7 +367,7 @@ defmodule OneCore.Call do
 
       counter = OneCore.Call.process(call, Hello.Counter, call.subject, 0)
   """
-  def process(%__MODULE__{loaded: loaded, who: app}, module, key, argument) do
+  def process(%__MODULE__{loaded: loaded, app_artifact: app}, module, key, argument) do
     under = Version.under(module)
     app = Enum.find_value(loaded, app, fn {_name, {app, other}} -> Version.under(other) == under && app end)
 

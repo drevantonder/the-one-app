@@ -8,7 +8,7 @@ defmodule OneCore.Call do
   # the server. `id` is the call's, which the server knows it by: a call that has ended asks nothing more.
   alias OneCore.Sandbox.Child
 
-  defstruct [:id, :own, :installed, :folder, :server, :subject, :actor, :caller, :app, :who, :loaded]
+  defstruct [:id, :own, :installed, :folder, :server, :subject, :actor, :caller, :app, :app_artifact, :who, :loaded]
 
   def app(%__MODULE__{loaded: loaded, app: app}, name) do
     case loaded do
@@ -280,6 +280,7 @@ defmodule OneCore.Sandbox.Child do
 
     probe.run(request, %{
       subject: scope["subject"],
+      app_artifact: nil,
       who: nil,
       own: if(scope["own"], do: &(label.(&1) != nil)),
       label: label,
@@ -300,7 +301,8 @@ defmodule OneCore.Sandbox.Child do
       actor: about["actor"],
       caller: about["caller"],
       app: about["app"],
-      who: about["who"],
+      app_artifact: about["app_artifact"],
+      who: about["app_artifact"],
       loaded:
         for(
           name <- about["loaded"],

@@ -71,7 +71,7 @@ defmodule OneCore.Service do
   def seen(server), do: (Servers.presence(server) || %{})["last_seen"]
 
   # The app whose service it is: this call's, or one whose code runs inside it, whose function this call is running.
-  defp whose(%Call{who: app, loaded: loaded}, service) do
+  defp whose(%Call{app_artifact: app, loaded: loaded}, service) do
     under = Version.under(service)
     Enum.find_value(loaded, app, fn {_name, {other, module}} -> Version.under(module) == under && other end)
   end

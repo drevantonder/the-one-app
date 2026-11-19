@@ -404,7 +404,7 @@ defmodule OneCore.Apps.Calls do
   end
 
   defp observes?(call, %{"artifact" => artifact, "by" => by}),
-    do: call.who != by and Call.refused(call, artifact, "viewer") == nil
+    do: call.app_artifact != by and Call.refused(call, artifact, "viewer") == nil
 
   defp observes?(_call, _about), do: true
 
@@ -482,7 +482,7 @@ defmodule OneCore.Apps.Calls do
   """
   def running(%Call{} = call, fun) do
     was = Logger.metadata()
-    Logger.metadata(who: call.who, installed: call.installed, subject: call.subject)
+    Logger.metadata(app_artifact: call.app_artifact, who: call.app_artifact, installed: call.installed, subject: call.subject)
 
     try do
       fun.()
@@ -519,6 +519,7 @@ defmodule OneCore.Apps.Calls do
       subject: subject,
       actor: actor,
       app: name,
+      app_artifact: versions[name].artifact,
       who: versions[name].artifact,
       request: ask,
       loaded:

@@ -165,7 +165,7 @@ defmodule OneCore.Sandbox do
         "actor" => call.actor,
         "caller" => call.caller,
         "app" => call.app,
-        "who" => call.who,
+        "app_artifact" => call.app_artifact,
         "server" => call.server,
         "loaded" => Map.keys(versions) -- [name]
       }
@@ -196,6 +196,7 @@ defmodule OneCore.Sandbox do
       subject: owner,
       actor: nil,
       app: name,
+      app_artifact: version.artifact,
       who: version.artifact,
       request: nil,
       loaded: %{},
