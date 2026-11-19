@@ -40,3 +40,18 @@ Native's platform files are; build.js swaps them in for the native build.
   from the tokens, a scene (`gallery/*.scenes.tsx`), and `///` comments that start with an example, which are the
   `ui` skill.
 - Updating from upstream: diff each copied file's upstream from the commit in its header to now, and apply that.
+
+## Motion
+
+Motion is the renderer's, on its own thread, never a turn of a page's JS a frame (`clients/app/renderer/src/view/transition.rs`,
+`motion.rs`). A style says it, by the ecosystem's names:
+
+- `transitionProperty` and `transition` (a motion token, eased or a spring): a change moves, and a spring turned
+  midway keeps its speed, as SwiftUI's and Motion's do.
+- `entering` (CSS's `@starting-style`) and `exiting` (Motion's `exit`): what's added starts from one, and what's taken
+  out is drawn moving to the other before it's gone. Nothing keeps a node mounted in JS to animate it out.
+- `drag`, `dragConstraints`, `dragElastic` and `onDragEnd` on a View (Motion's): it follows the finger where the input
+  arrives, and let go, springs from there at the finger's speed to wherever its style then puts it. A gesture that
+  settles somewhere (a sheet closing, a page turned) sets that style in `onDragEnd`; it doesn't move the node itself.
+
+The DOM build draws what CSS has (`transition`, `@starting-style`) and leaves out the rest.

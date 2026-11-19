@@ -346,7 +346,7 @@ impl Painter<'_> {
     pub(super) fn build(&mut self, id: Id, inherited: Text, root: bool) -> NodeId {
         let tree = self.tree;
         let node = &tree.nodes[&id];
-        let state = self.states.of(id, node.kind == Kind::Input);
+        let state = State { exiting: tree.leaving_in(id), ..self.states.of(id, node.kind == Kind::Input) };
         let restyle = match self.layout.kept.get_mut(&id) {
             None => true,
             Some(kept) => {
@@ -790,8 +790,8 @@ impl Painter<'_> {
         let shown = self.turned(bounds).intersect(&mask);
         let root = id == 0;
         // What's inert takes no pointer, nor does what's in it.
-        let pointer = !node.is("inert") && look.pointer_events.unwrap_or(pointer);
-        if node.str("aria-modal") == Some("true") {
+        let pointer = !node.is("inert") && !tree.leaving(id) && look.pointer_events.unwrap_or(pointer);
+        if node.str("aria-modal") == Some("true") && !tree.leaving_in(id) {
             self.modal = Some(id);
         }
         let drawn = self.turned(bounds);

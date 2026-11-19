@@ -369,16 +369,23 @@ impl Transitions {
             let transition = computed.transition.as_ref();
             dragged.spring = Some(transition.and_then(|transition| transition.spring).or(transition.map(|transition| Spring::new(transition.duration, 0.0))).unwrap_or(DRAGGED));
         }
-        // Where its style puts it is where it's let go to, not a change to move to once it's arrived.
-        for property in ["translateX", "translateY"] {
-            if let Some(styled) = get(computed, property) {
-                self.values.insert((id, property), styled);
+        // Where its style puts it is where it's let go to, not a change to move to once it's arrived; where it was
+        // drawn nowhere as it was held (let go within a frame), it was held from where its style last put it.
+        let px = |value: Value, size: f32| match value {
+            Value::Px(px) | Value::Number(px) => Some(px),
+            Value::Percent(percent) => Some(size * percent / 100.0),
+            Value::Colour(_) => None,
+        };
+        let mut styled = [None; 2];
+        for ((property, along), was) in [("translateX", size.width), ("translateY", size.height)].into_iter().zip(&mut styled) {
+            if let Some(now) = get(computed, property) {
+                *was = self.values.insert((id, property), now).and_then(|value| px(value, along));
             }
         }
         let rests = [computed.look.translate.0.of(size.width), computed.look.translate.1.of(size.height)];
         let state = dragged.state(now);
-        for ((axis, rest), (off, velocity)) in dragged.axes.iter_mut().zip(rests).zip(state) {
-            if let Some(was) = axis.rest.filter(|was| *was != rest && !dragged.held) {
+        for (((axis, rest), (off, velocity)), styled) in dragged.axes.iter_mut().zip(rests).zip(state).zip(styled) {
+            if let Some(was) = axis.rest.or(styled).filter(|was| *was != rest && !dragged.held) {
                 (axis.off, axis.velocity, axis.start) = (off + f64::from(was - rest), velocity, now);
             }
             axis.rest = Some(rest);

@@ -134,7 +134,7 @@ if (import.meta.main) process.stdout.write(tokensCss())
 // into what they are on each target.
 
 const hash = (text: string) => createHash("sha256").update(text).digest("base64url").replace(/[-_]/g, "").slice(0, 8)
-const states: State[] = ["hover", "pressed", "focused", "entering"]
+const states: State[] = ["hover", "pressed", "focused", "entering", "exiting"]
 const kebab = (name: string) => name.replace(/[A-Z]/g, (letter) => `-${letter.toLowerCase()}`)
 
 /** Each shorthand, as the longhands it says. */
@@ -243,6 +243,8 @@ function rule(name: string, state: string, body: string): string {
   if (state === "pressed") return `.${name}:active{${body}}`
   if (state === "focused") return `.${name}:focus-visible{${body}}`
   if (state === "entering") return `@starting-style{.${name}{${body}}}`
+  // The DOM takes out what goes at once, with no state of its going to draw.
+  if (state === "exiting") return ""
   return `.${name}{${body}}`
 }
 

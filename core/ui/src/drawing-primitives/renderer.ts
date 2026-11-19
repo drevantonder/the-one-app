@@ -420,8 +420,10 @@ export interface Styles {
 /** A node's state, which a style's value may depend on, as it may on a condition: `hover`, a mouse's pointer over it
  * (never a finger); `pressed`, a pointer or a finger down on it, or Enter or Space held where the keyboard is;
  * `focused`, where the keyboard is, as CSS's `:focus-visible`; `entering`, what it starts from as it's added, to
- * transition from (CSS's `@starting-style`). A later one wins, as conditions do. */
-export type State = "hover" | "pressed" | "focused" | "entering"
+ * transition from (CSS's `@starting-style`); `exiting`, what it goes to as it's taken out, which a native host draws
+ * it moving to before it's gone, as Motion's `exit` (the DOM takes it out at once). A later one wins, as conditions
+ * do. */
+export type State = "hover" | "pressed" | "focused" | "entering" | "exiting"
 
 /** A style: properties, as React Native names them, each a value or a value by state (`{ default, hover }`). Every
  * shorthand is written out (`padding` is its four sides), so the last style to say a property is all it is. */

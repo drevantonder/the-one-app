@@ -286,6 +286,8 @@ pub struct Screen {
     captured: Option<Id>,
     /// What the press drags, if it's on a node that does.
     drag: Option<drag::Drag>,
+    /// What was going (`Tree::leaving`) as the last frame was drawn.
+    going: HashSet<Id>,
     /// What takes the pointer, as it was last painted, in the order painted, the topmost last.
     placed: Vec<(Id, Placed)>,
     /// Whether anything moved by itself in the last frame.
@@ -378,6 +380,7 @@ impl Screen {
             chosen_files: Arc::default(),
             scrolled: HashMap::new(),
             drag: None,
+            going: HashSet::new(),
             states: States::default(),
             pointer: None,
             touch: false,
@@ -1115,6 +1118,14 @@ impl Screen {
         }
         self.chrome.home = home;
         let moving = self.transitions.finish(plan.now);
+        // What's going is gone once nothing in it moves, having been drawn going.
+        let still = self.transitions.moving();
+        let gone: Vec<Id> = self.tree.going().filter(|id| self.going.contains(id) && !still.iter().any(|moving| self.within(*moving, *id))).collect();
+        for id in gone {
+            self.tree.left(id);
+            self.again = true;
+        }
+        self.going = self.tree.going().collect();
         self.placed = placed;
         // A modal dialog holds the keyboard: Tab goes only to what's in it, and it has the keyboard as it appears.
         // What's inert, or in what is, Tab passes over.
@@ -1360,7 +1371,7 @@ impl Screen {
     /// Whether node `id` is in the page's tree: under its root, not taken out of it, though its JS may still hold it.
     fn attached(&self, id: Id) -> bool {
         let mut at = Some(id);
-        while let Some(node) = at {
+        while let Some(node) = at.filter(|node| !self.tree.leaving(*node)) {
             if node == 0 {
                 return true;
             }
@@ -2159,6 +2170,7 @@ impl States {
             pressed: self.pressed == Some(id),
             focused: self.focused == Some(id) && (self.focus_visible || input),
             entering: false,
+            exiting: false,
         }
     }
 }

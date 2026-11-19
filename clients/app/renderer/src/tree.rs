@@ -131,6 +131,11 @@ pub struct Tree {
     inputs: HashSet<Id>,
     autofocus: HashSet<Id>,
     layout: HashSet<Id>,
+    /// What's been taken out but is drawn going, as its `exiting` style moves it out (Motion's `AnimatePresence`, CSS's
+    /// exit transitions), until the screen says it's gone (`left`): inert, read by nobody, as if gone. What in it
+    /// the page has dropped meanwhile goes with it.
+    leaving: HashSet<Id>,
+    dropped: HashSet<Id>,
 }
 
 impl Default for Tree {
@@ -141,6 +146,8 @@ impl Default for Tree {
             inputs: HashSet::new(),
             autofocus: HashSet::new(),
             layout: HashSet::new(),
+            leaving: HashSet::new(),
+            dropped: HashSet::new(),
         }
     }
 }
@@ -183,13 +190,63 @@ impl Tree {
     /// Whether `id` is inert, or in what is (`inert`, as the DOM's).
     pub fn inert(&self, id: Id) -> bool {
         let mut at = Some(id);
-        while let Some(node) = at.and_then(|id| self.nodes.get(&id)) {
-            if node.is("inert") {
+        while let Some((id, node)) = at.and_then(|id| Some((id, self.nodes.get(&id)?))) {
+            if node.is("inert") || self.leaving.contains(&id) {
                 return true;
             }
             at = node.parent;
         }
         false
+    }
+
+    /// Whether `id` was taken out and is drawn going (`leaving`), itself.
+    pub fn leaving(&self, id: Id) -> bool {
+        self.leaving.contains(&id)
+    }
+
+    /// Whether `id` is going, or in what is.
+    pub fn leaving_in(&self, id: Id) -> bool {
+        let mut at = Some(id);
+        while let Some(id) = at.filter(|_| !self.leaving.is_empty()) {
+            if self.leaving.contains(&id) {
+                return true;
+            }
+            at = self.parent(id);
+        }
+        false
+    }
+
+    /// What's going.
+    pub fn going(&self) -> impl Iterator<Item = Id> + '_ {
+        self.leaving.iter().copied()
+    }
+
+    /// `id` has gone: it's taken out, and what in it the page has dropped is gone too.
+    pub fn left(&mut self, id: Id) {
+        if !self.leaving.remove(&id) {
+            return;
+        }
+        self.detach(id);
+        let mut at = vec![id];
+        while let Some(one) = at.pop() {
+            at.extend(self.nodes.get(&one).map(|node| node.children.clone()).unwrap_or_default());
+            if self.dropped.remove(&one) {
+                self.forget(one);
+            }
+        }
+    }
+
+    /// Whether anything in `id`, or it, looks a way of its own as it goes.
+    fn exits(&self, id: Id) -> bool {
+        self.nodes.get(&id).is_some_and(|node| node.styles.as_ref().is_some_and(|styles| crate::style::exits(styles)) || node.children.iter().any(|child| self.exits(*child)))
+    }
+
+    fn forget(&mut self, id: Id) {
+        self.detach(id);
+        self.nodes.remove(&id);
+        self.inputs.remove(&id);
+        self.autofocus.remove(&id);
+        self.layout.remove(&id);
     }
 
     /// Whether nothing's changed since `take_changed` was last asked.
@@ -258,6 +315,10 @@ impl Tree {
                 }
                 Mutation::Insert { parent, id, before } => {
                     anyhow::ensure!(self.nodes.contains_key(&id), "there's no node {id}");
+                    // Put back as it goes, it comes back.
+                    if self.leaving.remove(&id) {
+                        self.change(id);
+                    }
                     self.detach(id);
                     let into = self.nodes.get_mut(&parent).with_context(|| format!("there's no node {parent}"))?;
                     let at = before.and_then(|before| into.children.iter().position(|child| *child == before));
@@ -265,14 +326,14 @@ impl Tree {
                     self.nodes.get_mut(&id).expect("it's there").parent = Some(parent);
                     self.change(parent);
                 }
-                Mutation::Remove { id, .. } => self.detach(id),
-                Mutation::Drop { id } => {
-                    self.detach(id);
-                    self.nodes.remove(&id);
-                    self.inputs.remove(&id);
-                    self.autofocus.remove(&id);
-                    self.layout.remove(&id);
+                // What looks a way of its own as it goes is drawn going first.
+                Mutation::Remove { id, .. } if self.exits(id) => {
+                    self.leaving.insert(id);
+                    self.change(id);
                 }
+                Mutation::Remove { id, .. } => self.detach(id),
+                Mutation::Drop { id } if self.leaving_in(id) => drop(self.dropped.insert(id)),
+                Mutation::Drop { id } => self.forget(id),
             }
         }
         Ok(())
@@ -309,7 +370,7 @@ impl Tree {
     /// Whether there's a modal shown in `id`, the last one there putting the way to it, from `id`, in `path`.
     fn modal(&self, id: Id, path: &mut Vec<Id>) -> bool {
         let Some(node) = self.nodes.get(&id) else { return false };
-        if node.hidden() || node.str("aria-hidden") == Some("true") || node.is("inert") {
+        if node.hidden() || node.str("aria-hidden") == Some("true") || node.is("inert") || self.leaving.contains(&id) {
             return false;
         }
         path.push(id);
@@ -323,7 +384,7 @@ impl Tree {
     /// The semantic tree from `id`, where `held` is the way to the modal shown, which only what's on it is read on.
     fn read(&self, id: Id, held: Option<&[Id]>) -> Vec<Value> {
         let Some(node) = self.nodes.get(&id) else { return Vec::new() };
-        if node.hidden() || node.str("aria-hidden") == Some("true") || node.is("inert") {
+        if node.hidden() || node.str("aria-hidden") == Some("true") || node.is("inert") || self.leaving.contains(&id) {
             return Vec::new();
         }
         let held = match held {

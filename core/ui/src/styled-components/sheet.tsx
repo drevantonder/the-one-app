@@ -9,11 +9,8 @@ import { Button, Icon } from "./button.tsx"
 import { messages } from "../words.ts"
 import { Collect } from "./collect.ts"
 import { negative, styles } from "../styles.ts"
-import { duration, tokens } from "../tokens.ts"
+import { tokens } from "../tokens.ts"
 import { createDialog, createPull, type DialogProps } from "../headless-components/dialog.ts"
-
-/** How long what's over the page takes to go, in milliseconds: the travel pace's (tokens.ts). */
-const going = duration(tokens.motion.travel)
 
 /** Where a sheet is in the middle of the window, not at its foot: a window 40rem wide or more. */
 const wide = () => viewport().width >= 640
@@ -21,9 +18,8 @@ const wide = () => viewport().width >= 640
 const look = styles({
   scrim: {
     position: "absolute", top: 0, bottom: 0, start: 0, end: 0, backgroundColor: tokens.colour.overlay, pointerEvents: "auto",
-    opacity: { default: 1, entering: 0 }, transitionProperty: ["opacity"], transition: tokens.motion.travel,
+    opacity: { default: 1, entering: 0, exiting: 0 }, transitionProperty: ["opacity"], transition: tokens.motion.travel,
   },
-  gone: { opacity: 0 },
   place: { position: "absolute", top: 0, bottom: 0, start: 0, end: 0, alignItems: "stretch", justifyContent: "flex-end" },
   middle: { alignItems: "center", justifyContent: "center", padding: tokens.grid[4] },
   panel: {
@@ -32,13 +28,11 @@ const look = styles({
     // Up from the foot, it reaches the window's edge, and what's in it stays clear of the home indicator and the
     // keyboard, as an iPhone's sheet's does.
     paddingBottom: tokens.length.safeBottom,
-    translateY: { default: 0, entering: "100%" }, transitionProperty: ["translateY", "opacity", "scale"], transition: tokens.motion.travel,
+    translateY: { default: 0, entering: "100%", exiting: "100%" }, transitionProperty: ["translateY", "opacity", "scale"], transition: tokens.motion.travel,
   },
-  down: { translateY: "100%" },
-  floating: { width: "100%", maxWidth: tokens.length.sheet, borderRadius: tokens.radius.window, paddingBottom: 0, translateY: 0, opacity: { default: 1, entering: 0 }, scale: { default: 1, entering: 0.97 } },
+  floating: { width: "100%", maxWidth: tokens.length.sheet, borderRadius: tokens.radius.window, paddingBottom: 0, translateY: 0, opacity: { default: 1, entering: 0, exiting: 0 }, scale: { default: 1, entering: 0.97, exiting: 0.97 } },
   // On a computer, a panel of glass over the window, as Raycast's.
   glass: { backgroundColor: tokens.colour.panel, backdropFilter: tokens.material.glass },
-  shrunk: { opacity: 0, scale: 0.97 },
   grabber: { alignSelf: "center", width: tokens.grid[10], height: tokens.length.grabber, marginTop: tokens.length.grabberGap, borderRadius: tokens.radius.full, backgroundColor: tokens.colour.quaternaryLabel },
   header: { flexDirection: "row", alignItems: "center", gap: tokens.grid[2], paddingBlock: tokens.grid[2], paddingStart: tokens.length.gutter, paddingEnd: tokens.grid[2] },
   heading: { flexGrow: 1, minWidth: 0, font: tokens.type.large, fontWeight: tokens.weight.semibold, lineClamp: 2 },
@@ -52,14 +46,14 @@ const look = styles({
 })
 
 /// What a sheet and an alert share: shown over the window in a modal layer while `open`, with what's around it
-/// dimmed, kept until it's gone as it closes; Escape, the device's back and a press on what's around it close it,
+/// dimmed, drawn going as it closes; Escape, the device's back and a press on what's around it close it,
 /// each calling `onClose`.
 function Over(props: DialogProps & { children: (dialog: ReturnType<typeof createDialog>) => JSX.Element }) {
-  const dialog = createDialog(props, going)
+  const dialog = createDialog(props)
   return (
-    <Show when={dialog.shown()}>
+    <Show when={props.open}>
       <Modal>
-        <Pressable {...dialog.outside()} style={[look.scrim, dialog.leaving() && look.gone]} />
+        <Pressable {...dialog.outside()} style={look.scrim} />
         {/* What's over the page isn't the bar's, wherever it's written. */}
         <Collect value={null}>{props.children(dialog)}</Collect>
       </Modal>
@@ -81,7 +75,7 @@ export function Sheet(props: { heading?: JSX.Element; open?: boolean; onClose?: 
             {...dialog.content("dialog")}
             aria-label={typeof props.heading === "string" ? props.heading : undefined}
             {...pull}
-            style={[look.panel, wide() && look.floating, !touch() && look.glass, dialog.leaving() && (wide() ? look.shrunk : look.down)]}
+            style={[look.panel, wide() && look.floating, !touch() && look.glass]}
           >
             <Show when={!wide()}>
               <View aria-hidden="true" style={look.grabber} />
@@ -117,7 +111,7 @@ export function Alert(props: { heading: JSX.Element; text?: JSX.Element; open?: 
           <View
             {...dialog.content("alertdialog")}
             aria-label={typeof props.heading === "string" ? props.heading : undefined}
-            style={[look.panel, look.floating, !touch() && look.glass, look.alert, dialog.leaving() && look.shrunk]}
+            style={[look.panel, look.floating, !touch() && look.glass, look.alert]}
           >
             <Text role="heading" aria-level={2} style={[look.heading, !touch() && look.computerHeading, look.centred]}>
               {props.heading}

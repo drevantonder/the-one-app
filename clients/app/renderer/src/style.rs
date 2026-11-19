@@ -155,6 +155,9 @@ pub struct State {
     pub pressed: bool,
     pub focused: bool,
     pub entering: bool,
+    /// It's been taken out of the tree, and is drawn until what its `exiting` state moves has moved, as Motion's
+    /// `exit` (`tree::Tree::leaving`).
+    pub exiting: bool,
 }
 
 /// Every style table's styles, by id: the UI library's and each app's, kept in one, as their ids are their contents'.
@@ -175,8 +178,20 @@ pub fn load_styles(json: &str) -> anyhow::Result<u32> {
 /// Whether a value is split by state: an object of `default` and states, and nothing else.
 fn by_state(value: &Value) -> Option<&Map<String, Value>> {
     let object = value.as_object()?;
-    let states = ["default", "hover", "pressed", "focused", "entering"];
+    let states = ["default", "hover", "pressed", "focused", "entering", "exiting"];
     (!object.is_empty() && object.keys().all(|key| states.contains(&key.as_str()))).then_some(object)
+}
+
+/// Whether styles say how a node looks as it goes (`exiting`), so it's drawn going before it's gone.
+pub fn exits(list: &[Value]) -> bool {
+    let styles = STYLES.read().expect("nothing panics holding it");
+    let empty = HashMap::new();
+    let table = styles.as_ref().unwrap_or(&empty);
+    let picked = list.iter().filter_map(|style| match style {
+        Value::String(id) => table.get(id),
+        inline => Some(inline),
+    });
+    picked.filter_map(Value::as_object).any(|style| style.values().any(|value| by_state(value).is_some_and(|by| by.contains_key("exiting"))))
 }
 
 /// Styles merged in order, each by id or an object of its own (its lengths pixels), the last to say a property
@@ -201,7 +216,7 @@ pub fn resolve(list: &[Value], state: State) -> Map<String, Value> {
         let value = match by_state(&value) {
             Some(by) => {
                 let mut picked = by.get("default");
-                for (name, holds) in [("hover", state.hover), ("pressed", state.pressed), ("focused", state.focused), ("entering", state.entering)] {
+                for (name, holds) in [("hover", state.hover), ("pressed", state.pressed), ("focused", state.focused), ("entering", state.entering), ("exiting", state.exiting)] {
                     if holds && let Some(value) = by.get(name) {
                         picked = Some(value);
                     }
