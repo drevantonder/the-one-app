@@ -700,7 +700,10 @@ enum Phase {
 /// edge, which drags the window, and where it was lately, for how fast it was going as it lifts.
 struct Touch {
     finger: u64,
+    /// It came in from the left edge, which drags the window across, or with a screen of the page's over its first,
+    /// goes back a screen as it's let go (`pops`).
     edge: bool,
+    pops: bool,
     start: Point<f32>,
     last: Point<f32>,
     /// It's moved past the slop, so it's decided whether it pans or is what it's on's (`Screen::pans`).
@@ -788,11 +791,14 @@ fn touch_at(screen: &mut crate::Screen, native: &NativeWindow, id: WindowId, fin
                 let stopped = FLINGS.with(|flings| flings.borrow_mut().remove(&id)).is_some();
                 // One that lands as the window springs from the edge takes it where it is.
                 let caught = SLIDES.with(|slides| slides.borrow_mut().remove(&id)).is_some();
-                // The root window, the Home Screen, has nothing to go back to.
-                let edge = caught || (!native.root && at.x < EDGE);
+                // The root window, the Home Screen, has nothing to go back to, and what's open over a page (a sheet, a
+                // menu) takes no swipe back, as iOS's modals don't.
+                let covered = screen.covered();
+                let edge = caught || (!native.root && at.x < EDGE && covered != Some(true));
+                let pops = !caught && edge && covered == Some(false);
                 let on_input = !edge && screen.input_at(at);
                 let start = if caught { point(at.x - native.slid(), at.y) } else { at };
-                touches.insert(id, Touch { finger, edge, start, last: at, moved: false, panning: false, on_input, stopped, lately: vec![(Instant::now(), at)] });
+                touches.insert(id, Touch { finger, edge, pops, start, last: at, moved: false, panning: false, on_input, stopped, lately: vec![(Instant::now(), at)] });
                 if !edge && !on_input && !stopped {
                     screen.pointer_down(at, 0, false);
                 }
@@ -802,6 +808,9 @@ fn touch_at(screen: &mut crate::Screen, native: &NativeWindow, id: WindowId, fin
                 let now = Instant::now();
                 touch.lately.push((now, at));
                 touch.lately.retain(|(when, _)| now.duration_since(*when) < Duration::from_millis(100));
+                if touch.pops {
+                    return;
+                }
                 if touch.edge {
                     return native.slide((at.x - touch.start.x).max(0.0));
                 }
@@ -829,6 +838,13 @@ fn touch_at(screen: &mut crate::Screen, native: &NativeWindow, id: WindowId, fin
                 let (now, first) = (Instant::now(), touch.lately[0]);
                 let seconds = now.duration_since(first.0).as_secs_f32().max(0.008);
                 let velocity = point((first.1.x - at.x) / seconds, (first.1.y - at.y) / seconds);
+                // Over a screen of the page's, it goes back a screen, the app's window staying where it is.
+                if touch.pops {
+                    if at.x - touch.start.x > native.size().width.0 / 3.0 || -velocity.x > 500.0 {
+                        screen.back();
+                    }
+                    return;
+                }
                 if touch.edge {
                     // Let go past a third of the way across, or flicked, it goes back: through what's open over the
                     // app's page or its own screens first, as iOS's navigation does, springing back as the app goes
@@ -862,6 +878,9 @@ fn touch_at(screen: &mut crate::Screen, native: &NativeWindow, id: WindowId, fin
             }
             Phase::Cancelled => {
                 let Some(touch) = touches.remove(&id) else { return };
+                if touch.pops {
+                    return;
+                }
                 if touch.edge {
                     let across = native.slid();
                     SLIDES.with(|slides| slides.borrow_mut().insert(id, Slide { across, velocity: 0.0, target: 0.0, stepped: Instant::now() }));
