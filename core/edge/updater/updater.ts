@@ -3,23 +3,21 @@
 // CockroachDB's rolling upgrades). Nobody runs `one update`: publishing a build is all.
 //
 //     up to date ──a newer build published: the server's, or a `one` that runs servers──► preparing
-//       every awake server not on its latest pair (the server build, and the `one` that runs it) downloads it, checks
-//       it and says how it would take it: loaded in place, or restarted (why), as a pair with a new `one` is
-//     preparing ──all checked──► loading
-//       every server that loads it in place takes it at once
-//     loading ──► restarting
-//       one server at a time, never the last ready one: a lone ready server that must restart waits for a quiet
-//       moment (no calls for a while), or Update Now
+//       every awake server not on its latest pair (the server build, and the `one` that runs it) downloads it and
+//       checks it starts
+//     preparing ──all checked──► restarting
+//       one server at a time restarts on it, never the last ready one, as Elixir fleets roll a release: a lone ready
+//       server waits for a quiet moment (no calls for a while), or Update Now
 //     restarting ──► up to date
 //
 //     any state ──a newer build──► preparing, for the newer one
-//     preparing, loading or restarting ──a server goes back, or doesn't finish──►
+//     preparing or restarting ──a server goes back, or doesn't finish──►
 //       held (which, why): Try Again (Update Now), or a newer build, starts it again
 //     up to date ──a server that missed one is back──► preparing, for it alone
 //
 // A server that's asleep or gone as an update begins, or goes while it's under way, is skipped, and caught up under
-// the same rules once it's back. Each server prepares and goes as it's told, and decides itself how it takes a build
-// (`clients/cli/src/serving.rs`): this decides only when.
+// the same rules once it's back. Each server prepares and goes as it's told (`clients/cli/src/serving.rs`): this
+// decides only when.
 //
 // It hears only through the relay, which is bound to it, never the other way round (Cloudflare deploys no Worker
 // bound to one that isn't there yet, so two bound to each other couldn't be deployed to a new network): a build
@@ -37,7 +35,7 @@ declare global {
   }
 }
 
-type NetworkUpdateStatus = "up_to_date" | "preparing" | "loading" | "restarting" | "held";
+type NetworkUpdateStatus = "up_to_date" | "preparing" | "restarting" | "held";
 type ServerUpdateStatus = "up_to_date" | "downloading" | "checked" | "verifying";
 /** What a server is told to do: prepare the build, take it now, or take it once it has had no calls for a while. */
 type Instruction = "prepare" | "go" | "go_when_quiet";
@@ -49,8 +47,6 @@ export interface Reported {
   /** Whether it's installed with `one serve on`, which takes builds: one a developer runs from source never does. */
   installed?: boolean;
   server_update_status?: ServerUpdateStatus;
-  update_method?: "hot_load" | "restart" | null;
-  update_method_reason?: string | null;
   next_build?: string | null;
   /** The builds' name of the `one` that runs it (`one-cli/linux-x86_64`), and its build, now and being taken. */
   program_name?: string | null;
@@ -80,8 +76,8 @@ interface Taking {
   key: string;
   prepared?: number;
   went?: number;
-  /** When it first said it's on the build: loaded, or started and not yet running. */
-  loaded?: number;
+  /** When it first said it's on the build: started, and not yet running. */
+  started?: number;
   ready?: number;
   /** Whether it has begun since it was told to, so a `went_back` it says is this update's. */
   begun?: boolean;
@@ -242,36 +238,25 @@ export class NetworkUpdater extends DurableObject<UpdaterEnv> {
       const said = reported[server.key] ?? {};
       const next = { ...said, version: said.next_build ?? undefined, program: said.next_program };
       if (server.prepared === undefined && said.server_update_status === "checked" && on(state, next)) server.prepared = at;
-      if (server.loaded === undefined && on(state, said)) server.loaded = at;
+      if (server.started === undefined && on(state, said)) server.started = at;
       if (server.ready === undefined && on(state, said) && said.server_update_status === "up_to_date" && presence[server.key]?.server_ready) server.ready = at;
       // Back on the pair it was on, saying why: it went back, or couldn't prepare.
       if (server.begun && server.ready === undefined && said.server_update_status === "up_to_date" && !on(state, said) && said.went_back)
         return this.hold(state, server.key, said.name, said.went_back);
     }
     // One that's gone, but for one restarting to take it, is caught up once it's back.
-    const method = (key: string) => reported[key]?.update_method;
-    const gone = state.servers.filter(
-      (server) => server.ready === undefined && !presence[server.key]?.connected && (server.went === undefined || method(server.key) !== "restart"),
-    );
+    const gone = state.servers.filter((server) => server.ready === undefined && !presence[server.key]?.connected && server.went === undefined);
     state.skipped.push(...gone.map((server) => server.key));
     state.servers = state.servers.filter((server) => !gone.includes(server));
 
     if (state.network_update_status === "preparing") {
       if (state.servers.some((server) => server.prepared === undefined && server.ready === undefined)) return;
       state.timings.prepared = at;
-      state.network_update_status = "loading";
+      state.network_update_status = "restarting";
       state.until = Date.now() + RESTARTING;
     }
-    if (state.network_update_status === "loading") {
-      const loading = state.servers.filter((server) => method(server.key) !== "restart");
-      for (const server of loading) server.went ??= at;
-      if (loading.length) state.timings.go ??= at;
-      if (loading.some((server) => server.ready === undefined)) return;
-      if (loading.length) state.timings.loaded = Math.max(...loading.map((server) => server.loaded ?? at));
-      state.network_update_status = "restarting";
-    }
     if (state.network_update_status === "restarting") {
-      const restarting = state.servers.filter((server) => method(server.key) === "restart" && server.ready === undefined);
+      const restarting = state.servers.filter((server) => server.ready === undefined);
       const [next] = restarting.filter((server) => server.went !== undefined).concat(restarting);
       if (!next) return this.finish(state);
       if (next.went !== undefined && state.waiting_for !== "quiet") return;
@@ -318,8 +303,7 @@ export class NetworkUpdater extends DurableObject<UpdaterEnv> {
       if (state.network_update_status === "preparing" && server.prepared === undefined) told[server.key] = "prepare";
       else if (server.went !== undefined && reported[server.key]?.server_update_status === "checked") told[server.key] = "go";
       else if (server.went !== undefined && reported[server.key]?.server_update_status !== "checked") continue;
-      else if (state.network_update_status === "restarting" && state.waiting_for === "quiet" && reported[server.key]?.update_method === "restart")
-        told[server.key] = "go_when_quiet";
+      else if (state.network_update_status === "restarting" && state.waiting_for === "quiet") told[server.key] = "go_when_quiet";
       // A server that went back to the build before, or never prepared it, as one whose prepare was missed, prepares it.
       if (reported[server.key]?.server_update_status === "up_to_date" && !on(state, reported[server.key])) told[server.key] ??= "prepare";
     }
@@ -347,7 +331,7 @@ export class NetworkUpdater extends DurableObject<UpdaterEnv> {
       servers: this.instructions(state, reported),
       timings: {
         ...state.timings,
-        ...Object.fromEntries(state.servers.map(({ key, prepared, went, loaded, ready }) => [name(key), { prepared, went, loaded, ready }])),
+        ...Object.fromEntries(state.servers.map(({ key, prepared, went, started, ready }) => [name(key), { prepared, went, started, ready }])),
       },
     };
   }

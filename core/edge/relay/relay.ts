@@ -113,8 +113,6 @@ const UPDATE: (keyof Reported)[] = [
   "name",
   "installed",
   "server_update_status",
-  "update_method",
-  "update_method_reason",
   "next_build",
   "program_name",
   "program",

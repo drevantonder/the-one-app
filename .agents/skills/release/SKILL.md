@@ -42,8 +42,8 @@ Exactly two rules hold at runtime:
 ## Order
 
 Publishing is all a release does. The network's update takes every server to the latest build published by itself
-(`core/edge/updater/updater.ts`): each awake server prepares it, those that load it in place take it at once, and
-those that restart one at a time, never the last ready one. A build published while another is under way takes its
+(`core/edge/updater/updater.ts`): each awake server prepares it, then each restarts on it, one at
+a time, never the last ready one. A build published while another is under way takes its
 place; a server asleep or gone is caught up once it's back; one that goes back holds it, saying which and why, until
 a newer build or Update Now (the `update` tool). Run no `one update` for a release. `one builds` says how far it is
 (`network`: its `network_update_status`, the servers `behind` it, and when each step was reached, in `timings`).
