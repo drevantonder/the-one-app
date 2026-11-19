@@ -19,7 +19,7 @@ __pycache__/
 # What `wrangler dev` keeps, the secrets of the presigner and of an app's edge function as whoever deploys an
 # edge writes them (the web client and each app's edge function are built in target/)
 .wrangler/
-/core/edge/presigner/secrets
+/core/edge/secrets
 /apps/*/edge/secrets
 /apps/*/edge/files/
 # Where the web client was built before 19 Nov 2026, which checkouts made before then still have.

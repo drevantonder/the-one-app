@@ -3,10 +3,6 @@
  * most (`<file>.br` beside it: the renderer's WebAssembly, `clients/web/renderer/build.js`), goes as it's kept to a
  * browser that takes Brotli, where Cloudflare would compress it again as it sends, at a lower level: 1.1 MB, not 1.4.
  */
-interface Env {
-  ASSETS: Fetcher;
-}
-
 /** What a kept file is, by its extension. */
 const TYPES: Record<string, string> = { wasm: "application/wasm", js: "text/javascript" };
 

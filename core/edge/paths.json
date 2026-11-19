@@ -1,0 +1,10 @@
+{
+  "relay": "relay",
+  "ping": "relay",
+  "presigner": "presigner",
+  "mcp": "mcp",
+  "llms.txt": "mcp",
+  "skills": "mcp",
+  "apps": "mcp",
+  "link": "mcp"
+}

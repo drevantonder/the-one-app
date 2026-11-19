@@ -13,6 +13,9 @@
 // here has to say: a server holds one more connection here for those (`/relay/outside`), since nothing else at the
 // edge holds one.
 //
+// The rest of the edge calls it as functions (`forward`, `notify`, `presence`), and an app's part through
+// `RelayEntrypoint`, which `edge.js` binds it to as RELAY.
+//
 // And it knows who's here: a server or a device is connected while it's connected here, through any run of its
 // client, and otherwise was last seen when its last connection ended, which the Durable Object keeps. A connection
 // that says nothing for longer than iroh's pings allow has ended, as a machine that sleeps or loses its network says
@@ -33,14 +36,8 @@ import { DurableObject, WorkerEntrypoint } from "cloudflare:workers";
 import PROTOCOL_CONFIG from "../../protocol.json";
 import { blake3 } from "@noble/hashes/blake3.js";
 import { verifiedKey, hex, signedBy } from "../ask.ts";
+import { admits, reader } from "../presigner/presigner.ts";
 import type { Input, Reported } from "../updater/updater.ts";
-
-declare global {
-  interface RelayEnv {
-    /** The edge's build, as `tooling/version` names the commit it was deployed from, which `edge.js` sets. */
-    VERSION: string;
-  }
-}
 
 const PROTOCOL = "iroh-relay-v2";
 /** What an endpoint signs to prove its key: a key derived from the relay's challenge under this name. */
@@ -168,9 +165,9 @@ const refuse = (status: number, why: string) => new Response(why, { status });
  * of a client, whose token expires), with what the body says, JSON's, or `{}` with none; or the refusal they're
  * answered: 403 for one the network doesn't know, and 400 for a body that isn't JSON.
  */
-async function admit(network: RelayEnv["NETWORK"], request: Request, body: string) {
+async function admit(env: Env, request: Request, body: string) {
   const key = await verifiedKey(request, body);
-  const admitted = key && (await network.admits(key, request.headers.get("one-token")));
+  const admitted = key && (await admits(reader(env), key, request.headers.get("one-token")));
   if (!key || !admitted) return refuse(403, "This network doesn't know you");
   try {
     return { key, admitted, said: JSON.parse(body || "{}") as Record<string, unknown> };
@@ -179,232 +176,253 @@ async function admit(network: RelayEnv["NETWORK"], request: Request, body: strin
   }
 }
 
-export default class extends WorkerEntrypoint<RelayEnv> {
-  async fetch(request: Request) {
+export default {
+  async fetch(request: Request, env: Env) {
     const url = new URL(request.url);
     // iroh times this to learn how far away the relay is. An endpoint with no answer has no relay.
     if (url.pathname === "/ping") return new Response(null, { status: 200 });
-    if (url.pathname === "/relay/seen") return this.handleSeen(request, url);
-    if (url.pathname === "/relay/update") return this.handleUpdate(request);
+    if (url.pathname === "/relay/seen") return handleSeen(env, request, url);
+    if (url.pathname === "/relay/update") return handleUpdate(env, request);
     if (request.headers.get("upgrade") !== "websocket") return refuse(url.pathname.startsWith("/relay") ? 426 : 404, "The relay is a WebSocket at /relay");
-    if (url.pathname === "/relay") return this.endpoint(request, url);
-    if (url.pathname === "/relay/outside") return this.relay((relay) => relay.fetch(request));
+    if (url.pathname === "/relay") return endpoint(env, request, url);
+    if (url.pathname === "/relay/outside") return relay(env, (relay) => relay.fetch(request));
     return refuse(404, "The relay is at /relay");
-  }
+  },
+} satisfies ExportedHandler<Env>;
 
-  /** An iroh endpoint connects: it's sent a challenge, and is nobody until it signs it. */
-  endpoint(request: Request, url: URL) {
-    const speaks = (request.headers.get("sec-websocket-protocol") ?? "").split(",").map((protocol) => protocol.trim());
-    if (!speaks.includes(PROTOCOL)) return refuse(400, `The relay speaks ${PROTOCOL}`);
-    // iroh shows its token as a bearer token, and in the URL from a browser, which can't set a header.
-    const token = /^Bearer (.+)$/.exec(request.headers.get("authorization") ?? "")?.[1] ?? url.searchParams.get("token");
-    const challenge = crypto.getRandomValues(new Uint8Array(16));
-    const [theirs, ours] = Object.values(new WebSocketPair());
-    ours.accept();
-    ours.binaryType = "arraybuffer";
-    // What it sends before it's joined waits for that, in the order it was sent.
-    let joined: Promise<Joined | undefined> | undefined;
-    let received = Date.now();
-    const quiet = setInterval(async () => {
-      if (Date.now() - received >= SILENT) {
-        clearInterval(quiet);
-        ours.close(1001, "It went quiet");
-        return void (await joined)?.relay.close(1001, "It went quiet");
-      }
-      // A server taken off its list, or whose device's token no longer admits it, is cut: what's open isn't the network's.
-      const { key } = (await joined) ?? {};
-      if (key && !(await this.env.NETWORK.admits(key, token))) ours.close(1008, "Not one of this network's");
-    }, SILENT / 3);
-    ours.addEventListener("close", () => clearInterval(quiet));
-    ours.addEventListener("message", async ({ data }) => {
-      received = Date.now();
-      if (typeof data === "string") return ours.close(1003, "The relay takes binary frames");
-      const frame = new Uint8Array(data);
-      if (!joined) return void (joined = this.join(ours, challenge, token, frame));
-      const { relay, until } = (await joined) ?? {};
-      if (!relay) return;
-      if (until !== undefined && until < Date.now()) return ours.close(1008, "Its token expired");
-      if (frame[0] === PING) {
-        frame[0] = PONG;
-        ours.send(frame);
-      } else if (frame[0] === CLIENT_TO_RELAY_DATAGRAM || frame[0] === CLIENT_TO_RELAY_DATAGRAM_BATCH) {
-        if (frame.length < 33) return ours.close(1002, "A datagram names who it's for");
-        relay.send(frame);
-      }
-    });
-    ours.send(Uint8Array.of(SERVER_CHALLENGE, ...challenge));
-    return new Response(null, { status: 101, webSocket: theirs, headers: { "sec-websocket-protocol": PROTOCOL } });
-  }
-
-  /**
-   * The answer to a challenge: the endpoint's key, and its signature of the challenge. One of the network's own is
-   * joined to the relay: `{relay, until}`, the connection there that its datagrams are passed over, and when its
-   * token expires if it does.
-   */
-  async join(ours: WebSocket, challenge: Uint8Array, token: string | null, frame: Uint8Array): Promise<Joined | undefined> {
-    // The frame is postcard's: the type, the key's 32 bytes, then the signature as bytes with their length before.
-    const key = hex.encode(frame.subarray(1, 33));
-    const proved =
-      frame.length === 98 &&
-      frame[0] === CLIENT_AUTH &&
-      frame[33] === 64 &&
-      (await signedBy(key, hex.encode(frame.subarray(34)), blake3(challenge, { context: utf8.encode(CHALLENGE) })));
-    const admitted = proved && (await this.env.NETWORK.admits(key, token));
-    if (!admitted) {
-      const why = utf8.encode("This network doesn't know you");
-      ours.send(Uint8Array.of(SERVER_DENIES_AUTH, why.length, ...why));
-      return void ours.close(1008, "Not one of this network's");
+/** An iroh endpoint connects: it's sent a challenge, and is nobody until it signs it. */
+function endpoint(env: Env, request: Request, url: URL) {
+  const speaks = (request.headers.get("sec-websocket-protocol") ?? "").split(",").map((protocol) => protocol.trim());
+  if (!speaks.includes(PROTOCOL)) return refuse(400, `The relay speaks ${PROTOCOL}`);
+  // iroh shows its token as a bearer token, and in the URL from a browser, which can't set a header.
+  const token = /^Bearer (.+)$/.exec(request.headers.get("authorization") ?? "")?.[1] ?? url.searchParams.get("token");
+  const challenge = crypto.getRandomValues(new Uint8Array(16));
+  const [theirs, ours] = Object.values(new WebSocketPair());
+  ours.accept();
+  ours.binaryType = "arraybuffer";
+  // What it sends before it's joined waits for that, in the order it was sent.
+  let joined: Promise<Joined | undefined> | undefined;
+  let received = Date.now();
+  const quiet = setInterval(async () => {
+    if (Date.now() - received >= SILENT) {
+      clearInterval(quiet);
+      ours.close(1001, "It went quiet");
+      return void (await joined)?.relay.close(1001, "It went quiet");
     }
-    // A run of a client is on for the device it runs for, which its token names (the presigner checked it), and a server
-    // for itself: whatever else its token says, it's not a device.
-    const server = admitted.until === undefined;
-    const device = server ? key : ((token ?? "").split(".")[1] ?? key);
-    const on = new URLSearchParams({ key, device, ...(server && { server: "yes" }) });
-    const relay = (await this.relay((relay) => relay.fetch(`https://relay/endpoint?${on}`, { headers: { upgrade: "websocket" } }))).webSocket!;
-    relay.accept();
-    relay.binaryType = "arraybuffer";
-    relay.addEventListener("message", ({ data }) => ours.send(data as ArrayBuffer));
-    relay.addEventListener("close", () => ours.close(1000, "It connected again"));
-    ours.addEventListener("close", () => relay.close(1000, "It left"));
-    ours.send(Uint8Array.of(SERVER_CONFIRMS_AUTH));
-    return { relay, until: admitted.until, key };
-  }
+    // A server taken off its list, or whose device's token no longer admits it, is cut: what's open isn't the network's.
+    const { key } = (await joined) ?? {};
+    if (key && !(await admits(reader(env), key, token))) ours.close(1008, "Not one of this network's");
+  }, SILENT / 3);
+  ours.addEventListener("close", () => clearInterval(quiet));
+  ours.addEventListener("message", async ({ data }) => {
+    received = Date.now();
+    if (typeof data === "string") return ours.close(1003, "The relay takes binary frames");
+    const frame = new Uint8Array(data);
+    if (!joined) return void (joined = join(env, ours, challenge, token, frame));
+    const { relay, until } = (await joined) ?? {};
+    if (!relay) return;
+    if (until !== undefined && until < Date.now()) return ours.close(1008, "Its token expired");
+    if (frame[0] === PING) {
+      frame[0] = PONG;
+      ours.send(frame);
+    } else if (frame[0] === CLIENT_TO_RELAY_DATAGRAM || frame[0] === CLIENT_TO_RELAY_DATAGRAM_BATCH) {
+      if (frame.length < 33) return ours.close(1002, "A datagram names who it's for");
+      relay.send(frame);
+    }
+  });
+  ours.send(Uint8Array.of(SERVER_CHALLENGE, ...challenge));
+  return new Response(null, { status: 101, webSocket: theirs, headers: { "sec-websocket-protocol": PROTOCOL } });
+}
 
-  /**
-   * Passes an outsider's `message` to one of `servers`, by their keys, and gives `{server, answer}`: the first of
-   * them to show it's there by answering a ping within `REACH`, or `null` if none does. The wait for the answer is
-   * this Worker's, on a connection the relay holds asleep, so nothing is billed for it, and it's as long as the
-   * call takes.
-   */
-  async forward(servers: string[], message: string): Promise<{ server: string; answer: string } | null> {
-    // A span of its own under the caller's, which the server's is under in turn (W3C's Trace Context). It runs from
-    // here to the answer: the Worker lives on past it while its connections close, which isn't the call's.
+/**
+ * The answer to a challenge: the endpoint's key, and its signature of the challenge. One of the network's own is
+ * joined to the relay: `{relay, until}`, the connection there that its datagrams are passed over, and when its
+ * token expires if it does.
+ */
+async function join(env: Env, ours: WebSocket, challenge: Uint8Array, token: string | null, frame: Uint8Array): Promise<Joined | undefined> {
+  // The frame is postcard's: the type, the key's 32 bytes, then the signature as bytes with their length before.
+  const key = hex.encode(frame.subarray(1, 33));
+  const proved =
+    frame.length === 98 &&
+    frame[0] === CLIENT_AUTH &&
+    frame[33] === 64 &&
+    (await signedBy(key, hex.encode(frame.subarray(34)), blake3(challenge, { context: utf8.encode(CHALLENGE) })));
+  const admitted = proved && (await admits(reader(env), key, token));
+  if (!admitted) {
+    const why = utf8.encode("This network doesn't know you");
+    ours.send(Uint8Array.of(SERVER_DENIES_AUTH, why.length, ...why));
+    return void ours.close(1008, "Not one of this network's");
+  }
+  // A run of a client is on for the device it runs for, which its token names (the presigner checked it), and a server
+  // for itself: whatever else its token says, it's not a device.
+  const server = admitted.until === undefined;
+  const device = server ? key : ((token ?? "").split(".")[1] ?? key);
+  const on = new URLSearchParams({ key, device, ...(server && { server: "yes" }) });
+  const joined = (await relay(env, (relay) => relay.fetch(`https://relay/endpoint?${on}`, { headers: { upgrade: "websocket" } }))).webSocket!;
+  joined.accept();
+  joined.binaryType = "arraybuffer";
+  joined.addEventListener("message", ({ data }) => ours.send(data as ArrayBuffer));
+  joined.addEventListener("close", () => ours.close(1000, "It connected again"));
+  ours.addEventListener("close", () => joined.close(1000, "It left"));
+  ours.send(Uint8Array.of(SERVER_CONFIRMS_AUTH));
+  return { relay: joined, until: admitted.until, key };
+}
+
+/**
+ * Passes an outsider's `message` to one of `servers`, by their keys, and gives `{server, answer}`: the first of
+ * them to show it's there by answering a ping within `REACH`, or `null` if none does. The wait for the answer is
+ * on a connection the relay holds asleep, so nothing is billed for it, and it's as long as the call takes. It's under
+ * the span of the request that asked, whose `traceparent` the message carries, and says in that span which server
+ * answered, or why none did.
+ */
+export async function forward(env: Env, servers: string[], message: string): Promise<{ server: string; answer: string } | null> {
+  const call = JSON.parse(message);
+  message = JSON.stringify({ ...call, params: { ...call.params, _meta: { ...call.params?._meta, protocol: SPEAKS, version: env.VERSION } } });
+  const said = (attributes: Record<string, string | number>, error?: string) => console.log(JSON.stringify({ telemetry: { attributes, error } }));
+
+  // Only a server that talks with the edge is asked, and only one that's ready, or isn't known not to be.
+  const protocols = await relay(env, (relay) => relay.protocols(servers));
+  const talking = servers.filter((server) => talk(protocols[server]));
+  if (!talking.length) {
+    said({ "one.servers": servers.length }, `None of its ${servers.length} servers speaks a protocol the edge's ${named(SPEAKS)} does: ${servers.map((server) => `${server.slice(0, 8)} ${named(protocols[server])}`).join(", ")}`);
+    return null;
+  }
+  const here = await presence(env, talking);
+  servers = talking.filter((server) => here[server]?.server_ready !== false);
+  if (!servers.length) {
+    said({ "one.servers": talking.length }, `None of its ${talking.length} servers is ready: ${talking.map((server) => `${server.slice(0, 8)} ${here[server]?.server_ready_reason}`).join(", ")}`);
+    return null;
+  }
+  const tries = servers.map((server) => reach(relay(env, (relay) => relay.fetch(`https://relay/call?to=${server}`, { headers: { upgrade: "websocket" } })), server));
+  const reached = await Promise.any(tries).catch(() => null);
+  for (const tried of tries) tried.then((other) => other !== reached && other.close(), () => {});
+  const answer = reached && (await reached.ask(message));
+  reached?.close();
+  // With none reached, every try has failed, and each says why.
+  const why = (tried: Promise<unknown>, at: number) => tried.then(() => "", (error: Error) => `${servers[at].slice(0, 8)} ${error.message}`);
+  const error = !reached
+    ? `None of its ${servers.length} servers answered: ${(await Promise.all(tries.map(why))).join("; ") || "it has none"}`
+    : answer === null
+      ? `${reached.server.slice(0, 8)} left before it answered`
+      : undefined;
+  said({ "one.servers": servers.length, ...(reached && { "one.server": reached.server.slice(0, 8) }) }, error);
+  return reached && answer !== null ? { server: reached.server, answer } : null;
+}
+
+/** Tells every server that's here `message`, which none answers: a JSON-RPC notification. */
+export async function notify(env: Env, message: string): Promise<void> {
+  await relay(env, (relay) => relay.fetch("https://relay/notify", { method: "POST", body: message }));
+}
+
+/** Whether each of `keys`, servers' and devices', is here (`Presence`), or `null` for one never seen. */
+export async function presence(env: Env, keys: string[]): Promise<Record<string, Presence | null>> {
+  // Disposed of once it's copied, so the relay's call ends as it answers. Its own keys are copied, not its disposer.
+  using presence = await relay(env, (relay) => relay.presence(keys));
+  return Object.fromEntries(Object.entries(presence));
+}
+
+/**
+ * The relay, for an app's part (`RELAY`): `forward`, `notify` and `presence`. A call it forwards is a span of its own,
+ * under the part's, which the server's is under in turn (W3C's Trace Context), from here to the answer: the call
+ * lives on past it while its connections close, which isn't the call's.
+ */
+export class RelayEntrypoint extends WorkerEntrypoint<Env> {
+  async forward(servers: string[], message: string) {
     const start = Date.now();
     const call = JSON.parse(message);
     const parent: string | undefined = call.params?._meta?.traceparent;
     const traceparent = `00-${TRACE.exec(parent ?? "")?.[1] ?? hex.encode(crypto.getRandomValues(new Uint8Array(16)))}-${hex.encode(crypto.getRandomValues(new Uint8Array(8)))}-01`;
-    message = JSON.stringify({ ...call, params: { ...call.params, _meta: { ...call.params?._meta, traceparent, protocol: SPEAKS, version: this.env.VERSION } } });
-
-    // Only a server that talks with the edge is asked, and only one that's ready, or isn't known not to be.
-    const protocols = await this.relay((relay) => relay.protocols(servers));
-    const talking = servers.filter((server) => talk(protocols[server]));
-    if (!talking.length) {
-      const error = `None of its ${servers.length} servers speaks a protocol the edge's ${named(SPEAKS)} does: ${servers.map((server) => `${server.slice(0, 8)} ${named(protocols[server])}`).join(", ")}`;
-      console.log(JSON.stringify({ telemetry: { traceparent, parent, start, end: Date.now(), attributes: { "one.servers": servers.length }, error } }));
-      return null;
+    try {
+      return await forward(this.env, servers, JSON.stringify({ ...call, params: { ...call.params, _meta: { ...call.params?._meta, traceparent } } }));
+    } finally {
+      console.log(JSON.stringify({ telemetry: { traceparent, parent, start, end: Date.now() } }));
     }
-    const presence = await this.presence(talking);
-    servers = talking.filter((server) => presence[server]?.server_ready !== false);
-    if (!servers.length) {
-      const error = `None of its ${talking.length} servers is ready: ${talking.map((server) => `${server.slice(0, 8)} ${presence[server]?.server_ready_reason}`).join(", ")}`;
-      console.log(JSON.stringify({ telemetry: { traceparent, parent, start, end: Date.now(), attributes: { "one.servers": talking.length }, error } }));
-      return null;
-    }
-    const tries = servers.map((server) => reach(this.relay((relay) => relay.fetch(`https://relay/call?to=${server}`, { headers: { upgrade: "websocket" } })), server));
-    const reached = await Promise.any(tries).catch(() => null);
-    for (const tried of tries) tried.then((other) => other !== reached && other.close(), () => {});
-    const answer = reached && (await reached.ask(message));
-    reached?.close();
-    // With none reached, every try has failed, and each says why.
-    const why = (tried: Promise<unknown>, at: number) => tried.then(() => "", (error: Error) => `${servers[at].slice(0, 8)} ${error.message}`);
-    const error = !reached
-      ? `None of its ${servers.length} servers answered: ${(await Promise.all(tries.map(why))).join("; ") || "it has none"}`
-      : answer === null
-        ? `${reached.server.slice(0, 8)} left before it answered`
-        : undefined;
-    console.log(JSON.stringify({ telemetry: { traceparent, parent, start, end: Date.now(), attributes: { "one.servers": servers.length, ...(reached && { "one.server": reached.server.slice(0, 8) }) }, error } }));
-    return reached && answer !== null ? { server: reached.server, answer } : null;
   }
 
-  /** Tells every server that's here `message`, which none answers: a JSON-RPC notification. */
-  async notify(message: string): Promise<void> {
-    await this.relay((relay) => relay.fetch("https://relay/notify", { method: "POST", body: message }));
+  notify(message: string) {
+    return notify(this.env, message);
   }
 
-  /** Whether each of `keys`, servers' and devices', is here (`Presence`), or `null` for one never seen. */
-  async presence(keys: string[]): Promise<Record<string, Presence | null>> {
-    // Disposed of once it's copied, so the relay's call ends as it answers (`updater.ts`). Its own keys are copied,
-    // not its disposer.
-    using presence = await this.relay((relay) => relay.presence(keys));
-    return Object.fromEntries(Object.entries(presence));
+  presence(keys: string[]) {
+    return presence(this.env, keys);
   }
+}
 
-  /**
-   * A server or a device of the network's asks who's here, of the keys it names: `?keys=<key>,<key>`, and is told
-   * `{"presence": {<key>: <Presence>}, "protocol": <the edge's>}` and the edge's build as `one-version`. A server says
-   * what it is with a POST of `{"server_membership": <it>, "server_daemon_status": <it>, "version": <its build>,
-   * "protocol": <its>}`, as that changes.
-   */
-  async handleSeen(request: Request, url: URL) {
-    const admitted = await admit(this.env.NETWORK, request, request.method === "POST" ? await request.text() : "");
-    if (admitted instanceof Response) return admitted;
-    const { key } = admitted;
-    if (request.method === "POST") {
-      if (admitted.admitted.until !== undefined) return refuse(403, "Only a server says what it is");
-      const said = admitted.said as { server_membership?: ServerMembership; server_daemon_status?: ServerDaemonStatus; version?: unknown; protocol?: unknown } & Reported;
-      const version = typeof said.version === "string" ? said.version : undefined;
-      const protocol = spoken(said.protocol);
-      const status = MEMBERSHIPS.includes(said.server_membership!) && SAID.includes(said.server_daemon_status!)
-        ? { server_membership: said.server_membership!, server_daemon_status: said.server_daemon_status!, at: Date.now() }
-        : undefined;
-      const update: Reported = {
-        version,
-        ...Object.fromEntries(Object.entries(said).filter(([name]) => UPDATE.includes(name as keyof Reported))),
-      };
-      const error = !talk(protocol) ? `${key.slice(0, 8)} speaks protocol ${named(protocol)} and the edge ${named(SPEAKS)}, so the edge sends it nothing until one is updated` : undefined;
-      if (!version) return refuse(400, `A server says its build, {"version": <it>}`);
-      const now = await this.relay((relay) => relay.report(key, version, protocol, status, update));
-      const attributes = Object.fromEntries(Object.entries({ server: key.slice(0, 8), ...now }).map(([name, value]) => [`one.${name}`, value]));
-      console.log(JSON.stringify({ telemetry: { start: Date.now(), end: Date.now(), attributes, error } }));
-      if (!status) return refuse(400, `A server says what it is with {"server_membership": ${MEMBERSHIPS.join("|")}, "server_daemon_status": ${SAID.join("|")}}`);
-      return new Response(null, { status: 204 });
+/**
+ * A server or a device of the network's asks who's here, of the keys it names: `?keys=<key>,<key>`, and is told
+ * `{"presence": {<key>: <Presence>}, "protocol": <the edge's>}` and the edge's build as `one-version`. A server says
+ * what it is with a POST of `{"server_membership": <it>, "server_daemon_status": <it>, "version": <its build>,
+ * "protocol": <its>}`, as that changes.
+ */
+async function handleSeen(env: Env, request: Request, url: URL) {
+  const admitted = await admit(env, request, request.method === "POST" ? await request.text() : "");
+  if (admitted instanceof Response) return admitted;
+  const { key } = admitted;
+  if (request.method === "POST") {
+    if (admitted.admitted.until !== undefined) return refuse(403, "Only a server says what it is");
+    const said = admitted.said as { server_membership?: ServerMembership; server_daemon_status?: ServerDaemonStatus; version?: unknown; protocol?: unknown } & Reported;
+    const version = typeof said.version === "string" ? said.version : undefined;
+    const protocol = spoken(said.protocol);
+    const status = MEMBERSHIPS.includes(said.server_membership!) && SAID.includes(said.server_daemon_status!)
+      ? { server_membership: said.server_membership!, server_daemon_status: said.server_daemon_status!, at: Date.now() }
+      : undefined;
+    const update: Reported = {
+      version,
+      ...Object.fromEntries(Object.entries(said).filter(([name]) => UPDATE.includes(name as keyof Reported))),
+    };
+    const error = !talk(protocol) ? `${key.slice(0, 8)} speaks protocol ${named(protocol)} and the edge ${named(SPEAKS)}, so the edge sends it nothing until one is updated` : undefined;
+    if (!version) return refuse(400, `A server says its build, {"version": <it>}`);
+    const now = await relay(env, (relay) => relay.report(key, version, protocol, status, update));
+    const attributes = Object.fromEntries(Object.entries({ server: key.slice(0, 8), ...now }).map(([name, value]) => [`one.${name}`, value]));
+    console.log(JSON.stringify({ telemetry: { start: Date.now(), end: Date.now(), attributes, error } }));
+    if (!status) return refuse(400, `A server says what it is with {"server_membership": ${MEMBERSHIPS.join("|")}, "server_daemon_status": ${SAID.join("|")}}`);
+    return new Response(null, { status: 204 });
+  }
+  const keys = (url.searchParams.get("keys") ?? "").split(",").filter((key) => /^[0-9a-f]{64}$/.test(key));
+  const here = await presence(env, keys.slice(0, 1000));
+  // With `ping`, each server is pinged as one is before it's given an outsider's call, and whether it `answered`
+  // within `REACH` is said too: a connection that has gone quiet stays here for up to `SILENT`, as a machine that
+  // has just gone to sleep does, so being connected doesn't say a server would answer.
+  if (url.searchParams.has("ping")) {
+    for (const server of keys.slice(0, 10)) {
+      const call = relay(env, (relay) => relay.fetch(`https://relay/call?to=${server}`, { headers: { upgrade: "websocket" } }));
+      const answered = await reach(call, server).then(({ close }) => (close(), true), () => false);
+      here[server] = { ...(here[server] ?? { connected: false }), answered };
     }
-    const keys = (url.searchParams.get("keys") ?? "").split(",").filter((key) => /^[0-9a-f]{64}$/.test(key));
-    const presence = await this.presence(keys.slice(0, 1000));
-    // With `ping`, each server is pinged as one is before it's given an outsider's call, and whether it `answered`
-    // within `REACH` is said too: a connection that has gone quiet stays here for up to `SILENT`, as a machine that
-    // has just gone to sleep does, so being connected doesn't say a server would answer.
-    if (url.searchParams.has("ping")) {
-      for (const server of keys.slice(0, 10)) {
-        const call = this.relay((relay) => relay.fetch(`https://relay/call?to=${server}`, { headers: { upgrade: "websocket" } }));
-        const answered = await reach(call, server).then(({ close }) => (close(), true), () => false);
-        presence[server] = { ...(presence[server] ?? { connected: false }), answered };
-      }
-    }
-    return Response.json({ presence, protocol: SPEAKS }, { headers: { "one-version": this.env.VERSION } });
   }
+  return Response.json({ presence: here, protocol: SPEAKS }, { headers: { "one-version": env.VERSION } });
+}
 
-  /**
-   * A server says builds were published to the network, `{"published": <the newest>, "latest": {<name>: <build>}}`,
-   * the server build and each `one`, or asks for Update Now,
-   * `{"now": true}`, with a POST, and the network's updater's status is given; a GET, from any of the network's own,
-   * gives it.
-   */
-  async handleUpdate(request: Request) {
-    const admitted = await admit(this.env.NETWORK, request, request.method === "POST" ? await request.text() : "");
-    if (admitted instanceof Response) return admitted;
-    let input: Input = { status: true };
-    if (request.method === "POST") {
-      if (admitted.admitted.until !== undefined) return refuse(403, "Only a server says a build was published, or asks for Update Now");
-      const { said } = admitted;
-      if (typeof said.published === "string" && said.latest && typeof said.latest === "object") input = { published: said.published, latest: said.latest as Record<string, string> };
-      else if (said.now === true) input = { now: true };
-      else return refuse(400, 'A server says {"published": <build>, "latest": {<name>: <build>}} or {"now": true}');
-    }
-    return Response.json(await this.relay((relay) => relay.updated(input)), { headers: { "one-version": this.env.VERSION } });
+/**
+ * A server says builds were published to the network, `{"published": <the newest>, "latest": {<name>: <build>}}`,
+ * the server build and each `one`, or asks for Update Now,
+ * `{"now": true}`, with a POST, and the network's updater's status is given; a GET, from any of the network's own,
+ * gives it.
+ */
+async function handleUpdate(env: Env, request: Request) {
+  const admitted = await admit(env, request, request.method === "POST" ? await request.text() : "");
+  if (admitted instanceof Response) return admitted;
+  let input: Input = { status: true };
+  if (request.method === "POST") {
+    if (admitted.admitted.until !== undefined) return refuse(403, "Only a server says a build was published, or asks for Update Now");
+    const { said } = admitted;
+    if (typeof said.published === "string" && said.latest && typeof said.latest === "object") input = { published: said.published, latest: said.latest as Record<string, string> };
+    else if (said.now === true) input = { now: true };
+    else return refuse(400, 'A server says {"published": <build>, "latest": {<name>: <build>}} or {"now": true}');
   }
+  return Response.json(await relay(env, (relay) => relay.updated(input)), { headers: { "one-version": env.VERSION } });
+}
 
-  /** Gives what `call` gives of the network's one relay, tried again for up to `SWITCH` where it fails. */
-  async relay<T>(call: (relay: DurableObjectStub<Relay>) => Promise<T>): Promise<T> {
-    const until = Date.now() + SWITCH;
-    for (let wait = 250; ; wait = Math.min(wait * 2, 1_000)) {
-      try {
-        return await call(this.env.RELAY.get(this.env.RELAY.idFromName("relay")));
-      } catch (error) {
-        if ((error as { overloaded?: boolean }).overloaded || Date.now() + wait > until) throw error;
-        console.log(JSON.stringify({ relay: "tried again", error: String(error) }));
-        await scheduler.wait(wait);
-      }
+/** Gives what `call` gives of the network's one relay, tried again for up to `SWITCH` where it fails. */
+async function relay<T>(env: Env, call: (relay: DurableObjectStub<Relay>) => Promise<T>): Promise<T> {
+  const until = Date.now() + SWITCH;
+  for (let wait = 250; ; wait = Math.min(wait * 2, 1_000)) {
+    try {
+      return await call(env.RELAY.getByName("relay"));
+    } catch (error) {
+      if ((error as { overloaded?: boolean }).overloaded || Date.now() + wait > until) throw error;
+      console.log(JSON.stringify({ relay: "tried again", error: String(error) }));
+      await scheduler.wait(wait);
     }
   }
 }
@@ -434,8 +452,8 @@ async function reach(call: Promise<Response>, server: string) {
   return { server, ask, close };
 }
 
-export class Relay extends DurableObject<RelayEnv> {
-  constructor(ctx: DurableObjectState, env: RelayEnv) {
+export class Relay extends DurableObject<Env> {
+  constructor(ctx: DurableObjectState, env: Env) {
     super(ctx, env);
     console.log(JSON.stringify({ relay: "woke", connections: ctx.getWebSockets().length }));
   }
@@ -487,8 +505,8 @@ export class Relay extends DurableObject<RelayEnv> {
     const [presence, versions] = await Promise.all([this.presence(keys), this.versions(keys)]);
     const servers = Object.fromEntries(keys.map((key) => [key, presence[key] && { ...presence[key], version: versions[key] }]));
     try {
-      // Disposed of as it's read, so the updater's call ends as it answers (`updater.ts`).
-      using answered = await this.env.UPDATER.update(input, servers);
+      // Disposed of as it's read, so the updater's call ends as it answers, as Cloudflare's RPC lifecycle has it.
+      using answered = await this.env.UPDATER.getByName("network").update(input, servers);
       if (answered.broadcast) this.notify(answered.broadcast);
       return answered.status;
     } catch (error) {
@@ -540,7 +558,7 @@ export class Relay extends DurableObject<RelayEnv> {
 
   /** A server connects to hear outsiders' calls. It signed the request, so its key is known at once. */
   async server(request: Request) {
-    const admitted = await admit(this.env.NETWORK, request, "");
+    const admitted = await admit(this.env, request, "");
     if (admitted instanceof Response) return admitted;
     const { key } = admitted;
     for (const before of this.ctx.getWebSockets(`outside ${key}`)) before.close(1000, "It connected again");

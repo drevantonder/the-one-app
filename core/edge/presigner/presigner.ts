@@ -4,10 +4,10 @@
 // then to the bucket, and no signed request to keep for later. It never signs a write without a condition
 // (only if absent, or only if unchanged), so nothing in a network overwrites a blob blind: the condition is a
 // signed header, which the bucket refuses to go without. It also says who the network's own servers and clients
-// are, for the other pieces here and for a client (`Network`), and keeps the blobs an app's edge function
-// writes for its app's servers (`Own`). It keeps no blob itself, only the lists of servers it has read lately, and
-// runs no app code. Another Worker is
-// given only `Network` or `Own`: nothing but an ask signed by a server's key reaches the rest.
+// are, for the rest of the edge (`servers`, `admits`), an app's part (`Network`) and a client, and keeps the blobs an
+// app's part writes for its app's servers (`Own`). It keeps no blob itself, only the lists of servers it has read
+// lately, and runs no app code. An app's part is given only `Network` or `Own`: nothing but an ask signed by a
+// server's key reaches the rest.
 import { DurableObject, WorkerEntrypoint } from "cloudflare:workers";
 import { AwsClient } from "aws4fetch";
 import { verifiedKey, unsigned, isKey, signedBy, NETWORK } from "../ask.ts";
@@ -105,10 +105,10 @@ export default {
     }
     return refuse(404, "The presigner signs at /presigner/sign, reads at /presigner/read and lists servers at /presigner/servers");
   },
-} satisfies ExportedHandler<PresignerEnv>;
+} satisfies ExportedHandler<Env>;
 
-/** Who the network's own are, for another piece of the edge. */
-export class Network extends WorkerEntrypoint<PresignerEnv> {
+/** Who the network's own are, for an app's part. */
+export class Network extends WorkerEntrypoint<Env> {
   /** The keys of the servers that act for a user or group, by its prefix, or for the network, with none. */
   servers(of: string | null = NETWORK): Promise<string[]> {
     return servers(reader(this.env), of);
@@ -146,7 +146,7 @@ export class Network extends WorkerEntrypoint<PresignerEnv> {
  * app's servers read them, and reaches nothing else in the bucket. Which app is said by the binding it was
  * given (`props`), which only whoever deploys the edge sets.
  */
-export class Own extends WorkerEntrypoint<PresignerEnv, { app: string }> {
+export class Own extends WorkerEntrypoint<Env, { app: string }> {
   /** Writes the blob `name`, only if there's none. Gives whether it wrote it. */
   async write(name: string, data: BodyInit): Promise<boolean> {
     const wrote = await bucket(this.env).fetch(this.blob(name), { method: "PUT", body: data, headers: { "if-none-match": "*" } });
@@ -224,7 +224,7 @@ function parse(body: string): Ask | null {
  * Signs one request to the bucket for the server `by`, which shows `token`, if it may send it. Answers what to send:
  * its method, URL and headers.
  */
-async function sign(env: PresignerEnv, by: string, token: string | null, body: string) {
+async function sign(env: Env, by: string, token: string | null, body: string) {
   const ask = parse(body);
   if (!ask) return refuse(400, "An ask is JSON that names one blob's key, to read, write, replace, list or remove");
   if (!(await allowed(env, by, token, ask))) return refuse(403, "You aren't on its list of servers");
@@ -242,7 +242,7 @@ async function sign(env: PresignerEnv, by: string, token: string | null, body: s
  * lists of servers are, so this takes as long as the slower of the two, and an answer the server may not have is
  * dropped unread: a refusal comes as soon as the lists say so, however large or absent the blob.
  */
-async function read(env: PresignerEnv, by: string, token: string | null, body: string) {
+async function read(env: Env, by: string, token: string | null, body: string) {
   const ask = parse(body);
   if (!ask || (ask.operation !== "read" && ask.operation !== "list")) {
     return refuse(400, "An ask to read is JSON that names one blob's key to read, or the start of the keys to list");
@@ -264,7 +264,7 @@ async function read(env: PresignerEnv, by: string, token: string | null, body: s
 }
 
 /** Whether the server `by`, which shows `token`, may send the request to the bucket that `ask` is. */
-async function allowed(env: PresignerEnv, by: string, token: string | null, { operation, key }: Ask) {
+async function allowed(env: Env, by: string, token: string | null, { operation, key }: Ask) {
   const server = SERVER.exec(key)?.[1];
   const reads = operation === "read" || operation === "list";
   const opens = server === by || (server !== undefined && operation === "read") || (OPEN.test(key) && reads);
@@ -285,7 +285,7 @@ async function allowed(env: PresignerEnv, by: string, token: string | null, { op
 }
 
 /** The request to the bucket that `ask` is, unsigned: its method, URL and headers. */
-function request(env: PresignerEnv, { operation, key, tag, after }: Ask) {
+function request(env: Env, { operation, key, tag, after }: Ask) {
   const url = new URL(operation === "list" ? env.BUCKET : blob(env, key));
   if (operation === "list") url.search = new URLSearchParams({ "list-type": "2", prefix: key, ...(after && { "continuation-token": after }) }).toString();
   const headers: Record<string, string> = {};
@@ -296,7 +296,7 @@ function request(env: PresignerEnv, { operation, key, tag, after }: Ask) {
 }
 
 /** A blob's address in the bucket, each part of its key as it is, so the bucket reads no `%2F` in one as a `/`. */
-const blob = (env: PresignerEnv, key: string) => `${env.BUCKET}/${key.split("/").map(encodeURIComponent).join("/")}`;
+const blob = (env: Env, key: string) => `${env.BUCKET}/${key.split("/").map(encodeURIComponent).join("/")}`;
 
 /** What a token admits: a server's, for as long as it's on its list (`{}`), and a device's, until a time. */
 type Admitted = { until?: number }
@@ -308,7 +308,7 @@ type Admitted = { until?: number }
  * client on a device has a key of its own, and shows the device's token, the device's key and the device's word for
  * the run's key, joined by dots (`core/client/src/lib.rs`).
  */
-async function admits(lists: Lists, key: string, shown: string | null): Promise<Admitted | null> {
+export async function admits(lists: Lists, key: string, shown: string | null): Promise<Admitted | null> {
   const [token, device = key, attestation] = (shown ?? "").split(".");
   const { list, by, until, signature } = claims(token);
   if (!isKey(key) || owner(list) !== list) return null;
@@ -320,7 +320,7 @@ async function admits(lists: Lists, key: string, shown: string | null): Promise<
 }
 
 /** The keys of the servers that act for a user or group, or for the network, by its prefix. */
-async function servers(lists: Lists, of: unknown): Promise<string[]> {
+export async function servers(lists: Lists, of: unknown): Promise<string[]> {
   return (owner(of) === of && (await lists(of as string))) || [];
 }
 
@@ -340,7 +340,7 @@ const kept = new Map<string, { at: number; list: string[] | null }>();
  * A write that only lands if there's no list yet (`write`) can't change one that's there, and a server that starts
  * signs one each time (`OneCore.Servers.joined?/2`), so that holds back only the lists that weren't there.
  */
-export class Changes extends DurableObject<PresignerEnv> {
+export class Changes extends DurableObject<Env> {
   /** When lists read at or before it aren't believed, in milliseconds: any, and the ones that weren't there. */
   async until(): Promise<{ any: number; absent: number }> {
     const held = await this.ctx.storage.get<number>(["any", "absent"]);
@@ -353,14 +353,14 @@ export class Changes extends DurableObject<PresignerEnv> {
   }
 }
 
-const changes = (env: PresignerEnv) => env.CHANGES.getByName("lists");
+const changes = (env: Env) => env.CHANGES.getByName("lists");
 
 /**
  * Reads the lists of servers for one request: each from the bucket once, however often it's asked for, and from
  * what an earlier request read if that was read since any change to it and less than `KEPT` ago. What's kept is the
  * list, never a request for it: a promise made in one request can't be settled in another that has ended.
  */
-function reader(env: PresignerEnv): Lists {
+export function reader(env: Env): Lists {
   const read = new Map<string | undefined, Promise<string[] | null>>();
   let until: ReturnType<Changes["until"]> | undefined;
   const get = async (prefix: string) => {
@@ -376,7 +376,7 @@ function reader(env: PresignerEnv): Lists {
 }
 
 /** The list of servers kept under `prefix`, `null` if there's none yet. */
-async function list(env: PresignerEnv, prefix: string): Promise<string[] | null> {
+async function list(env: Env, prefix: string): Promise<string[] | null> {
   const got = await bucket(env).fetch(blob(env, `${prefix}servers`));
   if (got.status === 404) return null;
   if (!got.ok) throw new Error(`The bucket answered ${got.status} for ${prefix}servers`);
@@ -385,6 +385,6 @@ async function list(env: PresignerEnv, prefix: string): Promise<string[] | null>
 
 /** One client for the isolate, which keeps the signing key it derives for each day. */
 let client: AwsClient | undefined;
-function bucket({ ACCESS_KEY_ID: accessKeyId, SECRET_ACCESS_KEY: secretAccessKey }: PresignerEnv) {
+function bucket({ ACCESS_KEY_ID: accessKeyId, SECRET_ACCESS_KEY: secretAccessKey }: Env) {
   return (client ??= new AwsClient({ accessKeyId, secretAccessKey, service: "s3", region: "auto" }));
 }

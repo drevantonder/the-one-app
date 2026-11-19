@@ -1,8 +1,0 @@
-{
-  "name": "network-web",
-  "main": "web.ts",
-  "compatibility_date": "2026-11-01",
-  "workers_dev": false
-  // Its assets are the web client as `edge.js` builds it, beside its copy of this: the app's own page, its own
-  // files and the UI library. What's kept compressed already goes out as it's kept (web.ts).
-}

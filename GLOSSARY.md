@@ -61,10 +61,10 @@ An app's own words are defined in that app's `SKILL.md`.
   messages, a signed-in browser, a GPU. An instance runs on each server whose owner installed it, and keeps running
   between calls. It and the rest of its app call each other's functions, which nothing else can call. The app
   decides which instance it calls.
-- **Edge**: what of a network is always on and faces the internet, at the network's address: the gateway,
-  the presigner, the relay, the web client's files, the network's front door (its MCP endpoint, for its own
-  devices, whoever signed in and a sharing link's holder, and the `/llms.txt` that says how to come in), and each
-  app's edge function.
+- **Edge**: what of a network is always on and faces the internet, at the network's address: one Worker
+  with the presigner, the relay, the web client's files, the network's front door (its MCP endpoint, for its own
+  devices, whoever signed in and a sharing link's holder, and the `/llms.txt` that says how to come in); and each
+  app's edge function, a Worker of its own.
 - **Edge function**: a part of an app that runs at the network's address, for what comes in over the web: a
   page people sign in on, a call from an outside service. One runs for the whole network, with storage of its own
   there, and whoever sets up the edge puts it there with the edge's other pieces.

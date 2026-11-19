@@ -1,0 +1,38 @@
+{
+  // The network's edge, one Worker (`edge.ts`), which `edge.js` deploys with the web client's files and its bindings to
+  // each app's part.
+  "name": "network-edge",
+  "main": "edge.ts",
+  "compatibility_date": "2026-11-01",
+  // A request's signal is aborted when its client goes away, which the servers are told (`mcp/mcp.ts`).
+  "compatibility_flags": ["enable_request_signal"],
+  "workers_dev": false,
+  // The rules every agent is told first, which servers tell it too (`core/server/priv/rules.md`), as text.
+  "rules": [{ "type": "Text", "globs": ["**/*.md"] }],
+  // The relay's Durable Object (`relay/relay.ts`), the network's updater (`updater/updater.ts`) and when a list of
+  // servers last changed (`Changes` in `presigner/presigner.ts`). They take a deploy's code once they hibernate, or after
+  // 5 seconds where they're busy, rather than Cloudflare's 5 minutes, so the Worker and they are on different code no
+  // longer than the Worker tries a call to the relay again (`SWITCH` in `relay/relay.ts`).
+  "durable_objects": {
+    "bindings": [
+      { "name": "RELAY", "class_name": "Relay" },
+      { "name": "UPDATER", "class_name": "NetworkUpdater" },
+      { "name": "CHANGES", "class_name": "Changes" }
+    ],
+    "code_update_strategy": { "mode": "deferred", "max_delay": 5 }
+  },
+  // v1 moved them, with what they keep, from the Workers each was in before the edge was one.
+  "migrations": [
+    {
+      "tag": "v1",
+      "transferred_classes": [
+        { "from": "Relay", "from_script": "network-relay", "to": "Relay" },
+        { "from": "NetworkUpdater", "from_script": "network-updater", "to": "NetworkUpdater" },
+        { "from": "Changes", "from_script": "network-presigner", "to": "Changes" }
+      ]
+    }
+  ],
+  // Its secrets, which only it holds: BUCKET is the bucket's S3 address with the bucket's name as its path, and
+  // FIRST_SERVER is what the network's first server shows once. `wrangler dev` takes them from its environment.
+  "secrets": { "required": ["BUCKET", "ACCESS_KEY_ID", "SECRET_ACCESS_KEY", "FIRST_SERVER"] }
+}

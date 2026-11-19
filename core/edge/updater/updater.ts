@@ -19,21 +19,12 @@
 // the same rules once it's back. Each server prepares and goes as it's told (`clients/cli/src/serving.rs`): this
 // decides only when.
 //
-// It hears only through the relay, which is bound to it, never the other way round (Cloudflare deploys no Worker
-// bound to one that isn't there yet, so two bound to each other couldn't be deployed to a new network): a build
-// published or Update Now (`/relay/update`), what each server says of itself as it changes (`/relay/seen`), and a
+// It hears only through the relay's Durable Object, which calls it: a build published or Update Now (`/relay/update`), what each server says of itself as it changes (`/relay/seen`), and a
 // server coming or going there. Each time it's given who's here (`Presence`), and answers with what it is, and what
 // every server is to do, which the relay tells them all (`notifications/one/update`). So it decides only as it's
 // told something, and its alarm only marks what didn't finish in time: a server that hears nothing new from it has
 // nothing to do.
-import { DurableObject, WorkerEntrypoint } from "cloudflare:workers";
-
-declare global {
-  interface UpdaterEnv {
-    /** The edge's build, as `tooling/version` names the commit it was deployed from, which `edge.js` sets. */
-    VERSION?: string;
-  }
-}
+import { DurableObject } from "cloudflare:workers";
 
 type NetworkUpdateStatus = "up_to_date" | "preparing" | "restarting" | "held";
 type ServerUpdateStatus = "up_to_date" | "downloading" | "checked" | "verifying";
@@ -115,23 +106,7 @@ const RESTARTING = 5 * 60_000;
 
 const MESSAGE = "notifications/one/update";
 
-export default class extends WorkerEntrypoint<UpdaterEnv> {
-  fetch() {
-    return new Response("The network's updater is reached through its relay", { status: 404 });
-  }
-
-  /**
-   * Tells the network's one updater `input`, with who's here: what it is, and what to tell every server, if anything.
-   * What the Durable Object answered is disposed of once it's copied: Workers RPC keeps a call's context open until
-   * its result is, so one left to the caller's end was cancelled with it (`using`, as Cloudflare's RPC lifecycle has it).
-   */
-  async update(input: Input, presence: Record<string, Presence | null>): Promise<{ status: object; broadcast?: string }> {
-    using answered = await this.env.UPDATER.get(this.env.UPDATER.idFromName("network")).update(input, presence);
-    return { status: answered.status, ...(answered.broadcast && { broadcast: answered.broadcast }) };
-  }
-}
-
-export class NetworkUpdater extends DurableObject<UpdaterEnv> {
+export class NetworkUpdater extends DurableObject<Env> {
   async update(input: Input, presence: Record<string, Presence | null>): Promise<{ status: object; broadcast?: string }> {
     const state: State = (await this.ctx.storage.get<State>("state")) ?? { network_update_status: "up_to_date", servers: [], skipped: [], timings: {} };
     const reported = await this.reported();
@@ -140,7 +115,7 @@ export class NetworkUpdater extends DurableObject<UpdaterEnv> {
     for (const [key, here] of Object.entries(presence)) reported[key] ??= { version: here?.version, server_update_status: "up_to_date" };
     const before = JSON.stringify([state, this.instructions(state, reported)]);
     let concerned = false;
-    state.edge = this.env.VERSION ?? state.edge;
+    state.edge = this.env.VERSION || state.edge;
 
     if ("published" in input) {
       // Only a newer build moves it: one published again, as a release run again publishes, changes nothing.

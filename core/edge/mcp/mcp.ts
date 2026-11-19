@@ -8,6 +8,8 @@
 // `who(request)` (`apps/sign-in/edge/worker.ts`). With no such app, only devices signing with their key come in.
 import { verifiedKey, unsigned, hex, NETWORK } from "../ask.ts";
 import { randomBytes } from "@noble/hashes/utils.js";
+import { reader, servers as acting } from "../presigner/presigner.ts";
+import { forward as relayed, notify } from "../relay/relay.ts";
 import rules from "../../server/priv/rules.md";
 
 /** Who a request is from, as the app that signs people in says. */
@@ -24,14 +26,15 @@ interface Who {
   cookies?: string[];
 }
 
-type Env = McpEnv & {
-  /** The app that signs people in: who a request is from, or the answer for one from nobody signed in. */
-  WHO?: { who(request: Request): Promise<Who | { refused: Response }> };
-};
+declare global {
+  interface Env {
+    /** The app that signs people in: who a request is from, or the answer for one from nobody signed in. */
+    WHO?: { who(request: Request): Promise<Who | { refused: Response }> };
+  }
+}
 
 const refuse = (status: number, why: string) => Response.json({ jsonrpc: "2.0", id: null, error: { code: -32000, message: why } }, { status });
 
-/** A server on this list acts for the network, and so for everyone in it. */
 /** A sharing link starts with whose it leads to, as their prefix: that's whose servers answer its holder. */
 const LEADS_TO = /^(?:(?:users|groups)\/[^/]+\/|network\/)/;
 /** The JSON-RPC error a server answers a device that's nobody's (`OneCore.Mcp`). */
@@ -213,14 +216,15 @@ async function forward(
   const mcp = Object.fromEntries(Object.entries(meta).filter(([key]) => key.startsWith(MCP) || key === "progressToken"));
   const forwardedMeta = { ...mcp, ...from, traceparent, ...(typeof subject === "string" && { subject }), ...(typeof app === "string" && { app }), ...(mode && { mode }) };
   message = JSON.stringify({ ...call, params: { ...call.params, _meta: forwardedMeta } });
-  const servers = [...new Set((await Promise.all(of.map((of) => env.NETWORK.servers(of)))).flat())];
-  const forwarded = env.RELAY.forward(servers, message);
+  const lists = reader(env);
+  const servers = [...new Set((await Promise.all(of.map((of) => acting(lists, of)))).flat())];
+  const forwarded = relayed(env, servers, message);
   // A client that goes away before its answer is said to have, by the request's id: what a call does then is its own
   // (`OneCore.Call.State.gone/1`). MCP's Streamable HTTP has a client cancel with `notifications/cancelled`, which is
   // passed on as any message is.
   if (client && "id" in call) {
     const gone = { jsonrpc: "2.0", method: "notifications/one/gone", params: { requestId: call.id, _meta: forwardedMeta } };
-    const went = () => client.ctx.waitUntil(env.RELAY.notify(JSON.stringify(gone)));
+    const went = () => client.ctx.waitUntil(notify(env, JSON.stringify(gone)));
     client.signal.addEventListener("abort", went, { once: true });
     forwarded.finally(() => client.signal.removeEventListener("abort", went));
   }
