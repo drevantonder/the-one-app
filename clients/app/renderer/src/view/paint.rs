@@ -1328,7 +1328,7 @@ pub(super) fn colour_token(id: &str, conditions: Conditions) -> Hsla {
 pub(super) fn chrome_type(conditions: Conditions) -> (crate::text::TextStyle, crate::text::TextStyle) {
     let table = crate::tokens::table();
     let medium = table.type_style("type-medium", conditions).unwrap_or_default();
-    let words = crate::text::TextStyle { size: medium.size, weight: medium.weight.round() as u16, tracking: medium.tracking, line_height: medium.size.round(), tabular: false };
+    let words = crate::text::TextStyle { size: medium.size, weight: medium.weight.round() as u16, tracking: medium.tracking, line_height: medium.size.round(), tabular: false, mono: false };
     let weight = table.weight("label-weight", conditions).unwrap_or(medium.weight);
     (words, crate::text::TextStyle { weight: weight.round() as u16, ..words })
 }

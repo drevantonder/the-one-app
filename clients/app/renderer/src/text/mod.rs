@@ -75,7 +75,8 @@ impl RenderGlyphParams {
 }
 
 /// How text is set: its size and line height in pixels, its weight on the font's `wght` axis, its tracking in em,
-/// and whether its figures are tabular.
+/// whether its figures are tabular, and whether it's in the system's monospace, as CSS's `font-family: monospace`,
+/// where it has no ligatures.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct TextStyle {
     pub size: f32,
@@ -83,11 +84,12 @@ pub struct TextStyle {
     pub tracking: f32,
     pub line_height: f32,
     pub tabular: bool,
+    pub mono: bool,
 }
 
 impl TextStyle {
-    fn key(&self) -> [u32; 5] {
-        [self.size.to_bits(), u32::from(self.weight), self.tracking.to_bits(), self.line_height.to_bits(), u32::from(self.tabular)]
+    fn key(&self) -> [u32; 6] {
+        [self.size.to_bits(), u32::from(self.weight), self.tracking.to_bits(), self.line_height.to_bits(), u32::from(self.tabular), u32::from(self.mono)]
     }
 }
 
@@ -244,8 +246,8 @@ struct Face {
 /// A text shaped in its type styles, by the hash of both, with them to tell it from another of the same hash.
 struct Shaped {
     text: String,
-    style: [u32; 5],
-    fonts: Vec<(Range<usize>, [u32; 5])>,
+    style: [u32; 6],
+    fonts: Vec<(Range<usize>, [u32; 6])>,
     layout: Layout<()>,
 }
 
@@ -669,15 +671,21 @@ fn padded(mut image: swash::scale::image::Image) -> swash::scale::image::Image {
 }
 
 /// How Parley sets text in `style`.
-fn properties(style: &TextStyle) -> [StyleProperty<'static, ()>; 5] {
-    let tabular = if style.tabular { vec![FontFeature::new(Tag::new(b"tnum"), 1)] } else { Vec::new() };
-    [
+fn properties(style: &TextStyle) -> Vec<StyleProperty<'static, ()>> {
+    let mut features = if style.tabular { vec![FontFeature::new(Tag::new(b"tnum"), 1)] } else { Vec::new() };
+    let mut properties = vec![
         StyleProperty::FontSize(style.size),
         StyleProperty::FontWeight(FontWeight::new(f32::from(style.weight))),
         StyleProperty::LetterSpacing(style.tracking * style.size),
         StyleProperty::FontVariations(FontVariations::List(Cow::Owned(vec![FontVariation::new(Tag::new(b"opsz"), style.size)]))),
-        StyleProperty::FontFeatures(FontFeatures::List(Cow::Owned(tabular))),
-    ]
+    ];
+    if style.mono {
+        // Code reads as typed: `=>` stays two characters, whatever the face's ligatures.
+        features.extend([FontFeature::new(Tag::new(b"liga"), 0), FontFeature::new(Tag::new(b"calt"), 0)]);
+        properties.push(StyleProperty::FontFamily(FontFamily::List(vec![FontFamilyName::Generic(GenericFamily::Monospace), FontFamilyName::Generic(GenericFamily::Emoji), FontFamilyName::Generic(GenericFamily::SystemUi)].into())));
+    }
+    properties.push(StyleProperty::FontFeatures(FontFeatures::List(Cow::Owned(features))));
+    properties
 }
 
 /// `text`'s type styles, run by run: `style` where it has no runs, and runs side by side in the same one as one.

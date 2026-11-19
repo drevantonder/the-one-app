@@ -244,6 +244,7 @@ pub struct Transition {
 pub(crate) struct TextChange {
     style: Option<TextStyle>,
     weight: Option<u16>,
+    mono: Option<bool>,
     pub(crate) color: Option<Hsla>,
     align: Option<f32>,
     wrap: Option<bool>,
@@ -257,10 +258,14 @@ impl Text {
         let change = &computed.text;
         let mut out = self;
         if let Some(style) = change.style {
-            out.style = style;
+            // A type style says size, weight and spacing; the family is inherited, as CSS's is.
+            out.style = TextStyle { mono: out.style.mono, ..style };
         }
         if let Some(weight) = change.weight {
             out.style.weight = weight;
+        }
+        if let Some(mono) = change.mono {
+            out.style.mono = mono;
         }
         if let Some(color) = change.color {
             out.color = color;
@@ -281,7 +286,7 @@ impl Text {
     pub fn root(conditions: Conditions) -> (Text, Option<Hsla>) {
         let root = serde_json::json!({"backgroundColor": {"token": "background"}, "color": {"token": "label"}, "font": {"token": "type-body"}});
         let computed = computed(root.as_object().expect("it's an object"), conditions);
-        let base = Text { style: TextStyle { size: 16.0, weight: 400, tracking: 0.0, line_height: 24.0, tabular: false }, color: Hsla::default(), align: 0.0, wrap: true, underline: false };
+        let base = Text { style: TextStyle { size: 16.0, weight: 400, tracking: 0.0, line_height: 24.0, tabular: false, mono: false }, color: Hsla::default(), align: 0.0, wrap: true, underline: false };
         (base.with(&computed), computed.look.background)
     }
 }
@@ -572,10 +577,12 @@ fn computed(style: &Map<String, Value>, conditions: Conditions) -> Computed {
         tracking: font.tracking,
         line_height: font.line_height.round(),
         tabular: font.tabular,
+        mono: false,
     });
     let text = TextChange {
         style: type_style,
         weight: get("fontWeight").and_then(token_of).and_then(|(token, _)| table().weight(token, conditions)).map(|weight| weight.round() as u16),
+        mono: get("fontFamily").and_then(token_of).and_then(|(token, _)| table().monospace(token, conditions)),
         color: get("color").and_then(|value| ref_colour(value, conditions)),
         align: match word("textAlign") {
             Some("center") => Some(0.5),

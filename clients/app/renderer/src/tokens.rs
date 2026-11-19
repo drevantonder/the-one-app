@@ -261,6 +261,12 @@ impl Table {
         self.value(id, "weight", conditions)?.as_f64().map(|weight| weight as f32)
     }
 
+    /// Whether a font's families end in the generic `monospace`, as CSS's `font-family` falls back to one.
+    pub fn monospace(&self, id: &str, conditions: Conditions) -> Option<bool> {
+        let value = self.value(id, "font", conditions)?;
+        Some(value.as_array()?.last()?.as_str()? == "monospace")
+    }
+
     pub fn type_style(&self, id: &str, conditions: Conditions) -> Option<Type> {
         let value = self.value(id, "type", conditions)?;
         let size = length_of(varies(&value["size"], conditions))?;
