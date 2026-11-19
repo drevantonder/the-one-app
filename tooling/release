@@ -173,6 +173,11 @@ trap iphone_done EXIT
 
 # A build is named by its commit's version (`tooling/version`), so what's built is all committed.
 [[ -z $(git status --porcelain) ]] || { echo "Commit what's changed first: a build is named by its commit." >&2 && exit 1; }
+# And what's built is on main: a commit whose push lost a race to another's isn't, and built, it would publish a build
+# without the newer commits main has, undoing them where it's taken (19 Nov).
+git fetch -q origin main
+git merge-base --is-ancestor HEAD origin/main ||
+  { echo "$(git rev-parse --short HEAD) isn't on origin/main: rebase onto it, push, then release." >&2 && exit 1; }
 build=$(tooling/version)
 commit=$(git rev-parse HEAD)
 here="$(uname -s | sed -e s/Linux/linux/ -e s/Darwin/macos/)-$(uname -m | sed s/arm64/aarch64/)"
