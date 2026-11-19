@@ -121,7 +121,8 @@ const [bars, setBars] = createSignal<object[]>([])
 /** Whether it's a Mac, whose keys are ⌘ where a PC's are Ctrl, as its client says. */
 const [mac, setMac] = createSignal(false)
 let asked = false
-const ask = () => {
+/** Asks the client whether it's a Mac, once, for `pressed`. */
+export const askMac = () => {
   if (asked) return
   asked = true
   client().then((said) => setMac(!!said.mac), () => {})
@@ -132,8 +133,8 @@ const ask = () => {
 const shown = (key: string): string =>
   ({ mod: mac() ? "⌘" : "Ctrl", shift: "⇧", alt: mac() ? "⌥" : "Alt", ctrl: mac() ? "⌃" : "Ctrl", escape: "esc", backspace: "⌫", delete: "⌦", tab: "⇥", up: "↑", down: "↓", left: "←", right: "→" })[key.toLowerCase()] ?? key.toUpperCase()
 
-/** Whether a key pressed is these keys. */
-const pressed = (keys: string[], event: Keyed) => {
+/** Whether a key pressed is these keys, `mod` being ⌘ on a Mac and Ctrl elsewhere (`askMac` first). */
+export const pressed = (keys: string[], event: Keyed) => {
   const want = keys.map((key) => key.toLowerCase())
   const has = (name: string) => want.includes(name)
   const command = has("mod") ? (mac() ? event.metaKey : event.ctrlKey) : false
@@ -146,7 +147,7 @@ const pressed = (keys: string[], event: Keyed) => {
 /// `<Keys keys={["mod", "K"]} />`: keys, as chips, as Raycast shows them beside what they do: `mod` is ⌘ on a Mac
 /// and Ctrl on a PC, `enter` ↵ (an icon), `shift` ⇧, a letter in capitals.
 export function Keys(props: { keys: string[] }) {
-  onSettled(ask)
+  onSettled(askMac)
   return (
     <View aria-hidden="true" style={look.keys}>
       <For each={props.keys}>
@@ -251,7 +252,7 @@ export function ActionBar(props: { start?: JSX.Element; actions?: Action[] }) {
   const primary = () => actions().find((action) => !action.disabled && !action.menu)
   // The first that can be done is Return's unless it says otherwise.
   const keysOf = (action: Action) => action.keys ?? (action.label === primary()?.label ? ["enter"] : [])
-  onSettled(ask)
+  onSettled(askMac)
   // Only the one drawn last hears the keys, and is drawn: in a list beside what it opens, what's open's.
   const me = {}
   onSettled(() => {

@@ -1,11 +1,12 @@
 // What's typed in or chosen: a field around it, a line or lines of text, a search, a checkbox, a switch and radios,
 // written once on the drawing primitives (#primitives), the same on the DOM and on a native host.
-import { createSignal, For, omit, Show, useContext } from "solid-js"
+import { createSignal, For, omit, onSettled, Show, useContext } from "solid-js"
 import type { JSX } from "@solidjs/web"
 import { Path, Pressable, Svg, Text, TextInput, View } from "#primitives"
-import { touch } from "#bridge"
+import { keydown, touch } from "#bridge"
 import type { Keyed, TextInputProps } from "../drawing-primitives/primitives.tsx"
 import { Icon } from "./button.tsx"
+import { askMac, pressed } from "./actions.tsx"
 import { ListStyle } from "./list.tsx"
 import { messages } from "../words.ts"
 import { createField, createRadioGroup, createToggle, Field as Context, named, useField, type FieldProps, type RadioGroupProps, type ToggleProps } from "../headless-components/field.ts"
@@ -150,10 +151,22 @@ function Boxed(props: InputProps & { multiline?: boolean; own?: Styles }) {
 
 /// `<Search placeholder="Search notes" aria-label="Search notes" value={words()} onChangeText={setWords} />`:
 /// what's typed to find something in a list: a field with a magnifier and, once there's text, a button that clears
-/// it. Escape clears it too. The list it narrows is the app's.
+/// it. Escape clears it too. ⌘F, or Ctrl+F off a Mac, gives it the keyboard, as a Mac's and a browser's Find does. The
+/// list it narrows is the app's.
 export function Search(props: Omit<InputProps, "inputMode" | "style">) {
   const sidebar = useContext(ListStyle) === "sidebar"
   const [own, setOwn] = createSignal("")
+  // Given the keyboard as `autoFocus` is set again: off, then on at the next frame.
+  const [found, setFound] = createSignal<boolean>()
+  onSettled(() => {
+    askMac()
+    return keydown((event) => {
+      if (!pressed(["mod", "f"], event)) return
+      event.preventDefault()
+      setFound(false)
+      requestAnimationFrame(() => setFound(true))
+    })
+  })
   const text = () => props.value ?? own()
   const typed = (value: string) => {
     setOwn(value)
@@ -169,7 +182,8 @@ export function Search(props: Omit<InputProps, "inputMode" | "style">) {
   return (
     <View style={look.search}>
       <Boxed
-        {...omit(props, "onChangeText", "onKeyDown", "value")}
+        {...omit(props, "onChangeText", "onKeyDown", "value", "autoFocus")}
+        autoFocus={found() ?? props.autoFocus}
         inputMode="search"
         enterKeyHint={props.enterKeyHint ?? "search"}
         value={text()}

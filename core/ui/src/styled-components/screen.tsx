@@ -103,8 +103,19 @@ type Went = { back?: () => void; forward?: () => void } | null
 const Went = createContext<() => Went>(() => null)
 /// `<History value={{ back, forward }}>`: where a window's Back and Forward go, as macOS's System Settings keeps them:
 /// the screens in it draw them in their bar, each greyed where it goes nowhere, as `value` changes. A split pushing a
-/// screen over its list starts again, its Back going back to the list.
+/// screen over its list starts again, its Back going back to the list. ⌘[ and ⌘] on a Mac, and Alt+← and Alt+→
+/// elsewhere, go Back and Forward too, as a browser's and Finder's do.
 export function History(props: { value: Went; children?: JSX.Element }) {
+  onSettled(() =>
+    keydown((event) => {
+      const only = (held: boolean) => held && [event.metaKey, event.altKey, event.ctrlKey, event.shiftKey].filter(Boolean).length === 1
+      const way = only(event.metaKey) ? { "[": "back", "]": "forward" }[event.key] : only(event.altKey) ? { ArrowLeft: "back", ArrowRight: "forward" }[event.key] : undefined
+      const went = way && props.value?.[way as "back" | "forward"]
+      if (!went) return
+      event.preventDefault()
+      went()
+    }),
+  )
   return <Went value={() => props.value}>{props.children}</Went>
 }
 /** Which of the window's edges a screen's bar reaches, where its title row's controls and breadcrumb are: a split's
