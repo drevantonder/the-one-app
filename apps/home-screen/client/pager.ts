@@ -4,7 +4,7 @@
 // ends they give with resistance; once it lifts, a spring seeded with the finger's speed takes them to a page: the
 // next if it was flicked or dragged past half way, else back where they were. A finger that lands while they move
 // catches them where they are. For whoever asked for less motion, they cross-fade to where they're going instead.
-import { reducedMotion } from "ui"
+import { createVelocityTracker, reducedMotion } from "ui"
 
 /** One axis of the pages: where they are, in points, where they're going, and how fast. `draw` puts them there, and
  * `fade`, where it's given, how opaque they are as they cross-fade. */
@@ -106,10 +106,13 @@ export function settle(from: number, at: number, velocity: number, pages: number
   return Math.max(0, Math.min(pages - 1, from - 1 > to ? from - 1 : Math.min(from + 1, to)))
 }
 
-/// How fast a finger moved over the last few moves, in points a second: none if it had stopped before it lifted.
-export function speed(moves: { time: number; value: number }[], now: number) {
-  const recent = moves.filter((move) => now - move.time < 80)
-  if (recent.length < 2) return 0
-  const [first, end] = [recent[0], recent.at(-1)!]
-  return ((end.value - first.value) / Math.max(1, end.time - first.time)) * 1000
+/// How fast a finger was going as it lifted, in points a second, along each way: the UI library's velocity tracker,
+/// one an axis, `add`ed each move. None if it had stopped before it lifted.
+export function thrower() {
+  const [x, y] = [createVelocityTracker(), createVelocityTracker()]
+  return {
+    add: (event: { timeStamp: number; clientX: number; clientY: number }) => (x.add(event.timeStamp, event.clientX), y.add(event.timeStamp, event.clientY)),
+    reset: () => (x.reset(), y.reset()),
+    thrown: (now: number) => ({ x: x.velocity(now) * 1000, y: y.velocity(now) * 1000 }),
+  }
 }

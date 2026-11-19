@@ -94,7 +94,7 @@ function Updating(props: { profile: Profile; subject?: string }) {
     <Section heading="Updating">
       <LiveScreen label="The browser" screen={u().state === "ready" ? screen : undefined}>
         <Show when={u().state === "failed"}>
-          <Problem heading="Couldn't start the browser" text={u().why} action={<Button variant="outline" onClick={again}>Try Again</Button>} />
+          <Problem heading="Couldn't start the browser" text={u().why} action={<Button variant="outline" onPress={again}>Try Again</Button>} />
         </Show>
         <Show when={u().state === "starting" || u().state === "opening"}>
           <Steps
@@ -118,7 +118,7 @@ function Updating(props: { profile: Profile; subject?: string }) {
         <Problem
           heading={`Couldn't save ${p().profile}`}
           text={`Everything in its browser is kept, so nothing is lost.\n\n${u().why}`}
-          action={<Button variant="outline" loading={busy() === "save"} disabled={!!busy()} onClick={() => finish("save")}>Try Again</Button>}
+          action={<Button variant="outline" loading={busy() === "save"} disabled={!!busy()} onPress={() => finish("save")}>Try Again</Button>}
         />
       </Show>
       <Show when={u().state !== "failed" && !(u().state === "ready" && u().why)}>
@@ -126,11 +126,11 @@ function Updating(props: { profile: Profile; subject?: string }) {
       </Show>
       <View style={{ flexDirection: "row", gap: 8 }}>
         <Show when={u().state !== "failed" && !u().why}>
-          <Button loading={busy() === "save" || u().state === "saving"} disabled={u().state !== "ready" || !!busy()} onClick={() => finish("save")}>
+          <Button loading={busy() === "save" || u().state === "saving"} disabled={u().state !== "ready" || !!busy()} onPress={() => finish("save")}>
             Save
           </Button>
         </Show>
-        <Button variant="outline" loading={busy() === "discard" || u().state === "discarding"} disabled={!["ready", "failed"].includes(u().state) || !!busy()} onClick={() => finish("discard")}>
+        <Button variant="outline" loading={busy() === "discard" || u().state === "discarding"} disabled={!["ready", "failed"].includes(u().state) || !!busy()} onPress={() => finish("discard")}>
           Discard
         </Button>
       </View>
@@ -146,7 +146,7 @@ function Update(props: { profile: string; subject?: string }) {
     await call("chrome-profiles_update", { profile: props.profile }, { subject: props.subject }).catch(toast)
     setBusy(false)
   }
-  return <Button loading={busy()} onClick={update}>Update Profile</Button>
+  return <Button loading={busy()} onPress={update}>Update Profile</Button>
 }
 
 /// A new name for the profile.
@@ -167,7 +167,7 @@ function Rename(props: Props & { asking: boolean; done: () => void }) {
       <Field label="Name">
         <Input required autoFocus value={typed()} onChangeText={setTyped} onSubmitEditing={send} />
       </Field>
-      <Button loading={busy()} onClick={send}>Rename</Button>
+      <Button loading={busy()} onPress={send}>Rename</Button>
     </Sheet>
   )
 }

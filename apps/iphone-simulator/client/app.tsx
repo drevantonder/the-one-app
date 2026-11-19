@@ -95,13 +95,13 @@ function Detail(props: { simulator: Simulator }) {
           <Status heading="Removing…" />
         </Match>
         <Match when={e().state === "gone"}>
-          <Problem warn heading="Gone from Xcode" text="It was deleted outside the One App." action={<Button variant="outline" loading={busy()} onClick={() => act("remove")}>Remove</Button>} />
+          <Problem warn heading="Gone from Xcode" text="It was deleted outside the One App." action={<Button variant="outline" loading={busy()} onPress={() => act("remove")}>Remove</Button>} />
         </Match>
         <Match when={e().why}>
-          <Problem heading={`Couldn't start ${e().name}`} text={e().why} action={<Button variant="outline" loading={busy()} onClick={() => act("start")}>Try Again</Button>} />
+          <Problem heading={`Couldn't start ${e().name}`} text={e().why} action={<Button variant="outline" loading={busy()} onPress={() => act("start")}>Try Again</Button>} />
         </Match>
         <Match when={e().state === "stopped"}>
-          <Empty action={<Button loading={busy()} onClick={() => act("start")}>Start</Button>}>Stopped.</Empty>
+          <Empty action={<Button loading={busy()} onPress={() => act("start")}>Start</Button>}>Stopped.</Empty>
         </Match>
       </Switch>
     </Screen>
@@ -113,14 +113,14 @@ function App() {
   changed(() => refresh(simulators))
   const opened = () => simulators().find((e) => e.name === open())
   return (
-    <Errored fallback={(error, reset) => <Problem heading="Couldn't list your simulators" text={error() as Error} action={<Button variant="outline" onClick={reset}>Try Again</Button>} />}>
+    <Errored fallback={(error, reset) => <Problem heading="Couldn't list your simulators" text={error() as Error} action={<Button variant="outline" onPress={reset}>Try Again</Button>} />}>
       <Loading fallback={<Skeleton rows={3} />}>
         <Split open={!!opened()} onClose={() => setOpen()} detail={<Show when={opened()} fallback={<Show when={simulators().length}><Empty>Pick a simulator to use it.</Empty></Show>}><Detail simulator={opened()!} /></Show>}>
           <Screen heading="iPhone Simulator">
             <Show when={simulators().length} fallback={<Empty>No simulators. Your agents create them as they need them.</Empty>}>
               <List>
                 <For each={simulators()} keyed={(e) => e.name}>
-                  {(e) => <Row heading={e().name} text={[e().description, says(e()), e().machine, e().last_used && `used ${since(e().last_used)}`].filter(Boolean).join(" · ")} current={open() === e().name} onClick={() => setOpen(e().name)} />}
+                  {(e) => <Row heading={e().name} text={[e().description, says(e()), e().machine, e().last_used && `used ${since(e().last_used)}`].filter(Boolean).join(" · ")} current={open() === e().name} onPress={() => setOpen(e().name)} />}
                 </For>
               </List>
             </Show>

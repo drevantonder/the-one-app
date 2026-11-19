@@ -69,12 +69,12 @@ function ThisPhone() {
           warn
           heading="Your AI can't use this phone yet"
           text="Turn on the One App in Accessibility settings."
-          action={<Button onClick={() => client({ settings: "accessibility" })}>Open Settings</Button>}
+          action={<Button onPress={() => client({ settings: "accessibility" })}>Open Settings</Button>}
         />
         <List>
           <Row
             text="Restricted setting? Allow it under ⋮ in App Info."
-            action={<Button variant="ghost" onClick={() => client({ settings: "app" })}>App Info</Button>}
+            action={<Button variant="ghost" onPress={() => client({ settings: "app" })}>App Info</Button>}
           />
         </List>
       </Show>
@@ -87,7 +87,7 @@ function App() {
   changed(() => refresh(screens))
   const opened = () => screens().find((screen) => address(screen) === open())
   return (
-    <Errored fallback={(error, reset) => <Problem heading="Couldn't list your screens" text={error() as Error} action={<Button variant="outline" onClick={reset}>Try Again</Button>} />}>
+    <Errored fallback={(error, reset) => <Problem heading="Couldn't list your screens" text={error() as Error} action={<Button variant="outline" onPress={reset}>Try Again</Button>} />}>
       <Loading fallback={<Skeleton rows={3} />}>
         <Split open={!!opened()} onClose={() => setOpen()} detail={<Show when={opened()} fallback={<Show when={screens().length}><Empty>Pick a screen to watch it.</Empty></Show>}><Detail screen={opened()!} /></Show>}>
           <Screen heading="Computer Use">
@@ -95,7 +95,7 @@ function App() {
             <Show when={screens().length} fallback={<Empty>No screens. Your agents' desktops show here once they make one.</Empty>}>
               <List>
                 <For each={screens()} keyed={address}>
-                  {(screen) => <Row heading={screen().name} text={usage(screen().used)} current={open() === address(screen())} onClick={() => setOpen(address(screen()))} />}
+                  {(screen) => <Row heading={screen().name} text={usage(screen().used)} current={open() === address(screen())} onPress={() => setOpen(address(screen()))} />}
                 </For>
               </List>
             </Show>

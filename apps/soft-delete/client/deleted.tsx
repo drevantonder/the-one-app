@@ -95,7 +95,7 @@ async function purgeAll() {
 function Deleted(props: { items: Item[] }) {
   const deleted = () => props.items.filter((item) => item.state === "deleted")
   return (
-    <Screen heading="Recently Deleted" back action={<Show when={deleted().length}><Button variant="destructive" onClick={purgeAll}>Delete All</Button></Show>}>
+    <Screen heading="Recently Deleted" back action={<Show when={deleted().length}><Button variant="destructive" onPress={purgeAll}>Delete All</Button></Show>}>
       <Show when={props.items.length} fallback={<Empty>Nothing was deleted in the last 30 days.</Empty>}>
         <Text style={{ color: "muted-foreground", maxWidth: "readable" }}>Deleted for good after 30 days.</Text>
         <List>

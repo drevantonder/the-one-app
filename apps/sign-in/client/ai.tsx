@@ -21,7 +21,7 @@ function Connect(props: { network: string }) {
       <Field label="Send this to Claude, ChatGPT or any other AI.">
         <Textarea readOnly value={prompt()} />
       </Field>
-      <Button onClick={send}>Share</Button>
+      <Button onPress={send}>Share</Button>
     </View>
   )
 }

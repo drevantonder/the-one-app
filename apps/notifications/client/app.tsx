@@ -96,7 +96,7 @@ function Inbox(props: { inbox: Inbox }) {
                   heading={<Text style={{ font: notification.read ? "body" : "label" }}>{notification.title}</Text>}
                   text={[notification.from, notification.text].filter(Boolean).join(" · ")}
                   end={ago(notification.at)}
-                  onClick={() => tapped(notification)}
+                  onPress={() => tapped(notification)}
                 />
               )}
             </For>

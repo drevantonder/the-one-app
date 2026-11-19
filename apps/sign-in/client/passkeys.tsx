@@ -67,7 +67,7 @@ const opens = (tool: string, inputs?: object) => async () => {
   }
 }
 
-const opening = <Button onClick={opens("sign-in_add_passkey")}>Add Passkey</Button>
+const opening = <Button onPress={opens("sign-in_add_passkey")}>Add Passkey</Button>
 
 // The devices are read by `<Show>`, outside the `<Screen>`, which keeps what's thrown inside it to itself and draws nothing.
 /// Sign In & Security, as Settings draws it: a section of its own, which Back leaves on a phone.
@@ -79,7 +79,7 @@ export default function SignInAndSecurity() {
         <Problem
           heading="Can't show your passkeys"
           text={error() as Error}
-          action={<Button onClick={() => (refresh(mine), retry())}>Try Again</Button>}
+          action={<Button onPress={() => (refresh(mine), retry())}>Try Again</Button>}
         />
       </Screen>
     )}
@@ -98,12 +98,12 @@ export default function SignInAndSecurity() {
                   text={`${unlocks(passkey())} · ${only() ? "Your only one" : `Made ${on(passkey().added)}`}`}
                   action={
                     passkey().prf_key === null ? (
-                      <Button variant="secondary" onClick={opens("sign-in_unlock_with_passkey")}>Set Up</Button>
+                      <Button variant="secondary" onPress={opens("sign-in_unlock_with_passkey")}>Set Up</Button>
                     ) : waiting(passkey()) && holds() ? (
-                      <Button variant="secondary" onClick={() => allow(passkey())}>Allow</Button>
+                      <Button variant="secondary" onPress={() => allow(passkey())}>Allow</Button>
                     ) : undefined
                   }
-                  end={<Remove name={passkey().name} disabled={only()} onClick={() => remove(passkey())} />}
+                  end={<Remove name={passkey().name} disabled={only()} onPress={() => remove(passkey())} />}
                 />
               )
             }}

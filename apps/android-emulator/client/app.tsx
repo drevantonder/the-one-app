@@ -95,10 +95,10 @@ function Detail(props: { emulator: Emulator }) {
           <Status heading="Removing…" />
         </Match>
         <Match when={e().why}>
-          <Problem heading={`Couldn't start ${e().name}`} text={e().why} action={<Button variant="outline" loading={busy()} onClick={() => act("start")}>Try Again</Button>} />
+          <Problem heading={`Couldn't start ${e().name}`} text={e().why} action={<Button variant="outline" loading={busy()} onPress={() => act("start")}>Try Again</Button>} />
         </Match>
         <Match when={e().state === "stopped"}>
-          <Empty action={<Button loading={busy()} onClick={() => act("start")}>Start</Button>}>Stopped.</Empty>
+          <Empty action={<Button loading={busy()} onPress={() => act("start")}>Start</Button>}>Stopped.</Empty>
         </Match>
       </Switch>
     </Screen>
@@ -110,14 +110,14 @@ function App() {
   changed(() => refresh(emulators))
   const opened = () => emulators().find((e) => e.name === open())
   return (
-    <Errored fallback={(error, reset) => <Problem heading="Couldn't list your emulators" text={error() as Error} action={<Button variant="outline" onClick={reset}>Try Again</Button>} />}>
+    <Errored fallback={(error, reset) => <Problem heading="Couldn't list your emulators" text={error() as Error} action={<Button variant="outline" onPress={reset}>Try Again</Button>} />}>
       <Loading fallback={<Skeleton rows={3} />}>
         <Split open={!!opened()} onClose={() => setOpen()} detail={<Show when={opened()} fallback={<Show when={emulators().length}><Empty>Pick an emulator to use it.</Empty></Show>}><Detail emulator={opened()!} /></Show>}>
           <Screen heading="Android Emulator">
             <Show when={emulators().length} fallback={<Empty>No emulators. Your agents create them as they need them.</Empty>}>
               <List>
                 <For each={emulators()} keyed={(e) => e.name}>
-                  {(e) => <Row heading={e().name} text={[e().description, says(e()), e().machine, e().last_used && `used ${since(e().last_used)}`].filter(Boolean).join(" · ")} current={open() === e().name} onClick={() => setOpen(e().name)} />}
+                  {(e) => <Row heading={e().name} text={[e().description, says(e()), e().machine, e().last_used && `used ${since(e().last_used)}`].filter(Boolean).join(" · ")} current={open() === e().name} onPress={() => setOpen(e().name)} />}
                 </For>
               </List>
             </Show>

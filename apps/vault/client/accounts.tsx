@@ -257,7 +257,7 @@ function Readiness() {
   return (
     <Choose>
       <Match when={security().readiness === "not_set_up"}>
-        <Problem warn heading={`Set up ${whom()} Vault`} text="Passwords, keys and sign-ins are kept here, encrypted with a key only your devices hold." action={<Button onClick={setUp}>Set Up</Button>} />
+        <Problem warn heading={`Set up ${whom()} Vault`} text="Passwords, keys and sign-ins are kept here, encrypted with a key only your devices hold." action={<Button onPress={setUp}>Set Up</Button>} />
       </Match>
       <Match when={security().readiness === "no_server"}>
         <Problem
@@ -266,7 +266,7 @@ function Readiness() {
           text={security().holds ? "Until one can, it keeps nothing." : "Until one can, it keeps nothing. Choose one on a trusted device."}
           action={
             <Show when={!secure()}>
-              <Button variant="outline" onClick={() => enter()}>{security().holds ? "Choose a Server" : "Open Security"}</Button>
+              <Button variant="outline" onPress={() => enter()}>{security().holds ? "Choose a Server" : "Open Security"}</Button>
             </Show>
           }
         />
@@ -280,10 +280,10 @@ function Readiness() {
             // Security lists the same three, under Trust This Device.
             <Show when={!secure()}>
               <Show when={own()}>
-                <Button onClick={unlockWithPasskey}>Unlock with Passkey</Button>
+                <Button onPress={unlockWithPasskey}>Unlock with Passkey</Button>
               </Show>
-              <Button variant="outline" onClick={askAnother}>Ask Another Device</Button>
-              <Button variant="outline" onClick={() => useRecoveryKey({ subject: whose() }).then(again)}>Use Recovery Key</Button>
+              <Button variant="outline" onPress={askAnother}>Ask Another Device</Button>
+              <Button variant="outline" onPress={() => useRecoveryKey({ subject: whose() }).then(again)}>Use Recovery Key</Button>
             </Show>
           }
         />
@@ -420,11 +420,11 @@ function ItemScreen(props: { item: Item }) {
       <Section heading="Details">
         <List>
           <For each={item().fields}>
-            {(field) => <Row heading={label(field.name)} end={<Text style={field.secret ? { color: "muted-foreground" } : undefined}>{field.secret ? "••••••••" : field.value}</Text>} onClick={() => setSheet({ kind: "field", item: item(), field })} />}
+            {(field) => <Row heading={label(field.name)} end={<Text style={field.secret ? { color: "muted-foreground" } : undefined}>{field.secret ? "••••••••" : field.value}</Text>} onPress={() => setSheet({ kind: "field", item: item(), field })} />}
           </For>
           <Show when={item().added}>{(added) => <Row heading="Added by an agent" text={whence(added())} />}</Show>
         </List>
-        <Button variant="secondary" onClick={() => setSheet({ kind: "field", item: item() })}>
+        <Button variant="secondary" onPress={() => setSheet({ kind: "field", item: item() })}>
           Add Field
         </Button>
       </Section>
@@ -454,7 +454,7 @@ function ItemScreen(props: { item: Item }) {
         <Show when={problem()}>{(problem) => <Problem heading={problem().heading} text={problem().text} />}</Show>
       </Section>
       <Section>
-        <Button variant="destructive" onClick={remove}>
+        <Button variant="destructive" onPress={remove}>
           Delete Item
         </Button>
       </Section>
@@ -533,11 +533,11 @@ function FieldSheet() {
             <Input inputMode="url" autoCapitalize="none" autoCorrect={false} spellCheck={false} value={hosts()} onChangeText={setHosts} onSubmitEditing={submit} />
           </Field>
         </Show>
-        <Button loading={busy()} disabled={!ready()} onClick={save}>
+        <Button loading={busy()} disabled={!ready()} onPress={save}>
           Save
         </Button>
         <Show when={at()!.field}>
-          <Button variant="ghost" onClick={remove}>
+          <Button variant="ghost" onPress={remove}>
             Delete Field
           </Button>
         </Show>
@@ -560,7 +560,7 @@ function AddSheet() {
     <Sheet heading={section() ? `Add ${titled(section()!.replace(/s$/, ""))}` : ""} open={!!section()} onClose={shut}>
       <List>
         <For each={types()} keyed={(type) => type.id}>
-          {(type) => <Row start={<Image src={type().icon ?? ""} alt="" style={tile} />} heading={titled(type().name)} onClick={() => (shut(), create(type()))} />}
+          {(type) => <Row start={<Image src={type().icon ?? ""} alt="" style={tile} />} heading={titled(type().name)} onPress={() => (shut(), create(type()))} />}
         </For>
       </List>
     </Sheet>
@@ -592,7 +592,7 @@ function CreateSheet() {
       <Field label="Name">
         <Input required autoFocus value={name()} onChangeText={setName} onSubmitEditing={() => name().trim() && make()} />
       </Field>
-      <Button loading={busy()} disabled={!name().trim()} onClick={make}>
+      <Button loading={busy()} disabled={!name().trim()} onPress={make}>
         Add
       </Button>
     </Sheet>
@@ -661,10 +661,10 @@ function RequestAlert() {
       onClose={() => setAsking()}
       action={
         <>
-          <Button variant="outline" disabled={busy()} onClick={() => answer({ decline: true })}>
+          <Button variant="outline" disabled={busy()} onPress={() => answer({ decline: true })}>
             Don't Allow
           </Button>
-          <Button loading={busy()} disabled={!request() || !filled()} onClick={allow}>
+          <Button loading={busy()} disabled={!request() || !filled()} onPress={allow}>
             Allow
           </Button>
         </>
@@ -722,7 +722,7 @@ function SecurityScreen() {
                   text="Wants to be trusted"
                   action={
                     security().holds ? (
-                      <Button variant="secondary" onClick={() => does("encryption_approve", { device: device.device, name: device.name })}>
+                      <Button variant="secondary" onPress={() => does("encryption_approve", { device: device.device, name: device.name })}>
                         Approve
                       </Button>
                     ) : undefined
@@ -740,17 +740,17 @@ function SecurityScreen() {
             <Section heading="Trust This Device">
               <List>
                 <Show when={own()}>
-                  <Row heading="Unlock with Passkey" text="Use a passkey that unlocks your key" onClick={unlockWithPasskey} />
+                  <Row heading="Unlock with Passkey" text="Use a passkey that unlocks your key" onPress={unlockWithPasskey} />
                 </Show>
-                <Row heading="Ask Another Device" text="Approve this one on a trusted device" onClick={askAnother} />
-                <Row heading="Use Recovery Key" text="Type the key you wrote down" onClick={() => useRecoveryKey({ subject: whose() }).then(again)} />
+                <Row heading="Ask Another Device" text="Approve this one on a trusted device" onPress={askAnother} />
+                <Row heading="Use Recovery Key" text="Type the key you wrote down" onPress={() => useRecoveryKey({ subject: whose() }).then(again)} />
               </List>
             </Section>
           }
         >
           <Section heading="Recovery Key">
             <List>
-              <Row heading="Show Recovery Key" text="For when every device is gone" onClick={() => showRecoveryKey({ subject: whose() })} />
+              <Row heading="Show Recovery Key" text="For when every device is gone" onPress={() => showRecoveryKey({ subject: whose() })} />
             </List>
           </Section>
         </Show>
@@ -800,7 +800,7 @@ function Fix(props: { item: Item }) {
   }
   return (
     <Show when={action()}>
-      <Button variant="outline" loading={busy()} onClick={run}>
+      <Button variant="outline" loading={busy()} onPress={run}>
         {action()!.label}
       </Button>
     </Show>
@@ -841,7 +841,7 @@ function ItemRow(props: { item: Item }) {
       heading={shown(props.item)}
       text={props.item.status ? <Line status={props.item.status} /> : props.item.kind === "password" ? <UsedBy item={props.item} /> : <Summary item={props.item} />}
       current={props.item.name === open()}
-      onClick={() => choose(props.item)}
+      onPress={() => choose(props.item)}
       action={fixable(props.item) ? <Fix item={props.item} /> : undefined}
     />
   )
@@ -859,8 +859,8 @@ function Banner(props: { request: Request }) {
         text={props.request.why ?? undefined}
         action={
           <View style={inline}>
-            <Button variant="ghost" onClick={() => does("vault_answer", { id: props.request.id, decline: true })}>Don't Allow</Button>
-            <Button variant="outline" onClick={() => setAsking(props.request)}>Choose…</Button>
+            <Button variant="ghost" onPress={() => does("vault_answer", { id: props.request.id, decline: true })}>Don't Allow</Button>
+            <Button variant="outline" onPress={() => setAsking(props.request)}>Choose…</Button>
           </View>
         }
       />
@@ -914,7 +914,7 @@ export default function Accounts() {
               </Show>
               <Show when={creatable("accounts").length}>
                 <List>
-                  <Row heading="Sign in to your accounts for your apps." end={<Button variant="secondary" onClick={addAccount}>Add Account</Button>} />
+                  <Row heading="Sign in to your accounts for your apps." end={<Button variant="secondary" onPress={addAccount}>Add Account</Button>} />
                 </List>
               </Show>
             </Section>
@@ -925,7 +925,7 @@ export default function Accounts() {
                 </List>
               </Show>
               <List>
-                <Row heading="Keep a password or key for your apps and agents." end={<Button variant="secondary" onClick={() => setSheet({ kind: "field" })}>Add</Button>} />
+                <Row heading="Keep a password or key for your apps and agents." end={<Button variant="secondary" onPress={() => setSheet({ kind: "field" })}>Add</Button>} />
               </List>
             </Section>
             <For each={sections()}>
@@ -948,7 +948,7 @@ export default function Accounts() {
                       <Row
                         heading={`Add a ${typeIn(section)!.name} for your apps.`}
                         end={
-                          <Button variant="secondary" onClick={() => (creatable(`section:${section}`).length === 1 ? create(creatable(`section:${section}`)[0]) : setSheet({ kind: "add", section }))}>
+                          <Button variant="secondary" onPress={() => (creatable(`section:${section}`).length === 1 ? create(creatable(`section:${section}`)[0]) : setSheet({ kind: "add", section }))}>
                             {`Add ${titled(typeIn(section)!.name)}`}
                           </Button>
                         }
@@ -960,7 +960,7 @@ export default function Accounts() {
             </For>
           </Show>
           <List>
-            <Row heading="Security" end={security().readiness !== "ready" ? <View role="img" aria-label="Needs you" style={dot} /> : undefined} current={secure()} onClick={enter} />
+            <Row heading="Security" end={security().readiness !== "ready" ? <View role="img" aria-label="Needs you" style={dot} /> : undefined} current={secure()} onPress={enter} />
           </List>
         </Screen>
       </Split>

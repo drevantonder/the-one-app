@@ -319,7 +319,7 @@ function Telemetry(props: { all: Overview }) {
                     text={[failure().from, failure().message || "Failed", failure().took != null && failure().took! >= 1000 && `for ${took(failure().took)}`].filter(Boolean).join(" · ")}
                     end={`${failure().count > 1 ? `${many(failure().count, "time")} · ` : ""}${since(failure().at)}`}
                     current={open()?.trace === failure().trace}
-                    onClick={failure().trace ? () => setOpen({ trace: failure().trace, where: failure().where }) : undefined}
+                    onPress={failure().trace ? () => setOpen({ trace: failure().trace, where: failure().where }) : undefined}
                   />
                 )}
               </For>
@@ -336,7 +336,7 @@ function Telemetry(props: { all: Overview }) {
                     text={`p95 ${took(slow().p95)} · ${slow().view ? `opened ${many(slow().count, "time")}` : many(slow().count, "call")}${slow().should_be_task ? " · should be a task" : ""}`}
                     end={<Show when={slow().over_time.filter((v) => v != null).length > 1}><Spark values={slow().over_time} /></Show>}
                     current={open()?.slow?.key === slow().key}
-                    onClick={() => setOpen({ slow: slow() })}
+                    onPress={() => setOpen({ slow: slow() })}
                   />
                 )}
               </For>

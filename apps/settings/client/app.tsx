@@ -133,7 +133,7 @@ function Sidebar(props: { shown?: string }) {
       heading={section().name!}
       end={<Show when={section().count}><Badge variant="destructive">{section().count}</Badge></Show>}
       current={props.shown === section().id}
-      onClick={() => choose(section().id)}
+      onPress={() => choose(section().id)}
     />
   )
   const own = () => wanted("Updates")
@@ -151,7 +151,7 @@ function Sidebar(props: { shown?: string }) {
             heading={<Text style={look.personName}>{me()?.called ?? "You"}</Text>}
             text={person()!.name!}
             current={props.shown === person()!.id}
-            onClick={() => choose(person()!.id)}
+            onPress={() => choose(person()!.id)}
           />
         </List>
       </Show>
@@ -161,7 +161,7 @@ function Sidebar(props: { shown?: string }) {
             <List>
               <For each={of(group)} keyed={(one) => one.id}>{row}</For>
               <Show when={group === "system" && own()}>
-                <Row start={<Image src="updates.svg" alt="" style={look.icon} />} heading="Updates" current={props.shown === "updates"} onClick={() => choose("updates")} />
+                <Row start={<Image src="updates.svg" alt="" style={look.icon} />} heading="Updates" current={props.shown === "updates"} onPress={() => choose("updates")} />
               </Show>
             </List>
           </Show>
@@ -177,7 +177,7 @@ function Sidebar(props: { shown?: string }) {
                   heading={app().title}
                   end={<Show when={app().update}><Badge variant="secondary">Update</Badge></Show>}
                   current={props.shown === `app:${app().for}:${app().name}`}
-                  onClick={() => choose(`app:${app().for}:${app().name}`)}
+                  onPress={() => choose(`app:${app().for}:${app().name}`)}
                 />
               )}
             </For>
@@ -312,7 +312,7 @@ function Updates() {
                   <Row
                     heading="Software Update"
                     text={said().busy ? <><Spinner /> {said().text}</> : said().text}
-                    end={<Show when={said().action}><Button variant="outline" loading={working() === "network"} onClick={press("network", () => call("update", {}, { subject: "network" }))}>{said().action}</Button></Show>}
+                    end={<Show when={said().action}><Button variant="outline" loading={working() === "network"} onPress={press("network", () => call("update", {}, { subject: "network" }))}>{said().action}</Button></Show>}
                   />
                 )
               }}
@@ -320,7 +320,7 @@ function Updates() {
             <Row
               heading="This Device"
               text={updates().behind ? "Update ready" : "Up to date"}
-              end={<Show when={updates().behind}><Button variant="outline" loading={working() === "here"} onClick={press("here", () => client({ update: true }).then(({ message }) => toast(message)))}>Update</Button></Show>}
+              end={<Show when={updates().behind}><Button variant="outline" loading={working() === "here"} onPress={press("here", () => client({ update: true }).then(({ message }) => toast(message)))}>Update</Button></Show>}
             />
           </List>
           <Show when={ready().length}>
@@ -332,7 +332,7 @@ function Updates() {
                       start={<Tile icon={app().icon} />}
                       heading={app().title}
                       text={app().update!.why ?? "Update ready"}
-                      end={<Button variant="outline" loading={working() === app().name} onClick={press(app().name, () => call("apps_update", { name: app().name }, { subject: app().for }))}>Update</Button>}
+                      end={<Button variant="outline" loading={working() === app().name} onPress={press(app().name, () => call("apps_update", { name: app().name }, { subject: app().for }))}>Update</Button>}
                     />
                   )}
                 </For>
@@ -386,7 +386,7 @@ function AppPage(props: { app: App }) {
           {(allowed) => <Row heading="Notifications" end={<Switch aria-label="Notifications" checked={allowed().allowed} onChange={(event) => allow(event.currentTarget.checked)} />} />}
         </Show>
         <Show when={app().update}>
-          <Row heading="Update ready" text={app().update!.why ?? undefined} end={<Button variant="outline" loading={working() === "update"} onClick={update}>Update</Button>} />
+          <Row heading="Update ready" text={app().update!.why ?? undefined} end={<Button variant="outline" loading={working() === "update"} onPress={update}>Update</Button>} />
         </Show>
       </List>
       <Groups in="app" app={app().name} />
@@ -395,7 +395,7 @@ function AppPage(props: { app: App }) {
           heading="Remove App…"
           text={app().removes ? "It's in Recently Deleted for 30 days, with what it kept." : `This is ${whose(app().for)}'s, and you're not one of its owners.`}
           destructive={app().removes}
-          onClick={app().removes ? remove : undefined}
+          onPress={app().removes ? remove : undefined}
         />
       </List>
     </Screen>
@@ -457,7 +457,7 @@ function Settings() {
 let choosing = (id: string) => void setOpen(id)
 
 render(() => (
-  <Errored fallback={(error, retry) => <Screen heading="Settings"><Problem heading="Can't show Settings" text={error() as Error} action={<Button onClick={() => ([added, apps].forEach(refresh), retry())}>Try Again</Button>} /></Screen>}>
+  <Errored fallback={(error, retry) => <Screen heading="Settings"><Problem heading="Can't show Settings" text={error() as Error} action={<Button onPress={() => ([added, apps].forEach(refresh), retry())}>Try Again</Button>} /></Screen>}>
     <Loading fallback={<Screen heading="Settings"><Skeleton rows={6} /></Screen>}>
       <Settings />
     </Loading>

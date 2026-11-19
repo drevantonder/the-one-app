@@ -122,7 +122,7 @@ function NewRepo() {
           </Field>
         </Show>
       </Loading>
-      <Button onClick={make}>Create</Button>
+      <Button onPress={make}>Create</Button>
     </Sheet>
   )
 }
@@ -132,7 +132,7 @@ const mine = async () => (await json<{ people: { who: string }[] }>("sign-in_peo
 
 function GitRepos() {
   return (
-    <Screen heading="Git Repos" action={<Button onClick={() => setAdding(true)}>New</Button>}>
+    <Screen heading="Git Repos" action={<Button onPress={() => setAdding(true)}>New</Button>}>
       <Show when={repos().length} fallback={<Empty>No repos yet.</Empty>}>
         <List>
           <For each={repos()}>
@@ -141,7 +141,7 @@ function GitRepos() {
                 heading={short(repo.repo)}
                 text={`${short(repo.whose)} · ${repo.pushed ? `Pushed ${since(repo.pushed)}` : "Empty"}`}
                 current={repo.repo === open()}
-                onClick={() => go(() => (setAt({ tab: "code", path: "" }), setRef(), setOpen(repo.repo)))}
+                onPress={() => go(() => (setAt({ tab: "code", path: "" }), setRef(), setOpen(repo.repo)))}
               />
             )}
           </For>
@@ -176,7 +176,7 @@ function Repo(props: { repo: string }) {
       back
       action={
         <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
-          <Button onClick={clone}>Clone</Button>
+          <Button onPress={clone}>Clone</Button>
           <Show when={about().owns}>
             <Menu.Root onSelect={({ value }) => value === "remove" && remove()}>
               <Menu.Trigger />
@@ -536,10 +536,10 @@ function History(props: { repo: string; branch: string }) {
     <Show when={!at().commit} fallback={<CommitScreen repo={props.repo} sha={at().commit!} />}>
       <Show when={commits().length} fallback={<Empty>No commits yet.</Empty>}>
         <List>
-          <For each={commits()}>{(commit) => <Row heading={commit.subject} text={`${commit.author} · ${since(commit.at)} · ${commit.sha.slice(0, 7)}`} onClick={() => to({ tab: "history", commit: commit.sha })} />}</For>
+          <For each={commits()}>{(commit) => <Row heading={commit.subject} text={`${commit.author} · ${since(commit.at)} · ${commit.sha.slice(0, 7)}`} onPress={() => to({ tab: "history", commit: commit.sha })} />}</For>
         </List>
         <Show when={log().at(-1)!.more}>
-          <Button variant="outline" onClick={() => setPages(pages() + 1)}>
+          <Button variant="outline" onPress={() => setPages(pages() + 1)}>
             Older
           </Button>
         </Show>
@@ -559,7 +559,7 @@ function CommitScreen(props: { repo: string; sha: string }) {
   return (
     <View style={{ gap: "gutter", paddingTop: "gutter" }}>
       <View style={bar}>
-        <Button variant="ghost" onClick={() => to({ tab: "history" }, true)}>
+        <Button variant="ghost" onPress={() => to({ tab: "history" }, true)}>
           <Icon name="caret-left" along /> History
         </Button>
       </View>
@@ -599,10 +599,10 @@ function PullRequests(props: { repo: string; pushes: boolean }) {
                   end={
                     <Show when={props.pushes}>
                       <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
-                        <Button variant="secondary" onClick={() => merge(one)}>
+                        <Button variant="secondary" onPress={() => merge(one)}>
                           Merge
                         </Button>
-                        <Button variant="ghost" onClick={() => close(one)}>
+                        <Button variant="ghost" onPress={() => close(one)}>
                           Close
                         </Button>
                       </View>

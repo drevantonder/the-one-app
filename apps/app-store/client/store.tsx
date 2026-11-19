@@ -149,14 +149,14 @@ async function trust(market: Market, owner: Owner, done: Install) {
 }
 
 /// An app's icon and its name under it, the size it is on a Home Screen.
-function Tile(props: { listed: { title?: string; name?: string; icon: string | null }; onClick?: () => void; fills?: boolean }) {
+function Tile(props: { listed: { title?: string; name?: string; icon: string | null }; onPress?: () => void; fills?: boolean }) {
   const name = () => props.listed.title ?? props.listed.name
   return (
-    <Pressable role={props.onClick ? "button" : undefined} aria-label={props.onClick ? name() : undefined} onPress={props.onClick} style={{ alignItems: "center", gap: 7, width: props.fills ? "100%" : 68, flexShrink: 0 }}>
+    <Pressable role={props.onPress ? "button" : undefined} aria-label={props.onPress ? name() : undefined} onPress={props.onPress} style={{ alignItems: "center", gap: 7, width: props.fills ? "100%" : 68, flexShrink: 0 }}>
       <Show when={props.listed.icon} fallback={<View style={{ width: 60, height: 60, borderRadius: "xl", backgroundColor: "muted" }} />}>
         <Image src={props.listed.icon!} alt="" style={{ width: 60, height: 60, borderRadius: "xl" }} />
       </Show>
-      <Text aria-hidden={props.onClick ? "true" : undefined} style={{ font: "caption-1", textAlign: "center", lineClamp: 1, width: "100%" }}>{name()}</Text>
+      <Text aria-hidden={props.onPress ? "true" : undefined} style={{ font: "caption-1", textAlign: "center", lineClamp: 1, width: "100%" }}>{name()}</Text>
     </Pressable>
   )
 }
@@ -175,7 +175,7 @@ function Shelf(props: { category: string; apps: Listed[] }) {
       </View>
       <View style={{ flexDirection: "row", gap: 12, overflow: "scroll" }}>
         <For each={props.apps} keyed={key}>
-          {(listed) => <Tile listed={listed()} onClick={() => to({ category: view().category, app: key(listed()) })} />}
+          {(listed) => <Tile listed={listed()} onPress={() => to({ category: view().category, app: key(listed()) })} />}
         </For>
       </View>
     </View>
@@ -187,7 +187,7 @@ function Grid(props: { apps: Listed[] }) {
   return (
     <View style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(80px, 1fr))", rowGap: 24, columnGap: 12 }}>
       <For each={props.apps} keyed={key}>
-        {(listed) => <Tile fills listed={listed()} onClick={() => to({ category: view().category, app: key(listed()) })} />}
+        {(listed) => <Tile fills listed={listed()} onPress={() => to({ category: view().category, app: key(listed()) })} />}
       </For>
     </View>
   )
@@ -207,9 +207,9 @@ function Marketplace(props: { market: Market }) {
       <Search placeholder="Search" aria-label="Search apps" value={query()} onChangeText={setQuery} />
       <Show when={!query()}>
         <View role="toolbar" aria-label="Categories" style={{ flexDirection: "row", gap: 8, overflow: "scroll" }}>
-          <Chip chosen={!chosen()} onClick={() => choose()}>All</Chip>
+          <Chip chosen={!chosen()} onPress={() => choose()}>All</Chip>
           <For each={categories()} keyed={({ category }) => category}>
-            {(shelf) => <Chip chosen={chosen() === shelf().category} onClick={() => choose(shelf().category)}>{shelf().category}</Chip>}
+            {(shelf) => <Chip chosen={chosen() === shelf().category} onPress={() => choose(shelf().category)}>{shelf().category}</Chip>}
           </For>
         </View>
       </Show>
@@ -230,9 +230,9 @@ function Marketplace(props: { market: Market }) {
 }
 
 /// A category to choose, a pill: the one chosen is dark.
-function Chip(props: { chosen: boolean; onClick: () => void; children: Element }) {
+function Chip(props: { chosen: boolean; onPress: () => void; children: Element }) {
   return (
-    <Pressable role="button" aria-pressed={props.chosen ? "true" : "false"} onPress={props.onClick} style={{ flexShrink: 0, height: "control", paddingInline: 16, alignItems: "center", justifyContent: "center", borderRadius: "full", backgroundColor: props.chosen ? "primary" : "muted", color: props.chosen ? "primary-foreground" : "foreground" }}>
+    <Pressable role="button" aria-pressed={props.chosen ? "true" : "false"} onPress={props.onPress} style={{ flexShrink: 0, height: "control", paddingInline: 16, alignItems: "center", justifyContent: "center", borderRadius: "full", backgroundColor: props.chosen ? "primary" : "muted", color: props.chosen ? "primary-foreground" : "foreground" }}>
       <Text style={{ font: "label" }}>{props.children}</Text>
     </Pressable>
   )
@@ -249,11 +249,11 @@ function Get(props: { all: Owners; listed: Listed }) {
       ? props.all.owners.flatMap((owner) => owner.installs.filter((done) => done.app === props.listed.app && done.state === "installed").map((done) => ({ owner, done })))[0]
       : undefined
   return (
-    <Show when={left().length || busy()} fallback={<Show when={opens()}>{(it) => <Button onClick={() => open(it().done.name, { subject: it().owner.subject })}>Open</Button>}</Show>}>
+    <Show when={left().length || busy()} fallback={<Show when={opens()}>{(it) => <Button onPress={() => open(it().done.name, { subject: it().owner.subject })}>Open</Button>}</Show>}>
       <Show
         when={left().length > 1 && !busy()}
         fallback={
-          <Button loading={busy()} onClick={() => install(left()[0], props.listed)}>
+          <Button loading={busy()} onPress={() => install(left()[0], props.listed)}>
             Get
           </Button>
         }
@@ -301,7 +301,7 @@ function Where(props: { market: Market; all: Owners; owner: Owner; listed: Liste
       </Match>
       {/* Restoring is Recently Deleted's, as for everything deleted: one place, as iOS has it. */}
       <Match when={state() === "recently_deleted" && may()}>
-        <Button variant="secondary" onClick={() => open("settings#soft-delete/deleted", { subject: props.owner.subject })}>Recently Deleted</Button>
+        <Button variant="secondary" onPress={() => open("settings#soft-delete/deleted", { subject: props.owner.subject })}>Recently Deleted</Button>
       </Match>
       <Match when={state() === "installed"}>
         <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
@@ -313,10 +313,10 @@ function Where(props: { market: Market; all: Owners; owner: Owner; listed: Liste
               <Busy>Updating</Busy>
             </Match>
             <Match when={now().update?.state === "available" && may()}>
-              <Button variant="secondary" loading={busy("update")} onClick={() => update(props.owner, now())}>Update</Button>
+              <Button variant="secondary" loading={busy("update")} onPress={() => update(props.owner, now())}>Update</Button>
             </Match>
             <Match when={props.listed.entrypoints.length}>
-              <Button variant="secondary" onClick={() => open(now().name, { subject: props.owner.subject })}>Open</Button>
+              <Button variant="secondary" onPress={() => open(now().name, { subject: props.owner.subject })}>Open</Button>
             </Match>
           </Switch>
           <Show when={may()}>
@@ -350,7 +350,7 @@ function Failed(props: { all: Owners; owner: Owner; listed: Listed }) {
       <Problem
         heading={heading()}
         text={(done()!.state === "not_installed" ? done()!.why : done()!.update?.why) ?? undefined}
-        action={<Show when={!only(props.all, props.owner)}><Button variant="outline" loading={busy()} onClick={() => retry(props.owner, done()!)}>Try Again</Button></Show>}
+        action={<Show when={!only(props.all, props.owner)}><Button variant="outline" loading={busy()} onPress={() => retry(props.owner, done()!)}>Try Again</Button></Show>}
       />
     </Show>
   )
@@ -438,7 +438,7 @@ function Page(props: { market: Market; all: Owners; listed: Listed }) {
       </Show>
       <Show when={props.listed.tools.length}>
         <List>
-          <Row heading="See All" onClick={() => to({ ...view(), app: key(props.listed), details: true })} end={<Icon name="caret-right" along />} />
+          <Row heading="See All" onPress={() => to({ ...view(), app: key(props.listed), details: true })} end={<Icon name="caret-right" along />} />
         </List>
       </Show>
     </View>

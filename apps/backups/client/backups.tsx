@@ -121,7 +121,7 @@ function Opened(props: { destination: Destination }) {
     const [checked] = JSON.parse(await call("backups_check", { destination: destination().name }, network)).checks as { backup: string | null; objects?: number }[]
     toast(checked.backup ? `Read back ${checked.objects} objects. Every one is as it was sent.` : "There's no backup here yet.")
   })
-  const now = () => <Button variant="secondary" loading={working() === "now"} onClick={press("now", () => call("backups_now", { destination: destination().name }, network))}>Back Up Now</Button>
+  const now = () => <Button variant="secondary" loading={working() === "now"} onPress={press("now", () => call("backups_now", { destination: destination().name }, network))}>Back Up Now</Button>
   const on = () => (destination().running?.machine ? ` on ${destination().running!.machine}` : "")
   return (
     <Screen heading={destination().name} back>
@@ -160,10 +160,10 @@ function Opened(props: { destination: Destination }) {
       </Show>
       <View style={{ flexDirection: "row", flexWrap: "wrap", gap: "gutter", maxWidth: "readable" }}>
         <Show when={destination().backups.length}>
-          <Button variant="secondary" onClick={() => setRestoring(destination())}>Restore</Button>
-          <Button variant="outline" loading={working() === "check"} onClick={check}>Check</Button>
+          <Button variant="secondary" onPress={() => setRestoring(destination())}>Restore</Button>
+          <Button variant="outline" loading={working() === "check"} onPress={check}>Check</Button>
         </Show>
-        <Button variant="destructive" onClick={stop}>Stop Backing Up Here</Button>
+        <Button variant="destructive" onPress={stop}>Stop Backing Up Here</Button>
       </View>
     </Screen>
   )
@@ -221,7 +221,7 @@ function AddSheet(props: { machines: All["machines"] }) {
       <Field label="Name" hint="What to call it. The folder's or the bucket's name if left empty.">
         <Input value={typed().name} onChangeText={type("name")} onSubmitEditing={add} />
       </Field>
-      <Button loading={working() === "add"} disabled={kind() === "folder" && !props.machines.length} onClick={add}>Add</Button>
+      <Button loading={working() === "add"} disabled={kind() === "folder" && !props.machines.length} onPress={add}>Add</Button>
     </Sheet>
   )
 }
@@ -303,7 +303,7 @@ function Restore(props: { destination: Destination }) {
         </Field>
       </Show>
       <Text style={{ color: "muted-foreground", font: "body" }}>Only what's gone comes back. Nothing that's there now changes.</Text>
-      <Button loading={working() === "restore"} onClick={restore}>Restore</Button>
+      <Button loading={working() === "restore"} onPress={restore}>Restore</Button>
     </>
   )
 }
@@ -317,13 +317,13 @@ function Backups(props: { all: All }) {
   return (
     <>
       <Split open={!!opened()} onClose={() => setOpen()} detail={<Show when={opened()} fallback={<Show when={destinations().length}><Empty>Pick a destination to see its backups.</Empty></Show>}><Opened destination={opened()!} /></Show>}>
-        <Screen heading="Backups" back action={<Show when={destinations().length}><Button loading={working() === "now" || backingUp()} onClick={now}>Back Up Now</Button></Show>}>
-          <Show when={destinations().length} fallback={<Empty action={<Button onClick={() => setAdding(true)}>Add Destination</Button>}>Nothing is backed up yet.</Empty>}>
+        <Screen heading="Backups" back action={<Show when={destinations().length}><Button loading={working() === "now" || backingUp()} onPress={now}>Back Up Now</Button></Show>}>
+          <Show when={destinations().length} fallback={<Empty action={<Button onPress={() => setAdding(true)}>Add Destination</Button>}>Nothing is backed up yet.</Empty>}>
             <List>
               <For each={destinations()} keyed={(destination) => destination.name}>
-                {(destination) => <Row heading={destination().name} text={<Text style={{ color: warns(destination()) ? "destructive" : undefined }}>{about(destination())}</Text>} current={open() === destination().name} onClick={() => setOpen(destination().name)} />}
+                {(destination) => <Row heading={destination().name} text={<Text style={{ color: warns(destination()) ? "destructive" : undefined }}>{about(destination())}</Text>} current={open() === destination().name} onPress={() => setOpen(destination().name)} />}
               </For>
-              <Row heading="Add Destination" onClick={() => setAdding(true)} />
+              <Row heading="Add Destination" onPress={() => setAdding(true)} />
             </List>
             <Section heading="Schedule">
               <Field label="Back Up" hint={props.all.retention}>

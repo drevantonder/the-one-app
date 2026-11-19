@@ -41,7 +41,7 @@ export function PushState(props: { push: Push; settings: boolean; again: () => v
       </Show>
       <Show when={props.push.state === "notAsked"}>
         <List>
-          <Row heading="Notifications are off here" text="Turn them on to hear from your apps while this isn't open." action={<Button onClick={() => tryPush(props.again)}>Turn On</Button>} />
+          <Row heading="Notifications are off here" text="Turn them on to hear from your apps while this isn't open." action={<Button onPress={() => tryPush(props.again)}>Turn On</Button>} />
         </List>
       </Show>
       <Show when={props.push.state === "homeScreen"}>
@@ -54,11 +54,11 @@ export function PushState(props: { push: Push; settings: boolean; again: () => v
           warn
           heading="Notifications are off here"
           text="Turn them on in Settings for this app or site."
-          action={props.settings ? <Button variant="outline" onClick={openSettings}>Open Settings</Button> : undefined}
+          action={props.settings ? <Button variant="outline" onPress={openSettings}>Open Settings</Button> : undefined}
         />
       </Show>
       <Show when={props.push.state === "failed"}>
-        <Problem warn heading="This device isn't woken by notifications" text={"why" in props.push ? props.push.why : undefined} action={<Button variant="outline" onClick={() => tryPush(props.again)}>Try Again</Button>} />
+        <Problem warn heading="This device isn't woken by notifications" text={"why" in props.push ? props.push.why : undefined} action={<Button variant="outline" onPress={() => tryPush(props.again)}>Try Again</Button>} />
       </Show>
     </>
   )

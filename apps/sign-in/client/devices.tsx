@@ -288,7 +288,7 @@ function Detail(props: { thing: Thing; all: All; groups?: Groups }) {
         <Section heading="Options">
           <List>
             <Show when={thing().behind && thing().here}>
-              <Row heading="Update ready" end={<Button variant="outline" loading={working() === thing().id} onClick={press(thing(), update)}>Update</Button>} />
+              <Row heading="Update ready" end={<Button variant="outline" loading={working() === thing().id} onPress={press(thing(), update)}>Update</Button>} />
             </Show>
             <Show when={thing().here && thing().kind === "app"}>
               <Row
@@ -348,12 +348,12 @@ function Detail(props: { thing: Thing; all: All; groups?: Groups }) {
         </List>
       </Section>
       <List>
-        <Show when={thing().kind} fallback={<Row heading="Remove Server…" text="It stops running your apps." destructive onClick={() => removeServer(thing())} />}>
+        <Show when={thing().kind} fallback={<Row heading="Remove Server…" text="It stops running your apps." destructive onPress={() => removeServer(thing())} />}>
           <Row
             heading={thing().here ? "Sign Out…" : "Remove Device…"}
             text={thing().here ? "It stops acting as you." : "Signs it out of your network."}
             destructive
-            onClick={() => remove(thing())}
+            onPress={() => remove(thing())}
           />
         </Show>
       </List>
@@ -419,8 +419,8 @@ function Answer(props: { device?: Waiting }) {
                   style={look.number}
                 />
               </Field>
-              <Button onClick={yes}>Yes</Button>
-              <Button variant="outline" onClick={() => answer(device())}>Not Me</Button>
+              <Button onPress={yes}>Yes</Button>
+              <Button variant="outline" onPress={() => answer(device())}>Not Me</Button>
             </View>
           )
         }}
@@ -447,7 +447,7 @@ function Things(props: { all: All; groups?: Groups }) {
       text={about(thing())}
       end={<Show when={thing().behind && !underway(thing())}><Badge variant="secondary">Update</Badge></Show>}
       current={open() === thing().id}
-      onClick={() => setOpen(thing().id)}
+      onPress={() => setOpen(thing().id)}
     />
   )
   const said = () => props.all.update && softwareUpdate(props.all.update)
@@ -463,7 +463,7 @@ function Things(props: { all: All; groups?: Groups }) {
                     heading={`${device().name} · the One App`}
                     text={[named(device().at), device().place && `near ${device().place}`].filter(Boolean).join(" · ")}
                     current={answering() === device().request}
-                    onClick={() => setAnswering(device().request)}
+                    onPress={() => setAnswering(device().request)}
                   />
                 )}
               </For>
@@ -487,7 +487,7 @@ function Things(props: { all: All; groups?: Groups }) {
                   text={said()!.busy ? <><Spinner /> {said()!.text}</> : said()!.text}
                   end={
                     <Show when={said()!.action}>
-                      <Button variant="outline" loading={working() === "network"} onClick={press({ id: "network", here: false }, () => updateNow(props.all.who))}>
+                      <Button variant="outline" loading={working() === "network"} onPress={press({ id: "network", here: false }, () => updateNow(props.all.who))}>
                         {said()!.action}
                       </Button>
                     </Show>

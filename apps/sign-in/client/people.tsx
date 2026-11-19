@@ -106,7 +106,7 @@ function Name(props: { open: boolean; onClose: () => void; called?: string }) {
         <Field label="Name" hint="As people here know you." error={error()}>
           <Input name="called" required autoFocus autoComplete="name" value={called()} onChangeText={setCalled} onSubmitEditing={save} />
         </Field>
-        <Button loading={working()} onClick={save}>Save</Button>
+        <Button loading={working()} onPress={save}>Save</Button>
       </View>
     </Sheet>
   )
@@ -149,7 +149,7 @@ function Invite(props: { open: boolean; onClose: () => void }) {
             <Field label="Name" hint="Lowercase letters, digits and hyphens. It's who they are here, for good." error={error()}>
               <Input name="name" required autoFocus autoCapitalize="none" spellCheck={false} value={name()} onChangeText={setName} onSubmitEditing={make} />
             </Field>
-            <Button loading={working()} onClick={make}>Create Link</Button>
+            <Button loading={working()} onPress={make}>Create Link</Button>
           </View>
         }
       >
@@ -157,7 +157,7 @@ function Invite(props: { open: boolean; onClose: () => void }) {
           <Field label="Link" hint="It works once, for a week.">
             <Input readOnly value={link()} />
           </Field>
-          <Button onClick={send}>Share Link</Button>
+          <Button onPress={send}>Share Link</Button>
         </View>
       </Show>
     </Sheet>
@@ -177,7 +177,7 @@ function NewGroup(props: { open: boolean; onClose: () => void; me: string }) {
         <Field label="Name">
           <Input name="name" required autoFocus autoCapitalize="words" value={name()} onChangeText={setName} onSubmitEditing={send} />
         </Field>
-        <Button onClick={send}>New Group</Button>
+        <Button onPress={send}>New Group</Button>
       </View>
     </Sheet>
   )
@@ -190,7 +190,7 @@ function PersonRow(props: { person: Person; all: All }) {
     <Row
       heading={props.all.named(props.person.who)}
       text={about(props.person, props.all) || undefined}
-      onClick={props.person.who === props.all.me ? () => setNaming(true) : undefined}
+      onPress={props.person.who === props.all.me ? () => setNaming(true) : undefined}
       end={
         <Show when={mayRemove()}>
           <Menu.Root onSelect={({ value }) => value === "remove" && remove(props.person, props.all)}>
@@ -216,7 +216,7 @@ function GroupScreen(props: { group: Group; all: All }) {
       change("permissions_unshare", { artifact: props.group.group, relation: "member", who: member }, props.all.me)
   }
   return (
-    <Screen heading={props.group.called} back action={<Button variant="outline" onClick={() => setAdding("member")}>Add Member</Button>}>
+    <Screen heading={props.group.called} back action={<Button variant="outline" onPress={() => setAdding("member")}>Add Member</Button>}>
       <Section heading="Members">
         <List>
           <For each={props.group.members}>
@@ -225,7 +225,7 @@ function GroupScreen(props: { group: Group; all: All }) {
                 heading={props.all.named(member)}
                 text={props.group.owners.includes(member) ? "Owner" : undefined}
                 end={
-                  <Button variant="ghost" size="icon" aria-label={`Remove ${props.all.named(member)}`} onClick={() => remove(member)}>
+                  <Button variant="ghost" size="icon" aria-label={`Remove ${props.all.named(member)}`} onPress={() => remove(member)}>
                     <Icon name="trash" />
                   </Button>
                 }
@@ -246,7 +246,7 @@ function AddMember(props: { all: All; group?: Group }) {
       <Show when={outside().length} fallback={<Empty>Everyone in the network is in it.</Empty>}>
         <List>
           <For each={outside()} keyed={(person) => person.who}>
-            {(person) => <Row heading={props.all.named(person().who)} text={person().who.replace("users/", "")} onClick={() => (setAdding(), change("permissions_share", { artifact: opened()!, relation: "member", who: person().who }, props.all.me))} />}
+            {(person) => <Row heading={props.all.named(person().who)} text={person().who.replace("users/", "")} onPress={() => (setAdding(), change("permissions_share", { artifact: opened()!, relation: "member", who: person().who }, props.all.me))} />}
           </For>
         </List>
       </Show>
@@ -259,7 +259,7 @@ function UsersAndGroups(props: { all: All }) {
   return (
     <>
       <Split open={!!group()} onClose={() => setOpened()} detail={<Show when={group()}><GroupScreen group={group()!} all={props.all} /></Show>}>
-        <Screen heading="People & Groups" back action={props.all.invites ? <Button onClick={() => setInviting(true)}>Invite</Button> : undefined}>
+        <Screen heading="People & Groups" back action={props.all.invites ? <Button onPress={() => setInviting(true)}>Invite</Button> : undefined}>
           <Section heading="Users">
             <List>
               <For each={props.all.joined} keyed={(person) => person.who}>
@@ -280,14 +280,14 @@ function UsersAndGroups(props: { all: All }) {
             heading={
               <View style={look.groups}>
                 <Text style={look.grows}>Groups</Text>
-                <Button variant="secondary" onClick={() => setAdding("group")}>New Group</Button>
+                <Button variant="secondary" onPress={() => setAdding("group")}>New Group</Button>
               </View>
             }
           >
             <Show when={props.all.groups.length} fallback={<Empty>You're in no groups yet.</Empty>}>
               <List>
                 <For each={props.all.groups} keyed={({ group }) => group}>
-                  {(group) => <Row heading={group().called} text={new Intl.ListFormat("en").format(group().members.map(props.all.named))} current={opened() === group().group} onClick={() => setOpened(group().group)} />}
+                  {(group) => <Row heading={group().called} text={new Intl.ListFormat("en").format(group().members.map(props.all.named))} current={opened() === group().group} onPress={() => setOpened(group().group)} />}
                 </For>
               </List>
             </Show>

@@ -15,8 +15,8 @@
 import { createEffect, createMemo, createSignal, Errored, flush, For, Loading, onSettled, refresh, Show, untrack } from "solid-js"
 import { type WheelEventData, WheelGestures } from "wheel-gestures"
 import { createActor } from "xstate"
-import { Badge, Button, call, changed, client, confirm, covers, type Element, Empty, haptic, Icon, type IconName, Image, keydown, type Keyed, type Layout, leave, link, List, type Located, Menu, negative, open, pinShortcut, Pressable, type Pressed, type PressableProps, Problem, type Rect, reducedMotion, render, Row, safeArea, Search, Sheet, sizeChanged, Spinner, styles, Text, TextInput, toast, tokens, View, viewport, visible, type Wheeled, Widget } from "ui"
-import { give, glide, jump, settle, speed, spring, type Spring, stop } from "./pager.ts"
+import { Badge, Button, call, changed, client, confirm, covers, createVelocityTracker, type Element, Empty, haptic, Icon, type IconName, Image, keydown, type Keyed, type Layout, leave, link, List, type Located, Menu, negative, open, pinShortcut, Pressable, type Pressed, type PressableProps, Problem, type Rect, reducedMotion, render, Row, safeArea, Search, Sheet, sizeChanged, Spinner, styles, Text, TextInput, toast, tokens, View, viewport, visible, type Wheeled, Widget } from "ui"
+import { give, glide, jump, settle, spring, type Spring, stop, thrower } from "./pager.ts"
 import { at as gridAt, BAR, type Box as Place, cell as cellOf, DOTS, GAP, grid, halfHeight, INSET, launcherRoom, lefts, LIBRARY, MARGIN, measure, PAGE, page as pageOf, type Page as Laid, panelSize, PILLS, type Room, SEARCH, SEARCH_HEIGHT, TOP_ROW } from "./layout.ts"
 import { type At, carries, type Drop, type Editing, fitted, type Held, type Kind, machine, nearest, pack, type Page, type Placed, shown, spans } from "./machine.ts"
 import type { Entrypoint, Category, Item, Listed, Pages, Size, Widget as WidgetItem } from "./types.ts"
@@ -1140,7 +1140,7 @@ function Gallery(props: { owner: Owner }) {
           <Show when={props.owner.widgets.length} fallback={<Empty>No widgets yet.</Empty>}>
             <List>
               <For each={props.owner.widgets} keyed={(widget) => widget.widget}>
-                {(widget) => <Row heading={widget().name} start={widget().opens ? <Image src={src(widget().opens!.icon)} alt="" style={{ width: 32, height: 32, borderRadius: "md" }} /> : undefined} onClick={() => (setPicked(widget()), setSize(widget().sizes[0]))} />}
+                {(widget) => <Row heading={widget().name} start={widget().opens ? <Image src={src(widget().opens!.icon)} alt="" style={{ width: 32, height: 32, borderRadius: "md" }} /> : undefined} onPress={() => (setPicked(widget()), setSize(widget().sizes[0]))} />}
               </For>
             </List>
           </Show>
@@ -1160,7 +1160,7 @@ function Gallery(props: { owner: Owner }) {
                 )}
               </For>
             </View>
-            <Button onClick={add}>Add Widget</Button>
+            <Button onPress={add}>Add Widget</Button>
           </View>
         )}
       </Show>
@@ -1188,7 +1188,7 @@ function Overview(props: { owner: Owner; index: number; going?: boolean }) {
   const across = () => Math.max(1, Math.floor((room().width - 48 + 16) / (MINIATURE + 16)))
   const pitch = () => ({ x: (room().width - 48 - (across() - 1) * 16) / across() + 16, y: (MINIATURE * 16) / 9 + 12 + 28 + 24 })
   let down: (Pressed & { at: number; laid: { x: number; y: number } }) | undefined
-  let moves: { time: number; x: number; y: number }[] = []
+  const moves = thrower()
   const place = (at: number) => ({ x: (at % across()) * pitch().x, y: Math.floor(at / across()) * pitch().y })
   const follow = (event: Pressed) => {
     if (!down) return { x: 0, y: 0 }
@@ -1201,7 +1201,7 @@ function Overview(props: { owner: Owner; index: number; going?: boolean }) {
     onPointerDown: (event: Pressed) => {
       if (event.button) return
       down = { ...event, at: index, laid: place(index) }
-      moves = []
+      moves.reset()
       setMoved({ x: 0, y: 0 })
       setDragging(page)
       setCarried(page)
@@ -1209,8 +1209,7 @@ function Overview(props: { owner: Owner; index: number; going?: boolean }) {
     onPointerMove: (event: Pressed) => {
       if (!down || event.pointerId !== down.pointerId) return
       follow(event)
-      moves.push({ time: event.timeStamp, x: event.clientX, y: event.clientY })
-      if (moves.length > 32) moves.shift()
+      moves.add(event)
       // The thumbnail it's over, by where its middle is.
       const box = event.currentTarget.getBoundingClientRect()
       const [column, row] = [Math.floor((box.x + box.width / 2 - 24 + 8) / pitch().x), Math.floor((box.y + box.height / 2 - (room().safe.top + TOP_ROW + 16) + 12) / pitch().y)]
@@ -1229,7 +1228,7 @@ function Overview(props: { owner: Owner; index: number; going?: boolean }) {
     if (!down || event.pointerId !== down.pointerId) return
     down = undefined
     const at = untrack(moved)
-    const thrown = event.timeStamp ? { x: speed(moves.map(({ time, x }) => ({ time, value: x })), event.timeStamp), y: speed(moves.map(({ time, y }) => ({ time, value: y })), event.timeStamp) } : { x: 0, y: 0 }
+    const thrown = event.timeStamp ? moves.thrown(event.timeStamp) : { x: 0, y: 0 }
     const draw = () => setMoved({ x: x.value, y: y.value })
     const [x, y] = [spring(draw), spring(draw)]
     jump(x, at.x)
@@ -1248,7 +1247,7 @@ function Overview(props: { owner: Owner; index: number; going?: boolean }) {
     // Over the blurred Home Screen, it fades out as it closes; its miniatures float, with a window's shadow.
     <View role="dialog" aria-label="Pages" style={[looks.overview, props.going && looks.gone, looks.at(0, 0, room().width, viewport().height)]}>
       <View style={{ flexDirection: "row", justifyContent: "flex-end", alignItems: "center", paddingTop: room().safe.top, height: room().safe.top + TOP_ROW, paddingInline: 16 }}>
-        <Button variant="secondary" onClick={() => home.send({ type: "dismiss" })}>Done</Button>
+        <Button variant="secondary" onPress={() => home.send({ type: "dismiss" })}>Done</Button>
       </View>
       <View style={{ flexGrow: 1, flexBasis: 0, overflow: "scroll", paddingTop: 16, paddingInline: 24, paddingBottom: 48 + room().safe.bottom }}>
         {/* Each in its place by where it is in the pages, so that, as one's dragged past the others, they glide to theirs. */}
@@ -1611,8 +1610,8 @@ function Asking(props: { owner: Owner; held: Held }) {
         </View>
         <Text style={{ color: "muted-foreground", textAlign: "center" }}>{reach()}</Text>
         <View style={{ alignSelf: "stretch", gap: 12, paddingTop: 8 }}>
-          <Button onClick={install}>Install</Button>
-          <Button variant="secondary" onClick={() => home.send({ type: "cancel" })}>Cancel</Button>
+          <Button onPress={install}>Install</Button>
+          <Button variant="secondary" onPress={() => home.send({ type: "cancel" })}>Cancel</Button>
         </View>
       </View>
     </Sheet>
@@ -1640,7 +1639,7 @@ function Refused(props: { owner: Owner; held: Held }) {
           </Loading>
         </Errored>
         <View style={{ alignSelf: "stretch", paddingTop: 8 }}>
-          <Button onClick={dismiss}>OK</Button>
+          <Button onPress={dismiss}>OK</Button>
         </View>
       </View>
     </Sheet>
@@ -1664,12 +1663,12 @@ function EditBar(props: { going?: boolean; within?: Rect }) {
   return (
     <View style={{ position: "absolute", zIndex: 7, top: top(), left: left(), width: width(), height: height(), flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingInline: props.within ? 10 : 16, opacity: fade.value(), pointerEvents: "none" }}>
       <View style={[looks.pill, looks.glass]}>
-        <Button variant="ghost" size="icon" aria-label="Add Widget" onClick={() => state().matches({ editing: "still" }) && home.send({ type: "gallery" })}>
+        <Button variant="ghost" size="icon" aria-label="Add Widget" onPress={() => state().matches({ editing: "still" }) && home.send({ type: "gallery" })}>
           <Icon name="plus" />
         </Button>
       </View>
       <View style={[looks.pill, looks.glass]}>
-        <Button variant="ghost" onClick={() => home.send({ type: "done" })}>Done</Button>
+        <Button variant="ghost" onPress={() => home.send({ type: "done" })}>Done</Button>
       </View>
     </View>
   )
@@ -2043,7 +2042,7 @@ function HomeScreen(props: { owners: Owner[] }) {
   // A finger on the pages moves them, as a phone's: once it has moved far enough to say which way, along an owner's
   // screenfuls or between owners, the pages follow it one to one, giving at the ends; let go, they go to the nearest,
   // or on the way they were flicked. A mouse doesn't drag them: a trackpad or a wheel pages (`wheel`).
-  let swipe: { id: number; x: number; y: number; axis?: "x" | "y"; owner: number; from: number; base: number; moves: { time: number; value: number }[] } | undefined
+  let swipe: { id: number; x: number; y: number; axis?: "x" | "y"; owner: number; from: number; base: number; moves: ReturnType<typeof createVelocityTracker> } | undefined
   const carrying = () => home.getSnapshot().matches({ editing: "dragging" })
   /// Whether a second finger is swiping the pages under what the first carries.
   const swiping = () => !!swipe?.axis && swipe.id !== carrier
@@ -2060,7 +2059,7 @@ function HomeScreen(props: { owners: Owner[] }) {
       const { owner } = home.getSnapshot().context.at
       stop(down)
       stop(sideways(owner))
-      swipe = { id: event.pointerId, x: event.clientX, y: event.clientY, owner, from: 0, base: 0, moves: [] }
+      swipe = { id: event.pointerId, x: event.clientX, y: event.clientY, owner, from: 0, base: 0, moves: createVelocityTracker() }
     },
     onPointerMove: (event: Pressed) => {
       pointer = { x: event.clientX, y: event.clientY }
@@ -2086,8 +2085,7 @@ function HomeScreen(props: { owners: Owner[] }) {
       const end = x ? (reach(swipe.owner) - 1) * pitch() : (owned().length - 1) * height()
       const size = x ? pitch() : height()
       const value = swipe.base + moved
-      swipe.moves.push({ time: event.timeStamp, value })
-      if (swipe.moves.length > 32) swipe.moves.shift()
+      swipe.moves.add(event.timeStamp, value)
       jump(x ? sideways(swipe.owner) : down, value < 0 ? give(value, size) : value > end ? end + give(value - end, size) : value)
     },
     onPointerUp: (event: Pressed) => lift(event, false),
@@ -2107,7 +2105,8 @@ function HomeScreen(props: { owners: Owner[] }) {
       return
     }
     quiet = Date.now() + 350
-    const velocity = cancelled ? 0 : speed(done.moves, event.timeStamp)
+    // In points a second, as the pages' spring takes it.
+    const velocity = cancelled ? 0 : done.moves.velocity(event.timeStamp) * 1000
     const { at } = home.getSnapshot().context
     if (done.axis === "x") {
       const moving = sideways(done.owner)
@@ -2197,7 +2196,7 @@ function HomeScreen(props: { owners: Owner[] }) {
       createEffect(lifting.value, (lifted) => void setCopy((now) => now && { ...now, lifted }))
       haptic("medium")
       const id = carrier
-      const moves: { time: number; x: number; y: number }[] = []
+      const moves = thrower()
       let edge: ReturnType<typeof setTimeout> | undefined
       let side: "" | "left" | "right" | "up" | "down" = ""
       // A page, or an owner, turns after a moment at its edge, and again while it stays there, as an iPhone's does,
@@ -2219,8 +2218,7 @@ function HomeScreen(props: { owners: Owner[] }) {
         if (event.pointerId !== id) return
         pointer = { x: event.clientX, y: event.clientY }
         setCopy((now) => now && { ...now, x: event.clientX - grab.x, y: event.clientY - grab.y })
-        moves.push({ time: event.timeStamp, x: event.clientX, y: event.clientY })
-        if (moves.length > 32) moves.shift()
+        moves.add(event)
         const [x, y] = [event.clientX, event.clientY]
         // The pages' edges: the window's, or the launcher's card's, inside its pills.
         const area = untrack(launcher) ? { left: cardLeft(), right: cardLeft() + card().width, top: CARD_TOP + PILLS, bottom: CARD_TOP + card().height - PILLS } : { left: 0, right: pitch(), top: 0, bottom: height() }
@@ -2269,7 +2267,7 @@ function HomeScreen(props: { owners: Owner[] }) {
       const drop = (event: Pressed) => {
         if (event.pointerId !== id) return
         left = home.getSnapshot().context.held ?? left
-        if (event.timeStamp) thrown = { x: speed(moves.map(({ time, x }) => ({ time, value: x })), event.timeStamp), y: speed(moves.map(({ time, y }) => ({ time, value: y })), event.timeStamp) }
+        if (event.timeStamp) thrown = moves.thrown(event.timeStamp)
         const { held, at } = home.getSnapshot().context
         const owner = untrack(owners)![at.owner]
         const items = held?.item ? [held.item, ...(held.stack ?? [])] : []
@@ -2556,7 +2554,7 @@ function Broken(props: { error: Error }) {
       <Problem
         heading="Home Screen didn't open."
         text={new Error(`Try again in a moment.\n\n${typeof props.error?.cause === "string" ? props.error.cause : (props.error?.message ?? props.error)}`)}
-        action={<Button variant="secondary" onClick={() => refresh(owners)}>Try Again</Button>}
+        action={<Button variant="secondary" onPress={() => refresh(owners)}>Try Again</Button>}
       />
     </View>
   )
