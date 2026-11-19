@@ -417,6 +417,9 @@ export interface Styles {
   tokens?: Record<TokenId, Token>
 }
 
+/** Keyframes, as CSS's `@keyframes`: a style by where each is in a time through, `from`, `to` or a percentage. */
+export type Keyframes = { [at in "from" | "to" | `${number}%`]?: { [P in keyof Properties]?: Properties[P] } }
+
 /** A node's state, which a style's value may depend on, as it may on a condition: `hover`, a mouse's pointer over it
  * (never a finger); `pressed`, a pointer or a finger down on it, or Enter or Space held where the keyboard is;
  * `focused`, where the keyboard is, as CSS's `:focus-visible`; `entering`, what it starts from as it's added, to
@@ -522,9 +525,11 @@ export interface Properties {
   /** What changes of it move rather than jump, and how (a motion token). */
   transitionProperty: (keyof Properties)[]
   transition: Ref
-  /** A motion that repeats while it's drawn, at a motion token's pace: `spin`, a turn; `pulse`, fading to half and
-   * back. */
-  animationName: "spin" | "pulse" | "none"
+  /** A motion that repeats while it's drawn, at a motion token's pace and easing, which a native host runs by itself,
+   * never waking the page: `spin`, a turn; `pulse`, fading to half and back; or keyframes, as CSS's `@keyframes`, each
+   * a style by where it is (`from`, `50%`, `to`), what one leaves out the node's own (a shimmer:
+   * `{ from: { translateX: "-100%" }, to: { translateX: "100%" } }`). */
+  animationName: "spin" | "pulse" | "none" | Keyframes
   animation: Ref
   /** What of it is about to move, grow or fade (`translateX`, `translateY`, `scale`, `opacity`), as CSS's
    * `will-change`: drawn ahead as a layer of its own, which then only moves (`view::Layer`). */

@@ -114,7 +114,8 @@ export interface Look {
    * `initialSpringVelocity` is: a fling's speed, which the spring then keeps, where one says it. A change it moves
    * while this is said sets off at it; leave it out for one that sets off from rest, or at the speed it has. */
   transitionVelocity: number
-  animationName: Properties["animationName"]
+  /** `spin`, `pulse`, or keyframes, as CSS's `@keyframes`: a style by where each is (`from`, `50%`, `to`). */
+  animationName: "spin" | "pulse" | "none" | { [at in "from" | "to" | `${number}%`]?: { [P in keyof Look]?: Look[P] } }
   animation: Of<"motion">
   /** What of it is about to move, grow or fade, as CSS's `will-change`: a host draws it ahead, as a layer of its
    * own, so it moves from the first frame without being drawn then. Only for what's about to, as it holds memory. */

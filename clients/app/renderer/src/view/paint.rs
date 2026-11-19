@@ -398,6 +398,7 @@ impl Painter<'_> {
         let entering = (computed.transition.is_some() && self.transitions.entering(id)).then(|| style::of(node, State { entering: true, ..state }, self.conditions));
         let size = self.layout.kept.get(&id).and_then(|kept| self.layout.taffy.layout(kept.node).ok()).map_or(Size::default(), |laid| Size { width: laid.size.width, height: laid.size.height });
         self.transitions.apply(id, &mut computed, entering.as_ref(), self.time, self.since, self.conditions.reduced_motion, size);
+        self.transitions.animate(id, &mut computed, self.time, self.conditions);
         let mut layout = computed.layout.clone();
         let mut look = computed.look.clone();
         // A `Text` inherits what it's in, as CSS does.
@@ -767,17 +768,8 @@ impl Painter<'_> {
         let translate = point(look.translate.0.of(laid_out.size.width), look.translate.1.of(laid_out.size.height));
         let transform = if translate == point(0.0, 0.0) && look.scale == 1.0 { transform } else { transform.then(translate, look.scale, centre) };
         let bounds = transform.bounds(laid_out);
-        let mut opacity = opacity * look.opacity;
-        let mut rotate = look.rotate;
-        if let Some((name, duration)) = &look.animation {
-            self.animating = true;
-            let duration = f64::from(duration.max(1.0));
-            let turn = ((self.time % duration) / duration) as f32;
-            match name.as_str() {
-                "spin" => rotate += turn * 360.0,
-                _ => opacity *= 1.0 - 0.25 * (1.0 - (turn * std::f32::consts::TAU).cos()),
-            }
-        }
+        let opacity = opacity * look.opacity;
+        let rotate = look.rotate;
         // Turned around its middle, with what's in it.
         if rotate.rem_euclid(360.0) != 0.0 {
             let middle = transform.point(centre);

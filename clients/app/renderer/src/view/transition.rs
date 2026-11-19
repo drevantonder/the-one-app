@@ -313,6 +313,8 @@ pub(crate) struct Transitions {
     drawn: HashSet<Id>,
     /// Each node dragged, while it's held and as it springs back once let go.
     dragged: HashMap<Id, Dragged>,
+    /// The nodes moving by their keyframes (`Look::animation`), which are styled again each frame they're drawn.
+    animated: HashSet<Id>,
 }
 
 /// A node dragged: how far from where its style puts it, along and down, held where the finger has it or springing
@@ -418,6 +420,38 @@ impl Transitions {
         }
     }
 
+    /// Node `id` as its keyframes have it at `now` (ms on the screen's clock), where it has them: each property one
+    /// names, between the keyframes either side of where it is in its time through, eased, from the node's own where
+    /// it has no keyframe at its start or its end, as CSS's `@keyframes` are.
+    pub fn animate(&mut self, id: Id, computed: &mut Computed, now: f64, conditions: crate::tokens::Conditions) {
+        let Some(animation) = computed.look.animation.clone() else {
+            self.animated.remove(&id);
+            return;
+        };
+        self.animated.insert(id);
+        let part = ((now % f64::from(animation.duration)) / f64::from(animation.duration)) as f32;
+        let frames: Vec<(f32, Computed)> = animation.frames.iter().map(|(at, style)| (*at, crate::style::compute(&[serde_json::Value::Object(style.clone())], Default::default(), conditions))).collect();
+        for (property, _) in PROPERTIES {
+            let Some(own) = get(computed, property) else { continue };
+            let mut stops: Vec<(f32, Value)> = animation.frames.iter().zip(&frames).filter(|((_, style), _)| style.contains_key(property)).filter_map(|((at, _), (_, frame))| Some((*at, get(frame, property)?))).collect();
+            if stops.is_empty() {
+                continue;
+            }
+            if stops.first().is_none_or(|(at, _)| *at > 0.0) {
+                stops.insert(0, (0.0, own.clone()));
+            }
+            if stops.last().is_none_or(|(at, _)| *at < 1.0) {
+                stops.push((1.0, own));
+            }
+            let after = stops.iter().position(|(at, _)| *at > part).unwrap_or(stops.len() - 1).max(1);
+            let ((from, a), (to, b)) = (&stops[after - 1], &stops[after]);
+            let between = if to > from { ((part - from) / (to - from)).clamp(0.0, 1.0) } else { 1.0 };
+            if let Some(value) = a.mix(b, ease(animation.easing, between)) {
+                set(computed, property, value);
+            }
+        }
+    }
+
     /// Node `id` is dragged `offset` pixels, along and down, from where its style puts it, held there.
     pub fn hold(&mut self, id: Id, offset: Point<f32>) {
         let dragged = self.dragged.entry(id).or_insert(Dragged { held: true, axes: [Axis::default(); 2], spring: None });
@@ -477,6 +511,7 @@ impl Transitions {
     /// Node `id` is no longer in the tree as it's drawn: put back, it enters again.
     pub fn forget(&mut self, id: Id) {
         self.dragged.remove(&id);
+        self.animated.remove(&id);
         if self.drawn.remove(&id) {
             for (property, _) in PROPERTIES {
                 self.values.remove(&(id, property));
@@ -487,7 +522,7 @@ impl Transitions {
 
     /// The nodes with something on its way, which are styled again each frame until it's arrived.
     pub fn moving(&self) -> HashSet<Id> {
-        self.moving.keys().map(|(id, _)| *id).chain(self.dragged.keys().copied()).collect()
+        self.moving.keys().map(|(id, _)| *id).chain(self.dragged.keys().copied()).chain(self.animated.iter().copied()).collect()
     }
 
     /// The nodes moving only by their own move, growth and fade (`translateX`, `translateY`, `scale`, `opacity`),
@@ -505,7 +540,7 @@ impl Transitions {
     pub fn finish(&mut self, now: f64) -> bool {
         self.moving.retain(|_, moving| !moving.done(now));
         self.dragged.retain(|_, dragged| !dragged.done(now));
-        !self.moving.is_empty() || !self.dragged.is_empty()
+        !self.moving.is_empty() || !self.dragged.is_empty() || !self.animated.is_empty()
     }
 
     /// How many properties are still on their way, for the inspector's `settle`.

@@ -61,8 +61,47 @@ pub struct Look {
     pub fill: Paint,
     pub stroke: Paint,
     pub stroke_width: f32,
-    /// A motion that repeats while it's drawn: `spin` or `pulse`, and how long one takes, in milliseconds.
-    pub animation: Option<(String, f32)>,
+    /// A motion that repeats while it's drawn (`animationName`, `animation`).
+    pub animation: Option<Animation>,
+}
+
+/// A motion that repeats while it's drawn, as CSS's `animation` with `@keyframes`: its keyframes, each how far
+/// through it is (0 to 1) and the style it has there (what one leaves out is the node's own, as CSS has it), how long
+/// one time through takes, in milliseconds, and its easing between each two.
+#[derive(Clone, Debug, PartialEq)]
+pub struct Animation {
+    pub frames: Vec<(f32, Map<String, Value>)>,
+    pub duration: f32,
+    pub easing: [f32; 4],
+}
+
+impl Animation {
+    /// Its keyframes as a style says them: `spin`, a turn; `pulse`, fading to half and back; or CSS's, by where each
+    /// is (`from`, `50%`, `to`).
+    fn of(name: &Value, duration: f32, easing: [f32; 4]) -> Option<Animation> {
+        let frame = |at: f32, style: Value| (at, style.as_object().cloned().unwrap_or_default());
+        let frames = match name {
+            Value::String(name) if name == "spin" => vec![frame(1.0, serde_json::json!({"rotate": 360}))],
+            Value::String(name) if name == "pulse" => vec![frame(0.5, serde_json::json!({"opacity": 0.5}))],
+            Value::Object(keyframes) => {
+                let mut frames: Vec<_> = keyframes
+                    .iter()
+                    .filter_map(|(at, style)| {
+                        let at = match at.as_str() {
+                            "from" => 0.0,
+                            "to" => 1.0,
+                            at => at.strip_suffix('%')?.parse::<f32>().ok()? / 100.0,
+                        };
+                        Some(frame(at.clamp(0.0, 1.0), style.clone()))
+                    })
+                    .collect();
+                frames.sort_by(|a, b| a.0.total_cmp(&b.0));
+                frames
+            }
+            _ => return None,
+        };
+        Some(Animation { frames, duration: duration.max(1.0), easing })
+    }
 }
 
 /// A path's paint: a colour, the text's colour, or none.
@@ -584,13 +623,10 @@ fn computed(style: &Map<String, Value>, conditions: Conditions) -> Computed {
         fill: paint("fill", Paint::Current),
         stroke: paint("stroke", Paint::None),
         stroke_width: number("strokeWidth").unwrap_or(1.0),
-        animation: match word("animationName") {
-            Some(name @ ("spin" | "pulse")) => {
-                let duration = get("animation").and_then(token_of).and_then(|(token, _)| table().motion(token, conditions)).map_or(1000.0, |motion| motion.duration);
-                Some((name.to_owned(), duration))
-            }
-            _ => None,
-        },
+        animation: get("animationName").and_then(|name| {
+            let motion = get("animation").and_then(token_of).and_then(|(token, _)| table().motion(token, conditions));
+            Animation::of(name, motion.map_or(1000.0, |motion| motion.duration), motion.map_or([0.0, 0.0, 1.0, 1.0], |motion| motion.easing))
+        }),
     };
 
     let type_style = get("font").and_then(token_of).and_then(|(token, _)| table().type_style(token, conditions)).map(|font| TextStyle {

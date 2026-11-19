@@ -225,7 +225,7 @@ function declarations(property: string, value: any): string {
     case "transition":
       return `transition-duration:var(--${value.token});transition-timing-function:var(--${value.token.replace(/^move-/, "ease-")})`
     case "animationName":
-      return `animation-name:${value === "none" ? "none" : `ui-${value}`};animation-iteration-count:infinite`
+      return `animation-name:${value === "none" ? "none" : typeof value === "object" ? keyframesName(value) : `ui-${value}`};animation-iteration-count:infinite`
     case "animation":
       return `animation-duration:var(--${value.token});animation-timing-function:var(--${value.token.replace(/^move-/, "ease-")})`
     case "borderTopWidth":
@@ -238,6 +238,13 @@ function declarations(property: string, value: any): string {
   }
   return `${named[property] ?? kebab(property)}:${plain}`
 }
+
+/** The name of keyframes, as their CSS has them (`keyframes`). */
+const keyframesName = (frames: Record<string, Record<string, unknown>>) => `k${hash(JSON.stringify(frames))}`
+
+/** Keyframes as CSS's `@keyframes`. */
+const keyframes = (frames: Record<string, Record<string, unknown>>) =>
+  `@keyframes ${keyframesName(frames)}{${Object.entries(frames).map(([at, style]) => `${at}{${Object.entries(style).map(([property, value]) => declarations(property, value)).join(";")}}`).join("")}}`
 
 /** A class's rule, where it's in `state`. */
 function rule(name: string, state: string, body: string): string {
@@ -297,6 +304,7 @@ function compile(style: Record<string, any>, made: Made, dynamic: Record<string,
         const name = `x${hash(`${state}|${body}`)}`
         // A state's rules after those it wins over, and a type style's before what changes a part of it.
         made.css.set(`${["default", ...states].indexOf(state)}${property === "font" ? 0 : 1}${name}`, rule(name, state, body))
+        if (property === "animationName" && value && typeof value === "object") made.css.set(`00${keyframesName(value as never)}`, keyframes(value as never))
         return name
       })
       .join(" ")
