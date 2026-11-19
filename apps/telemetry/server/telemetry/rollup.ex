@@ -1,13 +1,13 @@
 defmodule Telemetry.Rollup do
   @moduledoc """
-  An hour of what's kept, rolled up once it's over, as observability stores roll up what they're sent: all that
+  An hour of what's kept, rolled up as it's kept, as observability stores roll up what they're sent: all that
   `Telemetry.Read` needs of it but a trace whole, in the shape `Telemetry.Otlp` lays exports out in, so a look over
   hours reads one small blob for each rather than every export, decoded.
 
   - Data points of a metric with the same attributes are added up by the minute they end in, after its start and up
     to its end, as `Telemetry.Read` steps through them, whichever server they're from.
-  - The spans kept are those that failed or were refused, and the clients' spans of the traces they're in, which say
-    who asked; their events go.
+  - The spans kept are those that failed or were refused, and the clients', which say who asked: a client exports
+    only those that failed or were slow. Their events go.
   - The log lines kept are the warnings and errors logged outside a call.
 
   It's kept as Erlang's external term format, compressed.
@@ -18,18 +18,8 @@ defmodule Telemetry.Rollup do
   # page, and who the client is (`Telemetry.Read.from/1`).
   @attributes ~w(one.for one.outcome one.forwarded one.app service.name host.name mcp.client.name user_agent.name)
 
-  @doc "The rollup of `batches`, an hour's exports laid flat, as one batch."
+  @doc "The rollup of `batches`, exports laid flat or rollups, as one batch."
   def of(batches) do
-    cut = cut(batches)
-    failed = for s <- cut["spans"], failed?(s), into: MapSet.new(), do: s["traceId"]
-    %{cut | "spans" => Enum.filter(cut["spans"], &(failed?(&1) or MapSet.member?(failed, &1["traceId"])))}
-  end
-
-  @doc """
-  What `Telemetry.Read` needs of `batches`, as one batch: as their rollup (`of/1`), but every client's span, since
-  the span that failed of its trace may be in another export.
-  """
-  def cut(batches) do
     %{
       "spans" =>
         for(s <- Enum.flat_map(batches, & &1["spans"]), failed?(s) or s["kind"] == "client",

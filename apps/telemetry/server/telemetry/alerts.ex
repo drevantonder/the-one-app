@@ -124,10 +124,8 @@ defmodule Telemetry.Alerts do
 
     asked = %{presence: Map.new(failing, &{&1, presence(&1)}), update: update(), names: Map.new(Call.apps(call), &{&1.name, &1.title})}
 
-    {names, batches} =
-      if looked,
-        do: Store.since(call, (now - @gap) * 1_000_000, read),
-        else: {[], Store.read(call, (now - Store.days() * 86_400_000) * 1_000_000)}
+    {names, exports} = if looked, do: Store.since(call, (now - @gap) * 1_000_000, read), else: {[], []}
+    batches = if looked, do: Enum.map(exports, &elem(&1, 1)), else: Store.read(call, (now - Store.days() * 86_400_000) * 1_000_000)
 
     signals = signals(batches)
 
@@ -147,7 +145,8 @@ defmodule Telemetry.Alerts do
         end
       end)
 
-    # What's newly kept is sent where its owner said, if they did.
+    # What's newly kept is rolled up, for looks over hours to read, and sent where its owner said, if they did.
+    Store.roll_up(call.own, for({name, _batch} = export <- exports, name in fresh, do: export))
     Telemetry.Forward.send(call, fresh)
   end
 
