@@ -47,6 +47,16 @@ type Queue = Rc<RefCell<Vec<(WindowId, usize, Input)>>>;
 pub struct Display {
     queue: Queue,
     cursors: RefCell<HashMap<Cursor, HCURSOR>>,
+    frames: std::sync::Arc<Frames>,
+}
+
+/// The display's frames, as a thread of their own waits for each by the compositor's clock (Windows 11's), while one
+/// is wanted, and wakes the windows' thread with when it came, as Chromium's vsync on Windows does.
+#[derive(Default)]
+struct Frames {
+    wanted: std::sync::Mutex<bool>,
+    told: std::sync::Condvar,
+    shown: std::sync::Mutex<Option<std::time::Instant>>,
 }
 
 pub struct NativeWindow {
@@ -160,7 +170,34 @@ impl Display {
         // Every window this thread makes is drawn at its monitor's DPI, whatever the process's manifest says.
         unsafe { SetThreadDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2) };
         register_window_class();
-        Ok(Display { queue: Queue::default(), cursors: RefCell::default() })
+        let frames = std::sync::Arc::new(Frames::default());
+        let (waiting, thread) = (frames.clone(), unsafe { windows::Win32::System::Threading::GetCurrentThreadId() });
+        std::thread::Builder::new().name("frames".into()).spawn(move || {
+            // Windows 11's, looked up as it runs, so the program still starts on Windows 10, which hasn't it.
+            type Wait = unsafe extern "system" fn(u32, *const windows::Win32::Foundation::HANDLE, u32) -> u32;
+            let wait: Option<Wait> = unsafe {
+                use windows::Win32::System::LibraryLoader::{GetProcAddress, LoadLibraryW};
+                let dcomp = LoadLibraryW(w!("dcomp.dll")).ok();
+                dcomp.and_then(|dcomp| GetProcAddress(dcomp, windows::core::s!("DCompositionWaitForCompositorClock"))).map(|found| std::mem::transmute::<_, Wait>(found))
+            };
+            loop {
+                let mut wanted = waiting.wanted.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+                while !*wanted {
+                    wanted = waiting.told.wait(wanted).unwrap_or_else(std::sync::PoisonError::into_inner);
+                }
+                *wanted = false;
+                drop(wanted);
+                // Where there's no compositor clock (before Windows 11, or a locked screen's, which says so at once), a
+                // 60 Hz display's frame stands in, on a high-resolution timer, as Rust's `sleep` is on Windows.
+                const WAIT_OBJECT_0: u32 = 0;
+                if wait.is_none_or(|wait| unsafe { wait(0, std::ptr::null(), 100) } != WAIT_OBJECT_0) {
+                    std::thread::sleep(std::time::Duration::from_micros(16_667));
+                }
+                *waiting.shown.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = Some(std::time::Instant::now());
+                let _ = unsafe { PostThreadMessageW(thread, WM_NULL, WPARAM(0), LPARAM(0)) };
+            }
+        })?;
+        Ok(Display { queue: Queue::default(), cursors: RefCell::default(), frames })
     }
 
     pub fn open(&self, id: WindowId, options: &WindowOptions) -> anyhow::Result<NativeWindow> {
@@ -456,6 +493,24 @@ impl Display {
     }
 
     pub fn flush(&self) {}
+
+    /// Whether it says when the compositor shows each frame: it does.
+    pub fn paced(&self) -> bool {
+        true
+    }
+
+    /// Has its thread wait for the compositor's next frame, while one is `wanted`.
+    pub fn request_frame(&self, wanted: bool) {
+        if wanted {
+            *self.frames.wanted.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = true;
+            self.frames.told.notify_one();
+        }
+    }
+
+    /// When the compositor showed the frame asked for, once it has.
+    pub fn frame(&self) -> Option<std::time::Instant> {
+        self.frames.shown.lock().unwrap_or_else(std::sync::PoisonError::into_inner).take()
+    }
 
     /// What Windows has said since it was last asked, by the window it's about: every message waiting for this
     /// thread dispatched to its window's procedure, which turns it into input.
@@ -792,3 +847,4 @@ fn handle_msg(hwnd: HWND, state: &State, msg: u32, wparam: WPARAM, lparam: LPARA
         _ => None,
     }
 }
+

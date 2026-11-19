@@ -459,10 +459,24 @@ impl Screen {
     pub fn due(&self) -> Option<Duration> {
         let now = Instant::now();
         let settle = self.settling.iter().map(|(until, _)| until.saturating_duration_since(now)).min();
-        // What moves by itself draws again each frame.
-        let frame = self.animating.then_some(Duration::from_millis(16));
         let frames = self.frames.values().filter_map(|child| child.screen.due());
-        settle.into_iter().chain(frame).chain(self.blinks()).chain(frames).min()
+        settle.into_iter().chain(self.blinks()).chain(frames).min()
+    }
+
+    /// Whether its page, or a frame's in it, asked for the display's next frame (`requestAnimationFrame`).
+    pub fn framing(&self) -> bool {
+        self.js.framing() || self.frames.values().any(|child| child.screen.framing())
+    }
+
+    /// The display showed a frame `at`: what asked for one runs, told when, on its clock.
+    pub fn frame(&mut self, at: Instant) {
+        for child in self.frames.values_mut() {
+            child.screen.frame(at);
+        }
+        if self.js.framing() {
+            let time = self.js.clock().at(at);
+            self.js.frame(time);
+        }
     }
 
     /// How long until the caret blinks on or off: as GTK's does, on two thirds of each 1.2 s and off a third, until

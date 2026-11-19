@@ -80,6 +80,10 @@ impl Shared {
 
 pub struct Display {
     queue: Queue,
+    /// The display link, while there's a display, and when the display last showed a frame, which its callback says
+    /// on a thread of its own, waking the native thread.
+    link: Option<DisplayLink>,
+    frames: Arc<Frames>,
     /// How many app windows are open, as against panels: while there's one, the One App is a regular app, with its
     /// Dock icon and Cmd-Tab entry, and with none an accessory, as Raycast is with only its launcher.
     apps: std::sync::atomic::AtomicUsize,
@@ -149,12 +153,60 @@ impl NativeWindow {
     }
 }
 
+/// When the display last showed a frame, and what wakes the native thread to it.
+struct Frames {
+    shown: Mutex<Option<std::time::Instant>>,
+    ping: calloop::ping::Ping,
+}
+
+/// A Core Video display link, which says each frame the active displays show. AppKit's own (`NSView.displayLink`,
+/// macOS 14) is a view's, on the main thread; this one calls back on a thread of its own, as the native thread wants.
+struct DisplayLink(std::ptr::NonNull<objc2_core_video::CVDisplayLink>);
+
+#[allow(deprecated)]
+impl DisplayLink {
+    fn new(frames: &Arc<Frames>) -> Option<DisplayLink> {
+        use objc2_core_video::{CVDisplayLink, CVOptionFlags, CVReturn, CVTimeStamp, kCVReturnSuccess};
+        unsafe extern "C-unwind" fn shown(
+            _: std::ptr::NonNull<CVDisplayLink>,
+            _: std::ptr::NonNull<CVTimeStamp>,
+            _: std::ptr::NonNull<CVTimeStamp>,
+            _: CVOptionFlags,
+            _: std::ptr::NonNull<CVOptionFlags>,
+            frames: *mut c_void,
+        ) -> CVReturn {
+            let frames = unsafe { &*frames.cast::<Frames>() };
+            *frames.shown.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = Some(std::time::Instant::now());
+            frames.ping.ping();
+            kCVReturnSuccess
+        }
+        let mut link = std::ptr::null_mut();
+        if unsafe { CVDisplayLink::create_with_active_cg_displays(std::ptr::NonNull::from(&mut link)) } != kCVReturnSuccess {
+            return None;
+        }
+        let link = std::ptr::NonNull::new(link)?;
+        // The frames it tells of are the display's for as long as the program runs, as the native thread is.
+        let told = Arc::into_raw(frames.clone()).cast_mut().cast::<c_void>();
+        unsafe { link.as_ref().set_output_callback(Some(shown), told) };
+        Some(DisplayLink(link))
+    }
+
+    fn set_running(&self, running: bool) {
+        let link = unsafe { self.0.as_ref() };
+        if running != link.is_running() {
+            let _ = if running { link.start() } else { link.stop() };
+        }
+    }
+}
+
 impl Display {
     pub fn connect<T: 'static>(handle: &calloop::LoopHandle<'static, T>) -> anyhow::Result<Display> {
         let (ping, source) = calloop::ping::make_ping()?;
         // The loop's turn reads what's queued (`events`).
         handle.insert_source(source, |_, _, _| {}).map_err(|error| anyhow::anyhow!("no queue for AppKit's events: {error}"))?;
-        Ok(Display { queue: Queue { inputs: Arc::default(), ping }, apps: Default::default() })
+        let frames = Arc::new(Frames { shown: Mutex::new(None), ping: ping.clone() });
+        let link = DisplayLink::new(&frames);
+        Ok(Display { queue: Queue { inputs: Arc::default(), ping }, apps: Default::default(), link, frames })
     }
 
     pub fn open(&self, id: WindowId, options: &WindowOptions) -> anyhow::Result<NativeWindow> {
@@ -441,6 +493,23 @@ impl Display {
     }
 
     pub fn flush(&self) {}
+
+    /// Whether it says when the display shows each frame: where there's a display link.
+    pub fn paced(&self) -> bool {
+        self.link.is_some()
+    }
+
+    /// Runs the display link while a frame is `wanted`, and stops it once none is.
+    pub fn request_frame(&self, wanted: bool) {
+        if let Some(link) = &self.link {
+            link.set_running(wanted);
+        }
+    }
+
+    /// When the display last showed a frame, once it has since this was last asked.
+    pub fn frame(&self) -> Option<std::time::Instant> {
+        self.frames.shown.lock().unwrap_or_else(std::sync::PoisonError::into_inner).take()
+    }
 
     /// What AppKit has said since it was last asked, by the window and part it's about.
     pub fn events(&self) -> Vec<(WindowId, usize, Input)> {

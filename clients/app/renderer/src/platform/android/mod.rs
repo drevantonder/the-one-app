@@ -107,6 +107,21 @@ thread_local! {
     static JAVA: RefCell<Option<(JavaVM, GlobalRef)>> = const { RefCell::new(None) };
     /// The file the looper wakes on when the next timer of any window is due.
     static TIMER: RefCell<Option<OwnedFd>> = const { RefCell::new(None) };
+    /// Whether Choreographer has been asked for the next frame, and when the display showed the last one asked for.
+    static ASKED: Cell<bool> = const { Cell::new(false) };
+    static FRAMED: Cell<Option<Instant>> = const { Cell::new(None) };
+}
+
+/// Choreographer's frame, on the UI thread: when it was shown, on CLOCK_MONOTONIC as `Instant` is, and the windows'
+/// turn for it.
+unsafe extern "C" fn framed(frame_time_nanos: std::ffi::c_long, _: *mut c_void) {
+    let mut now = libc::timespec { tv_sec: 0, tv_nsec: 0 };
+    unsafe { libc::clock_gettime(libc::CLOCK_MONOTONIC, &mut now) };
+    let now = now.tv_sec as i64 * 1_000_000_000 + now.tv_nsec as i64;
+    let ago = std::time::Duration::from_nanos(now.saturating_sub(frame_time_nanos as i64).max(0) as u64);
+    ASKED.set(false);
+    FRAMED.set(Some(Instant::now() - ago));
+    with_windows(|_| {});
 }
 
 /// Does `f` to the windows, made now if they aren't yet, then what that changed: timers, drawing, the keyboard. A call
@@ -223,6 +238,25 @@ impl Display {
     }
 
     pub fn flush(&self) {}
+
+    /// Whether it says when the display shows each frame: Choreographer does.
+    pub fn paced(&self) -> bool {
+        true
+    }
+
+    /// Asks Choreographer for the next frame, while one is `wanted` and it hasn't been asked. (Its 64-bit
+    /// `postFrameCallback64` is Android 10's; the app runs from Android 7.)
+    #[allow(deprecated)]
+    pub fn request_frame(&self, wanted: bool) {
+        if wanted && !ASKED.replace(true) {
+            unsafe { ndk_sys::AChoreographer_postFrameCallback(ndk_sys::AChoreographer_getInstance(), Some(framed), std::ptr::null_mut()) };
+        }
+    }
+
+    /// When the display showed the frame asked for, once it has.
+    pub fn frame(&self) -> Option<std::time::Instant> {
+        FRAMED.take()
+    }
 
     /// What the views heard comes straight in through JNI (`input`), not queued here.
     pub(crate) fn events(&self) -> Vec<(WindowId, usize, Input)> {

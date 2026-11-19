@@ -22,13 +22,14 @@ globalThis.setInterval = (callback, delay = 0, ...args) => {
   return id
 }
 globalThis.clearInterval = globalThis.clearTimeout
-// The next frame's, as a 60 Hz display's, told the time it's drawn at, as a browser's.
+// The next frame's, run as the host's display shows one (`frame`), told the time it's shown at, as a browser's.
+const frames = new Map()
 globalThis.requestAnimationFrame = (callback) => {
   const id = nextTimer++
-  timers.set(id, { due: __now() + 16, run: () => callback(__now()) })
+  frames.set(id, callback)
   return id
 }
-globalThis.cancelAnimationFrame = globalThis.clearTimeout
+globalThis.cancelAnimationFrame = (id) => void frames.delete(id)
 const say = (level) => (...parts) => __log(level, parts.map((part) => typeof part === "string" ? part : part instanceof Error ? `${part}\n${part.stack}` : JSON.stringify(part) ?? String(part)).join(" "))
 globalThis.console = { log: say("log"), info: say("info"), debug: say("debug"), warn: say("warn"), error: say("error") }
 
@@ -188,6 +189,20 @@ if (FIXED !== null) {
       timers.delete(id)
       try {
         timer.run()
+      } catch (error) {
+        reportError(error)
+      }
+    }
+  },
+  // Whether it asked for a frame, and the frame, at `time`: what asked for it runs, and what that asks for waits for
+  // the next, as a browser's do.
+  framing: () => frames.size > 0,
+  frame: (time) => {
+    const asked = [...frames.values()]
+    frames.clear()
+    for (const callback of asked) {
+      try {
+        callback(time)
       } catch (error) {
         reportError(error)
       }

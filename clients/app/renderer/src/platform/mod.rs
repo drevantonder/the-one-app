@@ -186,7 +186,10 @@ struct Window {
     screen: Result<Screen, String>,
     title: String,
     scene: crate::render::scene::Scene,
+    /// Whether what it shows changed, and so is drawn on the loop's turn, and whether something on it moves by
+    /// itself, and so is drawn again on the display's next frame.
     dirty: bool,
+    moving: bool,
     drawn: bool,
     /// What its text input plugin was last told.
     text_input: crate::view::TextInputConnection,
@@ -210,14 +213,19 @@ pub struct Windows {
     text: TextSystem,
     windows: HashMap<WindowId, Window>,
     next: WindowId,
+    /// When the display last showed a frame, as its platform says, or the loop's own clock stood in for it.
+    framed: std::time::Instant,
 }
+
+/// How often frames come where a platform says nothing of its display's: a 60 Hz display's.
+const FRAME: std::time::Duration = std::time::Duration::from_micros(16_667);
 
 impl Windows {
     fn new(display: Display) -> anyhow::Result<Windows> {
         let context = Context::new()?;
         let atlas = Arc::new(Atlas::new(&context));
         let text = TextSystem::new(crate::FONT, crate::fonts()?, true);
-        Ok(Windows { display, context, atlas, text, windows: HashMap::new(), next: 1 })
+        Ok(Windows { display, context, atlas, text, windows: HashMap::new(), next: 1, framed: std::time::Instant::now() })
     }
 
     /// Opens a window showing `screen`, which tells `on_event` what happens to it. It's shown once its app's JS
@@ -255,6 +263,7 @@ impl Windows {
                 title: options.title,
                 scene: Default::default(),
                 dirty: true,
+                moving: false,
                 drawn: false,
                 text_input: Default::default(),
                 on_event: Box::new(on_event),
@@ -426,13 +435,34 @@ impl Windows {
     fn due(&self) -> Option<std::time::Duration> {
         let screens = self.windows.values().filter_map(|window| window.screen.as_ref().ok()?.due());
         let showing = self.windows.values().filter(|window| !window.shown).map(|window| SHOWN_WITHIN.saturating_sub(window.opened.elapsed()));
-        screens.chain(showing).min()
+        // Where the display says nothing of its frames, the next is a 60 Hz display's.
+        let frame = (self.framing() && !self.display.paced()).then(|| FRAME.saturating_sub(self.framed.elapsed()));
+        screens.chain(showing).chain(frame).min()
+    }
+
+    /// Whether a window on screen wants the display's next frame: something on it moves by itself, or its page asked
+    /// for one (`requestAnimationFrame`).
+    fn framing(&self) -> bool {
+        self.windows.values().any(|window| window.on_screen() && (window.moving || window.screen.as_ref().is_ok_and(Screen::framing)))
     }
 
     /// After each turn of the loop: what the display said, timers that are due, then each window that changed drawn.
     fn turn(&mut self) {
         for (id, part, input) in self.display.events() {
             self.input(id, part, input);
+        }
+        // The display showed a frame: what moves on a window on screen is drawn again, and its page's
+        // `requestAnimationFrame` runs, told when, as a browser's does once a frame.
+        let framing = self.framing();
+        let shown = self.display.frame().or_else(|| (framing && !self.display.paced() && self.framed.elapsed() >= FRAME).then(std::time::Instant::now));
+        if let Some(at) = shown {
+            self.framed = at;
+            for window in self.windows.values_mut().filter(|window| window.on_screen()) {
+                window.dirty |= std::mem::take(&mut window.moving);
+                if let Ok(screen) = &mut window.screen {
+                    screen.frame(at);
+                }
+            }
         }
         for window in self.windows.values_mut() {
             if let Ok(screen) = &mut window.screen
@@ -491,7 +521,7 @@ impl Windows {
             match &mut window.screen {
                 Ok(screen) => {
                     screen.paint(room, scale, &mut self.text, &self.atlas, &mut window.scene);
-                    window.dirty = screen.take_again();
+                    window.moving = screen.take_again();
                     let calls = screen.text_input(&mut window.text_input);
                     if !calls.is_empty() {
                         self.display.text_input(&window.parts[0].native, &calls);
@@ -513,6 +543,7 @@ impl Windows {
                 (window.on_event)(Event::Shown(asked.elapsed()));
             }
         }
+        self.display.request_frame(self.framing());
         self.display.flush();
     }
 
@@ -614,6 +645,11 @@ impl Windows {
 }
 
 impl Window {
+    /// Whether it's on screen: shown, and for a panel, summoned.
+    fn on_screen(&self) -> bool {
+        self.shown && (!self.panel || self.visible)
+    }
+
     /// How big its page is laid out: a panel's as its page asked, the rest as big as their window.
     fn room(&self) -> Size<Pixels> {
         if self.panel { self.room } else { self.parts[0].native.size() }

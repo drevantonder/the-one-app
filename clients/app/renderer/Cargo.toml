@@ -82,7 +82,10 @@ wgpu = { version = "30.0.2", default-features = false, features = ["vulkan"] }
 [target.'cfg(target_os = "linux")'.dependencies]
 # The desktop's light or dark, from its portal, through libdbus, as tao reads the desktop.
 dbus = "0.9"
-x11rb = { version = "0.14", features = ["allow-unsafe-code", "xkb", "cursor", "resource_manager", "randr"] }
+# The display's frames, as its Present extension says each was shown (`Display::frame`).
+x11rb = { version = "0.14", features = ["allow-unsafe-code", "xkb", "cursor", "resource_manager", "randr", "present", "dri3"] }
+# CLOCK_MONOTONIC, which Present says when a frame was shown on, as Rust's `Instant` is.
+libc = "0.2"
 # The input method (ibus, fcitx: Chinese, Japanese, Korean), through XIM over x11rb, as GPUI's X11 platform has it,
 # but xim-rs's own release, whose compound text decodes Chinese and Korean, where GPUI's fork's has only Japanese.
 xim = { version = "0.6", features = ["x11rb-xcb", "x11rb-client"] }
@@ -123,6 +126,8 @@ objc2 = "0.6"
 objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "objc2-core-foundation", "objc2-quartz-core", "NSAccessibility", "NSAppearance", "NSApplication", "NSCursor", "NSPasteboard", "NSEvent", "NSGraphics", "NSPanel", "NSResponder", "NSRunningApplication", "NSTrackingArea", "NSView", "NSWindow", "NSWorkspace"] }
 objc2-foundation = { version = "0.3", default-features = false, features = ["std", "objc2-core-foundation", "NSArray", "NSGeometry", "NSNotification", "NSObjCRuntime", "NSString"] }
 objc2-quartz-core = { version = "0.3", default-features = false, features = ["std", "objc2-core-foundation", "CALayer", "CAMetalLayer", "CATransaction"] }
+# The display's frames, by a display link (`Display::frame`), as GPUI's Mac platform has them.
+objc2-core-video = { version = "0.3", default-features = false, features = ["std", "CVBase", "CVDisplayLink", "CVReturn"] }
 
 # Android: a native screen is a SurfaceView over the app's web view (`platform/android`), on the UI thread, whose
 # keyboard bridge (Flutter's) and accessibility delegate (AccessKit's) are Java that calls in through JNI.

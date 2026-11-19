@@ -21,6 +21,7 @@ use raw_window_handle as rwh;
 use x11rb::connection::Connection;
 use x11rb::cursor;
 use x11rb::protocol::Event;
+use x11rb::protocol::present::{self, ConnectionExt as _};
 use x11rb::protocol::xkb::{self, ConnectionExt as _};
 use x11rb::protocol::xproto::{self, ConnectionExt as _};
 use x11rb::wrapper::ConnectionExt as _;
@@ -83,6 +84,11 @@ pub struct Display {
     /// Each window whose input with the keyboard takes typing, by where its caret is, in device pixels: its keys go
     /// to the input method, which shows what it composes there.
     ime: RefCell<HashMap<xproto::Window, (i16, i16)>>,
+    /// The root window, whose next frame Present is asked to say it showed, where the X server has Present (all do
+    /// since 2013, Xwayland and Xvfb too); whether it's been asked, and when the last frame asked for was shown.
+    present: Option<xproto::Window>,
+    asked: Cell<bool>,
+    framed: Cell<Option<std::time::Instant>>,
 }
 
 /// Which window an event is for, and which of its parts: 0 the window itself, the rest a panel's parts.
@@ -220,6 +226,13 @@ impl Display {
         let scale = resources.get_value::<f32>("Xft.dpi", "Xft.dpi").ok().flatten().map_or(1.0, |dpi| dpi / 96.0);
         let cursors = cursor::Handle::new(&xcb, screen, &resources)?.reply()?;
 
+        // Each frame the display shows is said by Present, once asked (`request_frame`).
+        let root = xcb.setup().roots[screen].root;
+        let present = xcb.present_query_version(1, 0)?.reply().ok().and_then(|_| {
+            let id = xcb.generate_id().ok()?;
+            xcb.present_select_input(id, root, present::EventMask::COMPLETE_NOTIFY).ok()?.check().ok()?;
+            Some(root)
+        });
         let xcb = Rc::new(xcb);
         let xim = X11rbClient::init(Rc::clone(&xcb), screen, None).ok().map(|client| (client, XimHandler::new()));
         handle
@@ -247,6 +260,9 @@ impl Display {
             dragged: RefCell::default(),
             xim: RefCell::new(xim),
             ime: RefCell::default(),
+            present,
+            asked: Cell::new(false),
+            framed: Cell::new(None),
         })
     }
 
@@ -534,6 +550,27 @@ impl Display {
         let _ = self.xcb.flush();
     }
 
+    /// Whether it says when it shows each frame (Present), so frames come as the display shows them.
+    pub fn paced(&self) -> bool {
+        self.present.is_some()
+    }
+
+    /// Asks Present to say when the display shows its next frame, while one is `wanted` and it hasn't been asked.
+    pub fn request_frame(&self, wanted: bool) {
+        if let Some(root) = self.present
+            && wanted
+            && !self.asked.replace(true)
+        {
+            // The next frame: its count, as `divisor` 1 and `remainder` 0 have it, past the one showing now.
+            let _ = self.xcb.present_notify_msc(root, 0, 0, 1, 0);
+        }
+    }
+
+    /// When the display showed the frame asked for, once it has.
+    pub fn frame(&self) -> Option<std::time::Instant> {
+        self.framed.take()
+    }
+
     /// What the X server has said since it was last asked, by the window it's about. Each event goes by the input
     /// method first, which takes what's its own, and the keys of a window whose input takes typing go to it, which
     /// sends back what it doesn't compose.
@@ -747,6 +784,14 @@ impl Display {
 
     fn event(&self, event: Event, out: &mut Vec<(Who, Input)>) {
         match event {
+            Event::PresentCompleteNotify(shown) if shown.kind == present::CompleteKind::NOTIFY_MSC => {
+                self.asked.set(false);
+                // `ust` is CLOCK_MONOTONIC's microseconds, as `Instant` is.
+                let mut now = libc::timespec { tv_sec: 0, tv_nsec: 0 };
+                unsafe { libc::clock_gettime(libc::CLOCK_MONOTONIC, &mut now) };
+                let now = now.tv_sec as u64 * 1_000_000 + now.tv_nsec as u64 / 1000;
+                self.framed.set(Some(std::time::Instant::now() - std::time::Duration::from_micros(now.saturating_sub(shown.ust))));
+            }
             Event::ClientMessage(event) => {
                 let data = event.data.as_data32();
                 if data[0] == self.atoms.WM_DELETE_WINDOW

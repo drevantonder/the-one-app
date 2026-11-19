@@ -89,6 +89,12 @@ impl Clock {
         self.0.started.elapsed().as_secs_f64() * 1000.0
     }
 
+    /// When `instant` was, on this clock, or now while it's paused.
+    pub fn at(&self, instant: std::time::Instant) -> f64 {
+        let ago = std::time::Instant::now().saturating_duration_since(instant).as_secs_f64() * 1000.0;
+        if self.paused() { self.now() } else { self.now() - ago }
+    }
+
     pub fn now(&self) -> f64 {
         let moved = *self.moved();
         moved.paused.unwrap_or_else(|| self.elapsed() + moved.ahead)
@@ -260,6 +266,25 @@ impl Sandbox {
         .unwrap_or_default()
     }
 
+    /// Whether it asked for a frame (`requestAnimationFrame`).
+    fn framing(&self) -> bool {
+        block_on(self.context.with(|ctx| -> rquickjs::Result<bool> {
+            let host = self.host.clone().restore(&ctx)?;
+            host.get::<_, Function>("framing")?.call(())
+        }))
+        .unwrap_or(false)
+    }
+
+    /// Runs what asked for a frame, told `time`, on its clock, as the frame's shown.
+    fn frame(&self, time: f64) -> anyhow::Result<()> {
+        let ran = block_on(self.context.with(|ctx| {
+            let host = run(&ctx, self.host.clone().restore(&ctx))?;
+            run(&ctx, host.get::<_, Function>("frame").and_then(|frame| frame.call::<_, ()>((time,))))
+        }));
+        self.settle()?;
+        ran
+    }
+
     /// Runs the timers that are due.
     fn fire(&self) -> anyhow::Result<()> {
         let fired = block_on(self.context.with(|ctx| {
@@ -337,6 +362,8 @@ enum Call {
     Send(&'static str, serde_json::Value),
     /// Runs the timers that are due, and looks again at when the next is, as its clock was moved or paused.
     Fire,
+    /// A frame is shown, at this time on its clock: what asked for one runs.
+    Frame(f64),
 }
 
 #[derive(Default)]
@@ -361,6 +388,8 @@ struct Posts {
     /// When its next timer is due, on its clock, and each of its timers (`Sandbox::timers`), as its last turn left them.
     due: Option<f64>,
     timers: Vec<serde_json::Value>,
+    /// Whether it asked for a frame, as its last turn left it.
+    framing: bool,
     /// When, on its clock, its last turn ended.
     turned: f64,
 }
@@ -399,7 +428,7 @@ impl Thread {
                     threw.extend(sandbox.fire().err());
                     collect = true;
                 }
-                let (due, timers) = (sandbox.due(), sandbox.timers());
+                let (due, timers, framing) = (sandbox.due(), sandbox.timers(), sandbox.framing());
                 let now = time.now();
                 // It's started once what its module posted as it ran is here too, so its window shows that.
                 on.post(|posts| {
@@ -408,7 +437,7 @@ impl Thread {
                     posts.posted.extend(threw.drain(..).map(|error: anyhow::Error| Posted::Threw(format!("{error:#}"))));
                     posts.ran += std::mem::take(&mut ran);
                     posts.due = due.map(|due| now + due);
-                    (posts.timers, posts.turned) = (timers, now);
+                    (posts.timers, posts.turned, posts.framing) = (timers, now, framing);
                 });
                 // Its next timer, by the real time, unless its clock is paused, or what it dropped collected once it's
                 // been still a while.
@@ -435,8 +464,10 @@ impl Thread {
                 // Every call that's come runs in this turn, and what they changed goes back as one batch.
                 for call in first.into_iter().chain(std::iter::from_fn(|| queue.try_recv().ok())) {
                     ran += 1;
-                    if let Call::Send(to, message) = call {
-                        threw.extend(sandbox.send(to, &message).err());
+                    match call {
+                        Call::Send(to, message) => threw.extend(sandbox.send(to, &message).err()),
+                        Call::Frame(time) => threw.extend(sandbox.frame(time).err()),
+                        Call::Fire => {}
                     }
                 }
             }
@@ -453,6 +484,16 @@ impl Thread {
     /// Has it run the timers that are due, as its clock was moved or paused, and wait again till its next.
     pub fn fire(&mut self) {
         self.call(Call::Fire);
+    }
+
+    /// A frame is shown at `time`, on its clock: what asked for one runs (`requestAnimationFrame`).
+    pub fn frame(&mut self, time: f64) {
+        self.call(Call::Frame(time));
+    }
+
+    /// Whether it asked for a frame, as its last turn left it.
+    pub fn framing(&self) -> bool {
+        self.shared.posts().framing
     }
 
     fn call(&mut self, call: Call) {

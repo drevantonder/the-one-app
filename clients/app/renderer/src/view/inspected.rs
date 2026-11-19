@@ -205,14 +205,22 @@ impl Screen {
     /// Moves the clock on by `ms`, paused, running each timer due in that time at its own time, in order, each once
     /// what came before it has run: this waits on the app's JS thread.
     fn step(&mut self, ms: f64) {
+        // While its page asks for frames, they come as a 60 Hz display's would, on its clock.
+        const FRAME: f64 = 1000.0 / 60.0;
         let clock = self.js.clock().clone();
         clock.pause();
         self.idle();
         let mut left = ms;
-        while let Some(due) = self.js.due().filter(|due| *due <= left) {
-            let due = due.max(0.0);
-            clock.advance(due);
-            left -= due;
+        loop {
+            let frame = self.framing().then(|| ((clock.now() / FRAME).floor() + 1.0) * FRAME - clock.now());
+            let Some(next) = self.js.due().into_iter().chain(frame).reduce(f64::min).filter(|next| *next <= left) else { break };
+            let framed = frame == Some(next);
+            let next = next.max(0.0);
+            clock.advance(next);
+            left -= next;
+            if framed {
+                self.frame(std::time::Instant::now());
+            }
             self.js.fire();
             self.idle();
         }
