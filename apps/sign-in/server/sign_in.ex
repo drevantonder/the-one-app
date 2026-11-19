@@ -118,6 +118,7 @@ defmodule SignIn do
           type: "object",
           properties: %{
             passkey: %{type: "string", description: "The passkey your person allowed, by its id as `devices` lists it"},
+            code: %{type: "string", description: "Its code as `devices` lists it, which your person checked is the one the sign-in page showed them"},
             keys: %{
               type: "string",
               format: "passkey-keys",
@@ -184,7 +185,11 @@ defmodule SignIn do
                     description:
                       "The key its PRF output derives, which your key is encrypted to so it unlocks it on a new device: empty if it has no PRF, null until it's next used"
                   },
-                  unlocks: %{type: "boolean", description: "Whether it unlocks your key on a new device"}
+                  unlocks: %{type: "boolean", description: "Whether it unlocks your key on a new device"},
+                  code: %{
+                    type: ["string", "null"],
+                    description: "Its key's code, which the sign-in page showed as it was used: its person checks they're the same before it's allowed"
+                  }
                 },
                 required: ["id", "name", "added", "credential", "prf_key", "unlocks"]
               }
@@ -577,8 +582,20 @@ defmodule SignIn do
   defp devices(who) do
     %{"devices" => devices} = list = ask(%{ask: "devices", who: who})
     names = Builds.names(who, for(%{"kind" => "app", "id" => id} <- devices, do: id))
-    %{list | "devices" => for(device <- devices, do: Map.update!(device, "name", &Map.get(names, device["id"], &1)))}
+    passkeys = for passkey <- list["passkeys"] || [], do: Map.put(passkey, "code", code(passkey["prf_key"]))
+    %{list | "devices" => for(device <- devices, do: Map.update!(device, "name", &Map.get(names, device["id"], &1))), "passkeys" => passkeys}
   end
+
+  # A passkey's key, as its person checks it's the one they used, as Signal's safety numbers are: 20 digits in fours
+  # of five from its SHA-256, the same the sign-in page shows (`edge/page/passkey.ts`) and a device holds an Allow to
+  # (`apps/encryption/client/native/src/device.rs`).
+  defp code(key) when is_binary(key) and key != "" do
+    <<number::72, _::binary>> = :crypto.hash(:sha256, "one/passkey/1/code\n" <> key)
+    digits = number |> rem(Integer.pow(10, 20)) |> Integer.to_string() |> String.pad_leading(20, "0")
+    digits |> String.graphemes() |> Enum.chunk_every(5) |> Enum.map_join(" ", &Enum.join/1)
+  end
+
+  defp code(_key), do: nil
 
   # Whether `who` owns the network, as the apps that validate `reach` say.
   defp owns_network?(call, who) do

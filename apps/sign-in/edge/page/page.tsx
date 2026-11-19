@@ -19,7 +19,7 @@ import { createAuthClient } from "better-auth/client"
 import { deviceAuthorizationClient } from "better-auth/client/plugins"
 import { passkeyClient } from "@better-auth/passkey/client"
 import Bowser from "bowser"
-import { forDevice, NO_PRF, opened as openedKey, output, PRF, prfKey } from "./passkey.ts"
+import { code, forDevice, NO_PRF, opened as openedKey, output, PRF, prfKey } from "./passkey.ts"
 import "./page.css"
 
 const auth = createAuthClient({ basePath: "/sign-in/auth", plugins: [passkeyClient(), deviceAuthorizationClient()] })
@@ -167,6 +167,9 @@ async function claim() {
   setStage({ stage: "comparing", name: (data as { name?: string }).name ?? "A device", device: data.client_id })
 }
 
+/// The code of the key the passkey answered on this page derives, which a device that allows it shows too.
+let shownCode: string | undefined
+
 /// The passkey answered on this page, by its credential ID, with its PRF output if it gave one.
 let used: { credential: string; prf?: Uint8Array; at: number } | undefined
 
@@ -177,7 +180,9 @@ type Answered = { webauthn?: { response: { id: string }; clientExtensionResults?
 /// which a device that holds its person's key encrypts the key to (`edge/auth.ts`).
 async function answered(result: Answered, prf: Uint8Array | undefined | null) {
   used = { credential: result.webauthn!.response.id, prf: prf ?? undefined, at: Date.now() }
-  if (prf !== undefined) await ask("/passkey/prf-key", { credential: used.credential, key: prf && (await prfKey(prf)) })
+  const key = prf && (await prfKey(prf))
+  if (prf !== undefined) await ask("/passkey/prf-key", { credential: used.credential, key })
+  shownCode = key ? await code(key) : undefined
 }
 
 /// Signs in with a passkey, asked for its PRF output, which whoever was signed in here before no longer is.
@@ -389,14 +394,14 @@ function shows(): Shows {
     case "unlock":
       switch (now.stage) {
         case "unlocked":
-          return { heading: "Unlock with Passkey", done: now.name ? `Unlocked: ${now.name} holds your key now. Go back to it.` : "Your passkey is set up. Allow it in Sign In & Security on a device that holds your key." }
+          return { heading: "Unlock with Passkey", done: now.name ? `Unlocked: ${now.name} holds your key now. Go back to it.` : `Your passkey is set up. Allow it in Sign In & Security on a device that holds your key, if it shows this code: ${shownCode}` }
         case "failed":
           return { heading: "Unlock with Passkey", problem: failed, button: "Try Again", onSignIn: signIn }
         default:
           return { heading: "Unlock with Passkey", note: flow.device ? "Use a passkey of yours to let the device hold your key." : "Use the passkey that should unlock your key on a new device.", button: "Continue", onSignIn: signIn }
       }
     case "addPasskey":
-      return now.stage === "created" ? { heading: "Add a passkey", done: "Your passkey is created. Go back to the app." } : { heading: "Add a passkey", button: "Create a passkey", onSignIn: signIn }
+      return now.stage === "created" ? { heading: "Add a passkey", done: shownCode ? `Your passkey is created. Go back to the app, and allow it there if it shows this code: ${shownCode}` : "Your passkey is created. Go back to the app." } : { heading: "Add a passkey", button: "Create a passkey", onSignIn: signIn }
     case "join":
       return { heading: "Join", button: "Create a passkey", onSignIn: signIn, asksName: true }
     case "signIn":

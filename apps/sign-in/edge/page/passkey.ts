@@ -35,6 +35,14 @@ export async function prfKey(prf: Uint8Array) {
   return bytesToHex(new Uint8Array(await suite.kem.serializePublicKey(publicKey)))
 }
 
+/// A passkey's key, as its person checks it's the one a device of theirs allows, as Signal's safety numbers are: 20
+/// digits in fours of five from its SHA-256, the same the server lists (`server/sign_in.ex`).
+export async function code(key: string) {
+  const hash = new Uint8Array(await crypto.subtle.digest("SHA-256", text(`one/passkey/1/code\n${key}`)))
+  const number = hash.slice(0, 9).reduce((number, byte) => (number << 8n) | BigInt(byte), 0n)
+  return (number % 10n ** 20n).toString().padStart(20, "0").match(/.{5}/g)!.join(" ")
+}
+
 /// `owner`'s key, as a device that holds it encrypted it to the passkey `credential`, opened by its PRF output.
 export async function opened(prf: Uint8Array, owner: string, credential: string, encrypted: string) {
   const sealed = unbase64(encrypted)

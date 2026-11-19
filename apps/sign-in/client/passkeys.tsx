@@ -14,6 +14,7 @@ interface Passkey {
   added: string
   prf_key: string | null
   unlocks: boolean
+  code: string | null
 }
 
 const mine = createMemo(() => call("sign-in_devices").then((text): { passkeys: Passkey[] } => JSON.parse(text)))
@@ -44,11 +45,11 @@ async function allow(passkey: Passkey) {
   const when = new Date(passkey.added).toLocaleTimeString(undefined, { hour: "numeric", minute: "2-digit" })
   const question = {
     heading: "Let it unlock your encrypted data?",
-    text: `${passkey.name}, added ${on(passkey.added)} at ${when}. Whoever uses it can open everything encrypted for you. Allow it only if you added it.`,
+    text: `${passkey.name}, added ${on(passkey.added)} at ${when}. The sign-in page showed a code as you set it up: allow it only if that code is ${passkey.code}. Whoever uses it can open everything encrypted for you.`,
     action: "Allow",
   }
   if (!(await confirm(question))) return
-  await call("sign-in_encrypt_for_passkeys", { passkey: passkey.id }).catch(toast)
+  await call("sign-in_encrypt_for_passkeys", { passkey: passkey.id, code: passkey.code }).catch(toast)
   refresh(mine)
 }
 
