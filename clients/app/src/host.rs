@@ -151,11 +151,17 @@ fn window(opened: Opened, class: &str) -> anyhow::Result<ExitCode> {
         .with_title(&name)
         .with_inner_size(tao::dpi::LogicalSize::new(1024.0, 720.0))
         .with_visible(cfg!(not(target_os = "linux")));
-    // No title band, as the Home Screen's window has none (`titleBar`), the traffic lights kept.
+    // No title band, as the Home Screen's window has none (`titleBar`), the traffic lights kept, in the middle of the
+    // title bar the page's top bar is in, as a unified toolbar has them.
     #[cfg(target_os = "macos")]
     let window = {
         use tao::platform::macos::WindowBuilderExtMacOS;
-        window.with_title_hidden(true).with_titlebar_transparent(true).with_fullsize_content_view(true)
+        let (x, y) = crate::title_bar::LIGHTS;
+        window
+            .with_title_hidden(true)
+            .with_titlebar_transparent(true)
+            .with_fullsize_content_view(true)
+            .with_traffic_light_inset(tao::dpi::LogicalPosition::new(x, y))
     };
     let window = window.build(&event_loop)?;
     // It opens where it was last, as a strict app's window does (`strict::platform`), so one opened again as the app
@@ -239,6 +245,9 @@ fn window(opened: Opened, class: &str) -> anyhow::Result<ExitCode> {
                 use tao::platform::macos::WindowExtMacOS;
                 crate::hosts::double_clicked(window.ns_window())
             }
+            // Windows' title bar maximizes the window double-clicked, or puts it back.
+            #[cfg(windows)]
+            Event::UserEvent(Told::DoubleClick) => window.set_maximized(!window.is_maximized()),
             #[cfg(target_os = "linux")]
             Event::UserEvent(Told::DoubleClick) => {
                 use gtk::prelude::*;

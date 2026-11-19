@@ -224,6 +224,10 @@ pub struct Conditions {
     pub insets: [u16; 4],
     /// Whose own tokens it draws with, as `load_page` gave them: its page's, where it has any (0, where it has none).
     pub page: u32,
+    /// Where its title row has room for its page's top bar, which is in it (a unified toolbar): from the window's start,
+    /// after its controls and breadcrumb, and from its end, before its controls there. The UI library's
+    /// `title-bar-start` and `title-bar-end` lengths are these, where they're not 0, and else its own.
+    pub title_bar: [u16; 2],
 }
 
 impl Conditions {
@@ -357,6 +361,10 @@ impl Table {
         let inset = ["safe-top", "safe-right", "safe-bottom", "safe-left"].iter().position(|safe| *safe == id);
         if let Some(side) = inset {
             return Some(f32::from(conditions.insets[side]));
+        }
+        let title_bar = ["title-bar-start", "title-bar-end"].iter().position(|edge| *edge == id);
+        if let Some(edge) = title_bar.filter(|edge| conditions.title_bar[*edge] > 0) {
+            return Some(f32::from(conditions.title_bar[edge]));
         }
         let value = self.value(id, "length", conditions)?;
         length_of(&value)

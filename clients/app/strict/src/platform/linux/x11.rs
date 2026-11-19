@@ -530,6 +530,9 @@ impl Display {
     /// is blurred as any material.
     pub fn set_glass(&self, _: &NativeWindow, _: &[crate::platform::Glass]) {}
 
+    /// Its title row over its page: none here, where the system's own title bar is above the page and moves the window.
+    pub fn set_title_row(&self, _: &NativeWindow, _: Option<crate::view::TitleRow>) {}
+
     pub fn set_ime(&self, window: &NativeWindow, caret: Option<Bounds<f32>>) {
         let spot = caret.map(|caret| ((caret.origin.x * self.scale) as i16, ((caret.origin.y + caret.size.height) * self.scale) as i16));
         let was = match spot {

@@ -49,6 +49,21 @@ pub struct Breadcrumb {
     pub home: Box<dyn FnMut()>,
 }
 
+/// A window's title row over its page, its top bar's (`Screen::title_row`): how tall it is, and where in it a press is
+/// its page's; anywhere else in it moves the window.
+#[derive(Clone, Debug, Default, PartialEq)]
+pub struct TitleRow {
+    pub height: f32,
+    pub taken: Vec<Bounds<f32>>,
+}
+
+impl TitleRow {
+    /// Whether a press at `at` moves the window.
+    pub fn moves(&self, at: Point<f32>) -> bool {
+        at.y < self.height && !self.taken.iter().any(|bounds| bounds.contains(&at))
+    }
+}
+
 /// A panel's own background, which its window has no frame for (`WindowOptions::panel`): its corners' radius, and
 /// whether the host fills it with a popover's colour, where the system has no glass to draw under it (Linux).
 #[derive(Clone, Copy, Debug)]
@@ -109,6 +124,9 @@ pub struct Screen {
     pub page: u32,
     /// What its window says above it, on a computer, and where its Home was drawn and whether it's pressed.
     pub breadcrumb: Option<Breadcrumb>,
+    /// Where its page's top bar starts in its title row, after its breadcrumb, as it was last drawn: 0 for a window
+    /// with none.
+    title_start: u16,
     /// Its window is a panel, whose background the host draws, under its page's.
     pub panel: Option<Panel>,
     /// Where its page asked for the system's own material, as it was last drawn, which a panel's host puts under it.
@@ -218,6 +236,7 @@ impl Screen {
             reduced_motion: false,
             page: 0,
             breadcrumb: None,
+            title_start: 0,
             panel: None,
             glass: Vec::new(),
             notice: None,
@@ -458,7 +477,8 @@ impl Screen {
     /// The conditions its tokens' values vary by, as its window is now.
     fn conditions(&self) -> Conditions {
         let insets = [self.insets.top, self.insets.right, self.insets.bottom, self.insets.left].map(|inset| inset.round().max(0.0) as u16);
-        Conditions { dark: self.dark(), touch: self.touch, reduced_motion: self.reduced_motion, insets, page: self.page, ..Conditions::default() }
+        let title_bar = [self.title_start, if self.title_start > 0 { 16 } else { 0 }];
+        Conditions { dark: self.dark(), touch: self.touch, reduced_motion: self.reduced_motion, insets, title_bar, page: self.page, ..Conditions::default() }
     }
 
     /// Its insets as MCP Apps' host context says them (`safeAreaInsets`).
@@ -616,7 +636,14 @@ impl Screen {
         }
         // The window's breadcrumb, over its page.
         let hovering = |bounds: &Bounds<f32>| self.pointer.is_some_and(|at| bounds.contains(&at));
-        let home = self.breadcrumb.as_ref().map(|crumb| painter.breadcrumb(crumb, self.insets.top, self.home.as_ref().is_some_and(hovering)));
+        let crumb = self.breadcrumb.as_ref().map(|crumb| painter.breadcrumb(crumb, self.insets.top, self.home.as_ref().is_some_and(hovering)));
+        let home = crumb.map(|(home, _)| home);
+        // The page's top bar starts after it, which it's laid out again for once it's moved.
+        let start = crumb.map_or(0, |(_, end)| (end + 12.0).ceil() as u16);
+        if start != self.title_start {
+            self.title_start = start;
+            self.again = true;
+        }
         self.action = self.notice.as_ref().and_then(|notice| painter.notice(notice, self.insets.top, self.action.as_ref().is_some_and(hovering)));
         self.glass = painter.glass.take().unwrap_or_default();
         let (placed, mut tab_order, rects, animating, modal, wanted, intersections) = (painter.placed, painter.tab_order, painter.rects, painter.animating, painter.modal, painter.wanted, painter.intersections);
@@ -1128,6 +1155,19 @@ impl Screen {
         let (line, x) = field.placed().unwrap_or_else(|| editing::Layout::caret(drawn, field.caret()));
         let height = drawn.paragraph.line_height * drawn.grown;
         Some(Bounds { origin: point(drawn.origin.x + (x - drawn.scroll.x) * drawn.grown, drawn.origin.y + line as f32 * height), size: Size { width: drawn.grown, height } })
+    }
+
+    /// Its title row, where its window has one over its page (a unified toolbar): how tall it is, and where in it
+    /// something takes a press, which the rest of it doesn't, so the window moves held there, as a title bar does.
+    pub fn title_row(&self) -> Option<TitleRow> {
+        self.breadcrumb.as_ref()?;
+        let height = self.insets.top;
+        let row = |bounds: &Bounds<f32>| bounds.origin.y < height;
+        let mut taken: Vec<Bounds<f32>> =
+            self.placed.iter().filter(|(_, placed)| (placed.pressable || placed.input) && row(&placed.shown)).map(|(_, placed)| placed.shown).collect();
+        taken.extend(self.home);
+        taken.extend(self.action);
+        Some(TitleRow { height, taken })
     }
 
     /// Does `change` to input `id`'s editing, and tells its app what changed.
@@ -2162,8 +2202,8 @@ impl Painter<'_> {
 
     /// A window's breadcrumb over the top of its page (`Breadcrumb`), in a computer's own size, as shadcn's: Home light,
     /// highlighted under the pointer (`hovered`); a muted /; then the app's icon and its name in semibold. → where
-    /// Home is.
-    fn breadcrumb(&mut self, crumb: &Breadcrumb, bar: f32, hovered: bool) -> Bounds<f32> {
+    /// Home is, and where the breadcrumb ends.
+    fn breadcrumb(&mut self, crumb: &Breadcrumb, bar: f32, hovered: bool) -> (Bounds<f32>, f32) {
         let conditions = self.conditions;
         let window = self.window;
         let colour = |id: &str, otherwise: &str| colour_token(id, conditions).unwrap_or_else(|| colour(otherwise, conditions.dark));
@@ -2205,7 +2245,7 @@ impl Painter<'_> {
         }
         let name = self.text.paragraph(&crumb.name, &app_style, &[], None, Some(1));
         self.paint_text(&name, &[], words_at(&name, x), name.size().width.ceil(), 1.0, Text { style: app_style, color: colour("foreground", "foreground"), ..text }, 1.0, window);
-        home
+        (home, x + name.size().width.ceil())
     }
 
     /// The window's notice over the top of its page (`Notice`), `top` points down: a pill of the foreground's colour

@@ -316,13 +316,13 @@ async fn window(started: Instant, entrypoint: &str, subject: Option<&str>, link:
     Ok(true)
 }
 
-/// The bar at a window's top that its breadcrumb is in, which its page keeps clear, and where the breadcrumb starts
-/// in it: a Mac's title bar, after its traffic lights over the page (`title_bar`); elsewhere a GNOME header bar's height,
-/// under the window's own frame.
+/// The row at a window's top that its breadcrumb is in, with its page's top bar after it (a unified toolbar), and where
+/// the breadcrumb starts in it: a Mac's title bar, after its traffic lights over the page (`title_bar`); elsewhere the
+/// same height, under the window's own frame.
 #[cfg(target_os = "macos")]
 const BAR: (f64, f64) = (crate::title_bar::MAC.height, crate::title_bar::MAC.start);
 #[cfg(all(desktop, not(target_os = "macos")))]
-const BAR: (f64, f64) = (40.0, 12.0);
+const BAR: (f64, f64) = (crate::title_bar::HEIGHT, 12.0);
 /// A phone's window has none: the activity keeps the page clear of the system's bars (`MainActivity`).
 #[cfg(mobile)]
 const BAR: (f64, f64) = (0.0, 0.0);

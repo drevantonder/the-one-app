@@ -209,6 +209,9 @@ impl Display {
     pub fn set_glass(&self, _: &NativeWindow, _: &[crate::platform::Glass]) {}
 
     /// Android's keyboard is told where the field is as it's focused (`keyboard`), not where the caret is each frame.
+    /// Its title row over its page: none here, where the system's own title bar is above the page and moves the window.
+    pub fn set_title_row(&self, _: &NativeWindow, _: Option<crate::view::TitleRow>) {}
+
     pub fn set_ime(&self, _: &NativeWindow, _: Option<crate::geometry::Bounds<f32>>) {}
 
     pub fn flush(&self) {}

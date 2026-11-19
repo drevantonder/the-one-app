@@ -59,6 +59,9 @@ struct Shared {
     /// Where the caret of the input that takes typing is, in the view's logical pixels from its top left, for the
     /// input method to show what it composes beside; none where nothing takes typing.
     caret: Mutex<Option<Bounds<f32>>>,
+    /// Its title row over its page, as its page was last drawn (`Screen::title_row`): held where nothing in it takes a
+    /// press, it moves the window, as AppKit's title bar does.
+    title_row: Mutex<Option<crate::view::TitleRow>>,
 }
 
 impl Shared {
@@ -141,7 +144,7 @@ impl Display {
     pub fn open(&self, id: WindowId, options: &WindowOptions) -> anyhow::Result<NativeWindow> {
         let queue = self.queue.clone();
         run_on_main(|main| {
-            let shared = Arc::new(Shared { id, queue, size: Mutex::new((Size::default(), 1.0)), pending: Mutex::default(), caret: Mutex::default() });
+            let shared = Arc::new(Shared { id, queue, size: Mutex::new((Size::default(), 1.0)), pending: Mutex::default(), caret: Mutex::default(), title_row: Mutex::default() });
             let rect = NSRect::new(NSPoint::new(0.0, 0.0), NSSize::new(options.size.width.0.into(), options.size.height.0.into()));
             let window = match options.panel {
                 // GPUI's pop-up: titled, so it can take the keyboard, with nothing of its title band shown.
@@ -168,6 +171,9 @@ impl Display {
             window.setTitlebarAppearsTransparent(true);
             window.setTitleVisibility(NSWindowTitleVisibility::Hidden);
             window.setTabbingMode(NSWindowTabbingMode::Disallowed);
+            if options.panel.is_none() {
+                unsafe { place_lights(&window) };
+            }
             window.setAcceptsMouseMovedEvents(true);
 
             let view = View::new(main, rect, shared.clone());
@@ -323,6 +329,11 @@ impl Display {
         }
     }
 
+    /// Its title row, as its page was last drawn: what of it moves the window (`View`'s `mouseDown:`).
+    pub fn set_title_row(&self, window: &NativeWindow, row: Option<crate::view::TitleRow>) {
+        *window.shared.title_row.lock().expect("nothing panics holding it") = row;
+    }
+
     pub fn flush(&self) {}
 
     /// What AppKit has said since it was last asked, by the window it's about.
@@ -456,6 +467,14 @@ define_class!(
             // On a Mac, a Control-click is a secondary click.
             let flags = event.modifierFlags();
             let secondary = flags.contains(NSEventModifierFlags::Control);
+            // What's empty in its title row is its title bar: it moves the window, and double-clicked does what the
+            // person set in System Settings (Desktop & Dock, "Double-click a window's title bar to").
+            let at = self.at(event);
+            let moves = self.ivars().shared.title_row.lock().expect("nothing panics holding it").as_ref().is_some_and(|row| row.moves(at));
+            if moves && !secondary && let Some(window) = self.window() {
+                if event.clickCount() == 2 { double_clicked(&window) } else { window.performWindowDragWithEvent(event) }
+                return;
+            }
             self.ivars().secondary.set(secondary);
             self.ivars().shared.send(Input::Down(self.at(event), if secondary { 2 } else { 0 }, flags.contains(NSEventModifierFlags::Shift)));
         }
@@ -737,6 +756,53 @@ define_class!(
     }
 );
 
+/// Where its traffic lights are in its title row, 52 points tall as its page's top bar is (a unified toolbar), as
+/// AppKit puts them in one: the first's left edge, and how far below the window's top they start, in the middle of it.
+/// The app's web view windows put theirs in the same place (`title_bar::LIGHTS`).
+const LIGHTS: (f64, f64) = (20.0, (52.0 - 14.0) / 2.0);
+
+/// Puts `window`'s traffic lights where a unified toolbar has them (`LIGHTS`): their title bar container as tall as
+/// that, and each light along it, as far apart as AppKit put them.
+unsafe fn place_lights(window: &NSWindow) {
+    unsafe {
+        let buttons: [*mut AnyObject; 3] = [0usize, 1, 2].map(|button| msg_send![window, standardWindowButton: button]);
+        if buttons.iter().any(|button| button.is_null()) {
+            return;
+        }
+        let first: NSRect = msg_send![buttons[0], frame];
+        let second: NSRect = msg_send![buttons[1], frame];
+        let apart = second.origin.x - first.origin.x;
+        let lights: *mut AnyObject = msg_send![buttons[0], superview];
+        let container: *mut AnyObject = if lights.is_null() { lights } else { msg_send![lights, superview] };
+        if !container.is_null() {
+            let mut frame: NSRect = msg_send![container, frame];
+            frame.size.height = first.size.height + LIGHTS.1;
+            frame.origin.y = window.frame().size.height - frame.size.height;
+            let () = msg_send![container, setFrame: frame];
+        }
+        for (at, button) in buttons.into_iter().enumerate() {
+            let mut origin: NSRect = msg_send![button, frame];
+            origin.origin.x = LIGHTS.0 + at as f64 * apart;
+            let () = msg_send![button, setFrameOrigin: origin.origin];
+        }
+    }
+}
+
+/// Does what a double-click on a window's title bar does, as its person set it in System Settings (Desktop & Dock):
+/// zoom, which is what's set until they change it, minimize, or nothing.
+fn double_clicked(window: &NSWindow) {
+    unsafe {
+        let defaults: *mut AnyObject = msg_send![objc2::class!(NSUserDefaults), standardUserDefaults];
+        let key = NSString::from_str("AppleActionOnDoubleClick");
+        let set: *mut NSString = msg_send![defaults, stringForKey: &*key];
+        match set.as_ref().map(|set| set.to_string()).as_deref() {
+            Some("None") => {}
+            Some("Minimize") => window.miniaturize(None),
+            _ => window.zoom(None),
+        }
+    }
+}
+
 /// Makes `window` a panel, as a launcher's is: over other apps' windows on every Space, full-screen apps' too, out of
 /// Cmd-` and Mission Control, see-through, with a shadow, and its title band and traffic lights hidden; its content
 /// the system's glass, rounded `corner` points, with `view` over it.
@@ -842,6 +908,14 @@ define_class!(
         #[unsafe(method(windowDidResignKey:))]
         fn window_did_resign_key(&self, _notification: &NSNotification) {
             self.ivars().send(Input::Focus(false));
+        }
+
+        // AppKit lays the title bar out again as the window changes size, and out of full screen.
+        #[unsafe(method(windowDidResize:))]
+        fn window_did_resize(&self, notification: &NSNotification) {
+            if let Some(window) = notification.object().and_then(|object| object.downcast::<NSWindow>().ok()) {
+                unsafe { place_lights(&window) };
+            }
         }
     }
 );

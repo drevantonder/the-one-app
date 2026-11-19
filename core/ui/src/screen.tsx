@@ -24,8 +24,12 @@ const look = styles({
   computerTitle: { font: tokens.type.barTitle, lineClamp: 1 },
   // Where the window names the app above it, its first screen doesn't name it again, and keeps its place.
   unnamed: { opacity: 0 },
-  // With nothing else in it, the bar keeps only the title's place under the breadcrumb.
-  bare: { minHeight: 0 },
+  // On a computer the bar is the window's title row, its unified toolbar, as macOS's System Settings and Raycast have
+  // it: at the window's top, after the window's controls and breadcrumb where it's at the window's start, and before
+  // the controls at its end where it's at its end.
+  titleRow: { paddingTop: 0 },
+  atStart: { paddingStart: tokens.length.titleBarStart },
+  atEnd: { paddingEnd: tokens.length.titleBarEnd },
   // The arrow, not the button's edge, lines up with what's under it.
   back: { marginStart: negative(tokens.length.iconInset) },
   // On a computer, Back and Forward in one pill of glass before the title, as macOS's System Settings and Raycast's
@@ -93,6 +97,9 @@ const InDetail = createContext<() => boolean>(() => false)
 /// the screens in it draw them in their bar, each greyed where it goes nowhere. A split pushing a screen over its list
 /// starts again, its Back going back to the list.
 export const History = createContext<{ back?: () => void; forward?: () => void } | null>(null)
+/** Which of the window's edges a screen's bar reaches, where its title row's controls and breadcrumb are: a split's
+ * list beside what it opens reaches the start, and what it opens the end. */
+const Edge = createContext<() => { start: boolean; end: boolean }>(() => ({ start: true, end: true }))
 /** Whether a state is all there is of a split's detail beside its list, which it fills, in its middle. */
 export const Middle = createContext<() => boolean>(() => false)
 
@@ -117,6 +124,7 @@ export function Screen(props: { heading?: JSX.Element; action?: JSX.Element; bac
   const backed = () => !!props.back && !inDetail()
   const history = useContext(History)
   const style = useContext(ListStyle)
+  const edge = useContext(Edge)
   // Only an app's first screen, which has no Back, gives way to the breadcrumb.
   const named = () => !!props.back || !breadcrumb()
   // On a computer, as Raycast's: the bar's buttons and menus' items are the screen's actions, in the footer's pills and
@@ -138,8 +146,8 @@ export function Screen(props: { heading?: JSX.Element; action?: JSX.Element; bac
   const footed = () => computer && style === "plain" && actions().length > 0
   return (
     <Box style={look.screen}>
-      <Box role="banner" style={look.bar}>
-        <Box style={[look.row, !named() && (!props.action || computer) && look.bare]}>
+      <Box role="banner" style={[look.bar, computer && look.titleRow]}>
+        <Box style={[look.row, computer && edge().start && look.atStart, computer && edge().end && look.atEnd]}>
           <Show when={backed() || (computer && history)}>
             <Box role="group" style={[look.pill, !computer && look.round]}>
               <Box
@@ -235,6 +243,7 @@ const open: (() => void)[] = []
 export function Split(props: { open?: boolean; onClose?: () => void; detail?: JSX.Element; children?: JSX.Element }) {
   const room = useContext(Room)
   const history = useContext(History)
+  const edge = useContext(Edge)
   const beside = () => room() >= wide
   // A sidebar's list is a sidebar's width (`ListStyle`), and the detail has the rest.
   const sidebar = useContext(ListStyle) === "sidebar"
@@ -266,13 +275,16 @@ export function Split(props: { open?: boolean; onClose?: () => void; detail?: JS
     <Box style={[look.split, beside() && look.beside]}>
       <Box aria-hidden={!beside() && shown() ? "true" : undefined} style={[look.pane, beside() ? look.list : look.over, beside() && sidebar && look.sidebar, !beside() && shown() && look.hidden]}>
         <Room value={() => (beside() ? listWidth() : room())}>
+          <Edge value={() => ({ start: edge().start, end: edge().end && !beside() })}>
           <Opened value={() => (props.open ? close : undefined)}>
             <Middle value={() => false}>{props.children}</Middle>
           </Opened>
+          </Edge>
         </Room>
       </Box>
       <Box aria-hidden={!beside() && !shown() ? "true" : undefined} style={[look.pane, beside() ? look.detail : look.over, !beside() && !shown() && look.hidden]}>
         <Room value={() => (beside() ? room() - listWidth() - 1 : room())}>
+          <Edge value={() => ({ start: edge().start && !beside(), end: edge().end })}>
           <Leave value={close}>
             <History value={beside() ? history : null}>
             <InDetail value={beside}>
@@ -280,6 +292,7 @@ export function Split(props: { open?: boolean; onClose?: () => void; detail?: JS
             </InDetail>
             </History>
           </Leave>
+          </Edge>
         </Room>
       </Box>
     </Box>

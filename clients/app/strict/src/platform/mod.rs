@@ -462,6 +462,7 @@ impl Windows {
                         self.display.set_glass(&window.native, &window.glass);
                     }
                     self.display.set_ime(&window.native, screen.caret_rect());
+                    self.display.set_title_row(&window.native, screen.title_row());
                 }
                 Err(why) => crate::view::paint_message(why, appearance(), size, scale, &mut self.text, &self.atlas, &mut window.scene),
             }

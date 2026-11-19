@@ -20,6 +20,9 @@ interface HostContext {
   theme?: "light" | "dark" | null
   safeAreaInsets?: { top: number; right: number; bottom: number; left: number }
   breadcrumb?: boolean
+  /** Where a computer's window has its title row over the page, the page's top bar: where in it the page's own may
+   * start, after the window's controls and breadcrumb, and how much of its end the window's controls take. */
+  titleBar?: { start: number; end: number }
   connection?: Connection
   updateReady?: boolean
 }
@@ -114,12 +117,40 @@ function dress(context: HostContext | undefined) {
   if (context?.safeAreaInsets) for (const [edge, inset] of Object.entries(context.safeAreaInsets)) root.style.setProperty(`--safe-${edge}`, `${inset}px`)
   if (context?.safeAreaInsets) setInsets(context.safeAreaInsets)
   if (context && "breadcrumb" in context) setNamed(context.breadcrumb === true)
+  if (context?.titleBar) {
+    root.style.setProperty("--title-bar-start", `${context.titleBar.start}px`)
+    root.style.setProperty("--title-bar-end", `${context.titleBar.end}px`)
+    titled = true
+  }
   if (!context || !("theme" in context)) return
   root.style.colorScheme = context.theme ?? ""
   for (const name of ["light", "dark"]) root.classList.toggle(name, context.theme === name)
 }
 
 const [insets, setInsets] = createSignal({ top: 0, right: 0, bottom: 0, left: 0 })
+
+/// Whether the window's title row is over this page (`titleBar`): then its top bar is the window's title bar, which
+/// moves the window held anywhere nothing is pressed, and does what the system's does double-clicked, as macOS's
+/// System Settings' and Raycast's unified toolbars do.
+let titled = false
+const pressable = "a, button, input, select, textarea, [contenteditable], [tabindex], [role=button], [role=link], [role=tab], [role=switch], [role=checkbox], [role=searchbox], [role=combobox], [role=menuitem], [role=option]"
+const inTitleRow = (event: MouseEvent) =>
+  titled && event.button === 0 && event.clientY < insets().top && !(event.target instanceof Element && event.target.closest(pressable))
+/// Where it was pressed, until the pointer moves far enough to drag the window, as a title bar's own does: a drag that
+/// started at the press would take the pointer from the page, and the second press of a double-click with it.
+let pressedAt: { x: number; y: number } | undefined
+document.addEventListener("mousedown", (event) => {
+  pressedAt = inTitleRow(event) && event.detail === 1 ? { x: event.clientX, y: event.clientY } : undefined
+})
+document.addEventListener("mousemove", (event) => {
+  if (!pressedAt || !(event.buttons & 1) || Math.hypot(event.clientX - pressedAt.x, event.clientY - pressedAt.y) < 4) return
+  pressedAt = undefined
+  notify("one/drag-window")
+})
+document.addEventListener("mouseup", (event) => {
+  pressedAt = undefined
+  if (event.detail === 2 && inTitleRow(event)) notify("one/title-bar-double-click")
+})
 /// `<Box style={{ paddingTop: safeArea().top }}>`: what the device keeps for itself at each edge of the window (a
 /// status bar, a notch, a home indicator), in CSS pixels, as it changes: CSS's `--safe-top` and the rest, as numbers,
 /// for what's laid out by hand.

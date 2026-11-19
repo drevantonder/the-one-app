@@ -129,7 +129,8 @@ function insets(frame) {
 }
 /// Each app is told again as the window turns or its frame moves.
 function placed() {
-  for (const view of open.values()) post(view, { method: "ui/notifications/host-context-changed", params: { safeAreaInsets: insets(view.frame) } })
+  for (const view of open.values())
+    post(view, { method: "ui/notifications/host-context-changed", params: { safeAreaInsets: insets(view.frame), ...titleRow() } })
 }
 addEventListener("resize", placed)
 // The banner moves every frame down as it comes in.
@@ -1441,6 +1442,7 @@ async function respond(view, method, params) {
         timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
         deviceCapabilities: { touch: matchMedia("(pointer: coarse)").matches, hover: matchMedia("(hover: hover)").matches },
         safeAreaInsets: insets(view.frame),
+        ...titleRow(),
         // Whether the window names it above it, in its title bar's breadcrumb (`titled`), so its first screen doesn't.
         breadcrumb: Boolean(own) && !titleBar.hidden,
         // Whether its network answers, and whether an update for this device is ready, which the window keeps it
@@ -1543,6 +1545,10 @@ addEventListener("message", async ({ source, data }) => {
       asked = params.height
       fit()
     }
+    // Its top bar is the window's title bar: what's empty in it moves the window, and double-clicked does what a
+    // title bar does (`titleBar`).
+    if (method === "one/drag-window") invoke("plugin:window|start_dragging")
+    if (method === "one/title-bar-double-click") invoke("title_bar_double_click")
     // Its page has drawn: what it first asked for has settled (`render`), a problem shown as it failed included.
     if (method === "notifications/one/drawn") {
       page(view, { type: "drawn" })
@@ -1806,6 +1812,17 @@ function hear(told) {
 /// zoom). An app's own window has its breadcrumb there, just after the window's controls: Home, which brings the Home
 /// Screen forward and keeps this window open, as Window → Home Screen does (`host.rs`), then the app (`crumb`).
 const titleBar = byId("title-bar")
+/// Where the title row is over an app's page, which its top bar is: where in it the page's own may start, after the
+/// window's controls and breadcrumb, and how far from its end, before the controls there. Nothing where the window
+/// has no title bar over its page.
+function titleRow() {
+  if (titleBar.hidden) return {}
+  const style = getComputedStyle(document.documentElement)
+  const px = (/** @type {string} */ name) => parseFloat(style.getPropertyValue(name)) || 0
+  const nav = byId("title-bar-nav")
+  const start = nav.hidden ? px("--title-bar-start") : nav.getBoundingClientRect().right + 12
+  return { titleBar: { start: Math.round(start), end: Math.round(px("--title-bar-end") + 16) } }
+}
 /** @param {import("./host").TitleBar} at */
 function titled({ height, start, end }) {
   document.documentElement.style.setProperty("--title-bar-height", `${height}px`)
@@ -1826,25 +1843,33 @@ function crumb() {
   if (src) /** @type {HTMLImageElement} */ (picture).src = src
   picture.toggleAttribute("hidden", !src)
   name.textContent = names.get(own.entrypoint) || own.name || ""
+  // The page's top bar starts after it, wherever its name ends.
+  placed()
 }
 /// Where it was pressed, until the pointer moves far enough from there to drag the window, as a title bar's own does:
 /// a drag that started at the press would take the pointer from the page (a Linux window manager's does), and the
 /// second press of a double-click with it.
 /** @type {{ x: number, y: number } | undefined} */
 let pressedAt
-titleBar.addEventListener("mousedown", (event) => {
-  if (event.button !== 0 || event.target !== titleBar) return
+/// A press in the title row on nothing that takes it, on the window's own page (an app's page says its own).
+const inTitleRow = (/** @type {MouseEvent} */ event) =>
+  !titleBar.hidden &&
+  event.button === 0 &&
+  event.clientY < titleBar.offsetHeight &&
+  !(event.target instanceof Element && event.target.closest("a, button, input, iframe, [role=button], [tabindex]"))
+document.addEventListener("mousedown", (event) => {
+  if (!inTitleRow(event)) return
   event.preventDefault()
   pressedAt = event.detail === 1 ? { x: event.clientX, y: event.clientY } : undefined
 })
-titleBar.addEventListener("mousemove", (event) => {
+document.addEventListener("mousemove", (event) => {
   if (!pressedAt || !(event.buttons & 1) || Math.hypot(event.clientX - pressedAt.x, event.clientY - pressedAt.y) < 4) return
   pressedAt = undefined
   invoke("plugin:window|start_dragging")
 })
-titleBar.addEventListener("mouseup", (event) => {
+document.addEventListener("mouseup", (event) => {
   pressedAt = undefined
-  if (event.button === 0 && event.detail === 2 && event.target === titleBar) invoke("title_bar_double_click")
+  if (event.detail === 2 && inTitleRow(event)) invoke("title_bar_double_click")
 })
 /// Goes to the Home Screen from an app's own window, keeping it open: the breadcrumb's Home, as Window → Home Screen
 /// does (`host.rs`).

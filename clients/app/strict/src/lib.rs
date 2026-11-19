@@ -20,7 +20,7 @@ pub(crate) mod view;
 
 pub use style::{colour, load_styles};
 pub use view::inspected::Reply;
-pub use view::{Appearance, Asked, Breadcrumb, Cursor, FONT, Notice, Panel, Screen, fonts};
+pub use view::{Appearance, Asked, Breadcrumb, Cursor, FONT, Notice, Panel, Screen, TitleRow, fonts};
 
 /// This host's runtime version (`RUNTIME_VERSION` in core/ui/src/strict/renderer.ts). An entrypoint that needs a
 /// later one opens in a web view.

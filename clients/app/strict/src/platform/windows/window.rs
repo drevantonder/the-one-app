@@ -285,6 +285,9 @@ impl Display {
 
     /// The input with window `window`'s keyboard takes typing, its caret at `caret` (in the window's logical pixels),
     /// or none does: the input method is on there, and shows what it composes under the caret, or it's off.
+    /// Its title row over its page: none here, where the system's own title bar is above the page and moves the window.
+    pub fn set_title_row(&self, _: &NativeWindow, _: Option<crate::view::TitleRow>) {}
+
     pub fn set_ime(&self, window: &NativeWindow, caret: Option<Bounds<f32>>) {
         let scale = window.scale();
         let spot = caret.map(|caret| POINT { x: (caret.origin.x * scale) as i32, y: ((caret.origin.y + caret.size.height) * scale) as i32 });

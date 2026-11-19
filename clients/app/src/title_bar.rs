@@ -22,15 +22,24 @@ pub struct Area {
 /// How far what goes at the title bar's start is from the window's edge, or from the window's controls before it.
 const GAP: f64 = 8.0;
 
+/// How tall the title bar is: the page's top bar is in it, as a unified toolbar is (macOS's System Settings,
+/// Raycast), 52 points, which a Mac's traffic lights and Linux's window buttons sit in the middle of.
+pub const HEIGHT: f64 = 52.0;
+
+/// Where a Mac's traffic lights are in a title bar of `HEIGHT`, as AppKit puts them in a unified toolbar: their
+/// first's left edge, and how far below the window's top they start, so they're in the middle of it.
+#[cfg(target_os = "macos")]
+pub const LIGHTS: (f64, f64) = (20.0, (HEIGHT - 14.0) / 2.0);
+
 impl From<Area> for serde_json::Value {
     fn from(Area { height, start, end }: Area) -> Self {
         serde_json::json!({"height": height, "start": start, "end": end})
     }
 }
 
-/// A Mac's: the traffic lights at the start of a title bar of the standard height.
+/// A Mac's: the traffic lights at the start of a unified toolbar's title bar, three of 14 points, 20 apart.
 #[cfg(target_os = "macos")]
-pub const MAC: Area = Area { height: 28.0, start: 78.0, end: 0.0 };
+pub const MAC: Area = Area { height: HEIGHT, start: LIGHTS.0 + 2.0 * 20.0 + 14.0 + GAP, end: 0.0 };
 
 #[cfg(windows)]
 pub use self::windows::extend;
@@ -193,7 +202,7 @@ mod windows {
                 SetWindowRgn(webview, Some(shown), true);
             }
             let scale = f64::from(GetDpiForWindow(hwnd)) / 96.0;
-            let area = Area { height: f64::from(buttons.bottom) / scale, start: super::GAP, end: f64::from(client.right - buttons.left) / scale };
+            let area = Area { height: (f64::from(buttons.bottom) / scale).max(super::HEIGHT), start: super::GAP, end: f64::from(client.right - buttons.left) / scale };
             if area != state.area.replace(area) {
                 (state.changed)(area);
             }
@@ -224,7 +233,7 @@ pub fn header_bar(
         }
     }
     overlay.add(webview);
-    let header = gtk::HeaderBar::builder().show_close_button(true).valign(gtk::Align::Start).build();
+    let header = gtk::HeaderBar::builder().show_close_button(true).valign(gtk::Align::Start).height_request(HEIGHT as i32).build();
     let style = gtk::CssProvider::new();
     let _ = style.load_from_data(b"headerbar { background: none; border: none; box-shadow: none; }");
     header.style_context().add_provider(&style, gtk::STYLE_PROVIDER_PRIORITY_APPLICATION);

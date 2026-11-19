@@ -189,17 +189,18 @@ iframe {
 :root[data-title-bar] {
   --safe-top: max(env(safe-area-inset-top), var(--title-bar-height));
 }
-/* WebView2 drags a Windows window by it, and maximizes it double-clicked, as a title bar (`app-region`); a Mac's and
-   Linux's are dragged by client.js. */
+/* The title bar is the page's top bar (a unified toolbar), which takes every press but the breadcrumb's: what's
+   empty in it moves the window, as the page and client.js say (`one/drag-window`). */
 #title-bar {
   position: fixed;
   z-index: 5;
   inset: 0 0 auto;
   height: var(--safe-top);
-  app-region: drag;
+  pointer-events: none;
 }
 /* What's just after the window's own controls, level with them, in an app's own window, clear of those at its end. */
 #title-bar-nav {
+  pointer-events: auto;
   position: absolute;
   top: 50%;
   left: var(--title-bar-start);
