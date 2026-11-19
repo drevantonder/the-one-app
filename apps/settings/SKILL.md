@@ -37,9 +37,12 @@ An app adds to Settings by hooking into `settings.sections`, answering with its 
 
 - `component` is what draws it: a Solid component the app's client exports (`client/package.json`: `{"exports":
   {"./devices": "./devices.tsx"}}`), the module's default export. A trusted app's is drawn in Settings' page and acts
-  with what Settings' page may do; an untrusted app's opens its page `client/<component>.html` in a frame of its own
-  instead, as the Vault does an item type's.
-- `in` is where. `"settings"` is a section of the sidebar, for the apps a network starts with: its `name`, its `icon`
+  with what Settings' page may do. An untrusted app's is its page `client/<component>.html` instead, in a frame of
+  Settings' page (the UI library's `Frame`), the device after `#`, where it keeps what its own app may do; it says how
+  tall it is (`sizeChanged({ height })`), which its group grows to, and is 150 points otherwise. It draws its own
+  card, as a trusted one's is drawn in Settings' (`<ListStyle value="insetGrouped">`).
+- `in` is where. `"settings"` is a section of the sidebar, for the apps a network starts with, which are trusted (an
+  untrusted app's is left out): its `name`, its `icon`
   (a file of the app's `client/`), its `group`, `"you"` (the row with the person's name, which is Sign-In's),
   `"network"`, `"general"` or `"system"`, its `order` in the group, and a `badge`, if it has one: a tool of the app's
   that only reads, whose answer's `count` is the red count on its row and, added up, on Settings' icon. Its component

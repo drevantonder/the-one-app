@@ -17,7 +17,7 @@ defmodule Settings do
   def entrypoints, do: [%{page: "client/index.html", subject: "user", badge: "badge", runtime_version: 4}]
 
   @impl true
-  def requires, do: %{"core" => ">= 0.27.26"}
+  def requires, do: %{"core" => ">= 0.27.40"}
 
   @impl true
   def offers do
@@ -154,15 +154,16 @@ defmodule Settings do
     for {app, part} <- Enum.sort(parts),
         version = running[app],
         version != nil,
+        trusted <- [Map.get(version, :trusted, true)],
         section <- List.wrap(JSON.decode!(JSON.encode!(part))),
-        section?(section) do
+        section?(section, trusted) do
       %{
         id: "#{app}/#{section["component"]}",
         app: app,
         title: version.title || app,
         icon: if(section["icon"], do: "ui://#{app}/#{version.code}/#{section["icon"]}"),
         app_icon: Apps.Icons.address(version.icon),
-        trusted: Map.get(version, :trusted, true),
+        trusted: trusted,
         component: section["component"],
         in: section["in"],
         name: section["name"],
@@ -175,14 +176,16 @@ defmodule Settings do
     end
   end
 
-  defp section?(%{"component" => component, "in" => "settings", "name" => name, "group" => group})
+  # A section of the sidebar is the network's own apps', which are trusted; any app adds a group to a page, an untrusted
+  # one's drawn by its page in a frame.
+  defp section?(%{"component" => component, "in" => "settings", "name" => name, "group" => group}, true)
        when is_binary(component) and is_binary(name) and group in ~w(you network general system),
        do: true
 
-  defp section?(%{"component" => component, "in" => place}) when is_binary(component) and place in ~w(device app),
+  defp section?(%{"component" => component, "in" => place}, _trusted) when is_binary(component) and place in ~w(device app),
     do: true
 
-  defp section?(_section), do: false
+  defp section?(_section, _trusted), do: false
 
   # A section's red count, as its app's badge tool says it, or nil where it has none or the tool failed.
   defp count(_call, _app, nil), do: nil

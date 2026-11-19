@@ -1,10 +1,10 @@
 // Settings: one place where every app brings its settings, laid out as Raycast's Settings: a sidebar with its search,
 // whoever's looking (Sign In & Security under their name), the apps' sections in their groups, then every app they
 // have, A to Z. What's chosen opens beside it on a computer and is pushed over it on a phone. A section is its app's
-// component (`settings.sections`), drawn here if the app is trusted and in a frame of its own if it isn't, as the
+// component (`settings.sections`), drawn here if the app is trusted and by its page in a frame if it isn't, as the
 // Vault draws an item type's. Updates and an app's page are Settings' own.
 import { createMemo, createSignal, Errored, For, Loading, refresh, Show } from "solid-js"
-import { Badge, Box, Button, call, changed, client, component, confirm, Empty, History, Image, link, List, ListStyle, open as opening, Problem, render, Row, Screen, Search, Section, Skeleton, Spinner, Split, styles, Switch, Text, toast, tokens, viewport } from "ui"
+import { Badge, Box, Button, call, changed, client, component, confirm, Empty, Frame, History, Image, link, List, ListStyle, Problem, render, Row, Screen, Search, Section, Skeleton, Spinner, Split, styles, Switch, Text, toast, tokens, viewport } from "ui"
 
 /** What an app adds to Settings, as `settings_sections` answers it. */
 interface Added {
@@ -133,7 +133,7 @@ function Sidebar(props: { shown?: string }) {
       heading={section().name!}
       end={<Show when={section().count}><Badge variant="destructive">{section().count}</Badge></Show>}
       current={props.shown === section().id}
-      onClick={() => (section().trusted ? choose(section().id) : opening(`${section().app}/client/${section().component}.html`))}
+      onClick={() => choose(section().id)}
     />
   )
   const own = () => wanted("Updates")
@@ -216,8 +216,9 @@ function Drawn(props: { section: Added }) {
 }
 
 /// What other apps add to a place a section offers (`in`): each a group headed by its app's icon and name, drawn by
-/// its app's component, given what the place is about (`device`), or a row opening its page where its app is
-/// untrusted. An app's own page has only that app's.
+/// its app's component, given what the place is about (`device`), or where its app is untrusted, by its page for it
+/// in a frame (`client/<component>.html`, the device after `#`), as tall as the page says it is. An app's own page has
+/// only that app's.
 function Groups(props: { in: Added["in"]; device?: string; kind?: string; server?: string; services?: string[]; app?: string }) {
   const fits = (one: Added) =>
     props.in === "app" ? one.app === props.app : (!one.kinds || one.kinds.includes(props.kind!)) && (!one.service || !!props.services?.includes(one.app))
@@ -235,7 +236,7 @@ function Groups(props: { in: Added["in"]; device?: string; kind?: string; server
         >
           <Show
             when={one().trusted}
-            fallback={<List><Row heading={`Open ${one().title}`} onClick={() => opening(`${one().app}/client/${one().component}.html${props.device ? `#${props.device}` : ""}`)} /></List>}
+            fallback={<Frame src={`${one().app}/client/${one().component}.html${props.device ? `#${props.device}` : ""}`} title={one().title} />}
           >
             <Group added={one()} device={props.device} server={props.server} />
           </Show>
