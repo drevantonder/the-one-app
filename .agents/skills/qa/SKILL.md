@@ -15,6 +15,18 @@ it yourself on a local network. You decide the attacks; there is no fixed list.
 A failing check is chased until you know why, and reported. Never skip it, loosen it, or commit "a small fix" on a
 guess you haven't reproduced.
 
+## State machines
+
+Changing a pure state machine (a function from a state and an event to the next state), such as the Home Screen's
+`apps/home-screen/client/machine.ts`, `clients/cli/src/serving.rs`, the edge's `core/edge/updater/updater.ts` or the
+database's `apps/database/server/database/lease.ex`, is checked well by a throwaway property test: random sequences
+of events, and after each, what must always hold (one lease holder, no state it can't leave, every event answered).
+Use the ecosystem's own: fast-check from a script in your scratch folder (`bun add fast-check` there, importing the
+machine by its path), proptest in a `#[cfg(test)]` module with it added to the crate's dev-dependencies, or
+StreamData in a script with `Mix.install([:stream_data])`. Like every check here it isn't committed: drop the module
+and the dev-dependency before you commit. A sequence it finds that breaks the machine is a bug to fix, and the
+shrunk sequence is what the commit says.
+
 ## Screens
 
 UI work is shown with real pictures of the real app, never described. Pictures are for checking your own change:
