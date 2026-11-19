@@ -135,7 +135,6 @@ defmodule Telemetry do
               }
             },
             names: %{type: "object", additionalProperties: %{type: "string"}, description: "What a person calls each app"},
-            forwarding: %{type: ["string", "null"], description: "Where a copy of what's kept is sent, if anywhere (`forward`)"},
             retention: %{
               type: "object",
               properties: %{
@@ -147,7 +146,7 @@ defmodule Telemetry do
               required: ["since", "bytes", "days", "most_bytes"]
             }
           },
-          required: ["from", "to", "failing", "slowest", "spending", "calls", "names", "retention", "forwarding"]
+          required: ["from", "to", "failing", "slowest", "spending", "calls", "names", "retention"]
         }
       },
       %{
@@ -315,7 +314,7 @@ defmodule Telemetry do
         name: "alerts",
         read_only: true,
         description:
-          "The alerts for what needs a person, open and resolved in the last day, newest first, and each kind of alert with what fires it",
+          "The alerts for what needs a person, open and resolved in the last day, newest first, each kind of alert with what fires it, and where a copy of what's kept is sent",
         inputs: %{type: "object", properties: %{}},
         outputs: %{
           type: "object",
@@ -352,9 +351,10 @@ defmodule Telemetry do
                 },
                 required: ["kind", "about"]
               }
-            }
+            },
+            forwarding: %{type: ["string", "null"], description: "Where a copy of what's kept is sent, if anywhere (`forward`)"}
           },
-          required: ["alerts", "kinds"]
+          required: ["alerts", "kinds", "forwarding"]
         }
       },
       %{
@@ -441,8 +441,7 @@ defmodule Telemetry do
       spending: Read.spending(batches),
       calls: Read.calls(batches, from, to),
       names: names(call),
-      retention: Store.retention(call.own),
-      forwarding: (Forward.where(call) || %{})[:endpoint]
+      retention: Store.retention(call.own)
     }
   end
 

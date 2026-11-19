@@ -79,7 +79,6 @@ interface Overview {
   spending: Spent[]
   names: Record<string, string>
   retention: { days: number; bytes: number; most_bytes: number }
-  forwarding: string | null
 }
 
 /** A span of a trace, as `telemetry_trace` answers it. */
@@ -106,10 +105,11 @@ interface Alert {
   ended?: number | null
 }
 
-/** What `telemetry_alerts` answers: the alerts open or resolved in the last day, and each kind. */
+/** What `telemetry_alerts` answers: the alerts open or resolved in the last day, each kind, and where a copy goes. */
 interface Alerts {
   alerts: Alert[]
   kinds: { kind: string; about: string }[]
+  forwarding: string | null
 }
 
 const RANGES = [
@@ -345,22 +345,7 @@ function Telemetry(props: { all: Overview }) {
             <Tabs.Indicator />
           </Tabs.List>
         </Tabs.Root>
-        <Show when={alerts().alerts.length}>
-          <Section heading="Alerts">
-            <List>
-              <For each={alerts().alerts} keyed={(alert) => alert.id}>
-                {(alert) => (
-                  <Row
-                    start={<View style={[alert().state !== "resolved" && look.wrong]}><Icon name={alert().state === "resolved" ? "check" : "warning-circle"} /></View>}
-                    heading={alert().title}
-                    text={alert().text ?? undefined}
-                    end={alert().ended ? `Resolved ${since(alert().ended!, "narrow")}` : since(alert().began, "narrow")}
-                  />
-                )}
-              </For>
-            </List>
-          </Section>
-        </Show>
+        <Alerted />
         <Calls steps={all().calls} />
         <Show when={failing().length}>
           <Section heading="Failing">
@@ -400,10 +385,37 @@ function Telemetry(props: { all: Overview }) {
         <Spending days={all().spending} />
         <Text style={look.readableNote}>
           {`Kept for ${all().retention.days} days, up to ${size(all().retention.most_bytes)}. ${size(all().retention.bytes)} now.`}
-          <Show when={all().forwarding}>{(to) => ` A copy goes to ${host(to())}.`}</Show>
         </Text>
       </Screen>
     </Split>
+  )
+}
+
+// The alerts, and where a copy goes, are read from Telemetry's database, on whichever server holds it: they load
+// on their own, so what's kept shows while that server is away, and they say so if they can't be read.
+function Alerted() {
+  return (
+    <Errored fallback={(error) => <Problem heading="Can't show alerts" text={error() as Error} />}>
+      <Loading fallback={<Skeleton rows={1} />}>
+        <Show when={alerts().alerts.length}>
+          <Section heading="Alerts">
+            <List>
+              <For each={alerts().alerts} keyed={(alert) => alert.id}>
+                {(alert) => (
+                  <Row
+                    start={<View style={[alert().state !== "resolved" && look.wrong]}><Icon name={alert().state === "resolved" ? "check" : "warning-circle"} /></View>}
+                    heading={alert().title}
+                    text={alert().text ?? undefined}
+                    end={alert().ended ? `Resolved ${since(alert().ended!, "narrow")}` : since(alert().began, "narrow")}
+                  />
+                )}
+              </For>
+            </List>
+          </Section>
+        </Show>
+        <Show when={alerts().forwarding}>{(to) => <Text style={look.readableNote}>{`A copy of what's kept goes to ${host(to())}.`}</Text>}</Show>
+      </Loading>
+    </Errored>
   )
 }
 

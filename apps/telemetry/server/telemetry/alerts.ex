@@ -80,7 +80,8 @@ defmodule Telemetry.Alerts do
   def kinds, do: @kinds
 
   @doc """
-  The alerts not resolved, and those resolved in the last day, newest first, and each kind of alert.
+  The alerts not resolved, and those resolved in the last day, newest first, each kind of alert, and where a copy is
+  sent (`Telemetry.Forward`).
   """
   def list(call) do
     day = System.os_time(:millisecond) - 86_400_000
@@ -97,7 +98,8 @@ defmodule Telemetry.Alerts do
         )
 
       kinds = for {kind, about} <- Enum.sort(@kinds), do: %{kind: kind, about: about}
-      %{alerts: alerts, kinds: kinds}
+      forwarding = for %{"endpoint" => endpoint} <- query(db, "select endpoint from forward", []), do: endpoint
+      %{alerts: alerts, kinds: kinds, forwarding: List.first(forwarding)}
     end)
   end
 

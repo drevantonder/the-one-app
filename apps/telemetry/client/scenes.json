@@ -160,8 +160,7 @@
           "days": 14,
           "bytes": 212000000,
           "most_bytes": 1000000000
-        },
-        "forwarding": "https://logs.example.com/ingest"
+        }
       },
       "telemetry_alerts": {
         "alerts": [
@@ -195,7 +194,8 @@
             "kind": "slow",
             "about": "A tool is slow"
           }
-        ]
+        ],
+        "forwarding": "https://logs.example.com/ingest"
       },
       "telemetry_trace": {
         "spans": [
@@ -283,8 +283,7 @@
           "days": 14,
           "bytes": 5000000,
           "most_bytes": 1000000000
-        },
-        "forwarding": null
+        }
       },
       "telemetry_alerts": {
         "alerts": [],
@@ -301,7 +300,8 @@
             "kind": "slow",
             "about": "A tool is slow"
           }
-        ]
+        ],
+        "forwarding": null
       }
     }
   },
@@ -312,7 +312,8 @@
       },
       "telemetry_alerts": {
         "kinds": [],
-        "alerts": []
+        "alerts": [],
+        "forwarding": null
       }
     }
   }
