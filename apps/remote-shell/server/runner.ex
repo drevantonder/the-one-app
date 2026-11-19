@@ -3,9 +3,8 @@ defmodule RemoteShell.Runner do
   Runs a command on its device, as `sh -c` does, and logs each in its folder there, a line of JSON each in
   `ran.jsonl`: when, the command, its folder, its exit code and who ran it.
 
-  Each command is a program of its own, which leads a process group of its own as every program a server starts
-  does, so stopping one that took too long stops whatever it started too. What it writes as errors goes to a file
-  beside the log while it runs, since a program's output reaches here as one stream.
+  Each command is a program of its own (`OneCore.Command`), so stopping one that took too long stops whatever it
+  started too.
   """
   use GenServer
   @behaviour OneCore.Service
@@ -34,57 +33,9 @@ defmodule RemoteShell.Runner do
   def run(service, command, dir, timeout, by) do
     dir = dir || System.user_home!()
     if not File.dir?(dir), do: raise("There's no folder #{dir} on this device")
-    folder = OneCore.Service.folder(service)
-    errors = Path.join(folder, "errors-#{System.unique_integer([:positive])}")
-
-    program =
-      Port.open({:spawn_executable, System.find_executable("sh")}, [
-        :binary,
-        :exit_status,
-        args: ["-c", ~s(exec </dev/null 2>"$0"; eval "$1"), errors, command],
-        cd: dir
-      ])
-
-    {exit, stdout} = read(program, System.monotonic_time(:millisecond) + timeout * 1000, [])
-    stderr = File.read!(errors)
-    File.rm!(errors)
-    stderr = if exit == -1, do: stopped(stderr, timeout), else: stderr
-
+    %{exit: exit, stdout: stdout, stderr: stderr} = OneCore.Command.run(["sh", "-c", command], timeout, cd: dir)
     ran = %{time: System.system_time(:millisecond), command: command, dir: dir, exit: exit, by: by}
-    File.write!(Path.join(folder, "ran.jsonl"), JSON.encode!(ran) <> "\n", [:append])
-    %{exit: exit, stdout: clip(stdout), stderr: clip(stderr)}
-  end
-
-  # Reads what the command prints until it ends, or stops it and everything it started once `until` passes.
-  # Its program's id is asked for only then: one that has ended already has none.
-  defp read(program, until, printed) do
-    receive do
-      {^program, {:data, data}} -> read(program, until, [printed | data])
-      {^program, {:exit_status, status}} -> {status, IO.iodata_to_binary(printed)}
-    after
-      max(0, until - System.monotonic_time(:millisecond)) ->
-        {:os_pid, pid} = Port.info(program, :os_pid)
-        System.cmd("kill", ["-KILL", "--", "-#{pid}"])
-        Port.close(program)
-        {-1, IO.iodata_to_binary(printed)}
-    end
-  end
-
-  defp stopped(stderr, timeout) do
-    if stderr == "" or String.ends_with?(stderr, "\n"),
-      do: stderr <> "(stopped after #{timeout}s)",
-      else: stderr <> "\n(stopped after #{timeout}s)"
-  end
-
-  # Keeps the end of long output, and says how much was cut.
-  defp clip(text) do
-    text = String.replace_invalid(text)
-
-    if byte_size(text) <= @max_bytes do
-      text
-    else
-      tail = String.replace_invalid(binary_part(text, byte_size(text) - @max_bytes, @max_bytes), "")
-      "(#{byte_size(text) - byte_size(tail)} earlier bytes cut) …" <> tail
-    end
+    File.write!(Path.join(OneCore.Service.folder(service), "ran.jsonl"), JSON.encode!(ran) <> "\n", [:append])
+    %{exit: exit, stdout: OneCore.Command.clip(stdout, @max_bytes), stderr: OneCore.Command.clip(stderr, @max_bytes)}
   end
 end

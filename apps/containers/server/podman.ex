@@ -550,54 +550,12 @@ defmodule Containers.Podman do
     if length(lines) > 1, do: reason <> "\n\n" <> String.trim(stderr), else: reason
   end
 
-  # Runs podman with `args` for at most `timeout` seconds, as Shell's runner runs a command: its own process group,
-  # stopped whole once it takes too long, with what it writes as errors in a file beside while it runs.
-  # With `each`, a function and what it starts from, it's given each line printed and what it gave for the one before.
-  defp run(service, args, timeout, output \\ :text, each \\ nil) do
-    errors = Path.join(OneCore.Service.folder(service), "errors-#{System.unique_integer([:positive])}")
-
-    program =
-      Port.open({:spawn_executable, System.find_executable("sh")}, [
-        :binary,
-        :exit_status,
-        args: ["-c", ~s(exec </dev/null 2>"$0"; exec podman "$@"), errors | args]
-      ] ++ if(each, do: [{:line, 16_384}], else: []))
-
-    {:os_pid, pid} = Port.info(program, :os_pid)
-    {exit, stdout} = read(program, pid, System.monotonic_time(:millisecond) + timeout * 1000, [], each)
-    stderr = File.read!(errors)
-    File.rm!(errors)
-    stderr = if exit == -1, do: stderr <> "\n(stopped after #{timeout}s)", else: stderr
-
-    case output do
-      :raw -> %{exit: exit, stdout: stdout, stderr: stderr}
-      :text -> %{exit: exit, stdout: clip(stdout, @max_bytes), stderr: clip(stderr, @max_bytes)}
-    end
+  # Runs podman with `args` for at most `timeout` seconds (`OneCore.Command`). With `each`, a function and what it
+  # starts from, it's given each line printed and what it gave for the one before.
+  defp run(_service, args, timeout, output \\ :text, each \\ nil) do
+    ran = OneCore.Command.run(["podman" | args], timeout, if(each, do: [each: each], else: []))
+    if output == :raw, do: ran, else: %{ran | stdout: clip(ran.stdout, @max_bytes), stderr: clip(ran.stderr, @max_bytes)}
   end
 
-  defp read(program, pid, until, printed, each) do
-    receive do
-      {^program, {:data, {:noeol, part}}} -> read(program, pid, until, [printed | part], each)
-      {^program, {:data, {:eol, line}}} -> read(program, pid, until, [printed, line, "\n"], with({fun, at} <- each, do: {fun, fun.(line, at)}))
-      {^program, {:data, data}} -> read(program, pid, until, [printed | data], each)
-      {^program, {:exit_status, status}} -> {status, IO.iodata_to_binary(printed)}
-    after
-      max(0, until - System.monotonic_time(:millisecond)) ->
-        System.cmd("kill", ["-KILL", "--", "-#{pid}"])
-        Port.close(program)
-        {-1, IO.iodata_to_binary(printed)}
-    end
-  end
-
-  # Keeps the end of long output, and says how much was cut.
-  defp clip(text, max) do
-    text = String.replace_invalid(text)
-
-    if byte_size(text) <= max do
-      text
-    else
-      end_of = String.replace_invalid(binary_part(text, byte_size(text) - max, max), "")
-      "(#{byte_size(text) - byte_size(end_of)} earlier bytes cut) …" <> end_of
-    end
-  end
+  defp clip(text, max), do: OneCore.Command.clip(text, max)
 end

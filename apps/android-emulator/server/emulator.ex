@@ -662,48 +662,13 @@ defmodule AndroidEmulator.Emulator do
     end
   end
 
-  # Runs `args` for at most `timeout` seconds, as Containers' Podman runs podman: its own process group, stopped whole
-  # once it takes too long, with what it writes as errors in a file beside while it runs.
-  defp run(service, [program | args], timeout, output \\ :text) do
-    errors = Path.join(OneCore.Service.folder(service), "errors-#{System.unique_integer([:positive])}")
-    env = for {key, value} <- env(service, sdk(service)), do: {String.to_charlist(key), String.to_charlist(value)}
-
-    port =
-      Port.open({:spawn_executable, System.find_executable("sh")}, [
-        :binary,
-        :exit_status,
-        env: env,
-        args: ["-c", ~s(exec </dev/null 2>"$0"; exec "$@"), errors, program | args]
-      ])
-
-    {:os_pid, pid} = Port.info(port, :os_pid)
-    {exit, stdout} = read(port, pid, System.monotonic_time(:millisecond) + timeout * 1000, [])
-    stderr = read(errors)
-    File.rm(errors)
-
-    case output do
-      :raw -> %{exit: exit, stdout: stdout, stderr: stderr}
-      :text -> %{exit: exit, stdout: clip(stdout), stderr: clip(stderr)}
-    end
+  # Runs `args` for at most `timeout` seconds (`OneCore.Command`), with the SDK's variables.
+  defp run(service, args, timeout, output \\ :text) do
+    ran = OneCore.Command.run(args, timeout, env: env(service, sdk(service)))
+    if output == :raw, do: ran, else: %{ran | stdout: clip(ran.stdout), stderr: clip(ran.stderr)}
   end
 
-  defp read(port, pid, until, printed) do
-    receive do
-      {^port, {:data, data}} -> read(port, pid, until, [printed | data])
-      {^port, {:exit_status, status}} -> {status, IO.iodata_to_binary(printed)}
-    after
-      max(0, until - System.monotonic_time(:millisecond)) ->
-        System.cmd("kill", ["-KILL", "--", "-#{pid}"])
-        Port.close(port)
-        {-1, IO.iodata_to_binary(printed)}
-    end
-  end
-
-  # Keeps the end of long output, where errors usually are.
-  defp clip(text) do
-    text = String.replace_invalid(text)
-    if byte_size(text) <= @max_bytes, do: text, else: "… " <> String.replace_invalid(binary_part(text, byte_size(text) - @max_bytes, @max_bytes), "")
-  end
+  defp clip(text), do: OneCore.Command.clip(text, @max_bytes)
 
   defp read(file) do
     case File.read(file) do

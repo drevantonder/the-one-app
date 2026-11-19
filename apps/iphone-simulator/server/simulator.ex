@@ -485,40 +485,12 @@ defmodule IphoneSimulator.Simulator do
     for file <- File.ls!(folder), into: %{}, do: {file, File.stat!(Path.join(folder, file), time: :posix).mtime * 1000}
   end
 
-  # Runs `args` for at most `timeout` seconds, as Containers' Podman runs podman: its own process group, stopped
-  # whole once it takes too long, with what it writes as errors in a file beside while it runs. What it prints is
-  # kept whole, as simctl's JSON is read; only what goes into an error is cut short.
-  defp cmd([program | args], timeout) do
-    errors = Path.join(System.tmp_dir!(), "iphone-simulator-#{System.unique_integer([:positive])}")
-
-    port =
-      Port.open({:spawn_executable, System.find_executable("sh")}, [
-        :binary,
-        :exit_status,
-        args: ["-c", ~s(exec </dev/null 2>"$0"; exec "$@"), errors, program | args]
-      ])
-
-    {:os_pid, pid} = Port.info(port, :os_pid)
-    {exit, stdout} = read(port, pid, System.monotonic_time(:millisecond) + timeout * 1000, [])
-    stderr = with {:ok, text} <- File.read(errors), do: text, else: (_ -> "")
-    File.rm(errors)
-    %{exit: exit, stdout: stdout, stderr: clip(stderr)}
+  # Runs `args` for at most `timeout` seconds (`OneCore.Command`). What it prints is kept whole, as simctl's JSON is
+  # read; only what goes into an error is cut short.
+  defp cmd(args, timeout) do
+    ran = OneCore.Command.run(args, timeout)
+    %{ran | stderr: clip(ran.stderr)}
   end
 
-  defp read(port, pid, until, printed) do
-    receive do
-      {^port, {:data, data}} -> read(port, pid, until, [printed | data])
-      {^port, {:exit_status, status}} -> {status, IO.iodata_to_binary(printed)}
-    after
-      max(0, until - System.monotonic_time(:millisecond)) ->
-        System.cmd("kill", ["-KILL", "--", "-#{pid}"])
-        Port.close(port)
-        {-1, IO.iodata_to_binary(printed)}
-    end
-  end
-
-  defp clip(text) do
-    text = String.replace_invalid(text)
-    if byte_size(text) <= @max_bytes, do: text, else: "… " <> String.replace_invalid(binary_part(text, byte_size(text) - @max_bytes, @max_bytes), "")
-  end
+  defp clip(text), do: OneCore.Command.clip(text, @max_bytes)
 end

@@ -36,7 +36,7 @@ defmodule IphoneSimulator do
   @impl true
   def requires do
     %{
-      "core" => ">= 0.29.4",
+      "core" => ">= 0.29.5",
       "database" => "to keep your simulators",
       "webrtc" => "to show a simulator's screen live"
     }
