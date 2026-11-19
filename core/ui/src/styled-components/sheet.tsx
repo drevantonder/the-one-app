@@ -29,10 +29,13 @@ const look = styles({
   panel: {
     maxHeight: "92%", backgroundColor: tokens.colour.background, color: tokens.colour.label, boxShadow: tokens.shadow.window,
     borderTopStartRadius: tokens.radius.large, borderTopEndRadius: tokens.radius.large, pointerEvents: "auto", overflow: "hidden",
+    // Up from the foot, it reaches the window's edge, and what's in it stays clear of the home indicator and the
+    // keyboard, as an iPhone's sheet's does.
+    paddingBottom: tokens.length.safeBottom,
     translateY: { default: 0, entering: "100%" }, transitionProperty: ["translateY", "opacity", "scale"], transition: tokens.motion.travel,
   },
   down: { translateY: "100%" },
-  floating: { width: "100%", maxWidth: tokens.length.sheet, borderRadius: tokens.radius.window, translateY: 0, opacity: { default: 1, entering: 0 }, scale: { default: 1, entering: 0.97 } },
+  floating: { width: "100%", maxWidth: tokens.length.sheet, borderRadius: tokens.radius.window, paddingBottom: 0, translateY: 0, opacity: { default: 1, entering: 0 }, scale: { default: 1, entering: 0.97 } },
   // On a computer, a panel of glass over the window, as Raycast's.
   glass: { backgroundColor: tokens.colour.panel, backdropFilter: tokens.material.glass },
   shrunk: { opacity: 0, scale: 0.97 },
