@@ -16,10 +16,10 @@ Run it in the background and let your harness tell you when it ends; put the fol
 
 - An app, One Core's Elixir, the UI library (`core/ui`) or any Rust changed: just call a tool, or reload the app's
   page. Before a client's request, the network's code reloader (`tooling/code_reloader.exs`) loads what changed into
-  every server, as a server's update hot-loads: One Core's modules while it runs, the Rust workspace built again
-  (`one` and every NIF, each loaded beside the build before), the UI library built again and served, and an app
-  deployed as `one deploy --files-from` deploys it. A build error, or what a running server can't load (a supervisor,
-  a struct, `-on_load`: the rule a hot load follows), is that request's error, saying so.
+  every server, as Phoenix's code reloader does: One Core's changed modules, the Rust workspace built again (`one`
+  and app NIFs), the UI library built again and served, and an app deployed as `one deploy --files-from` deploys
+  it. A build error is that request's error, saying so, as is a changed One Core NIF, which needs a start again.
+  What only a start builds (a supervisor's children) stays as it was until then.
 - The deps or the config changed, or a request says to: stop it and start it again in the same folder.
 - A commit, or a rebase that moves it, builds `one` again once (about 5 s): a build is named by its commit.
 

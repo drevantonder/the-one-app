@@ -45,8 +45,6 @@
 # network keeps with it as its `inputs`, and published only when that changed, under the build that first had it,
 # which its file `runtime` names. It's what it's built from, not its files, since those name the folders they were
 # built in.
-# A machine loads new code and NIFs into its server while it runs, unless the rest of its runtime changed
-# (`OneCore.Release.compare/2`).
 set -euo pipefail
 
 root=$(cd "$(dirname "$0")/.." && pwd)

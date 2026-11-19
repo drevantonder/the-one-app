@@ -49,7 +49,7 @@ defmodule OneCore.Server do
     end
   end
 
-  # How long an endpoint that a hot load closes answers what it took already (`terminate/2`).
+  # How long an endpoint closed as the server stops answers what it took already (`terminate/2`).
   @drains 5_000
 
   # How long a device that was woken has to watch again: a push reaches a phone in a second or two, and its app
@@ -115,9 +115,8 @@ defmodule OneCore.Server do
   @doc "This server's key, or `nil` where no server is running."
   def key, do: elem(:persistent_term.get(__MODULE__, {nil, nil}), 0)
 
-  # This server's endpoint, as `{nif, endpoint}`: the build of its NIF that opened it, which is the one it's used
-  # with, since a hot load loads another build beside it (`OneCore.Nif`), and what one build opened can't be used with
-  # another. `nil` while none is open, as while a hot load starts this process again on that build.
+  # This server's endpoint, as `{nif, endpoint}`: the build of its NIF that opened it (`OneCore.Nif`), which is the one
+  # it's used with. `nil` while none is open.
   defp endpoint, do: elem(:persistent_term.get(__MODULE__, {nil, nil}), 1)
 
   @doc """
@@ -310,7 +309,6 @@ defmodule OneCore.Server do
     network = if at = Application.get_env(:one_core, :address), do: {at, Edge.token()}
     nif = OneCore.Nif.build(Iroh)
     {:ok, {endpoint, address}} = nif.start(key_file(), network, self())
-    OneCore.Release.holds(Iroh)
     key = JSON.decode!(address)["id"]
     :persistent_term.put(__MODULE__, {key, {nif, endpoint}})
     :persistent_term.put({__MODULE__, :wake}, options.wake)
@@ -323,10 +321,8 @@ defmodule OneCore.Server do
     {:ok, %{nif: nif, endpoint: endpoint, handle: options.handle}}
   end
 
-  # A hot load of another build of its NIF stops it, and starts it again on that build (`OneCore.Release.holds/1`).
-  # So it closes its endpoint as it stops: one left open would answer for its key beside the next one, with nobody
-  # behind it, until the VM collected it. It takes nothing new from now on, and what it took already is answered over
-  # it for up to `@drains`, the request a hot load is for among them, while the next one opens.
+  # It closes its endpoint as it stops: it takes nothing new from now on, and what it took already is answered over it
+  # for up to `@drains`.
   @impl true
   def terminate(_why, server) do
     :persistent_term.put(__MODULE__, {key(), nil})

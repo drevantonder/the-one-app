@@ -18,9 +18,9 @@ defmodule OneCore.Release do
   - `server_daemon_status`: `starting` until it answers by its key, `running`, and `stopping`. Stopped is what the
     network's edge says of one that's gone.
   - `server_update_status`: `up_to_date`, `downloading` the latest build and `one` while this one answers on and
-    checking how it's taken, `checked`, and `verifying` them once it's told to go, which loads the build into this
-    one, kept once it's loaded, or starts them in its place, kept once the build says it's running at the edge; and
-    otherwise the pair before is loaded or started again, saying why in `went_back`.
+    checking that the build starts, `checked`, and `verifying` them once it's told to go, which starts them in this
+    one's place, kept once the build says it's running at the edge; and otherwise the pair before is started again,
+    saying why in `went_back`.
 
   Its network's updater (`core/edge/updater/updater.ts`) says, through the relay, what each server is to do: prepare
   the latest build, or go (`instructed/1`). This says it to that program, which does it.
@@ -46,7 +46,7 @@ defmodule OneCore.Release do
     case Application.ensure_all_started(:one_core, :permanent) do
       {:ok, _started} ->
         say(%{"running" => %{"key" => Server.key()}})
-        __MODULE__.read()
+        read()
 
       {:error, {:one_core, {{:not_joined, key}, _start}}} ->
         IO.puts(:stderr, "This server, #{key}, isn't on the list of whoever it's for: `one serve on` puts it there.")
@@ -60,16 +60,12 @@ defmodule OneCore.Release do
 
   @doc """
   Reads what the program that started it tells it, a line at a time, until its input closes, and then stops the
-  server: what changed of it (`told/1`), and a build to load (`load/1`). Each line is read by a call to the latest code
-  of this module, so a hot load moves this loop onto the code it loaded, and the next loads nothing it runs.
+  server: what changed of it (`told/1`), and to say the latest builds.
   """
   def read do
     case IO.read(:line) do
       line when is_binary(line) ->
         case told_in(line) do
-          {:ok, %{"load" => build}} ->
-            load(build)
-
           {:ok, %{"latest" => target}} ->
             latest(target)
 
@@ -80,7 +76,7 @@ defmodule OneCore.Release do
             Logger.warning("The program keeping this server running said what it doesn't read (#{why}): #{line}")
         end
 
-        __MODULE__.read()
+        read()
 
       _closed ->
         System.stop()
@@ -127,13 +123,11 @@ defmodule OneCore.Release do
 
   @doc """
   What this server is, as the program keeping it running last said: `server_membership`, `server_daemon_status`,
-  `server_update_status`, with its `server_update_stage` while it's verifying (`checking`, then `loading` or
-  `starting`) and the `update_method` checking chose (`hot_load` or `restart`, `compare/2`), and `went_back`, why
-  the last update didn't take, until one does.
+  `server_update_status`, with its `server_update_stage` while it's verifying, and `went_back`, why the last update
+  didn't take, until one does.
   """
   def status do
-    # A server that was running when this was hot loaded into it kept its status in the application's environment
-    # until it next restarts.
+    # As it was started, until the program says more.
     Map.merge(@status, :persistent_term.get({__MODULE__, :status}, nil) || Application.get_env(:one_core, :status, %{}))
   end
 
@@ -348,11 +342,8 @@ defmodule OneCore.Release do
     end
   end
 
-
   @doc """
-  Says which build this is, once its code and NIFs have loaded: what's checked of a build before it's started. With
-  `ONE_FROM`, the build a server runs, it then compares this one with it in the same VM (`compare/2`), so preparing a
-  build starts one VM, not two.
+  Says which build this is, once its code and NIFs have loaded: what's checked of a build before it's started.
   """
   def check do
     Application.load(:one_core)
@@ -363,433 +354,16 @@ defmodule OneCore.Release do
         do: OneCore.Nif.build(module)
 
     say(%{"checked" => %{"build" => Builds.build()}})
-    if from = System.get_env("ONE_FROM"), do: compare(from, to_string(:code.root_dir()))
+    # A `one` from before every update restarted asks how a server on the build `ONE_FROM` takes this one.
+    if System.get_env("ONE_FROM"), do: compare(nil, nil)
   end
+
+  @doc "Says a server takes this build by restarting, as a `one` from before every update restarted asks."
+  def compare(_old, _new), do: say(%{"compared" => %{"update_method" => "restart", "why" => "every update restarts"}})
 
   @doc """
-  Whether the build in the folder `new` can be loaded into a server running the one in `old` while it runs, as
-  `one serve run` asks before it takes a build (both whole releases, as it keeps them): says so (`compared`), and
-  gives `nil` for a hot load, or why it restarts. It's run in a fresh VM of `new`, which nothing else runs in: to tell what changed,
-  it loads the code of `old` there too.
-
-  A hot load replaces only One Core's own code and NIFs (`load/1`), so it restarts for anything else, and for what its
-  code can't be swapped under: a runtime built from anything else (`runtime-inputs`, which `tooling/release` writes:
-  the VM, Elixir, Bun, the deps, One Core's config and `rel/`), messages to and from the `one` running the server
-  other than what that `one` speaks (`client::serve::protocol`, which it says in `ONE_PROTOCOL`), a pair with a new
-  `one` (`next_program` in `ONE_SERVER_STATUS`), which runs the server from then on, an update after one
-  that didn't take (`went_back`, in `ONE_SERVER_STATUS`), a breaking change
-  (another 0.minor), an `.app` that changed beyond its modules, and among
-  the modules that changed, `OneCore.Application`, a supervisor, a module with `-on_load`, a struct and a macro. A
-  supervisor is one by its behaviour or by the child spec it gives (`child_spec/1`), whose children differ. A macro's
-  own code can't be told apart from the rest of its module's, so any change to a module with macros restarts.
-  """
-  def compare(old, new) do
-    # Expanded, as Windows gives paths with backslashes, which `Path.wildcard/2` reads as escapes.
-    why = restart(Path.expand(old), Path.expand(new))
-    say(%{"compared" => %{"update_method" => if(why, do: "restart", else: "hot_load"), "why" => why}})
-    why
-  end
-
-  defp restart(old, new) do
-    apps = Enum.map([old, new], &app/1)
-    [was, now] = Enum.map([old, new], &named/1)
-    status = JSON.decode!(System.get_env("ONE_SERVER_STATUS", "{}"))
-
-    cond do
-      # The `one` that runs the server is the one its pair names, as every program a device runs is its install's: a
-      # pair with a new one restarts the server on it, where a hot load beside it would leave the one before running
-      # for as long as the server did (`prepared` in `clients/cli/src/serving.rs`, for a new `one` alone).
-      status["next_program"] && status["program"] && status["next_program"] != status["program"] ->
-        "one #{status["next_program"]} runs it from now on"
-
-      inputs(old) == nil or inputs(old) != inputs(new) ->
-        "its runtime is #{runtime(new)}, built from other than the server's #{runtime(old) || "whole build"}"
-
-      System.get_env("ONE_PROTOCOL") != Iroh.protocol() ->
-        "it speaks other messages than the one running the server (client::serve)"
-
-      # A hot load is run by the code of the build it's loaded into, so where that code can't load it (as a Windows
-      # server before `load/1` read its backslashed path), trying again goes back again: a restart takes it.
-      went_back = JSON.decode!(System.get_env("ONE_SERVER_STATUS", "{}"))["went_back"] ->
-        "the last update didn't take: #{went_back}"
-
-      Builds.apart(was, now) > 0 ->
-        "#{now} is a breaking change from #{was}"
-
-      not same_app?(apps) ->
-        "One Core's .app changed beyond its modules"
-
-      true ->
-        changed(changes(old, new), old, new)
-    end
-  end
-
-  @doc """
-  One Core's modules that differ from the code `old` to the code `new`, as `{removed, added, changed}`, and why a
-  running server can't load them, or `nil`: the rule `compare/2` applies to them. `old` and `new` are whole builds, or
-  the folders a developer's `_build` keeps One Core's code and NIFs in,
-  `%{ebin: <folder>, consolidated: <folder>, native: <folder>}`, as a local network's code reloader has them
-  (`tooling/code_reloader.exs`). It loads the code of both into the VM it runs
-  in, as `compare/2` does.
-  """
-  def modules(old, new) do
-    changes = changes(old, new)
-    {changes, changed(changes, old, new)}
-  end
-
-  defp changed({removed, added, changed} = changes, old, new) do
-    modules = removed ++ added ++ changed
-
-    if OneCore.Application in modules do
-      "OneCore.Application changed"
-    else
-      [before, now] = [facts(changes, old), facts(changes, new)]
-
-      Enum.find_value(modules, fn module ->
-        [a, b] = for facts <- [before, now], do: Map.get(facts, module, %{})
-
-        cond do
-          a[:on_load] || b[:on_load] ->
-            "#{inspect(module)} has -on_load"
-
-          a[:supervisor] || b[:supervisor] ->
-            "#{inspect(module)} is a supervisor"
-
-          a[:macros] || b[:macros] ->
-            "#{inspect(module)} has macros"
-
-          a[:struct] != b[:struct] ->
-            "#{inspect(module)}'s struct changed"
-
-          match?(%{type: :supervisor}, a[:child_spec]) or match?(%{type: :supervisor}, b[:child_spec]) ->
-            if a[:child_spec] != b[:child_spec], do: "#{inspect(module)} is a supervisor whose children changed"
-
-          true ->
-            nil
-        end
-      end)
-    end
-  end
-
-  # The runtime a build was put together from, as `tooling/release` names it in the build's file `runtime`, and what
-  # that's built from but One Core's NIFs, in its file `runtime-inputs`, which a running server loads beside the ones
-  # it has (`swap/3`): `nil` for a build from before either.
-  defp runtime(build), do: kept(build, "runtime")
-  defp inputs(build), do: kept(build, "runtime-inputs")
-
-  defp kept(build, file) do
-    case File.read(Path.join(build, file)) do
-      {:ok, kept} -> String.trim(kept)
-      {:error, _} -> nil
-    end
-  end
-
-  # The build a release is, its version, as its `start_erl.data` says it beside the VM's.
-  defp named(build) do
-    [_erts, version] = build |> Path.join("releases/start_erl.data") |> File.read!() |> String.split()
-    version
-  end
-
-  defp app(build) do
-    {:ok, [app]} = :file.consult(Path.join(ebin(build), "one_core.app"))
-    app
-  end
-
-  defp same_app?(apps) do
-    [a, b] =
-      for {:application, name, keys} <- apps do
-        {name, keys |> Keyword.delete(:modules) |> Enum.sort()}
-      end
-
-    a == b
-  end
-
-  defp ebin(%{ebin: ebin}), do: ebin
-  defp ebin(build), do: build |> Path.join("lib/one_core-*/ebin") |> Path.wildcard() |> hd()
-  defp consolidated(%{consolidated: consolidated}), do: consolidated
-  defp consolidated(build), do: build |> Path.join("releases/*/consolidated") |> Path.wildcard() |> hd()
-
-  # One Core's modules that differ from `old` to `new`, with its consolidated protocols: those only `old` has, those
-  # only `new` has, and those both have whose code differs, by its MD5 (`:beam_lib.md5/1`), which leaves out the
-  # attributes a build in another folder says otherwise, as `@external_resource`'s path, or, for one of One Core's
-  # NIFs, whose library differs.
-  defp changes(old, new) do
-    [{removed, added, changed}, {gone, new_protocols, protocols}] =
-      for dir <- [&ebin/1, &consolidated/1] do
-        [was, now] = for build <- [old, new], do: md5s(dir.(build))
-
-        {Map.keys(Map.drop(was, Map.keys(now))), Map.keys(Map.drop(now, Map.keys(was))),
-         for({module, md5} <- now, Map.has_key?(was, module), was[module] != md5, do: module)}
-      end
-
-    {removed ++ gone, added ++ new_protocols, Enum.uniq(changed ++ protocols ++ nifs(old, new))}
-  end
-
-  # One Core's NIFs whose library, built for this machine, differs from `old` to `new`: their modules.
-  defp nifs(old, new) do
-    for module <- Application.spec(:one_core, :modules) || [],
-        nif?(module),
-        {library, _source} = module.__nif__(),
-        native(old, library) != native(new, library),
-        do: module
-  end
-
-  defp nif?(module), do: Code.ensure_loaded?(module) and function_exported?(module, :__nif__, 0)
-
-  # A NIF's library as the build `build` has it.
-  defp native(build, library) do
-    case Path.wildcard(Path.join(natives(build), "#{library}.{so,dll}")) do
-      [file] -> File.read!(file)
-      [] -> nil
-    end
-  end
-
-  defp natives(%{native: native}), do: native
-  defp natives(build), do: Path.join(build, "lib/one_core-*/priv/native")
-
-  @doc """
-  Says the calling process keeps what the NIF `nif` (a module that says `use OneCore.Nif`) opened, as
-  `OneCore.Server` keeps its endpoint: a hot load that loads another build of it starts the process again on that
-  build (`load/1`), as what one build opened can't be used with another.
-  """
-  def holds(nif), do: Process.put({__MODULE__, :holds, nif}, true)
-
-  # The modules of the processes in the supervision tree that keep what one of `nifs` opened (`holds/1`).
-  defp holders([]), do: []
-
-  defp holders(nifs) do
-    for {_supervisor, _id, pid} <- tree(OneCore.Supervisor),
-        {:dictionary, dictionary} <- [Process.info(pid, :dictionary)],
-        Enum.any?(nifs, &List.keymember?(dictionary, {__MODULE__, :holds, &1}, 0)),
-        {module, _function, _arity} = :proc_lib.translate_initial_call(pid),
-        do: module
-  end
-
-  defp md5s(dir) do
-    for file <- Path.wildcard(Path.join(dir, "*.beam")), into: %{} do
-      {:ok, {module, md5}} = :beam_lib.md5(to_charlist(file))
-      {module, md5}
-    end
-  end
-
-  # The beam file of each of `modules` in the build `build`, as `{module, file, binary}`, where it has one.
-  defp files(modules, build) do
-    for module <- modules,
-        file <-
-          Path.wildcard(Path.join(ebin(build), "#{module}.beam")) ++
-            Path.wildcard(Path.join(consolidated(build), "#{module}.beam")),
-        do: {module, to_charlist(file), File.read!(file)}
-  end
-
-  # What tells whether a hot load can swap each module that changed, as the build `build` has it: whether it has
-  # `-on_load`, is a supervisor by its behaviour or has macros, read from its file, and its struct and child spec,
-  # which only running its code gives. So the modules that changed are loaded from `build` in place of what's loaded,
-  # all of them first, as one's child spec can name another's children: all but this one, which is running, and
-  # one with `-on_load`, which loading would run.
-  defp facts({removed, added, changed}, build) do
-    files = files(removed ++ added ++ changed, build)
-
-    told =
-      for {module, _file, binary} <- files, into: %{} do
-        {:ok, {_, [attributes: attributes, exports: exports]}} = :beam_lib.chunks(binary, [:attributes, :exports])
-        behaviours = for {:behaviour, names} <- attributes, name <- names, do: name
-
-        {module,
-         %{
-           module: module,
-           on_load: :erlang.has_prepared_code_on_load(:erlang.prepare_loading(module, binary)),
-           supervisor: Enum.any?(behaviours, &(&1 in [Supervisor, :supervisor, DynamicSupervisor])),
-           macros: Enum.any?(exports, fn {name, _arity} -> String.starts_with?(Atom.to_string(name), "MACRO-") end),
-           exports: exports
-         }}
-      end
-
-    for {module, file, binary} <- files, module != __MODULE__, not told[module].on_load do
-      :code.purge(module)
-      {:module, ^module} = :code.load_binary(module, file, binary)
-    end
-
-    Map.new(told, fn {module, facts} ->
-      {module, Map.merge(facts, %{struct: ran(facts, :__struct__, []), child_spec: ran(facts, :child_spec, [nil])})}
-    end)
-  end
-
-  # What `module`'s function gives, where it has it and was loaded: `:raised` where it raised.
-  defp ran(%{module: module, on_load: false, exports: exports}, name, args) do
-    if {name, length(args)} in exports, do: apply(module, name, args)
-  rescue
-    _ -> :raised
-  end
-
-  defp ran(_facts, _name, _args), do: nil
-
-  @doc """
-  Loads the build in the folder `build` into this server while it runs, as `one serve run` asks once `compare/2` said
-  `hot_load`, and says it's `loaded` it; or where it can't, leaves this server on the code it had and says it's
-  `not_loaded` it, and why. Going back is the same: loading the build before.
-
-  Each process of its supervision tree whose code changed is stopped first, then the modules that changed are loaded
-  all at once or none (`:code.atomic_load/1`), and those it no longer has are deleted, and the processes are started
-  again on the new code, so their state is built again as a restart builds it, and nothing needs a `code_change`.
-  The children a `Task.Supervisor` runs are calls, which aren't stopped: a call that began on the code before ends on
-  it. What a call holds of the code before the one before is purged as this loads, which ends it. A dynamic
-  supervisor's children are started whenever they're next asked for, as they are at any start.
-
-  Then the code path, the `.app` and the UI library are the new build's, and the apps built against another UI library
-  are built again, as at a start. The VM goes on running from the build it started from, whose runtime is built from
-  what this one's is, but One Core's NIFs: one whose library changed is loaded beside the one before (`OneCore.Nif`),
-  and each process that keeps what the one before opened (`holds/1`) is started again on it. A call that began
-  before it ends on the new build, so what it was asked over the endpoint before can't be answered.
-  """
-  def load(build) do
-    # Expanded, as Windows gives paths with backslashes, which `Path.wildcard/2` reads as escapes.
-    build = Path.expand(build)
-
-    case loaded(build) do
-      :ok ->
-        say(%{"loaded" => %{"build" => Builds.build()}})
-        :ok
-
-      {:error, why} ->
-        say(%{"not_loaded" => %{"build" => named(build), "why" => why}})
-        {:error, why}
-    end
-  end
-
-  # What raises as it reads the build is why it's not loaded, as what raises as it swaps is (`swap/3`): the process
-  # reading what it's told mustn't end, which ends the server.
-  defp loaded(build) do
-    was = :code.lib_dir(:one_core) |> to_string() |> Path.join("../..") |> Path.expand()
-    swap(changes(was, build), build, fn -> moved(build) end)
-  rescue
-    error -> {:error, Exception.message(error)}
-  end
-
-  @doc """
-  Loads `changes` of One Core's modules, as `modules/2` gives them, from the code `build` into this server while it
-  runs, as `load/1` does, running `then` once they're loaded and before its processes start again: `:ok`, or
-  `{:error, why}`.
-  """
-  def swap({removed, added, changed}, build, then \\ fn -> :ok end) do
-    nifs = Enum.filter(changed, &nif?/1)
-    stop(MapSet.new(removed ++ changed ++ holders(nifs)))
-    for module <- changed, do: :code.purge(module)
-
-    loaded =
-      case :code.atomic_load(files(added ++ changed, build)) do
-        :ok ->
-          for module <- removed, do: {:code.purge(module), :code.delete(module)}
-          with :ok <- then.(), do: nifs_loaded(nifs)
-
-        {:error, why} ->
-          {:error, "its code didn't load: #{inspect(why)}"}
-      end
-
-    case {loaded, started(OneCore.Supervisor)} do
-      {:ok, []} ->
-        :ok
-
-      {:ok, failed} ->
-        {:error, Enum.map_join(failed, ", ", fn {id, why} -> "#{inspect(id)} didn't start again: #{said(why)}" end)}
-
-      {error, _failed} ->
-        error
-    end
-  rescue
-    error -> {:error, Exception.message(error)}
-  end
-
-  # Loads the build of each of One Core's NIFs `nifs` that's in its code path now, beside the one loaded, as the one
-  # its calls go to from now on.
-  defp nifs_loaded(nifs) do
-    folder = Path.join(:code.priv_dir(:one_core), "native")
-
-    Enum.reduce_while(nifs, :ok, fn module, :ok ->
-      {library, source} = module.__nif__()
-      [file] = Path.wildcard(Path.join(folder, "#{library}.{so,dll}"))
-
-      case OneCore.Nif.load(source, File.read!(file), :one_core, folder) do
-        {:ok, _name, _build} -> {:cont, :ok}
-        {:error, why} -> {:halt, {:error, "#{inspect(module)}'s NIF didn't load: #{why}"}}
-      end
-    end)
-  end
-
-  # Why a process didn't start, as what it raised says it, or as OTP gives it.
-  defp said({%{__exception__: true} = error, _stacktrace}), do: Exception.message(error)
-  defp said(why), do: inspect(why)
-
-  # Stops each process in the supervision tree whose module, as it was started, is one of `modules`, as its
-  # supervisor stops it. One that a dynamic supervisor runs is started by whoever asks for it next, and the rest
-  # are started again once the code is loaded (`started/1`).
-  defp stop(modules) do
-    for {supervisor, id, pid} <- tree(OneCore.Supervisor),
-        {module, _function, _arity} = :proc_lib.translate_initial_call(pid),
-        module in modules do
-      if id == :undefined,
-        do: DynamicSupervisor.terminate_child(supervisor, pid),
-        else: :ok = Supervisor.terminate_child(supervisor, id)
-    end
-  end
-
-  # Every worker in the tree under `supervisor` with its supervisor and id, past those of a `Task.Supervisor`.
-  defp tree(supervisor) do
-    for {id, pid, type, modules} <- Supervisor.which_children(supervisor), is_pid(pid) do
-      if type == :supervisor do
-        if modules == [Task.Supervisor], do: [], else: tree(pid)
-      else
-        [{supervisor, id, pid}]
-      end
-    end
-    |> List.flatten()
-  end
-
-  # Starts again each child in the tree under `supervisor` that was stopped, as a load stops them: also one a load
-  # before couldn't start, which a load of the build before then does. Gives the ids of those that didn't start, and
-  # why.
-  defp started(supervisor) do
-    for {id, pid, type, modules} <- Supervisor.which_children(supervisor) do
-      cond do
-        pid == :undefined ->
-          case Supervisor.restart_child(supervisor, id) do
-            {:error, why} -> [{id, why}]
-            _started -> []
-          end
-
-        is_pid(pid) and type == :supervisor and modules != [Task.Supervisor] ->
-          started(pid)
-
-        true ->
-          []
-      end
-    end
-    |> Enum.concat()
-  end
-
-  # Has every application's code path, One Core's `.app` and the UI library be `build`'s, and the apps built against
-  # another UI library built again, by the server that builds them.
-  defp moved(build) do
-    for ebin <- Path.wildcard(Path.join(build, "lib/*/ebin")) ++ [consolidated(build)] do
-      name = ebin |> Path.dirname() |> Path.basename() |> String.replace(~r/-[^-]*$/, "")
-      name = if Path.basename(ebin) == "consolidated", do: "consolidated", else: name
-      :code.replace_path(String.to_atom(name), to_charlist(ebin))
-    end
-
-    {:application, :one_core, keys} = app(build)
-
-    :ok =
-      :application_controller.change_application_data(
-        [{:application, :one_core, keys}],
-        [{:one_core, Application.get_all_env(:one_core)}]
-      )
-
-    Application.put_env(:one_core, :build, named(build))
-    ui(Path.join(build, "ui"))
-  end
-
-  @doc """
-  Has the UI library this server serves be the build in `folder`, as a hot load does, and the apps built against
-  another built again, by the server that builds them: as a local network's code reloader has it, as it changes.
+  Has the UI library this server serves be the build in `folder`, and the apps built against another built again, by
+  the server that builds them: as a local network's code reloader has it, as it changes.
   """
   def ui(folder) do
     Application.put_env(:one_core, :ui, folder)

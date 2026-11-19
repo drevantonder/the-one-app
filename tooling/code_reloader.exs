@@ -11,9 +11,10 @@ defmodule CodeReloader do
 
   - The Rust workspace, where a file of it changed, is built again as `mix compile` builds it (`nifs/1` in
     `core/server/mix.exs`): `one`, and the NIFs, of One Core and of this repo's apps, each put where it's loaded from.
-  - One Core's code is compiled here and loaded into every server while it runs (`OneCore.Release.swap/3`), its NIFs
-    too, each beside the build before, unless it's what a running server can't load (`OneCore.Release.modules/2`,
-    the rule a hot load follows): then the request is refused, saying why and that the network starts again for it.
+  - One Core's code is compiled here and its modules that changed loaded into every server, as Phoenix's code
+    reloader loads what Mix compiled: a process carries on in the new code from its next call into its module, and
+    what only starting builds again, as a supervisor's children, is the code before until the network starts again.
+    One Core's NIFs aren't loaded: where one changed, the request is refused, saying the network starts again for it.
   - The UI library (`core/ui`), where a file of it changed, is built again and is the one every server serves, as a
     release's is (`OneCore.Release.ui/1`).
   - An app of this repo whose files changed is deployed for the network again, as `one deploy --files-from` deploys
@@ -37,14 +38,15 @@ defmodule CodeReloader do
   def reload(server), do: GenServer.call(__MODULE__, {:reload, server}, :infinity)
 
   @impl GenServer
-  def init(copy), do: {:ok, %{copy: copy, servers: [], rust: nil, core: nil, ui: nil, apps: nil}}
+  def init(copy), do: {:ok, %{copy: copy, servers: [], rust: nil, core: nil, natives: nil, ui: nil, apps: nil}}
 
   # What the servers run is what's compiled when the first starts, so that's what a change is told from.
   @impl GenServer
   def handle_call({:serving, server}, _from, %{core: nil} = state) do
     copy(state)
     rust = rust()
-    handle_call({:serving, server}, nil, %{state | rust: rust, core: core(rust), ui: ui(), apps: apps()})
+    state = %{state | rust: rust, core: core(rust), natives: natives(), ui: ui(), apps: apps()}
+    handle_call({:serving, server}, nil, state)
   end
 
   def handle_call({:serving, server}, _from, state), do: {:reply, :ok, %{state | servers: [server | state.servers]}}
@@ -79,32 +81,62 @@ defmodule CodeReloader do
 
   defp reloaded(core, state) do
     began = System.monotonic_time(:millisecond)
-    new = code(@build)
 
     with {:compiled, {compiled, _diagnostics}} when compiled in [:ok, :noop] <- {:compiled, compiled()},
-         {changes, nil} when changes != {[], [], []} <- Release.modules(code(state.copy), new),
-         [] <- for(server <- state.servers, (why = swap(server, changes, new)) != :ok, do: "#{server}: #{why}") do
+         {:natives, natives} when natives == state.natives <- {:natives, natives()},
+         {removed, changed} when removed != [] or changed != [] <- changes(state.copy),
+         [] <- for(server <- state.servers, (why = load(server, removed, changed)) != :ok, do: "#{server}: #{why}") do
       copy(state)
-      {removed, added, changed} = changes
       took = System.monotonic_time(:millisecond) - began
-      Mix.shell().info("Loaded #{Enum.map_join(removed ++ added ++ changed, ", ", &inspect/1)} in #{took} ms")
+      loaded = removed ++ Enum.map(changed, &elem(&1, 0))
+      Mix.shell().info("Loaded #{Enum.map_join(loaded, ", ", &inspect/1)} in #{took} ms")
       {:ok, %{state | core: core}}
     else
       {:compiled, {:error, diagnostics}} ->
         {:error, "One Core didn't compile:\n" <> Enum.map_join(diagnostics, "\n", &diagnostic/1), state}
 
-      {{[], [], []}, _why} ->
-        {:ok, %{state | core: core}}
+      {:natives, _natives} ->
+        {:error, "One Core's NIFs changed: stop tooling/network and start it again in the same folder.", state}
 
-      {_changes, why} ->
-        {:error,
-         "One Core changed in a way a running server can't load (#{why}): stop tooling/network and start it again " <>
-           "in the same folder.", state}
+      {[], []} ->
+        {:ok, %{state | core: core}}
 
       failed ->
         {:error, "One Core's change didn't load: #{Enum.join(failed, "; ")}", state}
     end
   end
+
+  # One Core's modules that differ from the copy of what the servers run, with its consolidated protocols, by each
+  # module's MD5 (`:beam_lib.md5/1`): `{removed, changed}`, each changed one as `:code.atomic_load/1` takes it.
+  defp changes(copy) do
+    [was, now] = for dir <- [copy, @build], do: beams(dir)
+
+    changed = for {module, {md5, file}} <- now, not match?({^md5, _}, was[module]), do: {module, file, File.read!(file)}
+    {Map.keys(Map.drop(was, Map.keys(now))), changed}
+  end
+
+  defp beams(dir) do
+    for file <- Path.wildcard(Path.join(dir, "{ebin,consolidated}/*.beam")), into: %{} do
+      {:ok, {module, md5}} = :beam_lib.md5(to_charlist(file))
+      {module, {md5, to_charlist(file)}}
+    end
+  end
+
+  # Loads `changed` into the server whose node is `server`, and deletes `removed`, as IEx's `r/1` reloads a module:
+  # what runs the code before the one before is ended as it's purged.
+  defp load(server, removed, changed) do
+    for module <- removed ++ Enum.map(changed, &elem(&1, 0)), do: :erpc.call(server, :code, :purge, [module])
+
+    case :erpc.call(server, :code, :atomic_load, [changed]) do
+      :ok -> Enum.each(removed, &:erpc.call(server, :code, :delete, [&1]))
+      {:error, why} -> inspect(why)
+    end
+  catch
+    kind, why -> Exception.format(kind, why)
+  end
+
+  # One Core's NIFs as built, by their contents: a server goes on with the build of each it loaded.
+  defp natives, do: hashes(Path.wildcard(Path.join(@build, "priv/native/*")))
 
   # Each compiler runs once in a VM unless it's run again, as Phoenix's code reloader runs them.
   defp compiled do
@@ -116,7 +148,7 @@ defmodule CodeReloader do
   defp copy(state) do
     File.rm_rf!(state.copy)
 
-    for dir <- ["ebin", "consolidated", "priv/native"], copy = Path.join(state.copy, dir) do
+    for dir <- ["ebin", "consolidated"], copy = Path.join(state.copy, dir) do
       File.mkdir_p!(Path.dirname(copy))
       File.cp_r!(Path.join(@build, dir), copy)
     end
@@ -137,13 +169,6 @@ defmodule CodeReloader do
     end
   end
 
-  defp swap(server, changes, new) do
-    case :erpc.call(server, Release, :swap, [changes, new], :infinity) do
-      :ok -> :ok
-      {:error, why} -> why
-    end
-  end
-
   defp deployed(apps, server, state) do
     changed = for {name, files} <- apps, state.apps[name] != files, do: name
     if changed != [], do: versioned(state.servers)
@@ -158,12 +183,14 @@ defmodule CodeReloader do
     end
   end
 
-  # Has each server's build be this checkout's version (`tooling/version`), as a hot load has it (`OneCore.Release`):
-  # an app that requires a newer platform than the one the servers started on is refused as waiting for their update,
-  # and what's loaded into them is this checkout's.
+  # Has each server's build be this checkout's version (`tooling/version`), as a release's would be: an app that
+  # requires a newer platform than the one the servers started on is refused as waiting for their update, and what's
+  # loaded into them is this checkout's.
   defp versioned(servers) do
     {version, 0} = System.cmd(Path.join(@root, "tooling/version"), [], cd: @root)
-    for server <- servers, do: :ok = :erpc.call(server, Application, :put_env, [:one_core, :build, String.trim(version)])
+
+    for server <- servers,
+        do: :ok = :erpc.call(server, Application, :put_env, [:one_core, :build, String.trim(version)])
   end
 
   # As `one deploy --name <name> --files-from apps/<name>` deploys it for the network.
@@ -177,13 +204,6 @@ defmodule CodeReloader do
       {:error, why} -> why
     end
   end
-
-  defp code(dir),
-    do: %{
-      ebin: Path.join(dir, "ebin"),
-      consolidated: Path.join(dir, "consolidated"),
-      native: Path.join(dir, "priv/native")
-    }
 
   defp diagnostic(%{file: file, position: position, message: message}),
     do: "#{Path.relative_to(to_string(file), @root)}:#{line(position)}: #{message}"

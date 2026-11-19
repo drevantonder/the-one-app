@@ -8,8 +8,7 @@ defmodule OneCore.Cache do
   read, and Nebulex doesn't keep a fetch apart at all. So each value is kept here with the generations of its key and
   of the whole cache when its fetch began, and is given out only while both are still those.
 
-  The table is made once, as the server starts (`table/0`), and a cache is only a name in it, so a cache a hot load
-  adds is there as soon as its code is.
+  The table is made once, as the server starts (`table/0`), and a cache is only a name in it.
   """
 
   @doc "Makes the table every cache is kept in. Whatever calls this owns it, and it goes when that ends."

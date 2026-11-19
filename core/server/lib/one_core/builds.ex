@@ -81,7 +81,7 @@ defmodule OneCore.Builds do
   end
 
   @doc """
-  The runtime this server runs on, `server-runtime/<target>`'s build, which a hot load of its code keeps, or `nil`
+  The runtime this server runs on, `server-runtime/<target>`'s build, which its code was put together with, or `nil`
   where it was built whole, before there were runtimes.
   """
   def runtime do
