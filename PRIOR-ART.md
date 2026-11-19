@@ -227,6 +227,15 @@ chose the same: an app's code on a server is free, and which servers act for who
   restore` would need their program, that password, and a second step into the bucket. Backups already sends each
   blob only once, by what's in it, and reads only blobs whose tag changed.
 
+- **Building apps in the server with oxc and rolldown, as a Rust NIF, in place of Bun**, measured on 19 November 2026
+  and set aside: Bun stays for app builds. Vite 8 already bundles with rolldown and oxc, and Solid 2's compiler is
+  oxc in Rust, so a build (0.4 to 1.3 s and 100 to 140 MB, Home Screen and Settings) spends only about 0.3 s on Bun
+  and Vite starting. Bun costs a server 52 MB to download and 103 MB unpacked, once, and the build's packages 102 MB.
+  Replacing it would need Solid's compiler, a crate not published, on an oxc older than rolldown's; Vite's pages and
+  CSS ported from JavaScript; the styles step (`core/ui/tables.ts`), which runs an app's code; an npm installer,
+  which Rust has none of that's kept up; and TypeScript 7's checker, a Go program fetched from npm, for the lint.
+  Code mode, which ran on the same Bun, moved to a QuickJS NIF instead (`core/server/nif/codemode`).
+
 ## Chosen
 
 - **iroh**: reaching a machine by its key, directly where possible and through a relay otherwise. Today's app links
