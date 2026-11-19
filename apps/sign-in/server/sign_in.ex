@@ -396,10 +396,17 @@ defmodule SignIn do
   # Who invites is whoever may change what this app keeps for the network: its owners, and whoever they made
   # an editor of it. Whoever joins by an invitation is that user, so someone who has joined is invited again only by
   # the network's owner, and an owner never: they add a passkey on a device they're signed in on, as Apple and
-  # Google have it. The edge knows who has joined, and is told whether this may be that (`again`).
+  # Google have it. The edge knows who has joined, and is told whether this may be that (`again`). A name someone was
+  # taken out of while what they made is kept is theirs still, since all of it is reached by that name, so nobody
+  # else is invited by it, as GitHub retires the name of an account that still has repos.
   def call("invite", %{"name" => name}, call) do
     Call.reach(call, Artifact.name(call.own), "editor")
-    again = owns_network?(call, call.actor) and not owns_network?(call, "users/#{name}")
+    who = "users/#{name}"
+
+    if not Enum.any?(ask(%{ask: "everyone"})["people"], &(&1["who"] == who)) and OneCore.Bucket.list(who <> "/") != [],
+      do: raise("#{who} was taken out of the network, and what they made is kept under that name, so nobody else is given it. Invite them by another name.")
+
+    again = owns_network?(call, call.actor) and not owns_network?(call, who)
     %{"link" => link} = ask(%{ask: "invite", who: name, again: again})
     %{who: "users/#{name}", link: link}
   end
@@ -409,10 +416,14 @@ defmodule SignIn do
     %{people: ask(%{ask: "everyone"})["people"]}
   end
 
-  # Whoever invites takes out, and nobody takes themselves out.
+  # Whoever invites takes out, and nobody takes themselves out. Only an owner takes out an owner, as only a super
+  # admin removes another in Google Workspace.
   def call("remove_person", %{"who" => who}, call) do
     Call.reach(call, Artifact.name(call.own), "editor")
     if who == call.actor, do: raise("You can't take yourself out of the network.")
+
+    if owns_network?(call, who) and not owns_network?(call, call.actor),
+      do: raise("Only the network's owners take out one of its owners.")
     ask(%{ask: "remove_person", who: who})
     Call.tool(call, "permissions", "forget", %{"who" => who})
     %{who: who}
