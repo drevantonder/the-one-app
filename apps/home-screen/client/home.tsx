@@ -181,6 +181,9 @@ type From = Rect & { radius: number }
 const launch = (entrypoint: Entrypoint, owner: Owner, behind?: boolean, from?: From) =>
   open(entrypoint.entrypoint, { subject: entrypoint.subject === "user" ? undefined : (entrypoint.subject ?? owner.subject), behind, from })
 
+/// How long the launcher, put away, stays where it was: Raycast's Pop to Root Search's default.
+const POP_TO_ROOT = 90_000
+
 /// Where the launcher's card's top is, under its search.
 const CARD_TOP = MARGIN + SEARCH_HEIGHT + GAP
 
@@ -1901,15 +1904,19 @@ function HomeScreen(props: { owners: Owner[] }) {
       if (!cells.some((cell) => same(cell, untrack(selected)))) choose(first(cells))
     },
   )
-  // Put away, the launcher forgets what was typed, and comes back to Home's first page.
+  // Put away, the launcher is where it was if it's back within 90 seconds, what was typed too; after that it forgets
+  // it and comes back to Home's first page, as Raycast's Pop to Root Search does.
   createEffect(
     () => launcher() && !visible(),
     (hidden) => {
       if (!hidden) return
-      setQuery("")
-      setChosenResult(0)
-      if (home.getSnapshot().matches("nothing") && home.getSnapshot().context.at.screen !== 0) home.send({ type: "go", screen: 0 })
-      choose(first(ordered(home.getSnapshot().context.at)))
+      const back = setTimeout(() => {
+        setQuery("")
+        setChosenResult(0)
+        if (home.getSnapshot().matches("nothing") && home.getSnapshot().context.at.screen !== 0) home.send({ type: "go", screen: 0 })
+        choose(first(ordered(home.getSnapshot().context.at)))
+      }, POP_TO_ROOT)
+      return () => clearTimeout(back)
     },
     { defer: true },
   )
