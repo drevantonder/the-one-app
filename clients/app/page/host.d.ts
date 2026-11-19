@@ -81,10 +81,10 @@ export type Session =
   | { state: "signedIn" }
   | { state: "signIn"; code?: { link: string; code: string }; why?: "denied" | "expired" | "removed" | null }
 
-/** Whether the client reaches its network, beside its session (`Connection` in core/client). */
 /** Where a phone or a browser is with being woken by its notifications (`Push` in apps/notifications/client/native), and an iPhone's browser that can be only from its Home Screen. */
 export type Push = { state: "notAsked" | "denied" | "registering" | "registered" | "homeScreen" } | { state: "failed"; why: string }
 
+/** Whether the client reaches its network, beside its session (`Connection` in core/client). */
 export type Connection = "connecting" | "online" | "offline" | "reconnecting"
 
 /** What the page is told of the device's session: the session, its place in the order the page hears them in, and while it's signing in, where the window goes. */
@@ -92,6 +92,11 @@ export interface Told {
   seq: number
   session: Session
   link?: string | null
+}
+
+/** Where the device is with its network, as the window hears it (`State` in core/client): its session, as it's told, and whether its network answers, or its servers say it's behind them. */
+export interface State extends Told {
+  connection: Connection | "behind"
 }
 
 /** What the window knows as it moves (`client.js`): the device's session and whether its network answers, as they
@@ -152,7 +157,7 @@ export type Moved =
 /** Each command the page invokes: what it's given, and what it answers. */
 export interface Commands {
   /** Where the device is with its network as the window opens, whether its network answers, whether a phone hears taps on notifications, whether each app opens in a window of its own (a computer's), which app this window is if it's an app's own, where the window's title bar is over the page, which keeps it clear, if it's known yet (`title_bar` says it as it changes), and the Colour Mode chosen on the device, if one has been. */
-  start(): Told & { connection: Connection; taps?: boolean; open?: string | null; windows?: boolean; window?: { entrypoint: string; subject?: string; name?: string | null } | null; titleBar?: TitleBar; theme?: "light" | "dark" | null; unnative?: string | null }
+  start(): { state: State; taps?: boolean; open?: string | null; windows?: boolean; window?: { entrypoint: string; subject?: string; name?: string | null } | null; titleBar?: TitleBar; theme?: "light" | "dark" | null; unnative?: string | null }
   /** The files a server lists for `subject`, and the apps whose open apps are out of date. */
   apps(args: { subject: string | undefined }): { resources: Resource[]; outdated: string[] }
   request(args: { view: string; method: string; params: Record<string, unknown> }): unknown
@@ -209,14 +214,10 @@ export interface Events {
   open: string
   /** What a server says changed: an open app's key, or `client` for the files listed. */
   changed: string
-  /** Whether the client reaches its network, as it moves. */
-  connection: Connection
   /** The open apps loaded against a version of an app, or a build of the UI library, a server says is gone, as their addresses name them. */
   stale: string[]
   /** Where the device is with its network, as it moves. */
-  session: Told
-  /** Why a server refused this client for being on a version before its own, once one has. */
-  behind: string
+  state: State
   /** The Colour Mode chosen on this device, in any of its windows: `null` for as the device is. */
   theme: "light" | "dark" | null
   /** Where this window's title bar is over its page, as that changes. */

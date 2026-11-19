@@ -9,7 +9,7 @@
 // `launcher`, which a network has exactly one of. It's the one this page shows first, under every other, and it
 // opens the rest (`one/open`).
 import { address, asksToReload, haptic, invoke, listen, openLink, sandbox, setTheme } from "./host.js"
-/** @import { Context, Moved, Paged, Rect, Shown, Told, View } from "./host.js" */
+/** @import { Context, Moved, Paged, Rect, Shown, State, View } from "./host.js" */
 
 /// Reports what went wrong here to Telemetry, through the client, which keeps it until a server can be told: what
 /// this page showed its person, an error of its own or of an app's page, an app that never drew. Names, files and
@@ -765,6 +765,9 @@ function problemOf(now) {
   if (now.matches("native_failed")) return [`${baseName()} can't open its windows on this device.`, "Its graphics didn't start.", now.context.why, undefined]
   if (now.matches("update_failed")) return ["Couldn't update", now.context.why ?? "", undefined, "Try Again"]
 }
+/// What a computer's launcher says while its servers say it's behind them: Update Required, with Update.
+/** @type {[string, string, undefined, string]} */
+const UPDATE_REQUIRED = ["Update Required", "This version of the One App no longer works with your network.", undefined, "Update"]
 
 /// How tall the launcher's content last said it is (`ui/notifications/size-changed`), and how tall its panel was made.
 let asked = 0
@@ -816,18 +819,22 @@ function draw() {
   byId("empty-text").textContent = context.only ?? (appStore ? "" : "Ask your AI to install a Home Screen")
   byId("empty-text").hidden = !byId("empty-text").textContent
   byId("open-app-store").hidden = Boolean(context.only) || !appStore
-  // Being behind isn't a problem: it's an alert, as iOS's Update Required, which always has a way on. A computer's
-  // app updates itself, with Update; a phone's is updated by its network's owner, so there it has Try Again, and
-  // Update too where it came from TestFlight, which opens TestFlight.
+  // Behind, a computer's launcher says so where it shows everything else, as one problem box with Update, as its app
+  // updates itself (DESIGN.md). A phone's is an alert, as iOS's Update Required, which always has a way on: its app
+  // is updated by its network's owner, so there it has Try Again, and Update too where it came from TestFlight, which
+  // opens TestFlight.
   const required = /** @type {HTMLDialogElement} */ (byId("update-required"))
   byId("update-button").hidden = phone && !testflight
   byId("update-owner").hidden = !phone || testflight
   byId("try-again-button").hidden = !phone
   byId("try-again-button").toggleAttribute("disabled", now.matches("checking"))
   byId("try-again-button").ariaBusy = now.matches("checking") ? "true" : null
-  if (behind && !required.open) required.showModal()
-  if (!behind && required.open) required.close()
-  const problem = problemOf(now)
+  if (behind && phone && !required.open) required.showModal()
+  if (!(behind && phone) && required.open) required.close()
+  const problem = behind && !phone ? UPDATE_REQUIRED : problemOf(now)
+  byId("problem-button").dataset.variant = behind ? "default" : "outline"
+  byId("problem-button").toggleAttribute("disabled", now.matches("checking"))
+  byId("problem-button").ariaBusy = now.matches("checking") ? "true" : null
   byId("problem").hidden = !problem
   if (problem) {
     const [heading, text, details, action] = problem
@@ -1729,9 +1736,6 @@ async function hearTaps() {
   await invoke("plugin:notifications|set_click_listener_active", { active: true })
 }
 
-// A server refused this client for being behind it: it asks nothing more, and says only that it needs updating.
-listen("behind", () => on({ type: "tooOld" }))
-
 // A server says which open apps were loaded against a version that's gone.
 listen("stale", ({ payload: hosts }) => {
   for (const view of open.values()) if (hosts.includes(view.host)) page(view, { type: "stale" })
@@ -1842,13 +1846,13 @@ addEventListener("popstate", (event) => {
   on(event.hasUAVisualTransition ? { type: "popped", to: view, tapped } : { type: "show", to: view, back, icon, tapped })
 })
 
-listen("connection", ({ payload }) => on({ type: "connection", connection: payload }))
 // Back online, or back in front, its network is tried again now if it didn't answer.
 for (const [target, event] of /** @type {const} */ ([[window, "online"], [document, "visibilitychange"]]))
   target.addEventListener(event, () => document.visibilityState === "visible" && invoke("reconnect").catch(() => {}))
 // Its network is tried again now, rather than when it next would be.
 for (const retry of ["reconnect", "banner-retry"]) byId(retry).addEventListener("click", () => invoke("retry").catch(() => {}))
-for (const retry of ["problem-button", "try-again-button"]) byId(retry).addEventListener("click", () => on({ type: "retry" }))
+byId("try-again-button").addEventListener("click", () => on({ type: "retry" }))
+byId("problem-button").addEventListener("click", () => on({ type: shown.getSnapshot().matches("needs_updating") ? "update" : "retry" }))
 byId("update-button").addEventListener("click", () => on({ type: "update" }))
 // Nothing dismisses it: the window works again once it's updated, or its network talks with it again.
 byId("update-required").addEventListener("cancel", (event) => event.preventDefault())
@@ -1918,14 +1922,22 @@ function openAppStore() {
   show(view.key, performance.now())
 }
 
-/// Follows the device's session as it moves, each move heard once and in order: the page may hear one as it opens
-/// before `start` has said where it was.
+/// Follows where the device is with its network as the client says it (`State`), as it moves: each move of its
+/// session heard once and in order (the page may hear one as it opens before `start` has said where it was), whether
+/// its network answers, and its servers saying it's behind them, after which it asks them nothing more and says only
+/// that it needs updating. A client that's behind was answered, so it's online.
 let heard = -1
-/** @param {Told} told */
-function hear(told) {
-  if (told.seq <= heard) return
-  heard = told.seq
-  on({ type: "session", told })
+let heardBehind = false
+/** @param {State} state */
+function hear(state) {
+  const connection = state.connection === "behind" ? "online" : state.connection
+  if (connection !== shown.getSnapshot().context.connection) on({ type: "connection", connection })
+  if (state.seq > heard) {
+    heard = state.seq
+    on({ type: "session", told: state })
+  }
+  if (state.connection === "behind" && !heardBehind) on({ type: "tooOld" })
+  heardBehind = state.connection === "behind"
 }
 
 /// A window whose title bar is over the page (`titleBar`), as a Mac's with no title band is: the page keeps its
@@ -2008,12 +2020,11 @@ shown.start()
 // The window isn't in use once another window, or another app, has the keyboard: not one of its own frames, which
 // takes it from this page too, but leaves it the document's (`hasFocus`).
 addEventListener("blur", () => setTimeout(() => shown.send({ type: "unused" })))
-await listen("session", ({ payload }) => hear(payload))
+await listen("state", ({ payload }) => hear(payload))
 await listen("title_bar", ({ payload }) => titled(payload))
-// Where the window starts: where its device is with its network, as the client says it (`State`), and whether its
-// network answers (`Connection`), which it follows from then on. A phone's app hears a tap on a notification through
-// its push plugin.
-const { taps, testflight: fromTestflight, connection, open: link, windows: inWindows, runtimeVersion: drawn, window: ownWindow, titleBar: overTitleBar, theme: kept, unnative, ...told } = await invoke("start")
+// Where the window starts: where its device is with its network, as the client says it (`State`), which it follows
+// from then on. A phone's app hears a tap on a notification through its push plugin.
+const { taps, testflight: fromTestflight, state, open: link, windows: inWindows, runtimeVersion: drawn, window: ownWindow, titleBar: overTitleBar, theme: kept, unnative } = await invoke("start")
 phone = Boolean(taps)
 testflight = Boolean(fromTestflight)
 windows = Boolean(inWindows)
@@ -2022,9 +2033,8 @@ own = ownWindow ?? undefined
 if (own?.name) document.title = own.name
 if (overTitleBar) titled(overTitleBar)
 heardTheme(kept)
-on({ type: "connection", connection })
+hear(state)
 if (link) on({ type: "link", link })
-hear(told)
 if (unnative) on({ type: "unnative", why: unnative })
 invoke("visible", { onScreen: !document.hidden }).catch(() => {})
 if (taps) hearTaps()

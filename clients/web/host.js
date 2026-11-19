@@ -142,7 +142,7 @@ const MOVES = { connecting: ["online", "offline"], offline: ["reconnecting"], re
 function connected(next) {
   if (!MOVES[connection].includes(next)) return
   connection = next
-  emit("connection", next)
+  emit("state", state())
 }
 
 /// Says whether its network answered what was just asked, which leaves it offline until it's tried again
@@ -177,7 +177,7 @@ function tryAgain(now = false) {
       again = Math.min(again * 2, MOST)
       connected("reconnecting")
       if (apps) mcp("ping").catch(() => {})
-      else opening()
+      else opened()
     },
     now ? 0 : again * (0.5 + Math.random() / 2),
   )
@@ -305,28 +305,36 @@ function outdated(subject, resources) {
   return changed.map((app) => app + whose)
 }
 
-/// How many moves of its session this browser has told the page of.
+/// Where this browser is with its network, as the page hears it (`State` in core/client): its session, as its network's
+/// address last said it, with how many moves of it the page has been told of, and whether its network answers.
+/** @type {Omit<import("../app/page/host.js").Told, "seq">} */
+let session = { session: { state: "opening" } }
 let told = 0
-/// Asks the network's address whether this browser is signed in, as it opens: → where it is with its network, as the
-/// app's client says a device's session (`State` in core/client), and, while it's to sign in, where it does.
-/** @returns {Promise<Omit<import("../app/page/host.js").Told, "seq">>} */
+/** @returns {import("../app/page/host.js").State} */
+const state = () => ({ seq: told, ...session, connection })
+/// Moves its session to `now`, which the page hears.
+/** @param {Omit<import("../app/page/host.js").Told, "seq">} now */
+function moved(now) {
+  session = now
+  told += 1
+  emit("state", state())
+}
+/// Asks the network's address whether this browser is signed in, as it opens, and moves its session on by what it
+/// says: signed in here, or sent to sign in, with where it does. An address that doesn't answer leaves it opening.
 async function opened() {
   let response
   try {
     response = await fetch("/apps")
   } catch {
-    answered(false)
-    return { session: { state: "opening" } }
+    return answered(false)
   }
   if (response.status === 401) {
-    answered(true)
-    return { session: { state: "signIn" }, link: await signIn() }
+    moved({ session: { state: "signIn" }, link: await signIn() })
+    return answered(true)
   }
-  if (!response.ok) {
-    answered(false)
-    return { session: { state: "opening" } }
-  }
+  if (!response.ok) return answered(false)
   ;({ apps, device, key } = await response.json())
+  moved({ session: { state: "signedIn" } })
   answered(true)
   listTools().catch(() => {})
   // Its person may have turned its notifications on or off in the browser's settings since.
@@ -334,12 +342,6 @@ async function opened() {
     if (Notification.permission === "granted") registerPush()
     else pushed({ state: Notification.permission === "denied" ? "denied" : "notAsked" })
   }
-  return { session: { state: "signedIn" } }
-}
-/// Asks again, while it's still opening, and tells the page where it is now, if it's moved.
-async function opening() {
-  const now = await opened()
-  if (now.session.state !== "opening") emit("session", { seq: ++told, ...now })
 }
 
 /// Where this browser is with being woken by its notifications, as a phone's is (`Push` in
@@ -408,10 +410,10 @@ const commands = {
       sessionStorage.setItem(OPEN, linked)
       history.replaceState(null, "", location.pathname)
     }
-    const now = await opened()
-    const open = now.session.state === "signIn" ? null : sessionStorage.getItem(OPEN)
+    await opened()
+    const open = session.session.state === "signIn" ? null : sessionStorage.getItem(OPEN)
     if (open) sessionStorage.removeItem(OPEN)
-    return { seq: (told = 0), ...now, connection, ...(open && { open }) }
+    return { state: state(), ...(open && { open }) }
   },
   /// The files a server lists for `subject`, and the open apps that are out of date.
   async apps({ subject }) {
