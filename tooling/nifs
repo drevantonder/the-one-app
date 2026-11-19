@@ -117,7 +117,8 @@ for kind in "${kinds[@]}"; do
     crate=$(dirname "$file")
     if [[ $crate == */bin/* ]]; then
       program=$target/$triple/release/$(basename "$crate")
-      cp "$program" "$file" 2>/dev/null || cp "$program.exe" "$file"
+      [[ $triple == *windows* ]] && program+=.exe
+      cp "$program" "$file"
     else
       cp "$target/$triple/release/$(printf "$library" "$(basename "$crate")")" "$file"
     fi
