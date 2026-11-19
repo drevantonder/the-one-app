@@ -50,9 +50,9 @@ export const launcherKeys = (props: { move: (key: string) => boolean; open: () =
     event.preventDefault()
     props.open()
   } else if (event.key === "Escape") {
-    // With something typed, the field empties itself.
-    if (query()) return
-    if (props.library()) props.toggleLibrary()
+    // With something typed, it empties the search, wherever the keyboard is.
+    if (query()) setQuery("")
+    else if (props.library()) props.toggleLibrary()
     else void leave()
   } else if (!typed) {
     if (props.move(event.key)) event.preventDefault()
