@@ -221,6 +221,8 @@ impl Display {
     pub fn put_away(&self, window: &NativeWindow, _: bool) {
         java(|env, host| env.call_static_method(<&JClass>::from(host.as_obj()), "hide", "(Lapp/theone/renderer/NativeView;)V", &[JValue::Object(window.view.as_obj())]).map(drop));
     }
+    /// The rail's pull home, which Android's app windows have once NativeHost draws it (`rail`): none yet.
+    pub fn set_moved(&self, _: &NativeWindow, _: super::rail::Moved) {}
     /// A part of a panel's page as a window of its own: which a phone has none of.
     pub fn open_part(&self, _: &NativeWindow, _: usize) -> anyhow::Result<NativeWindow> {
         anyhow::bail!("a panel's parts aren't windows of their own here")

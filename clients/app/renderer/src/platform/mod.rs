@@ -27,6 +27,9 @@ mod mac;
 use mac::{Display, Handle, NativeWindow, appearance, clipboard, reduced_motion};
 #[cfg(target_os = "android")]
 mod android;
+/// The rail's home line over a phone's app windows, pulled home (`Windows::line`).
+#[cfg_attr(not(any(target_os = "android", target_os = "ios")), allow(dead_code))]
+pub(crate) mod rail;
 #[cfg(target_os = "android")]
 use android::{Display, Handle, NativeWindow, appearance, clipboard, reduced_motion};
 #[cfg(target_os = "ios")]
@@ -85,6 +88,9 @@ pub struct WindowOptions {
     /// The window under every other, as a phone's launcher (its Home Screen) is: the system's Back doesn't close it,
     /// and the apps' windows open over it. It's hidden while something else covers the screen (`Windows::hide`).
     pub root: bool,
+    /// Where on the screen it opened from, in points: its app's icon on the Home Screen, which pulled home by the
+    /// rail's line it goes back into (`Windows::line`).
+    pub icon: Option<crate::geometry::Bounds<f32>>,
 }
 
 /// Where a panel was dragged to on each screen, by the screen's name as its platform gives it (`Input::Placed`): its
@@ -223,6 +229,11 @@ struct Window {
     places: Option<std::path::PathBuf>,
     /// It's the root window (`WindowOptions::root`).
     root: bool,
+    /// Where it opened from (`WindowOptions::icon`), and the finger on its rail's line, while there's one, and the
+    /// move home it drives.
+    #[cfg_attr(not(any(target_os = "android", target_os = "ios")), allow(dead_code))]
+    icon: Option<crate::geometry::Bounds<f32>>,
+    pull: Option<rail::Pull>,
 }
 
 /// What a panel's file of places says, or nothing where it hasn't one yet.
@@ -269,6 +280,8 @@ impl Windows {
         self.next += 1;
         let native = self.display.open(id, &options)?;
         if let Ok(screen) = &mut screen {
+            // A phone's app window has the rail's home line; its Home Screen doesn't.
+            screen.rail = cfg!(target_os = "ios") && !options.root;
             screen.appearance = appearance();
             screen.reduced_motion = reduced_motion();
             if let Some(clipboard) = clipboard() {
@@ -305,6 +318,8 @@ impl Windows {
                 tag: options.tag,
                 places: options.places,
                 root: options.root,
+                icon: options.icon,
+                pull: None,
             },
         );
         Ok(id)
@@ -466,6 +481,89 @@ impl Windows {
         }
     }
 
+    /// A finger on window `id`, as its platform says, which the rail's line takes where it lands on it (`rail`): it
+    /// drives the window's move home from then on, and the first to land keeps it, another on the line meanwhile
+    /// ignored. → whether it's the line's, which the window's page doesn't hear.
+    #[cfg(any(target_os = "android", target_os = "ios"))]
+    pub(crate) fn line(&mut self, id: WindowId, finger: u64, at: crate::geometry::Point<f32>, phase: rail::Phase) -> bool {
+        let Some(window) = self.windows.get_mut(&id) else { return false };
+        let (room, icon) = (window.room(), window.icon);
+        let Ok(screen) = &mut window.screen else { return false };
+        let Some(pull) = window.pull.as_mut() else {
+            if phase != rail::Phase::Down || window.root || !screen.on_line(at) {
+                return false;
+            }
+            window.pull = Some(rail::Pull::new(finger, at));
+            return true;
+        };
+        if pull.finger() != finger {
+            return phase == rail::Phase::Down && screen.on_line(at);
+        }
+        match phase {
+            rail::Phase::Down => {}
+            rail::Phase::Moved => {
+                let was = pull.pulling();
+                match pull.moved(at, Size { width: room.width.0, height: room.height.0 }, icon, screen.reduced_motion) {
+                    rail::Pulled::Kept(Some(moved)) => {
+                        self.display.set_moved(&window.parts[0].native, moved);
+                        if !was {
+                            // Its line goes with it, and its page is the card's, which no other window shows behind.
+                            screen.pulled = true;
+                            window.dirty = true;
+                            for (_, other) in self.windows.iter().filter(|(other, under)| **other != id && !under.root) {
+                                self.display.set_moved(&other.parts[0].native, rail::Moved::HIDDEN);
+                            }
+                        }
+                    }
+                    rail::Pulled::Kept(None) => {}
+                    rail::Pulled::Dropped => window.pull = None,
+                }
+            }
+            rail::Phase::Up | rail::Phase::Cancelled => {
+                if !pull.let_go(phase == rail::Phase::Cancelled) {
+                    window.pull = None;
+                }
+            }
+        }
+        true
+    }
+
+    /// Steps each window's pull let go: home, every app's window closes; back, it's as it was.
+    #[cfg(any(target_os = "android", target_os = "ios"))]
+    fn spring(&mut self) {
+        let mut home = false;
+        let mut back = false;
+        for window in self.windows.values_mut() {
+            let (room, icon) = (window.room(), window.icon);
+            let reduced = window.screen.as_ref().is_ok_and(|screen| screen.reduced_motion);
+            let Some(pull) = window.pull.as_mut().filter(|pull| pull.springing()) else { continue };
+            let (moved, still) = pull.step(Size { width: room.width.0, height: room.height.0 }, icon, reduced);
+            match still {
+                Some(1.0) => home = true,
+                Some(_) => {
+                    window.pull = None;
+                    if let Ok(screen) = &mut window.screen {
+                        screen.pulled = false;
+                    }
+                    window.dirty = true;
+                    back = true;
+                    self.display.set_moved(&window.parts[0].native, rail::Moved::STILL);
+                }
+                None => self.display.set_moved(&window.parts[0].native, moved),
+            }
+        }
+        if home {
+            let apps: Vec<WindowId> = self.windows.iter().filter(|(_, window)| !window.root).map(|(id, _)| *id).collect();
+            for id in apps {
+                self.close(id);
+            }
+        } else if back {
+            for window in self.windows.values().filter(|window| !window.root && window.pull.is_none()) {
+                self.display.set_moved(&window.parts[0].native, rail::Moved::STILL);
+            }
+        }
+    }
+
     /// Whether panel `id` is showing.
     pub fn showing(&self, id: WindowId) -> bool {
         self.windows.get(&id).is_some_and(|window| window.visible)
@@ -500,7 +598,9 @@ impl Windows {
         let showing = self.windows.values().filter(|window| !window.shown).map(|window| SHOWN_WITHIN.saturating_sub(window.opened.elapsed()));
         // Where the display says nothing of its frames, the next is a 60 Hz display's.
         let frame = (self.framing() && !self.display.paced()).then(|| FRAME.saturating_sub(self.framed.elapsed()));
-        screens.chain(showing).chain(frame).min()
+        // A pull's spring steps at a 120 Hz display's frames.
+        let pulled = self.windows.values().any(|window| window.pull.as_ref().is_some_and(rail::Pull::springing)).then_some(std::time::Duration::from_micros(8_333));
+        screens.chain(showing).chain(frame).chain(pulled).min()
     }
 
     /// Whether a window on screen wants the display's next frame: something on it moves by itself, or its page asked
@@ -514,6 +614,8 @@ impl Windows {
         for (id, part, input) in self.display.events() {
             self.input(id, part, input);
         }
+        #[cfg(any(target_os = "android", target_os = "ios"))]
+        self.spring();
         // The display showed a frame: what moves on a window on screen is drawn again, and its page's
         // `requestAnimationFrame` runs, told when, as a browser's does once a frame.
         let framing = self.framing();

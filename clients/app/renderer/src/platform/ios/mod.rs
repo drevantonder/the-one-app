@@ -34,13 +34,13 @@ use objc2_ui_kit::{
     UIAccessibilityIsReduceMotionEnabled, UIAccessibilitySwitchControlStatusDidChangeNotification,
     UIAccessibilityVoiceOverStatusDidChangeNotification, UIApplication, UIPasteboard,
     UIKeyboardDidChangeFrameNotification, UIKeyboardDidHideNotification, UITraitCollection, UITraitEnvironment,
-    UIUserInterfaceStyle, UIView, UIViewController, UIWindow,
+    UIColor, UIUserInterfaceStyle, UIView, UIViewAutoresizing, UIViewController, UIWindow,
 };
 use tao::event::{Event, TouchPhase, WindowEvent};
 use tao::event_loop::EventLoopWindowTarget;
 use tao::platform::ios::{WindowBuilderExtIOS, WindowExtIOS};
 
-use super::{Input, Job, WindowId, WindowOptions, Windows};
+use super::{Input, Job, WindowId, WindowOptions, Windows, rail};
 use crate::Appearance;
 use crate::editing::{self, TextInput, TextInputClient};
 use crate::geometry::{DevicePixels, Edges, Pixels, Point, Size, point};
@@ -180,6 +180,21 @@ fn handle<T>(event: &Event<'_, T>) -> bool {
 
 /// Window `id` heard `event` from tao.
 fn heard(windows: &mut Windows, id: WindowId, event: &WindowEvent<'_>) {
+    // A finger on the rail's line is the line's, which the page doesn't hear.
+    if let WindowEvent::Touch(touch) = event
+        && let Some(window) = windows.windows.get(&id)
+    {
+        let at = touch.location.to_logical::<f32>(window.parts[0].native.scale() as f64);
+        let phase = match touch.phase {
+            TouchPhase::Started => rail::Phase::Down,
+            TouchPhase::Moved => rail::Phase::Moved,
+            TouchPhase::Ended => rail::Phase::Up,
+            _ => rail::Phase::Cancelled,
+        };
+        if windows.line(id, touch.id, point(at.x, at.y), phase) {
+            return;
+        }
+    }
     let Some(window) = windows.windows.get_mut(&id) else { return };
     window.dirty = true;
     let native = &window.parts[0].native;
@@ -306,7 +321,15 @@ impl Display {
         ui_view.setMultipleTouchEnabled(false);
         IDS.with(|ids| ids.borrow_mut().insert(window.id(), id));
         VIEWS.with(|views| views.borrow_mut().insert(view, id));
-        let layer = Retained::as_ptr(&ui_view.layer()) as usize;
+        // What it draws is a view of its own over the whole of tao's, which takes no fingers, so tao's still hears them:
+        // the rail's pull grows and moves it (`set_moved`), which tao, which lays its own view out to fill the window,
+        // would undo on its.
+        let card: Retained<Card> = unsafe { msg_send![Card::alloc(main), initWithFrame: ui_view.bounds()] };
+        card.setAutoresizingMask(UIViewAutoresizing::FlexibleWidth | UIViewAutoresizing::FlexibleHeight);
+        card.setUserInteractionEnabled(false);
+        ui_view.addSubview(&card);
+        let card = Retained::into_super(card);
+        let layer = Retained::as_ptr(&card.layer()) as usize;
         let controller = window.ui_view_controller().cast::<UIViewController>();
         let text_input = Plugin(unsafe { text_input_new(controller, id as *mut c_void, said) });
         let a11y = a11y::A11y::new(ui_view, text_input.0, id);
@@ -323,7 +346,7 @@ impl Display {
         } {
             unsafe { center.addObserver_selector_name_object(ui_view.as_ref(), sel!(changed:), Some(name), None) };
         }
-        Ok(NativeWindow { window, layer, behind, a11y, text_input })
+        Ok(NativeWindow { window, card, layer, behind, a11y, text_input })
     }
 
     pub fn close(&self, native: &NativeWindow) {
@@ -364,6 +387,20 @@ impl Display {
     /// Its title row over its page: none, where the system's status bar is above the page.
     pub fn set_title_row(&self, _: &NativeWindow, _: Option<crate::view::TitleRow>) {}
 
+    /// Draws window `native` as the rail's pull has it (`rail::Moved`): what it draws grown and moved by its
+    /// transform, as opaque as it says, with round corners, over tao's view, which is see-through, dimming the page
+    /// under it.
+    pub fn set_moved(&self, native: &NativeWindow, moved: rail::Moved) {
+        let scale = f64::from(moved.scale);
+        native.card.setTransform(CGAffineTransform { a: scale, b: 0.0, c: 0.0, d: scale, tx: f64::from(moved.x), ty: f64::from(moved.y) });
+        native.card.setAlpha(f64::from(moved.opacity));
+        let layer = native.card.layer();
+        layer.setCornerRadius(f64::from(moved.corner));
+        layer.setMasksToBounds(moved.corner > 0.0);
+        let dim = UIColor::colorWithWhite_alpha(0.0, f64::from(moved.dim));
+        native.view().setBackgroundColor(Some(&dim));
+    }
+
     /// Tells window `native`'s text input plugin what its screen says (`editing::TextInput`).
     pub fn text_input(&self, native: &NativeWindow, calls: &[TextInput]) {
         for (method, arguments) in calls.iter().map(TextInput::call) {
@@ -391,10 +428,12 @@ impl Display {
     }
 }
 
-/// A tao window, its view's layer, the CAMetalLayer wgpu draws into, the window that had the keyboard before it, and
-/// its screen reader's bridge, which reads its text input plugin's view, so goes first.
+/// A tao window, the view over its own that it draws in and that view's layer, the CAMetalLayer wgpu draws into, the
+/// window that had the keyboard before it, and its screen reader's bridge, which reads its text input plugin's view, so
+/// goes first.
 pub struct NativeWindow {
     window: tao::window::Window,
+    card: Retained<UIView>,
     layer: usize,
     behind: Option<Retained<UIWindow>>,
     a11y: a11y::A11y,
@@ -410,8 +449,8 @@ impl NativeWindow {
         Handle
     }
 
-    /// What wgpu draws into: its view's layer, a CAMetalLayer as its view's class says (`View`), as a Mac's window
-    /// gives it.
+    /// What wgpu draws into: the layer of the view it draws in, a CAMetalLayer as its class says (`Card`), as a Mac's
+    /// window gives it.
     pub fn surface(&self) -> anyhow::Result<wgpu::SurfaceTargetUnsafe> {
         anyhow::ensure!(self.layer != 0, "its view has no layer to draw into");
         Ok(wgpu::SurfaceTargetUnsafe::CoreAnimationLayer(self.layer as *mut std::ffi::c_void))
@@ -421,12 +460,15 @@ impl NativeWindow {
         unsafe { &*(self.window.ui_window() as *const UIWindow) }
     }
 
-    /// Moves its view `across` its window, which is see-through, so the app's own window shows where it's moved
+    fn view(&self) -> &UIView {
+        unsafe { &*(self.window.ui_view() as *const UIView) }
+    }
+
+    /// Moves what it draws `across` its window, which is see-through, so the app's own window shows where it's moved
     /// from. It's moved by its transform, which lays nothing out again and leaves the window's points, where tao says
     /// a finger is, where they are.
     fn slide(&self, across: f32) {
-        let view = unsafe { &*(self.window.ui_view() as *const UIView) };
-        view.setTransform(CGAffineTransform { a: 1.0, b: 0.0, c: 0.0, d: 1.0, tx: across as f64, ty: 0.0 });
+        self.card.setTransform(CGAffineTransform { a: 1.0, b: 0.0, c: 0.0, d: 1.0, tx: across as f64, ty: 0.0 });
     }
 
     pub fn has_surface(&self) -> bool {
@@ -474,6 +516,24 @@ impl NativeWindow {
 }
 
 define_class!(
+    // SAFETY: UIView has no subclassing requirements, and `Card` doesn't implement `Drop`.
+    #[unsafe(super(UIView))]
+    #[thread_kind = MainThreadOnly]
+    #[name = "OneNativeCard"]
+    struct Card;
+
+    unsafe impl NSObjectProtocol for Card {}
+
+    impl Card {
+        /// Its layer is a Metal layer, which the renderer draws into.
+        #[unsafe(method(layerClass))]
+        fn layer_class() -> &'static AnyClass {
+            CAMetalLayer::class()
+        }
+    }
+);
+
+define_class!(
     // SAFETY: UIView has no subclassing requirements, and `View` doesn't implement `Drop`. tao makes a subclass of it,
     // which hears fingers, its layout and its scale.
     #[unsafe(super(UIView))]
@@ -484,12 +544,6 @@ define_class!(
     unsafe impl NSObjectProtocol for View {}
 
     impl View {
-        /// Its layer is a Metal layer, which the renderer draws into.
-        #[unsafe(method(layerClass))]
-        fn layer_class() -> &'static AnyClass {
-            CAMetalLayer::class()
-        }
-
         /// The keyboard came, went or changed, or a screen reader started or stopped (`Display::open`): its window's
         /// insets are read again, and its tree given.
         #[unsafe(method(changed:))]

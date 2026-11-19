@@ -169,7 +169,7 @@ pub fn reopen(entrypoint: String, subject: Option<String>, link: String) -> Resu
 pub fn reopen(entrypoint: String, subject: Option<String>, link: String) -> Result<(), String> {
     forget(&entrypoint, subject.as_deref());
     crate::spawn(async move {
-        let _ = open_window(entrypoint, subject, link).await;
+        let _ = open_window(entrypoint, subject, link, None).await;
     });
     Ok(())
 }
@@ -182,7 +182,7 @@ pub fn forget(entrypoint: &str, subject: Option<&str>) {
 /// A phone opens an app in its page, as a frame, unless its page is of a version this program speaks: then
 /// its window is drawn natively over the page (`renderer`), or brought forward if it's open. → whether it was.
 #[cfg(mobile)]
-pub async fn open_window(entrypoint: String, subject: Option<String>, link: String) -> Result<bool, String> {
+pub async fn open_window(entrypoint: String, subject: Option<String>, link: String, icon: Option<renderer::geometry::Bounds<f32>>) -> Result<bool, String> {
     let key = format!("{}|{entrypoint}", subject.as_deref().unwrap_or_default());
     {
         let mut open = HOSTS.open.lock().expect("no host panics");
@@ -195,7 +195,7 @@ pub async fn open_window(entrypoint: String, subject: Option<String>, link: Stri
         }
         open.insert(key.clone(), Host { to: None, link: None });
     }
-    let opened = crate::native::open(&entrypoint, subject.as_deref(), &link).await;
+    let opened = crate::native::open(&entrypoint, subject.as_deref(), &link, icon).await;
     if opened != Ok(true) {
         HOSTS.open.lock().expect("no host panics").remove(&key);
     }
@@ -237,7 +237,7 @@ fn open(entrypoint: String, subject: Option<String>, link: String) -> Result<(),
     drop(open);
     crate::spawn(async move {
         let started = std::time::Instant::now();
-        let why = match crate::native::open(&entrypoint, subject.as_deref(), &link).await {
+        let why = match crate::native::open(&entrypoint, subject.as_deref(), &link, None).await {
             Ok(true) => return,
             Ok(false) => {
                 let why = "this One App doesn't draw its page: it needs a newer One App, or the app has no such page".to_owned();

@@ -640,12 +640,14 @@ fn tapped(tapped: Value) {
 /// Says how long a view took to open: an app from the tap on its icon to its content on screen, and the home
 /// screen from when its page began to load, which the time since the program started is beside. Telemetry is told.
 /// Opens an app's window natively over the page, where its page is of a version this program speaks
-/// (`hosts::open_window`). → whether it did; if not, the page opens it in a frame, as it needs a newer host. One that
-/// should have and didn't is an error, which the page shows as its problem.
+/// (`hosts::open_window`), from its icon at `icon` (x, y, width and height, in points), where it was opened from one.
+/// → whether it did; if not, the page opens it in a frame, as it needs a newer host. One that should have and didn't
+/// is an error, which the page shows as its problem.
 #[cfg(mobile)]
 #[tauri::command]
-async fn open_window(entrypoint: String, subject: Option<String>, link: String) -> Result<bool, String> {
-    hosts::open_window(entrypoint, subject, link).await
+async fn open_window(entrypoint: String, subject: Option<String>, link: String, icon: Option<[f32; 4]>) -> Result<bool, String> {
+    let icon = icon.map(|[x, y, width, height]| renderer::geometry::Bounds { origin: renderer::geometry::point(x, y), size: renderer::geometry::Size { width, height } });
+    hosts::open_window(entrypoint, subject, link, icon).await
 }
 
 /// Opens the launcher's page natively, as the phone's root window, under every app's (`native::computer::open`).

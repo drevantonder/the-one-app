@@ -184,7 +184,7 @@ export interface Commands {
   theme(args: { theme: "light" | "dark" | null }): void
   listen(): void
   /** Opens an app in a window of its own, at `link`, or brings it forward there if it's open. */
-  open_window(args: { entrypoint: string; subject: string | undefined; link: string }): void
+  open_window(args: { entrypoint: string; subject: string | undefined; link: string; icon?: [number, number, number, number] }): void
   /** Brings the Home Screen's window forward. */
   front(): void
   /** Makes a computer's launcher panel as tall as `height`, in points, or its tallest without, its top where it is. */

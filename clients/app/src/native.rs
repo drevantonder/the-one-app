@@ -22,7 +22,7 @@ use std::time::Instant;
 
 use data_encoding::BASE64;
 use serde_json::{Value, json};
-use renderer::geometry::{Pixels, Size};
+use renderer::geometry::{Bounds, Pixels, Size};
 use renderer::js::{Clock, Files, Thread};
 use renderer::platform::{Event, Native, WindowId, WindowOptions};
 use renderer::{Appearance, Screen};
@@ -48,9 +48,9 @@ enum Asked {
 /// Opens `entrypoint`'s window here if its page is of a version this program speaks, at `link`, for
 /// `subject`. → whether it did; if not, it opens in a web view, as it needs a newer host. One that should have and
 /// didn't is an error, which Telemetry hears too, for whoever opened it to show.
-pub(crate) async fn open(entrypoint: &str, subject: Option<&str>, link: &str) -> Result<bool, String> {
+pub(crate) async fn open(entrypoint: &str, subject: Option<&str>, link: &str, icon: Option<Bounds<f32>>) -> Result<bool, String> {
     let started = Instant::now();
-    window(started, entrypoint, subject, link, Kind::App).await.map_err(|error| {
+    window(started, entrypoint, subject, link, Kind::App(icon)).await.map_err(|error| {
         let why = format!("{error:#}");
         reported(entrypoint, started, &why);
         why
@@ -75,7 +75,7 @@ pub(crate) fn unopened(entrypoint: &str, why: String) {
     let name = entrypoint.split('/').next().unwrap_or_default().to_owned();
     let tag = json!({"entrypoint": entrypoint});
     native.run(move |windows| {
-        let options = WindowOptions { title: name.clone(), app_id: ::client::NAME.to_owned(), size: Size { width: Pixels(1024.0), height: Pixels(720.0) }, tag, panel: None, places: None, root: false };
+        let options = WindowOptions { title: name.clone(), app_id: ::client::NAME.to_owned(), size: Size { width: Pixels(1024.0), height: Pixels(720.0) }, tag, panel: None, places: None, root: false, icon: None };
         if let Err(error) = windows.open(options, Err(format!("{name} didn't open: {why}")), |_| {}) {
             eprintln!("{name}'s window didn't open: {error:#}");
         }
@@ -208,6 +208,7 @@ async fn unopened_launcher(why: String) -> Option<WindowId> {
                 panel: Some(computer::CORNER as f32),
                 places: crate::app().shell.home().ok().map(|home| home.join("launcher-places.json")),
                 root: false,
+                icon: None,
             };
             let _ = shown_to.send(windows.open(options, Err(said), |_| {}).ok());
         });
@@ -222,13 +223,18 @@ async fn unopened_launcher(why: String) -> Option<WindowId> {
 /// What a native window is: an app's own, or the launcher, a panel the system summons, which tells whoever opens it
 /// its window once it's open, or that it didn't.
 enum Kind {
-    App,
+    /// An app's, opened from where its icon is on the screen, if it was.
+    App(Option<Bounds<f32>>),
     Launcher(Option<tokio::sync::oneshot::Sender<Option<WindowId>>>),
 }
 
 async fn window(started: Instant, entrypoint: &str, subject: Option<&str>, link: &str, mut kind: Kind) -> anyhow::Result<bool> {
     let Some(Page { page, module, trusted, tables, name: listed, icon }) = probe(entrypoint, subject, false).await? else { return Ok(false) };
     let launcher = matches!(kind, Kind::Launcher(_));
+    let from = match kind {
+        Kind::App(from) => from,
+        Kind::Launcher(_) => None,
+    };
     let tokens_page = load(&tables)?;
     let native = Native::get()?;
     let window: Arc<OnceLock<WindowId>> = Arc::default();
@@ -267,6 +273,7 @@ async fn window(started: Instant, entrypoint: &str, subject: Option<&str>, link:
             places: (launcher && cfg!(desktop)).then(|| crate::app().shell.home().ok()).flatten().map(|home| home.join("launcher-places.json")),
             // A phone's launcher is its Home Screen, under every app's window.
             root: launcher && cfg!(mobile),
+            icon: from,
         };
         let app = entrypoint.split('/').next().unwrap_or_default().to_owned();
         let on_event = {

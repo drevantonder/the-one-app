@@ -9,7 +9,7 @@ use serde_json::{Value, json};
 
 use super::Screen;
 use crate::editing::{self, TextInput, TextInputClient};
-use crate::geometry::{Bounds, Point, point};
+use crate::geometry::{Bounds, Point, Size, point};
 use crate::inspect::Rect;
 use crate::tree::{Id, Kind};
 
@@ -171,6 +171,22 @@ impl Screen {
         }
         self.states.pressed = None;
         self.editing.selecting = None;
+    }
+
+    /// Where the rail's line is drawn, while it shows (`rail`): iOS's home indicator on its side, 4 by 64 points, in the
+    /// middle of the right edge, 6 in from what the safe area leaves, as the window page's is (client.css's `#line`).
+    /// It's away while something is open over the page (a sheet, a menu) and while it's pulled.
+    pub fn line(&self) -> Option<Bounds<f32>> {
+        if !self.rail || self.pulled || self.over {
+            return None;
+        }
+        Some(Bounds { origin: point(self.room.width - self.insets.right - 10.0, self.room.height / 2.0 - 32.0), size: Size { width: 4.0, height: 64.0 } })
+    }
+
+    /// Whether a finger landing at `at` takes the rail's line: a fingertip's width in from the edge, and taller than the
+    /// line, as the window page's is.
+    pub fn on_line(&self, at: Point<f32>) -> bool {
+        self.line().is_some() && at.x >= self.room.width - self.insets.right - 24.0 && (at.y - self.room.height / 2.0).abs() <= 56.0
     }
 
     /// The device's Back: what's open over its page shuts, as the page's Escape would (`notifications/one/back`).

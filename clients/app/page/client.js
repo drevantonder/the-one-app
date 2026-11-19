@@ -1680,14 +1680,16 @@ function go(link, subject, behind, from) {
     return true
   }
   // On a phone, an app opens natively, over this page, and one that needs a newer host in a frame here. One whose
-  // native window should have opened and didn't says why, as a frame that didn't open does (`notes`).
+  // native window should have opened and didn't says why, as a frame that didn't open does (`notes`). Its window is
+  // told where its icon is, which pulled home by its rail's line it goes back into.
   const at = key(page, subject)
   const needed = needs.get(page) ?? 0
   if (runtimeVersion && needed && needed <= runtimeVersion && !framed.has(at) && at !== baseKey()) {
     if (behind) return true
     unopened = undefined
     notes()
-    invoke("open_window", { entrypoint: page, subject, link: fragment ? `${page}#${fragment}` : page }).then(
+    const icon = from && [from.x, from.y, from.width, from.height]
+    invoke("open_window", { entrypoint: page, subject, link: fragment ? `${page}#${fragment}` : page, icon }).then(
       (opened) => opened || (framed.add(at), go(link, subject, behind, from)),
       (why) => {
         unopened = { entrypoint: page, link, subject, why: String(why) }

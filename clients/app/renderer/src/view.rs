@@ -196,6 +196,10 @@ pub struct Screen {
     pointer: Option<Point<f32>>,
     /// The pointer is a finger, as a phone's is, which pointer events say (`pointerType`).
     pub touch: bool,
+    /// Its window has the rail's home line over its page, as a phone's app window has (DESIGN.md, The rail), and
+    /// whether a finger's pulling it home, which takes the line with it.
+    pub rail: bool,
+    pub pulled: bool,
     /// The node a pointer's press went down on, which its moves and its end go to, wherever it goes.
     captured: Option<Id>,
     /// What takes the pointer, as it was last painted, in the order painted, the topmost last.
@@ -280,6 +284,8 @@ impl Screen {
             states: States::default(),
             pointer: None,
             touch: false,
+            rail: false,
+            pulled: false,
             captured: None,
             placed: Vec::new(),
             layers: HashMap::new(),
@@ -663,6 +669,7 @@ impl Screen {
             notice: self.notice.as_ref().map(|notice| (notice.text.clone(), notice.action.as_ref().map(|(label, _)| label.clone()))),
             breadcrumb: self.breadcrumb.as_ref().map(|crumb| (crumb.name.clone(), crumb.start)),
             panel: self.panel.map(|panel| (panel.corner, panel.fill)),
+            line: self.line(),
             fetched: self.fetched.values().filter(|fetched| fetched.is_some()).count(),
             decoded: self.pictures.decoded,
             frames: self.frames.iter().map(|(id, child)| (*id, child.screen.frame)).collect(),
@@ -726,6 +733,7 @@ impl Screen {
     /// over it. → what the painter found as it drew.
     fn draw(&mut self, plan: &Plan, text: &mut TextSystem, atlas: &Atlas, scene: &mut Scene) -> Drawing {
         let Plan { conditions, window, scale, now, caret, everything, ref changed, ref moving, ref below, ref layered, still } = *plan;
+        let line = self.line();
         let mut painter = Painter {
             tree: &self.tree,
             layout: &mut self.layout,
@@ -828,6 +836,11 @@ impl Screen {
             self.again = true;
         }
         self.chrome.action = self.notice.as_ref().and_then(|notice| painter.notice(notice, self.insets.top, self.chrome.action.as_ref().is_some_and(hovering)));
+        // The rail's line, over everything: dark over a light page and light over a dark one, as iOS's home
+        // indicator is, the page's own label colour.
+        if let Some(line) = line {
+            painter.quad(line, window, colour_token("label", conditions), Edges::default(), Hsla::default(), Corners::all(line.size.width / 2.0), false, 1.0);
+        }
         self.chrome.glass = painter.glass.take().unwrap_or_default();
         self.chrome.drag_regions = std::mem::take(&mut painter.drag_regions);
         self.chrome.kept_regions = std::mem::take(&mut painter.kept_regions);
@@ -1729,6 +1742,8 @@ struct Seen {
     notice: Option<(String, Option<String>)>,
     breadcrumb: Option<(String, f32)>,
     panel: Option<(f32, bool)>,
+    /// Where the rail's line shows, if it does.
+    line: Option<Bounds<f32>>,
     fetched: usize,
     decoded: u64,
     /// Each frame's page's frame, as it was drawn.
