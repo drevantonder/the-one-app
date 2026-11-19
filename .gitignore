@@ -22,4 +22,6 @@ __pycache__/
 /core/edge/presigner/secrets
 /apps/*/edge/secrets
 /apps/*/edge/files/
+# Where the web client was built before 19 Nov 2026, which checkouts made before then still have.
+/clients/web/dist/
 /www/app-directory/seed.sql
