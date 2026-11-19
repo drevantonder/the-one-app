@@ -2,25 +2,32 @@
 //! on a thread of its own, as `OneCore.CodeMode.Runner` starts it. It reaches nothing but its host: each tool call it
 //! makes is a message to the process that started it, `{:codemode, tag, {:call, json}}`, answered with `reply/2`, and
 //! it ends with `{:codemode, tag, {:done, ok, text}}`, or `{:codemode, tag, {:exit, why}}` where it couldn't finish.
-//! Its memory is limited, and `stop/1`, or its process no longer holding it, stops it at once, even in a loop that
-//! never waits: QuickJS checks as it runs (its interrupt handler).
+//! `stop/1`, or its process no longer holding it, stops it at once, even in a loop that never waits, and so does its
+//! holding more memory than it may: QuickJS checks both as it runs (its interrupt handler).
 //!
 //!     running ─done / failed─► ended (told)
+//!     running ─holds more than MEMORY─► out of memory (QuickJS interrupted, told so)
 //!     running ─stop / dropped─► stopped (QuickJS interrupted, nothing told)
 
 use std::cell::RefCell;
 use std::rc::Rc;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, mpsc};
 use std::time::{Duration, Instant};
 
+use rquickjs::allocator::{Allocator, RustAllocator};
 use rquickjs::module::WriteOptions;
 use rquickjs::{CatchResultExt, Context, Ctx, Function, Module, Object, Persistent, Promise, Runtime};
 use rustler::{Binary, Encoder, Env, OwnedEnv, ResourceArc};
 
 /// What the sandbox's JS may hold, and how deep it may call: a script's data is a tool's answers, which a run keeps
-/// to 60 KB of what it gives back (run.js), and the interpreter is a loop, not a recursion.
+/// to 60 KB of what it gives back (run.js), and the interpreter is a loop, not a recursion. It's stopped once it holds
+/// more than MEMORY, and what it asks for past REFUSED isn't given, as one string can pass MEMORY between QuickJS's
+/// checks. Stopped by QuickJS's own limit instead, it collected its garbage at nearly every allocation, for seconds,
+/// and the interpreter said only "null".
 const MEMORY: usize = 256 << 20;
+const REFUSED: usize = MEMORY + (32 << 20);
+const OUT_OF_MEMORY: &str = "OutOfMemory: the script held more than its 256 MB.";
 const STACK: usize = 4 << 20;
 const PRELUDE: &str = include_str!("prelude.js");
 
@@ -108,11 +115,14 @@ fn encode<'a>(env: Env<'a>, said: Said) -> rustler::Term<'a> {
 fn run(bundle: &[u8], script: &str, answers: mpsc::Receiver<String>, stop: &Arc<AtomicBool>, say: impl Fn(String) + 'static) -> Said {
     let logged = Rc::new(RefCell::new(Vec::<String>::new()));
     let failed = |why: String| Said::Exit(format!("{why}{}", logged.borrow().iter().map(|line| format!("\n{line}")).collect::<String>()));
-    let Ok(runtime) = Runtime::new() else { return failed("QuickJS didn't start.".into()) };
-    runtime.set_memory_limit(MEMORY);
+    let memory = Counted::default();
+    let held = memory.clone();
+    let Ok(runtime) = Runtime::new_with_alloc(memory.clone()) else { return failed("QuickJS didn't start.".into()) };
     runtime.set_max_stack_size(STACK);
     let interrupt = stop.clone();
-    runtime.set_interrupt_handler(Some(Box::new(move || interrupt.load(Ordering::Relaxed))));
+    runtime.set_interrupt_handler(Some(Box::new(move || interrupt.load(Ordering::Relaxed) || held.over(MEMORY))));
+    // Out of memory, however the script came to it, unless it caught that and finished anyway.
+    let failed = |why: String| if memory.out.load(Ordering::Relaxed) { Said::Done(false, OUT_OF_MEMORY.into()) } else { failed(why) };
     let Ok(context) = Context::full(&runtime) else { return failed("QuickJS didn't start.".into()) };
     let started = Instant::now();
 
@@ -153,7 +163,10 @@ fn run(bundle: &[u8], script: &str, answers: mpsc::Receiver<String>, stop: &Arc<
         let now = context.with(|ctx| -> Result<_, String> {
             let promise = promise.clone().restore(&ctx).map_err(|error| error.to_string())?;
             match promise.result::<Object>() {
-                Some(Ok(result)) => Ok(Err(Said::Done(js(&ctx, result.get("ok"))?, js(&ctx, result.get("text"))?))),
+                Some(Ok(result)) => match js(&ctx, result.get("ok"))? {
+                    false if memory.out.load(Ordering::Relaxed) => Ok(Err(Said::Done(false, OUT_OF_MEMORY.into()))),
+                    ok => Ok(Err(Said::Done(ok, js(&ctx, result.get("text"))?))),
+                },
                 Some(Err(error)) => Err(js::<()>(&ctx, Err(error)).unwrap_err()),
                 None => {
                     let host = host.clone().restore(&ctx).map_err(|error| error.to_string())?;
@@ -205,6 +218,79 @@ fn compiled(ctx: &Ctx, bundle: &[u8]) -> Result<Arc<Vec<u8>>, String> {
     let compiled = Arc::new(js(ctx, Module::declare(ctx.clone(), "run.js", bundle).and_then(|module| module.write(WriteOptions::default())))?);
     *kept = Some((bundle.to_vec(), compiled.clone()));
     Ok(compiled)
+}
+
+/// QuickJS's memory, from Rust's allocator, counted: what a run holds, and whether it ran out.
+#[derive(Clone, Default)]
+struct Counted {
+    held: Arc<AtomicUsize>,
+    out: Arc<AtomicBool>,
+}
+
+impl Counted {
+    /// Whether it holds more than `limit`, which is its running out.
+    fn over(&self, limit: usize) -> bool {
+        let over = self.held.load(Ordering::Relaxed) > limit;
+        if over {
+            self.out.store(true, Ordering::Relaxed);
+        }
+        over
+    }
+
+    /// Whether `more` fits under REFUSED, which isn't given where it doesn't.
+    fn room(&self, more: usize) -> bool {
+        !self.over(REFUSED.saturating_sub(more))
+    }
+
+    fn given(&self, ptr: *mut u8) -> *mut u8 {
+        if !ptr.is_null() {
+            // SAFETY: RustAllocator just gave it.
+            self.held.fetch_add(unsafe { RustAllocator::usable_size(ptr) }, Ordering::Relaxed);
+        }
+        ptr
+    }
+}
+
+// SAFETY: each call is RustAllocator's, which keeps every allocation's size with it.
+unsafe impl Allocator for Counted {
+    fn alloc(&mut self, size: usize) -> *mut u8 {
+        if !self.room(size) {
+            return std::ptr::null_mut();
+        }
+        self.given(RustAllocator.alloc(size))
+    }
+
+    fn calloc(&mut self, count: usize, size: usize) -> *mut u8 {
+        if !self.room(count.saturating_mul(size)) {
+            return std::ptr::null_mut();
+        }
+        self.given(RustAllocator.calloc(count, size))
+    }
+
+    unsafe fn dealloc(&mut self, ptr: *mut u8) {
+        self.held.fetch_sub(unsafe { RustAllocator::usable_size(ptr) }, Ordering::Relaxed);
+        unsafe { RustAllocator.dealloc(ptr) }
+    }
+
+    unsafe fn realloc(&mut self, ptr: *mut u8, new_size: usize) -> *mut u8 {
+        if ptr.is_null() {
+            return self.alloc(new_size);
+        }
+        let old = unsafe { RustAllocator::usable_size(ptr) };
+        if new_size > old && !self.room(new_size - old) {
+            return std::ptr::null_mut();
+        }
+        let moved = unsafe { RustAllocator.realloc(ptr, new_size) };
+        if !moved.is_null() {
+            self.held.fetch_sub(old, Ordering::Relaxed);
+            self.given(moved);
+        }
+        moved
+    }
+
+    unsafe fn usable_size(ptr: *mut u8) -> usize {
+        unsafe { RustAllocator::usable_size(ptr) }
+    }
 }
 
 /// What QuickJS gave, or what it threw, with its stack.

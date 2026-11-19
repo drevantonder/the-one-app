@@ -12,7 +12,7 @@ test = false
 doctest = false
 
 [dependencies]
-rquickjs = "0.14"
+rquickjs = { version = "0.14", features = ["allocator"] }
 rustler = "0.39"
 # The Web APIs OpenCode's interpreter and Effect use, as the app renderer has them (`clients/app/renderer`): AWS LLRT's,
 # from its repo at a release (v0.10.0-beta).
