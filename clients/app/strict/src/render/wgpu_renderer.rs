@@ -246,8 +246,11 @@ impl WgpuRenderer {
             .or_else(|| capabilities.formats.iter().copied().find(|format| !format.is_srgb()))
             .or_else(|| capabilities.formats.first().copied())
             .ok_or_else(|| anyhow::anyhow!("this GPU can't draw on this window"))?;
+        // A see-through window's frame holds colours premultiplied by their alpha, as blending them over the cleared
+        // frame leaves them, which is what system compositors take: DirectComposition and Vulkan are told so (their
+        // "PostMultiplied" would read it as straight), and Core Animation reads any layer that way.
         let alpha_mode = (if transparent {
-            &[wgpu::CompositeAlphaMode::PostMultiplied, wgpu::CompositeAlphaMode::PreMultiplied, wgpu::CompositeAlphaMode::Inherit][..]
+            &[wgpu::CompositeAlphaMode::PreMultiplied, wgpu::CompositeAlphaMode::PostMultiplied, wgpu::CompositeAlphaMode::Inherit][..]
         } else {
             &[wgpu::CompositeAlphaMode::Opaque, wgpu::CompositeAlphaMode::Inherit][..]
         })
