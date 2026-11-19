@@ -186,20 +186,53 @@ for (const [target, event] of /** @type {const} */ ([[window, "online"], [docume
   target.addEventListener(event, () => connection === "offline" && document.visibilityState === "visible" && tryAgain(true))
 
 /// What each open app was answered that only reads, by what it asked: it's answered that again until something
-/// changes, as the app's client answers a view (`Subscription` in `core/client`).
-/** @type {Map<string, Map<string, { method: string, params: Record<string, unknown>, response: unknown }>>} */
+/// changes, as the app's client answers a view (`Subscription` in `core/client`). A write marks matching entries
+/// stale (`invalidated > fetched`) and starts an independent background refetch (`fetching`) before resolving;
+/// subsequent reads join the in-flight refetch rather than returning stale pre-write data.
+/** @typedef {{ method: string, params: Record<string, unknown>, response: unknown, invalidated: number, fetched: number, fetching?: { generation: number, done: Promise<boolean> } }} CachedQuery */
+/** @type {Map<string, Map<string, CachedQuery>>} */
 const views = new Map()
 /** @param {string} view */
 const responses = (view) => /** @type {NonNullable<ReturnType<typeof views.get>>} */ (views.get(view) ?? views.set(view, new Map()).get(view))
 
+/** @param {string} view @param {CachedQuery} entry @param {number} generation @returns {Promise<boolean>} */
+function fetchEntry(view, entry, generation) {
+  const done = mcp(entry.method, entry.params).then(
+    (fresh) => {
+      if (entry.fetching?.generation === generation) entry.fetching = undefined
+      if (generation < entry.invalidated || generation < entry.fetched) return true
+      entry.fetched = generation
+      if (JSON.stringify(fresh) !== JSON.stringify(entry.response)) {
+        entry.response = fresh
+        emit("changed", view)
+      }
+      return true
+    },
+    () => {
+      // With no server answering, what was answered stays what's shown.
+      if (entry.fetching?.generation === generation) entry.fetching = undefined
+      return false
+    },
+  )
+  entry.fetching = { generation, done }
+  return done
+}
+
 /** @param {string} view @param {string} method @param {Record<string, unknown>} params @returns {Promise<any>} */
 async function read(view, method, params) {
   const request = JSON.stringify([method, params])
-  const cached = responses(view).get(request)
-  if (cached) return cached.response
-  const response = await mcp(method, params)
-  responses(view).set(request, { method, params, response })
-  return response
+  for (;;) {
+    const cached = responses(view).get(request)
+    if (!cached) {
+      const response = await mcp(method, params)
+      responses(view).set(request, { method, params, response, invalidated: 0, fetched: 0 })
+      return response
+    }
+    if (cached.fetched >= cached.invalidated) return cached.response
+    const done = cached.fetching?.generation === cached.invalidated ? cached.fetching.done : fetchEntry(view, cached, cached.invalidated)
+    const ok = await done
+    if (cached.fetched >= cached.invalidated || !ok) return cached.response
+  }
 }
 
 /// The tools a server lists, by which a call is known to only read: asked for as soon as this browser is signed in,
@@ -237,20 +270,23 @@ async function reads(view, method, params) {
   return (await (tools ?? listTools())).some((/** @type {{ name: string, annotations?: { readOnlyHint?: boolean } }} */ tool) => tool.name === params.name && tool.annotations?.readOnlyHint === true)
 }
 
-/// Asks again for everything `view` was answered, and tells it if any of it changed.
+/// Marks every cached read in `view` stale and starts an independent background refetch for each.
+/** @param {string} view */
+function invalidate(view) {
+  for (const cached of views.get(view)?.values() ?? []) {
+    cached.invalidated += 1
+    fetchEntry(view, cached, cached.invalidated)
+  }
+}
+
+/// Asks again for everything `view` was answered, and tells it as each answer changes.
 /** @param {string} view */
 async function refresh(view) {
-  let changed = false
   await Promise.all(
-    [...(views.get(view)?.values() ?? [])].map(async (cached) => {
-      // With no server answering, what was answered stays what's shown.
-      const fresh = await mcp(cached.method, cached.params).catch(() => cached.response)
-      if (JSON.stringify(fresh) === JSON.stringify(cached.response)) return
-      cached.response = fresh
-      changed = true
-    }),
+    [...(views.get(view)?.values() ?? [])].map((cached) =>
+      cached.fetched < cached.invalidated && cached.fetching ? cached.fetching.done : fetchEntry(view, cached, cached.invalidated),
+    ),
   )
-  if (changed) emit("changed", view)
 }
 
 /// The version of each app a server last listed, by the subject it's listed for.
@@ -385,10 +421,11 @@ const commands = {
   async request({ view, method, params }) {
     if (await reads(view, method, params)) return read(view, method, params)
     const response = await mcp(method, params)
-    // A server tells every client it's connected to that something changed. A browser isn't connected, so it asks
-    // again itself, for every open app.
-    tools = undefined
-    for (const view of views.keys()) refresh(view)
+    // A server tells every client it's connected to that something changed. A browser isn't connected, so it
+    // invalidates every open app's cached reads and refetches them in the background.
+    const name = typeof params?.name === "string" ? params.name : ""
+    if (method === "tools/call" && (!name.includes("_") || name.startsWith("apps_"))) tools = undefined
+    for (const open of views.keys()) invalidate(open)
     return response
   },
   refresh: ({ view }) => refresh(view),
