@@ -16,13 +16,15 @@ const ios = /iPhone|iPad|iPod/.test(navigator.userAgent) || (navigator.userAgent
 
 /** @param {string} check @param {boolean} worked @param {string} [note] */
 async function told(check, worked, note) {
-  const record = {
-    name: "one.client.web.check",
-    error: worked ? undefined : (note ?? "it didn't work"),
-    attributes: { "one.check": check, "one.check.worked": worked, "one.check.note": note, "one.check.seen": JSON.stringify(seen), "service.name": "web", "user_agent.name": browser, "os.type": ios ? "ios" : navigator.userAgent.includes("Mac OS X") ? "macos" : undefined, "user_agent.original": navigator.userAgent },
-    time: Date.now(),
-  }
-  const sent = await fetch("/mcp", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ jsonrpc: "2.0", method: "notifications/one/measured", params: { records: [record] } }) }).catch(() => undefined)
+  const os = ios ? "ios" : navigator.userAgent.includes("Mac OS X") ? "macos" : undefined
+  const edits = Object.keys(seen).filter((kind) => kind.startsWith("edit:")).map((kind) => kind.slice(5)).sort().join(",")
+  const read = Object.keys(seen).some((kind) => kind.startsWith("screen reader:"))
+  // A metric, 1 where it worked and 0 where it didn't, which Telemetry's `metric` reads by its attributes; and where it
+  // didn't, its note and what the frame saw, as an error, which its `errors` read.
+  const attributes = { "one.check": check, "user_agent.name": browser, "os.type": os, "one.check.edits": edits, "one.check.screen_reader": read, "service.name": "web" }
+  const records = [{ name: "one.client.web.check", value: worked ? 1 : 0, attributes, time: Date.now() }]
+  if (!worked) records.push({ name: "one.client.web.check", error: `${check} didn't work on ${browser} (${os}): ${note ?? "said so"}; seen ${JSON.stringify(seen)}`, attributes: { ...attributes, "user_agent.original": navigator.userAgent }, time: Date.now() })
+  const sent = await fetch("/mcp", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ jsonrpc: "2.0", method: "notifications/one/measured", params: { records } }) }).catch(() => undefined)
   said.textContent = sent?.ok ? `Sent “${check}”: ${worked ? "it worked" : "it didn't"}.` : sent?.status === 401 ? "Sign in to your network in this browser first, then come back." : "It couldn't be sent: is this device online?"
 }
 
