@@ -22,7 +22,7 @@ defmodule OneCore.Servers do
   looks at someone (`reload/1`) or invalidates it all (`invalidate/0`).
   """
   require Logger
-  alias OneCore.{Bucket, Builds, Cache, Edge, Hooks, Protocol, Server}
+  alias OneCore.{Bucket, Builds, Cache, Edge, Protocol, Server}
 
   @network "network"
 
@@ -55,20 +55,6 @@ defmodule OneCore.Servers do
   def here?(owner) do
     key = Server.key() || elem(OneCore.Iroh.key(Server.key_file()), 1)
     Enum.any?(acts_for(key), &(&1 in [owner, @network]))
-  end
-
-  @doc "What `OneCore.Apps.servers/1` is, as an app that doesn't require it yet calls it."
-  def running(@network), do: listed(@network)
-
-  def running(owner) do
-    own = Enum.filter(listed(owner), &(owner in members(&1)))
-    Enum.uniq(own ++ if(owns_network?(owner), do: listed(@network), else: []))
-  end
-
-  # Asked of the network's apps by this server, as nobody, as everything about the network is.
-  defp owns_network?(owner) do
-    about = %{"who" => owner, "relation" => "owner", "artifact" => @network}
-    Hooks.validate("reach", about, {nil, @network}) == :ok
   end
 
   @doc """
