@@ -446,7 +446,7 @@ fn start(entrypoint: &str, subject: Option<&str>, link: &str, launcher: bool, pl
         let file = answer.recv()?.map_err(|error| anyhow::anyhow!("{error}"))?;
         Ok(String::from_utf8(file)?)
     });
-    let js = Thread::start(module, files, Some(cache), Clock::real());
+    let js = Thread::start(module, files, Some(cache), Clock::real(), cfg!(mobile));
     Ok(Started { js, to, asked, page })
 }
 

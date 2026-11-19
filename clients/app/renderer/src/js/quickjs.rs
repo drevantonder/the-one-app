@@ -68,7 +68,7 @@ impl Sandbox {
     /// Starts the module at `page`, which a page's `<script type="module">` names, running it until it waits on
     /// something. It and its imports are read by `files`, each compiled once and kept in `cache`.
     /// QuickJS stops what it runs, as an uncatchable error, once `stop` is set: its window closed.
-    fn start(page: &Url, files: Files, cache: Option<PathBuf>, clock: Clock, stop: Arc<AtomicBool>) -> anyhow::Result<Sandbox> {
+    fn start(page: &Url, files: Files, cache: Option<PathBuf>, clock: Clock, touch: bool, stop: Arc<AtomicBool>) -> anyhow::Result<Sandbox> {
         let runtime = AsyncRuntime::new()?;
         let rejected: Rc<RefCell<Vec<(Persistent<Value<'static>>, Persistent<Value<'static>>)>>> = Rc::default();
         let to = rejected.clone();
@@ -109,7 +109,7 @@ impl Sandbox {
             let locale = serde_json::to_string(&clock.locale())?;
             // How many fingers its screen takes at once, as a browser says it (`navigator.maxTouchPoints`): a phone's
             // five, as iOS's and Android's browsers say, a computer's none.
-            let touch_points = if cfg!(any(target_os = "android", target_os = "ios")) { 5 } else { 0 };
+            let touch_points = if touch { 5 } else { 0 };
             let host: rquickjs::Object = run(&ctx, ctx.eval(format!("const FIXED = {fixed}, LOCALE = {locale}, TOUCH_POINTS = {touch_points}, shim = (() => {{\n{EVENT_TARGET_SHIM}\n}})();\n{PRELUDE}")))?;
             run(&ctx, crate::intl::init(&ctx, &clock.time_zone()))?;
             run(&ctx, ctx.eval::<(), _>(INTL))?;
@@ -300,8 +300,8 @@ const IDLE: Duration = Duration::from_millis(250);
 const THREAD_STACK: usize = STACK * 4;
 
 impl Thread {
-    /// Starts the module at `page` on a thread of its own, as `Sandbox::start` says.
-    pub fn start(page: &Url, files: Files, cache: Option<PathBuf>, clock: Clock) -> anyhow::Result<Thread> {
+    /// Starts the module at `page` on a thread of its own, as `Sandbox::start` says, for a finger where `touch`.
+    pub fn start(page: &Url, files: Files, cache: Option<PathBuf>, clock: Clock, touch: bool) -> anyhow::Result<Thread> {
         let (calls, queue) = mpsc::channel::<Call>();
         let shared = Arc::new(Shared::default());
         let (page, on, time) = (page.clone(), shared.clone(), clock.clone());
@@ -314,7 +314,7 @@ impl Thread {
                 }
             }
             let _ended = Ended(on.clone());
-            let sandbox = match Sandbox::start(&page, files, cache, time.clone(), on.stop.clone()) {
+            let sandbox = match Sandbox::start(&page, files, cache, time.clone(), touch, on.stop.clone()) {
                 Ok(sandbox) => sandbox,
                 Err(error) => return on.post(|posts| posts.started = Some(Err(format!("{error:#}")))),
             };

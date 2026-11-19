@@ -827,30 +827,27 @@ impl Screen {
         painter.layout.place_fixed(painter.tree);
         let available = taffy::geometry::Size { width: AvailableSpace::Definite(window.size.width), height: AvailableSpace::Definite(window.size.height) };
         let Painter { layout, text, .. } = &mut painter;
-        let measured = layout.taffy.compute_layout_with_measure(root, available, |input, _, leaf, _| {
-            // What has nothing to measure is as big as its style says, or nothing.
-            let Some(Leaf { measure: Some(measure), .. }) = leaf else {
-                return taffy::LayoutOutput::from_outer_size(taffy::geometry::Size {
-                    width: input.known_dimensions.width.unwrap_or(0.0),
-                    height: input.known_dimensions.height.unwrap_or(0.0),
-                });
-            };
-            let width = input.known_dimensions.width.or(match input.available_space.width {
-                AvailableSpace::Definite(width) => Some(width),
-                AvailableSpace::MinContent => Some(0.0),
-                AvailableSpace::MaxContent => None,
-            });
-            let size = match measure {
-                Measure::Text { words, runs, text: style, lines } => text.paragraph(words, &style.style, runs, width.filter(|_| style.wrap), *lines).size(),
-                Measure::Input { words, text: style, multiline } => {
-                    let paragraph = text.paragraph(words, &style.style, &[], multiline.then_some(width).flatten(), None);
-                    Size { width: if *multiline { paragraph.size().width } else { 0.0 }, height: paragraph.size().height }
-                }
-                Measure::Frame { height } => Size { width: width.unwrap_or(300.0), height: height.unwrap_or(150.0) },
-            };
-            taffy::LayoutOutput::from_outer_size(taffy::geometry::Size {
-                width: input.known_dimensions.width.unwrap_or(size.width.ceil()),
-                height: input.known_dimensions.height.unwrap_or(size.height),
+        let measured = layout.taffy.compute_layout_with_measure(root, available, |input, _, leaf, style| {
+            // A node with nothing under it is its style's size, or its padding and border around what it measures (a
+            // text's words, an input's lines), as CSS has them; `space` is the room for that content, inside them.
+            taffy::compute_leaf_layout(input, style, |_, _| 0.0, |_, space| {
+                let Some(Leaf { measure: Some(measure), .. }) = leaf else {
+                    return taffy::geometry::Size::ZERO;
+                };
+                let width = match space.width {
+                    AvailableSpace::Definite(width) => Some(width),
+                    AvailableSpace::MinContent => Some(0.0),
+                    AvailableSpace::MaxContent => None,
+                };
+                let size = match measure {
+                    Measure::Text { words, runs, text: style, lines } => text.paragraph(words, &style.style, runs, width.filter(|_| style.wrap), *lines).size(),
+                    Measure::Input { words, text: style, multiline } => {
+                        let paragraph = text.paragraph(words, &style.style, &[], multiline.then_some(width).flatten(), None);
+                        Size { width: if *multiline { paragraph.size().width } else { 0.0 }, height: paragraph.size().height }
+                    }
+                    Measure::Frame { height } => Size { width: width.unwrap_or(300.0), height: height.unwrap_or(150.0) },
+                };
+                taffy::geometry::Size { width: size.width.ceil(), height: size.height }
             })
         });
         match measured {

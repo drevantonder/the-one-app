@@ -93,7 +93,7 @@ fn main() -> anyhow::Result<()> {
 
     let started = std::time::Instant::now();
     let mut text = TextSystem::new(renderer::FONT, renderer::fonts()?, false);
-    let js = Thread::start(&page, files, None, Clock::fixed())?;
+    let js = Thread::start(&page, files, None, Clock::fixed(), touch)?;
     // What the page asks its client, answered from `answers`, as record.js answers it.
     let asked: renderer::Asked = Box::new(move |message, _| {
         let id = message.get("id")?.clone();
