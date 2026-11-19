@@ -1298,15 +1298,45 @@ fn vs_poly_sprite(@builtin(vertex_index) vertex_id: u32, @builtin(instance_index
     return out;
 }
 
+// What tile `tile` shows at `uv` (in its atlas texture, 0 to 1), filtered as a mipmapped texture is, trilinear: its
+// texels as they are where it's drawn as large as they are or larger, and where it's drawn smaller, blended toward its
+// next mip level, each texel of which is the average of four of its own, which one bilinear tap where the four meet
+// gives. A picture is decoded at most twice as large as it's shown (`view::paint::decode`), so that level is all it
+// needs; with one tap of its own, it'd skip texels, and a picture drawn smaller would shimmer as it moved.
+fn sample_mipmapped(uv: vec2<f32>, tile: AtlasTile) -> vec4<f32> {
+    let atlas_size = vec2<f32>(textureDimensions(t_sprite, 0));
+    let texel = uv * atlas_size;
+    let toward = saturate(log2(max(length(dpdx(texel)), length(dpdy(texel)))));
+    let level0 = textureSampleLevel(t_sprite, s_sprite, uv, 0.0);
+    // Drawn at its size, give or take the float's rounding, it's its texels.
+    if (toward < 1.0 / 256.0) {
+        return level0;
+    }
+    // Its texels are paired from the tile's first inside its clear pixel all round (`pictures::tiled`), and each tap
+    // stays where its four texels are the tile's.
+    let first = vec2<f32>(tile.bounds.origin) + 1.0;
+    let last = vec2<f32>(tile.bounds.origin + tile.bounds.size) - 1.0;
+    let at = (texel - first) / 2.0 - 0.5;
+    let base = floor(at);
+    let part = at - base;
+    let corner = first + 2.0 * base + 1.0;
+    let t00 = textureSampleLevel(t_sprite, s_sprite, clamp(corner, first, last) / atlas_size, 0.0);
+    let t10 = textureSampleLevel(t_sprite, s_sprite, clamp(corner + vec2<f32>(2.0, 0.0), first, last) / atlas_size, 0.0);
+    let t01 = textureSampleLevel(t_sprite, s_sprite, clamp(corner + vec2<f32>(0.0, 2.0), first, last) / atlas_size, 0.0);
+    let t11 = textureSampleLevel(t_sprite, s_sprite, clamp(corner + 2.0, first, last) / atlas_size, 0.0);
+    let level1 = mix(mix(t00, t10, part.x), mix(t01, t11, part.x), part.y);
+    return mix(level0, level1, toward);
+}
+
 @fragment
 fn fs_poly_sprite(input: PolySpriteVarying) -> @location(0) vec4<f32> {
-    let sample = textureSample(t_sprite, s_sprite, input.tile_position);
+    let sprite = b_poly_sprites[input.sprite_id];
+    let sample = sample_mipmapped(input.tile_position, sprite.tile);
     // Alpha clip after using the derivatives.
     if (any(input.clip_distances < vec4<f32>(0.0))) {
         return vec4<f32>(0.0);
     }
 
-    let sprite = b_poly_sprites[input.sprite_id];
     let distance = quad_sdf(input.local, sprite.bounds, sprite.corner_radii);
 
     var color = sample;
