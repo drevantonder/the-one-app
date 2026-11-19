@@ -269,65 +269,55 @@ const pageMachine = setup({
 })
 
 /// What each of a move's two frames does over it, as keyframes from its start to its end, and how long it takes: an
-/// app opened from its icon or widget (`icon`) grows out of it as an iPhone's does, cut to its shape and corners and
-/// showing itself over it in its first moments, as the launcher sinks back under it; going back, it shrinks back into
-/// it as the launcher comes forward, and is gone in its last moments. With no icon, it slides in over what was there
-/// from the end of the line, which moves back a quarter, and going back, back out. Pulled home by the rail's line
-/// (`pulled`), as iOS's swipe home is, its first part (to `HELD`) follows the finger in, its right edge under it,
-/// shrinking to a card with rounded corners over the Home Screen, dimmed; let go, it goes on into its icon, or with none,
-/// shrinks away. For whoever asked for less motion, what comes fades in over what was there. The one drawn over the
-/// other is `upper`.
-/** @param {View} leaving @param {View} coming @param {boolean} back @param {Rect} [icon] @param {boolean} [pulled] @returns {{ upper: View, ms: number, parts: [View, Keyframe[]][] }} */
+/// app opened from its icon or widget (`icon`) grows out of it as an iPhone's does, showing itself over it in its first
+/// moments, as the launcher sinks back under it; going back, it shrinks back into it as the launcher comes forward, and
+/// fades into it as it gets there. With no icon, it slides in over what was there from the end of the line, which moves
+/// back a quarter, and going back, back out. Pulled home by the rail's line (`pulled`), as iOS's swipe home is, its
+/// first part (to `HELD`) follows the finger in, its right edge under it, shrinking to a card over the Home Screen,
+/// dimmed; let go, it goes on into its icon, or with none, shrinks away. For whoever asked for less motion, what comes
+/// fades in over what was there. The one drawn over the other is `upper`, with `corner` its corners' radius while it
+/// moves: a phone's, which its screen's own hide while it fills it, as an iPhone's app is. What moves is only moved,
+/// grown and faded, which a browser draws without drawing the app again, as Core Animation does a layer: a clip that
+/// changed as it moved had WebKit draw the app again each frame, half of them late.
+/** @param {View} leaving @param {View} coming @param {boolean} back @param {Rect} [icon] @param {boolean} [pulled] @returns {{ upper: View, ms: number, corner?: number, parts: [View, Keyframe[]][] }} */
 function moves(leaving, coming, back, icon, pulled) {
   const style = getComputedStyle(document.documentElement)
   if (matchMedia("(prefers-reduced-motion: reduce)").matches) return { upper: coming, ms: parseFloat(style.getPropertyValue("--move-settle")), parts: [[coming, [{ opacity: 0 }, { opacity: 1 }]]] }
   const [app, under] = back ? [leaving, coming] : [coming, leaving]
+  const { x, y, width, height } = app.frame.getBoundingClientRect()
+  // The app in its icon: its middle on the icon's, as large as fits in it.
+  const small = icon && {
+    translate: `${icon.x + icon.width / 2 - (x + width / 2)}px ${icon.y + icon.height / 2 - (y + height / 2)}px`,
+    scale: `${Math.min(icon.width / width, icon.height / height)}`,
+  }
+  const whole = { scale: "1", translate: "0px 0px" }
   if (pulled) {
-    const { x, y, width, height } = app.frame.getBoundingClientRect()
-    // The card at `HELD`: its right edge as far in as the finger, `HELD` of the width, and its corners a phone's.
-    const held = { scale: `${CARD}`, translate: `${(width / 2) * (1 - CARD) - HELD * width}px 0px`, clipPath: `inset(0px 0px round ${CORNER / CARD}px)`, offset: HELD }
-    let gone = { scale: "0.5", translate: `${-0.3 * width}px 0px`, clipPath: `inset(0px 0px round ${CORNER / 0.5}px)` }
-    if (icon) {
-      const scale = Math.max(icon.width / width, icon.height / height)
-      const radius = icon.radius ?? Math.min(icon.width, icon.height) * 0.225
-      gone = {
-        scale: `${scale}`,
-        translate: `${icon.x + icon.width / 2 - (x + width / 2)}px ${icon.y + icon.height / 2 - (y + height / 2)}px`,
-        clipPath: `inset(${(height - icon.height / scale) / 2}px ${(width - icon.width / scale) / 2}px round ${radius / scale}px)`,
-      }
-    }
+    // The card at `HELD`: its right edge as far in as the finger, `HELD` of the width.
+    const held = { scale: `${CARD}`, translate: `${(width / 2) * (1 - CARD) - HELD * width}px 0px`, offset: HELD }
+    const gone = small ?? { scale: "0.5", translate: `${-0.3 * width}px 0px` }
     return {
       upper: app,
       ms: 400,
+      corner: CORNER / CARD,
       parts: [
-        [app, [{ scale: "1", translate: "0px 0px", clipPath: "inset(0px 0px round 0px)" }, held, gone]],
-        [app, [{ opacity: 1 }, { opacity: 1, offset: icon ? 0.97 : HELD }, { opacity: 0 }]],
+        [app, [whole, held, gone]],
+        [app, [{ opacity: 1 }, { opacity: 1, offset: small ? HELD + (1 - HELD) * FADES : HELD }, { opacity: 0 }]],
         // The Home Screen behind it dimmed at first, as iOS's is, so the card stands out from it: dimmed, not sunk,
         // so no undimmed edge shows round it.
         [under, [{ filter: "brightness(0.7)" }, { filter: "brightness(1)" }]],
       ],
     }
   }
-  if (icon) {
-    // The app's middle on the icon's, as small as covers it, cut to its shape, and its corners the icon's: an
-    // icon's are 22.5 % of it where it doesn't say.
-    const { x, y, width, height } = app.frame.getBoundingClientRect()
-    const scale = Math.max(icon.width / width, icon.height / height)
-    const radius = icon.radius ?? Math.min(icon.width, icon.height) * 0.225
-    const small = {
-      translate: `${icon.x + icon.width / 2 - (x + width / 2)}px ${icon.y + icon.height / 2 - (y + height / 2)}px`,
-      scale: `${scale}`,
-      clipPath: `inset(${(height - icon.height / scale) / 2}px ${(width - icon.width / scale) / 2}px round ${radius / scale}px)`,
-    }
-    const whole = { translate: "0px 0px", scale: "1", clipPath: "inset(0px 0px round 0px)" }
+  if (small) {
     const sunk = { scale: "0.92" }
     const up = { scale: "1" }
     return {
       upper: app,
       ms: 400,
+      corner: CORNER / CARD,
       parts: back
-        ? [[app, [whole, small]], [app, [{ opacity: 1 }, { opacity: 1, offset: 0.97 }, { opacity: 0 }]], [under, [sunk, up]]]
-        : [[app, [small, whole]], [app, [{ opacity: 0 }, { opacity: 1, offset: 0.85 }, { opacity: 1 }]], [under, [up, sunk]]],
+        ? [[app, [whole, small]], [app, [{ opacity: 1 }, { opacity: 1, offset: FADES }, { opacity: 0 }]], [under, [sunk, up]]]
+        : [[app, [small, whole]], [app, [{ opacity: 0 }, { opacity: 1, offset: 1 - FADES }, { opacity: 1 }]], [under, [up, sunk]]],
     }
   }
   const end = style.direction === "rtl" ? -1 : 1
@@ -343,6 +333,8 @@ function moves(leaving, coming, back, icon, pulled) {
 const HELD = 0.4
 const CARD = 0.8
 const CORNER = 40
+/// How far into its icon an app has gone as it starts to fade into it, and out of it as it has shown itself.
+const FADES = 0.75
 
 /// Takes `body.p` to `body.target` as a critically damped spring, as the Home Screen's pages have
 /// (apps/home-screen/client/pager.ts), from as fast as it's going (`velocity`), drawing each frame (`seek`) until it's
@@ -435,9 +427,10 @@ const moveMachine = setup({
       const grabbed = () => (pulled ? { to: showing(null), icon: depth === 1 ? stack[1].from : undefined } : { to: showing(stack[depth - 1].key), icon: stack[depth].from })
       const show = /** @type {Extract<Shown, { type: "show" }>} */ (event.type === "grab" ? { ...grabbed(), back: true, tapped: performance.now() } : event)
       const from = /** @type {View} */ (front)
-      const { upper, ms, parts } = moves(from, show.to, show.back, show.icon, pulled)
+      const { upper, ms, corner, parts } = moves(from, show.to, show.back, show.icon, pulled)
       show.to.frame.inert = false
       upper.frame.dataset.move = ""
+      upper.frame.style.borderRadius = corner ? `${corner}px` : ""
       const animations = parts.map(([view, keyframes]) => {
         const part = view.frame.animate(keyframes, { duration: 1000, fill: "both" })
         part.pause()
@@ -459,7 +452,10 @@ const moveMachine = setup({
       const move = context.move
       const to = event.type === "popped" ? event.to : move && toward(move)
       for (const part of move?.parts ?? []) part.cancel()
-      if (move) delete move.upper.frame.dataset.move
+      if (move) {
+        delete move.upper.frame.dataset.move
+        move.upper.frame.style.borderRadius = ""
+      }
       if (to) layer(to.key)
       notes()
       return { move: undefined }
