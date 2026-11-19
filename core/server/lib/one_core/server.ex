@@ -11,6 +11,8 @@ defmodule OneCore.Server do
   use GenServer
   require Logger
   alias OneCore.{Builds, Edge, Iroh, Protocol, Servers}
+  alias OpenTelemetryAPIExperimental.Histogram
+  require Histogram
   alias OneCore.Call.State
 
   @doc """
@@ -282,7 +284,7 @@ defmodule OneCore.Server do
 
   defp connect(nif, endpoint, server, request) do
     with {:ok, address} <- Servers.address(server),
-         :ok <- await(&nif.connect(endpoint, address, self(), &1)) do
+         :connected <- connected(server, fn -> await(&nif.connect(endpoint, address, self(), &1)) end) do
       case request.() do
         :closed -> :unreachable
         {:gone, _address} -> :unreachable
@@ -290,6 +292,27 @@ defmodule OneCore.Server do
       end
     else
       _ -> :unreachable
+    end
+  end
+
+  # Connects, and says how: how long it took and the path it's on (Telemetry's `one.server.connect.duration`), and
+  # where it didn't, why and how this server reached its network's relay then, which is the way a server that can't
+  # be reached directly is reached.
+  defp connected(server, connect) do
+    began = System.monotonic_time(:millisecond)
+    connected = connect.()
+    took = System.monotonic_time(:millisecond) - began
+    to = Servers.name(server) || String.slice(server, 0, 8)
+
+    case connected do
+      {:connected, path} ->
+        Histogram.record(:"one.server.connect.duration", took, %{"one.server" => to, "one.path" => to_string(path)})
+        :connected
+
+      {:unreachable, why, relay} ->
+        Histogram.record(:"one.server.connect.duration", took, %{"one.server" => to, "one.path" => "unreachable"})
+        Logger.warning("Couldn't reach #{to} in #{took} ms: #{why}. This server's relay: #{relay}")
+        :unreachable
     end
   end
 

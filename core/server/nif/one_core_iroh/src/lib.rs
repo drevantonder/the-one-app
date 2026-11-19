@@ -23,7 +23,7 @@ use tokio::time::{Instant, MissedTickBehavior, interval_at};
 mod outside;
 
 mod atoms {
-    rustler::atoms! { ok, ask, closed, gone, stopped, unreachable }
+    rustler::atoms! { ok, ask, closed, connected, gone, stopped, unreachable }
 }
 
 static RUNTIME: LazyLock<Runtime> = LazyLock::new(|| Runtime::new().expect("tokio starts"));
@@ -85,7 +85,7 @@ impl Watcher {
     async fn reached(&self, endpoint: &Endpoint) -> Option<Arc<client::Reached>> {
         let mut open = self.open.lock().await;
         if !open.as_ref().is_some_and(|open| open.open()) {
-            *open = client::Reached::connect(endpoint, self.address.clone(), client::CONNECT).await.map(Arc::new);
+            *open = client::Reached::connect(endpoint, self.address.clone(), client::CONNECT).await.ok().map(Arc::new);
         }
         open.clone()
     }
@@ -357,7 +357,7 @@ fn notify(reached: ResourceArc<Reached>, message: Binary) -> Atom {
             {
                 return;
             }
-            *open = client::Reached::connect(&reached.endpoint, watcher.address.clone(), client::CONNECT).await.map(Arc::new);
+            *open = client::Reached::connect(&reached.endpoint, watcher.address.clone(), client::CONNECT).await.ok().map(Arc::new);
             match open.as_ref() {
                 Some(open) => drop(client::notify(open.connection(), &message).await),
                 None => {
@@ -451,14 +451,17 @@ fn stage(ask: ResourceArc<Ask>, doing: String) -> Atom {
 }
 
 /// Connects to the server at `address`, the JSON a client is told it in, and sends `to` the message
-/// `{reference, :ok}`, or `{reference, :unreachable}` if it doesn't answer in time. A server last found gone at
-/// this same address is given only as long as one that's there takes to say so.
+/// `{reference, {:connected, path}}`, the path being `direct` or `relay` (`client::Reached::path`), or
+/// `{reference, {:unreachable, why, relay}}`, `relay` being how this server reaches its network's relay just then
+/// (`client::relay`). A server last found gone at this same address is given only as long as one that's there takes
+/// to say so.
 #[rustler::nif]
 fn connect(reached: ResourceArc<Reached>, address: String, to: LocalPid, reference: Term) -> Atom {
     let reference = Reference::keep(reference);
     RUNTIME.spawn(async move {
         let connected = async {
-            let server = serde_json::from_str::<EndpointAddr>(&address).ok()?;
+            let server = serde_json::from_str::<EndpointAddr>(&address)
+                .map_err(|error| format!("{address} isn't an address: {error}"))?;
             let key = server.id.to_string();
             let gone_there = reached
                 .servers
@@ -467,12 +470,17 @@ fn connect(reached: ResourceArc<Reached>, address: String, to: LocalPid, referen
                 .get(&key)
                 .is_some_and(|(was, open)| *was == address && open.is_none());
             let within = if gone_there { client::THERE } else { client::CONNECT };
-            let open = Arc::new(client::Reached::connect(&reached.endpoint, server, within).await?);
-            reached.servers.lock().expect("no connection panics").insert(key, (address, Some(open)));
-            Some(atoms::ok())
+            let open = client::Reached::connect(&reached.endpoint, server, within).await.map_err(|why| why.to_string())?;
+            let path = open.path();
+            reached.servers.lock().expect("no connection panics").insert(key, (address, Some(Arc::new(open))));
+            Ok::<_, String>(path)
         };
-        let outcome = connected.await.unwrap_or(atoms::unreachable());
-        reference.send(&to, |env| outcome.encode(env));
+        let outcome = connected.await;
+        let relay = client::relay(&reached.endpoint);
+        reference.send(&to, |env| match outcome {
+            Ok(path) => (atoms::connected(), path).encode(env),
+            Err(why) => (atoms::unreachable(), why, relay).encode(env),
+        });
     });
     atoms::ok()
 }

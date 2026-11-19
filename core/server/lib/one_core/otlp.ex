@@ -33,6 +33,12 @@ defmodule OneCore.Otlp do
 
     Counter.create(:"one.hook.timeouts", %{description: "An app that didn't answer a hook in time"})
 
+    Histogram.create(:"one.server.connect.duration", %{
+      unit: :ms,
+      description: "How long connecting to another server took, by the path it's on (direct or relay), or unreachable",
+      advisory_params: %{explicit_bucket_boundaries: buckets()}
+    })
+
     :ok =
       :logger.add_handler(:otel, :otel_log_handler, %{
         level: :info,

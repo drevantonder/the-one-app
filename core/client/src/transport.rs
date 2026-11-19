@@ -147,10 +147,48 @@ impl Drop for Asking {
     }
 }
 
+/// Why a server wasn't reached.
+#[derive(Debug)]
+pub enum Unreached {
+    /// Nothing answered within that long.
+    TimedOut(Duration),
+    /// The connection failed, as QUIC or iroh says.
+    Failed(String),
+}
+
+impl std::fmt::Display for Unreached {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::TimedOut(within) => write!(f, "nothing answered within {} ms", within.as_millis()),
+            Self::Failed(why) => write!(f, "{why}"),
+        }
+    }
+}
+
+/// How `endpoint` reaches the relay at its network's address now: `connected`, or not with the last error, or `none`
+/// with no network. Without it, a server that can't be reached directly isn't reached at all.
+pub fn relay(endpoint: &Endpoint) -> String {
+    use iroh::Watcher;
+    let statuses = endpoint.home_relay_status().get();
+    if statuses.is_empty() {
+        return "none".into();
+    }
+    let said = statuses.iter().map(|status| match (status.is_connected(), status.last_error()) {
+        (true, _) => "connected".to_string(),
+        (false, Some(error)) => format!("not connected: {error:#}"),
+        (false, None) => "not connected yet".to_string(),
+    });
+    said.collect::<Vec<_>>().join("; ")
+}
+
 impl Reached {
-    /// Connects to the server at `address`, or gives nothing if it doesn't answer `within` that long.
-    pub async fn connect(endpoint: &Endpoint, address: EndpointAddr, within: Duration) -> Option<Self> {
-        let connection = timeout(within, endpoint.connect(address, ALPN)).await.ok()?.ok()?;
+    /// Connects to the server at `address`, or says why not if it doesn't answer `within` that long.
+    pub async fn connect(endpoint: &Endpoint, address: EndpointAddr, within: Duration) -> Result<Self, Unreached> {
+        let connection = match timeout(within, endpoint.connect(address, ALPN)).await {
+            Err(_) => return Err(Unreached::TimedOut(within)),
+            Ok(Err(error)) => return Err(Unreached::Failed(format!("{error:#}"))),
+            Ok(Ok(connection)) => connection,
+        };
         let received = Arc::new(std::sync::Mutex::new(Instant::now()));
         let asking = Arc::new(AtomicUsize::new(0));
         let (open, last, busy) = (connection.clone(), received.clone(), asking.clone());
@@ -164,7 +202,7 @@ impl Reached {
                 }
             }
         });
-        Some(Self { connection, received, asking, gone: AtomicBool::new(false) })
+        Ok(Self { connection, received, asking, gone: AtomicBool::new(false) })
     }
 
     pub fn connection(&self) -> &iroh::endpoint::Connection {
@@ -399,7 +437,7 @@ impl Client {
     /// watching, says so first, with where a server reaches it and the device it runs for.
     async fn connect(&self, server: EndpointAddr) -> Option<Reached> {
         let link = self.link();
-        let open = Reached::connect(&link.endpoint, server, CONNECT).await?;
+        let open = Reached::connect(&link.endpoint, server, CONNECT).await.ok()?;
         tokio::spawn(receive_notifications(open.connection().clone(), self.notifications.clone()));
         tokio::spawn(answer(self.me.clone(), open.connection().clone()));
         tokio::spawn(straight(self.me.clone(), open.connection().clone()));

@@ -37,7 +37,7 @@ pub use resolve::{InputResolver, Input};
 pub use cache::Subscription;
 pub use state::{State, Connection};
 pub use auth::{Network, DeviceAuthorization, NotApproved};
-pub use transport::{ALPN, LIMIT, CONNECT, THERE, REFUSED, STOPPED, endpoint, address, RequestError, Reached, notify};
+pub use transport::{ALPN, LIMIT, CONNECT, THERE, REFUSED, STOPPED, endpoint, address, relay, RequestError, Reached, Unreached, notify};
 pub use rpc::{progress_token, request_id, progress, progress_message};
 use auth::{NetworkConfig, sessions};
 use transport::{Reach, Link, accept};
