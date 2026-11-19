@@ -18,7 +18,7 @@ defmodule OneCore.Bucket.Folder do
   @impl true
   def read(folder, key) do
     case File.read(file(folder, key)) do
-      {:ok, data} -> {:ok, data, :crypto.hash(:sha256, data)}
+      {:ok, data} -> {:ok, data, Base.encode16(:crypto.hash(:sha256, data), case: :lower)}
       {:error, :enoent} -> :absent
     end
   end
@@ -72,6 +72,11 @@ defmodule OneCore.Bucket.Folder do
     within = if String.ends_with?(prefix, "/") or prefix == "", do: prefix, else: Path.dirname(prefix) <> "/"
     within = String.trim_leading(within, "./")
     Enum.sort(for key <- keys(folder, within), String.starts_with?(key, prefix), do: key)
+  end
+
+  @impl true
+  def list_tagged(folder, prefix) do
+    for key <- list(folder, prefix), {:ok, _data, tag} <- [read(folder, key)], do: {key, tag}
   end
 
   @impl true

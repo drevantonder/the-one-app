@@ -20,6 +20,7 @@ defmodule OneCore.Bucket do
   @callback write(where :: term, key, binary) :: :ok | :exists
   @callback replace(where :: term, key, binary, tag) :: :ok | :changed
   @callback list(where :: term, prefix :: String.t()) :: [key]
+  @callback list_tagged(where :: term, prefix :: String.t()) :: [{key, tag}]
   @callback remove(where :: term, key) :: :ok
   @callback size(where :: term, key) :: {:ok, non_neg_integer} | :absent
   @callback link(where :: term, key, :read | :write) :: link
@@ -60,6 +61,12 @@ defmodule OneCore.Bucket do
 
   @doc "The keys starting with `prefix`, in order."
   def list(prefix), do: bucket(:list, [prefix])
+
+  @doc """
+  The keys starting with `prefix`, in order, each with its blob's tag, as `read/1` gives it: a blob whose tag is the
+  same as when it was last read is the same blob, so what keeps a copy of blobs reads only those that changed.
+  """
+  def list_tagged(prefix), do: bucket(:list_tagged, [prefix])
 
   @doc "Removes a blob. Nothing brings it back, so only what nothing reads any more is removed."
   def remove(key), do: fused(fn -> sent(fn _tried -> backend(:remove, [key]) end) end)

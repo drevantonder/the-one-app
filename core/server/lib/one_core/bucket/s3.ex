@@ -63,16 +63,21 @@ defmodule OneCore.Bucket.S3 do
     end
   end
 
-  # A bucket lists a thousand keys at a time, and says where the next ones start.
   @impl true
-  def list(address, prefix, next \\ nil) do
+  def list(address, prefix), do: for({key, _tag} <- list_tagged(address, prefix), do: key)
+
+  # A bucket lists a thousand keys at a time, each with its ETag, as a read gives it, and says where the next ones
+  # start.
+  @impl true
+  def list_tagged(address, prefix, next \\ nil) do
     case send_request(address, %{list: prefix, after: next}) do
       %{status: 200, body: listed} ->
         {listed, _} = :xmerl_scan.string(:binary.bin_to_list(listed))
+        here = Enum.zip(texts(listed, ~c"/ListBucketResult/Contents/Key"), texts(listed, ~c"/ListBucketResult/Contents/ETag"))
 
         case texts(listed, ~c"/ListBucketResult/NextContinuationToken") do
-          [] -> texts(listed, ~c"/ListBucketResult/Contents/Key")
-          [next] -> texts(listed, ~c"/ListBucketResult/Contents/Key") ++ list(address, prefix, next)
+          [] -> here
+          [next] -> here ++ list_tagged(address, prefix, next)
         end
 
       refused ->
