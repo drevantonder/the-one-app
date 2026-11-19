@@ -53,8 +53,9 @@ const looks = styles({
   surface: { position: "absolute", overflow: "hidden", borderRadius: tokens.radius.window, backgroundColor: tokens.colour.veil, backdropFilter: tokens.material.window, boxShadow: tokens.shadow.window, appRegion: "drag" },
   // The card changes size by a spring, which a change on the way turns, and what's in it is carried with it.
   card: { transitionProperty: ["width", "height", "translateX"], transition: tokens.motion.snappy },
-  // Home, the App Library and what was found cross-fade in the card; an owner's pages roll up and down.
-  fading: { transitionProperty: ["opacity", "scale", "translateY"], transition: tokens.motion.smooth },
+  // Home, the App Library and what was found cross-fade in the card, each drawn ahead as it's about to (`willChange`);
+  // an owner's pages roll up and down.
+  fading: { transitionProperty: ["opacity", "scale", "translateY"], transition: tokens.motion.smooth, willChange: ["opacity", "scale", "translateY"] },
   rolling: { transitionProperty: ["opacity", "translateY"], transition: tokens.motion.snappy },
   search: { flexDirection: "row", alignItems: "center", zIndex: 6 },
   owner: { position: "absolute", overflow: "hidden" },
