@@ -329,7 +329,8 @@ function Where(props: { market: Market; all: Owners; owner: Owner; listed: Liste
   // Each state's controls stay as they are while what's listed is asked for again, so an open menu stays open.
   const now = () => done()!
   const may = () => !only(props.all, props.owner)
-  const end = (
+  // Drawn where the row asks for it, so a menu in it is the row's (a right-click, a swipe, the action panel).
+  const end = () => (
     <Switch>
       <Match when={state() === "installing"}>
         <Busy>Installing</Busy>
@@ -372,7 +373,7 @@ function Where(props: { market: Market; all: Owners; owner: Owner; listed: Liste
   )
   // Version numbers are the App Store's alone (DESIGN.md).
   const text = () => (state() === "not_installed" ? "Couldn't install" : state() === "recently_deleted" ? "Uninstalled" : state() === "installed" && now().version ? `Version ${now().version}` : !state() ? (only(props.all, props.owner) ?? "Not installed") : undefined)
-  return <Row heading={props.owner.name} text={text()} end={end} />
+  return <Row heading={props.owner.name} text={text()} end={end()} />
 }
 
 /// What's failed of an app for an owner, on the app's page: installing it, or its update.
@@ -513,7 +514,7 @@ function AppStore(props: { market: Market; all: Owners }) {
         </Screen>
       </View>
       <Show when={covered()}>
-        <Show when={view().details} fallback={<Screen back={!view().linked} onBack={out} heading={opened()!.title}><Page market={props.market} all={props.all} listed={opened()!} /></Screen>}>
+        <Show when={view().details} fallback={<Screen back={!view().linked} onBack={out} heading={opened()!.title} largeTitle><Page market={props.market} all={props.all} listed={opened()!} /></Screen>}>
           <Details listed={opened()!} />
         </Show>
       </Show>

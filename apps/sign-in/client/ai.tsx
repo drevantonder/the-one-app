@@ -1,6 +1,6 @@
 // AI: one short prompt that points an assistant at the network's llms.txt, which says how it comes in.
 import { createMemo, Errored, Loading, Show } from "solid-js"
-import { Button, client, Empty, Field, Problem, Screen, share, Skeleton, styles, Textarea, toast, tokens, View } from "ui"
+import { Button, client, Empty, Problem, Screen, share, Skeleton, styles, Text, Textarea, toast, tokens, View } from "ui"
 
 const look = styles({ readable: { gap: tokens.length.gutter, maxWidth: tokens.length.readable } })
 
@@ -18,9 +18,8 @@ function Connect(props: { network: string }) {
   }
   return (
     <View style={look.readable}>
-      <Field label="Send this to Claude, ChatGPT or any other AI.">
-        <Textarea readOnly value={prompt()} />
-      </Field>
+      <Text>Send this to Claude, ChatGPT or any other AI.</Text>
+      <Textarea aria-label="What to send" readOnly value={prompt()} />
       <Button onPress={send}>Share</Button>
     </View>
   )

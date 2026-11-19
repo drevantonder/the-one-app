@@ -2,11 +2,15 @@
 // a browser that isn't woken by them says so first, and why, and a browser turns them on here. Which apps may notify you
 // is in Settings (settings.tsx).
 import { createMemo, Errored, For, Loading, refresh, Show } from "solid-js"
-import { call, changed, client, confirm, Empty, List, Menu, open, Problem, render, Row, Screen, Section, since, Skeleton, styles, Text, toast, tokens } from "ui"
+import { call, changed, client, confirm, Empty, List, ListStyle, Menu, open, Problem, render, Row, Screen, Section, since, Skeleton, styles, Text, toast, tokens, View } from "ui"
 import { type Push, PushState } from "./push.tsx"
 
-/** What hasn't been read is in a heavier weight. */
-const look = styles({ unread: { fontWeight: tokens.weight.medium } })
+/** What hasn't been read has a blue dot before it, as Mail's rows do, and a heavier weight. */
+const look = styles({
+  unread: { fontWeight: tokens.weight.medium },
+  dot: { width: tokens.grid[2.5], height: tokens.grid[2.5], borderRadius: tokens.radius.full },
+  blue: { backgroundColor: tokens.colour.blue },
+})
 
 /** A notification, as `notifications_inbox` answers it. */
 interface Received {
@@ -79,6 +83,7 @@ type Inbox = Awaited<ReturnType<typeof inbox>>
 
 function Inbox(props: { inbox: Inbox }) {
   return (
+    <ListStyle value="insetGrouped">
     <Screen heading="Notifications" action={<Show when={props.inbox.notifications.length}><More /></Show>}>
       <Show when={props.inbox.push}>{(push) => <PushState push={push()} settings={props.inbox.settings} again={() => refresh(inbox)} />}</Show>
       <Section>
@@ -87,6 +92,7 @@ function Inbox(props: { inbox: Inbox }) {
             <For each={props.inbox.notifications}>
               {(notification) => (
                 <Row
+                  start={<View style={[look.dot, !notification.read && look.blue]} />}
                   heading={<Text style={!notification.read && look.unread}>{notification.title}</Text>}
                   text={[notification.from, notification.text].filter(Boolean).join(" · ")}
                   end={since(notification.at, "narrow")}
@@ -98,6 +104,7 @@ function Inbox(props: { inbox: Inbox }) {
         </Show>
       </Section>
     </Screen>
+    </ListStyle>
   )
 }
 

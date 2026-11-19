@@ -4,7 +4,7 @@
 // component (`settings.sections`), drawn here if the app is trusted and by its page in a frame if it isn't, as the
 // Vault draws an item type's. Updates and an app's page are Settings' own.
 import { createMemo, createSignal, Errored, For, Loading, refresh, Show } from "solid-js"
-import { Badge, Button, call, changed, client, component, confirm, Empty, Frame, History, Image, link, List, ListStyle, Problem, render, Row, Screen, Search, Section, Skeleton, Spinner, Split, styles, Switch, Text, toast, tokens, View, viewport } from "ui"
+import { Badge, Button, call, changed, client, component, confirm, Empty, Frame, History, Image, link, List, ListStyle, Problem, render, Row, Screen, Search, Section, Skeleton, Split, styles, Switch, Text, toast, tokens, View, viewport } from "ui"
 
 /** What an app adds to Settings, as `settings_sections` answers it. */
 interface Added {
@@ -45,19 +45,8 @@ interface App {
   required_by?: string[]
 }
 
-/** The network's update, as `builds`' `network` says it. */
-interface NetworkUpdate {
-  network_update_status: "up_to_date" | "preparing" | "restarting" | "held"
-  build: string | null
-  done: number
-  of: number
-  waiting_for: "quiet" | null
-  held: { name?: string; why: string } | null
-}
-
 /** What `builds` answers that Updates shows. */
 interface Builds {
-  network?: NetworkUpdate | null
   devices: { device: string; build?: string; target?: string }[]
   latest: Record<string, { build: string }>
 }
@@ -272,23 +261,14 @@ async function doing(does: () => Promise<unknown>) {
   }
 }
 
-/// The network's update, as Software Update says it, in Apple's words.
-function softwareUpdate(update: NetworkUpdate) {
-  const version = update.build?.split("+")[0] ?? ""
-  if (update.network_update_status === "up_to_date") return { text: `Up to date · ${version}` }
-  if (update.network_update_status === "held") return { text: `Update failed · ${update.held?.name ?? "A server"}: ${update.held?.why}`, action: "Try Again" }
-  if (update.waiting_for === "quiet") return { text: `Waiting for a quiet moment · ${version}`, action: "Update Now" }
-  return { text: `Updating… ${update.done} of ${update.of}`, busy: true }
-}
-
-/// What's waiting to update: the network's servers (Software Update, for whoever owns it), this device, and each app
-/// with a newer version ready.
+/// What's waiting to update: this device and each app with a newer version ready. The network's servers' is Software
+/// Update's, at the top of Servers (Devices).
 const updates = createMemo(async () => {
   const [mine, network, here] = await Promise.all([json<Builds>("builds"), json<Builds>("builds", {}, "network").catch(() => undefined), client()])
   const latest = { ...network?.latest, ...mine.latest }
   const target = mine.devices.find((device) => device.device === here.device)?.target
   const newest = target && latest[`one/${target}`]?.build
-  return { network: network?.network ?? undefined, behind: !!newest && newest !== here.build }
+  return { behind: !!newest && newest !== here.build }
 })
 
 function Updates() {
@@ -305,18 +285,6 @@ function Updates() {
       <Errored fallback={(error) => <Problem heading="Can't show what's waiting to update" text={error() as Error} />}>
         <Loading fallback={<Skeleton rows={2} />}>
           <List>
-            <Show when={updates().network}>
-              {(network) => {
-                const said = () => softwareUpdate(network())
-                return (
-                  <Row
-                    heading="Software Update"
-                    text={said().busy ? <><Spinner /> {said().text}</> : said().text}
-                    end={<Show when={said().action}><Button variant="outline" loading={working() === "network"} onPress={press("network", () => call("update", {}, { subject: "network" }))}>{said().action}</Button></Show>}
-                  />
-                )
-              }}
-            </Show>
             <Row
               heading="This Device"
               text={updates().behind ? "Update ready" : "Up to date"}

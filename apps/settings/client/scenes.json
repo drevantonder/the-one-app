@@ -407,33 +407,6 @@
       }
     }
   },
-  "Updates, servers updating": {
-    "like": "Settings",
-    "answers": {
-      "builds": {
-        "network": {
-          "network_update_status": "restarting",
-          "build": "0.26.91+3810.abc",
-          "done": 1,
-          "of": 4,
-          "waiting_for": null,
-          "held": null
-        },
-        "devices": [
-          {
-            "device": "d1",
-            "build": "0.26.89+3790.abc",
-            "target": "linux-x86_64"
-          }
-        ],
-        "latest": {
-          "one/linux-x86_64": {
-            "build": "0.26.90+3800.abc"
-          }
-        }
-      }
-    }
-  },
   "Can't show Settings": {
     "like": "Settings",
     "answers": {
