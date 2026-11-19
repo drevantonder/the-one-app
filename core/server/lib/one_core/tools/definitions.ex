@@ -2,7 +2,9 @@ defmodule OneCore.Tools.Definitions do
   @moduledoc """
   What each of One Core's own tools says of itself, as an app's `tools/0` does: its name, what it takes and gives,
   and whether it only reads, runs as a task or exempts the app it names (`OneCore.Tools`). It's data alone, so what
-  runs beneath the tools, the hooks and calls among them, reads it without depending on what runs them.
+  runs beneath the tools, the hooks and calls among them, reads it without depending on what runs them. Kept beside
+  each tool's handler instead, as an app's are, it would pull those modules into the cycle `mix compile` checks
+  (27 files to 35, 20 Nov 2026).
   """
 
   # A short-lived link to the bucket, as `OneCore.Bucket.link/2` gives it: sent by its `method` to its `url` with its

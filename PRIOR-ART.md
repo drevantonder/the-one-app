@@ -123,6 +123,14 @@ chose the same: an app's code on a server is free, and which servers act for who
 
 - That celld can load many apps inside its one application.
 
+## To watch
+
+- **A SQLite-over-S3 engine that fences its writer with conditional writes alone** (Litestream, an S3 VFS, celld and
+  the like): once one lets a writer commit only while a conditional write in the bucket says it still holds the
+  database, with no coordinator to run, it could replace `apps/database`'s `Database.Lease` and `Database.Log`. As of
+  20 November 2026 Litestream doesn't check before an upload, and celld fences this way but as a whole application
+  server, not a library.
+
 ## Looked at and set aside
 
 - **Durable Objects on Cloudflare as where the truth is kept**: their data can't be moved out to your own machine.
@@ -150,6 +158,27 @@ chose the same: an app's code on a server is free, and which servers act for who
   (`contents`) for what it can't say (`Type=notify`, `PartOf=graphical-session.target`, `LimitLoadToSessionType`),
   and loads an agent with the older `launchctl load`, not `bootstrap gui/<uid>`. So it would cover two of three
   systems and still leave us writing every definition.
+- **Podman's REST API** (its Docker-compatible one, over its Unix socket with Req) for Containers, in place of its
+  CLI (checked 20 November 2026, Podman 4.9.3): the socket is a service of its own, `podman.socket`, which Ubuntu's
+  package leaves disabled, so every machine would need it enabled, or the server would start `podman system service`,
+  the CLI again. `exec` becomes a create, a start and an inspect with a multiplexed stream to split; `cp` becomes tar
+  archives packed and unpacked; `build` takes its folder as a tar. What the CLI prints is read as JSON already
+  (`--format json`), so its parsing is a few lines. It would be no shorter and one more thing to set up.
+- **`git http-backend`, or gix, for a push to Git Repos** (20 November 2026): a fetch is `git http-backend`'s
+  already, protocol v2 included. A push is decided against the bucket, each ref moving only from where the pusher saw
+  it, not against the mirror `http-backend` would write to, so it would need a hook calling back into the server for
+  each ref; ours is about 40 lines of pkt-lines (`GitRepos.Wire`). gix speaks git's protocols as a client, with no
+  receive-pack to serve one.
+- **cargo-dist** (dist) for releasing (20 November 2026, from reading): it builds Rust binaries in GitHub Actions on a
+  tag, publishes them to GitHub Releases with shell, PowerShell, MSI, Homebrew or npm installers, and its updater reads
+  them from there. Ours is mostly what it has no place for: a server that's an Erlang release with its NIFs, Bun, the
+  UI library and MinGit, split into code and a runtime published only as its inputs change; builds published to the
+  network's bucket, each with the platform's Ed25519 signature that `one` checks; a Mac's client from whichever of
+  GitHub's macOS runner and the Mac is first; TestFlight; a server and a client published as one update; and a build
+  left alone where the network has one from this commit or a newer. Windows' signing there is SSL.com's alone, not
+  jsign with Artifact Signing, and its installer is MSI, not ours with NSIS. It would take over only the client's
+  cross-builds, about 40 lines, and move them from this machine's kept checkout and compiler cache to CI. Nothing in
+  ours is worth consolidating meanwhile: `tooling/on-mac` is the one race, which `nifs` and `release` share already.
 - **Elixir WebRTC** for reaching by key: browsers would reach a home server directly and shells would need no
   networking code. Set aside: reaching by key would be ours to add, its relay can't be a Worker, the first connection
   is slower, and large transfers over data channels are its weak spot.
