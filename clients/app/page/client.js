@@ -862,10 +862,16 @@ function spinner() {
 async function behind() {
   const { build, target } = await invoke("client")
   if (!build || !target) return false
-  const result = /** @type {{ structuredContent?: { latest?: Record<string, { build: string }> }, content?: { text: string }[], isError?: boolean }} */ (await invoke("request", { view: "client", method: "tools/call", params: { name: "builds" } }))
-  if (result.isError) throw new Error(result.content?.[0]?.text)
-  const latest = result.structuredContent?.latest?.[`one/${target}`]?.build
+  const latest = (await call("builds")).latest?.[`one/${target}`]?.build
   return Boolean(latest) && latest !== build
+}
+
+/// Calls the network's tool `name` as this device's client, and gives what it answered, or throws the error it said.
+/** @param {string} name @param {Record<string, unknown>} [inputs] @returns {Promise<any>} */
+async function call(name, inputs = {}) {
+  const result = /** @type {{ structuredContent?: unknown, content: { text: string }[], isError?: boolean }} */ (await invoke("request", { view: "client", method: "tools/call", params: { name, arguments: inputs } }))
+  if (result.isError) throw new Error(result.content[0]?.text)
+  return result.structuredContent ?? JSON.parse(result.content[0].text)
 }
 
 /// Lists the files a server has for `subject`, which the client keeps, so an app opens with no server up. An open app
@@ -940,12 +946,6 @@ function launcherIn(resources) {
 /// Home Screen for Everyone", by the names they go by, as the App Store says it. Nothing where they can, or where
 /// the network can't say.
 async function only() {
-  /** @param {string} name @param {Record<string, unknown>} [inputs] @returns {Promise<any>} */
-  const call = async (name, inputs = {}) => {
-    const result = /** @type {{ structuredContent?: unknown, content: { text: string }[], isError?: boolean }} */ (await invoke("request", { view: "client", method: "tools/call", params: { name, arguments: inputs } }))
-    if (result.isError) throw new Error(result.content[0]?.text)
-    return result.structuredContent ?? JSON.parse(result.content[0].text)
-  }
   try {
     const [{ who }, { users }] = await Promise.all([call("permissions_check", { artifact: "network" }), call("permissions_users", { artifact: "network", relation: "installer" })])
     if (users.includes(who) || users.includes("everyone")) return undefined
