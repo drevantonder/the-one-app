@@ -882,13 +882,34 @@ pub(crate) fn about() -> muda::AboutMetadata {
     muda::AboutMetadata { short_version: Some(version.to_owned()), version: Some(build.to_owned()), ..Default::default() }
 }
 
-/// A Mac app's menu bar, which shows while the launcher has the keyboard: its app menu (About, Quit) and Edit, which
-/// a web view's copy and paste keys need.
+/// A Mac app's menu bar, as every Mac app's: its app menu (About, Settings… ⌘, Hide ⌘H, Hide Others ⌥⌘H, Show All,
+/// Quit), Edit, which a field's copy and paste keys need, and Window (Minimize ⌘M, Zoom, Enter Full Screen ⌃⌘F, Home
+/// Screen ⇧⌘H as Finder's and Safari's Home, Bring All to Front, and every window open, which macOS lists itself).
+/// Its items are heard where the ring's are (`ring`).
 #[cfg(target_os = "macos")]
 fn menu() -> muda::Menu {
-    use muda::{Menu, PredefinedMenuItem, Submenu};
+    use muda::accelerator::{Accelerator, Code, Modifiers};
+    use muda::{Menu, MenuItem, PredefinedMenuItem, Submenu};
     let menu = Menu::new();
-    let app = Submenu::with_items(crate::page::NAME, true, &[&PredefinedMenuItem::about(None, Some(about())), &PredefinedMenuItem::separator(), &PredefinedMenuItem::quit(None)]);
+    let settings = MenuItem::with_id("settings", "Settings…", true, Some(Accelerator::new(Modifiers::META, Code::Comma)));
+    let home = MenuItem::with_id("open", "Home Screen", true, Some(Accelerator::new(Modifiers::META | Modifiers::SHIFT, Code::KeyH)));
+    let app = Submenu::with_items(
+        crate::page::NAME,
+        true,
+        &[
+            &PredefinedMenuItem::about(None, Some(about())),
+            &PredefinedMenuItem::separator(),
+            &settings,
+            &PredefinedMenuItem::separator(),
+            &PredefinedMenuItem::services(None),
+            &PredefinedMenuItem::separator(),
+            &PredefinedMenuItem::hide(None),
+            &PredefinedMenuItem::hide_others(None),
+            &PredefinedMenuItem::show_all(None),
+            &PredefinedMenuItem::separator(),
+            &PredefinedMenuItem::quit(None),
+        ],
+    );
     let edit = Submenu::with_items(
         "Edit",
         true,
@@ -902,9 +923,23 @@ fn menu() -> muda::Menu {
             &PredefinedMenuItem::select_all(None),
         ],
     );
-    if let (Ok(app), Ok(edit)) = (app, edit) {
-        let _ = menu.append_items(&[&app, &edit]);
+    let window = Submenu::with_items(
+        "Window",
+        true,
+        &[
+            &PredefinedMenuItem::minimize(None),
+            &PredefinedMenuItem::maximize(Some("Zoom")),
+            &PredefinedMenuItem::fullscreen(None),
+            &PredefinedMenuItem::separator(),
+            &home,
+            &PredefinedMenuItem::separator(),
+            &PredefinedMenuItem::bring_all_to_front(None),
+        ],
+    );
+    if let (Ok(app), Ok(edit), Ok(window)) = (app, edit, window) {
+        let _ = menu.append_items(&[&app, &edit, &window]);
         menu.init_for_nsapp();
+        window.set_as_windows_menu_for_nsapp();
     }
     menu
 }
@@ -919,6 +954,13 @@ fn ring() -> Option<tray_icon::TrayIcon> {
     use tray_icon::{Icon, TrayIconBuilder};
     #[cfg(windows)]
     use tray_icon::{MouseButton, MouseButtonState, TrayIconEvent};
+    // The menu bar's items too (`menu`).
+    MenuEvent::set_event_handler(Some(|event: MenuEvent| match event.id.0.as_str() {
+        "open" => tell(Told::Summon),
+        "settings" => tell(Told::Open("settings".to_owned())),
+        "quit" => tell(Told::Quit),
+        _ => {}
+    }));
     #[cfg(target_os = "macos")]
     let picture = include_bytes!("../../../icons/MenuBarIcon@2x.png");
     #[cfg(windows)]
@@ -930,12 +972,6 @@ fn ring() -> Option<tray_icon::TrayIcon> {
     let settings = MenuItem::with_id("settings", "Settings…", true, None);
     let quit = MenuItem::with_id("quit", format!("Quit {}", crate::page::NAME), true, None);
     let menu = Menu::with_items(&[&open, &settings, &PredefinedMenuItem::separator(), &quit]).ok()?;
-    MenuEvent::set_event_handler(Some(|event: MenuEvent| match event.id.0.as_str() {
-        "open" => tell(Told::Summon),
-        "settings" => tell(Told::Open("settings".to_owned())),
-        "quit" => tell(Told::Quit),
-        _ => {}
-    }));
     #[cfg(windows)]
     TrayIconEvent::set_event_handler(Some(|event: TrayIconEvent| {
         if let TrayIconEvent::Click { button: MouseButton::Left, button_state: MouseButtonState::Up, .. } = event {
