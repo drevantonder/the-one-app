@@ -35,8 +35,9 @@ in core/ui, after `bun build.js`:
     bun scenes.js --out <scratch>/after --against <scratch>/before [<folder>…]
 
 It draws every scene, or those of the folders named, on the DOM in headless Chromium (Playwright's, which
-`bunx playwright-core install chromium` fetches where it's missing), by our renderer on the web there (its WebGPU on
-SwiftShader: `web.png`, compared with `native.png`; a scene with taps isn't yet) and on a native host by its headless
+`bunx playwright-core install chromium` fetches where it's missing), with `--web` by our renderer on the web there (its
+WebGPU on SwiftShader, which draws on the CPU, so only for a change to the web platform: `web.png`, compared with
+`native.png`) and on a native host by its headless
 harness (`cargo build -p renderer --example screenshot`). What counts is **what changed since `--against`** on our renderer
 (`changed.png`): a tree that changed, or pictures more than 2% apart, is looked at. A difference that's meant is said
 in the commit; one that isn't is fixed. Our renderer is the reference, judged against DESIGN.md (Raycast-inspired), not

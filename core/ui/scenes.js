@@ -1,5 +1,5 @@
 // Draws every scene on the DOM and on a native host, and compares the two: `bun scenes.js [<folder>…] [--out <dir>]
-// [--against <dir>] [--dark] [--size <width>x<height>] [--release]` in core/ui, after `bun build.js` (and, for the native half, `cargo build -p renderer
+// [--against <dir>] [--dark] [--size <width>x<height>] [--release] [--web]` in core/ui, after `bun build.js` (and, for the native half, `cargo build -p renderer
 // --example screenshot`, `--release` too for `--release`, whose timings are a shipped build's). `--against` compares each scene with an earlier run's too, our renderer's drawing where both have one (the DOM's where not), kept in that
 // `--out`: what a change did to how things look, drawn before it (on main) and after.
 //
@@ -15,8 +15,10 @@
 // refusal. A method of the client's (`ui/initialize`, `one/client`) is answered as it's named too. It's 1 January 2026,
 // 00:00 UTC, as a native host's harness has it, so a fixture's times are said from then.
 //
-// Each scene is drawn on the DOM in headless Chromium, in a frame a stand-in client answers, by our renderer there too
-// (its web frame, clients/web/renderer, on Chromium's WebGPU), and on a native host by
+// Each scene is drawn on the DOM in headless Chromium, in a frame a stand-in client answers, with `--web` by our
+// renderer there too (its web frame, clients/web/renderer, on Chromium's WebGPU: on a machine with no GPU,
+// SwiftShader's, which draws every frame on the CPU, so it's for a change to the web platform; elsewhere native and
+// web draw with the same renderer), and on a native host by
 // its headless harness (clients/app/renderer's `screenshot` example), each as a picture and its semantic tree as text
 // (src/drawing-primitives/outline.ts). It says, scene by scene, whether the trees are the same and how much of the pictures
 // differs, and keeps them all in `--out` to look at. A native host that can't draw a page yet (an older runtime
@@ -37,6 +39,7 @@ const flag = (name) => args.includes(name)
 const option = (name) => (args.includes(name) ? args[args.indexOf(name) + 1] : undefined)
 const out = resolve(option("--out") ?? join(process.env.TMPDIR ?? "/tmp", "scenes"))
 const dark = flag("--dark")
+const onTheWeb = flag("--web")
 // Every scene in a window this size, as a computer's, where it says none of its own.
 const sized = option("--size")?.split("x").map(Number)
 const against = option("--against") && resolve(option("--against"))
@@ -316,11 +319,11 @@ const browser = await chromium.launch({ args: ["--font-render-hinting=none"] })
 // the page only when the page is composited on the GPU too (ANGLE on SwiftShader), at a phone's two pixels a point.
 // One that hangs (SwiftShader's GPU process, under load) is started again, so it takes no other scene with it.
 const webgpuArgs = ["--font-render-hinting=none", "--enable-unsafe-webgpu", "--enable-unsafe-swiftshader", "--enable-gpu", "--use-gl=angle", "--use-angle=swiftshader", "--use-webgpu-adapter=opengles", "--force-device-scale-factor=2"]
-let webgpu = await chromium.launch({ args: webgpuArgs })
+let webgpu = onTheWeb && (await chromium.launch({ args: webgpuArgs }))
 // The renderer's frame, built once for every scene drawn on the web (clients/web/renderer/build.js).
 const rendererFrame = join(out, "renderer")
-const framed = Bun.spawnSync(["bun", join(root, "clients/web/renderer/build.js"), rendererFrame])
-if (framed.exitCode !== 0) throw new Error(`The renderer's frame didn't build: ${framed.stderr}`)
+const framed = onTheWeb && Bun.spawnSync(["bun", join(root, "clients/web/renderer/build.js"), rendererFrame])
+if (framed && framed.exitCode !== 0) throw new Error(`The renderer's frame didn't build: ${framed.stderr}`)
 const report = []
 for (const target of targets) {
   const name = target.endsWith("core/ui/gallery") ? "gallery" : target.split("/").at(-1)
@@ -372,7 +375,7 @@ for (const target of targets) {
     mkdirSync(folder, { recursive: true })
     const shown = await dom(browser, serve, `${name}/${scene.name}`, scene, folder).catch((error) => ({ problems: [String(error)] }))
     const drawn = native(built, scene, folder, used)
-    const onWeb = await web(webgpu, serve, `${name}/${scene.name}`, scene, folder).catch(async (error) => {
+    const onWeb = !onTheWeb ? {} : await web(webgpu, serve, `${name}/${scene.name}`, scene, folder).catch(async (error) => {
       await webgpu.close().catch(() => {})
       webgpu = await chromium.launch({ args: webgpuArgs })
       return { missing: String(error) }
@@ -383,7 +386,7 @@ for (const target of targets) {
     else if (shown.tree !== undefined) compared(said, "DOM and native", shown.tree, drawn.tree, join(folder, "dom.png"), join(folder, "native.png"), join(folder, "diff.png"))
     if (drawn.measured) said.push(`  native: ${timings(drawn.measured)}`)
     if (onWeb.missing) said.push(`  web: ${onWeb.missing}`)
-    else if (!drawn.missing) {
+    else if (onTheWeb && !drawn.missing) {
       const part = differs(join(folder, "native.png"), join(folder, "web.png"), join(folder, "web-diff.png"))
       said.push(`  native and web: pictures ${part === undefined ? "aren't the same size" : `${(part * 100).toFixed(1)}% different${part > 0.02 ? " (over 2%)" : ""}`}`)
     }
@@ -399,5 +402,5 @@ for (const target of targets) {
   serve.stop()
 }
 await browser.close()
-await webgpu.close()
+if (webgpu) await webgpu.close()
 console.log(report.join("\n"))
