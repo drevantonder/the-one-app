@@ -20,6 +20,9 @@ defmodule AgentSkills.Writer do
   def called, do: "Agent Skills' writer on this machine"
 
   @impl OneCore.Service
+  def os, do: ["linux", "darwin"]
+
+  @impl OneCore.Service
   def needs do
     "A Linux or Mac machine its person uses agent tools on (Claude Code, Codex, OpenCode, Amp). It writes the skills of their apps into the home folder of the user this server runs as."
   end

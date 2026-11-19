@@ -67,6 +67,9 @@ defmodule AndroidEmulator.Emulator do
   def called, do: "Android Emulator's emulators"
 
   @impl OneCore.Service
+  def os, do: ["linux", "darwin"]
+
+  @impl OneCore.Service
   def needs do
     "A Linux x86 machine with KVM (/dev/kvm) and pasta (the passt package), or a Mac, with uv and Java. It runs " <>
       "Android emulators as the user this server runs as, about 2 GB of memory and a CPU or two each while they " <>

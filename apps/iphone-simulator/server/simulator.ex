@@ -60,6 +60,9 @@ defmodule IphoneSimulator.Simulator do
   def called, do: "iPhone Simulator's simulators"
 
   @impl OneCore.Service
+  def os, do: ["darwin"]
+
+  @impl OneCore.Service
   def needs do
     "A Mac with Apple silicon, macOS 15 or later and Xcode 26 or later with an iOS runtime, and uv. It runs iOS " <>
       "Simulators as the Mac's user, with no window, about 2 GB of memory each while they run, and installs idb " <>

@@ -24,6 +24,9 @@ defmodule Containers.Podman do
   def called, do: "Containers' Podman"
 
   @impl OneCore.Service
+  def os, do: ["linux"]
+
+  @impl OneCore.Service
   def needs do
     "A Linux machine with Podman (rootless is best), which pulls images and runs containers as the user this " <>
       "server runs as, for everyone this server acts for. Containers get no host files, no host network and no " <>

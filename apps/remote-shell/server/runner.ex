@@ -16,6 +16,9 @@ defmodule RemoteShell.Runner do
   def called, do: "Remote Shell's runner"
 
   @impl OneCore.Service
+  def os, do: ["linux", "darwin"]
+
+  @impl OneCore.Service
   def needs do
     "A Linux or Mac machine, with sh. It runs any command it's given, as the user this server runs as, for everyone this server acts for, and keeps a log of each on this machine."
   end

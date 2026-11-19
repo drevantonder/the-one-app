@@ -10,7 +10,7 @@ defmodule RemoteShell do
   def icon, do: "icon.svg"
 
   @impl true
-  def requires, do: %{"core" => ">= 0.29.5"}
+  def requires, do: %{"core" => ">= 0.32.47"}
 
   @impl true
   def tools do
