@@ -34,8 +34,8 @@ export type Id = number
  * - `scroll`: a box whose content scrolls along its `flexDirection`: down in a column, sideways in a row, with no
  *   scrollbar beside it, as on a phone; one the device draws over it as it moves.
  * - `text`: words. One in a `text` runs on in its line, and one in a box is a block, as React Native's Text. A text
- *   takes its parent's `font`, `fontWeight` and `color` where it has none of its own, as CSS does; the root's are its
- *   page's root style's (`Styles.root`).
+ *   takes its parent's `font`, `fontWeight` and `color` where it has none of its own, as CSS does; the root's are the
+ *   page's `body`'s: `label` in `type-body`, on `background`.
  * - `image`: a picture (`src`), scaled to fit its box, keeping its shape.
  * - `path`: a vector shape (`d`, in its `viewBox`), as SVG's `<path>`: filled with its `fill`, the text's colour
  *   unless its style says otherwise, and stroked with its `stroke`; its `viewBox` is stretched to its box, its stroke
@@ -397,12 +397,10 @@ export type Dynamic = Record<string, number | string>
 /** A style's id. The same style is the same id in every table, so a host may keep them all in one. */
 export type StyleId = string
 
-/** The styles of the UI library or an app, by id, and the root's: what the root of its page is styled by (its
- * background, its text's colour and type style), in the UI library's table. */
+/** The styles of the UI library or an app, by id. */
 export interface Styles {
   v: number
   styles: Record<StyleId, Style>
-  root?: StyleId
   /** An app's own tokens, and the UI library's it names new values for, for its page alone: by id as `Tokens` has
    * them, those it names winning over `/ui/client/tokens.json`'s. */
   tokens?: Record<TokenId, Token>

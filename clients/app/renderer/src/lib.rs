@@ -18,7 +18,7 @@ pub mod tokens;
 pub mod tree;
 pub(crate) mod view;
 
-pub use style::{colour, load_styles};
+pub use style::load_styles;
 pub use view::inspected::Reply;
 pub use view::{Appearance, Asked, Breadcrumb, Cursor, FONT, MakeFrame, Notice, Panel, Screen, TitleRow, fonts};
 

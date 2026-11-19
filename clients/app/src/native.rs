@@ -90,8 +90,7 @@ struct Page {
     page: Url,
     module: Url,
     trusted: bool,
-    /// The UI library's design tokens (`ui.css`), and its tables.
-    css: String,
+    /// The UI library's tables, and its app's styles where it has them.
     tables: Vec<String>,
     /// Its name and icon, as a `data:` address, as its app lists them, for the window's title and breadcrumb.
     name: Option<String>,
@@ -126,8 +125,6 @@ async fn probe(entrypoint: &str, subject: Option<&str>, framed: bool) -> anyhow:
     let html = crate::hosts::file(page.as_str()).await.map_err(|error| anyhow::anyhow!(error))?;
     let html = BASE64.decode(html["body"].as_str().unwrap_or_default().as_bytes())?;
     let module = module_script(&String::from_utf8_lossy(&html)).ok_or_else(|| anyhow::anyhow!("its page loads no module"))?;
-    let css = crate::hosts::file(page.join("/ui/client/ui.css")?.as_str()).await.map_err(|error| anyhow::anyhow!("ui.css didn't load: {error}"))?;
-    let css = String::from_utf8(BASE64.decode(css["body"].as_str().unwrap_or_default().as_bytes())?)?;
     // Its tables, each needing a runtime version this program has, or it's a web view's: the UI library's, and its
     // app's styles, which its build writes beside every page (`core/ui/app.js`).
     let mut tables = Vec::new();
@@ -142,7 +139,7 @@ async fn probe(entrypoint: &str, subject: Option<&str>, framed: bool) -> anyhow:
         tables.push(text);
     }
     let name = resource["name"].as_str().filter(|name| !name.is_empty()).map(str::to_owned);
-    Ok(Some(Page { module: page.join(&module)?, page, trusted, css, tables, name, icon }))
+    Ok(Some(Page { module: page.join(&module)?, page, trusted, tables, name, icon }))
 }
 
 /// Opens the launcher's page natively, if it's of a version this program speaks, in a panel put away until
@@ -169,9 +166,9 @@ enum Kind {
 }
 
 async fn window(started: Instant, entrypoint: &str, subject: Option<&str>, link: &str, mut kind: Kind) -> anyhow::Result<bool> {
-    let Some(Page { page, module, trusted, css, tables, name: listed, icon }) = probe(entrypoint, subject, false).await? else { return Ok(false) };
+    let Some(Page { page, module, trusted, tables, name: listed, icon }) = probe(entrypoint, subject, false).await? else { return Ok(false) };
     let launcher = matches!(kind, Kind::Launcher(_));
-    let tokens_page = load(&css, &tables)?;
+    let tokens_page = load(&tables)?;
     let native = Native::get()?;
     let window: Arc<OnceLock<WindowId>> = Arc::default();
     let begun = start(entrypoint, subject, link, launcher, Place::Window(window.clone()), &module, page)?;
@@ -311,8 +308,7 @@ async fn window(started: Instant, entrypoint: &str, subject: Option<&str>, link:
 /// Loads the design tokens and styles, which come with the UI library, as its pages' do, and a page's app's styles.
 /// → the number of its page's own tokens, where its styles have them, which are its screen's alone
 /// (`tokens::load_page`).
-fn load(css: &str, tables: &[String]) -> anyhow::Result<u32> {
-    renderer::tokens::load(css);
+fn load(tables: &[String]) -> anyhow::Result<u32> {
     if let [tokens, styles @ ..] = tables {
         renderer::tokens::load_table(tokens)?;
         for styles in styles {
@@ -386,10 +382,10 @@ impl Started {
 /// own window's page would, and drawn in the frame's box.
 async fn frame(window: Arc<OnceLock<WindowId>>, node: renderer::tree::Id, src: &str, subject: Option<&str>) -> anyhow::Result<()> {
     let entrypoint = src.split_once('#').map_or(src, |(page, _)| page);
-    let Some(Page { page, module, trusted, css, tables, .. }) = probe(entrypoint, subject, true).await? else {
+    let Some(Page { page, module, trusted, tables, .. }) = probe(entrypoint, subject, true).await? else {
         anyhow::bail!("it's no page of an app's this host draws")
     };
-    let tokens_page = load(&css, &tables)?;
+    let tokens_page = load(&tables)?;
     let started = start(entrypoint, subject, src, false, Place::Frame(window.clone(), node), &module, page)?;
     let view = format!("{}|{entrypoint}", subject.unwrap_or_default());
     let fragment = src.split_once('#').map(|(_, fragment)| fragment.to_owned());

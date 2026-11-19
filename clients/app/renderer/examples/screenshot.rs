@@ -77,8 +77,6 @@ fn main() -> anyhow::Result<()> {
         .find_map(|tag| tag.contains("type=\"module\"").then(|| tag.split("src=\"").nth(1)?.split('"').next()).flatten())
         .ok_or_else(|| anyhow::anyhow!("index.html loads no module"))?;
     let page = Url::parse("file:///index.html")?.join(module)?;
-    // The design tokens, which come with the UI library.
-    renderer::tokens::load(&files(&Url::parse("file:///ui/client/ui.css")?)?);
     // The tables: the UI library's tokens and styles, and the page's own styles, where it has them.
     let mut tokens_page = 0;
     for table in ["file:///ui/client/tokens.json", "file:///ui/client/styles.json", "file:///styles.json"] {

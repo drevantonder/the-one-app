@@ -1,151 +1,15 @@
 //! The design tokens, which aren't the host's: they come with the UI library, over the air, as the app's page does,
-//! and are read as it opens (`load`). The host knows only kinds of token (a colour, light and dark, a length, a
-//! number), never their names or values. What the host draws itself (a window's title row, a notice) reads them from
-//! the UI library's stylesheet (`/ui/client/ui.css`): `:root`'s first rule, which is a computer's, the one in
-//! `@media (pointer: coarse)`, which a touch screen's lengths are, and `:root.dark`'s `--lighter`; a page's own are
-//! the token table's (`load_table`).
+//! as its token table (`load_table`), read as a window opens. The host knows only kinds of token (a colour, light and
+//! dark, a length, a number), never their names or values, but for the few it draws its own window's breadcrumb and
+//! notices with.
 
 use std::borrow::Cow;
 use std::collections::HashMap;
-use std::sync::OnceLock;
 
 use crate::geometry::Rgba;
 
 /// What CSS has as 1rem, in pixels.
 const REM: f32 = 16.0;
-
-/// The tokens, light and dark.
-pub struct Tokens {
-    declared: HashMap<String, String>,
-    /// What a touch screen declares in place of a computer's (`@media (pointer: coarse)`).
-    touch: HashMap<String, String>,
-    lighter: f32,
-}
-
-static LOADED: OnceLock<Tokens> = OnceLock::new();
-
-/// Takes the tokens the UI library came with, as the window opens, before anything is drawn.
-pub fn load(css: &str) {
-    let _ = LOADED.set(Tokens::parse(css));
-}
-
-/// The tokens loaded, or none (`load`), where every lookup is `None`.
-pub fn tokens() -> &'static Tokens {
-    LOADED.get_or_init(|| Tokens::parse(""))
-}
-
-impl Tokens {
-    fn parse(css: &str) -> Tokens {
-        // A rule's declarations in `css`, by its selector exactly, as written or minified (`:root {` or `:root{`).
-        let rule = |css: &str, selector: &str| -> HashMap<String, String> {
-            let Some(start) = [format!("{selector} {{"), format!("{selector}{{")].iter().filter_map(|open| {
-                css.match_indices(open.as_str()).find(|(at, _)| *at == 0 || matches!(css.as_bytes()[at - 1], b'\n' | b'}' | b'{' | b' '))
-            }).map(|(at, _)| at).min() else { return HashMap::new() };
-            let body = &css[start..];
-            let body = &body[body.find('{').unwrap_or(0) + 1..body.find('}').unwrap_or(body.len())];
-            uncommented(body)
-                .split(';')
-                .filter_map(|declaration| {
-                    let (name, value) = declaration.trim().split_once(':')?;
-                    Some((name.trim().strip_prefix("--")?.to_owned(), value.split_whitespace().collect::<Vec<_>>().join(" ")))
-                })
-                .collect()
-        };
-        let declared = rule(css, ":root");
-        let touch = ["@media (pointer: coarse)", "@media (pointer:coarse)"]
-            .iter()
-            .find_map(|media| css.find(media))
-            .map(|at| rule(&css[at..], ":root"))
-            .unwrap_or_default();
-        let lighter = rule(css, ":root.dark").get("lighter").and_then(|value| value.parse().ok()).unwrap_or(0.0);
-        Tokens { declared, touch, lighter }
-    }
-
-    /// A colour token (`muted-foreground`), as it is in light or dark.
-    pub fn colour(&self, name: &str, dark: bool) -> Option<Rgba> {
-        let value = self.declared.get(name)?;
-        let value = match value.strip_prefix("light-dark(").and_then(|value| value.strip_suffix(')')) {
-            Some(both) => {
-                let split = split_top_level(both);
-                if dark { split.1 } else { split.0 }
-            }
-            None => value.as_str(),
-        };
-        oklch(value.trim())
-    }
-
-    /// A length token (`gutter`, `radius-sm`, `text-base`), in pixels, a touch screen's where `touch`.
-    pub fn length(&self, name: &str, touch: bool) -> Option<f32> {
-        let value = self.touch.get(name).filter(|_| touch).or_else(|| self.declared.get(name))?;
-        self.evaluate(value, false)
-    }
-
-    /// A number token (`body-weight`), as it is in light or dark: a weight is lighter in dark.
-    pub fn number(&self, name: &str, dark: bool) -> Option<f32> {
-        self.evaluate(self.declared.get(name)?, dark)
-    }
-
-    /// A tracking token (`title-tracking`), in em.
-    pub fn em(&self, name: &str) -> Option<f32> {
-        self.declared.get(name)?.strip_suffix("em")?.parse().ok()
-    }
-
-    /// What `calc()` the tokens use comes to: lengths and numbers, `var()`s of other tokens, added and taken away.
-    fn evaluate(&self, value: &str, dark: bool) -> Option<f32> {
-        let value = value.trim();
-        let value = value.strip_prefix("calc(").and_then(|value| value.strip_suffix(')')).unwrap_or(value);
-        let mut total = 0.0;
-        let mut sign = 1.0;
-        for term in value.split_whitespace() {
-            match term {
-                "+" => sign = 1.0,
-                "-" => sign = -1.0,
-                term => {
-                    let amount = if let Some(name) = term.strip_prefix("var(--").and_then(|term| term.strip_suffix(')')) {
-                        if name == "lighter" {
-                            if dark { self.lighter } else { 0.0 }
-                        } else {
-                            self.evaluate(self.declared.get(name)?, dark)?
-                        }
-                    } else if let Some(rem) = term.strip_suffix("rem") {
-                        rem.parse::<f32>().ok()? * REM
-                    } else if let Some(px) = term.strip_suffix("px") {
-                        px.parse().ok()?
-                    } else {
-                        term.parse().ok()?
-                    };
-                    total += sign * amount;
-                }
-            }
-        }
-        Some(total)
-    }
-}
-
-fn uncommented(css: &str) -> String {
-    let mut out = String::new();
-    let mut rest = css;
-    while let Some(start) = rest.find("/*") {
-        out.push_str(&rest[..start]);
-        rest = rest[start..].find("*/").map_or("", |end| &rest[start + end + 2..]);
-    }
-    out.push_str(rest);
-    out
-}
-
-/// `a, b` at the top level of a `light-dark()`, where each may have commas of its own in brackets.
-fn split_top_level(both: &str) -> (&str, &str) {
-    let mut depth = 0;
-    for (at, character) in both.char_indices() {
-        match character {
-            '(' => depth += 1,
-            ')' => depth -= 1,
-            ',' if depth == 0 => return (both[..at].trim(), both[at + 1..].trim()),
-            _ => {}
-        }
-    }
-    (both, both)
-}
 
 /// `oklch(L C H)` or `oklch(L C H / A%)`, as sRGB (Björn Ottosson's OKLab, which CSS Color 4 uses).
 pub(crate) fn oklch(value: &str) -> Option<Rgba> {
@@ -177,35 +41,6 @@ pub(crate) fn oklch(value: &str) -> Option<Rgba> {
         if channel <= 0.003_130_8 { 12.92 * channel } else { 1.055 * channel.powf(1.0 / 2.4) - 0.055 }
     };
     Some(Rgba { r: gamma(linear[0]), g: gamma(linear[1]), b: gamma(linear[2]), a: alpha })
-}
-
-/// A type style (DESIGN.md: text is one of a few), as the UI library's stylesheet draws it (`[data-font]` in ui.css),
-/// each line 1.5 times its size, as `body`'s, but a title's and a figure's.
-pub struct TypeStyle {
-    pub size: f32,
-    pub weight: f32,
-    /// Tracking, in em.
-    pub tracking: f32,
-    pub line_height: f32,
-    pub tabular: bool,
-}
-
-/// `body`, `label`, `title`, `figure`, `subheadline`, `footnote`, `caption-1` or `caption-2`, where `conditions` hold.
-pub fn type_style(font: &str, conditions: Conditions) -> TypeStyle {
-    let tokens = tokens();
-    let weight = |name: &str| tokens.number(name, conditions.dark).unwrap_or(450.0);
-    let size = |name: &str| tokens.length(name, conditions.touch).unwrap_or(14.0);
-    let (size, weight, tracking, line_height, tabular) = match font {
-        "label" => (size("text-base"), weight("label-weight"), 0.0, 1.5, false),
-        "title" => (size("text-title"), weight("title-weight"), tokens.em("title-tracking").unwrap_or(0.0), 1.2, false),
-        "figure" => (size("text-title"), weight("figure-weight"), tokens.em("figure-tracking").unwrap_or(0.0), 1.2, true),
-        "subheadline" => (size("text-subheadline"), weight("body-weight"), 0.0, 1.5, false),
-        "footnote" => (size("text-footnote"), weight("body-weight"), 0.0, 1.5, false),
-        "caption-1" => (size("text-caption-1"), weight("body-weight"), 0.0, 1.5, false),
-        "caption-2" => (size("text-caption-2"), weight("body-weight"), 0.0, 1.5, false),
-        _ => (size("text-base"), weight("body-weight"), 0.0, 1.5, false),
-    };
-    TypeStyle { size, weight, tracking, line_height, tabular }
 }
 
 // The token table (`Tokens` in core/ui/src/drawing-primitives/renderer.ts), which comes with the UI library as
@@ -262,7 +97,7 @@ pub struct Shadow {
 
 /// A `type` token resolved: its size and line height in pixels, its weight, tracking in em, and whether its figures
 /// line up.
-#[derive(Clone, Copy, Debug, PartialEq)]
+#[derive(Clone, Copy, Debug, Default, PartialEq)]
 pub struct Type {
     pub size: f32,
     pub line_height: f32,

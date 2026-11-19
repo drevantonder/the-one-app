@@ -16,7 +16,7 @@ use crate::js::{Posted, Thread};
 use crate::render::Atlas;
 use crate::render::atlas::AtlasTile;
 use crate::render::scene::{Backdrop, BorderStyle, PolychromeSprite, Quad, Recording, Scene, Shadow, TransformationMatrix};
-use crate::style::{self, Look, Offset, Paint, State, Text, colour};
+use crate::style::{self, Look, Offset, Paint, State, Text};
 use crate::text::{Paragraph, TextRun, TextSystem};
 use crate::tokens::{Conditions, Radius};
 use crate::tree::{Id, Kind, Node, Tree};
@@ -759,7 +759,7 @@ impl Screen {
             modal: None,
             turn: TransformationMatrix::unit(),
             glass: self.panel.map(|_| Vec::new()),
-            fill: self.panel.filter(|panel| panel.fill).map(|_| colour("card", conditions.dark)),
+            fill: self.panel.filter(|panel| panel.fill).map(|_| colour_token("card", conditions)),
             drag_regions: Vec::new(),
             kept_regions: Vec::new(),
             frames: &self.frames,
@@ -1531,7 +1531,9 @@ impl Screen {
 /// Paints a screen that says only `words`, in the middle, in the muted colour, as a page's empty state does.
 pub(crate) fn paint_message(words: &str, appearance: Appearance, size: Size<Pixels>, scale: f32, text: &mut TextSystem, atlas: &Atlas, scene: &mut Scene) {
     scene.clear();
-    let dark = appearance == Appearance::Dark;
+    // A host's own message, in a computer's size: it has no window's conditions.
+    let conditions = Conditions { dark: appearance == Appearance::Dark, ..Conditions::default() };
+    let (body, background) = Text::root(conditions);
     let window = Bounds { origin: point(0.0, 0.0), size: Size { width: size.width.0, height: size.height.0 } };
     let mask = ContentMask { bounds: window.scale_to(scale) };
     scene.insert_primitive(Quad {
@@ -1539,18 +1541,16 @@ pub(crate) fn paint_message(words: &str, appearance: Appearance, size: Size<Pixe
         border_style: Default::default(),
         bounds: window.scale_to(scale),
         content_mask: mask,
-        background: Background::from(colour("background", dark)),
+        background: Background::from(background.unwrap_or_default()),
         border_color: Hsla::default(),
         corner_radii: Corners::default(),
         border_widths: Edges::default(),
         transformation: TransformationMatrix::unit(),
     });
-    // A host's own message, in a computer's size: it has no window's conditions.
-    let body = Text::body(Conditions { dark, ..Conditions::default() });
     let width = (window.size.width - 32.0).max(1.0);
     let paragraph = text.paragraph(words, &body.style, &[], Some(width), None);
     let top = (window.size.height - paragraph.size().height) / 2.0;
-    let muted = colour("muted-foreground", dark);
+    let muted = colour_token("secondary-label", conditions);
     let _ = text.paint(&paragraph, point(px(16.0), px(top)), width, 0.5, &|_| muted, scale, mask, TransformationMatrix::unit(), atlas, scene);
     scene.finish();
 }
@@ -2598,7 +2598,7 @@ impl Painter<'_> {
         let multiline = node.is("multiline");
         let focused = self.states.focused == Some(id) && field.is_some();
         let empty = shown.is_empty();
-        let placeholder = colour_token("tertiary-label", self.conditions).unwrap_or_else(|| colour("muted-foreground", self.conditions.dark));
+        let placeholder = colour_token("tertiary-label", self.conditions);
         let (words, color) = if empty { (node.str("placeholder").unwrap_or_default().to_owned(), placeholder) } else { (shown.clone(), text.color) };
         let paragraph = self.text.paragraph(&words, &text.style, &[], multiline.then_some(width), None);
         let line_height = text.style.line_height;
@@ -2649,7 +2649,7 @@ impl Painter<'_> {
         if let (true, Some(field), false) = (focused, field, empty) {
             let (start, end) = field.selection();
             if start < end {
-                let tint = colour_token("blue", self.conditions).unwrap_or(text.color).opacity(0.3);
+                let tint = colour_token("blue", self.conditions).opacity(0.3);
                 for (line, x0, x1) in paragraph.spans(start, end) {
                     let bounds = Bounds { origin: at(line, x0 + offset(line)), size: Size { width: (x1 - x0) * grown, height: line_height * grown } };
                     self.quad(bounds, clip, tint, Edges::default(), Hsla::default(), Corners::default(), false, opacity);
@@ -2773,17 +2773,8 @@ impl Painter<'_> {
     fn breadcrumb(&mut self, crumb: &Breadcrumb, bar: f32, hovered: bool) -> (Bounds<f32>, f32) {
         let conditions = self.conditions;
         let window = self.window;
-        let colour = |id: &str, otherwise: &str| colour_token(id, conditions).unwrap_or_else(|| colour(otherwise, conditions.dark));
-        let footnote = crate::tokens::table().type_style("type-footnote", conditions);
-        let label = crate::tokens::table().type_style("type-label", conditions);
-        let style = |weight: Option<f32>| crate::text::TextStyle {
-            size: footnote.map_or(13.0, |font| font.size),
-            weight: weight.or(footnote.map(|font| font.weight)).unwrap_or(450.0).round() as u16,
-            tracking: footnote.map_or(0.0, |font| font.tracking),
-            line_height: footnote.map_or(16.0, |font| font.size.round()),
-            tabular: false,
-        };
-        let (home_style, app_style) = (style(None), style(label.map(|font| font.weight)));
+        let colour = |id: &str| colour_token(id, conditions);
+        let (home_style, app_style) = chrome_type(conditions);
         let middle = bar / 2.0;
         let (icon, gap, pad) = (16.0, 6.0, 6.0);
         let mut x = crumb.start;
@@ -2792,17 +2783,17 @@ impl Painter<'_> {
         let home = Bounds { origin: point(x, middle - 11.0), size: Size { width: pad + icon + gap + home_words.size().width.ceil() + pad, height: 22.0 } };
         if hovered {
             let radius = crate::tokens::table().radius("radius-md", conditions).map_or(8.0, |radius| corner(radius, home.size));
-            self.quad(home, window, colour("muted", "muted"), Edges::default(), Hsla::default(), Corners::all(radius), false, 1.0);
+            self.quad(home, window, colour("quinary-label"), Edges::default(), Hsla::default(), Corners::all(radius), false, 1.0);
         }
         self.picture(&crumb.ring, Bounds { origin: point(x + pad, middle - icon / 2.0), size: Size { width: icon, height: icon } }, 0.0);
-        let home_colour = if hovered { colour("foreground", "foreground") } else { colour("muted-foreground", "muted-foreground") };
+        let home_colour = if hovered { colour("label") } else { colour("secondary-label") };
         let words_at = |paragraph: &Paragraph, x: f32| Bounds { origin: point(x, middle - paragraph.size().height / 2.0), size: paragraph.size() };
         let text = Text { style: home_style, color: home_colour, align: 0.0, wrap: false, underline: false };
         self.paint_text(&home_words, &[], words_at(&home_words, x + pad + icon + gap), home_words.size().width.ceil(), 1.0, text, 1.0, window);
         x = home.origin.x + home.size.width + 4.0;
         // A muted /.
         let slash = self.text.paragraph("/", &home_style, &[], None, None);
-        let muted = colour("muted-foreground", "muted-foreground");
+        let muted = colour("secondary-label");
         self.paint_text(&slash, &[], words_at(&slash, x), slash.size().width.ceil(), 1.0, Text { color: muted, ..text }, 0.6, window);
         x += slash.size().width.ceil() + 4.0 + pad;
         // The app.
@@ -2811,7 +2802,7 @@ impl Painter<'_> {
             x += icon + gap;
         }
         let name = self.text.paragraph(&crumb.name, &app_style, &[], None, Some(1));
-        self.paint_text(&name, &[], words_at(&name, x), name.size().width.ceil(), 1.0, Text { style: app_style, color: colour("foreground", "foreground"), ..text }, 1.0, window);
+        self.paint_text(&name, &[], words_at(&name, x), name.size().width.ceil(), 1.0, Text { style: app_style, color: colour("label"), ..text }, 1.0, window);
         (home, x + name.size().width.ceil())
     }
 
@@ -2821,24 +2812,15 @@ impl Painter<'_> {
     fn notice(&mut self, notice: &Notice, top: f32, hovered: bool) -> Option<Bounds<f32>> {
         let conditions = self.conditions;
         let window = self.window;
-        let colour = |id: &str| colour_token(id, conditions).unwrap_or_else(|| colour(id, conditions.dark));
-        let footnote = crate::tokens::table().type_style("type-footnote", conditions);
-        let label = crate::tokens::table().type_style("type-label", conditions);
-        let style = |weight: Option<f32>| crate::text::TextStyle {
-            size: footnote.map_or(13.0, |font| font.size),
-            weight: weight.or(footnote.map(|font| font.weight)).unwrap_or(450.0).round() as u16,
-            tracking: footnote.map_or(0.0, |font| font.tracking),
-            line_height: footnote.map_or(16.0, |font| font.size.round()),
-            tabular: false,
-        };
-        let (words_style, action_style) = (style(None), style(label.map(|font| font.weight)));
+        let colour = |id: &str| colour_token(id, conditions);
+        let (words_style, action_style) = chrome_type(conditions);
         let words = self.text.paragraph(&notice.text, &words_style, &[], None, Some(1));
         let action = notice.action.as_ref().map(|(name, _)| self.text.paragraph(name, &action_style, &[], None, Some(1)));
         let (pad, gap, height) = (12.0, 4.0, 30.0);
         let action_width = action.as_ref().map_or(0.0, |action| gap + pad + action.size().width.ceil() + pad - 4.0);
         let width = pad + words.size().width.ceil() + action_width + if action.is_some() { 4.0 } else { pad };
         let pill = Bounds { origin: point((window.size.width - width) / 2.0, top + 8.0), size: Size { width, height } };
-        self.quad(pill, window, colour("foreground"), Edges::default(), Hsla::default(), Corners::all(height / 2.0), false, 1.0);
+        self.quad(pill, window, colour("label"), Edges::default(), Hsla::default(), Corners::all(height / 2.0), false, 1.0);
         let middle = pill.origin.y + height / 2.0;
         let words_at = |paragraph: &Paragraph, x: f32| Bounds { origin: point(x, middle - paragraph.size().height / 2.0), size: paragraph.size() };
         let text = Text { style: words_style, color: colour("background"), align: 0.0, wrap: false, underline: false };
@@ -3037,8 +3019,19 @@ impl editing::Layout for Drawn {
 }
 
 /// A colour token of the table, where there is one.
-fn colour_token(id: &str, conditions: Conditions) -> Option<Hsla> {
-    crate::tokens::table().colour(id, conditions).map(Hsla::from)
+/// A colour token of the table: none, where it has none by that id.
+fn colour_token(id: &str, conditions: Conditions) -> Hsla {
+    crate::tokens::table().colour(id, conditions).map(Hsla::from).unwrap_or_default()
+}
+
+/// What the window draws of its own over its page (its breadcrumb, a notice) is set in: the medium type, as words,
+/// and in its medium weight, as a name or an action, each line its size.
+fn chrome_type(conditions: Conditions) -> (crate::text::TextStyle, crate::text::TextStyle) {
+    let table = crate::tokens::table();
+    let medium = table.type_style("type-medium", conditions).unwrap_or_default();
+    let words = crate::text::TextStyle { size: medium.size, weight: medium.weight.round() as u16, tracking: medium.tracking, line_height: medium.size.round(), tabular: false };
+    let weight = table.weight("label-weight", conditions).unwrap_or(medium.weight);
+    (words, crate::text::TextStyle { weight: weight.round() as u16, ..words })
 }
 
 /// An SVG, parsed as a browser reads it: its `oklch()` colours as sRGB, which resvg's parser (svgtypes) doesn't read

@@ -14,13 +14,8 @@ use serde_json::{Map, Value};
 use crate::Cursor;
 use crate::geometry::{Corners, Edges, Hsla, Rgba};
 use crate::text::TextStyle;
-use crate::tokens::{Conditions, Radius, Shadow, table, tokens, type_style};
+use crate::tokens::{Conditions, Radius, Shadow, table};
 use crate::tree::Node;
-
-/// A colour token, in light or dark.
-pub fn colour(name: &str, dark: bool) -> Hsla {
-    tokens().colour(name, dark).map(Hsla::from).unwrap_or_default()
-}
 
 /// A node's box: its fill, border and corners, its shadows and what shows through it, how opaque it is, where it's
 /// drawn from where it's laid out, and how it takes the pointer.
@@ -122,32 +117,16 @@ pub struct Text {
 }
 
 impl Text {
-    /// The body's, as a page's `body` is (ui.css).
-    pub fn body(conditions: Conditions) -> Text {
-        Text { style: text_style("body", false, conditions), color: colour("foreground", conditions.dark), align: 0.0, wrap: true, underline: false }
-    }
-
     /// A heading's, as the DOM draws a `Text` that's one, an `<h1>` to `<h3>`, with no styles of its own: a title's
     /// weight and tracking (ui.css).
     pub fn heading(self, conditions: Conditions) -> Text {
-        let title = text_style("title", false, conditions);
+        let title = table().type_style("type-title", conditions).unwrap_or_default();
         let mut out = self;
-        out.style.weight = title.weight;
+        out.style.weight = title.weight.round() as u16;
         if out.style.tracking == 0.0 {
             out.style.tracking = title.tracking;
         }
         out
-    }
-}
-
-fn text_style(font: &str, tabular: bool, conditions: Conditions) -> TextStyle {
-    let font = type_style(font, conditions);
-    TextStyle {
-        size: font.size,
-        weight: font.weight.round() as u16,
-        tracking: font.tracking,
-        line_height: (font.size * font.line_height).round(),
-        tabular: font.tabular || tabular,
     }
 }
 
@@ -162,7 +141,6 @@ pub struct State {
 
 /// Every style table's styles, by id: the UI library's and each app's, kept in one, as their ids are their contents'.
 static STYLES: RwLock<Option<HashMap<String, Value>>> = RwLock::new(None);
-static ROOT: RwLock<Option<String>> = RwLock::new(None);
 
 /// Takes a style table (`Styles`): the UI library's (`/ui/client/styles.json`), or an app's (`styles.json` beside
 /// its page). → the runtime version it needs.
@@ -172,9 +150,6 @@ pub fn load_styles(json: &str) -> anyhow::Result<u32> {
     let styles = styles.get_or_insert_with(HashMap::new);
     for (id, style) in parsed["styles"].as_object().into_iter().flatten() {
         styles.insert(id.clone(), style.clone());
-    }
-    if let Some(root) = parsed["root"].as_str() {
-        *ROOT.write().expect("nothing panics holding it") = Some(root.to_owned());
     }
     Ok(parsed["v"].as_u64().unwrap_or(0) as u32)
 }
@@ -287,20 +262,10 @@ impl Text {
         out
     }
 
-    /// The root's, as its page's root style says (`Styles.root`), or as the DOM's `body` is (ui.css): the
-    /// background's colour, `label` and `type-body`.
+    /// The root's, as the DOM's `body` is (ui.css): on the background's colour, in `label` and `type-body`.
     pub fn root(conditions: Conditions) -> (Text, Option<Hsla>) {
-        let root = ROOT.read().expect("nothing panics holding it").clone();
-        let computed = match root {
-            Some(root) => compute(&[Value::String(root)], State::default(), conditions),
-            None => {
-                let mut style = Map::new();
-                style.insert("backgroundColor".into(), serde_json::json!({"token": "background"}));
-                style.insert("color".into(), serde_json::json!({"token": "label"}));
-                style.insert("font".into(), serde_json::json!({"token": "type-body"}));
-                computed(&style, conditions)
-            }
-        };
+        let root = serde_json::json!({"backgroundColor": {"token": "background"}, "color": {"token": "label"}, "font": {"token": "type-body"}});
+        let computed = computed(root.as_object().expect("it's an object"), conditions);
         let base = Text { style: TextStyle { size: 16.0, weight: 400, tracking: 0.0, line_height: 24.0, tabular: false }, color: Hsla::default(), align: 0.0, wrap: true, underline: false };
         (base.with(&computed), computed.look.background)
     }
