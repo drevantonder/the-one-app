@@ -86,20 +86,21 @@ impl Screen {
                         crate::geometry::point(x, y)
                     }
                 };
-                // In a frame, what its page has there takes it, which the frame passes on.
+                // In a frame, what its page has there takes it, which the frame passes on. Where nothing takes a
+                // press, it's clicked all the same, as a person's click there is: what had the keyboard loses it.
                 let tapped = match self.frame_at(at) {
-                    Some((frame, _)) => frame,
-                    None => self.pressed_in(&self.under(at)).with_context(|| format!("nothing at {}, {} takes a press", at.x, at.y))?,
+                    Some((frame, _)) => Some(frame),
+                    None => self.pressed_in(&self.under(at)),
                 };
                 self.pointer_moved(at);
                 self.pointer_down(at, 0, request.bool("shift"));
                 self.pointer_up(at, 0);
                 // A point in an input: `clicks` 2 selects a word there, 3 its line.
                 let clicks = request.inputs.get("clicks").and_then(Value::as_u64).unwrap_or(1).clamp(1, 3) as u8;
-                if clicks > 1 && self.fields.contains_key(&tapped) {
+                if let Some(tapped) = tapped.filter(|tapped| clicks > 1 && self.fields.contains_key(tapped)) {
                     self.press_input(tapped, at, clicks, request.bool("shift"));
                 }
-                json!({"tapped": tapped, "editing": self.fields.get(&tapped).map(editing::Field::value)})
+                json!({"tapped": tapped, "focused": self.focused, "editing": tapped.and_then(|tapped| self.fields.get(&tapped)).map(editing::Field::value)})
             }
             "type" => {
                 let text = request.str("text").context("say what to type, as text")?.to_owned();
@@ -194,7 +195,7 @@ impl Screen {
             at = self.tree.parent(node).filter(|parent| *parent != 0);
         }
         let pressed = at.with_context(|| format!("node {id} takes no press, and neither does what it's in"))?;
-        self.focus(Some(pressed));
+        self.click_focus(&self.chain_from(pressed));
         if self.tree.nodes[&pressed].kind != Kind::Input {
             self.click(pressed, None);
         }

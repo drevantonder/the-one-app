@@ -850,6 +850,16 @@ impl Screen {
         chain.iter().copied().find(|id| self.placed(*id).is_some_and(|placed| placed.pressable))
     }
 
+    /// Gives the keyboard to what a click on `chain`, from the innermost out, gives it to, as the DOM does: the first
+    /// in it that takes it, or nothing, but where what's clicked keeps it where it is (`Placed::focus`).
+    pub(crate) fn click_focus(&mut self, chain: &[Id]) {
+        let first = chain.iter().find_map(|id| self.placed(*id).map(|placed| (*id, placed.focus)).filter(|(_, focus)| *focus != Clicked::Passes));
+        match first {
+            Some((_, Clicked::Keeps)) => {}
+            first => self.focus(first.map(|(id, _)| id)),
+        }
+    }
+
     /// The pointer's shape at `at`: what its style says, or a hand over what's pressed and a beam over an input.
     pub fn cursor(&self, at: Point<f32>) -> Cursor {
         if let Some(cursor) = self.frame_cursor(at) {
@@ -1014,7 +1024,7 @@ impl Screen {
         self.states.pressed = pressed;
         self.changed();
         self.states.focus_visible = false;
-        self.focus(pressed);
+        self.click_focus(&chain);
         if let Some(input) = input {
             // Presses close together in time and place count as a double or triple click, by GTK's defaults.
             let now = Instant::now();
@@ -1530,6 +1540,14 @@ impl Transform {
 }
 
 /// What the painter keeps of each node it paints, for the pointer and the keyboard.
+/// What a click on a node does with the keyboard (`Placed::focus`).
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Clicked {
+    Takes,
+    Keeps,
+    Passes,
+}
+
 pub(crate) struct Placed {
     pub parent: Option<Id>,
     /// Where it shows, clipped, in the window.
@@ -1539,6 +1557,11 @@ pub(crate) struct Placed {
     pub cursor: Option<Cursor>,
     pub pressable: bool,
     pub input: bool,
+    /// What a click gives the keyboard, as the DOM's does: it, where it takes the keyboard (an input, what's pressed as
+    /// a button is, what says its `tabindex`, a frame), or nothing, or the keyboard stays where it is, as a press of
+    /// what's chosen from a list another holds it for (`option`) leaves it (core/ui's drawing-primitives/primitives.tsx
+    /// `chosen`).
+    pub focus: Clicked,
     /// It scrolls: how far it can, down and along, and whether along is its way.
     pub scroll: Option<(f32, f32, bool)>,
 }
@@ -2120,7 +2143,12 @@ impl Painter<'_> {
         if (pressable && tabindex.is_none_or(|index| index >= 0) && (node.kind == Kind::Input || button || tabindex.is_some())) || node.kind == Kind::Frame {
             self.tab_order.push(id);
         }
-        let mut placed = Placed { parent, shown, pointer, cursor: look.cursor, pressable, input: node.kind == Kind::Input, scroll: None };
+        let focus = match node.str("role") {
+            Some("option") => Clicked::Keeps,
+            _ if (node.kind == Kind::Input && !node.is("disabled")) || button || tabindex.is_some() || node.kind == Kind::Frame => Clicked::Takes,
+            _ => Clicked::Passes,
+        };
+        let mut placed = Placed { parent, shown, pointer, cursor: look.cursor, pressable, input: node.kind == Kind::Input, focus, scroll: None };
         match node.kind {
             Kind::Text | Kind::RawText => {
                 let width = laid.content_box_width().max(1.0);
@@ -2406,7 +2434,8 @@ impl Painter<'_> {
                 self.tab_order.push(span.id);
             }
             for rect in rects {
-                let placed = Placed { parent: Some(parent), shown: rect.intersect(&mask), pointer, cursor: span.cursor, pressable, input: false, scroll: None };
+                let focus = if tabindex.is_some() { Clicked::Takes } else { Clicked::Passes };
+                let placed = Placed { parent: Some(parent), shown: rect.intersect(&mask), pointer, cursor: span.cursor, pressable, input: false, focus, scroll: None };
                 self.placed.push((span.id, placed));
             }
         }
