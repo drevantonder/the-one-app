@@ -59,6 +59,24 @@ async fn unlocked_on(client: &Client, app: &str, says: &Value, subject: Option<&
     tool_for(client, &format!("{app}_{tool}"), json!({}), subject).await
 }
 
+/// The key an owner signs which servers open each of their artifacts with: Ed25519, from their key (HKDF, RFC 5869),
+/// so every device that holds that signs and checks alike, and a server, which never holds it, can't say its owner
+/// chose it. Only a device signs, so it's here, and a server's NIF is built without it.
+fn signer(owner: &Key) -> iroh_base::SecretKey {
+    let mut seed = zeroize::Zeroizing::new([0; 32]);
+    hkdf::Hkdf::<sha2::Sha256>::new(None, owner.as_slice())
+        .expand(b"one/encryption/1/signer", seed.as_mut_slice())
+        .expect("32 bytes fit");
+    iroh_base::SecretKey::from_bytes(&seed)
+}
+
+/// What an owner signs of an artifact as they choose the servers that open it: those servers at that epoch.
+fn signed_list(artifact: &str, epoch: u32, servers: &[String]) -> Vec<u8> {
+    let mut servers = servers.to_vec();
+    servers.sort();
+    format!("one/encryption/1/servers\n{artifact}\n{epoch}\n{}", servers.join("\n")).into_bytes()
+}
+
 /// The keys a JSON list names.
 fn keys(value: &Value) -> Vec<String> {
     value.as_array().into_iter().flatten().filter_map(Value::as_str).map(str::to_owned).collect()
@@ -109,7 +127,7 @@ async fn chosen(client: &Client, unlocked_on: &Value, subject: Option<&str>) -> 
     };
     let owner = owner_of(artifact);
     let signer = match owner_key_of(client, subject).await {
-        Ok((key, _)) => cipher::signer(&key).public(),
+        Ok((key, _)) => signer(&key).public(),
         Err(_) => {
             let said: PublicKey = unlocked_on["signer"].as_str().unwrap_or_default().parse().context("the tool didn't say who signed it")?;
             match seen["signers"][&owner].as_str() {
@@ -121,7 +139,7 @@ async fn chosen(client: &Client, unlocked_on: &Value, subject: Option<&str>) -> 
     };
     let signature = data_encoding::HEXLOWER.decode(signature.as_bytes()).ok().and_then(|bytes| Signature::try_from(bytes.as_slice()).ok());
     let servers = keys(&unlocked_on["servers"]);
-    if signature.is_none_or(|signature| signer.verify(&cipher::chosen(artifact, epoch, &servers), &signature).is_err()) {
+    if signature.is_none_or(|signature| signer.verify(&signed_list(artifact, epoch, &servers), &signature).is_err()) {
         bail!("The servers said to open {artifact} aren't the ones its owner chose, so nothing was sent.")
     }
     if !signed_before {
@@ -220,8 +238,8 @@ async fn artifact_keys(
             BASE64.encode(&cipher::seal(&to, &cipher::for_server(artifact, server), &joined)?).into(),
         );
     }
-    let signer = cipher::signer(&owner);
-    let signature = data_encoding::HEXLOWER.encode(&signer.sign(&cipher::chosen(artifact, epoch, &servers)).to_bytes());
+    let signer = signer(&owner);
+    let signature = data_encoding::HEXLOWER.encode(&signer.sign(&signed_list(artifact, epoch, &servers)).to_bytes());
     let signer = signer.public().to_string();
     Ok(json!({"artifact": artifact, "epoch": epoch, "was": was, "slots": slots, "signature": signature, "signer": signer}).to_string())
 }
