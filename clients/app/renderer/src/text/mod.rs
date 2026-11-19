@@ -381,14 +381,22 @@ impl TextSystem {
         // nothing on Apple's.
         let mut family = vec![FontFamilyName::named(&self.family), FontFamilyName::Generic(GenericFamily::Emoji), FontFamilyName::Generic(GenericFamily::SystemUi)];
         family.extend(self.fallbacks.iter().map(|name| FontFamilyName::named(name)));
+        // Code is in the system's monospace, and in these where it has none (a host that loads no system fonts).
+        let mono: Vec<FontFamilyName> = [FontFamilyName::Generic(GenericFamily::Monospace)].into_iter().chain(family.iter().cloned()).collect();
         builder.push_default(StyleProperty::FontFamily(FontFamily::List(family.into())));
         builder.push_default(StyleProperty::WhiteSpaceCollapse(WhiteSpaceCollapse::Preserve));
         for property in properties(style) {
             builder.push_default(property);
         }
+        if style.mono {
+            builder.push_default(StyleProperty::FontFamily(FontFamily::List(mono.clone().into())));
+        }
         for (range, style) in fonts {
             for property in properties(style) {
                 builder.push(property, range.clone());
+            }
+            if style.mono {
+                builder.push(StyleProperty::FontFamily(FontFamily::List(mono.clone().into())), range.clone());
             }
         }
         let mut layout = builder.build(text);
@@ -723,7 +731,6 @@ fn properties(style: &TextStyle) -> Vec<StyleProperty<'static, ()>> {
     if style.mono {
         // Code reads as typed: `=>` stays two characters, whatever the face's ligatures.
         features.extend([FontFeature::new(Tag::new(b"liga"), 0), FontFeature::new(Tag::new(b"calt"), 0)]);
-        properties.push(StyleProperty::FontFamily(FontFamily::List(vec![FontFamilyName::Generic(GenericFamily::Monospace), FontFamilyName::Generic(GenericFamily::Emoji), FontFamilyName::Generic(GenericFamily::SystemUi)].into())));
     }
     properties.push(StyleProperty::FontFeatures(FontFeatures::List(Cow::Owned(features))));
     properties

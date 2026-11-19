@@ -97,7 +97,7 @@
     "like": "Destinations",
     "taps": [
       "Home Disk",
-      "Restore"
+      "Restore…"
     ],
     "answers": {
       "sign-in_everyone": {

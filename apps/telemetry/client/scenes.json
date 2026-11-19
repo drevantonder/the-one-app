@@ -4,50 +4,62 @@
       "telemetry_overview": {
         "calls": [
           {
+            "at": 1767139200000,
             "calls": 40,
             "failed": 0
           },
           {
+            "at": 1767141000000,
             "calls": 55,
             "failed": 1
           },
           {
+            "at": 1767142800000,
             "calls": 80,
             "failed": 2
           },
           {
+            "at": 1767144600000,
             "calls": 120,
             "failed": 0
           },
           {
+            "at": 1767146400000,
             "calls": 95,
             "failed": 3
           },
           {
+            "at": 1767148200000,
             "calls": 60,
             "failed": 0
           },
           {
+            "at": 1767150000000,
             "calls": 70,
             "failed": 1
           },
           {
+            "at": 1767151800000,
             "calls": 110,
             "failed": 6
           },
           {
+            "at": 1767153600000,
             "calls": 90,
             "failed": 2
           },
           {
+            "at": 1767155400000,
             "calls": 50,
             "failed": 0
           },
           {
+            "at": 1767157200000,
             "calls": 45,
             "failed": 0
           },
           {
+            "at": 1767159000000,
             "calls": 65,
             "failed": 1
           }
@@ -233,26 +245,32 @@
       "telemetry_overview": {
         "calls": [
           {
+            "at": 1767139200000,
             "calls": 40,
             "failed": 0
           },
           {
+            "at": 1767141000000,
             "calls": 55,
             "failed": 1
           },
           {
+            "at": 1767142800000,
             "calls": 80,
             "failed": 2
           },
           {
+            "at": 1767144600000,
             "calls": 120,
             "failed": 0
           },
           {
+            "at": 1767146400000,
             "calls": 95,
             "failed": 3
           },
           {
+            "at": 1767148200000,
             "calls": 60,
             "failed": 0
           }
