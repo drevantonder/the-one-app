@@ -1,6 +1,6 @@
-//! A computer's app windows: a strict app's is drawn by this process (`strict`), and any other app's is a web view in
+//! A computer's app windows: an app's is drawn by this process (`renderer`), and any other app's is a web view in
 //! a process of its own (`host`), as an app the system lists by its own name and icon; the launcher (`computer`)
-//! starts them. On Android a strict app's window, drawn natively over the page, talks over this channel too, in
+//! starts them. On Android an app's window, drawn natively over the page, talks over this channel too, in
 //! memory, and every other app is a frame in the page, as on any phone. They have no client of
 //! their own: each asks through this one, over a local channel that only this user on this machine reaches, a Unix
 //! socket (`address`), or on Windows a named pipe, so there's one connection to the network, one sign-in
@@ -36,7 +36,7 @@ static HOSTS: LazyLock<Hosts> = LazyLock::new(Hosts::default);
 #[derive(Default)]
 struct Hosts {
     open: Mutex<HashMap<String, Host>>,
-    /// Each page drawn in another's frame (`strict`), by its channel's label: told what every window is, but none's.
+    /// Each page drawn in another's frame (`renderer`), by its channel's label: told what every window is, but none's.
     frames: Mutex<HashMap<String, UnboundedSender<Value>>>,
     next: AtomicU64,
 }
@@ -140,15 +140,15 @@ pub fn open_now() -> Vec<(String, Option<String>)> {
 }
 
 /// Opens an app in its own window, at `link` (`<app>/<page>[#<fragment>]`, as a `one:` link says it), or brings its
-/// window forward there if it's open: drawn here if its page is strict and of a version this program speaks
-/// (`strict`), otherwise in a web view in a process of its own. With `ONE_WEB_VIEW` set in this program's environment,
+/// window forward there if it's open: drawn here if its page is of a version this program speaks
+/// (`renderer`), otherwise in a web view in a process of its own. With `ONE_WEB_VIEW` set in this program's environment,
 /// every app is a web view, as an agent wants one to compare its DOM with the native window (`tooling/window.py`).
 #[cfg(desktop)]
 pub fn open_window(entrypoint: String, subject: Option<String>, link: String) -> Result<(), String> {
     open(entrypoint, subject, link, true)
 }
 
-/// Opens an app's window again in a web view, as `open_window` does one that isn't strict, in place of its strict
+/// Opens an app's window again in a web view, as `open_window` does one that isn't drawn natively, in place of its native
 /// window: one whose page uses what this program doesn't draw yet.
 #[cfg(desktop)]
 pub fn open_web_view(entrypoint: String, subject: Option<String>, link: String) -> Result<(), String> {
@@ -156,14 +156,14 @@ pub fn open_web_view(entrypoint: String, subject: Option<String>, link: String) 
     open(entrypoint, subject, link, false)
 }
 
-/// Opens an app's strict window again, in place of the one it had, as it reloads its page.
+/// Opens an app's native window again, in place of the one it had, as it reloads its page.
 #[cfg(desktop)]
 pub fn reopen(entrypoint: String, subject: Option<String>, link: String) -> Result<(), String> {
     forget(&entrypoint, subject.as_deref());
     open(entrypoint, subject, link, true)
 }
 
-/// Opens an app's strict window again over the page, in place of the one it had, as it reloads its page.
+/// Opens an app's native window again over the page, in place of the one it had, as it reloads its page.
 #[cfg(target_os = "android")]
 pub fn reopen(entrypoint: String, subject: Option<String>, link: String) -> Result<(), String> {
     forget(&entrypoint, subject.as_deref());
@@ -178,8 +178,8 @@ pub fn forget(entrypoint: &str, subject: Option<&str>) {
     HOSTS.open.lock().expect("no host panics").remove(&format!("{}|{entrypoint}", subject.unwrap_or_default()));
 }
 
-/// A phone opens an app in its page, as a frame, unless its page is strict and of a version this program speaks: then
-/// its window is drawn natively over the page (`strict`), or brought forward if it's open. → whether it was.
+/// A phone opens an app in its page, as a frame, unless its page is of a version this program speaks: then
+/// its window is drawn natively over the page (`renderer`), or brought forward if it's open. → whether it was.
 #[cfg(target_os = "android")]
 pub async fn open_window(entrypoint: String, subject: Option<String>, link: String) -> bool {
     let key = format!("{}|{entrypoint}", subject.as_deref().unwrap_or_default());
@@ -194,19 +194,19 @@ pub async fn open_window(entrypoint: String, subject: Option<String>, link: Stri
         }
         open.insert(key.clone(), Host { to: None, link: None });
     }
-    let opened = crate::strict::open(&entrypoint, subject.as_deref(), &link).await;
+    let opened = crate::native::open(&entrypoint, subject.as_deref(), &link).await;
     if !opened {
         HOSTS.open.lock().expect("no host panics").remove(&key);
     }
     opened
 }
 
-/// The apps whose strict window closed as it sent a version of the protocol this program doesn't speak, which open
+/// The apps whose native window closed as it sent a version of the protocol this program doesn't speak, which open
 /// in the page from then on.
 #[cfg(target_os = "android")]
 static WEB_VIEWS: LazyLock<Mutex<std::collections::HashSet<String>>> = LazyLock::new(Default::default);
 
-/// Opens an app in the page, as a frame, in place of its strict window, as `open_window` does one that isn't strict.
+/// Opens an app in the page, as a frame, in place of its native window, as `open_window` does one that isn't drawn natively.
 #[cfg(target_os = "android")]
 pub fn open_web_view(entrypoint: String, subject: Option<String>, link: String) -> Result<(), String> {
     let key = format!("{}|{entrypoint}", subject.as_deref().unwrap_or_default());
@@ -217,7 +217,7 @@ pub fn open_web_view(entrypoint: String, subject: Option<String>, link: String) 
 }
 
 #[cfg(desktop)]
-fn open(entrypoint: String, subject: Option<String>, link: String, strict: bool) -> Result<(), String> {
+fn open(entrypoint: String, subject: Option<String>, link: String, native: bool) -> Result<(), String> {
     let key = format!("{}|{entrypoint}", subject.as_deref().unwrap_or_default());
     #[cfg(target_os = "macos")]
     {
@@ -235,9 +235,9 @@ fn open(entrypoint: String, subject: Option<String>, link: String, strict: bool)
     open.insert(key.clone(), Host { to: None, link: None });
     drop(open);
     #[cfg(any(target_os = "linux", target_os = "macos", windows))]
-    if strict && std::env::var_os("ONE_WEB_VIEW").is_none() {
+    if native && std::env::var_os("ONE_WEB_VIEW").is_none() {
         crate::spawn(async move {
-            if !crate::strict::open(&entrypoint, subject.as_deref(), &link).await
+            if !crate::native::open(&entrypoint, subject.as_deref(), &link).await
                 && let Err(error) = process(&key, &entrypoint, subject.as_deref(), &link)
             {
                 eprintln!("{error}");
@@ -247,7 +247,7 @@ fn open(entrypoint: String, subject: Option<String>, link: String, strict: bool)
         return Ok(());
     }
     #[cfg(not(any(target_os = "linux", target_os = "macos", windows)))]
-    let _ = strict;
+    let _ = native;
     process(&key, &entrypoint, subject.as_deref(), &link).inspect_err(|_| drop(HOSTS.open.lock().expect("no host panics").remove(&key)))
 }
 
@@ -447,7 +447,7 @@ pub(crate) async fn command(label: &str, command: &str, args: Value) -> Result<V
             }
             Ok(Value::Null)
         }
-        // On a phone, another app a strict app opens opens as a link the page follows.
+        // On a phone, another app an app opens opens as a link the page follows.
         #[cfg(target_os = "android")]
         "open_window" => Ok(done(app().shell.emit("open", json!(text("link").unwrap_or_default())))),
         // An app's Home, or Window → Home Screen.

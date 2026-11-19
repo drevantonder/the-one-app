@@ -120,8 +120,8 @@ fn hand_over(home: &std::path::Path, opened: &Opened) -> anyhow::Result<()> {
 
 fn window(opened: Opened, class: &str) -> anyhow::Result<ExitCode> {
     let home = ::client::home()?;
-    // Started by the system, from the app's own shortcut, it asks the One App to open it, which draws a strict app's
-    // window itself (`strict`) and starts a web view's, as this, for any other. Where that can't be, it's a web view.
+    // Started by the system, from the app's own shortcut, it asks the One App to open it, which draws an app's
+    // window itself (`renderer`) and starts a web view's, as this, for any other. Where that can't be, it's a web view.
     #[cfg(target_os = "linux")]
     if std::env::var_os("ONE_WEB_VIEW").is_none() {
         match hand_over(&home, &opened) {
@@ -164,7 +164,7 @@ fn window(opened: Opened, class: &str) -> anyhow::Result<ExitCode> {
             .with_traffic_light_inset(tao::dpi::LogicalPosition::new(x, y))
     };
     let window = window.build(&event_loop)?;
-    // It opens where it was last, as a strict app's window does (`strict::platform`), so one opened again as the app
+    // It opens where it was last, as an app's native window does (`renderer::platform`), so one opened again as the app
     // starts again on a new build is where it was (`updater`).
     #[cfg(target_os = "macos")]
     {

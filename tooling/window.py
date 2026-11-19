@@ -1,6 +1,6 @@
 """WebDriver on the app's own window on Linux, the one a `one:` link opens: the Home Screen's, or an app's, in a web view.
 
-A strict app's window is drawn natively, and has no web view for WebDriver to reach: `opened` has the launcher open
+An app's window is drawn natively, and has no web view for WebDriver to reach: `opened` has the launcher open
 every app in a web view (`ONE_WEB_VIEW`, which the launcher honours), so a picture here is the DOM's, to compare with
 the native window's, which the inspector takes (the qa skill's Screens).
 

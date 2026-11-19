@@ -46,7 +46,7 @@ const [adding, setAdding] = createSignal(false)
 /// Who something is, as its name's last part: users/alice is alice.
 const short = (name: unknown) => String(name ?? "").split("/").pop()!
 /// How long ago `at` was, as people say it: "2 hours ago", or its date once it's long ago. (Not Intl's: a
-/// strict page's JS has none on a native host.)
+/// native page's JS has none on a native host.)
 const months = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
 function since(at: number) {
   const minutes = Math.round((Date.now() - at) / 60_000)
@@ -67,7 +67,7 @@ function size(bytes: number) {
 const plural = (count: number, one: string) => `${count} ${one}${count === 1 ? "" : "s"}`
 
 // TODO: the UI library's Icon has no folder or git-branch (Phosphor's, drawn here from their SVGs in a mid grey, which
-// reads on light and dark), and an image can't take a colour of the tokens: restore them as Icon names in the strict contract.
+// reads on light and dark), and an image can't take a colour of the tokens: restore them as Icon names in the UI library's contract.
 const svg = (markup: string) => `data:image/svg+xml,${encodeURIComponent(markup)}`
 const FOLDER = svg('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="#8a8a8a"><path d="M216,72H131.31L104,44.69A15.86,15.86,0,0,0,92.69,40H40A16,16,0,0,0,24,56V200.62A15.4,15.4,0,0,0,39.38,216H216.89A15.13,15.13,0,0,0,232,200.89V88A16,16,0,0,0,216,72Z"/></svg>')
 const BRANCH = svg('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="#8a8a8a"><path d="M232,64a32,32,0,1,0-40,31v17a8,8,0,0,1-8,8H96a23.84,23.84,0,0,0-8,1.38V95a32,32,0,1,0-16,0v66a32,32,0,1,0,16,0V144a8,8,0,0,1,8-8h88a24,24,0,0,0,24-24V95A32.06,32.06,0,0,0,232,64ZM64,64A16,16,0,1,1,80,80,16,16,0,0,1,64,64ZM96,192a16,16,0,1,1-16-16A16,16,0,0,1,96,192Z"/></svg>')
@@ -507,7 +507,7 @@ function File(props: { repo: string; branch: string; path: string }) {
 
 // TODO: code is in a proportional font that wraps, its indentation kept as no-break spaces, its added and removed lines
 // tinted by their text only: restore the mono type style, no wrapping with sideways scrolling, and the diff tints
-// (`diff-add`, `diff-del`) in the strict contract.
+// (`diff-add`, `diff-del`) in the UI library's contract.
 const kept = (text: string) => text.replace(/^[ \t]+/, (space) => space.replace(/\t/g, "    ").replace(/ /g, "\u00a0")) || "\u00a0"
 
 /// Lines of code, each with its number where it has one.

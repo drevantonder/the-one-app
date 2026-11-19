@@ -1,0 +1,518 @@
+//! The tree an app's mutations build (`Mutations` in core/ui/src/drawing-primitives/renderer.ts), as React Native's mounting
+//! layer applies Fabric's, which the window draws and which is its semantic tree: each node's role, name, value,
+//! states and actions.
+
+use std::collections::{HashMap, HashSet};
+
+use anyhow::Context as _;
+use serde::{Deserialize, Serialize};
+use serde_json::{Map, Value, json};
+
+/// A node, as the app names it. `0` is the root, which the window makes.
+pub type Id = u64;
+
+/// JS → host: one mutation of the tree, as the app's JS called it (`js::Sandbox`).
+pub enum Mutation {
+    Create { id: Id, kind: Kind, value: Option<String> },
+    Set { id: Id, name: String, value: Value },
+    Insert { parent: Id, id: Id, before: Option<Id> },
+    Remove { parent: Id, id: Id },
+    Drop { id: Id },
+    /// The page uses `what`, which a native host doesn't draw yet.
+    Unsupported { what: String },
+}
+
+#[derive(Deserialize, Serialize, Clone, Copy, PartialEq, Eq, Debug)]
+#[serde(rename_all = "kebab-case")]
+pub enum Kind {
+    Box,
+    /// A box whose content scrolls along its `flexDirection`.
+    Scroll,
+    Text,
+    Image,
+    /// A vector shape, SVG's `<path>`: its `d` in its `viewBox`.
+    Path,
+    /// The device's own chooser, see-through over its box, which a computer draws nothing of: the UI library draws
+    /// one only where a finger points.
+    Picker,
+    Input,
+    RawText,
+    /// Another app's page (`src`), for `subject`, drawn in its box by a sandbox of its own, as an iframe is (`Screen`'s
+    /// frames): its own JS, calling as its own app.
+    Frame,
+}
+
+/// A length: pixels or a word (`gap`, `auto`, `50%`, `control`).
+#[derive(Deserialize, Serialize, Clone, Debug)]
+#[serde(untagged)]
+pub enum Length {
+    Px(f32),
+    Word(String),
+}
+
+/// Version 1's style subset (`Version1Style` in core/ui/src/drawing-primitives/renderer.ts).
+#[derive(Deserialize, Serialize, Default, Clone, Debug)]
+#[serde(rename_all = "camelCase", default)]
+pub struct Style {
+    pub display: Option<String>,
+    pub flex_direction: Option<String>,
+    pub flex_wrap: Option<String>,
+    pub flex_grow: Option<f32>,
+    pub flex_shrink: Option<f32>,
+    pub flex_basis: Option<Length>,
+    pub align_items: Option<String>,
+    pub align_self: Option<String>,
+    pub justify_content: Option<String>,
+    pub grid_template_columns: Option<String>,
+    pub grid_column: Option<String>,
+    pub gap: Option<Length>,
+    pub row_gap: Option<Length>,
+    pub column_gap: Option<Length>,
+    pub padding: Option<Length>,
+    pub padding_inline: Option<Length>,
+    pub padding_block: Option<Length>,
+    pub padding_top: Option<Length>,
+    pub padding_right: Option<Length>,
+    pub padding_bottom: Option<Length>,
+    pub padding_left: Option<Length>,
+    pub margin: Option<Length>,
+    pub margin_inline: Option<Length>,
+    pub margin_block: Option<Length>,
+    pub width: Option<Length>,
+    pub height: Option<Length>,
+    pub min_width: Option<Length>,
+    pub min_height: Option<Length>,
+    pub max_width: Option<Length>,
+    pub max_height: Option<Length>,
+    pub aspect_ratio: Option<f32>,
+    pub overflow: Option<String>,
+    pub opacity: Option<f32>,
+    pub background_color: Option<String>,
+    pub color: Option<String>,
+    pub border_color: Option<String>,
+    pub border_width: Option<u8>,
+    pub border_top_width: Option<u8>,
+    pub border_right_width: Option<u8>,
+    pub border_bottom_width: Option<u8>,
+    pub border_left_width: Option<u8>,
+    pub border_radius: Option<Length>,
+    pub font: Option<String>,
+    pub text_align: Option<String>,
+    pub font_variant_numeric: Option<String>,
+    pub line_clamp: Option<usize>,
+    /// `absolute` takes it out of its parent's flow, placed by `top`, `right`, `bottom` and `left` in its parent
+    /// (renderer.ts's `Version1Style`), over what's drawn before it, or under what's drawn before it with a higher `zIndex`.
+    pub position: Option<String>,
+    pub top: Option<f32>,
+    pub right: Option<f32>,
+    pub bottom: Option<f32>,
+    pub left: Option<f32>,
+    pub z_index: Option<f32>,
+    /// Drawn moved, larger or turned from where it's laid out, around its middle, which moves nothing else.
+    pub translate_x: Option<f32>,
+    pub translate_y: Option<f32>,
+    pub scale: Option<f32>,
+    pub rotate: Option<f32>,
+    pub pointer_events: Option<String>,
+}
+
+pub struct Node {
+    pub kind: Kind,
+    /// A `raw-text`'s text.
+    pub value: Option<String>,
+    /// Every prop but `style`, as it was set.
+    pub props: Map<String, Value>,
+    /// A version 1 page's style object.
+    pub style: Style,
+    /// A version 2 page's styles, each by id or an object of its own, merged in order (`style::resolve`).
+    pub styles: Option<Vec<Value>>,
+    pub children: Vec<Id>,
+    /// What it's in, so it's taken out of only that as it moves.
+    parent: Option<Id>,
+}
+
+impl Node {
+    fn new(kind: Kind, value: Option<String>) -> Node {
+        Node { kind, value, props: Map::new(), style: Style::default(), styles: None, children: Vec::new(), parent: None }
+    }
+
+    pub fn prop(&self, name: &str) -> Option<&Value> {
+        self.props.get(name).filter(|value| !value.is_null())
+    }
+
+    pub fn str(&self, name: &str) -> Option<&str> {
+        self.prop(name).and_then(Value::as_str)
+    }
+
+    /// Whether a state is so: `true`, or ARIA's `"true"`.
+    pub fn is(&self, name: &str) -> bool {
+        matches!(self.prop(name), Some(Value::Bool(true))) || self.str(name) == Some("true")
+    }
+
+    /// Whether it isn't displayed (`display: none`), by its version 1 style object or its version 2 styles, so
+    /// neither it nor what's in it is drawn or read.
+    pub fn hidden(&self) -> bool {
+        match &self.styles {
+            Some(styles) => crate::style::resolve(styles, crate::style::State::default()).get("display").and_then(Value::as_str) == Some("none"),
+            None => self.style.display.as_deref() == Some("none"),
+        }
+    }
+
+    /// Whether it listens for `event`, by its prop as JSX names it (`keydown` is `onKeyDown`, as the DOM's).
+    pub fn listens(&self, event: &str) -> bool {
+        let prop = match event {
+            "click" => "onClick",
+            "input" => "onInput",
+            "action" => "onAction",
+            "focus" => "onFocus",
+            "blur" => "onBlur",
+            "keydown" => "onKeyDown",
+            "pointerenter" => "onPointerEnter",
+            "pointerleave" => "onPointerLeave",
+            "pointerdown" => "onPointerDown",
+            "pointermove" => "onPointerMove",
+            "pointerup" => "onPointerUp",
+            "pointercancel" => "onPointerCancel",
+            "contextmenu" => "onContextMenu",
+            "wheel" => "onWheel",
+            "scroll" => "onScroll",
+            "layout" => "onLayout",
+            "intersection" => "onIntersection",
+            _ => return false,
+        };
+        self.is(prop)
+    }
+}
+
+/// What a page uses that this host can't draw yet, so its window opens in a web view instead, and why.
+#[derive(Debug)]
+pub struct Mismatch(pub String);
+
+impl std::fmt::Display for Mismatch {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+impl std::error::Error for Mismatch {}
+
+pub struct Tree {
+    pub nodes: HashMap<Id, Node>,
+    /// What changed since the window last took it (`take_changed`): each node whose own props, style, text or
+    /// children did, and each `text` whose words did, so only that's laid out and painted again.
+    changed: HashSet<Id>,
+    /// The inputs, and what says `autofocus` or listens for `layout`, found without going through every node.
+    inputs: HashSet<Id>,
+    autofocus: HashSet<Id>,
+    layout: HashSet<Id>,
+    /// Whether the page names its styles (version 2) rather than sending style objects.
+    styled: bool,
+}
+
+impl Default for Tree {
+    fn default() -> Self {
+        Tree {
+            nodes: HashMap::from([(0, Node::new(Kind::Box, None))]),
+            changed: HashSet::from([0]),
+            inputs: HashSet::new(),
+            autofocus: HashSet::new(),
+            layout: HashSet::new(),
+            styled: false,
+        }
+    }
+}
+
+impl Tree {
+    pub fn root(&self) -> &Node {
+        &self.nodes[&0]
+    }
+
+    /// What `id` is in.
+    pub fn parent(&self, id: Id) -> Option<Id> {
+        self.nodes.get(&id)?.parent
+    }
+
+    /// The outermost text `id` is inside, where it's inside one, which draws it as a run of its own.
+    pub fn outer_text(&self, id: Id) -> Option<Id> {
+        let mut outer = None;
+        let mut at = self.parent(id);
+        while let Some(parent) = at.filter(|parent| self.nodes.get(parent).is_some_and(|node| node.kind == Kind::Text)) {
+            outer = Some(parent);
+            at = self.parent(parent);
+        }
+        outer
+    }
+
+    /// Whether a text in text `id` (not displayed: not) says something of its own to a screen reader: a role, a
+    /// name, or that it's pressed, as an inline link does.
+    fn speaks(&self, id: Id) -> bool {
+        self.nodes.get(&id).is_some_and(|node| {
+            node.children.iter().any(|child| {
+                self.nodes.get(child).is_some_and(|inner| {
+                    inner.kind == Kind::Text
+                        && !inner.hidden()
+                        && (inner.str("role").is_some() || inner.str("aria-label").is_some() || inner.listens("click") || self.speaks(*child))
+                })
+            })
+        })
+    }
+
+    /// Whether `id` is inert, or in what is (`inert`, as the DOM's).
+    pub fn inert(&self, id: Id) -> bool {
+        let mut at = Some(id);
+        while let Some(node) = at.and_then(|id| self.nodes.get(&id)) {
+            if node.is("inert") {
+                return true;
+            }
+            at = node.parent;
+        }
+        false
+    }
+
+    /// Whether nothing's changed since `take_changed` was last asked.
+    pub fn unchanged(&self) -> bool {
+        self.changed.is_empty()
+    }
+
+    /// What's changed since this was last asked, and forgets it.
+    pub fn take_changed(&mut self) -> HashSet<Id> {
+        std::mem::take(&mut self.changed)
+    }
+
+    pub fn inputs(&self) -> impl Iterator<Item = Id> + '_ {
+        self.inputs.iter().copied()
+    }
+
+    /// What says `autofocus`.
+    pub fn autofocused(&self) -> impl Iterator<Item = Id> + '_ {
+        self.autofocus.iter().copied().filter(|id| self.nodes.get(id).is_some_and(|node| node.is("autofocus")))
+    }
+
+    /// What listens for `layout`.
+    pub fn laid_out(&self) -> impl Iterator<Item = Id> + '_ {
+        self.layout.iter().copied().filter(|id| self.nodes.get(id).is_some_and(|node| node.listens("layout")))
+    }
+
+    pub fn styled(&self) -> bool {
+        self.styled
+    }
+
+    /// `id` changed, and so did the words of each `text` it's in.
+    fn change(&mut self, id: Id) {
+        let mut at = Some(id);
+        while let Some(changed) = at {
+            self.changed.insert(changed);
+            at = self.nodes.get(&changed).and_then(|node| node.parent).filter(|parent| self.nodes.get(parent).is_some_and(|node| node.kind == Kind::Text));
+        }
+    }
+
+    /// Applies the app's mutations, in order. One that uses what this host doesn't draw yet is refused, and so is what
+    /// comes after it (`Mismatch`).
+    pub fn apply(&mut self, mutations: impl IntoIterator<Item = Mutation>) -> anyhow::Result<()> {
+        for mutation in mutations {
+            match mutation {
+                Mutation::Unsupported { what } => return Err(Mismatch(format!("it uses {what}, which a native host doesn't draw yet")).into()),
+                Mutation::Create { id, kind, value } => {
+                    self.nodes.insert(id, Node::new(kind, value));
+                    if kind == Kind::Input {
+                        self.inputs.insert(id);
+                    }
+                    self.changed.insert(id);
+                }
+                Mutation::Set { id, name, value } => {
+                    let node = self.nodes.get_mut(&id).with_context(|| format!("there's no node {id}"))?;
+                    match name.as_str() {
+                        "autofocus" => drop(self.autofocus.insert(id)),
+                        "onLayout" => drop(self.layout.insert(id)),
+                        _ => {}
+                    }
+                    match name.as_str() {
+                        "style" => match value {
+                            Value::Array(styles) => (node.styles, self.styled) = (Some(styles), true),
+                            Value::Null => (node.style, node.styles) = (Style::default(), None),
+                            value => node.style = serde_json::from_value(value)?,
+                        },
+                        "value" if node.kind == Kind::RawText => node.value = value.as_str().map(str::to_owned),
+                        _ => drop(node.props.insert(name, value)),
+                    }
+                    self.change(id);
+                }
+                Mutation::Insert { parent, id, before } => {
+                    anyhow::ensure!(self.nodes.contains_key(&id), "there's no node {id}");
+                    self.detach(id);
+                    let into = self.nodes.get_mut(&parent).with_context(|| format!("there's no node {parent}"))?;
+                    let at = before.and_then(|before| into.children.iter().position(|child| *child == before));
+                    into.children.insert(at.unwrap_or(into.children.len()), id);
+                    self.nodes.get_mut(&id).expect("it's there").parent = Some(parent);
+                    self.change(parent);
+                }
+                Mutation::Remove { id, .. } => self.detach(id),
+                Mutation::Drop { id } => {
+                    self.detach(id);
+                    self.nodes.remove(&id);
+                    self.inputs.remove(&id);
+                    self.autofocus.remove(&id);
+                    self.layout.remove(&id);
+                }
+            }
+        }
+        Ok(())
+    }
+
+    /// Takes `id` out of what it's in, as a node inserted again moves.
+    fn detach(&mut self, id: Id) {
+        let Some(parent) = self.nodes.get_mut(&id).and_then(|node| node.parent.take()) else { return };
+        if let Some(node) = self.nodes.get_mut(&parent) {
+            node.children.retain(|child| *child != id);
+            self.change(parent);
+        }
+    }
+
+    /// What a `text` says: its runs of text, and those of the texts in it.
+    pub fn text(&self, id: Id) -> String {
+        let Some(node) = self.nodes.get(&id) else { return String::new() };
+        match node.kind {
+            Kind::RawText => node.value.clone().unwrap_or_default(),
+            _ => node.children.iter().map(|child| self.text(*child)).collect(),
+        }
+    }
+
+    /// The semantic tree from `id`, as a screen reader and an agent read it: each node's role, name, value, states
+    /// and actions. A plain group with nothing to say is left out, its children in its place, as AccessKit's
+    /// generic containers are, and so is what's `aria-hidden`. While a modal (`aria-modal`) is shown, it's all that's
+    /// read: what's behind it is inert, as the DOM's is.
+    pub fn semantics(&self, id: Id) -> Vec<Value> {
+        let mut path = Vec::new();
+        let held = self.modal(id, &mut path).then_some(path);
+        self.read(id, held.as_deref())
+    }
+
+    /// Whether there's a modal shown in `id`, the last one there putting the way to it, from `id`, in `path`.
+    fn modal(&self, id: Id, path: &mut Vec<Id>) -> bool {
+        let Some(node) = self.nodes.get(&id) else { return false };
+        if node.hidden() || node.str("aria-hidden") == Some("true") || node.is("inert") {
+            return false;
+        }
+        path.push(id);
+        if node.children.iter().rev().any(|child| self.modal(*child, path)) || node.str("aria-modal") == Some("true") {
+            return true;
+        }
+        path.pop();
+        false
+    }
+
+    /// The semantic tree from `id`, where `held` is the way to the modal shown, which only what's on it is read on.
+    fn read(&self, id: Id, held: Option<&[Id]>) -> Vec<Value> {
+        let Some(node) = self.nodes.get(&id) else { return Vec::new() };
+        if node.hidden() || node.str("aria-hidden") == Some("true") || node.is("inert") {
+            return Vec::new();
+        }
+        let held = match held {
+            Some([at, rest @ ..]) if *at == id => (!rest.is_empty()).then_some(rest),
+            Some(_) => return Vec::new(),
+            None => None,
+        };
+        // A text that's only words, with a text in it that says something of its own (an inline link), is its words
+        // and that text side by side, as the DOM's spans are read.
+        if node.kind == Kind::Text && node.str("role").is_none() && node.str("aria-label").is_none() && !node.listens("click") && self.speaks(id) {
+            return node.children.iter().flat_map(|child| self.read(*child, held)).collect();
+        }
+        // What's in a frame is its own page's, which the screen puts in its place (`Screen::semantics`).
+        if node.kind == Kind::Frame {
+            return vec![json!({"frame": id})];
+        }
+        let text = matches!(node.kind, Kind::Text | Kind::RawText);
+        let children: Vec<Value> =
+            if text { Vec::new() } else { node.children.iter().flat_map(|child| self.read(*child, held)).collect() };
+        let role = node.str("role").map(str::to_owned).or_else(|| match node.kind {
+            Kind::Text | Kind::RawText => Some("text".into()),
+            Kind::Image if node.str("alt").is_some_and(|alt| !alt.is_empty()) => Some("img".into()),
+            Kind::Input if node.str("type") == Some("search") => Some("searchbox".into()),
+            Kind::Input => Some("textbox".into()),
+            _ => None,
+        });
+        let name = node
+            .str("aria-label")
+            .or_else(|| node.str("alt"))
+            .map(str::to_owned)
+            .or_else(|| text.then(|| self.text(id)))
+            .or_else(|| (node.str("role") == Some("button") || node.str("role") == Some("radio")).then(|| self.label(id)));
+        let actions: Vec<&str> =
+            ["click", "input", "focus", "blur"].into_iter().filter(|event| node.listens(event)).collect();
+        if role.is_none() && actions.is_empty() && node.str("aria-label").is_none() {
+            return children;
+        }
+        let mut out = Map::new();
+        out.insert("id".into(), json!(id));
+        if let Some(role) = role {
+            out.insert("role".into(), json!(role));
+        }
+        if let Some(name) = name.filter(|name| !name.is_empty()) {
+            out.insert("name".into(), json!(name));
+        }
+        // An input's value is its text, as its app last set it, but a password's, which is never read out.
+        let secret = node.str("type") == Some("password");
+        if node.kind == Kind::Input
+            && !secret
+            && let Some(text) = node.prop("editing").and_then(|editing| editing.get("text"))
+        {
+            out.insert("value".into(), text.clone());
+        }
+        for (prop, said) in [
+            ("aria-description", "description"),
+            ("aria-level", "level"),
+            ("value", "value"),
+            ("aria-valuenow", "value"),
+            ("aria-valuemin", "min"),
+            ("aria-valuemax", "max"),
+            ("placeholder", "placeholder"),
+        ] {
+            if let Some(value) = node.prop(prop).filter(|_| !(secret && prop == "value")) {
+                out.insert(said.into(), value.clone());
+            }
+        }
+        let mut states: Map<String, Value> = ["selected", "checked", "expanded", "busy", "current", "invalid", "disabled"]
+            .into_iter()
+            .filter_map(|state| {
+                let value = node.prop(&format!("aria-{state}"))?;
+                Some((state.to_owned(), match value.as_str() {
+                    Some("true") => json!(true),
+                    Some("false") => json!(false),
+                    _ => value.clone(),
+                }))
+            })
+            .collect();
+        for state in ["disabled", "required"] {
+            if node.is(state) {
+                states.insert(state.into(), json!(true));
+            }
+        }
+        if !states.is_empty() {
+            out.insert("states".into(), Value::Object(states));
+        }
+        if !actions.is_empty() {
+            out.insert("actions".into(), json!(actions));
+        }
+        if !children.is_empty() {
+            out.insert("children".into(), Value::Array(children));
+        }
+        vec![Value::Object(out)]
+    }
+
+    /// What's written in `id`, its texts' words one after another, as ARIA names something from what's in it: what
+    /// isn't read (`aria-hidden`, or not displayed) says nothing, and what's named (`aria-label`) says its name. A
+    /// button's name where it has no `aria-label`.
+    fn label(&self, id: Id) -> String {
+        let Some(node) = self.nodes.get(&id) else { return String::new() };
+        if node.hidden() || node.str("aria-hidden") == Some("true") || node.is("inert") {
+            return String::new();
+        }
+        if let Some(name) = node.str("aria-label") {
+            return name.to_owned();
+        }
+        match node.kind {
+            Kind::Text | Kind::RawText => self.text(id),
+            _ => node.children.iter().map(|child| self.label(*child)).filter(|words| !words.is_empty()).collect::<Vec<_>>().join(" "),
+        }
+    }
+}

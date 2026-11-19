@@ -1,5 +1,5 @@
 // Draws every scene on the DOM and on a native host, and compares the two: `bun scenes.js [<folder>…] [--out <dir>]
-// [--against <dir>] [--dark] [--size <width>x<height>] [--release]` in core/ui, after `bun build.js` (and, for the native half, `cargo build -p strict
+// [--against <dir>] [--dark] [--size <width>x<height>] [--release]` in core/ui, after `bun build.js` (and, for the native half, `cargo build -p renderer
 // --example screenshot`, `--release` too for `--release`, whose timings are a shipped build's). `--against` compares each scene's DOM drawing with an earlier run's too, kept in that
 // `--out`: what a change did to how things look, drawn before it (on main) and after.
 //
@@ -15,7 +15,7 @@
 // 00:00 UTC, as a native host's harness has it, so a fixture's times are said from then.
 //
 // Each scene is drawn on the DOM in headless Chromium, in a frame a stand-in client answers, and on a native host by
-// its headless harness (clients/app/strict's `screenshot` example), each as a picture and its semantic tree as text
+// its headless harness (clients/app/renderer's `screenshot` example), each as a picture and its semantic tree as text
 // (src/drawing-primitives/outline.ts). It says, scene by scene, whether the trees are the same and how much of the pictures
 // differs, and keeps them all in `--out` to look at. A native host that can't draw a page yet (an older runtime
 // version) gives nothing, which it says. It says too how quickly the native host drew each (the harness's
@@ -45,7 +45,7 @@ const harness = join(root, `target/${flag("--release") ? "release" : "debug"}/ex
 // page written for this one, so there's nothing yet to compare.
 const speaks = (file, pattern) => Number(readFileSync(join(root, file), "utf8").match(pattern)?.[1])
 const needed = speaks("core/ui/src/drawing-primitives/renderer.ts", /export const RUNTIME_VERSION = (\d+)/)
-const hosted = speaks("clients/app/strict/src/lib.rs", /pub const RUNTIME_VERSION: u32 = (\d+)/)
+const hosted = speaks("clients/app/renderer/src/lib.rs", /pub const RUNTIME_VERSION: u32 = (\d+)/)
 
 if (!existsSync(here("dist/build/app.js"))) throw new Error("Build the UI library first: `bun build.js` in core/ui")
 
@@ -166,7 +166,7 @@ async function dom(browser, serve, key, scene, folder) {
   const page = await browser.newPage({ viewport: { width: scene.size[0], height: scene.size[1] }, deviceScaleFactor: 2, hasTouch: scene.touch, colorScheme: dark ? "dark" : "light" })
   const problems = []
   page.on("pageerror", (error) => problems.push(String(error)))
-  // The clock a native host's harness has (clients/app/strict/src/js.rs's `Clock::fixed`): 1 January 2026, UTC.
+  // The clock a native host's harness has (clients/app/renderer/src/js.rs's `Clock::fixed`): 1 January 2026, UTC.
   await page.clock.setFixedTime(new Date(Date.UTC(2026, 0, 1)))
   serve.host(key, scene)
   await page.goto(serve.url(key))
@@ -184,7 +184,7 @@ async function dom(browser, serve, key, scene, folder) {
 
 /// A scene drawn by a native host's headless harness, or nothing where it hasn't been built or can't draw the page.
 function native(built, scene, folder) {
-  if (!existsSync(harness)) return { missing: "the native harness isn't built (`cargo build -p strict --example screenshot`)" }
+  if (!existsSync(harness)) return { missing: "the native harness isn't built (`cargo build -p renderer --example screenshot`)" }
   if (hosted < needed) return { missing: `the native host's runtime version is ${hosted}, the UI library needs ${needed}: nothing to compare until it's ${needed}` }
   // The harness loads the module the folder's `index.html` names, from beside it: the page's, with what it loads.
   const at = join(folder, "page")

@@ -28,12 +28,12 @@ None of these is chosen. Each is named so it's weighed before anything like it i
 ## What the clients could be built with
 
 - **Expo**: phone apps, and it can send them updates without a store release. No desktop apps. Not chosen.
-- **Tauri**: desktop and phone apps from one codebase. What the app as it runs today uses. Chosen on 14 November 2026. From 19 November 2026 it stays the iPhone's shell, and the web view a host falls back to for a page that isn't strict or needs a newer host.
-- **Our own renderer** (19 November 2026): strict screens on a computer and an Android phone are drawn by a renderer of
+- **Tauri**: desktop and phone apps from one codebase. What the app as it runs today uses. Chosen on 14 November 2026. From 19 November 2026 it stays the iPhone's shell, and the web view a host falls back to for a page that isn't drawn natively or needs a newer host.
+- **Our own renderer** (19 November 2026): native screens on a computer and an Android phone are drawn by a renderer of
   ours for our closed set of primitives and tokens, with code copied in rather than depended on, so the repo stays MIT.
   Each copied file keeps its source's notice and says where it came from and at which upstream commit.
   - **GPUI** (Zed, Apache-2.0): its scene, shaders, glyph atlas and wgpu renderer and its desktop windows, input and
-    panel code. Not its App, Entity and View layers, which Solid strict replaces, and not as a dependency.
+    panel code. Not its App, Entity and View layers, which Solid replaces, and not as a dependency.
   - **Parley** (Linebender, as a dependency): text, the same on every platform and on the web, with fontique finding
     fonts and swash rasterizing glyphs. It replaced GPUI's three text systems (Core Text, DirectWrite, cosmic-text),
     which each measured a little differently and broke lines differently from the DOM (19 November 2026: of 347
@@ -63,7 +63,7 @@ None of these is chosen. Each is named so it's weighed before anything like it i
     through our fork of it) and the Direct3D 11 renderer copied from GPUI: one backend to keep, not three, and the
     same renderer and shaders run on the web later, as WebGPU in WASM.
   - Not used: Zed's `editor` crate, which is GPL-3.0.
-- **Lynx** (ByteDance): native views on Android from JS. A spike on 19 November 2026 drew a strict screen in it with a
+- **Lynx** (ByteDance): native views on Android from JS. A spike on 19 November 2026 drew a native screen in it with a
   cold start 35% faster than the web view and a fifth of its memory. Not chosen: Android uses our own renderer, and the
   web view until that works.
 - **Blitz**: an HTML and CSS renderer in Rust. Not chosen.
@@ -76,7 +76,7 @@ None of these is chosen. Each is named so it's weighed before anything like it i
   a data structure with no DOM) is used.
 - **Asuka** (`egoist/asuka`, MIT, v0.1.0, 13 November 2026): apps in Go drawn with each platform's own widgets. Set
   aside: it's compiled, so an app's entrypoint couldn't arrive from a server, and its widgets are each platform's own look.
-- **What a strict app's JS runs with on a native host** (18 November 2026, measured): the WinterTC Minimum Common API.
+- **What an app's JS runs with on a native host** (18 November 2026, measured): the WinterTC Minimum Common API.
   - **AWS LLRT's modules** (Apache-2.0, on rquickjs): chosen for URL, encoding, crypto, Blob, streams, DOMException
     and structuredClone. Its v0.10 is only on GitHub; crates.io's is on an older rquickjs. Its Event, EventTarget and
     AbortSignal give a listener no event's target, no `preventDefault` and no `handleEvent`, so those are
@@ -88,7 +88,7 @@ None of these is chosen. Each is named so it's weighed before anything like it i
     8.5 MB of each binary, so only English's is (`en` and its regional variants), and any other locale falls back to
     English. Its `unstable` `DateTimeFieldBag` mirrors ECMA-402's date options. icu_experimental 0.7 formats only
     lengths, areas, masses, volumes and durations as units, not bytes, temperatures or percentages, so units come from
-    CLDR's JSON (`clients/app/strict/units.js`). It has no DisplayNames for Intl, number ranges or plural ranges yet.
+    CLDR's JSON (`clients/app/renderer/units.js`). It has no DisplayNames for Intl, number ranges or plural ranges yet.
 
 ## App systems to learn from
 

@@ -1,0 +1,878 @@
+// Copied from Zed's GPUI (github.com/zed-industries/zed, crates/gpui/src/platform/mac/window.rs, events.rs and
+// platform/blade/apple_compat.rs) at commit 69e2130295c2649963eb639fc70b4f2ee8ea1624 (gpui 0.2.2 on crates.io), and
+// cut down for the native host, written on objc2's AppKit bindings in place of the deprecated `cocoa` crate: a window
+// with no title band and its traffic lights kept, its view's layer a CAMetalLayer wgpu draws into (GPUI's
+// `macos-blade`), its size and Retina scale as AppKit says them, the mouse and the wheel, keys, and the window having
+// the keyboard. What's typed goes through Flutter's text input plugin (`text_input.mm`), in place of GPUI's
+// NSTextInputClient. A panel (a launcher's) is GPUI's pop-up: a non-activating NSPanel
+// that can take the keyboard, with no title band or traffic lights, over every Space and full-screen app, and under
+// its view the system's glass (NSGlassEffectView on macOS 26, NSVisualEffectView before), rounded. AppKit is the main thread's: what's made or changed is changed there,
+// and what AppKit says is queued for the native thread, which the queue wakes. No tabs, full screen callbacks, drag
+// and drop, or window restoration.
+// Copyright 2022 - 2025 Zed Industries, Inc. Licensed under the Apache License, Version 2.0
+// (clients/app/renderer/LICENSE-APACHE); this file is changed from the original.
+
+use std::cell::{Cell, RefCell};
+use std::ffi::{CStr, CString, c_char, c_void};
+use std::sync::{Arc, Mutex};
+
+use dispatch2::{DispatchQueue, MainThreadBound, run_on_main};
+use objc2::rc::Retained;
+use objc2::runtime::{AnyObject, NSObjectProtocol, ProtocolObject};
+use objc2::{DefinedClass, MainThreadMarker, MainThreadOnly, define_class, msg_send};
+use objc2_app_kit::{
+    NSAppearanceCustomization, NSApplication, NSBackingStoreType, NSCursor, NSEvent, NSEventModifierFlags, NSEventPhase, NSPanel, NSResponder, NSTrackingArea,
+    NSTrackingAreaOptions, NSView, NSViewLayerContentsRedrawPolicy, NSWindow, NSWindowDelegate, NSWindowStyleMask, NSWindowTabbingMode,
+    NSWindowTitleVisibility,
+};
+use objc2_foundation::{NSArray, NSNotification, NSObject, NSPoint, NSRect, NSSize, NSString};
+use objc2_quartz_core::{CAAutoresizingMask, CALayer, CAMetalLayer, kCAGravityTopLeft};
+
+use super::events;
+use crate::Cursor;
+use crate::editing::{TextInput, TextInputClient};
+use crate::inspect::Key;
+use crate::geometry::{DevicePixels, Pixels, Point, Size};
+use crate::platform::{Input, WindowId, WindowOptions};
+use crate::view::Phase;
+
+/// What AppKit said, queued for the native thread, which `ping` wakes.
+#[derive(Clone)]
+struct Queue {
+    inputs: Arc<Mutex<Vec<(WindowId, Input)>>>,
+    ping: calloop::ping::Ping,
+}
+
+/// What a window's view and the native thread share.
+struct Shared {
+    id: WindowId,
+    queue: Queue,
+    /// Its view's size in device pixels, and its scale, as AppKit last said.
+    size: Mutex<(Size<DevicePixels>, f32)>,
+    /// Its title row over its page, as its page was last drawn (`Screen::title_row`): held where nothing in it takes a
+    /// press, it moves the window, as AppKit's title bar does.
+    title_row: Mutex<Option<crate::view::TitleRow>>,
+    /// A panel being dragged by a person, since a press in its title row and until it's summoned again: where it
+    /// moves to is told (`Input::Placed`).
+    dragged: std::sync::atomic::AtomicBool,
+}
+
+/// A screen's name, by its frame, which a panel's places are kept by: the same screen in the same arrangement.
+fn screen_name(screen: NSRect) -> String {
+    format!("{}x{}+{}+{}", screen.size.width, screen.size.height, screen.origin.x, screen.origin.y)
+}
+
+impl Shared {
+    fn send(&self, input: Input) {
+        self.queue.inputs.lock().expect("nothing panics holding it").push((self.id, input));
+        self.queue.ping.ping();
+    }
+}
+
+pub struct Display {
+    queue: Queue,
+    /// How many app windows are open, as against panels: while there's one, the One App is a regular app, with its
+    /// Dock icon and Cmd-Tab entry, and with none an accessory, as Raycast is with only its launcher.
+    apps: std::sync::atomic::AtomicUsize,
+}
+
+pub struct NativeWindow {
+    window: MainThreadBound<Retained<NSWindow>>,
+    /// A panel's: see-through where it isn't drawn, over its glass.
+    panel: bool,
+    /// A panel's glass where its page asked for the system's material (`set_glass`), each under its part of the page,
+    /// and how round the panel's corners are where its glass is under the whole of it.
+    glass: MainThreadBound<RefCell<Vec<Retained<NSView>>>>,
+    corner: f64,
+    /// A window holds its delegate weakly.
+    _delegate: MainThreadBound<Retained<Delegate>>,
+    /// Its view, which its text input plugin is called on, and its view's layer, the CAMetalLayer wgpu draws into,
+    /// which live as long as the window: addresses, as AppKit's objects are the main thread's.
+    view: usize,
+    layer: usize,
+    shared: Arc<Shared>,
+    cursor: Cell<Cursor>,
+}
+
+impl NativeWindow {
+    /// What wgpu draws into: its view's layer, taken on the main thread as the window was made, where wgpu would
+    /// take it from the view on the native thread, which AppKit doesn't allow.
+    pub fn surface(&self) -> anyhow::Result<wgpu::SurfaceTargetUnsafe> {
+        anyhow::ensure!(self.layer != 0, "its view has no layer to draw into");
+        Ok(wgpu::SurfaceTargetUnsafe::CoreAnimationLayer(self.layer as *mut c_void))
+    }
+
+    /// A computer's window has its surface from the start.
+    pub fn has_surface(&self) -> bool {
+        true
+    }
+
+    pub fn device_size(&self) -> Size<DevicePixels> {
+        self.shared.size.lock().expect("nothing panics holding it").0
+    }
+
+    pub fn size(&self) -> Size<Pixels> {
+        let (size, scale) = *self.shared.size.lock().expect("nothing panics holding it");
+        Size { width: Pixels(size.width.0 as f32 / scale), height: Pixels(size.height.0 as f32 / scale) }
+    }
+
+    pub fn scale(&self) -> f32 {
+        self.shared.size.lock().expect("nothing panics holding it").1
+    }
+
+    /// Its size, which its view keeps as AppKit changes it.
+    pub fn resized(&self, _size: Size<DevicePixels>) {}
+
+    /// Whether what isn't drawn on it is see-through: a panel's glass shows where it isn't.
+    pub fn transparent(&self) -> bool {
+        self.panel
+    }
+}
+
+impl Display {
+    pub fn connect<T: 'static>(handle: &calloop::LoopHandle<'static, T>) -> anyhow::Result<Display> {
+        let (ping, source) = calloop::ping::make_ping()?;
+        // The loop's turn reads what's queued (`events`).
+        handle.insert_source(source, |_, _, _| {}).map_err(|error| anyhow::anyhow!("no queue for AppKit's events: {error}"))?;
+        Ok(Display { queue: Queue { inputs: Arc::default(), ping }, apps: Default::default() })
+    }
+
+    pub fn open(&self, id: WindowId, options: &WindowOptions) -> anyhow::Result<NativeWindow> {
+        let queue = self.queue.clone();
+        let first = options.panel.is_none() && self.apps.fetch_add(1, std::sync::atomic::Ordering::Relaxed) == 0;
+        run_on_main(|main| {
+            // An app's window gives the One App its Dock icon and Cmd-Tab entry, as a regular app's.
+            if first {
+                NSApplication::sharedApplication(main).setActivationPolicy(objc2_app_kit::NSApplicationActivationPolicy::Regular);
+            }
+            let shared = Arc::new(Shared { id, queue, size: Mutex::new((Size::default(), 1.0)), title_row: Mutex::default(), dragged: Default::default() });
+            let rect = NSRect::new(NSPoint::new(0.0, 0.0), NSSize::new(options.size.width.0.into(), options.size.height.0.into()));
+            let window = match options.panel {
+                // GPUI's pop-up: titled, so it can take the keyboard, with nothing of its title band shown.
+                Some(_) => {
+                    let style = NSWindowStyleMask::Titled | NSWindowStyleMask::FullSizeContentView | NSWindowStyleMask::NonactivatingPanel;
+                    let panel: Retained<Panel> = unsafe {
+                        msg_send![main.alloc::<Panel>(), initWithContentRect: rect, styleMask: style, backing: NSBackingStoreType::Buffered, defer: false]
+                    };
+                    Retained::into_super(Retained::into_super(panel))
+                }
+                None => {
+                    let style = NSWindowStyleMask::Titled
+                        | NSWindowStyleMask::Closable
+                        | NSWindowStyleMask::Miniaturizable
+                        | NSWindowStyleMask::Resizable
+                        | NSWindowStyleMask::FullSizeContentView;
+                    unsafe { NSWindow::initWithContentRect_styleMask_backing_defer(main.alloc(), rect, style, NSBackingStoreType::Buffered, false) }
+                }
+            };
+            unsafe { window.setReleasedWhenClosed(false) };
+            // No title band: the app runs to the window's top, under the traffic lights, its title kept for Mission
+            // Control, the Window menu and Cmd-Tab.
+            window.setTitle(&NSString::from_str(&options.title));
+            window.setTitlebarAppearsTransparent(true);
+            window.setTitleVisibility(NSWindowTitleVisibility::Hidden);
+            window.setTabbingMode(NSWindowTabbingMode::Disallowed);
+            if options.panel.is_none() {
+                unsafe { place_lights(&window) };
+            }
+            window.setAcceptsMouseMovedEvents(true);
+
+            let view = View::new(main, rect, shared.clone());
+            match options.panel {
+                Some(corner) => unsafe { panel(&window, &view, rect, corner.into()) },
+                None => window.setContentView(Some(&view)),
+            }
+            window.makeFirstResponder(Some(&view));
+            let delegate = Delegate::new(main, shared.clone());
+            window.setDelegate(Some(ProtocolObject::from_ref(&*delegate)));
+            view.measure(&window);
+
+            window.center();
+            // An app's window opens where it was last, as AppKit keeps a named window's frame in the user's defaults,
+            // so one opened again as the app starts again on a new build is where it was (`updater`).
+            if options.panel.is_none() {
+                let name = NSString::from_str(&format!("one {}", options.tag));
+                window.setFrameUsingName(&name);
+                window.setFrameAutosaveName(&name);
+            }
+            let layer = view.layer().map_or(0, |layer| Retained::as_ptr(&layer) as usize);
+            Ok(NativeWindow {
+                view: Retained::as_ptr(&view) as usize,
+                layer,
+                panel: options.panel.is_some(),
+                glass: MainThreadBound::new(RefCell::default(), main),
+                corner: options.panel.map_or(0.0, f64::from),
+                window: MainThreadBound::new(window, main),
+                _delegate: MainThreadBound::new(delegate, main),
+                shared,
+                cursor: Cell::new(Cursor::Arrow),
+            })
+        })
+    }
+
+    /// Puts a window opened hidden on the screen, in front.
+    pub fn show(&self, window: &NativeWindow) {
+        self.activate(window);
+    }
+
+    pub fn close(&self, window: &NativeWindow) {
+        let last = !window.panel && self.apps.fetch_sub(1, std::sync::atomic::Ordering::Relaxed) == 1;
+        window.window.get_on_main(|window| {
+            window.setDelegate(None);
+            window.close();
+            // The last app window gone, the One App is an accessory again: its launcher has no Dock icon.
+            if last {
+                NSApplication::sharedApplication(window.mtm()).setActivationPolicy(objc2_app_kit::NSApplicationActivationPolicy::Accessory);
+            }
+        });
+    }
+
+    /// Shows a panel centred near the top of the screen the pointer is on, a fifth of the way down as Spotlight sits,
+    /// with the keyboard. It never activates the One App, so the app in front stays in front, and has the keyboard
+    /// back as it goes.
+    /// Where it was dragged to on that screen before (`places`), it's there, as Raycast's is, as much of it as fits.
+    pub fn summon(&self, window: &NativeWindow, places: &crate::platform::Places) {
+        window.shared.dragged.store(false, std::sync::atomic::Ordering::Relaxed);
+        window.window.get_on_main(|window| unsafe {
+            let mouse: NSPoint = msg_send![objc2::class!(NSEvent), mouseLocation];
+            let screens: Retained<NSArray<AnyObject>> = msg_send![objc2::class!(NSScreen), screens];
+            let frame_of = |screen: &AnyObject| -> NSRect { msg_send![screen, frame] };
+            let on = screens.iter().map(|screen| frame_of(&screen)).find(|frame| {
+                mouse.x >= frame.origin.x && mouse.y >= frame.origin.y && mouse.x < frame.origin.x + frame.size.width && mouse.y < frame.origin.y + frame.size.height
+            });
+            if let Some(screen) = on.or_else(|| screens.firstObject().map(|screen| frame_of(&screen))) {
+                let size = window.frame().size;
+                let (x, top) = match places.get(&screen_name(screen)) {
+                    Some(at) => (
+                        (screen.origin.x + f64::from(at.x)).clamp(screen.origin.x, screen.origin.x + (screen.size.width - size.width).max(0.0)),
+                        (screen.origin.y + screen.size.height - f64::from(at.y)).clamp(screen.origin.y + size.height.min(screen.size.height), screen.origin.y + screen.size.height),
+                    ),
+                    None => (
+                        screen.origin.x + (screen.size.width - size.width) / 2.0,
+                        screen.origin.y + screen.size.height - (screen.size.height * 0.2).min((screen.size.height - size.height).max(0.0)),
+                    ),
+                };
+                window.setFrameTopLeftPoint(NSPoint::new(x, top));
+            }
+            window.makeKeyAndOrderFront(None);
+        });
+    }
+
+    /// Puts a panel away. The One App never came in front for it, so the app that had the keyboard has it again.
+    pub fn put_away(&self, window: &NativeWindow, _give_back: bool) {
+        window.window.get_on_main(|window| window.orderOut(None));
+    }
+
+    /// Makes a window `size`, its top and its middle where they are.
+    pub fn resize(&self, window: &NativeWindow, size: Size<Pixels>) {
+        window.window.get_on_main(|window| {
+            let frame = window.frame();
+            let (width, height) = (f64::from(size.width.0), f64::from(size.height.0));
+            let x = frame.origin.x + (frame.size.width - width) / 2.0;
+            let to = NSRect::new(NSPoint::new(x, frame.origin.y + frame.size.height - height), NSSize::new(width, height));
+            window.setFrame_display(to, true);
+        });
+    }
+
+    /// Puts the system's glass under a panel's page where it asked for it (`regions`), as Liquid Glass shapes each of a
+    /// Mac's floating controls, and nowhere else: with none asked for, it's under the whole panel, as before a page
+    /// asked. A part that moves has its glass moved with it, frame by frame.
+    pub fn set_glass(&self, window: &NativeWindow, regions: &[crate::platform::Glass]) {
+        if !window.panel {
+            return;
+        }
+        let (views, corner) = (&window.glass, window.corner);
+        window.window.get_on_main(|window| unsafe {
+            let main = window.mtm();
+            let Some(content) = window.contentView() else { return };
+            let subviews = content.subviews();
+            // The whole panel's glass is first under the page, which is last.
+            let (Some(whole), Some(page)) = (subviews.firstObject(), subviews.lastObject()) else { return };
+            whole.setHidden(!regions.is_empty());
+            window.setHasShadow(regions.is_empty());
+            if let Some(layer) = page.layer() {
+                layer.setCornerRadius(if regions.is_empty() { corner } else { 0.0 });
+            }
+            let mut views = views.get(main).borrow_mut();
+            while views.len() > regions.len() {
+                views.pop().expect("there's one").removeFromSuperview();
+            }
+            while views.len() < regions.len() {
+                let glass = glass(NSRect::ZERO, 0.0);
+                // NSWindowBelow: under the page.
+                let () = msg_send![&*content, addSubview: &*glass, positioned: -1isize, relativeTo: &*page];
+                views.push(glass);
+            }
+            let height = content.frame().size.height;
+            for (view, region) in views.iter().zip(regions) {
+                let (x, y, w, h) = (f64::from(region.bounds.origin.x), f64::from(region.bounds.origin.y), f64::from(region.bounds.size.width), f64::from(region.bounds.size.height));
+                view.setFrame(NSRect::new(NSPoint::new(x, height - y - h), NSSize::new(w, h)));
+                view.setAlphaValue(f64::from(region.opacity));
+                round(view, f64::from(region.radius));
+            }
+        });
+    }
+
+    pub fn activate(&self, window: &NativeWindow) {
+        window.window.get_on_main(|window| {
+            window.makeKeyAndOrderFront(None);
+            NSApplication::sharedApplication(window.mtm()).activate();
+        });
+    }
+
+    pub fn set_cursor(&self, window: &NativeWindow, cursor: Cursor) {
+        if window.cursor.replace(cursor) == cursor {
+            return;
+        }
+        DispatchQueue::main().exec_async(move || {
+            let cursor = match cursor {
+                Cursor::Arrow => NSCursor::arrowCursor(),
+                Cursor::Pointer => NSCursor::pointingHandCursor(),
+                Cursor::Text => NSCursor::IBeamCursor(),
+            };
+            cursor.set();
+        });
+    }
+
+    /// Tells window `window`'s text input plugin what the screen says (`editing::TextInput`), on the main thread.
+    pub fn text_input(&self, window: &NativeWindow, calls: &[TextInput]) {
+        let calls: Vec<_> = calls.iter().map(|call| call.call()).map(|(method, arguments)| (cstring(method), cstring(&arguments.to_string()))).collect();
+        let view = window.view;
+        window.window.get_on_main(move |_| {
+            // SAFETY: the window's content view, which lives as long as the window, which this holds.
+            let view = unsafe { &*(view as *const View) };
+            for (method, arguments) in calls {
+                unsafe { text_input_call(view.ivars().text_input.get(), method.as_ptr(), arguments.as_ptr()) };
+            }
+        });
+    }
+
+    /// Its title row, as its page was last drawn: what of it moves the window (`View`'s `mouseDown:`).
+    pub fn set_title_row(&self, window: &NativeWindow, row: Option<crate::view::TitleRow>) {
+        *window.shared.title_row.lock().expect("nothing panics holding it") = row;
+    }
+
+    pub fn flush(&self) {}
+
+    /// What AppKit has said since it was last asked, by the window it's about.
+    pub fn events(&self) -> Vec<(WindowId, Input)> {
+        std::mem::take(&mut *self.queue.inputs.lock().expect("nothing panics holding it"))
+    }
+}
+
+struct ViewIvars {
+    /// Its text input plugin, dropped before what it tells.
+    text_input: Plugin,
+    shared: Arc<Shared>,
+    /// The main button went down with Control held, which a Mac takes as the secondary one, so it comes up as that.
+    secondary: Cell<bool>,
+}
+
+define_class!(
+    // SAFETY: NSView has no subclassing requirements, and `View` doesn't implement `Drop`.
+    #[unsafe(super(NSView, NSResponder, NSObject))]
+    #[thread_kind = MainThreadOnly]
+    #[name = "OneNativeView"]
+    #[ivars = ViewIvars]
+    struct View;
+
+    impl View {
+        #[unsafe(method(acceptsFirstResponder))]
+        fn accepts_first_responder(&self) -> bool {
+            true
+        }
+
+        #[unsafe(method(acceptsFirstMouse:))]
+        fn accepts_first_mouse(&self, _event: Option<&NSEvent>) -> bool {
+            true
+        }
+
+        #[unsafe(method_id(makeBackingLayer))]
+        fn make_backing_layer(&self) -> Retained<CALayer> {
+            let layer = CAMetalLayer::new();
+            layer.setAutoresizingMask(CAAutoresizingMask::LayerWidthSizable | CAAutoresizingMask::LayerHeightSizable);
+            layer.setContentsGravity(unsafe { kCAGravityTopLeft });
+            layer.setNeedsDisplayOnBoundsChange(true);
+            Retained::into_super(layer)
+        }
+
+        #[unsafe(method(wantsUpdateLayer))]
+        fn wants_update_layer(&self) -> bool {
+            true
+        }
+
+        // AppKit asks for the layer's contents again (GPUI's `displayLayer:`): it's drawn on the native thread.
+        #[unsafe(method(updateLayer))]
+        fn update_layer(&self) {
+            self.ivars().shared.send(Input::Expose);
+        }
+
+        #[unsafe(method(setFrameSize:))]
+        fn set_frame_size(&self, size: NSSize) {
+            let _: () = unsafe { msg_send![super(self), setFrameSize: size] };
+            if let Some(window) = self.window() {
+                self.measure(&window);
+            }
+        }
+
+        #[unsafe(method(viewDidChangeBackingProperties))]
+        fn view_did_change_backing_properties(&self) {
+            if let Some(window) = self.window() {
+                self.measure(&window);
+            }
+        }
+
+        #[unsafe(method(viewDidChangeEffectiveAppearance))]
+        fn view_did_change_effective_appearance(&self) {
+            self.ivars().shared.send(Input::Appearance(super::of(&self.effectiveAppearance())));
+        }
+
+        #[unsafe(method(keyDown:))]
+        fn key_down(&self, event: &NSEvent) {
+            let key = events::key(event);
+            let shared = &self.ivars().shared;
+            // ⌘W closes the window, as a Mac app's does.
+            if key.meta && !key.ctrl && !key.alt && key.key.eq_ignore_ascii_case("w") {
+                return shared.send(Input::Close);
+            }
+            // A shortcut (⌘ or Control) the menu bar didn't take, or a key that types nothing (Enter, an arrow,
+            // Backspace), is the page's first, as Flutter's keyboard manager gives its framework each key before the
+            // text input plugin; while its input method composes, every key is the input method's.
+            let plugin = self.ivars().text_input.get();
+            let composing = unsafe { text_input_composing(plugin) };
+            if !composing && (key.meta || key.ctrl || key.key.chars().count() > 1) {
+                return shared.send(Input::Key(key));
+            }
+            if !unsafe { text_input_key(plugin, event) } {
+                shared.send(Input::Key(key));
+            }
+        }
+
+        // The Edit menu's, and their keys' (⌘C, ⌘X, ⌘V, ⌘A, ⌘Z, ⇧⌘Z): the page's, as those keys.
+        #[unsafe(method(copy:))]
+        fn copy(&self, _sender: Option<&AnyObject>) {
+            self.command("c", false);
+        }
+
+        #[unsafe(method(cut:))]
+        fn cut(&self, _sender: Option<&AnyObject>) {
+            self.command("x", false);
+        }
+
+        #[unsafe(method(paste:))]
+        fn paste(&self, _sender: Option<&AnyObject>) {
+            self.command("v", false);
+        }
+
+        #[unsafe(method(selectAll:))]
+        fn select_all(&self, _sender: Option<&AnyObject>) {
+            self.command("a", false);
+        }
+
+        #[unsafe(method(undo:))]
+        fn undo(&self, _sender: Option<&AnyObject>) {
+            self.command("z", false);
+        }
+
+        #[unsafe(method(redo:))]
+        fn redo(&self, _sender: Option<&AnyObject>) {
+            self.command("z", true);
+        }
+
+        #[unsafe(method(mouseDown:))]
+        fn mouse_down(&self, event: &NSEvent) {
+            // On a Mac, a Control-click is a secondary click.
+            let flags = event.modifierFlags();
+            let secondary = flags.contains(NSEventModifierFlags::Control);
+            // What's empty in its title row is its title bar: it moves the window, and double-clicked does what the
+            // person set in System Settings (Desktop & Dock, "Double-click a window's title bar to").
+            let at = self.at(event);
+            let moves = self.ivars().shared.title_row.lock().expect("nothing panics holding it").as_ref().is_some_and(|row| row.moves(at));
+            if moves && !secondary && let Some(window) = self.window() {
+                // A panel has no zoom; it's only dragged.
+                let panel = window.isKindOfClass(objc2::class!(NSPanel));
+                if event.clickCount() == 2 && !panel {
+                    double_clicked(&window)
+                } else {
+                    self.ivars().shared.dragged.store(panel, std::sync::atomic::Ordering::Relaxed);
+                    window.performWindowDragWithEvent(event)
+                }
+                return;
+            }
+            self.ivars().secondary.set(secondary);
+            self.ivars().shared.send(Input::Down(self.at(event), if secondary { 2 } else { 0 }, flags.contains(NSEventModifierFlags::Shift)));
+        }
+
+        #[unsafe(method(mouseUp:))]
+        fn mouse_up(&self, event: &NSEvent) {
+            let button = if self.ivars().secondary.take() { 2 } else { 0 };
+            self.ivars().shared.send(Input::Up(self.at(event), button));
+        }
+
+        #[unsafe(method(rightMouseDown:))]
+        fn right_mouse_down(&self, event: &NSEvent) {
+            self.ivars().shared.send(Input::Down(self.at(event), 2, event.modifierFlags().contains(NSEventModifierFlags::Shift)));
+        }
+
+        #[unsafe(method(rightMouseUp:))]
+        fn right_mouse_up(&self, event: &NSEvent) {
+            self.ivars().shared.send(Input::Up(self.at(event), 2));
+        }
+
+        #[unsafe(method(otherMouseDown:))]
+        fn other_mouse_down(&self, event: &NSEvent) {
+            if event.buttonNumber() == 2 {
+                self.ivars().shared.send(Input::Down(self.at(event), 1, event.modifierFlags().contains(NSEventModifierFlags::Shift)));
+            }
+        }
+
+        #[unsafe(method(otherMouseUp:))]
+        fn other_mouse_up(&self, event: &NSEvent) {
+            if event.buttonNumber() == 2 {
+                self.ivars().shared.send(Input::Up(self.at(event), 1));
+            }
+        }
+
+        #[unsafe(method(mouseMoved:))]
+        fn mouse_moved(&self, event: &NSEvent) {
+            self.ivars().shared.send(Input::Moved(self.at(event)));
+        }
+
+        #[unsafe(method(mouseDragged:))]
+        fn mouse_dragged(&self, event: &NSEvent) {
+            self.ivars().shared.send(Input::Moved(self.at(event)));
+        }
+
+        #[unsafe(method(rightMouseDragged:))]
+        fn right_mouse_dragged(&self, event: &NSEvent) {
+            self.ivars().shared.send(Input::Moved(self.at(event)));
+        }
+
+        #[unsafe(method(otherMouseDragged:))]
+        fn other_mouse_dragged(&self, event: &NSEvent) {
+            self.ivars().shared.send(Input::Moved(self.at(event)));
+        }
+
+        #[unsafe(method(mouseExited:))]
+        fn mouse_exited(&self, _event: &NSEvent) {
+            self.ivars().shared.send(Input::Left);
+        }
+
+        #[unsafe(method(scrollWheel:))]
+        fn scroll_wheel(&self, event: &NSEvent) {
+            // A trackpad says pixels; a wheel says lines, which WebKit scrolls 40 px each. AppKit's deltas move the
+            // content, so the DOM's, which move the view, are the other way.
+            let per = if event.hasPreciseScrollingDeltas() { 1.0 } else { 40.0 };
+            let delta = Point { x: -(event.scrollingDeltaX() as f32) * per, y: -(event.scrollingDeltaY() as f32) * per };
+            // A trackpad's fingers' phase, and the momentum AppKit goes on with once they've lifted; a wheel has neither.
+            let (fingers, momentum) = (event.phase(), event.momentumPhase());
+            let phase = (fingers != NSEventPhase::None || momentum != NSEventPhase::None).then(|| Phase {
+                fingers: [NSEventPhase::Began, NSEventPhase::Changed, NSEventPhase::Ended, NSEventPhase::Cancelled, NSEventPhase::MayBegin]
+                    .iter()
+                    .position(|one| *one == fingers)
+                    .map(|at| Phase::FINGERS[at]),
+                momentum: momentum != NSEventPhase::None,
+            });
+            self.ivars().shared.send(Input::Wheel(self.at(event), delta, phase));
+        }
+    }
+
+    unsafe impl NSObjectProtocol for View {}
+);
+
+impl View {
+    /// ⌘ and `key`, with Shift if `shift`, as a menu's command is its key.
+    fn command(&self, key: &str, shift: bool) {
+        self.ivars().shared.send(Input::Key(Key { key: key.to_owned(), shift, alt: false, ctrl: false, meta: true }));
+    }
+
+    fn new(main: MainThreadMarker, frame: NSRect, shared: Arc<Shared>) -> Retained<View> {
+        let this = main.alloc::<View>().set_ivars(ViewIvars { text_input: Plugin(Cell::new(std::ptr::null_mut())), shared, secondary: Cell::new(false) });
+        let view: Retained<View> = unsafe { msg_send![super(this), initWithFrame: frame] };
+        let shared = Arc::as_ptr(&view.ivars().shared).cast_mut().cast();
+        view.ivars().text_input.0.set(unsafe { text_input_new(Retained::as_ptr(&view).cast_mut().cast(), shared, said) });
+        // Layer-backed from the start, its layer the CAMetalLayer wgpu draws into (`makeBackingLayer`).
+        view.setWantsLayer(true);
+        view.setLayerContentsRedrawPolicy(NSViewLayerContentsRedrawPolicy::DuringViewResize);
+        // The pointer, over it, whether or not its window has the keyboard, and as it leaves.
+        let options = NSTrackingAreaOptions::MouseEnteredAndExited
+            | NSTrackingAreaOptions::MouseMoved
+            | NSTrackingAreaOptions::ActiveAlways
+            | NSTrackingAreaOptions::InVisibleRect;
+        let area = unsafe { NSTrackingArea::initWithRect_options_owner_userInfo(main.alloc(), NSRect::ZERO, options, Some(&view), None) };
+        view.addTrackingArea(&area);
+        view
+    }
+
+    /// Its size and scale now, to draw at, which tells the native thread it changed.
+    fn measure(&self, window: &NSWindow) {
+        let scale = window.backingScaleFactor();
+        if let Some(layer) = self.layer() {
+            layer.setContentsScale(scale);
+        }
+        let frame = self.frame();
+        let size = Size { width: DevicePixels((frame.size.width * scale).round() as i32), height: DevicePixels((frame.size.height * scale).round() as i32) };
+        let shared = &self.ivars().shared;
+        *shared.size.lock().expect("nothing panics holding it") = (size, scale as f32);
+        shared.send(Input::Resized(size));
+    }
+
+    /// Where `event` is in the view, from its top left: AppKit's y is from the bottom.
+    fn at(&self, event: &NSEvent) -> Point<f32> {
+        let point = self.convertPoint_fromView(event.locationInWindow(), None);
+        Point { x: point.x as f32, y: (self.frame().size.height - point.y) as f32 }
+    }
+}
+
+define_class!(
+    // SAFETY: NSPanel has no subclassing requirements, and `Panel` doesn't implement `Drop`.
+    #[unsafe(super(NSPanel, NSWindow, NSResponder, NSObject))]
+    #[thread_kind = MainThreadOnly]
+    #[name = "OneNativePanel"]
+    struct Panel;
+
+    impl Panel {
+        // A panel with no frame takes the keyboard only if it says it can, as GPUI's `GPUIPanel` does.
+        #[unsafe(method(canBecomeKeyWindow))]
+        fn can_become_key_window(&self) -> bool {
+            true
+        }
+
+        #[unsafe(method(canBecomeMainWindow))]
+        fn can_become_main_window(&self) -> bool {
+            true
+        }
+    }
+);
+
+/// Where its traffic lights are in its title row, 52 points tall as its page's top bar is (a unified toolbar), as
+/// AppKit puts them in one: the first's left edge, and how far below the window's top they start, in the middle of it.
+/// The app's web view windows put theirs in the same place (`title_bar::LIGHTS`).
+const LIGHTS: (f64, f64) = (20.0, (52.0 - 14.0) / 2.0);
+
+/// Puts `window`'s traffic lights where a unified toolbar has them (`LIGHTS`): their title bar container as tall as
+/// that, and each light along it, as far apart as AppKit put them.
+unsafe fn place_lights(window: &NSWindow) {
+    unsafe {
+        let buttons: [*mut AnyObject; 3] = [0usize, 1, 2].map(|button| msg_send![window, standardWindowButton: button]);
+        if buttons.iter().any(|button| button.is_null()) {
+            return;
+        }
+        let first: NSRect = msg_send![buttons[0], frame];
+        let second: NSRect = msg_send![buttons[1], frame];
+        let apart = second.origin.x - first.origin.x;
+        let lights: *mut AnyObject = msg_send![buttons[0], superview];
+        let container: *mut AnyObject = if lights.is_null() { lights } else { msg_send![lights, superview] };
+        if !container.is_null() {
+            let mut frame: NSRect = msg_send![container, frame];
+            frame.size.height = first.size.height + LIGHTS.1;
+            frame.origin.y = window.frame().size.height - frame.size.height;
+            let () = msg_send![container, setFrame: frame];
+        }
+        for (at, button) in buttons.into_iter().enumerate() {
+            let mut origin: NSRect = msg_send![button, frame];
+            origin.origin.x = LIGHTS.0 + at as f64 * apart;
+            let () = msg_send![button, setFrameOrigin: origin.origin];
+        }
+    }
+}
+
+/// Does what a double-click on a window's title bar does, as its person set it in System Settings (Desktop & Dock):
+/// zoom, which is what's set until they change it, minimize, or nothing.
+fn double_clicked(window: &NSWindow) {
+    unsafe {
+        let defaults: *mut AnyObject = msg_send![objc2::class!(NSUserDefaults), standardUserDefaults];
+        let key = NSString::from_str("AppleActionOnDoubleClick");
+        let set: *mut NSString = msg_send![defaults, stringForKey: &*key];
+        match set.as_ref().map(|set| set.to_string()).as_deref() {
+            Some("None") => {}
+            Some("Minimize") => window.miniaturize(None),
+            _ => window.zoom(None),
+        }
+    }
+}
+
+/// Makes `window` a panel, as a launcher's is: over other apps' windows on every Space, full-screen apps' too, out of
+/// Cmd-` and Mission Control, see-through, with a shadow, and its title band and traffic lights hidden; its content
+/// the system's glass, rounded `corner` points, with `view` over it.
+unsafe fn panel(window: &NSWindow, view: &View, rect: NSRect, corner: f64) {
+    unsafe {
+        window.setTitlebarAppearsTransparent(true);
+        window.setTitleVisibility(NSWindowTitleVisibility::Hidden);
+        for button in 0..3usize {
+            let button: *mut AnyObject = msg_send![window, standardWindowButton: button];
+            if !button.is_null() {
+                let () = msg_send![button, setHidden: true];
+            }
+        }
+        // NSWindowCollectionBehavior: canJoinAllSpaces, stationary, ignoresCycle, fullScreenAuxiliary.
+        let () = msg_send![window, setCollectionBehavior: (1usize << 0) | (1 << 4) | (1 << 6) | (1 << 8)];
+        // NSStatusWindowLevel, as Spotlight's.
+        let () = msg_send![window, setLevel: 25isize];
+        // It moves only by what its page says moves it (`appRegion`), as Raycast's is dragged by its own.
+        let () = msg_send![window, setMovable: true];
+        let () = msg_send![window, setHidesOnDeactivate: false];
+        window.setOpaque(false);
+        let clear: *mut AnyObject = msg_send![objc2::class!(NSColor), clearColor];
+        let () = msg_send![window, setBackgroundColor: clear];
+        window.setHasShadow(true);
+        // A view that holds the panel's glass and the page over it, and the glass under parts of it its page asks for
+        // instead (`set_glass`), all following the window's size.
+        let sizable = objc2_app_kit::NSAutoresizingMaskOptions::ViewWidthSizable | objc2_app_kit::NSAutoresizingMaskOptions::ViewHeightSizable;
+        let main = window.mtm();
+        let content = NSView::initWithFrame(main.alloc(), rect);
+        window.setContentView(Some(&content));
+        let whole = glass(rect, corner);
+        whole.setAutoresizingMask(sizable);
+        content.addSubview(&whole);
+        view.setAutoresizingMask(sizable);
+        content.addSubview(view);
+        if let Some(layer) = view.layer() {
+            layer.setCornerRadius(corner);
+            layer.setMasksToBounds(true);
+        }
+    }
+}
+
+/// The system's glass, `rect`, rounded `corner` points: Liquid Glass (NSGlassEffectView) on macOS 26, and before it the
+/// HUD window's material, blended behind the window and always active.
+unsafe fn glass(rect: NSRect, corner: f64) -> Retained<NSView> {
+    unsafe {
+        let glass: *mut AnyObject = match objc2::runtime::AnyClass::get(c"NSGlassEffectView") {
+            Some(class) => {
+                let glass: *mut AnyObject = msg_send![class, alloc];
+                msg_send![glass, initWithFrame: rect]
+            }
+            None => {
+                let glass: *mut AnyObject = msg_send![objc2::class!(NSVisualEffectView), alloc];
+                let glass: *mut AnyObject = msg_send![glass, initWithFrame: rect];
+                let () = msg_send![glass, setMaterial: 13isize];
+                let () = msg_send![glass, setBlendingMode: 0isize];
+                let () = msg_send![glass, setState: 1isize];
+                let () = msg_send![glass, setWantsLayer: true];
+                glass
+            }
+        };
+        let glass = Retained::from_raw(glass as *mut NSView).expect("AppKit made it");
+        round(&glass, corner);
+        glass
+    }
+}
+
+/// Rounds the system's glass `corner` points.
+unsafe fn round(glass: &NSView, corner: f64) {
+    unsafe {
+        let responds: bool = msg_send![glass, respondsToSelector: objc2::sel!(setCornerRadius:)];
+        if responds {
+            let () = msg_send![glass, setCornerRadius: corner];
+        } else if let Some(layer) = glass.layer() {
+            layer.setCornerRadius(corner);
+            layer.setMasksToBounds(true);
+        }
+    }
+}
+
+define_class!(
+    // SAFETY: NSObject has no subclassing requirements, and `Delegate` doesn't implement `Drop`.
+    #[unsafe(super(NSObject))]
+    #[thread_kind = MainThreadOnly]
+    #[name = "OneNativeWindowDelegate"]
+    #[ivars = Arc<Shared>]
+    struct Delegate;
+
+    unsafe impl NSObjectProtocol for Delegate {}
+
+    unsafe impl NSWindowDelegate for Delegate {
+        // Its close button, or the Window menu's Close: the native thread closes it (`Display::close`).
+        #[unsafe(method(windowShouldClose:))]
+        fn window_should_close(&self, _sender: &NSWindow) -> bool {
+            self.ivars().send(Input::Close);
+            false
+        }
+
+        #[unsafe(method(windowDidBecomeKey:))]
+        fn window_did_become_key(&self, _notification: &NSNotification) {
+            self.ivars().send(Input::Focus(true));
+        }
+
+        // A panel dragged by a person is told where it was left on its screen.
+        #[unsafe(method(windowDidMove:))]
+        fn window_did_move(&self, notification: &NSNotification) {
+            if !self.ivars().dragged.load(std::sync::atomic::Ordering::Relaxed) {
+                return;
+            }
+            let window: *mut AnyObject = unsafe { msg_send![notification, object] };
+            let screen: *mut AnyObject = if window.is_null() { std::ptr::null_mut() } else { unsafe { msg_send![window, screen] } };
+            if screen.is_null() {
+                return;
+            }
+            let (frame, on): (NSRect, NSRect) = unsafe { (msg_send![window, frame], msg_send![screen, frame]) };
+            let at = Point { x: (frame.origin.x - on.origin.x) as f32, y: (on.origin.y + on.size.height - (frame.origin.y + frame.size.height)) as f32 };
+            self.ivars().send(Input::Placed(screen_name(on), at));
+        }
+
+        #[unsafe(method(windowDidResignKey:))]
+        fn window_did_resign_key(&self, _notification: &NSNotification) {
+            self.ivars().send(Input::Focus(false));
+        }
+
+        // AppKit lays the title bar out again as the window changes size, and out of full screen.
+        #[unsafe(method(windowDidResize:))]
+        fn window_did_resize(&self, notification: &NSNotification) {
+            if let Some(window) = notification.object().and_then(|object| object.downcast::<NSWindow>().ok()) {
+                unsafe { place_lights(&window) };
+            }
+        }
+    }
+);
+
+/// A native view's text input plugin (`text_input.mm`): Flutter's, as a C interface.
+struct Plugin(Cell<*mut c_void>);
+
+impl Plugin {
+    fn get(&self) -> *mut c_void {
+        self.0.get()
+    }
+}
+
+impl Drop for Plugin {
+    fn drop(&mut self) {
+        unsafe { text_input_free(self.0.get()) };
+    }
+}
+
+unsafe extern "C" {
+    fn text_input_new(view: *mut c_void, context: *mut c_void, send: extern "C" fn(*mut c_void, *const c_char, *const c_char)) -> *mut c_void;
+    fn text_input_free(plugin: *mut c_void);
+    fn text_input_call(plugin: *mut c_void, method: *const c_char, arguments: *const c_char);
+    fn text_input_key(plugin: *mut c_void, event: &NSEvent) -> bool;
+    fn text_input_composing(plugin: *mut c_void) -> bool;
+}
+
+/// What a view's text input plugin says, as Flutter's text input channel's method calls, for its window's screen.
+/// The commands its input method gives (`doCommandBySelector:`) are the keys they stand for, as the page hears keys.
+extern "C" fn said(shared: *mut c_void, method: *const c_char, arguments: *const c_char) {
+    // SAFETY: the view's, which outlives its plugin (`ViewIvars`).
+    let shared = unsafe { &*shared.cast::<Shared>() };
+    let method = unsafe { CStr::from_ptr(method) }.to_string_lossy();
+    let arguments: serde_json::Value = serde_json::from_slice(unsafe { CStr::from_ptr(arguments) }.to_bytes()).unwrap_or_default();
+    if method == "TextInputClient.performSelectors" {
+        let selectors = arguments[1].as_array().into_iter().flatten().filter_map(|selector| selector.as_str());
+        for key in selectors.filter_map(events::command) {
+            shared.send(Input::Key(key));
+        }
+    } else if let Some(said) = TextInputClient::from_call(&method, &arguments) {
+        shared.send(Input::TextInputClient(said));
+    }
+}
+
+fn cstring(text: &str) -> CString {
+    CString::new(text.replace('\0', "")).expect("no NUL in it")
+}
+
+impl Delegate {
+    fn new(main: MainThreadMarker, shared: Arc<Shared>) -> Retained<Delegate> {
+        let this = main.alloc::<Delegate>().set_ivars(shared);
+        unsafe { msg_send![super(this), init] }
+    }
+}

@@ -55,7 +55,7 @@ window = [
   "dep:wry",
   "dep:tao",
   "dep:muda",
-  "dep:strict",
+  "dep:renderer",
   "cli/window",
 ]
 
@@ -129,20 +129,20 @@ objc2 = { version = "0.6", optional = true }
 muda = { version = "0.20", optional = true }
 objc2-foundation = { version = "0.3", default-features = false, features = ["std", "objc2-core-foundation", "NSGeometry"], optional = true }
 
-# A strict app's own window, drawn natively (`strict`), on Linux, a Mac and Windows.
+# An app's own window, drawn natively (`renderer`), on Linux, a Mac and Windows.
 [target.'cfg(any(target_os = "linux", target_os = "macos", windows))'.dependencies]
-strict = { path = "strict", optional = true }
+renderer = { path = "renderer", optional = true }
 
 [target.'cfg(target_os = "linux")'.dependencies]
 webkit2gtk = { version = "=2.0.2", features = ["v2_38"], optional = true }
 # Ctrl-Q and Ctrl-W, as a Linux app's window has them (`linux_keys`).
 gtk = { version = "0.18", optional = true }
 
-# A push that wakes the phone starts the client without its window (`Java_app_theone_client_Notifications_wake`). A
-# strict app's window is drawn natively over the page (`strict`), as on Linux.
+# A push that wakes the phone starts the client without its window (`Java_app_theone_client_Notifications_wake`). An
+# app's window is drawn natively over the page (`renderer`), as on Linux.
 [target.'cfg(target_os = "android")'.dependencies]
 jni = "0.21"
-strict = { path = "strict", optional = true }
+renderer = { path = "renderer", optional = true }
 
 # A phone's app is Tauri's: `custom-protocol` builds it with its page inside it, however it's built. A `one:` link
 # opens it at what it links to (`links`): what Spotlight, an App Shortcut or an Android shortcut opens. The opener

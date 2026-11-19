@@ -4,7 +4,7 @@
 // your agents and each app, switched here. One of a type with a component is drawn by its own app. Deleting one is
 // soft delete's. Security is everything about the key that keeps it. What's missing before the Vault works shows as
 // one box atop the list, with the one thing that fixes it. A request is an alert, as a system's permission prompt is.
-// It's written in strict mode (the UI library's skill), so it runs on a native host as it does on the DOM.
+// It's written as the UI library's skill says, so it runs on a native host as it does on the DOM.
 import { createEffect, createMemo, createSignal, Errored, For, Loading, Match, refresh, Show, Switch as Choose, untrack } from "solid-js"
 import { Alert, Button, call, changed, Checkbox, component, confirm, createListCollection, Empty, Field, Frame, Image, Input, link, List, open as opening, Problem, Row, Screen, Section, Select, Sheet, showRecoveryKey, Skeleton, Spinner, Split, Switch, Text, toast, useRecoveryKey, View } from "ui"
 

@@ -1,7 +1,7 @@
 // `bun web-apis.js`: writes src/types/web-apis.d.ts, the Web APIs an app's page's JS has (globals.d.ts), as
 // TypeScript's own lib.dom.d.ts declares them, with each type they name that a page has too. They're the WinterTC
 // Minimum Common API's (https://min-common-api.proposal.wintertc.org), which a native host's sandbox has
-// (clients/app/strict/src/js.rs) and a browser has, but the network's: no fetch, Request, Response, Headers or FormData.
+// (clients/app/renderer/src/js.rs) and a browser has, but the network's: no fetch, Request, Response, Headers or FormData.
 import { readFileSync, writeFileSync } from "node:fs"
 import { dirname, join } from "node:path"
 import { fileURLToPath } from "node:url"

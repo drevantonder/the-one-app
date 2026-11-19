@@ -12,7 +12,7 @@
 //! opening again where they were. A phone's app reloads a newer page once it's off screen; its own builds come from
 //! its store (TestFlight). Either waits while a window on screen holds something its person typed and hasn't sent: in
 //! a web view a field typed in that still holds text, which its page says (`editing`, from `initialization-script.js`),
-//! and in a strict window an input with typing to undo (`strict::typed`), until that window is put away or closed, or
+//! and in a native window an input with typing to undo (`renderer::typed`), until that window is put away or closed, or
 //! what's typed is sent.
 
 use std::collections::BTreeSet;
@@ -224,15 +224,15 @@ pub async fn ready() {
     }
 }
 
-/// Which window on screen holds something its person typed and hasn't sent, if one does: its label, or `strict`.
+/// Which window on screen holds something its person typed and hasn't sent, if one does: its label, or `native`.
 async fn typing() -> Option<String> {
     let shown = crate::views().map(|views| views.on_screen.lock().expect("no view panics").clone()).unwrap_or_default();
     if let Some(label) = EDITING.lock().expect("nothing panics holding it").iter().find(|label| shown.contains(*label)) {
         return Some(label.clone());
     }
     #[cfg(any(desktop, target_os = "android"))]
-    if crate::strict::typed().await {
-        return Some("strict".to_owned());
+    if crate::native::typed().await {
+        return Some("native".to_owned());
     }
     None
 }

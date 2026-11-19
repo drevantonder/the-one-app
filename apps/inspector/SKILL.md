@@ -1,6 +1,6 @@
 ---
 name: inspector
-description: Read before checking or driving a strict app's window (one drawn natively, not in a web view) on one of the user's devices, to read its tree, tap, type, snap a picture or control its clock.
+description: Read before checking or driving an app's window (one drawn natively, not in a web view) on one of the user's devices, to read its tree, tap, type, snap a picture or control its clock.
 metadata:
   title: "Inspector"
   subtitle: "Your AI checks an app's screen"
@@ -8,11 +8,11 @@ metadata:
   category: Developer tools
 ---
 
-A strict app's window on a computer is drawn natively, and Inspector reads and drives it the way a test does: by
+An app's window on a computer is drawn natively, and Inspector reads and drives it the way a test does: by
 what's in it, not by pixels. It's faster and surer than Computer Use for these windows; use Computer Use for anything
 else.
 
-- `windows` lists the strict windows open on your devices: each one's `device`, `window`, the `entrypoint` it shows
+- `windows` lists the native windows open on your devices: each one's `device`, `window`, the `entrypoint` it shows
   (`notifications`), its size, and its clock. Every other tool takes `device` and `window` from there, and needs
   neither when only one is open.
 - `tree` gives the semantic tree, each node's id, role, name, value, states, actions and `rect` (CSS pixels from the

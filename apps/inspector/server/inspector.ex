@@ -1,7 +1,7 @@
 defmodule Inspector do
   @moduledoc """
-  Inspector: an agent reads a strict app's window on any of its person's devices and drives it, as a test would. A
-  strict window on a computer serves the inspector's protocol (`clients/app/strict/src/inspect.rs`, which documents
+  Inspector: an agent reads an app's native window on any of its person's devices and drives it, as a test would. A
+  native window on a computer serves the inspector's protocol (`clients/app/renderer/src/inspect.rs`, which documents
   it), and the device's app answers each of this app's tools for it, as a tool of the device's own
   (`OneCore.Server.ask_device/3`): `windows` lists them, and each other tool is that protocol's op of the same name,
   its inputs passed on as they are. A device is its person's: only they, or the network's owner, inspect it.
@@ -15,8 +15,8 @@ defmodule Inspector do
   @impl true
   def requires, do: %{"core" => ">= 0.25.4"}
 
-  @device %{type: "string", description: "the device, by its key or name, as `windows` lists it; the only one with a strict window open if not given"}
-  @window %{type: "integer", description: "the window, as `windows` lists it; the device's only strict window if not given"}
+  @device %{type: "string", description: "the device, by its key or name, as `windows` lists it; the only one with a native window open if not given"}
+  @window %{type: "integer", description: "the window, as `windows` lists it; the device's only native window if not given"}
   @selector %{
     node: %{type: "integer", description: "a node by its id in the tree"},
     role: %{type: "string", description: "ARIA's role: button, searchbox, heading, listitem"},
@@ -38,7 +38,7 @@ defmodule Inspector do
         name: "windows",
         read_only: true,
         description:
-          "The strict app windows open on your devices, each with its device, `window`, the entrypoint it shows, its size and its clock. A device whose app isn't running has none.",
+          "The app windows, drawn natively, open on your devices, each with its device, `window`, the entrypoint it shows, its size and its clock. A device whose app isn't running has none.",
         inputs: %{type: "object", properties: %{device: @device}},
         outputs: %{type: "object", properties: %{windows: %{type: "array", items: %{type: "object"}}}, required: ["windows"]}
       },
@@ -102,7 +102,7 @@ defmodule Inspector do
         {:ok, {device, {:ok, %{"structuredContent" => %{"windows" => windows} = listed}}}} ->
           for window <- windows, do: Map.merge(window, %{"device" => device, "name" => listed["device"]})
 
-        # A device whose app has no strict windows to give: a phone, or one on a build before them.
+        # A device whose app has no native windows to give: a phone, or one on a build before them.
         {:ok, _} ->
           []
       end)
@@ -134,16 +134,16 @@ defmodule Inspector do
   defp device(call, named) do
     cond do
       named in mine(call) -> named
-      true -> Enum.find_value(call("windows", %{}, call)["windows"], &(&1["name"] == named && &1["device"])) || raise("None of your devices called #{named} has a strict window open.")
+      true -> Enum.find_value(call("windows", %{}, call)["windows"], &(&1["name"] == named && &1["device"])) || raise("None of your devices called #{named} has a native window open.")
     end
   end
 
-  # The one device with a strict window open, when none is named.
+  # The one device with a native window open, when none is named.
   defp only(call) do
     case Enum.uniq(for w <- call("windows", %{}, call)["windows"], do: w["device"]) do
       [device] -> device
-      [] -> raise "None of your devices has a strict window open."
-      _ -> raise "More than one of your devices has a strict window open: say which, as `windows` lists them."
+      [] -> raise "None of your devices has a native window open."
+      _ -> raise "More than one of your devices has a native window open: say which, as `windows` lists them."
     end
   end
 

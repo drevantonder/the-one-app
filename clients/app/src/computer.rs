@@ -6,8 +6,8 @@
 //! app window's Home. The program runs on with it put away, holding the device's one connection to its network, its
 //! notifications and its app windows, until it's quit (its menu, Cmd-Q, or Ctrl-Q on Linux).
 //!
-//! Where the Home Screen's page is strict, and of a version this program speaks, the launcher is drawn natively, in a
-//! panel of this process's own (`strict::launcher`), as every strict app's window is, and it shows within a frame of
+//! Where the Home Screen's page is of a version this program speaks, the launcher is drawn natively, in a
+//! panel of this process's own (`renderer::launcher`), as every app's native window is, and it shows within a frame of
 //! being summoned. Otherwise, and while the device signs in or needs updating, which its page doesn't show, it's a
 //! window and a web view (tao and wry), as a web view's app window is: its page is the window's own (`page/`), which
 //! shows the Home Screen, and asks what it asks of the app (`hosts::command`) through the same bridge an app's window
@@ -45,8 +45,8 @@ pub(crate) enum Told {
     /// was pressed, and the key the shortcut ends with, as the DOM names it.
     Toggle(std::time::Instant, Option<String>),
     Summon,
-    /// The launcher is drawn natively in this window (`strict::launcher`), or with none, it's the web launcher.
-    Native(Option<strict::platform::WindowId>),
+    /// The launcher is drawn natively in this window (`renderer::launcher`), or with none, it's the web launcher.
+    Native(Option<renderer::platform::WindowId>),
     /// Puts it away, and with `true` gives the keyboard back to the app that had it (Escape, or its page done).
     Hide(bool),
     Theme(Option<crate::Theme>),
@@ -94,7 +94,7 @@ pub(crate) fn resize(width: Option<f64>, height: Option<f64>) {
 }
 
 /// The launcher is drawn natively in window `id`, or with none, it's the web launcher, as its page turns out to need.
-pub(crate) fn native(id: Option<strict::platform::WindowId>) {
+pub(crate) fn native(id: Option<renderer::platform::WindowId>) {
     tell(Told::Native(id))
 }
 
@@ -112,7 +112,7 @@ pub(crate) fn is_launcher(page: &str) -> bool {
 }
 
 /// Opens the launcher natively, where it can be, and tells the main thread which it is (`Told::Native`): where the
-/// device is in its network, and its Home Screen's page is strict. Signing in, it's the web launcher's.
+/// device is in its network,. Signing in, it's the web launcher's.
 async fn prepare() {
     let opened = async {
         let started = crate::start().await.ok()?;
@@ -120,9 +120,9 @@ async fn prepare() {
             return None;
         }
         let listed = hosts::command("main", "apps", json!({})).await.ok()?;
-        let (page, _) = crate::strict::pages(&listed).find(|(_, meta)| meta["category"] == "launcher")?;
+        let (page, _) = crate::native::pages(&listed).find(|(_, meta)| meta["category"] == "launcher")?;
         *LAUNCHER.lock().expect("nothing panics holding it") = Some(page.clone());
-        crate::strict::launcher(&page).await
+        crate::native::launcher(&page).await
     };
     tell(Told::Native(opened.await))
 }
@@ -132,11 +132,11 @@ pub(crate) fn again(link: Option<String>) {
     tell(link.and_then(|link| crate::link(&link)).map_or(Told::Summon, Told::Open))
 }
 
-/// Runs `job` on the strict windows' thread, where the native launcher is.
-fn on_strict(job: impl FnOnce(&mut strict::platform::Windows) + Send + 'static) {
-    match strict::platform::Strict::get() {
-        Ok(strict) => strict.run(job),
-        Err(error) => eprintln!("no strict window here: {error:#}"),
+/// Runs `job` on the native windows' thread, where the native launcher is.
+fn on_native(job: impl FnOnce(&mut renderer::platform::Windows) + Send + 'static) {
+    match renderer::platform::Native::get() {
+        Ok(native) => native.run(job),
+        Err(error) => eprintln!("no native window here: {error:#}"),
     }
 }
 
@@ -223,7 +223,7 @@ fn launcher(home: std::path::PathBuf, link: Option<String>, started: std::time::
     #[cfg(target_os = "linux")]
     gtk::gdk::set_program_class(::client::NAME);
     // On a Mac the launcher alone has no Dock icon and no Cmd-Tab entry, as Raycast's hasn't: the One App is an
-    // accessory until an app's window opens in it (strict's `Display::open`), and again once the last one closes.
+    // accessory until an app's window opens in it (the renderer's `Display::open`), and again once the last one closes.
     #[cfg(target_os = "macos")]
     {
         use tao::platform::macos::{ActivationPolicy, EventLoopExtMacOS};
@@ -281,7 +281,7 @@ fn launcher(home: std::path::PathBuf, link: Option<String>, started: std::time::
     };
     let mut page: Option<Discarding<Page>> = None;
     // The native launcher's window, once it's open, and whether it's been decided which it is.
-    let mut native: Option<strict::platform::WindowId> = None;
+    let mut native: Option<renderer::platform::WindowId> = None;
     let mut decided = false;
     crate::spawn(prepare());
 
@@ -354,7 +354,7 @@ fn launcher(home: std::path::PathBuf, link: Option<String>, started: std::time::
                 page = None;
                 if std::mem::take(&mut wanted) {
                     let asked = std::time::Instant::now();
-                    on_strict(move |windows| windows.summon(id, asked, None));
+                    on_native(move |windows| windows.summon(id, asked, None));
                 }
             }
             // It's the web launcher: its page loads, and it shows if it's wanted.
@@ -362,7 +362,7 @@ fn launcher(home: std::path::PathBuf, link: Option<String>, started: std::time::
                 decided = true;
                 if let Some(id) = native.take() {
                     wanted = true;
-                    on_strict(move |windows| windows.close(id));
+                    on_native(move |windows| windows.close(id));
                 }
                 if page.is_none() {
                     page = make_page(&window);
@@ -377,11 +377,11 @@ fn launcher(home: std::path::PathBuf, link: Option<String>, started: std::time::
             }
             Event::UserEvent(Told::Toggle(asked, key)) if native.is_some() => {
                 let id = native.expect("it's native");
-                on_strict(move |windows| if windows.showing(id) { windows.put_away(id, true) } else { windows.summon(id, asked, key.as_deref()) });
+                on_native(move |windows| if windows.showing(id) { windows.put_away(id, true) } else { windows.summon(id, asked, key.as_deref()) });
             }
             Event::UserEvent(Told::Summon) if native.is_some() => {
                 let (id, asked) = (native.expect("it's native"), std::time::Instant::now());
-                on_strict(move |windows| windows.summon(id, asked, None));
+                on_native(move |windows| windows.summon(id, asked, None));
             }
             Event::UserEvent(Told::Toggle(..) | Told::Summon) if !decided => wanted = true,
             Event::UserEvent(Told::Toggle(..)) if shown => {
@@ -395,7 +395,7 @@ fn launcher(home: std::path::PathBuf, link: Option<String>, started: std::time::
             }
             Event::UserEvent(Told::Hide(give_back)) if native.is_some() => {
                 let id = native.expect("it's native");
-                on_strict(move |windows| windows.put_away(id, give_back));
+                on_native(move |windows| windows.put_away(id, give_back));
             }
             Event::UserEvent(Told::Hide(give_back)) => {
                 shown = false;
@@ -411,7 +411,7 @@ fn launcher(home: std::path::PathBuf, link: Option<String>, started: std::time::
                 if let Some(id) = native {
                     let width = width.map(|width| width.clamp(1.0, MOST.width) as f32);
                     let height = height.unwrap_or(SIZE.height).clamp(1.0, MOST.height) as f32;
-                    on_strict(move |windows| windows.resize(id, width, height));
+                    on_native(move |windows| windows.resize(id, width, height));
                     return;
                 }
                 let height = height.unwrap_or(SIZE.height).clamp(1.0, SIZE.height);
@@ -431,7 +431,7 @@ fn launcher(home: std::path::PathBuf, link: Option<String>, started: std::time::
             // is decided again, the native one open again where it can be.
             Event::UserEvent(Told::Reload) if native.is_some() || !decided => {
                 if let Some(id) = native.take() {
-                    on_strict(move |windows| {
+                    on_native(move |windows| {
                         if windows.showing(id) {
                             tell(Told::Summon);
                         }
@@ -457,7 +457,7 @@ fn launcher(home: std::path::PathBuf, link: Option<String>, started: std::time::
                 crate::spawn(prepare());
             }
             // The native launcher opens a link to an app in that app's window.
-            Event::UserEvent(Told::Open(link)) if native.is_some() => crate::spawn(crate::strict::go(link, None)),
+            Event::UserEvent(Told::Open(link)) if native.is_some() => crate::spawn(crate::native::go(link, None)),
             // The page opens it once it's there to (`start`), and if it isn't yet, once it asks where it is.
             Event::UserEvent(Told::Open(link)) => {
                 if let Some(webview) = page.as_ref().and_then(|page| page.webview()).filter(|_| page_started.load(Ordering::Relaxed)) {

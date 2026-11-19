@@ -43,7 +43,7 @@ mod hosts;
 #[cfg(desktop)]
 mod title_bar;
 #[cfg(any(desktop, target_os = "android"))]
-mod strict;
+mod native;
 
 pub(crate) mod page;
 mod updater;
@@ -504,11 +504,11 @@ async fn start() -> Result<Value, String> {
     told["testflight"] = json!(testflight());
     // A computer opens each app in a window of its own (`hosts`).
     told["windows"] = json!(cfg!(desktop));
-    // Android draws a strict app's window natively, over the page, where it needs this program's runtime version or
-    // an older one (`strict`).
+    // Android draws an app's window natively, over the page, where it needs this program's runtime version or
+    // an older one (`renderer`).
     #[cfg(target_os = "android")]
     {
-        told["runtimeVersion"] = json!(::strict::RUNTIME_VERSION);
+        told["runtimeVersion"] = json!(::renderer::RUNTIME_VERSION);
     }
     if let Some(theme) = *app.chosen.lock().expect("nothing panics holding it") {
         told["theme"] = json!(theme);
@@ -646,7 +646,7 @@ fn tapped(tapped: Value) {
 
 /// Says how long a view took to open: an app from the tap on its icon to its content on screen, and the home
 /// screen from when its page began to load, which the time since the program started is beside. Telemetry is told.
-/// Opens an app's window natively over the page, where its page is strict and of a version this program speaks
+/// Opens an app's window natively over the page, where its page is of a version this program speaks
 /// (`hosts::open_window`). → whether it did; if not, the page opens it in a frame.
 #[cfg(mobile)]
 #[tauri::command]
@@ -1002,9 +1002,9 @@ async fn open(home: std::path::PathBuf) -> anyhow::Result<Arc<Client>> {
     let open = || async {
         #[allow(unused_mut)]
         let mut tools = computer_use_client::tools();
-        // A strict window's inspector, which is this program's own.
+        // A native window's inspector, which is this program's own.
         #[cfg(any(desktop, target_os = "android"))]
-        tools.push(Arc::new(strict::Inspector));
+        tools.push(Arc::new(native::Inspector));
         let client = Client::open(home, cli::resolvers(), tools).await?;
         client.service("app");
         anyhow::Ok(client)
@@ -1148,7 +1148,7 @@ impl Shell for Phone {
     }
 
     fn emit(&self, event: &str, payload: Value) {
-        // A strict app's window over the page hears what an app's own window would on a computer.
+        // An app's native window over the page hears what an app's own window would on a computer.
         #[cfg(target_os = "android")]
         if hosts::EVENTS.contains(&event) {
             hosts::tell_all(json!({"event": event, "payload": payload}));

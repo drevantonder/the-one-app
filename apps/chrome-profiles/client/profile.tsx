@@ -26,7 +26,7 @@ type State = "starting" | "opening" | "ready" | "saving" | "discarding" | "faile
 // What a profile's row says while it's being updated.
 const SAYS: Record<State, string> = { starting: "Starting", opening: "Starting", ready: "Updating", saving: "Saving", discarding: "Closing", failed: "Couldn't start" }
 
-/// How long ago `at` was, in the largest unit that's whole: "2 hours ago". (Not Intl's: a strict page's JS has none on a
+/// How long ago `at` was, in the largest unit that's whole: "2 hours ago". (Not Intl's: a native page's JS has none on a
 /// native host.)
 function since(at: number) {
   const minutes = Math.max(1, Math.round((Date.now() - at) / 60_000))

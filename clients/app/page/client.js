@@ -38,11 +38,11 @@ let appStore = ""
 /// launcher is in a phone's. Either opens every other app in its own window.
 let windows = false
 /// On Android, the runtime version of the renderer the app draws natively with, over this page (`runtimeVersion` in
-/// src/lib.rs): an app whose page is strict and needs that version or an older one opens there, any other in a frame
+/// src/lib.rs): an app whose page is needs that version or an older one opens there, any other in a frame
 /// here. 0 where it doesn't.
 let runtimeVersion = 0
-/// The runtime version each app's strict page needs, by its entrypoint, as its `runtimeVersion` says, and the apps
-/// that opened in a frame here as their strict window couldn't.
+/// The runtime version each app's native page needs, by its entrypoint, as its `runtimeVersion` says, and the apps
+/// that opened in a frame here as their native window couldn't.
 /** @type {Map<string, number>} */
 let needs = new Map()
 const framed = new Set()
@@ -1649,7 +1649,7 @@ function go(link, subject, behind, from) {
     rail()
     return true
   }
-  // On Android, a strict app opens natively, over this page; one whose window couldn't open opens in a frame here.
+  // On Android, an app opens natively, over this page; one whose window couldn't open opens in a frame here.
   const at = key(page, subject)
   const needed = needs.get(page) ?? 0
   if (runtimeVersion && needed && needed <= runtimeVersion && !framed.has(at) && at !== baseKey()) {

@@ -7,9 +7,9 @@ rustflags = ["-C", "link-arg=-Wl,-install_name,@rpath/nif.so"]
 [env]
 CFLAGS_aarch64_apple_darwin = "-g0"
 # ICU4X's compiled data, for English only (`en` and its regional variants), where its crates' own have every locale's,
-# ~10 MB in each binary: a strict app's Intl falls back to English for any other. Made with ICU4X's datagen at the
-# version Cargo.lock has: `icu4x-datagen --markers all --locales en --format baked --out clients/app/strict/icu4x`.
-ICU4X_DATA_DIR = { value = "clients/app/strict/icu4x", relative = true }
+# ~10 MB in each binary: a native window's Intl falls back to English for any other. Made with ICU4X's datagen at the
+# version Cargo.lock has: `icu4x-datagen --markers all --locales en --format baked --out clients/app/renderer/icu4x`.
+ICU4X_DATA_DIR = { value = "clients/app/renderer/icu4x", relative = true }
 
 # Windows builds carry the C runtime in them, so `one` and a NIF need nothing a PC may not have installed: Windows
 # has the Universal CRT, and not the Visual C++ runtime unless something installed it.

@@ -32,14 +32,14 @@ What users see, as the project's owner decided it. Only their decisions are here
 - Admin things (infrastructure apps, managing users) show only to the people who can act on them, the network's owners (17 Nov). Everyone else never sees them.
 - A section header's See All sits on the title's baseline, smaller than the title, ending at the content's edge (17 Nov), as iOS's App Store does.
 
-## Strict (18 Nov)
+## Screens (18 Nov)
 
-- Every app's screens and the launcher are written in strict mode, so they run natively on our renderer on a computer and Android, and unchanged on the DOM on the web, an iPhone and in MCP Apps.
-- The strict contract (18 Nov) is built from low-level primitives the way GPUI is: a box, a scroll (a box that scrolls), text, an image, a path (a vector shape) and a text input, with events (click, hover, focus, keys, scroll), focus, and transitions and animations. Hosts (the DOM and our renderer) draw only these. An input's state and events are Flutter's editing state: its text, selection and composing range, and its action (Done, Go, Next, Search, Send).
+- Every app's screens and the launcher are written on the UI library's primitives, so they run natively on our renderer on a computer and Android, and unchanged on the DOM on the web, an iPhone and in MCP Apps.
+- The contract (18 Nov) is built from low-level primitives the way GPUI is: a box, a scroll (a box that scrolls), text, an image, a path (a vector shape) and a text input, with events (click, hover, focus, keys, scroll), focus, and transitions and animations. Hosts (the DOM and our renderer) draw only these. An input's state and events are Flutter's editing state: its text, selection and composing range, and its action (Done, Go, Next, Search, Send).
 - Design tokens are typed values in one TypeScript module of the UI library, each varying by condition (dark, phone, touch, reduced motion), never a stylesheet written by hand. Styles are static, typed objects beside the component that uses them, of tokens only, resolved by the build ahead of time: the last style applied wins, with no cascade, and a component says by its types which properties a caller may override. A raw colour or length in a static style is a warning, "make it a token", and a raw font fails the check; an app's own tokens (`defineVars`, `createTheme`, as StyleX's) and dynamic styles (a function of its values, as StyleX's) take any valid value.
 - One build makes every target's: the web's CSS (variables and atomic classes), and for our renderer token and style tables, which travel with the UI library and each app over the air, versioned. A host knows kinds of token and the conditions, never a token's name or value.
-- Every UI library component is written once, in strict, on those primitives, and is the same code on every host; its look stays exactly the one described here.
-- Everything written in strict updates over the air.
+- Every UI library component is written once, on those primitives, and is the same code on every host; its look stays exactly the one described here.
+- Everything written this way updates over the air.
 
 ## App windows (18 Nov)
 

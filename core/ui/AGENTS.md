@@ -28,7 +28,7 @@ Native's platform files are; build.js swaps them in for the native build.
 
 ## Adding
 
-- A drawing primitive is renderer work, and rare: a host type in Rust (`clients/app/strict`) and in
+- A drawing primitive is renderer work, and rare: a host type in Rust (`clients/app/renderer`) and in
   `drawing-primitives/renderer.ts`, with a `RUNTIME_VERSION` bump. First see whether it's a composition of the host's
   types, as `Pressable`, `Svg`, `Modal` and `Portal` are. It takes React Native's core component's name and props,
   else the standard community package's (react-native-svg, @react-native-picker/picker), and our own only where

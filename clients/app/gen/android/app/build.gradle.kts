@@ -53,8 +53,8 @@ android {
     buildFeatures {
         buildConfig = true
     }
-    // A strict app's window, drawn natively by the strict crate: its view, and Flutter's keyboard bridge.
-    sourceSets["main"].java.srcDir("../../../strict/android/src/main/java")
+    // An app's native window, drawn by the renderer crate: its view, and Flutter's keyboard bridge.
+    sourceSets["main"].java.srcDir("../../../renderer/android/src/main/java")
 }
 
 kotlin {

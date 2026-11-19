@@ -11,7 +11,7 @@
 // Screen is edited: touch and hold an app or a widget (press and hold it, or right-click it, with a mouse), then Edit
 // Home Screen, or hold it a while longer, or touch and hold a page's empty space. An app held in the App Library is
 // carried onto any owner's pages. Where it is, what's open over it and the editing are one state machine (machine.ts),
-// whose snapshot is one signal here. It's written in strict mode, so a native host draws it as the DOM does.
+// whose snapshot is one signal here. It's written on the UI library's primitives, so a native host draws it as the DOM does.
 import { createEffect, createMemo, createSignal, Errored, flush, For, Loading, onSettled, refresh, Show, untrack } from "solid-js"
 import { type WheelEventData, WheelGestures } from "wheel-gestures"
 import { createActor } from "xstate"

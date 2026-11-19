@@ -2,7 +2,7 @@
 # client and its server's NIFs, the clients, and the native code of the apps the One App ships with.
 [workspace]
 resolver = "3"
-members = ["core/client", "core/server/nif/*", "clients/cli", "clients/app", "clients/app/strict", "apps/*/server/nif/*", "apps/*/server/bin/*", "apps/*/client/native"]
+members = ["core/client", "core/server/nif/*", "clients/cli", "clients/app", "clients/app/renderer", "apps/*/server/nif/*", "apps/*/server/bin/*", "apps/*/client/native"]
 # Programs of apps' that aren't Rust: Computer Use's helper app for a Mac is Swift (`tooling/mac-helper`).
 exclude = ["apps/computer-use/server/bin/helper"]
 

@@ -36,7 +36,7 @@ in core/ui, after `bun build.js`:
 
 It draws every scene, or those of the folders named, on the DOM in headless Chromium (Playwright's, which
 `bunx playwright-core install chromium` fetches where it's missing) and on a native host by its headless harness
-(`cargo build -p strict --example screenshot`), and says for each where the DOM's and the native host's trees and
+(`cargo build -p renderer --example screenshot`), and says for each where the DOM's and the native host's trees and
 pictures differ, and what changed since `--against`: a tree that differs, or pictures more than 2% apart, is looked
 at in the folder it names (`dom.png`, `native.png`, `diff.png`, `changed.png`). A native host that hasn't the
 runtime version the UI library needs draws nothing, which it says. A difference that's meant is said in the commit; one that
@@ -44,8 +44,8 @@ isn't is fixed.
 
 ### Which to use
 
-A strict app's page the renderer supports opens as a native window, with no WebKit inspector; any other opens in a web
-view. Native → the inspector (Strict windows, below). Web view, or the DOM for comparison → `tooling/window.py`
+An app's page the renderer supports opens as a native window, with no WebKit inspector; any other opens in a web
+view. Native → the inspector (Native windows, below). Web view, or the DOM for comparison → `tooling/window.py`
 (Desktop, next), which has the launcher open every app in a web view (`ONE_WEB_VIEW=1`, which the launcher honours,
 for any window you start yourself). A screen's states with no network → `bun scenes.js` (above): DOM against native.
 Either picture of a local network's screen takes seconds; neither hangs: `window.py` fails in `timeout` seconds
@@ -90,14 +90,14 @@ drops.
 - What the app says, and every page's console, Solid's dev warnings too, is in `log`, as `CONSOLE WARN …` (a debug
   build only), and when each window drew, as `<app> opened in … ms`. WebKitGTK here has no WebDriver BiDi.
 
-### Strict windows
+### Native windows
 
-A strict app's window (its entrypoint's `runtime_version`) is drawn natively on Linux and Windows by the launcher's process, not in a web
-view, so WebDriver doesn't reach it: drive it with the inspector, which every strict window answers (`clients/app/strict/src/inspect.rs` is its
+An app's window (its entrypoint's `runtime_version`) is drawn natively on Linux and Windows by the launcher's process, not in a web
+view, so WebDriver doesn't reach it: drive it with the inspector, which every native window answers (`clients/app/renderer/src/inspect.rs` is its
 protocol). Find nodes by role and text, tap, type, `settle`, then `snap`, never a sleep:
 
 - Offscreen, the same on every run, with no network: `bun dist/build/app.js apps/<app>/client <out>` in `core/ui`
-  (after `bun build.js`), then `cargo run -p strict --example screenshot -- <out> <png> <json>
+  (after `bun build.js`), then `cargo run -p renderer --example screenshot -- <out> <png> <json>
   --ui core/ui/dist/client --answers <answers.json> --requests <requests.jsonl>`, its header says how. Its clock is
   paused: `clock` `step` moves it.
 - On Windows (the Surface, `ssh surface`): build with `cargo xwin build --target x86_64-pc-windows-msvc` (the
@@ -113,7 +113,7 @@ protocol). Find nodes by role and text, tap, type, `settle`, then `snap`, never 
   `ONE_HOME` and `ONE_AS` set), then call its tools as that user: `one inspector windows`, `one inspector tap --text
   …`, `one inspector settle`, `one inspector snap > <scratch>/<name>.png` (stdout is the PNG, the window's own size,
   1024×720 at first). They reach the window through the launcher, as an agent on another device does: it draws every
-  strict window itself.
+  native window itself.
 
 ### Android
 
@@ -124,7 +124,7 @@ An emulator with the AVD `one-phone` (Android 36, x86_64, KVM) is set up here:
     adb exec-out screencap -p > <scratch>/<name>.png
 
 How to build the APK is in `clients/app/README.md`. Rust alone checks for Android with the NDK's compilers on `PATH`:
-`PATH=~/Android/Sdk/ndk/<version>/toolchains/llvm/prebuilt/linux-x86_64/bin:$PATH cargo check -p strict --target
+`PATH=~/Android/Sdk/ndk/<version>/toolchains/llvm/prebuilt/linux-x86_64/bin:$PATH cargo check -p renderer --target
 x86_64-linux-android`. In a worktree that hasn't built yet, run `tooling/copy-build --android` first
 (Cargo's Android target, Gradle's build folders and the generated project come from the worktree that built an APK last, so the
 build is about a minute, not minutes); sccache and `~/.gradle` are already shared by every worktree. A new AVD's Chrome asks to
