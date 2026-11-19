@@ -5,21 +5,13 @@
 
 /// An app is written in Solid 2.0 (its skills, `solid-2.0` and `solid-2.0-cheatsheet`, say how), and imports what
 /// it draws with from the UI library: `import { Screen, List, Row, call } from "ui"`. The UI library looks the same in every
-/// app, light and dark, under a finger and with a mouse, and right to left on `<html dir="rtl">`; an app lays out
-/// what's its own with its own CSS, from the UI library's custom properties (`--foreground`, `--muted-foreground`,
-/// `--border`, `--warning`, `--radius`, `--gap`), with any hover of its own behind `@media (hover: hover) and
-/// (pointer: fine)`, as the UI library's is: a touch screen leaves what was tapped looking hovered. A page shows pictures only from `data:` addresses and its
-/// app's own files. Tabs take Ark UI's tabs' parts and props, and Select Ark's select's root props
-/// (ark-ui.com/llms-solid.txt); the rest are the UI library's own. An app may be TypeScript (`.tsx`, `.ts`) as well as
-/// JavaScript: the UI library's types are its `types/` (`one code --name ui`), which the app's `tsconfig.json` names
-/// as `"paths": { "ui": ["<there>/index.d.ts"] }`, and its build doesn't check them. A field's text is never set
-/// under 16px on a touch screen, where an iPhone zooms into it: the UI library's fields and its base styles keep every
-/// `<input>`, `<textarea>` and `<select>` at 16px or more there, and a field of another size sets `--text-field`.
+/// app, light and dark, under a finger and with a mouse, and right to left. A page shows pictures only from `data:`
+/// addresses and its app's own files. An app may be TypeScript (`.tsx`, `.ts`) as well as JavaScript.
 /// **A page.** An app's page runs natively, on our renderer on a computer and Android, and unchanged on the DOM
-/// everywhere else (the web, an iPhone, MCP Apps), where its `tsconfig.json` is `{ "extends":
-/// "<ui>/tsconfig.app.json", "include": ["**/*"] }` (in this repo `../../../core/ui/tsconfig.app.json`) and its
-/// entrypoint says so, with the runtime version it needs: `%{page: "client/index.html", runtime_version: 4}`; every
-/// app's page is to be one. It's written with the UI library alone: its components and the drawing primitives,
+/// everywhere else (the web, an iPhone, MCP Apps). Its `tsconfig.json` is `{ "extends": "<ui>/tsconfig.app.json",
+/// "include": ["**/*"] }` (in this repo `../../../core/ui/tsconfig.app.json`; the UI library's types are `one code
+/// --name ui`), and its entrypoint names it with the runtime version it needs: `%{page: "client/index.html",
+/// runtime_version: 4}`. It's written with the UI library alone: its components and the drawing primitives,
 /// named and shaped as React Native's core components and their props: `View`, `Pressable` (a view that's pressed),
 /// `ScrollView` (a view whose content scrolls), `Text`, `Image`, `TextInput` (bare text to type, which `Input` draws in
 /// a field's box), `Modal` and `Portal` (what's drawn over the page), react-native-svg's `Svg` and `Path` (a vector
@@ -39,19 +31,17 @@
 /// the page, and a page that throws while drawing shows what failed and Try Again, as `<Errored>` would. Words are in a `Text`, or in a component that takes them (a
 /// `Row`'s `heading`). A press is `onPress={() => ...}`, a `Pressable`'s, a `Button`'s and a `Row`'s, as React Native names it; what's
 /// typed `onChangeText={setText}`, Return in it `onSubmitEditing={save}`, a key `onKeyDown={(event) => event.key ===
-/// "Escape" && close()}`, a switch's `onChange={(event) => set(event.currentTarget.checked)}`. `bun run lint:app apps/<app>/client`, from the repo's
+/// "Escape" && close()}`, and a choice, a switch's, a select's, a radio group's or tabs', `onValueChange={setChosen}`, told
+/// the value chosen. `bun run lint:app apps/<app>/client`, from the repo's
 /// root, checks a page, as a deploy does of one whose entrypoint says its `runtime_version` and refuses it with the errors. What a page may use is `core/ui/src/types/ui.d.ts`: one that needs what isn't
 /// there adds it there, with only what every host can draw (`drawing-primitives/renderer.ts`), and core/ui's `bun run typecheck` then says
 /// whether the DOM's takes it.
-export { call, changed, client, component, connection, covers, direction, go, haptic, keydown, leave, link, open, pinShortcut, reducedMotion, safeArea, showRecoveryKey, sizeChanged, updateReady, upload, useRecoveryKey, viewport, visible } from "./bridge.ts"
-export { pace, share } from "./shared.ts"
+export { call, changed, client, component, connection, covers, direction, go, haptic, keydown, leave, link, open, pinShortcut, reducedMotion, safeArea, showRecoveryKey, sizeChanged, upload, useRecoveryKey, viewport, visible } from "./bridge.ts"
+export { share } from "./shared.ts"
 export { seen, since, size } from "./format.ts"
-export { words } from "./words.ts"
 export { Button, Icon, Spinner } from "./styled-components/button.tsx"
 export { Badge } from "./styled-components/badge.tsx"
 export { Checkbox, Field, Input, RadioGroup, Search, Switch, Textarea } from "./styled-components/field.tsx"
-export { useField } from "./headless-components/field.ts"
-export { createListCollection } from "./collection.ts"
 export { createVelocityTracker } from "./behavior-primitives/velocity.ts"
 export { Select } from "./styled-components/select.tsx"
 export { List, ListStyle, Row } from "./styled-components/list.tsx"

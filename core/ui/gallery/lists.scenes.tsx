@@ -66,7 +66,7 @@ export default {
       <Row heading="With an end" end={<Text style={look.time}>12:30</Text>} />
       <Row
         heading="With a control"
-        control={<Checkbox aria-label="Done" checked />}
+        control={<Checkbox aria-label="Done" value />}
         action={
           <Menu.Root>
             <Menu.Trigger aria-label="More" />

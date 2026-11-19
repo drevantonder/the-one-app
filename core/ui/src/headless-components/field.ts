@@ -68,15 +68,15 @@ export interface ToggleProps {
   label?: JSX.Element
   hint?: JSX.Element
   error?: string
-  checked?: boolean
+  value?: boolean
   disabled?: boolean
   "aria-label"?: string
-  onChange?: (event: { currentTarget: { checked: boolean } }) => void
+  onValueChange?: (value: boolean) => void
 }
 
 /** `const toggle = createToggle(props, "switch")`: whether it's ticked, and the props of what's pressed to tick it. */
 export function createToggle(props: ToggleProps, role: "checkbox" | "switch") {
-  const [checked, setChecked] = createControllableSignal<boolean>({ value: () => props.checked, defaultValue: () => false, onChange: (checked) => props.onChange?.({ currentTarget: { checked } }) })
+  const [checked, setChecked] = createControllableSignal<boolean>({ value: () => props.value, defaultValue: () => false, onChange: (value) => props.onValueChange?.(value) })
   return {
     checked: () => !!checked(),
     control: () => ({
@@ -106,12 +106,14 @@ export interface RadioGroupProps {
   value?: string
   options: { value: string; label: JSX.Element; disabled?: boolean }[]
   disabled?: boolean
+  onValueChange?: (value: string) => void
+  /** The old name of `onValueChange`, which goes once the Home Screen's appearance page uses that. */
   onChange?: (value: string) => void
 }
 
 /** `const radios = createRadioGroup(props, field)`: which is checked, and the props of the group and each radio. */
 export function createRadioGroup(props: RadioGroupProps, field: FieldContext | null) {
-  const [chosen, choose] = createControllableSignal<string>({ value: () => props.value, onChange: (value) => props.onChange?.(value) })
+  const [chosen, choose] = createControllableSignal<string>({ value: () => props.value, onChange: (value) => (props.onValueChange ?? props.onChange)?.(value) })
   const off = (option: RadioGroupProps["options"][number]) => !!props.disabled || !!option.disabled || !!field?.disabled()
   const roving = createRovingFocus({ items: () => props.options.filter((option) => !off(option)).map((option) => ({ key: option.value, preferred: option.value === chosen() })), orientation: "both", loop: true, remember: false })
   return {

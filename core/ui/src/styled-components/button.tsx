@@ -156,7 +156,7 @@ export interface ButtonProps {
   "aria-label"?: string
   "aria-haspopup"?: "menu" | "dialog" | "listbox"
   "aria-expanded"?: "true" | "false"
-  autofocus?: boolean
+  autoFocus?: boolean
   /** What pressing it does, as React Native's `onPress`. */
   onPress?: (event: Located) => void
   /** Told where it's drawn as it's laid out, as a menu's button is, which its menu opens under. */
@@ -199,7 +199,7 @@ export function Button(props: ButtonProps) {
       aria-label={props["aria-label"]}
       aria-haspopup={props["aria-haspopup"]}
       aria-expanded={props["aria-expanded"]}
-      autoFocus={props.autofocus}
+      autoFocus={props.autoFocus}
       onLayout={props.onLayout}
       style={[look.button, props.variant && props.variant !== "default" && look[props.variant], props.size === "icon" && look.square, end && props.variant === "ghost" && props.size === "icon" && look.pulled, button.off() && look.disabled, props["aria-expanded"] === "true" && (props.variant === "outline" || props.variant === "ghost") && look.open, props.style]}
     >

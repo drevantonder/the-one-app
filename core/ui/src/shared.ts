@@ -18,15 +18,6 @@ export const touch = matching("(pointer: coarse)")
 /// Whether the user asked their device for less motion: what the UI library moves in JavaScript asks this first.
 export const reduced = matchMedia("(prefers-reduced-motion: reduce)")
 
-/// One of the UI library's three paces (`quick`, `settle`, `travel`) as the timing of an animation of `element`'s:
-/// tokens.css says how long each is and how it eases.
-export function pace(element: Element, name: "quick" | "settle" | "travel"): { duration: number; easing: string } {
-  const tokens = getComputedStyle(element)
-  const time = tokens.getPropertyValue(`--move-${name}`).trim()
-  // A time is written in milliseconds or seconds, and an animation counts in milliseconds.
-  return { duration: parseFloat(time) * (time.endsWith("ms") ? 1 : 1000), easing: tokens.getPropertyValue(`--ease-${name}`).trim() }
-}
-
 /// `await share(link)`: hands text to the device's own share sheet where it has one, and copies it otherwise. Call
 /// it as a press is handled: a device shares only what its person just asked to. → `"shared"`, `"copied"`, or
 /// `undefined` if they closed the sheet.

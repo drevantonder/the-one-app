@@ -4,7 +4,6 @@
 // so a page runs unchanged on the DOM. A component an app needs that isn't here yet is added here, with only
 // the props every host can draw, and the check says whether the DOM's takes them.
 import type { Element } from "solid-js"
-import type { ListCollection } from "@zag-js/collection"
 import type { Ice, Props, Rect } from "../drawing-primitives/renderer.ts"
 import type { Look, Styled, Styles } from "../styles.ts"
 import type { tokens as Tokens } from "../tokens.ts"
@@ -278,7 +277,7 @@ export type ButtonProps = {
   "aria-label"?: string
   "aria-haspopup"?: "menu" | "dialog" | "listbox"
   "aria-expanded"?: "true" | "false"
-  autofocus?: boolean
+  autoFocus?: boolean
   /** What pressing it does, as React Native's `onPress`. */
   onPress?: (event: Located) => void
   onLayout?: (event: Laid) => void
@@ -303,18 +302,16 @@ export type InputProps = Omit<TextInputProps, "style" | "multiline"> & {
 export declare function Input(props: InputProps): Element
 export declare function Textarea(props: Omit<InputProps, "style">): Element
 export declare function Search(props: Omit<InputProps, "inputMode" | "style">): Element
-/** What a `Checkbox`'s or a `Switch`'s `onChange` is told: whether it's ticked now. */
-export type Ticked = {
-  currentTarget: { checked: boolean }
-}
+/** A `Checkbox`'s or a `Switch`'s props: whether it's on (`value`), and what's told when it changes, as React
+ * Native's `Switch` has them. */
 export type ChoiceProps = {
   label?: Element
   hint?: Element
   error?: string
-  checked?: boolean
+  value?: boolean
   disabled?: boolean
   "aria-label"?: string
-  onChange?: (event: Ticked) => void
+  onValueChange?: (value: boolean) => void
 }
 export declare function Checkbox(props: ChoiceProps): Element
 export declare function Switch(props: ChoiceProps): Element
@@ -322,22 +319,22 @@ export declare function RadioGroup(props: {
   value?: string
   options: { value: string; label: Element; disabled?: boolean }[]
   disabled?: boolean
+  onValueChange?: (value: string) => void
+  /** The old name of `onValueChange`, which goes once the Home Screen's appearance page uses that. */
   onChange?: (value: string) => void
 }): Element
 
-/** What a select chooses from, and what it's told of what's chosen, as Ark UI's select has them. */
+/** What a select chooses from, and what it's told of what's chosen, as React Native's `Picker` has them. */
 export type Choice = { value: string; label: string; disabled?: boolean }
-export type Choices = ListCollection<Choice>
-export declare function createListCollection(options: { items: Choice[] }): Choices
 export declare const Select: {
   Root: (props: {
-    collection: Choices
-    value?: string[]
-    defaultValue?: string[]
+    items: Choice[]
+    value?: string
+    defaultValue?: string
     placeholder?: string
     disabled?: boolean
     "aria-label"?: string
-    onValueChange?: (details: { value: string[] }) => void
+    onValueChange?: (value: string) => void
   }) => Element
 }
 
@@ -370,7 +367,7 @@ export declare const Menu: {
 }
 
 export declare const Tabs: {
-  Root: (props: { value?: string; defaultValue?: string; onValueChange?: (details: { value: string | null }) => void; children?: Element }) => Element
+  Root: (props: { value?: string; defaultValue?: string; onValueChange?: (value: string) => void; children?: Element }) => Element
   List: (props: { children?: Element }) => Element
   Trigger: (props: { value: string; children?: Element }) => Element
   Content: (props: { value: string; children?: Element }) => Element
@@ -406,6 +403,9 @@ export type Subject = {
   subject?: string
 }
 export declare function call(tool: string, inputs?: object, options?: Subject): Promise<string>
+/** Sends a file the person chose where the network keeps it, for a tool of this app's: the name that tool takes for it,
+ * in the input its app says is an upload. */
+export declare function upload(file: File | Blob): Promise<string>
 export declare function changed(listener: () => void): () => void
 export declare function toast(text: string | Error, options?: { action?: { label: string; run: () => void } }): Promise<void>
 export declare function confirm(question: { heading: string; text?: string; action?: string; destructive?: boolean }): Promise<boolean>

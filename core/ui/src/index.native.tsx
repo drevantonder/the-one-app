@@ -3,8 +3,6 @@
 // (drawing-primitives/renderer.native.ts). The UI library's typecheck proves each takes what a page gives it
 // (check.ts).
 
-export { words } from "./words.ts"
-export { createListCollection } from "./collection.ts"
 export { createVelocityTracker } from "./behavior-primitives/velocity.ts"
 export { createTheme, defineVars, negative, styles } from "./styles.ts"
 export { tokens } from "./tokens.ts"
@@ -14,7 +12,7 @@ export { render } from "./render.tsx"
 export { Checkbox, Field, Input, RadioGroup, Search, Switch, Textarea } from "./styled-components/field.tsx"
 export { Select } from "./styled-components/select.tsx"
 export { LiveScreen } from "./styled-components/live-screen.tsx"
-export { call, changed, client, component, connection, covers, direction, leave, link, go, keydown, open, pinShortcut, haptic, reducedMotion, safeArea, share, showRecoveryKey, sizeChanged, useRecoveryKey, viewport, visible } from "./bridge.native.ts"
+export { call, changed, client, component, connection, covers, direction, leave, link, go, keydown, open, pinShortcut, haptic, reducedMotion, safeArea, share, showRecoveryKey, sizeChanged, upload, useRecoveryKey, viewport, visible } from "./bridge.native.ts"
 
 // The components, as the DOM's look and read: the same roles and names, from the design tokens.
 

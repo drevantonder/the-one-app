@@ -100,7 +100,7 @@ export const Menu = {
         aria-label={props["aria-label"] ?? (words() ? undefined : messages.more)}
         aria-haspopup={trigger["aria-haspopup"]}
         aria-expanded={trigger["aria-expanded"]}
-        autofocus={trigger.autoFocus}
+        autoFocus={trigger.autoFocus}
         onLayout={trigger.onLayout}
         onPress={menu.toggle}
       >

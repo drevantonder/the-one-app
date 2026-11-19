@@ -69,7 +69,7 @@ function Over(props: DialogProps & { children: (dialog: ReturnType<typeof create
 /// `<Sheet heading="Add note" open={adding()} onClose={() => setAdding(false)}>...</Sheet>`: something to fill in
 /// or look at, over the page: up from the foot of a narrow window, in the middle of a wide one, while `open`.
 /// Escape, the device's back, a press outside and a pull down close it too: each calls `onClose`, which sets
-/// `open` false. `autofocus` on a field in it brings up a phone's keyboard as it opens.
+/// `open` false. `autoFocus` on a field in it brings up a phone's keyboard as it opens.
 export function Sheet(props: { heading?: JSX.Element; open?: boolean; onClose?: () => void; children?: JSX.Element }) {
   const pull = createPull({ enabled: () => !wide(), onClose: () => props.onClose?.() })
   return (

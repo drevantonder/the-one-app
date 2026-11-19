@@ -17,11 +17,11 @@ const rectOf = (event: Laid): At => {
   return { x, y, width, height }
 }
 
-/** A `Tabs.Root`'s props, as Ark UI's tabs name them. */
+/** A `Tabs.Root`'s props: which tab shows (`value`), and what's told of a choice (`onValueChange`). */
 export interface TabsProps {
   value?: string
   defaultValue?: string
-  onValueChange?: (details: { value: string | null }) => void
+  onValueChange?: (value: string) => void
 }
 
 /** `const tabs = createTabs(props)`: the state of one set of tabs, and the props of each of its parts. */
@@ -29,7 +29,7 @@ export function createTabs(props: TabsProps) {
   const [tabs, setTabs] = createSignal<{ value: string; at?: At }[]>([])
   const [list, setList] = createSignal<At>()
   const [indicators, setIndicators] = createSignal(0)
-  const [chosen, choose] = createControllableSignal<string>({ value: () => props.value, defaultValue: () => props.defaultValue, onChange: (value) => props.onValueChange?.({ value }) })
+  const [chosen, choose] = createControllableSignal<string>({ value: () => props.value, defaultValue: () => props.defaultValue, onChange: (value) => props.onValueChange?.(value) })
   const value = () => chosen() ?? tabs()[0]?.value
   const roving = createRovingFocus({ items: () => tabs().map((tab) => ({ key: tab.value, preferred: tab.value === value() })), orientation: "horizontal", loop: true, remember: false })
   /** Where the selected tab is drawn, from the list's corner, once both are laid out. */

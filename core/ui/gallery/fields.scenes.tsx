@@ -1,12 +1,12 @@
 import { createSignal } from "solid-js"
-import { Checkbox, createListCollection, Field, Input, RadioGroup, type Scenes, Search, Select, styles, Switch, Text, Textarea, tokens, View } from "ui"
+import { Checkbox, Field, Input, RadioGroup, type Scenes, Search, Select, styles, Switch, Text, Textarea, tokens, View } from "ui"
 
 const look = styles({
   form: { gap: tokens.grid[4] },
   narrow: (width: number) => ({ gap: tokens.grid[2], width }),
 })
 
-const fruits = createListCollection({ items: [{ value: "apple", label: "Apple" }, { value: "pear", label: "Pear" }] })
+const fruits = [{ value: "apple", label: "Apple" }, { value: "pear", label: "Pear" }]
 
 const Fields = () => {
   const [code, setCode] = createSignal("")
@@ -32,19 +32,19 @@ const Fields = () => {
       </Field>
       <Search placeholder="Search" aria-label="Search" />
       <Search placeholder="Search" aria-label="Search found" value="git" />
-      <Switch label="Notifications" hint="On this device" checked />
+      <Switch label="Notifications" hint="On this device" value />
       <Switch label="Off" />
       <Checkbox label="Remember me" />
-      <Checkbox label="Ticked" checked />
+      <Checkbox label="Ticked" value />
       <Checkbox label="Must be ticked" error="Tick this to go on." />
       <Field label="How often">
         <RadioGroup value="a" options={[{ value: "a", label: "Daily" }, { value: "b", label: "Weekly" }, { value: "c", label: "Never", disabled: true }]} />
       </Field>
       <Field label="Fruit">
-        <Select.Root collection={fruits} value={["apple"]} />
+        <Select.Root items={fruits} value="apple" />
       </Field>
       <Field label="Nothing chosen">
-        <Select.Root collection={fruits} placeholder="Pick one" />
+        <Select.Root items={fruits} placeholder="Pick one" />
       </Field>
     </View>
   )

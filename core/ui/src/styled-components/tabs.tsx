@@ -61,8 +61,8 @@ const Shared = createContext<ReturnType<typeof createTabs>>()
 
 /// `<Tabs.Root defaultValue="all">`, then `<Tabs.List>` around `<Tabs.Trigger value="all">All</Tabs.Trigger>`s and
 /// a `<Tabs.Indicator />`, then a `<Tabs.Content value="all">...</Tabs.Content>` for each: a few views of one thing,
-/// one showing at a time, chosen in a segmented control, with Ark UI's tabs' parts and props
-/// (ark-ui.com/docs/components/tabs): `value` and `onValueChange` say which is showing, and with neither the first is.
+/// one showing at a time, chosen in a segmented control: `value` says which is showing, `onValueChange` is told the
+/// value chosen, and with neither the first is.
 /// The indicator slides to the tab chosen. The keyboard moves between the tabs as WAI-ARIA's tabs pattern has it: the
 /// arrows along them (the other way right to left), Home and End to the first and last, each choosing as it goes.
 export const Tabs = {

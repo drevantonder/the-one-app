@@ -1,7 +1,6 @@
 // One of several, from a list that opens under it: written once on the drawing primitives (#primitives), the same
 // on the DOM and on a native host.
 import { For, Show } from "solid-js"
-import type { CollectionItem } from "@zag-js/collection"
 import { Picker, Portal, Pressable, Text, View } from "#primitives"
 import { touch } from "#bridge"
 import type { Located } from "../types/ui.d.ts"
@@ -73,14 +72,14 @@ const look = styles({
   hidden: { opacity: 0 },
 })
 
-/// `<Field label="Category"><Select.Root collection={categories} value={[category()]} onValueChange={({ value }) => setCategory(value[0])} /></Field>`:
-/// one of a few, from a collection (`createListCollection`), in a list that opens under it, as Ark UI's select's
-/// props have it: `value` and `onValueChange` (`({ value: ["meals"] })`), and `placeholder` until something's chosen;
+/// `<Field label="Category"><Select.Root items={[{ value: "meals", label: "Meals" }, ...]} value={category()} onValueChange={setCategory} /></Field>`:
+/// one of a few, from `items` (one `disabled: true` can't be chosen), in a list that opens under it, as React Native's
+/// `Picker` has them: `value` and `onValueChange`, told the value chosen, and `placeholder` until something's chosen;
 /// with none the first is chosen, as a `<select>` does. The list opens over the page, under it or above it where it's
 /// in the window's lower half; the arrow keys choose, and Escape and a press elsewhere close it.
 export const Select = { Root: SelectRoot }
 
-function SelectRoot<T extends CollectionItem>(props: SelectProps<T>) {
+function SelectRoot(props: SelectProps) {
   const field = useField()
   const select = createSelect(props, { disabled: () => !!field?.disabled() })
   return (
@@ -101,7 +100,7 @@ function SelectRoot<T extends CollectionItem>(props: SelectProps<T>) {
           <Picker
             aria-label={props["aria-label"] ?? field?.label()}
             enabled={!select.off()}
-            selectedValue={select.chosen()[0]}
+            selectedValue={select.chosen()}
             onValueChange={(chose) => {
               const item = select.items().find((one) => select.value(one) === chose)
               if (item) select.choose(item)
@@ -121,7 +120,7 @@ function SelectRoot<T extends CollectionItem>(props: SelectProps<T>) {
                 {(item, i) => (
                   <Pressable {...select.option(item, i)} style={[look.item, i() === select.highlighted() && look.highlighted, select.itemOff(item) && look.itemOff]}>
                     <Text style={look.itemText}>{select.label(item)}</Text>
-                    <View style={[!select.chosen().includes(select.value(item)) && look.hidden]}>
+                    <View style={[select.chosen() !== select.value(item) && look.hidden]}>
                       <Icon name="check" />
                     </View>
                   </Pressable>

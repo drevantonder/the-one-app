@@ -97,7 +97,7 @@ const look = styles({
   radios: { minWidth: 0 },
 })
 
-/// `<Field label="Name" hint="As your card has it" error={problem()}><Input value={name()} onInput={…} /></Field>`: a
+/// `<Field label="Name" hint="As your card has it" error={problem()}><Input value={name()} onChangeText={setName} /></Field>`: a
 /// `label` above whatever's typed in or chosen, which names it, a grey `hint` below, and its problem, `error`, red in
 /// the hint's place, which the app sets: the field's edge goes red too. Every control below goes in one.
 export function Field(props: FieldProps & { children?: JSX.Element }) {
@@ -222,7 +222,7 @@ function Choice(props: ChoiceProps & { role: "checkbox" | "switch"; mark: (on: b
 /** Phosphor's check, as the checkbox's mark draws it, bold. */
 const check = "M232.49,80.49l-128,128a12,12,0,0,1-17,0l-56-56a12,12,0,1,1,17-17L96,183,215.51,63.51a12,12,0,0,1,17,17Z"
 
-/// `<Checkbox label="I have the receipt" checked={has()} onChange={(event) => setHas(event.currentTarget.checked)} />`:
+/// `<Checkbox label="I have the receipt" value={has()} onValueChange={setHas} />`:
 /// one thing that's so or not, ticked, with what it says beside it and a grey `hint` under that. It's its own field.
 export function Checkbox(props: ChoiceProps) {
   return (
@@ -238,7 +238,7 @@ export function Checkbox(props: ChoiceProps) {
   )
 }
 
-/// `<Switch label="Reimbursable" checked={on()} onChange={(event) => set(event.currentTarget.checked)} />`: something
+/// `<Switch label="Reimbursable" value={on()} onValueChange={set} />`: something
 /// that's on or off, and takes effect at once, at the end of what it says. A checkbox in every other way.
 export function Switch(props: ChoiceProps) {
   return (
@@ -254,9 +254,9 @@ export function Switch(props: ChoiceProps) {
   )
 }
 
-/// `<RadioGroup value={paid()} onChange={setPaid} options={[{ value: "card", label: "My card" }, ...]} />`: one of a
+/// `<RadioGroup value={paid()} onValueChange={setPaid} options={[{ value: "card", label: "My card" }, ...]} />`: one of a
 /// few, all in view, in a `Field` whose label names them. For two to five things; a select holds more. The arrow keys
-/// move between them. `onChange` is told the value chosen.
+/// move between them. `onValueChange` is told the value chosen.
 export function RadioGroup(props: RadioGroupProps) {
   const field = useField()
   const radios = createRadioGroup(props, field)

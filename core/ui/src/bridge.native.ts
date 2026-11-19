@@ -147,6 +147,14 @@ export function back(): void {
 }
 
 /** Puts text on the clipboard, which its client does (`one/copy`): a page has none of its own. */
+/** Sends a file the page chose where the network keeps it, as the DOM's bridge does: the host takes it as base64, the
+ * only way a file crosses its JSON channel. */
+export const upload: typeof Page.upload = async (file) => {
+  const bytes = new Uint8Array(await file.arrayBuffer())
+  let binary = ""
+  for (let at = 0; at < bytes.length; at += 0x8000) binary += String.fromCharCode(...bytes.subarray(at, at + 0x8000))
+  return (await greeted, (await ask<{ upload: string }>("one/upload", { body: btoa(binary) })).upload)
+}
 export const copy = async (text: string): Promise<void> => (await greeted, void (await ask("one/copy", { text })))
 
 /** Hands text to the device's share sheet, or copies it where there's none, as its client does (`one/share`). */

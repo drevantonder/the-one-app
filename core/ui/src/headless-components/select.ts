@@ -8,7 +8,6 @@
 // opens under its face, as wide, flipped above where there isn't room. On our host's layout (`onLayout`,
 // `viewport()`).
 import { createEffect, createSignal } from "solid-js"
-import type { CollectionItem, ListCollection } from "@zag-js/collection"
 import { direction, viewport } from "#bridge"
 import { createControllableSignal } from "../behavior-primitives/controllable.ts"
 import { createDismissable } from "../behavior-primitives/dismissable.ts"
@@ -17,29 +16,33 @@ import { createTypeahead, isTypeaheadKey } from "../behavior-primitives/typeahea
 import { pixels, tokens } from "../tokens.ts"
 import type { Keyed, Laid, Located, Rect } from "../types/ui.d.ts"
 
-/** A `Select.Root`'s props, as Ark UI's select names them. */
-export interface SelectProps<T extends CollectionItem = CollectionItem> {
-  collection: ListCollection<T>
-  value?: string[]
-  defaultValue?: string[]
+/** One of what a select chooses from: what it's chosen as, what it says, and whether it can't be chosen. */
+export type Choice = { value: string; label: string; disabled?: boolean }
+
+/** A `Select.Root`'s props: what it chooses from (`items`), what's chosen (`value`), and what's told of a choice
+ * (`onValueChange`), as React Native's `Picker` has them. */
+export interface SelectProps {
+  items: Choice[]
+  value?: string
+  defaultValue?: string
   placeholder?: string
   disabled?: boolean
   "aria-label"?: string
-  onValueChange?: (details: { value: string[] }) => void
+  onValueChange?: (value: string) => void
 }
 
 let selects = 0
 
 /** `const select = createSelect(props, { disabled })`: one select's state, and the props of each of its parts. */
-export function createSelect<T extends CollectionItem>(props: SelectProps<T>, field: { disabled: () => boolean }) {
+export function createSelect(props: SelectProps, field: { disabled: () => boolean }) {
   const id = `select-${++selects}`
-  const items = () => props.collection.items
-  const value = (item: T) => props.collection.getItemValue(item) ?? ""
-  const label = (item: T) => props.collection.stringifyItem(item) ?? ""
-  const itemOff = (item: T) => props.collection.getItemDisabled(item)
-  const [own, setOwn] = createControllableSignal<string[]>({ value: () => props.value, defaultValue: () => props.defaultValue, onChange: (value) => props.onValueChange?.({ value }) })
+  const items = () => props.items
+  const value = (item: Choice) => item.value
+  const label = (item: Choice) => item.label
+  const itemOff = (item: Choice) => !!item.disabled
+  const [own, setOwn] = createControllableSignal<string>({ value: () => props.value, defaultValue: () => props.defaultValue, onChange: (value) => props.onValueChange?.(value) })
   // With nothing chosen and nothing to say so, the first is, as a `<select>`'s is.
-  const chosen = () => own() ?? (props.placeholder ? [] : [props.collection.firstValue].filter((one): one is string => one != null))
+  const chosen = () => own() ?? (props.placeholder ? undefined : props.items[0]?.value)
   const off = () => !!props.disabled || field.disabled()
   // Where its face is drawn while its list is open, which the list opens from, and the list's size once measured.
   const [at, setAt] = createSignal<Rect>()
@@ -49,11 +52,11 @@ export function createSelect<T extends CollectionItem>(props: SelectProps<T>, fi
   const close = () => setAt(undefined)
   const layer = createDismissable({ open: () => !!at(), onDismiss: close })
   createEffect(() => !!at(), () => void (setSize(undefined), typeahead.reset()))
-  const index = () => items().findIndex((item) => value(item) === chosen()[0])
-  const choose = (item: T) => {
+  const index = () => items().findIndex((item) => value(item) === chosen())
+  const choose = (item: Choice) => {
     if (itemOff(item)) return
     close()
-    setOwn([value(item)])
+    setOwn(value(item))
   }
   const open = (face: Rect) => {
     if (off()) return
@@ -111,7 +114,7 @@ export function createSelect<T extends CollectionItem>(props: SelectProps<T>, fi
     placed,
     highlighted,
     /** What its face says: the label of what's chosen. */
-    text: () => chosen().map((one) => props.collection.stringifyItem(props.collection.find(one))).filter(Boolean).join(", "),
+    text: () => items().find((item) => value(item) === chosen())?.label ?? "",
     choose,
     face: () => ({
       role: "combobox" as const,
@@ -140,13 +143,13 @@ export function createSelect<T extends CollectionItem>(props: SelectProps<T>, fi
         setSize({ width, height })
       },
     }),
-    option: (item: T, index: () => number) => ({
+    option: (item: Choice, index: () => number) => ({
       role: "option" as const,
       get id() {
         return option(index())
       },
       get "aria-selected"() {
-        return chosen().includes(value(item)) ? ("true" as const) : ("false" as const)
+        return chosen() === value(item) ? ("true" as const) : ("false" as const)
       },
       get "aria-disabled"() {
         return itemOff(item) ? ("true" as const) : undefined

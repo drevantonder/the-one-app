@@ -390,7 +390,7 @@ function Flip(props: { part: Layout }) {
   // Its own box takes the press first on the DOM, where it then goes on to the card, which leaves it be.
   return (
     <Pressable tabIndex={-1} onPress={took} style={[look.flip, ...room(props.part)]}>
-      <Switch label={props.part.label} checked={!!props.part.on} disabled={busy()} onChange={(event) => act({ ...(props.part.inputs ?? {}), on: event.currentTarget.checked })} />
+      <Switch label={props.part.label} value={!!props.part.on} disabled={busy()} onValueChange={(on) => act({ ...(props.part.inputs ?? {}), on })} />
     </Pressable>
   )
 }

@@ -15,7 +15,7 @@ interface JsonRpcResponse {
 
 /** What the client says of where the page is shown: light or dark, how far in from each edge what the device
  * keeps for itself reaches, whether the window names the app above it (an app's own window on a computer, in its
- * title bar's breadcrumb), whether its network answers, and whether an update for this device is ready. */
+ * title bar's breadcrumb), and whether its network answers. */
 interface HostContext {
   theme?: "light" | "dark" | null
   safeAreaInsets?: { top: number; right: number; bottom: number; left: number }
@@ -24,7 +24,6 @@ interface HostContext {
    * start, after the window's controls and breadcrumb, and how much of its end the window's controls take. */
   titleBar?: { start: number; end: number }
   connection?: Connection
-  updateReady?: boolean
 }
 
 /** Whether this device reaches its network (`connection()`). */
@@ -93,7 +92,6 @@ const ask = <Result>(method: string, params: object = {}) => {
 }
 
 const [connected, setConnected] = createSignal<Connection>("online")
-const [updatable, setUpdatable] = createSignal(false)
 
 const [shown, setShown] = createSignal(document.visibilityState === "visible")
 document.addEventListener("visibilitychange", () => setShown(document.visibilityState === "visible"))
@@ -108,18 +106,12 @@ export const visible = (): boolean => shown()
 /// shown either way, and the client says it's offline itself. A client that doesn't say is `"online"`.
 export const connection = () => (greet(), connected())
 
-/// `<Show when={updateReady()}><Button onPress={() => client({ update: true })}>Update</Button></Show>`: whether an
-/// update for this device is ready, as it changes, which `client({ update: true })` takes. The launcher shows it.
-export const updateReady = () => (greet(), updatable())
-
 /// Light or dark, where the client says which (Colour Mode), and otherwise the device's own: as
 /// `color-scheme` for colours, and as a `light` or `dark` class for what can't follow it (tokens.css). And what the
 /// device keeps for itself at each edge, as `--safe-top` and the rest (tokens.ts's `safeTop`), whether the window names
-/// the app above it (`breadcrumb`), whether its network answers and whether an update
-/// is ready.
+/// the app above it (`breadcrumb`), and whether its network answers.
 function dress(context: HostContext | undefined) {
   if (context?.connection) setConnected(context.connection)
-  if (context && "updateReady" in context) setUpdatable(context.updateReady === true)
   const root = document.documentElement
   if (context?.safeAreaInsets) for (const [edge, inset] of Object.entries(context.safeAreaInsets)) root.style.setProperty(`--safe-${edge}`, `${inset}px`)
   if (context?.safeAreaInsets) setInsets(context.safeAreaInsets)
