@@ -1300,13 +1300,15 @@ defmodule OneCore.Tools do
 
   # Where an install is in its life for `owner`, with its app's version, trust and update, as a tool that moves
   # either answers: `record` is its record, or `nil` once it's gone.
-  defp moved(owner, name, record), do: moved(owner, name, record, nil, :read)
+  defp moved(owner, name, record) do
+    app = record && record["app"]
+    moved(owner, name, record, nil, app && Update.read(app))
+  end
 
   defp moved(owner, name, record, about, update) do
     record = record || %{}
     app = record["app"]
     about = about || if(app, do: Store.about(app), else: %{})
-    update = if update == :read and app, do: Update.read(app), else: if(update == :read, do: nil, else: update)
 
     %{
       name: name,
@@ -1387,8 +1389,6 @@ defmodule OneCore.Tools do
                 "first. To update the one there is, deploy it #{to}; to make a second one, pass --new."
     end
   end
-
-  # This server, as a person picks it: what its machine is called, or its key where it has no name.
 
   # Whose this server is: who it was started for.
   defp owner, do: hd(Servers.members(Server.key()))
