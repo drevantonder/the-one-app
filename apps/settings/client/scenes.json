@@ -630,5 +630,646 @@
     "uses": [
       "sign-in"
     ]
+  },
+  "Appearance": {
+    "like": "Settings",
+    "page": "client/index.html#home-screen/appearance",
+    "uses": [
+      "home-screen"
+    ],
+    "answers": {},
+    "size": [
+      1100,
+      720
+    ]
+  },
+  "Accounts": {
+    "like": "Settings",
+    "page": "client/index.html#vault/accounts",
+    "uses": [
+      "vault"
+    ],
+    "answers": {
+      "vault_security": {
+        "readiness": "ready",
+        "owner": "users/alex",
+        "holds": true,
+        "device": "d1",
+        "devices": [
+          {
+            "device": "d1",
+            "name": "Alex's Laptop"
+          }
+        ],
+        "asking": [],
+        "servers": [
+          "s1"
+        ],
+        "may": [
+          {
+            "key": "s1",
+            "name": "Home Server"
+          }
+        ]
+      },
+      "vault_list": {
+        "items": [
+          {
+            "name": "GitHub",
+            "artifact": "vault/github",
+            "kind": "password",
+            "type": null,
+            "status": null,
+            "fields": [
+              {
+                "name": "token",
+                "secret": true
+              }
+            ],
+            "hosts": [
+              "api.github.com"
+            ],
+            "access": [
+              "agents"
+            ]
+          },
+          {
+            "name": "Example Mail",
+            "artifact": "vault/example-mail",
+            "kind": "account",
+            "type": null,
+            "status": null,
+            "fields": [
+              {
+                "name": "username",
+                "secret": false,
+                "value": "sam@example.com"
+              },
+              {
+                "name": "password",
+                "secret": true
+              }
+            ],
+            "hosts": [
+              "mail.example.com"
+            ],
+            "access": [],
+            "sign_in": true
+          }
+        ],
+        "requests": [
+          {
+            "id": "r1",
+            "title": "Example API",
+            "state": "waiting",
+            "app": null,
+            "by": "Claude on Alex's Laptop",
+            "why": "To read the build status",
+            "hosts": [
+              "api.example.com"
+            ],
+            "fields": [
+              {
+                "name": "api_key"
+              }
+            ]
+          }
+        ],
+        "apps": [
+          {
+            "name": "backups",
+            "title": "Backups"
+          }
+        ],
+        "types": []
+      },
+      "permissions_groups": {
+        "groups": []
+      },
+      "permissions_check": {
+        "may": false
+      }
+    },
+    "size": [
+      1100,
+      720
+    ]
+  },
+  "Notifications": {
+    "like": "Settings",
+    "page": "client/index.html#notifications/settings",
+    "uses": [
+      "notifications"
+    ],
+    "answers": {
+      "notifications_inbox": {
+        "notifications": [
+          {
+            "id": "n1",
+            "title": "Backup finished",
+            "text": "Your network was backed up to Backblaze B2.",
+            "from": "Backups",
+            "app": "backups",
+            "at": "2025-12-31T23:55:00Z",
+            "read": false
+          },
+          {
+            "id": "n2",
+            "title": "GitHub wants a key",
+            "text": "Vault was asked for a token for api.github.com.",
+            "from": "Vault",
+            "app": "vault",
+            "at": "2025-12-31T21:00:00Z",
+            "read": false
+          },
+          {
+            "id": "n3",
+            "title": "Sam joined Family",
+            "from": "Sign-In",
+            "app": "sign-in",
+            "at": "2025-12-29T10:00:00Z",
+            "read": true
+          }
+        ]
+      }
+    },
+    "size": [
+      1100,
+      720
+    ]
+  },
+  "Backups": {
+    "like": "Settings",
+    "page": "client/index.html#backups/backups",
+    "uses": [
+      "backups"
+    ],
+    "answers": {
+      "backups_destinations": {
+        "destinations": [
+          {
+            "name": "Home Disk",
+            "kind": "folder",
+            "where": "/mnt/disk/backups",
+            "machine": "Studio",
+            "size": 18400000000,
+            "last": {
+              "at": 1767218400000
+            },
+            "state": "backed_up",
+            "backups": [
+              {
+                "name": "b3",
+                "at": 1767218400000,
+                "bytes": 2400000000,
+                "sent_bytes": 200000000,
+                "took": 95000
+              },
+              {
+                "name": "b2",
+                "at": 1767132000000,
+                "bytes": 2400000000,
+                "sent_bytes": 200000000,
+                "took": 95000
+              },
+              {
+                "name": "b1",
+                "at": 1767045600000,
+                "bytes": 2400000000,
+                "sent_bytes": 200000000,
+                "took": 95000
+              }
+            ]
+          },
+          {
+            "name": "example-backups",
+            "kind": "s3",
+            "where": "https://example.r2.cloudflarestorage.com/example-backups",
+            "item": "Backups Storage",
+            "size": 17900000000,
+            "last": {
+              "at": 1767117600000
+            },
+            "state": "failed",
+            "problem": {
+              "kind": "unreachable",
+              "text": "The bucket didn't answer."
+            },
+            "backups": [
+              {
+                "name": "b2",
+                "at": 1767117600000,
+                "bytes": 2400000000,
+                "sent_bytes": 200000000,
+                "took": 95000
+              },
+              {
+                "name": "b1",
+                "at": 1767031200000,
+                "bytes": 2400000000,
+                "sent_bytes": 200000000,
+                "took": 95000
+              }
+            ]
+          }
+        ],
+        "every": "day",
+        "retention": "Keeps hourly backups for a day, daily for a month and weekly for a year.",
+        "machines": [
+          {
+            "key": "m1abcdef",
+            "name": "Studio"
+          }
+        ]
+      }
+    },
+    "size": [
+      1100,
+      720
+    ]
+  },
+  "Recently Deleted": {
+    "like": "Settings",
+    "page": "client/index.html#soft-delete/deleted",
+    "uses": [
+      "soft-delete"
+    ],
+    "answers": {
+      "soft-delete_list": {
+        "deleted": [
+          {
+            "item": "notes/groceries",
+            "state": "deleted",
+            "artifacts": [
+              "users/sam/made/notes/groceries"
+            ],
+            "app": null,
+            "title": "Notes",
+            "installed": true,
+            "owner": "users/sam",
+            "names": null,
+            "purges": 1769731200000,
+            "why": null
+          },
+          {
+            "item": "tasks",
+            "state": "deleted",
+            "artifacts": [
+              "users/sam/made/tasks/inbox",
+              "users/sam/made/tasks/work",
+              "users/sam/made/tasks/home",
+              "users/sam/made/tasks/later"
+            ],
+            "app": "users/sam/own/tasks",
+            "title": "Tasks",
+            "installed": false,
+            "owner": "users/sam",
+            "names": null,
+            "purges": 1769040000000,
+            "why": null
+          },
+          {
+            "item": "photos/trip.jpg",
+            "state": "deleted",
+            "artifacts": [
+              "users/sam/made/photos/trip.jpg"
+            ],
+            "app": null,
+            "title": "Photos",
+            "installed": false,
+            "owner": "users/sam",
+            "names": null,
+            "purges": 1768262400000,
+            "why": null
+          },
+          {
+            "item": "recipes/pasta",
+            "state": "purging",
+            "artifacts": [
+              "users/sam/made/recipes/pasta"
+            ],
+            "app": null,
+            "title": "Recipes",
+            "installed": true,
+            "owner": "users/sam",
+            "names": null,
+            "purges": 1767657600000,
+            "why": null
+          },
+          {
+            "item": "budget/2025",
+            "state": "deleted",
+            "artifacts": [
+              "users/sam/made/budget/2025"
+            ],
+            "app": null,
+            "title": "Budget",
+            "installed": true,
+            "owner": "users/sam",
+            "names": null,
+            "purges": 1767398400000,
+            "why": "The storage was busy."
+          }
+        ]
+      }
+    },
+    "size": [
+      1100,
+      720
+    ]
+  },
+  "AI": {
+    "like": "Settings",
+    "page": "client/index.html#sign-in/ai",
+    "uses": [
+      "sign-in"
+    ],
+    "answers": {
+      "sign-in_devices": {
+        "devices": [
+          {
+            "id": "dev1",
+            "name": "Alex's Laptop",
+            "kind": "app",
+            "added": "2025-11-01T10:00:00Z",
+            "connected": true
+          },
+          {
+            "id": "dev2",
+            "name": "Sam's Phone",
+            "kind": "app",
+            "added": "2025-12-10T08:00:00Z",
+            "connected": false,
+            "last_seen": "2025-12-31T21:00:00Z"
+          },
+          {
+            "id": "dev3",
+            "name": "Claude",
+            "kind": "assistant",
+            "added": "2025-12-20T09:00:00Z",
+            "connected": false
+          },
+          {
+            "id": "dev4",
+            "name": "Browser on Work PC",
+            "kind": "browser",
+            "added": "2025-12-22T09:00:00Z",
+            "connected": false
+          }
+        ],
+        "passkeys": [
+          {
+            "id": "pk1",
+            "name": "Alex's Laptop",
+            "added": "2025-11-01T10:00:00Z",
+            "prf_key": "k1",
+            "unlocks": true
+          },
+          {
+            "id": "pk2",
+            "name": "Security Key",
+            "added": "2025-12-28T10:00:00Z",
+            "prf_key": "k2",
+            "unlocks": false
+          },
+          {
+            "id": "pk3",
+            "name": "Phone Passkey",
+            "added": "2025-12-30T10:00:00Z",
+            "prf_key": null,
+            "unlocks": false
+          }
+        ]
+      },
+      "sign-in_waiting": {
+        "waiting": [
+          {
+            "request": "w1",
+            "device": "dev9",
+            "name": "Pixel Tablet",
+            "at": "2025-12-31T23:58:00Z",
+            "place": "Sydney"
+          }
+        ]
+      },
+      "builds": {
+        "network": {
+          "network_update_status": "up_to_date",
+          "build": "0.12.1+bbbb222",
+          "done": 2,
+          "of": 2,
+          "waiting_for": null,
+          "held": null
+        },
+        "devices": [
+          {
+            "device": "dev2",
+            "build": "0.12.0+aaaa111",
+            "target": "ios"
+          }
+        ],
+        "latest": {
+          "one/ios": {
+            "build": "0.12.1+bbbb222"
+          }
+        },
+        "servers": [
+          {
+            "server": "srv1",
+            "name": "Home Server",
+            "server_membership": "active",
+            "server_daemon_status": "running",
+            "server_ready": true,
+            "server_update_status": "up_to_date"
+          },
+          {
+            "server": "srv2",
+            "name": "Cloud Server",
+            "server_membership": "active",
+            "server_daemon_status": "running",
+            "server_ready": true,
+            "server_update_status": "up_to_date",
+            "last_seen": 1767225000000
+          }
+        ]
+      },
+      "services": {
+        "services": [
+          {
+            "app": "backups",
+            "service": "backups",
+            "called": "Backups",
+            "needs": "Needs a disk",
+            "servers": [
+              "srv1"
+            ]
+          },
+          {
+            "app": "telemetry",
+            "service": "collector",
+            "called": "Telemetry Collector",
+            "servers": [
+              "srv1",
+              "srv2"
+            ]
+          }
+        ]
+      },
+      "encryption_key": {
+        "slot": 1
+      },
+      "sign-in_encrypt_for_passkeys": {}
+    },
+    "size": [
+      1100,
+      720
+    ]
+  },
+  "Sign In & Security": {
+    "like": "Settings",
+    "page": "client/index.html#sign-in/passkeys",
+    "uses": [
+      "sign-in"
+    ],
+    "answers": {
+      "sign-in_devices": {
+        "devices": [
+          {
+            "id": "dev1",
+            "name": "Alex's Laptop",
+            "kind": "app",
+            "added": "2025-11-01T10:00:00Z",
+            "connected": true
+          },
+          {
+            "id": "dev2",
+            "name": "Sam's Phone",
+            "kind": "app",
+            "added": "2025-12-10T08:00:00Z",
+            "connected": false,
+            "last_seen": "2025-12-31T21:00:00Z"
+          },
+          {
+            "id": "dev3",
+            "name": "Claude",
+            "kind": "assistant",
+            "added": "2025-12-20T09:00:00Z",
+            "connected": false
+          },
+          {
+            "id": "dev4",
+            "name": "Browser on Work PC",
+            "kind": "browser",
+            "added": "2025-12-22T09:00:00Z",
+            "connected": false
+          }
+        ],
+        "passkeys": [
+          {
+            "id": "pk1",
+            "name": "Alex's Laptop",
+            "added": "2025-11-01T10:00:00Z",
+            "prf_key": "k1",
+            "unlocks": true
+          },
+          {
+            "id": "pk2",
+            "name": "Security Key",
+            "added": "2025-12-28T10:00:00Z",
+            "prf_key": "k2",
+            "unlocks": false
+          },
+          {
+            "id": "pk3",
+            "name": "Phone Passkey",
+            "added": "2025-12-30T10:00:00Z",
+            "prf_key": null,
+            "unlocks": false
+          }
+        ]
+      },
+      "sign-in_waiting": {
+        "waiting": [
+          {
+            "request": "w1",
+            "device": "dev9",
+            "name": "Pixel Tablet",
+            "at": "2025-12-31T23:58:00Z",
+            "place": "Sydney"
+          }
+        ]
+      },
+      "builds": {
+        "network": {
+          "network_update_status": "up_to_date",
+          "build": "0.12.1+bbbb222",
+          "done": 2,
+          "of": 2,
+          "waiting_for": null,
+          "held": null
+        },
+        "devices": [
+          {
+            "device": "dev2",
+            "build": "0.12.0+aaaa111",
+            "target": "ios"
+          }
+        ],
+        "latest": {
+          "one/ios": {
+            "build": "0.12.1+bbbb222"
+          }
+        },
+        "servers": [
+          {
+            "server": "srv1",
+            "name": "Home Server",
+            "server_membership": "active",
+            "server_daemon_status": "running",
+            "server_ready": true,
+            "server_update_status": "up_to_date"
+          },
+          {
+            "server": "srv2",
+            "name": "Cloud Server",
+            "server_membership": "active",
+            "server_daemon_status": "running",
+            "server_ready": true,
+            "server_update_status": "up_to_date",
+            "last_seen": 1767225000000
+          }
+        ]
+      },
+      "services": {
+        "services": [
+          {
+            "app": "backups",
+            "service": "backups",
+            "called": "Backups",
+            "needs": "Needs a disk",
+            "servers": [
+              "srv1"
+            ]
+          },
+          {
+            "app": "telemetry",
+            "service": "collector",
+            "called": "Telemetry Collector",
+            "servers": [
+              "srv1",
+              "srv2"
+            ]
+          }
+        ]
+      },
+      "encryption_key": {
+        "slot": 1
+      },
+      "sign-in_encrypt_for_passkeys": {}
+    },
+    "size": [
+      1100,
+      720
+    ]
   }
 }
