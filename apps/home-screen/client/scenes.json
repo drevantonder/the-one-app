@@ -721,8 +721,7 @@
         "build": "0.26.0",
         "theme": null,
         "launcher": true,
-        "mac": true,
-        "transparent": true
+        "mac": true
       }
     }
   },
@@ -738,8 +737,7 @@
         "build": "0.26.0",
         "theme": null,
         "launcher": true,
-        "mac": true,
-        "transparent": true
+        "mac": true
       }
     }
   },
@@ -756,8 +754,7 @@
         "build": "0.26.0",
         "theme": null,
         "launcher": true,
-        "mac": true,
-        "transparent": true
+        "mac": true
       }
     }
   },
@@ -773,8 +770,7 @@
         "build": "0.26.0",
         "theme": null,
         "launcher": true,
-        "mac": true,
-        "transparent": true
+        "mac": true
       }
     }
   },

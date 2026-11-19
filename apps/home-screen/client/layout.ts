@@ -74,8 +74,7 @@ export function launcherRoom(safe: Insets): Room {
 /// half beside its bottom half.
 export const halfHeight = (room: Room) => (3 * ROW + 2 * ROW_GAP) * room.scale + 8
 
-/// How large a launcher's panel is, for a card `card` wide and tall: on a see-through one, as large as the card ever
-/// is, which it never changes; else just around what it shows.
+/// How large a launcher's panel is, for a card `card` wide and tall.
 export const panelSize = (card: { width: number; height: number }) => ({
   width: Math.max(SEARCH, card.width) + 2 * MARGIN,
   height: MARGIN + SEARCH_HEIGHT + GAP + card.height + SHADOW,

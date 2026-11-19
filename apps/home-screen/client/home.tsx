@@ -150,10 +150,7 @@ const [pins, setPins] = createSignal(false)
 /// the page dots at its foot, which changes size for the App Library and for what's found as it's typed (`Pair`).
 /// The arrow keys move a highlight over Home's apps and widgets (`leave` puts it away).
 const [launcher, setLauncher] = createSignal(false)
-/// Whether the launcher's panel is see-through where nothing's drawn, so its search and its card float on the desktop
-/// on the system's glass (a Mac's); else they're in one panel, as large as what they show.
-const [transparent, setTransparent] = createSignal(false)
-client().then(({ pinsShortcuts, launcher, transparent }) => (setPins(!!pinsShortcuts), setLauncher(!!launcher), setTransparent(!!transparent)), () => {})
+client().then(({ pinsShortcuts, launcher }) => (setPins(!!pinsShortcuts), setLauncher(!!launcher)), () => {})
 /// What's typed in the launcher's search, and which of what it found is chosen, which Return opens.
 const [query, setQuery] = createSignal("")
 const [chosenResult, setChosenResult] = createSignal(0)
@@ -1822,8 +1819,6 @@ function HomeScreen(props: { owners: Owner[] }) {
     return { width: pagesAcross(owner) * PAGE + 2 * INSET, height: Math.ceil(PILLS + (halves(owner) ? halfHeight(room()) : room().height) + PILLS) }
   }
   const sized = { equals: (a: { width: number; height: number }, b: { width: number; height: number }) => a.width === b.width && a.height === b.height }
-  /// The card it shows, which the panel is asked to be large enough for.
-  const wanted = createMemo(() => cardWithin({ width: Infinity, height: Infinity }), sized)
   /// The card as it's drawn, in the room the panel has: what it asked for, or where the panel isn't as large as it
   /// asked, what fits, so the App Library is never cut off at its sides.
   const card = createMemo(() => cardWithin({ width: viewport().width - 2 * MARGIN, height: viewport().height - CARD_TOP }), sized)
@@ -1843,18 +1838,13 @@ function HomeScreen(props: { owners: Owner[] }) {
   /// What was typed, kept a moment as it's emptied, while what it found fades.
   const [words] = lingering(() => query().trim() && query(), 400)
   const cardRect = () => ({ x: cardLeft(), y: CARD_TOP, width: card().width, height: card().height })
-  // The launcher's panel: on a see-through one, as large as its card ever is, which it never changes; else just around
-  // what it shows, growing at once, and shrinking once its card has.
-  let told = { width: 0, height: 0 }
-  let shrinking: ReturnType<typeof setTimeout> | undefined
+  // The launcher's panel: as large as its card ever is, which it never changes. Its search and its card are each a
+  // window of their own, as large as they're drawn, so the room around them costs nothing, and moves nothing as the
+  // card grows and shrinks.
   createEffect(
-    () => launcher() && panelSize(transparent() ? { width: LIBRARY + 2 * INSET, height: tallest() } : wanted()),
+    () => launcher() && panelSize({ width: LIBRARY + 2 * INSET, height: tallest() }),
     (size) => {
-      if (!size) return
-      clearTimeout(shrinking)
-      const now = { width: Math.ceil(Math.max(size.width, told.width)), height: Math.ceil(Math.max(size.height, told.height)) }
-      if (now.width !== told.width || now.height !== told.height) sizeChanged((told = now))
-      if (Math.ceil(size.width) < now.width || Math.ceil(size.height) < now.height) shrinking = setTimeout(() => sizeChanged((told = { width: Math.ceil(size.width), height: Math.ceil(size.height) })), 600)
+      if (size) void sizeChanged({ width: Math.ceil(size.width), height: Math.ceil(size.height) })
     },
   )
 
@@ -2422,8 +2412,6 @@ function HomeScreen(props: { owners: Owner[] }) {
           </>
         }
       >
-        {/* A click beside the search and the card puts the launcher away, as one on another app's window would. */}
-        <Pressable aria-hidden="true" onPress={() => state().matches("nothing") && void leave()} style={looks.cover} />
         <View style={[looks.surface, looks.search, looks.at((viewport().width - SEARCH) / 2, MARGIN, SEARCH, SEARCH_HEIGHT)]}>
           <LauncherSearch />
         </View>
