@@ -84,8 +84,10 @@ struct State {
     /// A panel's, and its parts': where a press moves it, as its page says (`set_title_row`).
     row: Rc<RefCell<Option<crate::view::TitleRow>>>,
     panel: bool,
-    /// A panel's, or its part's: the top left of its box of the page, in points, as it was last put (`arrange`).
+    /// A panel's, or its part's: the top left of its box of the page, in points, as it was last put (`arrange`), and
+    /// its shape, its width, height and corners' radius in pixels, as it was last cut to (`round`).
     placed: Cell<Option<Point<f32>>>,
+    shape: Cell<(i32, i32, i32)>,
     /// A panel's parts, which move with it.
     parts: RefCell<Vec<HWND>>,
 }
@@ -212,6 +214,7 @@ impl Display {
             row: Rc::default(),
             panel: options.panel.is_some(),
             placed: Cell::new(None),
+            shape: Cell::new((0, 0, 0)),
             parts: RefCell::default(),
         });
         let panel = options.panel.is_some();
@@ -337,6 +340,7 @@ impl Display {
             row: parent.state.row.clone(),
             panel: true,
             placed: Cell::new(None),
+            shape: Cell::new((0, 0, 0)),
             parts: RefCell::default(),
         });
         let ex_style = WS_EX_TOOLWINDOW | WS_EX_TOPMOST | WS_EX_NOACTIVATE | WS_EX_NOREDIRECTIONBITMAP;
@@ -366,7 +370,7 @@ impl Display {
                     state.placed.set(Some(bounds.origin));
                 }
             }
-            for (handle, bounds, _) in placed {
+            for (handle, bounds, radius) in placed {
                 let (x, y) = (page.0 + (bounds.origin.x * scale).round() as i32, page.1 + (bounds.origin.y * scale).round() as i32);
                 let (width, height) = ((bounds.size.width * scale).round() as i32, (bounds.size.height * scale).round() as i32);
                 let mut now = RECT::default();
@@ -381,6 +385,7 @@ impl Display {
                         let _ = SetWindowPos(handle.hwnd, None, x, y, width, height, flags);
                     }
                 }
+                round(handle.hwnd, width, height, (radius * scale).round() as i32);
             }
         }
         draw();
@@ -603,20 +608,38 @@ fn register_window_class() {
 }
 
 /// A panel's material: Windows 11's Acrylic under what its page doesn't draw (DWM's transient window backdrop, over
-/// the whole window as its frame), light or dark as the system is, with Windows 11's own round corners.
+/// the whole window as its frame), light or dark as the system is. Its corners and its edge are its page's, as on a
+/// Mac: Windows 11 neither rounds it nor draws its border round it (each would be a second edge, its corners 8 points
+/// where its page's are its own), and it's cut to its page's corners (`round`).
 fn glass(hwnd: HWND) {
     use windows::Win32::Graphics::Dwm::{
-        DWMSBT_TRANSIENTWINDOW, DWMWA_SYSTEMBACKDROP_TYPE, DWMWA_WINDOW_CORNER_PREFERENCE, DWMWCP_ROUND, DwmExtendFrameIntoClientArea,
+        DWMSBT_TRANSIENTWINDOW, DWMWA_BORDER_COLOR, DWMWA_COLOR_NONE, DWMWA_SYSTEMBACKDROP_TYPE, DWMWA_WINDOW_CORNER_PREFERENCE, DWMWCP_DONOTROUND,
+        DwmExtendFrameIntoClientArea,
     };
     use windows::Win32::UI::Controls::MARGINS;
     let dark = BOOL::from(super::appearance() == crate::Appearance::Dark);
-    let (backdrop, round) = (DWMSBT_TRANSIENTWINDOW, DWMWCP_ROUND);
+    let (backdrop, corners, border) = (DWMSBT_TRANSIENTWINDOW, DWMWCP_DONOTROUND, DWMWA_COLOR_NONE);
     let whole = MARGINS { cxLeftWidth: -1, cxRightWidth: -1, cyTopHeight: -1, cyBottomHeight: -1 };
     unsafe {
         let _ = DwmExtendFrameIntoClientArea(hwnd, &whole);
         let _ = DwmSetWindowAttribute(hwnd, DWMWA_USE_IMMERSIVE_DARK_MODE, std::ptr::from_ref(&dark).cast(), size_of::<BOOL>() as u32);
         let _ = DwmSetWindowAttribute(hwnd, DWMWA_SYSTEMBACKDROP_TYPE, std::ptr::from_ref(&backdrop).cast(), size_of_val(&backdrop) as u32);
-        let _ = DwmSetWindowAttribute(hwnd, DWMWA_WINDOW_CORNER_PREFERENCE, std::ptr::from_ref(&round).cast(), size_of_val(&round) as u32);
+        let _ = DwmSetWindowAttribute(hwnd, DWMWA_WINDOW_CORNER_PREFERENCE, std::ptr::from_ref(&corners).cast(), size_of_val(&corners) as u32);
+        let _ = DwmSetWindowAttribute(hwnd, DWMWA_BORDER_COLOR, std::ptr::from_ref(&border).cast(), size_of_val(&border) as u32);
+    }
+}
+
+/// Cuts a panel's window, `width` by `height` pixels, to round corners of `radius` pixels, its page's, so its Acrylic
+/// is only under what its page draws; again only as its shape changes.
+fn round(hwnd: HWND, width: i32, height: i32, radius: i32) {
+    let Some(state) = state(hwnd) else { return };
+    if state.shape.replace((width, height, radius)) == (width, height, radius) {
+        return;
+    }
+    unsafe {
+        // The region's right and bottom edges are outside it, so it's a pixel larger; it's the window's once set.
+        let region = windows::Win32::Graphics::Gdi::CreateRoundRectRgn(0, 0, width + 1, height + 1, 2 * radius, 2 * radius);
+        let _ = windows::Win32::Graphics::Gdi::SetWindowRgn(hwnd, Some(region), true);
     }
 }
 
