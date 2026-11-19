@@ -33,7 +33,7 @@ function Detail(props: { screen: AgentScreen }) {
       </Show>
       <Section heading="Last Used">
         <List>
-          <Row heading={s().used?.doing ?? "Not used yet"} text={s().used ? `${name(s().used!.by)}'s agent · ${since(s().used!.at)}` : undefined} />
+          <Row heading={s().used?.doing ?? "Not used yet"} text={s().used ? `${s().used!.by ? `${name(s().used!.by)}'s agent` : "An agent"} · ${since(s().used!.at)}` : undefined} />
         </List>
       </Section>
       <Section heading="Screen">
@@ -74,28 +74,39 @@ function ThisPhone() {
   )
 }
 
+const screens = createMemo(() => call("computer-use_screens").then((text): AgentScreen[] => JSON.parse(text).screens))
+changed(() => refresh(screens))
+
 function App() {
-  const screens = createMemo(() => call("computer-use_screens").then((text): AgentScreen[] => JSON.parse(text).screens))
-  changed(() => refresh(screens))
   const opened = () => screens().find((screen) => address(screen) === open())
   return (
-    <Errored fallback={(error, reset) => <Problem heading="Couldn't list your screens" text={error() as Error} action={<Button variant="outline" onPress={reset}>Try Again</Button>} />}>
-      <Loading fallback={<Skeleton rows={3} />}>
-        <Split open={!!opened()} onClose={() => setOpen()} detail={<Show when={opened()} fallback={<Show when={screens().length}><Empty>Pick a screen to watch it.</Empty></Show>}><Detail screen={opened()!} /></Show>}>
-          <Screen heading="Computer Use">
-            <ThisPhone />
-            <Show when={screens().length} fallback={<Empty>No screens. Your agents' desktops show here once they make one.</Empty>}>
-              <List>
-                <For each={screens()} keyed={address}>
-                  {(screen) => <Row heading={screen().name} text={usage(screen().used)} current={open() === address(screen())} onPress={() => setOpen(address(screen()))} />}
-                </For>
-              </List>
-            </Show>
-          </Screen>
-        </Split>
-      </Loading>
-    </Errored>
+    <Show
+      when={screens().length}
+      fallback={
+        <Screen heading="Computer Use">
+          <ThisPhone />
+          <Empty>No screens. Your agents' desktops show here once they make one.</Empty>
+        </Screen>
+      }
+    >
+      <Split open={!!opened()} onClose={() => setOpen()} detail={<Show when={opened()} fallback={<Empty>Pick a screen to watch it.</Empty>}><Detail screen={opened()!} /></Show>}>
+        <Screen heading="Computer Use">
+          <ThisPhone />
+          <List>
+            <For each={screens()} keyed={address}>
+              {(screen) => <Row heading={screen().name} text={usage(screen().used)} current={open() === address(screen())} onPress={() => setOpen(address(screen()))} />}
+            </For>
+          </List>
+        </Screen>
+      </Split>
+    </Show>
   )
 }
 
-render(() => <App />)
+render(() => (
+  <Errored fallback={(error, reset) => <Screen heading="Computer Use"><Problem heading="Couldn't list your screens" text={error() as Error} action={<Button variant="outline" onPress={() => (refresh(screens), reset())}>Try Again</Button>} /></Screen>}>
+    <Loading fallback={<Screen heading="Computer Use"><Skeleton rows={3} /></Screen>}>
+      <App />
+    </Loading>
+  </Errored>
+))
