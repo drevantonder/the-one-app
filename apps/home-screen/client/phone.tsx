@@ -1,6 +1,6 @@
 // A phone's Home Screen: every owner's pages one above another, each a row of screenfuls, the App Library after them,
 // and the owner pill and dots over them.
-import { For, Show } from "solid-js"
+import { For } from "solid-js"
 import { View } from "ui"
 import { lefts, TOP_ROW } from "./layout.ts"
 import { looks } from "./looks.ts"
@@ -51,13 +51,12 @@ export function Phone(props: { owners: Owner[]; layout: Screens; paging: Paging 
           </View>
           <Library owner={props.owners[0]} />
         </View>
-        <Show when={!library()}>
-          <View style={[looks.topRow, looks.top(room().safe.top), looks.tall(TOP_ROW)]}>
-            <View style={[looks.live, looks.opacity(state().matches("editing") ? 0.6 : 1)]}>
-              <OwnerPill owners={props.owners} />
-            </View>
+        {/* Whose pages they are, over Home's, which goes with them as they slide off to the App Library. */}
+        <View inert={library() || undefined} style={[looks.topRow, looks.top(room().safe.top), looks.tall(TOP_ROW), looks.shifted(-sectionsX())]}>
+          <View style={[looks.live, looks.opacity(state().matches("editing") ? 0.6 : 1)]}>
+            <OwnerPill owners={props.owners} />
           </View>
-        </Show>
+        </View>
         <View style={[looks.bottomRow, looks.bottom(room().safe.bottom + 16)]}>
           <View style={looks.live}>
             <DotsPill owners={props.owners} laid={laid().screens} />

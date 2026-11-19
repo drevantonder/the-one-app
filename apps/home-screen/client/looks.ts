@@ -7,6 +7,8 @@ export const looks = styles({
   cover: { position: "absolute", top: 0, bottom: 0, start: 0, end: 0 },
   frosted: { backgroundColor: tokens.colour.veil, backdropFilter: tokens.material.thin },
   pill: { flexDirection: "row", alignItems: "center", borderRadius: tokens.radius.full },
+  // The owner pill is its button, whose press and open fill it whole.
+  ownerPill: { paddingInline: 0 },
   glass: { paddingInline: tokens.grid[1], pointerEvents: "auto", backgroundColor: tokens.colour.glass, boxShadow: tokens.shadow.glass, backdropFilter: tokens.material.glass },
   panel: { position: "absolute", overflow: "hidden", borderRadius: tokens.radius.large, backgroundColor: tokens.colour.tile },
   // What's in an opened category, at the panel's size in its middle, which shows more of it as it grows.

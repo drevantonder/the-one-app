@@ -91,10 +91,8 @@ function Dots(props: { owner: Owner; index: number; count: number; size: number;
 
 /// The owner pill, at the top of Home in the middle, and of the launcher's card: whose pages they are, "You ⌄", which
 /// opens the list of every owner, the current one ticked, in a pill of Liquid Glass as the dots have. Its name rolls as
-/// the owners move. While pages are edited, + and Done are either side of it, and it opens nothing. Where it's `hidden`,
-/// faded out over something else, it has no glass, which a host would draw blurred over whatever is under it, as clear as
-/// it is.
-export function OwnerPill(props: { owners: Owner[]; hidden?: boolean }) {
+/// the owners move. While pages are edited, + and Done are either side of it, and it opens nothing.
+export function OwnerPill(props: { owners: Owner[] }) {
   const at = () => state().context.at.owner
   return (
     <Menu.Root
@@ -102,8 +100,8 @@ export function OwnerPill(props: { owners: Owner[]; hidden?: boolean }) {
       onOpenChange={(open) => (open ? state().matches("nothing") && home.send({ type: "list" }) : state().matches("listing") && home.send({ type: "dismiss" }))}
       onSelect={(value) => home.send({ type: "pick", owner: Number(value) })}
     >
-      <View style={[looks.pill, !props.hidden && looks.glass]}>
-        <Menu.Trigger variant="ghost" aria-label={props.owners[at()]?.name}>
+      <View style={[looks.pill, looks.glass, looks.ownerPill]}>
+        <Menu.Trigger variant="ghost" shape="capsule" aria-label={props.owners[at()]?.name}>
           <View style={looks.ownerRow}>
             <Roll count={props.owners.length} height={BAR - 8} row={(index) => <Text style={looks.ownerName}>{props.owners[index]?.name}</Text>} />
             <View style={looks.caret}>

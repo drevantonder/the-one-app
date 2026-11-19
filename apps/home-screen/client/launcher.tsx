@@ -306,8 +306,11 @@ export function LauncherPanel(props: { owners: Owner[]; layout: Screens; paging:
   const { pages, laid } = props.layout
   const { card, cardLeft, lead, trackX, turnOf, flingOf, opacityOf, wheel } = props.paging
   const { showing, words } = props.launching
-  // The owner pill's glass goes once it has faded out over the App Library or what was found, not before.
-  const [onHome] = lingering(() => showing() === "home" || undefined, 400)
+  // How far the owner shown's pages have given past their last screenful, on the way to the App Library.
+  const pastHome = () => {
+    const owner = state().context.at.owner
+    return Math.max(0, trackX(owner) - Math.max(0, props.layout.homes(owner).length - 1) * PAGE)
+  }
   return (
     <>
         <View style={[looks.surface, looks.search, looks.at((viewport().width - SEARCH) / 2, 0, SEARCH, SEARCH_HEIGHT)]}>
@@ -344,6 +347,11 @@ export function LauncherPanel(props: { owners: Owner[]; layout: Screens; paging:
                 )
               }}
             </For>
+            {/* Whose pages they are at the top, as a phone has it: part of Home, going with its pages as they give
+                on the way to the App Library and fading with them. */}
+            <View style={[looks.row, looks.top(0), looks.tall(PILLS), looks.shifted(-pastHome()), looks.opacity(state().matches("editing") ? 0.6 : 1)]}>
+              <OwnerPill owners={props.owners} />
+            </View>
           </View>
           {/* The App Library, in the same card, cross-fading in, scrolling what's taller. */}
           <View inert={showing() !== "library" || undefined} style={[looks.layer, looks.fading, showing() !== "library" && looks.inert, looks.fill(INSET, 0, 0), looks.faded(showing() === "library" ? 1 : 0, showing() === "library" ? 1 : 0.965)]}>
@@ -355,10 +363,7 @@ export function LauncherPanel(props: { owners: Owner[]; layout: Screens; paging:
               <Show when={words()}>{(typed) => <Results owner={props.owners[0]} found={findAll(props.owners[0]?.library ?? [], typed())} words={typed()} />}</Show>
             </ScrollView>
           </View>
-          {/* Whose pages they are at the top, as a phone has it, and their dots at the foot, with the App Library's glyph. */}
-          <View inert={showing() !== "home" || undefined} style={[looks.row, looks.fading, showing() !== "home" && looks.inert, looks.top(0), looks.tall(PILLS), looks.opacity(showing() === "home" ? (state().matches("editing") ? 0.6 : 1) : 0)]}>
-            <OwnerPill owners={props.owners} hidden={!onHome()} />
-          </View>
+          {/* Their dots at the foot, with the App Library's glyph. */}
           <View inert={showing() === "search" || undefined} style={[looks.row, looks.fading, showing() === "search" && looks.inert, looks.bottom(0), looks.tall(PILLS), looks.opacity(showing() === "search" ? 0 : 1)]}>
             <DotsPill owners={props.owners} laid={laid().screens} pages={(owner) => pages()[owner]?.length ?? 1} />
           </View>
