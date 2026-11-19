@@ -328,7 +328,7 @@ function Code(props: { repo: string; about: About; branch: string }) {
             <View role="list">
               <For each={tree()!.entries}>
                 {(entry, index) => (
-                  <View role="listitem" style={index() > 0 && look.between}>
+                  <View role="listitem" style={[index() > 0 && look.between]}>
                     <Pressable
                       role="button"
                       onPress={() => to(entry.type === "tree" ? { tab: "code", path: [at().path, entry.name].filter(Boolean).join("/") } : { tab: "code", path: at().path, file: [at().path, entry.name].filter(Boolean).join("/") })}

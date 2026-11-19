@@ -213,7 +213,7 @@ function Trace(props: { id: string; names: Record<string, string> }) {
             {(span) => (
               <View role="listitem" style={look.span}>
                 <View style={[look.spanHeading, look.indent(span.depth * 12)]}>
-                  <Text style={span.outcome === "error" && look.wrong}>{named(span.name, props.names)}</Text>
+                  <Text style={[span.outcome === "error" && look.wrong]}>{named(span.name, props.names)}</Text>
                   <Text style={look.took}>{took(span.took)}</Text>
                 </View>
                 <View aria-hidden="true" style={look.track}>
@@ -347,7 +347,7 @@ function Telemetry(props: { all: Overview }) {
               <For each={alerts().alerts} keyed={(alert) => alert.id}>
                 {(alert) => (
                   <Row
-                    start={<View style={alert().state !== "resolved" && look.wrong}><Icon name={alert().state === "resolved" ? "check" : "warning-circle"} /></View>}
+                    start={<View style={[alert().state !== "resolved" && look.wrong]}><Icon name={alert().state === "resolved" ? "check" : "warning-circle"} /></View>}
                     heading={alert().title}
                     text={alert().text ?? undefined}
                     end={alert().ended ? `Resolved ${since(alert().ended!, "narrow")}` : since(alert().began, "narrow")}
