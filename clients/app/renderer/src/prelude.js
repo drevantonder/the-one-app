@@ -1,6 +1,6 @@
 // The sandbox's own globals, run after LLRT's Web APIs and before the app's code. `__post`, `__now`, `__log`, `FIXED`
-// (ms since 1970 for a fixed clock, or null), `LOCALE` and `shim` (event-target-shim.js) are the host's (js.rs), and
-// so is `mutations`, what the renderer draws with. It evaluates to what the host itself calls: its timers, and what it tells of promises nothing
+// (ms since 1970 for a fixed clock, or null), `LOCALE`, `TOUCH_POINTS` and `shim` (event-target-shim.js) are the
+// host's (js.rs), and so is `mutations`, what the renderer draws with. It evaluates to what the host itself calls: its timers, and what it tells of promises nothing
 // handled. What throws in a timer or a listener is reported (`reportError`), as a browser does, and runs nothing less.
 const timers = new Map()
 let nextTimer = 1
@@ -134,7 +134,7 @@ globalThis.Performance = class Performance extends EventTarget {
   toJSON() { return { timeOrigin: ORIGIN } }
 }
 globalThis.performance = new Performance()
-globalThis.navigator = { userAgent: "One", language: LOCALE, languages: [LOCALE] }
+globalThis.navigator = { userAgent: "One", language: LOCALE, languages: [LOCALE], maxTouchPoints: TOUCH_POINTS }
 const events = new EventTarget()
 for (const name of ["addEventListener", "removeEventListener", "dispatchEvent"]) globalThis[name] = events[name].bind(events)
 globalThis.onunhandledrejection = null

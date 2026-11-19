@@ -212,7 +212,10 @@ impl Sandbox {
             run(&ctx, web(&ctx))?;
             let fixed = clock.0.epoch_ms.map_or_else(|| "null".into(), |epoch_ms| epoch_ms.to_string());
             let locale = serde_json::to_string(&clock.locale())?;
-            let host: rquickjs::Object = run(&ctx, ctx.eval(format!("const FIXED = {fixed}, LOCALE = {locale}, shim = (() => {{\n{EVENT_TARGET_SHIM}\n}})();\n{PRELUDE}")))?;
+            // How many fingers its screen takes at once, as a browser says it (`navigator.maxTouchPoints`): a phone's
+            // five, as iOS's and Android's browsers say, a computer's none.
+            let touch_points = if cfg!(any(target_os = "android", target_os = "ios")) { 5 } else { 0 };
+            let host: rquickjs::Object = run(&ctx, ctx.eval(format!("const FIXED = {fixed}, LOCALE = {locale}, TOUCH_POINTS = {touch_points}, shim = (() => {{\n{EVENT_TARGET_SHIM}\n}})();\n{PRELUDE}")))?;
             run(&ctx, crate::intl::init(&ctx, &clock.time_zone()))?;
             run(&ctx, ctx.eval::<(), _>(INTL))?;
             let started = run(&ctx, Module::import(&ctx, page.as_str()))?;

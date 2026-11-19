@@ -65,7 +65,9 @@ interface Context {
   /** Whether its window is on screen, as a computer's launcher put away isn't: the DOM's `visibilityState`. */
   visible?: boolean
 }
-const [fingered, setFingered] = createSignal(false)
+// Under a finger from the start where the device is, as its host says before it's greeted, so what's drawn before then
+// (a screen in its loading fallback) is drawn for a finger too.
+const [fingered, setFingered] = createSignal(navigator.maxTouchPoints > 0)
 const [opened, setOpened] = createSignal<string>()
 function dress(context?: Context) {
   if (context?.link) setOpened(context.link)
