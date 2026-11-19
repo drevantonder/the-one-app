@@ -2,6 +2,7 @@ import { onSettled, refresh, Show, untrack } from "solid-js"
 import { call, confirm, covers, haptic, Icon, type IconName, Image, keydown, pinShortcut, Pressable, Text, toast, View, viewport } from "ui"
 import { type Held } from "./machine.ts"
 import { type Entrypoint, type Item, type Widget as WidgetItem, src } from "./types.ts"
+import { corner } from "./layout.ts"
 import { looks } from "./looks.ts"
 import { home, state, pins, room, laidPage } from "./store.ts"
 import { json, type Owner, owners, draft, subjectOf, and, addable, addToHome, removeFromHome, whose } from "./owners.ts"
@@ -92,7 +93,7 @@ export function Holding(props: { owner: Owner; index: number; held: Held }) {
         {(item) => (
           <View aria-hidden="true" style={[looks.copy, looks.copyAt(held.x + (held.width - copyWidth) / 2, held.y + (held.height - copyHeight) / 2, copyWidth, copyHeight, scale)]}>
             <View style={looks.lifting}>
-              <Show when={item().widget} fallback={library ? <Image src={src((item() as Entrypoint).icon)} alt="" style={[looks.iconImage, looks.square(copyWidth)]} /> : <Tile name={(item() as Entrypoint).name} icon={(item() as Entrypoint).icon} size={tile} scale={scale} />}>
+              <Show when={item().widget} fallback={library ? <Image src={src((item() as Entrypoint).icon)} alt="" style={[looks.iconImage(corner(copyWidth)), looks.square(copyWidth)]} /> : <Tile name={(item() as Entrypoint).name} icon={(item() as Entrypoint).icon} size={tile} scale={scale} />}>
                 <Card item={item() as WidgetItem} owner={props.owner} still />
               </Show>
             </View>

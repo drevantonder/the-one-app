@@ -95,7 +95,8 @@ export const looks = styles({
   widgetCell: { position: "relative", display: "grid", flexGrow: 1 },
   count: { position: "absolute", top: negative(tokens.grid[1.5]), end: negative(tokens.grid[1.5]) },
   tileBox: { alignItems: "center", gap: sizes.iconGap, minWidth: 0, width: "100%" },
-  iconImage: { borderRadius: tokens.radius.large },
+  // An app's icon, `size` across: corners from `corner`, the 18 points a Home Screen icon of 60 has, so a small icon in an App Library category is the same shape.
+  iconImage: (borderRadius: number) => ({ borderRadius }),
   name: { font: tokens.type.caption, lineClamp: 1, textAlign: "center", maxWidth: "100%" },
   smallName: { font: tokens.type.small },
   empty: { position: "absolute", start: 0, end: 0 },
@@ -109,7 +110,6 @@ export const looks = styles({
   folder: { position: "relative", display: "grid", gridTemplateColumns: { repeat: 2 } },
   folderBox: (columnGap: number, rowGap: number, size: number, paddingTop: number, paddingInline: number, paddingBottom: number) => ({ columnGap, rowGap, width: size, height: size, paddingTop, paddingInline, paddingBottom }),
   more: { display: "grid", gridTemplateColumns: { repeat: 2 }, gap: sizes.folderGap, alignSelf: "center", justifyContent: "center", marginInline: "auto" },
-  mini: { borderRadius: tokens.radius.medium },
   categoryName: { font: tokens.type.caption, color: tokens.colour.secondaryLabel, lineClamp: 1 },
   found: { display: "grid", gridTemplateColumns: { fill: sizes.found }, rowGap: tokens.grid[4], columnGap: tokens.grid[3] },
   library: { flexShrink: 0 },

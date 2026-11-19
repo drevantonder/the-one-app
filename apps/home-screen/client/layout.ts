@@ -105,6 +105,10 @@ export function grid(width: number, height: number, top: number, left: number, r
   return { width, height, top, left, right, bottom, column, row, tile: Math.min(60, row - 28) }
 }
 
+/// An app's icon's corner radius at `size` across: 30% of it, the 18 points of a Home Screen icon of 60, so a small icon, as in an
+/// App Library category, is the same shape.
+export const corner = (size: number) => size * 0.3
+
 /** Where something is, in CSS pixels. */
 export interface Box {
   x: number

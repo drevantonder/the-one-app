@@ -3,6 +3,7 @@
 import { createEffect, createMemo, createSignal, Errored, Loading, onSettled, refresh, Show, untrack } from "solid-js"
 import { Badge, call, changed, Icon, Image, type Layout, type Located, Pressable, type Rect, Text, View, visible, Widget } from "ui"
 import { type Widget as WidgetItem, src } from "./types.ts"
+import { corner } from "./layout.ts"
 import { looks } from "./looks.ts"
 import { state, tapping } from "./store.ts"
 import { json, type Owner, type From, launch } from "./owners.ts"
@@ -83,7 +84,7 @@ export function Tile(props: { name: string; icon: string; size: number; scale: n
       style={looks.tileBox}
     >
       <View style={[looks.icon, looks.square(props.size)]}>
-        <Image src={src(props.icon)} alt="" style={[looks.iconImage, looks.square(props.size)]} />
+        <Image src={src(props.icon)} alt="" style={[looks.iconImage(corner(props.size)), looks.square(props.size)]} />
         <Count count={props.badge} />
       </View>
       <Text style={looks.name}>{props.name}</Text>

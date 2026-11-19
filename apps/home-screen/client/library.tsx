@@ -2,7 +2,7 @@
 // in it.
 import { createMemo, createSignal, For, Show } from "solid-js"
 import { ScrollView, Empty, Icon, Image, type Located, Pressable, type Rect, Search, Text, View } from "ui"
-import { BAR, TOP_ROW } from "./layout.ts"
+import { BAR, corner, TOP_ROW } from "./layout.ts"
 import { type Category, type Listed, src } from "./types.ts"
 import { looks } from "./looks.ts"
 import { home, state, launcher, room, tapping } from "./store.ts"
@@ -118,7 +118,7 @@ export function Library(props: { owner: Owner; size?: { width: number; height: n
                 <Show when={category().entrypoints.length > 4}>
                   <Pressable role="button" aria-label={`All of ${category().category}`} onPress={opening(key)} style={[looks.more, looks.square(laid().icon + 14)]}>
                     <For each={category().entrypoints.slice(3, 7)} keyed={(entrypoint) => entrypoint.entrypoint ?? entrypoint.app}>
-                      {(entrypoint) => <Image src={src(entrypoint().icon)} alt="" style={[looks.mini, looks.square((laid().icon + 9) / 2)]} />}
+                      {(entrypoint) => <Image src={src(entrypoint().icon)} alt="" style={[looks.iconImage(corner((laid().icon + 9) / 2)), looks.square((laid().icon + 9) / 2)]} />}
                     </For>
                   </Pressable>
                 </Show>
@@ -209,7 +209,7 @@ function LibraryEntrypoint(props: { entrypoint: Listed; owner: Owner; icon: numb
       style={[looks.entry, props.small && looks.entrySmall]}
     >
       <View style={[looks.slots, looks.square(props.icon)]}>
-        <Image src={src(props.entrypoint.icon)} alt="" style={[looks.iconImage, looks.square(props.icon)]} />
+        <Image src={src(props.entrypoint.icon)} alt="" style={[looks.iconImage(corner(props.icon)), looks.square(props.icon)]} />
         <Count count={badge()} />
       </View>
       <Text style={[looks.name, props.small && looks.smallName]}>{props.entrypoint.name}</Text>
