@@ -269,14 +269,18 @@ defmodule OneCore.Hooks do
 
   @doc """
   Whose the device `device` is, as the apps that mutate `device` say: a user, or `nil` for nobody's. Kept
-  once it's somebody's, so a call asks nothing. `{:error, why}` where an app couldn't say, which isn't nobody's.
+  once it's somebody's, so a call asks nothing. `{:error, why}` where an app couldn't say, or none that says runs
+  here (as while it waits for this server's update), which isn't nobody's: only an app says a device is nobody's, and
+  a device a client is told is nobody's is signed out.
   """
   def whose(device) do
     Cache.fetch(@caches["device"], device, fn ->
-      with {:ok, %{"who" => who}, _by} <- mutate("device", %{"device" => device, "who" => nil}, {nil, "network"}),
+      with [_ | _] <- hooking("device", "network"),
+           {:ok, %{"who" => who}, _by} <- mutate("device", %{"device" => device, "who" => nil}, {nil, "network"}),
            :ok <- OneCore.User.user(who) do
         {:commit, who}
       else
+        [] -> {:ignore, {:error, "no app that says whose a device is runs on this server"}}
         {:refuse, why} -> {:ignore, {:error, why}}
         _ -> {:ignore, nil}
       end
