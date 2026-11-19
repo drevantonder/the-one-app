@@ -92,8 +92,10 @@ and never sees a secret, so an untrusted app can use one too. It requires this a
   (`hosts`: the token address's site, names under it, such as gmail.googleapis.com under oauth2.googleapis.com's
   googleapis.com, or the client's sites), anything more its sign-in page is asked with (`params`), and `client`, the
   item that holds the `client_id` the service gave whoever registered the app with it, and its `client_secret` if it
-  has one. The code goes only to that item's sites, its secret too: its person keeps the service's token address
-  among them. An item that's there already is written only by signing in to the same service again, for an app
+  has one, which its person switched on for the app: an app signs in only with a client switched on for it. The
+  client item keeps its sign-in page (`authorize`, not secret): the one its person gave it, or else the first an app
+  it's switched on for names, so no other app sends its person anywhere else with it. The code goes only to that
+  item's sites, its secret too: its person keeps the service's token address among them. An item that's there already is written only by signing in to the same service again, for an app
   that uses it. A network
   without an address has nowhere to be sent back to. An item's name that says `{{<claim>}}` is filled in from
   who signed in, as the service's OpenID Connect ID token says: `"Google {{email}}"`, with `openid` and `email`

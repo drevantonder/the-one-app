@@ -50,7 +50,8 @@ defmodule Vault.SignIns do
 
     Store.quietly("Starting the sign-in", fn ->
       {state, verifier} = {"#{Base.url_encode64(call.subject, padding: false)}.#{Store.random(24)}", Store.random(48)}
-      found = Items.find!(call, db, service.client)
+      # An app signs in with a client its person switched on for it, and nothing else of theirs.
+      found = Access.may!(Items.find!(call, db, service.client), {:app, app})
       client = Items.fields(found)
 
       client["client_id"] ||
@@ -62,7 +63,7 @@ defmodule Vault.SignIns do
         do: raise("#{service.client}'s sign-ins go only to its sites, and #{service.name}'s token address isn't one. Its person adds it, in the Vault.")
 
       own!(service, found["hosts"])
-      authorize!(service)
+      service = %{service | authorize: authorize!(call, db, service, found, client, app)}
       if not String.contains?(item, "{{"), do: ours!(Items.find(call, db, item), app, service.name)
 
       Store.transaction(call, db, fn d ->
@@ -230,17 +231,25 @@ defmodule Vault.SignIns do
     end
   end
 
-  # A sign-in writes only into an item a sign-in to the same service made, which the app keeps or uses, as signing in
-  # again does, never into another of its person's.
-  # The link its person opens, where the Vault's page sends them, is a web page over https that names nobody before
-  # its site: never a script (`javascript:`), a file or a page sent in the clear.
-  defp authorize!(service) do
-    authorize = URI.parse(service.authorize || "")
+  # Where its person signs in to the service: the client's own sign-in page, which the client item keeps. A client
+  # kept before items kept it takes the first page an app it was switched on for names, and keeps it from then on, so
+  # no other app sends its person anywhere else with it. It's a web page over https that names nobody before its
+  # site: never a script (`javascript:`), a file or a page sent in the clear.
+  defp authorize!(call, db, service, found, client, app) do
+    authorize = client["authorize"] || service.authorize || ""
+    uri = URI.parse(authorize)
 
-    if not (authorize.scheme == "https" and is_binary(authorize.host) and authorize.userinfo == nil),
-      do: raise("#{service.name}'s sign-in page is an https address.")
+    if not (uri.scheme == "https" and is_binary(uri.host) and uri.userinfo == nil),
+      do: raise("#{service.client}'s sign-in page is an https address.")
+
+    if client["authorize"] == nil,
+      do: Items.write!(call, db, found["name"], nil, {:app, app}, &Items.put_field(&1, "authorize", authorize, false))
+
+    authorize
   end
 
+  # A sign-in writes only into an item a sign-in to the same service made, which the app keeps or uses, as signing in
+  # again does, never into another of its person's.
   defp ours!(nil, _app, _service), do: :ok
 
   defp ours!(found, app, service) do
