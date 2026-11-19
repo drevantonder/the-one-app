@@ -156,25 +156,17 @@ await Bun.write(`${built}/gateway.jsonc`, JSON.stringify(gateway, null, 2));
 const gatewayConfig = relative(here, `${built}/gateway.jsonc`);
 
 const wrangler = (...args) => Bun.spawn(["bun", "x", "wrangler", ...args], { cwd: here, env: process.env, stdio: ["inherit", "inherit", "inherit"] }).exited;
-// The relay and the MCP endpoint are told their tail parts in a copy of their config beside the gateway's, and the MCP
-// endpoint the part that says who a request is from.
 const config = {
   web: "web/wrangler.jsonc",
   presigner: "presigner/wrangler.jsonc",
 };
-// The network's updater, which the relay is bound to, and which is told its tail parts and the edge's build as the relay
-// is.
-{
-  const worker = (await import(`${here}/updater/wrangler.jsonc`)).default;
-  worker.vars = { ...worker.vars, VERSION: version };
-  await Bun.write(`${built}/updater.jsonc`, JSON.stringify(tailed({ ...worker, main: relative(built, `${here}/updater/${worker.main}`) }), null, 2));
-  config.updater = relative(here, `${built}/updater.jsonc`);
-}
-// The relay is told the edge's build, by which it knows which servers talk with it (`relay/relay.ts`).
-for (const piece of ["relay", "mcp"]) {
+// The network's updater, which the relay is bound to, the relay and the MCP endpoint are told their tail parts in a
+// copy of their config beside the gateway's; the updater and the relay the edge's build, by which the relay knows which
+// servers talk with it (`relay/relay.ts`); and the MCP endpoint the part that says who a request is from.
+for (const piece of ["updater", "relay", "mcp"]) {
   const worker = (await import(`${here}/${piece}/wrangler.jsonc`)).default;
   if (piece === "mcp" && who) worker.services = [...worker.services, { binding: who.binding, service: who.service, entrypoint: who.entrypoint }];
-  if (piece === "relay") worker.vars = { ...worker.vars, VERSION: version };
+  if (piece !== "mcp") worker.vars = { ...worker.vars, VERSION: version };
   await Bun.write(`${built}/${piece}.jsonc`, JSON.stringify(tailed({ ...worker, main: relative(built, `${here}/${piece}/${worker.main}`) }), null, 2));
   config[piece] = relative(here, `${built}/${piece}.jsonc`);
 }
