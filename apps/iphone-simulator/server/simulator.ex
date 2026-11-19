@@ -103,7 +103,7 @@ defmodule IphoneSimulator.Simulator do
             do: Map.put(data.simulators, udid, %{state: to, step: step, why: why}),
             else: Map.delete(data.simulators, udid)
 
-        if simulators != data.simulators or to != was, do: tell()
+        if simulators != data.simulators or to != was, do: OneCore.Service.changed(self())
         {:reply, {:ok, to}, %{data | simulators: simulators}}
     end
   end
@@ -117,12 +117,6 @@ defmodule IphoneSimulator.Simulator do
   defp refused("gone", _), do: "It's gone from Xcode, deleted outside the One App. `remove` takes it off the list."
   defp refused(state, event), do: "It can't #{event} while it's #{state}."
 
-  # Tells every app watching that a simulator's state changed, as a call to the app does once it's done.
-  defp tell do
-    service = self()
-    for who <- Enum.take(OneCore.Service.acts_for(), 1), do: Task.start(fn -> OneCore.Service.app(service, who, :changed) end)
-  end
-
   # Takes the simulator `udid` one step (`event`, by `@steps`, or `nil` for none) with `changes`, and gives its state.
   defp step(service, udid, event, changes \\ %{}) do
     case GenServer.call(service, {:step, udid, event, changes}, 30_000) do
@@ -135,7 +129,7 @@ defmodule IphoneSimulator.Simulator do
   def list(service) do
     states = for {udid, s} <- simulators(), into: %{}, do: {udid, s["state"]}
     kept = GenServer.call(service, :simulators)
-    used = used(service)
+    used = OneCore.Service.used(service)
     folder = folder(service, "simulators")
 
     for file <- File.ls!(folder), String.ends_with?(file, ".json") do
@@ -193,7 +187,7 @@ defmodule IphoneSimulator.Simulator do
   end
 
   defp boot(service, udid) do
-    touch(service, udid)
+    OneCore.Service.touch(service, udid)
 
     case cmd(["xcrun", "simctl", "boot", udid], 120) do
       %{exit: 0} -> :ok
@@ -263,7 +257,7 @@ defmodule IphoneSimulator.Simulator do
 
   @doc "A PNG of the simulator's screen, as base64, in its own pixels, by `simctl io screenshot`."
   def screenshot(service, udid) do
-    touch(service, udid)
+    OneCore.Service.touch(service, udid)
     file = Path.join(folder(service, "shots"), "#{System.unique_integer([:positive])}.png")
 
     try do
@@ -279,7 +273,7 @@ defmodule IphoneSimulator.Simulator do
   takes as whole points: a click is a tap, a right click a long press, a drag a swipe, a scroll a swipe the other way.
   """
   def act(service, udid, action, inputs) do
-    touch(service, udid)
+    OneCore.Service.touch(service, udid)
     %{"points" => points} = describe(service, udid) || raise "It isn't running.\n\n`start` starts it."
     at = fn x, y -> [round(x * points), round(y * points)] end
 
@@ -339,14 +333,14 @@ defmodule IphoneSimulator.Simulator do
 
   @doc "Opens `url` in the simulator, in the app for it or Safari."
   def open_url(service, udid, url) do
-    touch(service, udid)
+    OneCore.Service.touch(service, udid)
     simctl!(service, ["openurl", udid, url])
     :ok
   end
 
   @doc "Installs an app built for the simulator: its .app, zipped, as base64 or by its URL."
   def install(service, udid, zip) do
-    touch(service, udid)
+    OneCore.Service.touch(service, udid)
     folder = Path.join(folder(service, "install"), "#{System.unique_integer([:positive])}")
     File.mkdir_p!(folder)
 
@@ -387,7 +381,7 @@ defmodule IphoneSimulator.Simulator do
   answer.
   """
   def stream(service, udid, request) do
-    touch(service, udid)
+    OneCore.Service.touch(service, udid)
     [_, "--companion-path", companion] = idb(service)
     %{"points" => points} = describe(service, udid) || raise "It isn't running.\n\n`start` starts it."
     file = Path.join(OneCore.Service.folder(service), "stream-#{System.unique_integer([:positive])}.json")
@@ -479,13 +473,6 @@ defmodule IphoneSimulator.Simulator do
     folder = Path.join(OneCore.Service.folder(service), name)
     File.mkdir_p!(folder)
     folder
-  end
-
-  defp touch(service, udid), do: File.touch!(Path.join(folder(service, "used"), udid))
-
-  defp used(service) do
-    folder = folder(service, "used")
-    for file <- File.ls!(folder), into: %{}, do: {file, File.stat!(Path.join(folder, file), time: :posix).mtime * 1000}
   end
 
   # Runs `args` for at most `timeout` seconds (`OneCore.Command`). What it prints is kept whole, as simctl's JSON is

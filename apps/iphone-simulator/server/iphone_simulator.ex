@@ -36,7 +36,7 @@ defmodule IphoneSimulator do
   @impl true
   def requires do
     %{
-      "core" => ">= 0.32.47",
+      "core" => ">= 0.32.109",
       "database" => "to keep your simulators",
       "webrtc" => "to show a simulator's screen live"
     }
@@ -206,23 +206,13 @@ defmodule IphoneSimulator do
   @impl true
   def call("list", _inputs, call), do: %{simulators: listed(call)}
 
-  def call("machines", _inputs, call) do
-    machines =
-      for server <- Service.servers(call, Simulator) do
-        case Service.seen(server) do
-          at when is_integer(at) -> %{machine: Service.name(server), on: false, last_on: at}
-          _ -> %{machine: Service.name(server), on: true}
-        end
-      end
-
-    %{machines: machines}
-  end
+  def call("machines", _inputs, call), do: %{machines: Service.machines(call, Simulator)}
 
   def call("create", %{"name" => name} = inputs, call) do
     if Enum.any?(simulators(call), &(&1["name"] == name)), do: raise("You have a simulator called #{name} already")
     servers = Service.servers(call, Simulator)
     if servers == [], do: raise("No Mac runs simulators yet. Ask your network's admin to set one up.\n\n`install_service` runs IphoneSimulator.Simulator on one.")
-    server = if inputs["machine"], do: machine(servers, inputs["machine"]), else: hd(servers)
+    server = if inputs["machine"], do: Service.machine!(call, Simulator, inputs["machine"]), else: hd(servers)
     id = Base.encode16(:crypto.strong_rand_bytes(4), case: :lower)
 
     spec = %{
@@ -288,15 +278,7 @@ defmodule IphoneSimulator do
     %{done: did(action, inputs)}
   end
 
-  def call("stop_idle", _inputs, call) do
-    stopped =
-      for server <- Service.servers(call, Simulator),
-          not is_integer(Service.seen(server)),
-          name <- Service.call(call, Simulator, :stop_idle, [@idle_hours * 3_600_000], server),
-          do: %{machine: Service.name(server), name: name}
-
-    %{stopped: stopped}
-  end
+  def call("stop_idle", _inputs, call), do: %{stopped: Service.stop_idle(call, Simulator, @idle_hours * 3_600_000)}
 
   # Computer Use asks for the caller's screens: each running simulator of theirs is one, called what it is, and acted
   # on with `screen`.
@@ -306,7 +288,7 @@ defmodule IphoneSimulator do
 
   @impl true
   def hook("computer-use.screens", _about, call) do
-    for server <- Service.servers(call, Simulator), s <- each(call, server, :screens), Call.reaches?(call, s["artifact"]) do
+    for {server, s} <- Service.each(call, Simulator, :screens), Call.reaches?(call, s["artifact"]) do
       %{
         "name" => s["name"],
         "description" => "#{s["description"]}, an #{s["model"]} simulator on #{Service.name(server)}",
@@ -340,19 +322,8 @@ defmodule IphoneSimulator do
   defp listed(call), do: Enum.map(simulators(call), &Map.drop(&1, ["server", "artifact", "udid"]))
 
   defp simulators(call) do
-    for server <- Service.servers(call, Simulator),
-        e <- each(call, server, :list),
+    for {server, e} <- Service.each(call, Simulator, :list),
         Call.reaches?(call, e["artifact"]),
         do: Map.merge(e, %{"server" => server, "machine" => Service.name(server)})
-  end
-
-  # A machine that's known to be off has nothing to list now: `machines` says which.
-  defp each(call, server, function) do
-    if is_integer(Service.seen(server)), do: [], else: Service.call(call, Simulator, function, [], server)
-  end
-
-  defp machine(servers, name) do
-    Enum.find(servers, &(String.downcase(Service.name(&1) || "") == String.downcase(name))) ||
-      raise "No Mac called #{name} runs simulators. They're on #{Enum.map_join(servers, ", ", &Service.name/1)}."
   end
 end
