@@ -215,11 +215,13 @@ defmodule OneCore.Apps.Version do
 
   @doc """
   Whether a page loads `path`: a client may load nothing it isn't served (`clients/app`'s `APP_MAY_LOAD`), and is
-  served pages, scripts, stylesheets, pictures, sounds, videos and fonts.
+  served pages, scripts, stylesheets, the style tables a native host draws a page with (`styles.json`, the UI
+  library's `tokens.json`), pictures, sounds, videos and fonts. What's listed is kept with its version, so a client
+  that opens from what it kept has every file it loads.
   """
   def loaded?(path) do
     client?(path) and
-      (Path.extname(path) in ~w(.html .js .css) or
+      (Path.extname(path) in ~w(.html .js .css .json) or
          String.starts_with?(MIME.from_path(path), ~w(image/ audio/ video/ font/)))
   end
 
