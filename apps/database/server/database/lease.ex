@@ -34,8 +34,9 @@ defmodule Database.Lease do
 
   - `{:following, server}`: `server` holds the lease. A transaction is answered with who holds it, to be passed on
     to them. One they didn't run has this server read what was logged after the last entry it read, and take the
-    lease if that's nothing; one that another server took meanwhile is followed there. `nil` is nobody: the log is
-    empty, and this server isn't up to take it.
+    lease if they handed it on, or if that's nothing and the relay can't reach them either; one that another
+    server took meanwhile is followed there. `nil` is nobody: the log is empty or handed on, and this server isn't up
+    to take it.
   - `:settling`: this server has just opened the database, and writes nothing until `@writes_after` has passed.
     Its copy is read-only meanwhile: a transaction that only reads is answered from it at once, and one that would
     write raises there, is rolled back, and waits until then to run again, with any that came after it that write.
@@ -48,6 +49,12 @@ defmodule Database.Lease do
   Only a server that's up takes the lease (`OneCore.Server.up?/0`): a build being tried that can't be reached by its
   key, or a server that's stopping, would have everyone pass their calls to it and wait. It still holds the lease
   the log gave it before it started, which everyone passes their calls to already.
+
+  A server that stops as it's asked to hands its leases on: it writes the log's next entry naming nobody, once it
+  answers nothing more from its copy, and whoever asks next takes it and writes at once, with nothing to wait out. A
+  server that stopped without saying so is taken over from only once the relay at the network's address can't reach it
+  either (`OneCore.Servers.answers?/1`): one the relay reaches may only be out of this server's reach, as everyone is
+  of a laptop that has just woken, and taking its leases has every other server follow the one that can't reach them.
 
   Whether a server may answer from its copy isn't a state of its own. It's the time since it last saw the log's next
   entry free, read after the transaction ran by both its clocks, since a state timeout fires only between events,
@@ -70,6 +77,9 @@ defmodule Database.Lease do
   # that names it. The second is longer by far more than two machines' clocks drift apart in that time.
   @lease_ttl 4_000
   @writes_after 5_000
+
+  # What SQLite says of a write to a copy that's read-only (`pragma query_only`), as `Database.query/3` raises it.
+  @read_only "attempt to write a readonly database"
 
   # What it keeps besides its state. `db` is the copy while it's open, with the build of `Sqlite` that opened it,
   # `{sqlite, db}`, which is the build it's used with (`OneCore.Nif`), `number` the log's last entry it read or
@@ -109,6 +119,8 @@ defmodule Database.Lease do
   # `folder` is where this server keeps its copy, which is nobody else's.
   @impl true
   def init({artifact, server, folder}) do
+    # So it hears that its server is stopping, and hands its lease on (`terminate/3`).
+    Process.flag(:trap_exit, true)
     measures()
     {:next_state, state, data, actions} = moved(look(%__MODULE__{artifact: artifact, server: server, folder: folder}))
     {:ok, state, data, actions}
@@ -121,22 +133,33 @@ defmodule Database.Lease do
     {:next_state, :holding, data}
   end
 
-  # The server this one follows didn't run a call passed on to it. If the log names nobody after it, this server takes
-  # the lease, and otherwise it has learnt who holds it now. Only what was logged after the last entry it read is
-  # read, which is one request: every call passed to a holder that's gone asks this, one after another, and each
-  # waits for the ones before. One that isn't up takes nothing, and says so.
+  # The server this one follows didn't run a call passed on to it. If it handed the lease on, this server takes it;
+  # if the log names nobody after it, this server takes it unless the relay still reaches that server; and
+  # otherwise it has learnt who holds it now. Only what was logged after the last entry it read is read, which is one
+  # request: every call passed to a holder that's gone asks this, one after another, and each waits for the ones
+  # before. One that isn't up takes nothing, and says so.
   def handle_event({:call, from}, {:take_over, server}, {:following, server}, data) do
     entries = Log.since(data.artifact, data.number)
     data = %{data | number: data.number + length(entries)}
 
     case List.last(entries) do
-      nil ->
-        if OneCore.Server.up?() do
-          Logger.info("#{data.artifact.prefix}: #{server}, which holds its lease, didn't run a call passed to it")
-          moved(take(data, "unanswered"), [{:reply, from, :ok}])
-        else
-          {:keep_state_and_data, {:reply, from, :not_up}}
+      _free when not is_nil(server) and entries == [] ->
+        cond do
+          not OneCore.Server.up?() ->
+            {:keep_state_and_data, {:reply, from, :not_up}}
+
+          OneCore.Servers.answers?(server) ->
+            {:keep_state_and_data, {:reply, from, :connected}}
+
+          true ->
+            Logger.info("#{data.artifact.prefix}: #{server}, which holds its lease, didn't run a call passed to it")
+            moved(take(data, "unanswered"), [{:reply, from, :ok}])
         end
+
+      free when free in [nil, %{server: nil}] ->
+        if OneCore.Server.up?(),
+          do: moved(take(data, if(free, do: "handed_on", else: "free")), [{:reply, from, :ok}]),
+          else: {:keep_state, data, {:reply, from, :not_up}}
 
       %{server: holder} when holder != data.server ->
         Logger.info("#{data.artifact.prefix}: its lease is held by #{holder}")
@@ -185,14 +208,25 @@ defmodule Database.Lease do
 
   def handle_event(:info, _message, _state, _data), do: :keep_state_and_data
 
+  # A server stopping as it was asked to hands on the lease it holds: its copy is closed first, so it answers nothing
+  # from it after, and then the log's next entry names nobody. One that has lost the lease meanwhile writes nothing.
   @impl true
-  def terminate(_why, _state, data), do: close(data)
+  def terminate(why, state, data) do
+    data = close(data)
+
+    if state in [:settling, :holding] and (why == :shutdown or match?({:shutdown, _}, why)) do
+      wrote = Log.write(data.artifact, data.number + 1, %{server: nil})
+      Logger.info("#{data.artifact.prefix}: handing its lease on at #{data.number + 1}: #{wrote}")
+    end
+  end
 
   # A database open under an earlier version of this module carries on open under this one, in the state it was in,
   # with what this one keeps that that one didn't at its default. One opened by another build of `Sqlite` is opened
   # with this version's, and closed with that one's, which is still loaded now.
   @impl true
   def code_change(_vsn, state, data, _extra) do
+    # One started by a version before it handed its lease on hears its server stopping from now on (`init/1`).
+    Process.flag(:trap_exit, true)
     data = struct(__MODULE__, Map.from_struct(data))
     {:ok, state, if(match?({sqlite, _db} when sqlite != Sqlite, data.db), do: reopened(data, state), else: data)}
   end
@@ -208,29 +242,32 @@ defmodule Database.Lease do
 
   # Runs `work` with the database in a transaction, for `event`, which is answered once what it changed is in the
   # bucket (`done/3`). One that changed nothing, raised or not, is answered from the copy, while the copy is still the
-  # database. While settling the copy is read-only, so one that raised may have raised for writing: it waits, with
-  # nothing it did kept, to run again once settled, which is the state it changes to next. The rest of what `data`
-  # changed for it is left as it was, for then.
+  # database. While settling the copy is read-only, so one that raised for writing, as SQLite says (`SQLITE_READONLY`),
+  # waits, with nothing it did kept, to run again once settled, which is the state it changes to next; one that raised
+  # for anything else is answered with that now. The rest of what `data` changed for it is left as it was, for then.
   defp transact(event, state, data, work) do
     ran = run(data.db, work)
 
-    case {Log.changed(file(data)), state} do
-      {nil, :settling} when elem(ran, 0) == :raised ->
+    case {Log.changed(file(data)), state, read_only?(ran)} do
+      {nil, :settling, true} ->
         {:keep_state_and_data, :postpone}
 
-      {nil, _state} ->
+      {nil, _state, _read_only} ->
         case proved(data) do
           {:ok, data} -> answered(event, ran, data)
           :lost -> lost(event, data, "so it didn't answer from its copy")
         end
 
-      {changed, :holding} ->
+      {changed, :holding, _read_only} ->
         case write(data, changed) do
           {:ok, data} -> answered(event, ran, data)
           :lost -> lost(event, data, "and the write it hadn't answered with it")
         end
     end
   end
+
+  defp read_only?({:raised, :error, error, _stacktrace}) when is_exception(error), do: Exception.message(error) =~ @read_only
+  defp read_only?(_ran), do: false
 
   defp answered(event, ran, data) do
     {data, actions} = done(event, ran, data)
@@ -348,8 +385,8 @@ defmodule Database.Lease do
     data = %{data | number: snapshot + length(entries)}
 
     case List.last(entries) || Log.entry(data.artifact, snapshot) do
-      nil ->
-        if OneCore.Server.up?(), do: take(data, "free"), else: {{:following, nil}, data}
+      free when free in [nil, %{server: nil}] ->
+        if OneCore.Server.up?(), do: take(data, if(free, do: "handed_on", else: "free")), else: {{:following, nil}, data}
 
       %{server: server} when server == data.server ->
         Logger.info("#{data.artifact.prefix}: holds its lease, from snapshot #{snapshot} and the log to #{data.number}")
@@ -362,8 +399,9 @@ defmodule Database.Lease do
   end
 
   # Writing the log's next entry is taking the lease. If another server wrote it first, the lease is theirs. A lease
-  # this server took is said as a number of its app's, with why: `free`, as nobody held it, or `unanswered`, as its
-  # holder didn't run a call passed to it (Telemetry's `one.database.lease.moves`).
+  # this server took is said as a number of its app's, with why: `free`, as nobody held it, `handed_on`, as its holder
+  # stopped and said so, or `unanswered`, as its holder didn't run a call passed to it and didn't answer the relay
+  # either (Telemetry's `one.database.lease.moves`).
   defp take(data, why) do
     wrote = Log.write(data.artifact, data.number + 1, %{server: data.server})
     Logger.info("#{data.artifact.prefix}: taking its lease at #{data.number + 1}: #{wrote}")
@@ -415,10 +453,18 @@ defmodule Database.Lease do
   # lease before and doesn't know it lost it has stopped answering from its copy (`proved/1`): that one last saw the
   # entry naming this server free before it was written, which was before this began. Until then its copy is
   # read-only. The monotonic clock stops while the machine sleeps, which only makes it wait longer. A new database,
-  # whose log is only this server taking its lease, has nothing anyone could answer from, so it writes at once.
+  # whose log is only this server taking its lease, has nothing anyone could answer from, so it writes at once, as
+  # does one whose last holder handed it on, which it did once it answered nothing more.
   defp opened(%{proved: {began, _system}} = data, snapshot, entries) do
     logged = Enum.sum_by(entries, &max(length(Map.get(&1, :pages, [])), 1))
-    wait = if snapshot == 0 and entries == [%{server: data.server}], do: 0, else: @writes_after
+
+    wait =
+      case Enum.take(entries, -2) do
+        [%{server: nil}, %{server: server}] when server == data.server -> 0
+        [%{server: server}] when server == data.server and snapshot == 0 -> 0
+        _held -> @writes_after
+      end
+
     db = connected(file(data))
     {:ok, _} = sqlite(db, "pragma query_only = on")
     %{data | db: db, logged: logged, settled: began + wait}

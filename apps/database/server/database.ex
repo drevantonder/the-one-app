@@ -9,7 +9,7 @@ defmodule Database do
   def icon, do: "icon.svg"
 
   @impl true
-  def requires, do: %{"core" => ">= 0.23.48"}
+  def requires, do: %{"core" => ">= 0.29.73"}
 
   require Logger
   alias Database.Lease
@@ -57,35 +57,43 @@ defmodule Database do
 
   # The server holding the lease didn't run a call passed on to it: it's gone, or it can't run this call, as one
   # that needs what only another server has can't be passed on again (a Vault item only some servers open, say).
-  # Either way this server takes the lease, if the log still names that one, and runs the call itself. But not
-  # reaching it just now isn't its being gone: a network loses a connection now and then, and what this server knew
-  # of it may be from before it came back. So one given up on at once is asked once more first. One that was waited
-  # for has had what it was sent sent again by then (`@waited`). A server that isn't up takes no lease, so the call
-  # fails here, for whoever asked to ask another.
+  # Either way this server takes the lease, if the log still names that one and the relay at the network's address
+  # can't reach it either (`Database.Lease`), and runs the call itself. But not reaching it just now isn't its
+  # being gone: a network loses a connection now and then, and what this server knew of it may be from before it came
+  # back. So one given up on at once is asked once more first. One that was waited for has had what it was sent sent
+  # again by then (`@waited`). A server that isn't up takes no lease, so the call fails here, for whoever asked to ask
+  # another, as it does where the holder is still connected: it's this server that can't reach it.
   #
   # How long that waited is said as a number of the app's (Telemetry's `one.database.lease.wait`): `not_answered`
-  # where the holder kept it `@waited` or more without running it, as one that's stuck does, which is warned of, and
-  # `gone` where it said at once that it wouldn't.
+  # where the holder kept it `@waited` or more without running it, as one that's stuck does, which is warned of,
+  # `gone` where it said at once that it wouldn't, and `connected` where the relay still reached it.
   defp taken_over(call, lease, server) do
     began = System.monotonic_time(:millisecond)
     if server, do: Call.forward_to(call, server, @reach)
     if server && System.monotonic_time(:millisecond) - began < @waited, do: Call.forward_to(call, server, @reach)
     waited = System.monotonic_time(:millisecond) - began
+    took = :gen_statem.call(lease, {:take_over, server})
+    app = Lease.app(call.own)
+    holder = server && (OneCore.Servers.name(server) || server)
 
     if server do
-      app = Lease.app(call.own)
-      outcome = if waited >= @waited, do: "not_answered", else: "gone"
+      outcome = if took == :connected, do: "connected", else: if(waited >= @waited, do: "not_answered", else: "gone")
       Lease.waited(waited, %{"one.app" => app, "one.outcome" => outcome})
 
       if outcome == "not_answered",
-        do: Logger.warning("#{app}'s database: #{OneCore.Servers.name(server) || server} holds its lease and didn't answer within #{waited} ms, so this server takes it")
+        do: Logger.warning("#{app}'s database: #{holder} holds its lease and didn't answer within #{waited} ms, so this server takes it")
     end
 
-    with :not_up <- :gen_statem.call(lease, {:take_over, server}) do
-      held =
-        if server, do: "#{OneCore.Servers.name(server) || server} holds it and didn't answer", else: "nobody holds it"
+    case took do
+      :ok ->
+        :ok
 
-      raise "This server is starting or stopping, so it doesn't take a database over, and #{held}. Try again in a moment."
+      :connected ->
+        raise "#{holder} holds #{app}'s database and answers the network's relay, but it didn't answer this server within #{waited} ms, so this server doesn't take it over. Check this server's connection, then try again."
+
+      :not_up ->
+        held = if server, do: "#{holder} holds it and didn't answer", else: "nobody holds it"
+        raise "This server is starting or stopping, so it doesn't take a database over, and #{held}. Try again in a moment."
     end
   end
 
