@@ -220,11 +220,6 @@ pub fn open_web_view(entrypoint: String, subject: Option<String>, link: String) 
 #[cfg(desktop)]
 fn open(entrypoint: String, subject: Option<String>, link: String) -> Result<(), String> {
     let key = format!("{}|{entrypoint}", subject.as_deref().unwrap_or_default());
-    #[cfg(target_os = "macos")]
-    {
-        let id = crate::shortcuts::app_id(&entrypoint, subject.as_deref());
-        computer::on_main(move || yield_activation(&id));
-    }
     let mut open = HOSTS.open.lock().expect("no host panics");
     if let Some(host) = open.get_mut(&key) {
         match &host.to {
@@ -250,63 +245,6 @@ fn open(entrypoint: String, subject: Option<String>, link: String) -> Result<(),
         crate::native::unopened(entrypoint, subject, link, why);
     });
     Ok(())
-}
-
-/// Lets the app `id` come in front of this one, as a person opened it from here: since macOS 14 an app comes in front
-/// only where the one in front lets it (cooperative activation), so an app's window would otherwise open behind the
-/// Home Screen's, and the Home Screen's behind an app's. AppKit's, on the main thread.
-#[cfg(target_os = "macos")]
-pub(crate) fn yield_activation(id: &str) {
-    use objc2::runtime::{AnyClass, AnyObject};
-    let (Some(application), Some(id)) = (AnyClass::get(c"NSApplication"), ns_string(id)) else { return };
-    unsafe {
-        let shared: *mut AnyObject = objc2::msg_send![application, sharedApplication];
-        let yields: bool = objc2::msg_send![shared, respondsToSelector: objc2::sel!(yieldActivationToApplicationWithBundleIdentifier:)];
-        if yields {
-            let () = objc2::msg_send![shared, yieldActivationToApplicationWithBundleIdentifier: id];
-        }
-    }
-}
-
-/// The window's title bar was double-clicked: does what that does on a Mac, as its person set it in System Settings (Desktop & Dock,
-/// "Double-click a window's title bar to"): zoom, which is what's set until they change it, minimize, or nothing. A
-/// window with no title band is double-clicked at its page's top (`title_bar_double_click`). AppKit's, on the main
-/// thread.
-#[cfg(target_os = "macos")]
-pub(crate) fn double_clicked(window: *mut std::ffi::c_void) {
-    use objc2::runtime::{AnyClass, AnyObject};
-    let (Some(defaults), Some(key)) = (AnyClass::get(c"NSUserDefaults"), ns_string("AppleActionOnDoubleClick")) else { return };
-    let window = window.cast::<AnyObject>();
-    let nothing: *mut AnyObject = std::ptr::null_mut();
-    unsafe {
-        let defaults: *mut AnyObject = objc2::msg_send![defaults, standardUserDefaults];
-        let action: *mut AnyObject = objc2::msg_send![defaults, stringForKey: key];
-        let action: *const std::ffi::c_char = if action.is_null() { std::ptr::null() } else { objc2::msg_send![action, UTF8String] };
-        match (!action.is_null()).then(|| std::ffi::CStr::from_ptr(action).to_bytes()) {
-            Some(b"Minimize") => objc2::msg_send![window, performMiniaturize: nothing],
-            Some(b"None") => {}
-            _ => objc2::msg_send![window, performZoom: nothing],
-        }
-    }
-}
-
-/// Has `window` keep its frame by `name` in the user's defaults, as AppKit does a named window's, and opens it there
-/// if it was kept. AppKit's, on the main thread.
-#[cfg(target_os = "macos")]
-pub(crate) fn remember_frame(window: *mut std::ffi::c_void, name: &str) {
-    let Some(name) = ns_string(name) else { return };
-    let window = window.cast::<objc2::runtime::AnyObject>();
-    unsafe {
-        let _: bool = objc2::msg_send![window, setFrameUsingName: name];
-        let _: bool = objc2::msg_send![window, setFrameAutosaveName: name];
-    }
-}
-
-/// `text` as an `NSString`.
-#[cfg(target_os = "macos")]
-fn ns_string(text: &str) -> Option<*mut objc2::runtime::AnyObject> {
-    let (string, text) = (objc2::runtime::AnyClass::get(c"NSString")?, std::ffi::CString::new(text).ok()?);
-    Some(unsafe { objc2::msg_send![string, stringWithUTF8String: text.as_ptr()] })
 }
 
 /// Talks with one app's window until it ends, or with a second start of the app (`again`).

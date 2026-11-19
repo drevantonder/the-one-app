@@ -223,6 +223,8 @@ struct Window {
     panel: bool,
     visible: bool,
     summoned: Option<web_time::Instant>,
+    /// When a panel last went as something else took the keyboard (`showing`).
+    left: Option<web_time::Instant>,
     /// What it shows: its app's screen, or why its app didn't open.
     screen: Result<Screen, String>,
     title: String,
@@ -333,6 +335,7 @@ impl Windows {
                 panel,
                 visible: false,
                 summoned: None,
+                left: None,
                 screen,
                 title: options.title,
                 scene: Default::default(),
@@ -452,8 +455,9 @@ impl Windows {
     /// `key` is the key its shortcut ends with, where its shortcut summoned it (`Screen::summoned`).
     pub fn summon(&mut self, id: WindowId, asked: web_time::Instant, key: Option<&str>) {
         let Some(window) = self.windows.get_mut(&id) else { return };
+        // Showing, it has the keyboard already: a panel never brings the One App in front.
         if window.visible {
-            return self.display.activate(&window.parts[0].native);
+            return;
         }
         window.visible = true;
         window.dirty = true;
@@ -591,9 +595,12 @@ impl Windows {
         }
     }
 
-    /// Whether panel `id` is showing.
+    /// Whether panel `id` is showing, or was until something else took the keyboard just now: a click on Windows'
+    /// notification-area icon, which toggles it, first gives the keyboard to the taskbar, so the click that would put
+    /// it away would show it again.
     pub fn showing(&self, id: WindowId) -> bool {
-        self.windows.get(&id).is_some_and(|window| window.visible)
+        const CLICK: std::time::Duration = std::time::Duration::from_millis(300);
+        self.windows.get(&id).is_some_and(|window| window.visible || window.left.is_some_and(|left| left.elapsed() < CLICK))
     }
 
     /// Lays panel `id`'s page out `height` points tall, and `width` wide where it's said, as its page asks: its parts'
@@ -869,6 +876,7 @@ impl Windows {
             Input::TextInputClient(said) => screen.text_input_client(&mut window.text_input, said),
             // A panel goes as something else takes the keyboard, as Spotlight does.
             Input::Focus(false) if window.panel && window.visible => {
+                window.left = Some(web_time::Instant::now());
                 screen.activate(false);
                 self.put_away(id, false);
                 if let Some(window) = self.windows.get_mut(&id) {

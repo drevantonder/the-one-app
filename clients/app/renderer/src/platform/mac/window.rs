@@ -472,10 +472,14 @@ impl Display {
         });
     }
 
+    /// Brings an app's window in front, the One App with it, as its person opened it from the launcher, whose panel
+    /// never activates the One App: since macOS 14 `activate` waits for the app in front to yield, which it never
+    /// does here, so the window would open behind it.
     pub fn activate(&self, window: &NativeWindow) {
         window.window.get_on_main(|window| {
             window.makeKeyAndOrderFront(None);
-            NSApplication::sharedApplication(window.mtm()).activate();
+            #[allow(deprecated)]
+            NSApplication::sharedApplication(window.mtm()).activateIgnoringOtherApps(true);
         });
     }
 

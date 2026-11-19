@@ -59,9 +59,6 @@ pub(crate) enum Told {
     Talks,
     /// Opens a `one:` link.
     Open(String),
-    /// Runs on the main thread, as AppKit's calls must.
-    #[cfg(target_os = "macos")]
-    Main(Box<dyn FnOnce() + Send>),
     Restart,
     Quit,
 }
@@ -73,12 +70,6 @@ fn tell(told: Told) {
     if let Some(proxy) = PROXY.get() {
         let _ = proxy.lock().expect("nothing panics holding it").send_event(told);
     }
-}
-
-/// Runs `run` on the main thread.
-#[cfg(target_os = "macos")]
-pub(crate) fn on_main(run: impl FnOnce() + Send + 'static) {
-    tell(Told::Main(Box::new(run)))
 }
 
 /// Shows the launcher, as an app window's Home does.
@@ -516,8 +507,6 @@ fn launcher(home: std::path::PathBuf, link: Option<String>, started: std::time::
                     }
                 }
             }
-            #[cfg(target_os = "macos")]
-            Event::UserEvent(Told::Main(run)) => run(),
             Event::UserEvent(Told::Restart) => restart(&home, shown),
             Event::UserEvent(Told::Quit) => *flow = ControlFlow::Exit,
             _ => {}
