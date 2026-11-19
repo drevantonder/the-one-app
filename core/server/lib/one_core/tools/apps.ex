@@ -273,10 +273,10 @@ defmodule OneCore.Tools.Apps do
         :ok
 
       [owner | _] ->
-        to = if owner == actor, do: "without ONE_SUBJECT", else: "with ONE_SUBJECT=#{owner}"
+        to = if owner == actor, do: "for yourself (no ONE_SUBJECT)", else: "for #{owner} (ONE_SUBJECT=#{owner})"
 
         raise "#{name} is installed for #{owner}, so this would make a second, empty #{name} for #{subject} that answers " <>
-                "first. To update the one there is, deploy it #{to}; to make a second one, pass --new."
+                "first. To update the one there is, deploy it #{to}; to make a second one, say `new: true` (`--new`)."
     end
   end
 

@@ -204,7 +204,7 @@ defmodule OneCore.Tools.Definitions do
       name: "skills",
       description: """
       Lists the skills you have and reads one. A skill says when and how to use an app's tools, and One Core's own \
-      say how to make an app (building-apps), install one (installing-apps) and write its app (ui). {} lists \
+      say how to make an app (building-apps), install one (installing-apps) and write its screens (ui). {} lists \
       every skill, each with its app, name, what it's for and its other files; { app: "gmail" } lists one \
       app's; { app: "gmail", name: "gmail" } reads that skill, and { name: "building-apps" } one of One \
       Core's own; add file to read one of its other files.\
@@ -341,7 +341,7 @@ defmodule OneCore.Tools.Definitions do
       task_support: :optional,
       description: """
       Adds an app for you, or updates it, from its files.
-      The server builds its apps from their source in client/, compiles its Elixir in server/ and runs the app at
+      The server builds its client from its source in client/, compiles its Elixir in server/ and runs the app at
       once, with its tools listed and called as <name>_<tool>. If either fails, it says why, and the version already
       running stays.
       The skill `building-apps` says how to write an app. It's yours, and is installed for you: asked for a group
@@ -354,8 +354,10 @@ defmodule OneCore.Tools.Definitions do
       `one install <owner>/<repo> --app <name>` deploys one from a git repo, saying where it came from (`from`).
       Where a group or the network has a member's own copy of it, deploying it for them from the same repo makes it
       theirs: the one copy from then on, and the member's goes to Recently Deleted, keeping what they kept.
-      `one deploy --files-from <folder>` in a git repo says so too, and, as `git push` refuses a non-fast-forward, is
-      refused where the live version came from a commit that yours doesn't contain, unless `--force`.
+      `one deploy --files-from <folder>` in a git repo says so too. What's live is a commit: it's refused where that
+      commit isn't on the remote's default branch, or has changes not committed (but on a local network being built),
+      and, as `git push` refuses a non-fast-forward, where the live version came from a commit that yours doesn't
+      contain, unless `--force`.
       """,
       inputs: %{
         type: "object",
@@ -413,7 +415,7 @@ defmodule OneCore.Tools.Definitions do
     %{
       name: "code",
       description: """
-      Gives an app's files as they were deployed, its app's source among them, by their paths: what `deploy`
+      Gives an app's files as they were deployed, its client's source among them, by their paths: what `deploy`
       takes, to change and deploy again. Asked for a group or the network, it's one of the apps in use for them,
       which their members may read.
       """,
@@ -750,6 +752,15 @@ defmodule OneCore.Tools.Definitions do
           server: %{type: "string", description: "The key of the server that answered"},
           build: %{type: "string", description: "Its build: <version>+<count>.<commit>"},
           protocol: @protocol,
+          network: %{
+            type: ["object", "null"],
+            description:
+              "The network's update, as its updater says, if its edge has one: `network_update_status` (up_to_date, " <>
+                "preparing, restarting or held), the `build` it takes every server to, how many " <>
+                "are `done` `of` those taking part, what it's `waiting_for` (quiet: a lone server waits " <>
+                "for no calls a while, or Update Now), why it's `held`, the servers `skipped` as asleep or gone, " <>
+                "those `behind` its build, and when each step was reached, in ms after the build was published (`timings`)"
+          },
           edge: %{type: ["string", "null"], description: "The build the network's edge is, if it says"},
           edge_protocol: %{
             type: ["object", "null"],
@@ -769,15 +780,6 @@ defmodule OneCore.Tools.Definitions do
                 build: %{type: "string"},
                 server_membership: %{
                   type: "string",
-                  network: %{
-                    type: ["object", "null"],
-                    description:
-                      "The network's update, as its updater says, if its edge has one: `network_update_status` (up_to_date, " <>
-                        "preparing, restarting or held), the `build` it takes every server to, how many " <>
-                        "are `done` `of` those taking part, what it's `waiting_for` (quiet: a lone server that restarts waits " <>
-                        "for no calls a while, or Update Now), why it's `held`, the servers `skipped` as asleep or gone, " <>
-                        "those `behind` its build, and when each step was reached, in ms after the build was published (`timings`)"
-                  },
                   enum: ["inactive", "joining", "active", "leaving"],
                   description:
                     "Whether it's one of the network's servers: joining until it answers by its key, and leaving while it drains"
@@ -920,9 +922,9 @@ defmodule OneCore.Tools.Definitions do
       name: "update",
       task_support: :optional,
       description: """
-      Software Update's Update Now: has the network's update (`builds`' `network`) take every server to the latest
-      build published to the network now, where it waits, as a lone server that must restart waits for a quiet
-      moment, or try again where it's held. It answers once the network is up to date, or held, saying which server
+      Software Update's Update Now: has the network's update (`builds`' `network`) take every server to the latest build
+      published to the network now, where a lone server waits for a quiet moment before it restarts, or try again
+      where it's held. It answers once the network is up to date, or held, saying which server
       didn't take it and why. Servers take each build published by themselves, so it's needed only for those.
       """,
       inputs: %{type: "object", properties: %{}},

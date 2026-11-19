@@ -279,8 +279,8 @@ defmodule OneCore.Mcp do
 
       why =
         if Protocol.behind?(theirs),
-          do: "#{speaks}, which is older: it talks with it once it's updated (`one update`)",
-          else: "#{speaks}, which is newer: it's asked once it's updated"
+          do: "#{speaks}, which is older: they talk once what asked is updated (`one update`)",
+          else: "#{speaks}, which is newer: they talk once #{here} is updated"
 
       {:error, -32022, why, %{supported: Protocol.range(), requested: theirs, version: Builds.build()}}
     end

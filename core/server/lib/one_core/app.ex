@@ -356,16 +356,16 @@ defmodule OneCore.App do
   What of an app runs in a client is its folder `client/`, as the server built it, which reaches each client from
   the server. Its other files that aren't Elixir or skills stay on servers: the source of a program a service brings,
   and its edge function. An app's icon is its own, as an Android package's is, and deploying one without it is
-  refused: `icon/0` names its file, an entrypoint's icon or one of its own, which goes wherever the app itself is shown (the App Store, the Vault). `entrypoints/0`, if the app has any, names its app entrypoints: each an icon
+  refused: `icon/0` names its file, an entrypoint's icon or one of its own, which goes wherever the app itself is shown (the App Store, Settings). `entrypoints/0`, if the app has any, names its app entrypoints: each an icon
   it puts in the launcher, with its page, a page of `client/`, and an icon of its own or else the app's. It's called
-  its app's `title`, and has a `name` of its own only where it's something else than its app, as Sign-In's Users &
-  Groups and Devices are, and so is a widget. People just see apps:
+  its app's `title`, and has a `name` of its own only where it's something else than its app, and so is a widget.
+  People just see apps:
 
       @impl true
       def icon, do: "icon.png"
 
       @impl true
-      def entrypoints, do: [%{page: "client/index.html"}]
+      def entrypoints, do: [%{page: "client/index.html", runtime_version: 5}]
 
   - An entrypoint may say its `category`, one of the app's categories above, where it's for something else than its
     app (`category: "Devices"`); One Core passes it to the launcher as it is, which otherwise places it by its app's. One
@@ -375,15 +375,17 @@ defmodule OneCore.App do
     opens itself where there's no launcher yet; and `settings`, where apps' settings are, which a link to an app with
     no page of its own opens at that app.
   - An entrypoint may say its `subject`, who it's opened for, which One Core passes to the launcher as it is too:
-    `subject: "user"` is an entrypoint about whoever opens it, as Vault and Devices are, which is opened for them wherever
+    `subject: "user"` is an entrypoint about whoever opens it, as Settings and Notifications are, which is opened for them wherever
     it's installed. Without one, it's opened for whoever it's installed for, or whose page it's on.
   - An entrypoint may say its `badge`, one of the app's tools that only reads, whose answer's `count` is the red count
     on its icon while it's more than 0, as an iPhone's app sets its own: what's waiting for whoever's looking, as
-    Devices counts the devices waiting to sign in as them (`badge: "waiting"`). A Home Screen asks it again whenever
+    Settings counts what waits in its sections, such as devices waiting to sign in as them (`badge: "badge"`). A Home Screen asks it again whenever
     something changed, so it only reads what the app keeps.
-  - An entrypoint may say its `runtime_version`, the runtime version its page needs of a native host
-    (`core/ui/src/drawing-primitives/renderer.ts`, `runtime_version: 4`): its page is written with the UI library alone (the UI library's skill), so a
-    native host that has that version draws it itself, and an older host, or a browser, opens it as any other page. Deploying type checks it against
+  - An entrypoint says its `runtime_version`, the runtime version its page needs of a native host
+    (`RUNTIME_VERSION` in `core/ui/src/drawing-primitives/renderer.ts`, 5 now): its page is written with the UI library
+    alone (the UI library's skill), so a computer, an iPhone or Android that has that version draws it itself, and a
+    browser or an MCP App draws it on the DOM. A computer doesn't open one with none, or one needing a newer version
+    than it has, and says why in its window; an older phone opens it in its web view. Deploying type checks it against
     the UI library (`OneCore.Entrypoint.lint/3`) and refuses it with the checker's errors where it isn't, and gives its warnings with the deploy's: a raw
     colour or length in a style, which should be a token.
   - An app's settings are in Settings, where it adds a section, or a group in another's page, by the hook
@@ -404,15 +406,18 @@ defmodule OneCore.App do
   - A tool with a page of its own, which shows what it does to a person, says it as `ui: "client/link.html"`. It's
     listed as an MCP App's tool names its UI (`_meta.ui.resourceUri`), so a host shows it, and that page needn't be
     an app. One that isn't is named for what it does (`client/sign-in.html`), not `client/index.html`, an app's.
-  - An app is drawn in the client's web view on a home screen under its `name` and `icon`. It's written in Solid
-    2.0 with the UI library, and its source is the folder `client/`: each `.html` there is a page, whose script is the
-    app's, and the rest is whatever the app's made of. The UI library gives every page its look, so a page is no more
-    than this:
+  - An app is drawn on a home screen under its `name` and `icon`, natively on a computer, an iPhone and Android, and
+    on the DOM in a browser. It's written in Solid 2.0 with the UI library, and its source is the folder `client/`:
+    each `.html` there is a page, whose script is the app's, and the rest is whatever the app's made of. Its look is
+    the UI library's components and `styles()` beside what uses them, never a stylesheet. The UI library gives every
+    page its look, so a page is no more than this:
 
-        client/index.html    <!doctype html><title>Hello</title><script type="module" src="./app.tsx"></script>
-        client/app.tsx       import { render } from "@solidjs/web"; import { Screen } from "ui"; ...
-        client/app.css       the app's own look, if it has any, imported by app.tsx
-        client/package.json  packages of its own, if it needs any, under "dependencies"
+        client/index.html     <!doctype html><title>Hello</title><script type="module" src="./app.tsx"></script>
+        client/app.tsx        import { render, Screen, Text } from "ui"
+                              render(() => <Screen heading="Hello"><Text>Hello</Text></Screen>)
+        client/tsconfig.json  {"extends": "<ui>/tsconfig.app.json", "include": ["**/*"]}, for its editor: a deploy
+                              checks it against its server's own copy of the UI library
+        client/package.json   packages of its own, if it needs any, under "dependencies"
 
   - An app's client may export modules for another app's page to import, as a package does, in
     `client/package.json`'s `exports` (`{"exports": {"./profile": "./profile.tsx"}}`), each built as `client/<name>.js`
@@ -433,8 +438,9 @@ defmodule OneCore.App do
   - Read Solid's skills before writing one: `solid-2.0`, then `solid-2.0-cheatsheet`
     (skill://ui/skills/solid-2.0-cheatsheet/SKILL.md), and `reactivity-diagnostics` for a problem Solid names
     by its code.
-    They're Solid's own, from the version apps are built with. Solid 2.0 isn't 1.x, and isn't React. What it renders
-    with is `@solidjs/web`, not `solid-js/web`, and `Dynamic` is `dynamic` there.
+    They're Solid's own, from the version apps are built with. Solid 2.0 isn't 1.x, and isn't React. A page draws with
+    `render` from `"ui"`, never Solid's own from `@solidjs/web`, which doesn't tell its client it drew; `@solidjs/web`
+    gives a page only `dynamic` and `Dynamic`, for a component chosen as it runs.
   - The UI library, One Core's own, is what an app's UI is written with, so every app looks and moves the same. Its
     skill, `ui`, has every component with an example. It speaks to the client for the app: its `call` and `changed` are
     how an app asks and hears, done.
