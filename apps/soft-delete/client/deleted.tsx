@@ -1,7 +1,7 @@
 // Recently Deleted: what you deleted in the last 30 days, the latest first, each with how long until it's deleted for
 // good. Restore or Delete Now from a row's menu, and Delete All for everything.
 import { createMemo, Errored, For, Loading, refresh, Show } from "solid-js"
-import { Button, call, changed, confirm, Empty, List, Menu, Problem, Row, Screen, Skeleton, Spinner, styles, Text, toast, tokens } from "ui"
+import { call, changed, confirm, Empty, List, Menu, Problem, Row, Screen, Skeleton, Spinner, styles, Text, toast, tokens } from "ui"
 
 const look = styles({ note: { color: tokens.colour.secondaryLabel, maxWidth: tokens.length.readable }, wrong: { color: tokens.colour.red } })
 
@@ -89,6 +89,11 @@ async function purge(item: Item) {
   if (await confirm(question)) await doing("soft-delete_purge", { item: item.item })
 }
 
+/// Tapping a row brings it back, after asking, as the menu's Restore does.
+async function ask(item: Item) {
+  if (item.state === "deleted" && (await confirm({ heading: `Restore ${heading(item)}?`, text: about(item), action: "Restore" }))) restore(item)
+}
+
 async function purgeAll() {
   const question = { heading: "Delete everything for good?", text: "None of it can be restored.", action: "Delete All", destructive: true }
   if (await confirm(question)) await doing("soft-delete_purge_all")
@@ -97,7 +102,7 @@ async function purgeAll() {
 function Deleted(props: { items: Item[] }) {
   const deleted = () => props.items.filter((item) => item.state === "deleted")
   return (
-    <Screen heading="Recently Deleted" back action={<Show when={deleted().length}><Button variant="destructive" onPress={purgeAll}>Delete All</Button></Show>}>
+    <Screen heading="Recently Deleted" back>
       <Show when={props.items.length} fallback={<Empty>Nothing was deleted in the last 30 days.</Empty>}>
         <Text style={look.note}>Deleted for good after 30 days.</Text>
         <List>
@@ -105,7 +110,8 @@ function Deleted(props: { items: Item[] }) {
             {(item) => (
               <Row
                 heading={heading(item())}
-                text={<Text style={!!item().why && look.wrong}>{about(item())}</Text>}
+                text={<Text style={[!!item().why && look.wrong]}>{about(item())}</Text>}
+                onPress={() => ask(item())}
                 end={
                   <Show when={item().state === "deleted"} fallback={<Spinner />}>
                     <Menu.Root onSelect={(value) => (value === "restore" ? restore(item()) : purge(item()))}>
@@ -124,6 +130,11 @@ function Deleted(props: { items: Item[] }) {
             )}
           </For>
         </List>
+        <Show when={deleted().length}>
+          <List>
+            <Row heading="Delete All…" destructive onPress={purgeAll} />
+          </List>
+        </Show>
       </Show>
     </Screen>
   )

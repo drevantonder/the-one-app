@@ -847,7 +847,16 @@ defmodule Vault do
   # From the database, which keeps each item's name while soft delete has it aside.
   def call("names", %{"artifacts" => artifacts}, call) do
     names = Store.names(call, Store.own(call))
-    %{names: for({artifact, name} <- names, artifact in artifacts, do: %{artifact: artifact, name: name})}
+    types = Items.types(call)
+    # As a person reads it: "Personal", not "Chrome profile: Personal".
+    shown = fn name ->
+      case Enum.find(types, &String.starts_with?(name, &1.prefix)) do
+        nil -> name
+        type -> String.replace_prefix(name, type.prefix, "")
+      end
+    end
+
+    %{names: for({artifact, name} <- names, artifact in artifacts, do: %{artifact: artifact, name: shown.(name)})}
   end
 
   def call("security", inputs, call) do
