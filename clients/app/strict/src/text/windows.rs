@@ -520,10 +520,14 @@ impl IDWriteTextRenderer_Impl for TextRenderer_Impl {
         context.ascent = context.ascent.max(f32::from(metrics.Base.ascent) * em);
         context.descent = context.descent.max(f32::from(metrics.Base.descent) * em);
 
-        let glyph_ids = unsafe { std::slice::from_raw_parts(glyphrun.glyphIndices, glyph_count) };
-        let glyph_advances = unsafe { std::slice::from_raw_parts(glyphrun.glyphAdvances, glyph_count) };
-        let glyph_offsets = unsafe { std::slice::from_raw_parts(glyphrun.glyphOffsets, glyph_count) };
-        let cluster_map = unsafe { std::slice::from_raw_parts(desc.clusterMap, desc.stringLength as usize) };
+        // DirectWrite gives no array where there's nothing in it, and no offsets where every one is zero.
+        fn slice<'a, T>(at: *const T, len: usize) -> &'a [T] {
+            if at.is_null() { &[] } else { unsafe { std::slice::from_raw_parts(at, len) } }
+        }
+        let glyph_ids = slice(glyphrun.glyphIndices, glyph_count);
+        let glyph_advances = slice(glyphrun.glyphAdvances, glyph_count);
+        let glyph_offsets = slice(glyphrun.glyphOffsets, glyph_count);
+        let cluster_map = slice(desc.clusterMap, desc.stringLength as usize);
 
         // A right-to-left run (an odd bidi level) is drawn leftwards from its origin, its glyphs in the text's order.
         let rtl = glyphrun.bidiLevel % 2 == 1;
@@ -540,7 +544,7 @@ impl IDWriteTextRenderer_Impl for TextRenderer_Impl {
                 let id = GlyphId(*glyph_id as u32);
                 let is_emoji = color_font && is_color_glyph(font_face, id, &context.text_system.factory);
                 let this_glyph_idx = glyph_idx + cluster_glyph_idx;
-                let (advance, offset) = (glyph_advances[this_glyph_idx], glyph_offsets[this_glyph_idx]);
+                let (advance, offset) = (glyph_advances[this_glyph_idx], glyph_offsets.get(this_glyph_idx).copied().unwrap_or_default());
                 let x = if rtl { baselineoriginx - along - advance - offset.advanceOffset } else { baselineoriginx + along + offset.advanceOffset };
                 glyphs.push(ShapedGlyph { id, position: point(px(x), px(-offset.ascenderOffset)), index, end, advance, rtl, is_emoji });
                 along += advance;
