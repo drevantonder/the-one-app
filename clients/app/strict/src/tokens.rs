@@ -148,7 +148,7 @@ fn split_top_level(both: &str) -> (&str, &str) {
 }
 
 /// `oklch(L C H)` or `oklch(L C H / A%)`, as sRGB (Björn Ottosson's OKLab, which CSS Color 4 uses).
-fn oklch(value: &str) -> Option<Rgba> {
+pub(crate) fn oklch(value: &str) -> Option<Rgba> {
     let inner = value.strip_prefix("oklch(")?.strip_suffix(')')?;
     let (lch, alpha) = match inner.split_once('/') {
         Some((lch, alpha)) => (lch, alpha.trim()),

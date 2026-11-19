@@ -16,7 +16,8 @@ image = { version = "0.25", default-features = false, features = ["png", "jpeg",
 log = "0.4"
 parking_lot = "0.12"
 raw-window-handle = "0.6"
-resvg = { version = "0.47", default-features = false }
+# Its `text`, an SVG's `<text>`, drawn in Allo (`view::svg`).
+resvg = { version = "0.47", default-features = false, features = ["text"] }
 # A COLRv1 emoji (Android's emoji font, and Linux's Noto Color Emoji), which swash doesn't draw: skrifa walks its paint
 # graph and tiny-skia (resvg's) rasterizes it, as Chrome's Skia does (`text::colr`); swash's own version of skrifa.
 skrifa = "0.44"

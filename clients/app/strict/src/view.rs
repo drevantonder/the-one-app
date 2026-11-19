@@ -2662,6 +2662,37 @@ fn colour_token(id: &str, conditions: Conditions) -> Option<Hsla> {
     crate::tokens::table().colour(id, conditions).map(Hsla::from)
 }
 
+/// An SVG, parsed as a browser reads it: its `oklch()` colours as sRGB, which resvg's parser (svgtypes) doesn't read
+/// and draws black, and its text in Allo, the typeface a host has everywhere, for `sans-serif` and `system-ui`.
+fn svg(bytes: &[u8]) -> Option<resvg::usvg::Tree> {
+    static OPTIONS: std::sync::OnceLock<resvg::usvg::Options<'static>> = std::sync::OnceLock::new();
+    let options = OPTIONS.get_or_init(|| {
+        let mut fonts = resvg::usvg::fontdb::Database::new();
+        for font in crate::fonts().unwrap_or_default() {
+            fonts.load_font_data(font);
+        }
+        fonts.set_sans_serif_family(crate::FONT);
+        resvg::usvg::Options { fontdb: Arc::new(fonts), ..resvg::usvg::Options::default() }
+    });
+    let text = std::str::from_utf8(bytes).ok()?;
+    let mut out = String::with_capacity(text.len());
+    let mut rest = text;
+    while let Some(at) = rest.find("oklch(") {
+        let end = rest[at..].find(')').map_or(rest.len(), |end| at + end + 1);
+        out.push_str(&rest[..at]);
+        match crate::tokens::oklch(&rest[at..end]) {
+            Some(rgba) => {
+                let byte = |channel: f32| (channel.clamp(0.0, 1.0) * 255.0).round() as u8;
+                out.push_str(&format!("rgba({}, {}, {}, {})", byte(rgba.r), byte(rgba.g), byte(rgba.b), rgba.a));
+            }
+            None => out.push_str(&rest[at..end]),
+        }
+        rest = &rest[end..];
+    }
+    out.push_str(rest);
+    resvg::usvg::Tree::from_str(&out, options).ok()
+}
+
 /// A `data:` address's image, decoded for a box of `device` pixels: an SVG drawn at that size, and any other at the
 /// smallest of its size halved again and again that still covers what of the box it fills, as a mipmap's levels are, so its pixels
 /// beyond what the box shows aren't kept, and a box that grows and shrinks (a window resized) decodes it at a few
@@ -2674,7 +2705,7 @@ fn decode(src: &str, device: Size<u32>) -> Option<Decoded> {
         url::form_urlencoded::parse(format!("x={body}").as_bytes()).next().map(|(_, value)| value.into_owned().into_bytes())?
     };
     let (width, height, mut rgba) = if head.starts_with("image/svg+xml") {
-        let tree = resvg::usvg::Tree::from_data(&bytes, &resvg::usvg::Options::default()).ok()?;
+        let tree = svg(&bytes)?;
         let mut pixmap = resvg::tiny_skia::Pixmap::new(device.width, device.height)?;
         let size = tree.size();
         let fit = (device.width as f32 / size.width()).min(device.height as f32 / size.height());
