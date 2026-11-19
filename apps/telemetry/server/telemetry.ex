@@ -15,7 +15,7 @@ defmodule Telemetry do
   thing it keeps in its database.
   """
   @behaviour OneCore.App
-  alias Telemetry.{Alerts, Forward, Otlp, Read, Record, Store}
+  alias Telemetry.{Alerts, Buffer, Forward, Otlp, Read, Record, Store}
   alias OneCore.Call
 
   @impl true
@@ -408,8 +408,7 @@ defmodule Telemetry do
 
   @impl true
   # What this server's SDK exported, which is told on a server acting for the network.
-  def hook("exported", %{"signal" => signal, "otlp" => otlp}, call),
-    do: Store.keep(call.own, String.slice(call.server, 0, 8), signal, Base.decode64!(otlp))
+  def hook("exported", %{"signal" => signal, "otlp" => otlp}, call), do: Buffer.add(call, signal, Base.decode64!(otlp))
 
   # What a client exported of itself, as from the device and person its request proved it is, whatever it says of
   # itself.
@@ -417,7 +416,7 @@ defmodule Telemetry do
     proved = %{"one.device" => device, "one.for" => OneCore.User.owner(who || "") || "link"}
 
     for %{"signal" => signal, "otlp" => otlp} <- exports, signal in Otlp.signals() do
-      Store.keep(call.own, String.slice(device, 0, 8), signal, Otlp.stamp(signal, Base.decode64!(otlp), proved))
+      Buffer.add(call, signal, Otlp.stamp(signal, Base.decode64!(otlp), proved))
     end
 
     :ok

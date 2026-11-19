@@ -5,9 +5,9 @@ defmodule Telemetry.Store do
 
       curl --data-binary @<blob> -H 'content-type: application/x-protobuf' http://localhost:4318/v1/traces
 
-  - `otlp/<day>/<hour>/<to>-<source>-<bytes>.<signal>` is one export, as a server's SDK or a client gave it: what it
-    gathered of `traces`, `metrics` or `logs` until `to`, in nanoseconds since 1970. A busy server writes about one a
-    minute of each, and an idle one none.
+  - `otlp/<day>/<hour>/<to>-<source>-<bytes>.<signal>` is the exports of `traces`, `metrics` or `logs` that the server
+    `source` held until `to`, in nanoseconds since 1970, its own SDK's and its clients' (`Telemetry.Buffer`). A busy
+    server writes about two a minute of each, and an idle one none.
   - `otlp/<day>/<hour>/hour-<to>-<bytes>.<signal>` is all of an hour's exports of a signal, once the hour is over
     (`prune/1`): protobuf's messages put one after the other are one message holding all of theirs, so it's still one
     export request. It holds every export of its hour up to `to`, so one left over by a tidying that stopped partway
@@ -30,9 +30,8 @@ defmodule Telemetry.Store do
   @doc "How many bytes are kept at most."
   def most_bytes, do: @most_bytes
 
-  @doc "Keeps an OTLP export request of `signal` that `source`, a server or a client, gave."
+  @doc "Keeps an OTLP export request of `signal` that the server `source` held."
   def keep(own, source, signal, otlp) when is_binary(otlp) do
-    if signal not in Otlp.signals(), do: raise("There's no signal #{signal}: it's one of #{Enum.join(Otlp.signals(), ", ")}")
     to = System.os_time(:nanosecond)
     :ok = Artifact.write(own, "#{hour(to)}/#{to}-#{source}-#{byte_size(otlp)}.#{signal}", otlp)
   end
