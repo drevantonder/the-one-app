@@ -172,6 +172,9 @@ struct Window {
     parts: Vec<Part>,
     /// How big its page is laid out, in points: a panel's as its page asks (`resize`), the rest their window's.
     room: Size<Pixels>,
+    /// A panel showing as its page asked for another room, which it's placed again for once it's drawn in it, as it
+    /// would have been summoned: its page asks as it first opens, which is after it first shows.
+    placing: bool,
     /// When it was opened, hidden, and whether it's shown.
     opened: std::time::Instant,
     shown: bool,
@@ -242,6 +245,7 @@ impl Windows {
             Window {
                 parts: vec![Part { native, renderer, bounds: whole, radius: options.panel.unwrap_or(0.0) }],
                 room: options.size,
+                placing: false,
                 opened,
                 shown: panel,
                 panel,
@@ -404,6 +408,7 @@ impl Windows {
             if (size.height.0 - height).abs() >= 0.5 || (size.width.0 - width).abs() >= 0.5 {
                 window.room = Size { width: Pixels(width), height: Pixels(height) };
                 window.dirty = true;
+                window.placing = window.visible;
             }
         }
     }
@@ -497,6 +502,9 @@ impl Windows {
             }
             let glass = window.screen.as_ref().map(|screen| screen.glass.clone()).unwrap_or_default();
             window.arrange(&self.display, &self.context, &self.atlas, &glass);
+            if std::mem::take(&mut window.placing) {
+                self.display.summon(&window.parts[0].native, &places(window.places.as_deref()), window.room);
+            }
             if !window.drawn {
                 window.drawn = true;
                 (window.on_event)(Event::Drawn);

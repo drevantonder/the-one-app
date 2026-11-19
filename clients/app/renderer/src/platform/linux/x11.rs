@@ -49,6 +49,7 @@ x11rb::atom_manager! {
         _NET_WM_STATE_SKIP_TASKBAR,
         _NET_WM_STATE_SKIP_PAGER,
         _NET_WM_MOVERESIZE,
+        _NET_WORKAREA,
         _MOTIF_WM_HINTS,
     }
 }
@@ -369,6 +370,18 @@ impl Display {
         self.screen_at(i32::from(pointer.root_x), i32::from(pointer.root_y))
     }
 
+    /// What of `monitor` the desktop's panels leave clear, as the window manager says (`_NET_WORKAREA`), or all of it.
+    fn work_area(&self, monitor: (i32, i32, i32, i32)) -> (i32, i32, i32, i32) {
+        let root = self.xcb.setup().roots[self.screen].root;
+        let area = self.xcb.get_property(false, root, self.atoms._NET_WORKAREA, xproto::AtomEnum::CARDINAL, 0, 4).ok().and_then(|cookie| cookie.reply().ok());
+        let Some([x, y, w, h]) = area.and_then(|reply| reply.value32().map(|values| values.map(|value| value as i32).collect::<Vec<_>>())).and_then(|values| <[i32; 4]>::try_from(values).ok()) else {
+            return monitor;
+        };
+        let (left, top) = (monitor.0.max(x), monitor.1.max(y));
+        let (right, bottom) = ((monitor.0 + monitor.2).min(x + w), (monitor.1 + monitor.3).min(y + h));
+        if right <= left || bottom <= top { monitor } else { (left, top, right - left, bottom - top) }
+    }
+
     /// The monitor point `x`, `y` is on, as RandR says, or the whole screen: its left, top, width and height.
     fn screen_at(&self, x: i32, y: i32) -> (i32, i32, i32, i32) {
         use x11rb::protocol::randr::ConnectionExt as _;
@@ -391,6 +404,7 @@ impl Display {
         self.shown.borrow_mut().insert(window.x_window);
         let size = window.size.get();
         let (left, top, width, height) = self.pointer_screen();
+        let (work_left, work_top, work_width, work_height) = self.work_area((left, top, width, height));
         let page = ((room.width.0 * self.scale) as i32, (room.height.0 * self.scale) as i32);
         let at = self.parts.borrow().get(&window.x_window).map_or((0, 0), |(_, at)| ((at.x * self.scale) as i32, (at.y * self.scale) as i32));
         let (x, y) = match places.get(&screen_name((left, top, width, height))) {
@@ -398,7 +412,8 @@ impl Display {
                 (left + (at.x * self.scale) as i32).clamp(left, left + (width - size.width.0).max(0)),
                 (top + (at.y * self.scale) as i32).clamp(top, top + (height - size.height.0).max(0)),
             ),
-            None => (left + (width - page.0) / 2 + at.0, top + (height / 5).min((height - page.1).max(0)) + at.1),
+            // Its search and its card, as one, in the middle of what the monitor has clear of the desktop's panels.
+            None => (work_left + (work_width - page.0) / 2 + at.0, work_top + ((work_height - page.1) / 2).max(0) + at.1),
         };
         let before = self.active();
         if before != window.x_window {

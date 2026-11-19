@@ -252,10 +252,13 @@ impl Display {
             let mouse: NSPoint = msg_send![objc2::class!(NSEvent), mouseLocation];
             let screens: Retained<NSArray<AnyObject>> = msg_send![objc2::class!(NSScreen), screens];
             let frame_of = |screen: &AnyObject| -> NSRect { msg_send![screen, frame] };
-            let on = screens.iter().map(|screen| frame_of(&screen)).find(|frame| {
+            // The screen the pointer is on, and what of it the menu bar and the Dock leave clear.
+            let on = screens.iter().find(|screen| {
+                let frame = frame_of(screen);
                 mouse.x >= frame.origin.x && mouse.y >= frame.origin.y && mouse.x < frame.origin.x + frame.size.width && mouse.y < frame.origin.y + frame.size.height
             });
-            if let Some(screen) = on.or_else(|| screens.firstObject().map(|screen| frame_of(&screen))) {
+            if let Some(on) = on.or_else(|| screens.firstObject()) {
+                let (screen, visible): (NSRect, NSRect) = (frame_of(&on), msg_send![&*on, visibleFrame]);
                 let size = window.frame().size;
                 let (width, height) = (f64::from(room.width.0), f64::from(room.height.0));
                 let at = placed.map_or((0.0, 0.0), |placed| (f64::from(placed.origin.x), f64::from(placed.origin.y)));
@@ -264,9 +267,10 @@ impl Display {
                         (screen.origin.x + f64::from(at.x)).clamp(screen.origin.x, screen.origin.x + (screen.size.width - size.width).max(0.0)),
                         (screen.origin.y + screen.size.height - f64::from(at.y)).clamp(screen.origin.y + size.height.min(screen.size.height), screen.origin.y + screen.size.height),
                     ),
+                    // Its search and its card, as one, in the middle of what the menu bar and the Dock leave clear.
                     None => (
-                        screen.origin.x + (screen.size.width - width) / 2.0 + at.0,
-                        screen.origin.y + screen.size.height - (screen.size.height * 0.2).min((screen.size.height - height).max(0.0)) - at.1,
+                        visible.origin.x + (visible.size.width - width) / 2.0 + at.0,
+                        visible.origin.y + visible.size.height - ((visible.size.height - height) / 2.0).max(0.0) - at.1,
                     ),
                 };
                 window.setFrameTopLeftPoint(NSPoint::new(x, top));

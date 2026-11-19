@@ -259,7 +259,8 @@ impl Display {
                     (work.left + (at.x * scale) as i32).clamp(work.left, work.left + (width - size.width.0).max(0)),
                     (work.top + (at.y * scale) as i32).clamp(work.top, work.top + (height - size.height.0).max(0)),
                 ),
-                None => (work.left + (width - page.0) / 2 + at.0, work.top + (height / 5).min((height - page.1).max(0)) + at.1),
+                // Its search and its card, as one, in the middle of the monitor's work area, clear of the taskbar.
+                None => (work.left + (width - page.0) / 2 + at.0, work.top + ((height - page.1) / 2).max(0) + at.1),
             };
             let before = GetForegroundWindow();
             if before != window.hwnd {
