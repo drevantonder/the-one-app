@@ -641,7 +641,6 @@ fn respond(
                 // The place its link names, as its address's `#` says on the DOM (`link()`).
                 "link": state.fragment,
                 "connection": "online",
-                "updateReady": false,
             },
         }))),
         "ping" => Some(Ok(json!({}))),
@@ -696,6 +695,15 @@ fn respond(
         method if method.starts_with("ui/") => Some(Err(json!({"code": -32601, "message": format!("This client has no {method}")}))),
         _ => None,
     };
+    // A file the page chose goes where the network keeps it, for a tool of this window's app (`upload` in hosts.rs).
+    if answered.is_none() && method == "one/upload" {
+        state.next += 1;
+        let at = format!("m{}", state.next);
+        let app = state.entrypoint.split('/').next().unwrap_or_default().to_owned();
+        asked.lock().expect("nothing panics holding it").insert(at.clone(), Asked::Message(id));
+        let _ = to.send(json!({"id": at, "command": "upload", "args": {"app": app, "body": params["body"]}}));
+        return None;
+    }
     match answered {
         Some(Ok(result)) => Some(json!({"jsonrpc": "2.0", "id": id, "result": result})),
         Some(Err(error)) => Some(json!({"jsonrpc": "2.0", "id": id, "error": error})),

@@ -578,7 +578,6 @@ const machine = setup({
     }),
     updateReady: assign(({ event, context }) => {
       if (event.type !== "updateReady" || event.ready === context.updateReady) return {}
-      for (const view of open.values()) post(view, { method: "ui/notifications/host-context-changed", params: { updateReady: event.ready } })
       return { updateReady: event.ready }
     }),
     // Its apps are listed once it's told where its device is, unless it's to sign in.
@@ -1501,10 +1500,8 @@ async function respond(view, method, params) {
         ...(!inFrame && titleRow()),
         // Whether the window names it above it, in its title bar's breadcrumb (`titled`), so its first screen doesn't.
         breadcrumb: Boolean(own) && !titleBar.hidden && !inFrame,
-        // Whether its network answers, and whether an update for this device is ready, which the window keeps it
-        // told of: the launcher shows Update while one is.
+        // Whether its network answers, which the window keeps it told of.
         connection: shown.getSnapshot().context.connection,
-        updateReady: shown.getSnapshot().context.updateReady,
       },
     }
   }
