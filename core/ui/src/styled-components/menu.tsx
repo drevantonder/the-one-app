@@ -139,7 +139,7 @@ export const Menu = {
     const inside = children(() => props.children)
     const entry = { value: props.value, label: inside.toArray().filter((part) => typeof part === "string").join(" "), disabled: !!props.disabled, destructive: !!props.destructive }
     onCleanup(menu.add(entry))
-    collected(() => ({ label: entry.label, onAction: () => menu.select(props.value), destructive: entry.destructive, disabled: entry.disabled, menu: true }))
+    collected(() => ({ label: entry.label, onAction: () => menu.select(props.value), destructive: entry.destructive, disabled: entry.disabled }))
     return (
       <Pressable {...menu.item(() => entry)} style={[look.item, props.destructive && look.destructive, props.disabled && look.disabled]}>
         {inside.toArray().map((part) => (typeof part === "string" ? <Text>{part}</Text> : part))}

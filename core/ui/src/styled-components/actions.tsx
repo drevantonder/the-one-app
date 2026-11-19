@@ -22,7 +22,8 @@ export interface Action {
   destructive?: boolean
   disabled?: boolean
   section?: string
-  /** Whether it's an item of a menu, which the panel lists but Return never does: a menu holds what's beside the main thing. */
+  /** Whether it's an item of a row's menu, which the panel lists but Return never does: what a pointer rests on isn't
+   * what's meant by a key, as an action of the screen is. */
   menu?: boolean
 }
 
