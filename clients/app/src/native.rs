@@ -910,9 +910,11 @@ fn channel(
                     "changed" if payload.as_str() == Some(view.as_str()) => {
                         on(Box::new(move |screen| screen.message(&json!({"jsonrpc": "2.0", "method": "notifications/one/changed"}))))
                     }
+                    // Behind its servers, the launcher is the web launcher's, which says Update Required.
+                    "state" if launcher && payload["connection"] == "behind" => computer::native(None),
                     // Over its page, while its network doesn't answer, as over an app on a phone (DESIGN.md).
-                    "connection" if framed.is_none() => on(Box::new(move |screen| {
-                        screen.notice = match payload.as_str() {
+                    "state" if framed.is_none() => on(Box::new(move |screen| {
+                        screen.notice = match payload["connection"].as_str() {
                             Some("reconnecting") => Some(renderer::Notice { text: "Reconnecting…".into(), action: None }),
                             Some("offline") => Some(renderer::Notice { text: "Can't reach your network".into(), action: None }),
                             _ => screen.notice.take().filter(|notice| notice.action.is_some()),
@@ -932,8 +934,6 @@ fn channel(
                             }
                         });
                     }
-                    // Behind its servers, the launcher is the web launcher's, which says Update Required.
-                    "behind" if launcher => computer::native(None),
                     // The launcher, linked to, comes forward.
                     "open" if launcher => computer::summon(),
                     // Its window comes forward, and its page is told the place the link names, as a page's `hashchange`.

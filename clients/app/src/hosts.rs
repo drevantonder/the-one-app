@@ -27,7 +27,7 @@ use crate::computer;
 
 /// The events the launcher's page hears that an app's window hears too. A `one:` link (`open`) is told only to the
 /// launcher, which opens the app's window.
-pub const EVENTS: [&str; 7] = ["changed", "connection", "behind", "stale", "session", "state", "theme"];
+pub const EVENTS: [&str; 4] = ["changed", "stale", "state", "theme"];
 
 /// The app windows that are open or starting, by the app they show (`key`), as the launcher's page names an open
 /// app: `<subject>|<entrypoint>`.

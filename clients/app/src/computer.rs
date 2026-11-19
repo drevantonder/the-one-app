@@ -142,7 +142,7 @@ async fn prepare() {
     let opened = async {
         let started = crate::start().await.ok()?;
         link = started["open"].as_str().map(str::to_owned);
-        if started["session"]["state"] == "signIn" {
+        if started["state"]["session"]["state"] == "signIn" {
             return None;
         }
         let listed = hosts::command("main", "apps", json!({})).await.ok()?;
