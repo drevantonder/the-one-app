@@ -527,7 +527,7 @@ defmodule Gmail do
               raise "Attachment #{name} needs base64 or upload."
           end
 
-        %{name: String.replace(name, ~r/[\r\n"]/, ""), type: file["type"] || Mime.type(name), bytes: bytes}
+        %{name: String.replace(name, ~r/[\r\n"]/, ""), type: file["type"] || MIME.from_path(name), bytes: bytes}
       end
 
     if Enum.sum_by(files, &byte_size(&1.bytes)) > 25 * 1024 * 1024, do: raise("Attachments may be 25 MB in all.")
