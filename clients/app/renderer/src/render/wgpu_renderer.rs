@@ -5,7 +5,7 @@
 // Copyright 2022 - 2025 Zed Industries, Inc. Licensed under the Apache License, Version 2.0
 // (clients/app/renderer/LICENSE-APACHE); this file is changed from the original.
 
-use super::scene::{PrimitiveBatch, Scene, Shadow};
+use super::scene::{PrimitiveBatch, Recording, Scene, Shadow};
 use super::wgpu_atlas::WgpuAtlas;
 use super::wgpu_context::WgpuContext;
 use crate::geometry::{DevicePixels, Size};
@@ -46,6 +46,8 @@ pub(crate) struct WgpuPipelines {
     underlines: wgpu::RenderPipeline,
     mono_sprites: wgpu::RenderPipeline,
     poly_sprites: wgpu::RenderPipeline,
+    /// A raster's: a layer's texture drawn over what's there, premultiplied, as it was drawn over nothing.
+    rasters: wgpu::RenderPipeline,
     /// A backdrop's and its blur's, which few windows draw: compiled after the rest, on a thread of their own, so a
     /// window's first frame doesn't wait for them (`backdrops`).
     backdrops: OnceLock<(wgpu::RenderPipeline, wgpu::RenderPipeline)>,
@@ -152,17 +154,18 @@ impl WgpuPipelines {
         let layouts = Layouts::new(device, format, premultiplied);
         let (l, blend) = (&layouts, Some(layouts.blend));
         // Compiled side by side, as each takes its compiler a while (Direct3D's most).
-        let [quads, shadows, underlines, mono_sprites, poly_sprites] = std::thread::scope(|scope| {
+        let [quads, shadows, underlines, mono_sprites, poly_sprites, rasters] = std::thread::scope(|scope| {
             [
                 scope.spawn(|| l.pipeline(&l.instances, "vs_quad", "fs_quad", blend, false)),
                 scope.spawn(|| l.pipeline(&l.instances, "vs_shadow", "fs_shadow", blend, false)),
                 scope.spawn(|| l.pipeline(&l.instances, "vs_underline", "fs_underline", blend, false)),
                 scope.spawn(|| l.pipeline(&l.instances, "vs_mono_sprite", "fs_mono_sprite", blend, true)),
                 scope.spawn(|| l.pipeline(&l.instances, "vs_poly_sprite", "fs_poly_sprite", blend, true)),
+                scope.spawn(|| l.pipeline(&l.instances, "vs_raster", "fs_raster", Some(wgpu::BlendState::PREMULTIPLIED_ALPHA_BLENDING), true)),
             ]
             .map(|compiling| compiling.join().expect("compiling a pipeline doesn't panic"))
         });
-        Self { layouts, quads, shadows, underlines, mono_sprites, poly_sprites, backdrops: OnceLock::new(), tiles: OnceLock::new() }
+        Self { layouts, quads, shadows, underlines, mono_sprites, poly_sprites, rasters, backdrops: OnceLock::new(), tiles: OnceLock::new() }
     }
 
     /// A shadow's tile's pipelines (`tiles`), compiled now unless they are, or waited for where they're being.
@@ -283,6 +286,8 @@ pub struct WgpuRenderer {
     /// The bind group of the frame's data for its batches' instances, each at its offset, and how much of the data
     /// from there it binds; made again only as the data's buffer is, or a batch needs more.
     instances: Option<(wgpu::Buffer, u64, wgpu::BindGroup)>,
+    /// Each raster's texture, by its id, drawn the first frame it's in, kept while frames have it, and its bind group.
+    rasters: std::collections::HashMap<u32, (wgpu::Texture, wgpu::BindGroup)>,
     /// Each atlas texture's bind group, as of the atlas's having made so many textures.
     atlas_groups: std::cell::RefCell<(u64, std::collections::HashMap<super::atlas::AtlasTextureId, wgpu::BindGroup>)>,
 }
@@ -427,6 +432,7 @@ impl WgpuRenderer {
             last: Drawn::default(),
             kept: None,
             instances: None,
+            rasters: Default::default(),
             atlas_groups: Default::default(),
         }
     }
@@ -500,17 +506,7 @@ impl WgpuRenderer {
         let gamma = self.gamma;
         let gamma = self.push(bytemuck::bytes_of(&gamma));
         let batches: Vec<PrimitiveBatch<'_>> = scene.batches().collect();
-        let instances: Vec<(u64, u64)> = batches
-            .iter()
-            .map(|batch| match batch {
-                PrimitiveBatch::Quads(quads) => self.push_instances(quads),
-                PrimitiveBatch::Shadows(shadows) => self.push_instances(shadows),
-                PrimitiveBatch::Underlines(underlines) => self.push_instances(underlines),
-                PrimitiveBatch::MonochromeSprites { sprites, .. } => self.push_instances(sprites),
-                PrimitiveBatch::PolychromeSprites { sprites, .. } => self.push_instances(sprites),
-                PrimitiveBatch::Backdrops(backdrops) => self.push_instances(backdrops),
-            })
-            .collect();
+        let instances: Vec<(u64, u64)> = batches.iter().map(|batch| self.push_batch(batch)).collect();
         // What each batch is, and what of the frame's start is the same as the last's.
         let drawn = {
             use std::hash::{Hash, Hasher};
@@ -570,8 +566,29 @@ impl WgpuRenderer {
                 }
             }
         }
+        // The frame's rasters' scenes that haven't a texture yet, each drawn into one of its own, from its origin.
+        let recordings: Vec<Recording> = scene.recordings.iter().filter(|recording| !self.rasters.contains_key(&recording.id)).cloned().collect();
+        let mut rastering: Vec<(Recording, (u64, u64), Vec<(u64, u64)>)> = Vec::new();
+        for recording in recordings {
+            let globals = GlobalParams {
+                viewport_size: [recording.size[0] as f32, recording.size[1] as f32],
+                origin: recording.origin,
+                premultiplied_alpha: u32::from(self.premultiplied),
+                pad: [0; 3],
+            };
+            let globals = self.push(bytemuck::bytes_of(&globals));
+            let scene = recording.scene.clone();
+            let instances = scene.batches().map(|batch| self.push_batch(&batch)).collect();
+            rastering.push((recording, globals, instances));
+        }
         // What a batch's instances bind is as much as the largest needs, from its offset, so one bind group serves all.
-        let largest = instances.iter().chain(planned.iter().map(|(.., instance)| instance)).map(|(_, length)| *length).max().unwrap_or(4);
+        let largest = instances
+            .iter()
+            .chain(planned.iter().map(|(.., instance)| instance))
+            .chain(rastering.iter().flat_map(|(.., instances)| instances))
+            .map(|(_, length)| *length)
+            .max()
+            .unwrap_or(4);
         let window = self.instances.as_ref().map_or(0, |(_, window, _)| *window).max(largest.next_power_of_two().max(256));
         self.data.resize(self.data.len() + window as usize, 0);
         self.write_data();
@@ -599,6 +616,10 @@ impl WgpuRenderer {
         for (key, (width, height), globals, instance) in planned {
             self.draw_tile(&mut encoder, &buffer, &instances.group, key, (width, height), globals, gamma, instance);
         }
+        for (recording, globals, offsets) in rastering {
+            self.draw_raster(&mut encoder, &buffer, &instances.group, &recording, globals, gamma, &offsets);
+        }
+        self.rasters.retain(|id, _| scene.recordings.iter().any(|recording| recording.id == *id));
         // The frame starts from what's kept, where it starts as that did, and is drawn only from there; or what's the
         // same as the last frame's start, two frames running, is kept now, where it's worth more than its copy.
         let copies = texture.usage().contains(wgpu::TextureUsages::COPY_DST);
@@ -690,9 +711,18 @@ impl WgpuRenderer {
                 self.draw_shadows(&mut pass, shadows, &instances.group, instances.offsets[at]);
                 continue;
             }
+            if let PrimitiveBatch::Rasters(rasters) = &batches[at] {
+                if let Some((_, group)) = self.rasters.get(&rasters[0].raster) {
+                    pass.set_pipeline(&self.pipelines.rasters);
+                    pass.set_bind_group(1, &instances.group, &[instances.offsets[at]]);
+                    pass.set_bind_group(2, group, &[]);
+                    pass.draw(0..4, 0..1);
+                }
+                continue;
+            }
             let (pipeline, texture, count) = match &batches[at] {
                 PrimitiveBatch::Quads(quads) => (&self.pipelines.quads, None, quads.len()),
-                PrimitiveBatch::Shadows(_) => unreachable!("drawn above"),
+                PrimitiveBatch::Shadows(_) | PrimitiveBatch::Rasters(_) => unreachable!("drawn above"),
                 PrimitiveBatch::Underlines(underlines) => (&self.pipelines.underlines, None, underlines.len()),
                 PrimitiveBatch::MonochromeSprites { texture_id, sprites } => (&self.pipelines.mono_sprites, Some(*texture_id), sprites.len()),
                 PrimitiveBatch::PolychromeSprites { texture_id, sprites } => (&self.pipelines.poly_sprites, Some(*texture_id), sprites.len()),
@@ -747,6 +777,48 @@ impl WgpuRenderer {
             }
         }
         self.draw_run(encoder, view, load, globals, batches, instances, &run, None);
+    }
+
+    /// Adds a batch's instances to the frame's data, and says where.
+    fn push_batch(&mut self, batch: &PrimitiveBatch<'_>) -> (u64, u64) {
+        match batch {
+            PrimitiveBatch::Quads(quads) => self.push_instances(quads),
+            PrimitiveBatch::Shadows(shadows) => self.push_instances(shadows),
+            PrimitiveBatch::Underlines(underlines) => self.push_instances(underlines),
+            PrimitiveBatch::MonochromeSprites { sprites, .. } => self.push_instances(sprites),
+            PrimitiveBatch::PolychromeSprites { sprites, .. } => self.push_instances(sprites),
+            PrimitiveBatch::Backdrops(backdrops) => self.push_instances(backdrops),
+            PrimitiveBatch::Rasters(rasters) => self.push_instances(rasters),
+        }
+    }
+
+    /// Draws a raster's scene (`recording`) into a texture of its own, over nothing, from its origin (with its own
+    /// `globals`, the frame's `gamma`, and its batches' instances at `offsets`), and keeps it, by its id.
+    #[allow(clippy::too_many_arguments)]
+    fn draw_raster(&mut self, encoder: &mut wgpu::CommandEncoder, buffer: &wgpu::Buffer, group: &wgpu::BindGroup, recording: &Recording, globals: (u64, u64), gamma: (u64, u64), offsets: &[(u64, u64)]) {
+        let texture = self.device.create_texture(&wgpu::TextureDescriptor {
+            label: None,
+            size: wgpu::Extent3d { width: recording.size[0].max(1), height: recording.size[1].max(1), depth_or_array_layers: 1 },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: self.format,
+            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::TEXTURE_BINDING,
+            view_formats: &[],
+        });
+        let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+        let binding = |(offset, size): (u64, u64)| wgpu::BindingResource::Buffer(wgpu::BufferBinding { buffer, offset, size: wgpu::BufferSize::new(size) });
+        let globals = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: None,
+            layout: &self.pipelines.layouts.globals,
+            entries: &[wgpu::BindGroupEntry { binding: 0, resource: binding(globals) }, wgpu::BindGroupEntry { binding: 1, resource: binding(gamma) }],
+        });
+        let batches: Vec<PrimitiveBatch<'_>> = recording.scene.batches().collect();
+        let instances = Instances { group: group.clone(), offsets: offsets.iter().map(|(offset, _)| *offset as u32).collect() };
+        let blurs: Vec<Vec<Blur>> = batches.iter().map(|_| Vec::new()).collect();
+        self.draw_batches(encoder, &texture, &view, &globals, buffer, &batches, &instances, &blurs, 0..batches.len());
+        let bound = self.texture(&view);
+        self.rasters.insert(recording.id, (texture, bound));
     }
 
     /// Draws a batch of shadows, each from its tile where it has one, else worked out where it's drawn, in runs.

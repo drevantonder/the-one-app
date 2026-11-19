@@ -15,7 +15,7 @@ use crate::inspect::{self, Key, Rect, Rects};
 use crate::js::{Posted, Thread};
 use crate::render::Atlas;
 use crate::render::atlas::AtlasTile;
-use crate::render::scene::{Backdrop, BorderStyle, PolychromeSprite, Quad, Scene, Shadow, TransformationMatrix};
+use crate::render::scene::{Backdrop, BorderStyle, PolychromeSprite, Quad, Recording, Scene, Shadow, TransformationMatrix};
 use crate::style::{self, Look, Offset, Paint, State, Text, colour};
 use crate::text::{Paragraph, TextRun, TextSystem};
 use crate::tokens::{Conditions, Radius};
@@ -712,7 +712,10 @@ impl Screen {
                 at = self.tree.parent(id);
             }
         }
-        for id in &moving {
+        // What's in a layer and moving as a layer of its own is drawn into it each frame, where it's moved to, as a
+        // compositor draws a sublayer; anything else moving in it draws it again.
+        let drawing: Vec<Id> = moving.iter().filter(|id| !whole.contains(id) || touched.contains(id)).copied().collect();
+        for id in &drawing {
             let mut at = self.tree.parent(*id);
             while let Some(id) = at.filter(|id| touched.insert(*id)) {
                 at = self.tree.parent(id);
@@ -764,6 +767,7 @@ impl Screen {
             layers: &mut self.layers,
             layered: &layered,
             recording: None,
+            parts: Vec::new(),
             unsettled: None,
         };
         // The window, as a page's body: its root's background and text, scrolling what's taller than it.
@@ -1665,9 +1669,12 @@ struct Layer {
     at: Point<f32>,
     /// It's been drawn, rather than only noted where it rests, as that was changing.
     recorded: bool,
+    /// How much what it's in had grown it as it was drawn.
+    scale: f32,
     /// It's kept for the next frame: what's in it doesn't move by itself.
     kept: bool,
-    scene: Scene,
+    /// What it draws, in order: its scenes, and between them what's in it that's a layer of its own (`Sublayer`).
+    parts: Vec<Part>,
     placed: Vec<(Id, Placed)>,
     rects: Vec<(Id, Rect)>,
     tab_order: Vec<Id>,
@@ -1686,9 +1693,10 @@ impl Layer {
         Layer {
             key,
             at: point(0.0, 0.0),
+            scale: 1.0,
             recorded: false,
             kept: true,
-            scene: Scene::default(),
+            parts: Vec::new(),
             placed: Vec::new(),
             rects: Vec::new(),
             tab_order: Vec::new(),
@@ -1703,15 +1711,33 @@ impl Layer {
     }
 }
 
-/// What a layer was drawn for: where its node rests, what it's in grew it by, how opaque that is, and the window's
-/// scale. Any other, and it's drawn again; what it's in moving it (a card it's in sliding as it grows) only moves it,
-/// as a compositor moves a sublayer.
+/// What a layer was drawn for: where its node rests and the window's scale. Any other, and it's drawn again; what it's
+/// in moving, growing or fading it (a card it's in sliding as it grows) only moves, grows and fades it, as a compositor
+/// does a sublayer.
 #[derive(PartialEq)]
 struct LayerKey {
     laid_out: Bounds<f32>,
-    scale: f32,
-    opacity: f32,
     device: f32,
+}
+
+/// Part of what a layer draws: a scene of it, drawn as an image of it (`Recording`, as a compositor draws a layer,
+/// once, with `Scene::raster`) where it can be one, or what's in it that's a layer of its own.
+#[derive(Clone)]
+enum Part {
+    Scene(std::sync::Arc<Scene>, Option<Recording>),
+    Sublayer(Sublayer),
+}
+
+/// What's in a layer that's a layer of its own, and what it's painted with as the layer it's in rests.
+#[derive(Clone, Copy)]
+struct Sublayer {
+    taffy_node: NodeId,
+    offset: Point<f32>,
+    transform: Transform,
+    mask: Bounds<f32>,
+    opacity: f32,
+    parent: Option<Id>,
+    pointer: bool,
 }
 
 /// The tree as Taffy lays it out, kept from frame to frame, as GPUI's and Flutter's are: a frame styles again only what
@@ -1802,6 +1828,8 @@ struct Painter<'a> {
     layers: &'a mut HashMap<Id, Layer>,
     layered: &'a HashSet<Id>,
     recording: Option<Id>,
+    /// The parts of the layer being drawn so far, before its scene now.
+    parts: Vec<Part>,
     /// A layered node drawn as usual, as where it rests is changing.
     unsettled: Option<Id>,
     tree: &'a Tree,
@@ -2192,7 +2220,7 @@ impl Painter<'_> {
     fn paint_layer(&mut self, taffy_node: NodeId, id: Id, offset: Point<f32>, transform: Transform, look: &Look, mask: Bounds<f32>, opacity: f32, parent: Option<Id>, pointer: bool) {
         let Ok(laid) = self.layout.taffy.layout(taffy_node).copied() else { return };
         let laid_out = Bounds { origin: point(offset.x + laid.location.x, offset.y + laid.location.y), size: Size { width: laid.size.width, height: laid.size.height } };
-        let key = LayerKey { laid_out, scale: transform.scale, opacity, device: self.scale };
+        let key = LayerKey { laid_out, device: self.scale };
         match self.layers.get(&id) {
             Some(layer) if layer.key == key && layer.recorded => {}
             // Where it rests is changing (what it's in is growing): it's drawn as usual until it holds still a frame,
@@ -2205,20 +2233,30 @@ impl Painter<'_> {
                 return;
             }
             _ => {
-                let layer = self.record(taffy_node, id, offset, transform, opacity, parent, pointer, key);
+                let layer = self.record(taffy_node, id, offset, transform, parent, pointer, key);
                 self.layers.insert(id, layer);
             }
         }
-        // Its own move and growth around its middle, as `paint_node` draws it, in the window: p ↦ p·grown + by.
+        // Its own move and growth around its middle, as `paint_node` draws it, in the window, from where it was drawn
+        // (`Layer::at`, grown by `Layer::scale`): p ↦ p·grown + by.
         let centre = point(laid_out.origin.x + laid_out.size.width / 2.0, laid_out.origin.y + laid_out.size.height / 2.0);
         let translate = point(look.translate.0.of(laid_out.size.width), look.translate.1.of(laid_out.size.height));
-        let (at, k, grown) = (transform.offset, transform.scale, look.scale);
-        // What it's in has moved it since it was drawn, which moves what was drawn as much, grown as it is.
-        let since = point(at.x - self.layers[&id].at.x, at.y - self.layers[&id].at.y);
-        let by = point(at.x + k * (centre.x + translate.x) - grown * (at.x + k * centre.x) + grown * since.x, at.y + k * (centre.y + translate.y) - grown * (at.y + k * centre.y) + grown * since.y);
+        let (at, k, own) = (transform.offset, transform.scale, look.scale);
+        let (was, grown) = (self.layers[&id].at, k * own / self.layers[&id].scale);
+        let by = point(at.x + k * (centre.x + translate.x - own * centre.x) - grown * was.x, at.y + k * (centre.y + translate.y - own * centre.y) - grown * was.y);
         let moved = |bounds: Bounds<f32>| Bounds { origin: point(bounds.origin.x * grown + by.x, bounds.origin.y * grown + by.y), size: Size { width: bounds.size.width * grown, height: bounds.size.height * grown } };
+        let opacity = opacity * look.opacity;
+        for part in self.layers[&id].parts.clone() {
+            match part {
+                Part::Scene(_, Some(recording)) => self.scene.raster(&recording, grown, [by.x * self.scale, by.y * self.scale], opacity, mask.scale_to(self.scale)),
+                Part::Scene(scene, None) => self.scene.splice(&scene, grown, [by.x * self.scale, by.y * self.scale], opacity, mask.scale_to(self.scale)),
+                Part::Sublayer(sublayer) => {
+                    let transform = Transform { offset: point(sublayer.transform.offset.x * grown + by.x, sublayer.transform.offset.y * grown + by.y), scale: sublayer.transform.scale * grown };
+                    self.paint(sublayer.taffy_node, sublayer.offset, transform, moved(sublayer.mask).intersect(&mask), sublayer.opacity * opacity, sublayer.parent, sublayer.pointer);
+                }
+            }
+        }
         let layer = &self.layers[&id];
-        self.scene.splice(&layer.scene, grown, [by.x * self.scale, by.y * self.scale], look.opacity, mask.scale_to(self.scale));
         self.placed.extend(layer.placed.iter().map(|(id, placed)| (*id, Placed { shown: moved(placed.shown).intersect(&mask), ..placed.clone() })));
         self.rects.extend(layer.rects.iter().map(|(id, rect)| {
             let drawn = moved(Bounds { origin: point(rect.x, rect.y), size: Size { width: rect.width, height: rect.height } });
@@ -2228,8 +2266,8 @@ impl Painter<'_> {
         self.intersections.extend(&layer.intersections);
         self.drag_regions.extend(layer.drag_regions.iter().map(|(id, bounds)| (*id, moved(*bounds).intersect(&mask))));
         self.kept_regions.extend(layer.kept_regions.iter().map(|bounds| moved(*bounds).intersect(&mask)));
-        if let Some(glass) = self.glass.as_mut().filter(|_| look.opacity > 0.0) {
-            glass.extend(layer.glass.iter().map(|pane| crate::platform::Glass { bounds: moved(pane.bounds).intersect(&mask), radius: pane.radius * grown, opacity: pane.opacity * look.opacity }));
+        if let Some(glass) = self.glass.as_mut().filter(|_| opacity > 0.0) {
+            glass.extend(layer.glass.iter().map(|pane| crate::platform::Glass { bounds: moved(pane.bounds).intersect(&mask), radius: pane.radius * grown, opacity: pane.opacity * opacity }));
         }
         self.wanted.extend(layer.wanted.iter().cloned());
         self.framed.extend(layer.framed.iter().map(|(id, bounds)| (*id, moved(*bounds))));
@@ -2242,7 +2280,7 @@ impl Painter<'_> {
     /// What node `id` draws as it rests, everywhere, not cut to what it's in: its own scene, and what it says of where
     /// it puts what's in it, apart from this frame's.
     #[allow(clippy::too_many_arguments)]
-    fn record(&mut self, taffy_node: NodeId, id: Id, offset: Point<f32>, transform: Transform, opacity: f32, parent: Option<Id>, pointer: bool, key: LayerKey) -> Layer {
+    fn record(&mut self, taffy_node: NodeId, id: Id, offset: Point<f32>, transform: Transform, parent: Option<Id>, pointer: bool, key: LayerKey) -> Layer {
         let mut scene = Scene::default();
         std::mem::swap(&mut *self.scene, &mut scene);
         let outside = (
@@ -2257,20 +2295,31 @@ impl Painter<'_> {
             self.modal.take(),
             std::mem::take(&mut self.framed),
             std::mem::take(&mut self.animating),
+            std::mem::take(&mut self.parts),
         );
         self.recording = Some(id);
         let everywhere = Bounds { origin: point(-1.0e6, -1.0e6), size: Size { width: 2.0e6, height: 2.0e6 } };
-        self.paint(taffy_node, offset, transform, everywhere, opacity, parent, pointer);
+        self.paint(taffy_node, offset, transform, everywhere, 1.0, parent, pointer);
         self.recording = None;
         std::mem::swap(&mut *self.scene, &mut scene);
-        let (placed, rects, tab_order, intersections, drag_regions, kept_regions, glass, wanted, modal, framed, animating) = outside;
+        let (placed, rects, tab_order, intersections, drag_regions, kept_regions, glass, wanted, modal, framed, animating, parts) = outside;
+        // What moves by itself or shows another frame's page changes as it's drawn: it's drawn afresh each frame, so
+        // it's no image, which would be drawn afresh too.
+        let kept = !self.animating && self.framed.is_empty();
+        let mut drawn = std::mem::replace(&mut self.parts, parts);
+        drawn.push(Part::Scene(std::sync::Arc::new(scene), None));
+        for part in &mut drawn {
+            if let Part::Scene(scene, image) = part {
+                *image = kept.then(|| recording(scene)).flatten();
+            }
+        }
         let layer = Layer {
             key,
             at: transform.offset,
+            scale: transform.scale,
             recorded: true,
-            // What moves by itself or shows another frame's page changes as it's drawn: it's drawn afresh each frame.
-            kept: !self.animating && self.framed.is_empty(),
-            scene,
+            kept,
+            parts: drawn,
             placed: std::mem::replace(&mut self.placed, placed),
             rects: std::mem::replace(&mut self.rects, rects).into_iter().collect(),
             tab_order: std::mem::replace(&mut self.tab_order, tab_order),
@@ -2311,6 +2360,15 @@ impl Painter<'_> {
         if self.recording == Some(id) {
             // Its layer is drawn as it rests, and moved, grown and faded as it's drawn from it.
             (look.translate, look.scale, look.opacity) = ((Offset::Px(0.0), Offset::Px(0.0)), 1.0, 1.0);
+        } else if self.recording.is_some() && self.layered.contains(&id) && self.turn != TransformationMatrix::unit() {
+            // Turned in the layer being drawn, it's drawn in it as usual, which is drawn again each frame.
+            self.animating = true;
+        } else if self.recording.is_some() && self.layered.contains(&id) {
+            // A layer of its own in the one being drawn: drawn into it each frame, where that's moved it.
+            let scene = std::mem::take(&mut *self.scene);
+            self.parts.push(Part::Scene(std::sync::Arc::new(scene), None));
+            self.parts.push(Part::Sublayer(Sublayer { taffy_node, offset, transform, mask, opacity, parent, pointer }));
+            return;
         } else if self.layered.contains(&id) && self.unsettled != Some(id) && self.turn == TransformationMatrix::unit() && look.animation.is_none() {
             return self.paint_layer(taffy_node, id, offset, transform, &look, mask, opacity, parent, pointer);
         }
@@ -3061,4 +3119,25 @@ fn decode(src: &str, device: Size<u32>) -> Option<Decoded> {
         pixel.swap(0, 2);
     }
     Some(Decoded { picture: Picture { width, height }, bgra: rgba })
+}
+
+/// The largest a layer's image is, in device pixels, along either side, as every GPU the renderer runs on allows.
+const RASTER_MOST: f32 = 8192.0;
+
+/// A layer's scene as an image of it (`Recording`), with an id of its own, where it can be one: what it draws covers
+/// whole device pixels from its origin, and it blurs nothing behind it.
+fn recording(scene: &std::sync::Arc<Scene>) -> Option<Recording> {
+    static NEXT: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(1);
+    if !scene.backdrops.is_empty() {
+        return None;
+    }
+    let extent = scene.extent()?;
+    let (left, top) = (extent.origin.x.0.floor(), extent.origin.y.0.floor());
+    let (right, bottom) = ((extent.origin.x.0 + extent.size.width.0).ceil(), (extent.origin.y.0 + extent.size.height.0).ceil());
+    let size = [right - left, bottom - top];
+    if size[0] < 1.0 || size[1] < 1.0 || size[0] > RASTER_MOST || size[1] > RASTER_MOST {
+        return None;
+    }
+    let id = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    Some(Recording { id, scene: scene.clone(), origin: [left, top], size: [size[0] as u32, size[1] as u32] })
 }

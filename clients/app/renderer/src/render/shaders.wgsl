@@ -1329,3 +1329,46 @@ fn fs_backdrop(input: BackdropVarying) -> @location(0) vec4<f32> {
     let color = vec4<f32>(clamp(mix(vec3<f32>(luminance), sample.rgb, backdrop.saturation), vec3<f32>(0.0), vec3<f32>(1.0)), 1.0);
     return blend_color(color, saturate(0.5 - distance));
 }
+
+// --- rasters (ours: a layer drawn once into a texture of its own, and drawn as that, as a compositor draws one) --- //
+
+struct Raster {
+    order: u32,
+    raster: u32,
+    opacity: f32,
+    pad: u32,
+    bounds: Bounds,
+    content_mask: Bounds,
+    transformation: TransformationMatrix,
+}
+@group(1) @binding(0) var<storage, read> b_rasters: array<Raster>;
+
+struct RasterVarying {
+    @builtin(position) position: vec4<f32>,
+    @location(0) uv: vec2<f32>,
+    @location(1) @interpolate(flat) raster_id: u32,
+    @location(2) clip_distances: vec4<f32>,
+}
+
+@vertex
+fn vs_raster(@builtin(vertex_index) vertex_id: u32, @builtin(instance_index) instance_id: u32) -> RasterVarying {
+    let unit_vertex = vec2<f32>(f32(vertex_id & 1u), 0.5 * f32(vertex_id & 2u));
+    let raster = b_rasters[instance_id];
+    var out = RasterVarying();
+    out.position = to_device_position_transformed(unit_vertex, raster.bounds, raster.transformation);
+    out.uv = unit_vertex;
+    out.raster_id = instance_id;
+    out.clip_distances = distance_from_clip_rect_transformed(unit_vertex, raster.bounds, raster.content_mask, raster.transformation);
+    return out;
+}
+
+// Its texture holds what was drawn over nothing, so each texel's colour is already multiplied by its alpha: it's drawn
+// over what's there as it is, as opaque as the raster is (the pipeline blends premultiplied, whatever the target's).
+@fragment
+fn fs_raster(input: RasterVarying) -> @location(0) vec4<f32> {
+    let texel = textureSample(t_sprite, s_sprite, input.uv);
+    if (any(input.clip_distances < vec4<f32>(0.0))) {
+        return vec4<f32>(0.0);
+    }
+    return texel * b_rasters[input.raster_id].opacity;
+}

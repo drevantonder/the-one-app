@@ -22,6 +22,19 @@ pub struct Scene {
     pub(crate) monochrome_sprites: Vec<MonochromeSprite>,
     pub(crate) polychrome_sprites: Vec<PolychromeSprite>,
     pub(crate) backdrops: Vec<Backdrop>,
+    pub(crate) rasters: Vec<Raster>,
+    /// What each of its rasters is of, by its id: a layer's scene, drawn once into a texture of its own by the
+    /// renderer, from `origin` (device pixels) and `size` big.
+    pub(crate) recordings: Vec<Recording>,
+}
+
+/// A layer's scene, as it was drawn (`view::Layer`), which a raster is an image of.
+#[derive(Clone)]
+pub(crate) struct Recording {
+    pub id: u32,
+    pub scene: std::sync::Arc<Scene>,
+    pub origin: [f32; 2],
+    pub size: [u32; 2],
 }
 
 impl Scene {
@@ -33,6 +46,8 @@ impl Scene {
         self.monochrome_sprites.clear();
         self.polychrome_sprites.clear();
         self.backdrops.clear();
+        self.rasters.clear();
+        self.recordings.clear();
     }
 
     pub(crate) fn insert_primitive(&mut self, primitive: impl Into<Primitive>) {
@@ -67,7 +82,56 @@ impl Scene {
                 backdrop.order = order;
                 self.backdrops.push(backdrop.clone());
             }
+            Primitive::Raster(raster) => {
+                raster.order = order;
+                self.rasters.push(raster.clone());
+            }
         }
+    }
+
+    /// Draws `recording` in this scene as an image of it, drawn once, grown `scale` times and moved `by` (`p ↦
+    /// p·scale + by`), `opacity` as opaque, and cut to `mask`, as a compositor draws a layer: as `splice` draws it,
+    /// and as cheaply as one picture however much is in it.
+    pub(crate) fn raster(&mut self, recording: &Recording, scale: f32, by: [f32; 2], opacity: f32, mask: Bounds<ScaledPixels>) {
+        let px = |length: f32| ScaledPixels(length * scale);
+        let origin = crate::geometry::Point { x: ScaledPixels(recording.origin[0] * scale + by[0]), y: ScaledPixels(recording.origin[1] * scale + by[1]) };
+        let bounds = Bounds::new(origin, crate::geometry::Size { width: px(recording.size[0] as f32), height: px(recording.size[1] as f32) });
+        self.insert_primitive(Raster {
+            order: 0,
+            raster: recording.id,
+            opacity,
+            pad: 0,
+            bounds,
+            content_mask: ContentMask { bounds: mask },
+            transformation: TransformationMatrix::unit(),
+        });
+        // What's drawn in it as images is drawn into their textures before it.
+        for inner in recording.scene.recordings.iter().chain([recording]) {
+            if !self.recordings.iter().any(|kept| kept.id == inner.id) {
+                self.recordings.push(inner.clone());
+            }
+        }
+    }
+
+    /// Where everything it draws is, in device pixels, a shadow's blur and all: what a raster of it covers.
+    pub(crate) fn extent(&self) -> Option<Bounds<ScaledPixels>> {
+        let grown = |shadow: &Shadow| {
+            let (margin, bounds) = (3.0 * shadow.blur_radius.0, shadow.bounds);
+            Bounds::new(
+                crate::geometry::Point { x: ScaledPixels(bounds.origin.x.0 - margin), y: ScaledPixels(bounds.origin.y.0 - margin) },
+                crate::geometry::Size { width: ScaledPixels(bounds.size.width.0 + 2.0 * margin), height: ScaledPixels(bounds.size.height.0 + 2.0 * margin) },
+            )
+        };
+        let all = self
+            .shadows
+            .iter()
+            .map(grown)
+            .chain(self.quads.iter().map(|one| one.bounds))
+            .chain(self.underlines.iter().map(|one| one.bounds))
+            .chain(self.monochrome_sprites.iter().map(|one| one.bounds))
+            .chain(self.polychrome_sprites.iter().map(|one| one.bounds))
+            .chain(self.rasters.iter().map(|one| one.bounds));
+        all.reduce(|a, b| a.union(&b))
     }
 
     /// Draws what `other` holds in this scene, in the order it was drawn there, grown `scale` times and moved `by`
@@ -123,6 +187,16 @@ impl Scene {
             (sprite.corner_radii, sprite.opacity) = (corners(&sprite.corner_radii), sprite.opacity * opacity);
             (sprite.order, sprite.into())
         }));
+        all.extend(other.rasters.iter().map(|raster| {
+            let mut raster = raster.clone();
+            (raster.bounds, raster.content_mask, raster.opacity) = (moved(&raster.bounds), masked(&raster.content_mask), raster.opacity * opacity);
+            (raster.order, raster.into())
+        }));
+        for recording in &other.recordings {
+            if !self.recordings.iter().any(|kept| kept.id == recording.id) {
+                self.recordings.push(recording.clone());
+            }
+        }
         all.extend(other.backdrops.iter().map(|backdrop| {
             let mut backdrop = backdrop.clone();
             (backdrop.bounds, backdrop.content_mask, backdrop.corner_radii, backdrop.blur) = (moved(&backdrop.bounds), masked(&backdrop.content_mask), corners(&backdrop.corner_radii), px(backdrop.blur));
@@ -141,6 +215,7 @@ impl Scene {
         self.monochrome_sprites.sort_by_key(|sprite| (sprite.order, sprite.tile.tile_id));
         self.polychrome_sprites.sort_by_key(|sprite| (sprite.order, sprite.tile.tile_id));
         self.backdrops.sort_by_key(|backdrop| backdrop.order);
+        self.rasters.sort_by_key(|raster| raster.order);
     }
 
     pub(crate) fn batches(&self) -> impl Iterator<Item = PrimitiveBatch<'_>> {
@@ -163,6 +238,9 @@ impl Scene {
             backdrops: &self.backdrops,
             backdrops_start: 0,
             backdrops_iter: self.backdrops.iter().peekable(),
+            rasters: &self.rasters,
+            rasters_start: 0,
+            rasters_iter: self.rasters.iter().peekable(),
         }
     }
 }
@@ -176,6 +254,7 @@ pub(crate) enum PrimitiveKind {
     MonochromeSprite,
     PolychromeSprite,
     Backdrop,
+    Raster,
 }
 
 #[derive(Clone)]
@@ -186,6 +265,7 @@ pub(crate) enum Primitive {
     MonochromeSprite(MonochromeSprite),
     PolychromeSprite(PolychromeSprite),
     Backdrop(Backdrop),
+    Raster(Raster),
 }
 
 impl Primitive {
@@ -197,6 +277,7 @@ impl Primitive {
             Primitive::MonochromeSprite(sprite) => &sprite.bounds,
             Primitive::PolychromeSprite(sprite) => &sprite.bounds,
             Primitive::Backdrop(backdrop) => &backdrop.bounds,
+            Primitive::Raster(raster) => &raster.bounds,
         }
     }
 
@@ -208,6 +289,7 @@ impl Primitive {
             Primitive::MonochromeSprite(sprite) => &sprite.content_mask,
             Primitive::PolychromeSprite(sprite) => &sprite.content_mask,
             Primitive::Backdrop(backdrop) => &backdrop.content_mask,
+            Primitive::Raster(raster) => &raster.content_mask,
         }
     }
 }
@@ -231,6 +313,9 @@ struct BatchIterator<'a> {
     backdrops: &'a [Backdrop],
     backdrops_start: usize,
     backdrops_iter: Peekable<slice::Iter<'a, Backdrop>>,
+    rasters: &'a [Raster],
+    rasters_start: usize,
+    rasters_iter: Peekable<slice::Iter<'a, Raster>>,
 }
 
 /// The run of one kind from `start` while each is drawn before `max`, as GPUI batches them.
@@ -258,6 +343,7 @@ impl<'a> Iterator for BatchIterator<'a> {
             (self.monochrome_sprites_iter.peek().map(|s| s.order), PrimitiveKind::MonochromeSprite),
             (self.polychrome_sprites_iter.peek().map(|s| s.order), PrimitiveKind::PolychromeSprite),
             (self.backdrops_iter.peek().map(|b| b.order), PrimitiveKind::Backdrop),
+            (self.rasters_iter.peek().map(|r| r.order), PrimitiveKind::Raster),
         ];
         orders_and_kinds.sort_by_key(|(order, kind)| (order.unwrap_or(u32::MAX), *kind));
 
@@ -269,6 +355,13 @@ impl<'a> Iterator for BatchIterator<'a> {
             PrimitiveKind::Shadow => Some(PrimitiveBatch::Shadows(batch!(self, shadows_iter, shadows_start, shadows, batch_kind, max))),
             PrimitiveKind::Quad => Some(PrimitiveBatch::Quads(batch!(self, quads_iter, quads_start, quads, batch_kind, max))),
             PrimitiveKind::Backdrop => Some(PrimitiveBatch::Backdrops(batch!(self, backdrops_iter, backdrops_start, backdrops, batch_kind, max))),
+            // Each raster its own batch, as each is its own texture.
+            PrimitiveKind::Raster => {
+                let start = self.rasters_start;
+                self.rasters_iter.next();
+                self.rasters_start = start + 1;
+                Some(PrimitiveBatch::Rasters(&self.rasters[start..start + 1]))
+            }
             PrimitiveKind::Underline => {
                 Some(PrimitiveBatch::Underlines(batch!(self, underlines_iter, underlines_start, underlines, batch_kind, max)))
             }
@@ -314,6 +407,7 @@ pub(crate) enum PrimitiveBatch<'a> {
     MonochromeSprites { texture_id: AtlasTextureId, sprites: &'a [MonochromeSprite] },
     PolychromeSprites { texture_id: AtlasTextureId, sprites: &'a [PolychromeSprite] },
     Backdrops(&'a [Backdrop]),
+    Rasters(&'a [Raster]),
 }
 
 #[derive(Default, Debug, Clone)]
@@ -492,5 +586,25 @@ pub(crate) struct Backdrop {
 impl From<Backdrop> for Primitive {
     fn from(backdrop: Backdrop) -> Self {
         Primitive::Backdrop(backdrop)
+    }
+}
+
+/// An image of a layer's scene (`Recording`), drawn once into a texture of its own, drawn `opacity` as opaque in
+/// `bounds`, cut to `content_mask`: what a compositor draws a layer as.
+#[derive(Clone, Debug)]
+#[repr(C)]
+pub(crate) struct Raster {
+    pub order: DrawOrder,
+    pub raster: u32,
+    pub opacity: f32,
+    pub pad: u32,
+    pub bounds: Bounds<ScaledPixels>,
+    pub content_mask: ContentMask<ScaledPixels>,
+    pub transformation: TransformationMatrix,
+}
+
+impl From<Raster> for Primitive {
+    fn from(raster: Raster) -> Self {
+        Primitive::Raster(raster)
     }
 }
