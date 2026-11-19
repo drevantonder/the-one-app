@@ -221,6 +221,8 @@ struct Window {
     dirty: bool,
     moving: bool,
     drawn: bool,
+    /// How many frames running it had nothing to draw on (`Window::missed`).
+    missed: u32,
     /// What its text input plugin was last told.
     text_input: crate::view::TextInputConnection,
     on_event: Box<dyn FnMut(Event)>,
@@ -313,6 +315,7 @@ impl Windows {
                 dirty: true,
                 moving: false,
                 drawn: false,
+                missed: 0,
                 text_input: Default::default(),
                 on_event: Box::new(on_event),
                 tag: options.tag,
@@ -696,7 +699,11 @@ impl Windows {
                 Err(why) => crate::view::paint_message(why, appearance(), room, scale, &mut self.text, &self.atlas, &mut window.scene),
             }
             let glass = window.screen.as_ref().map(|screen| screen.glass().to_vec()).unwrap_or_default();
-            window.arrange(&self.display, &self.context, &self.atlas, &glass);
+            if !window.arrange(&self.display, &self.context, &self.atlas, &glass) {
+                window.missed(&self.context, &self.atlas);
+                continue;
+            }
+            window.missed = 0;
             if std::mem::take(&mut window.placing) {
                 self.display.summon(&window.parts[0].native, &places(window.places.as_deref()), window.room);
             }
@@ -824,7 +831,30 @@ impl Window {
     /// the system's material for (`glass`), or one for all of it until it has, each window's frame and what's drawn in
     /// it put on screen together (`Display::arrange`). A display with no windows of a panel's own keeps one, as big
     /// as its page.
-    fn arrange(&mut self, display: &Display, context: &Context, atlas: &Arc<Atlas>, glass: &[Glass]) {
+    /// It had nothing to draw on this frame, as when its surface is lost (the computer slept, its display changed,
+    /// its GPU was reset): it's drawn again on the next, and after a few such, on a surface made again from its native
+    /// window's, as when the system gives it a new one (`Input::Surface`).
+    fn missed(&mut self, context: &Context, atlas: &Arc<Atlas>) {
+        self.dirty = true;
+        self.moving = true;
+        self.missed += 1;
+        if self.missed < 3 {
+            return;
+        }
+        self.missed = 0;
+        for part in &mut self.parts {
+            if let Some(mut renderer) = part.renderer.take() {
+                renderer.destroy();
+            }
+            match part.native.surface().and_then(|surface| Renderer::new(context, atlas.clone(), surface, part.native.device_size(), part.native.transparent())) {
+                Ok(renderer) => part.renderer = Some(renderer),
+                Err(error) => log::error!("a native window can't draw: {error:#}"),
+            }
+        }
+    }
+
+    /// → whether each of its parts was drawn, which isn't so where one had nothing to draw on (`missed`).
+    fn arrange(&mut self, display: &Display, context: &Context, atlas: &Arc<Atlas>, glass: &[Glass]) -> bool {
         let whole = crate::geometry::Bounds { origin: crate::geometry::point(0.0, 0.0), size: Size { width: self.room().width.0, height: self.room().height.0 } };
         let corner = self.parts[0].radius;
         let mut boxes: Vec<(crate::geometry::Bounds<f32>, f32)> = match self.panel {
@@ -858,13 +888,14 @@ impl Window {
         let scale = self.parts[0].native.scale();
         let placed: Vec<(Handle, crate::geometry::Bounds<f32>, f32)> = self.parts.iter().map(|part| (part.native.handle(), part.bounds, part.radius)).collect();
         let (parts, scene, panel) = (&mut self.parts, &self.scene, self.panel);
+        let mut drawn = true;
         let mut draw = || {
             for part in parts.iter_mut() {
                 let Some(renderer) = part.renderer.as_mut() else { continue };
                 // A panel's part is as big as it was just made (`Display::arrange`), which its window says later.
                 let size = |length: f32| DevicePixels((length * scale).round() as i32);
                 renderer.update_drawable_size(if panel { Size { width: size(part.bounds.size.width), height: size(part.bounds.size.height) } } else { part.native.device_size() });
-                renderer.draw(scene, [(part.bounds.origin.x * scale).round(), (part.bounds.origin.y * scale).round()]);
+                drawn &= renderer.draw(scene, [(part.bounds.origin.x * scale).round(), (part.bounds.origin.y * scale).round()]);
             }
         };
         if self.panel {
@@ -872,6 +903,7 @@ impl Window {
         } else {
             draw();
         }
+        drawn
     }
 }
 

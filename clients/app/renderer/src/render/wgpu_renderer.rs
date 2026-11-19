@@ -479,7 +479,7 @@ impl WgpuRenderer {
     }
 
     /// Draws the box of `scene` whose top left is `origin`, in device pixels, as big as the target.
-    pub fn draw(&mut self, scene: &Scene, origin: [f32; 2]) {
+    pub fn draw(&mut self, scene: &Scene, origin: [f32; 2]) -> bool {
         self.atlas.before_frame();
         let (frame, view, texture) = match &self.target {
             Target::Surface { surface, config } => {
@@ -492,9 +492,10 @@ impl WgpuRenderer {
                     }
                     taken => taken,
                 };
+                // None to draw on now (a window hidden or asleep, a surface lost): it's drawn on the next.
                 let frame = match frame {
                     wgpu::CurrentSurfaceTexture::Success(frame) | wgpu::CurrentSurfaceTexture::Suboptimal(frame) => frame,
-                    _ => return,
+                    _ => return false,
                 };
                 let view = frame.texture.create_view(&wgpu::TextureViewDescriptor::default());
                 let texture = frame.texture.clone();
@@ -683,6 +684,7 @@ impl WgpuRenderer {
         if let Some(frame) = frame {
             self.queue.present(frame);
         }
+        true
     }
 
     /// Writes the frame's data into its buffer, grown to hold it.
