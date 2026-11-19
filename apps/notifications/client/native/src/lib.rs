@@ -1,7 +1,7 @@
 //! Notifications' native code in the app: notifications on this device. The app keeps its person's inbox, and a server tells this client
 //! when something changed, which may be a new one there.
 //!
-//! - A computer shows what's new in the inbox as the system's own notification while the app runs, and a tap on one
+//! - A computer shows what's new in the inbox as the system's own notification while the app runs, and a click on one
 //!   opens the app it's from. One that isn't running shows nothing: its person sees the inbox when they open it.
 //! - A phone is woken by its push service instead, even when the app isn't running, so it gives the app where
 //!   that reaches it, and the key what it's sent is encrypted to. What's sent is opened on the phone before it
@@ -142,9 +142,8 @@ pub fn plugin<R: Runtime>() -> tauri::plugin::TauriPlugin<R> {
 }
 
 /// Shows each notification that reaches the inbox after the app started, as a server says something changed. One
-/// already read, on another device, isn't shown. A tap on one opens the app it's from (`tapped`, with its app's name),
-/// where the system says so: a Linux desktop's notifications do, through their default action. `identifier` is the
-/// app's, which a Mac and Windows show its notifications as.
+/// already read, on another device, isn't shown. A click on one opens the app it's from (`tapped`, with its app's
+/// name). `identifier` is the app's, which a Mac and Windows show its notifications as.
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
 pub async fn listen(client: Arc<Client>, identifier: &str, tapped: impl Fn(String) + Clone + Send + 'static) {
     #[cfg(target_os = "macos")]
@@ -203,7 +202,8 @@ pub async fn listen(client: Arc<Client>, identifier: &str, tapped: impl Fn(Strin
     }
 }
 
-/// Shows one notification, as the system's own, and hears it tapped where the system says (Linux's default action).
+/// Shows one notification, as the system's own, and hears it clicked: a Linux desktop's default action, a Mac's
+/// click and a Windows toast's activation.
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
 fn show(identifier: &str, title: &str, body: &str, opens: Option<String>, tapped: impl Fn(String)) {
     let mut shown = notify_rust::Notification::new();
@@ -215,20 +215,19 @@ fn show(identifier: &str, title: &str, body: &str, opens: Option<String>, tapped
     let _ = identifier;
     #[cfg(target_os = "linux")]
     shown.action("default", "Open");
-    match shown.show() {
-        Ok(_handle) => {
-            eprintln!("showed a notification: {title}");
-            #[cfg(target_os = "linux")]
-            _handle.wait_for_action(|action| {
-                if let ("default", Some(app)) = (action, opens) {
-                    tapped(app)
-                }
-            });
+    let handle = match shown.show() {
+        Ok(handle) => handle,
+        Err(error) => return eprintln!("couldn't show a notification: {error}"),
+    };
+    eprintln!("showed a notification: {title}");
+    let clicked = |response: &notify_rust::NotificationResponse| {
+        if let (notify_rust::NotificationResponse::Default, Some(app)) = (response, opens) {
+            tapped(app)
         }
-        Err(error) => eprintln!("couldn't show a notification: {error}"),
+    };
+    if let Err(error) = handle.wait_for_response(clicked) {
+        eprintln!("a notification's click isn't heard: {error}");
     }
-    #[cfg(not(target_os = "linux"))]
-    let _ = (opens, tapped);
 }
 
 /// The app a notification tapped on a phone opens, by its app's name, as its push plugin says of the tap
