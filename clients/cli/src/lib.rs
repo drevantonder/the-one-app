@@ -65,7 +65,7 @@ pub fn main() -> ExitCode {
 const COMMANDS: &str = "Besides the tools:\n\n\
                            one serve on       makes it a server of yours, which starts whenever it does\n\
                            one serve off      stops it being one, and removes it\n\
-                           one update         takes the latest builds\n\
+                           one update         takes the latest build: this device's, or on a server the network's Update Now\n\
                            one search <words> finds the tools for a task, each with its command\n\
                            one run <file>     runs a script that calls tools, as MCP's execute does\n\
                            one task <id>      says how a tool called with --task is going; --result waits for its answer\n\

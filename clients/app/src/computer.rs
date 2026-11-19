@@ -135,10 +135,13 @@ pub(crate) fn is_launcher(page: &str) -> bool {
 }
 
 /// Opens the launcher natively, where it can be, and tells the main thread which it is (`Told::Native`): where the
-/// device is in its network,. Signing in, it's the web launcher's.
+/// device is in its network,. Signing in, it's the web launcher's. The `one:` link the app was started with, or that
+/// came before, opens once the native launcher has, or is the web launcher's to open.
 async fn prepare() {
+    let mut link = None;
     let opened = async {
         let started = crate::start().await.ok()?;
+        link = started["open"].as_str().map(str::to_owned);
         if started["session"]["state"] == "signIn" {
             return None;
         }
@@ -147,7 +150,14 @@ async fn prepare() {
         *LAUNCHER.lock().expect("nothing panics holding it") = Some(page.clone());
         crate::native::launcher(&page).await
     };
-    tell(Told::Native(opened.await))
+    let opened = opened.await;
+    match (link, opened.is_some()) {
+        (Some(link), true) => crate::spawn(crate::native::go(link, None)),
+        // The web launcher's page asks for it as it starts (`start`).
+        (Some(link), false) => *OPENED.lock().expect("nothing panics holding it") = Some(link),
+        (None, _) => {}
+    }
+    tell(Told::Native(opened))
 }
 
 /// The app was started again: its icon in the Dock or taskbar, which shows the launcher, or a `one:` link it opens.
