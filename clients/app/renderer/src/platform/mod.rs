@@ -31,11 +31,11 @@ mod android;
 #[cfg_attr(not(any(target_os = "android", target_os = "ios")), allow(dead_code))]
 pub(crate) mod rail;
 #[cfg(target_os = "android")]
-use android::{Display, Handle, NativeWindow, appearance, clipboard, reduced_motion};
+use android::{Display, Handle, NativeWindow, appearance, clipboard, reduced_motion, text_size};
 #[cfg(target_os = "ios")]
 pub mod ios;
 #[cfg(target_os = "ios")]
-use ios::{Display, Handle, NativeWindow, appearance, clipboard, reduced_motion};
+use ios::{Display, Handle, NativeWindow, appearance, clipboard, reduced_motion, text_size};
 #[cfg(target_arch = "wasm32")]
 pub mod web;
 #[cfg(target_arch = "wasm32")]
@@ -314,6 +314,7 @@ impl Windows {
             #[cfg(any(target_os = "android", target_os = "ios"))]
             {
                 screen.device = native.device(id);
+                screen.text_size = Some(text_size());
             }
             if let Some(native) = Native::started() {
                 let native = std::sync::Mutex::new(native);

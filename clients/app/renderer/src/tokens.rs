@@ -8,8 +8,8 @@ use std::collections::HashMap;
 
 use crate::geometry::Rgba;
 
-/// What CSS has as 1rem, in pixels.
-const REM: f32 = 16.0;
+/// What CSS has as 1rem, in hundredths of a pixel, where the device has no text size of its own.
+const REM: u16 = 1600;
 
 /// `oklch(L C H)` or `oklch(L C H / A%)`, as sRGB (Björn Ottosson's OKLab, which CSS Color 4 uses).
 #[cfg(not(target_arch = "wasm32"))]
@@ -48,7 +48,7 @@ pub(crate) fn oklch(value: &str) -> Option<Rgba> {
 // /ui/client/tokens.json. A host knows each kind of token and the conditions a value varies by, never a token's name.
 
 /// What a token's value may depend on, as the window is now, in the order they win.
-#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Conditions {
     pub dark: bool,
     pub touch: bool,
@@ -64,6 +64,15 @@ pub struct Conditions {
     /// after its controls and breadcrumb, and from its end, before its controls there. The UI library's
     /// `title-bar-start` and `title-bar-end` lengths are these, where they're not 0, and else its own.
     pub title_bar: [u16; 2],
+    /// What 1rem is, in hundredths of a pixel: a phone's own text size, as an iPhone's browser has it
+    /// (`font: -apple-system-body`), where `phone` holds, and CSS's 16px elsewhere.
+    pub rem: u16,
+}
+
+impl Default for Conditions {
+    fn default() -> Conditions {
+        Conditions { dark: false, touch: false, phone: false, reduced_motion: false, insets: [0; 4], page: 0, title_bar: [0; 2], rem: REM }
+    }
 }
 
 impl Conditions {
@@ -176,9 +185,9 @@ fn varies<'a>(value: &'a serde_json::Value, conditions: Conditions) -> &'a serde
     out
 }
 
-/// A `Length` (`{px}` or `{rem}`), in pixels.
-fn length_of(value: &serde_json::Value) -> Option<f32> {
-    value["px"].as_f64().or_else(|| value["rem"].as_f64().map(|rem| rem * f64::from(REM))).map(|px| px as f32)
+/// A `Length` (`{px}` or `{rem}`), in pixels, as 1rem is where `conditions` hold.
+fn length_of(value: &serde_json::Value, conditions: Conditions) -> Option<f32> {
+    value["px"].as_f64().or_else(|| value["rem"].as_f64().map(|rem| rem * f64::from(conditions.rem) / 100.0)).map(|px| px as f32)
 }
 
 fn rgba_of(value: &serde_json::Value) -> Option<Rgba> {
@@ -221,14 +230,14 @@ impl Table {
             return Some(f32::from(conditions.title_bar[edge]));
         }
         let value = self.value(id, "length", conditions)?;
-        length_of(&value)
+        length_of(&value, conditions)
     }
 
     pub fn radius(&self, id: &str, conditions: Conditions) -> Option<Radius> {
         let value = self.value(id, "radius", conditions)?;
         match value["percent"].as_f64() {
             Some(percent) => Some(Radius::Percent(percent as f32)),
-            None => length_of(&value).map(Radius::Px),
+            None => length_of(&value, conditions).map(Radius::Px),
         }
     }
 
@@ -239,10 +248,10 @@ impl Table {
             .iter()
             .filter_map(|shadow| {
                 Some(Shadow {
-                    x: length_of(&shadow["x"]).unwrap_or(0.0),
-                    y: length_of(&shadow["y"]).unwrap_or(0.0),
-                    blur: length_of(&shadow["blur"]).unwrap_or(0.0),
-                    spread: length_of(&shadow["spread"]).unwrap_or(0.0),
+                    x: length_of(&shadow["x"], conditions).unwrap_or(0.0),
+                    y: length_of(&shadow["y"], conditions).unwrap_or(0.0),
+                    blur: length_of(&shadow["blur"], conditions).unwrap_or(0.0),
+                    spread: length_of(&shadow["spread"], conditions).unwrap_or(0.0),
                     colour: rgba_of(&shadow["colour"])?,
                     inset: shadow["inset"] == true,
                 })
@@ -254,7 +263,7 @@ impl Table {
     /// where the host has one.
     pub fn material(&self, id: &str, conditions: Conditions) -> Option<(f32, f32, bool)> {
         let value = self.value(id, "material", conditions)?;
-        Some((length_of(&value["blur"])?, value["saturate"].as_f64().unwrap_or(1.0) as f32, value["system"] == true))
+        Some((length_of(&value["blur"], conditions)?, value["saturate"].as_f64().unwrap_or(1.0) as f32, value["system"] == true))
     }
 
     pub fn weight(&self, id: &str, conditions: Conditions) -> Option<f32> {
@@ -269,7 +278,7 @@ impl Table {
 
     pub fn type_style(&self, id: &str, conditions: Conditions) -> Option<Type> {
         let value = self.value(id, "type", conditions)?;
-        let size = length_of(varies(&value["size"], conditions))?;
+        let size = length_of(varies(&value["size"], conditions), conditions)?;
         Some(Type {
             size,
             line_height: size * value["lineHeight"].as_f64().unwrap_or(1.5) as f32,

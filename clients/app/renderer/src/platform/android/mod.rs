@@ -15,7 +15,7 @@ use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
 use std::ffi::c_void;
 use std::os::fd::{AsFd, AsRawFd, FromRawFd, OwnedFd};
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
 use std::sync::{Arc, OnceLock, mpsc};
 use std::time::Instant;
 
@@ -52,6 +52,8 @@ static STARTED: OnceLock<Sender> = OnceLock::new();
 /// last said.
 static DARK: AtomicBool = AtomicBool::new(false);
 static REDUCED: AtomicBool = AtomicBool::new(false);
+/// Android's Font size, as the bits of its `fontScale`.
+static FONT_SCALE: AtomicU32 = AtomicU32::new(0x3f80_0000);
 
 /// The windows' thread: the UI thread, once the activity has attached (`NativeHost.attach`).
 pub fn start() -> anyhow::Result<super::Native> {
@@ -64,6 +66,12 @@ pub fn appearance() -> Appearance {
 
 pub fn reduced_motion() -> bool {
     REDUCED.load(Ordering::Relaxed)
+}
+
+/// The text size its person chose, in Display's Font size: an iPhone's body text's 17pt, which the `phone` tokens are
+/// made for, at its scale, so a phone's look is the same on both.
+pub fn text_size() -> f32 {
+    17.0 * f32::from_bits(FONT_SCALE.load(Ordering::Relaxed))
 }
 
 /// Android's clipboard (`ClipboardManager`, through the host), which a keyboard's Ctrl+C and Ctrl+V use; it has no
@@ -433,10 +441,11 @@ fn string(env: &mut JNIEnv, string: &JString) -> String {
 /// The activity is made: the UI thread is the windows' thread from now, and the system is light or dark, with or
 /// without animations.
 #[unsafe(no_mangle)]
-pub extern "system" fn Java_app_theone_renderer_NativeHost_nativeAttach(env: JNIEnv, host: JClass, dark: jboolean, reduced: jboolean) {
+pub extern "system" fn Java_app_theone_renderer_NativeHost_nativeAttach(env: JNIEnv, host: JClass, dark: jboolean, reduced: jboolean, font_scale: jfloat) {
     android_logger::init_once(android_logger::Config::default().with_max_level(log::LevelFilter::Info).with_filter(android_logger::FilterBuilder::new().parse("warn,renderer=info").build()).with_tag("native"));
     DARK.store(dark != 0, Ordering::Relaxed);
     REDUCED.store(reduced != 0, Ordering::Relaxed);
+    FONT_SCALE.store(font_scale.to_bits(), Ordering::Relaxed);
     if STARTED.get().is_some() {
         return;
     }
@@ -485,16 +494,18 @@ pub extern "system" fn Java_app_theone_renderer_NativeHost_nativeAttach(env: JNI
     let _ = STARTED.set(Sender { jobs, wake });
 }
 
-/// The system turned light or dark, or animations were turned on or off.
+/// The system turned light or dark, animations were turned on or off, or the font size changed.
 #[unsafe(no_mangle)]
-pub extern "system" fn Java_app_theone_renderer_NativeHost_nativeAppearance(_: JNIEnv, _: JClass, dark: jboolean, reduced: jboolean) {
+pub extern "system" fn Java_app_theone_renderer_NativeHost_nativeAppearance(_: JNIEnv, _: JClass, dark: jboolean, reduced: jboolean, font_scale: jfloat) {
     DARK.store(dark != 0, Ordering::Relaxed);
     REDUCED.store(reduced != 0, Ordering::Relaxed);
+    FONT_SCALE.store(font_scale.to_bits(), Ordering::Relaxed);
     with_windows(|windows| {
         for window in windows.windows.values_mut() {
             if let Ok(screen) = &mut window.screen {
                 screen.appearance = appearance();
                 screen.reduced_motion = reduced_motion();
+                screen.text_size = Some(text_size());
             }
             window.dirty = true;
         }

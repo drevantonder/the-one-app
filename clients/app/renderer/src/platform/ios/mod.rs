@@ -75,6 +75,11 @@ pub fn appearance() -> Appearance {
     if DARK.load(Ordering::Relaxed) { Appearance::Dark } else { Appearance::Light }
 }
 
+/// The text size its person chose, in Display & Brightness (Dynamic Type): its body text's, 17pt as it comes.
+pub fn text_size() -> f32 {
+    unsafe { device_text_size() as f32 }
+}
+
 /// Reduce Motion, in Accessibility's Motion.
 pub fn reduced_motion() -> bool {
     UIAccessibilityIsReduceMotionEnabled()
@@ -246,6 +251,7 @@ fn with_windows<R>(f: impl FnOnce(&mut Windows) -> R) -> Option<R> {
                 if let Ok(screen) = &mut window.screen {
                     screen.appearance = appearance();
                     screen.reduced_motion = reduced_motion();
+                    screen.text_size = Some(text_size());
                 }
                 window.dirty = true;
             }
@@ -623,7 +629,7 @@ define_class!(
             wake();
         }
 
-        /// The system went light or dark: tao doesn't say it on an iPhone.
+        /// The system went light or dark, or its text size changed: tao doesn't say it on an iPhone.
         #[unsafe(method(traitCollectionDidChange:))]
         fn trait_collection_did_change(&self, previous: Option<&UITraitCollection>) {
             let _: () = unsafe { msg_send![super(self), traitCollectionDidChange: previous] };
@@ -844,6 +850,7 @@ unsafe extern "C" {
     fn device_pick(view: *mut c_void, x: f64, y: f64, width: f64, height: f64, options: *const c_char, chosen: *const c_char, context: *mut c_void, node: i64, picked: extern "C" fn(*mut c_void, i64, *const c_char)) -> bool;
     fn device_share(view: *mut c_void, text: *const c_char) -> bool;
     fn device_haptic(kind: *const c_char) -> bool;
+    fn device_text_size() -> f64;
 }
 
 impl crate::view::Device for Device {

@@ -184,6 +184,8 @@ pub struct Screen {
     pub appearance: Appearance,
     /// The person asked for less motion, as the device says.
     pub reduced_motion: bool,
+    /// The device's own text size, which a phone has, in pixels: 1rem is it, and the `phone` tokens hold.
+    pub text_size: Option<f32>,
     /// Whose own tokens it draws with, as its page's styles gave them (`tokens::load_page`).
     pub page: u32,
     /// What its window says above it, on a computer.
@@ -305,6 +307,7 @@ impl Screen {
             theme: None,
             appearance: Appearance::Light,
             reduced_motion: false,
+            text_size: None,
             page: 0,
             breadcrumb: None,
             panel: None,
@@ -650,7 +653,11 @@ impl Screen {
     fn conditions(&self) -> Conditions {
         let insets = [self.insets.top, self.insets.right, self.insets.bottom, self.insets.left].map(|inset| inset.round().max(0.0) as u16);
         let title_bar = [self.chrome.title_start, if self.chrome.title_start > 0 { 16 } else { 0 }];
-        Conditions { dark: self.dark(), touch: self.touch, reduced_motion: self.reduced_motion, insets, title_bar, page: self.page, ..Conditions::default() }
+        let (phone, rem) = match self.text_size {
+            Some(size) => (true, (size * 100.0).round() as u16),
+            None => (false, Conditions::default().rem),
+        };
+        Conditions { dark: self.dark(), touch: self.touch, phone, reduced_motion: self.reduced_motion, insets, title_bar, page: self.page, rem }
     }
 
     /// Its insets as MCP Apps' host context says them (`safeAreaInsets`).

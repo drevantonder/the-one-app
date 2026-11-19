@@ -17,7 +17,7 @@ import java.util.ArrayList;
 /**
  * Where an activity's native windows are (`renderer::platform::android`): each a view over its content, the newest in
  * front, which Back closes. Its activity attaches it as it's made, which makes the UI thread the native windows'
- * thread, and says when the system turns light or dark, or animations go on or off. Rust calls the rest, on the UI thread.
+ * thread, and says when the system turns light or dark, animations go on or off, or the font size changes. Rust calls the rest, on the UI thread.
  * Kept whole (`@Keep`) as a release build shrinks it: Rust calls it by name.
  */
 @Keep
@@ -37,11 +37,11 @@ public final class NativeHost {
     public static void attach(ComponentActivity activity, Runnable changed) {
         NativeHost.activity = activity;
         NativeHost.changed = changed;
-        nativeAttach(dark(activity), reduced());
+        nativeAttach(dark(activity), reduced(), activity.getResources().getConfiguration().fontScale);
     }
 
     public static void configurationChanged(Context context) {
-        nativeAppearance(dark(context), reduced());
+        nativeAppearance(dark(context), reduced(), context.getResources().getConfiguration().fontScale);
     }
 
     /** Whether a native window is open, which Back closes: an app's, over the launcher's. */
@@ -216,6 +216,6 @@ public final class NativeHost {
         if (changed != null) changed.run();
     }
 
-    private static native void nativeAttach(boolean dark, boolean reduced);
-    private static native void nativeAppearance(boolean dark, boolean reduced);
+    private static native void nativeAttach(boolean dark, boolean reduced, float fontScale);
+    private static native void nativeAppearance(boolean dark, boolean reduced, float fontScale);
 }

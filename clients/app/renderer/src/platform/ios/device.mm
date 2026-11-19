@@ -1,5 +1,5 @@
 // What an iPhone does for a native window's page itself (`Device` in mod.rs): its picker, the pop-up menu a `<select>`
-// opens in Safari, from a button over the picker's box; its share sheet; and its haptics.
+// opens in Safari, from a button over the picker's box; its share sheet; its haptics; and its text size.
 
 #include <string>
 
@@ -92,4 +92,9 @@ extern "C" bool device_haptic(const char* kind) {
     return false;
   }
   return true;
+}
+
+// The text size its person chose (Dynamic Type), as its body text's size in points.
+extern "C" double device_text_size() {
+  return [UIFont preferredFontForTextStyle:UIFontTextStyleBody].pointSize;
 }
