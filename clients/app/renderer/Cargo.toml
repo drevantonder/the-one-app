@@ -142,8 +142,8 @@ objc2-core-foundation = { version = "0.3", default-features = false, features = 
 objc2-core-text = { version = "0.3", default-features = false, features = ["std", "CTFont"] }
 dispatch2 = "0.3"
 objc2 = "0.6"
-objc2-foundation = { version = "0.3", default-features = false, features = ["std", "objc2-core-foundation", "NSArray", "NSGeometry", "NSNotification", "NSObjCRuntime", "NSString"] }
-objc2-quartz-core = { version = "0.3", default-features = false, features = ["std", "objc2-core-foundation", "CALayer", "CAMetalLayer", "CATransaction"] }
+objc2-foundation = { version = "0.3", default-features = false, features = ["std", "objc2-core-foundation", "NSArray", "NSGeometry", "NSNotification", "NSObjCRuntime", "NSObject", "NSRunLoop", "NSString"] }
+objc2-quartz-core = { version = "0.3", default-features = false, features = ["std", "objc2-core-foundation", "CABase", "CALayer", "CAMetalLayer", "CATransaction"] }
 # The display's frames, by a display link (`Display::frame`), as GPUI's Mac platform has them.
 objc2-core-video = { version = "0.3", default-features = false, features = ["std", "CVBase", "CVDisplayLink", "CVReturn"] }
 
@@ -159,6 +159,8 @@ objc2-ui-kit = { version = "0.3", default-features = false, features = ["std", "
 # beside it, as it starts only by calling UIApplicationMain itself.
 tao = { version = "0.37", default-features = false }
 rquickjs = { version = "0.14", features = ["bindgen"] }
+# Its display's frames, by a display link (`Display::frame`).
+objc2-quartz-core = { version = "0.3", default-features = false, features = ["CADisplayLink", "CAFrameRateRange"] }
 
 # Android: a native screen is a SurfaceView over the app's web view (`platform/android`), on the UI thread, whose
 # keyboard bridge (Flutter's) and accessibility delegate (AccessKit's) are Java that calls in through JNI.

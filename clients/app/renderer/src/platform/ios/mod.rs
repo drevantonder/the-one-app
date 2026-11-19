@@ -28,8 +28,8 @@ use std::ffi::{CStr, CString, c_char, c_void};
 use objc2::runtime::{AnyClass, NSObjectProtocol};
 use objc2::{ClassType, MainThreadMarker, MainThreadOnly, define_class, msg_send, sel};
 use objc2_core_foundation::CGAffineTransform;
-use objc2_foundation::{NSNotification, NSNotificationCenter, NSString};
-use objc2_quartz_core::CAMetalLayer;
+use objc2_foundation::{NSNotification, NSNotificationCenter, NSObject, NSRunLoop, NSRunLoopCommonModes, NSString};
+use objc2_quartz_core::{CACurrentMediaTime, CADisplayLink, CAFrameRateRange, CAMetalLayer};
 use objc2_ui_kit::{
     UIAccessibilityIsReduceMotionEnabled, UIAccessibilitySwitchControlStatusDidChangeNotification,
     UIAccessibilityVoiceOverStatusDidChangeNotification, UIApplication, UIPasteboard,
@@ -144,6 +144,9 @@ thread_local! {
     static SLIDES: RefCell<HashMap<WindowId, Slide>> = RefCell::new(HashMap::new());
     /// What each window's text input plugin said, until the windows hear it: it can say it while they're in use.
     static SAID: RefCell<Vec<(WindowId, TextInputClient)>> = const { RefCell::new(Vec::new()) };
+    /// The display link, once a frame's been wanted, and when the display showed the last frame it said.
+    static LINK: RefCell<Option<Retained<CADisplayLink>>> = const { RefCell::new(None) };
+    static FRAMED: Cell<Option<Instant>> = const { Cell::new(None) };
 }
 
 /// One of tao's events, on the main thread: the jobs waiting run, and a native window hears what's said of it. →
@@ -414,15 +417,34 @@ impl Display {
 
     pub fn flush(&self) {}
 
-    /// Whether it says when the display shows each frame: not yet (a CADisplayLink would), so frames come at 60 Hz.
+    /// Whether it says when the display shows each frame: its display link does.
     pub fn paced(&self) -> bool {
-        false
+        true
     }
 
-    pub fn request_frame(&self, _: bool) {}
+    /// Runs the display link while a frame is `wanted`, as fast as the display goes (120 Hz on a ProMotion iPhone),
+    /// and pauses it while none is, as a phone's own apps do: a display link that runs uses power each frame.
+    pub fn request_frame(&self, wanted: bool) {
+        let Some(main) = MainThreadMarker::new() else { return };
+        LINK.with(|link| {
+            let mut link = link.borrow_mut();
+            if link.is_none() && !wanted {
+                return;
+            }
+            let link = link.get_or_insert_with(|| {
+                let ticker: Retained<Ticker> = unsafe { msg_send![Ticker::alloc(main), init] };
+                let made = unsafe { CADisplayLink::displayLinkWithTarget_selector(&ticker, sel!(framed:)) };
+                made.setPreferredFrameRateRange(CAFrameRateRange { minimum: 60.0, maximum: 120.0, preferred: 120.0 });
+                unsafe { made.addToRunLoop_forMode(&NSRunLoop::mainRunLoop(), NSRunLoopCommonModes) };
+                made
+            });
+            link.setPaused(!wanted);
+        });
+    }
 
+    /// When the display showed the frame asked for, once it has.
     pub fn frame(&self) -> Option<std::time::Instant> {
-        None
+        FRAMED.take()
     }
 
     /// What tao says of a window comes in through `event`, not queued here.
@@ -522,6 +544,27 @@ impl NativeWindow {
         Edges { top: points(top), right: points(right), bottom: points(bottom).max(keyboard), left: points(left) }
     }
 }
+
+define_class!(
+    // SAFETY: NSObject has no subclassing requirements, and `Ticker` doesn't implement `Drop`.
+    #[unsafe(super(NSObject))]
+    #[thread_kind = MainThreadOnly]
+    #[name = "OneDisplayLinkTarget"]
+    struct Ticker;
+
+    unsafe impl NSObjectProtocol for Ticker {}
+
+    impl Ticker {
+        /// The display showed a frame: when, on the clock Core Animation's media time is, as `Instant` is (mach's
+        /// continuous time), and the windows' turn for it.
+        #[unsafe(method(framed:))]
+        fn framed(&self, link: &CADisplayLink) {
+            let ago = (CACurrentMediaTime() - link.timestamp()).max(0.0);
+            FRAMED.set(Some(Instant::now() - Duration::from_secs_f64(ago)));
+            with_windows(|_| {});
+        }
+    }
+);
 
 define_class!(
     // SAFETY: UIView has no subclassing requirements, and `Card` doesn't implement `Drop`.
