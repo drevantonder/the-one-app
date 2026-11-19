@@ -314,7 +314,9 @@ function compared(said, them, treeA, treeB, pictureA, pictureB, diff) {
 const browser = await chromium.launch({ args: ["--font-render-hinting=none"] })
 // Our renderer on the web, on WebGPU, which a machine with no GPU has only as SwiftShader's, and whose canvas is put on
 // the page only when the page is composited on the GPU too (ANGLE on SwiftShader), at a phone's two pixels a point.
-const webgpu = await chromium.launch({ args: ["--font-render-hinting=none", "--enable-unsafe-webgpu", "--enable-unsafe-swiftshader", "--enable-gpu", "--use-gl=angle", "--use-angle=swiftshader", "--use-webgpu-adapter=opengles", "--force-device-scale-factor=2"] })
+// One that hangs (SwiftShader's GPU process, under load) is started again, so it takes no other scene with it.
+const webgpuArgs = ["--font-render-hinting=none", "--enable-unsafe-webgpu", "--enable-unsafe-swiftshader", "--enable-gpu", "--use-gl=angle", "--use-angle=swiftshader", "--use-webgpu-adapter=opengles", "--force-device-scale-factor=2"]
+let webgpu = await chromium.launch({ args: webgpuArgs })
 // The renderer's frame, built once for every scene drawn on the web (clients/web/renderer/build.js).
 const rendererFrame = join(out, "renderer")
 const framed = Bun.spawnSync(["bun", join(root, "clients/web/renderer/build.js"), rendererFrame])
@@ -370,7 +372,11 @@ for (const target of targets) {
     mkdirSync(folder, { recursive: true })
     const shown = await dom(browser, serve, `${name}/${scene.name}`, scene, folder).catch((error) => ({ problems: [String(error)] }))
     const drawn = native(built, scene, folder, used)
-    const onWeb = await web(webgpu, serve, `${name}/${scene.name}`, scene, folder).catch((error) => ({ missing: String(error) }))
+    const onWeb = await web(webgpu, serve, `${name}/${scene.name}`, scene, folder).catch(async (error) => {
+      await webgpu.close().catch(() => {})
+      webgpu = await chromium.launch({ args: webgpuArgs })
+      return { missing: String(error) }
+    })
     const said = [`${name} · ${scene.name}`]
     if (shown.problems.length) said.push(`  DOM: ${shown.problems.join("; ")}`)
     if (drawn.missing) said.push(`  native: ${drawn.missing}`)

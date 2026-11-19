@@ -55,7 +55,7 @@
     const spoken = semantics(/** @type {HTMLElement} */ (document.getElementById("semantics")), (id, action) => (seen(`screen reader:${action}`), renderer.act(id, action)))
     const sized = (/** @type {number} */ width, /** @type {number} */ height) => [Math.max(1, Math.round(width)), Math.max(1, Math.round(height))]
     ;[canvas.width, canvas.height] = sized(innerWidth * devicePixelRatio, innerHeight * devicePixelRatio)
-    await renderer.open(canvas, devicePixelRatio, base.href, tables, page.searchParams.get("theme"), matchMedia("(pointer: coarse)").matches, {
+    await renderer.open(canvas, devicePixelRatio, base.href, decodeURIComponent(page.hash.slice(1)), tables, page.searchParams.get("theme"), matchMedia("(pointer: coarse)").matches, {
       post: (/** @type {object} */ message) => parent.postMessage(message, "*"),
       cursor: (/** @type {string} */ cursor) => void (canvas.style.cursor = cursor),
       textInput: (/** @type {[string, unknown][]} */ calls) => calls.forEach(([method, args]) => typing.call(method, args)),
@@ -108,6 +108,13 @@
     addEventListener("blur", () => renderer.focused(false))
     matchMedia("(prefers-color-scheme: dark)").addEventListener("change", ({ matches }) => renderer.appearance_changed(matches))
     canvas.focus()
+    // The page's place in itself, a link's fragment, which its client names after its address in the frame's
+    // (client.js's `load`), and which a native host tells a page as its host context's `link`: as it opens, and as its
+    // client takes it somewhere else in it.
+    addEventListener("hashchange", () => {
+      const link = decodeURIComponent(new URL(location.hash.slice(1), location.href).hash.slice(1))
+      renderer.message({ jsonrpc: "2.0", method: "ui/notifications/host-context-changed", params: { link } })
+    })
     try {
       await import(new URL(script, base).href)
       renderer.started()
