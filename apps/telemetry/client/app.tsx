@@ -297,16 +297,14 @@ function Spending(props: { days: Spent[] }) {
   return (
     <Section heading="AI Spending">
       <Show when={models().length} fallback={<Empty>No AI was used.</Empty>}>
-        <List>
-          <For each={models()}>
-            {(model) => (
-              <Row
-                heading={model.model}
-                text={[`${count(model.input)} in`, `${count(model.output)} out`, model.cost != null && dollars(model.cost)].filter(Boolean).join(" · ")}
-                end={<Show when={model.days.length > 1}><Spark values={model.days} /></Show>}
-              />
-            )}
-          </For>
+        <List each={models()}>
+          {(model) => (
+            <Row
+              heading={model.model}
+              text={[`${count(model.input)} in`, `${count(model.output)} out`, model.cost != null && dollars(model.cost)].filter(Boolean).join(" · ")}
+              end={<Show when={model.days.length > 1}><Spark values={model.days} /></Show>}
+            />
+          )}
         </List>
       </Show>
     </Section>
@@ -349,36 +347,32 @@ function Telemetry(props: { all: Overview }) {
         <Calls steps={all().calls} />
         <Show when={failing().length}>
           <Section heading="Failing">
-            <List>
-              <For each={failing()} keyed={(failure) => `${failure.where}|${failure.message}`}>
-                {(failure) => (
-                  <Row
-                    start={<View style={look.wrong}><Icon name="warning-circle" /></View>}
-                    heading={failure().span ? named(failure().where, all().names) : failure().where}
-                    text={failure().message || "Failed"}
-                    end={`${failure().count > 1 ? `${many(failure().count, "time")} · ` : ""}${since(failure().at, "narrow")}`}
-                    current={!!open()?.failure && keyOf(open()!.failure!) === keyOf(failure())}
-                    onPress={() => setOpen({ failure: failure() })}
-                  />
-                )}
-              </For>
+            <List each={failing()} keyed={(failure) => `${failure.where}|${failure.message}`}>
+              {(failure) => (
+                <Row
+                  start={<View style={look.wrong}><Icon name="warning-circle" /></View>}
+                  heading={failure().span ? named(failure().where, all().names) : failure().where}
+                  text={failure().message || "Failed"}
+                  end={`${failure().count > 1 ? `${many(failure().count, "time")} · ` : ""}${since(failure().at, "narrow")}`}
+                  current={!!open()?.failure && keyOf(open()!.failure!) === keyOf(failure())}
+                  onPress={() => setOpen({ failure: failure() })}
+                />
+              )}
             </List>
           </Section>
         </Show>
         <Show when={slowest().length}>
           <Section heading="Slowest">
-            <List>
-              <For each={slowest()} keyed={(slow) => slow.key}>
-                {(slow) => (
-                  <Row
-                    heading={slowName(slow())}
-                    text={`p95 ${took(slow().p95)} · ${slow().view ? `opened ${many(slow().count, "time")}` : many(slow().count, "call")}${slow().should_be_task ? " · should be a task" : ""}`}
-                    end={<Show when={slow().over_time.filter((v) => v != null).length > 1}><Spark values={slow().over_time} /></Show>}
-                    current={open()?.slow?.key === slow().key}
-                    onPress={() => setOpen({ slow: slow() })}
-                  />
-                )}
-              </For>
+            <List each={slowest()} keyed={(slow) => slow.key}>
+              {(slow) => (
+                <Row
+                  heading={slowName(slow())}
+                  text={`p95 ${took(slow().p95)} · ${slow().view ? `opened ${many(slow().count, "time")}` : many(slow().count, "call")}${slow().should_be_task ? " · should be a task" : ""}`}
+                  end={<Show when={slow().over_time.filter((v) => v != null).length > 1}><Spark values={slow().over_time} /></Show>}
+                  current={open()?.slow?.key === slow().key}
+                  onPress={() => setOpen({ slow: slow() })}
+                />
+              )}
             </List>
           </Section>
         </Show>

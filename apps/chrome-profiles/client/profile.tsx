@@ -1,7 +1,7 @@
 // A Chrome profile, as the Vault draws it beside its list (the item type `vault.types` gives): the extensions installed
 // in it and the pages it visited last, as it was last saved, and updating it yourself: its browser, drawn here, which
 // you click and type on as you would Chrome, then save. `Summary` is its row's line in the Vault's list.
-import { createEffect, createMemo, createSignal, For, Loading, refresh, Show } from "solid-js"
+import { createEffect, createMemo, createSignal, Loading, refresh, Show } from "solid-js"
 import { Button, call, changed, confirm, Empty, Field, Image, Input, List, LiveScreen, Problem, Row, Screen, Section, Sheet, since, Status, Steps, styles, Text, toast, tokens, View } from "ui"
 
 const look = styles({
@@ -195,19 +195,15 @@ export default function ChromeProfile(props: Props) {
             </List>
             <Section heading="Extensions">
               <Show when={p().extensions.length} fallback={<Empty>No extensions.</Empty>}>
-                <List>
-                  <For each={p().extensions} keyed={(e) => e.id}>
-                    {(e) => <Row start={e().icon ? <Image src={e().icon!} alt="" style={look.extension} /> : undefined} heading={e().name} />}
-                  </For>
+                <List each={p().extensions} keyed={(e) => e.id}>
+                  {(e) => <Row start={e().icon ? <Image src={e().icon!} alt="" style={look.extension} /> : undefined} heading={e().name} />}
                 </List>
               </Show>
             </Section>
             <Section heading="History">
               <Show when={p().history.length} fallback={<Empty>{p().saved ? "Nothing visited yet." : "Not saved yet."}</Empty>}>
-                <List>
-                  <For each={p().history} keyed={(h) => `${h.url} ${h.visited}`}>
-                    {(h) => <Row heading={h().title || site(h().url)} text={`${site(h().url)} · ${since(h().visited)}`} />}
-                  </For>
+                <List each={p().history} keyed={(h) => `${h.url} ${h.visited}`}>
+                  {(h) => <Row heading={h().title || site(h().url)} text={`${site(h().url)} · ${since(h().visited)}`} />}
                 </List>
               </Show>
             </Section>

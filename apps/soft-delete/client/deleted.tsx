@@ -1,6 +1,6 @@
 // Recently Deleted: what you deleted in the last 30 days, the latest first, each with how long until it's deleted for
 // good. Restore or Delete Now from a row's menu, and Delete All for everything.
-import { createMemo, Errored, For, Loading, refresh, Show } from "solid-js"
+import { createMemo, Errored, Loading, refresh, Show } from "solid-js"
 import { call, changed, confirm, Empty, List, Menu, Problem, Row, Screen, Skeleton, Spinner, styles, Text, toast, tokens } from "ui"
 
 const look = styles({ note: { color: tokens.colour.secondaryLabel, maxWidth: tokens.length.readable }, wrong: { color: tokens.colour.red } })
@@ -106,30 +106,28 @@ function Deleted(props: { items: Item[] }) {
     <Screen heading="Recently Deleted" back>
       <Show when={props.items.length} fallback={<Empty>Nothing was deleted in the last 30 days.</Empty>}>
         <Text style={look.note}>Deleted for good after 30 days.</Text>
-        <List>
-          <For each={props.items} keyed={(item) => item.item}>
-            {(item) => (
-              <Row
-                heading={heading(item())}
-                text={<Text style={[!!item().why && look.wrong]}>{about(item())}</Text>}
-                onPress={() => ask(item())}
-                end={
-                  <Show when={item().state === "deleted"} fallback={<Spinner />}>
-                    <Menu.Root onSelect={(value) => (value === "restore" ? restore(item()) : purge(item()))}>
-                      <Menu.Trigger aria-label={`More for ${heading(item())}`} />
-                      <Menu.Positioner>
-                        <Menu.Content>
-                          <Menu.Item value="restore">Restore</Menu.Item>
-                          <Menu.Separator />
-                          <Menu.Item value="purge" destructive>Delete Now</Menu.Item>
-                        </Menu.Content>
-                      </Menu.Positioner>
-                    </Menu.Root>
-                  </Show>
-                }
-              />
-            )}
-          </For>
+        <List each={props.items} keyed={(item) => item.item}>
+          {(item) => (
+            <Row
+              heading={heading(item())}
+              text={<Text style={[!!item().why && look.wrong]}>{about(item())}</Text>}
+              onPress={() => ask(item())}
+              end={
+                <Show when={item().state === "deleted"} fallback={<Spinner />}>
+                  <Menu.Root onSelect={(value) => (value === "restore" ? restore(item()) : purge(item()))}>
+                    <Menu.Trigger aria-label={`More for ${heading(item())}`} />
+                    <Menu.Positioner>
+                      <Menu.Content>
+                        <Menu.Item value="restore">Restore</Menu.Item>
+                        <Menu.Separator />
+                        <Menu.Item value="purge" destructive>Delete Now</Menu.Item>
+                      </Menu.Content>
+                    </Menu.Positioner>
+                  </Menu.Root>
+                </Show>
+              }
+            />
+          )}
         </List>
         <Show when={deleted().length}>
           <List>

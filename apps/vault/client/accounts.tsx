@@ -763,16 +763,14 @@ function SecurityScreen() {
         </Show>
         <Section heading="Servers">
           <Text style={look.note}>{`A server that can open ${whom()} Vault runs what uses its secrets.${security().holds ? "" : " Choosing them takes a trusted device."}`}</Text>
-          <List>
-            <For each={security().may}>
-              {(server) => (
-                <Row
-                  heading={server.name ?? "A server"}
-                  text={security().servers.includes(server.key) ? `Opens ${whom()} Vault` : undefined}
-                  end={<Switch aria-label={server.name ?? "A server"} value={security().servers.includes(server.key)} disabled={!security().holds} onValueChange={(on) => choose(server.key, on)} />}
-                />
-              )}
-            </For>
+          <List each={security().may}>
+            {(server) => (
+              <Row
+                heading={server.name ?? "A server"}
+                text={security().servers.includes(server.key) ? `Opens ${whom()} Vault` : undefined}
+                end={<Switch aria-label={server.name ?? "A server"} value={security().servers.includes(server.key)} disabled={!security().holds} onValueChange={(on) => choose(server.key, on)} />}
+              />
+            )}
           </List>
         </Section>
       </Show>
@@ -910,9 +908,7 @@ export default function Accounts() {
           <Show when={ready()}>
             <Section>
               <Show when={items("accounts").length}>
-                <List>
-                  <For each={items("accounts")} keyed={(item) => item.artifact}>{(item) => <ItemRow item={item()} />}</For>
-                </List>
+                <List each={items("accounts")} keyed={(item) => item.artifact}>{(item) => <ItemRow item={item()} />}</List>
               </Show>
               <Show when={creatable("accounts").length}>
                 <List>
@@ -922,9 +918,7 @@ export default function Accounts() {
             </Section>
             <Section heading="Passwords and Keys">
               <Show when={items("passwords").length}>
-                <List>
-                  <For each={items("passwords")} keyed={(item) => item.artifact}>{(item) => <ItemRow item={item()} />}</For>
-                </List>
+                <List each={items("passwords")} keyed={(item) => item.artifact}>{(item) => <ItemRow item={item()} />}</List>
               </Show>
               <List>
                 <Row heading="Keep a password or key for your apps and agents." end={<Button variant="secondary" onPress={() => setSheet({ kind: "field" })}>Add</Button>} />
@@ -941,9 +935,7 @@ export default function Accounts() {
                   }
                 >
                   <Show when={items(`section:${section}`).length} fallback={<Empty>None yet.</Empty>}>
-                    <List>
-                      <For each={items(`section:${section}`)} keyed={(item) => item.artifact}>{(item) => <ItemRow item={item()} />}</For>
-                    </List>
+                    <List each={items(`section:${section}`)} keyed={(item) => item.artifact}>{(item) => <ItemRow item={item()} />}</List>
                   </Show>
                   <Show when={creatable(`section:${section}`).length}>
                     <List>

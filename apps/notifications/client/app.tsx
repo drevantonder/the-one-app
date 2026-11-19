@@ -1,7 +1,7 @@
 // Notifications: what you've been told, newest first. Tapping one marks it read and opens the app it's from. A phone or
 // a browser that isn't woken by them says so first, and why, and a browser turns them on here. Which apps may notify you
 // is in Settings (settings.tsx).
-import { createMemo, Errored, For, Loading, refresh, Show } from "solid-js"
+import { createMemo, Errored, Loading, refresh, Show } from "solid-js"
 import { call, changed, client, confirm, Empty, List, ListStyle, Menu, open, Problem, render, Row, Screen, Section, since, Skeleton, styles, Text, toast, tokens, View } from "ui"
 import { type Push, PushState } from "./push.tsx"
 
@@ -88,18 +88,16 @@ function Inbox(props: { inbox: Inbox }) {
       <Show when={props.inbox.push}>{(push) => <PushState push={push()} settings={props.inbox.settings} again={() => refresh(inbox)} />}</Show>
       <Section>
         <Show when={props.inbox.notifications.length} fallback={<Empty>No notifications.</Empty>}>
-          <List>
-            <For each={props.inbox.notifications}>
-              {(notification) => (
-                <Row
-                  start={<View style={[look.dot, !notification.read && look.blue]} />}
-                  heading={<Text style={!notification.read && look.unread}>{notification.title}</Text>}
-                  text={[notification.from, notification.text].filter(Boolean).join(" · ")}
-                  end={since(notification.at, "narrow")}
-                  onPress={() => tapped(notification)}
-                />
-              )}
-            </For>
+          <List each={props.inbox.notifications}>
+            {(notification) => (
+              <Row
+                start={<View style={[look.dot, !notification.read && look.blue]} />}
+                heading={<Text style={!notification.read && look.unread}>{notification.title}</Text>}
+                text={[notification.from, notification.text].filter(Boolean).join(" · ")}
+                end={since(notification.at, "narrow")}
+                onPress={() => tapped(notification)}
+              />
+            )}
           </List>
         </Show>
       </Section>
