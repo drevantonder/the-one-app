@@ -122,8 +122,9 @@ const looks = styles({
   placed: (start: number, top: number, width: number, height: number, translateX: number, translateY: number, rotate: number, opacity: number) => ({ position: "absolute", start, top, width, height, translateX, translateY, rotate, opacity }),
   installing: { position: "absolute", borderRadius: tokens.radius.full, backgroundColor: tokens.colour.overlay, color: tokens.colour.background, alignItems: "center", justifyContent: "center" },
   minus: { position: "absolute", zIndex: 2, borderRadius: tokens.radius.full, backgroundColor: tokens.colour.secondaryLabel, color: tokens.colour.background, alignItems: "center", justifyContent: "center" },
-  // The App Library: its categories, each a square of its first apps, as many across as fit, and what's found.
-  categories: { flexDirection: "row", flexWrap: "wrap", gap: tokens.grid[5] },
+  // The App Library: its categories, each a square of its first apps, as many across as fit (`shelf`), with the gap
+  // between them in points, as iOS's are, and what's found.
+  categories: (gap: number) => ({ flexDirection: "row", flexWrap: "wrap", gap }),
   category: { alignItems: "center", gap: tokens.grid[1.5], minWidth: 0 },
   folder: { position: "relative", display: "grid", gridTemplateColumns: { repeat: 2 } },
   folderBox: (columnGap: number, rowGap: number, size: number, paddingTop: number, paddingInline: number, paddingBottom: number) => ({ columnGap, rowGap, width: size, height: size, paddingTop, paddingInline, paddingBottom }),
@@ -734,16 +735,19 @@ const openedCategory = (library: Category[], key: string) =>
 const places: Record<string, Rect> = {}
 
 /// The App Library's search, its categories and what it found, laid out for the room it's in: categories as many
-/// across as fit at an iPhone's size, each its icons in a square, whose padding and gaps follow its width.
+/// across as fit at an iPhone's size, two at a phone's least, as iOS's are, each its icons in a square, whose padding
+/// and gaps follow its width. The gap between them is points, not the text's size, which a phone's larger text would
+/// grow past what's left for it, wrapping each row after one.
 function shelf(width: number) {
-  const across = Math.max(2, Math.floor((width + 20) / (152 + 20)))
+  const gap = 20
+  const across = Math.max(2, Math.floor((width + gap) / (152 + gap)))
   // A row of them wraps after `across`: each a 64th of a pixel narrower at most than its share, so rounding never
   // wraps one early.
-  const category = Math.floor(((width - (across - 1) * 20) / across) * 64) / 64
+  const category = Math.floor(((width - (across - 1) * gap) / across) * 64) / 64
   const padding = { top: category * 0.072, inline: category * 0.066, bottom: category * 0.054 }
   const [columnGap, rowGap] = [category * 0.06, category * 0.036]
   const icon = (category - padding.inline * 2 - columnGap) / 2 - 18 - 4
-  return { category, padding, columnGap, rowGap, icon }
+  return { gap, category, padding, columnGap, rowGap, icon }
 }
 
 /// The App Library: one page, which scrolls, as an iPhone's does, with every app you can reach once, whether it's
@@ -779,7 +783,7 @@ function Library(props: { owner: Owner; size?: { width: number; height: number }
   const open = () => (searching() ? !shut() : unfolded())
   // Components, not JSX made again whenever the App Library's asked again: its rows stay, each with its icon.
   const Categories = (inner: { list: Category[]; prefix: string }) => (
-    <View style={looks.categories}>
+    <View style={looks.categories(laid().gap)}>
       <For each={inner.list} keyed={(category) => category.category}>
         {(category) => {
           const key = () => inner.prefix + category().category
