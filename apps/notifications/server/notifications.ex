@@ -58,7 +58,9 @@ defmodule Notifications do
     "create index devices_by_user on devices (user)",
     "create index devices_by_device on devices (device)",
     # Where in its app a tap opens, where it isn't the app's first page.
-    "alter table notifications add column page text"
+    "alter table notifications add column page text",
+    # Or its section in Settings, which is the app's own too.
+    "alter table notifications add column section text"
   ]
 
   # The most of a person's notifications an inbox shows, newest first.
@@ -147,6 +149,11 @@ defmodule Notifications do
               type: "string",
               description:
                 "Where an app notifies, one of its own pages a tap opens instead of its first, and what follows # there: client/index.html#waiting"
+            },
+            section: %{
+              type: "string",
+              description:
+                "Where an app notifies, or one of its own sections in Settings a tap opens, by its component (settings.sections), and what follows # there: devices#waiting=7"
             }
           },
           required: ["title"]
@@ -190,13 +197,14 @@ defmodule Notifications do
                   id: %{type: "integer"},
                   app: %{type: ["string", "null"], description: "The app whose app a tap opens"},
                   page: %{type: ["string", "null"], description: "Its page a tap opens, where it isn't its first"},
+                  opens: %{type: ["string", "null"], description: "What a tap opens, as the UI library's `open` takes it: <app>/<page>#…, or none"},
                   from: %{type: ["string", "null"], description: "What its app is called"},
                   title: %{type: "string"},
                   text: %{type: ["string", "null"]},
                   at: %{type: "string", description: "When, ISO 8601"},
                   read: %{type: "boolean"}
                 },
-                required: ["id", "app", "page", "from", "title", "text", "at", "read"]
+                required: ["id", "app", "page", "opens", "from", "title", "text", "at", "read"]
               }
             }
           },
@@ -331,10 +339,11 @@ defmodule Notifications do
         sent = users -- quiet
 
         for user <- sent do
-          query(db, "insert into notifications (user, app, page, title, text, at) values (?, ?, ?, ?, ?, ?)", [
+          query(db, "insert into notifications (user, app, page, section, title, text, at) values (?, ?, ?, ?, ?, ?, ?)", [
             user,
             app,
             app && inputs["page"],
+            app && inputs["section"],
             title,
             inputs["text"],
             at
@@ -351,7 +360,7 @@ defmodule Notifications do
     # nobody's, or that app's, and a device asks its inbox again only for Notifications'.
     if sent != [], do: Call.changed(call)
     # A phone opens what it's told to as a link to an app's page (`open` in the UI library), its page too.
-    opens = if app && inputs["page"], do: "#{app}/#{inputs["page"]}", else: app
+    opens = opens(app, app && inputs["page"], app && inputs["section"])
     %{sent: sent, muted: quiet, unwoken: push(call, devices, %{title: title, text: inputs["text"], app: opens})}
   end
 
@@ -366,17 +375,35 @@ defmodule Notifications do
         query(
           db,
           """
-          select id, app, page, title, text, at, read from notifications where user = ? and id > ?
+          select id, app, page, section, title, text, at, read from notifications where user = ? and id > ?
           order by id desc limit ?
           """,
           [user, Map.get(inputs, "after", 0), @shown]
         )
 
       names = names(user)
-      shown = Enum.map(notifications, &Map.merge(&1, %{"read" => &1["read"] == 1, "from" => names[&1["app"]]}))
+      shown =
+        for notification <- notifications do
+          {section, notification} = Map.pop(notification, "section")
+          opens = opens(notification["app"], notification["page"], section)
+          Map.merge(notification, %{"read" => notification["read"] == 1, "from" => names[notification["app"]], "opens" => opens})
+        end
+
       %{unread: unread, notifications: shown}
     end)
   end
+
+  # What a tap opens, as the UI library's `open` takes it: the app's section in Settings (`settings.sections`), with
+  # what follows # there after the section's own, its page, or its first. A notification opens only its own app's.
+  defp opens(nil, _page, _section), do: nil
+
+  defp opens(app, _page, section) when is_binary(section) do
+    [component | rest] = String.split(section, "#", parts: 2)
+    "settings/client/index.html#" <> Enum.join(["#{app}/#{component}" | rest], "&")
+  end
+
+  defp opens(app, page, _section) when is_binary(page), do: "#{app}/#{page}"
+  defp opens(app, _page, _section), do: app
 
   def call("read", inputs, call) do
     %{read: changed(call, inputs, "update notifications set read = 1", "No notification is read")}

@@ -13,7 +13,7 @@ Notifications reach a person on their devices and stay in their inbox until they
 - `send` notifies whoever you're asking for, or `to` a user, a group you're in, or the network. Only yourself and
   people you share a group with, or anyone if you own the network, as an app installed for the network does for
   its people; anyone else's refused. An app that sends is the app whose app a tap opens, which can't be
-  chosen, and `page` is one of its own pages it opens instead of its first, with what follows `#` there. A person
+  chosen, and `page` is one of its own pages it opens instead of its first, or `section` one of its own sections in Settings, by its component (`devices#waiting=7`), with what follows `#` there. A person
   or an agent sends as nobody's: nothing opens. It says who was notified, who silenced that app, and any phone
   that wasn't woken.
 - An app notifies with `OneCore.Call.app(call, "notifications").send(call, %{"title" => ...})`, after

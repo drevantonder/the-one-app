@@ -14,6 +14,8 @@ interface Received {
   app?: string
   /// Its app's page a tap opens, where it isn't its first.
   page?: string
+  /// What a tap opens, as `open` takes it: its app's page, or its section in Settings.
+  opens?: string
   at: string
   read: boolean
 }
@@ -57,7 +59,7 @@ async function change(tool: string, input = {}) {
 
 function tapped(notification: Received) {
   if (!notification.read) change("notifications_read", { id: notification.id })
-  if (notification.app) open(notification.page ? `${notification.app}/${notification.page}` : notification.app)
+  if (notification.opens) open(notification.opens)
 }
 
 async function clearAll() {
