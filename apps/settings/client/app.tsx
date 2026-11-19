@@ -77,7 +77,7 @@ changed(() => [added, apps, me].forEach(refresh))
 const src = (icon: string) => icon.replace(/^ui:\/\/([^/]+)\/([^/]+)\//, "../../$1@$2/")
 
 const look = styles({
-  icon: { width: tokens.grid[6], height: tokens.grid[6] },
+  icon: { width: tokens.length.sidebarIcon, height: tokens.length.sidebarIcon },
   /// A group's heading in another section's page: its app's icon and name.
   heading: { flexDirection: "row", alignItems: "center", gap: tokens.grid[2] },
   small: { width: tokens.grid[4], height: tokens.grid[4] },
