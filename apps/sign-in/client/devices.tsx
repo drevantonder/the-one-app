@@ -262,8 +262,8 @@ function Detail(props: { thing: Thing; all: All; groups?: Groups }) {
     await doing(() => client({ serve: now }).then(({ message }) => toast(message)))
     setServing()
   }
-  // A service that runs on some systems only shows on servers of those.
-  const runnable = () => (server()?.services ?? []).filter((service) => !service.os?.length || !system(server()!.target) || service.os.includes(system(server()!.target)!))
+  // A service that runs on some systems only shows on servers of those, and where it's on, so it can be switched off.
+  const runnable = () => (server()?.services ?? []).filter((service) => service.on || !service.os?.length || !system(server()!.target) || service.os.includes(system(server()!.target)!))
   const stage = () => (updating(thing()) ? (thing().server_update_status as keyof typeof updates) : undefined)
   // This device becoming a server, or stopping being one, at the stage the app says.
   const membership = () => (thing().here && thing().kind === "app" ? props.all.here.server : undefined)
