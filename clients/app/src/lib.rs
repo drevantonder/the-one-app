@@ -459,7 +459,14 @@ async fn retry() -> Result<(), String> {
         spawn(opens());
         return Ok(());
     };
-    views.client.retry().await.map_err(|error| error.to_string())
+    let behind = matches!(views.client.state().borrow().connection(), Connection::Behind(_));
+    views.client.retry().await.map_err(|error| error.to_string())?;
+    // A computer's launcher, which was the web one for being behind, is native again.
+    #[cfg(desktop)]
+    if behind {
+        computer::talks();
+    }
+    Ok(())
 }
 
 /// The device is back online or the window in front again, so a client whose network didn't answer asks it again
@@ -501,7 +508,8 @@ async fn start() -> Result<Value, String> {
     if let Some(theme) = *app.chosen.lock().expect("nothing panics holding it") {
         told["theme"] = json!(theme);
     }
-    told["connection"] = json!(session.connection());
+    told["connection"] = connection(&session.connection());
+    told["state"] = state(seq, &session);
     told["open"] = json!(app.shell.opened_at());
     Ok(told)
 }
@@ -572,6 +580,23 @@ fn open_link(url: String) {
             Err(error) => eprintln!("couldn't learn where {url} leads: {error:#}"),
         }
     });
+}
+
+/// Where this device is now, as the window's page hears it (`state`): what it's told of its session (`told`), and
+/// whether its network answers, or its servers say it's behind them.
+fn state(seq: u64, state: &State) -> Value {
+    let mut said = told(seq, state);
+    said["connection"] = json!(state.connection());
+    said
+}
+
+/// Whether its network answers, as a page from before `state` is told it (`connection`, and `start`'s), where a
+/// client that's behind is online and hears `behind` beside it.
+fn connection(connection: &Connection) -> Value {
+    match connection {
+        Connection::Behind(_) => json!("online"),
+        connection => json!(connection),
+    }
 }
 
 /// What the window's page is told of where this device is now: its session, the session's place in the order the
@@ -1078,11 +1103,14 @@ async fn follows(client: Arc<Client>) {
                 app.shell.emit("session", told(seq, &now));
             }
         }
-        // The page was told the connection as it started (`start`), and hears each change of what it's told from there.
+        // The page was told where it is as it started (`start`), and hears each change from there.
+        if was.as_ref() != Some(&now) {
+            app.shell.emit("state", self::state(seq, &now));
+        }
         let (connection, before) = (now.connection(), was.map(|was| was.connection()));
-        if let Some(before) = before.clone().filter(|before| json!(before) != json!(connection)) {
+        if let Some(before) = before.clone().filter(|before| self::connection(before) != self::connection(&connection)) {
             eprintln!("this client's connection: {connection:?}");
-            app.shell.emit("connection", json!(connection));
+            app.shell.emit("connection", self::connection(&connection));
             if connection.answers()
                 && !before.answers()
                 && let Some(views) = app.views.get()

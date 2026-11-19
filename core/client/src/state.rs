@@ -103,7 +103,7 @@ impl std::fmt::Display for State {
 /// Whether a client's network answers, as its state has it (`State`). Its network answers where what the client asks
 /// of it is answered: its address, while the device asks to be let in, and its servers from then on. Whether it lost
 /// its network is which one it is: asking again after it did is `Reconnecting`, never `Connecting`. It's said to a
-/// page as its name (`online`), and a client that's behind is online.
+/// page as its name (`online`, `behind`).
 #[derive(Clone, Debug, PartialEq, Eq, Serialize)]
 #[serde(into = "&'static str")]
 pub enum Connection {
@@ -152,7 +152,8 @@ impl From<Connection> for &'static str {
     fn from(connection: Connection) -> Self {
         match connection {
             Connection::Connecting => "connecting",
-            Connection::Online | Connection::Behind(_) => "online",
+            Connection::Online => "online",
+            Connection::Behind(_) => "behind",
             Connection::Offline => "offline",
             Connection::Reconnecting => "reconnecting",
         }

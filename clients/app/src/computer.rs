@@ -54,6 +54,9 @@ pub(crate) enum Told {
     Resize(Option<f64>, Option<f64>),
     /// Loads its page again, as the device's session starts again.
     Reload,
+    /// Its servers talk with it again after they said it was behind, which made it the web launcher (`native`): which
+    /// launcher it is is decided again, the native one where it can be.
+    Talks,
     /// Opens a `one:` link.
     Open(String),
     /// Runs on the main thread, as AppKit's calls must.
@@ -111,6 +114,11 @@ pub(crate) fn unnative(why: String) {
 /// Why this device's native windows couldn't start, if they couldn't (`unnative`).
 pub(crate) fn unnatived() -> Option<String> {
     UNNATIVE.lock().expect("nothing panics holding it").clone()
+}
+
+/// Its servers talk with it again: a launcher that's the web one for being behind them is native again (`Told::Talks`).
+pub(crate) fn talks() {
+    tell(Told::Talks)
 }
 
 /// The native launcher's page was updated: it opens again, on its new version.
@@ -466,8 +474,9 @@ fn launcher(home: std::path::PathBuf, link: Option<String>, started: std::time::
                 decided = false;
                 crate::spawn(prepare());
             }
+            Event::UserEvent(Told::Talks) if native.is_some() || !decided => {}
             // Its page is made again, and may be native now.
-            Event::UserEvent(Told::Reload) => {
+            Event::UserEvent(Told::Reload | Told::Talks) => {
                 page_started.store(false, Ordering::Relaxed);
                 page = None;
                 decided = false;
