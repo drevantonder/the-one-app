@@ -97,8 +97,8 @@ public final class NativeView extends SurfaceView implements SurfaceHolder.Callb
     }
 
     /**
-     * Android's picker for picker node `node`: a dialog of its options that can be chosen, the one chosen ticked, as
-     * Chrome's `<select>` opens. What's chosen goes back to Rust (`nativePicked`).
+     * Android's picker for picker node `node`: Material 3's dialog of its options that can be chosen, the one chosen
+     * ticked, as Chrome's `<select>` opens. What's chosen goes back to Rust (`nativePicked`).
      */
     private void pick(JSONObject pick) throws org.json.JSONException {
         JSONArray options = pick.getJSONArray("options");
@@ -114,7 +114,7 @@ public final class NativeView extends SurfaceView implements SurfaceHolder.Callb
             values.add(value);
         }
         long node = pick.getLong("node");
-        new android.app.AlertDialog.Builder(getContext())
+        new com.google.android.material.dialog.MaterialAlertDialogBuilder(getContext())
             .setSingleChoiceItems(labels.toArray(new String[0]), checked, (dialog, which) -> {
                 dialog.dismiss();
                 nativePicked(id, node, values.get(which));
