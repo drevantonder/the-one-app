@@ -129,6 +129,9 @@ pub struct Text {
     /// Whether lines wrap at its box's width, or run on (`whiteSpace: nowrap`).
     pub wrap: bool,
     pub underline: bool,
+    /// Whether its words can be selected and copied, as the DOM's text can unless `userSelect: none` says, which
+    /// what's in it inherits, as a browser's `user-select: auto` does.
+    pub selectable: bool,
 }
 
 impl Text {
@@ -249,6 +252,7 @@ pub(crate) struct TextChange {
     align: Option<f32>,
     wrap: Option<bool>,
     underline: Option<bool>,
+    selectable: Option<bool>,
 }
 
 impl Text {
@@ -279,6 +283,9 @@ impl Text {
         if let Some(underline) = change.underline {
             out.underline = underline;
         }
+        if let Some(selectable) = change.selectable {
+            out.selectable = selectable;
+        }
         out
     }
 
@@ -286,7 +293,7 @@ impl Text {
     pub fn root(conditions: Conditions) -> (Text, Option<Hsla>) {
         let root = serde_json::json!({"backgroundColor": {"token": "background"}, "color": {"token": "label"}, "font": {"token": "type-body"}});
         let computed = computed(root.as_object().expect("it's an object"), conditions);
-        let base = Text { style: TextStyle { size: 16.0, weight: 400, tracking: 0.0, line_height: 24.0, tabular: false, mono: false }, color: Hsla::default(), align: 0.0, wrap: true, underline: false };
+        let base = Text { style: TextStyle { size: 16.0, weight: 400, tracking: 0.0, line_height: 24.0, tabular: false, mono: false }, color: Hsla::default(), align: 0.0, wrap: true, underline: false, selectable: true };
         (base.with(&computed), computed.look.background)
     }
 }
@@ -592,6 +599,11 @@ fn computed(style: &Map<String, Value>, conditions: Conditions) -> Computed {
         },
         wrap: word("whiteSpace").map(|white_space| white_space != "nowrap"),
         underline: word("textDecorationLine").map(|line| line == "underline"),
+        selectable: match word("userSelect") {
+            Some("none") => Some(false),
+            Some("text") => Some(true),
+            _ => None,
+        },
     };
     let properties: Vec<String> = get("transitionProperty").and_then(Value::as_array).into_iter().flatten().filter_map(Value::as_str).map(str::to_owned).collect();
     let motion = get("transition").and_then(token_of).and_then(|(token, _)| table().motion(token, conditions));

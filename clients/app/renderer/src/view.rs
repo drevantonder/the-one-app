@@ -29,6 +29,7 @@ pub use bridge::TextInputConnection;
 mod frames;
 mod paint;
 mod pictures;
+mod selection;
 pub use frames::Make as MakeFrame;
 pub(crate) mod inspected;
 mod transition;
@@ -911,6 +912,8 @@ impl Screen {
             scrolled: &mut self.scrolled,
             fields: &self.editing.fields,
             drawn: &mut self.editing.drawn,
+            texts: &mut self.editing.texts,
+            selected: self.editing.selected.map(|selected| (selected.id, selected.range())),
             caret,
             pictures: &mut self.pictures,
             fetched: &self.fetched,
@@ -1240,6 +1243,7 @@ impl Screen {
             None => chain,
         };
         self.pointer_event(&target, "pointermove", at, 0, None);
+        self.select_moved(at);
         // A press held in an input selects as it's dragged.
         if let Some(id) = self.editing.selecting
             && let (Some(field), Some(drawn)) = (self.editing.fields.get_mut(&id), self.editing.drawn.get(&id))
@@ -1354,14 +1358,18 @@ impl Screen {
         self.changed();
         self.states.focus_visible = false;
         self.click_focus(&chain);
+        // Presses close together in time and place count as a double or triple click, by GTK's defaults.
+        let now = Instant::now();
+        let clicks = match self.editing.last_press {
+            Some((when, was, clicks)) if now - when < Duration::from_millis(400) && (was.x - at.x).abs() < 5.0 && (was.y - at.y).abs() < 5.0 => (clicks + 1).min(3),
+            _ => 1,
+        };
+        self.editing.last_press = Some((now, at, clicks));
+        // Text that's neither a field nor in something pressed is selected from here, by a pointer (a finger drags to
+        // scroll); a press anywhere else lets go of what was.
+        let text = (pressed.is_none() && !self.touch).then(|| chain.iter().copied().find(|id| self.editing.texts.contains_key(id))).flatten();
+        self.select_down(text, at, clicks);
         if let Some(input) = input {
-            // Presses close together in time and place count as a double or triple click, by GTK's defaults.
-            let now = Instant::now();
-            let clicks = match self.editing.last_press {
-                Some((when, was, clicks)) if now - when < Duration::from_millis(400) && (was.x - at.x).abs() < 5.0 && (was.y - at.y).abs() < 5.0 => (clicks + 1).min(3),
-                _ => 1,
-            };
-            self.editing.last_press = Some((now, at, clicks));
             self.editing.selecting = Some(input);
             self.press_input(input, at, clicks, shift);
         }
@@ -1400,6 +1408,7 @@ impl Screen {
             None => self.under(at),
         };
         self.pointer_event(&target, "pointerup", at, button, None);
+        self.select_up();
         // What the pointer selected goes on the primary selection, as Linux's fields put it, never a password.
         if let Some(field) = self.editing.selecting.take().and_then(|id| self.editing.fields.get(&id))
             && !field.secure
@@ -1594,6 +1603,10 @@ impl Screen {
         let presses = plain && matches!(key.key.as_str(), "Enter" | " ") && focused.is_some_and(|id| matches!(id, HOME | NOTICE_ACTION) || (!self.editing.fields.contains_key(&id) && self.tree.nodes.get(&id).is_some_and(|node| node.listens("click"))));
         if !presses {
             self.tell(PAGE, "keydown", key.told());
+        }
+        // What's selected of a text that isn't a field is copied, as a browser's is.
+        if self.copy_selected(key) {
+            return focused;
         }
         let id = focused?;
         // Escape empties a search field with something typed in it, as a browser's `type="search"` does.
@@ -1793,6 +1806,10 @@ impl Screen {
         self.editing.set.retain(|id, _| input(id));
         self.editing.edits.retain(|id, _| input(id));
         self.editing.drawn.retain(|id, _| input(id));
+        self.editing.texts.retain(|id, _| tree.nodes.contains_key(id));
+        if self.editing.selected.is_some_and(|selected| !tree.nodes.contains_key(&selected.id)) {
+            self.editing.selected = None;
+        }
         for id in tree.inputs() {
             let node = &tree.nodes[&id];
             let field = self.editing.fields.entry(id).or_default();
@@ -1901,6 +1918,11 @@ struct Editing {
     selecting: Option<Id>,
     last_press: Option<(Instant, Point<f32>, u8)>,
     blink: f64,
+    /// Each selectable text as it was last drawn, what's selected of one, and whether a press is selecting
+    /// (`selection`).
+    texts: HashMap<Id, selection::Shown>,
+    selected: Option<selection::Selected>,
+    selecting_text: bool,
 }
 
 /// What the window draws of its own over its page, as it was last drawn: where its page's top bar starts in its title

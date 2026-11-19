@@ -278,6 +278,9 @@ pub(super) struct Painter<'a> {
     pub(super) scrolled: &'a mut HashMap<Id, Point<f32>>,
     pub(super) fields: &'a HashMap<Id, Field>,
     pub(super) drawn: &'a mut HashMap<Id, Drawn>,
+    /// Each selectable text as it's drawn, and what's selected of one: its node, start and end (`selection`).
+    pub(super) texts: &'a mut HashMap<Id, super::selection::Shown>,
+    pub(super) selected: Option<(Id, (usize, usize))>,
     /// The caret shows in this frame, as it blinks.
     pub(super) caret: bool,
     pub(super) pictures: &'a mut pictures::Pictures,
@@ -878,6 +881,24 @@ impl Painter<'_> {
                     }
                     paragraph
                 });
+                // Selectable, it's kept as it's drawn, and what's selected of it is tinted behind its words.
+                if text.selectable {
+                    let words = match &self.layout.leaf(taffy_node).measure {
+                        Some(Measure::Text { words, .. }) => words.clone(),
+                        _ => String::new(),
+                    };
+                    let shown = super::selection::Shown { paragraph: paragraph.clone(), words, content, width, grown: transform.scale, align: text.align };
+                    if let Some((_, (start, end))) = self.selected.filter(|(on, (start, end))| *on == id && start < end) {
+                        let (tint, line_height) = (colour_token("blue", self.conditions).opacity(0.3), paragraph.line_height * transform.scale);
+                        for (line, x0, x1) in paragraph.spans(start, end) {
+                            let bounds = Bounds { origin: point(shown.left(line) + x0 * transform.scale, content.origin.y + line as f32 * line_height), size: Size { width: (x1 - x0) * transform.scale, height: line_height } };
+                            self.quad(bounds, mask, tint, Edges::default(), Hsla::default(), Corners::default(), false, opacity);
+                        }
+                    }
+                    self.texts.insert(id, shown);
+                } else {
+                    self.texts.remove(&id);
+                }
                 // Words that don't show aren't drawn: their lines start at its content's left and run on to the right.
                 let size = paragraph.size();
                 let covers = Bounds { origin: content.origin, size: Size { width: size.width.max(width) * transform.scale, height: size.height * transform.scale } };
@@ -1176,7 +1197,7 @@ impl Painter<'_> {
         self.picture(&crumb.ring, Bounds { origin: point(x + pad, middle - icon / 2.0), size: Size { width: icon, height: icon } }, 0.0);
         let home_colour = if hovered { colour("label") } else { colour("secondary-label") };
         let words_at = |paragraph: &Paragraph, x: f32| Bounds { origin: point(x, middle - paragraph.size().height / 2.0), size: paragraph.size() };
-        let text = Text { style: home_style, color: home_colour, align: 0.0, wrap: false, underline: false };
+        let text = Text { style: home_style, color: home_colour, align: 0.0, wrap: false, underline: false, selectable: false };
         self.paint_text(&home_words, &[], words_at(&home_words, x + pad + icon + gap), home_words.size().width.ceil(), 1.0, text, 1.0, window);
         x = home.origin.x + home.size.width + 4.0;
         // A muted /.
@@ -1211,7 +1232,7 @@ impl Painter<'_> {
         self.quad(pill, window, colour("label"), Edges::default(), Hsla::default(), Corners::all(height / 2.0), false, 1.0);
         let middle = pill.origin.y + height / 2.0;
         let words_at = |paragraph: &Paragraph, x: f32| Bounds { origin: point(x, middle - paragraph.size().height / 2.0), size: paragraph.size() };
-        let text = Text { style: words_style, color: colour("background"), align: 0.0, wrap: false, underline: false };
+        let text = Text { style: words_style, color: colour("background"), align: 0.0, wrap: false, underline: false, selectable: false };
         self.paint_text(&words, &[], words_at(&words, pill.origin.x + pad), words.size().width.ceil(), 1.0, text, 1.0, window);
         let action = action?;
         let x = pill.origin.x + pad + words.size().width.ceil() + gap;
