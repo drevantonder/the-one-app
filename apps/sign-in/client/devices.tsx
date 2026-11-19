@@ -8,7 +8,7 @@
 // each stage. Above them all are the devices waiting to sign in as whoever's looking, each let in by typing the
 // number it shows, as Microsoft Authenticator has it, or blocked.
 import { createMemo, createSignal, Errored, For, Loading, refresh, Show } from "solid-js"
-import { Badge, Box, Button, call, changed, client, confirm, Empty, Field, haptic, Icon, Input, link, List, Problem, Row, Screen, Section, seen, Sheet, Skeleton, Spinner, Split, Steps, styles, Switch, Text, toast, tokens, type Element } from "ui"
+import { Badge, Button, call, changed, client, confirm, type Element, Empty, Field, haptic, Icon, Input, link, List, Problem, Row, Screen, Section, seen, Sheet, Skeleton, Spinner, Split, Steps, styles, Switch, Text, toast, tokens, View } from "ui"
 import { on } from "./mine.tsx"
 
 /** A build a machine is on, as `builds` answers it. */
@@ -268,20 +268,20 @@ function Detail(props: { thing: Thing; all: All; groups?: Groups }) {
     <Screen heading={thing().name ?? "Server"} back>
       <Show when={stage()}>
         <Section heading="Updating">
-          <Box style={look.updating}>
+          <View style={look.updating}>
             <Steps
               steps={Object.values(updates).map(({ step }) => step)}
               at={Object.keys(updates).indexOf(stage()!)}
               text={stage() === "verifying" ? "If it doesn't start, it goes back to the version it had." : stage() === "checked" ? "It installs when Software Update gets to it." : undefined}
             />
-          </Box>
+          </View>
         </Section>
       </Show>
       <Show when={steps()}>
         <Section heading={membership()!.server_membership === "joining" ? "Becoming a server" : "Stopping being a server"}>
-          <Box style={look.updating}>
+          <View style={look.updating}>
             <Steps steps={Object.values(steps()!)} at={Math.max(0, Object.keys(steps()!).indexOf(membership()!.server_membership_stage ?? ""))} />
-          </Box>
+          </View>
         </Section>
       </Show>
       <Show when={(thing().behind && thing().here) || (thing().here && thing().kind === "app") || (!thing().kind && thing().server_membership)}>
@@ -405,23 +405,23 @@ function Answer(props: { device?: Waiting }) {
           const [error, setError] = createSignal<string>()
           const yes = () => (number().length === 2 ? answer(device(), Number(number())) : setError(`Enter the 2 digits showing on ${device().name}.`))
           return (
-            <Box style={look.answer}>
+            <View style={look.answer}>
               <Field label={`Enter the number showing on ${device().name}`} error={error()}>
                 <Input
                   name="number"
-                  inputmode="numeric"
-                  autocomplete="off"
+                  inputMode="numeric"
+                  autoComplete="off"
                   required
-                  autofocus
+                  autoFocus
                   value={number()}
-                  onInput={(event) => (setNumber(event.currentTarget.value.replace(/[^0-9]/g, "").slice(0, 2)), setError())}
-                  onAction={yes}
+                  onChangeText={(text) => (setNumber(text.replace(/[^0-9]/g, "").slice(0, 2)), setError())}
+                  onSubmitEditing={yes}
                   style={look.number}
                 />
               </Field>
               <Button onClick={yes}>Yes</Button>
               <Button variant="outline" onClick={() => answer(device())}>Not Me</Button>
-            </Box>
+            </View>
           )
         }}
       </Show>
@@ -433,9 +433,9 @@ function Answer(props: { device?: Waiting }) {
 /// browser, an assistant or a server.
 const glyphs = { app: "devices", browser: "globe", assistant: "robot", server: "hard-drives" } as const
 const Glyph = (props: { thing: Thing }) => (
-  <Box style={look.glyph}>
+  <View style={look.glyph}>
     <Icon name={glyphs[props.thing.kind ?? "server"]} />
-  </Box>
+  </View>
 )
 
 function Things(props: { all: All; groups?: Groups }) {
