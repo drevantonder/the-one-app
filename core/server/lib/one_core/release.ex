@@ -132,7 +132,7 @@ defmodule OneCore.Release do
   @doc """
   Keeps what changed of this server, `said`, as the program keeping it running says it, or as it stops. It's said in
   `builds` and at the network's edge, even where the edge or the bucket can't be reached just now, and whoever waits
-  for it (`await/1`) and the clients watching are told.
+  for it (`await/1`) is told, as `OneCore.Apps` is, which tells the clients watching.
   """
   def told(said) do
     was = status()
@@ -149,8 +149,6 @@ defmodule OneCore.Release do
       Registry.dispatch(OneCore.Waiting, :status, fn waiting ->
         for {process, _} <- waiting, do: send(process, :status)
       end)
-
-      OneCore.Apps.changed()
     end
   rescue
     error -> Logger.warning("Couldn't say what changed of this server: #{Exception.message(error)}")
@@ -194,7 +192,6 @@ defmodule OneCore.Release do
   def instructed(update) do
     if update != network() do
       :persistent_term.put({__MODULE__, :network}, update)
-      OneCore.Apps.changed()
       # The apps watching this server hear it too, as each takes a newer build of itself, or of its page, by itself.
       Server.tell("update", update)
 
@@ -208,7 +205,10 @@ defmodule OneCore.Release do
     at = status["server_update_status"]
     next = %{"build" => status["next_build"], "program" => status["next_program"]}
     checked = at == "checked" and on?({build, program}, next)
-    behind = (at == "up_to_date" and not on?({build, program}, Map.put(status, "build", Builds.build()))) or (at == "checked" and not checked)
+
+    behind =
+      (at == "up_to_date" and not on?({build, program}, Map.put(status, "build", Builds.build()))) or
+        (at == "checked" and not checked)
 
     # Said once until the program says it began, though the updater says it again to every server as each moves on.
     asked = :persistent_term.get({__MODULE__, :asked}, nil) == {build, program}
@@ -241,7 +241,8 @@ defmodule OneCore.Release do
   end
 
   @doc "Whether a server on the pair `server`, its `build` and `program`, is on `target`, any `one` where either doesn't say."
-  def on?({build, program}, server), do: server["build"] == build and (program == nil or server["program"] in [nil, program])
+  def on?({build, program}, server),
+    do: server["build"] == build and (program == nil or server["program"] in [nil, program])
 
   # How long Update Now waits for the network's update to finish, in milliseconds: a restart is seconds, and each server
   # restarts in turn.
@@ -352,16 +353,5 @@ defmodule OneCore.Release do
         do: OneCore.Nif.build(module)
 
     say(%{"checked" => %{"build" => Builds.build()}})
-  end
-
-  @doc """
-  Has the UI library this server serves be the build in `folder`, and the apps built against another built again, by
-  the server that builds them: as a local network's code reloader has it, as it changes.
-  """
-  def ui(folder) do
-    Application.put_env(:one_core, :ui, folder)
-    :persistent_term.erase({OneCore.Entrypoint, :library})
-    {:ok, _pid} = Task.Supervisor.start_child(OneCore.Asks, &OneCore.Apps.Deploy.rebuild/0)
-    :ok
   end
 end

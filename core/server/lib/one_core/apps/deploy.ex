@@ -413,6 +413,17 @@ defmodule OneCore.Apps.Deploy do
   end
 
   @doc """
+  Has the UI library this server serves be the build in `folder`, and the apps built against another built again, by
+  the server that builds them: as a local network's code reloader has it, as it changes.
+  """
+  def ui(folder) do
+    Application.put_env(:one_core, :ui, folder)
+    :persistent_term.erase({OneCore.Entrypoint, :library})
+    {:ok, _pid} = Task.Supervisor.start_child(OneCore.Asks, &rebuild/0)
+    :ok
+  end
+
+  @doc """
   Builds again, from its source, the app of each app anyone has deployed that was built against another UI library
   than this server's, installed or not, as a server acting for whoever the app is, as they would deploy it again.
   A server does it once it's up, on a build no published server build is newer than: so a server release rebuilds

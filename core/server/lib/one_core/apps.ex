@@ -319,6 +319,9 @@ defmodule OneCore.Apps do
   @impl true
   def init(nil) do
     Hooks.keep()
+    # What this server is changing, and the network's update, are told to the clients watching (`changed/2`).
+    Registry.register(OneCore.Waiting, :status, nil)
+    Registry.register(OneCore.Waiting, :network, nil)
     {:ok, %{installed: %{}, reloaded: %{}, running: %{}, latest: %{}, described: %{}, syncs: %{}}, {:continue, :start}}
   end
 
@@ -467,6 +470,11 @@ defmodule OneCore.Apps do
   end
 
   @impl true
+  def handle_info(changed, state) when changed in [:status, :network] do
+    changed()
+    {:noreply, state}
+  end
+
   def handle_info({ref, any}, state) when is_reference(ref) do
     Process.demonitor(ref, [:flush])
     if sync?(state, ref), do: {:noreply, done(state, ref, any)}, else: {:noreply, state}

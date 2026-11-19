@@ -16,14 +16,14 @@ defmodule CodeReloader do
     what only starting builds again, as a supervisor's children, is the code before until the network starts again.
     One Core's NIFs aren't loaded: where one changed, the request is refused, saying the network starts again for it.
   - The UI library (`core/ui`), where a file of it changed, is built again and is the one every server serves, as a
-    release's is (`OneCore.Release.ui/1`).
+    release's is (`OneCore.Apps.Deploy.ui/1`).
   - An app of this repo whose files changed is deployed for the network again, as `one deploy --files-from` deploys
     it. A request is refused with why it didn't deploy.
 
   The deps and the config are built as the network starts again. Its compilers' output is its log.
   """
   use GenServer
-  alias OneCore.{Folder, Release}
+  alias OneCore.Folder
   alias OneCore.Apps.Deploy
 
   @root Path.expand("..", __DIR__)
@@ -160,7 +160,7 @@ defmodule CodeReloader do
   defp ui_built(ui, state) do
     case System.cmd("bun", ["build.js"], cd: Path.join(@root, "core/ui"), stderr_to_stdout: true) do
       {_output, 0} ->
-        for server <- state.servers, do: :ok = :erpc.call(server, Release, :ui, [Path.join(@root, "core/ui/dist")])
+        for server <- state.servers, do: :ok = :erpc.call(server, Deploy, :ui, [Path.join(@root, "core/ui/dist")])
         Mix.shell().info("Built the UI library")
         {:ok, %{state | ui: ui}}
 
