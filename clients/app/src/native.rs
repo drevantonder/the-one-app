@@ -154,10 +154,17 @@ async fn probe(entrypoint: &str, subject: Option<&str>, framed: bool) -> anyhow:
     let html = crate::hosts::file(page.as_str()).await.map_err(|error| anyhow::anyhow!(error))?;
     let html = BASE64.decode(html["body"].as_str().unwrap_or_default().as_bytes())?;
     let module = module_script(&String::from_utf8_lossy(&html)).ok_or_else(|| anyhow::anyhow!("its page loads no module"))?;
-    // Its tables, each needing a runtime version this program has, or it's a web view's: the UI library's, and its
-    // app's styles, which its build writes beside every page (`core/ui/app.js`).
+    // Its tables: the UI library's, and its app's styles, which its build writes beside every page (`core/ui/app.js`).
+    let Some(tables) = tables(&[page.join("/ui/client/tokens.json")?, page.join("/ui/client/styles.json")?, page.join("styles.json")?]).await? else { return Ok(None) };
+    let name = resource["name"].as_str().filter(|name| !name.is_empty()).map(str::to_owned);
+    Ok(Some(Page { module: page.join(&module)?, page, trusted, tables, name, icon }))
+}
+
+/// The tables at `addresses`, or none where one needs a runtime version this program hasn't, so its page is a web
+/// view's.
+async fn tables(addresses: &[Url]) -> anyhow::Result<Option<Vec<String>>> {
     let mut tables = Vec::new();
-    for table in [page.join("/ui/client/tokens.json")?, page.join("/ui/client/styles.json")?, page.join("styles.json")?] {
+    for table in addresses {
         let file = crate::hosts::file(table.as_str()).await.map_err(|error| anyhow::anyhow!("{table} didn't load: {error}"))?;
         let file = BASE64.decode(file["body"].as_str().unwrap_or_default().as_bytes())?;
         let text = String::from_utf8(file)?;
@@ -167,8 +174,17 @@ async fn probe(entrypoint: &str, subject: Option<&str>, framed: bool) -> anyhow:
         }
         tables.push(text);
     }
-    let name = resource["name"].as_str().filter(|name| !name.is_empty()).map(str::to_owned);
-    Ok(Some(Page { module: page.join(&module)?, page, trusted, tables, name, icon }))
+    Ok(Some(tables))
+}
+
+/// The client's own page (`RECOVERY`), drawn with the UI library as an app's page is, which it loads as one does, and
+/// no styles of its own.
+async fn client_page() -> anyhow::Result<Page> {
+    let module = Url::parse(RECOVERY)?;
+    let Some(tables) = tables(&[module.join("/ui/client/tokens.json")?, module.join("/ui/client/styles.json")?]).await? else {
+        anyhow::bail!("the UI library needs a newer runtime than this program's")
+    };
+    Ok(Page { page: module.clone(), module, trusted: false, tables, name: Some("Recovery Key".into()), icon: None })
 }
 
 /// Opens the launcher's page natively: on a computer in a panel put away until it's summoned (`computer`), on a phone
@@ -226,14 +242,51 @@ enum Kind {
     /// An app's, opened from where its icon is on the screen, if it was.
     App(Option<Bounds<f32>>),
     Launcher(Option<tokio::sync::oneshot::Sender<Option<WindowId>>>),
+    /// The client's own, over an app's, where a recovery key is shown or typed (`recovery`).
+    Sheet(Sheet),
+}
+
+/// What the client's recovery key window is for: showing the key of this device's person, or of `subject`, a group or
+/// the network, or with `typed`, letting this device in with the one they type; and who hears whether it was done.
+#[derive(Clone)]
+struct Sheet {
+    typed: bool,
+    subject: Option<String>,
+    done: Arc<Mutex<Option<tokio::sync::oneshot::Sender<bool>>>>,
+}
+
+/// The client's own page, which only the recovery key window shows: its JS, the client's and no app's, at an address
+/// of its own (`hosts::file`).
+pub(crate) const RECOVERY: &str = "oneapp://client.localhost/client/recovery.js";
+
+/// Shows its person the recovery key, theirs or `subject`'s, or with `typed` asks them for it, in a window of the
+/// client's own over the app that asked, which is told only whether they saw it or the device is in now: no app's
+/// page is handed a recovery key, as an Apple device shows one in its own system's UI and never in an app.
+/// It's boxed, as a window it opens asks the client what a window's page asks it (`hosts::command`), which opens this.
+pub(crate) fn recovery(typed: bool, subject: Option<String>) -> std::pin::Pin<Box<dyn Future<Output = Result<bool, String>> + Send>> {
+    Box::pin(async move {
+        let (done_to, done) = tokio::sync::oneshot::channel();
+        let sheet = Sheet { typed, subject, done: Arc::new(Mutex::new(Some(done_to))) };
+        let started = Instant::now();
+        window(started, "client/recovery.js", None, "", Kind::Sheet(sheet)).await.map_err(|error| format!("{error:#}"))?;
+        Ok(done.await.unwrap_or(false))
+    })
 }
 
 async fn window(started: Instant, entrypoint: &str, subject: Option<&str>, link: &str, mut kind: Kind) -> anyhow::Result<bool> {
-    let Some(Page { page, module, trusted, tables, name: listed, icon }) = probe(entrypoint, subject, false).await? else { return Ok(false) };
+    let page = match &kind {
+        Kind::Sheet(_) => Some(client_page().await?),
+        _ => probe(entrypoint, subject, false).await?,
+    };
+    let Some(Page { page, module, trusted, tables, name: listed, icon }) = page else { return Ok(false) };
     let launcher = matches!(kind, Kind::Launcher(_));
+    let sheet = match &kind {
+        Kind::Sheet(sheet) => Some(sheet.clone()),
+        _ => None,
+    };
     let from = match kind {
         Kind::App(from) => from,
-        Kind::Launcher(_) => None,
+        Kind::Launcher(_) | Kind::Sheet(_) => None,
     };
     let tokens_page = load(&tables)?;
     let native = Native::get()?;
@@ -251,7 +304,7 @@ async fn window(started: Instant, entrypoint: &str, subject: Option<&str>, link:
     let name = listed.or_else(|| start["name"].as_str().map(str::to_owned)).unwrap_or_else(|| entrypoint.split('/').next().unwrap_or_default().to_owned());
 
     let fragment = link.split_once('#').map(|(_, fragment)| fragment.to_owned());
-    let state = State { chosen: chosen.clone(), trusted, entrypoint: entrypoint.to_owned(), subject: subject.map(str::to_owned), view, next: 0, launcher, framed: false, fragment };
+    let state = State { chosen: chosen.clone(), trusted, entrypoint: entrypoint.to_owned(), subject: subject.map(str::to_owned), view, next: 0, launcher, framed: false, fragment, sheet: sheet.clone().map(|sheet| (sheet, window.clone())) };
     let (entrypoint, subject) = (entrypoint.to_owned(), subject.map(str::to_owned));
     #[cfg(mobile)]
     let link = link.to_owned();
@@ -259,9 +312,10 @@ async fn window(started: Instant, entrypoint: &str, subject: Option<&str>, link:
     // couldn't start, says why there.
     let (opened_to, opened) = tokio::sync::oneshot::channel::<Result<(), String>>();
     native.run(move |windows| {
-        let (size, panel) = match launcher && cfg!(desktop) {
-            true => ((computer::SIZE.width as f32, computer::SIZE.height as f32), Some(computer::CORNER)),
-            false => ((1024.0, 720.0), None),
+        let (size, panel) = match (launcher && cfg!(desktop), &sheet) {
+            (true, _) => ((computer::SIZE.width as f32, computer::SIZE.height as f32), Some(computer::CORNER)),
+            (false, Some(_)) => ((440.0, 360.0), None),
+            (false, None) => ((1024.0, 720.0), None),
         };
         let options = WindowOptions {
             title: if launcher { NAME.to_owned() } else { name.clone() },
@@ -277,7 +331,7 @@ async fn window(started: Instant, entrypoint: &str, subject: Option<&str>, link:
         };
         let app = entrypoint.split('/').next().unwrap_or_default().to_owned();
         let on_event = {
-            let (to, app, entrypoint) = (to.clone(), app.clone(), entrypoint.clone());
+            let (to, app, entrypoint, sheet) = (to.clone(), app.clone(), entrypoint.clone(), sheet.clone());
             #[cfg(mobile)]
             let (subject, link, shown) = (subject.clone(), link.clone(), window.clone());
             move |event: Event| match event {
@@ -303,7 +357,12 @@ async fn window(started: Instant, entrypoint: &str, subject: Option<&str>, link:
                 // Its person is using something else, so a new build waiting for what they typed to be sent looks
                 // again (`updater::ready`), as a web view's window does as its frames say they're done typing.
                 Event::Unfocused => crate::spawn(crate::updater::ready()),
-                Event::Closed => {}
+                // Closed before it was done, the recovery key wasn't seen or used.
+                Event::Closed => {
+                    if let Some(told) = sheet.as_ref().and_then(|sheet| sheet.done.lock().expect("nothing panics holding it").take()) {
+                        let _ = told.send(false);
+                    }
+                }
                 // A window whose page didn't start says so, and Telemetry hears why; a phone's launcher is then its
                 // page's.
                 Event::Failed(why) => {
@@ -363,7 +422,7 @@ async fn window(started: Instant, entrypoint: &str, subject: Option<&str>, link:
                     // Its glass is the system's, under its page, where there's one; Linux has none, so it's a
                     // popover's colour (DESIGN.md, Launcher).
                     screen.panel = Some(renderer::Panel { corner: computer::CORNER as f32, fill: cfg!(target_os = "linux") });
-                } else if cfg!(desktop) {
+                } else if cfg!(desktop) && sheet.is_none() {
                     // Its way Home, as an app's window on a computer has (DESIGN.md, App windows): Home brings the
                     // launcher forward and keeps this window open, as Window → Home Screen does.
                     let ring = format!("data:image/png;base64,{}", BASE64.encode(include_bytes!("../../../icons/Logo.png")));
@@ -482,7 +541,7 @@ async fn frame(window: Arc<OnceLock<WindowId>>, node: renderer::tree::Id, src: &
     let started = start(entrypoint, subject, src, false, Place::Frame(window.clone(), node), &module, page)?;
     let view = format!("{}|{entrypoint}", subject.unwrap_or_default());
     let fragment = src.split_once('#').map(|(_, fragment)| fragment.to_owned());
-    let state = State { chosen: None, trusted, entrypoint: entrypoint.to_owned(), subject: subject.map(str::to_owned), view, next: 0, launcher: false, framed: true, fragment };
+    let state = State { chosen: None, trusted, entrypoint: entrypoint.to_owned(), subject: subject.map(str::to_owned), view, next: 0, launcher: false, framed: true, fragment, sheet: None };
     let src = src.to_owned();
     Native::get()?.run(move |windows| {
         let Some(id) = window.get() else { return };
@@ -601,6 +660,8 @@ struct State {
     entrypoint: String,
     /// Who it was opened for, a group or the network, or none for its person: whoever its requests are for.
     subject: Option<String>,
+    /// It's the client's recovery key window (`recovery`), with the window it's in.
+    sheet: Option<(Sheet, Arc<OnceLock<WindowId>>)>,
     view: String,
     next: u64,
 }
@@ -659,8 +720,9 @@ fn respond(
                 "displayMode": "fullscreen",
                 "availableDisplayModes": ["fullscreen"],
                 "deviceCapabilities": {"touch": cfg!(mobile), "hover": cfg!(desktop)},
-                // A page in a frame is named by nothing above it: its first screen says its heading.
-                "breadcrumb": cfg!(desktop) && !state.framed,
+                // A page in a frame is named by nothing above it, nor is the recovery key window's: its first screen
+                // says its heading.
+                "breadcrumb": cfg!(desktop) && !state.framed && state.sheet.is_none(),
                 // The place its link names, as its address's `#` says on the DOM (`link()`).
                 "link": state.fragment,
                 "connection": "online",
@@ -730,9 +792,56 @@ fn respond(
         // native window has neither yet, which it says, as a device without them does (client.js).
         "one/pin-shortcut" => Some(Err(json!({"code": -32000, "message": "This device can't put that app on its home screen"}))),
         "one/haptic" => Some(Err(json!({"code": -32000, "message": "This device plays no haptics"}))),
-        // A recovery key is shown and typed on the client's own page, never an app's: a native window has none of its
-        // own yet, which it says, rather than asking the network what only this device holds.
-        "one/recovery-key" => Some(Err(json!({"code": -32000, "message": "This window can't show or take a recovery key yet. Open it in the web client at your network's address."}))),
+        // A person's recovery key is shown and typed in the client's own window over the app (`recovery`), for whoever
+        // the app asks for, and the app is told only whether it was done (`whom` in client.js).
+        "one/recovery-key" if state.sheet.is_none() => {
+            let said = params["subject"].as_str().filter(|_| state.trusted).map(str::to_owned);
+            let subject = said.or_else(|| state.subject.clone());
+            state.next += 1;
+            let at = format!("m{}", state.next);
+            asked.lock().expect("nothing panics holding it").insert(at.clone(), Asked::Message(id));
+            let _ = to.send(json!({"id": at, "command": "recovery", "args": {"typed": params["typed"] == true, "subject": subject}}));
+            return None;
+        }
+        // What the recovery key window asks, which only it may: what it's for, the key it shows, the key it was given,
+        // and that it's done, which closes it.
+        method if method == "one/recovery" || method.starts_with("one/recovery/") => match &state.sheet {
+            None => Some(Err(json!({"code": -32601, "message": format!("Only the client's own page asks {method}")}))),
+            Some((sheet, window)) => match method {
+                "one/recovery" => Some(Ok(json!({"typed": sheet.typed}))),
+                "one/recovery/key" | "one/recovery/recover" => {
+                    let (command, args) = match method {
+                        "one/recovery/key" if !sheet.typed => ("recovery_key", json!({"subject": sheet.subject})),
+                        "one/recovery/recover" if sheet.typed => ("recover", json!({"key": params["key"], "subject": sheet.subject})),
+                        _ => return Some(json!({"jsonrpc": "2.0", "id": id, "error": {"code": -32601, "message": format!("This window doesn't ask {method}")}})),
+                    };
+                    state.next += 1;
+                    let at = format!("m{}", state.next);
+                    asked.lock().expect("nothing panics holding it").insert(at.clone(), Asked::Message(id));
+                    let _ = to.send(json!({"id": at, "command": command, "args": args}));
+                    return None;
+                }
+                "one/recovery/done" => {
+                    if let Some(told) = sheet.done.lock().expect("nothing panics holding it").take() {
+                        let _ = told.send(params["done"] == true);
+                    }
+                    let window = window.clone();
+                    if let Ok(native) = Native::get() {
+                        native.run(move |windows| {
+                            if let Some(id) = window.get() {
+                                windows.close(*id);
+                            }
+                        });
+                    }
+                    Some(Ok(json!({})))
+                }
+                _ => Some(Err(json!({"code": -32601, "message": format!("This window doesn't ask {method}")}))),
+            },
+        },
+        // The recovery key window asks nothing else: it's no app's, and calls no tool.
+        method if state.sheet.is_some() && !method.starts_with("ui/") && method != "ping" && method != "one/client" => {
+            Some(Err(json!({"code": -32601, "message": format!("This window doesn't ask {method}")})))
+        }
         method if method.starts_with("ui/") => Some(Err(json!({"code": -32601, "message": format!("This client has no {method}")}))),
         _ => None,
     };

@@ -391,6 +391,10 @@ pub(crate) async fn talk(stream: impl AsyncRead + AsyncWrite + Send + 'static) {
 
 /// One file of an app's, for an app's window, as the launcher's page loads one (`Views::file`).
 pub(crate) async fn file(address: &str) -> Result<Value, String> {
+    // The client's own page is in this program, not the network's.
+    if address == crate::native::RECOVERY {
+        return Ok(json!({"kind": "text/javascript", "body": BASE64.encode(include_bytes!("recovery.js"))}));
+    }
     let (kind, file) = crate::views()?.file(address).await.map_err(|error| format!("{error:#}"))?;
     Ok(json!({"kind": kind, "body": BASE64.encode(&file)}))
 }
@@ -501,6 +505,7 @@ pub(crate) async fn command(label: &str, command: &str, args: Value) -> Result<V
             upload_file(args["app"].as_str().unwrap_or_default(), body).await
         }
         "change" => change(&args).await,
+        "recovery" => crate::native::recovery(args["typed"] == true, text("subject")).await.map(|done| json!({"done": done})),
         "recovery_key" => recovery_key(text("subject")).await.map(Value::from),
         "recover" => recover(text("key").unwrap_or_default(), text("subject")).await.map(done),
         "close" => close(text("view").unwrap_or_default()).map(done),
