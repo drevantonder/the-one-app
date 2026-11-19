@@ -612,8 +612,9 @@ pub extern "system" fn Java_app_theone_renderer_NativeView_nativePan(_: JNIEnv, 
     .into()
 }
 
-/// A finger held: in an input, the word under it is selected, for Android's Cut, Copy and Paste menu; elsewhere, what's
-/// under it is told, as a right-click (`contextmenu`).
+/// A finger held in an input: the word under it is selected, for Android's Cut, Copy and Paste menu. Elsewhere it's the
+/// page's, whose pointer events carry on, as iOS's do: what it's on holds it as it likes (a row's menu, an icon lifted
+/// and dragged).
 #[unsafe(no_mangle)]
 pub extern "system" fn Java_app_theone_renderer_NativeView_nativeLongPress(_: JNIEnv, _: JObject, id: jlong, x: jfloat, y: jfloat) {
     let id = id as WindowId;
@@ -626,16 +627,12 @@ pub extern "system" fn Java_app_theone_renderer_NativeView_nativeLongPress(_: JN
         let density = window.parts[0].native.density;
         let at = point(x / density, y / density);
         let Ok(screen) = &mut window.screen else { return };
+        if !TOUCHES.with(|touches| touches.borrow().get(&id).is_some_and(|touch| touch.on_input)) || !screen.select_word(at) {
+            return;
+        }
         window.dirty = true;
-        let touch = TOUCHES.with(|touches| touches.borrow_mut().remove(&id));
-        if touch.is_some_and(|touch| !touch.on_input) {
-            screen.pointer_cancel(at);
-        }
-        if screen.select_word(at) {
-            return window.parts[0].native.apply(json!({"menu": true}));
-        }
-        screen.pointer_down(at, 2, false);
-        screen.pointer_up(at, 2);
+        TOUCHES.with(|touches| touches.borrow_mut().remove(&id));
+        window.parts[0].native.apply(json!({"menu": true}));
     });
 }
 
