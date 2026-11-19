@@ -67,11 +67,7 @@ defmodule OneCore.Entrypoint do
     out = Path.join(folder, "out")
 
     try do
-      files = for {path, text} <- app, do: {String.replace_prefix(path, @client, ""), text}
-      # An untrusted app's packages come from the registry as its package.json names them: a registry, a lockfile or a
-      # URL of its own would have this server fetch whatever the app says, as an internal address.
-      files = if trusted, do: files, else: Enum.reject(files, fn {path, _} -> path in @own_registry end)
-      write(source, files)
+      write(source, client(app, trusted))
 
       with {:ok, bun} <- bun(),
            {:ok, builder} <- builder(bun),
@@ -108,12 +104,23 @@ defmodule OneCore.Entrypoint do
       else: {:ok, ""}
   end
 
+  # The app's client files, by their paths in `client/`, as Bun installs and builds them. An untrusted app's packages
+  # come from the registry as its package.json names them: a registry, a lockfile or a URL of its own would have this
+  # server fetch whatever the app says, as an internal address.
+  defp client(files, trusted) do
+    for {path, text} <- files,
+        String.starts_with?(path, @client),
+        path = String.replace_prefix(path, @client, ""),
+        trusted or path not in @own_registry,
+        do: {path, text}
+  end
+
   defp type_check(files, trusted) do
     folder = Path.join([Server.home(), "building", Base.encode16(:crypto.strong_rand_bytes(8), case: :lower)])
     source = Path.join(folder, "source")
 
     try do
-      write(source, for({path, text} <- files, String.starts_with?(path, @client), do: {String.replace_prefix(path, @client, ""), text}))
+      write(source, client(files, trusted))
 
       with {:ok, bun} <- bun(),
            {:ok, builder} <- builder(bun),
