@@ -40,12 +40,16 @@ defmodule CodeReloader do
   @impl GenServer
   def init(copy), do: {:ok, %{copy: copy, servers: [], rust: nil, core: nil, natives: nil, ui: nil, apps: nil}}
 
-  # What the servers run is what's compiled when the first starts, so that's what a change is told from.
+  # What the servers run is what's compiled when the first starts, so that's what a change is told from. The apps are
+  # what was last deployed, which the network's folder keeps (`kept/1`): a network started again in the same folder,
+  # after the checkout moved on, deploys each that changed meanwhile at its first request, rather than running what
+  # it was first deployed with (19 Nov: a Vault from before a fix, which a delegate took for the bug still there).
   @impl GenServer
   def handle_call({:serving, server}, _from, %{core: nil} = state) do
     copy(state)
     rust = rust()
-    state = %{state | rust: rust, core: core(rust), natives: natives(), ui: ui(), apps: apps()}
+    apps = kept(state) || keep(state, apps())
+    state = %{state | rust: rust, core: core(rust), natives: natives(), ui: ui(), apps: apps}
     handle_call({:serving, server}, nil, state)
   end
 
@@ -176,7 +180,7 @@ defmodule CodeReloader do
     case for(name <- changed, (why = deploy(server, name)) != :ok, do: "#{name}: #{why}") do
       [] ->
         if changed != [], do: Mix.shell().info("Deployed #{Enum.join(changed, ", ")}")
-        {:ok, %{state | apps: apps}}
+        {:ok, %{state | apps: keep(state, apps)}}
 
       failed ->
         {:error, "An app didn't deploy: #{Enum.join(failed, "; ")}", state}
@@ -191,6 +195,16 @@ defmodule CodeReloader do
 
     for server <- servers,
         do: :ok = :erpc.call(server, Application, :put_env, [:one_core, :build, String.trim(version)])
+  end
+
+  # What each app was last deployed from, as the network's folder keeps it, or nil for a network that hasn't kept it.
+  defp kept(state) do
+    with {:ok, kept} <- File.read(state.copy <> "-apps"), do: :erlang.binary_to_term(kept), else: (_ -> nil)
+  end
+
+  defp keep(state, apps) do
+    File.write!(state.copy <> "-apps", :erlang.term_to_binary(apps))
+    apps
   end
 
   # As `one deploy --name <name> --files-from apps/<name>` deploys it for the network.
