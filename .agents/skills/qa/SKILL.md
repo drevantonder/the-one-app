@@ -60,7 +60,7 @@ in a web view, drawn and still. Start a network (`local-network`), then write a 
     from window import opened, settled, frame
     from selenium.webdriver.support.ui import WebDriverWait
     named = lambda text: f"//*[text()[normalize-space()='{text}']]"
-    with opened("one:vault", log="<scratch>/window.log") as driver:  # 390×844, or size=(w, h)
+    with opened("one:settings#vault/accounts", log="<scratch>/window.log") as driver:  # 390×844, or size=(w, h)
         frame(driver)
         driver.find_element("xpath", named("All")).click()
         WebDriverWait(driver, 10).until(lambda d: d.find_elements("xpath", named("GitHub")))
@@ -77,7 +77,7 @@ and run it in a desktop of its own, so nothing is shared with other agents and n
 drops.
 
 - Open the screen by its link, the same one a person's link or notification opens: `one:<app>` (its first page),
-  `one:<app>/<page>` (a page by its file, `one:sign-in/client/security.html`), and a fragment the app follows,
+  `one:<app>/<page>` (a page by its file, `one:settings/client/index.html`), and a fragment the app follows,
   `one:home-screen#library`. Click only for what the change is about.
 - Wait for state, never a time: after a click, `WebDriverWait` for what it shows, then `settled`, which waits for
   what moves to end, in the window and in the app's frame.

@@ -78,7 +78,8 @@
           }
         ]
       }
-    }
+    },
+    "component": "deleted"
   },
   "Menu Open": {
     "like": "Recently Deleted",
@@ -92,13 +93,15 @@
       "soft-delete_list": {
         "deleted": []
       }
-    }
+    },
+    "component": "deleted"
   },
   "Can't Show": {
     "answers": {
       "soft-delete_list": {
         "$error": "Couldn't reach the network"
       }
-    }
+    },
+    "component": "deleted"
   }
 }

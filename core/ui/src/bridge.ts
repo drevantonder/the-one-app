@@ -367,7 +367,7 @@ export const leave = () => greet().then(() => notify("ui/notifications/request-t
 export const open = (app: string, { subject, behind, from }: Subject & { behind?: boolean; from?: { x: number; y: number; width: number; height: number; radius?: number } } = {}): Promise<unknown> =>
   greet().then(() => ask("ui/open-link", /^https?:/.test(app) ? { url: app } : { url: `one:${app}`, subject, behind, from }))
 
-/// `createEffect(link, (to) => ...)`: the link the page was opened to last, `one:vault#request=4`'s `request=4`, as it
+/// `createEffect(link, (to) => ...)`: the link the page was opened to last, `one:settings#vault/accounts&request=4`'s `vault/accounts&request=4`, as it
 /// changes: a link followed while the page is open is told too, the same one again as well. The page's address
 /// forgets it once it's read, so following it again is news. None until a link names more than the app.
 export function link(): string | undefined {

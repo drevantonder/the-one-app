@@ -91,9 +91,9 @@ defmodule Vault.SignIns do
     cond do
       name = client["web"] && assistant(call, client["device"]) -> %{agent: name}
       client["name"] == "one-cli" -> %{cli: true}
-      client["name"] in ["one-app", "one-web"] -> %{screen: "vault"}
+      client["name"] in ["one-app", "one-web"] -> %{screen: "settings#vault/accounts"}
       said -> %{agent: said}
-      true -> %{screen: "vault"}
+      true -> %{screen: "settings#vault/accounts"}
     end
   end
 

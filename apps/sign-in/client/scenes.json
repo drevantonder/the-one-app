@@ -144,7 +144,8 @@
         "slot": 1
       },
       "sign-in_encrypt_for_passkeys": {}
-    }
+    },
+    "component": "devices"
   },
   "Sign in request": {
     "like": "Devices",
@@ -233,11 +234,12 @@
       "sign-in_devices": {
         "$error": "Couldn't reach the server"
       }
-    }
+    },
+    "component": "devices"
   },
   "Passkeys": {
     "like": "Server",
-    "page": "client/security.html"
+    "component": "passkeys"
   },
   "Passkeys error": {
     "like": "Passkeys",
@@ -248,7 +250,6 @@
     }
   },
   "Users & Groups": {
-    "page": "client/users.html",
     "answers": {
       "sign-in_everyone": {
         "people": [
@@ -300,7 +301,8 @@
           }
         ]
       }
-    }
+    },
+    "component": "people"
   },
   "Group": {
     "like": "Users & Groups",
@@ -316,7 +318,7 @@
   },
   "Connect": {
     "like": "Server",
-    "page": "client/connect.html"
+    "component": "ai"
   },
   "Devices, on a phone": {
     "like": "Devices",

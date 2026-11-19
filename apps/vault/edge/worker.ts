@@ -68,7 +68,7 @@ export default {
     if (url.pathname === "/vault/callback") return env.ASSETS.fetch(new URL("/vault/", url));
     if (url.pathname === "/vault/request") {
       const id = url.searchParams.get("id");
-      return Response.redirect(new URL(`/?open=${encodeURIComponent(id ? `vault#request=${id}` : "vault")}`, url).href, 302);
+      return Response.redirect(new URL(`/?open=${encodeURIComponent(id ? `settings#vault/accounts&request=${id}` : "settings#vault/accounts")}`, url).href, 302);
     }
     return env.ASSETS.fetch(request);
   },

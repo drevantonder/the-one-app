@@ -108,7 +108,8 @@
       "permissions_check": {
         "may": false
       }
-    }
+    },
+    "component": "accounts"
   },
   "All items": {
     "like": "Accounts",
@@ -253,7 +254,7 @@
   "Add item": {
     "like": "Empty",
     "taps": [
-      "Add Password or Key"
+      "Add"
     ]
   },
   "Request": {
@@ -376,13 +377,15 @@
       "permissions_check": {
         "may": false
       }
-    }
+    },
+    "component": "accounts"
   },
   "Error": {
     "answers": {
       "vault_security": {
         "$error": "Couldn't reach the server"
       }
-    }
+    },
+    "component": "accounts"
   }
 }

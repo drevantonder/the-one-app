@@ -6,7 +6,7 @@ the native window's, which the inspector takes (the qa skill's Screens).
 
     import sys; sys.path.insert(0, "tooling")
     from window import opened, settled, frame
-    with opened("one:vault") as driver:
+    with opened("one:settings#vault/accounts") as driver:
         driver.save_screenshot("vault.png")
 
 Run it as the qa skill's Screens says, under `dbus-run-session -- xvfb-run`, with `ONE_HOME` set. It starts `openbox`

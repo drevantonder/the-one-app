@@ -49,7 +49,8 @@ async function again() {
 const back = (began?: Began) => (began && "agent" in began ? began.agent : began && "cli" in began ? "your terminal" : undefined)
 /// An app's screen, by its app, and how its button names it.
 const screen = (began?: Began) => (began && "screen" in began ? began.screen : undefined)
-const titled = (app: string) => app[0].toUpperCase() + app.slice(1)
+/// An app's name, as its button says it, from a link to it (`settings#vault/accounts` is Settings).
+const titled = (app: string) => app[0].toUpperCase() + app.split("#")[0].slice(1)
 /// "Gmail, Google Calendar and Google Drive".
 const listed = (things: string[]) => new Intl.ListFormat("en", { type: "conjunction" }).format(things)
 

@@ -431,7 +431,7 @@ defmodule SignIn do
         "text" => "Open Sign In & Security and tap Add Passkey.",
         "to" => who,
         "app" => call.app,
-        "page" => "client/security.html"
+        "section" => "passkeys"
       })
 
       %{message: "Your person was notified: Sign In & Security, on a device of theirs, makes it. The link is shown only there."}
@@ -527,9 +527,9 @@ defmodule SignIn do
 
         Call.tool(call, "notifications", "send", %{
           "title" => "#{name} wants to sign in as you",
-          "text" => "Open Devices to let it in.",
+          "text" => "Open Settings › Devices to let it in.",
           "to" => who,
-          "page" => "client/index.html#waiting=#{request}"
+          "section" => "devices#waiting=#{request}"
         })
 
         %{notified: true}

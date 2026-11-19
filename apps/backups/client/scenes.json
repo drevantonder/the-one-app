@@ -78,7 +78,8 @@
           }
         ]
       }
-    }
+    },
+    "component": "backups"
   },
   "Destination Open": {
     "like": "Destinations",
@@ -151,13 +152,15 @@
           }
         ]
       }
-    }
+    },
+    "component": "backups"
   },
   "Can't Show Backups": {
     "answers": {
       "backups_destinations": {
         "$error": "Couldn't reach the network"
       }
-    }
+    },
+    "component": "backups"
   }
 }

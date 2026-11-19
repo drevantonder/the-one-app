@@ -779,7 +779,7 @@
     }
   },
   "Colour Mode": {
-    "page": "client/colour-mode.html",
+    "component": "appearance",
     "answers": {
       "one/client": {
         "theme": null
@@ -787,7 +787,7 @@
     }
   },
   "Colour Mode, dark chosen": {
-    "page": "client/colour-mode.html",
+    "component": "appearance",
     "answers": {
       "one/client": {
         "theme": "dark"
