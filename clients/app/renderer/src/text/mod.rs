@@ -527,7 +527,7 @@ impl TextSystem {
             scene.insert_primitive(PolychromeSprite {
                 order: 0,
                 pad: 0,
-                grayscale: false,
+                grayscale: 0,
                 opacity: color.a,
                 bounds,
                 corner_radii: Default::default(),

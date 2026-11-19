@@ -554,7 +554,9 @@ impl From<MonochromeSprite> for Primitive {
 pub(crate) struct PolychromeSprite {
     pub order: DrawOrder,
     pub pad: u32, // align to 8 bytes
-    pub grayscale: bool,
+    /// 1 to draw it grey: a whole `u32`, as a frame's batches are told apart by their bytes (`Drawn`), which a
+    /// `bool`'s padding would make differ.
+    pub grayscale: u32,
     pub opacity: f32,
     pub bounds: Bounds<ScaledPixels>,
     pub content_mask: ContentMask<ScaledPixels>,

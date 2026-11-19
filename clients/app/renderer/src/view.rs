@@ -2858,7 +2858,7 @@ impl Painter<'_> {
         self.scene.insert_primitive(PolychromeSprite {
             order: 0,
             pad: 0,
-            grayscale: false,
+            grayscale: 0,
             opacity,
             bounds: bounds.scale_to(scale),
             content_mask: ContentMask { bounds: mask.scale_to(scale) },
