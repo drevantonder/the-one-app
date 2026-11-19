@@ -10,7 +10,6 @@
 import { env, waitUntil } from "cloudflare:workers";
 import { betterAuth } from "better-auth";
 import { APIError, createAuthEndpoint, createAuthMiddleware, getAuthoritativeSessionFromCtx, getSessionFromCtx } from "better-auth/api";
-import { getMigrations } from "better-auth/db/migration";
 import { jwt } from "better-auth/plugins";
 import { cimd } from "@better-auth/cimd";
 import { mcp } from "@better-auth/mcp";
@@ -19,7 +18,7 @@ import { passkey } from "@better-auth/passkey";
 import { bytesToHex, randomBytes } from "@noble/hashes/utils.js";
 import Bowser from "bowser";
 import * as z from "zod";
-import type { BetterAuthPlugin, DBAdapter, User as AuthUser } from "better-auth";
+import type { BetterAuthOptions, BetterAuthPlugin, DBAdapter, User as AuthUser } from "better-auth";
 
 declare global {
   namespace Cloudflare {
@@ -158,19 +157,14 @@ export const assistant = (client: string, user: string) => sha256(`${client}\n${
 export const browserDevice = (session: string) => sha256(`browser\n${session}`);
 
 /**
- * What signs this Worker's cookies and tokens, made on first use and kept beside what it protects, and the version of
- * this Worker that last made its tables (`createAuth`), in one round trip to the database.
+ * What signs this Worker's cookies and tokens, kept beside what it protects. It's made once, as the database's tables
+ * are, by its migrations at deploy (`migrations/`): a request only reads it, which D1 retries itself where it fails
+ * for a moment.
  */
-async function stored() {
-  const generated = bytesToHex(randomBytes(32));
-  const [, , , secret, migrated] = await env.DB.batch<{ secret?: string; version?: string }>([
-    env.DB.prepare("create table if not exists secret (secret text not null)"),
-    env.DB.prepare("insert into secret select ? where not exists (select 1 from secret)").bind(generated),
-    env.DB.prepare("create table if not exists migrated (version text not null)"),
-    env.DB.prepare("select secret from secret"),
-    env.DB.prepare("select version from migrated"),
-  ]);
-  return { secret: secret.results[0].secret!, migrated: migrated.results[0]?.version };
+async function secret() {
+  const kept = await env.DB.prepare("select secret from secret").first<{ secret: string }>();
+  if (!kept) throw new Error("The sign-in database has no secret: its migrations haven't been applied (`bun edge.js deploy`)");
+  return kept.secret;
 }
 
 /** Tells every server that whose a device is has changed, so each asks again. */
@@ -479,14 +473,16 @@ function fetchMetadata(input: RequestInfo | URL, init?: RequestInit) {
   return fetch(request);
 }
 
-/** Better Auth for the network at `origin`, with its tables made. */
-async function createAuth(origin: string) {
-  const { secret, migrated } = await stored();
-  const auth = betterAuth({
+/**
+ * How Better Auth is set up for the network at `origin`, signing with `secret`, in `database`: the Worker's D1, or
+ * the SQLite a migration is worked out against (`generate.ts`).
+ */
+export function options(origin: string, secret: string, database: BetterAuthOptions["database"] = env.DB) {
+  return {
     baseURL: origin,
     basePath: "/sign-in/auth",
     secret,
-    database: env.DB,
+    database,
     // The JWT plugin signs the tokens an assistant is given, and hands out none of its own. A device asks for its
     // answer at the token endpoint, which passes it on to `/device/token` once it's checked its signature.
     disabledPaths: ["/token", "/device/token"],
@@ -550,35 +546,25 @@ async function createAuth(origin: string) {
       oauthDeviceAuthorization({ verificationUri: SIGN_IN, validateClient: async () => true }),
       devices(),
     ],
-  });
-  // Working out what to make asks the database about every table, a round trip each, so it's done once for each
-  // version of this Worker deployed, as a deploy's migrations are, not as each copy of it starts.
-  if (migrated !== env.VERSION.id) {
-    const { runMigrations } = await getMigrations(auth.options);
-    await runMigrations();
-    await env.DB.batch([env.DB.prepare("delete from migrated"), env.DB.prepare("insert into migrated values (?)").bind(env.VERSION.id)]);
-  }
-  return auth;
+  } satisfies BetterAuthOptions;
 }
 
 /** Better Auth, as this Worker sets it up. */
-export type Auth = Awaited<ReturnType<typeof createAuth>>;
+const authFor = (origin: string, secret: string) => betterAuth(options(origin, secret));
+export type Auth = ReturnType<typeof authFor>;
+const auths = new Map<string, Auth>();
 
-const auths = new Map<string, Promise<Auth>>();
 /**
- * Better Auth for the network at `origin`, made once for as long as this Worker stays loaded. The request that asks
- * first is often gone before it's made, as a page's are when it's left, and a promise made in a request that has ended
- * can never settle: every other request waiting on it, and each after, would fail. So it's made for as long as it
- * takes, whether that request stays or not (`waitUntil`).
+ * Better Auth for the network at `origin`, made once for as long as this Worker stays loaded. What's kept is Better
+ * Auth itself, never a request for it: a promise made in one request can't be settled in another that has ended, so
+ * requests that come before it's made each read the secret and make it.
  */
-export function at(origin: string): Promise<Auth> {
-  if (!auths.has(origin)) {
-    const made = createAuth(origin).catch((error) => (auths.delete(origin), Promise.reject(error)));
-    // Whoever asked for it hears how it went; this only keeps the request it was made in until then.
-    waitUntil(made.then(() => {}, () => {}));
-    auths.set(origin, made);
-  }
-  return auths.get(origin)!;
+export async function at(origin: string): Promise<Auth> {
+  const kept = auths.get(origin);
+  if (kept) return kept;
+  const auth = authFor(origin, await secret());
+  auths.set(origin, auth);
+  return auth;
 }
 
 /**

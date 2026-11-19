@@ -11,5 +11,6 @@
     "allowImportingTsExtensions": true,
     "verbatimModuleSyntax": true
   },
-  "include": ["*.ts"]
+  "include": ["*.ts"],
+  "exclude": ["generate.ts"]
 }

@@ -3,9 +3,10 @@
   "main": "worker.ts",
   "compatibility_date": "2026-11-01",
   "workers_dev": false,
-  // Its accounts: who has signed in, their passkeys, and the devices and assistants they let act as them.
-  "d1_databases": [{ "binding": "DB", "database_name": "network-sign-in" }],
-  // Which version of it is deployed, by which it makes its tables once for each (`auth.ts`).
+  // Its accounts: who has signed in, their passkeys, and the devices and assistants they let act as them. Its tables
+  // are made by its migrations, which the edge's deploy applies (`generate.ts` writes Better Auth's).
+  "d1_databases": [{ "binding": "DB", "database_name": "network-sign-in", "migrations_dir": "migrations" }],
+  // Which version of it is deployed, which a discovery document cached from another is told from by (`worker.ts`).
   "version_metadata": { "binding": "VERSION" },
   // The apps that use this network's passkeys, and open the links of its listed in APP_LINKS, which iOS and Android
   // check against the files this serves (`/.well-known/apple-app-site-association`, `/.well-known/assetlinks.json`).

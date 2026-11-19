@@ -182,7 +182,20 @@ for (const piece of ["updater", "relay", "mcp"]) {
   config[piece] = relative(here, `${built}/${piece}.jsonc`);
 }
 const pieces = Object.values(config);
+// A part's D1 databases are made what they should be by their migrations (`migrations_dir`), as Wrangler applies
+// them, never as the part answers a request: the local ones before `dev` starts, where it keeps them, and Cloudflare's
+// just after the part is deployed, since Wrangler makes a database a part names on its first deploy, and refuses
+// migrations for one that isn't there yet.
+const migrate = async (/** @type {string} */ deployed, /** @type {string[]} */ where) => {
+  const { worker } = workers.find(({ part }) => relative(here, `${part}/wrangler.jsonc`) === deployed) ?? {};
+  for (const { binding, migrations_dir } of worker?.d1_databases ?? []) {
+    const failed = migrations_dir && (await wrangler("d1", "migrations", "apply", binding, "-c", deployed, ...where));
+    if (failed) process.exit(failed);
+  }
+};
 if (what === "dev") {
+  const kept = rest.indexOf("--persist-to");
+  for (const part of parts) await migrate(part, ["--local", ...(kept >= 0 ? rest.slice(kept, kept + 2) : [])]);
   process.exit(await wrangler("dev", ...[gatewayConfig, ...pieces, ...parts].flatMap((config) => ["-c", config]), ...rest));
 }
 // A Worker is deployed after the ones it's bound to, each with its secrets if it has any: a file `secrets` beside
@@ -194,4 +207,5 @@ for (const deployed of [config.web, config.presigner, ...tailParts, config.updat
   const secrets = existsSync(`${here}/${file}`) ? ["--secrets-file", file] : [];
   const failed = await wrangler("deploy", "-c", deployed, ...secrets);
   if (failed) process.exit(failed);
+  await migrate(deployed, ["--remote"]);
 }
