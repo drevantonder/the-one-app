@@ -1931,8 +1931,9 @@ let heard = -1
 let heardBehind = false
 /** @param {State} state */
 function hear(state) {
-  const behind = state.connection === "behind"
-  if (!behind && state.connection !== shown.getSnapshot().context.connection) on({ type: "connection", connection: state.connection })
+  const { connection } = state
+  const behind = connection === "behind"
+  if (connection !== "behind" && connection !== shown.getSnapshot().context.connection) on({ type: "connection", connection })
   if (state.seq > heard) {
     heard = state.seq
     on({ type: "session", told: state })
