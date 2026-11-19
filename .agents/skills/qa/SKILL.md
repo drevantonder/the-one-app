@@ -24,7 +24,7 @@ A phone-sized desktop window (390×844) shows most screen changes; build for a p
 is about that platform. Save pictures in your harness's scratch folder, never in the repo, and look at each before
 you show it. Screen wording and look follow `DESIGN.md`: read the section of the screen you change first.
 
-### Scenes and parity: every UI change
+### Scenes: every UI change
 
 A screen's states are scenes, with what they show beside them, so no network is needed to see one: a component's in
 `core/ui/gallery/*.scenes.tsx`, an app's in `apps/<app>/client/scenes.json` (the format is `core/ui/scenes.js`'s
@@ -36,18 +36,19 @@ in core/ui, after `bun build.js`:
 
 It draws every scene, or those of the folders named, on the DOM in headless Chromium (Playwright's, which
 `bunx playwright-core install chromium` fetches where it's missing) and on a native host by its headless harness
-(`cargo build -p renderer --example screenshot`), and says for each where the DOM's and the native host's trees and
-pictures differ, and what changed since `--against`: a tree that differs, or pictures more than 2% apart, is looked
-at in the folder it names (`dom.png`, `native.png`, `diff.png`, `changed.png`). A native host that hasn't the
-runtime version the UI library needs draws nothing, which it says. A difference that's meant is said in the commit; one that
-isn't is fixed.
+(`cargo build -p renderer --example screenshot`). What counts is **what changed since `--against`** on our renderer
+(`changed.png`): a tree that changed, or pictures more than 2% apart, is looked at. A difference that's meant is said
+in the commit; one that isn't is fixed. Our renderer is the reference, judged against DESIGN.md and its mockups, not
+the browser: it will draw the web too. Until it does, browsers, MCP hosts and older phones still show the DOM, so a
+large DOM-vs-native difference it reports (`dom.png`, `native.png`, `diff.png`) is worth a look, but matching the DOM
+isn't the goal. A native host that hasn't the runtime version the UI library needs draws nothing, which it says.
 
 ### Which to use
 
 An app's page the renderer supports opens as a native window, with no WebKit inspector; any other opens in a web
-view. Native → the inspector (Native windows, below). Web view, or the DOM for comparison → `tooling/window.py`
+view. Native → the inspector (Native windows, below). Web view → `tooling/window.py`
 (Desktop, next), which has the launcher open every app in a web view (`ONE_WEB_VIEW=1`, which the launcher honours,
-for any window you start yourself). A screen's states with no network → `bun scenes.js` (above): DOM against native.
+for any window you start yourself). A screen's states with no network → `bun scenes.js` (above): before against after.
 Either picture of a local network's screen takes seconds; neither hangs: `window.py` fails in `timeout` seconds
 saying what the app said.
 
