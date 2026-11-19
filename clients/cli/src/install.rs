@@ -689,7 +689,8 @@ pub async fn uninstall(client: &Client, name: &str) -> Result<ExitCode> {
 }
 
 /// `one deploy ... --files-from <folder> [--force]`. From a folder in a git repo, the deploy says which commit its
-/// files came from (`from`), and `dirty` where the folder has changes not committed, as a build does. As `git push`
+/// files came from (`from`), and `dirty` where the folder has changes not committed, as a build does, which only a
+/// network being built takes (`OneCore.Tools.Apps`), so what's live is a commit on the default branch. As `git push`
 /// refuses a non-fast-forward, it's refused where the live version came from a commit that one doesn't contain, so
 /// it would drop changes that are live, unless `--force`. And, as `tooling/release` refuses a build, it's refused
 /// where its repo has a remote and the commit isn't on the remote's default branch once fetched, which `--force`

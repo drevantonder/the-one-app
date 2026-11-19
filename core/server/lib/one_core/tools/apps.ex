@@ -8,7 +8,12 @@ defmodule OneCore.Tools.Apps do
   # deployed for. Either way it's loaded where it will run.
   # An untrusted app runs on any server acting for whoever it's for, the network's among them.
   @doc "Runs its tool `name` with `inputs`, as `OneCore.Tools.call/5` hands it on."
+  # What's live is a commit: changes not committed are deployed only to a network being built (`:development`), as a
+  # local network is, where they're tried before they're committed (19 Nov).
   def run("deploy", %{"name" => name, "files" => files} = inputs, {_actor, subject} = principal, forward, _request) do
+    if match?(%{"dirty" => true}, inputs["from"]) and not Application.get_env(:one_core, :development, false),
+      do: raise("#{name} wasn't deployed: its files have changes not committed. Commit them, push, then deploy.")
+
     app = Apps.app(subject, name)
     trusted = Map.get(inputs, "trusted", app == nil or Store.trusted?(app))
     runs(subject, trusted, forward)

@@ -370,7 +370,7 @@ defmodule OneCore.Tools.Definitions do
           from: %{
             type: ["object", "null"],
             description:
-              "The git repo its files came from, if they did: its `source` (owner/repo, a URL or a path), the `ref` asked for, the `commit`, and whether they had changes not committed (`dirty`). Left out, the version before's stays; null says they came from none",
+              "The git repo its files came from, if they did: its `source` (owner/repo, a URL or a path), the `ref` asked for, the `commit`, and whether they had changes not committed (`dirty`), which only a network being built takes. Left out, the version before's stays; null says they came from none",
             properties: %{
               source: %{type: "string"},
               ref: %{type: ["string", "null"]},
