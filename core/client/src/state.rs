@@ -114,7 +114,7 @@ pub enum Connection {
     /// Its network didn't answer. It tries again by itself, sooner at first and then less often, and at once when
     /// its person tries again (`retry`).
     Offline,
-    /// Asking again after its network didn't answer, and not answered yet.
+    /// Asking again after its network didn't answer, or its servers said it's behind them, and not answered yet.
     Reconnecting,
     /// Its servers answer, but refused it for being on a version before theirs that doesn't talk with them
     /// (`OneCore.Mcp`), saying why: from then on it asks only what brings it up to date (`updates`), as an app that
@@ -137,8 +137,8 @@ impl Connection {
             | (Offline, Reconnecting)
             // It lost its network, or a server says it's behind it.
             | (Online, Offline | Behind(_))
-            // It lost its network, or a server talks with it again, or its person tries again.
-            | (Behind(_), Offline | Online)
+            // It lost its network, or its person tries again.
+            | (Behind(_), Offline | Reconnecting)
         )
     }
 
@@ -276,12 +276,12 @@ impl Client {
     }
 
     /// Asks its network again now, as its person does by trying again: where it didn't answer, and where a server
-    /// refused it for being behind (`Connection::Behind`), which it's no longer taken to be until a server refuses it
-    /// again, as one updated or rolled back since may talk with it. What it asks is the list of its files, as itself, which a
+    /// refused it for being behind (`Connection::Behind`), where it's reconnecting until a server answers, which may
+    /// talk with it now, updated or rolled back since. What it asks is the list of its files, as itself, which a
     /// server refuses while it's behind: it answers once it has, failing with why where it wasn't answered.
     pub async fn retry(&self) -> Result<()> {
         self.reconnect();
-        self.moved(|now| matches!(now.connection(), Connection::Behind(_)).then(|| now.with(Connection::Online)).flatten());
+        self.moved(|now| matches!(now.connection(), Connection::Behind(_)).then(|| now.with(Connection::Reconnecting)).flatten());
         self.fresh("resources/list", &json!({})).await.map(drop)
     }
 }
