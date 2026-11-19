@@ -9,6 +9,7 @@ import android.view.KeyEvent;
 import android.view.Menu;
 import android.view.MenuItem;
 import android.view.MotionEvent;
+import android.view.VelocityTracker;
 import android.view.SurfaceHolder;
 import android.view.SurfaceView;
 import android.view.View;
@@ -17,6 +18,7 @@ import android.view.ViewStructure;
 import android.view.autofill.AutofillValue;
 import android.view.inputmethod.EditorInfo;
 import android.view.inputmethod.InputConnection;
+import android.widget.OverScroller;
 import androidx.annotation.Keep;
 import app.theone.renderer.editing.InputConnectionAdaptor;
 import app.theone.renderer.editing.TextEditState;
@@ -38,11 +40,22 @@ public final class NativeView extends SurfaceView implements SurfaceHolder.Callb
     private final TextInputPlugin input;
     private float downX, downY;
     private final Runnable longPress = this::longPress;
+    /**
+     * A finger's speed, and the fling it leaves what it panned with as it lifts: Android's own (`OverScroller`, as a
+     * ScrollView's and a RecyclerView's), stepped a display frame at a time, each step what's under where the finger
+     * went down panned by (`nativePan`).
+     */
+    private VelocityTracker speed;
+    private final OverScroller fling;
+    private boolean panning;
+    private int flungX, flungY;
+    private final Runnable flinging = this::flinging;
     private ActionMode menu;
 
     NativeView(Context context, long id) {
         super(context);
         this.id = id;
+        fling = new OverScroller(context);
         input = new TextInputPlugin(this, this);
         getHolder().addCallback(this);
         setFocusable(true);
@@ -132,6 +145,10 @@ public final class NativeView extends SurfaceView implements SurfaceHolder.Callb
         int action = e.getActionMasked();
         float slop = ViewConfiguration.get(getContext()).getScaledTouchSlop();
         if (action == MotionEvent.ACTION_DOWN) {
+            // A finger landing stops a fling, as it does a ScrollView's.
+            fling.forceFinished(true);
+            if (speed == null) speed = VelocityTracker.obtain();
+            speed.clear();
             downX = e.getX();
             downY = e.getY();
             postDelayed(longPress, ViewConfiguration.getLongPressTimeout());
@@ -142,8 +159,32 @@ public final class NativeView extends SurfaceView implements SurfaceHolder.Callb
         }
         // A second finger isn't followed.
         if (action > MotionEvent.ACTION_CANCEL) return true;
-        nativeTouch(id, action, e.getX(), e.getY(), slop);
+        if (speed != null) speed.addMovement(e);
+        boolean pans = nativeTouch(id, action, e.getX(), e.getY(), slop);
+        if (action == MotionEvent.ACTION_MOVE) panning = pans;
+        if (action == MotionEvent.ACTION_UP && panning && speed != null) {
+            ViewConfiguration configuration = ViewConfiguration.get(getContext());
+            speed.computeCurrentVelocity(1000, configuration.getScaledMaximumFlingVelocity());
+            float vx = speed.getXVelocity(), vy = speed.getYVelocity();
+            if (Math.hypot(vx, vy) > configuration.getScaledMinimumFlingVelocity()) {
+                flungX = flungY = 0;
+                fling.fling(0, 0, (int) -vx, (int) -vy, Integer.MIN_VALUE, Integer.MAX_VALUE, Integer.MIN_VALUE, Integer.MAX_VALUE);
+                postOnAnimation(flinging);
+            }
+        }
+        if (action != MotionEvent.ACTION_MOVE) panning = false;
         return true;
+    }
+
+    /** A display frame's step of the fling: what it panned stops it at its end. */
+    private void flinging() {
+        if (!fling.computeScrollOffset()) return;
+        int x = fling.getCurrX(), y = fling.getCurrY();
+        boolean moved = nativePan(id, downX, downY, x - flungX, y - flungY);
+        flungX = x;
+        flungY = y;
+        if (moved) postOnAnimation(flinging);
+        else fling.forceFinished(true);
     }
 
     private void longPress() {
@@ -225,7 +266,8 @@ public final class NativeView extends SurfaceView implements SurfaceHolder.Callb
     private native void nativeSurfaceDestroyed(long id);
     private native boolean nativeBack(long id);
     private native void nativeActive(long id, boolean active);
-    private native void nativeTouch(long id, int action, float x, float y, float slop);
+    private native boolean nativeTouch(long id, int action, float x, float y, float slop);
+    private native boolean nativePan(long id, float x, float y, float dx, float dy);
     private native void nativeLongPress(long id, float x, float y);
     private native void nativeEditingState(long id, int field, String text, int base, int extent, int composingStart, int composingEnd);
     private native void nativeAction(long id, int field, String action);

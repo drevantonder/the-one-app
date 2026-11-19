@@ -509,13 +509,13 @@ pub extern "system" fn Java_app_theone_renderer_NativeView_nativeBack(_: JNIEnv,
 /// that moves further than `slop` pans what scrolls under it, and what it pressed isn't pressed. One on an input gives
 /// it the keyboard as it lifts, as a phone's own fields do, so one that lands there to scroll doesn't.
 #[unsafe(no_mangle)]
-pub extern "system" fn Java_app_theone_renderer_NativeView_nativeTouch(_: JNIEnv, _: JObject, id: jlong, action: jint, x: jfloat, y: jfloat, slop: jfloat) {
+pub extern "system" fn Java_app_theone_renderer_NativeView_nativeTouch(_: JNIEnv, _: JObject, id: jlong, action: jint, x: jfloat, y: jfloat, slop: jfloat) -> jboolean {
     let id = id as WindowId;
-    with_windows(|windows| {
-        let Some(window) = windows.windows.get_mut(&id) else { return };
+    let panning = with_windows(|windows| {
+        let Some(window) = windows.windows.get_mut(&id) else { return false };
         let density = window.parts[0].native.density;
         let at = point(x / density, y / density);
-        let Ok(screen) = &mut window.screen else { return };
+        let Ok(screen) = &mut window.screen else { return false };
         window.dirty = true;
         screen.touch = true;
         TOUCHES.with(|touches| {
@@ -568,7 +568,26 @@ pub extern "system" fn Java_app_theone_renderer_NativeView_nativeTouch(_: JNIEnv
                 }
             }
         });
+        TOUCHES.with(|touches| touches.borrow().get(&id).is_some_and(|touch| touch.panning))
     });
+    panning.unwrap_or(false).into()
+}
+
+/// A step of a fling Java runs (`OverScroller`, in NativeView): what's under `x`, `y`, where the finger went down,
+/// scrolls by `dx`, `dy` (device pixels, down and right positive). → whether it did, or its fling stops.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_app_theone_renderer_NativeView_nativePan(_: JNIEnv, _: JObject, id: jlong, x: jfloat, y: jfloat, dx: jfloat, dy: jfloat) -> jboolean {
+    with_windows(|windows| {
+        let window = windows.windows.get_mut(&(id as WindowId))?;
+        let density = window.parts[0].native.density;
+        let screen = window.screen.as_mut().ok()?;
+        let moved = screen.pan(point(x / density, y / density), point(dx / density, dy / density)).is_some();
+        window.dirty |= moved;
+        Some(moved)
+    })
+    .flatten()
+    .unwrap_or(false)
+    .into()
 }
 
 /// A finger held: in an input, the word under it is selected, for Android's Cut, Copy and Paste menu; elsewhere, what's
