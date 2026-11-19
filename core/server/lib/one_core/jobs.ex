@@ -33,6 +33,11 @@ defmodule OneCore.Jobs do
   @impl true
   def handle_info(:due, clock), do: {:noreply, schedule_next(clock)}
 
+  # Every server's clock would wake at the same whole minute, and each asks the server holding an app's schedule for
+  # what's due at once. So each wakes a random part of `@spread` milliseconds after it, as systemd's timers do with
+  # `RandomizedDelaySec`, so that machines don't all fire together. It's well short of the shortest job's `every`.
+  @spread 10_000
+
   # Asks for each app that has a job due since `at` and runs here, apart from the others, and waits for the next time
   # any app has one.
   defp schedule_next(%{at: at, timer: timer} = clock) do
@@ -46,7 +51,7 @@ defmodule OneCore.Jobs do
 
     timer =
       if next != [],
-        do: Process.send_after(self(), :due, max(Enum.min(next) * 1000 - System.os_time(:millisecond), 0))
+        do: Process.send_after(self(), :due, max(Enum.min(next) * 1000 - System.os_time(:millisecond), 0) + :rand.uniform(@spread))
 
     %{clock | timer: timer}
   end
