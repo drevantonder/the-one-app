@@ -595,14 +595,16 @@ export type Auth = ReturnType<typeof authFor>;
 const auths = new Map<string, Auth>();
 
 /**
- * Better Auth for the network at `origin`, made once for as long as this Worker stays loaded. What's kept is Better
- * Auth itself, never a request for it: a promise made in one request can't be settled in another that has ended, so
- * requests that come before it's made each read the secret and make it.
+ * Better Auth for the network at `origin`, made once for as long as this Worker stays loaded. A promise made in one
+ * request settles only in that request, and Better Auth makes what it needs (`$context`) in the request that first
+ * asks: so that request waits for it, and Better Auth is kept for others only once it's made. Requests that come
+ * before that each read the secret and make it.
  */
 export async function at(origin: string): Promise<Auth> {
   const kept = auths.get(origin);
   if (kept) return kept;
   const auth = authFor(origin, await secret());
+  await auth.$context;
   auths.set(origin, auth);
   return auth;
 }
