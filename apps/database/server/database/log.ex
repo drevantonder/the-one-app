@@ -30,14 +30,24 @@ defmodule Database.Log do
   # read is a trip across the internet.
   @together 32
 
-  @doc "The log's entries after `number`, in order."
+  @doc """
+  The log's entries after `number`, in order. Most often there's none, as where a server asks whether the one holding
+  the lease wrote anything before it went, so the next is read alone first, and the rest `@together` at a time.
+  """
   def since(artifact, number) do
+    case entry(artifact, number + 1) do
+      nil -> []
+      next -> [next | together(artifact, number + 1)]
+    end
+  end
+
+  defp together(artifact, number) do
     read = Artifact.read_all(artifact, for(at <- 1..@together, do: name("log", number + at)))
 
     entries =
       for {:ok, entry, _tag} <- Enum.take_while(read, &(&1 != :absent)), do: :erlang.binary_to_term(entry, [:safe])
 
-    if length(entries) == @together, do: entries ++ since(artifact, number + @together), else: entries
+    if length(entries) == @together, do: entries ++ together(artifact, number + @together), else: entries
   end
 
   @doc "A log entry: its `server`, and for a write its `pages` by their numbers and the file's `size` in pages."
