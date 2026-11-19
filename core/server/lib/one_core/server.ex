@@ -10,33 +10,16 @@ defmodule OneCore.Server do
   """
   use GenServer
   require Logger
-  alias OneCore.{Builds, Edge, Hooks, Iroh, Mcp, Apps, Protocol, Servers}
+  alias OneCore.{Builds, Edge, Iroh, Protocol, Servers}
   alias OneCore.Call.State
 
-  def start_link(_), do: GenServer.start_link(__MODULE__, nil, name: __MODULE__)
-
   @doc """
-  Tells every client that's watching that something changed, so that it asks again. It says the UI library's build
-  (`library`), and for each of `owners` whose apps moved, the version each of theirs runs at (`apps`): an app's
-  screen loaded against another of either is stale, and its client loads it again. With no server started, nobody is
-  told. The versions are looked up apart from whoever says it, which may be what keeps them. Where it's an app's
-  call that changed something, it says that app (`app`), so a client asks only what's that app's again; left
-  out, it may be anything.
+  Starts this server's endpoint. What it can't do itself is handed it, as a web server is handed what answers its
+  requests: `handle`, which answers a message (`OneCore.Mcp.handle/3`); `wake`, which has the apps that can wake a
+  device wake it, and says whether one did (`OneCore.Hooks.wake/1`); and `started`, which tells the clients watching
+  it that something changed (`OneCore.Apps.changed/2`), as it starts.
   """
-  def changed(owners \\ [], app \\ nil) do
-    Task.Supervisor.start_child(OneCore.Asks, fn ->
-      apps =
-        Map.new(owners, fn owner ->
-          {owner, for({name, version} <- Apps.versions([owner]), into: %{}, do: {name, version.code})}
-        end)
-
-      params = %{library: OneCore.Entrypoint.library().code, apps: apps}
-      params = if app, do: Map.put(params, :app, app), else: params
-      tell("changed", params)
-    end)
-
-    :ok
-  end
+  def start_link(options), do: GenServer.start_link(__MODULE__, Map.new(options), name: __MODULE__)
 
   @doc "Tells every client watching this server `notifications/one/<what>`, with `params`."
   def tell(what, params) do
@@ -109,9 +92,7 @@ defmodule OneCore.Server do
     Registry.register(OneCore.Waiting, {:watching, device}, nil)
 
     try do
-      {:ok, woken, _failed} = Hooks.collect("wake", %{"device" => device}, {nil, "network"})
-
-      if Enum.any?(woken, fn {_app, part} -> part["woken"] == true end) do
+      if :persistent_term.get({__MODULE__, :wake}).(device) do
         receive do
           {:watching, ^device} -> :watching
         after
@@ -278,38 +259,6 @@ defmodule OneCore.Server do
     Stream.run(Task.async_stream(servers -- [key()], &ask(&1, notification), timeout: :infinity))
   end
 
-  @doc """
-  Looks in the bucket at what other servers put there for `owner`: the servers on their list, what each acts for
-  and the services it runs, and what's installed for them, running the latest version of each app. Its clients are told if an app
-  changed.
-
-  A server looks at someone when it's told to, when it's asked for them and last looked more than five minutes
-  ago (`OneCore.Apps`), and when it comes back (`reconnected/0`). Nothing else has it look, so someone nobody
-  uses costs nothing.
-  """
-  def reload(owner) do
-    Servers.reload(owner)
-    OneCore.Apps.Deploy.forget()
-    if Apps.sync(owner), do: changed([owner])
-    # An app updated by a server elsewhere may require what isn't installed for them yet.
-    if Servers.here?(owner), do: Task.start(fn -> OneCore.Apps.Lifecycle.required(owner) end)
-    :ok
-  end
-
-  @doc """
-  This server can reach the others again, its network's address or its bucket, after it couldn't, so it may have
-  missed being told something, and the edge what it is: it says its status again (`OneCore.Servers.report/0`),
-  invalidates what it cached of servers and hooks, looks at once at who it acts for, and at everyone else it has
-  looked at behind the next request for them (`OneCore.Apps.refresh/0`). Saying its status is how the network's update
-  hears it's back, and catches it up if it missed a release.
-  """
-  def reconnected do
-    Servers.report()
-    Hooks.invalidate()
-    Servers.invalidate()
-    Enum.each(Apps.refresh(), &reload/1)
-  end
-
   # A connection is opened when there's none, to where the server says it is now. One whose connection no longer
   # answered may only have lost what it was sent, as a network now and then does, so it's connected to again, which
   # one that's there answers at once (`Iroh.connect/4`), one that started again too. What the server asked says it's
@@ -355,7 +304,7 @@ defmodule OneCore.Server do
   end
 
   @impl true
-  def init(nil) do
+  def init(options) do
     # What it opened closes as it stops (`terminate/2`).
     Process.flag(:trap_exit, true)
     network = if at = Application.get_env(:one_core, :address), do: {at, Edge.token()}
@@ -364,13 +313,14 @@ defmodule OneCore.Server do
     OneCore.Release.holds(Iroh)
     key = JSON.decode!(address)["id"]
     :persistent_term.put(__MODULE__, {key, {nif, endpoint}})
+    :persistent_term.put({__MODULE__, :wake}, options.wake)
     {:ok, machine} = :inet.gethostname()
     name = Application.get_env(:one_core, :name) || to_string(machine)
     Servers.started(key, address, name, Application.get_env(:one_core, :owner, "network"))
     # The clients that were watching before it stopped may have missed something meanwhile, a new build of its
     # apps among them, so they're told to ask again.
-    changed()
-    {:ok, %{nif: nif, endpoint: endpoint}}
+    options.started.()
+    {:ok, %{nif: nif, endpoint: endpoint, handle: options.handle}}
   end
 
   # A hot load of another build of its NIF stops it, and starts it again on that build (`OneCore.Release.holds/1`).
@@ -389,14 +339,9 @@ defmodule OneCore.Server do
     {:noreply, server}
   end
 
-  # A server is reached as soon as it starts, and answers what it's asked once its apps are there, since they
-  # say whose a device is: so whoever asks while they start waits for them, and isn't told it can't be reached.
   @impl true
   def handle_info({:ask, ask, from, message}, server) do
-    reply = fn ->
-      Apps.started()
-      server.nif.reply(ask, Mcp.handle(message, from, {server.nif, ask}))
-    end
+    reply = fn -> server.nif.reply(ask, server.handle.(message, from, {server.nif, ask})) end
 
     Task.Supervisor.start_child(OneCore.Asks, reply)
     {:noreply, server}

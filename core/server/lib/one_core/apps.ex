@@ -14,7 +14,7 @@ defmodule OneCore.Apps do
   app was installed for (`OneCore.Servers.runs?/1`) loads it and runs it for them: another knows it only by what it
   says of itself (`OneCore.Apps.Version.Description`), which lists it, and passes every call to it on to one
   that does. It looks again when it's told to, when it's asked for
-  an app it doesn't run, when it comes back (`OneCore.Server.reconnected/0`), and behind a request for someone it
+  an app it doesn't run, when it comes back (`reconnected/0`), and behind a request for someone it
   last looked at more than five minutes ago: the request runs on what the server has, and the look is for what it
   wasn't told. So nothing is read for someone nobody uses.
   """
@@ -172,6 +172,60 @@ defmodule OneCore.Apps do
   def refresh do
     ask(:refresh)
     here(Server.key())
+  end
+
+  @doc """
+  Tells every client watching this server that something changed, so that it asks again (`OneCore.Server.tell/2`).
+  It says the UI library's build (`library`), and for each of `owners` whose apps moved, the version each of theirs
+  runs at (`apps`): an app's screen loaded against another of either is stale, and its client loads it again. With
+  no server started, nobody is told. The versions are looked up apart from whoever says it, which may be what keeps
+  them. Where it's an app's call that changed something, it says that app (`app`), so a client asks only what's that
+  app's again; left out, it may be anything.
+  """
+  def changed(owners \\ [], app \\ nil) do
+    Task.Supervisor.start_child(OneCore.Asks, fn ->
+      apps =
+        Map.new(owners, fn owner ->
+          {owner, for({name, version} <- versions([owner]), into: %{}, do: {name, version.code})}
+        end)
+
+      params = %{library: OneCore.Entrypoint.library().code, apps: apps}
+      params = if app, do: Map.put(params, :app, app), else: params
+      Server.tell("changed", params)
+    end)
+
+    :ok
+  end
+
+  @doc """
+  Looks in the bucket at what other servers put there for `owner`: the servers on their list, what each acts for
+  and the services it runs, and what's installed for them, running the latest version of each app. Its clients are
+  told if an app changed.
+
+  A server looks at someone when it's told to, when it's asked for them and last looked more than five minutes
+  ago, and when it comes back (`reconnected/0`). Nothing else has it look, so someone nobody uses costs nothing.
+  """
+  def reload(owner) do
+    Servers.reload(owner)
+    OneCore.Apps.Deploy.forget()
+    if sync(owner), do: changed([owner])
+    # An app updated by a server elsewhere may require what isn't installed for them yet.
+    if Servers.here?(owner), do: Task.start(fn -> OneCore.Apps.Lifecycle.required(owner) end)
+    :ok
+  end
+
+  @doc """
+  This server can reach the others again, its network's address or its bucket, after it couldn't, so it may have
+  missed being told something, and the edge what it is: it says its status again (`OneCore.Servers.report/0`),
+  invalidates what it cached of servers and hooks, looks at once at who it acts for, and at everyone else it has
+  looked at behind the next request for them (`refresh/0`). Saying its status is how the network's update hears
+  it's back, and catches it up if it missed a release.
+  """
+  def reconnected do
+    Servers.report()
+    Hooks.invalidate()
+    Servers.invalidate()
+    Enum.each(refresh(), &reload/1)
   end
 
   # Whose apps a server runs whether or not it's asked for them: the network's, those of whoever it acts for, and
@@ -456,7 +510,7 @@ defmodule OneCore.Apps do
           Map.get(state.reloaded, owner, now - @looks_after) <= now - @looks_after,
           do: owner
 
-    for owner <- stale, do: Task.start(fn -> Server.reload(owner) end)
+    for owner <- stale, do: Task.start(fn -> reload(owner) end)
     %{state | reloaded: Map.merge(state.reloaded, Map.new(stale, &{&1, now}))}
   end
 

@@ -158,7 +158,7 @@ defmodule OneCore.Release do
         for {process, _} <- waiting, do: send(process, :status)
       end)
 
-      Server.changed()
+      OneCore.Apps.changed()
     end
   rescue
     error -> Logger.warning("Couldn't say what changed of this server: #{Exception.message(error)}")
@@ -202,7 +202,7 @@ defmodule OneCore.Release do
   def instructed(update) do
     if update != network() do
       :persistent_term.put({__MODULE__, :network}, update)
-      Server.changed()
+      OneCore.Apps.changed()
       # The apps watching this server hear it too, as each takes a newer build of itself, or of its page, by itself.
       Server.tell("update", update)
 

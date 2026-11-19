@@ -6,7 +6,7 @@ defmodule OneCore.Services do
   `servers/<its key>/services`: each service's name with its app, by its artifact's name. Only that server
   writes it. Every server keeps what the servers it asked about have installed, as it last read it
   (`OneCore.Servers`), so calling a service asks the bucket nothing. It reads again when it looks at whoever the
-  servers act for (`OneCore.Server.reload/1`), and for whoever it knows of no server running a service for.
+  servers act for (`OneCore.Apps.reload/1`), and for whoever it knows of no server running a service for.
 
   Each service installed here is a process (`OneCore.Apps.Process`) for as long as its app has it. One that
   stops is started again, whatever stopped it, and the server carries on meanwhile. This process only keeps

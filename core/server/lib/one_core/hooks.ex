@@ -274,6 +274,16 @@ defmodule OneCore.Hooks do
   end
 
   @doc """
+  Has the apps installed for the network that can wake the device `device` wake it (the hook `wake`, as
+  Notifications does by a push), as a server does before it asks one whose app isn't running
+  (`OneCore.Server.ask_device/3`). Whether one did.
+  """
+  def wake(device) do
+    {:ok, woken, _failed} = collect("wake", %{"device" => device}, {nil, "network"})
+    Enum.any?(woken, fn {_app, part} -> part["woken"] == true end)
+  end
+
+  @doc """
   Whose the device `device` is, as the apps that mutate `device` say: a user, or `nil` for nobody's. Kept
   once it's somebody's, so a call asks nothing. `{:error, why}` where an app couldn't say, or none that says runs
   here (as while it waits for this server's update), which isn't nobody's: only an app says a device is nobody's, and

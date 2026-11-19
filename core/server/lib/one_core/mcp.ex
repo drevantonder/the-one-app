@@ -190,15 +190,15 @@ defmodule OneCore.Mcp do
       # it can reach its network's address again.
       {:ok, %{"method" => "notifications/one/reload"} = notification} ->
         case notification["params"]["owners"] do
-          nil -> Server.reconnected()
-          owners -> for owner <- List.wrap(owners), User.owner?(owner), do: Server.reload(owner)
+          nil -> Apps.reconnected()
+          owners -> for owner <- List.wrap(owners), User.owner?(owner), do: Apps.reload(owner)
         end
 
         ""
 
       # Another server saying where an app is in its life for someone moved, which this one's clients ask again.
       {:ok, %{"method" => "notifications/one/changed"} = notification} ->
-        Server.changed(
+        Apps.changed(
           for owner <- List.wrap(notification["params"]["owners"]), is_binary(owner), User.owner?(owner), do: owner
         )
 
@@ -749,7 +749,7 @@ defmodule OneCore.Mcp do
   # After a tool that doesn't only read, every client connected here is told that something changed: the tool's
   # app, or anything for One Core's own.
   defp changed(name, result, {_actor, subject}) do
-    if not reads?(name, subject), do: Server.changed([], app(name))
+    if not reads?(name, subject), do: Apps.changed([], app(name))
     {:ok, result}
   end
 

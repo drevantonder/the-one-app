@@ -19,7 +19,7 @@ defmodule OneCore.Application do
     OneCore.Cache.table()
 
     # A server that couldn't reach the bucket may have missed being told something meanwhile: once it can, it looks again.
-    OneCore.Bucket.Fuse.install(&Server.reconnected/0)
+    OneCore.Bucket.Fuse.install(&Apps.reconnected/0)
     # Windows keeps a few root certificates and fetches the rest only as its own programs ask it to, which Erlang
     # doesn't, so github.com's was missing on a new PC: a server there trusts Mozilla's, as Mint does where a system
     # has none (`castore`). Every `:public_key.cacerts_get/0`, and so every HTTPS request, has them from here.
@@ -45,7 +45,9 @@ defmodule OneCore.Application do
         # lease it held before it stopped among them. `Servers.Report` says so as it starts, before them.
         Servers.Report,
         Apps,
-        Server,
+        # A message is answered once the apps are there, since they say whose a device is: so whoever asks while
+        # they start waits for them, and isn't told the server can't be reached.
+        {Server, handle: &answer/3, wake: &OneCore.Hooks.wake/1, started: &Apps.changed/0},
         Services,
         Jobs,
         OneCore.Apps.Lifecycle
@@ -72,6 +74,11 @@ defmodule OneCore.Application do
     else
       {:error, {:not_joined, key}}
     end
+  end
+
+  defp answer(message, from, ask) do
+    Apps.started()
+    OneCore.Mcp.handle(message, from, ask)
   end
 
   # A server that's stopping, as a system stops one with SIGTERM, drains: it says it's stopping, so it isn't ready

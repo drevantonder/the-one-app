@@ -793,14 +793,14 @@ defmodule OneCore.Apps.Lifecycle do
   # apps runs at now, and their other servers look.
   defp ran(owner, loaded \\ []) do
     Apps.sync(owner, loaded)
-    Server.changed([owner])
+    Apps.changed([owner])
     Server.notify_servers([owner])
   end
 
   # Where an app's updates are moved, told to whoever has it installed, so their clients ask again.
   defp told(artifact, record \\ nil) do
     owners = Enum.uniq([Store.whose(artifact) | Installed.installed_for(artifact)])
-    Server.changed(owners)
+    Apps.changed(owners)
     Server.notify_servers(owners, "changed")
     record
   end
@@ -809,7 +809,7 @@ defmodule OneCore.Apps.Lifecycle do
   # `nil`, or `{:error, why}`.
   defp move(owner, name, event) do
     with record when not is_tuple(record) <- Installed.change(owner, name, event) do
-      Server.changed([owner])
+      Apps.changed([owner])
       Server.notify_servers([owner], "changed")
       record
     end
