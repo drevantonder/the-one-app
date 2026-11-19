@@ -116,6 +116,9 @@ export interface Look {
   transitionVelocity: number
   animationName: Properties["animationName"]
   animation: Of<"motion">
+  /** What of it is about to move, grow or fade, as CSS's `will-change`: a host draws it ahead, as a layer of its
+   * own, so it moves from the first frame without being drawn then. Only for what's about to, as it holds memory. */
+  willChange: (keyof Properties)[]
 }
 
 /** A style as it's written: each property a value, or a value by the node's state (`{ default, hover, pressed }`). */

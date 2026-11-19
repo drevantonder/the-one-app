@@ -513,4 +513,7 @@ export interface Properties {
    * back. */
   animationName: "spin" | "pulse" | "none"
   animation: Ref
+  /** What of it is about to move, grow or fade (`translateX`, `translateY`, `scale`, `opacity`), as CSS's
+   * `will-change`: drawn ahead as a layer of its own, which then only moves (`view::Layer`). */
+  willChange: (keyof Properties)[]
 }

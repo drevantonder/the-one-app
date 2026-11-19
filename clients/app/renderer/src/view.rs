@@ -721,8 +721,11 @@ impl Screen {
                 at = self.tree.parent(id);
             }
         }
-        let layered: HashSet<Id> = whole.into_iter().filter(|id| !touched.contains(id)).collect();
+        // What says it's about to move (`will-change`) is one as it holds still too: drawn ahead, it only moves then.
+        let layered: HashSet<Id> = whole.iter().chain(&self.layout.will_change).filter(|id| !touched.contains(id)).copied().collect();
         self.layers.retain(|id, _| layered.contains(id));
+        // It's drawn ahead in a frame where nothing moves, as a browser draws in idle time, not in one that's busy.
+        let still = moving.is_empty();
         self.frame += 1;
         let mut painter = Painter {
             tree: &self.tree,
@@ -766,6 +769,7 @@ impl Screen {
             framed: Vec::new(),
             layers: &mut self.layers,
             layered: &layered,
+            still,
             recording: None,
             parts: Vec::new(),
             unsettled: None,
@@ -858,6 +862,8 @@ impl Screen {
         self.tab_order = tab_order;
         self.rects = rects;
         self.animating = animating || moving;
+        // What's about to move and wasn't drawn ahead, as something was moving, is in a frame of its own once it stops.
+        self.again |= !still && self.layout.will_change.iter().any(|id| layered.contains(id) && !self.layers.get(id).is_some_and(|layer| layer.recorded));
         self.painted = (window.size, scale);
         self.pictures.drawn();
         self.tell_settled();
@@ -1748,6 +1754,8 @@ struct Retained {
     kept: HashMap<Id, Kept>,
     /// What's placed in the window (`position: fixed`), laid out as the root's children after its own.
     fixed: HashSet<Id>,
+    /// What's about to move, grow or fade (`Look::will_change`), drawn as a layer while it holds still too.
+    will_change: HashSet<Id>,
     /// The conditions it was styled in: when they change, everything's styled again.
     conditions: Option<Conditions>,
 }
@@ -1769,7 +1777,7 @@ impl Default for Retained {
         // or moves by its layout (a card's width) moves its contents with it smoothly, a frame at a time.
         let mut taffy = TaffyTree::new();
         taffy.disable_rounding();
-        Retained { taffy, kept: HashMap::new(), fixed: HashSet::new(), conditions: None }
+        Retained { taffy, kept: HashMap::new(), fixed: HashSet::new(), will_change: HashSet::new(), conditions: None }
     }
 }
 
@@ -1786,6 +1794,7 @@ impl Retained {
         let kept = self.kept.remove(&id).expect("it's kept");
         let _ = self.taffy.remove(kept.node);
         self.fixed.remove(&id);
+        self.will_change.remove(&id);
         transitions.forget(id);
         for child in kept.children {
             self.forget(child, frame, transitions);
@@ -1827,6 +1836,8 @@ struct Painter<'a> {
     /// What's drawn from a layer kept from an earlier frame (`Layer`), and the node whose is being drawn now.
     layers: &'a mut HashMap<Id, Layer>,
     layered: &'a HashSet<Id>,
+    /// Nothing moves this frame, so what's about to (`will-change`) is drawn into its layer ahead.
+    still: bool,
     recording: Option<Id>,
     /// The parts of the layer being drawn so far, before its scene now.
     parts: Vec<Part>,
@@ -2073,6 +2084,11 @@ impl Painter<'_> {
             Kind::Image | Kind::Path | Kind::Picker | Kind::Box | Kind::Scroll => None,
         };
         let positioned = layout.position == taffy::style::Position::Absolute;
+        if look.will_change {
+            self.layout.will_change.insert(id);
+        } else {
+            self.layout.will_change.remove(&id);
+        }
         let leaf = Leaf { id, text, look, line_clamp: lines, positioned, fixed: computed.fixed, measure, paragraph: None, spans };
         let taffy = &mut self.layout.taffy;
         match self.layout.kept.get_mut(&id) {
@@ -2227,6 +2243,13 @@ impl Painter<'_> {
             // rather than drawn into a layer each frame.
             Some(layer) if layer.key != key => {
                 self.layers.insert(id, Layer::unsettled(key));
+                self.unsettled = Some(id);
+                self.paint_node(taffy_node, offset, transform, mask, opacity, parent, pointer);
+                self.unsettled = None;
+                return;
+            }
+            // What's only about to move is drawn ahead only in a frame where nothing does, as usual till then.
+            _ if !self.still && !self.moving.contains(&id) => {
                 self.unsettled = Some(id);
                 self.paint_node(taffy_node, offset, transform, mask, opacity, parent, pointer);
                 self.unsettled = None;

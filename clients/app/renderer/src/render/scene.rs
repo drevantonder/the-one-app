@@ -96,15 +96,18 @@ impl Scene {
         let px = |length: f32| ScaledPixels(length * scale);
         let origin = crate::geometry::Point { x: ScaledPixels(recording.origin[0] * scale + by[0]), y: ScaledPixels(recording.origin[1] * scale + by[1]) };
         let bounds = Bounds::new(origin, crate::geometry::Size { width: px(recording.size[0] as f32), height: px(recording.size[1] as f32) });
-        self.insert_primitive(Raster {
-            order: 0,
-            raster: recording.id,
-            opacity,
-            pad: 0,
-            bounds,
-            content_mask: ContentMask { bounds: mask },
-            transformation: TransformationMatrix::unit(),
-        });
+        // Unseen, it isn't drawn, but its image is still made, ahead of its showing.
+        if opacity > 0.0 {
+            self.insert_primitive(Raster {
+                order: 0,
+                raster: recording.id,
+                opacity,
+                pad: 0,
+                bounds,
+                content_mask: ContentMask { bounds: mask },
+                transformation: TransformationMatrix::unit(),
+            });
+        }
         // What's drawn in it as images is drawn into their textures before it.
         for inner in recording.scene.recordings.iter().chain([recording]) {
             if !self.recordings.iter().any(|kept| kept.id == inner.id) {

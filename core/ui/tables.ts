@@ -154,7 +154,7 @@ const longhands: Record<string, string[]> = {
 /** Properties whose numbers aren't pixels. */
 const numbers = ["flexGrow", "flexShrink", "opacity", "zIndex", "aspectRatio", "scale", "strokeWidth", "lineClamp"]
 /** Properties whose values are tokens, or made of several things, which a dynamic style can't take as a value. */
-const fixed = ["font", "gridTemplateColumns", "gridColumn", "boxShadow", "backdropFilter", "transitionProperty", "transition", "animationName", "animation", "lineClamp"]
+const fixed = ["font", "gridTemplateColumns", "gridColumn", "boxShadow", "backdropFilter", "transitionProperty", "transition", "animationName", "animation", "lineClamp", "willChange"]
 
 /** A value as a token's reference, a token's negative's, or itself. */
 function referenced(value: any): unknown {
@@ -216,7 +216,8 @@ function declarations(property: string, value: any): string {
     case "userSelect":
       return `-webkit-user-select:${value};user-select:${value}`
     case "transitionProperty":
-      return `transition-property:${(value as string[]).map((one) => (one === "translateX" || one === "translateY" ? "translate" : named[one] ?? kebab(one))).join(",")}`
+    case "willChange":
+      return `${kebab(property)}:${[...new Set((value as string[]).map((one) => (one === "translateX" || one === "translateY" ? "translate" : named[one] ?? kebab(one))))].join(",")}`
     case "transition":
       return `transition-duration:var(--${value.token});transition-timing-function:var(--${value.token.replace(/^move-/, "ease-")})`
     case "animationName":

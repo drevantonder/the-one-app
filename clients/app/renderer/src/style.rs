@@ -43,6 +43,8 @@ pub struct Look {
     pub pointer_events: Option<bool>,
     /// Whether a press moves its window (`appRegion: "drag"`), or doesn't though what it's in does (`no-drag`).
     pub app_region: Option<bool>,
+    /// It's about to move, grow or fade (`willChange` names one of those), so it's drawn ahead as a layer of its own.
+    pub will_change: bool,
     pub cursor: Option<Cursor>,
     /// A path's paint, where it says, and its stroke's width.
     pub fill: Paint,
@@ -94,6 +96,7 @@ impl Default for Look {
             rotate: 0.0,
             z_index: 0,
             pointer_events: None,
+            will_change: false,
             app_region: None,
             cursor: None,
             fill: Paint::Current,
@@ -527,6 +530,7 @@ fn computed(style: &Map<String, Value>, conditions: Conditions) -> Computed {
         z_index: number("zIndex").unwrap_or(0.0) as i32,
         pointer_events: word("pointerEvents").map(|events| events != "none"),
         app_region: word("appRegion").map(|region| region == "drag"),
+        will_change: get("willChange").and_then(Value::as_array).into_iter().flatten().filter_map(Value::as_str).any(|property| matches!(property, "translateX" | "translateY" | "scale" | "opacity")),
         cursor: match word("cursor") {
             Some("pointer") => Some(Cursor::Pointer),
             Some("text") => Some(Cursor::Text),
