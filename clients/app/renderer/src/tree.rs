@@ -28,6 +28,11 @@ pub enum Kind {
     Box,
     /// A box whose content scrolls along its `flexDirection`.
     Scroll,
+    /// A column of `count` rows of which only those near the window are in it, each by its `index`, as UIKit's
+    /// collection view and Android's RecyclerView hold only those: it's as tall as all of them, those it hasn't drawn
+    /// as tall as the drawn ones are on average (`estimate` until it has drawn one), and asks for the rows it needs by
+    /// `range` (`view::list`).
+    List,
     Text,
     Image,
     /// A vector shape, SVG's `<path>`: its `d` in its `viewBox`.
@@ -101,6 +106,7 @@ impl Node {
             "scroll" => "onScroll",
             "layout" => "onLayout",
             "intersection" => "onIntersection",
+            "range" => "onRange",
             "drop" => "onDrop",
             "dragstart" => "onDragStart",
             "dragend" => "onDragEnd",

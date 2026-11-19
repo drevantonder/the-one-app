@@ -28,6 +28,7 @@ mod bridge;
 mod drag;
 pub use bridge::TextInputConnection;
 mod frames;
+mod list;
 mod paint;
 mod pictures;
 mod selection;
@@ -934,7 +935,7 @@ impl Screen {
             decoded: self.pictures.decoded,
             frames: self.frames.iter().map(|(id, child)| (*id, child.screen.frame)).collect(),
         };
-        if !self.animating && self.tree.unchanged() && self.seen.as_ref() == Some(&seen) {
+        if !self.animating && self.tree.unchanged() && self.seen.as_ref() == Some(&seen) && self.stale_lists().is_empty() {
             return None;
         }
         // What's kept of what only moves, grows or fades is drawn again where what it draws from changed: anything
@@ -954,7 +955,9 @@ impl Screen {
         self.styled = self.states.clone();
         // A text inside a text is drawn as a run of the one it's in, which is styled again as its state changes.
         changed.extend(states.iter().filter_map(|id| self.tree.outer_text(*id)));
-        for id in changed.iter().chain(&moving).chain(&states).copied().chain(self.tree.inputs()) {
+        // A list whose rows' heights changed holds their room again (`list`).
+        let stale = self.stale_lists();
+        for id in changed.iter().chain(&moving).chain(&states).copied().chain(self.tree.inputs()).chain(stale) {
             let mut at = Some(id);
             while let Some(id) = at.filter(|id| below.insert(*id)) {
                 at = self.tree.parent(id);
@@ -1084,6 +1087,10 @@ impl Screen {
             })
         });
         self.cost.layout = laying_out.elapsed();
+        // A list's rows laid out as other than it held room for are held for as they are in the next frame.
+        if painter.layout.measure_lists(painter.tree) {
+            self.again = true;
+        }
         match measured {
             Err(error) => log::error!("its layout failed: {error}"),
             Ok(()) => {
@@ -1226,6 +1233,7 @@ impl Screen {
     /// What's told of where things landed: what a still pointer is over now, as a browser finds again after layout;
     /// where each node listening for `layout` is; and whether each listening for `intersection` is near the window.
     fn tell_placed(&mut self, intersections: Vec<(Id, bool)>) {
+        self.ask_lists(self.painted.0.height);
         // What moved under a pointer that's still is what it's over now, as a browser finds again after layout.
         if let Some(at) = self.pointer.filter(|_| !self.touch) {
             let before = self.states.hovered.clone();

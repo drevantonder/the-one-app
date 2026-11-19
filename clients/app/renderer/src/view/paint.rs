@@ -172,6 +172,8 @@ pub(super) struct Retained {
     pub(super) will_change: HashSet<Id>,
     /// The conditions it was styled in: when they change, everything's styled again.
     pub(super) conditions: Option<Conditions>,
+    /// Each list's rows, as it laid them out (`list::Listed`).
+    pub(super) lists: HashMap<Id, super::list::Listed>,
 }
 
 /// A node as it was last built: its Taffy node, what its style was resolved from, its children in the tree, those of
@@ -191,7 +193,7 @@ impl Default for Retained {
         // or moves by its layout (a card's width) moves its contents with it smoothly, a frame at a time.
         let mut taffy = TaffyTree::new();
         taffy.disable_rounding();
-        Retained { taffy, kept: HashMap::new(), fixed: HashSet::new(), will_change: HashSet::new(), conditions: None }
+        Retained { taffy, kept: HashMap::new(), fixed: HashSet::new(), will_change: HashSet::new(), conditions: None, lists: HashMap::new() }
     }
 }
 
@@ -207,6 +209,7 @@ impl Retained {
         }
         let kept = self.kept.remove(&id).expect("it's kept");
         let _ = self.taffy.remove(kept.node);
+        self.lists.remove(&id);
         self.fixed.remove(&id);
         self.will_change.remove(&id);
         transitions.forget(id);
@@ -369,8 +372,12 @@ impl Painter<'_> {
             true => self.restyle(id, inherited, state, root),
             false => self.layout.leaf(self.layout.kept[&id].node).text,
         };
-        if matches!(node.kind, Kind::Box | Kind::Scroll) {
-            let children: Vec<Id> = node.children.iter().copied().filter(|child| tree.nodes.contains_key(child)).collect();
+        if matches!(node.kind, Kind::Box | Kind::Scroll | Kind::List) {
+            let mut children: Vec<Id> = node.children.iter().copied().filter(|child| tree.nodes.contains_key(child)).collect();
+            // A list's rows are laid out in their order, whatever order they came in.
+            if node.kind == Kind::List {
+                children.sort_by_key(|child| super::list::index(&tree.nodes[child]));
+            }
             let built: Vec<NodeId> = children.iter().map(|child| self.build(*child, text, false)).collect();
             // What's fixed is laid out in the window, as the root's (`Retained::place_fixed`).
             let inside: Vec<NodeId> = built.into_iter().filter(|child| !self.layout.leaf(*child).fixed).collect();
@@ -385,6 +392,9 @@ impl Painter<'_> {
                     self.layout.taffy.set_children(kept.node, &inside).expect("its children are Taffy's");
                 }
                 kept.inside = inside;
+            }
+            if node.kind == Kind::List {
+                self.layout.hold(id, node, tree);
             }
         }
         self.layout.kept[&id].node
@@ -465,7 +475,7 @@ impl Painter<'_> {
                 Some(Measure::Input { words: if words.is_empty() { " ".into() } else { words }, text, multiline: node.is("multiline") })
             }
             Kind::Frame => Some(Measure::Frame { height: self.frames.get(&id).and_then(|child| child.screen.content_height) }),
-            Kind::Image | Kind::Path | Kind::Picker | Kind::Box | Kind::Scroll | Kind::Video => None,
+            Kind::Image | Kind::Path | Kind::Picker | Kind::Box | Kind::Scroll | Kind::List | Kind::Video => None,
         };
         let positioned = layout.position == taffy::style::Position::Absolute;
         if look.will_change {
@@ -953,7 +963,7 @@ impl Painter<'_> {
                     self.scene.splice(&child.scene, 1.0, [content.origin.x * self.scale, content.origin.y * self.scale], 1.0, shown.intersect(&content).scale_to(self.scale));
                 }
             }
-            Kind::Box | Kind::Scroll => {
+            Kind::Box | Kind::Scroll | Kind::List => {
                 let mut child_mask = mask;
                 let mut child_offset = laid_out.origin;
                 let around = self.near;
