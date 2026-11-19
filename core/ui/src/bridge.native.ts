@@ -25,6 +25,8 @@ const keys = new Set<(event: Page.Keyed) => void>()
   message(message: { id?: number; method?: string; result?: unknown; error?: { message: string } }) {
     if (message.method === "notifications/one/changed") for (const listener of listeners) listener()
     else if (message.method === "ui/notifications/host-context-changed") dress((message as { params?: object }).params)
+    // The device's own back, where something is open over the page: the last opened shuts.
+    else if (message.method === "notifications/one/back") over.at(-1)?.shut()
     else if (message.id !== undefined) waiting.get(message.id)?.(message)
   },
 }
@@ -115,7 +117,19 @@ export const changed: typeof Page.changed = (listener) => {
   listeners.add(listener)
   return () => void listeners.delete(listener)
 }
-export const covers: typeof Page.covers = () => () => {}
+/** What's open over the page, as the DOM's bridge keeps it (`covers`), which its host hears of, so its Back shuts it. */
+const over: { shut: () => void; layer: boolean }[] = []
+const said = async () => (await greeted, host?.post({ jsonrpc: "2.0", method: "notifications/one/over", params: { over: over.length > 0, layer: over.some(({ layer }) => layer) } }))
+export const covers: typeof Page.covers = (shut, { layer = true } = {}) => {
+  const one = { shut, layer }
+  over.push(one)
+  void said()
+  return () => {
+    if (!over.includes(one)) return
+    over.splice(over.indexOf(one), 1)
+    void said()
+  }
+}
 export const connection: typeof Page.connection = () => connected()
 /** Opening something is a step back closes, as the device's back closes what covers the page. */
 export const step = covers
