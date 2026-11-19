@@ -4,7 +4,9 @@
 # `tooling/version apps/gmail`, that app's. It's Semantic Versioning's, `0.18.2+2974.febd37350abc`: the
 # version, then as build metadata how many commits lead to the one checked out, which only grows on main and is what
 # a phone's store takes as its build number, and that commit, with `.dirty` after when what's built isn't all
-# committed.
+# committed, and the first 8 hex digits of a hash of what isn't (the diff from that commit and each untracked file),
+# so each uncommitted state a local network or a test build runs has a name of its own, and nothing that keeps what
+# a build had by its name keeps one's under another's: `0.18.2+2974.febd37350abc.dirty.3f9a0c21`.
 #
 # A version counts the Conventional Commits since 4706f3067 that touch its part's paths, as release-please's manifest
 # mode, Nx Release and release-plz do: the message says what kind of change it is, the paths which part changed. A
@@ -48,4 +50,10 @@ version=$(git log --reverse --format='%s%n%b%x1e' "$since..HEAD" -- $paths | awk
   }
   END { print major "." minor "." patch }')
 commit=$(git describe --always --dirty=.dirty --abbrev=12 --exclude='*')
+case $commit in
+  *.dirty) commit=$commit.$({
+    git diff HEAD --binary
+    git ls-files --others --exclude-standard | while IFS= read -r file; do echo "$file $(git hash-object -- "$file")"; done
+  } | git hash-object --stdin | cut -c1-8) ;;
+esac
 echo "$version+$(git rev-list --count HEAD).$commit"
