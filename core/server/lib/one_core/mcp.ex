@@ -447,8 +447,6 @@ defmodule OneCore.Mcp do
           # Whether its app is trusted goes too: the client lets only a trusted app's page change the device
           # or ask for someone else (`clients/app/page/client.js`). So does the runtime version its native page needs
           # (`runtimeVersion`), which a native host that has it draws itself, and one that hasn't opens in a web view.
-          # A client before runtime version 3 reads it as `host`, and gets it so until none is in use, so it opens
-          # in a web view what it can't draw.
           entrypoint ->
             Map.merge(resource, %{
               name: entrypoint.name,
@@ -458,8 +456,7 @@ defmodule OneCore.Mcp do
                   %{
                     category: entrypoint.category,
                     trusted: version.trusted,
-                    runtimeVersion: entrypoint[:runtime_version],
-                    host: entrypoint[:runtime_version]
+                    runtimeVersion: entrypoint[:runtime_version]
                   },
                   &match?({_, nil}, &1)
                 )
