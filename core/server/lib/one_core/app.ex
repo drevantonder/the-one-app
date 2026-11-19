@@ -414,7 +414,7 @@ defmodule OneCore.App do
   - An app's client may export modules for another app's page to import, as a package does, in
     `client/package.json`'s `exports` (`{"exports": {"./profile": "./profile.tsx"}}`), each built as `client/<name>.js`
     with what it exports: a component another app draws, as the Vault draws an item of a type an app registers.
-    Solid, `@zag-js/solid` and `ui` are the one copy every page and every module it imports shares, whichever app
+    Solid and `ui` are the one copy every page and every module it imports shares, whichever app
     built it, so signals and context work across apps; and every page is served with an import map (`OneCore.Mcp`)
     that names them and `<app>/`, the client of its own app and of each app it requires, for what it imports by
     name as it runs.
@@ -445,12 +445,8 @@ defmodule OneCore.App do
     principles: `principle-experience-first` for what to build, `principle-model-the-domain` for the state it keeps,
     `principle-make-operations-idempotent` for tools and jobs that may run twice, `principle-fix-root-causes` when
     something's wrong, and `principle-prove-it-works` before calling it done.
-  - The UI library's menu, select, date picker, number input and tabs are Ark UI's, with Ark's parts and props, over Zag.
-    For something the UI library lacks, Zag's docs for Solid are https://v2.zagjs.com/llms-solid.txt and Ark's are
-    https://ark-ui.com/llms-solid.txt: an app installs `@zag-js/<component>` to its package.json, at the version of
-    Zag the UI library's `build/package.json` names, and draws the component as Zag says, styling it with the UI library's
-    custom properties. Zag's Solid adapter, `@zag-js/solid`, is the UI library's, as Solid is. Zag's docs import from
-    `solid-js/web`, which is `@solidjs/web`; and Zag's props set `id`, so one written before them is replaced.
+  - The UI library's components are its own and work on every host, the DOM and a native one. For something it lacks,
+    compose its primitives (and, later, the element API).
   - An app reaches nothing but its client, and speaks to it as an MCP App does: JSON-RPC messages posted to
     `window.parent`, which answers with a message to the page. It sends `ui/initialize` first and then
     `ui/notifications/initialized`, calls a tool with `tools/call` (`{name: "hello_greet", arguments: {...}}`),

@@ -519,7 +519,6 @@ defmodule OneCore.Mcp do
     "solid-js" => "/ui/client/solid.js",
     "solid-js/internal" => "/ui/client/internal.js",
     "@solidjs/web" => "/ui/client/web.js",
-    "@zag-js/solid" => "/ui/client/zag.js",
     "ui" => "/ui/client/ui.js"
   }
   defp mapped(page, path, apps) do

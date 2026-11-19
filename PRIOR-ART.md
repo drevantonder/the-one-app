@@ -61,9 +61,10 @@ None of these is chosen. Each is named so it's weighed before anything like it i
 - **Vercel's UI SDK** (`@ui-sdk`, Apache-2.0, 0.1.0 beta, 12 November 2026): behaviours with no look of their own
   (popups, selection, keyboard, focus) for React, Vue, Svelte, Solid and Web Components, made for agents to build
   with. Considered for the UI the clients share, and not chosen.
-- **Ark UI** (`@ark-ui/solid`): Zag's machines as components. Its `6.0.0-next.0` still imports `solid-js/web`, which
-  Solid 2.0 removed, so it doesn't build on Solid 2.0 yet (tried 14 November 2026). The UI library's Zag components are
-  in its shape until it does.
+- **Ark UI** (`@ark-ui/solid`) and **Zag**'s machines: not used. Ark's `6.0.0-next.0` still imports `solid-js/web`, which
+  Solid 2.0 removed, so it doesn't build on Solid 2.0 (tried 14 November 2026), and Zag's machines need the DOM, which a
+  native host doesn't have. The UI library's components are its own; only Zag's list collection (`@zag-js/collection`,
+  a data structure with no DOM) is used.
 - **Asuka** (`egoist/asuka`, MIT, v0.1.0, 13 November 2026): apps in Go drawn with each platform's own widgets. Set
   aside: it's compiled, so an app's entrypoint couldn't arrive from a server, and its widgets are each platform's own look.
 - **What a strict app's JS runs with on a native host** (18 November 2026, measured): the WinterTC Minimum Common API.

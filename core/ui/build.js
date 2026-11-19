@@ -1,8 +1,7 @@
 // Builds the UI library into dist, which is the app `ui`. What runs in a client is in client/, as every app's is: ui.css
 // is the one stylesheet, ui.js every component, solid.js and web.js are Solid, native/ what a native host loads in place
 // of web.js and ui.js, internal.js is Solid's internals (`solid-js/internal`), which Solid's universal renderer reads with
-// its views, and zag.js is Zag's Solid adapter,
-// which the UI library and every app share (app.js leaves them out of an app). SKILL.md is the UI library's skill, and skills/ are Solid's, as the version apps are
+// its views. SKILL.md is the UI library's skill, and skills/ are Solid's, as the version apps are
 // built with has them, Emil Kowalski's, pstack's, Modern Web Guidance and our design rules. build/ is how an app is built and checked against it: app.js and lint-strict.js, with what they need to run, which a server
 // installs and runs on an app's source.
 import { cpSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs"
@@ -29,7 +28,7 @@ await build({
     outDir: "dist/client",
     sourcemap: true,
     rolldownOptions: {
-      input: { ui: here("src/index.ts"), solid: "solid-js", internal: "solid-js/internal", web: "@solidjs/web", zag: "@zag-js/solid" },
+      input: { ui: here("src/index.ts"), solid: "solid-js", internal: "solid-js/internal", web: "@solidjs/web" },
       // What an app imports from each is what each exports, whether or not the UI library uses it.
       preserveEntrySignatures: "strict",
       output: { entryFileNames: "[name].js", chunkFileNames: "ui-[hash].js" },

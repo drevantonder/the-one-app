@@ -2,7 +2,7 @@
 // app with an app is deployed, on the app's source as it was deployed, and serves what it writes to <out>. Each
 // `.html` in <source> is a page, and each module its package.json `exports` (`"./profile": "./profile.tsx"`) is built as
 // `<name>.js`, with its exports, for another app's page to import: a component it draws. What every app shares (Solid,
-// Zag's Solid adapter and the UI library) is left out of it, and imported from the app `ui`, which the network serves
+// the UI library) is left out of it, and imported from the app `ui`, which the network serves
 // once, so every page and every module it imports, whichever app built it, shares one Solid; the import map a server
 // serves a page with names the same (`OneCore.Mcp`), for what's imported by name as it runs. A page the edge serves
 // itself is built here too. A build that fails says why on stderr, a problem to a line with its file and line, and
@@ -17,7 +17,7 @@ import { newMade, stylesCss, stylesPlugin, stylesTable } from "./tables.ts"
 const [source, out] = process.argv.slice(2)
 
 // What an app imports that the app `ui` serves, by where it's served (ui/build.js).
-const shared = { "solid-js": "/ui/client/solid.js", "solid-js/internal": "/ui/client/internal.js", "@solidjs/web": "/ui/client/web.js", "@zag-js/solid": "/ui/client/zag.js", ui: "/ui/client/ui.js" }
+const shared = { "solid-js": "/ui/client/solid.js", "solid-js/internal": "/ui/client/internal.js", "@solidjs/web": "/ui/client/web.js", ui: "/ui/client/ui.js" }
 
 /** The app's styles (src/styles.ts), made as each module is built. */
 const made = newMade()

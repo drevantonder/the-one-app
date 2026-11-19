@@ -18,11 +18,6 @@ export const touch = matching("(pointer: coarse)")
 /// Whether the user asked their device for less motion: what the UI library moves in JavaScript asks this first.
 export const reduced = matchMedia("(prefers-reduced-motion: reduce)")
 
-/// Which way text runs, as the page says on `<html dir>`. It can change its mind, and Zag is told again.
-const [direction, turn] = createSignal<"ltr" | "rtl">(document.documentElement.dir === "rtl" ? "rtl" : "ltr")
-new MutationObserver(() => turn(document.documentElement.dir === "rtl" ? "rtl" : "ltr")).observe(document.documentElement, { attributeFilter: ["dir"] })
-export const dir = direction
-
 /// One of the UI library's three paces (`quick`, `settle`, `travel`) as the timing of an animation of `element`'s:
 /// tokens.css says how long each is and how it eases.
 export function pace(element: Element, name: "quick" | "settle" | "travel"): { duration: number; easing: string } {
