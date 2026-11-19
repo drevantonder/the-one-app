@@ -18,8 +18,7 @@
 // (`Tokens`), and sends back what the person does to them (`EventName`). Every component of the UI library is written
 // once on them, so a host draws no component of its own. Both tables come with the UI library and with each app, over
 // the air, and a host knows only the kinds of token, the conditions and the style properties, never a token's or a
-// style's name or value. A page written for version 1 sends `style` objects (`Version1Style`), which are still drawn
-// until it's written on the tables.
+// style's name or value.
 
 /** The runtime version: what the host's side of the renderer is, which a host says it has, an entrypoint names
  * (`runtime_version`), and the tables say they need. 3 made each mutation and event a direct call, 4 added
@@ -235,8 +234,8 @@ export interface Props {
   /** The option the keyboard is on while it stays in what's typed in, by its `id` (WAI-ARIA's combobox). */
   "aria-activedescendant"?: string
   /** How it's laid out and looks: its styles (`Styles`) by id, each dynamic one's values (`Dynamic`) after it, the last
-   * winning where two say the same property. A page written for 1 sends one `Version1Style` instead. */
-  style?: (StyleId | Dynamic)[] | Version1Style
+   * winning where two say the same property. */
+  style?: (StyleId | Dynamic)[]
   /** `image`: a `data:` address, or a file of the app's own by its path. `frame`: the page it shows, as a `one:` link
    * names it after its scheme. */
   src?: string
@@ -330,98 +329,6 @@ export type Role =
   | "menu" | "menuitem" | "navigation" | "progressbar" | "radio" | "radiogroup" | "region" | "searchbox" | "separator"
   | "slider" | "status" | "switch" | "tab" | "tablist" | "tabpanel" | "textbox" | "toolbar" | "banner" | "alertdialog"
   | "listbox" | "option" | "combobox" | "form" | "tooltip"
-
-// Version 1's style subset, which a page written for 1 has as its `style`: CSS's own property names and values,
-// as React Native takes them, limited to what every host draws, with colours, radii, sizes and type by the design
-// tokens' names, never a value of their own. Lengths are CSS pixels.
-
-/** A colour, by its token: `muted-foreground` is `var(--muted-foreground)`. */
-export type Colour =
-  | "background" | "foreground" | "card" | "primary" | "primary-foreground" | "muted" | "muted-foreground" | "destructive"
-  | "warning" | "border" | "overlay"
-
-/** A type style (DESIGN.md: text is one of a few type styles), each a size, a weight and a tracking from the tokens. */
-export type Font = "body" | "label" | "title" | "figure" | "subheadline" | "footnote" | "caption-1" | "caption-2"
-
-/** A space: pixels, or a screen's `gutter`. */
-export type Space = number | "gutter"
-
-/** A size: pixels, a percentage of the room, `auto`, or a token: what's pressed (`control`), an icon (`icon`), and
- * where lists stop growing (`readable`). */
-export type Size = number | `${number}%` | "auto" | "control" | "icon" | "readable"
-
-/** A radius, by its token, or `full` for a pill or a circle. */
-export type Radius = 0 | "sm" | "md" | "xl" | "full"
-
-export interface Version1Style {
-  display?: "flex" | "grid" | "none"
-  flexDirection?: "row" | "column" | "row-reverse" | "column-reverse"
-  flexWrap?: "nowrap" | "wrap"
-  flexGrow?: number
-  flexShrink?: number
-  flexBasis?: Size
-  alignItems?: "flex-start" | "center" | "flex-end" | "stretch" | "baseline"
-  alignSelf?: "auto" | "flex-start" | "center" | "flex-end" | "stretch" | "baseline"
-  justifyContent?: "flex-start" | "center" | "flex-end" | "space-between" | "space-around" | "space-evenly"
-  /** Equal columns, or as many as fit at least so wide, filling the room. */
-  gridTemplateColumns?: `repeat(${number}, 1fr)` | `repeat(auto-fill, minmax(${number}px, 1fr))`
-  gridColumn?: `span ${number}`
-  gap?: Space
-  rowGap?: Space
-  columnGap?: Space
-  padding?: Space
-  paddingInline?: Space
-  paddingBlock?: Space
-  paddingTop?: Space
-  paddingRight?: Space
-  paddingBottom?: Space
-  paddingLeft?: Space
-  margin?: Space
-  marginInline?: Space | "auto"
-  marginBlock?: Space
-  width?: Size
-  height?: Size
-  minWidth?: Size
-  minHeight?: Size
-  maxWidth?: Size
-  maxHeight?: Size
-  aspectRatio?: number
-  overflow?: "visible" | "hidden" | "scroll"
-  opacity?: number
-  backgroundColor?: Colour
-  color?: Colour
-  borderColor?: Colour
-  /** Borders are hairlines, or none. */
-  borderWidth?: 0 | 1
-  borderTopWidth?: 0 | 1
-  borderRightWidth?: 0 | 1
-  borderBottomWidth?: 0 | 1
-  borderLeftWidth?: 0 | 1
-  borderRadius?: Radius
-  font?: Font
-  textAlign?: "start" | "center" | "end"
-  fontVariantNumeric?: "normal" | "tabular-nums"
-  /** At most so many lines, the last cut with "…". */
-  lineClamp?: number
-  /** `absolute` takes it out of its parent's flow, placed by `top`, `right`, `bottom` and `left` in its nearest
-   * parent that's `relative` or `absolute`, over what's drawn before it, or under what's drawn before it with a
-   * higher `zIndex`. */
-  position?: "relative" | "absolute"
-  top?: number
-  right?: number
-  bottom?: number
-  left?: number
-  zIndex?: number
-  /** Drawn moved, larger or turned from where it's laid out, around its middle, which moves nothing else: CSS's
-   * `translate`, `scale` and `rotate` (degrees), React Native's `transform`. What a page moves by hand, a frame at a
-   * time (`requestAnimationFrame`), it moves with these. */
-  translateX?: number
-  translateY?: number
-  scale?: number
-  rotate?: number
-  /** `none` lets what's under it have the pointer, as a picture of something carried over the screen does. */
-  pointerEvents?: "auto" | "none"
-}
 
 // The tables. The UI library's build makes both from its own TypeScript (core/ui/src/tokens.ts, and each component's
 // styles), as it makes the web's CSS from them; each app's build makes its styles' the same way. A host fetches them

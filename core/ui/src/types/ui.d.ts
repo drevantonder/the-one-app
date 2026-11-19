@@ -5,14 +5,11 @@
 // the props every host can draw, and the check says whether the DOM's takes them.
 import type { Element } from "solid-js"
 import type { ListCollection } from "@zag-js/collection"
-import type { Ice, Props, Rect, Version1Style } from "../drawing-primitives/renderer.ts"
+import type { Ice, Props, Rect } from "../drawing-primitives/renderer.ts"
 import type { Look, Styled, Styles } from "../styles.ts"
 import type { tokens as Tokens } from "../tokens.ts"
 
 export type { Element, Ice, Look, Rect, Styled, Styles }
-
-/** A primitive's `style`: styles (`styles()`), or, on a page written for version 1, one style object. */
-export type Style = Styles | Version1Style
 
 // Styles and tokens (../../styles.ts, ../../tokens.ts).
 export { createTheme, defineVars, styles, negative } from "../styles.ts"
@@ -77,7 +74,7 @@ export type Scrolled = {
 
 /** What every primitive but an image and a text input takes: how it looks, and what it listens for. */
 type Listens = Semantics & {
-  style?: Style
+  style?: Styles
   /** What Tab reaches, as the web's `tabIndex`: `0` for what it otherwise wouldn't, `-1` for what's focused only by a
    * press. */
   tabIndex?: 0 | -1
@@ -124,7 +121,7 @@ export type ScrollViewProps = ViewProps & {
 export declare function ScrollView(props: ScrollViewProps): Element
 
 export type TextProps = Semantics & {
-  style?: Style
+  style?: Styles
   /** Pressed where its words are, as an inline link (`role="link"`), reached by Tab with a `tabIndex`. */
   tabIndex?: 0 | -1
   onPress?: (event: Located) => void
@@ -135,13 +132,13 @@ export declare function Text(props: TextProps): Element
 export type ImageProps = Pick<Semantics, "aria-hidden"> & {
   src: string
   alt: string
-  style?: Style
+  style?: Styles
 }
 export declare function Image(props: ImageProps): Element
 
 export type SvgProps = Pick<Semantics, "role" | "aria-label" | "aria-hidden"> & {
   viewBox: string
-  style?: Style
+  style?: Styles
   children?: Element
 }
 export declare function Svg(props: SvgProps): Element
@@ -163,7 +160,7 @@ export type VideoProps = {
   "aria-label": string
   /** Has the keyboard, what's typed going to the screen, each time it's set. */
   autoFocus?: boolean
-  style?: Style
+  style?: Styles
   onOffer?: (event: { sdp: string }) => void
   onState?: (event: { state: "connected" | "lost" }) => void
   /** The video's own size, in its pixels, as it comes and changes. */
@@ -178,7 +175,7 @@ export type FrameProps = {
   subject?: string
   /** What it is, its accessible name. */
   title?: string
-  style?: Style
+  style?: Styles
 }
 export declare function Frame(props: FrameProps): Element
 
@@ -211,7 +208,7 @@ export type TextInputProps = Pick<Semantics, "role" | "aria-label" | "aria-descr
   autoCorrect?: boolean
   spellCheck?: boolean
   autoComplete?: string
-  style?: Style
+  style?: Styles
   /** What's in it now, each time that changes. */
   onChangeText?: (text: string) => void
   /** Its action key was pressed: Return in one line, or a phone's Done, Go, Search or Send. */

@@ -56,7 +56,7 @@ impl Screen {
             }
             "tree" => self.inspected_tree(),
             "query" => {
-                let mut found = inspect::query(&self.tree, &self.rects, self.conditions(), request);
+                let mut found = inspect::query(&self.tree, &self.rects, request);
                 // An input's editing state as the host has it, which is ahead of what its app set.
                 for node in found["nodes"].as_array_mut().into_iter().flatten() {
                     if let Some(field) = node["node"].as_u64().and_then(|id| self.fields.get(&id)) {

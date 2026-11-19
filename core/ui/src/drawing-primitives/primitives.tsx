@@ -1,12 +1,12 @@
 // The drawing primitives, as the DOM draws them: a box, a scroll, a text, an image, a path and an editable text, each a
 // plain element with the semantic props a native host's renderer has (renderer.ts). A native host draws
 // the same props from the mutations Solid's universal renderer tells it. A primitive's `style` is styles (../styles.ts),
-// drawn by their classes, or, on a page written for version 1, one style object, drawn as inline CSS.
+// drawn by their classes.
 import { createEffect, createSignal, For, merge, omit, onCleanup, onSettled, Show } from "solid-js"
 import { Dynamic, Portal as Inserted, render as mount, type JSX } from "@solidjs/web"
 import { frame, sized, tellDrawn, unframe } from "../bridge.ts"
 import { layer as whole } from "./layer.ts"
-import type { Ice, Props, TextInputAction, Version1Style } from "./renderer.ts"
+import type { Ice, Props, TextInputAction } from "./renderer.ts"
 import { fullScreen, mods, named, type Input } from "./input.ts"
 import type { Intersected, Laid, Located, Pressed, Wheeled } from "../types/ui.d.ts"
 import { flat, web, type Styles } from "../styles.ts"
@@ -64,7 +64,7 @@ export interface PickerProps {
   onValueChange?: (value: string, index: number) => void
   enabled?: boolean
   "aria-label"?: string
-  style?: Style
+  style?: Styles
   children?: JSX.Element
 }
 
@@ -98,7 +98,7 @@ export interface VideoProps {
   watch?: boolean
   "aria-label": string
   autoFocus?: boolean
-  style?: Style
+  style?: Styles
   onOffer?: (event: { sdp: string }) => void
   onState?: (event: { state: "connected" | "lost" }) => void
   onSize?: (event: { width: number; height: number }) => void
@@ -261,13 +261,8 @@ export function Video(props: VideoProps) {
 /// asked for has settled, under its `<Loading>`s.
 export const render = (code: () => JSX.Element): (() => void) => mount(() => (onSettled(() => void tellDrawn()), code()), document.body)
 
-/** A primitive's `style`: styles, or version 1's one object. */
-type Style = Styles | Version1Style
-/** Whether `style` is version 1's. */
-const v1 = (style: Style | undefined): style is Version1Style => !!style && !Array.isArray(style) && typeof style === "object" && !("$id" in style)
-/** What a primitive's element has of its `style`: its classes after the primitive's own, its inline CSS, and a version
- * 1 type style's `data-font`. */
-export const drawn = (own: string, style: Style | undefined) => (v1(style) ? { class: own, style: css(style), "data-font": style.font } : (({ class: names, style: inline }) => ({ class: `${own} ${names}`, style: inline }))(web(style as Styles)))
+/** What a primitive's element has of its `style`: its classes after the primitive's own, and its inline CSS. */
+export const drawn = (own: string, style: Styles | undefined) => (({ class: names, style: inline }) => ({ class: `${own} ${names}`, style: inline }))(web(style))
 
 /** What a primitive takes of the renderer's props: its role and states, with what it listens for. */
 type Semantics = Pick<Props, Extract<keyof Props, "role" | "id" | `aria-${string}`>>
@@ -290,7 +285,7 @@ export interface Scrolled {
 
 /** What every primitive but an image takes: how it looks, and what it listens for. */
 interface Listens extends Semantics {
-  style?: Style
+  style?: Styles
   /** What Tab reaches, as the web's `tabIndex`: `0` for what it otherwise wouldn't, `-1` for what's focused only by a
    * press. What's pressed and a text input are reached already. */
   tabIndex?: 0 | -1
@@ -367,7 +362,6 @@ export function Pressable(props: PressableProps) {
       {...own}
       {...moves}
       ref={[moves.ref, (element: HTMLElement) => watched(element, props)]}
-      data-scrolls={v1(props.style) && props.style.overflow === "scroll" ? "" : undefined}
       onMouseDown={(event: MouseEvent) => props.role && chosen.has(props.role) && event.preventDefault()}
       {...drawn("ui-view", props.style)}
     >
@@ -483,7 +477,7 @@ const scrolls = (target: EventTarget | null, box: HTMLElement) => {
 
 /** A text's props. */
 export interface TextProps extends Semantics {
-  style?: Style
+  style?: Styles
   /** Pressed where its words are, as an inline link (`role="link"`), reached by Tab with a `tabIndex`. */
   tabIndex?: 0 | -1
   onPress?: (event: Located) => void
@@ -517,7 +511,7 @@ export interface ImageProps extends Pick<Semantics, "aria-hidden"> {
   src: string
   /** What it shows, which names it; `""` for one that's only how it looks. */
   alt: string
-  style?: Style
+  style?: Styles
 }
 
 /// `<Image src="icon.svg" alt="" style={{ width: 24, height: 24 }} />`: a picture, from a `data:` address or the app's
@@ -531,7 +525,7 @@ export interface FrameProps {
   src: string
   subject?: string
   title?: string
-  style?: Style
+  style?: Styles
 }
 
 /// `<Frame src="chrome-profiles/client/profile.html#work" title="Work" style={look.fill} />`: another app's page, in
@@ -573,7 +567,7 @@ export function Frame(props: FrameProps) {
 export interface SvgProps extends Pick<Semantics, "role" | "aria-label" | "aria-hidden"> {
   /** The box its paths are drawn in, as SVG's: `"0 0 256 256"`. */
   viewBox: string
-  style?: Style
+  style?: Styles
   children?: JSX.Element
 }
 
@@ -633,7 +627,7 @@ export interface TextInputProps extends Pick<Semantics, "role" | "aria-label" | 
   /** Shown, chosen and copied, but not typed in: React Native's `readOnly` (the web's), not its older `editable`. */
   readOnly?: boolean
   required?: boolean
-  style?: Style
+  style?: Styles
   /** What's in it now, each time that changes: its one change handler, React Native's `onChangeText`, with no
    * `onChange` too. */
   onChangeText?: (text: string) => void
@@ -707,33 +701,4 @@ export function TextInput(props: TextInputProps) {
       class={[looks().class, (props as { class?: string }).class].filter(Boolean).join(" ")}
     />
   )
-}
-
-const colours = new Set(["backgroundColor", "color", "borderColor"])
-const offsets = new Set(["top", "right", "bottom", "left"])
-const spaces = new Set(["gap", "rowGap", "columnGap", "padding", "paddingInline", "paddingBlock", "paddingTop", "paddingRight", "paddingBottom", "paddingLeft", "margin", "marginInline", "marginBlock"])
-const sizes = new Set(["flexBasis", "width", "height", "minWidth", "minHeight", "maxWidth", "maxHeight"])
-const tokens: Record<string, string> = { gutter: "var(--gutter)", control: "var(--control)", icon: "var(--icon)", readable: "var(--readable)" }
-
-/** A version 1 style as CSS: its tokens as the custom properties they name, its pixels as `px`. Its `font` is the
- * element's `data-font` (ui.css). */
-export function css(style: Version1Style | undefined): JSX.CSSProperties | undefined {
-  if (!style) return
-  const out: Record<string, string | number> = {}
-  for (const [name, value] of Object.entries(style) as [keyof Version1Style, string | number][]) {
-    const property = name.replace(/[A-Z]/g, (letter) => `-${letter.toLowerCase()}`)
-    if (name === "font" || value === undefined) continue
-    else if (name === "translateX" || name === "translateY") out.translate = `${style.translateX ?? 0}px ${style.translateY ?? 0}px`
-    else if (name === "rotate") out.rotate = `${value}deg`
-    else if (offsets.has(name)) out[property] = `${value}px`
-    else if (colours.has(name)) out[property] = `var(--${value})`
-    else if (name === "borderRadius") out[property] = value === "full" ? "9999px" : value ? `var(--radius-${value})` : 0
-    else if (name.startsWith("border")) out[property] = `${value}px`
-    // What scrolls has no scrollbar drawn beside it, as on a phone and on a native host, which draw one over it as it moves.
-    else if (name === "overflow") Object.assign(out, value === "scroll" ? { overflow: "auto", "scrollbar-width": "none" } : { overflow: value })
-    else if (name === "lineClamp") Object.assign(out, { display: "-webkit-box", "-webkit-box-orient": "vertical", "-webkit-line-clamp": value, overflow: "hidden" })
-    else if (spaces.has(name) || sizes.has(name)) out[property] = typeof value === "number" ? `${value}px` : (tokens[value] ?? value)
-    else out[property] = value
-  }
-  return out
 }

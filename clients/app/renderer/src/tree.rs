@@ -42,89 +42,13 @@ pub enum Kind {
     Frame,
 }
 
-/// A length: pixels or a word (`gap`, `auto`, `50%`, `control`).
-#[derive(Deserialize, Serialize, Clone, Debug)]
-#[serde(untagged)]
-pub enum Length {
-    Px(f32),
-    Word(String),
-}
-
-/// Version 1's style subset (`Version1Style` in core/ui/src/drawing-primitives/renderer.ts).
-#[derive(Deserialize, Serialize, Default, Clone, Debug)]
-#[serde(rename_all = "camelCase", default)]
-pub struct Style {
-    pub display: Option<String>,
-    pub flex_direction: Option<String>,
-    pub flex_wrap: Option<String>,
-    pub flex_grow: Option<f32>,
-    pub flex_shrink: Option<f32>,
-    pub flex_basis: Option<Length>,
-    pub align_items: Option<String>,
-    pub align_self: Option<String>,
-    pub justify_content: Option<String>,
-    pub grid_template_columns: Option<String>,
-    pub grid_column: Option<String>,
-    pub gap: Option<Length>,
-    pub row_gap: Option<Length>,
-    pub column_gap: Option<Length>,
-    pub padding: Option<Length>,
-    pub padding_inline: Option<Length>,
-    pub padding_block: Option<Length>,
-    pub padding_top: Option<Length>,
-    pub padding_right: Option<Length>,
-    pub padding_bottom: Option<Length>,
-    pub padding_left: Option<Length>,
-    pub margin: Option<Length>,
-    pub margin_inline: Option<Length>,
-    pub margin_block: Option<Length>,
-    pub width: Option<Length>,
-    pub height: Option<Length>,
-    pub min_width: Option<Length>,
-    pub min_height: Option<Length>,
-    pub max_width: Option<Length>,
-    pub max_height: Option<Length>,
-    pub aspect_ratio: Option<f32>,
-    pub overflow: Option<String>,
-    pub opacity: Option<f32>,
-    pub background_color: Option<String>,
-    pub color: Option<String>,
-    pub border_color: Option<String>,
-    pub border_width: Option<u8>,
-    pub border_top_width: Option<u8>,
-    pub border_right_width: Option<u8>,
-    pub border_bottom_width: Option<u8>,
-    pub border_left_width: Option<u8>,
-    pub border_radius: Option<Length>,
-    pub font: Option<String>,
-    pub text_align: Option<String>,
-    pub font_variant_numeric: Option<String>,
-    pub line_clamp: Option<usize>,
-    /// `absolute` takes it out of its parent's flow, placed by `top`, `right`, `bottom` and `left` in its parent
-    /// (renderer.ts's `Version1Style`), over what's drawn before it, or under what's drawn before it with a higher `zIndex`.
-    pub position: Option<String>,
-    pub top: Option<f32>,
-    pub right: Option<f32>,
-    pub bottom: Option<f32>,
-    pub left: Option<f32>,
-    pub z_index: Option<f32>,
-    /// Drawn moved, larger or turned from where it's laid out, around its middle, which moves nothing else.
-    pub translate_x: Option<f32>,
-    pub translate_y: Option<f32>,
-    pub scale: Option<f32>,
-    pub rotate: Option<f32>,
-    pub pointer_events: Option<String>,
-}
-
 pub struct Node {
     pub kind: Kind,
     /// A `raw-text`'s text.
     pub value: Option<String>,
     /// Every prop but `style`, as it was set.
     pub props: Map<String, Value>,
-    /// A version 1 page's style object.
-    pub style: Style,
-    /// A version 2 page's styles, each by id or an object of its own, merged in order (`style::resolve`).
+    /// Its styles, each by id or an object of its own, merged in order (`style::resolve`).
     pub styles: Option<Vec<Value>>,
     pub children: Vec<Id>,
     /// What it's in, so it's taken out of only that as it moves.
@@ -133,7 +57,7 @@ pub struct Node {
 
 impl Node {
     fn new(kind: Kind, value: Option<String>) -> Node {
-        Node { kind, value, props: Map::new(), style: Style::default(), styles: None, children: Vec::new(), parent: None }
+        Node { kind, value, props: Map::new(), styles: None, children: Vec::new(), parent: None }
     }
 
     pub fn prop(&self, name: &str) -> Option<&Value> {
@@ -149,13 +73,9 @@ impl Node {
         matches!(self.prop(name), Some(Value::Bool(true))) || self.str(name) == Some("true")
     }
 
-    /// Whether it isn't displayed (`display: none`), by its version 1 style object or its version 2 styles, so
-    /// neither it nor what's in it is drawn or read.
+    /// Whether it isn't displayed (`display: none`), by its styles, so neither it nor what's in it is drawn or read.
     pub fn hidden(&self) -> bool {
-        match &self.styles {
-            Some(styles) => crate::style::resolve(styles, crate::style::State::default()).get("display").and_then(Value::as_str) == Some("none"),
-            None => self.style.display.as_deref() == Some("none"),
-        }
+        self.styles.as_ref().is_some_and(|styles| crate::style::resolve(styles, crate::style::State::default()).get("display").and_then(Value::as_str) == Some("none"))
     }
 
     /// Whether it listens for `event`, by its prop as JSX names it (`keydown` is `onKeyDown`, as the DOM's).
@@ -205,8 +125,6 @@ pub struct Tree {
     inputs: HashSet<Id>,
     autofocus: HashSet<Id>,
     layout: HashSet<Id>,
-    /// Whether the page names its styles (version 2) rather than sending style objects.
-    styled: bool,
 }
 
 impl Default for Tree {
@@ -217,7 +135,6 @@ impl Default for Tree {
             inputs: HashSet::new(),
             autofocus: HashSet::new(),
             layout: HashSet::new(),
-            styled: false,
         }
     }
 }
@@ -293,10 +210,6 @@ impl Tree {
         self.layout.iter().copied().filter(|id| self.nodes.get(id).is_some_and(|node| node.listens("layout")))
     }
 
-    pub fn styled(&self) -> bool {
-        self.styled
-    }
-
     /// `id` changed, and so did the words of each `text` it's in.
     fn change(&mut self, id: Id) {
         let mut at = Some(id);
@@ -328,9 +241,9 @@ impl Tree {
                     }
                     match name.as_str() {
                         "style" => match value {
-                            Value::Array(styles) => (node.styles, self.styled) = (Some(styles), true),
-                            Value::Null => (node.style, node.styles) = (Style::default(), None),
-                            value => node.style = serde_json::from_value(value)?,
+                            Value::Array(styles) => node.styles = Some(styles),
+                            Value::Null => node.styles = None,
+                            value => anyhow::bail!("node {id}'s style is {value}, not a list of styles: a page from before styles()"),
                         },
                         "value" if node.kind == Kind::RawText => node.value = value.as_str().map(str::to_owned),
                         _ => drop(node.props.insert(name, value)),

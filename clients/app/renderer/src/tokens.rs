@@ -1,9 +1,9 @@
 //! The design tokens, which aren't the host's: they come with the UI library, over the air, as the app's page does,
 //! and are read as it opens (`load`). The host knows only kinds of token (a colour, light and dark, a length, a
-//! number), never their names or values. For a page written for version 1, which has no token table,
-//! it's read from the UI library's stylesheet (`/ui/client/ui.css`): `:root`'s first rule, which is a computer's, the
-//! one in `@media (pointer: coarse)`, which a touch screen's lengths are, and `:root.dark`'s `--lighter`. This module is the only one that
-//! knows that, so the table replaces it here alone.
+//! number), never their names or values. What the host draws itself (a window's title row, a notice) reads them from
+//! the UI library's stylesheet (`/ui/client/ui.css`): `:root`'s first rule, which is a computer's, the one in
+//! `@media (pointer: coarse)`, which a touch screen's lengths are, and `:root.dark`'s `--lighter`; a page's own are
+//! the token table's (`load_table`).
 
 use std::borrow::Cow;
 use std::collections::HashMap;

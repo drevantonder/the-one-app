@@ -767,8 +767,7 @@ impl Screen {
             unsettled: None,
         };
         // The window, as a page's body: its root's background and text, scrolling what's taller than it.
-        let version2 = self.tree.styled();
-        let (body, background) = if version2 { Text::root(conditions) } else { (Text::body(conditions), Some(colour("background", conditions.dark))) };
+        let (body, background) = Text::root(conditions);
         // A panel has no background of its own: what its page draws is over the system's glass, or the host's fill.
         if self.panel.is_none() {
             painter.quad(window, window, background.unwrap_or_default(), Edges::default(), Hsla::default(), Corners::default(), false, 1.0);
@@ -1480,7 +1479,7 @@ impl Screen {
     }
 
     /// Input `id`'s editing changed from `before`, or perhaps not: its caret shows again, and its app hears its
-    /// editing state (`input`) if it's different, with its text as `value` too, which version 1 said alone.
+    /// editing state (`input`) if it's different, with its text as `value` too, as the DOM's event has it.
     fn edited(&mut self, id: Id, before: editing::Value) {
         self.blink = self.js.clock().now();
         let Some(value) = self.fields.get(&id).map(Field::value).filter(|value| *value != before) else { return };
@@ -1514,15 +1513,7 @@ impl Screen {
             field.newline = field.multiline && node.str("action").is_none_or(|action| action == "newline");
             field.secure = node.str("type") == Some("password");
             field.readonly = node.is("readonly");
-            // Version 1 said only its text, as `value`, the caret at its end.
-            let set = match node.prop("editing") {
-                Some(editing) => serde_json::from_value::<editing::Value>(editing.clone()).ok(),
-                None => node.prop("value").map(|_| {
-                    let text = value_of(node);
-                    let end = editing::utf16(&text, text.len());
-                    editing::Value { text, selection: editing::Selection { base: end, extent: end }, composing: None }
-                }),
-            };
+            let set = node.prop("editing").and_then(|editing| serde_json::from_value::<editing::Value>(editing.clone()).ok());
             if let Some(set) = set.filter(|set| self.set.get(&id) != Some(set)) {
                 if self.edits.get(&id).is_none_or(|told| *told <= self.heard) {
                     field.set(&set);
@@ -1558,14 +1549,6 @@ pub(crate) fn paint_message(words: &str, appearance: Appearance, size: Size<Pixe
     let muted = colour("muted-foreground", dark);
     let _ = text.paint(&paragraph, point(px(16.0), px(top)), width, 0.5, &|_| muted, scale, mask, TransformationMatrix::unit(), atlas, scene);
     scene.finish();
-}
-
-fn value_of(node: &Node) -> String {
-    match node.prop("value") {
-        Some(Value::String(value)) => value.clone(),
-        Some(value) => value.to_string(),
-        None => String::new(),
-    }
 }
 
 /// What a leaf measures for layout.
@@ -2015,15 +1998,11 @@ impl Painter<'_> {
         self.transitions.apply(id, &mut computed, entering.as_ref(), self.time, self.since, self.conditions.reduced_motion);
         let mut layout = computed.layout.clone();
         let mut look = computed.look.clone();
-        // A version 1 page's `Text` with no type style is body text; in a version 2 page it inherits what it's in, as
-        // CSS does, whatever style object it has.
-        let text = match &node.styles {
-            Some(_) => inherited.with(&computed),
-            None => inherited.of(&node.style, node.kind == Kind::Text && !tree.styled(), self.conditions),
-        };
+        // A `Text` inherits what it's in, as CSS does.
+        let text = inherited.with(&computed);
         let level = node.prop("aria-level").and_then(|level| level.as_u64().or_else(|| level.as_str()?.parse().ok())).unwrap_or(2);
         let text = match node.kind == Kind::Text && node.styles.is_none() && node.str("role") == Some("heading") && level <= 3 {
-            true => text.heading(node.style.font.is_some(), self.conditions),
+            true => text.heading(self.conditions),
             false => text,
         };
         if root {
@@ -2044,7 +2023,7 @@ impl Painter<'_> {
             look.scrolls = true;
         }
         layout.scrollbar_width = 0.0;
-        let lines = computed.line_clamp.or(node.style.line_clamp);
+        let lines = computed.line_clamp;
         let mut spans = Vec::new();
         let measure = match node.kind {
             Kind::Text => {
@@ -2116,10 +2095,7 @@ impl Painter<'_> {
                 }
                 Kind::Text => {
                     let computed = style::of(inner, self.states.of(*child, false), self.conditions);
-                    let set = match &inner.styles {
-                        Some(_) => text.with(&computed),
-                        None => text.of(&inner.style, false, self.conditions),
-                    };
+                    let set = text.with(&computed);
                     let at = spans.len();
                     spans.push(Span { id: *child, start, end: start, cursor: computed.look.cursor, pointer: computed.look.pointer_events });
                     self.runs(*child, set, computed.look.background.or(behind), words, runs, spans);
@@ -3002,7 +2978,7 @@ impl editing::Layout for Drawn {
     }
 }
 
-/// A colour token of the version 2 table, where there is one.
+/// A colour token of the table, where there is one.
 fn colour_token(id: &str, conditions: Conditions) -> Option<Hsla> {
     crate::tokens::table().colour(id, conditions).map(Hsla::from)
 }

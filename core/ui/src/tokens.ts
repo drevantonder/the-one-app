@@ -56,7 +56,7 @@ const spring = (duration: number, bounce: number): Token<"motion"> => ({ kind: "
 
 // Raycast's values as round two measured them beside it (raycast-mockups-v2): a near-black blue-grey or a near-white
 // window, one text colour, and Apple's accents but red, orange and blue, which are the mockup's. Colours CSS names
-// are written in OKLCH, which a native host reads from tokens.css for pages written for version 1.
+// are written in OKLCH.
 const ink = ["oklch(0.224 0.008 285.76)", "oklch(1 0 0)"] as const
 const red = ["oklch(0.614 0.204 25.56)", "oklch(0.7 0.191 23.4)"] as const
 const orange = ["oklch(0.677 0.164 57.12)", "oklch(0.782 0.171 67.22)"] as const
@@ -91,13 +91,8 @@ const lengths = {
   textTitle: length({ default: rem(1.25), phone: rem(28 / 17) }),
   /** A big number's: 34px, as iOS's widgets draw one. */
   textFigure: length({ default: rem(2.125), phone: rem(34 / 17) }),
-  /** Apple's smaller text styles, the same under a finger and a mouse: subheadline, for a section's toggle;
-   * footnote, for a count, code or a hint; caption 1, for an icon's name; caption 2, the smallest, for a key or a
-   * small heading. */
-  textSubheadline: length(rem(0.9375)),
+  /** Apple's footnote, the same under a finger and a mouse: for a count, code or a hint. */
   textFootnote: length(rem(0.8125)),
-  textCaption1: length(rem(0.75)),
-  textCaption2: length(rem(0.6875)),
   /** What's typed in a field: body, but never under 16px under a finger. */
   textField: length({ default: rem(0.8125), touch: rem(1) }),
   /** How tall what's pressed or typed in is, and an icon in it. */
@@ -150,10 +145,7 @@ const types = {
   title: type(lengths.textTitle, weights.title, { lineHeight: 1.2, tracking: -0.015 }),
   /** A big number, as an iOS widget's and Raycast's large numbers: 34px, tracked in, its figures tabular. */
   figure: type(lengths.textFigure, weights.title, { lineHeight: 1.1, tracking: -0.03, tabular: true }),
-  subheadline: type(lengths.textSubheadline, weights.body),
   footnote: type(lengths.textFootnote, weights.body),
-  caption1: type(lengths.textCaption1, weights.body),
-  caption2: type(lengths.textCaption2, weights.body),
 }
 
 /** How things move. Quick: what goes, what's small (a press, a fade, a menu). Settle: what arrives or shifts in
