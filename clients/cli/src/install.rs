@@ -176,24 +176,9 @@ async fn call_raw(client: &Client, of: Option<&str>, tool: &str, arguments: Valu
     client.request("tools/call", params).await
 }
 
-fn result_text(result: &Value) -> String {
-    result["content"]
-        .as_array()
-        .into_iter()
-        .flatten()
-        .filter_map(|part| part["text"].as_str())
-        .collect::<Vec<_>>()
-        .join("\n")
-}
-
 /// Calls a tool for `of` (a user, a group or the network), as `ONE_SUBJECT` would have it, and gives its text.
 async fn call(client: &Client, of: Option<&str>, tool: &str, arguments: Value) -> Result<String> {
-    let result = call_raw(client, of, tool, arguments).await?;
-    let text = result_text(&result);
-    if result["isError"] == true {
-        bail!("{text}");
-    }
-    Ok(text)
+    crate::said(call_raw(client, of, tool, arguments).await?)
 }
 
 /// A requirement the server said an app lacks when `deploy` refused it.
@@ -460,7 +445,7 @@ impl<'a> Installer<'a> {
                 .await?;
         loop {
             let result = call_raw(self.client, Some(self.of), "deploy", payload.clone()).await?;
-            let text = result_text(&result);
+            let text = crate::text(&result);
             if result["isError"] != true {
                 let it = finish_deploy(self.client, self.of, name, self.source, self.commit, &text).await?;
                 if let Some(file) = self.lock {

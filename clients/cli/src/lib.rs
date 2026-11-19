@@ -100,9 +100,7 @@ async fn run(args: Vec<String>) -> Result<ExitCode> {
         ["search", query @ ..] if !query.is_empty() && !query[0].starts_with("--") => {
             let request = json!({"name": "search", "arguments": {"query": query.join(" ")}, "_meta": {"mode": "cli"}});
             let result = client.request("tools/call", request).await?;
-            let text: Vec<&str> =
-                result["content"].as_array().into_iter().flatten().filter_map(|part| part["text"].as_str()).collect();
-            printed(text.join("\n"))
+            printed(text(&result))
         }
         ["serve", "on"] => printed(serving::on(&client).await?),
         ["serve", "off"] => printed(serving::off(&client).await?),
@@ -152,13 +150,27 @@ fn printed(text: String) -> ExitCode {
     ExitCode::SUCCESS
 }
 
+/// What a tool answered, `result`, as text: its parts' text, a line each.
+pub(crate) fn text(result: &Value) -> String {
+    let parts = result["content"].as_array().into_iter().flatten();
+    parts.filter_map(|part| part["text"].as_str()).collect::<Vec<_>>().join("\n")
+}
+
+/// What a tool answered, `result`, as text, or the error it says.
+pub(crate) fn said(result: Value) -> Result<String> {
+    let text = text(&result);
+    if result["isError"] == true {
+        bail!("{text}")
+    }
+    Ok(text)
+}
+
 /// Prints what a tool answered: its text, or a file as it is, to be sent to a file (`> photo.jpg`). An answer that's
 /// an error is printed to stderr, and fails.
 pub(crate) fn answered(client: &Client, result: &Value) -> Result<ExitCode> {
     let parts = result["content"].as_array().map(Vec::as_slice).unwrap_or_default();
     if result["isError"] == true {
-        let text: Vec<&str> = parts.iter().filter_map(|part| part["text"].as_str()).collect();
-        eprintln!("{}", text.join("\n"));
+        eprintln!("{}", text(result));
         return Ok(ExitCode::FAILURE);
     }
     for part in parts {

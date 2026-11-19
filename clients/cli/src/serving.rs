@@ -490,7 +490,7 @@ pub async fn update(client: &Client) -> Result<String> {
     let here = Here::of(&client::home()?);
     // A server is taken to the latest build, as every other, by its network's update: this is its Update Now.
     if settled(client, &here, true).await?.server_membership != ServerMembership::Inactive {
-        return said(crate::tasks::result(client, "update", json!({})).await?);
+        return crate::said(crate::tasks::result(client, "update", json!({})).await?);
     }
     let builds = download(client).await?;
     let one =
@@ -1192,18 +1192,7 @@ pub fn count(build: &str) -> u64 {
 
 /// Calls one of the network's tools and gives what it said, or the error it said.
 async fn tool(client: &Client, name: &str, arguments: Value) -> Result<String> {
-    said(client.request("tools/call", json!({"name": name, "arguments": arguments})).await?)
-}
-
-/// What a tool answered, `result`, as text, or the error it says.
-fn said(result: Value) -> Result<String> {
-    let lines: Vec<&str> =
-        result["content"].as_array().into_iter().flatten().filter_map(|part| part["text"].as_str()).collect();
-    let message = lines.join("\n");
-    if result["isError"] == true {
-        bail!("{message}")
-    }
-    Ok(message)
+    crate::said(client.request("tools/call", json!({"name": name, "arguments": arguments})).await?)
 }
 
 /// This device's server, in the client's home.
