@@ -39,14 +39,25 @@
     document.head.append(Object.assign(document.createElement("script"), { type: "importmap", textContent: JSON.stringify({ imports }) }))
     // Its tables: the UI library's tokens and styles, and its app's styles, which its build writes beside every page.
     const tables = await Promise.all(["/ui/client/tokens.json", "/ui/client/styles.json", "styles.json"].map(async (table) => (await fetch(new URL(table, base))).text()))
-    const [renderer, { textInput }, { semantics }] = await Promise.all([import("./web_renderer.js"), import("./text-input.js"), import("./semantics.js")])
+    const [renderer, { textInput }, { semantics }, { videos }] = await Promise.all([import("./web_renderer.js"), import("./text-input.js"), import("./semantics.js"), import("./video.js")])
     await renderer.default()
     // A page built with this renderer's own UI library (check/) names none.
     const needs = Number(new URLSearchParams(location.search).get("runtime"))
     if (!(needs <= renderer.runtime_version())) throw new Error(`it needs runtime version ${needs}`)
-    // What the page's JS draws through, and asks its client through, as a native host's sandbox has them.
+    // What the page's JS draws through, and asks its client through, as a native host's sandbox has them; its videos
+    // are the browser's to connect and play too (video.js).
+    const streams = videos(renderer)
     Object.assign(globalThis, {
-      mutations: { create: renderer.create, set: renderer.set, insert: renderer.insert, remove: renderer.remove, drop: renderer.drop, unsupported: renderer.unsupported, frame: false, video: false },
+      mutations: {
+        create: (/** @type {number} */ id, /** @type {string} */ type, /** @type {string} */ value) => (type === "video" && streams.created(id), renderer.create(id, type, value)),
+        set: (/** @type {number} */ id, /** @type {string} */ name, /** @type {unknown} */ value) => (streams.set(id, name, value), renderer.set(id, name, value)),
+        insert: renderer.insert,
+        remove: renderer.remove,
+        drop: (/** @type {number} */ id) => (streams.dropped(id), renderer.drop(id)),
+        unsupported: renderer.unsupported,
+        frame: false,
+        video: true,
+      },
       host: { post: (/** @type {object} */ message) => renderer.post(JSON.stringify(message)) },
     })
     const canvas = /** @type {HTMLCanvasElement} */ (document.querySelector("canvas"))
@@ -75,7 +86,7 @@
       const [box] = entry.devicePixelContentBoxSize ?? [{ inlineSize: entry.contentRect.width * devicePixelRatio, blockSize: entry.contentRect.height * devicePixelRatio }]
       if (entry.contentRect.width) renderer.resized(...sized(box.inlineSize, box.blockSize), box.inlineSize / entry.contentRect.width)
     }).observe(canvas)
-    const pointer = (/** @type {string} */ kind) => (/** @type {PointerEvent} */ event) => renderer.pointer(kind, event.offsetX, event.offsetY, event.button, event.shiftKey)
+    const pointer = (/** @type {string} */ kind) => (/** @type {PointerEvent} */ event) => (streams.pointer(kind, event), renderer.pointer(kind, event.offsetX, event.offsetY, event.button, event.shiftKey))
     canvas.addEventListener("pointermove", pointer("move"))
     // A press takes the keyboard for the frame itself, not by the browser's default after it, which would take it
     // back from a field the press gave it to (the screen gives a field the keyboard as it's pressed).
@@ -90,7 +101,8 @@
     canvas.addEventListener("pointerleave", pointer("leave"))
     // A wheel's lines and pages, in CSS pixels, as a browser scrolls them.
     const unit = [1, 16, innerHeight]
-    canvas.addEventListener("wheel", (event) => (event.preventDefault(), renderer.wheel(event.offsetX, event.offsetY, event.deltaX * unit[event.deltaMode], event.deltaY * unit[event.deltaMode])), { passive: false })
+    // A wheel over a video turns the screen's, not the page.
+    canvas.addEventListener("wheel", (event) => (event.preventDefault(), streams.wheel(event, unit[event.deltaMode]) || renderer.wheel(event.offsetX, event.offsetY, event.deltaX * unit[event.deltaMode], event.deltaY * unit[event.deltaMode])), { passive: false })
     // A key is the page's first, as a Mac's are (`platform::mac`): one that types nothing, or with ⌘ or Ctrl held.
     // What types something goes to the field being typed in, and every key while its input method composes, and so do
     // copy, cut and paste, so they're the browser's own clipboard's.
@@ -101,6 +113,8 @@
       const chord = event.metaKey || event.ctrlKey
       if (field && !chord && [...event.key].length === 1) return
       if (field && chord && ["c", "x", "v"].includes(event.key.toLowerCase())) return
+      // A key while a video was last pressed is its screen's.
+      if (!field && streams.key(event)) return event.preventDefault()
       if (field || event.key === "Tab" || event.key === " " || event.key.startsWith("Arrow") || (chord && event.key.length === 1)) event.preventDefault()
       renderer.key(event.key, event.shiftKey, event.altKey, event.ctrlKey, event.metaKey)
     })

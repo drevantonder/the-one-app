@@ -37,6 +37,9 @@ pub enum Kind {
     Picker,
     Input,
     RawText,
+    /// A screen's live video over WebRTC, drawn in its box as big as fits: the web's, which the browser connects and plays
+    /// (`platform::web`, `clients/web/renderer/video.js`).
+    Video,
     /// Another app's page (`src`), for `subject`, drawn in its box by a sandbox of its own, as an iframe is (`Screen`'s
     /// frames): its own JS, calling as its own app.
     Frame,
@@ -340,6 +343,7 @@ impl Tree {
         let role = node.str("role").map(str::to_owned).or_else(|| match node.kind {
             Kind::Text | Kind::RawText => Some("text".into()),
             Kind::Image if node.str("alt").is_some_and(|alt| !alt.is_empty()) => Some("img".into()),
+            Kind::Video => Some("img".into()),
             Kind::Input if node.str("type") == Some("search") => Some("searchbox".into()),
             Kind::Input => Some("textbox".into()),
             _ => None,

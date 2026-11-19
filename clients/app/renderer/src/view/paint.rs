@@ -440,7 +440,7 @@ impl Painter<'_> {
                 Some(Measure::Input { words: if words.is_empty() { " ".into() } else { words }, text, multiline: node.is("multiline") })
             }
             Kind::Frame => Some(Measure::Frame { height: self.frames.get(&id).and_then(|child| child.screen.content_height) }),
-            Kind::Image | Kind::Path | Kind::Picker | Kind::Box | Kind::Scroll => None,
+            Kind::Image | Kind::Path | Kind::Picker | Kind::Box | Kind::Scroll | Kind::Video => None,
         };
         let positioned = layout.position == taffy::style::Position::Absolute;
         if look.will_change {
@@ -899,6 +899,11 @@ impl Painter<'_> {
             }
             Kind::Image => self.paint_image(node, content, radii, opacity, mask),
             Kind::Path => self.paint_path(node, content, &look, text.color, opacity, mask),
+            // Its latest frame, as the web's browser plays it; a native host draws none (its pages aren't given one).
+            #[cfg(target_arch = "wasm32")]
+            Kind::Video => self.paint_video(id, content, radii, opacity, mask),
+            #[cfg(not(target_arch = "wasm32"))]
+            Kind::Video => {}
             Kind::Picker => {}
             // A frame's page, drawn as it last drew itself, in its box, where the frame comes in this scene's order.
             Kind::Frame => {
@@ -1277,6 +1282,17 @@ impl Painter<'_> {
             size,
         };
         let radii = Corners { top_left: radii.top_left.min(size.width / 2.0), top_right: radii.top_right.min(size.width / 2.0), bottom_right: radii.bottom_right.min(size.width / 2.0), bottom_left: radii.bottom_left.min(size.width / 2.0) };
+        self.sprite(tile, bounds, radii, opacity, mask);
+    }
+
+    /// A video's latest frame, as big as fits in `content`, in the middle, as a `<video>` draws it.
+    #[cfg(target_arch = "wasm32")]
+    pub(super) fn paint_video(&mut self, id: Id, content: Bounds<f32>, radii: Corners<f32>, opacity: f32, mask: Bounds<f32>) {
+        let device = Size { width: (content.size.width * self.scale).round() as u32, height: (content.size.height * self.scale).round() as u32 };
+        let Some((tile, frame)) = crate::platform::web::video(id, content, device, self.atlas) else { return };
+        let fit = (content.size.width / frame.width as f32).min(content.size.height / frame.height as f32);
+        let size = Size { width: frame.width as f32 * fit, height: frame.height as f32 * fit };
+        let bounds = Bounds { origin: point(content.origin.x + (content.size.width - size.width) / 2.0, content.origin.y + (content.size.height - size.height) / 2.0), size };
         self.sprite(tile, bounds, radii, opacity, mask);
     }
 

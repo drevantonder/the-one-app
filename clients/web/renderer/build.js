@@ -9,7 +9,7 @@ const [out] = process.argv.slice(2)
 const here = (path) => new URL(path, import.meta.url).pathname
 const root = here("../../../")
 mkdirSync(out, { recursive: true })
-for (const file of ["index.html", "renderer.js", "text-input.js", "semantics.js", "check.html", "check.js"]) copyFileSync(here(file), `${out}/${file}`)
+for (const file of ["index.html", "renderer.js", "text-input.js", "semantics.js", "video.js", "check.html", "check.js"]) copyFileSync(here(file), `${out}/${file}`)
 // The gate's check page, an app's page built as a server builds one (core/ui/app.js), which check.html hosts.
 await $`bun ${root}/core/ui/dist/build/app.js ${here("check")} ${out}/check`.quiet()
 await $`cargo build -p web-renderer --target wasm32-unknown-unknown --profile web`.cwd(root).quiet()

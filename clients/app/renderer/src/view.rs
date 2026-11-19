@@ -330,6 +330,13 @@ impl Screen {
         screen
     }
 
+    /// A picture came from outside it, a video's frame as the web's browser played it (`platform::web::video`): drawn
+    /// in the next frame, as one decoded is.
+    #[cfg(target_arch = "wasm32")]
+    pub(crate) fn picture_came(&mut self) {
+        self.pictures.decoded += 1;
+    }
+
     pub fn tree(&self) -> &Tree {
         &self.tree
     }
