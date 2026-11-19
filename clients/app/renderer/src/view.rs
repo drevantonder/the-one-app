@@ -24,6 +24,7 @@ use crate::tree::{Id, Kind, Node, Tree};
 use paint::*;
 pub(crate) use paint::{Decoded, Picture};
 
+mod bounce;
 mod bridge;
 mod drag;
 pub use bridge::TextInputConnection;
@@ -288,6 +289,8 @@ pub struct Screen {
     drag: Option<drag::Drag>,
     /// What was going (`Tree::leaving`) as the last frame was drawn.
     going: HashSet<Id>,
+    /// What scrolls by itself or past its end, as a finger left it (`bounce`).
+    coasts: HashMap<Id, bounce::Coast>,
     /// What takes the pointer, as it was last painted, in the order painted, the topmost last.
     placed: Vec<(Id, Placed)>,
     /// Whether anything moved by itself in the last frame.
@@ -381,6 +384,7 @@ impl Screen {
             scrolled: HashMap::new(),
             drag: None,
             going: HashSet::new(),
+            coasts: HashMap::new(),
             states: States::default(),
             pointer: None,
             touch: false,
@@ -868,6 +872,7 @@ impl Screen {
         let conditions = self.conditions();
         let window = Bounds { origin: point(0.0, 0.0), size: Size { width: size.width.0, height: size.height.0 } };
         self.pictures.take();
+        self.coast();
         self.states.focused = self.focus.focused;
         self.states.touch = self.touch;
         let now = self.js.clock().now();
@@ -880,6 +885,7 @@ impl Screen {
             conditions,
             states: self.states.clone(),
             scrolled: self.scrolled.clone(),
+            stretched: self.stretched().into_iter().collect(),
             fields,
             caret,
             hovering: (self.chrome.home.as_ref().is_some_and(hovering), self.chrome.action.as_ref().is_some_and(hovering)),
@@ -896,7 +902,7 @@ impl Screen {
         }
         // What's kept of what only moves, grows or fades is drawn again where what it draws from changed: anything
         // fetched, decoded, scrolled or in another frame's page, or the window's conditions.
-        if self.seen.as_ref().is_none_or(|was| (was.size, was.conditions, &was.scrolled, was.fetched, was.decoded, &was.frames) != (seen.size, seen.conditions, &seen.scrolled, seen.fetched, seen.decoded, &seen.frames)) {
+        if self.seen.as_ref().is_none_or(|was| (was.size, was.conditions, &was.scrolled, &was.stretched, was.fetched, was.decoded, &was.frames) != (seen.size, seen.conditions, &seen.scrolled, &seen.stretched, seen.fetched, seen.decoded, &seen.frames)) {
             self.layers.clear();
         }
         self.seen = Some(seen);
@@ -951,6 +957,7 @@ impl Screen {
     fn draw(&mut self, plan: &Plan, text: &mut TextSystem, atlas: &Atlas, scene: &mut Scene) -> Drawing {
         let Plan { conditions, window, scale, now, caret, everything, ref changed, ref moving, ref below, ref layered, still } = *plan;
         let line = self.line();
+        let stretched = self.stretched();
         let mut painter = Painter {
             tree: &self.tree,
             layout: &mut self.layout,
@@ -969,6 +976,7 @@ impl Screen {
             placed: Vec::new(),
             tab_order: Vec::new(),
             scrolled: &mut self.scrolled,
+            stretched,
             fields: &self.editing.fields,
             drawn: &mut self.editing.drawn,
             texts: &mut self.editing.texts,
@@ -1143,7 +1151,7 @@ impl Screen {
         }
         self.focus.tab_order = tab_order;
         self.rects = rects;
-        self.animating = animating || moving;
+        self.animating = animating || moving || self.coasting();
         // What's about to move and wasn't drawn ahead, as something was moving, is in a frame of its own once it stops.
         self.again |= !plan.still && self.layout.will_change.iter().any(|id| plan.layered.contains(id) && !self.layers.get(id).is_some_and(|layer| layer.recorded));
         intersections
@@ -2123,6 +2131,7 @@ struct Seen {
     conditions: Conditions,
     states: States,
     scrolled: HashMap<Id, Point<f32>>,
+    stretched: std::collections::BTreeMap<Id, Point<f32>>,
     fields: Vec<(Id, String, editing::Value, Option<(usize, f32)>, bool)>,
     caret: bool,
     hovering: (bool, bool),

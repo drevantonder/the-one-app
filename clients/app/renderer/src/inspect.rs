@@ -41,7 +41,9 @@
 //!   AppKit's names, and `momentum`, as a Mac says them, `view::Phase`) → `{scrolled: {x, y}}`.
 //! - `drag` (a selector, or a point, where it starts; `dx`, `dy` in CSS pixels; `steps`, 10 unless given, and `ms`,
 //!   200) → `{dragged}`: the pointer goes down there, moves `dx`, `dy` in `steps` even moves, and comes up, as
-//!   Playwright's mouse drags; with the clock paused, it's stepped `ms` over them, so what's let go has their speed.
+//!   Playwright's mouse drags, or in a window for a finger, as a phone's finger does, scrolling what scrolls that way
+//!   under it, past its end as a rubber band, and flinging it as it lifts; with the clock paused, it's stepped `ms`
+//!   over them, so what's let go has their speed.
 //! - `clock` (`pause`: true or false, `step`: ms, `seek`: ms since it started) → `{time, paused}`. The app's clock
 //!   (`Date`, `performance.now`, its timers) and the host's animations run on it. Paused, nothing is due until it's
 //!   stepped; a step runs each timer due in it at its own time, in order.

@@ -145,7 +145,6 @@ thread_local! {
     static VIEWS: RefCell<HashMap<usize, WindowId>> = RefCell::new(HashMap::new());
     /// Each finger on a window, and each window's scroll carrying on after its finger let go.
     static TOUCHES: RefCell<HashMap<WindowId, Touch>> = RefCell::new(HashMap::new());
-    static FLINGS: RefCell<HashMap<WindowId, Fling>> = RefCell::new(HashMap::new());
     static SLIDES: RefCell<HashMap<WindowId, Slide>> = RefCell::new(HashMap::new());
     /// What each window's text input plugin said, until the windows hear it: it can say it while they're in use.
     static SAID: RefCell<Vec<(WindowId, TextInputClient)>> = const { RefCell::new(Vec::new()) };
@@ -232,8 +231,8 @@ fn heard(windows: &mut Windows, id: WindowId, event: &WindowEvent<'_>) {
     }
 }
 
-/// Does `f` to the windows, made now if they aren't yet, steps each fling, draws what changed, and asks to be woken
-/// when the next timer is due, and for the display's next frame while a fling runs. A call that comes while the windows are in use (UIKit
+/// Does `f` to the windows, made now if they aren't yet, steps each window sliding from the edge, draws what changed,
+/// and asks to be woken when the next timer is due, and for the display's next frame while one slides. A call that comes while the windows are in use (UIKit
 /// calling back into a view as Rust changes it) is dropped.
 fn with_windows<R>(f: impl FnOnce(&mut Windows) -> R) -> Option<R> {
     WINDOWS.with(|windows| {
@@ -312,7 +311,6 @@ fn with_windows<R>(f: impl FnOnce(&mut Windows) -> R) -> Option<R> {
                 }
             }
         }
-        fling(windows);
         slide(windows);
         windows.turn();
         for window in windows.windows.values() {
@@ -321,8 +319,8 @@ fn with_windows<R>(f: impl FnOnce(&mut Windows) -> R) -> Option<R> {
                 native.a11y.update(screen, native.scale());
             }
         }
-        // A fling or a slide takes a step each frame the display shows, as UIScrollView's deceleration does.
-        if FLINGS.with(|flings| !flings.borrow().is_empty()) || SLIDES.with(|slides| !slides.borrow().is_empty()) {
+        // A slide takes a step each frame the display shows.
+        if SLIDES.with(|slides| !slides.borrow().is_empty()) {
             Display.request_frame(true);
         }
         schedule(windows.due());
@@ -404,7 +402,6 @@ impl Display {
         VIEWS.with(|views| views.borrow_mut().remove(&(native.window.ui_view() as usize)));
         if let Some(id) = id {
             TOUCHES.with(|touches| touches.borrow_mut().remove(&id));
-            FLINGS.with(|flings| flings.borrow_mut().remove(&id));
             SLIDES.with(|slides| slides.borrow_mut().remove(&id));
         }
         if let Some(behind) = &native.behind {
@@ -678,8 +675,6 @@ define_class!(
 const SLOP: f32 = 10.0;
 /// How near the left edge a finger lands to drag the window, in points, as UINavigationController's back swipe.
 const EDGE: f32 = 20.0;
-/// The speed, in points a second, below which a fling stops.
-const STOPPED: f32 = 20.0;
 
 #[derive(Clone, Copy, PartialEq)]
 enum Phase {
@@ -706,14 +701,6 @@ struct Touch {
     on_input: bool,
     stopped: bool,
     velocity: crate::motion::Velocity,
-}
-
-/// A scroll carrying on after its finger let go: where the finger was, how fast it goes (points a second, along and
-/// down as a pan's), and when it last stepped.
-struct Fling {
-    at: Point<f32>,
-    velocity: Point<f32>,
-    stepped: Instant,
 }
 
 /// A window let go of from the left edge, springing back to where it was or off to the right (`target`, in points),
@@ -750,26 +737,9 @@ fn slide(windows: &mut Windows) {
     }
 }
 
-/// Steps every fling to now, stopping one that's slow enough or reached the end of what it scrolls.
-fn fling(windows: &mut Windows) {
-    let now = Instant::now();
-    FLINGS.with(|flings| {
-        flings.borrow_mut().retain(|id, fling| {
-            let Some(window) = windows.windows.get_mut(id) else { return false };
-            let Ok(screen) = &mut window.screen else { return false };
-            let seconds = f64::from(now.duration_since(fling.stepped).as_secs_f32());
-            fling.stepped = now;
-            let ((x, along), (y, down)) = (crate::motion::decay(f64::from(fling.velocity.x), seconds), crate::motion::decay(f64::from(fling.velocity.y), seconds));
-            let by = point(x as f32, y as f32);
-            fling.velocity = point(along as f32, down as f32);
-            window.dirty = true;
-            screen.pan(fling.at, by).is_some() && fling.velocity.x.hypot(fling.velocity.y) > STOPPED
-        });
-    });
-}
-
 /// A finger at `at`, in the window's points. One that moves further than `SLOP` pans what scrolls under it, and what
-/// it pressed isn't pressed; let go, the pan carries on as a fling. One on an input gives it the keyboard as it lifts,
+/// it pressed isn't pressed, stretching past its end as a rubber band; let go, the pan carries on as a fling, or
+/// springs back (`Screen::release_scroll`). One on an input gives it the keyboard as it lifts,
 /// as a phone's own fields do, so one that lands there to scroll doesn't. One that lands on a fling stops it.
 fn touch_at(screen: &mut crate::Screen, native: &NativeWindow, id: WindowId, finger: u64, at: Point<f32>, phase: Phase) {
     screen.touch = true;
@@ -780,7 +750,7 @@ fn touch_at(screen: &mut crate::Screen, native: &NativeWindow, id: WindowId, fin
         }
         match phase {
             Phase::Down => {
-                let stopped = FLINGS.with(|flings| flings.borrow_mut().remove(&id)).is_some();
+                let stopped = screen.catch_scroll(at);
                 // One that lands as the window springs from the edge takes it where it is.
                 let caught = SLIDES.with(|slides| slides.borrow_mut().remove(&id)).is_some();
                 // The root window, the Home Screen, has nothing to go back to, and what's open over a page (a sheet, a
@@ -818,7 +788,7 @@ fn touch_at(screen: &mut crate::Screen, native: &NativeWindow, id: WindowId, fin
                     }
                 }
                 if touch.panning {
-                    screen.pan(touch.start, point(touch.last.x - at.x, touch.last.y - at.y));
+                    screen.drag_scroll(touch.start, point(touch.last.x - at.x, touch.last.y - at.y));
                 } else if !touch.on_input && !touch.stopped {
                     screen.pointer_moved(at);
                 }
@@ -850,10 +820,7 @@ fn touch_at(screen: &mut crate::Screen, native: &NativeWindow, id: WindowId, fin
                     return;
                 }
                 if touch.panning {
-                    if velocity.x.hypot(velocity.y) > STOPPED * 10.0 {
-                        FLINGS.with(|flings| flings.borrow_mut().insert(id, Fling { at: touch.start, velocity, stepped: now }));
-                    }
-                    return;
+                    return screen.release_scroll(touch.start, velocity);
                 }
                 if touch.stopped {
                     return;
@@ -876,7 +843,9 @@ fn touch_at(screen: &mut crate::Screen, native: &NativeWindow, id: WindowId, fin
                 if touch.edge {
                     let across = native.slid();
                     SLIDES.with(|slides| slides.borrow_mut().insert(id, Slide { across, velocity: 0.0, target: 0.0, stepped: Instant::now() }));
-                } else if !touch.on_input && !touch.panning && !touch.stopped {
+                } else if touch.panning {
+                    screen.release_scroll(touch.start, point(0.0, 0.0));
+                } else if !touch.on_input && !touch.stopped {
                     screen.pointer_cancel(at);
                 }
             }

@@ -171,15 +171,35 @@ impl Screen {
                 let steps = request.inputs.get("steps").and_then(Value::as_u64).unwrap_or(10).max(1);
                 let ms = request.f64("ms").unwrap_or(200.0).max(0.0);
                 let at = |part: f32| crate::geometry::point(start.0 + dx * part, start.1 + dy * part);
-                self.pointer_moved(at(0.0));
-                self.pointer_down(at(0.0), 0, false);
+                // A finger, in a window for one, pans what scrolls under it once it's moved past the slop, as a phone's
+                // does, where that scrolls that way, and is otherwise what it's on's.
+                let finger = self.touch;
+                let mut panning = false;
+                if !finger {
+                    self.pointer_moved(at(0.0));
+                }
+                if !(finger && self.catch_scroll(at(0.0))) {
+                    self.pointer_down(at(0.0), 0, false);
+                }
                 for step in 1..=steps {
                     if self.js.clock().paused() {
                         self.step(ms / steps as f64);
                     }
-                    self.pointer_moved(at(step as f32 / steps as f32));
+                    let (was, now) = (at((step - 1) as f32 / steps as f32), at(step as f32 / steps as f32));
+                    if finger && !panning && (now.x - start.0).hypot(now.y - start.1) > 10.0 && self.pans(at(0.0), crate::geometry::point(now.x - start.0, now.y - start.1)) {
+                        panning = true;
+                        self.pointer_cancel(now);
+                    }
+                    match panning {
+                        true => drop(self.drag_scroll(at(0.0), crate::geometry::point(was.x - now.x, was.y - now.y))),
+                        false => self.pointer_moved(now),
+                    }
                 }
-                self.pointer_up(at(1.0), 0);
+                let seconds = (ms / 1000.0).max(0.001) as f32;
+                match panning {
+                    true => self.release_scroll(at(0.0), crate::geometry::point(-dx / seconds, -dy / seconds)),
+                    false => self.pointer_up(at(1.0), 0),
+                }
                 json!({"dragged": {"x": dx, "y": dy}})
             }
             "clock" => {

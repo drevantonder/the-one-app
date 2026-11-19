@@ -276,6 +276,8 @@ pub(super) struct Painter<'a> {
     pub(super) placed: Vec<(Id, Placed)>,
     pub(super) tab_order: Vec<Id>,
     pub(super) scrolled: &'a mut HashMap<Id, Point<f32>>,
+    /// How far past its end each scroll is stretched, which moves its content as far again (`Screen::stretched`).
+    pub(super) stretched: HashMap<Id, Point<f32>>,
     pub(super) fields: &'a HashMap<Id, Field>,
     pub(super) drawn: &'a mut HashMap<Id, Drawn>,
     /// Each selectable text as it's drawn, and what's selected of one: its node, start and end (`selection`).
@@ -969,7 +971,8 @@ impl Painter<'_> {
                         let most = point((laid.scrollable_overflow_rect.right - inner.width).max(0.0), (laid.scrollable_overflow_rect.bottom - inner.height).max(0.0));
                         let now = self.scrolled.entry(id).or_insert(point(0.0, 0.0));
                         *now = point(now.x.clamp(0.0, most.x), now.y.clamp(0.0, most.y));
-                        child_offset = point(child_offset.x - now.x, child_offset.y - now.y);
+                        let stretched = self.stretched.get(&id).copied().unwrap_or(point(0.0, 0.0));
+                        child_offset = point(child_offset.x - now.x - stretched.x, child_offset.y - now.y - stretched.y);
                         let along = node.kind == Kind::Scroll && most.x > 0.0 && most.y == 0.0;
                         placed.scroll = Some((most.y, most.x, along));
                         placed.shown = child_mask;
