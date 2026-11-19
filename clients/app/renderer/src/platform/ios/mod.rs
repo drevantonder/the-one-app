@@ -224,8 +224,10 @@ fn heard(windows: &mut Windows, id: WindowId, event: &WindowEvent<'_>) {
             };
             touch_at(screen, native, id, touch.id, point(at.x, at.y), phase);
         }
-        WindowEvent::Suspended => screen.shown(false),
-        WindowEvent::Resumed => screen.shown(true),
+        // The app going to the background leaves its windows as they are, the keyboard with what had it, as an
+        // iPhone's own apps do: only in use no longer, as Android's window losing focus is.
+        WindowEvent::Suspended => screen.activate(false),
+        WindowEvent::Resumed => screen.activate(true),
         _ => {}
     }
 }
