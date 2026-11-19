@@ -28,10 +28,24 @@ async function told(check, worked, note) {
   said.textContent = sent?.ok ? `Sent “${check}”: ${worked ? "it worked" : "it didn't"}.` : sent?.status === 401 ? "Sign in to your network in this browser first, then come back." : "It couldn't be sent: is this device online?"
 }
 
+/// How long each step of the frame's start took, in ms from its script (`took`, renderer.js), as a metric of each
+/// (`one.client.web.start`), which Telemetry's `metric` reads by `one.step`, browser and system.
+/** @param {Record<string, number>} took */
+function started(took) {
+  const os = ios ? "ios" : navigator.userAgent.includes("Mac OS X") ? "macos" : undefined
+  const records = Object.entries(took)
+    .filter(([, ms]) => typeof ms === "number")
+    .map(([step, ms]) => ({ name: "one.client.web.start", value: ms, attributes: { "one.step": step, "user_agent.name": browser, "os.type": os, "service.name": "web" }, time: Date.now() }))
+  fetch("/mcp", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ jsonrpc: "2.0", method: "notifications/one/measured", params: { records } }) }).catch(() => {})
+}
+
 addEventListener("message", ({ source, data }) => {
   if (source !== frame.contentWindow || !data || typeof data !== "object") return
   const reply = (/** @type {object} */ body) => frame.contentWindow?.postMessage({ jsonrpc: "2.0", id: data.id, ...body }, "*")
-  if (data.method === "notifications/one/seen") Object.assign(seen, data.params)
+  if (data.method === "notifications/one/seen") {
+    Object.assign(seen, data.params)
+    if (data.params.took) started(data.params.took)
+  }
   else if (data.method === "notifications/one/checked") told(data.params.check, !!data.params.worked, data.params.note)
   else if (data.method === "ui/initialize") reply({ result: { hostContext: { theme: matchMedia("(prefers-color-scheme: dark)").matches ? "dark" : "light", deviceCapabilities: { touch: matchMedia("(pointer: coarse)").matches, hover: matchMedia("(hover: hover)").matches } } } })
   else if (data.id !== undefined) reply({ error: { code: -32601, message: `${data.method} isn't answered here` } })

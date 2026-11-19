@@ -18,6 +18,8 @@
   </style>
   <!-- From its opaque origin, this address is another: the renderer it imports is found beside it once it's a CORS
        request. -->
+  <!-- The renderer, which is most of what the frame loads, fetched from the start (renderer.js compiles it). -->
+  <link rel="preload" href="web_renderer_bg.wasm" as="fetch" crossorigin>
   <script src="renderer.js" crossorigin></script>
 </head>
 <body>

@@ -7,6 +7,16 @@
 ;(async () => {
   const started = performance.now()
   const page = new URL(location.hash.slice(1), location.href)
+  // What takes longest starts at once, each beside the others: the renderer, downloaded and compiled as it comes (and
+  // preloaded by index.html), the page's own HTML, and the UI library's tables, which are at the network's root.
+  const here = /** @type {HTMLScriptElement} */ (document.currentScript).src
+  const compiled = WebAssembly.compileStreaming(fetch(new URL("web_renderer_bg.wasm", here)))
+  const pageHtml = fetch(page).then((response) => response.text())
+  const libraryTables = Promise.all(["/ui/client/tokens.json", "/ui/client/styles.json"].map(async (table) => (await fetch(new URL(table, page))).text()))
+  /// How long each step took, from the frame's script, which its first frame tells (`seen`).
+  /** @type {Record<string, number>} */
+  const took = {}
+  const step = (/** @type {string} */ name) => void (took[name] = Math.round(performance.now() - started))
   /// What happened, said once of each kind to the frame's client, which may tell Telemetry (check.js): the first
   /// frame, the edits its real field had, a screen reader's presses.
   /** @type {Set<string>} */
@@ -25,7 +35,8 @@
   try {
     if (!navigator.gpu) throw new Error("this browser has no WebGPU")
     // The page's own: where what it names is from, the module it loads, and the import map a server serves it with.
-    const html = new DOMParser().parseFromString(await (await fetch(page)).text(), "text/html")
+    const html = new DOMParser().parseFromString(await pageHtml, "text/html")
+    step("page")
     const base = new URL(html.querySelector("base")?.getAttribute("href") ?? page.href, page)
     const script = html.querySelector('script[type="module"][src]')?.getAttribute("src")
     if (!script) throw new Error("its page loads no module")
@@ -37,10 +48,16 @@
     for (const [name, to] of Object.entries(imports)) imports[name] = native[new URL(to, base).href] ?? new URL(to, base).href
     Object.assign(imports, native)
     document.head.append(Object.assign(document.createElement("script"), { type: "importmap", textContent: JSON.stringify({ imports }) }))
+    // The page's module and the UI library it imports, fetched now, beside the renderer, rather than each as the one
+    // before it has loaded and named it.
+    for (const module of [new URL(script, base).href, ...new Set(Object.values(imports).filter((to) => to.endsWith(".js")))]) document.head.append(Object.assign(document.createElement("link"), { rel: "modulepreload", href: module, crossOrigin: "anonymous" }))
     // Its tables: the UI library's tokens and styles, and its app's styles, which its build writes beside every page.
-    const tables = await Promise.all(["/ui/client/tokens.json", "/ui/client/styles.json", "styles.json"].map(async (table) => (await fetch(new URL(table, base))).text()))
-    const [renderer, { textInput }, { semantics }, { videos }] = await Promise.all([import("./web_renderer.js"), import("./text-input.js"), import("./semantics.js"), import("./video.js")])
-    await renderer.default()
+    const [tables, [renderer, { textInput }, { semantics }, { videos }]] = await Promise.all([
+      Promise.all([libraryTables, fetch(new URL("styles.json", base)).then((response) => response.text())]).then(([library, own]) => (step("tables"), [...library, own])),
+      Promise.all([import("./web_renderer.js"), import("./text-input.js"), import("./semantics.js"), import("./video.js")]),
+    ])
+    await renderer.default({ module_or_path: await compiled.then((module) => (step("compiled"), module)) })
+    step("renderer")
     // A page built with this renderer's own UI library (check/) names none.
     const needs = Number(new URLSearchParams(location.search).get("runtime"))
     if (!(needs <= renderer.runtime_version())) throw new Error(`it needs runtime version ${needs}`)
@@ -77,10 +94,14 @@
       drawn: () => {
         document.documentElement.dataset.drawn = String(Math.round(performance.now()))
         seen("first frame ms", Math.round(performance.now()))
+        const wasm = /** @type {PerformanceResourceTiming | undefined} */ (performance.getEntriesByName(new URL("web_renderer_bg.wasm", here).href)[0])
+        step("drawn")
+        seen("took", { ...took, script: Math.round(started), wasmDownload: wasm && Math.round(wasm.responseEnd - wasm.startTime), wasmBytes: wasm?.transferSize })
         console.info(`first frame ${Math.round(performance.now() - started)} ms after the frame's script, ${Math.round(performance.now())} ms after it was opened`)
       },
       unopened,
     })
+    step("opened")
     addEventListener("message", ({ source, data }) => source === parent && renderer.message(data))
     // The canvas as the DOM says it is, in device pixels, and how many to a CSS pixel (the display's and the zoom),
     // and what happens on it.
@@ -133,6 +154,7 @@
     })
     try {
       await import(new URL(script, base).href)
+      step("module")
       renderer.started()
     } catch (error) {
       renderer.started(String(/** @type {Error} */ (error)?.stack ?? error))
