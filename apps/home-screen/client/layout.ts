@@ -12,21 +12,17 @@ export const TOP_ROW = BAR + 16
 export const DOTS = 32
 /** A phone's page, which a wide window draws larger, as many side by side as fit. */
 export const PHONE = 390
-/** A computer's launcher (DESIGN.md, Launcher): its search, a bar floating on its own at its top, `SEARCH` wide and
- * `SEARCH_HEIGHT` tall, and `GAP` under it the card, Home's pages, the App Library or what was found, each a surface of
- * glass, `MARGIN` in from the panel's edges, which leaves room for their shadows. A phone's page is drawn `PAGE` wide in
- * the card, `INSET` in from its sides, under the owner switcher and over the page dots, each in `PILLS` of it. The App
- * Library is `LIBRARY` wide, five categories across. */
+/** A computer's launcher (DESIGN.md, Launcher): its search, a bar `SEARCH` wide and `SEARCH_HEIGHT` tall on its own
+ * at the top, and `GAP` under it the card, one size whatever it shows, as Raycast's is: `ACROSS` of a phone's pages side
+ * by side, each drawn `PAGE` wide, `INSET` in from the card's sides, under the owner switcher and over the page dots,
+ * each in `PILLS` of it. Home, the App Library and what was found are each that card, which scrolls what's taller. */
 export const SEARCH = 600
 export const SEARCH_HEIGHT = 52
-export const MARGIN = 24
 export const GAP = 14
 export const PAGE = 316
+export const ACROSS = 3
 export const INSET = 16
 export const PILLS = 52
-export const LIBRARY = 840
-/** What's under a page in the launcher, past its sixth row, and the shadow's room under the card. */
-const SHADOW = 56
 /** A grid's gaps, across and down, and the tallest a row is. */
 const COLUMN_GAP = 12
 const ROW_GAP = 16
@@ -70,15 +66,13 @@ export function launcherRoom(safe: Insets): Room {
   return { width: PAGE, height: (ROWS * ROW + (ROWS - 1) * ROW_GAP) * scale + 8, wide: true, fit: 1, scale, side: 0, gap: 0, launcher: true, safe }
 }
 
-/// How tall a page of `room` is drawn when only its top three rows show: a launcher's owner with one page shows its top
-/// half beside its bottom half.
-export const halfHeight = (room: Room) => (3 * ROW + 2 * ROW_GAP) * room.scale + 8
+/// A launcher's card, its one size: `ACROSS` of `room`'s pages, each its six rows, with the owner switcher over them and
+/// the dots under them.
+export const card = (room: Room) => ({ width: ACROSS * PAGE + 2 * INSET, height: PILLS + room.height + PILLS })
 
-/// How large a launcher's panel is, for a card `card` wide and tall.
-export const panelSize = (card: { width: number; height: number }) => ({
-  width: Math.max(SEARCH, card.width) + 2 * MARGIN,
-  height: MARGIN + SEARCH_HEIGHT + GAP + card.height + SHADOW,
-})
+/// What a launcher's page asks its panel to be: its search and its card, one above the other, as much as they take and
+/// no more, so its host centres them on the screen as one.
+export const group = (room: Room) => ({ width: Math.max(SEARCH, card(room).width), height: SEARCH_HEIGHT + GAP + card(room).height })
 
 /** A page as it's laid out, before it's drawn larger: its size, what's kept clear inside it, and its grid's tracks. */
 export interface Page {

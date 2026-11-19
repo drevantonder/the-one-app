@@ -15,9 +15,9 @@
 import { createEffect, createMemo, createSignal, Errored, flush, For, Loading, onSettled, refresh, Show, untrack } from "solid-js"
 import { type WheelEventData, WheelGestures } from "wheel-gestures"
 import { createActor } from "xstate"
-import { Badge, Button, call, changed, client, confirm, covers, createVelocityTracker, type Element, Empty, haptic, Icon, type IconName, Image, keydown, type Keyed, type Layout, leave, link, List, type Located, Menu, negative, open, pinShortcut, Pressable, type Pressed, type PressableProps, Problem, type Rect, reducedMotion, render, Row, safeArea, Search, Sheet, sizeChanged, Spinner, styles, Text, TextInput, toast, tokens, View, viewport, visible, type Wheeled, Widget } from "ui"
+import { Badge, Button, ScrollView, call, changed, client, confirm, covers, createVelocityTracker, type Element, Empty, haptic, Icon, type IconName, Image, keydown, type Keyed, type Layout, leave, link, List, type Located, Menu, negative, open, pinShortcut, Pressable, type Pressed, type PressableProps, Problem, type Rect, reducedMotion, render, Row, safeArea, Search, Sheet, sizeChanged, Spinner, styles, Text, TextInput, toast, tokens, View, viewport, visible, type Wheeled, Widget } from "ui"
 import { give, glide, jump, settle, spring, type Spring, stop, thrower } from "./pager.ts"
-import { at as gridAt, BAR, type Box as Place, cell as cellOf, DOTS, GAP, grid, halfHeight, INSET, launcherRoom, lefts, LIBRARY, MARGIN, measure, PAGE, page as pageOf, type Page as Laid, panelSize, PILLS, type Room, SEARCH, SEARCH_HEIGHT, TOP_ROW } from "./layout.ts"
+import { ACROSS, at as gridAt, BAR, type Box as Place, card as cardOf, cell as cellOf, DOTS, GAP, grid, group, INSET, launcherRoom, lefts, measure, PAGE, page as pageOf, type Page as Laid, PILLS, type Room, SEARCH, SEARCH_HEIGHT, TOP_ROW } from "./layout.ts"
 import { type At, carries, type Drop, type Editing, fitted, type Held, type Kind, machine, nearest, pack, type Page, type Placed, shown, spans } from "./machine.ts"
 import type { Entrypoint, Category, Item, Listed, Pages, Size, Widget as WidgetItem } from "./types.ts"
 import { src } from "./types.ts"
@@ -183,7 +183,7 @@ const launch = (entrypoint: Entrypoint, owner: Owner, behind?: boolean, from?: F
 const POP_TO_ROOT = 90_000
 
 /// Where the launcher's card's top is, under its search.
-const CARD_TOP = MARGIN + SEARCH_HEIGHT + GAP
+const CARD_TOP = SEARCH_HEIGHT + GAP
 
 /// The room the pages have and how they're laid out in it, a phone's until it's known.
 const [room, setRoom] = createSignal<Room>(measure(390, 844, { top: 0, right: 0, bottom: 0, left: 0 }))
@@ -1504,26 +1504,7 @@ const widgetsOf = (owner: Owner | undefined, found: Listed[], words: string) => 
   const lead = leadOf(owner, found)
   return (owner?.widgets ?? []).filter((one) => one !== lead && `${one.name} ${one.opens?.name ?? ""}`.toLowerCase().includes(typed))
 }
-/// How tall what a search found is, as `Results` lays it out: each section's heading, then under Apps the widget
-/// leading as many rows of apps as there are beside it, and under Widgets three to a row.
 const HEADING = 20
-const resultsHeight = (owner: Owner | undefined, found: Listed[], words: string) => {
-  const [tile, widget] = [88, 2 * 88 - 8]
-  const lead = leadOf(owner, found)
-  const beside = Math.max(1, Math.floor((2 * PAGE - (lead ? 2 * 76 + 8 + 12 : 0)) / 76))
-  const rows = Math.ceil(found.length / beside)
-  const apps = found.length ? HEADING + 12 + Math.max(lead ? widget : 0, rows * tile + (rows - 1) * 12) : 0
-  const others = widgetsOf(owner, found, words).length
-  const widgets = others ? HEADING + 12 + Math.ceil(others / 3) * (widget + 12) - 12 : 0
-  return apps && widgets ? apps + 12 + widgets : apps || widgets || 80
-}
-/// How tall a launcher's App Library is, `width` wide, as `shelf` lays it out across it: its rows of categories, each a square with
-/// its name under it, and Background Apps under them.
-const shelfHeight = (library: Category[], width: number) => {
-  const laid = shelf(width)
-  const rows = Math.ceil(sorted(library, false).length / laid.across)
-  return rows ? rows * (laid.category + 6 + 20) + (rows - 1) * 20 + (sorted(library, true).length ? 20 + 28 : 0) : 80
-}
 
 /// What the launcher's Return opens: an app it found, or what's chosen on Home, with where it is on Home, if it's there.
 type Target = { item?: Item; listed?: Listed; place?: { page: number; index: number } }
@@ -1546,7 +1527,7 @@ function DotsPill(props: { owners: Owner[]; laid: Kind[][]; pages?: (owner: numb
     // iOS 26's Liquid Glass, the pages blurred through it with a rim of light and a soft shadow, but in the launcher's
     // footer, which is flat.
     <View style={[looks.pill, !props.flat && looks.glass, looks.tall(height())]}>
-      <Roll count={props.owners.length} height={height()} row={(index) => <Dots owner={props.owners[index]} index={index} count={count(index)} size={props.flat ? 5 : 7} shows={props.pages ? 2 : 1} />} />
+      <Roll count={props.owners.length} height={height()} row={(index) => <Dots owner={props.owners[index]} index={index} count={count(index)} size={props.flat ? 5 : 7} shows={props.pages ? ACROSS : 1} />} />
       <Pressable
         role="button"
         aria-label="App Library"
@@ -1714,11 +1695,11 @@ function HomeScreen(props: { owners: Owner[] }) {
   /// then the App Library, the same for everyone, a screenful.
   const screens = createMemo(() => {
     const fit = room().fit
-    // The launcher shows two pages side by side and turns them one at a time: a screenful from each page but the last,
+    // The launcher shows `ACROSS` pages side by side and turns them one at a time: a screenful from each page but the last,
     // which while they're edited has its own, with room beside it for another.
     if (launcher())
       return pages().map((homes, owner) => [
-        ...Array.from({ length: Math.max(1, homes.length - (editingOwner(owner) ? 0 : 1)) }, (_, at) => ({ kind: "home" as Kind, from: at, count: Math.min(2, homes.length - at) })),
+        ...Array.from({ length: Math.max(1, homes.length - (editingOwner(owner) ? ACROSS - 2 : ACROSS - 1)) }, (_, at) => ({ kind: "home" as Kind, from: at, count: Math.min(ACROSS, homes.length - at) })),
         { kind: "library" as Kind, from: 0, count: 1 },
       ])
     return pages().map((homes) => [...Array.from({ length: Math.ceil(homes.length / fit) }, (_, at) => ({ kind: "home" as Kind, from: at * fit, count: Math.min(fit, homes.length - at * fit) })), { kind: "library" as Kind, from: 0, count: 1 }])
@@ -1795,33 +1776,12 @@ function HomeScreen(props: { owners: Owner[] }) {
     return Math.max(0, xOf(owner)[0]() - Math.max(0, homes(owner).length - 1) * room().width)
   }
 
-  /// The launcher's card: what it shows, Home, the App Library or what was found, and how large it is for that, under
-  /// the search, its middle the panel's. Home's is as tall as the owner's pages; an owner with one page shows its top
-  /// half beside its bottom half, unless it's edited or something on it spans both halves.
+  /// The launcher's card: what it shows, Home, the App Library or what was found, all in one card of one size, under
+  /// the search, in the middle of the room.
   const showing = () => (query().trim() ? "search" : library() ? "library" : "home")
-  const halves = (owner: number) => {
-    const all = pages()[owner] ?? []
-    return all.length === 1 && !editingOwner(owner) && !all[0].some((placed) => placed.row <= 3 && placed.row + placed.height > 4)
-  }
-  /// How many pages across an owner's pages are: two, or one for a single page whose bottom half is empty, or that
-  /// shows whole.
-  const pagesAcross = (owner: number) => ((pages()[owner]?.length ?? 1) > 1 || editingOwner(owner) || (halves(owner) && pages()[owner][0].some((placed) => placed.row > 3)) ? 2 : 1)
-  const tallest = () => PILLS + room().height + PILLS
-  /// The card for what it shows, within `most`: the App Library and what's found, which scroll, as wide as fits, and
-  /// as tall as they are, to the most; Home's pages as they are.
-  const cardWithin = (most: { width: number; height: number }) => {
-    if (showing() === "library") {
-      const width = Math.min(LIBRARY, most.width - 2 * INSET)
-      return { width: width + 2 * INSET, height: Math.ceil(Math.min(tallest(), most.height, INSET + shelfHeight(props.owners[0]?.library ?? [], width) + PILLS)) }
-    }
-    if (showing() === "search") return { width: Math.min(2 * PAGE + 2 * INSET, most.width), height: Math.ceil(Math.min(tallest(), most.height, 2 * INSET + resultsHeight(props.owners[0], found(), query()))) }
-    const owner = state().context.at.owner
-    return { width: pagesAcross(owner) * PAGE + 2 * INSET, height: Math.ceil(PILLS + (halves(owner) ? halfHeight(room()) : room().height) + PILLS) }
-  }
-  const sized = { equals: (a: { width: number; height: number }, b: { width: number; height: number }) => a.width === b.width && a.height === b.height }
-  /// The card as it's drawn, in the room the panel has: what it asked for, or where the panel isn't as large as it
-  /// asked, what fits, so the App Library is never cut off at its sides.
-  const card = createMemo(() => cardWithin({ width: viewport().width - 2 * MARGIN, height: viewport().height - CARD_TOP }), sized)
+  const card = () => cardOf(room())
+  /// How far an owner's pages are moved along so fewer than fill the card are in its middle.
+  const lead = (owner: number) => (Math.max(0, ACROSS - (pages()[owner]?.length ?? 1)) * PAGE) / 2
   const cardLeft = () => (viewport().width - card().width) / 2
   /// How far an owner's pages are moved along in the card, at `x`: there, and past Home's last screenful, on the way
   /// to the App Library, which cross-fades in, giving rather than sliding on.
@@ -1838,11 +1798,9 @@ function HomeScreen(props: { owners: Owner[] }) {
   /// What was typed, kept a moment as it's emptied, while what it found fades.
   const [words] = lingering(() => query().trim() && query(), 400)
   const cardRect = () => ({ x: cardLeft(), y: CARD_TOP, width: card().width, height: card().height })
-  // The launcher's panel: as large as its card ever is, which it never changes. Its search and its card are each a
-  // window of their own, as large as they're drawn, so the room around them costs nothing, and moves nothing as the
-  // card grows and shrinks.
+  // The launcher's panel: its search and its card, as large as they are, which never changes; its host centres it.
   createEffect(
-    () => launcher() && panelSize({ width: LIBRARY + 2 * INSET, height: tallest() }),
+    () => launcher() && group(room()),
     (size) => {
       if (size) void sizeChanged({ width: Math.ceil(size.width), height: Math.ceil(size.height) })
     },
@@ -1850,7 +1808,7 @@ function HomeScreen(props: { owners: Owner[] }) {
 
   /// Where a page of an owner is drawn in the window: its left and top, and how much larger it's drawn.
   const pageAt = (owner: number, page: number) => {
-    if (untrack(launcher)) return { x: untrack(cardLeft) + INSET + page * PAGE - Math.min(sideways(owner).value, homeEnd(owner)), y: CARD_TOP + PILLS, scale: untrack(room).scale }
+    if (untrack(launcher)) return { x: untrack(cardLeft) + INSET + untrack(() => lead(owner)) + page * PAGE - Math.min(sideways(owner).value, homeEnd(owner)), y: CARD_TOP + PILLS, scale: untrack(room).scale }
     const fit = untrack(room).fit
     const screen = Math.floor(page / fit)
     const count = untrack(screens)[owner]?.[screen]?.count ?? 1
@@ -1938,10 +1896,7 @@ function HomeScreen(props: { owners: Owner[] }) {
     if (!placed) return
     const laid = untrack(laidPage)
     const at = pageAt(chosen.owner, chosen.page)
-    // In the launcher, an owner's one page's bottom half is beside its top half.
-    const lower = untrack(launcher) && halves(chosen.owner) && placed.row > 3
-    const box = cellOf(laid, lower ? { ...placed, row: placed.row - 3 } : placed)
-    if (lower) at.x += PAGE
+    const box = cellOf(laid, placed)
     if (placed.item.item.widget) return { x: at.x + box.x * at.scale, y: at.y + box.y * at.scale, width: box.width * at.scale, height: box.height * at.scale, radius: 22 * at.scale }
     const size = laid.tile * at.scale
     return { x: at.x + box.x * at.scale + (box.width * at.scale - size) / 2, y: at.y + box.y * at.scale, width: size, height: size, radius: size * 0.225 }
@@ -2412,7 +2367,7 @@ function HomeScreen(props: { owners: Owner[] }) {
           </>
         }
       >
-        <View style={[looks.surface, looks.search, looks.at((viewport().width - SEARCH) / 2, MARGIN, SEARCH, SEARCH_HEIGHT)]}>
+        <View style={[looks.surface, looks.search, looks.at((viewport().width - SEARCH) / 2, 0, SEARCH, SEARCH_HEIGHT)]}>
           <LauncherSearch />
         </View>
         <View onWheel={wheel} style={[looks.surface, looks.card, looks.at(0, CARD_TOP, card().width, card().height), looks.shifted(cardLeft())]}>
@@ -2433,19 +2388,12 @@ function HomeScreen(props: { owners: Owner[] }) {
                     role="region"
                     aria-label={owner().name}
                     inert={!shown() || undefined}
-                    style={[looks.owner, looks.rolling, !shown() && looks.inert, looks.at(INSET, PILLS, pagesAcross(index()) * PAGE, halves(index()) ? halfHeight(room()) : room().height), looks.drifted(shown() ? 1 : 0, (index() - state().context.at.owner) * 40)]}
+                    style={[looks.owner, looks.rolling, !shown() && looks.inert, looks.at(INSET, PILLS, ACROSS * PAGE, room().height), looks.drifted(shown() ? 1 : 0, (index() - state().context.at.owner) * 40)]}
                   >
-                    <View style={[looks.track, looks.slid(turnOf(index())[0]() - trackX(index()), opacityOf(index())[0]())]}>
+                    <View style={[looks.track, looks.slid(lead(index()) + turnOf(index())[0]() - trackX(index()), opacityOf(index())[0]())]}>
                       <View style={[looks.turning, looks.shifted(-turnOf(index())[0]())]}>
                         <For each={pages()[index()] ?? []} keyed={false}>
-                          {(placed, at) => (
-                            <Show when={halves(index())} fallback={<Page page={at} placed={placed()} />}>
-                              <Page page={at} placed={placed().filter((one) => one.row <= 3)} />
-                              <Show when={pagesAcross(index()) > 1}>
-                                <Page page={at} placed={placed().flatMap((one) => (one.row > 3 ? [{ ...one, row: one.row - 3 }] : []))} />
-                              </Show>
-                            </Show>
-                          )}
+                          {(placed, at) => <Page page={at} placed={placed()} />}
                         </For>
                       </View>
                     </View>
@@ -2454,13 +2402,15 @@ function HomeScreen(props: { owners: Owner[] }) {
               }}
             </For>
           </View>
-          {/* The App Library, in the same card, which grows to it as it cross-fades in. */}
+          {/* The App Library, in the same card, cross-fading in, scrolling what's taller. */}
           <View inert={showing() !== "library" || undefined} style={[looks.layer, looks.fading, showing() !== "library" && looks.inert, looks.fill(INSET, 0, 0), looks.faded(showing() === "library" ? 1 : 0, showing() === "library" ? 1 : 0.965)]}>
             <Library owner={props.owners[0]} size={{ width: card().width - 2 * INSET, height: card().height - INSET - PILLS }} />
           </View>
           {/* What was typed found, as it's typed, and as it goes, what it last found. */}
-          <View inert={showing() !== "search" || undefined} style={[looks.owner, looks.fading, showing() !== "search" && looks.inert, looks.fill(INSET, INSET, INSET), looks.drifted(showing() === "search" ? 1 : 0, showing() === "search" ? 0 : -8)]}>
-            <Show when={words()}>{(typed) => <Results owner={props.owners[0]} found={findIn(props.owners[0]?.library ?? [], typed(), false)} words={typed()} />}</Show>
+          <View inert={showing() !== "search" || undefined} style={[looks.owner, looks.fading, showing() !== "search" && looks.inert, looks.at(INSET, INSET, card().width - 2 * INSET, card().height - 2 * INSET), looks.drifted(showing() === "search" ? 1 : 0, showing() === "search" ? 0 : -8)]}>
+            <ScrollView style={looks.cover}>
+              <Show when={words()}>{(typed) => <Results owner={props.owners[0]} found={findIn(props.owners[0]?.library ?? [], typed(), false)} words={typed()} />}</Show>
+            </ScrollView>
           </View>
           {/* Whose pages they are at the top, as a phone has it, and their dots at the foot, with the App Library's glyph. */}
           <View inert={showing() !== "home" || undefined} style={[looks.row, looks.fading, showing() !== "home" && looks.inert, looks.top(0), looks.tall(PILLS), looks.opacity(showing() === "home" ? (state().matches("editing") ? 0.6 : 1) : 0)]}>

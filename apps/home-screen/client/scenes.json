@@ -712,8 +712,8 @@
   "Launcher on a computer": {
     "like": "Home, two pages",
     "size": [
-      920,
-      751
+      980,
+      671
     ],
     "answers": {
       "one/client": {
@@ -728,8 +728,8 @@
   "Launcher, one page": {
     "like": "Home, one page of apps",
     "size": [
-      920,
-      751
+      980,
+      671
     ],
     "answers": {
       "one/client": {
@@ -745,8 +745,8 @@
     "like": "Home, two pages",
     "page": "client/index.html#library",
     "size": [
-      920,
-      751
+      980,
+      671
     ],
     "answers": {
       "one/client": {
@@ -761,8 +761,8 @@
   "Launcher, nothing installed": {
     "like": "Home, nothing installed",
     "size": [
-      920,
-      751
+      980,
+      671
     ],
     "answers": {
       "one/client": {
