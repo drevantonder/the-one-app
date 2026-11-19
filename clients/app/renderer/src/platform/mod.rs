@@ -2,8 +2,8 @@
 //! glyph atlas and one font set, and a QuickJS sandbox per app (its `Screen`'s) on a thread of its own (`js::Thread`),
 //! so another open app costs a few MB, as Zed's and Raycast's windows do, and one busy in its JS holds up no window's
 //! frames. What the rest of the program asks of them (open one, tell one's app something) is a job run on that thread
-//! (`Native::run`), as GPUI's foreground executor runs its work: on a computer a thread of its own, and on Android the
-//! app's UI thread, where its views are (`android`).
+//! (`Native::run`), as GPUI's foreground executor runs its work: on a computer a thread of its own, and on a phone the
+//! app's UI thread, where its views are (`android`, `ios`).
 
 use std::collections::HashMap;
 use std::sync::{Arc, OnceLock};
@@ -29,6 +29,10 @@ use mac::{Display, Handle, NativeWindow, appearance, clipboard, reduced_motion};
 mod android;
 #[cfg(target_os = "android")]
 use android::{Display, Handle, NativeWindow, appearance, clipboard, reduced_motion};
+#[cfg(target_os = "ios")]
+pub mod ios;
+#[cfg(target_os = "ios")]
+use ios::{Display, Handle, NativeWindow, appearance, clipboard, reduced_motion};
 
 /// A window, as the windows' thread names it.
 pub type WindowId = u64;
@@ -93,6 +97,8 @@ type Sender = calloop::channel::Sender<Job>;
 type Sender = windows::Sender;
 #[cfg(target_os = "android")]
 type Sender = android::Sender;
+#[cfg(target_os = "ios")]
+type Sender = ios::Sender;
 
 impl Native {
     /// The windows' thread, started the first time it's asked for.
@@ -115,6 +121,8 @@ impl Native {
 use windows::start;
 #[cfg(target_os = "android")]
 use android::start;
+#[cfg(target_os = "ios")]
+use ios::start;
 
 #[cfg(any(target_os = "linux", target_os = "macos"))]
 fn start() -> anyhow::Result<Native> {
@@ -732,7 +740,7 @@ impl Input {
 }
 
 /// What the display says happened to a window.
-#[cfg_attr(target_os = "android", allow(dead_code))]
+#[cfg_attr(any(target_os = "android", target_os = "ios"), allow(dead_code))]
 pub(crate) enum Input {
     Resized(Size<crate::geometry::DevicePixels>),
     /// It has a surface to draw on, or a new one (Android's view's).

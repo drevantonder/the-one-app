@@ -1,0 +1,581 @@
+//! An iPhone's native windows: each a tao window, its UIWindow over the app's, in the event loop tao runs for the app
+//! (Tauri's, which owns `UIApplicationMain`, so winit can't run beside it). Its root view is a `View`, whose layer is a
+//! `CAMetalLayer` wgpu draws into. The app hands each of tao's events to `event`, on the main thread, which
+//! runs the jobs sent to the windows' thread (`Native::run`), with tao's event loop at hand to open windows in, and
+//! gives each window what tao says of it: a finger, its size and safe area, the app going to the background and back.
+//! What tao doesn't say is heard on the view itself: the system going light or dark (`traitCollectionDidChange:`).
+//!
+//! A finger is the pointer, as a phone's browser has it: a tap presses, and one that moves further than
+//! UIScrollView's slop pans what scrolls under it, which carries on as it's let go, slowing as a UIScrollView
+//! decelerates. One that comes in from the left edge drags the window across, the app's own showing under it, and
+//! closes it, as Back does on Android.
+
+use std::cell::{Cell, RefCell};
+use std::collections::HashMap;
+use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::{Mutex, OnceLock, mpsc};
+use std::time::{Duration, Instant};
+
+use dispatch2::{DispatchQueue, DispatchTime};
+use objc2::rc::Retained;
+use objc2::runtime::{AnyClass, NSObjectProtocol};
+use objc2::{ClassType, MainThreadMarker, MainThreadOnly, define_class, msg_send};
+use objc2_core_foundation::CGAffineTransform;
+use objc2_foundation::NSString;
+use objc2_quartz_core::CAMetalLayer;
+use objc2_ui_kit::{
+    UIAccessibilityIsReduceMotionEnabled, UIApplication, UIPasteboard,
+    UITraitCollection, UITraitEnvironment, UIUserInterfaceStyle, UIView, UIWindow,
+};
+use tao::event::{Event, TouchPhase, WindowEvent};
+use tao::event_loop::EventLoopWindowTarget;
+use tao::platform::ios::{WindowBuilderExtIOS, WindowExtIOS};
+
+use super::{Job, WindowId, WindowOptions, Windows};
+use crate::Appearance;
+use crate::editing;
+use crate::geometry::{DevicePixels, Edges, Pixels, Point, Size, point};
+
+/// Where a job is sent: the queue `event` runs, and what wakes tao's event loop to run it.
+#[derive(Clone)]
+pub struct Sender(mpsc::Sender<Job>);
+
+impl Sender {
+    pub fn send(&self, job: Job) -> Result<(), mpsc::SendError<Job>> {
+        self.0.send(job)?;
+        wake();
+        Ok(())
+    }
+}
+
+type Wake = Box<dyn Fn() + Send>;
+
+static STARTED: OnceLock<Sender> = OnceLock::new();
+static JOBS: Mutex<Option<mpsc::Receiver<Job>>> = Mutex::new(None);
+static WAKE: Mutex<Option<Wake>> = Mutex::new(None);
+/// Whether the system is dark, as the views last said, and whether that's changed since the windows were told.
+static DARK: AtomicBool = AtomicBool::new(false);
+static APPEARANCE_CHANGED: AtomicBool = AtomicBool::new(false);
+
+/// The windows' thread: the main thread, once the app has handed tao's event loop over (`attach`).
+pub fn start() -> anyhow::Result<super::Native> {
+    STARTED.get().cloned().map(super::Native).ok_or_else(|| anyhow::anyhow!("the app hasn't attached its native host"))
+}
+
+pub fn appearance() -> Appearance {
+    if DARK.load(Ordering::Relaxed) { Appearance::Dark } else { Appearance::Light }
+}
+
+/// Reduce Motion, in Accessibility's Motion.
+pub fn reduced_motion() -> bool {
+    UIAccessibilityIsReduceMotionEnabled()
+}
+
+/// The general pasteboard. An iPhone has no primary selection.
+pub fn clipboard() -> Option<Box<dyn editing::Clipboard>> {
+    Some(Box::new(Clipboard))
+}
+
+struct Clipboard;
+
+impl editing::Clipboard for Clipboard {
+    fn read(&mut self, primary: bool) -> Option<String> {
+        if primary {
+            return None;
+        }
+        unsafe { UIPasteboard::generalPasteboard().string() }.map(|text| text.to_string())
+    }
+
+    fn write(&mut self, primary: bool, text: &str) {
+        if !primary {
+            unsafe { UIPasteboard::generalPasteboard().setString(Some(&NSString::from_str(text))) };
+        }
+    }
+}
+
+/// The app's event loop is tao's, and `wake` has it deliver an event soon, on the main thread, which the app hands to
+/// `event`: native windows can open from now on.
+pub fn attach(wake: impl Fn() + Send + 'static) {
+    if MainThreadMarker::new().is_some() {
+        let traits = unsafe { UITraitCollection::currentTraitCollection() };
+        DARK.store(dark(&traits), Ordering::Relaxed);
+    }
+    *WAKE.lock().expect("nothing panics holding it") = Some(Box::new(wake));
+    if STARTED.get().is_some() {
+        return;
+    }
+    let (jobs, queue) = mpsc::channel::<Job>();
+    *JOBS.lock().expect("nothing panics holding it") = Some(queue);
+    let _ = STARTED.set(Sender(jobs));
+}
+
+fn wake() {
+    if let Some(wake) = WAKE.lock().expect("nothing panics holding it").as_ref() {
+        wake();
+    }
+}
+
+fn dark(traits: &UITraitCollection) -> bool {
+    (unsafe { traits.userInterfaceStyle() }) == UIUserInterfaceStyle::Dark
+}
+
+type Build<'a> = dyn Fn(tao::window::WindowBuilder) -> Result<tao::window::Window, tao::error::OsError> + 'a;
+
+thread_local! {
+    /// Every window, made the first time a job comes, on the main thread.
+    static WINDOWS: RefCell<Option<Windows>> = const { RefCell::new(None) };
+    /// What opens a tao window, while `event` has tao's event loop at hand.
+    static BUILD: Cell<Option<*const Build<'static>>> = const { Cell::new(None) };
+    /// Each window's id by its tao window's, and by its view.
+    static IDS: RefCell<HashMap<tao::window::WindowId, WindowId>> = RefCell::new(HashMap::new());
+    static VIEWS: RefCell<HashMap<usize, WindowId>> = RefCell::new(HashMap::new());
+    /// Each finger on a window, and each window's scroll carrying on after its finger let go.
+    static TOUCHES: RefCell<HashMap<WindowId, Touch>> = RefCell::new(HashMap::new());
+    static FLINGS: RefCell<HashMap<WindowId, Fling>> = RefCell::new(HashMap::new());
+}
+
+/// One of tao's events, on the main thread: the jobs waiting run, and a native window hears what's said of it. →
+/// whether it was one of theirs, which no one else need hear.
+pub fn event<T>(event: &Event<'_, T>, target: &EventLoopWindowTarget<T>) -> bool {
+    let build = |builder: tao::window::WindowBuilder| builder.build(target);
+    let build: &Build<'_> = &build;
+    // Only while this call runs, which is as long as `build` lives.
+    BUILD.with(|slot| slot.set(Some(unsafe { std::mem::transmute::<*const Build<'_>, *const Build<'static>>(build) })));
+    let ours = handle(event);
+    BUILD.with(|slot| slot.set(None));
+    ours
+}
+
+fn handle<T>(event: &Event<'_, T>) -> bool {
+    let jobs: Vec<Job> = JOBS.lock().expect("nothing panics holding it").as_ref().map(|queue| queue.try_iter().collect()).unwrap_or_default();
+    let window = match event {
+        Event::WindowEvent { window_id, event, .. } => IDS.with(|ids| ids.borrow().get(window_id).copied()).map(|id| (id, event)),
+        _ => None,
+    };
+    let woken = matches!(event, Event::UserEvent(_));
+    if jobs.is_empty() && window.is_none() && !woken {
+        return false;
+    }
+    with_windows(|windows| {
+        for job in jobs {
+            job(windows);
+        }
+        if let Some((id, event)) = window {
+            heard(windows, id, event);
+        }
+    });
+    window.is_some()
+}
+
+/// Window `id` heard `event` from tao.
+fn heard(windows: &mut Windows, id: WindowId, event: &WindowEvent<'_>) {
+    let Some(window) = windows.windows.get_mut(&id) else { return };
+    window.dirty = true;
+    let native = &window.parts[0].native;
+    let scale = native.scale();
+    let Ok(screen) = &mut window.screen else { return };
+    match event {
+        WindowEvent::Touch(touch) => {
+            let at = touch.location.to_logical::<f32>(scale as f64);
+            let phase = match touch.phase {
+                TouchPhase::Started => Phase::Down,
+                TouchPhase::Moved => Phase::Moved,
+                TouchPhase::Ended => Phase::Up,
+                _ => Phase::Cancelled,
+            };
+            touch_at(screen, native, id, touch.id, point(at.x, at.y), phase);
+        }
+        WindowEvent::Suspended => screen.shown(false),
+        WindowEvent::Resumed => screen.shown(true),
+        _ => {}
+    }
+}
+
+/// Does `f` to the windows, made now if they aren't yet, steps each fling, draws what changed, and asks to be woken
+/// when the next timer, or the next step of a fling, is due. A call that comes while the windows are in use (UIKit
+/// calling back into a view as Rust changes it) is dropped.
+fn with_windows<R>(f: impl FnOnce(&mut Windows) -> R) -> Option<R> {
+    WINDOWS.with(|windows| {
+        let mut windows = windows.try_borrow_mut().ok()?;
+        if windows.is_none() {
+            let started = Instant::now();
+            match Windows::new(Display) {
+                Ok(made) => *windows = Some(made),
+                Err(error) => {
+                    log::error!("native windows can't open: {error:#}");
+                    return None;
+                }
+            }
+            log::info!("native windows ready in {:?}", started.elapsed());
+        }
+        let windows = windows.as_mut().expect("made above");
+        if APPEARANCE_CHANGED.swap(false, Ordering::Relaxed) {
+            for window in windows.windows.values_mut() {
+                if let Ok(screen) = &mut window.screen {
+                    screen.appearance = appearance();
+                    screen.reduced_motion = reduced_motion();
+                }
+                window.dirty = true;
+            }
+        }
+        let result = f(windows);
+        // Its page keeps clear of what its safe area leaves out, as tao says it now: the first tao says, as the window
+        // is made, comes before it's one of these.
+        for window in windows.windows.values_mut() {
+            let insets = window.parts[0].native.insets();
+            if let Ok(screen) = &mut window.screen
+                && screen.insets != insets
+            {
+                screen.insets = insets;
+                window.dirty = true;
+            }
+        }
+        fling(windows);
+        windows.turn();
+        let flinging = FLINGS.with(|flings| !flings.borrow().is_empty());
+        let due = windows.due();
+        schedule(if flinging { Some(due.map_or(FRAME, |due| due.min(FRAME))) } else { due });
+        Some(result)
+    })
+}
+
+/// A frame at 120 Hz, which a fling steps at.
+const FRAME: Duration = Duration::from_micros(8_333);
+
+/// Which wake is the latest asked for (`schedule`): an older one does nothing.
+static SCHEDULED: AtomicU64 = AtomicU64::new(0);
+
+/// Has tao's event loop woken when `due`, or not at all: what's due fires, and each fling takes a step.
+fn schedule(due: Option<Duration>) {
+    let scheduled = SCHEDULED.fetch_add(1, Ordering::Relaxed) + 1;
+    let Some(due) = due else { return };
+    let Ok(when) = DispatchTime::try_from(due.max(Duration::from_micros(100))) else { return };
+    let _ = DispatchQueue::main().after(when, move || {
+        if SCHEDULED.load(Ordering::Relaxed) == scheduled {
+            wake();
+        }
+    });
+}
+
+/// The windows' host, which opens them in tao's event loop.
+pub struct Display;
+
+impl Display {
+    pub fn open(&self, id: WindowId, options: &WindowOptions) -> anyhow::Result<NativeWindow> {
+        let main = MainThreadMarker::new().ok_or_else(|| anyhow::anyhow!("a native window opens on the main thread"))?;
+        let build = BUILD.with(Cell::get).ok_or_else(|| anyhow::anyhow!("a native window opens as tao's event loop runs"))?;
+        // The window that had the keyboard, which has it back as this one closes.
+        let behind: Option<Retained<UIWindow>> = unsafe { msg_send![&UIApplication::sharedApplication(main), keyWindow] };
+        // Hidden until its page has what it first asked for (`show`).
+        let builder = tao::window::WindowBuilder::new().with_title(&options.title).with_visible(false).with_root_view_class((View::class() as *const AnyClass).cast());
+        let window = unsafe { (*build)(builder) }?;
+        let view = window.ui_view() as usize;
+        let ui_view = unsafe { &*(view as *const UIView) };
+        ui_view.setMultipleTouchEnabled(false);
+        IDS.with(|ids| ids.borrow_mut().insert(window.id(), id));
+        VIEWS.with(|views| views.borrow_mut().insert(view, id));
+        let layer = Retained::as_ptr(&ui_view.layer()) as usize;
+        Ok(NativeWindow { window, layer, behind })
+    }
+
+    pub fn close(&self, native: &NativeWindow) {
+        native.window.set_visible(false);
+        let id = IDS.with(|ids| ids.borrow_mut().remove(&native.window.id()));
+        VIEWS.with(|views| views.borrow_mut().remove(&(native.window.ui_view() as usize)));
+        if let Some(id) = id {
+            TOUCHES.with(|touches| touches.borrow_mut().remove(&id));
+            FLINGS.with(|flings| flings.borrow_mut().remove(&id));
+        }
+        if let Some(behind) = &native.behind {
+            behind.makeKeyWindow();
+        }
+    }
+
+    pub fn show(&self, native: &NativeWindow) {
+        native.window.set_visible(true);
+        native.ui_window().makeKeyAndVisible();
+    }
+
+    pub fn activate(&self, native: &NativeWindow) {
+        native.ui_window().makeKeyAndVisible();
+    }
+
+    pub fn set_cursor(&self, _: &NativeWindow, _: crate::Cursor) {}
+
+    // A launcher's panel, which a phone has none of: its launcher is its page.
+    pub fn summon(&self, _: &NativeWindow, _: &crate::platform::Places, _: Size<Pixels>) {}
+    pub fn put_away(&self, _: &NativeWindow, _: bool) {}
+    /// A part of a panel's page as a window of its own: which a phone has none of.
+    pub fn open_part(&self, _: &NativeWindow, _: usize) -> anyhow::Result<NativeWindow> {
+        anyhow::bail!("a panel's parts aren't windows of their own here")
+    }
+    pub fn arrange(&self, _: &[(Handle, crate::geometry::Bounds<f32>, f32)], draw: &mut dyn FnMut()) {
+        draw();
+    }
+
+    /// Its title row over its page: none, where the system's status bar is above the page.
+    pub fn set_title_row(&self, _: &NativeWindow, _: Option<crate::view::TitleRow>) {}
+
+    /// Flutter's text input calls, which no keyboard takes yet: an iPhone's window doesn't type until its bridge is
+    /// Flutter's (`FlutterTextInputPlugin`), so its apps open natively only where they're asked to.
+    pub fn text_input(&self, _: &NativeWindow, _: &[crate::editing::TextInput]) {}
+
+    pub fn flush(&self) {}
+
+    /// What tao says of a window comes in through `event`, not queued here.
+    pub(crate) fn events(&self) -> Vec<(WindowId, usize, super::Input)> {
+        Vec::new()
+    }
+}
+
+/// A tao window, its view's layer, the CAMetalLayer wgpu draws into, and the window that had the keyboard before it.
+pub struct NativeWindow {
+    window: tao::window::Window,
+    layer: usize,
+    behind: Option<Retained<UIWindow>>,
+}
+
+/// A window as `Display::arrange` would place it, which a phone's never does.
+#[derive(Clone, Copy)]
+pub struct Handle;
+
+impl NativeWindow {
+    pub fn handle(&self) -> Handle {
+        Handle
+    }
+
+    /// What wgpu draws into: its view's layer, a CAMetalLayer as its view's class says (`View`), as a Mac's window
+    /// gives it.
+    pub fn surface(&self) -> anyhow::Result<wgpu::SurfaceTargetUnsafe> {
+        anyhow::ensure!(self.layer != 0, "its view has no layer to draw into");
+        Ok(wgpu::SurfaceTargetUnsafe::CoreAnimationLayer(self.layer as *mut std::ffi::c_void))
+    }
+
+    fn ui_window(&self) -> &UIWindow {
+        unsafe { &*(self.window.ui_window() as *const UIWindow) }
+    }
+
+    /// Moves its view `across` its window, which is see-through, so the app's own window shows where it's moved
+    /// from. It's moved by its transform, which lays nothing out again and leaves the window's points, where tao says
+    /// a finger is, where they are.
+    fn slide(&self, across: f32) {
+        let view = unsafe { &*(self.window.ui_view() as *const UIView) };
+        view.setTransform(CGAffineTransform { a: 1.0, b: 0.0, c: 0.0, d: 1.0, tx: across as f64, ty: 0.0 });
+    }
+
+    pub fn has_surface(&self) -> bool {
+        true
+    }
+
+    /// A window over the page is opaque: its page draws its own background.
+    pub fn transparent(&self) -> bool {
+        false
+    }
+
+    pub fn size(&self) -> Size<Pixels> {
+        let size = self.window.outer_size().to_logical::<f32>(self.window.scale_factor());
+        Size { width: Pixels(size.width), height: Pixels(size.height) }
+    }
+
+    pub fn device_size(&self) -> Size<DevicePixels> {
+        let size = self.window.outer_size();
+        Size { width: DevicePixels(size.width.max(1) as i32), height: DevicePixels(size.height.max(1) as i32) }
+    }
+
+    pub fn scale(&self) -> f32 {
+        self.window.scale_factor() as f32
+    }
+
+    /// Its size is its UIWindow's, which tao says.
+    pub fn resized(&self, _: Size<DevicePixels>) {}
+
+    /// What its safe area leaves out (the status bar, the Dynamic Island, the home indicator), as tao says it: the
+    /// room between its inner rectangle and its outer one, in points.
+    fn insets(&self) -> Edges<f32> {
+        let scale = self.window.scale_factor();
+        let (Ok(inner), Ok(outer)) = (self.window.inner_position(), self.window.outer_position()) else { return Edges::default() };
+        let (inner_size, outer_size) = (self.window.inner_size(), self.window.outer_size());
+        let left = (inner.x - outer.x) as f64;
+        let top = (inner.y - outer.y) as f64;
+        let right = outer_size.width as f64 - inner_size.width as f64 - left;
+        let bottom = outer_size.height as f64 - inner_size.height as f64 - top;
+        let points = |pixels: f64| (pixels / scale).max(0.0) as f32;
+        Edges { top: points(top), right: points(right), bottom: points(bottom), left: points(left) }
+    }
+}
+
+define_class!(
+    // SAFETY: UIView has no subclassing requirements, and `View` doesn't implement `Drop`. tao makes a subclass of it,
+    // which hears fingers, its layout and its scale.
+    #[unsafe(super(UIView))]
+    #[thread_kind = MainThreadOnly]
+    #[name = "OneNativeView"]
+    struct View;
+
+    unsafe impl NSObjectProtocol for View {}
+
+    impl View {
+        /// Its layer is a Metal layer, which the renderer draws into.
+        #[unsafe(method(layerClass))]
+        fn layer_class() -> &'static AnyClass {
+            CAMetalLayer::class()
+        }
+
+        /// The system went light or dark: tao doesn't say it on an iPhone.
+        #[unsafe(method(traitCollectionDidChange:))]
+        fn trait_collection_did_change(&self, previous: Option<&UITraitCollection>) {
+            let _: () = unsafe { msg_send![super(self), traitCollectionDidChange: previous] };
+            DARK.store(dark(&self.traitCollection()), Ordering::Relaxed);
+            APPEARANCE_CHANGED.store(true, Ordering::Relaxed);
+            wake();
+        }
+    }
+);
+
+/// How far a finger moves before it pans rather than presses, in points: UIScrollView's.
+const SLOP: f32 = 10.0;
+/// How near the left edge a finger lands to drag the window, in points, as UINavigationController's back swipe.
+const EDGE: f32 = 20.0;
+/// How much of its speed a fling keeps each millisecond: UIScrollView's normal deceleration rate.
+const DECELERATION: f32 = 0.998;
+/// The speed, in points a second, below which a fling stops.
+const STOPPED: f32 = 20.0;
+
+#[derive(Clone, Copy, PartialEq)]
+enum Phase {
+    Down,
+    Moved,
+    Up,
+    Cancelled,
+}
+
+/// A finger: tao's id for it, where it landed, where it was last, whether it's panning, whether it landed on an input,
+/// which it presses only as it lifts, or stopped a fling, which it doesn't press at all, or came in from the left
+/// edge, which drags the window, and where it was lately, for how fast it was going as it lifts.
+struct Touch {
+    finger: u64,
+    edge: bool,
+    start: Point<f32>,
+    last: Point<f32>,
+    panning: bool,
+    on_input: bool,
+    stopped: bool,
+    lately: Vec<(Instant, Point<f32>)>,
+}
+
+/// A scroll carrying on after its finger let go: where the finger was, how fast it goes (points a second, along and
+/// down as a pan's), and when it last stepped.
+struct Fling {
+    at: Point<f32>,
+    velocity: Point<f32>,
+    stepped: Instant,
+}
+
+/// Steps every fling to now, stopping one that's slow enough or reached the end of what it scrolls.
+fn fling(windows: &mut Windows) {
+    let now = Instant::now();
+    FLINGS.with(|flings| {
+        flings.borrow_mut().retain(|id, fling| {
+            let Some(window) = windows.windows.get_mut(id) else { return false };
+            let Ok(screen) = &mut window.screen else { return false };
+            let ms = now.duration_since(fling.stepped).as_secs_f32() * 1000.0;
+            fling.stepped = now;
+            // Its speed decays by DECELERATION each millisecond; it goes as far as the decay's integral over the step.
+            let decay = DECELERATION.powf(ms);
+            let travelled = (decay - 1.0) / DECELERATION.ln() / 1000.0;
+            let by = point(fling.velocity.x * travelled, fling.velocity.y * travelled);
+            fling.velocity = point(fling.velocity.x * decay, fling.velocity.y * decay);
+            window.dirty = true;
+            screen.pan(fling.at, by).is_some() && fling.velocity.x.hypot(fling.velocity.y) > STOPPED
+        });
+    });
+}
+
+/// A finger at `at`, in the window's points. One that moves further than `SLOP` pans what scrolls under it, and what
+/// it pressed isn't pressed; let go, the pan carries on as a fling. One on an input gives it the keyboard as it lifts,
+/// as a phone's own fields do, so one that lands there to scroll doesn't. One that lands on a fling stops it.
+fn touch_at(screen: &mut crate::Screen, native: &NativeWindow, id: WindowId, finger: u64, at: Point<f32>, phase: Phase) {
+    screen.touch = true;
+    TOUCHES.with(|touches| {
+        let mut touches = touches.borrow_mut();
+        if phase != Phase::Down && touches.get(&id).is_none_or(|touch| touch.finger != finger) {
+            return;
+        }
+        match phase {
+            Phase::Down => {
+                let stopped = FLINGS.with(|flings| flings.borrow_mut().remove(&id)).is_some();
+                let edge = at.x < EDGE;
+                let on_input = !edge && screen.input_at(at);
+                touches.insert(id, Touch { finger, edge, start: at, last: at, panning: false, on_input, stopped, lately: vec![(Instant::now(), at)] });
+                if !edge && !on_input && !stopped {
+                    screen.pointer_down(at, 0, false);
+                }
+            }
+            Phase::Moved => {
+                let Some(touch) = touches.get_mut(&id) else { return };
+                let now = Instant::now();
+                touch.lately.push((now, at));
+                touch.lately.retain(|(when, _)| now.duration_since(*when) < Duration::from_millis(100));
+                if touch.edge {
+                    return native.slide((at.x - touch.start.x).max(0.0));
+                }
+                if !touch.panning && ((at.x - touch.start.x).abs() > SLOP || (at.y - touch.start.y).abs() > SLOP) {
+                    touch.panning = true;
+                    if !touch.on_input && !touch.stopped {
+                        screen.pointer_cancel(at);
+                    }
+                }
+                if touch.panning {
+                    screen.pan(touch.start, point(touch.last.x - at.x, touch.last.y - at.y));
+                } else if !touch.on_input && !touch.stopped {
+                    screen.pointer_moved(at);
+                }
+                touch.last = at;
+            }
+            Phase::Up => {
+                let Some(touch) = touches.remove(&id) else { return };
+                // How fast it was going over its last tenth of a second, as UIScrollView's pan measures it.
+                let (now, first) = (Instant::now(), touch.lately[0]);
+                let seconds = now.duration_since(first.0).as_secs_f32().max(0.008);
+                let velocity = point((first.1.x - at.x) / seconds, (first.1.y - at.y) / seconds);
+                if touch.edge {
+                    // Let go past a third of the way across, or flicked, it closes, once this event is done with.
+                    if at.x - touch.start.x > native.size().width.0 / 3.0 || -velocity.x > 500.0 {
+                        if let Some(native) = super::Native::started() {
+                            native.run(move |windows| windows.close(id));
+                        }
+                    } else {
+                        native.slide(0.0);
+                    }
+                    return;
+                }
+                if touch.panning {
+                    if velocity.x.hypot(velocity.y) > STOPPED * 10.0 {
+                        FLINGS.with(|flings| flings.borrow_mut().insert(id, Fling { at: touch.start, velocity, stepped: now }));
+                    }
+                    return;
+                }
+                if touch.stopped {
+                    return;
+                }
+                if touch.on_input {
+                    screen.pointer_down(at, 0, false);
+                }
+                screen.pointer_up(at, 0);
+            }
+            Phase::Cancelled => {
+                let Some(touch) = touches.remove(&id) else { return };
+                if touch.edge {
+                    native.slide(0.0);
+                } else if !touch.on_input && !touch.panning && !touch.stopped {
+                    screen.pointer_cancel(at);
+                }
+            }
+        }
+    });
+    // A finger that's lifted is over nothing, as a phone's browser has it: nothing it scrolled under it is hovered.
+    if matches!(phase, Phase::Up | Phase::Cancelled) {
+        screen.pointer_left();
+    }
+}
+

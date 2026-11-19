@@ -38,11 +38,9 @@ pub mod computer;
 mod discard;
 #[cfg(desktop)]
 pub mod host;
-#[cfg(any(desktop, target_os = "android"))]
 mod hosts;
 #[cfg(desktop)]
 mod title_bar;
-#[cfg(any(desktop, target_os = "android"))]
 mod native;
 
 pub(crate) mod page;
@@ -504,10 +502,11 @@ async fn start() -> Result<Value, String> {
     told["testflight"] = json!(testflight());
     // A computer opens each app in a window of its own (`hosts`).
     told["windows"] = json!(cfg!(desktop));
-    // Android draws an app's window natively, over the page, where it needs this program's runtime version or
-    // an older one (`renderer`).
-    #[cfg(target_os = "android")]
-    {
+    // A phone draws an app's window natively, over the page, where it needs this program's runtime version or an
+    // older one (`renderer`). An iPhone does only where it's asked to (ONE_NATIVE=1, as a simulator's app is launched
+    // with), until it types and speaks to VoiceOver natively.
+    #[cfg(mobile)]
+    if cfg!(target_os = "android") || std::env::var_os("ONE_NATIVE").is_some_and(|on| on == "1") {
         told["runtimeVersion"] = json!(::renderer::RUNTIME_VERSION);
     }
     if let Some(theme) = *app.chosen.lock().expect("nothing panics holding it") {
@@ -658,13 +657,7 @@ fn tapped(tapped: Value) {
 #[cfg(mobile)]
 #[tauri::command]
 async fn open_window(entrypoint: String, subject: Option<String>, link: String) -> bool {
-    #[cfg(target_os = "android")]
-    return hosts::open_window(entrypoint, subject, link).await;
-    #[cfg(not(target_os = "android"))]
-    {
-        let _ = (entrypoint, subject, link);
-        false
-    }
+    hosts::open_window(entrypoint, subject, link).await
 }
 
 #[cfg_attr(mobile, tauri::command)]
@@ -1010,7 +1003,6 @@ async fn open(home: std::path::PathBuf) -> anyhow::Result<Arc<Client>> {
         #[allow(unused_mut)]
         let mut tools = computer_use_client::tools();
         // A native window's inspector, which is this program's own.
-        #[cfg(any(desktop, target_os = "android"))]
         tools.push(Arc::new(native::Inspector));
         let client = Client::open(home, cli::resolvers(), tools).await?;
         client.service("app");
@@ -1156,7 +1148,6 @@ impl Shell for Phone {
 
     fn emit(&self, event: &str, payload: Value) {
         // An app's native window over the page hears what an app's own window would on a computer.
-        #[cfg(target_os = "android")]
         if hosts::EVENTS.contains(&event) {
             hosts::tell_all(json!({"event": event, "payload": payload}));
         }
@@ -1164,7 +1155,6 @@ impl Shell for Phone {
     }
 
     fn reload(&self) {
-        #[cfg(target_os = "android")]
         hosts::close_all();
         if let Some(window) = self.0.get_webview_window("main") {
             let _ = window.eval(format!("location.replace({})", Value::from(HOME)));
@@ -1229,6 +1219,9 @@ pub fn run() {
     let builder = builder.plugin(tauri_plugin_haptics::init());
     builder
         .setup(move |app| {
+            // An app's window is drawn natively, in a tao window over this one (`native`).
+            #[cfg(target_os = "ios")]
+            app.wry_plugin(native::Ios);
             begin(Phone(app.handle().clone()), started);
             // The window opens at its own page at once, which draws the mark until the client has opened behind it,
             // and then follows where the device is: a device that isn't in its network to the page that signs it

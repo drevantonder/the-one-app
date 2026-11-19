@@ -62,6 +62,9 @@ None of these is chosen. Each is named so it's weighed before anything like it i
     Direct3D 12 on Windows, from GPUI's WGSL shaders, as GPUI itself moved to it. It replaced Blade (Vulkan and Metal,
     through our fork of it) and the Direct3D 11 renderer copied from GPUI: one backend to keep, not three, and the
     same renderer and shaders run on the web later, as WebGPU in WASM.
+  - **tao** (19 November 2026): an iPhone's strict windows, with their fingers, safe areas and lifecycle, are tao's,
+    in the event loop Tauri runs for the app, which hands them its events (a wry plugin). winit was the first choice
+    and can't be used there: its UIKit backend starts only by calling `UIApplicationMain` itself, which tao already has.
   - Not used: Zed's `editor` crate, which is GPL-3.0.
 - **Lynx** (ByteDance): native views on Android from JS. A spike on 19 November 2026 drew a native screen in it with a
   cold start 35% faster than the web view and a fifth of its memory. Not chosen: Android uses our own renderer, and the

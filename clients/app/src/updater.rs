@@ -230,7 +230,6 @@ async fn typing() -> Option<String> {
     if let Some(label) = EDITING.lock().expect("nothing panics holding it").iter().find(|label| shown.contains(*label)) {
         return Some(label.clone());
     }
-    #[cfg(any(desktop, target_os = "android"))]
     if crate::native::typed().await {
         return Some("native".to_owned());
     }

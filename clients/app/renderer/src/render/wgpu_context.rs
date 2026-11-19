@@ -18,7 +18,7 @@ pub struct WgpuContext {
 }
 
 /// The one backend each platform draws with.
-const BACKENDS: wgpu::Backends = if cfg!(target_os = "macos") {
+const BACKENDS: wgpu::Backends = if cfg!(target_vendor = "apple") {
     wgpu::Backends::METAL
 } else if cfg!(target_os = "windows") {
     wgpu::Backends::DX12

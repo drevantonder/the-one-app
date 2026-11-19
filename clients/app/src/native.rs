@@ -13,7 +13,7 @@
 //! as the Inspector app's tools (`Inspector`), so an agent anywhere in the network reads and drives a native window as
 //! it would one of its own.
 //!
-//! On Android the same window is a view over the page, on the UI thread, and any other app is a frame in the page
+//! On a phone the same window is a view over the page, on its UI thread, and any other app is a frame in the page
 //! (`hosts::open_window`); what a computer's launcher does for it, a phone does as its own (`computer`, below).
 
 use std::collections::HashMap;
@@ -253,6 +253,9 @@ async fn window(started: Instant, entrypoint: &str, subject: Option<&str>, link:
         let opened = match begun.screen(state, Size { width: options.size.width.0, height: options.size.height.0 }, insets) {
             Ok(mut screen) => {
                 screen.theme = theme(chosen.as_deref());
+                // A phone's is under a finger from the start, so it's drawn with its tokens' touch values from its
+                // first frame (pointer: coarse), as the page is told (`deviceCapabilities`).
+                screen.touch = cfg!(mobile);
                 screen.page = tokens_page;
                 // What its frames show, each another app's page in a sandbox of its own (`frame`): only a trusted
                 // app's page shows one, as on the DOM (`one/frame` in page/client.js).
@@ -861,4 +864,41 @@ pub async fn typed() -> bool {
         let _ = told.send(windows.typed());
     });
     answer.await.unwrap_or(false)
+}
+
+/// An iPhone's native windows are tao's, in the event loop Tauri runs: every one of its events goes to them first
+/// (`renderer::platform::ios::event`), and one of theirs goes no further; a job for them wakes the loop.
+#[cfg(target_os = "ios")]
+pub(crate) struct Ios;
+
+#[cfg(target_os = "ios")]
+mod ios {
+    use tauri::EventLoopMessage;
+    use tauri_runtime_wry::tao::event::Event;
+    use tauri_runtime_wry::tao::event_loop::{ControlFlow, EventLoopProxy, EventLoopWindowTarget};
+    use tauri_runtime_wry::{Context, EventLoopIterationContext, Message, Plugin, PluginBuilder, WebContextStore};
+
+    impl PluginBuilder<EventLoopMessage> for super::Ios {
+        type Plugin = super::Ios;
+
+        fn build(self, context: Context<EventLoopMessage>) -> super::Ios {
+            let proxy = context.proxy.clone();
+            renderer::platform::ios::attach(move || drop(proxy.send_event(Message::Task(Box::new(|| {})))));
+            self
+        }
+    }
+
+    impl Plugin<EventLoopMessage> for super::Ios {
+        fn on_event(
+            &mut self,
+            event: &Event<Message<EventLoopMessage>>,
+            event_loop: &EventLoopWindowTarget<Message<EventLoopMessage>>,
+            _: &EventLoopProxy<Message<EventLoopMessage>>,
+            _: &mut ControlFlow,
+            _: EventLoopIterationContext<'_, EventLoopMessage>,
+            _: &WebContextStore,
+        ) -> bool {
+            renderer::platform::ios::event(event, event_loop)
+        }
+    }
 }

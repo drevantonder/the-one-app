@@ -60,7 +60,7 @@ taffy = "0.15"
 unicode-segmentation = "1"
 url = "2"
 # The GPU, by wgpu, as GPUI draws with it: each platform's own backend, named below (Vulkan on Linux and Android, Metal
-# on a Mac, Direct3D 12 on Windows), and the WGSL our shaders are written in, which WebGPU runs on the web.
+# on a Mac and an iPhone, Direct3D 12 on Windows), and the WGSL our shaders are written in, which WebGPU runs on the web.
 wgpu = { version = "30.0.2", default-features = false, features = ["std", "wgsl"] }
 # The typeface the UI library ships as WOFF2 (core/ui/src/Allo-Variable.woff2), which the text system reads as TTF.
 wuff = "0.2"
@@ -118,16 +118,29 @@ windows-numerics = "0.3"
 # The clipboard, as arboard serves it, as on Linux.
 arboard = { version = "3", default-features = false }
 
-[target.'cfg(target_os = "macos")'.dependencies]
+# A Mac's and an iPhone's: the GPU, by wgpu on Metal, and the main thread's queue, by objc2's bindings.
+[target.'cfg(target_vendor = "apple")'.dependencies]
 wgpu = { version = "30.0.2", default-features = false, features = ["metal"] }
-# AppKit's windows, on its main thread, by objc2's bindings, as wgpu reaches Metal.
 dispatch2 = "0.3"
 objc2 = "0.6"
-objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "objc2-core-foundation", "objc2-quartz-core", "NSAccessibility", "NSAppearance", "NSApplication", "NSCursor", "NSPasteboard", "NSEvent", "NSGraphics", "NSPanel", "NSResponder", "NSRunningApplication", "NSTrackingArea", "NSView", "NSWindow", "NSWorkspace"] }
 objc2-foundation = { version = "0.3", default-features = false, features = ["std", "objc2-core-foundation", "NSArray", "NSGeometry", "NSNotification", "NSObjCRuntime", "NSString"] }
 objc2-quartz-core = { version = "0.3", default-features = false, features = ["std", "objc2-core-foundation", "CALayer", "CAMetalLayer", "CATransaction"] }
 # The display's frames, by a display link (`Display::frame`), as GPUI's Mac platform has them.
 objc2-core-video = { version = "0.3", default-features = false, features = ["std", "CVBase", "CVDisplayLink", "CVReturn"] }
+
+# AppKit's windows, on its main thread.
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "objc2-core-foundation", "objc2-quartz-core", "NSAccessibility", "NSAppearance", "NSApplication", "NSCursor", "NSPasteboard", "NSEvent", "NSGraphics", "NSPanel", "NSResponder", "NSRunningApplication", "NSTrackingArea", "NSView", "NSWindow", "NSWorkspace"] }
+
+# An iPhone's: a native screen is a tao window over the app's (`platform/ios`), on the main thread. Its QuickJS has
+# no prebuilt bindings in rquickjs-sys, so bindgen makes them against the iOS SDK's headers, as Android's.
+[target.'cfg(target_os = "ios")'.dependencies]
+objc2-core-foundation = { version = "0.3", default-features = false, features = ["std", "CFCGTypes"] }
+objc2-ui-kit = { version = "0.3", default-features = false, features = ["std", "objc2-core-foundation", "objc2-quartz-core", "UIAccessibility", "UIApplication", "UIGeometry", "UIInterface", "UIPasteboard", "UIResponder", "UITraitCollection", "UIView", "UIWindow"] }
+# Its windows, fingers, safe area and lifecycle: tao's, whose event loop the app (Tauri's) runs; winit can't run
+# beside it, as it starts only by calling UIApplicationMain itself.
+tao = { version = "0.37", default-features = false }
+rquickjs = { version = "0.14", features = ["bindgen"] }
 
 # Android: a native screen is a SurfaceView over the app's web view (`platform/android`), on the UI thread, whose
 # keyboard bridge (Flutter's) and accessibility delegate (AccessKit's) are Java that calls in through JNI.
