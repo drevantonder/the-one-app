@@ -288,6 +288,10 @@ pub struct WgpuRenderer {
     instances: Option<(wgpu::Buffer, u64, wgpu::BindGroup)>,
     /// Each raster's texture, by its id, drawn the first frame it's in, kept while frames have it, and its bind group.
     rasters: std::collections::HashMap<u32, (wgpu::Texture, wgpu::BindGroup)>,
+    /// Each blur of what's behind a backdrop, by what was drawn before it (`Blur::behind`), kept while frames draw the
+    /// same behind one, as iOS's materials blur what's behind them once while it holds still; and whether this frame
+    /// used it.
+    blurred: std::collections::HashMap<u64, (wgpu::TextureView, bool)>,
     /// Each atlas texture's bind group, as of the atlas's having made so many textures.
     atlas_groups: std::cell::RefCell<(u64, std::collections::HashMap<super::atlas::AtlasTextureId, wgpu::BindGroup>)>,
 }
@@ -433,6 +437,7 @@ impl WgpuRenderer {
             kept: None,
             instances: None,
             rasters: Default::default(),
+            blurred: Default::default(),
             atlas_groups: Default::default(),
         }
     }
@@ -530,10 +535,25 @@ impl WgpuRenderer {
                 .collect();
             Drawn { over, batches }
         };
+        // A backdrop's blur is of the whole frame drawn before it, wherever the backdrop is: the same while that is,
+        // as the first of its batch moves (a sheet carried up), it's kept.
         let blurs: Vec<Vec<Blur>> = batches
             .iter()
-            .map(|batch| match batch {
-                PrimitiveBatch::Backdrops(backdrops) => backdrops.iter().map(|backdrop| self.plan_blur(size, backdrop.blur.0)).collect(),
+            .enumerate()
+            .map(|(at, batch)| match batch {
+                PrimitiveBatch::Backdrops(backdrops) => backdrops
+                    .iter()
+                    .enumerate()
+                    .map(|(one, backdrop)| {
+                        use std::hash::{Hash, Hasher};
+                        let mut hasher = std::collections::hash_map::DefaultHasher::new();
+                        let before = if one == 0 { &drawn.batches[..at] } else { &drawn.batches[..=at] };
+                        (drawn.over, before, one, backdrop.blur.0.to_bits()).hash(&mut hasher);
+                        let mut blur = self.plan_blur(size, backdrop.blur.0);
+                        blur.behind = Some(hasher.finish());
+                        blur
+                    })
+                    .collect(),
                 _ => Vec::new(),
             })
             .collect();
@@ -656,6 +676,8 @@ impl WgpuRenderer {
         };
         self.draw_batches(&mut encoder, &texture, &view, &globals, &buffer, &batches, &instances, &blurs, from..batches.len());
         self.last = drawn;
+        // What's behind no backdrop this frame isn't kept; what's still drawn starts the next frame unused.
+        self.blurred.retain(|_, (_, used)| std::mem::take(used));
 
         self.queue.submit([encoder.finish()]);
         if let Some(frame) = frame {
@@ -923,7 +945,7 @@ impl WgpuRenderer {
         let shrink = self.push(bytemuck::bytes_of(&BlurParams { step: [0.0, 0.0], sigma: 0.0, pad: 0.0 }));
         let across = self.push(bytemuck::bytes_of(&BlurParams { step: [1.0 / width as f32, 0.0], sigma, pad: 0.0 }));
         let down = self.push(bytemuck::bytes_of(&BlurParams { step: [0.0, 1.0 / height as f32], sigma, pad: 0.0 }));
-        Blur { level, shrink, across, down }
+        Blur { level, shrink, across, down, behind: None }
     }
 
     /// Blurs what's drawn into `frame` so far, as `blur` says, into the backdrop's textures: shrunk, then blurred
@@ -931,6 +953,10 @@ impl WgpuRenderer {
     /// last. Only the textures this blur goes through are made, each the first time one needs it, and the frame is
     /// read as it is where its surface lets a shader read it.
     fn blur_behind(&mut self, encoder: &mut wgpu::CommandEncoder, frame: &wgpu::Texture, view: &wgpu::TextureView, globals: &wgpu::BindGroup, buffer: &wgpu::Buffer, blur: &Blur) -> wgpu::TextureView {
+        if let Some((view, used)) = blur.behind.and_then(|behind| self.blurred.get_mut(&behind)) {
+            *used = true;
+            return view.clone();
+        }
         let size = (frame.width(), frame.height());
         if self.backdrop.as_ref().is_none_or(|backdrop| backdrop.size != size) {
             self.backdrop = Some(BackdropTextures { size, source: None, levels: Default::default() });
@@ -953,7 +979,7 @@ impl WgpuRenderer {
         let wanted = (0..blur.level).map(|at| (at, 0)).chain([(blur.level - 1, 1), (blur.level - 1, 2)]);
         for (at, which) in wanted {
             if backdrop.levels[at][which].is_none() {
-                backdrop.levels[at][which] = Some(make(halved(size, at + 1), wgpu::TextureUsages::RENDER_ATTACHMENT));
+                backdrop.levels[at][which] = Some(make(halved(size, at + 1), wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC));
             }
         }
         // A Metal drawable or a Direct3D 12 swap chain's buffer isn't one wgpu lets a shader read: what's drawn so
@@ -1000,7 +1026,24 @@ impl WgpuRenderer {
             pass.set_bind_group(2, &texture, &[]);
             pass.draw(0..4, 0..1);
         }
-        down.clone()
+        let Some(behind) = blur.behind else { return down.clone() };
+        // Kept in a texture of its own, as the next backdrop blurs into the same ones.
+        let down = &backdrop.levels[blur.level - 1][2].as_ref().expect("made above").0;
+        let (width, height) = (down.width(), down.height());
+        let kept = self.device.create_texture(&wgpu::TextureDescriptor {
+            label: None,
+            size: wgpu::Extent3d { width, height, depth_or_array_layers: 1 },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: self.format,
+            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+            view_formats: &[],
+        });
+        encoder.copy_texture_to_texture(down.as_image_copy(), kept.as_image_copy(), wgpu::Extent3d { width, height, depth_or_array_layers: 1 });
+        let view = kept.create_view(&wgpu::TextureViewDescriptor::default());
+        self.blurred.insert(behind, (view.clone(), true));
+        view
     }
 
     /// The last frame drawn offscreen, as RGBA rows, top first.
@@ -1030,6 +1073,8 @@ impl WgpuRenderer {
 
 /// Where a backdrop's blur's parameters are in the frame's data, and at which level it's blurred.
 struct Blur {
+    /// What was drawn before it, by which a blur of it is kept (`WgpuRenderer::blurred`).
+    behind: Option<u64>,
     level: usize,
     shrink: (u64, u64),
     across: (u64, u64),
