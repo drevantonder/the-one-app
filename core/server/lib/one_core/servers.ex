@@ -104,6 +104,20 @@ defmodule OneCore.Servers do
     end
   end
 
+  @doc """
+  Whether the server whose key is `key` answers the relay at the network's address now: the relay pings it there, as
+  it does before it gives one an outsider's call, and it has 5 seconds to answer. A connection that has gone quiet
+  stays connected there for a while (`presence/1`), as a machine that has just gone to sleep does, and this doesn't
+  wait for that. `nil` where the network has no address.
+  """
+  def answers?(key) do
+    if at = Application.get_env(:one_core, :address) do
+      path = "/relay/seen"
+      response = Edge.send!(method: :get, url: at <> path, params: [keys: key, ping: 1], headers: Edge.signed(path, ""))
+      response.status == 200 and get_in(response.body, ["presence", key, "answered"]) == true
+    end
+  end
+
   @doc "Whether the server whose key is `key` is ready (`presence/1`): `nil` where that isn't known."
   def ready?(key), do: presence(key)["server_ready"]
 

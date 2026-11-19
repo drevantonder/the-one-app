@@ -139,6 +139,8 @@ interface Presence {
   server_daemon_status?: ServerDaemonStatus;
   server_ready?: boolean;
   server_ready_reason?: ServerReadyReason;
+  /** Whether it answered a ping within `REACH`, where `/relay/seen` was asked to ping it. */
+  answered?: boolean;
 }
 
 /** An endpoint joined to the relay: the connection its datagrams are passed over, and when its token expires. */
@@ -358,7 +360,18 @@ export default class extends WorkerEntrypoint<RelayEnv> {
       return new Response(null, { status: 204 });
     }
     const keys = (url.searchParams.get("keys") ?? "").split(",").filter((key) => /^[0-9a-f]{64}$/.test(key));
-    return Response.json({ presence: await this.presence(keys.slice(0, 1000)), protocol: SPEAKS }, { headers: { "one-version": this.env.VERSION } });
+    const presence = await this.presence(keys.slice(0, 1000));
+    // With `ping`, each server is pinged as one is before it's given an outsider's call, and whether it `answered`
+    // within `REACH` is said too: a connection that has gone quiet stays here for up to `SILENT`, as a machine that
+    // has just gone to sleep does, so being connected doesn't say a server would answer.
+    if (url.searchParams.has("ping")) {
+      for (const server of keys.slice(0, 10)) {
+        const call = this.relay((relay) => relay.fetch(`https://relay/call?to=${server}`, { headers: { upgrade: "websocket" } }));
+        const answered = await reach(call, server).then(({ close }) => (close(), true), () => false);
+        presence[server] = { ...(presence[server] ?? { connected: false }), answered };
+      }
+    }
+    return Response.json({ presence, protocol: SPEAKS }, { headers: { "one-version": this.env.VERSION } });
   }
 
   /**
