@@ -15,6 +15,7 @@ use std::io::Write;
 
 use anyhow::{Context, Result, bail};
 use futures_util::future::join_all;
+use futures_util::stream::{self, StreamExt, TryStreamExt};
 use serde_json::{Value, json};
 use sha2::{Digest, Sha256};
 use tokio::sync::watch;
@@ -22,11 +23,39 @@ use tokio::sync::watch;
 use crate::Client;
 
 impl Client {
-    /// Asks the server for `method`, which only reads, and keeps its answer.
+    /// Asks the server for `method`, which only reads, and keeps its answer: a list of files once it's whole
+    /// (`keep_whole`).
     pub async fn fresh(&self, method: &str, params: &Value) -> Result<Value> {
         let response = self.request(method, params.clone()).await?;
-        self.keep(method, params, &response)?;
+        match method {
+            "resources/list" => self.keep_whole(params, &response),
+            _ => self.keep(method, params, &response)?,
+        }
         Ok(response)
+    }
+
+    /// Keeps a list of files a server gave once every file of a version it lists (`ui://<app>/<code>/…`, which never
+    /// changes) is kept too, behind it. A server keeps only the last few versions' files, so a list kept before its
+    /// files would name some that may be gone by the time a view opens from it with no answer since, as the next
+    /// start does before it's asked again. One whose files couldn't all be kept isn't, and the list kept before it
+    /// stays, whose files all are: what went wrong is told to Telemetry.
+    fn keep_whole(&self, params: &Value, listed: &Value) {
+        let Some(client) = self.me.upgrade() else { return };
+        let (params, listed) = (params.clone(), listed.clone());
+        self.runtime.spawn(async move {
+            let files = listed["resources"].as_array().into_iter().flatten().filter_map(|resource| resource["uri"].as_str());
+            let reads = files.filter(|uri| uri.starts_with("ui://")).map(|uri| json!({"uri": uri}));
+            let missing: Vec<Value> = reads.filter(|read| !client.cache_file("resources/read", read).exists()).collect();
+            let fetch = |read: Value| {
+                let client = client.clone();
+                async move { client.fresh("resources/read", &read).await }
+            };
+            let kept = stream::iter(missing).map(fetch).buffer_unordered(8);
+            let kept = kept.try_collect::<Vec<_>>().await.and_then(|_| client.keep("resources/list", &params, &listed));
+            if let Err(error) = kept {
+                client.report(json!({"name": "one.client.cache", "error": format!("{error:#}")}));
+            }
+        });
     }
 
     /// Keeps `answer` as what `method` was last answered with.
@@ -112,7 +141,10 @@ pub(crate) fn write(file: &Path, bytes: &[u8]) -> Result<()> {
     fs::create_dir_all(folder)?;
     let mut writing = tempfile::NamedTempFile::new_in(folder)?;
     writing.write_all(bytes)?;
-    writing.persist(file)?;
+    // Named by std's rename, not tempfile's `persist`: on Windows, MoveFileEx alone is refused (Access is denied)
+    // where another ask has the file open to read it, and std's rename then replaces it as POSIX's does.
+    let written = writing.into_temp_path().keep()?;
+    fs::rename(&written, file).inspect_err(|_| drop(fs::remove_file(&written)))?;
     Ok(())
 }
 

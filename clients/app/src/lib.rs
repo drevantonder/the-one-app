@@ -309,8 +309,8 @@ fn parts(resource: &str) -> Option<(&str, &str, &str)> {
 }
 
 /// The files a server lists for `subject`, a group or the network, or for this client's user, and with them the open
-/// apps that are `outdated` and load again, each as its address names it. Every file listed is kept behind this, so
-/// with no server up an app opens whole, even one that was never opened, or whose apps have changed since. The user's
+/// apps that are `outdated` and load again, each as its address names it. A list is kept only with every file it
+/// lists (`Client::fresh`), so with no server up an app opens whole, even one that was never opened. The user's
 /// apps with a screen are where the device lists its own apps too (`shortcuts`).
 #[cfg_attr(mobile, tauri::command)]
 async fn apps(subject: Option<String>) -> Result<Value, String> {
@@ -321,15 +321,6 @@ async fn apps(subject: Option<String>) -> Result<Value, String> {
     if subject.is_none() {
         shortcuts::keep(shortcuts::listed(&listed));
     }
-    // The list `listed` is answered with may be one a server gave days ago, whose files an update since has replaced,
-    // and a server keeps only the last few versions': so what's kept is what the server lists now. With no server
-    // answering, what's missing is asked for when an app loads it.
-    spawn(async move {
-        let Ok(now) = views.client.fresh("resources/list", &listing(subject.as_deref())).await else { return };
-        for resource in resources(&now) {
-            let _ = views.read(resource).await;
-        }
-    });
     Ok(listed)
 }
 

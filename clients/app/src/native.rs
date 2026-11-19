@@ -128,15 +128,12 @@ async fn probe(entrypoint: &str, subject: Option<&str>, framed: bool) -> anyhow:
     let module = module_script(&String::from_utf8_lossy(&html)).ok_or_else(|| anyhow::anyhow!("its page loads no module"))?;
     let css = crate::hosts::file(page.join("/ui/client/ui.css")?.as_str()).await.map_err(|error| anyhow::anyhow!("ui.css didn't load: {error}"))?;
     let css = String::from_utf8(BASE64.decode(css["body"].as_str().unwrap_or_default().as_bytes())?)?;
-    // Its tables, each needing a runtime version this program has, or it's a web view's. An app with no styles of its own has
-    // no table of them.
+    // Its tables, each needing a runtime version this program has, or it's a web view's: the UI library's, and its
+    // app's styles, which its build writes beside every page (`core/ui/app.js`).
     let mut tables = Vec::new();
-    for (table, needed) in [(page.join("/ui/client/tokens.json")?, true), (page.join("/ui/client/styles.json")?, true), (page.join("styles.json")?, false)] {
-        let file = match crate::hosts::file(table.as_str()).await {
-            Ok(file) => BASE64.decode(file["body"].as_str().unwrap_or_default().as_bytes())?,
-            Err(_) if !needed => continue,
-            Err(error) => anyhow::bail!("{table} didn't load: {error}"),
-        };
+    for table in [page.join("/ui/client/tokens.json")?, page.join("/ui/client/styles.json")?, page.join("styles.json")?] {
+        let file = crate::hosts::file(table.as_str()).await.map_err(|error| anyhow::anyhow!("{table} didn't load: {error}"))?;
+        let file = BASE64.decode(file["body"].as_str().unwrap_or_default().as_bytes())?;
         let text = String::from_utf8(file)?;
         let v = serde_json::from_str::<Value>(&text).map(|table| table["v"].as_u64().unwrap_or(0)).unwrap_or(0);
         if v > u64::from(renderer::RUNTIME_VERSION) {
