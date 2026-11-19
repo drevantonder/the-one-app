@@ -604,6 +604,8 @@ defmodule Vault do
             artifact: %{type: "string"},
             epoch: %{type: "integer"},
             servers: %{type: "array", items: %{type: "string"}, description: "The servers that open it"},
+            signature: %{type: "string", description: "Its owner's signature of which servers open it, by the key `signer`"},
+            signer: %{type: "string", description: "The public key its owner signs with, which their devices derive from their key"},
             may: %{
               type: "array",
               description: "The servers that may be chosen to",

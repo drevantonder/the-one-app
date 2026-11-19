@@ -85,12 +85,24 @@ defmodule Encryption do
   that run this call's app, each with what its machine is called.
   """
   def unlocked_on(%Call{} = call, %Artifact{} = artifact) do
-    %{
-      artifact: Artifact.name(artifact),
-      epoch: epoch(artifact),
-      servers: servers(artifact),
-      may: for(server <- OneCore.Servers.acting(call.installed), do: %{key: server, name: OneCore.Servers.name(server)})
-    }
+    Map.merge(
+      %{
+        artifact: Artifact.name(artifact),
+        epoch: epoch(artifact),
+        servers: servers(artifact),
+        may: for(server <- OneCore.Servers.acting(call.installed), do: %{key: server, name: OneCore.Servers.name(server)})
+      },
+      signed(artifact)
+    )
+  end
+
+  # Its owner's signature of which servers open it at its epoch, and the public key that signed it, as the device that
+  # chose them gave them: a device checks it before it encrypts to them (`device.rs`). A server can't make one.
+  defp signed(artifact) do
+    case Artifact.read(%{artifact | codec: nil}, "keys/signed") do
+      {:ok, json, _tag} -> Map.take(JSON.decode!(json), ["signature", "signer"])
+      :absent -> %{}
+    end
   end
 
   defp epoch(artifact) do
@@ -121,6 +133,15 @@ defmodule Encryption do
       for server <- Map.keys(slots) -- had, do: share(call, "share", name, server)
       for {server, slot} <- slots, do: put(artifact, "keys/" <> server, Base.decode64!(slot))
       put(artifact, "keys/epoch", Integer.to_string(epoch))
+
+      # A device from before lists were signed signs none, and the signature of a list before isn't this one's.
+      case JSON.decode!(given) do
+        %{"signature" => signature, "signer" => signer} when is_binary(signature) and is_binary(signer) ->
+          put(artifact, "keys/signed", JSON.encode!(%{signature: signature, signer: signer}))
+
+        _ ->
+          Artifact.remove(artifact, "keys/signed")
+      end
 
       for server <- had -- Map.keys(slots) do
         Artifact.remove(artifact, "keys/" <> server)

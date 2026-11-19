@@ -4,7 +4,7 @@ use anyhow::{Context, Result, anyhow, bail};
 use client::{Client, Input, InputResolver};
 use data_encoding::BASE64;
 use futures_util::future::BoxFuture;
-use iroh_base::PublicKey;
+use iroh_base::{PublicKey, Signature};
 use serde_json::{Map, Value, json};
 
 use crate::cipher::{self, Key};
@@ -59,20 +59,92 @@ async fn unlocked_on(client: &Client, app: &str, says: &Value, subject: Option<&
     tool_for(client, &format!("{app}_{tool}"), json!({}), subject).await
 }
 
-/// `text` encrypted to each server that opens what it's kept in, by the server's key.
+/// The keys a JSON list names.
+fn keys(value: &Value) -> Vec<String> {
+    value.as_array().into_iter().flatten().filter_map(Value::as_str).map(str::to_owned).collect()
+}
+
+/// What this device has seen of who signs which servers open what (`chosen`), kept in its home: each owner's signer,
+/// by its public key, and each artifact it has seen a signed list of. So a server can't later say an owner signs with
+/// another key, or that an artifact's list was never signed: trust on first use, as SSH's known hosts and Signal's
+/// safety numbers are.
+fn seen_file() -> Result<std::path::PathBuf> {
+    Ok(client::home()?.join("encryption-seen.json"))
+}
+
+fn seen() -> Value {
+    seen_file().ok().and_then(|file| std::fs::read(file).ok()).and_then(|json| serde_json::from_slice(&json).ok()).unwrap_or_else(|| json!({}))
+}
+
+fn keep_seen(seen: &Value) -> Result<()> {
+    let file = seen_file()?;
+    let writing = file.with_extension("json.writing");
+    std::fs::write(&writing, seen.to_string())?;
+    std::fs::rename(writing, file).context("couldn't keep what this device saw of who signs what")
+}
+
+/// Who an artifact belongs to, by its name: `users/<name>`, `groups/<name>` or `network`.
+fn owner_of(artifact: &str) -> String {
+    let parts: Vec<&str> = artifact.split('/').collect();
+    match parts.as_slice() {
+        [kind @ ("users" | "groups"), name, ..] => format!("{kind}/{name}"),
+        _ => "network".to_owned(),
+    }
+}
+
+/// Whether the servers an app's tool says open an artifact (`unlocked_on`) are the ones its owner chose: signed with
+/// the owner's signer, which this device derives where it holds their key, and otherwise is the one it saw first.
+/// `Ok(true)` for a list its owner signed, `Ok(false)` for an unsigned one of an artifact this device never saw signed
+/// (one chosen before lists were signed), and an error for any other, which nothing is sent to.
+async fn chosen(client: &Client, unlocked_on: &Value, subject: Option<&str>) -> Result<bool> {
+    let artifact = unlocked_on["artifact"].as_str().context("the tool didn't name the artifact")?;
+    let epoch = unlocked_on["epoch"].as_u64().unwrap_or_default() as u32;
+    let mut seen = seen();
+    let signed_before = seen["signed"].as_array().is_some_and(|signed| signed.iter().any(|a| a == artifact));
+    let Some(signature) = unlocked_on["signature"].as_str() else {
+        if signed_before {
+            bail!("Which servers open {artifact} was signed by its owner before, and isn't now, so nothing was sent. Choose them again from a trusted device.")
+        }
+        return Ok(false);
+    };
+    let owner = owner_of(artifact);
+    let signer = match owner_key_of(client, subject).await {
+        Ok((key, _)) => cipher::signer(&key).public(),
+        Err(_) => {
+            let said: PublicKey = unlocked_on["signer"].as_str().unwrap_or_default().parse().context("the tool didn't say who signed it")?;
+            match seen["signers"][&owner].as_str() {
+                Some(first) if first != said.to_string() => bail!("{owner}'s key that signs which servers open what isn't the one this device saw before, so nothing was sent. Check with them, from a trusted device."),
+                _ => seen["signers"][&owner] = said.to_string().into(),
+            }
+            said
+        }
+    };
+    let signature = data_encoding::HEXLOWER.decode(signature.as_bytes()).ok().and_then(|bytes| Signature::try_from(bytes.as_slice()).ok());
+    let servers = keys(&unlocked_on["servers"]);
+    if signature.is_none_or(|signature| signer.verify(&cipher::chosen(artifact, epoch, &servers), &signature).is_err()) {
+        bail!("The servers said to open {artifact} aren't the ones its owner chose, so nothing was sent.")
+    }
+    if !signed_before {
+        let mut signed = seen["signed"].as_array().cloned().unwrap_or_default();
+        signed.push(artifact.into());
+        seen["signed"] = signed.into();
+    }
+    keep_seen(&seen)?;
+    Ok(true)
+}
+
+/// `text` encrypted to each server that opens what it's kept in, by the server's key, as its owner chose them.
 async fn secret(client: &Client, app: &str, says: &Value, text: &str, subject: Option<&str>) -> Result<String> {
     let unlocked_on = unlocked_on(client, app, says, subject).await?;
-    let servers = unlocked_on["servers"].as_array().map(Vec::as_slice).unwrap_or_default();
+    chosen(client, &unlocked_on, subject).await?;
+    let servers = keys(&unlocked_on["servers"]);
     if servers.is_empty() {
         bail!("No server opens what this is kept in yet. Choose one first, from a trusted device.")
     }
     let mut sealed = Map::new();
-    for server in servers.iter().filter_map(Value::as_str) {
+    for server in &servers {
         let to: PublicKey = server.parse().context("that isn't a server's key")?;
-        sealed.insert(
-            server.to_owned(),
-            BASE64.encode(&cipher::seal(&to, &cipher::for_secret(server), text.as_bytes())?).into(),
-        );
+        sealed.insert(server.clone(), BASE64.encode(&cipher::seal(&to, &cipher::for_secret(server), text.as_bytes())?).into());
     }
     Ok(Value::Object(sealed).to_string())
 }
@@ -122,8 +194,9 @@ async fn owner_key_for(
     Ok(Some(json!({"check": cipher::check(&key), "slot": BASE64.encode(&slot)}).to_string()))
 }
 
-/// The keys of the artifact an app's tool names, encrypted to each server in the input `servers`. Taking a
-/// server off starts a new epoch, whose key it was never given.
+/// The keys of the artifact an app's tool names, encrypted to each server in the input `servers`, which its owner
+/// signs. Taking a server off starts a new epoch, whose key it was never given; so does any choosing where the list
+/// before wasn't one its owner signed, since a server could have left one out.
 async fn artifact_keys(
     client: &Client,
     app: &str,
@@ -134,11 +207,9 @@ async fn artifact_keys(
     let unlocked_on = unlocked_on(client, app, says, subject).await?;
     let artifact = unlocked_on["artifact"].as_str().context("the tool didn't name the artifact")?;
     let was = unlocked_on["epoch"].as_u64().unwrap_or_default() as u32;
-    let keys = |value: &Value| -> Vec<String> {
-        value.as_array().into_iter().flatten().filter_map(Value::as_str).map(str::to_owned).collect()
-    };
     let (had, servers) = (keys(&unlocked_on["servers"]), keys(inputs.get("servers").unwrap_or(&Value::Null)));
-    let epoch = if was == 0 || had.iter().any(|server| !servers.contains(server)) { was + 1 } else { was };
+    let signed = matches!(chosen(client, &unlocked_on, subject).await, Ok(true));
+    let epoch = if was == 0 || !signed || had.iter().any(|server| !servers.contains(server)) { was + 1 } else { was };
     let (owner, _) = owner_key_of(client, subject).await?;
     let joined = cipher::joined(&cipher::artifact(&owner, artifact, epoch));
     let mut slots = Map::new();
@@ -149,7 +220,10 @@ async fn artifact_keys(
             BASE64.encode(&cipher::seal(&to, &cipher::for_server(artifact, server), &joined)?).into(),
         );
     }
-    Ok(json!({"artifact": artifact, "epoch": epoch, "was": was, "slots": slots}).to_string())
+    let signer = cipher::signer(&owner);
+    let signature = data_encoding::HEXLOWER.encode(&signer.sign(&cipher::chosen(artifact, epoch, &servers)).to_bytes());
+    let signer = signer.public().to_string();
+    Ok(json!({"artifact": artifact, "epoch": epoch, "was": was, "slots": slots, "signature": signature, "signer": signer}).to_string())
 }
 
 /// The owner's key, encrypted to the one passkey the input `passkey` names, which its person allowed, as the app's

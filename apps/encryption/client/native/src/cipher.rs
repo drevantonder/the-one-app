@@ -66,6 +66,19 @@ fn derived(owner: &Key, what: &str) -> Key {
     key
 }
 
+/// The key an owner signs which servers open each of their artifacts with: Ed25519, from their key, so every device
+/// that holds that signs and checks alike, and a server, which never holds it, can't say its owner chose it.
+pub fn signer(owner: &Key) -> SecretKey {
+    SecretKey::from_bytes(&derived(owner, "one/encryption/1/signer"))
+}
+
+/// What an owner signs of an artifact as they choose the servers that open it: those servers at that epoch.
+pub fn chosen(artifact: &str, epoch: u32, servers: &[String]) -> Vec<u8> {
+    let mut servers = servers.to_vec();
+    servers.sort();
+    format!("one/encryption/1/servers\n{artifact}\n{epoch}\n{}", servers.join("\n")).into_bytes()
+}
+
 /// An artifact's keys for every epoch up to `epochs`, the first first, from its owner's key.
 pub fn artifact(owner: &Key, artifact: &str, epochs: u32) -> Vec<Key> {
     (1..=epochs).map(|epoch| derived(owner, &format!("one/encryption/1/artifact\n{artifact}\n{epoch}"))).collect()

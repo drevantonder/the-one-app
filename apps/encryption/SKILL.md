@@ -68,8 +68,9 @@ An app keeps something encrypted by requiring this app:
   to encrypt: keep what's encrypted in an artifact the app makes.
 - What a person types that's secret is encrypted on their device, by an input that says so: `%{type: "string",
   format: "secret", unlocked_on: "unlocked_on"}`, where `unlocked_on` names a read-only tool of the app that
-  answers `encryption.unlocked_on(call, artifact)`. The app, `one` and an agent's MCP on a device all encrypt it
-  before it's sent, and `encryption.secret(call, input)` opens it on a chosen server. So no hook, log or other
+  answers `encryption.unlocked_on(call, artifact)`, all of it: the list of servers its owner chose comes with
+  their signature, which a device checks before it encrypts to them. The app, `one` and an agent's MCP on a device
+  all encrypt it before it's sent, and `encryption.secret(call, input)` opens it on a chosen server. So no hook, log or other
   server reads it. What arrives as it was typed is refused.
 - Choosing servers is a tool of the app's that takes `servers`, their keys, and an input the device fills
   in, `%{type: "string", format: "artifact-keys", unlocked_on: "unlocked_on"}`, and calls `encryption.choose(call,
