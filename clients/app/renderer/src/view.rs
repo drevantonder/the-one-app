@@ -131,6 +131,8 @@ pub fn fonts() -> anyhow::Result<Vec<Vec<u8>>> {
 /// The roles of what the DOM draws as a button, which Tab reaches (core/ui's drawing-primitives/primitives.tsx `pressed`).
 const BUTTON_ROLES: [&str; 9] = ["button", "menuitem", "tab", "checkbox", "radio", "switch", "option", "link", "combobox"];
 
+/// The page itself, as an event's node: what a key is told to, once, for what listens to every key (`keydown()`).
+const PAGE: Id = 0;
 const SHORTCUT_HELD: std::time::Duration = std::time::Duration::from_millis(600);
 
 pub struct Screen {
@@ -1347,8 +1349,9 @@ impl Screen {
     }
 
     /// A key went down where the keyboard is, as the DOM's `KeyboardEvent` has it: Tab moves the keyboard, what
-    /// listens for `keydown` hears it, Enter and Space press what has it, and an input takes what's typed. → what had
-    /// the keyboard.
+    /// listens for `keydown` hears it, Enter and Space press what has it, and an input takes what's typed. The page
+    /// hears every key too, once, whatever has the keyboard, even nothing, as a browser's `document` does (`keydown()`:
+    /// Escape closing what's open, ⌘K). → what had the keyboard.
     pub fn key(&mut self, key: &Key) -> Option<Id> {
         let focused = self.focus.focused;
         // The key of the shortcut that just summoned it, still held or pressed again at once, is the shortcut's, not
@@ -1373,6 +1376,7 @@ impl Screen {
                     }
                 }
             }
+            self.tell(PAGE, "keydown", key.told());
             self.states.focus_visible = true;
             // It goes round, but out of a frame's page at its ends, back to the page the frame's in; into a frame's
             // page, to its first stop or its last, and past a frame whose page has none.
@@ -1411,13 +1415,16 @@ impl Screen {
             }
             return focused;
         }
-        let id = focused?;
-        // A key goes to what has the keyboard and to each node it's in that listens, the innermost first.
-        for listener in self.chain_from(id) {
-            if self.tree.nodes.get(&listener).is_some_and(|node| node.listens("keydown")) {
-                self.tell(listener, "keydown", key.told());
+        // A key goes to what has the keyboard and to each node it's in that listens, the innermost first, then the page.
+        if let Some(id) = focused {
+            for listener in self.chain_from(id) {
+                if self.tree.nodes.get(&listener).is_some_and(|node| node.listens("keydown")) {
+                    self.tell(listener, "keydown", key.told());
+                }
             }
         }
+        self.tell(PAGE, "keydown", key.told());
+        let id = focused?;
         // Escape empties a search field with something typed in it, as a browser's `type="search"` does.
         let search = self.tree.nodes.get(&id).is_some_and(|node| node.str("type") == Some("search"));
         if search && key.key == "Escape" && self.editing.fields.get(&id).is_some_and(|field| !field.value().text.is_empty()) {

@@ -17,10 +17,11 @@ let requests = 0
 const keys = new Set<(event: Page.Keyed) => void>()
 
 ;(globalThis as { ui?: Sandbox & Events }).ui = {
-  // A key pressed where the keyboard is goes to what has it, then to what listens for every key (`keydown`).
+  // A key pressed goes to what has the keyboard, and once to the page (the host tells it, as node 0), for what listens for
+  // every key (`keydown`), as the DOM's `document` does, whatever has the keyboard.
   event(told: Event) {
     event(told)
-    if (told.name === "keydown") for (const listener of keys) listener({ key: told.key ?? "", shiftKey: !!told.shiftKey, altKey: !!told.altKey, ctrlKey: !!told.ctrlKey, metaKey: !!told.metaKey, preventDefault() {} })
+    if (told.name === "keydown" && told.id === 0) for (const listener of keys) listener({ key: told.key ?? "", shiftKey: !!told.shiftKey, altKey: !!told.altKey, ctrlKey: !!told.ctrlKey, metaKey: !!told.metaKey, preventDefault() {} })
   },
   message(message: { id?: number; method?: string; result?: unknown; error?: { message: string } }) {
     if (message.method === "notifications/one/changed") for (const listener of listeners) listener()
