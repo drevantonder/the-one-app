@@ -80,13 +80,36 @@ impl Screen {
                 self.tell(id, "dragstart", json!({"clientX": at.x, "clientY": at.y}));
             }
         }
-        let id = self.drag.as_ref().expect("it's dragging").id;
+        self.hold_at(by);
+    }
+
+    /// Where the device predicts the press is going (iOS's `predictedTouches`, Android's `MotionPredictor`, the web's
+    /// `getPredictedEvents`), at `at`, a little after its last move: what's dragged is drawn there, as far ahead of the
+    /// last move as the frame takes to show, so it keeps up with the finger. How fast it was going stays the real
+    /// moves'.
+    pub fn predicted(&mut self, at: Point<f32>) {
+        // A press held in a frame is its page's.
+        if let Some(frame) = self.captured_frame {
+            let local = self.local(frame, at);
+            if let Some(child) = self.frames.get_mut(&frame) {
+                child.screen.predicted(local);
+            }
+            return;
+        }
+        let Some(drag) = self.drag.as_ref().filter(|drag| drag.began) else { return };
+        let by = point(if drag.along { at.x - drag.start.x } else { 0.0 }, if drag.down { at.y - drag.start.y } else { 0.0 });
+        self.hold_at(by);
+    }
+
+    /// The node dragged is held `by` from where it was pressed, as its constraints let it, giving past them as a
+    /// rubber band.
+    fn hold_at(&mut self, by: Point<f32>) {
+        let Some(id) = self.drag.as_ref().map(|drag| drag.id) else { return };
         let Some(node) = self.tree.nodes.get(&id) else { return self.drag = None };
         let constraints = node.prop("dragConstraints");
         let bound = |side: &str| constraints.and_then(|constraints| constraints[side].as_f64()).map(|px| px as f32);
         let elastic = node.prop("dragElastic").and_then(Value::as_f64).map_or(ELASTIC, |elastic| elastic as f32);
         let size = self.rects.get(&id).map_or((0.0, 0.0), |rect| (rect.width, rect.height));
-        // Held in where its constraints say, giving past them as a rubber band.
         let give = |by: f32, least: Option<f32>, most: Option<f32>, size: f32| match (least.map(|least| -least), most) {
             (Some(least), _) if by < least => least + rubber_band(by - least, size, elastic),
             (_, Some(most)) if by > most => most + rubber_band(by - most, size, elastic),

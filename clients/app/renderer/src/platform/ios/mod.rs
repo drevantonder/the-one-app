@@ -25,7 +25,7 @@ use dispatch2::{DispatchQueue, DispatchTime};
 use objc2::rc::Retained;
 use std::ffi::{CStr, CString, c_char, c_void};
 
-use objc2::runtime::{AnyClass, NSObjectProtocol};
+use objc2::runtime::{AnyClass, AnyObject, NSObjectProtocol};
 use objc2::{ClassType, MainThreadMarker, MainThreadOnly, define_class, msg_send, sel};
 use objc2_core_foundation::CGAffineTransform;
 use objc2_foundation::{NSNotification, NSNotificationCenter, NSObject, NSRunLoop, NSRunLoopCommonModes, NSString};
@@ -34,7 +34,7 @@ use objc2_ui_kit::{
     UIAccessibilityIsReduceMotionEnabled, UIAccessibilitySwitchControlStatusDidChangeNotification,
     UIAccessibilityVoiceOverStatusDidChangeNotification, UIApplication, UIPasteboard,
     UIKeyboardDidChangeFrameNotification, UIKeyboardDidHideNotification, UITraitCollection, UITraitEnvironment,
-    UIColor, UIUserInterfaceStyle, UIView, UIViewAutoresizing, UIViewController, UIWindow, UIWindowLevelNormal,
+    UIColor, UIGestureRecognizer, UIGestureRecognizerState, UIUserInterfaceStyle, UIView, UIViewAutoresizing, UIViewController, UIWindow, UIWindowLevelNormal,
 };
 use tao::event::{Event, TouchPhase, WindowEvent};
 use tao::event_loop::EventLoopWindowTarget;
@@ -145,6 +145,8 @@ thread_local! {
     static VIEWS: RefCell<HashMap<usize, WindowId>> = RefCell::new(HashMap::new());
     /// Each finger on a window, and each window's scroll carrying on after its finger let go.
     static TOUCHES: RefCell<HashMap<WindowId, Touch>> = RefCell::new(HashMap::new());
+    /// Where UIKit predicts the finger down is going, as its last move came (`Predictor`).
+    static PREDICTED: Cell<Option<Point<f32>>> = const { Cell::new(None) };
     static SLIDES: RefCell<HashMap<WindowId, Slide>> = RefCell::new(HashMap::new());
     /// What each window's text input plugin said, until the windows hear it: it can say it while they're in use.
     static SAID: RefCell<Vec<(WindowId, TextInputClient)>> = const { RefCell::new(Vec::new()) };
@@ -365,6 +367,14 @@ impl Display {
         let view = window.ui_view() as usize;
         let ui_view = unsafe { &*(view as *const UIView) };
         ui_view.setMultipleTouchEnabled(false);
+        // What watches its fingers for where UIKit predicts each is going (`Predictor`).
+        let predictor: Retained<Predictor> = unsafe { msg_send![Predictor::alloc(main), init] };
+        unsafe {
+            let _: () = msg_send![&predictor, setCancelsTouchesInView: false];
+            let _: () = msg_send![&predictor, setDelaysTouchesBegan: false];
+            let _: () = msg_send![&predictor, setDelaysTouchesEnded: false];
+            let _: () = msg_send![ui_view, addGestureRecognizer: &*predictor];
+        }
         IDS.with(|ids| ids.borrow_mut().insert(window.id(), id));
         VIEWS.with(|views| views.borrow_mut().insert(view, id));
         // What it draws is a view of its own over the whole of tao's, which takes no fingers, so tao's still hears them:
@@ -629,6 +639,48 @@ define_class!(
 );
 
 define_class!(
+    // SAFETY: UIGestureRecognizer's subclasses may override its touch methods, and `Predictor` doesn't implement
+    // `Drop`. It only watches: it never recognizes, delays or cancels a touch, so tao's view hears every one as before.
+    #[unsafe(super(UIGestureRecognizer, NSObject))]
+    #[thread_kind = MainThreadOnly]
+    #[name = "OnePredictedTouches"]
+    struct Predictor;
+
+    unsafe impl NSObjectProtocol for Predictor {}
+
+    impl Predictor {
+        /// A finger moved: where UIKit predicts it's going (`predictedTouchesForTouch:`), the furthest, in its view's
+        /// points, for its move tao tells next (`PREDICTED`). tao hears no `UIEvent`, which UIKit predicts by.
+        #[unsafe(method(touchesMoved:withEvent:))]
+        fn touches_moved(&self, touches: *mut AnyObject, event: *mut AnyObject) {
+            unsafe {
+                let touch: *mut AnyObject = msg_send![touches, anyObject];
+                let view: *mut AnyObject = msg_send![self, view];
+                let ahead: *mut AnyObject = msg_send![event, predictedTouchesForTouch: touch];
+                let last: *mut AnyObject = if ahead.is_null() { std::ptr::null_mut() } else { msg_send![ahead, lastObject] };
+                if !last.is_null() && !view.is_null() {
+                    let at: objc2_core_foundation::CGPoint = msg_send![last, locationInView: view];
+                    PREDICTED.set(Some(point(at.x as f32, at.y as f32)));
+                }
+            }
+        }
+
+        /// The finger's gone: it's failed, as it never recognizes, so UIKit resets it for the next.
+        #[unsafe(method(touchesEnded:withEvent:))]
+        fn touches_ended(&self, _touches: *mut AnyObject, _event: *mut AnyObject) {
+            PREDICTED.set(None);
+            let _: () = unsafe { msg_send![self, setState: UIGestureRecognizerState::Failed] };
+        }
+
+        #[unsafe(method(touchesCancelled:withEvent:))]
+        fn touches_cancelled(&self, _touches: *mut AnyObject, _event: *mut AnyObject) {
+            PREDICTED.set(None);
+            let _: () = unsafe { msg_send![self, setState: UIGestureRecognizerState::Failed] };
+        }
+    }
+);
+
+define_class!(
     // SAFETY: UIView has no subclassing requirements, and `Card` doesn't implement `Drop`.
     #[unsafe(super(UIView))]
     #[thread_kind = MainThreadOnly]
@@ -795,6 +847,10 @@ fn touch_at(screen: &mut crate::Screen, native: &NativeWindow, id: WindowId, fin
                     screen.drag_scroll(touch.start, point(touch.last.x - at.x, touch.last.y - at.y));
                 } else if !touch.on_input && !touch.stopped {
                     screen.pointer_moved(at);
+                    // What's dragged is drawn where UIKit predicts the finger is going, so it keeps up with it.
+                    if let Some(ahead) = PREDICTED.take() {
+                        screen.predicted(ahead);
+                    }
                 }
                 touch.last = at;
             }

@@ -8,7 +8,9 @@ import android.view.ActionMode;
 import android.view.KeyEvent;
 import android.view.Menu;
 import android.view.MenuItem;
+import android.os.Build;
 import android.view.MotionEvent;
+import android.view.MotionPredictor;
 import android.view.VelocityTracker;
 import android.view.SurfaceHolder;
 import android.view.SurfaceView;
@@ -36,6 +38,10 @@ import org.json.JSONObject;
 @Keep
 public final class NativeView extends SurfaceView implements SurfaceHolder.Callback, TextInputPlugin.Framework {
     private static final String TAG = "renderer";
+    /** How far ahead a finger is predicted: a 60 Hz frame. */
+    private static final long FRAME_NANOS = 16_666_667;
+    /** Where Android predicts a finger is going (API 34's MotionPredictor), made as a finger first lands. */
+    private MotionPredictor predictor;
     private final long id;
     private final TextInputPlugin input;
     private float downX, downY;
@@ -201,6 +207,13 @@ public final class NativeView extends SurfaceView implements SurfaceHolder.Callb
         if (action > MotionEvent.ACTION_CANCEL) return true;
         if (speed != null) speed.addMovement(e);
         boolean pans = nativeTouch(id, action, e.getX(), e.getY(), slop, stopped);
+        // What's dragged is drawn where Android predicts the finger will be as the next frame shows, so it keeps up.
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE && action != MotionEvent.ACTION_CANCEL) {
+            if (predictor == null) predictor = new MotionPredictor(getContext());
+            predictor.record(e);
+            MotionEvent ahead = action == MotionEvent.ACTION_MOVE && predictor.isPredictionAvailable(e.getDeviceId(), e.getSource()) ? predictor.predict(System.nanoTime() + FRAME_NANOS) : null;
+            if (ahead != null) nativePredicted(id, ahead.getX(), ahead.getY());
+        }
         if (action == MotionEvent.ACTION_MOVE) panning = pans;
         if (action == MotionEvent.ACTION_UP && panning && speed != null) {
             ViewConfiguration configuration = ViewConfiguration.get(getContext());
@@ -308,6 +321,7 @@ public final class NativeView extends SurfaceView implements SurfaceHolder.Callb
     private native void nativeActive(long id, boolean active);
     private native boolean nativeTouch(long id, int action, float x, float y, float slop, boolean stopped);
     private native boolean nativePan(long id, float x, float y, float dx, float dy);
+    private native void nativePredicted(long id, float x, float y);
     private native void nativeLongPress(long id, float x, float y);
 
     private native void nativePicked(long id, long node, String value);

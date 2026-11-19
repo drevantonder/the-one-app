@@ -122,7 +122,12 @@
     // and flings as it's let go); a mouse and a pen point and press.
     const pointer = (/** @type {string} */ kind) => (/** @type {PointerEvent} */ event) =>
       event.pointerType === "touch" ? kind !== "leave" && renderer.touch(kind, event.offsetX, event.offsetY, event.pointerId) : (streams.pointer(kind, event), renderer.pointer(kind, event.offsetX, event.offsetY, event.button, event.shiftKey))
-    canvas.addEventListener("pointermove", pointer("move"))
+    canvas.addEventListener("pointermove", (event) => {
+      pointer("move")(event)
+      // What's dragged is drawn where the browser predicts the pointer is going, so it keeps up with a finger.
+      const ahead = event.buttons ? event.getPredictedEvents?.().at(-1) : undefined
+      if (ahead) renderer.predicted(ahead.offsetX, ahead.offsetY)
+    })
     // A press takes the keyboard for the frame itself, not by the browser's default after it, which would take it
     // back from a field the press gave it to (the screen gives a field the keyboard as it's pressed).
     canvas.addEventListener("pointerdown", (event) => {

@@ -690,6 +690,17 @@ pub extern "system" fn Java_app_theone_renderer_NativeView_nativePan(_: JNIEnv, 
     .into()
 }
 
+/// Where Android predicts the finger is going, at `x`, `y` in device pixels, as the next frame shows (`MotionPredictor`):
+/// what's dragged is drawn there.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_app_theone_renderer_NativeView_nativePredicted(_: JNIEnv, _: JObject, id: jlong, x: jfloat, y: jfloat) {
+    with_windows(|windows| {
+        let Some(window) = windows.windows.get(&(id as WindowId)) else { return };
+        let density = window.parts[0].native.density;
+        windows.input(id as WindowId, 0, Input::Predicted(point(x / density, y / density)));
+    });
+}
+
 /// A finger held in an input: the word under it is selected, for Android's Cut, Copy and Paste menu. Elsewhere it's the
 /// page's, whose pointer events carry on, as iOS's do: what it's on holds it as it likes (a row's menu, an icon lifted
 /// and dragged).

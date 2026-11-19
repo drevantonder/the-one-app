@@ -825,6 +825,13 @@ pub fn pointer(kind: &str, x: f32, y: f32, button: u8, shift: bool) {
     });
 }
 
+/// Where the browser predicts the pointer or finger down is going (`getPredictedEvents`), at `x`, `y` in CSS pixels, after
+/// its last move.
+#[wasm_bindgen]
+pub fn predicted(x: f32, y: f32) {
+    input(Input::Predicted(point(x, y)));
+}
+
 /// A wheel or trackpad scrolled by `dx`, `dy` CSS pixels.
 #[wasm_bindgen]
 pub fn wheel(x: f32, y: f32, dx: f32, dy: f32) {

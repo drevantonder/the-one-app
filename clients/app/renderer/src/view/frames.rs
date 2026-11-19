@@ -99,7 +99,7 @@ impl Screen {
     }
 
     /// Where `at` is in frame `id`'s page.
-    fn local(&self, id: Id, at: Point<f32>) -> Point<f32> {
+    pub(super) fn local(&self, id: Id, at: Point<f32>) -> Point<f32> {
         let origin = self.frames.get(&id).map_or(point(0.0, 0.0), |child| child.rect.origin);
         point(at.x - origin.x, at.y - origin.y)
     }

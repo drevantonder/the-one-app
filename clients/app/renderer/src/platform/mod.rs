@@ -1074,6 +1074,7 @@ impl Windows {
                 let cursor = screen.cursor(at);
                 self.display.set_cursor(&window.parts[part].native, cursor);
             }
+            Input::Predicted(at) => screen.predicted(at),
             Input::Left => screen.pointer_left(),
             Input::Down(at, button, shift) => {
                 screen.pointer_down(at, button, shift);
@@ -1242,6 +1243,7 @@ impl Input {
         let moved = |at: crate::geometry::Point<f32>| crate::geometry::point(at.x + by.x, at.y + by.y);
         match self {
             Input::Moved(at) => Input::Moved(moved(at)),
+            Input::Predicted(at) => Input::Predicted(moved(at)),
             Input::Down(at, button, shift) => Input::Down(moved(at), button, shift),
             Input::Up(at, button) => Input::Up(moved(at), button),
             Input::Dropped(at, files) => Input::Dropped(moved(at), files),
@@ -1272,6 +1274,9 @@ pub(crate) enum Input {
     FullScreen(bool),
     Close,
     Moved(crate::geometry::Point<f32>),
+    /// Where the device predicts the pointer or finger down is going, a little after its last move
+    /// (`Screen::predicted`).
+    Predicted(crate::geometry::Point<f32>),
     Left,
     /// A button went down, with Shift held or not, or up: 0 the main one, 1 the middle, 2 the secondary, as the DOM
     /// numbers them.
