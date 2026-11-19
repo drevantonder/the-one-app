@@ -26,7 +26,7 @@ defmodule OneCore.App do
   to the server: `tools/0`, `call/3`, `entrypoints/0`, `icon/0`, `widgets/0`, `jobs/0` and
   `requires/0`; `OneCore.Artifact`'s functions but `link`;
   `OneCore.Call`'s `tool` (with `on_behalf_of`), `make`, `reach`, `reaches?`, `member?`, `owns?`, `apps`, `deployed`, `process`,
-  `forward_to`, `changed`, `stage` and `ask`; `OneCore.App.file/2`; `OneCore.Nif`; `Logger`; and hooks it observes. The apps
+  `forward_to`, `changed`, `stage` and `ask`; `OneCore.App.file/2`; `OneCore.Nif`; `Logger`; and hooks it observes or collects. The apps
   it requires whose code runs inside it run in its VM too, as it, `database` among them, where their code can run
   there. It has no services, no hooks it mutates or validates, no other apps' functions but those (it calls the
   tools of the apps it requires), no programs, no network and no website, and no files but its `folder`, which goes

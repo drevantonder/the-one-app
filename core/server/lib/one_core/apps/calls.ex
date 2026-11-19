@@ -336,8 +336,10 @@ defmodule OneCore.Apps.Calls do
       ask = {"hooks/call", %{installed: at, app: name, kind: kind, hook: hook, about: about}}
       call = called(at, name, versions, ask, principal, forwarded)
 
-      # An untrusted app only observes: it mutates, validates and collects nothing.
-      if hook in version.hooks and observes?(call, about) and (kind == :observe or version.trusted),
+      # An untrusted app observes and collects: what it answers a collect is only its own part, which the app that
+      # offered the hook reads as data, as a trusted app's. It mutates and validates nothing, which would change or
+      # refuse what others do.
+      if hook in version.hooks and observes?(call, about) and (kind in [:observe, :collect] or version.trusted),
         do:
           {:ok,
            Hooks.check_result(
