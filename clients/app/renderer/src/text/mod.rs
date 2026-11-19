@@ -386,6 +386,10 @@ impl TextSystem {
     // Copyright 2022 - 2025 Zed Industries, Inc. Licensed under the Apache License, Version 2.0
     // (clients/app/renderer/LICENSE-APACHE).
     fn render_glyph(&mut self, params: &RenderGlyphParams) -> Result<swash::scale::image::Image> {
+        self.render_unpadded(params).map(padded)
+    }
+
+    fn render_unpadded(&mut self, params: &RenderGlyphParams) -> Result<swash::scale::image::Image> {
         let face = &self.faces[params.font_id.0];
         let (data, index) = (face.font.data.data(), face.font.index);
         let ppem = params.font_size() * params.scale_factor();
@@ -597,6 +601,24 @@ fn face(faces: &mut Vec<Face>, font: &FontData, coords: impl Iterator<Item = i16
         .is_ok_and(|face| [b"COLR", b"CBDT", b"sbix"].iter().any(|tag| face.table_data(skrifa::Tag::new(tag)).is_some()));
     faces.push(Face { font: font.clone(), coords: coords.collect(), embolden, emoji });
     (FontId(faces.len() - 1), emoji)
+}
+
+/// `image` with a clear pixel all round, so a glyph drawn between device pixels, as a layer moving by a fraction of one
+/// draws it (`view::Layer`), samples nothing of the glyph beside it in the atlas and loses none of its own edge.
+fn padded(mut image: swash::scale::image::Image) -> swash::scale::image::Image {
+    let (width, height) = (image.placement.width as usize, image.placement.height as usize);
+    if width == 0 || height == 0 {
+        return image;
+    }
+    let bytes = image.data.len() / (width * height);
+    let mut data = vec![0; (width + 2) * (height + 2) * bytes];
+    for (row, line) in image.data.chunks_exact(width * bytes).enumerate() {
+        let at = ((row + 1) * (width + 2) + 1) * bytes;
+        data[at..at + width * bytes].copy_from_slice(line);
+    }
+    image.data = data;
+    image.placement = swash::zeno::Placement { left: image.placement.left - 1, top: image.placement.top + 1, width: image.placement.width + 2, height: image.placement.height + 2 };
+    image
 }
 
 /// How Parley sets text in `style`.

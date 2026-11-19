@@ -70,48 +70,62 @@ impl Scene {
         }
     }
 
-    /// Draws what `other` holds in this scene, in the order it was drawn there, moved `by` and cut to `mask`, as a
-    /// frame's page is drawn in its box: it's the frame's, drawn where the frame comes in this scene's order.
-    pub fn splice(&mut self, other: &Scene, by: [f32; 2], mask: Bounds<ScaledPixels>) {
+    /// Draws what `other` holds in this scene, in the order it was drawn there, grown `scale` times and moved `by`
+    /// (`p ↦ p·scale + by`), `opacity` as opaque, and cut to `mask`: as a frame's page is drawn in its box, and as a
+    /// layer kept from an earlier frame (`view::Layer`) is drawn where it's moved, grown or faded to now.
+    pub fn splice(&mut self, other: &Scene, scale: f32, by: [f32; 2], opacity: f32, mask: Bounds<ScaledPixels>) {
+        let px = |length: ScaledPixels| ScaledPixels(length.0 * scale);
         let moved = |bounds: &Bounds<ScaledPixels>| {
-            Bounds::new(crate::geometry::Point { x: ScaledPixels(bounds.origin.x.0 + by[0]), y: ScaledPixels(bounds.origin.y.0 + by[1]) }, bounds.size)
+            let origin = crate::geometry::Point { x: ScaledPixels(bounds.origin.x.0 * scale + by[0]), y: ScaledPixels(bounds.origin.y.0 * scale + by[1]) };
+            Bounds::new(origin, crate::geometry::Size { width: px(bounds.size.width), height: px(bounds.size.height) })
         };
         let masked = |content: &ContentMask<ScaledPixels>| ContentMask { bounds: moved(&content.bounds).intersect(&mask) };
-        // What was turned about a point there is turned about that point here: T(p - by) + by.
+        let corners = |radii: &Corners<ScaledPixels>| Corners { top_left: px(radii.top_left), top_right: px(radii.top_right), bottom_right: px(radii.bottom_right), bottom_left: px(radii.bottom_left) };
+        let faded = |colour: Hsla| Hsla { a: colour.a * opacity, ..colour };
+        // What was turned about a point there is turned about where that point is here: p ↦ A·p + (scale·t + by − A·by).
         let turned = |matrix: &TransformationMatrix| {
             let [[a, b], [c, d]] = matrix.rotation_scale;
             let [x, y] = matrix.translation;
-            TransformationMatrix { rotation_scale: matrix.rotation_scale, translation: [x + by[0] - (a * by[0] + b * by[1]), y + by[1] - (c * by[0] + d * by[1])] }
+            TransformationMatrix { rotation_scale: matrix.rotation_scale, translation: [x * scale + by[0] - (a * by[0] + b * by[1]), y * scale + by[1] - (c * by[0] + d * by[1])] }
         };
         let mut all: Vec<(DrawOrder, Primitive)> = Vec::new();
         all.extend(other.shadows.iter().map(|shadow| {
             let mut shadow = shadow.clone();
             (shadow.bounds, shadow.outer, shadow.content_mask, shadow.transformation) = (moved(&shadow.bounds), moved(&shadow.outer), masked(&shadow.content_mask), turned(&shadow.transformation));
+            (shadow.corner_radii, shadow.outer_radii, shadow.blur_radius, shadow.color) = (corners(&shadow.corner_radii), corners(&shadow.outer_radii), px(shadow.blur_radius), faded(shadow.color));
             (shadow.order, shadow.into())
         }));
         all.extend(other.quads.iter().map(|quad| {
             let mut quad = quad.clone();
             (quad.bounds, quad.content_mask, quad.transformation) = (moved(&quad.bounds), masked(&quad.content_mask), turned(&quad.transformation));
+            (quad.corner_radii, quad.border_color) = (corners(&quad.corner_radii), faded(quad.border_color));
+            let widths = quad.border_widths;
+            quad.border_widths = crate::geometry::Edges { top: px(widths.top), right: px(widths.right), bottom: px(widths.bottom), left: px(widths.left) };
+            quad.background.solid = faded(quad.background.solid);
+            for stop in &mut quad.background.colors {
+                stop.color = faded(stop.color);
+            }
             (quad.order, quad.into())
         }));
         all.extend(other.underlines.iter().map(|underline| {
             let mut underline = underline.clone();
-            (underline.bounds, underline.content_mask) = (moved(&underline.bounds), masked(&underline.content_mask));
+            (underline.bounds, underline.content_mask, underline.thickness, underline.color) = (moved(&underline.bounds), masked(&underline.content_mask), px(underline.thickness), faded(underline.color));
             (underline.order, underline.into())
         }));
         all.extend(other.monochrome_sprites.iter().map(|sprite| {
             let mut sprite = sprite.clone();
-            (sprite.bounds, sprite.content_mask, sprite.transformation) = (moved(&sprite.bounds), masked(&sprite.content_mask), turned(&sprite.transformation));
+            (sprite.bounds, sprite.content_mask, sprite.transformation, sprite.color) = (moved(&sprite.bounds), masked(&sprite.content_mask), turned(&sprite.transformation), faded(sprite.color));
             (sprite.order, sprite.into())
         }));
         all.extend(other.polychrome_sprites.iter().map(|sprite| {
             let mut sprite = sprite.clone();
             (sprite.bounds, sprite.content_mask, sprite.transformation) = (moved(&sprite.bounds), masked(&sprite.content_mask), turned(&sprite.transformation));
+            (sprite.corner_radii, sprite.opacity) = (corners(&sprite.corner_radii), sprite.opacity * opacity);
             (sprite.order, sprite.into())
         }));
         all.extend(other.backdrops.iter().map(|backdrop| {
             let mut backdrop = backdrop.clone();
-            (backdrop.bounds, backdrop.content_mask) = (moved(&backdrop.bounds), masked(&backdrop.content_mask));
+            (backdrop.bounds, backdrop.content_mask, backdrop.corner_radii, backdrop.blur) = (moved(&backdrop.bounds), masked(&backdrop.content_mask), corners(&backdrop.corner_radii), px(backdrop.blur));
             (backdrop.order, backdrop.into())
         }));
         all.sort_by_key(|(order, _)| *order);

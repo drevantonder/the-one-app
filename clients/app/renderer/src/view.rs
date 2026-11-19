@@ -16,7 +16,7 @@ use crate::js::{Posted, Thread};
 use crate::render::Atlas;
 use crate::render::atlas::AtlasTile;
 use crate::render::scene::{Backdrop, BorderStyle, PolychromeSprite, Quad, Scene, Shadow, TransformationMatrix};
-use crate::style::{self, Look, Paint, State, Text, colour};
+use crate::style::{self, Look, Offset, Paint, State, Text, colour};
 use crate::text::{Paragraph, TextRun, TextSystem};
 use crate::tokens::{Conditions, Radius};
 use crate::tree::{Id, Kind, Node, Tree};
@@ -231,6 +231,8 @@ pub struct Screen {
     again: bool,
     /// What's on its way from one value to another as a style changed.
     transitions: transition::Transitions,
+    /// What's in each node that's only moving, growing or fading, as it was drawn as that started (`Layer`).
+    layers: HashMap<Id, Layer>,
     /// The tree as Taffy lays it out, kept from frame to frame (`Retained`), the states its styles were last resolved
     /// in, and the frame it's on.
     layout: Retained,
@@ -326,6 +328,7 @@ impl Screen {
             touch: false,
             captured: None,
             placed: Vec::new(),
+            layers: HashMap::new(),
             animating: false,
             again: false,
             transitions: Default::default(),
@@ -660,6 +663,11 @@ impl Screen {
         if !self.animating && self.tree.unchanged() && self.seen.as_ref() == Some(&seen) {
             return;
         }
+        // What's kept of what only moves, grows or fades is drawn again where what it draws from changed: anything
+        // fetched, decoded, scrolled or in another frame's page, or the window's conditions.
+        if self.seen.as_ref().is_none_or(|was| (was.size, was.conditions, &was.scrolled, was.fetched, was.decoded, &was.frames) != (seen.size, seen.conditions, &seen.scrolled, seen.fetched, seen.decoded, &seen.frames)) {
+            self.layers.clear();
+        }
         self.seen = Some(seen);
         scene.clear();
         // What's styled again: what changed, what's moving, each input (its words are its field's), and what's
@@ -679,6 +687,25 @@ impl Screen {
                 at = self.tree.parent(id);
             }
         }
+        // What's moving, growing or fading and nothing else, with nothing in it changing, moving otherwise or holding
+        // the keyboard, is drawn from its layer, moved; anything else in it that changes draws it all again.
+        let whole = self.transitions.moving_whole();
+        let mut touched = HashSet::new();
+        let focused = self.states.focused.filter(|id| self.fields.contains_key(id));
+        for id in changed.iter().chain(&states).chain(moving.iter().filter(|id| !whole.contains(id))).chain(&focused).copied() {
+            let mut at = Some(id);
+            while let Some(id) = at.filter(|id| touched.insert(*id)) {
+                at = self.tree.parent(id);
+            }
+        }
+        for id in &moving {
+            let mut at = self.tree.parent(*id);
+            while let Some(id) = at.filter(|id| touched.insert(*id)) {
+                at = self.tree.parent(id);
+            }
+        }
+        let layered: HashSet<Id> = whole.into_iter().filter(|id| !touched.contains(id)).collect();
+        self.layers.retain(|id, _| layered.contains(id));
         self.frame += 1;
         let mut painter = Painter {
             tree: &self.tree,
@@ -720,6 +747,10 @@ impl Screen {
             kept_regions: Vec::new(),
             frames: &self.frames,
             framed: Vec::new(),
+            layers: &mut self.layers,
+            layered: &layered,
+            recording: None,
+            unsettled: None,
         };
         // The window, as a page's body: its root's background and text, scrolling what's taller than it.
         let version2 = self.tree.styled();
@@ -1610,6 +1641,7 @@ pub(crate) enum Clicked {
     Passes,
 }
 
+#[derive(Clone)]
 pub(crate) struct Placed {
     pub parent: Option<Id>,
     /// Where it shows, clipped, in the window.
@@ -1626,6 +1658,60 @@ pub(crate) struct Placed {
     pub focus: Clicked,
     /// It scrolls: how far it can, down and along, and whether along is its way.
     pub scroll: Option<(f32, f32, bool)>,
+}
+
+/// A node's subtree as it was drawn at rest, kept while the node only moves, grows or fades, so each frame moves it
+/// rather than drawing it again (`Painter::paint_layer`): its scene, and where it put what's in it.
+struct Layer {
+    key: LayerKey,
+    /// It's been drawn, rather than only noted where it rests, as that was changing.
+    recorded: bool,
+    /// It's kept for the next frame: what's in it doesn't move by itself.
+    kept: bool,
+    scene: Scene,
+    placed: Vec<(Id, Placed)>,
+    rects: Vec<(Id, Rect)>,
+    tab_order: Vec<Id>,
+    intersections: Vec<(Id, bool)>,
+    drag_regions: Vec<(Id, Bounds<f32>)>,
+    kept_regions: Vec<Bounds<f32>>,
+    glass: Vec<crate::platform::Glass>,
+    wanted: Vec<String>,
+    modal: Option<Id>,
+    framed: Vec<(Id, Bounds<f32>)>,
+}
+
+impl Layer {
+    /// One noted where it rests, not drawn, as that's changing.
+    fn unsettled(key: LayerKey) -> Layer {
+        Layer {
+            key,
+            recorded: false,
+            kept: true,
+            scene: Scene::default(),
+            placed: Vec::new(),
+            rects: Vec::new(),
+            tab_order: Vec::new(),
+            intersections: Vec::new(),
+            drag_regions: Vec::new(),
+            kept_regions: Vec::new(),
+            glass: Vec::new(),
+            wanted: Vec::new(),
+            modal: None,
+            framed: Vec::new(),
+        }
+    }
+}
+
+/// What a layer was drawn for: where its node rests, what it's in moved and grew it by, how opaque that is, and the
+/// window's scale. Any other, and it's drawn again.
+#[derive(PartialEq)]
+struct LayerKey {
+    laid_out: Bounds<f32>,
+    offset: Point<f32>,
+    scale: f32,
+    opacity: f32,
+    device: f32,
 }
 
 /// The tree as Taffy lays it out, kept from frame to frame, as GPUI's and Flutter's are: a frame styles again only what
@@ -1712,6 +1798,12 @@ impl Retained {
 }
 
 struct Painter<'a> {
+    /// What's drawn from a layer kept from an earlier frame (`Layer`), and the node whose is being drawn now.
+    layers: &'a mut HashMap<Id, Layer>,
+    layered: &'a HashSet<Id>,
+    recording: Option<Id>,
+    /// A layered node drawn as usual, as where it rests is changing.
+    unsettled: Option<Id>,
     tree: &'a Tree,
     layout: &'a mut Retained,
     /// What's styled again this frame (`Screen::paint`): what changed, what's moving, what's in or around either
@@ -2099,6 +2191,108 @@ impl Painter<'_> {
         Bounds { origin: point(low[0], low[1]), size: Size { width: high[0] - low[0], height: high[1] - low[1] } }
     }
 
+    /// Draws node `id`, which is only moving, growing or fading, from its layer: what's in it drawn once as it rests,
+    /// then each frame moved, grown and faded as a whole, with where it puts what's in it for the pointer, Tab and the
+    /// inspector, as Core Animation moves a layer and Flutter a RepaintBoundary's picture. Nothing in it is laid out,
+    /// shaped or painted again, and its words move exactly with their boxes.
+    #[allow(clippy::too_many_arguments)]
+    fn paint_layer(&mut self, taffy_node: NodeId, id: Id, offset: Point<f32>, transform: Transform, look: &Look, mask: Bounds<f32>, opacity: f32, parent: Option<Id>, pointer: bool) {
+        let Ok(laid) = self.layout.taffy.layout(taffy_node).copied() else { return };
+        let laid_out = Bounds { origin: point(offset.x + laid.location.x, offset.y + laid.location.y), size: Size { width: laid.size.width, height: laid.size.height } };
+        let key = LayerKey { laid_out, offset: transform.offset, scale: transform.scale, opacity, device: self.scale };
+        match self.layers.get(&id) {
+            Some(layer) if layer.key == key && layer.recorded => {}
+            // Where it rests is changing (what it's in is growing): it's drawn as usual until it holds still a frame,
+            // rather than drawn into a layer each frame.
+            Some(layer) if layer.key != key => {
+                self.layers.insert(id, Layer::unsettled(key));
+                self.unsettled = Some(id);
+                self.paint_node(taffy_node, offset, transform, mask, opacity, parent, pointer);
+                self.unsettled = None;
+                return;
+            }
+            _ => {
+                let layer = self.record(taffy_node, id, offset, transform, opacity, parent, pointer, key);
+                self.layers.insert(id, layer);
+            }
+        }
+        // Its own move and growth around its middle, as `paint_node` draws it, in the window: p ↦ p·grown + by.
+        let centre = point(laid_out.origin.x + laid_out.size.width / 2.0, laid_out.origin.y + laid_out.size.height / 2.0);
+        let translate = point(look.translate.0.of(laid_out.size.width), look.translate.1.of(laid_out.size.height));
+        let (at, k, grown) = (transform.offset, transform.scale, look.scale);
+        let by = point(at.x + k * (centre.x + translate.x) - grown * (at.x + k * centre.x), at.y + k * (centre.y + translate.y) - grown * (at.y + k * centre.y));
+        let moved = |bounds: Bounds<f32>| Bounds { origin: point(bounds.origin.x * grown + by.x, bounds.origin.y * grown + by.y), size: Size { width: bounds.size.width * grown, height: bounds.size.height * grown } };
+        let layer = &self.layers[&id];
+        self.scene.splice(&layer.scene, grown, [by.x * self.scale, by.y * self.scale], look.opacity, mask.scale_to(self.scale));
+        self.placed.extend(layer.placed.iter().map(|(id, placed)| (*id, Placed { shown: moved(placed.shown).intersect(&mask), ..placed.clone() })));
+        self.rects.extend(layer.rects.iter().map(|(id, rect)| {
+            let drawn = moved(Bounds { origin: point(rect.x, rect.y), size: Size { width: rect.width, height: rect.height } });
+            (*id, Rect { x: drawn.origin.x, y: drawn.origin.y, width: drawn.size.width, height: drawn.size.height })
+        }));
+        self.tab_order.extend(&layer.tab_order);
+        self.intersections.extend(&layer.intersections);
+        self.drag_regions.extend(layer.drag_regions.iter().map(|(id, bounds)| (*id, moved(*bounds).intersect(&mask))));
+        self.kept_regions.extend(layer.kept_regions.iter().map(|bounds| moved(*bounds).intersect(&mask)));
+        if let Some(glass) = self.glass.as_mut().filter(|_| look.opacity > 0.0) {
+            glass.extend(layer.glass.iter().map(|pane| crate::platform::Glass { bounds: moved(pane.bounds).intersect(&mask), radius: pane.radius * grown, opacity: pane.opacity * look.opacity }));
+        }
+        self.wanted.extend(layer.wanted.iter().cloned());
+        self.framed.extend(layer.framed.iter().map(|(id, bounds)| (*id, moved(*bounds))));
+        self.modal = layer.modal.or(self.modal);
+        if !layer.kept {
+            self.layers.remove(&id);
+        }
+    }
+
+    /// What node `id` draws as it rests, everywhere, not cut to what it's in: its own scene, and what it says of where
+    /// it puts what's in it, apart from this frame's.
+    #[allow(clippy::too_many_arguments)]
+    fn record(&mut self, taffy_node: NodeId, id: Id, offset: Point<f32>, transform: Transform, opacity: f32, parent: Option<Id>, pointer: bool, key: LayerKey) -> Layer {
+        let mut scene = Scene::default();
+        std::mem::swap(&mut *self.scene, &mut scene);
+        let outside = (
+            std::mem::take(&mut self.placed),
+            std::mem::take(&mut self.rects),
+            std::mem::take(&mut self.tab_order),
+            std::mem::take(&mut self.intersections),
+            std::mem::take(&mut self.drag_regions),
+            std::mem::take(&mut self.kept_regions),
+            self.glass.as_mut().map(std::mem::take),
+            std::mem::take(&mut self.wanted),
+            self.modal.take(),
+            std::mem::take(&mut self.framed),
+            std::mem::take(&mut self.animating),
+        );
+        self.recording = Some(id);
+        let everywhere = Bounds { origin: point(-1.0e6, -1.0e6), size: Size { width: 2.0e6, height: 2.0e6 } };
+        self.paint(taffy_node, offset, transform, everywhere, opacity, parent, pointer);
+        self.recording = None;
+        std::mem::swap(&mut *self.scene, &mut scene);
+        let (placed, rects, tab_order, intersections, drag_regions, kept_regions, glass, wanted, modal, framed, animating) = outside;
+        let layer = Layer {
+            key,
+            recorded: true,
+            // What moves by itself or shows another frame's page changes as it's drawn: it's drawn afresh each frame.
+            kept: !self.animating && self.framed.is_empty(),
+            scene,
+            placed: std::mem::replace(&mut self.placed, placed),
+            rects: std::mem::replace(&mut self.rects, rects).into_iter().collect(),
+            tab_order: std::mem::replace(&mut self.tab_order, tab_order),
+            intersections: std::mem::replace(&mut self.intersections, intersections),
+            drag_regions: std::mem::replace(&mut self.drag_regions, drag_regions),
+            kept_regions: std::mem::replace(&mut self.kept_regions, kept_regions),
+            glass: match glass {
+                Some(glass) => self.glass.replace(glass).unwrap_or_default(),
+                None => Vec::new(),
+            },
+            wanted: std::mem::replace(&mut self.wanted, wanted),
+            modal: std::mem::replace(&mut self.modal, modal),
+            framed: std::mem::replace(&mut self.framed, framed),
+        };
+        self.animating |= animating;
+        layer
+    }
+
     /// Paints `node` with its parent's top left at `offset` in its layout, drawn through `transform` and turned as
     /// what it's in is, clipped to `mask` (in the window), `opacity` as opaque as it shows, taking the pointer if
     /// `pointer`.
@@ -2117,7 +2311,13 @@ impl Painter<'_> {
             return;
         }
         let Some(leaf) = self.layout.taffy.get_node_context(taffy_node) else { return };
-        let (id, text, look, lines) = (leaf.id, leaf.text, leaf.look.clone(), leaf.line_clamp);
+        let (id, text, mut look, lines) = (leaf.id, leaf.text, leaf.look.clone(), leaf.line_clamp);
+        if self.recording == Some(id) {
+            // Its layer is drawn as it rests, and moved, grown and faded as it's drawn from it.
+            (look.translate, look.scale, look.opacity) = ((Offset::Px(0.0), Offset::Px(0.0)), 1.0, 1.0);
+        } else if self.layered.contains(&id) && self.unsettled != Some(id) && self.turn == TransformationMatrix::unit() && look.animation.is_none() {
+            return self.paint_layer(taffy_node, id, offset, transform, &look, mask, opacity, parent, pointer);
+        }
         let tree = self.tree;
         let node = &tree.nodes[&id];
         let laid_out = Bounds { origin: point(offset.x + laid.location.x, offset.y + laid.location.y), size: Size { width: laid.size.width, height: laid.size.height } };
@@ -2268,7 +2468,7 @@ impl Painter<'_> {
             Kind::Frame => {
                 self.framed.push((id, content));
                 if let Some(child) = self.frames.get(&id) {
-                    self.scene.splice(&child.scene, [content.origin.x * self.scale, content.origin.y * self.scale], shown.intersect(&content).scale_to(self.scale));
+                    self.scene.splice(&child.scene, 1.0, [content.origin.x * self.scale, content.origin.y * self.scale], 1.0, shown.intersect(&content).scale_to(self.scale));
                 }
             }
             Kind::Box | Kind::Scroll => {
@@ -2614,6 +2814,11 @@ impl Painter<'_> {
     #[allow(clippy::too_many_arguments)]
     fn sprite(&mut self, tile: AtlasTile, bounds: Bounds<f32>, radii: Corners<f32>, opacity: f32, mask: Bounds<f32>) {
         let scale = self.scale;
+        // Its tile's clear pixel all round (`pictures::tiled`), drawn as wide as one of its pixels is here, outside
+        // `bounds`.
+        let texel = |drawn: f32, pixels: i32| drawn / (pixels - 2).max(1) as f32;
+        let (x, y) = (texel(bounds.size.width, tile.bounds.size.width.0), texel(bounds.size.height, tile.bounds.size.height.0));
+        let bounds = Bounds { origin: point(bounds.origin.x - x, bounds.origin.y - y), size: Size { width: bounds.size.width + 2.0 * x, height: bounds.size.height + 2.0 * y } };
         self.scene.insert_primitive(PolychromeSprite {
             order: 0,
             pad: 0,

@@ -304,6 +304,17 @@ impl Transitions {
         self.moving.keys().map(|(id, _)| *id).collect()
     }
 
+    /// The nodes moving only by their own move, growth and fade (`translateX`, `translateY`, `scale`, `opacity`),
+    /// which change nothing in them, so what's in them can be drawn once and moved (`view::Layer`).
+    pub fn moving_whole(&self) -> HashSet<Id> {
+        let whole = |property: &str| matches!(property, "translateX" | "translateY" | "scale" | "opacity");
+        let mut ids: HashSet<Id> = self.moving.keys().filter(|(_, property)| whole(property)).map(|(id, _)| *id).collect();
+        for (id, _) in self.moving.keys().filter(|(_, property)| !whole(property)) {
+            ids.remove(id);
+        }
+        ids
+    }
+
     /// Ends a frame: forgets what's arrived. → whether anything's still moving.
     pub fn finish(&mut self, now: f64) -> bool {
         self.moving.retain(|_, moving| !moving.done(now));

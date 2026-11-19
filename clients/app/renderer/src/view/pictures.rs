@@ -6,7 +6,7 @@ use std::collections::{HashMap, HashSet};
 use std::hash::{Hash, Hasher};
 use std::sync::{Arc, Condvar, Mutex, OnceLock, mpsc};
 
-use crate::geometry::Size;
+use crate::geometry::{DevicePixels, Size};
 use crate::render::Atlas;
 use crate::render::atlas::{AtlasKey, AtlasTile};
 
@@ -110,7 +110,7 @@ impl Pictures {
         let tile = atlas.get_or_insert_with(&AtlasKey::Image(id), &mut || {
             let decoded = draw();
             self.sizes.insert(id, decoded.as_ref().map(|decoded| decoded.picture));
-            Ok(decoded.map(|decoded| (Size { width: decoded.picture.width.into(), height: decoded.picture.height.into() }, std::borrow::Cow::Owned(decoded.bgra))))
+            Ok(decoded.map(tiled))
         });
         tile.ok().flatten()
     }
@@ -132,9 +132,7 @@ impl Pictures {
         let mut ready = self.ready.remove(&id).flatten();
         let tile = atlas
             .get_or_insert_with(&AtlasKey::Image(id), &mut || {
-                Ok(ready.take().map(|decoded| {
-                    (Size { width: decoded.picture.width.into(), height: decoded.picture.height.into() }, std::borrow::Cow::Owned(decoded.bgra))
-                }))
+                Ok(ready.take().map(tiled))
             })
             .ok()
             .flatten();
@@ -159,4 +157,17 @@ impl Pictures {
         }
         latest(self)
     }
+}
+
+/// A picture's pixels as the atlas keeps them, with a clear pixel all round, so one drawn between device pixels, as a
+/// layer moving by a fraction of one draws it (`view::Layer`), samples nothing beside it in the atlas and loses none of
+/// its own edge (`Painter::sprite` draws that pixel outside its box).
+fn tiled(decoded: Decoded) -> (Size<DevicePixels>, std::borrow::Cow<'static, [u8]>) {
+    let (width, height) = (decoded.picture.width as usize, decoded.picture.height as usize);
+    let mut bgra = vec![0; (width + 2) * (height + 2) * 4];
+    for (row, line) in decoded.bgra.chunks_exact(width * 4).enumerate() {
+        let at = ((row + 1) * (width + 2) + 1) * 4;
+        bgra[at..at + width * 4].copy_from_slice(line);
+    }
+    (Size { width: (width as i32 + 2).into(), height: (height as i32 + 2).into() }, std::borrow::Cow::Owned(bgra))
 }
