@@ -4,7 +4,7 @@ import { type Held } from "./machine.ts"
 import { type Entrypoint, type Item, type Widget as WidgetItem, src } from "./types.ts"
 import { corner } from "./layout.ts"
 import { looks } from "./looks.ts"
-import { home, state, pins, room, laidPage } from "./store.ts"
+import { home, state, pins, room, laidPage, windowWidth } from "./store.ts"
 import { json, type Owner, owners, draft, subjectOf, and, addable, addToHome, removeFromHome, whose } from "./owners.ts"
 import { Card, Tile } from "./tiles.tsx"
 
@@ -86,7 +86,7 @@ export function Holding(props: { owner: Owner; index: number; held: Held }) {
   const [copyWidth, copyHeight] = [held.width / scale, held.height / scale]
   const tile = untrack(laidPage).tile
   return (
-    <View style={[looks.dialog, looks.heldLayer, looks.sized(room().width, viewport().height)]}>
+    <View style={[looks.dialog, looks.heldLayer, looks.sized(windowWidth(), viewport().height)]}>
       {/* The Home Screen blurs through a veil under what's held, and its menu floats in glass, as a window does. */}
       <Pressable aria-hidden="true" onPress={dismiss} style={[looks.cover, looks.frosted, looks.fadeIn]} />
       <Show when={item ?? (props.held.listed as Item | undefined)}>

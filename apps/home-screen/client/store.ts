@@ -2,7 +2,7 @@
 // which kind of device this is, and what a finger is doing.
 import { createMemo, createSignal } from "solid-js"
 import { createActor } from "xstate"
-import { client, type Pressed } from "ui"
+import { client, type Pressed, viewport } from "ui"
 import { measure, page as pageOf, type Room } from "./layout.ts"
 import { type At, type Editing, machine } from "./machine.ts"
 
@@ -54,6 +54,10 @@ export const [selected, setSelected] = createSignal<Selected | undefined>(undefi
 export const [room, setRoom] = createSignal<Room>(measure(390, 844, { top: 0, right: 0, bottom: 0, left: 0 }))
 
 /// A page of the room, laid out.
+/// How wide the Home Screen's window is, which what's opened over it covers: a phone's page, but a computer launcher's
+/// whole panel, which is wider than the one page the room has.
+export const windowWidth = () => (launcher() ? viewport().width : room().width)
+
 export const laidPage = createMemo(() => pageOf(room()))
 
 /// Owners' pages as they were just edited, shown until the Home Screen is asked again.

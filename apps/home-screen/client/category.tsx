@@ -2,7 +2,7 @@ import { createEffect, createMemo, For, onSettled } from "solid-js"
 import { covers, keydown, Pressable, type Rect, reducedMotion, Text, View, viewport } from "ui"
 import { type Entrypoint } from "./types.ts"
 import { looks } from "./looks.ts"
-import { home, state, room } from "./store.ts"
+import { home, state, windowWidth } from "./store.ts"
 import { type Owner, badgeOf, press } from "./owners.ts"
 import { Tile } from "./tiles.tsx"
 import { tween } from "./tween.ts"
@@ -27,7 +27,7 @@ export function OpenCategory(props: { owner: Owner; opened: string; within?: Rec
   })
   // The panel, in the middle of the window: three across, as many rows as it has apps for.
   // In the launcher, in the middle of its card, which it veils.
-  const area = () => props.within ?? { x: 0, y: 0, width: room().width, height: viewport().height }
+  const area = () => props.within ?? { x: 0, y: 0, width: windowWidth(), height: viewport().height }
   const panel = () => {
     const width = Math.min(352, area().width - 56)
     const rows = Math.max(1, Math.ceil((category()?.entrypoints.length ?? 0) / 3))
@@ -49,7 +49,7 @@ export function OpenCategory(props: { owner: Owner; opened: string; within?: Rec
     <View
       role="dialog"
       aria-label={category()?.category}
-      style={[looks.dialog, looks.categoryLayer, phase() === "closing" && looks.inert, looks.sized(room().width, viewport().height)]}
+      style={[looks.dialog, looks.categoryLayer, phase() === "closing" && looks.inert, looks.sized(windowWidth(), viewport().height)]}
     >
       {/* What's behind blurs through a veil. */}
       <Pressable aria-hidden="true" onPress={close} style={[looks.cover, looks.frosted, props.within && looks.round, props.within && looks.at(area().x, area().y, area().width, area().height), looks.opacity(t())]} />

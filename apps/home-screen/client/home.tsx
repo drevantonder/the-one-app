@@ -15,7 +15,7 @@
 import { createEffect, createMemo, Errored, Loading, refresh, Show } from "solid-js"
 import { Button, covers, haptic, Problem, render, View, viewport } from "ui"
 import { looks } from "./looks.ts"
-import { home, state, editing, launcher, room } from "./store.ts"
+import { home, state, editing, launcher, windowWidth } from "./store.ts"
 import { type Owner, owners } from "./owners.ts"
 import { OpenCategory } from "./category.tsx"
 import { Holding } from "./holding.tsx"
@@ -54,7 +54,7 @@ function HomeScreen(props: { owners: Owner[] }) {
   return (
     <View
       onKeyDown={launcher() ? launcherKeys({ move, open: openTarget, toggleLibrary, library, found: () => found().length }) : undefined}
-      style={[looks.root, looks.sized(launcher() ? viewport().width : room().width, viewport().height)]}
+      style={[looks.root, looks.sized(windowWidth(), viewport().height)]}
     >
       <Show
         when={launcher()}

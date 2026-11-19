@@ -4,7 +4,7 @@ import { glide, jump, spring, thrower } from "./pager.ts"
 import { grid, TOP_ROW } from "./layout.ts"
 import { pack, type Page, spans } from "./machine.ts"
 import { looks } from "./looks.ts"
-import { home, editing, room } from "./store.ts"
+import { home, editing, room, windowWidth } from "./store.ts"
 import { type Owner } from "./owners.ts"
 import { Minus } from "./tiles.tsx"
 import { type Cell, HomePage } from "./pages.tsx"
@@ -27,8 +27,8 @@ export function Overview(props: { owner: Owner; index: number; going?: boolean }
     if (await confirm({ heading: "Delete Page?", text: "Its apps stay in the App Library.", action: "Delete", destructive: true })) home.send({ type: "delete", page })
   }
   // The thumbnails' grid: as many across as fit, each a miniature with its tick under it.
-  const across = () => Math.max(1, Math.floor((room().width - 48 + 16) / (MINIATURE + 16)))
-  const pitch = () => ({ x: (room().width - 48 - (across() - 1) * 16) / across() + 16, y: (MINIATURE * 16) / 9 + 12 + 28 + 24 })
+  const across = () => Math.max(1, Math.floor((windowWidth() - 48 + 16) / (MINIATURE + 16)))
+  const pitch = () => ({ x: (windowWidth() - 48 - (across() - 1) * 16) / across() + 16, y: (MINIATURE * 16) / 9 + 12 + 28 + 24 })
   let down: (Pressed & { at: number; laid: { x: number; y: number } }) | undefined
   const moves = thrower()
   const place = (at: number) => ({ x: (at % across()) * pitch().x, y: Math.floor(at / across()) * pitch().y })
@@ -87,7 +87,7 @@ export function Overview(props: { owner: Owner; index: number; going?: boolean }
   const scale = MINIATURE / THUMB.width
   return (
     // Over the blurred Home Screen, it fades out as it closes; its miniatures float, with a window's shadow.
-    <View role="dialog" aria-label="Pages" style={[looks.overview, props.going && looks.gone, looks.at(0, 0, room().width, viewport().height)]}>
+    <View role="dialog" aria-label="Pages" style={[looks.overview, props.going && looks.gone, looks.at(0, 0, windowWidth(), viewport().height)]}>
       <View style={[looks.overviewBar, looks.topRowAt(room().safe.top, room().safe.top + TOP_ROW)]}>
         <Button variant="secondary" onPress={() => home.send({ type: "dismiss" })}>Done</Button>
       </View>
