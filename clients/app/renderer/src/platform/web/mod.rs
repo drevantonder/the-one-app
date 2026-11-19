@@ -45,6 +45,9 @@ thread_local! {
     /// field, as the frame was last told (`selected`).
     static SPOKEN: RefCell<String> = const { RefCell::new(String::new()) };
     static SELECTED: RefCell<Option<String>> = const { RefCell::new(None) };
+    /// The finger on the canvas, and the fling a finger let go of, as the iPhone's host has them (`platform::ios`).
+    static TOUCH: RefCell<Option<Touch>> = const { RefCell::new(None) };
+    static FLING: RefCell<Option<Fling>> = const { RefCell::new(None) };
     /// What the DOM said happened to the canvas, for the windows' next turn (`Display::events`).
     static EVENTS: RefCell<Vec<(WindowId, usize, Input)>> = const { RefCell::new(Vec::new()) };
     /// How many device pixels the canvas has to a CSS pixel, as the frame last said it (`resized`): the display's, and
@@ -175,7 +178,11 @@ fn turn() {
         while let Some(job) = JOBS.with_borrow_mut(VecDeque::pop_front) {
             job(windows);
         }
+        fling(windows);
         windows.turn();
+        if FLING.with_borrow(Option::is_some) {
+            windows.display.request_frame(true);
+        }
         let screen = windows.windows.get(&WINDOW).and_then(|window| window.screen.as_ref().ok());
         let (semantics, selected) = (screen.map(semantics), screen.and_then(Screen::selection_text));
         (windows.due(), semantics, selected)
@@ -853,6 +860,131 @@ pub fn act(id: f64, action: &str) {
             });
         })
     });
+}
+
+/// How far a finger moves before it pans rather than presses, in CSS pixels, how much of a fling's speed it keeps each
+/// millisecond, and the speed, in pixels a second, below which it stops: UIScrollView's, as the iPhone's host has them.
+const SLOP: f32 = 10.0;
+const DECELERATION: f32 = 0.998;
+const STOPPED: f32 = 20.0;
+
+/// A finger: the browser's id for it, where it landed and was last, whether it's moved past the slop and pans, whether it
+/// landed on an input, which it presses only as it lifts, or stopped a fling, which it doesn't press, and where it was
+/// lately, for how fast it was going as it lifts.
+struct Touch {
+    finger: i32,
+    start: crate::geometry::Point<f32>,
+    last: crate::geometry::Point<f32>,
+    moved: bool,
+    panning: bool,
+    on_input: bool,
+    stopped: bool,
+    lately: Vec<(web_time::Instant, crate::geometry::Point<f32>)>,
+}
+
+/// What a finger let go of while panning carries on as: where it pans, how fast, and when it last stepped.
+struct Fling {
+    at: crate::geometry::Point<f32>,
+    velocity: crate::geometry::Point<f32>,
+    stepped: web_time::Instant,
+}
+
+/// Steps the fling to now, as UIScrollView decelerates, stopping where it's slow enough or what it scrolls ends.
+fn fling(windows: &mut Windows) {
+    let Some(mut fling) = FLING.take() else { return };
+    let Some(window) = windows.windows.get_mut(&WINDOW) else { return };
+    let Ok(screen) = &mut window.screen else { return };
+    let now = web_time::Instant::now();
+    let ms = now.duration_since(fling.stepped).as_secs_f32() * 1000.0;
+    fling.stepped = now;
+    let decay = DECELERATION.powf(ms);
+    let travelled = (decay - 1.0) / DECELERATION.ln() / 1000.0;
+    let by = point(fling.velocity.x * travelled, fling.velocity.y * travelled);
+    fling.velocity = point(fling.velocity.x * decay, fling.velocity.y * decay);
+    window.dirty = true;
+    // A step that took no time (the turn it was let go in) moves nothing, which isn't its end.
+    let moved = (by.x == 0.0 && by.y == 0.0) || screen.pan(fling.at, by).is_some();
+    if moved && fling.velocity.x.hypot(fling.velocity.y) > STOPPED {
+        FLING.set(Some(fling));
+    }
+}
+
+/// A finger at `x`, `y` (CSS pixels on the canvas), as a phone's own app has it, the iPhone host's way: one that moves
+/// further than the slop pans what scrolls under it, and what it pressed isn't pressed; let go, the pan carries on as a
+/// fling. One on an input gives it the keyboard as it lifts (in the lift's own event, `flush`, which is when a phone
+/// brings up its keyboard), so one that lands there to scroll doesn't. One that lands on a fling stops it.
+#[wasm_bindgen]
+pub fn touch(kind: &str, x: f32, y: f32, finger: i32) {
+    let (kind, at) = (kind.to_owned(), point(x, y));
+    let _ = Native::get().map(|native| {
+        native.run(move |windows| {
+            windows.with(WINDOW, |screen| touch_at(screen, &kind, at, finger));
+        })
+    });
+}
+
+fn touch_at(screen: &mut Screen, kind: &str, at: crate::geometry::Point<f32>, finger: i32) {
+    screen.touch = true;
+    let now = web_time::Instant::now();
+    match kind {
+        "down" => {
+            let stopped = FLING.take().is_some();
+            let on_input = screen.input_at(at);
+            TOUCH.set(Some(Touch { finger, start: at, last: at, moved: false, panning: false, on_input, stopped, lately: vec![(now, at)] }));
+            if !on_input && !stopped {
+                screen.pointer_down(at, 0, false);
+            }
+        }
+        "move" => TOUCH.with_borrow_mut(|touch| {
+            let Some(touch) = touch.as_mut().filter(|touch| touch.finger == finger) else { return };
+            touch.lately.push((now, at));
+            touch.lately.retain(|(when, _)| now.duration_since(*when).as_millis() < 100);
+            // Past the slop, it pans where what's under it scrolls that way, and is otherwise what it's on's to follow.
+            if !touch.moved && ((at.x - touch.start.x).abs() > SLOP || (at.y - touch.start.y).abs() > SLOP) {
+                touch.moved = true;
+                touch.panning = touch.on_input || touch.stopped || screen.pans(touch.start, point(at.x - touch.start.x, at.y - touch.start.y));
+                if touch.panning && !touch.on_input && !touch.stopped {
+                    screen.pointer_cancel(at);
+                } else if !touch.panning {
+                    screen.dragged();
+                }
+            }
+            if touch.panning {
+                screen.pan(touch.start, point(touch.last.x - at.x, touch.last.y - at.y));
+            } else if !touch.on_input && !touch.stopped {
+                screen.pointer_moved(at);
+            }
+            touch.last = at;
+        }),
+        "up" => {
+            let Some(touch) = TOUCH.take().filter(|touch| touch.finger == finger) else { return };
+            // How fast it was going over its last tenth of a second, as UIScrollView's pan measures it.
+            let first = touch.lately[0];
+            let seconds = now.duration_since(first.0).as_secs_f32().max(0.008);
+            let velocity = point((first.1.x - at.x) / seconds, (first.1.y - at.y) / seconds);
+            if touch.panning {
+                if velocity.x.hypot(velocity.y) > STOPPED * 10.0 {
+                    FLING.set(Some(Fling { at: touch.start, velocity, stepped: now }));
+                }
+            } else if !touch.stopped {
+                if touch.on_input {
+                    screen.pointer_down(at, 0, false);
+                }
+                screen.pointer_up(at, 0);
+            }
+            screen.pointer_left();
+        }
+        _ => {
+            if let Some(touch) = TOUCH.take().filter(|touch| touch.finger == finger)
+                && !touch.on_input
+                && !touch.panning
+                && !touch.stopped
+            {
+                screen.pointer_cancel(at);
+            }
+            screen.pointer_left();
+        }
+    }
 }
 
 /// The frame got the keyboard, or lost it.

@@ -118,7 +118,10 @@
       const [box] = entry.devicePixelContentBoxSize ?? [{ inlineSize: entry.contentRect.width * devicePixelRatio, blockSize: entry.contentRect.height * devicePixelRatio }]
       if (entry.contentRect.width) renderer.resized(...sized(box.inlineSize, box.blockSize), box.inlineSize / entry.contentRect.width)
     }).observe(canvas)
-    const pointer = (/** @type {string} */ kind) => (/** @type {PointerEvent} */ event) => (streams.pointer(kind, event), renderer.pointer(kind, event.offsetX, event.offsetY, event.button, event.shiftKey))
+    // A finger is the renderer's to pan with, as a phone's app has it (`touch`: past the slop it scrolls what's under it,
+    // and flings as it's let go); a mouse and a pen point and press.
+    const pointer = (/** @type {string} */ kind) => (/** @type {PointerEvent} */ event) =>
+      event.pointerType === "touch" ? kind !== "leave" && renderer.touch(kind, event.offsetX, event.offsetY, event.pointerId) : (streams.pointer(kind, event), renderer.pointer(kind, event.offsetX, event.offsetY, event.button, event.shiftKey))
     canvas.addEventListener("pointermove", pointer("move"))
     // A press takes the keyboard for the frame itself, not by the browser's default after it, which would take it
     // back from a field the press gave it to (the screen gives a field the keyboard as it's pressed).
@@ -135,6 +138,7 @@
     // What a press gives the keyboard is focused in the press itself, which is when a phone brings up its keyboard.
     canvas.addEventListener("pointerup", (event) => (pointer("up")(event), renderer.flush()))
     canvas.addEventListener("pointerleave", pointer("leave"))
+    canvas.addEventListener("pointercancel", pointer("cancel"))
     // A wheel's lines and pages, in CSS pixels, as a browser scrolls them.
     const unit = [1, 16, innerHeight]
     // A wheel over a video turns the screen's, not the page.
