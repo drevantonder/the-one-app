@@ -199,11 +199,14 @@ async function browserOut(session: string) {
   await invalidate();
 }
 
-/** Makes a device nobody's, on every server. */
+/**
+ * Makes a device nobody's, on every server. Servers read whose it is from the bucket, so it goes there first: one
+ * whose removal there fails is still listed here, to be removed again, rather than gone from the list and still let in.
+ */
 async function remove(adapter: Adapter, device: { id: string }) {
-  await adapter.delete({ model: "device", where: [{ field: "id", value: device.id }] });
   await env.OWN.remove(`devices/${device.id}`);
   await invalidate();
+  await adapter.delete({ model: "device", where: [{ field: "id", value: device.id }] });
 }
 
 /** The invitation a link carries, if it's one that still stands. The link is kept nowhere: only its hash is. */
@@ -496,7 +499,8 @@ export function options(origin: string, secret: string, database: BetterAuthOpti
       // session (`worker.ts`).
       session: {
         create: { after: (session) => browserIn(session) },
-        delete: { after: (session) => browserOut(session.id) },
+        // Before, as a device is removed (`remove`): a session whose device couldn't be removed isn't deleted.
+        delete: { before: (session) => browserOut(session.id) },
       },
     },
     // Better Auth limits how often an address asks only where NODE_ENV says production, which a Worker's doesn't,
