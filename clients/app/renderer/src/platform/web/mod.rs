@@ -41,8 +41,10 @@ thread_local! {
     /// A microtask is on its way to run what's queued, and a turn is running now.
     static SOON: Cell<bool> = const { Cell::new(false) };
     static TURNING: Cell<bool> = const { Cell::new(false) };
-    /// The semantic tree the frame's ARIA tree was last given (`semantics`).
+    /// The semantic tree the frame's ARIA tree was last given (`semantics`), and what's selected of a text that isn't a
+    /// field, as the frame was last told (`selected`).
     static SPOKEN: RefCell<String> = const { RefCell::new(String::new()) };
+    static SELECTED: RefCell<Option<String>> = const { RefCell::new(None) };
     /// What the DOM said happened to the canvas, for the windows' next turn (`Display::events`).
     static EVENTS: RefCell<Vec<(WindowId, usize, Input)>> = const { RefCell::new(Vec::new()) };
     /// How many device pixels the canvas has to a CSS pixel, as the frame last said it (`resized`): the display's, and
@@ -115,10 +117,32 @@ pub fn reduced_motion() -> bool {
     HOST.with_borrow(|host| host.as_ref().is_some_and(|host| host.reduced_motion))
 }
 
-/// The browser's clipboard is asked for with a promise and a person's gesture, which a screen's copy doesn't wait on:
-/// its own, for now.
+/// The browser's clipboard, which what's copied is written to (`navigator.clipboard`, in the key's own gesture). What's
+/// pasted comes through the field typed in (text-input.js), as the browser reads its clipboard only with a promise.
+struct Clipboard;
+
+impl crate::editing::Clipboard for Clipboard {
+    fn read(&mut self, _: bool) -> Option<String> {
+        None
+    }
+
+    fn write(&mut self, primary: bool, text: &str) {
+        if !primary && let Some(window) = web_sys::window() {
+            let _ = window.navigator().clipboard().write_text(text);
+        }
+    }
+}
+
 pub fn clipboard() -> Option<Box<dyn crate::editing::Clipboard>> {
-    None
+    Some(Box::new(Clipboard))
+}
+
+/// Whether the browser is a Mac's, an iPhone's or an iPad's, whose keys are a Mac's (`platform::mac_keys`).
+pub fn mac_keys() -> bool {
+    thread_local! {
+        static MAC: bool = web_sys::window().and_then(|window| window.navigator().platform().ok()).is_some_and(|platform| ["Mac", "iPhone", "iPad"].iter().any(|name| platform.contains(name)));
+    }
+    MAC.with(|mac| *mac)
 }
 
 /// Calls the frame's own JS: `calls[name](argument)`.
@@ -146,20 +170,26 @@ fn turn() {
     if TURNING.replace(true) {
         return soon();
     }
-    let (due, semantics) = WINDOWS.with_borrow_mut(|windows| {
-        let Some(windows) = windows.as_mut() else { return (None, None) };
+    let (due, semantics, selected) = WINDOWS.with_borrow_mut(|windows| {
+        let Some(windows) = windows.as_mut() else { return (None, None, None) };
         while let Some(job) = JOBS.with_borrow_mut(VecDeque::pop_front) {
             job(windows);
         }
         windows.turn();
-        let semantics = windows.windows.get(&WINDOW).and_then(|window| window.screen.as_ref().ok()).map(semantics);
-        (windows.due(), semantics)
+        let screen = windows.windows.get(&WINDOW).and_then(|window| window.screen.as_ref().ok());
+        let (semantics, selected) = (screen.map(semantics), screen.and_then(Screen::selection_text));
+        (windows.due(), semantics, selected)
     });
     TURNING.set(false);
     // The ARIA tree follows the semantic tree, where it changed.
     if let Some(semantics) = semantics.filter(|semantics| SPOKEN.with_borrow(|spoken| spoken != semantics)) {
         call("semantics", &js_sys::JSON::parse(&semantics).unwrap_or(JsValue::NULL));
         SPOKEN.set(semantics);
+    }
+    // What's selected of a text, mirrored in the page as it changes, for the browser's own Copy.
+    if SELECTED.with_borrow(|was| *was != selected) {
+        call("selected", &selected.as_deref().map_or(JsValue::NULL, JsValue::from));
+        SELECTED.set(selected);
     }
     deliver();
     if let Some(due) = due {

@@ -399,6 +399,13 @@ impl Screen {
 
     /// A picture came from outside it, a video's frame as the web's browser played it (`platform::web::video`): drawn
     /// in the next frame, as one decoded is.
+    /// What's selected of a text that isn't a field, where something is: the web mirrors it in the page, for the
+    /// browser's own Copy.
+    #[cfg(target_arch = "wasm32")]
+    pub(crate) fn selection_text(&self) -> Option<String> {
+        self.selected_text()
+    }
+
     #[cfg(target_arch = "wasm32")]
     pub(crate) fn picture_came(&mut self) {
         self.pictures.decoded += 1;

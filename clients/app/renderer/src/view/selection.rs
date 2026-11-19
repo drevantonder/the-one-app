@@ -116,7 +116,7 @@ impl Screen {
 
     /// ⌘C on a Mac, or Ctrl+C, with no field to copy from: what's selected of a text is copied. → whether it was.
     pub(super) fn copy_selected(&mut self, key: &Key) -> bool {
-        let command = if cfg!(target_os = "macos") { key.meta && !key.ctrl } else { key.ctrl && !key.meta };
+        let command = if crate::platform::mac_keys() { key.meta && !key.ctrl } else { key.ctrl && !key.meta };
         if !command || key.shift || key.alt || !key.key.eq_ignore_ascii_case("c") || self.focus.focused.is_some_and(|id| self.editing.fields.contains_key(&id)) {
             return false;
         }

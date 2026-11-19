@@ -82,6 +82,14 @@
     // What the pointer does on the field typed in is the canvas's, as it would be with no field over it.
     const pointed = (/** @type {PointerEvent | WheelEvent} */ event) => canvas.dispatchEvent(event instanceof WheelEvent ? new WheelEvent(event.type, event) : new PointerEvent(event.type, event))
     const typing = textInput((method, args) => renderer.text_input_client(method, args), (edit) => seen(`edit:${edit}`), pointed)
+    // What's selected of a text that isn't a field, as the page's own selection, so the browser's Copy (its key, and its
+    // menu where the mirror is under a right click) copies it, as a web page's text is copied.
+    const selection = /** @type {HTMLElement} */ (document.getElementById("selection"))
+    const mirror = (/** @type {string | null} */ text) => {
+      selection.textContent = text ?? ""
+      if (text && document.activeElement !== typing.field) getSelection()?.selectAllChildren(selection)
+      else if (getSelection()?.anchorNode && selection.contains(getSelection()?.anchorNode ?? null)) getSelection()?.removeAllRanges()
+    }
     const spoken = semantics(/** @type {HTMLElement} */ (document.getElementById("semantics")), (id, action) => (seen(`screen reader:${action}`), renderer.act(id, action)))
     const sized = (/** @type {number} */ width, /** @type {number} */ height) => [Math.max(1, Math.round(width)), Math.max(1, Math.round(height))]
     ;[canvas.width, canvas.height] = sized(innerWidth * devicePixelRatio, innerHeight * devicePixelRatio)
@@ -90,6 +98,7 @@
       cursor: (/** @type {string} */ cursor) => void (canvas.style.cursor = cursor),
       textInput: (/** @type {[string, unknown][]} */ calls) => calls.forEach(([method, args]) => typing.call(method, args)),
       semantics: spoken,
+      selected: (/** @type {string | null} */ text) => mirror(text),
       // Its first frame, marked on the frame's own element for whoever measures it.
       drawn: () => {
         document.documentElement.dataset.drawn = String(Math.round(performance.now()))
@@ -115,6 +124,10 @@
     // back from a field the press gave it to (the screen gives a field the keyboard as it's pressed).
     canvas.addEventListener("pointerdown", (event) => {
       event.preventDefault()
+      // A right click over what's selected is the mirror's, so the browser's menu has Copy; any other press puts it away.
+      const right = event.button === 2 && !!selection.textContent
+      Object.assign(selection.style, right ? { left: `${event.clientX - 4}px`, top: `${event.clientY - 8}px`, pointerEvents: "auto" } : { left: "-9999px", pointerEvents: "none" })
+      if (right) getSelection()?.selectAllChildren(selection)
       if (document.activeElement !== typing.field) canvas.focus({ preventScroll: true })
       if (event.isTrusted) canvas.setPointerCapture(event.pointerId)
       pointer("down")(event)

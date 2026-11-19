@@ -822,7 +822,7 @@ impl Field {
             return len;
         }
         let mut j = i.min(len);
-        if !cfg!(target_os = "macos") {
+        if !crate::platform::mac_keys() {
             if let Some((end, true)) = self.segment_after(j) {
                 j = end;
             }
@@ -916,7 +916,7 @@ impl Field {
         if self.preedit.is_some() {
             return out;
         }
-        let mac = cfg!(target_os = "macos");
+        let mac = crate::platform::mac_keys();
         // The edit chords' modifier: ⌘ on macOS, Ctrl elsewhere. A word: ⌥ on macOS, Ctrl elsewhere. A line's edge:
         // ⌘ on macOS.
         let command = if mac { key.meta && !key.ctrl } else { key.ctrl && !key.meta };

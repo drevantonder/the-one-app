@@ -41,6 +41,15 @@ pub mod web;
 #[cfg(target_arch = "wasm32")]
 use web::{Display, Handle, NativeWindow, appearance, clipboard, reduced_motion};
 
+/// Whether the keys are a Mac's: ⌘ the edit chords' modifier, ⌥ a word's, as AppKit's text fields have them. A Mac's,
+/// and on the web a browser's on a Mac, an iPhone or an iPad.
+pub fn mac_keys() -> bool {
+    #[cfg(target_arch = "wasm32")]
+    return web::mac_keys();
+    #[cfg(not(target_arch = "wasm32"))]
+    cfg!(target_os = "macos")
+}
+
 /// A window, as the windows' thread names it.
 pub type WindowId = u64;
 
