@@ -61,7 +61,7 @@ pub(crate) async fn connect(address: &str) -> anyhow::Result<impl AsyncRead + As
     if let Ok(stream) = open(address).await {
         return Ok(stream);
     }
-    std::process::Command::new(crate::computer::program()?)
+    std::process::Command::new(cli::serving::program()?)
         .env_remove("ONE_APP")
         .env_remove("ONE_SUBJECT")
         .env_remove("ONE_OPEN")

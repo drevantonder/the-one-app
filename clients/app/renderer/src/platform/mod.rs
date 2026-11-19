@@ -70,6 +70,8 @@ pub enum Event {
     Shown(std::time::Duration),
     /// A panel put itself away, as something else was clicked or came in front.
     PutAway,
+    /// A window that isn't a panel lost the keyboard: its person is using something else.
+    Unfocused,
 }
 
 pub struct WindowOptions {
@@ -794,7 +796,12 @@ impl Windows {
                 }
                 return;
             }
-            Input::Focus(active) => screen.activate(active),
+            Input::Focus(active) => {
+                screen.activate(active);
+                if !active {
+                    (window.on_event)(Event::Unfocused);
+                }
+            }
             // Dragged somewhere on a screen, a panel is summoned there on that screen from now on.
             Input::Placed(on, at) => {
                 if let Some(file) = &window.places {

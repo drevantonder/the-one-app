@@ -300,6 +300,9 @@ async fn window(started: Instant, entrypoint: &str, subject: Option<&str>, link:
                 Event::PutAway => {
                     let _ = to.send(json!({"id": "visible", "command": "visible", "args": {"onScreen": false}}));
                 }
+                // Its person is using something else, so a new build waiting for what they typed to be sent looks
+                // again (`updater::ready`), as a web view's window does as its frames say they're done typing.
+                Event::Unfocused => crate::spawn(crate::updater::ready()),
                 Event::Closed => {}
                 // A window whose page didn't start says so, and Telemetry hears why; a phone's launcher is then its
                 // page's.
@@ -421,7 +424,18 @@ fn start(entrypoint: &str, subject: Option<&str>, link: &str, launcher: bool, pl
     let native = Native::get()?;
     let asked: Arc<Mutex<HashMap<String, Asked>>> = Arc::default();
     let to = channel(entrypoint, subject, link, launcher, asked.clone(), native, place)?;
-    let cache = crate::app().shell.home()?.join("native").join(::client::BUILD);
+    let kept = crate::app().shell.home()?.join("native");
+    // Each build keeps its pages' compiled JS apart, as another build's is no use to it: what the builds before kept goes,
+    // once, as this one first starts a page.
+    static PRUNED: std::sync::Once = std::sync::Once::new();
+    PRUNED.call_once(|| {
+        for before in std::fs::read_dir(&kept).into_iter().flatten().flatten().filter(|entry| entry.file_name() != ::client::BUILD) {
+            if let Err(error) = std::fs::remove_dir_all(before.path()) {
+                eprintln!("{} wasn't removed: {error}", before.path().display());
+            }
+        }
+    });
+    let cache = kept.join(::client::BUILD);
     let (files_to, files_asked) = (to.clone(), asked.clone());
     let next = std::sync::atomic::AtomicU64::new(0);
     let files: Files = Box::new(move |url: &Url| {

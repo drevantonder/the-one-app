@@ -70,7 +70,7 @@ fn report(name: &str, attributes: Value) {
 #[cfg(desktop)]
 fn replaced() {
     use notify::{RecursiveMode, Watcher};
-    let Ok(program) = crate::computer::program() else { return };
+    let Ok(program) = cli::serving::program() else { return };
     let (Some(folder), Some(name)) = (program.parent().map(std::path::Path::to_owned), program.file_name().map(ToOwned::to_owned)) else { return };
     let heard = move |event: notify::Result<notify::Event>| {
         if event.is_ok_and(|event| event.paths.iter().any(|path| path.file_name() == Some(&name))) {
@@ -138,7 +138,7 @@ async fn take(latest: &str) {
 /// file.
 #[cfg(desktop)]
 async fn in_place() {
-    let Ok(program) = crate::computer::program() else { return };
+    let Ok(program) = cli::serving::program() else { return };
     let Ok(Some(there)) = tokio::task::spawn_blocking(move || cli::serving::build_of(&program)).await else { return };
     // The system says each change to the program's folder, often several for one replacement: the first is taken.
     if cli::serving::count(&there) > cli::serving::count(::client::BUILD) && !DUE.swap(true, Ordering::Relaxed) {

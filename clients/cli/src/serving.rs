@@ -296,7 +296,7 @@ async fn join(client: &Client, here: &Here, key: &str, who: &str) -> Result<()> 
         here.change(|record| record.current = Some(Pair { build, program: BUILD.to_owned() }))?;
     }
     here.change(joining(ServerMembershipStage::Installing))?;
-    system::install(here, key, &env::current_exe()?, &unit_env(who.to_owned(), None).await?)?;
+    system::install(here, key, &program()?, &unit_env(who.to_owned(), None).await?)?;
     here.change(joining(ServerMembershipStage::Starting))?;
     // The system starts `one serve run`, which makes it active once it answers by its key. Where it didn't, its log's
     // last lines say why, as undoing the join removes its folder, and a Mac's or Windows' log with it.
@@ -465,7 +465,7 @@ async fn undo_leaving(client: &Client, here: &Here, key: &str, start: bool) -> R
         record.server_membership_stage = None;
     })?;
     if start {
-        system::install(here, key, &env::current_exe()?, &unit_env(who(client)?, None).await?)?;
+        system::install(here, key, &program()?, &unit_env(who(client)?, None).await?)?;
         system::start(here, key).await?;
     }
     Ok(())
@@ -485,9 +485,19 @@ pub async fn update(client: &Client) -> Result<String> {
     if one["build"] == BUILD {
         return Ok(format!("This device is on the latest build already: {BUILD}"));
     }
-    let program = env::current_exe()?;
+    let program = program()?;
     put(&fetched_program(one, &program).await?, &program)?;
     Ok(format!("This device is on the build {} now.", one["build"].as_str().unwrap_or_default()))
+}
+
+/// This program's file, which an update replaces, or `ONE_PROGRAM` where something else runs it: Linux names a
+/// program whose file was replaced while it ran `<its path> (deleted)`, and it's the new file that's meant, as an app
+/// that's also a server, which doesn't start again on its update, finds on its next.
+pub fn program() -> std::io::Result<PathBuf> {
+    env::var_os("ONE_PROGRAM").map(PathBuf::from).map_or_else(env::current_exe, Ok).map(|program| {
+        let named = program.to_string_lossy();
+        named.strip_suffix(" (deleted)").map(PathBuf::from).unwrap_or(program)
+    })
 }
 
 /// This program's name among the network's builds: `one/macos-aarch64`, `one-cli/linux-x86_64`.
@@ -535,7 +545,7 @@ pub async fn run(client: Arc<Client>) -> Result<()> {
 
 async fn serve(client: &Arc<Client>, here: &Here, reports: &Reports) -> Result<()> {
     // The program's own file, named before an update replaces what's there.
-    let program = env::current_exe()?;
+    let program = program()?;
     let key = here.key()?;
     let address = client.address().context("A server is for a network with an address, and this one has none.")?;
     let who = env::var("ONE_SUBJECT").context("ONE_SUBJECT says who the server is for")?;

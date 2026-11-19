@@ -270,7 +270,7 @@ mod device {
         super::renamed(&start)?;
         std::fs::create_dir_all(&start)?;
         std::fs::create_dir_all(&icons)?;
-        let program = std::env::current_exe()?;
+        let program = cli::serving::program()?;
         // The shell's COM objects are its thread's, which is this one, made for this.
         unsafe { CoInitializeEx(None, COINIT_APARTMENTTHREADED) }.ok()?;
         let mut made = Vec::new();
@@ -394,7 +394,7 @@ mod device {
             }
         }
         std::fs::create_dir_all(&folder)?;
-        let program = std::env::current_exe()?;
+        let program = cli::serving::program()?;
         let mut made = Vec::new();
         for shortcut in shortcuts {
             let bundle = bundle(&folder, &shortcut.name);
@@ -519,7 +519,7 @@ mod device {
         let icons = super::local_data_dir()?.join("shortcuts");
         std::fs::create_dir_all(&entries)?;
         std::fs::create_dir_all(&icons)?;
-        let program = std::env::current_exe()?;
+        let program = cli::serving::program()?;
         // A desktop entry's Exec quotes each argument, and escapes what's special inside the quotes.
         let quoted = |text: &str| format!("\"{}\"", text.replace('\\', "\\\\").replace('"', "\\\"").replace('`', "\\`").replace('$', "\\$"));
         let mut made = Vec::new();
