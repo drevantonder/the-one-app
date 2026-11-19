@@ -552,6 +552,13 @@ impl Screen {
         self.changed.get_or_insert(now);
     }
 
+    /// Paints the screen into `scene`, a scene of its own, all of it, as an offscreen picture of it is: `paint` keeps the
+    /// scene a frame that changes nothing drew, which a new scene doesn't have.
+    pub fn paint_afresh(&mut self, size: Size<Pixels>, scale: f32, text: &mut TextSystem, atlas: &Atlas, scene: &mut Scene) {
+        self.seen = None;
+        self.paint(size, scale, text, atlas, scene);
+    }
+
     /// Paints the screen into `scene`, `size` logical pixels at `scale` device pixels each.
     pub fn paint(&mut self, size: Size<Pixels>, scale: f32, text: &mut TextSystem, atlas: &Atlas, scene: &mut Scene) {
         // The page is told when its room, its motion or its insets change, as a frame's host tells an MCP App.

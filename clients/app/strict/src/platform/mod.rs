@@ -303,9 +303,12 @@ impl Windows {
         if request.op != "snap" {
             return screen.inspect(request, reply);
         }
-        // The scene it last drew: painting one afresh would draw nothing where nothing changed since (`Screen::paint`).
+        // Painted afresh, as it is now: a window with no surface (Android's view while it's hidden) has drawn nothing,
+        // and the scene it last drew may be older than what it shows.
         let mut renderer = Renderer::offscreen(&self.context, self.atlas.clone(), window.native.device_size());
-        renderer.draw(&window.scene);
+        let mut scene = crate::render::scene::Scene::default();
+        screen.paint_afresh(window.native.size(), window.native.scale(), &mut self.text, &self.atlas, &mut scene);
+        renderer.draw(&scene);
         let snapped = renderer.read().ok_or_else(|| anyhow::anyhow!("nothing was drawn")).and_then(|(width, height, rgba)| {
             let mut png = Vec::new();
             image::RgbaImage::from_raw(width, height, rgba)
