@@ -69,6 +69,8 @@ const look = styles({
   text: { font: tokens.type.medium, color: tokens.colour.secondaryLabel, lineClamp: 2 },
   // Under its heading in grouped cards and a sidebar, as Raycast's Settings draws a row's subtitle.
   groupedHeading: { fontWeight: tokens.weight.regular },
+  groupedSize: { font: tokens.type.groupedRow },
+  sidebarSize: { font: tokens.type.sidebarRow },
   groupedText: { font: tokens.type.caption },
   destructive: { color: tokens.colour.red },
   flatText: { flexShrink: 1, minWidth: 0, lineClamp: 1 },
@@ -486,7 +488,7 @@ function Drawn(props: RowProps) {
         <Box style={look.start}>{props.start}</Box>
       </Show>
       <Box style={[look.words, flat() && look.flatWords]}>
-        <Text style={[look.heading, flat() && look.flatHeading, style !== "plain" && look.groupedHeading, props.destructive && look.destructive]}>{props.heading}</Text>
+        <Text style={[look.heading, flat() && look.flatHeading, style !== "plain" && look.groupedHeading, grouped() && look.groupedSize, sidebar() && look.sidebarSize, props.destructive && look.destructive]}>{props.heading}</Text>
         <Show when={props.text}>
           <Text style={[look.text, flat() && look.flatText, style !== "plain" && !touch() && look.groupedText]}>{props.text}</Text>
         </Show>

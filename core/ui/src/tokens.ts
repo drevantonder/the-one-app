@@ -244,6 +244,10 @@ const sizes = {
   small: length({ default: rem(0.6875), touch: rem(0.8125), phone: rem(13 / 17) }),
   /** A computer's bar's title: Raycast's 15px. */
   barTitle: length(rem(0.9375)),
+  /** A row's heading in grouped cards and a sidebar on a computer, as Raycast's Settings draws them: 13.5px and 14px;
+   * under a finger, a row's own. */
+  groupedRow: length({ default: rem(0.84375), touch: rem(0.9375), phone: rem(15 / 17) }),
+  sidebarRow: length({ default: rem(0.875), touch: rem(0.9375), phone: rem(15 / 17) }),
   /** A footer pill's and a toast's: Raycast's 12px. */
   caption: length({ default: rem(0.75), touch: rem(0.8125), phone: rem(13 / 17) }),
   largeTitle: length({ default: rem(1.25), phone: rem(34 / 17) }),
@@ -291,6 +295,11 @@ export const tokens = {
     safeBottom: length(px(0)),
     safeLeft: length(px(0)),
     safeRight: length(px(0)),
+    /** Where a computer's window has its title row over the page, which its top bar is (`titleBar` in its host
+     * context): where in it the page's own may start, after the window's controls and breadcrumb, and how far from
+     * its end, before the controls there. With none, a gutter's. The host sets them as they change. */
+    titleBarStart: length(rem(1)),
+    titleBarEnd: length(rem(1)),
     sheet: length({ default: rem(34), touch: rem(28) }),
     alert: length(rem(18.75)),
     menu: length(rem(10)),
@@ -312,6 +321,10 @@ export const tokens = {
     groupedRow: length({ default: rem(2.875), touch: rem(3.25), phone: rem(52 / 17) }),
     /** A sidebar's row on a computer, as macOS's and Raycast's Settings' sidebars draw them. */
     sidebarRow: length({ default: rem(2.0625), touch: rem(3.25), phone: rem(52 / 17) }),
+    /** An icon at a row's start in a sidebar and in grouped cards, as Raycast's Settings: 22px and 28px on a computer,
+     * 30px under a finger. */
+    sidebarIcon: length({ default: rem(1.375), touch: rem(1.875), phone: rem(30 / 17) }),
+    groupedIcon: length({ default: rem(1.75), touch: rem(1.875), phone: rem(30 / 17) }),
   }, (key) => key),
   size: named(sizes, (key) => `size-${key}`),
   radius: named({ small: radius(px(6)), medium: radius(px(10)), large: radius(px(18)), window: radius(px(26)), full: radii.full, icon: radii.icon }, (key) => `radius-${key}`),
@@ -358,6 +371,8 @@ export const tokens = {
     barTitle: type(sizes.barTitle, weights.label, { lineHeight: 1.3, tracking: -0.01 }),
     large: type(sizes.large, weights.label),
     medium: type(sizes.medium, weights.body, { lineHeight: 1.35 }),
+    groupedRow: type(sizes.groupedRow, weights.body, { lineHeight: 1.35 }),
+    sidebarRow: type(sizes.sidebarRow, weights.body, { lineHeight: 1.35 }),
     small: type(sizes.small, weights.body),
     caption: type(sizes.caption, weights.body, { lineHeight: 1.35 }),
     /** What's typed in a field: medium, but never under 16px under a finger, where an iPhone would zoom into it. */
