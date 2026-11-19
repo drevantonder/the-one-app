@@ -127,9 +127,12 @@ defmodule OneCore.Tools.Apps do
 
   # A file sent this way lands in the app's own artifact, whoever's its calls for them reach (`Calls.whose/3`), under a
   # name nobody could guess.
-  def run("upload", %{"app" => app}, {_actor, subject}, forward, _request) do
+  # A member uploads for a group or the network only as an editor of what the app made for them, as a tool that
+  # changes something is called (`OneCore.Apps.Calls`).
+  def run("upload", %{"app" => app}, {actor, subject} = principal, forward, _request) do
     with %{^app => version} <- Apps.running(subject),
          {installed, ^app} <- Apps.installed(subject, version.artifact) do
+      if actor != nil and actor != subject, do: reaches!(principal, "#{subject}/made/#{app}", "editor")
       at(installed, forward)
       name = "uploads/" <> Base.encode16(:crypto.strong_rand_bytes(16), case: :lower)
       own = %Artifact{prefix: "#{Calls.whose(installed, version, subject)}/own/#{app}/"}

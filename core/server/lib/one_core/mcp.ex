@@ -170,39 +170,18 @@ defmodule OneCore.Mcp do
 
         ""
 
-      # The relay at the network's address saying one of its servers came or went.
-      {:ok, %{"method" => "notifications/one/seen"}} ->
-        Servers.presence_again()
-        ""
-
       # The network's updater, through the relay at the network's address, saying where the network's update is and
       # what each server is to do: only the edge says it.
       {:ok, %{"method" => "notifications/one/update", "params" => %{} = update}} when from == nil ->
         OneCore.Release.instructed(update)
         ""
 
-      # Another server, or an app's edge function, saying that what this one kept of some hooks
-      # was decided from what has since changed.
-      {:ok, %{"method" => "notifications/one/invalidate"} = notification} ->
-        Hooks.invalidate(for hook <- List.wrap(notification["params"]["hooks"]), is_binary(hook), do: hook)
-        ""
-
-      # Another server saying there's something new in the bucket for some owners, or with none, this server saying
-      # it can reach its network's address again.
-      {:ok, %{"method" => "notifications/one/reload"} = notification} ->
-        case notification["params"]["owners"] do
-          nil -> Apps.reconnected()
-          owners -> for owner <- List.wrap(owners), User.owner?(owner), do: Apps.reload(owner)
-        end
-
-        ""
-
-      # Another server saying where an app is in its life for someone moved, which this one's clients ask again.
-      {:ok, %{"method" => "notifications/one/changed"} = notification} ->
-        Apps.changed(
-          for owner <- List.wrap(notification["params"]["owners"]), is_binary(owner), User.owner?(owner), do: owner
-        )
-
+      # What the network's own say of what servers keep: its edge (by its relay, or an app's edge function), this
+      # server itself, or another server of the network. A device tells servers nothing of it, so what one says is
+      # ignored.
+      {:ok, %{"method" => "notifications/one/" <> said} = notification}
+      when said in ["seen", "invalidate", "reload", "changed"] ->
+        if from == nil or Servers.acts_for(from) != [], do: told(said, notification["params"] || %{})
         ""
 
       # A client cancelling a call it asked for that isn't a task, by the request's id, as only it may.
@@ -223,6 +202,24 @@ defmodule OneCore.Mcp do
         JSON.encode!(%{jsonrpc: "2.0", id: nil, error: %{code: -32700, message: "That isn't a JSON-RPC request"}})
     end
   end
+
+  # The relay at the network's address saying one of its servers came or went.
+  defp told("seen", _params), do: Servers.presence_again()
+
+  # Another server, or an app's edge function, saying that what this one kept of some hooks was decided from what has
+  # since changed.
+  defp told("invalidate", params), do: Hooks.invalidate(for hook <- List.wrap(params["hooks"]), is_binary(hook), do: hook)
+
+  # Another server saying there's something new in the bucket for some owners, or with none, this server saying it can
+  # reach its network's address again.
+  defp told("reload", %{"owners" => owners}) when owners != nil,
+    do: for(owner <- List.wrap(owners), User.owner?(owner), do: Apps.reload(owner))
+
+  defp told("reload", _params), do: Apps.reconnected()
+
+  # Another server saying where an app is in its life for someone moved, which this one's clients ask again.
+  defp told("changed", params),
+    do: Apps.changed(for owner <- List.wrap(params["owners"]), is_binary(owner), User.owner?(owner), do: owner)
 
   # What a request says of itself.
   defp meta(%{"_meta" => %{} = meta}), do: meta
@@ -306,8 +303,11 @@ defmodule OneCore.Mcp do
       else: Map.put(result, key, value)
   end
 
-  defp result("services/call", %{"app" => app, "service" => service} = params, _from, _principal, forwarded) do
-    between(forwarded, fn -> Services.run(app, service, params["function"], params["arguments"]) end)
+  # A service's functions are its app's own, asked only by a server that runs that app: one acting for someone it's
+  # installed for.
+  defp result("services/call", %{"app" => app, "service" => service} = params, from, _principal, forwarded) do
+    runs = Enum.any?(Apps.installed_for(app), &Servers.acts_for?(from, &1))
+    between(runs && forwarded, fn -> Services.run(app, service, params["function"], params["arguments"]) end)
   end
 
   # An app's own functions and jobs are asked of it only by a server that runs it too: one acting for whoever it's
