@@ -3,6 +3,7 @@
   "private": true,
   "type": "module",
   "dependencies": {
-    "@opencode/codemode": "2.3.0"
+    "@opencode/codemode": "2.3.0",
+    "effect": "4.1.0"
   }
 }

@@ -7,24 +7,14 @@
 // { reply, ok | error } for each call. stdout: { call, name, input } for each call, then { done: { ok, text } }.
 import { CodeMode, Namespace, Tool, toolError } from "@opencode/codemode"
 import { Effect } from "effect"
+import { createInterface } from "node:readline"
 
 // No limit on its time or its calls, as OpenCode's Core has it: it runs until it's done, or whatever started it stops
 // it. What it gives back is kept to 60 KB, which an agent's client takes whole (Claude Code keeps 25,000 tokens of an
 // MCP tool's answer).
 const limits = { maxOutputBytes: 60_000 }
 
-const lines = (async function* () {
-  let rest = ""
-  const decoder = new TextDecoder()
-  for await (const chunk of Bun.stdin.stream()) {
-    rest += decoder.decode(chunk, { stream: true })
-    let at
-    while ((at = rest.indexOf("\n")) >= 0) {
-      yield rest.slice(0, at)
-      rest = rest.slice(at + 1)
-    }
-  }
-})()
+const lines = createInterface({ input: process.stdin, crlfDelay: Infinity })[Symbol.asyncIterator]()
 
 const { code, tools: list, namespaces = {} } = JSON.parse((await lines.next()).value)
 const waiting = new Map()
@@ -57,7 +47,7 @@ for (const t of list) {
   const tool = Tool.make({
     description: t.description ?? "",
     input: t.input ?? { type: "object" },
-    // What it answers, so a signature says its type. A tool from before tools said it answers unknown.
+    // What it answers, so a signature says its type. A tool that says nothing of it answers unknown.
     output: t.output ?? {},
     execute: (input) => Effect.tryPromise({ try: () => call(t.name, input), catch: (e) => toolError(String(e)) }),
   })
