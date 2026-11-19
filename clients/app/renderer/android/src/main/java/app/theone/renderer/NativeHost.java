@@ -2,7 +2,12 @@ package app.theone.renderer;
 
 import android.content.Context;
 import android.content.res.Configuration;
+import android.graphics.Color;
+import android.graphics.Outline;
+import android.graphics.Rect;
+import android.view.View;
 import android.view.ViewGroup;
+import android.view.ViewOutlineProvider;
 import androidx.activity.ComponentActivity;
 import androidx.activity.OnBackPressedCallback;
 import androidx.annotation.Keep;
@@ -22,6 +27,8 @@ public final class NativeHost {
     /** The view under every other, as a phone's launcher's is: Back doesn't close it. */
     private static NativeView root;
     private static OnBackPressedCallback back;
+    /** What dims what's under an app's view as the rail's line pulls it home (`moved`), under every app's view. */
+    private static View dim;
 
     private NativeHost() {}
 
@@ -69,6 +76,16 @@ public final class NativeHost {
             return view;
         }
         view.setZOrderMediaOverlay(true);
+        // The rail's line, in the middle of its right edge, is pulled in, which the system's back gesture from that edge
+        // would take: that stretch of the edge is the view's (DESIGN.md, The rail), a fingertip wide and taller than it.
+        if (android.os.Build.VERSION.SDK_INT >= 29) {
+            view.addOnLayoutChangeListener((changed, left, top, right, bottom, wasLeft, wasTop, wasRight, wasBottom) -> {
+                float density = changed.getResources().getDisplayMetrics().density;
+                int middle = (bottom - top) / 2;
+                Rect line = new Rect(right - left - Math.round(24 * density), middle - Math.round(56 * density), right - left, middle + Math.round(56 * density));
+                changed.setSystemGestureExclusionRects(java.util.Collections.singletonList(line));
+            });
+        }
         content.addView(view, fill);
         open.add(view);
         listen();
@@ -97,6 +114,34 @@ public final class NativeHost {
     /** Shows it, once Rust has let go of the windows: its surface comes as it's shown, which Rust draws on. */
     static void show(NativeView view) {
         view.post(() -> view.setVisibility(android.view.View.VISIBLE));
+    }
+
+    /**
+     * Draws `view` as the rail's pull has it: grown by `scale` about its middle, moved by `x`, `y` points, as opaque as
+     * `opacity`, its corners `corner` points round, and what's under it dimmed by `dim` (the black over it, 0 to 1). An
+     * app's view is a media overlay, over the activity's window, so the dim, a view in it, is under every app's.
+     */
+    static void moved(NativeView view, float scale, float x, float y, float opacity, float corner, float dim) {
+        float density = view.getResources().getDisplayMetrics().density;
+        view.setScaleX(scale);
+        view.setScaleY(scale);
+        view.setTranslationX(x * density);
+        view.setTranslationY(y * density);
+        view.setAlpha(opacity);
+        view.setOutlineProvider(new ViewOutlineProvider() {
+            @Override public void getOutline(View of, Outline outline) {
+                outline.setRoundRect(0, 0, of.getWidth(), of.getHeight(), corner * density);
+            }
+        });
+        view.setClipToOutline(corner > 0);
+        if (NativeHost.dim == null) {
+            NativeHost.dim = new View(activity);
+            NativeHost.dim.setBackgroundColor(Color.BLACK);
+            ViewGroup content = activity.findViewById(android.R.id.content);
+            content.addView(NativeHost.dim, new ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT));
+        }
+        NativeHost.dim.setAlpha(dim);
+        NativeHost.dim.setVisibility(dim > 0 ? View.VISIBLE : View.GONE);
     }
 
     /** Hides it, as the root is while the page shows an app over it; `show` shows it again. */

@@ -221,8 +221,15 @@ impl Display {
     pub fn put_away(&self, window: &NativeWindow, _: bool) {
         java(|env, host| env.call_static_method(<&JClass>::from(host.as_obj()), "hide", "(Lapp/theone/renderer/NativeView;)V", &[JValue::Object(window.view.as_obj())]).map(drop));
     }
-    /// The rail's pull home, which Android's app windows have once NativeHost draws it (`rail`): none yet.
-    pub fn set_moved(&self, _: &NativeWindow, _: super::rail::Moved) {}
+    /// Draws window `native` as the rail's pull has it (`rail::Moved`): its view grown, moved, faded and rounded, and
+    /// what's under it dimmed (`NativeHost.moved`).
+    pub fn set_moved(&self, native: &NativeWindow, moved: super::rail::Moved) {
+        java(|env, host| {
+            let floats = [moved.scale, moved.x, moved.y, moved.opacity, moved.corner, moved.dim].map(JValue::Float);
+            let [scale, x, y, opacity, corner, dim] = floats;
+            env.call_static_method(<&JClass>::from(host.as_obj()), "moved", "(Lapp/theone/renderer/NativeView;FFFFFF)V", &[JValue::Object(native.view.as_obj()), scale, x, y, opacity, corner, dim]).map(drop)
+        });
+    }
     /// A part of a panel's page as a window of its own: which a phone has none of.
     pub fn open_part(&self, _: &NativeWindow, _: usize) -> anyhow::Result<NativeWindow> {
         anyhow::bail!("a panel's parts aren't windows of their own here")
@@ -512,9 +519,21 @@ pub extern "system" fn Java_app_theone_renderer_NativeView_nativeBack(_: JNIEnv,
 pub extern "system" fn Java_app_theone_renderer_NativeView_nativeTouch(_: JNIEnv, _: JObject, id: jlong, action: jint, x: jfloat, y: jfloat, slop: jfloat) -> jboolean {
     let id = id as WindowId;
     let panning = with_windows(|windows| {
-        let Some(window) = windows.windows.get_mut(&id) else { return false };
+        let Some(window) = windows.windows.get(&id) else { return false };
         let density = window.parts[0].native.density;
         let at = point(x / density, y / density);
+        // A finger on the rail's line is the line's, which the page doesn't hear, and never flings. Only the first
+        // finger is followed.
+        let phase = match action {
+            0 => super::rail::Phase::Down,
+            1 => super::rail::Phase::Up,
+            2 => super::rail::Phase::Moved,
+            _ => super::rail::Phase::Cancelled,
+        };
+        if windows.line(id, 0, at, phase) {
+            return false;
+        }
+        let Some(window) = windows.windows.get_mut(&id) else { return false };
         let Ok(screen) = &mut window.screen else { return false };
         window.dirty = true;
         screen.touch = true;
@@ -597,6 +616,10 @@ pub extern "system" fn Java_app_theone_renderer_NativeView_nativeLongPress(_: JN
     let id = id as WindowId;
     with_windows(|windows| {
         let Some(window) = windows.windows.get_mut(&id) else { return };
+        // A finger held on the rail's line is the line's.
+        if window.pull.is_some() {
+            return;
+        }
         let density = window.parts[0].native.density;
         let at = point(x / density, y / density);
         let Ok(screen) = &mut window.screen else { return };

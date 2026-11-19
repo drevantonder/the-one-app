@@ -299,7 +299,7 @@ impl Windows {
         let native = self.display.open(id, &options)?;
         if let Ok(screen) = &mut screen {
             // A phone's app window has the rail's home line; its Home Screen doesn't.
-            screen.rail = cfg!(target_os = "ios") && !options.root;
+            screen.rail = cfg!(any(target_os = "android", target_os = "ios")) && !options.root;
             screen.appearance = appearance();
             screen.reduced_motion = reduced_motion();
             if let Some(clipboard) = clipboard() {
