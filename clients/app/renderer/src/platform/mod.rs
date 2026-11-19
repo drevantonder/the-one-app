@@ -71,7 +71,7 @@ pub type Job = Box<dyn FnOnce(&mut Windows) + Send>;
 
 /// What a window tells whoever opened it.
 pub enum Event {
-    /// Its first frame is on screen.
+    /// Its first frame is drawn: on screen, or for a panel put away, ready to show.
     Drawn,
     /// It was closed: by the person, or by `close`.
     Closed,
@@ -899,6 +899,8 @@ impl Windows {
             // shows with is as quick as any after (26 to 52 ms on Linux's first summon after the app started, where
             // later ones take 7). What moves asks for no more frames while it's away. A window with no surface yet
             // (Android's view, until it's laid out) is drawn once it has one.
+            // Its first frame drawn so is when it's opened (`Drawn`), as it's ready to show: when it's first summoned is
+            // its person's (`Shown`).
             if window.panel && !window.visible {
                 if std::mem::take(&mut window.dirty)
                     && let Ok(screen) = &mut window.screen
@@ -907,6 +909,10 @@ impl Windows {
                     screen.paint(window.room, window.parts[0].native.scale(), &mut self.text, &self.atlas, &mut window.scene);
                     let glass = screen.glass().to_vec();
                     window.arrange(&self.display, &self.context, &self.atlas, &glass);
+                    if !window.drawn {
+                        window.drawn = true;
+                        (window.on_event)(Event::Drawn);
+                    }
                 }
                 continue;
             }

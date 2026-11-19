@@ -73,9 +73,7 @@ pub(crate) fn reported(entrypoint: &str, started: Instant, why: &str) {
 /// with, it's said in words alone.
 pub(crate) fn unopened(entrypoint: String, subject: Option<String>, link: String, why: String) {
     crate::spawn(async move {
-        let listed = crate::hosts::command("native", "apps", json!({"subject": subject})).await.unwrap_or_default();
-        let name = listed_page(&listed, &entrypoint).and_then(|page| page["name"].as_str()).filter(|name| !name.contains('/')).map(str::to_owned);
-        let name = name.unwrap_or_else(|| entrypoint.split('/').next().unwrap_or_default().to_owned());
+        let name = named(&entrypoint, subject.as_deref()).await;
         let said = format!("{name} didn't open: {why}");
         // It's the app's window, as its client knows it, so the app opened again brings it forward.
         let unopened = Unopened { entrypoint: entrypoint.clone(), subject: subject.clone(), link: link.clone(), name: name.clone(), why };
@@ -93,6 +91,13 @@ pub(crate) fn unopened(entrypoint: String, subject: Option<String>, link: String
             }
         });
     });
+}
+
+/// `entrypoint`'s name, as its app lists it for `subject`, or its app's where it isn't listed.
+async fn named(entrypoint: &str, subject: Option<&str>) -> String {
+    let listed = crate::hosts::command("native", "apps", json!({"subject": subject})).await.unwrap_or_default();
+    let name = listed_page(&listed, entrypoint).and_then(|page| page["name"].as_str()).filter(|name| !name.contains('/'));
+    name.unwrap_or_else(|| entrypoint.split('/').next().unwrap_or_default()).to_owned()
 }
 
 /// Closes the window `shown`, once it's open.
@@ -209,25 +214,39 @@ async fn client_page(address: &str, name: &str) -> anyhow::Result<Page> {
 pub(crate) async fn launcher(entrypoint: &str) -> Option<WindowId> {
     let started = Instant::now();
     let (opened_to, opened) = tokio::sync::oneshot::channel();
-    let why = match window(started, entrypoint, None, entrypoint, Kind::Launcher(Some(opened_to))).await {
+    let why = match window(started, entrypoint, None, entrypoint, Kind::Launcher(Some(opened_to), None)).await {
         Ok(true) => return opened.await.ok().flatten(),
         Ok(false) => "this One App doesn't draw its page: it needs a newer One App".to_owned(),
         Err(error) => format!("{error:#}"),
     };
     reported(entrypoint, started, &why);
-    unopened_launcher(why).await
+    unopened_launcher(entrypoint, why).await
 }
 
 /// A phone's launcher that isn't drawn natively is its page's.
 #[cfg(mobile)]
-async fn unopened_launcher(_: String) -> Option<WindowId> {
+async fn unopened_launcher(_: &str, _: String) -> Option<WindowId> {
     None
 }
 
-/// A panel that says why the Home Screen didn't open, or where this computer's native windows can't start, none.
+/// The launcher's panel in place of one whose page didn't open: its problem box, with Try Again, on the client's own
+/// page (`UNOPENED`), or where that can't be drawn either, why in words alone; where this computer's native windows
+/// can't start, none.
 #[cfg(desktop)]
-async fn unopened_launcher(why: String) -> Option<WindowId> {
-    let said = format!("The Home Screen didn't open: {why}");
+async fn unopened_launcher(entrypoint: &str, why: String) -> Option<WindowId> {
+    let name = named(entrypoint, None).await;
+    let said = format!("{name} didn't open: {why}");
+    let unopened = Unopened { entrypoint: entrypoint.to_owned(), subject: None, link: entrypoint.to_owned(), name, why: why.clone() };
+    let (opened_to, opened) = tokio::sync::oneshot::channel();
+    match window(Instant::now(), entrypoint, None, entrypoint, Kind::Launcher(Some(opened_to), Some(unopened))).await {
+        Ok(true) => {
+            if let Some(id) = opened.await.ok().flatten() {
+                return Some(id);
+            }
+        }
+        Ok(false) => {}
+        Err(error) => eprintln!("{entrypoint}'s problem didn't open: {error:#}"),
+    }
     let (shown_to, shown) = tokio::sync::oneshot::channel();
     if let Ok(native) = Native::get() {
         native.run(move |windows| {
@@ -254,12 +273,36 @@ async fn unopened_launcher(why: String) -> Option<WindowId> {
     id
 }
 
+/// The launcher's panel `old`, whose page failed as it started, replaced by one with its problem box
+/// (`unopened_launcher`), which shows if it was showing. The old one goes first, and its client forgets it, as the
+/// new one is the launcher's as its client knows it.
+#[cfg(desktop)]
+fn replace_launcher(entrypoint: String, why: String, old: Option<WindowId>) {
+    let (showing_to, showing) = tokio::sync::oneshot::channel();
+    if let (Some(old), Ok(native)) = (old, Native::get()) {
+        native.run(move |windows| {
+            let _ = showing_to.send(windows.showing(old));
+            windows.close(old);
+        });
+    }
+    crate::hosts::forget(&entrypoint, None);
+    crate::spawn(async move {
+        let showing = showing.await.unwrap_or(false);
+        computer::native(unopened_launcher(&entrypoint, why).await);
+        if showing {
+            computer::summon();
+        }
+    });
+}
+
 /// What a native window is: an app's own, or the launcher, a panel the system summons, which tells whoever opens it
 /// its window once it's open, or that it didn't.
 enum Kind {
     /// An app's, opened from where its icon is on the screen, if it was.
     App(Option<Bounds<f32>>),
-    Launcher(Option<tokio::sync::oneshot::Sender<Option<WindowId>>>),
+    /// The launcher, which tells whoever opens it its window, and with `Unopened`, the client's page in place of one
+    /// that didn't open (`unopened_launcher`).
+    Launcher(Option<tokio::sync::oneshot::Sender<Option<WindowId>>>, Option<Unopened>),
     /// The client's own, over an app's, where a recovery key is shown or typed (`recovery`).
     Sheet(Sheet),
     /// The client's own, in place of an app's that didn't open (`unopened`).
@@ -310,24 +353,27 @@ pub(crate) fn recovery(typed: bool, subject: Option<String>, owner: Option<Windo
 async fn window(started: Instant, entrypoint: &str, subject: Option<&str>, link: &str, mut kind: Kind) -> anyhow::Result<bool> {
     let page = match &kind {
         Kind::Sheet(_) => Some(client_page(RECOVERY, "Recovery Key").await?),
-        Kind::Unopened(unopened) => Some(client_page(UNOPENED, &unopened.name).await?),
+        Kind::Unopened(unopened) | Kind::Launcher(_, Some(unopened)) => Some(client_page(UNOPENED, &unopened.name).await?),
         _ => probe(entrypoint, subject, false).await?,
     };
     let Some(Page { page, module, trusted, tables, name: listed, icon }) = page else { return Ok(false) };
-    let launcher = matches!(kind, Kind::Launcher(_));
+    let launcher = matches!(kind, Kind::Launcher(..));
     let sheet = match &kind {
         Kind::Sheet(sheet) => Some(sheet.clone()),
         _ => None,
     };
     let unopened = match &kind {
-        Kind::Unopened(unopened) => Some(unopened.clone()),
+        Kind::Unopened(unopened) | Kind::Launcher(_, Some(unopened)) => Some(unopened.clone()),
         _ => None,
     };
+    // A launcher whose page fails as it starts has its problem box in its place, in a panel of its own.
+    #[cfg(desktop)]
+    let launcher_page = launcher && unopened.is_none();
     // An app's own window, which says why in a window of the client's own if its page doesn't start (`unopened`).
     let app_window = matches!(kind, Kind::App(_));
     let from = match kind {
         Kind::App(from) => from,
-        Kind::Launcher(_) | Kind::Sheet(_) | Kind::Unopened(_) => None,
+        Kind::Launcher(..) | Kind::Sheet(_) | Kind::Unopened(_) => None,
     };
     let tokens_page = load(&tables)?;
     // An app's window, and a phone's Home Screen, shows its last frame as it opens again.
@@ -385,7 +431,10 @@ async fn window(started: Instant, entrypoint: &str, subject: Option<&str>, link:
                 Event::Drawn => {
                     let ms = started.elapsed().as_millis() as u64;
                     let _ = to.send(json!({"id": "opened", "command": "opened", "args": {"view": app, "ms": ms}}));
-                    let _ = to.send(json!({"id": "visible", "command": "visible", "args": {"onScreen": true}}));
+                    // A computer's launcher is drawn put away, and is on screen once it's summoned (`Shown`).
+                    if !(launcher && cfg!(desktop)) {
+                        let _ = to.send(json!({"id": "visible", "command": "visible", "args": {"onScreen": true}}));
+                    }
                     // The device hears its person's notifications once their home is on screen, as the web
                     // launcher's page has it (`listen`).
                     if launcher {
@@ -421,6 +470,11 @@ async fn window(started: Instant, entrypoint: &str, subject: Option<&str>, link:
                     if launcher {
                         computer::native(None);
                     }
+                    #[cfg(desktop)]
+                    if launcher_page {
+                        replace_launcher(entrypoint.clone(), why, shown.get().copied());
+                        return;
+                    }
                     if app_window {
                         close(&shown);
                         crate::hosts::forget(&entrypoint, subject.as_deref());
@@ -431,6 +485,11 @@ async fn window(started: Instant, entrypoint: &str, subject: Option<&str>, link:
                 // phone opens it in its page.
                 Event::Mismatched(why) => {
                     reported(&entrypoint, started, &why);
+                    #[cfg(desktop)]
+                    if launcher_page {
+                        replace_launcher(entrypoint.clone(), why, shown.get().copied());
+                        return;
+                    }
                     #[cfg(desktop)]
                     if app_window {
                         close(&shown);
@@ -495,7 +554,7 @@ async fn window(started: Instant, entrypoint: &str, subject: Option<&str>, link:
             Err(error) => Err(error),
         };
         let _ = opened_to.send(opened.map(|id| { let _ = window.set(id); }).map_err(|error| format!("{error:#}")));
-        if let Kind::Launcher(told) = &mut kind
+        if let Kind::Launcher(told, _) = &mut kind
             && let Some(told) = told.take()
         {
             let _ = told.send(window.get().copied());
@@ -952,6 +1011,12 @@ fn respond(
         method if method == "one/unopened" || method == "one/unopened/retry" => match &state.unopened {
             None => Some(Err(json!({"code": -32601, "message": format!("Only the client's own page asks {method}")}))),
             Some(unopened) if method == "one/unopened" => Some(Ok(json!({"name": unopened.name, "why": unopened.why}))),
+            // The launcher opens again in its panel's place, as it does once its page is updated.
+            #[cfg(desktop)]
+            Some(_) if state.launcher => {
+                computer::reload_native();
+                Some(Ok(json!({})))
+            }
             Some(unopened) => {
                 close(&state.window);
                 if let Err(error) = crate::hosts::reopen(unopened.entrypoint.clone(), unopened.subject.clone(), unopened.link.clone()) {
