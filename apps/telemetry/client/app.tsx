@@ -296,7 +296,7 @@ function Telemetry(props: { all: Overview }) {
       }
     >
       <Screen heading="Telemetry">
-        <Tabs.Root value={hours()} onValueChange={({ value }) => (setOpen(), setHours(value!))}>
+        <Tabs.Root value={hours()} onValueChange={(value) => (setOpen(), setHours(value))}>
           <Tabs.List>
             <For each={RANGES}>{(range) => <Tabs.Trigger value={range[0]}>{range[1]}</Tabs.Trigger>}</For>
             <Tabs.Indicator />

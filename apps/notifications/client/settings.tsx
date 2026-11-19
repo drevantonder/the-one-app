@@ -36,7 +36,7 @@ export default function NotificationSettings() {
             <Show when={state().apps.length} fallback={<Empty>No app has told you anything yet.</Empty>}>
               <List>
                 <For each={state().apps} keyed={(app) => app.app}>
-                  {(app) => <Row heading={app().name} end={<Switch aria-label={app().name} checked={app().allowed} onChange={(event) => allow(app().app, event.currentTarget.checked)} />} />}
+                  {(app) => <Row heading={app().name} end={<Switch aria-label={app().name} value={app().allowed} onValueChange={(on) => allow(app().app, on)} />} />}
                 </For>
               </List>
             </Show>

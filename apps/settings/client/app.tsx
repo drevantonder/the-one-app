@@ -379,11 +379,11 @@ function AppPage(props: { app: App }) {
           <Row
             heading="Trusted"
             text={app().trusted ? "Runs on your servers, with everything you can reach." : "Runs in a sandbox, with only what it's given."}
-            end={<Switch aria-label="Trusted" checked={!!app().trusted} disabled={!app().removes} onChange={(event) => trust(event.currentTarget.checked)} />}
+            end={<Switch aria-label="Trusted" value={!!app().trusted} disabled={!app().removes} onValueChange={trust} />}
           />
         </Show>
         <Show when={allowed()}>
-          {(allowed) => <Row heading="Notifications" end={<Switch aria-label="Notifications" checked={allowed().allowed} onChange={(event) => allow(event.currentTarget.checked)} />} />}
+          {(allowed) => <Row heading="Notifications" end={<Switch aria-label="Notifications" value={allowed().allowed} onValueChange={allow} />} />}
         </Show>
         <Show when={app().update}>
           <Row heading="Update ready" text={app().update!.why ?? undefined} end={<Button variant="outline" loading={working() === "update"} onPress={update}>Update</Button>} />

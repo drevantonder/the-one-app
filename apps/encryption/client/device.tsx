@@ -50,7 +50,7 @@ export default function HoldsYourKey(props: { device: string }) {
             <Row
               heading="Holds Your Key"
               text={text()}
-              end={<Switch aria-label="Holds Your Key" checked={key().holds} disabled={!key().holds && !(key().asking && key().approves)} onChange={(event) => set(event.currentTarget.checked)} />}
+              end={<Switch aria-label="Holds Your Key" value={key().holds} disabled={!key().holds && !(key().asking && key().approves)} onValueChange={set} />}
             />
           </List>
         </Show>

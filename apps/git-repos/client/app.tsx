@@ -3,7 +3,7 @@
 // closes. A file and a commit open in the repo's place, with Back.
 import { createMemo, createSignal, Errored, For, Loading, refresh, Show } from "solid-js"
 import { marked, type Token, type Tokens } from "marked"
-import { Button, call, changed, confirm, createListCollection, Empty, Field, go, Icon, Image, Input, List, Menu, Pressable, Problem, render, Row, Screen, Section, Select, share, Sheet, since, size, Skeleton, Split, styles, Tabs, Text, toast, tokens, View } from "ui"
+import { Button, call, changed, confirm, Empty, Field, go, Icon, Image, Input, List, Menu, Pressable, Problem, render, Row, Screen, Section, Select, share, Sheet, since, size, Skeleton, Split, styles, Tabs, Text, toast, tokens, View } from "ui"
 
 /** A commit, as the tools answer it. */
 interface Commit {
@@ -116,7 +116,7 @@ const NAME = /^[a-z0-9][a-z0-9_-]*$/
 
 function NewRepo() {
   const groups = createMemo(() => (adding() ? json<{ groups: { group: string; called?: string }[] }>("permissions_groups").then(({ groups }) => groups) : []))
-  const whose = createMemo(() => createListCollection({ items: [{ value: "", label: "You" }, ...groups().map((group) => ({ value: group.group, label: group.called ?? short(group.group) }))] }))
+  const whose = createMemo(() => [{ value: "", label: "You" }, ...groups().map((group) => ({ value: group.group, label: group.called ?? short(group.group) }))])
   const [forWhom, setFor] = createSignal("")
   const [name, setName] = createSignal("")
   const [sent, setSent] = createSignal(false)
@@ -135,7 +135,7 @@ function NewRepo() {
       <Loading>
         <Show when={groups().length}>
           <Field label="Owner">
-            <Select.Root collection={whose()} value={[forWhom()]} onValueChange={({ value }) => setFor(value[0]!)} />
+            <Select.Root items={whose()} value={forWhom()} onValueChange={setFor} />
           </Field>
         </Show>
       </Loading>
@@ -212,7 +212,7 @@ function Repo(props: { repo: string }) {
       <Text style={look.footnote}>
         {short(about().whose)} · {about().pushes ? "You push to it" : "You read it"}
       </Text>
-      <Tabs.Root value={at().tab} onValueChange={({ value }) => setAt({ tab: value!, path: "" })}>
+      <Tabs.Root value={at().tab} onValueChange={(tab) => setAt({ tab, path: "" })}>
         <Tabs.List>
           <Tabs.Trigger value="code">Code</Tabs.Trigger>
           <Tabs.Trigger value="history">History</Tabs.Trigger>

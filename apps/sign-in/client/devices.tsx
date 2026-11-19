@@ -294,7 +294,7 @@ function Detail(props: { thing: Thing; all: All; groups?: Groups }) {
               <Row
                 heading="Server"
                 text={serving() === undefined ? "Runs your apps from this device whenever it's on." : <><Spinner /> {serving() ? "Starting…" : "Stopping…"}</>}
-                end={<Switch aria-label="Server" checked={serving() ?? !!props.all.here.server} disabled={serving() !== undefined} onChange={(event) => serve(event.currentTarget.checked)} />}
+                end={<Switch aria-label="Server" value={serving() ?? !!props.all.here.server} disabled={serving() !== undefined} onValueChange={serve} />}
               />
             </Show>
             <Show when={!thing().kind && thing().server_membership}>
@@ -319,8 +319,8 @@ function Detail(props: { thing: Thing; all: All; groups?: Groups }) {
                   end={
                     <Switch
                       aria-label={service().called}
-                      checked={service().on}
-                      onChange={(event) => doing(() => call(event.currentTarget.checked ? "install_service" : "uninstall_service", { app: service().app, service: service().service, server: server()!.id }, { subject: server()!.subject }))}
+                      value={service().on}
+                      onValueChange={(on) => doing(() => call(on ? "install_service" : "uninstall_service", { app: service().app, service: service().service, server: server()!.id }, { subject: server()!.subject }))}
                     />
                   }
                 />

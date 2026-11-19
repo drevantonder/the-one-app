@@ -6,7 +6,7 @@
 // one box atop the list, with the one thing that fixes it. A request is an alert, as a system's permission prompt is.
 // It's written as the UI library's skill says, so it runs on a native host as it does on the DOM.
 import { createEffect, createMemo, createSignal, Errored, For, Loading, Match, refresh, Show, Switch as Choose, untrack } from "solid-js"
-import { Alert, Button, call, changed, Checkbox, component, confirm, createListCollection, Empty, Field, Frame, Image, Input, link, List, open as opening, Problem, Row, Screen, Section, Select, Sheet, showRecoveryKey, Skeleton, Spinner, Split, styles, Switch, Text, toast, tokens, useRecoveryKey, View } from "ui"
+import { Alert, Button, call, changed, Checkbox, component, confirm, Empty, Field, Frame, Image, Input, link, List, open as opening, Problem, Row, Screen, Section, Select, Sheet, showRecoveryKey, Skeleton, Spinner, Split, styles, Switch, Text, toast, tokens, useRecoveryKey, View } from "ui"
 
 const look = styles({
   fill: { flexGrow: 1, alignSelf: "stretch" },
@@ -308,16 +308,15 @@ function Readiness() {
 
 /// Which Vault shows, where its person owns more than their own.
 function Whose() {
-  const collection = createMemo(() => createListCollection({ items: owners().map(({ value, label }) => ({ value, label })) }))
-  const pick = ({ value }: { value: string[] }) => {
+  const pick = (owner: string) => {
     setOpen()
     setSheet()
-    setWhose(value[0])
+    setWhose(owner)
   }
   return (
     <Show when={owners().length > 1}>
       <Field label="Owner">
-        <Select.Root collection={collection()} value={[security().owner]} onValueChange={pick} />
+        <Select.Root items={owners()} value={security().owner} onValueChange={pick} />
       </Field>
     </Show>
   )
@@ -454,13 +453,13 @@ function ItemScreen(props: { item: Item }) {
           <Row
             heading="Your agents"
             text="Use it, never see it"
-            end={<Switch aria-label="Your agents" checked={has("agents")} onChange={(event) => switchAccess("agents", "Your agents", event.currentTarget.checked)} />}
+            end={<Switch aria-label="Your agents" value={has("agents")} onValueChange={(on) => switchAccess("agents", "Your agents", on)} />}
           />
           <For each={contents().apps}>
             {(app) => (
               <Row
                 heading={app.title}
-                end={<Switch aria-label={app.title} checked={has(app.name)} onChange={(event) => switchAccess(app.name, app.title, event.currentTarget.checked)} />}
+                end={<Switch aria-label={app.title} value={has(app.name)} onValueChange={(on) => switchAccess(app.name, app.title, on)} />}
               />
             )}
           </For>
@@ -540,7 +539,7 @@ function FieldSheet() {
           <Input secureTextEntry={hidden()} autoComplete="off" autoCapitalize="none" autoCorrect={false} spellCheck={false} required autoFocus={!!at()!.item} value={value()} onChangeText={setValue} onSubmitEditing={submit} />
         </Field>
         <Show when={!at()!.field}>
-          <Checkbox label="Secret" checked={secret()} onChange={(event) => setSecret(event.currentTarget.checked)} />
+          <Checkbox label="Secret" value={secret()} onValueChange={setSecret} />
         </Show>
         <Show when={!at()!.item}>
           <Field label="Websites" hint="Where its secrets may be sent, like api.github.com.">
@@ -636,7 +635,7 @@ function RequestAlert() {
   const [problem, setProblem] = createSignal<string>()
   const [busy, setBusy] = createSignal(false)
   const item = () => chosen() ?? fits()[0]?.name ?? ""
-  const options = createMemo(() => createListCollection({ items: [...fits().map((item) => ({ value: item.name, label: item.name })), { value: "", label: "New Item" }] }))
+  const options = createMemo(() => [...fits().map((item) => ({ value: item.name, label: item.name })), { value: "", label: "New Item" }])
   // Each request asked about starts with nothing chosen or typed.
   createEffect(
     () => request()?.id,
@@ -686,7 +685,7 @@ function RequestAlert() {
     >
       <Show when={request()}>
         <Field label={request()!.title}>
-          <Select.Root collection={options()} value={[item()]} onValueChange={({ value }) => setChosen(value[0] ?? "")} />
+          <Select.Root items={options()} value={item()} onValueChange={setChosen} />
         </Field>
         <Show when={!item()}>
           <For each={request()!.fields}>
@@ -776,7 +775,7 @@ function SecurityScreen() {
                 <Row
                   heading={server.name ?? "A server"}
                   text={security().servers.includes(server.key) ? `Opens ${whom()} Vault` : undefined}
-                  end={<Switch aria-label={server.name ?? "A server"} checked={security().servers.includes(server.key)} disabled={!security().holds} onChange={(event) => choose(server.key, event.currentTarget.checked)} />}
+                  end={<Switch aria-label={server.name ?? "A server"} value={security().servers.includes(server.key)} disabled={!security().holds} onValueChange={(on) => choose(server.key, on)} />}
                 />
               )}
             </For>

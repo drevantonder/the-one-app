@@ -2,7 +2,7 @@
 // what's wrong; how often they're made and which are kept. A destination opens beside the list with its backups,
 // Restore, Check and Stop Backing Up Here. Backups are the network's, so every call is for the network.
 import { createMemo, createSignal, Errored, For, Loading, Match, refresh, Show, Switch } from "solid-js"
-import { Button, call, changed, confirm, createListCollection, Empty, Field, Input, List, Problem, RadioGroup, Row, Screen, Section, Select, Sheet, since, size, Skeleton, Split, Status, styles, Text, toast, tokens, View } from "ui"
+import { Button, call, changed, confirm, Empty, Field, Input, List, Problem, RadioGroup, Row, Screen, Section, Select, Sheet, since, size, Skeleton, Split, Status, styles, Text, toast, tokens, View } from "ui"
 
 const look = styles({
   buttons: { flexDirection: "row", flexWrap: "wrap", gap: tokens.length.gutter, maxWidth: tokens.length.readable },
@@ -91,14 +91,12 @@ const press = (which: string, does: () => Promise<unknown>) => async () => {
   setWorking()
 }
 
-const schedules = createListCollection({
-  items: [
+const schedules = [
     { value: "hour", label: "Every Hour" },
     { value: "day", label: "Every Day" },
     { value: "week", label: "Every Week" },
     { value: "never", label: "Manually" },
-  ],
-})
+]
 
 /// A destination, opened: what's wrong with it, where it is, its backups, Check and Stop Backing Up Here.
 function Opened(props: { destination: Destination }) {
@@ -167,7 +165,7 @@ function AddSheet(props: { machines: All["machines"] }) {
   const [machine, setMachine] = createSignal<string>()
   const [typed, setTyped] = createSignal<Record<string, string>>({})
   const [missing, setMissing] = createSignal<string[]>([])
-  const machines = () => createListCollection({ items: props.machines.map((machine) => ({ value: machine.key, label: machine.name ?? machine.key.slice(0, 8) })) })
+  const machines = () => props.machines.map((machine) => ({ value: machine.key, label: machine.name ?? machine.key.slice(0, 8) }))
   const type = (name: string) => (text: string) => (setTyped({ ...typed(), [name]: text }), setMissing(missing().filter((one) => one !== name)))
   const required = () => (kind() === "folder" ? (props.machines.length ? ["folder"] : []) : ["endpoint", "bucket", "item"])
   const add = async () => {
@@ -184,14 +182,14 @@ function AddSheet(props: { machines: All["machines"] }) {
   const error = (name: string) => (missing().includes(name) ? "Fill in this field." : undefined)
   return (
     <Sheet heading="Add Destination" open={adding()} onClose={() => setAdding(false)}>
-      <RadioGroup value={kind()} onChange={setKind} options={[{ value: "folder", label: "A Disk" }, { value: "s3", label: "S3-Compatible Storage" }]} />
+      <RadioGroup value={kind()} onValueChange={setKind} options={[{ value: "folder", label: "A Disk" }, { value: "s3", label: "S3-Compatible Storage" }]} />
       <Show when={kind() === "folder"}>
         <Show
           when={props.machines.length}
           fallback={<Problem warn heading="No machine can hold backups yet" text="Switch on Backups.Disk for the machine the disk is plugged into, in Devices." />}
         >
           <Field label="Machine">
-            <Select.Root collection={machines()} value={[machine() ?? props.machines[0].key]} onValueChange={({ value: [key] }) => setMachine(key)} />
+            <Select.Root items={machines()} value={machine() ?? props.machines[0].key} onValueChange={setMachine} />
           </Field>
           <Field label="Folder" hint="Its whole path on that machine." error={error("folder")}>
             <Input placeholder="/mnt/disk/backups" autoCapitalize="none" autoCorrect={false} spellCheck={false} value={typed().folder} onChangeText={type("folder")} onSubmitEditing={add} required />
@@ -247,13 +245,13 @@ function Restore(props: { destination: Destination }) {
       { value: "network", label: "Everyone" },
     ]
     const apps = [...new Map(marketplace.filter((app) => app.app).map((app) => [app.name, app.title])).entries()].map(([value, label]) => ({ value, label }))
-    return { owners: createListCollection({ items: owners }), apps: createListCollection({ items: apps }) }
+    return { owners, apps }
   })
-  const backupsOf = () => createListCollection({ items: props.destination.backups.map((backup) => ({ value: backup.name, label: when(backup.at) })) })
+  const backupsOf = () => props.destination.backups.map((backup) => ({ value: backup.name, label: when(backup.at) }))
   const restore = async () => {
     // What a select has chosen until someone picks another is its first.
-    const owner = whose() ?? choices().owners.firstValue
-    const which = app() ?? choices().apps.firstValue
+    const owner = whose() ?? choices().owners[0]?.value
+    const which = app() ?? choices().apps[0]?.value
     if (what() === "file" ? !file().trim() : false) return setMissing(true)
     const blobs = what() === "file" ? [file().trim()] : what() === "app" ? [`${owner}/own/${which}/`, `${owner}/made/${which}/`] : [`${owner}/`]
     setWorking("restore")
@@ -271,20 +269,20 @@ function Restore(props: { destination: Destination }) {
   return (
     <>
       <Field label="From">
-        <Select.Root collection={backupsOf()} value={[backup() ?? props.destination.backups[0]?.name]} onValueChange={({ value: [name] }) => setBackup(name)} />
+        <Select.Root items={backupsOf()} value={backup() ?? props.destination.backups[0]?.name} onValueChange={setBackup} />
       </Field>
       <Field label="What">
-        <RadioGroup value={what()} onChange={setWhat} options={[{ value: "whose", label: "Someone's Data" }, { value: "app", label: "One App's Data" }, { value: "file", label: "One File" }]} />
+        <RadioGroup value={what()} onValueChange={setWhat} options={[{ value: "whose", label: "Someone's Data" }, { value: "app", label: "One App's Data" }, { value: "file", label: "One File" }]} />
       </Field>
       <Loading fallback={<Skeleton rows={1} />}>
         <Show when={what() !== "file"}>
           <Field label="Owner">
-            <Select.Root collection={choices().owners} value={[whose() ?? choices().owners.firstValue!]} onValueChange={({ value: [one] }) => setWhose(one)} />
+            <Select.Root items={choices().owners} value={whose() ?? choices().owners[0]?.value} onValueChange={setWhose} />
           </Field>
         </Show>
         <Show when={what() === "app"}>
           <Field label="App">
-            <Select.Root collection={choices().apps} value={[app() ?? choices().apps.firstValue!]} onValueChange={({ value: [one] }) => setApp(one)} />
+            <Select.Root items={choices().apps} value={app() ?? choices().apps[0]?.value} onValueChange={setApp} />
           </Field>
         </Show>
       </Loading>
@@ -304,7 +302,7 @@ function Backups(props: { all: All }) {
   const opened = () => destinations().find((destination) => destination.name === open())
   const now = press("now", () => call("backups_now", {}, network))
   const backingUp = () => destinations().some((destination) => destination.state === "backing_up")
-  const schedule = ({ value: [every] }: { value: string[] }) => every && every !== props.all.every && doing(() => call("backups_schedule", { every }, network))
+  const schedule = (every: string) => every !== props.all.every && doing(() => call("backups_schedule", { every }, network))
   return (
     <>
       <Split open={!!opened()} onClose={() => setOpen()} detail={<Show when={opened()} fallback={<Show when={destinations().length}><Empty>Pick a destination to see its backups.</Empty></Show>}><Opened destination={opened()!} /></Show>}>
@@ -318,7 +316,7 @@ function Backups(props: { all: All }) {
             </List>
             <Section heading="Schedule">
               <Field label="Back Up" hint={props.all.retention}>
-                <Select.Root collection={schedules} value={[props.all.every]} onValueChange={schedule} />
+                <Select.Root items={schedules} value={props.all.every} onValueChange={schedule} />
               </Field>
             </Section>
           </Show>
