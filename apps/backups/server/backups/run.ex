@@ -2,10 +2,11 @@ defmodule Backups.Run do
   @moduledoc """
   Backing up to a destination, checking what's there, and restoring from it into the running network.
 
-  A backup reads every blob in the bucket and sends each one the destination hasn't been sent before, by what's in it,
-  as an object of its own: the blob as it is, under a random name. Then it sends the backup's list of blobs, named by
-  when the backup began. What was sent is kept here, so the destination's objects are never read to know what's
-  there.
+  A backup lists the bucket with each blob's tag (`OneCore.Bucket.list_tagged/1`), and reads only the blobs whose tag
+  isn't the one the last backup there had, as restic reads only files whose metadata changed: a blob with the same tag
+  is the same blob. It sends each one the destination hasn't been sent before, by what's in it, as an object of its
+  own: the blob as it is, under a random name. Then it sends the backup's list of blobs, named by when the backup
+  began. What was sent is kept here, so the destination's objects are never read to know what's there.
 
   A database is a snapshot and a log after it, where a snapshot is written whole and then the ones before the
   newest two are removed, and the log is only ever added to (`Database.Log`). So the log is listed last, once the
@@ -61,23 +62,32 @@ defmodule Backups.Run do
       OneCore.Call.stage(call, "Opening #{destination["name"]}")
       opened = Destination.open(call, destination)
 
-      known =
+      {known, last} =
         transaction(call, fn db ->
-          Map.new(
-            query(db, "select sha256, object from objects where destination = ?", [destination["id"]]),
-            &{&1["sha256"], &1["object"]}
-          )
+          {Map.new(
+             query(db, "select sha256, object from objects where destination = ?", [destination["id"]]),
+             &{&1["sha256"], &1["object"]}
+           ),
+           query(db, "select listed from backups where destination = ? order by at desc limit 1", [destination["id"]])}
         end)
 
+      # What the last backup there held of each blob by its key and tag, where what it was sent as is still there.
+      unchanged =
+        for [%{"listed" => listed}] <- [last],
+            %{"key" => key, "tag" => tag, "sha256" => sha256} = blob <- listed(listed),
+            known[sha256] == blob["object"],
+            into: %{},
+            do: {{key, tag}, %{key: key, tag: tag, object: blob["object"], size: blob["size"], sha256: sha256}}
+
       # The log is read last, once everything else is (`@moduledoc`).
-      log? = &(&1 =~ ~r{/log/\d+$})
-      {listed, sent} = copy(opened, Enum.reject(Bucket.list(""), log?), known, {[], []})
+      log? = &(elem(&1, 0) =~ ~r{/log/\d+$})
+      {listed, sent} = copy(opened, Enum.reject(Bucket.list_tagged(""), log?), {known, unchanged}, {[], []})
 
       {listed, sent} =
         copy(
           opened,
-          Enum.filter(Bucket.list(""), log?),
-          Map.merge(known, Map.new(sent, &{&1.sha256, &1.object})),
+          Enum.filter(Bucket.list_tagged(""), log?),
+          {Map.merge(known, Map.new(sent, &{&1.sha256, &1.object})), unchanged},
           {listed, sent}
         )
 
@@ -163,16 +173,21 @@ defmodule Backups.Run do
     end
   end
 
-  # Reads `keys` from the bucket, a few at once, and sends what the destination doesn't have: the blobs listed, and the
-  # objects sent. A blob removed since it was listed isn't there to back up.
-  defp copy(opened, keys, known, {listed, sent}) do
-    keys
+  # Reads the blobs `tagged` from the bucket that aren't `unchanged` since the last backup, a few at once, and sends
+  # what the destination doesn't have: the blobs listed, and the objects sent. A blob removed since it was listed
+  # isn't there to back up.
+  defp copy(opened, tagged, {known, unchanged}, {listed, sent}) do
+    {kept, changed} = Enum.split_with(tagged, &is_map_key(unchanged, &1))
+    listed = Enum.reduce(kept, listed, &[unchanged[&1] | &2])
+
+    changed
+    |> Enum.map(&elem(&1, 0))
     |> Enum.chunk_every(@together)
     |> Enum.reduce({listed, sent, known}, fn keys, {listed, sent, known} ->
-      OneCore.Call.stage(opened.call, "Backing up to #{opened.destination["name"]}: #{length(listed)} blobs read")
+      OneCore.Call.stage(opened.call, "Backing up to #{opened.destination["name"]}: #{length(listed)} blobs listed")
 
       {listed, new, known} =
-        for {key, {:ok, data, _tag}} <- Enum.zip(keys, Bucket.read_all(keys)), reduce: {listed, [], known} do
+        for {key, {:ok, data, tag}} <- Enum.zip(keys, Bucket.read_all(keys)), reduce: {listed, [], known} do
           {listed, new, known} ->
             sha256 = digest(data)
 
@@ -186,7 +201,7 @@ defmodule Backups.Run do
                   {object, [{object, data} | new], Map.put(known, sha256, object)}
               end
 
-            {[%{key: key, object: object, size: byte_size(data), sha256: sha256} | listed], new, known}
+            {[%{key: key, tag: tag, object: object, size: byte_size(data), sha256: sha256} | listed], new, known}
         end
 
       for {object, data} <- Enum.reverse(new), do: Destination.put(opened, "objects/" <> object, data)
@@ -307,14 +322,16 @@ defmodule Backups.Run do
     blobs = listed(listed)
     held = blobs |> Enum.map(& &1["object"]) |> Enum.uniq()
 
+    # Each object is hashed as it's read and let go, so a check holds a few objects at a time, however large the
+    # backup.
     read =
       held
-      |> Task.async_stream(&{&1, Destination.get(opened, "objects/" <> &1)}, max_concurrency: 8, timeout: :infinity)
+      |> Task.async_stream(&read_back(opened, &1), max_concurrency: 8, timeout: :infinity)
       |> Enum.map(fn {:ok, read} -> read end)
 
-    wrong = for {object, data} <- read, data == nil or digest(data) != objects[object], into: MapSet.new(), do: object
+    wrong = for {object, _bytes, digest} <- read, digest != objects[object], into: MapSet.new(), do: object
     listed_ok = digest(Destination.get(opened, "backups/" <> name) || "") == listed_digest
-    bytes = Enum.sum_by(read, fn {_object, data} -> byte_size(data || "") end)
+    bytes = Enum.sum_by(read, fn {_object, bytes, _digest} -> bytes end)
     took = System.os_time(:millisecond) - began
     message = "#{destination["name"]}: read back backup #{name}, #{length(held)} objects, #{size(bytes)}, in #{seconds(took)}."
 
@@ -346,6 +363,14 @@ defmodule Backups.Run do
         end)
 
         raise message <> not_as_sent
+    end
+  end
+
+  # An object as it's read back: its name, its size, and its digest, or `nil` where it isn't there.
+  defp read_back(opened, object) do
+    case Destination.get(opened, "objects/" <> object) do
+      nil -> {object, 0, nil}
+      data -> {object, byte_size(data), digest(data)}
     end
   end
 

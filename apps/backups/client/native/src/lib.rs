@@ -17,7 +17,8 @@ use serde::Deserialize;
 use sha2::{Digest, Sha256};
 
 const USAGE: &str = "one restore --from <destination> --to <bucket> [--backup <name>]\n\n\
-    Restores a whole network from a backup into an empty bucket, with no network running. A destination or a bucket is a\n\
+    Restores a whole network from a backup into an empty bucket, with no network running, or carries on with one that\n\
+    was cut short, into the bucket it was restoring. A destination or a bucket is a\n\
     folder, or S3-compatible storage as https://<endpoint>/<bucket>[/<folder>], whose keys are in the file\n\
     --from-keys or --to-keys names, as ACCESS_KEY_ID=... and SECRET_ACCESS_KEY=... lines (the presigner's `secrets`\n\
     has them). --backup names one of the destination's backups, the newest if left out, and with --list the\n\
@@ -209,13 +210,22 @@ pub async fn restore(args: &[String]) -> Result<String> {
     let backup = name.trim_start_matches("backups/");
     let listed = from.get(&name).await?.with_context(|| format!("There's no backup {backup} there."))?;
     let listed: Listed = serde_json::from_slice(&listed).context("that backup's list of blobs isn't one")?;
-    if !to.list("").await?.is_empty() {
-        bail!("{} isn't empty. A network is restored into an empty bucket.", flags["to"])
-    }
 
     // The network's list of servers isn't restored: the first server started on the bucket is its server then, as
     // a new network's first is, since the ones it had may be gone with the bucket.
     let blobs: Vec<Blob> = listed.blobs.into_iter().filter(|blob| blob.key != "network/servers").collect();
+    // A network is restored into an empty bucket, or into one that a restore of this backup was cut short in, which
+    // holds only blobs it has: it carries on from there, as a bucket writes each blob whole or not at all.
+    let there: std::collections::HashSet<String> = to.list("").await?.into_iter().collect();
+    let keys: std::collections::HashSet<&str> = blobs.iter().map(|blob| blob.key.as_str()).collect();
+    if let Some(other) = there.iter().find(|key| !keys.contains(key.as_str())) {
+        bail!(
+            "{} holds {other}, which backup {backup} doesn't. A network is restored into an empty bucket, or into one a \
+             restore of the same backup was cut short in.",
+            flags["to"]
+        )
+    }
+    let blobs: Vec<Blob> = blobs.into_iter().filter(|blob| !there.contains(&blob.key)).collect();
     let began = Instant::now();
     for some in blobs.chunks(AT_ONCE) {
         try_join_all(some.iter().map(|blob| async {
@@ -230,10 +240,11 @@ pub async fn restore(args: &[String]) -> Result<String> {
     }
     let bytes = blobs.iter().map(|blob| blob.size).sum();
     Ok(format!(
-        "Restored backup {backup}: {} blobs, {}, in {} ms. The first server started on it acts for the network, and \
+        "Restored backup {backup}: {} blobs, {}, in {} ms{}. The first server started on it acts for the network, and \
          its other servers are added again.",
         blobs.len(),
         size(bytes),
-        began.elapsed().as_millis()
+        began.elapsed().as_millis(),
+        if there.is_empty() { String::new() } else { format!(", carrying on from the {} it had restored", there.len()) }
     ))
 }
