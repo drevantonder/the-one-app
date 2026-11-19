@@ -170,7 +170,7 @@ impl Screen {
 
     /// The page of the frame with the keyboard, if one has it.
     pub(super) fn focused_frame(&mut self) -> Option<&mut Screen> {
-        let id = self.focused?;
+        let id = self.focus.focused?;
         self.frames.get_mut(&id).map(|child| &mut child.screen)
     }
 
@@ -191,12 +191,12 @@ impl Screen {
 
     /// The keyboard comes into this page by Tab, as into a frame: to its first stop, or its last. → whether it has one.
     pub(super) fn enter(&mut self, back: bool) -> bool {
-        let next = if back { self.tab_order.last() } else { self.tab_order.first() }.copied();
+        let next = if back { self.focus.tab_order.last() } else { self.focus.tab_order.first() }.copied();
         let Some(next) = next else { return false };
         self.states.focus_visible = true;
         self.focus(Some(next));
         self.reveal(next);
-        if self.fields.contains_key(&next) {
+        if self.editing.fields.contains_key(&next) {
             self.edit(next, crate::editing::Field::select_all);
         }
         true
@@ -215,7 +215,7 @@ impl Screen {
 
     /// Where the frame with the keyboard has its caret, in the window.
     pub(super) fn frame_caret(&self) -> Option<Option<Bounds<f32>>> {
-        let child = self.frames.get(&self.focused?)?;
+        let child = self.frames.get(&self.focus.focused?)?;
         Some(child.screen.caret_rect().map(|caret| Bounds { origin: point(caret.origin.x + child.rect.origin.x, caret.origin.y + child.rect.origin.y), size: caret.size }))
     }
 

@@ -571,7 +571,7 @@ impl Windows {
                     && window.parts[0].renderer.is_some()
                 {
                     screen.paint(window.room, window.parts[0].native.scale(), &mut self.text, &self.atlas, &mut window.scene);
-                    let glass = screen.glass.clone();
+                    let glass = screen.glass().to_vec();
                     window.arrange(&self.display, &self.context, &self.atlas, &glass);
                 }
                 continue;
@@ -593,7 +593,7 @@ impl Windows {
                 }
                 Err(why) => crate::view::paint_message(why, appearance(), room, scale, &mut self.text, &self.atlas, &mut window.scene),
             }
-            let glass = window.screen.as_ref().map(|screen| screen.glass.clone()).unwrap_or_default();
+            let glass = window.screen.as_ref().map(|screen| screen.glass().to_vec()).unwrap_or_default();
             window.arrange(&self.display, &self.context, &self.atlas, &glass);
             if std::mem::take(&mut window.placing) {
                 self.display.summon(&window.parts[0].native, &places(window.places.as_deref()), window.room);

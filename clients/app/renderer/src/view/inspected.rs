@@ -59,7 +59,7 @@ impl Screen {
                 let mut found = inspect::query(&self.tree, &self.rects, request);
                 // An input's editing state as the host has it, which is ahead of what its app set.
                 for node in found["nodes"].as_array_mut().into_iter().flatten() {
-                    if let Some(field) = node["node"].as_u64().and_then(|id| self.fields.get(&id)) {
+                    if let Some(field) = node["node"].as_u64().and_then(|id| self.editing.fields.get(&id)) {
                         node["editing"] = json!(field.value());
                     }
                 }
@@ -77,7 +77,7 @@ impl Screen {
                         let reached = at.map(|at| self.under(at)).unwrap_or_default();
                         if !reached.contains(&node) && (reached.is_empty() || self.pressed_in(&reached) != self.pressed_in(&self.chain_from(node))) {
                             let tapped = self.press(node)?;
-                            return Ok(json!({"tapped": tapped, "editing": self.fields.get(&tapped).map(editing::Field::value)}));
+                            return Ok(json!({"tapped": tapped, "editing": self.editing.fields.get(&tapped).map(editing::Field::value)}));
                         }
                         at.expect("a node reached is drawn")
                     }
@@ -97,10 +97,10 @@ impl Screen {
                 self.pointer_up(at, 0);
                 // A point in an input: `clicks` 2 selects a word there, 3 its line.
                 let clicks = request.inputs.get("clicks").and_then(Value::as_u64).unwrap_or(1).clamp(1, 3) as u8;
-                if let Some(tapped) = tapped.filter(|tapped| clicks > 1 && self.fields.contains_key(tapped)) {
+                if let Some(tapped) = tapped.filter(|tapped| clicks > 1 && self.editing.fields.contains_key(tapped)) {
                     self.press_input(tapped, at, clicks, request.bool("shift"));
                 }
-                json!({"tapped": tapped, "focused": self.focused, "editing": tapped.and_then(|tapped| self.fields.get(&tapped)).map(editing::Field::value)})
+                json!({"tapped": tapped, "focused": self.focus.focused, "editing": tapped.and_then(|tapped| self.editing.fields.get(&tapped)).map(editing::Field::value)})
             }
             "type" => {
                 let text = request.str("text").context("say what to type, as text")?.to_owned();
@@ -112,23 +112,23 @@ impl Screen {
                     false => {
                         // An input in a frame's page with the keyboard takes it there.
                         if let Some(child) = self.focused_frame() {
-                            let input = child.focused.filter(|id| child.fields.contains_key(id)).context("nothing in the frame with the keyboard takes text")?;
+                            let input = child.focus.focused.filter(|id| child.editing.fields.contains_key(id)).context("nothing in the frame with the keyboard takes text")?;
                             child.type_text(input, &text);
-                            let editing = child.fields.get(&input).map(editing::Field::value);
+                            let editing = child.editing.fields.get(&input).map(editing::Field::value);
                             return Ok(json!({"typed": input, "value": editing.as_ref().map(|editing| &editing.text), "editing": editing}));
                         }
-                        self.focused.context("nothing has the keyboard: say which input, by a selector")?
+                        self.focus.focused.context("nothing has the keyboard: say which input, by a selector")?
                     }
                 };
                 if self.tree.nodes.get(&input).is_none_or(|node| node.kind != Kind::Input) {
                     bail!("node {input} isn't an input, so it takes no text");
                 }
                 self.type_text(input, &text);
-                let editing = self.fields.get(&input).map(editing::Field::value);
+                let editing = self.editing.fields.get(&input).map(editing::Field::value);
                 json!({"typed": input, "value": editing.as_ref().map(|editing| &editing.text), "editing": editing})
             }
             "ime" => {
-                let input = self.focused.filter(|id| self.fields.contains_key(id)).context("no input has the keyboard: tap one first")?;
+                let input = self.focus.focused.filter(|id| self.editing.fields.contains_key(id)).context("no input has the keyboard: tap one first")?;
                 if let Some([start, end]) = request.inputs.get("select").and_then(|range| serde_json::from_value::<[usize; 2]>(range.clone()).ok()) {
                     self.ime(Ime::Select(start..end));
                 }
@@ -142,7 +142,7 @@ impl Screen {
                     (None, None) if request.inputs.contains_key("select") => {}
                     (None, None) => bail!("say what the input method composes (`preedit`, and its `cursor`), commits (`commit`), selects (`select`) or finishes (`finish`)"),
                 }
-                json!({"node": input, "editing": self.fields.get(&input).map(editing::Field::value)})
+                json!({"node": input, "editing": self.editing.fields.get(&input).map(editing::Field::value)})
             }
             "key" => {
                 let key = Key::of(request)?;

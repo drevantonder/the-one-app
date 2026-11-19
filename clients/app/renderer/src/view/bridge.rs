@@ -30,7 +30,7 @@ impl Screen {
     /// changed since `connection` was: attached to an input that takes typing as it takes the keyboard, detached as it
     /// loses it, as Flutter's `TextInput.attach` and `TextInputConnection.close` call it.
     pub fn text_input(&self, connection: &mut TextInputConnection) -> Vec<TextInput> {
-        let typing = self.focused.filter(|id| self.fields.get(id).is_some_and(|field| !field.readonly));
+        let typing = self.focus.focused.filter(|id| self.editing.fields.get(id).is_some_and(|field| !field.readonly));
         let mut calls = Vec::new();
         if connection.client != typing {
             if connection.client.is_some() {
@@ -87,7 +87,7 @@ impl Screen {
 
     /// What has the keyboard.
     pub fn focused(&self) -> Option<Id> {
-        self.focused
+        self.focus.focused
     }
 
     /// Gives the keyboard to `id`, or takes it from what has it, as a screen reader or a keyboard's Next asks.
@@ -103,17 +103,17 @@ impl Screen {
 
     /// Input `id`'s editing state.
     pub fn value(&self, id: Id) -> Option<editing::Value> {
-        self.fields.get(&id).map(editing::Field::value)
+        self.editing.fields.get(&id).map(editing::Field::value)
     }
 
     /// The inputs, in the order Tab goes, as last painted.
     pub fn inputs(&self) -> Vec<Id> {
-        self.tab_order.iter().copied().filter(|id| self.fields.contains_key(id)).collect()
+        self.focus.tab_order.iter().copied().filter(|id| self.editing.fields.contains_key(id)).collect()
     }
 
     /// Whether what a press at `at` presses is an input, which a finger gives the keyboard only as it lifts.
     pub fn input_at(&self, at: Point<f32>) -> bool {
-        self.under(at).into_iter().find(|id| self.placed(*id).is_some_and(|placed| placed.pressable)).is_some_and(|id| self.fields.contains_key(&id))
+        self.under(at).into_iter().find(|id| self.placed(*id).is_some_and(|placed| placed.pressable)).is_some_and(|id| self.editing.fields.contains_key(&id))
     }
 
     /// What a keyboard bridge needs to know of input `id`: what kind of text it takes (`type`, `inputmode`), what may
@@ -134,7 +134,7 @@ impl Screen {
             "action": node.str("action").unwrap_or(if multiline { "newline" } else { "done" }),
             "label": node.str("aria-label").or_else(|| node.str("placeholder")),
             "rect": {"x": rect.x, "y": rect.y, "width": rect.width, "height": rect.height},
-            "text": self.fields.get(&id).map(|field| field.value().text),
+            "text": self.editing.fields.get(&id).map(|field| field.value().text),
         }))
     }
 
@@ -145,7 +145,7 @@ impl Screen {
     pub fn action(&mut self, id: Id, action: &str) {
         if self.tree.nodes.get(&id).is_some_and(|node| node.listens("action")) {
             self.tell(id, "action", json!({"action": action}));
-            if self.touch && matches!(action, "done" | "go" | "search" | "send") && self.focused == Some(id) {
+            if self.touch && matches!(action, "done" | "go" | "search" | "send") && self.focus.focused == Some(id) {
                 self.focus(None);
             }
             return;
@@ -170,7 +170,7 @@ impl Screen {
             self.pointer_event(&chain, "pointercancel", at, 0, None);
         }
         self.states.pressed = None;
-        self.selecting = None;
+        self.editing.selecting = None;
     }
 
     /// The device's Back: what's open over its page shuts, as the page's Escape would (`notifications/one/back`).
@@ -193,9 +193,9 @@ impl Screen {
 
     /// Selects the word at `at` in the input there, as a finger held on it does; → whether there was one.
     pub fn select_word(&mut self, at: Point<f32>) -> bool {
-        let Some(id) = self.under(at).into_iter().find(|id| self.fields.contains_key(id)) else { return false };
+        let Some(id) = self.under(at).into_iter().find(|id| self.editing.fields.contains_key(id)) else { return false };
         self.focus(Some(id));
-        let index = self.drawn.get(&id).map_or(usize::MAX, |drawn| drawn.index_at(at));
+        let index = self.editing.drawn.get(&id).map_or(usize::MAX, |drawn| drawn.index_at(at));
         self.edit(id, |field| field.press(index.min(field.display().len()), false, 2, false));
         true
     }
