@@ -628,7 +628,9 @@ defmodule Vault do
             state: %{type: "string"},
             code: %{type: "string"},
             error: %{type: "string"},
-            again: %{type: "boolean", description: "Starts it again, once it ended without signing in"}
+            again: %{type: "boolean", description: "Starts it again, once it ended without signing in"},
+            open: %{type: "string", description: "Its link opened, in the browser this random value is kept in"},
+            browser: %{type: "string", description: "The random value the browser it was opened in keeps"}
           },
           required: ["state"]
         },
@@ -646,7 +648,7 @@ defmodule Vault do
             item: %{type: "string", description: "What it's kept as in the Vault, once it's ok"},
             account: %{type: "string", description: "Who signed in, where the service says their email"},
             problem: %{type: "string", description: "Why it failed"},
-            url: %{type: "string", description: "Where it's started again, with `again`"}
+            url: %{type: "string", description: "Where it's started again, with `again`, or where its link goes, with `open`"}
           },
           required: ["service", "status", "began", "apps"]
         }

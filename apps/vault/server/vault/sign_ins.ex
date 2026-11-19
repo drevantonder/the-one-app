@@ -28,6 +28,9 @@ defmodule Vault.SignIns do
   # How long a sign-in waits for its browser, in seconds.
   @waits 600
 
+  # What a sign-in's page says in a browser its link wasn't opened in.
+  @elsewhere "Finish signing in in the browser you began in, or start it again."
+
   @doc "The states a sign-in is in."
   def states, do: ["started" | @moves["started"]]
 
@@ -76,7 +79,8 @@ defmodule Vault.SignIns do
         )
       end)
 
-      link(service, client["client_id"], address <> "/vault/callback", state, verifier)
+      # Its person opens it at the network's edge, which keeps the browser that did (`opened/4`).
+      address <> "/vault/start?" <> URI.encode_query(%{"state" => state})
     end)
   end
 
@@ -125,6 +129,8 @@ defmodule Vault.SignIns do
         end
 
       cond do
+        inputs["open"] -> opened(call, db, sign_in, inputs["open"])
+        not browser?(sign_in, inputs["browser"]) -> raise(@elsewhere)
         inputs["again"] -> again(call, db, sign_in)
         sign_in["ending"] -> ending(sign_in, JSON.decode!(sign_in["ending"]))
         true -> returned(call, db, sign_in, inputs)
@@ -247,6 +253,31 @@ defmodule Vault.SignIns do
 
     authorize
   end
+
+  # Its link opened, in the browser its person's edge says `browser` (a random value it keeps in a cookie): the first
+  # to open it is the only one it finishes in, as OAuth 2.1 binds a request's state to its user agent (RFC 9700
+  # 4.7.1). Gives where the service's page is, asked for a code that only its verifier redeems.
+  defp opened(call, db, sign_in, browser) when is_binary(browser) and byte_size(browser) >= 32 do
+    opened =
+      Store.transaction(call, db, fn d ->
+        Store.query(d, "update sign_ins set browser = ? where state = ? and browser is null and ended is null returning state", [hashed(browser), sign_in["state"]])
+      end)
+
+    if opened == [], do: raise("This sign-in was opened already, in another browser. Start it again.")
+    service = service(JSON.decode!(sign_in["service"]))
+    client = Items.fields(Items.find!(call, db, service.client))
+    url = link(service, client["client_id"], address() <> "/vault/callback", sign_in["state"], sign_in["verifier"])
+    %{service: service.name, status: "started", began: JSON.decode!(sign_in["began"]), apps: JSON.decode!(sign_in["apps"]), url: url}
+  end
+
+  defp opened(_call, _db, _sign_in, _browser), do: raise(@elsewhere)
+
+  defp browser?(%{"browser" => kept}, browser) when is_binary(kept) and is_binary(browser),
+    do: :crypto.hash_equals(kept, hashed(browser))
+
+  defp browser?(_sign_in, _browser), do: false
+
+  defp hashed(browser), do: Base.encode16(:crypto.hash(:sha256, browser), case: :lower)
 
   # A sign-in writes only into an item a sign-in to the same service made, which the app keeps or uses, as signing in
   # again does, never into another of its person's.

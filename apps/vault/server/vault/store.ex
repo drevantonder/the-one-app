@@ -31,7 +31,9 @@ defmodule Vault.Store do
       state text primary key, verifier text not null, service text not null, app text not null,
       item text not null, at integer not null, began text, apps text, ended text, ending text
     ) without rowid
-    """
+    """,
+    # The browser a sign-in's link was opened in, by its hash, which alone finishes it.
+    "alter table sign_ins add column browser text"
   ]
 
   # Someone's Vault is theirs alone: no relation tuple has anyone else ask for a user, the network's owner included.
