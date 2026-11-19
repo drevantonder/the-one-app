@@ -1312,8 +1312,10 @@ const line = byId("line")
 /// leaves to it.
 /** @type {string | undefined} */
 let excluded
-/// A finger on the line (`pull`, below).
-/** @type {{ id: number, x: number, y: number, taken?: boolean, recent: [number, number][] } | undefined} */
+/// The fingers on the line, by their pointers, where each came down, and the one pulling it (`pull`, below).
+/** @type {Map<number, { x: number, y: number }>} */
+const touching = new Map()
+/** @type {{ id: number, x: number, recent: [number, number][] } | undefined} */
 let pull
 function rail() {
   const now = shown.getSnapshot()
@@ -1336,24 +1338,26 @@ addEventListener("resize", rail)
 const PULLED = 0.18
 /// A finger on the line, pulling it in: once it has come in far enough to say so, the window's move to the Home
 /// Screen follows it (`grab` with `home`, and `drag`), the app as far shrunk as `p`, and let go, it goes home if it
-/// came in past `PULLED` or was flicked in, and otherwise springs back. A tap does nothing.
+/// came in past `PULLED` or was flicked in, and otherwise springs back. A tap does nothing. The first finger to come
+/// in takes it, and only its lifting lets go: another on the line meanwhile, as the hand holding the phone touches
+/// its edge, is ignored, as iOS's swipe home ignores a second finger.
 line.addEventListener("pointerdown", (event) => {
   if (event.button !== 0) return
   line.setPointerCapture(event.pointerId)
-  pull = { id: event.pointerId, x: event.clientX, y: event.clientY, recent: [] }
+  touching.set(event.pointerId, { x: event.clientX, y: event.clientY })
 })
 line.addEventListener("pointermove", (event) => {
-  if (!pull || event.pointerId !== pull.id) return
-  const inward = (pull.x - event.clientX) / innerWidth
-  if (pull.taken === undefined) {
+  const down = touching.get(event.pointerId)
+  if (!pull && down) {
     // Too little yet to say which way it goes; up or down isn't a pull.
-    if (Math.hypot(event.clientX - pull.x, event.clientY - pull.y) < 8) return
-    pull.taken = inward > 0 && Math.abs(event.clientX - pull.x) > Math.abs(event.clientY - pull.y)
-    if (!pull.taken) return
+    if (Math.hypot(event.clientX - down.x, event.clientY - down.y) < 8) return
+    touching.delete(event.pointerId)
+    if (!(down.x > event.clientX && Math.abs(event.clientX - down.x) > Math.abs(event.clientY - down.y))) return
     on({ type: "grab", home: true })
-    pull.taken = moving()?.matches("tracking") === true
+    if (moving()?.matches("tracking")) pull = { id: event.pointerId, x: down.x, recent: [] }
   }
-  if (!pull.taken) return
+  if (event.pointerId !== pull?.id) return
+  const inward = (pull.x - event.clientX) / innerWidth
   // The app follows the finger, and past the card (`HELD`) slows to a stop, as a rubber band does.
   const p = HELD * Math.tanh(Math.max(0, inward) / HELD)
   pull.recent = [...pull.recent.filter(([then]) => event.timeStamp - then <= 100), [event.timeStamp, inward]]
@@ -1362,9 +1366,9 @@ line.addEventListener("pointermove", (event) => {
 })
 /** @param {PointerEvent} event */
 function letGo(event) {
-  if (!pull || event.pointerId !== pull.id) return
-  const { taken, recent: moves } = pull
-  if (!taken) return void (pull = undefined)
+  touching.delete(event.pointerId)
+  if (event.pointerId !== pull?.id) return
+  const moves = pull.recent
   // How fast it was coming in over its last tenth of a second, in widths a second.
   const [[since, was] = [0, 0]] = moves
   const [at, inward] = moves.at(-1) ?? [0, 0]
