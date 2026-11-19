@@ -148,21 +148,29 @@ impl Pull {
     pub fn step(&mut self, size: Size<f32>, icon: Option<Bounds<f32>>, reduced: bool) -> (Moved, Option<f32>) {
         let Some(target) = self.target else { return (moved(self.p, size, icon, reduced), None) };
         let now = Instant::now();
-        // A frame late, as when the app was in the background, is taken as one, so nothing jumps.
-        let dt = now.duration_since(self.stepped).as_secs_f32().min(1.0 / 30.0);
+        let dt = now.duration_since(self.stepped).as_secs_f32();
         self.stepped = now;
-        let (mut p, mut velocity) = (self.p, self.velocity);
-        let mut at = 0.0;
-        while at < dt {
-            let slice = (1.0 / 240.0f32).min(dt - at);
-            velocity += (-STIFFNESS * (p - target) - 2.0 * STIFFNESS.sqrt() * velocity) * slice;
-            p += velocity * slice;
-            at += slice;
-        }
-        let still = (p - target).abs() < 0.001 && velocity.abs() < 0.05;
-        (self.p, self.velocity) = if still { (target, 0.0) } else { (p, velocity) };
+        let still;
+        (self.p, self.velocity, still) = spring(self.p, self.velocity, target, dt);
         (moved(self.p, size, icon, reduced), still.then_some(target))
     }
+}
+
+/// Steps a critically damped spring at `p`, going `velocity` a second, `dt` seconds on toward `target`, as the page's
+/// moves have it (client.js's `spring`): → where it is, how fast it goes, and whether it's still there. A step late, as
+/// when the app was in the background, is taken as a frame's, so nothing jumps.
+pub fn spring(p: f32, velocity: f32, target: f32, dt: f32) -> (f32, f32, bool) {
+    let dt = dt.min(1.0 / 30.0);
+    let (mut p, mut velocity) = (p, velocity);
+    let mut at = 0.0;
+    while at < dt {
+        let slice = (1.0 / 240.0f32).min(dt - at);
+        velocity += (-STIFFNESS * (p - target) - 2.0 * STIFFNESS.sqrt() * velocity) * slice;
+        p += velocity * slice;
+        at += slice;
+    }
+    let still = (p - target).abs() < 0.001 && velocity.abs() < 0.05;
+    if still { (target, 0.0, true) } else { (p, velocity, false) }
 }
 
 /// The window at `p` of its way home, on a window `size` big, into `icon` where it opened from one, as the page's

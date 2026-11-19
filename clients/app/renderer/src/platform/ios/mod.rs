@@ -141,6 +141,7 @@ thread_local! {
     /// Each finger on a window, and each window's scroll carrying on after its finger let go.
     static TOUCHES: RefCell<HashMap<WindowId, Touch>> = RefCell::new(HashMap::new());
     static FLINGS: RefCell<HashMap<WindowId, Fling>> = RefCell::new(HashMap::new());
+    static SLIDES: RefCell<HashMap<WindowId, Slide>> = RefCell::new(HashMap::new());
     /// What each window's text input plugin said, until the windows hear it: it can say it while they're in use.
     static SAID: RefCell<Vec<(WindowId, TextInputClient)>> = const { RefCell::new(Vec::new()) };
 }
@@ -271,6 +272,7 @@ fn with_windows<R>(f: impl FnOnce(&mut Windows) -> R) -> Option<R> {
             }
         }
         fling(windows);
+        slide(windows);
         windows.turn();
         for window in windows.windows.values() {
             if let Ok(screen) = &window.screen {
@@ -279,7 +281,7 @@ fn with_windows<R>(f: impl FnOnce(&mut Windows) -> R) -> Option<R> {
                 native.a11y.update(screen, (size.width as f32, size.height as f32), native.scale());
             }
         }
-        let flinging = FLINGS.with(|flings| !flings.borrow().is_empty());
+        let flinging = FLINGS.with(|flings| !flings.borrow().is_empty()) || SLIDES.with(|slides| !slides.borrow().is_empty());
         let due = windows.due();
         schedule(if flinging { Some(due.map_or(FRAME, |due| due.min(FRAME))) } else { due });
         Some(result)
@@ -356,6 +358,7 @@ impl Display {
         if let Some(id) = id {
             TOUCHES.with(|touches| touches.borrow_mut().remove(&id));
             FLINGS.with(|flings| flings.borrow_mut().remove(&id));
+            SLIDES.with(|slides| slides.borrow_mut().remove(&id));
         }
         if let Some(behind) = &native.behind {
             behind.makeKeyWindow();
@@ -469,6 +472,11 @@ impl NativeWindow {
     /// a finger is, where they are.
     fn slide(&self, across: f32) {
         self.card.setTransform(CGAffineTransform { a: 1.0, b: 0.0, c: 0.0, d: 1.0, tx: across as f64, ty: 0.0 });
+    }
+
+    /// How far across it's slid (`slide`).
+    fn slid(&self) -> f32 {
+        self.card.transform().tx as f32
     }
 
     pub fn has_surface(&self) -> bool {
@@ -587,6 +595,8 @@ struct Touch {
     edge: bool,
     start: Point<f32>,
     last: Point<f32>,
+    /// It's moved past the slop, so it's decided whether it pans or is what it's on's (`Screen::pans`).
+    moved: bool,
     panning: bool,
     on_input: bool,
     stopped: bool,
@@ -599,6 +609,40 @@ struct Fling {
     at: Point<f32>,
     velocity: Point<f32>,
     stepped: Instant,
+}
+
+/// A window let go of from the left edge, springing back to where it was or off to the right (`target`, in points),
+/// from where it is and how fast it's going (points a second), and when it last stepped.
+struct Slide {
+    across: f32,
+    velocity: f32,
+    target: f32,
+    stepped: Instant,
+}
+
+/// Steps every window springing from the edge to now, with the rail's spring; one that's slid off closes.
+fn slide(windows: &mut Windows) {
+    let now = Instant::now();
+    let mut off = Vec::new();
+    SLIDES.with(|slides| {
+        slides.borrow_mut().retain(|id, slide| {
+            let Some(window) = windows.windows.get(id) else { return false };
+            let native = &window.parts[0].native;
+            let width = native.size().width.0.max(1.0);
+            let dt = now.duration_since(slide.stepped).as_secs_f32();
+            slide.stepped = now;
+            let (at, velocity, still) = rail::spring(slide.across / width, slide.velocity / width, slide.target / width, dt);
+            (slide.across, slide.velocity) = (at * width, velocity * width);
+            native.slide(slide.across);
+            if still && slide.target > 0.0 {
+                off.push(*id);
+            }
+            !still
+        });
+    });
+    for id in off {
+        windows.close(id);
+    }
 }
 
 /// Steps every fling to now, stopping one that's slow enough or reached the end of what it scrolls.
@@ -634,9 +678,12 @@ fn touch_at(screen: &mut crate::Screen, native: &NativeWindow, id: WindowId, fin
         match phase {
             Phase::Down => {
                 let stopped = FLINGS.with(|flings| flings.borrow_mut().remove(&id)).is_some();
-                let edge = at.x < EDGE;
+                // One that lands as the window springs from the edge takes it where it is.
+                let caught = SLIDES.with(|slides| slides.borrow_mut().remove(&id)).is_some();
+                let edge = caught || at.x < EDGE;
                 let on_input = !edge && screen.input_at(at);
-                touches.insert(id, Touch { finger, edge, start: at, last: at, panning: false, on_input, stopped, lately: vec![(Instant::now(), at)] });
+                let start = if caught { point(at.x - native.slid(), at.y) } else { at };
+                touches.insert(id, Touch { finger, edge, start, last: at, moved: false, panning: false, on_input, stopped, lately: vec![(Instant::now(), at)] });
                 if !edge && !on_input && !stopped {
                     screen.pointer_down(at, 0, false);
                 }
@@ -649,10 +696,15 @@ fn touch_at(screen: &mut crate::Screen, native: &NativeWindow, id: WindowId, fin
                 if touch.edge {
                     return native.slide((at.x - touch.start.x).max(0.0));
                 }
-                if !touch.panning && ((at.x - touch.start.x).abs() > SLOP || (at.y - touch.start.y).abs() > SLOP) {
-                    touch.panning = true;
-                    if !touch.on_input && !touch.stopped {
+                // Past the slop, it pans where what's under it scrolls that way, and is otherwise what it's on's to follow
+                // (a row swiped across, a sheet pulled down), as a browser decides by `touch-action`.
+                if !touch.moved && ((at.x - touch.start.x).abs() > SLOP || (at.y - touch.start.y).abs() > SLOP) {
+                    touch.moved = true;
+                    touch.panning = touch.on_input || touch.stopped || screen.pans(touch.start, point(at.x - touch.start.x, at.y - touch.start.y));
+                    if touch.panning && !touch.on_input && !touch.stopped {
                         screen.pointer_cancel(at);
+                    } else if !touch.panning {
+                        screen.dragged();
                     }
                 }
                 if touch.panning {
@@ -669,14 +721,15 @@ fn touch_at(screen: &mut crate::Screen, native: &NativeWindow, id: WindowId, fin
                 let seconds = now.duration_since(first.0).as_secs_f32().max(0.008);
                 let velocity = point((first.1.x - at.x) / seconds, (first.1.y - at.y) / seconds);
                 if touch.edge {
-                    // Let go past a third of the way across, or flicked, it closes, once this event is done with.
-                    if at.x - touch.start.x > native.size().width.0 / 3.0 || -velocity.x > 500.0 {
-                        if let Some(native) = super::Native::started() {
-                            native.run(move |windows| windows.close(id));
-                        }
-                    } else {
-                        native.slide(0.0);
-                    }
+                    // Let go past a third of the way across, or flicked, it goes back: through what's open over the
+                    // app's page or its own screens first, as iOS's navigation does, springing back as the app goes
+                    // back a screen; from its first, the window slides off and closes. Short of that, it springs back.
+                    let width = native.size().width.0;
+                    let across = native.slid();
+                    let far = across > width / 3.0 || -velocity.x > 500.0;
+                    let out = far && !screen.back();
+                    let speed = if far { (-velocity.x).max(0.0) } else { 0.0 };
+                    SLIDES.with(|slides| slides.borrow_mut().insert(id, Slide { across, velocity: speed, target: if out { width } else { 0.0 }, stepped: now }));
                     return;
                 }
                 if touch.panning {
@@ -696,7 +749,8 @@ fn touch_at(screen: &mut crate::Screen, native: &NativeWindow, id: WindowId, fin
             Phase::Cancelled => {
                 let Some(touch) = touches.remove(&id) else { return };
                 if touch.edge {
-                    native.slide(0.0);
+                    let across = native.slid();
+                    SLIDES.with(|slides| slides.borrow_mut().insert(id, Slide { across, velocity: 0.0, target: 0.0, stepped: Instant::now() }));
                 } else if !touch.on_input && !touch.panning && !touch.stopped {
                     screen.pointer_cancel(at);
                 }
