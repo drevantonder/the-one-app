@@ -188,8 +188,12 @@ pub struct Screen {
     /// on before a frame is drawn (a paused one, stepped) finds it where it's got to.
     pub(super) changed: Option<f64>,
     asked: Option<Asked>,
-    /// What has the keyboard.
+    /// What has the keyboard, and what had it before.
     focused: Option<Id>,
+    blurred: Option<Id>,
+    /// Each modal dialog shown, the topmost last, with what had the keyboard as it came, which it gives the keyboard
+    /// back to as it goes, as the DOM's `<dialog>` does.
+    modals: Vec<(Id, Option<Id>)>,
     /// Each input's editing, as it's typed, ahead of the app setting it back, and the editing state its app last
     /// set, which replaces it only as it changes.
     fields: HashMap<Id, Field>,
@@ -298,6 +302,8 @@ impl Screen {
             changed: None,
             asked,
             focused: None,
+            blurred: None,
+            modals: Vec::new(),
             fields: HashMap::new(),
             set: HashMap::new(),
             drawn: HashMap::new(),
@@ -791,11 +797,29 @@ impl Screen {
         self.painted = (window.size, scale);
         self.tell_settled();
         scene.finish();
-        if let Some(modal) = modal
-            && !self.focused.is_some_and(|focused| self.within(focused, modal))
-        {
-            self.focus(Some(modal));
-            self.again = true;
+        // A modal that's gone gives the keyboard back to what had it as it came, if the keyboard was in it or is
+        // nowhere, and that's still there.
+        while let Some(&(gone, was)) = self.modals.last() {
+            if self.attached(gone) && self.tree.nodes.get(&gone).is_some_and(|node| node.str("aria-modal") == Some("true")) {
+                break;
+            }
+            self.modals.pop();
+            if self.focused.is_none_or(|focused| !self.attached(focused) || self.within(focused, gone)) {
+                self.focus(was.filter(|was| self.attached(*was)));
+                self.again = true;
+            }
+        }
+        if let Some(modal) = modal {
+            // What had the keyboard as it came: what has it now, or, where what's in it took it as it came
+            // (`autofocus`), what had it before that.
+            if !self.modals.iter().any(|(shown, _)| *shown == modal) {
+                let was = [self.focused, self.blurred].into_iter().flatten().find(|had| !self.within(*had, modal));
+                self.modals.push((modal, was));
+            }
+            if !self.focused.is_some_and(|focused| self.within(focused, modal)) {
+                self.focus(Some(modal));
+                self.again = true;
+            }
         }
         // What moved under a pointer that's still is what it's over now, as a browser finds again after layout.
         if let Some(at) = self.pointer.filter(|_| !self.touch) {
@@ -976,6 +1000,18 @@ impl Screen {
         false
     }
 
+    /// Whether node `id` is in the page's tree: under its root, not taken out of it, though its JS may still hold it.
+    fn attached(&self, id: Id) -> bool {
+        let mut at = Some(id);
+        while let Some(node) = at {
+            if node == 0 {
+                return true;
+            }
+            at = self.tree.parent(node);
+        }
+        false
+    }
+
     fn chain_from(&self, id: Id) -> Vec<Id> {
         let mut chain = vec![id];
         while let Some(parent) = chain.last().and_then(|id| self.placed(*id)).and_then(|placed| placed.parent) {
@@ -1139,6 +1175,7 @@ impl Screen {
         }
         self.blink = self.js.clock().now();
         let blurred = std::mem::replace(&mut self.focused, id);
+        self.blurred = blurred;
         if let Some(blurred) = blurred.filter(|blurred| self.tree.nodes.get(blurred).is_some_and(|node| node.listens("blur"))) {
             self.event(blurred, "blur", None);
         }
