@@ -4,7 +4,7 @@
 // key, which it says the next time it's used, gets the key encrypted to it by a device that holds it, here, once its
 // person says it may. Whoever uses it has their key from then on, so a passkey nobody here allowed never does.
 import { createEffect, createMemo, Errored, For, Loading, refresh, Show } from "solid-js"
-import { Button, call, changed, confirm, List, open, Problem, Row, Screen, Skeleton, toast, visible } from "ui"
+import { Button, call, changed, confirm, Empty, List, open, Problem, Row, Screen, Skeleton, toast, visible } from "ui"
 import { on, Remove } from "./mine.tsx"
 
 /** A passkey, as `sign-in_devices` answers it. */
@@ -68,7 +68,8 @@ const opens = (tool: string, inputs?: object) => async () => {
   }
 }
 
-const opening = <Button onPress={opens("sign-in_add_passkey")}>Add Passkey</Button>
+// A button of its own for each screen that has it: one made here would be shared by all, outside any of them.
+const opening = () => <Button onPress={opens("sign-in_add_passkey")}>Add Passkey</Button>
 
 // The devices are read by `<Show>`, outside the `<Screen>`, which keeps what's thrown inside it to itself and draws nothing.
 /// Sign In & Security, as Settings draws it: a section of its own, which Back leaves on a phone.
@@ -76,7 +77,7 @@ export default function SignInAndSecurity() {
   return (
   <Errored
     fallback={(error, retry) => (
-      <Screen heading="Sign In & Security" back action={opening}>
+      <Screen heading="Sign In & Security" back action={opening()}>
         <Problem
           heading="Can't show your passkeys"
           text={error() as Error}
@@ -85,10 +86,11 @@ export default function SignInAndSecurity() {
       </Screen>
     )}
   >
-    <Loading fallback={<Screen heading="Sign In & Security" back action={opening}><Skeleton rows={2} /></Screen>}>
+    <Loading fallback={<Screen heading="Sign In & Security" back action={opening()}><Skeleton rows={2} /></Screen>}>
       <Show when={mine()}>
         {(all) => (
-          <Screen heading="Sign In & Security" back action={opening}>
+          <Screen heading="Sign In & Security" back action={opening()}>
+            <Show when={all().passkeys.length} fallback={<Empty>No passkeys yet.</Empty>}>
             <List>
               <For each={all().passkeys} keyed={(passkey) => passkey.id}>
             {(passkey) => {
@@ -110,6 +112,7 @@ export default function SignInAndSecurity() {
             }}
           </For>
             </List>
+            </Show>
           </Screen>
         )}
       </Show>

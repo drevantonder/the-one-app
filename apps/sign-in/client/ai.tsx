@@ -2,7 +2,7 @@
 import { createMemo, Errored, Loading, Show } from "solid-js"
 import { Button, client, Empty, Problem, Screen, share, Skeleton, styles, Text, Textarea, toast, tokens, View } from "ui"
 
-const look = styles({ readable: { gap: tokens.length.gutter, maxWidth: tokens.length.readable } })
+const look = styles({ readable: { gap: tokens.length.gutter, maxWidth: tokens.length.readable }, button: { flexDirection: "row" } })
 
 const network = createMemo(() => client().then(({ network }) => network))
 
@@ -20,7 +20,9 @@ function Connect(props: { network: string }) {
     <View style={look.readable}>
       <Text>Send this to Claude, ChatGPT or any other AI.</Text>
       <Textarea aria-label="What to send" readOnly value={prompt()} />
-      <Button onPress={send}>Share</Button>
+      <View style={look.button}>
+        <Button onPress={send}>Share</Button>
+      </View>
     </View>
   )
 }
