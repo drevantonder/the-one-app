@@ -2,10 +2,9 @@
 // what's wrong; how often they're made and which are kept. A destination opens beside the list with its backups,
 // Restore, Check and Stop Backing Up Here. Backups are the network's, so every call is for the network.
 import { createMemo, createSignal, Errored, For, Loading, Match, refresh, Show, Switch } from "solid-js"
-import { Button, call, changed, confirm, Empty, Field, Input, List, Problem, RadioGroup, Row, Screen, Section, Select, Sheet, since, size, Skeleton, Split, Status, styles, Text, toast, tokens, View } from "ui"
+import { Button, call, changed, confirm, Empty, Field, Icon, Input, List, Problem, RadioGroup, Row, Screen, Section, Select, Sheet, since, size, Skeleton, Spinner, Split, Status, styles, Text, toast, tokens, View } from "ui"
 
 const look = styles({
-  buttons: { flexDirection: "row", flexWrap: "wrap", gap: tokens.length.gutter, maxWidth: tokens.length.readable },
   note: { color: tokens.colour.secondaryLabel },
   warns: { color: tokens.colour.red },
 })
@@ -81,7 +80,8 @@ async function doing<T>(does: () => Promise<T>): Promise<T | true | false> {
 
 const [open, setOpen] = createSignal<string>()
 const [adding, setAdding] = createSignal(false)
-const [restoring, setRestoring] = createSignal<Destination>()
+/// What's being restored from: a destination, and the backup if one was picked.
+const [restoring, setRestoring] = createSignal<{ destination: Destination; backup?: string }>()
 const [working, setWorking] = createSignal<string>()
 
 /// `does` under way on the button `which`, which shows it's working until it's done.
@@ -131,35 +131,37 @@ function Opened(props: { destination: Destination }) {
       <List>
         <Row heading={destination().kind === "folder" ? "Folder" : "Bucket"} text={destination().where} />
         <Show when={destination().machine}>
-          <Row heading="On" text={destination().machine} />
+          <Row heading="On" end={destination().machine} />
         </Show>
         <Show when={destination().item}>
-          <Row heading="Keys" text={`${destination().item}, in Everyone's Vault`} />
+          <Row heading="Keys" end={`${destination().item}, in Accounts`} />
         </Show>
-        <Row heading="Size" text={size(destination().size)} />
+        <Row heading="Size" end={size(destination().size)} />
       </List>
       <Show when={destination().backups.length}>
         <Section heading="Backups">
           <List>
             <For each={destination().backups} keyed={(backup) => backup.name}>
-              {(backup) => <Row heading={when(backup().at)} text={`${size(backup().bytes)} · ${size(backup().sent_bytes)} sent · ${took(backup().took)}`} />}
+              {(backup) => <Row heading={when(backup().at)} text={`${size(backup().bytes)} · ${size(backup().sent_bytes)} sent · ${took(backup().took)}`} onPress={() => setRestoring({ destination: destination(), backup: backup().name })} />}
             </For>
           </List>
         </Section>
       </Show>
-      <View style={look.buttons}>
-        <Show when={destination().backups.length}>
-          <Button variant="secondary" onPress={() => setRestoring(destination())}>Restore</Button>
-          <Button variant="outline" loading={working() === "check"} onPress={check}>Check</Button>
-        </Show>
-        <Button variant="destructive" onPress={stop}>Stop Backing Up Here</Button>
-      </View>
+      <Show when={destination().backups.length}>
+        <List>
+          <Row heading="Restore…" onPress={() => setRestoring({ destination: destination() })} />
+          <Row heading="Check" end={working() === "check" ? <Spinner /> : undefined} onPress={working() === "check" ? undefined : check} />
+        </List>
+      </Show>
+      <List>
+        <Row heading="Stop Backing Up Here…" destructive onPress={stop} />
+      </List>
     </Screen>
   )
 }
 
 /// Adds a destination: a folder on one of the network's machines, as on a disk plugged into it, or S3-compatible storage
-/// whose keys are an item in Everyone's Vault. It's tried before it's added, so a typo shows here.
+/// whose keys are an item in Accounts for Everyone. It's tried before it's added, so a typo shows here.
 function AddSheet(props: { machines: All["machines"] }) {
   const [kind, setKind] = createSignal("folder")
   const [machine, setMachine] = createSignal<string>()
@@ -186,7 +188,7 @@ function AddSheet(props: { machines: All["machines"] }) {
       <Show when={kind() === "folder"}>
         <Show
           when={props.machines.length}
-          fallback={<Problem warn heading="No machine can hold backups yet" text="Switch on Backups.Disk for the machine the disk is plugged into, in Devices." />}
+          fallback={<Problem warn heading="No machine can hold backups yet" text="Switch on Backups to a disk for the machine the disk is plugged into, in Devices." />}
         >
           <Field label="Machine">
             <Select.Root items={machines()} value={machine() ?? props.machines[0].key} onValueChange={setMachine} />
@@ -203,7 +205,7 @@ function AddSheet(props: { machines: All["machines"] }) {
         <Field label="Bucket" error={error("bucket")}>
           <Input placeholder="backups" autoCapitalize="none" autoCorrect={false} spellCheck={false} value={typed().bucket} onChangeText={type("bucket")} onSubmitEditing={add} required />
         </Field>
-        <Field label="Keys" hint="An item in Everyone's Vault with access_key_id and secret_access_key, switched on for Backups." error={error("item")}>
+        <Field label="Keys" hint="An item in Accounts for Everyone, with an access key ID and a secret access key, switched on for Backups." error={error("item")}>
           <Input placeholder="Backups Storage" value={typed().item} onChangeText={type("item")} onSubmitEditing={add} required />
         </Field>
       </Show>
@@ -220,14 +222,14 @@ function AddSheet(props: { machines: All["machines"] }) {
 function RestoreSheet() {
   return (
     <Sheet heading="Restore" open={!!restoring()} onClose={() => setRestoring()}>
-      <Show when={restoring()}>{(destination) => <Restore destination={destination()} />}</Show>
+      <Show when={restoring()}>{(from) => <Restore destination={from().destination} from={from().backup} />}</Show>
     </Sheet>
   )
 }
 
-function Restore(props: { destination: Destination }) {
+function Restore(props: { destination: Destination; from?: string }) {
   const [what, setWhat] = createSignal("whose")
-  const [backup, setBackup] = createSignal<string>()
+  const [backup, setBackup] = createSignal<string | undefined>(props.from)
   const [whose, setWhose] = createSignal<string>()
   const [app, setApp] = createSignal<string>()
   const [file, setFile] = createSignal("")
@@ -310,14 +312,17 @@ function Backups(props: { all: All }) {
           <Show when={destinations().length} fallback={<Empty action={<Button onPress={() => setAdding(true)}>Add Destination</Button>}>Nothing is backed up yet.</Empty>}>
             <List>
               <For each={destinations()} keyed={(destination) => destination.name}>
-                {(destination) => <Row heading={destination().name} text={<Text style={warns(destination()) && look.warns}>{about(destination())}</Text>} current={open() === destination().name} onPress={() => setOpen(destination().name)} />}
+                {(destination) => <Row heading={destination().name} text={<Text style={[warns(destination()) && look.warns]}>{about(destination())}</Text>} current={open() === destination().name} onPress={() => setOpen(destination().name)} />}
               </For>
-              <Row heading="Add Destination" onPress={() => setAdding(true)} />
+            </List>
+            <List>
+              <Row start={<Icon name="plus" />} heading="Add Destination" onPress={() => setAdding(true)} />
             </List>
             <Section heading="Schedule">
-              <Field label="Back Up" hint={props.all.retention}>
-                <Select.Root items={schedules} value={props.all.every} onValueChange={schedule} />
-              </Field>
+              <List>
+                <Row heading="Back Up" end={<Select.Root aria-label="Back Up" items={schedules} value={props.all.every} onValueChange={schedule} />} />
+              </List>
+              <Text style={look.note}>{props.all.retention}</Text>
             </Section>
           </Show>
         </Screen>
