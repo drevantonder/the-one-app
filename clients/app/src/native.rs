@@ -396,6 +396,10 @@ async fn window(started: Instant, entrypoint: &str, subject: Option<&str>, link:
                 // Its person is using something else, so a new build waiting for what they typed to be sent looks
                 // again (`updater::ready`), as a web view's window does as its frames say they're done typing.
                 Event::Unfocused => crate::spawn(crate::updater::ready()),
+                Event::Quit => {
+                    #[cfg(desktop)]
+                    computer::quit();
+                }
                 // Closed before it was done, the recovery key wasn't seen or used.
                 Event::Closed => {
                     if let Some(told) = sheet.as_ref().and_then(|sheet| sheet.done.lock().expect("nothing panics holding it").take()) {

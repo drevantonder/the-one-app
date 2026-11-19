@@ -72,6 +72,8 @@ pub enum Event {
     PutAway,
     /// A window that isn't a panel lost the keyboard: its person is using something else.
     Unfocused,
+    /// Its person asked to quit the app from it: Ctrl-Q on Linux.
+    Quit,
 }
 
 pub struct WindowOptions {
@@ -792,8 +794,29 @@ impl Windows {
 
     /// What the display said happened to part `part` of window `id`, where it is in its page.
     fn input(&mut self, id: WindowId, part: usize, input: Input) {
-        if let Input::Close = input {
-            return self.close(id);
+        // Ctrl-W closes the window, as a Linux or Windows app's does, and Ctrl-Q on Linux quits the app (a Mac's are
+        // ⌘W and ⌘Q, its menu bar's).
+        let (closes, quits) = match &input {
+            Input::Close => (true, false),
+            Input::Key(key) if !cfg!(target_os = "macos") && key.ctrl && !key.alt && !key.shift && !key.meta => (key.key == "w", cfg!(target_os = "linux") && key.key == "q"),
+            _ => (false, false),
+        };
+        if quits {
+            if let Some(window) = self.windows.get_mut(&id) {
+                (window.on_event)(Event::Quit);
+            }
+            return;
+        }
+        if closes {
+            // A panel's put away, as Raycast's is by ⌘W or Alt-F4: it's summoned again, never closed.
+            if !self.windows.get(&id).is_some_and(|window| window.panel) {
+                return self.close(id);
+            }
+            self.put_away(id, true);
+            if let Some(window) = self.windows.get_mut(&id) {
+                (window.on_event)(Event::PutAway);
+            }
+            return;
         }
         let Some(window) = self.windows.get_mut(&id) else { return };
         let Some(at) = window.parts.get(part).map(|part| part.bounds.origin) else { return };
@@ -837,13 +860,7 @@ impl Windows {
             Input::Down(at, button, shift) => screen.pointer_down(at, button, shift),
             Input::Up(at, button) => screen.pointer_up(at, button),
             Input::Wheel(at, delta, phase) => drop(screen.scroll(at, delta, phase)),
-            Input::Key(key) => {
-                // Ctrl-W and Ctrl-Q close the window, as a Linux or Windows app's do (a Mac's is ⌘W, its own).
-                if !cfg!(target_os = "macos") && key.ctrl && !key.alt && matches!(key.key.as_str(), "w" | "q") {
-                    return self.close(id);
-                }
-                screen.key(&key);
-            }
+            Input::Key(key) => drop(screen.key(&key)),
             Input::Ime(ime) => screen.ime(ime),
             Input::TextInputClient(said) => screen.text_input_client(&mut window.text_input, said),
             // A panel goes as something else takes the keyboard, as Spotlight does.

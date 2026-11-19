@@ -86,6 +86,11 @@ pub(crate) fn summon() {
     tell(Told::Summon)
 }
 
+/// Quits the app, every window with it, as its menu's Quit does.
+pub(crate) fn quit() {
+    tell(Told::Quit)
+}
+
 /// Puts the launcher away, as an app opens from it, or with `give_back`, as it's dismissed.
 pub(crate) fn hide(give_back: bool) {
     tell(Told::Hide(give_back))
