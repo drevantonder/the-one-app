@@ -164,11 +164,12 @@ fn add(semantic: &Value, screen: &Screen, density: f64, out: &mut Vec<(NodeId, N
     if let Some(live) = live {
         out_node.set_live(live);
     }
-    // A clickable row is read whole, by what it says, as a button's words are.
+    // A control is one element, read whole by the words in it, as Android's own controls are; so is a live region.
+    let whole = matches!(role, Role::Button | Role::Link | Role::ListBoxOption | Role::CheckBox | Role::Switch | Role::RadioButton | Role::Tab | Role::MenuItem);
     let name = semantic["name"]
         .as_str()
         .map(str::to_owned)
-        .or_else(|| (role == Role::Button || live.is_some()).then(|| words(semantic)).filter(|words| !words.is_empty()));
+        .or_else(|| (whole || live.is_some()).then(|| words(semantic)).filter(|words| !words.is_empty()));
     // Words are a label's value, as AccessKit has them (`label_comes_from_value`); anything else is named by its label.
     match name {
         Some(name) if role == Role::Label => out_node.set_value(name),
@@ -208,8 +209,8 @@ fn add(semantic: &Value, screen: &Screen, density: f64, out: &mut Vec<(NodeId, N
         out_node.add_action(Action::Focus);
         out_node.add_action(Action::Click);
     }
-    // A button's words are its name, so they aren't read again as its children.
-    let children: Vec<NodeId> = if role == Role::Button && semantic["name"].is_null() {
+    // A control is read by its name, so what's in it isn't read again.
+    let children: Vec<NodeId> = if whole {
         Vec::new()
     } else {
         semantic["children"].as_array().into_iter().flatten().filter_map(|child| add(child, screen, density, out)).collect()
