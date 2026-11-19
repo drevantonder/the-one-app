@@ -5,12 +5,15 @@
 //! gives each window what tao says of it: a finger, its size and safe area, the app going to the background and back.
 //! What tao doesn't say is heard on the view itself: the system going light or dark (`traitCollectionDidChange:`), and
 //! the keyboard coming and going, which its page keeps clear of as it does the safe area. Typing goes through Flutter's
-//! iOS text input plugin (`text_input.mm`), which the screen speaks Flutter's text input calls to, as on every platform.
+//! iOS text input plugin (`text_input.mm`), which the screen speaks Flutter's text input calls to, as on every platform,
+//! and VoiceOver reads its semantic tree through Flutter's iOS semantics objects (`a11y`).
 //!
 //! A finger is the pointer, as a phone's browser has it: a tap presses, and one that moves further than
 //! UIScrollView's slop pans what scrolls under it, which carries on as it's let go, slowing as a UIScrollView
 //! decelerates. One that comes in from the left edge drags the window across, the app's own showing under it, and
 //! closes it, as Back does on Android.
+
+mod a11y;
 
 use std::cell::{Cell, RefCell};
 use std::collections::HashMap;
@@ -28,7 +31,8 @@ use objc2_core_foundation::CGAffineTransform;
 use objc2_foundation::{NSNotification, NSNotificationCenter, NSString};
 use objc2_quartz_core::CAMetalLayer;
 use objc2_ui_kit::{
-    UIAccessibilityIsReduceMotionEnabled, UIApplication, UIPasteboard,
+    UIAccessibilityIsReduceMotionEnabled, UIAccessibilitySwitchControlStatusDidChangeNotification,
+    UIAccessibilityVoiceOverStatusDidChangeNotification, UIApplication, UIPasteboard,
     UIKeyboardDidChangeFrameNotification, UIKeyboardDidHideNotification, UITraitCollection, UITraitEnvironment,
     UIUserInterfaceStyle, UIView, UIViewController, UIWindow,
 };
@@ -228,6 +232,13 @@ fn with_windows<R>(f: impl FnOnce(&mut Windows) -> R) -> Option<R> {
         for (id, said) in SAID.with(|said| std::mem::take(&mut *said.borrow_mut())) {
             windows.input(id, 0, Input::TextInputClient(said));
         }
+        for (id, window) in windows.windows.iter_mut() {
+            let Ok(screen) = &mut window.screen else { continue };
+            for (node, action) in a11y::take(*id) {
+                a11y::act(screen, node, action);
+                window.dirty = true;
+            }
+        }
         let result = f(windows);
         // Its page keeps clear of what its safe area and the keyboard leave out, as they are now: the first tao says,
         // as the window is made, comes before it's one of these. The field the keyboard came up for shows whole above
@@ -246,6 +257,13 @@ fn with_windows<R>(f: impl FnOnce(&mut Windows) -> R) -> Option<R> {
         }
         fling(windows);
         windows.turn();
+        for window in windows.windows.values() {
+            if let Ok(screen) = &window.screen {
+                let native = &window.parts[0].native;
+                let size = native.window.outer_size();
+                native.a11y.update(screen, (size.width as f32, size.height as f32), native.scale());
+            }
+        }
         let flinging = FLINGS.with(|flings| !flings.borrow().is_empty());
         let due = windows.due();
         schedule(if flinging { Some(due.map_or(FRAME, |due| due.min(FRAME))) } else { due });
@@ -291,12 +309,21 @@ impl Display {
         let layer = Retained::as_ptr(&ui_view.layer()) as usize;
         let controller = window.ui_view_controller().cast::<UIViewController>();
         let text_input = Plugin(unsafe { text_input_new(controller, id as *mut c_void, said) });
-        // The keyboard came, went or changed: what it covers is read from the view's keyboard guide.
+        let a11y = a11y::A11y::new(ui_view, text_input.0, id);
+        // The keyboard came, went or changed: what it covers is read from the view's keyboard guide. A screen reader
+        // started or stopped: it's given the tree, or isn't.
         let center = NSNotificationCenter::defaultCenter();
-        for name in unsafe { [UIKeyboardDidChangeFrameNotification, UIKeyboardDidHideNotification] } {
-            unsafe { center.addObserver_selector_name_object(ui_view.as_ref(), sel!(keyboardChanged:), Some(name), None) };
+        for name in unsafe {
+            [
+                UIKeyboardDidChangeFrameNotification,
+                UIKeyboardDidHideNotification,
+                UIAccessibilityVoiceOverStatusDidChangeNotification,
+                UIAccessibilitySwitchControlStatusDidChangeNotification,
+            ]
+        } {
+            unsafe { center.addObserver_selector_name_object(ui_view.as_ref(), sel!(changed:), Some(name), None) };
         }
-        Ok(NativeWindow { window, layer, behind, text_input })
+        Ok(NativeWindow { window, layer, behind, a11y, text_input })
     }
 
     pub fn close(&self, native: &NativeWindow) {
@@ -364,11 +391,13 @@ impl Display {
     }
 }
 
-/// A tao window, its view's layer, the CAMetalLayer wgpu draws into, and the window that had the keyboard before it.
+/// A tao window, its view's layer, the CAMetalLayer wgpu draws into, the window that had the keyboard before it, and
+/// its screen reader's bridge, which reads its text input plugin's view, so goes first.
 pub struct NativeWindow {
     window: tao::window::Window,
     layer: usize,
     behind: Option<Retained<UIWindow>>,
+    a11y: a11y::A11y,
     text_input: Plugin,
 }
 
@@ -461,9 +490,10 @@ define_class!(
             CAMetalLayer::class()
         }
 
-        /// The keyboard came, went or changed (`Display::open`): its window's insets are read again.
-        #[unsafe(method(keyboardChanged:))]
-        fn keyboard_changed(&self, _: &NSNotification) {
+        /// The keyboard came, went or changed, or a screen reader started or stopped (`Display::open`): its window's
+        /// insets are read again, and its tree given.
+        #[unsafe(method(changed:))]
+        fn changed(&self, _: &NSNotification) {
             wake();
         }
 

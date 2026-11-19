@@ -1,5 +1,6 @@
 //! A Mac's, an iPhone's and Windows' text input is Flutter's (`flutter/`, the plugin and its `TextInputModel`), built
-//! here with the `cc` crate as Flutter's engine builds it, with the window's side of it (`src/platform/<os>/text_input.*`).
+//! here with the `cc` crate as Flutter's engine builds it, with the window's side of it (`src/platform/<os>/text_input.*`),
+//! and so is an iPhone's screen reader's (Flutter's iOS semantics objects, with `src/platform/ios/accessibility.mm`).
 //!
 //! The X11 window (`platform/linux/x11.rs`) links xkbcommon's X11 half by its unversioned name (`libxkbcommon-x11.so`), which a Linux
 //! distribution ships only in its development package (Debian's and Ubuntu's `libxkbcommon-x11-dev`), while the library
@@ -10,13 +11,20 @@ fn main() {
     println!("cargo::rerun-if-changed=build.rs");
     println!("cargo::rerun-if-changed=flutter");
     match std::env::var("CARGO_CFG_TARGET_OS").as_deref() {
-        Ok("macos") => text_input("src/platform/mac/text_input.mm", &["flutter/flutter/shell/platform/darwin/macos/framework/Source/FlutterTextInputPlugin.mm"]),
+        Ok("macos") => text_input(&["src/platform/mac/text_input.mm"], &["flutter/flutter/shell/platform/darwin/macos/framework/Source/FlutterTextInputPlugin.mm"]),
         Ok("ios") => text_input(
-            "src/platform/ios/text_input.mm",
-            &["flutter/flutter/shell/platform/darwin/ios/framework/Source/FlutterTextInputPlugin.mm", "flutter/flutter/fml/platform/darwin/string_range_sanitization.mm"],
+            &["src/platform/ios/text_input.mm", "src/platform/ios/accessibility.mm"],
+            &[
+                "flutter/flutter/shell/platform/darwin/ios/framework/Source/FlutterTextInputPlugin.mm",
+                "flutter/flutter/fml/platform/darwin/string_range_sanitization.mm",
+                "flutter/flutter/shell/platform/darwin/ios/framework/Source/SemanticsObject.mm",
+                "flutter/flutter/shell/platform/darwin/ios/framework/Source/FlutterSemanticsScrollView.mm",
+                "flutter/flutter/shell/platform/darwin/ios/framework/Source/TextInputSemanticsObject.mm",
+                "flutter/flutter/lib/ui/semantics/semantics_node.cc",
+            ],
         ),
         Ok("windows") => text_input(
-            "src/platform/windows/text_input.cc",
+            &["src/platform/windows/text_input.cc"],
             &["flutter/flutter/shell/platform/windows/text_input_plugin.cc", "flutter/flutter/shell/platform/windows/text_input_manager.cc"],
         ),
         Ok("linux") => x11(),
@@ -25,11 +33,13 @@ fn main() {
 }
 
 /// Flutter's text input plugin for this platform, its model, and the window's side of it, `ours`.
-fn text_input(ours: &str, plugin: &[&str]) {
-    println!("cargo::rerun-if-changed={ours}");
+fn text_input(ours: &[&str], plugin: &[&str]) {
+    for ours in ours {
+        println!("cargo::rerun-if-changed={ours}");
+    }
     let common = ["flutter/flutter/fml/string_conversion.cc", "flutter/flutter/shell/platform/common/text_input_model.cc", "flutter/flutter/shell/platform/common/text_editing_delta.cc"];
     let mut build = cc::Build::new();
-    build.cpp(true).std("c++20").include("flutter").files(common).files(plugin).file(ours).warnings(false);
+    build.cpp(true).std("c++20").include("flutter").files(common).files(plugin).files(ours).warnings(false);
     let os = std::env::var("CARGO_CFG_TARGET_OS").unwrap_or_default();
     if os == "macos" {
         build.flag("-fobjc-arc");

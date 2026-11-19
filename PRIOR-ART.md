@@ -54,6 +54,10 @@ None of these is chosen. Each is named so it's weighed before anything like it i
     `TextInputModel`, built with the `cc` crate and their engine connections replaced by a small C interface. Linux
     keeps GPUI's XIM: Flutter's GTK plugin needs GTK's input method context, which our X11 window hasn't.
   - **AccessKit**: accessibility, from one semantic tree, wired as GPUI wires it.
+  - **Flutter's iOS semantics objects** (BSD-3, 19 November 2026): an iPhone's VoiceOver reads that semantic tree
+    through Flutter's `SemanticsObject` and its kin (Objective-C), as Flutter's iOS engine gives them its own, kept by a
+    bridge modelled on its `AccessibilityBridge`. AccessKit has no iOS adapter, and Flutter's are the UIKit elements a
+    renderer of its own draws under, with text fields that read and edit through its text input plugin.
   - **React Native's JSI and Fabric**: how a page's JS tells the host what to draw. Each mutation is a direct call of a
     host function with its values as they are, applied once a turn of the sandbox has run, as Fabric's mounting layer
     applies its mutations, in place of a batch of JSON, as React Native's old bridge had it. In QuickJS, for 11,000
