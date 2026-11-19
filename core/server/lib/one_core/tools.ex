@@ -17,20 +17,27 @@ defmodule OneCore.Tools do
   What a tool changes is whoever's it is, so a server acting for them runs it: the one asked, or one it passes
   the call on to.
 
-  Each is in the module of what it does: `OneCore.Tools.Agents`, `OneCore.Tools.Apps`, `OneCore.Tools.Servers` and
-  `OneCore.Tools.Builds`.
+  What each says of itself is `OneCore.Tools.Definitions`, and what runs it the module of what it does:
+  `OneCore.Tools.Agents`, `OneCore.Tools.Apps`, `OneCore.Tools.Servers` and `OneCore.Tools.Builds`.
   """
   alias OneCore.Call
   alias OneCore.Call.State
   alias OneCore.Apps.Calls
-  alias __MODULE__.{Agents, Apps, Builds, Servers}
+  alias __MODULE__.{Agents, Apps, Builds, Definitions, Servers}
+
+  # What each takes and gives is read once here, as the schemas its inputs and answers are checked against on every
+  # call.
+  @taking Enum.map(Definitions.tools(), &OneCore.Apps.Version.schemas/1)
+  @agents for tool <- Definitions.agents(), do: tool.name
+  @apps for tool <- Definitions.apps(), do: tool.name
+  @servers for tool <- Definitions.servers(), do: tool.name
 
   @doc """
   One Core's own tools, each as an app says one of its own. Code mode lists only `search`, `execute`, `call` and
   `skills`, and lists every tool but those three otherwise (`listed`): a client that runs scripts finds the rest by
   searching.
   """
-  def tools, do: Agents.tools() ++ Apps.tools() ++ Servers.tools() ++ Builds.tools()
+  def tools, do: @taking
 
   @doc """
   Calls one of One Core's own tools for `asked`, who asked and who for, as an app's tool is called
@@ -40,14 +47,11 @@ defmodule OneCore.Tools do
   or `:none` if `name` isn't one.
   """
   def call(name, inputs, principal, forwarded, request) do
-    case Enum.find_value(
-           [Agents, Apps, Servers, Builds],
-           &with(%{} = tool <- Enum.find(&1.tools(), fn tool -> tool.name == name end), do: {&1, tool})
-         ) do
+    case Enum.find(@taking, &(&1.name == name)) do
       nil ->
         :none
 
-      {module, tool} ->
+      tool ->
         # What's passed on is what was asked, so the server it's passed to hooks into the same thing.
         ask = {"tools/call", %{name: name, arguments: inputs}}
         # To a server acting for someone, or with `{:running, owner}` to one that runs their apps.
@@ -57,7 +61,18 @@ defmodule OneCore.Tools do
         end
 
         about = %{"app" => nil, "tool" => name, "inputs" => inputs}
-        State.run(fn -> Calls.tool(tool, about, principal, [], &module.run(name, &1, principal, forward, request)) end)
+        State.run(fn -> Calls.tool(tool, about, principal, [], &run(name, &1, principal, forward, request)) end)
     end
   end
+
+  defp run(name, inputs, principal, forward, request) when name in @agents,
+    do: Agents.run(name, inputs, principal, forward, request)
+
+  defp run(name, inputs, principal, forward, request) when name in @apps,
+    do: Apps.run(name, inputs, principal, forward, request)
+
+  defp run(name, inputs, principal, forward, request) when name in @servers,
+    do: Servers.run(name, inputs, principal, forward, request)
+
+  defp run(name, inputs, principal, forward, request), do: Builds.run(name, inputs, principal, forward, request)
 end

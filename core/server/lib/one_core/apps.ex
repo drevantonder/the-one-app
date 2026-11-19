@@ -20,7 +20,7 @@ defmodule OneCore.Apps do
   """
   use GenServer
   require Logger
-  alias OneCore.{Call, Hooks, Iroh, Jobs, Search, Server, Servers, Services, Skills, User}
+  alias OneCore.{Call, Hooks, Iroh, Jobs, Server, Servers, Services, Skills, User}
   alias OneCore.Apps.{Installed, LoadedVersion, Store, Version}
 
   @network "network"
@@ -271,6 +271,12 @@ defmodule OneCore.Apps do
   end
 
   @doc """
+  What `fetch` gives for `key`, kept until the apps running here change, as what's worked out from them is, such as
+  `OneCore.Search`'s index of their tools.
+  """
+  def cached(key, fetch), do: OneCore.Cache.fetch(__MODULE__, key, fn -> {:commit, fetch.()} end)
+
+  @doc """
   Says what's installed for `owner` changed, and returns once a sync that read it after that has finished: whether
   anything that runs here changed. A sync reads what runs for them (`OneCore.Apps.Installed.running/1`), and runs
   each app's latest version. `loaded` are versions already loaded here, each as `OneCore.Apps.Store.newer/3`
@@ -321,7 +327,7 @@ defmodule OneCore.Apps do
 
     if any do
       Hooks.invalidate()
-      Search.invalidate()
+      OneCore.Cache.invalidate(__MODULE__)
       Skills.invalidate()
       Jobs.reload()
     end

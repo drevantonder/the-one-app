@@ -2,21 +2,6 @@ defmodule OneCore.Tools.Helpers do
   @moduledoc "What One Core's own tools share (`OneCore.Tools`): where a call runs, and whether whoever asked may."
   alias OneCore.{Call, Hooks, Server, Servers}
 
-  # A short-lived link to the bucket, as `OneCore.Bucket.link/2` gives it: sent by its `method` to its `url` with its
-  # `headers`.
-  @link %{
-    type: "object",
-    properties: %{
-      method: %{type: "string"},
-      url: %{type: "string"},
-      headers: %{type: "object", additionalProperties: %{type: "string"}}
-    },
-    required: ["method", "url", "headers"]
-  }
-
-  @doc "A short-lived link to the bucket, as `OneCore.Bucket.link/2` gives it, as a JSON Schema."
-  def link, do: @link
-
   # Has a server acting for `owner` run this call, if this one doesn't act for them: `forward` ends it here.
   def at(owner, forward), do: Servers.here?(owner) || forward.(owner)
 

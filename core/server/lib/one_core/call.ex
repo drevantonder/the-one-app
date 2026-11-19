@@ -25,7 +25,7 @@ defmodule OneCore.Call do
   run it instead (`forward/2`): `forwarded` is then `:to`. That one may still hand it to the one server that holds
   what it needs (`forward_to/2`): `forwarded` is then `true`, and it goes no further.
   """
-  alias OneCore.{Artifact, Bucket, Hooks, Mcp, Apps, Server, Servers, Tasks, User}
+  alias OneCore.{Artifact, Bucket, Hooks, Apps, Server, Servers, Tasks, User}
   alias OneCore.Call.State
   alias OneCore.Apps.{Calls, Version}
 
@@ -515,6 +515,6 @@ defmodule OneCore.Call do
   # What a server went away from after it was asked is asked of the next one only where asking twice does no harm:
   # a hook, which may be asked more than once for one moment, and a tool that only reads.
   defp again?("hooks/call", _params, _who), do: true
-  defp again?("tools/call", %{name: name}, who), do: Mcp.reads?(name, who)
+  defp again?("tools/call", %{name: name}, who), do: Calls.reads?(name, who)
   defp again?(_method, _params, _who), do: false
 end

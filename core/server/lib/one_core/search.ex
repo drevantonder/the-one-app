@@ -12,7 +12,7 @@ defmodule OneCore.Search do
   The call is written as whoever asked calls tools (`_meta.mode`): a line of a code mode script
   (`tools.gmail.search({ query: string })`), or a command (`one gmail search --query <string>`).
   """
-  alias OneCore.{Builds, Cache, Skills}
+  alias OneCore.{Builds, Skills}
   alias OneCore.Apps.Version
 
   # About how much of an answer the matches may take, in characters, before their descriptions are cut short, and
@@ -59,13 +59,11 @@ defmodule OneCore.Search do
     end
   end
 
-  @doc "Lets go of every index, as the apps running change."
-  def invalidate, do: Cache.invalidate(__MODULE__)
-
-  # The index of `tools`, built once for them, the versions of the apps they're from and this build of the server.
+  # The index of `tools`, built once for them, the versions of the apps they're from and this build of the server,
+  # until the apps running here change.
   defp index(tools, running) do
     versions = for {name, version} <- Enum.sort(running), do: {name, version.artifact, version.code}
-    Cache.fetch(__MODULE__, {Builds.build(), versions, tools}, fn -> {:commit, index(entries(tools, running))} end)
+    OneCore.Apps.cached({__MODULE__, Builds.build(), versions, tools}, fn -> index(entries(tools, running)) end)
   end
 
   @doc "What an app says it's for: its skill's description, or nothing."
@@ -85,7 +83,7 @@ defmodule OneCore.Search do
       name = if app, do: String.replace_prefix(listed.name, app <> "_", ""), else: listed.name
       read_only = listed[:annotations][:readOnlyHint] == true
       # Whether its app makes it an MCP task, which a tool's listing doesn't say (`OneCore.Tasks`).
-      own = if app, do: running[app].tools, else: OneCore.Tools.tools()
+      own = if app, do: running[app].tools, else: OneCore.Tools.Definitions.tools()
 
       tool = %{
         name: name,

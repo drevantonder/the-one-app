@@ -59,10 +59,10 @@ defmodule OneCore.MixProject do
   defp elixirc_paths(_env), do: ["lib", "priv/sandbox/manifest.ex", "priv/sandbox/redact.ex", "priv/sandbox/nif.ex"]
 
   # One Core is in layers, as `mix xref graph --format cycles` shows them: what's low never calls up into what's
-  # above it, and what's above calls down. Most of it still calls back and forth in one cycle of 38 files, so a
+  # above it, and what's above calls down. Most of it still calls back and forth in one cycle of 27 files, so a
   # developer's build fails where a bigger one forms, as a module that calls up into it makes. Lower the number as
   # that cycle shrinks.
-  def cycles(_args), do: Mix.Task.run("xref", ~w(graph --format cycles --min-cycle-size 39 --fail-above 0 --no-compile))
+  def cycles(_args), do: Mix.Task.run("xref", ~w(graph --format cycles --min-cycle-size 28 --fail-above 0 --no-compile))
 
   # The NIFs, built for this machine with the rest of the Rust workspace, as `tooling/network` and its code reloader
   # run it: built as one, it has one set of features, so nothing in it is built twice or again for nothing. It's the

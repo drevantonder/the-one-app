@@ -696,16 +696,8 @@ defmodule OneCore.Mcp do
     end
   end
 
-  # The tool `name` is for `who`: One Core's own, or an app's by its name and the app's, or `nil`.
-  defp tool(name, who) do
-    Enum.find(Tools.tools(), &(&1.name == name)) ||
-      with [app, tool] <- String.split(name, "_", parts: 2),
-           %{^app => version} <- Apps.running(who) do
-        Enum.find(version.tools, &(&1.name == tool))
-      else
-        _ -> nil
-      end
-  end
+  # The tool `name` is for `who`, with what One Core's own take and give read as its schemas.
+  defp tool(name, who), do: Calls.find(name, who, Tools.tools())
 
   # A tool is one of One Core's own, or an app's by its name and the app's.
   defp call(name, inputs, principal, forwarded, caller, request) do
@@ -758,16 +750,13 @@ defmodule OneCore.Mcp do
   # After a tool that doesn't only read, every client connected here is told that something changed: the tool's
   # app, or anything for One Core's own.
   defp changed(name, result, {_actor, subject}) do
-    if not reads?(name, subject), do: Apps.changed([], app(name))
+    if not Calls.reads?(name, subject), do: Apps.changed([], app(name))
     {:ok, result}
   end
 
   defp app(name) do
     if not Enum.any?(Tools.tools(), &(&1.name == name)), do: hd(String.split(name, "_", parts: 2))
   end
-
-  @doc "Whether calling the tool `name` for `who`, the one a call runs (`tool/2`), only reads: it says so."
-  def reads?(name, who), do: tool(name, who)[:read_only] == true
 
   defp holder?(by), do: by != nil and User.link?(by)
 

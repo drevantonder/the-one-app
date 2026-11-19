@@ -93,6 +93,23 @@ defmodule OneCore.Apps.Calls do
   end
 
   @doc """
+  The tool `name` is for `who`: One Core's own, one of `own` (as `OneCore.Tools.Definitions` says them, or with their
+  schemas read, as `OneCore.Tools` lists them), or an app's by its name and the app's, or `nil`.
+  """
+  def find(name, who, own) do
+    Enum.find(own, &(&1.name == name)) ||
+      with [app, tool] <- String.split(name, "_", parts: 2),
+           %{^app => version} <- Apps.running(who) do
+        Enum.find(version.tools, &(&1.name == tool))
+      else
+        _ -> nil
+      end
+  end
+
+  @doc "Whether calling the tool `name` for `who`, as `find/3` finds it, only reads: it says so."
+  def reads?(name, who), do: find(name, who, OneCore.Tools.Definitions.tools())[:read_only] == true
+
+  @doc """
   Calls a tool as every tool is called, an app's and One Core's own alike. `tool` is what it says of itself,
   `about` is what the call is about, and `fun` is the tool: it's given the inputs, and raises to refuse. The
   inputs are what the tool takes, the apps that mutate a call's inputs are asked and the ones that validate it,

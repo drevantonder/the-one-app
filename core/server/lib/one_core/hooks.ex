@@ -257,7 +257,7 @@ defmodule OneCore.Hooks do
   # The apps asked about `hook` for a moment that runs for `subject`: those that hook into it, but the one a call of a
   # tool that says `exempts_app` removes or deploys over (`OneCore.Tools`), which has no say in it.
   defp asked(hook, %{"app" => nil, "tool" => tool, "inputs" => inputs}, subject) do
-    if Enum.find(OneCore.Tools.tools(), &(&1.name == tool))[:exempts_app],
+    if Enum.find(OneCore.Tools.Definitions.tools(), &(&1.name == tool))[:exempts_app],
       do: hooking(hook, subject) -- [{OneCore.User.owner(subject), inputs["name"]}],
       else: hooking(hook, subject)
   end
