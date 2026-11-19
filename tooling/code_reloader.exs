@@ -146,6 +146,7 @@ defmodule CodeReloader do
 
   defp deployed(apps, server, state) do
     changed = for {name, files} <- apps, state.apps[name] != files, do: name
+    if changed != [], do: versioned(state.servers)
 
     case for(name <- changed, (why = deploy(server, name)) != :ok, do: "#{name}: #{why}") do
       [] ->
@@ -155,6 +156,14 @@ defmodule CodeReloader do
       failed ->
         {:error, "An app didn't deploy: #{Enum.join(failed, "; ")}", state}
     end
+  end
+
+  # Has each server's build be this checkout's version (`tooling/version`), as a hot load has it (`OneCore.Release`):
+  # an app that requires a newer platform than the one the servers started on is refused as waiting for their update,
+  # and what's loaded into them is this checkout's.
+  defp versioned(servers) do
+    {version, 0} = System.cmd(Path.join(@root, "tooling/version"), [], cd: @root)
+    for server <- servers, do: :ok = :erpc.call(server, Application, :put_env, [:one_core, :build, String.trim(version)])
   end
 
   # As `one deploy --name <name> --files-from apps/<name>` deploys it for the network.
