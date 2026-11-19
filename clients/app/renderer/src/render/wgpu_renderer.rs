@@ -469,13 +469,6 @@ impl WgpuRenderer {
         }
         self.draw_run(&mut encoder, &view, load, &globals, &batches, &instances, &run, None);
 
-        if let Target::Offscreen { readback, row, .. } = &self.target {
-            encoder.copy_texture_to_buffer(
-                texture.as_image_copy(),
-                wgpu::TexelCopyBufferInfo { buffer: readback, layout: wgpu::TexelCopyBufferLayout { offset: 0, bytes_per_row: Some(*row), rows_per_image: None } },
-                wgpu::Extent3d { width: size.0, height: size.1, depth_or_array_layers: 1 },
-            );
-        }
         self.queue.submit([encoder.finish()]);
         if let Some(frame) = frame {
             self.queue.present(frame);
@@ -655,8 +648,16 @@ impl WgpuRenderer {
 
     /// The last frame drawn offscreen, as RGBA rows, top first.
     pub fn read(&mut self) -> Option<(u32, u32, Vec<u8>)> {
-        let Target::Offscreen { readback, row, .. } = &self.target else { return None };
+        let Target::Offscreen { texture, readback, row, .. } = &self.target else { return None };
         let (width, height) = self.size;
+        // Copied out only as it's read, so a frame that isn't costs no copy.
+        let mut encoder = self.device.create_command_encoder(&wgpu::CommandEncoderDescriptor::default());
+        encoder.copy_texture_to_buffer(
+            texture.as_image_copy(),
+            wgpu::TexelCopyBufferInfo { buffer: readback, layout: wgpu::TexelCopyBufferLayout { offset: 0, bytes_per_row: Some(*row), rows_per_image: None } },
+            wgpu::Extent3d { width, height, depth_or_array_layers: 1 },
+        );
+        self.queue.submit([encoder.finish()]);
         readback.map_async(wgpu::MapMode::Read, .., |_| {});
         self.device.poll(wgpu::PollType::wait_indefinitely()).ok()?;
         let mapped = readback.get_mapped_range(..).ok()?;

@@ -147,7 +147,8 @@ fn main() -> anyhow::Result<()> {
             }
         }
         renderer.draw(&scene, [0.0, 0.0]);
-        if !read {
+        // The first frame is read back too, which `first_frame_ms` is until.
+        if !read && first_frame.get().is_some() {
             return Ok((0, 0, Vec::new()));
         }
         let read = renderer.read().ok_or_else(|| anyhow::anyhow!("nothing was drawn"))?;
@@ -155,8 +156,10 @@ fn main() -> anyhow::Result<()> {
         Ok(read)
     };
     for line in requests.lines().filter(|line| !line.trim().is_empty()) {
-        let (w, h, rgba) = frame(&mut screen, true)?;
-        let request = match renderer::inspect::Request::parse(line) {
+        let request = renderer::inspect::Request::parse(line);
+        // A frame is drawn before each, and read back only for a picture, as a window's is never read.
+        let (w, h, rgba) = frame(&mut screen, request.as_ref().is_ok_and(|request| request.op == "snap"))?;
+        let request = match request {
             Ok(request) => request,
             Err(refused) => {
                 println!("{refused}");
