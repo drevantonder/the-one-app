@@ -726,13 +726,21 @@ pub(crate) fn program() -> std::io::Result<std::path::PathBuf> {
 /// Starts the app again on the build it was just updated to: the app windows that are open open again in it, and the
 /// launcher shows again if it was showing. Each app's window ends with this program's channel.
 fn restart(#[cfg_attr(not(unix), expect(unused_variables))] home: &std::path::Path, shown: bool) {
+    // Asked again before it has gone, it starts one program, not two (two did, 19 Nov).
+    static STARTED: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+    if STARTED.swap(true, std::sync::atomic::Ordering::Relaxed) {
+        return;
+    }
     let reopen = serde_json::to_string(&hosts::open_now()).unwrap_or_default();
     // The new program serves the channel at the same address.
     #[cfg(unix)]
     let _ = std::fs::remove_file(hosts::address(home));
     let mut command = match program() {
         Ok(program) => std::process::Command::new(program),
-        Err(error) => return eprintln!("couldn't start again: {error}"),
+        Err(error) => {
+            STARTED.store(false, std::sync::atomic::Ordering::Relaxed);
+            return eprintln!("couldn't start again: {error}");
+        }
     };
     command.env("ONE_RESTARTED", "1").env("ONE_REOPEN", reopen).stdin(std::process::Stdio::null());
     if shown {
@@ -742,7 +750,10 @@ fn restart(#[cfg_attr(not(unix), expect(unused_variables))] home: &std::path::Pa
     }
     match command.spawn() {
         Ok(_) => std::process::exit(0),
-        Err(error) => eprintln!("couldn't start again: {error}"),
+        Err(error) => {
+            STARTED.store(false, std::sync::atomic::Ordering::Relaxed);
+            eprintln!("couldn't start again: {error}")
+        }
     }
 }
 
