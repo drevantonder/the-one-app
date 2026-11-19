@@ -16,7 +16,8 @@
 //! `--measure` says, on stderr after the rest, how quickly it draws, as a line `measured {…}`: its first
 //! frame (`first_frame_ms`, from the GPU's start to the frame read back), a frame's time when nothing changes
 //! (`idle_ms`), as its first text field takes a character a frame (`typing_ms`) and as its first list scrolls
-//! (`scrolling_ms`), each where it has one, the memory drawing took (`memory_mb`: the GPU, its atlas and the
+//! (`scrolling_ms`), each where it has one, the longest the drawing thread spent on a frame of all it drew
+//! (`worst_paint_ms`: laying it out and making its scene, which a picture's decoding, in the background, isn't part of), the memory drawing took (`memory_mb`: the GPU, its atlas and the
 //! renderer, as the process's resident set grew), and what a second window of its size adds (`window_mb`: a renderer
 //! of its own, drawing the same frame, the GPU and the atlas shared).
 
@@ -132,10 +133,19 @@ fn main() -> anyhow::Result<()> {
     let mut scene = Scene::default();
     let size = Size { width: Pixels(width), height: Pixels(height) };
     let first_frame = std::cell::Cell::new(None);
-    // A frame drawn, and with `read`, waited for and read back.
+    let worst_paint = std::cell::Cell::new(std::time::Duration::ZERO);
+    // A frame drawn, and with `read`, waited for and read back: drawn again once the pictures it decodes in the
+    // background are ready, as a window is woken to.
     let mut frame = |screen: &mut Screen, read: bool| -> anyhow::Result<(u32, u32, Vec<u8>)> {
-        screen.idle();
-        screen.paint(size, scale, &mut text, renderer.sprite_atlas(), &mut scene);
+        loop {
+            screen.idle();
+            let painting = std::time::Instant::now();
+            screen.paint(size, scale, &mut text, renderer.sprite_atlas(), &mut scene);
+            worst_paint.set(worst_paint.get().max(painting.elapsed()));
+            if !screen.decoding() {
+                break;
+            }
+        }
         renderer.draw(&scene, [0.0, 0.0]);
         if !read {
             return Ok((0, 0, Vec::new()));
@@ -218,6 +228,7 @@ fn main() -> anyhow::Result<()> {
         };
         let ms = |ms: Option<f64>| ms.map(|ms| (ms * 100.0).round() / 100.0);
         let first_frame_ms = first_frame.get().map(|first| first.as_secs_f64() * 1000.0);
+        let worst_paint_ms = worst_paint.get().as_secs_f64() * 1000.0;
         let mb = |bytes: usize| (bytes as f64 / 1e5).round() / 10.0;
         let memory_mb = mb(resident().saturating_sub(before));
         let alone = resident();
@@ -228,7 +239,7 @@ fn main() -> anyhow::Result<()> {
         second.destroy();
         eprintln!(
             "measured {}",
-            json!({"first_frame_ms": ms(first_frame_ms), "idle_ms": ms(idle), "typing_ms": ms(typing), "scrolling_ms": ms(scrolling), "memory_mb": memory_mb, "window_mb": window_mb})
+            json!({"first_frame_ms": ms(first_frame_ms), "worst_paint_ms": ms(Some(worst_paint_ms)), "idle_ms": ms(idle), "typing_ms": ms(typing), "scrolling_ms": ms(scrolling), "memory_mb": memory_mb, "window_mb": window_mb})
         );
     }
     renderer.destroy();

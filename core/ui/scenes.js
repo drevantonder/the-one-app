@@ -217,8 +217,8 @@ function native(built, scene, folder) {
 }
 
 /// How quickly the native host drew a scene, as a line.
-const timings = ({ first_frame_ms, idle_ms, typing_ms, scrolling_ms, memory_mb, window_mb }) =>
-  [`first frame ${first_frame_ms} ms`, `frame ${idle_ms} ms idle`, typing_ms != null && `${typing_ms} ms typing`, scrolling_ms != null && `${scrolling_ms} ms scrolling`, `${memory_mb} MB`, `${window_mb} MB a window more`].filter(Boolean).join(", ")
+const timings = ({ first_frame_ms, worst_paint_ms, idle_ms, typing_ms, scrolling_ms, memory_mb, window_mb }) =>
+  [`first frame ${first_frame_ms} ms`, `worst frame ${worst_paint_ms} ms on its thread`, `frame ${idle_ms} ms idle`, typing_ms != null && `${typing_ms} ms typing`, scrolling_ms != null && `${scrolling_ms} ms scrolling`, `${memory_mb} MB`, `${window_mb} MB a window more`].filter(Boolean).join(", ")
 
 /// How much of two pictures differs, from 0 to 1, where they're the same size, with where in `diff`.
 function differs(one, other, diff) {

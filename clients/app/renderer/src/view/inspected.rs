@@ -231,6 +231,11 @@ impl Screen {
         for child in self.frames.values() {
             pending.extend(inspect::pending(&child.screen.unanswered, &[], 0, false, false));
         }
+        // A picture decoding in the background is drawn once it's ready.
+        let pictures = self.pictures.pending() + self.frames.values().map(|child| child.screen.pictures.pending()).sum::<usize>();
+        if pictures > 0 {
+            pending.push(json!({"kind": "picture", "decoding": pictures}));
+        }
         let settled = inspect::settled(&pending, self.js.clock().paused());
         let now = Instant::now();
         let (told, waiting): (Vec<_>, Vec<_>) = std::mem::take(&mut self.settling).into_iter().partition(|(until, _)| settled || *until <= now);

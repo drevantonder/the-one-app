@@ -14,7 +14,7 @@ use crate::geometry::{Background, Bounds, ContentMask, Corners, Edges, Hsla, Pix
 use crate::inspect::{self, Key, Rect, Rects};
 use crate::js::{Posted, Thread};
 use crate::render::Atlas;
-use crate::render::atlas::{AtlasKey, AtlasTile};
+use crate::render::atlas::AtlasTile;
 use crate::render::scene::{Backdrop, BorderStyle, PolychromeSprite, Quad, Scene, Shadow, TransformationMatrix};
 use crate::style::{self, Look, Paint, State, Text, colour};
 use crate::text::{Paragraph, TextRun, TextSystem};
@@ -24,6 +24,7 @@ use crate::tree::{Id, Kind, Node, Tree};
 mod bridge;
 pub use bridge::TextInputConnection;
 mod frames;
+mod pictures;
 pub use frames::Make as MakeFrame;
 pub(crate) mod inspected;
 mod transition;
@@ -247,8 +248,8 @@ pub struct Screen {
     intersecting: HashMap<Id, bool>,
     /// What takes the keyboard, in the order Tab goes, as it was last painted.
     tab_order: Vec<Id>,
-    /// Each picture drawn, by its key in the atlas, and its size there, or none where it didn't decode.
-    images: HashMap<u64, Option<Picture>>,
+    /// Each picture drawn, decoded in the background.
+    pictures: pictures::Pictures,
     /// Each picture its page names by an address rather than a `data:` one, as a `data:` address once its window has
     /// fetched it (`fetched`), or none while it's on its way or wasn't found; and what fetches one, the window's.
     fetched: HashMap<String, Option<String>>,
@@ -337,7 +338,7 @@ impl Screen {
             laid_out: HashMap::new(),
             intersecting: HashMap::new(),
             tab_order: Vec::new(),
-            images: HashMap::new(),
+            pictures: Default::default(),
             fetched: HashMap::new(),
             fetch: None,
             rects: Rects::new(),
@@ -363,7 +364,14 @@ impl Screen {
         for child in self.frames.values_mut() {
             child.screen.on_post(wake.clone());
         }
+        self.pictures.wake = Some(wake.clone());
         self.wake = Some(wake);
+    }
+
+    /// Whether a picture it drew, or a frame's page did, is decoding, or is decoded and not yet drawn: a harness draws
+    /// again once it's waited for them (`idle`).
+    pub fn decoding(&self) -> bool {
+        self.pictures.pending() > 0 || self.frames.values().any(|child| child.screen.decoding())
     }
 
     /// Whether its app's JS, or a frame's, has something it was sent to run yet, or hasn't started.
@@ -381,6 +389,7 @@ impl Screen {
     pub fn idle(&mut self) {
         loop {
             self.js.wait();
+            self.pictures.wait();
             for child in self.frames.values_mut() {
                 child.screen.idle();
             }
@@ -487,7 +496,7 @@ impl Screen {
     pub fn pump(&mut self) -> bool {
         let posted;
         (posted, self.heard) = self.js.take();
-        let mut came = !posted.is_empty() || self.started.is_none();
+        let mut came = !posted.is_empty() || self.started.is_none() || self.pictures.take();
         let mut cant = None;
         for child in self.frames.values_mut() {
             came |= child.screen.pump();
@@ -625,6 +634,7 @@ impl Screen {
         }
         let conditions = self.conditions();
         let window = Bounds { origin: point(0.0, 0.0), size: Size { width: size.width.0, height: size.height.0 } };
+        self.pictures.take();
         self.states.focused = self.focused;
         let now = self.js.clock().now();
         let caret = self.caret_shows();
@@ -644,6 +654,7 @@ impl Screen {
             breadcrumb: self.breadcrumb.as_ref().map(|crumb| (crumb.name.clone(), crumb.start)),
             panel: self.panel.map(|panel| (panel.corner, panel.fill)),
             fetched: self.fetched.values().filter(|fetched| fetched.is_some()).count(),
+            decoded: self.pictures.decoded,
             frames: self.frames.iter().map(|(id, child)| (*id, child.screen.frame)).collect(),
         };
         if !self.animating && self.tree.unchanged() && self.seen.as_ref() == Some(&seen) {
@@ -690,7 +701,7 @@ impl Screen {
             fields: &self.fields,
             drawn: &mut self.drawn,
             caret,
-            images: &mut self.images,
+            pictures: &mut self.pictures,
             fetched: &self.fetched,
             wanted: Vec::new(),
             rects: Rects::new(),
@@ -800,6 +811,7 @@ impl Screen {
         self.rects = rects;
         self.animating = animating || moving;
         self.painted = (window.size, scale);
+        self.pictures.drawn();
         self.tell_settled();
         scene.finish();
         // A modal that's gone gives the keyboard back to what had it as it came, if the keyboard was in it or is
@@ -1719,7 +1731,7 @@ struct Painter<'a> {
     drawn: &'a mut HashMap<Id, Drawn>,
     /// The caret shows in this frame, as it blinks.
     caret: bool,
-    images: &'a mut HashMap<u64, Option<Picture>>,
+    pictures: &'a mut pictures::Pictures,
     /// Pictures by address, fetched, and those this frame wanted that weren't yet.
     fetched: &'a HashMap<String, Option<String>>,
     wanted: Vec<String>,
@@ -1771,6 +1783,7 @@ struct Seen {
     breadcrumb: Option<(String, f32)>,
     panel: Option<(f32, bool)>,
     fetched: usize,
+    decoded: u64,
     /// Each frame's page's frame, as it was drawn.
     frames: std::collections::BTreeMap<Id, u64>,
 }
@@ -2587,35 +2600,10 @@ impl Painter<'_> {
     /// A picture by its `data:` address at `bounds`, its corners rounded `radius`.
     fn picture(&mut self, src: &str, bounds: Bounds<f32>, radius: f32) {
         let device = Size { width: (bounds.size.width * self.scale).round() as u32, height: (bounds.size.height * self.scale).round() as u32 };
-        if let Some((_, tile)) = self.image(&format!("{}x{}{src}", device.width, device.height), || decode(src, device)) {
+        if let Some((_, tile)) = self.pictures.get(self.atlas, src, device, decode) {
             let window = self.window;
             self.sprite(tile, bounds, Corners::all(radius), 1.0, window);
         }
-    }
-
-    /// The picture `key` names and its tile in the atlas, decoded by `decode` the first time it's drawn and put in the
-    /// atlas, which alone keeps its pixels: they're decoded again only where it hasn't them.
-    fn image(&mut self, key: &str, decode: impl Fn() -> Option<Decoded>) -> Option<(Picture, AtlasTile)> {
-        use std::hash::{Hash, Hasher};
-        let mut hasher = std::collections::hash_map::DefaultHasher::new();
-        key.hash(&mut hasher);
-        let id = hasher.finish();
-        let mut decoded = None;
-        let picture = match self.images.get(&id) {
-            Some(picture) => (*picture)?,
-            None => {
-                decoded = decode();
-                let picture = decoded.as_ref().map(|decoded| decoded.picture);
-                self.images.insert(id, picture);
-                picture?
-            }
-        };
-        let tile = self.atlas.get_or_insert_with(&AtlasKey::Image(id), &mut || {
-            Ok(decoded.take().or_else(&decode).map(|decoded| {
-                (Size { width: decoded.picture.width.into(), height: decoded.picture.height.into() }, std::borrow::Cow::Owned(decoded.bgra))
-            }))
-        });
-        Some((picture, tile.ok()??))
     }
 
     /// A picture's sprite, `width`×`height` device pixels, at `bounds` in the window.
@@ -2654,7 +2642,7 @@ impl Painter<'_> {
         if device.width == 0 || device.height == 0 {
             return;
         }
-        let Some((picture, tile)) = self.image(&format!("{}x{}{src}", device.width, device.height), || decode(src, device)) else { return };
+        let Some((picture, tile)) = self.pictures.get(self.atlas, src, device, decode) else { return };
         let fit = (content.size.width / picture.width as f32).min(content.size.height / picture.height as f32);
         let size = Size { width: picture.width as f32 * fit, height: picture.height as f32 * fit };
         let bounds = Bounds {
@@ -2692,7 +2680,7 @@ impl Painter<'_> {
             stroke = css(paint(look.stroke)),
             width = look.stroke_width * self.scale,
         );
-        let Some((_, tile)) = self.image(&format!("path{svg}"), || decode(&format!("data:image/svg+xml;base64,{}", data_encoding::BASE64.encode(svg.as_bytes())), device)) else { return };
+        let Some(tile) = self.pictures.now(self.atlas, &format!("path{svg}"), || decode(&format!("data:image/svg+xml;base64,{}", data_encoding::BASE64.encode(svg.as_bytes())), device)) else { return };
         self.sprite(tile, content, Corners::default(), opacity, mask);
     }
 }
