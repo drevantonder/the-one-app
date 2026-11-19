@@ -691,8 +691,12 @@ pub async fn uninstall(client: &Client, name: &str) -> Result<ExitCode> {
 /// `one deploy ... --files-from <folder> [--force]`. From a folder in a git repo, the deploy says which commit its
 /// files came from (`from`), and `dirty` where the folder has changes not committed, as a build does. As `git push`
 /// refuses a non-fast-forward, it's refused where the live version came from a commit that one doesn't contain, so
-/// it would drop changes that are live, unless `--force`. That's decided here, since only the repo knows which
-/// commits contain which; the network only keeps the commit. From a folder in no git repo, it's deployed as it is.
+/// it would drop changes that are live, unless `--force`. And, as `tooling/release` refuses a build, it's refused
+/// where its repo has a remote and the commit isn't on the remote's default branch once fetched, which `--force`
+/// doesn't change: a commit nobody pushed, such as one from before a rebase, would be live from no branch, and the
+/// next deploy from the branch would be refused for not containing it (19 Nov, twice). That's decided here, since
+/// only the repo knows which commits contain which; the network only keeps the commit. From a folder in no git
+/// repo, it's deployed as it is.
 pub async fn deploy_folder(client: &Client, args: &[String]) -> Result<ExitCode> {
     let force = args.iter().any(|arg| arg == "--force");
     let mut args: Vec<String> = args.iter().filter(|arg| *arg != "--force").cloned().collect();
@@ -705,16 +709,27 @@ pub async fn deploy_folder(client: &Client, args: &[String]) -> Result<ExitCode>
     built(client, &of, &name, &folder).await?;
     let Ok(commit) = git(&folder, &["rev-parse", "HEAD"]) else { return crate::command(client, &args).await };
     let dirty = !git(&folder, &["status", "--porcelain", "--", "."])?.is_empty();
-    let source =
-        git(&folder, &["remote", "get-url", "origin"]).or_else(|_| git(&folder, &["rev-parse", "--show-toplevel"]))?;
+    let remote = git(&folder, &["remote", "get-url", "origin"]);
+    if remote.is_ok() {
+        git(&folder, &["fetch", "--quiet", "origin"])?;
+        // The remote's default branch, as `git clone` names it; a repo that never had it named asks the remote.
+        let branch = git(&folder, &["rev-parse", "--abbrev-ref", "origin/HEAD"]).or_else(|_| {
+            git(&folder, &["remote", "set-head", "origin", "--auto"])?;
+            git(&folder, &["rev-parse", "--abbrev-ref", "origin/HEAD"])
+        })?;
+        if git(&folder, &["merge-base", "--is-ancestor", &commit, &branch]).is_err() {
+            bail!(
+                "{name} wasn't deployed: commit {} isn't on {branch}, so what's live would come from a commit no \
+                 branch has. Rebase onto {branch}, push, then deploy.",
+                &commit[..12]
+            );
+        }
+    }
+    let source = remote.or_else(|_| git(&folder, &["rev-parse", "--show-toplevel"]))?;
 
     let live = apps.iter().find(|app| app["name"] == name.as_str() && app["for"] == of.as_str());
     let live = live.and_then(|app| app["from"]["commit"].as_str());
     if let Some(live) = live.filter(|live| !force && *live != commit) {
-        // A commit someone else pushed is fetched before it's decided that this one doesn't contain it.
-        if git(&folder, &["cat-file", "-e", &format!("{live}^{{commit}}")]).is_err() {
-            let _ = git(&folder, &["fetch", "--quiet"]);
-        }
         if git(&folder, &["merge-base", "--is-ancestor", live, &commit]).is_err() {
             bail!(
                 "{name} wasn't deployed: its live version is from commit {}, which yours ({}) doesn't contain, so \
