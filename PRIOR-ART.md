@@ -143,6 +143,13 @@ chose the same: an app's code on a server is free, and which servers act for who
     every database call crossing a socket.
   - **Wasm components**: any language, but the heaviest path for JavaScript and a compile step on the server.
   - **Each app as its own process**: any language and every package, at 20 to 60 MB each.
+- **`service-manager`** (crate, 0.11.0, checked 20 November 2026) to register a server or Computer Use's desktop
+  with the system: on Windows it has only `sc.exe` and WinSW, both of which refuse a user-level service and install
+  one an administrator must, running apart from its person, not the person's own scheduled task in their session that
+  ours are. On Linux and a Mac it has user-level systemd units and LaunchAgents, but takes our own unit or plist
+  (`contents`) for what it can't say (`Type=notify`, `PartOf=graphical-session.target`, `LimitLoadToSessionType`),
+  and loads an agent with the older `launchctl load`, not `bootstrap gui/<uid>`. So it would cover two of three
+  systems and still leave us writing every definition.
 - **Elixir WebRTC** for reaching by key: browsers would reach a home server directly and shells would need no
   networking code. Set aside: reaching by key would be ours to add, its relay can't be a Worker, the first connection
   is slower, and large transfers over data channels are its weak spot.
