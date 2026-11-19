@@ -224,7 +224,7 @@ defmodule OneCore.Call do
 
     about =
       cond do
-        name == Artifact.name(call.own) -> [subject]
+        name == Artifact.name(call.own) -> [asking]
         match?(["own" | _], kind) -> nil
         kind == ["made", app] and String.starts_with?(name, subject <> "/") -> []
         kind == ["made", app] -> [asking]
