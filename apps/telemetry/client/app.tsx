@@ -144,9 +144,13 @@ const dollars = (cost: number) => cost.toLocaleString(undefined, { style: "curre
 /// A span's name as a person reads it: its app's title, then its tool.
 /// One Core's own tools are named by themselves.
 function named(where: string, names: Record<string, string>) {
-  const [app, ...rest] = where.replace(/^tools\/call (?=[^ ]+_)/, "").replace(/^([^ _]+)_/, "$1 ").split(" ")
-  if (!rest.length) return where
-  return app === "one" ? rest.join(" ") : `${names[app] ?? app} › ${rest.join(" ")}`
+  // MCP names a call `tools/call <app>_<tool>`; the server's own span `<app> <tool>`. One Core's own tools have no app.
+  const call = where.replace(/^tools\/call /, "")
+  const at = call.search(/[ _]/)
+  if (at < 0) return call
+  const [app, tool] = [call.slice(0, at), call.slice(at + 1)]
+  if (app === "one") return tool
+  return names[app] || call[at] === " " ? `${names[app] ?? app} › ${tool}` : call
 }
 /// A slow tool or app, as a person reads it.
 const slowName = (slow: Slowest) => (slow.view ? `Opening ${slow.called}` : slow.app === "one" ? slow.tool : `${slow.called} › ${slow.tool}`)
