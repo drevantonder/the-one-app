@@ -413,13 +413,109 @@ impl NativeWindow {
     }
 }
 
+// What the browser draws for the renderer: a page's paths and its pictures.
+
+/// A path, SVG's `d` in its `viewBox` stretched to `device` pixels, filled and stroked (`stroke_width` device pixels
+/// wide however it's stretched), drawn by the browser's canvas, as its own SVG would draw it: in BGRA, straight.
+pub(crate) fn path(d: &str, view_box: &str, device: Size<u32>, fill: Option<String>, stroke: Option<String>, stroke_width: f32) -> Option<crate::view::Decoded> {
+    let [x, y, width, height] = <[f64; 4]>::try_from(view_box.split([' ', ',']).filter(|part| !part.is_empty()).map(|part| part.parse().unwrap_or(0.0)).collect::<Vec<f64>>()).ok()?;
+    let canvas = web_sys::OffscreenCanvas::new(device.width, device.height).ok()?;
+    let context: web_sys::OffscreenCanvasRenderingContext2d = canvas.get_context("2d").ok()??.dyn_into().ok()?;
+    let (sx, sy) = (f64::from(device.width) / width.max(f64::EPSILON), f64::from(device.height) / height.max(f64::EPSILON));
+    let shape = web_sys::Path2d::new_with_path_string(d).ok()?;
+    // In device pixels, so its stroke is as wide however it's stretched (`vector-effect: non-scaling-stroke`).
+    let placed = web_sys::Path2d::new().ok()?;
+    let matrix = web_sys::DomMatrix2dInit::new();
+    (matrix.set_a(sx), matrix.set_d(sy), matrix.set_e(-x * sx), matrix.set_f(-y * sy));
+    // `addPath` takes any DOMMatrix2DInit, where web-sys binds only an SVGMatrix.
+    let add: js_sys::Function = js_sys::Reflect::get(&placed, &"addPath".into()).ok()?.dyn_into().ok()?;
+    add.call2(&placed, &shape, &matrix).ok()?;
+    if let Some(fill) = fill {
+        context.set_fill_style_str(&fill);
+        context.fill_with_path_2d(&placed);
+    }
+    if let Some(stroke) = stroke {
+        context.set_stroke_style_str(&stroke);
+        context.set_line_width(f64::from(stroke_width));
+        context.set_line_cap("round");
+        context.set_line_join("round");
+        context.stroke_with_path(&placed);
+    }
+    let pixels = context.get_image_data(0.0, 0.0, f64::from(device.width), f64::from(device.height)).ok()?.data().0;
+    Some(bgra(device, pixels))
+}
+
+/// The browser's straight RGBA as the atlas's BGRA.
+fn bgra(size: Size<u32>, mut pixels: Vec<u8>) -> crate::view::Decoded {
+    for pixel in pixels.chunks_exact_mut(4) {
+        pixel.swap(0, 2);
+    }
+    crate::view::Decoded { picture: crate::view::Picture { width: size.width, height: size.height }, bgra: pixels }
+}
+
+/// A `data:` address's picture, decoded by the browser for a box of `device` pixels, as a native host's are
+/// (`view::paint::decode`): an SVG drawn at that size, and any other at the smallest of its size halved again and again
+/// that still covers what of the box it fills.
+pub(crate) async fn decode(src: &str, device: Size<u32>) -> Option<crate::view::Decoded> {
+    let image = web_sys::HtmlImageElement::new().ok()?;
+    image.set_src(src);
+    wasm_bindgen_futures::JsFuture::from(image.decode()).await.ok()?;
+    let svg = src.starts_with("data:image/svg+xml");
+    let size = if svg {
+        device
+    } else {
+        let (mut width, mut height) = (image.natural_width().max(1), image.natural_height().max(1));
+        let fit = (device.width as f32 / width as f32).min(device.height as f32 / height as f32);
+        let shown = (width as f32 * fit, height as f32 * fit);
+        while (width / 2) as f32 >= shown.0 && (height / 2) as f32 >= shown.1 && width > 1 && height > 1 {
+            (width, height) = (width / 2, height / 2);
+        }
+        Size { width, height }
+    };
+    let canvas = web_sys::OffscreenCanvas::new(size.width, size.height).ok()?;
+    let context: web_sys::OffscreenCanvasRenderingContext2d = canvas.get_context("2d").ok()??.dyn_into().ok()?;
+    let (width, height) = (f64::from(size.width), f64::from(size.height));
+    if svg {
+        // Fitted in its box, keeping its shape, as resvg draws one natively.
+        let (natural_width, natural_height) = (f64::from(image.natural_width().max(1)), f64::from(image.natural_height().max(1)));
+        let fit = (width / natural_width).min(height / natural_height);
+        context.draw_image_with_html_image_element_and_dw_and_dh(&image, 0.0, 0.0, natural_width * fit, natural_height * fit).ok()?;
+    } else {
+        context.draw_image_with_html_image_element_and_dw_and_dh(&image, 0.0, 0.0, width, height).ok()?;
+    }
+    Some(bgra(size, context.get_image_data(0.0, 0.0, width, height).ok()?.data().0))
+}
+
+/// A picture a page names by an address, fetched as one of its app's files by the browser, which the screen then has
+/// as a `data:` address (`Screen::fetched`).
+fn fetch(page: &url::Url, src: &str) {
+    let (src, address) = (src.to_owned(), page.join(src).map(String::from).unwrap_or_default());
+    wasm_bindgen_futures::spawn_local(async move {
+        let fetched = async {
+            let window = web_sys::window()?;
+            let response: web_sys::Response = wasm_bindgen_futures::JsFuture::from(window.fetch_with_str(&address)).await.ok()?.dyn_into().ok()?;
+            if !response.ok() {
+                return None;
+            }
+            let kind = response.headers().get("content-type").ok().flatten().unwrap_or_default();
+            let bytes = js_sys::Uint8Array::new(&wasm_bindgen_futures::JsFuture::from(response.array_buffer().ok()?).await.ok()?).to_vec();
+            Some(format!("data:{kind};base64,{}", data_encoding::BASE64.encode(&bytes)))
+        };
+        let data = fetched.await;
+        let _ = Native::get().map(|native| native.run(move |windows| {
+            windows.with(WINDOW, |screen| screen.fetched(&src, data));
+        }));
+    });
+}
+
 // What the frame's JS calls: `renderer.js`, as it opens the page and as the DOM tells it what happens on the canvas.
 
-/// Opens the page's window on `canvas`, `scale` device pixels to a CSS pixel, drawn with the design tokens and styles in `tables` (the UI library's tokens
+/// Opens the page at `page` (where what it names by an address is from) on `canvas`, `scale` device pixels to a CSS
+/// pixel, drawn with the design tokens and styles in `tables` (the UI library's tokens
 /// and styles, and its app's styles), in `theme` (`dark`, `light`, or as the device is), as the frame's JS (`calls`)
 /// is told what it says of itself. The page's module is imported after, and says it ran (`started`).
 #[wasm_bindgen]
-pub async fn open(canvas: web_sys::HtmlCanvasElement, scale: f32, tables: Vec<String>, theme: Option<String>, touch: bool, calls: JsValue) -> Result<(), JsError> {
+pub async fn open(canvas: web_sys::HtmlCanvasElement, scale: f32, page: String, tables: Vec<String>, theme: Option<String>, touch: bool, calls: JsValue) -> Result<(), JsError> {
     console_log();
     SCALE.set(scale);
     let media = |query: &str| web_sys::window().and_then(|window| window.match_media(query).ok().flatten()).is_some_and(|list| list.matches());
@@ -429,6 +525,8 @@ pub async fn open(canvas: web_sys::HtmlCanvasElement, scale: f32, tables: Vec<St
     let mut windows = Windows::made(Display, Ok(context)).map_err(|error| JsError::new(&format!("{error:#}")))?;
     let mut screen = Screen::new(Thread::new(Clock::real()), Some(Box::new(asked)), Size { width: 0.0, height: 0.0 }, Default::default());
     screen.page = tokens;
+    let page = url::Url::parse(&page).map_err(|error| JsError::new(&format!("{error}")))?;
+    screen.fetch = Some(Box::new(move |src: &str| fetch(&page, src)));
     screen.touch = touch;
     screen.theme = match theme.as_deref() {
         Some("dark") => Some(Appearance::Dark),

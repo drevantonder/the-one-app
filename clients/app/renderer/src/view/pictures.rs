@@ -12,14 +12,10 @@ use crate::render::atlas::{AtlasKey, AtlasTile};
 
 use super::{Decoded, Picture};
 
+#[cfg(not(target_arch = "wasm32"))]
 type Job = Box<dyn FnOnce() + Send>;
 
-/// The threads pictures decode on, as many as the computer has cores, shared by every screen; on the web, which has none
-/// here, the screen's own, at once.
-#[cfg(target_arch = "wasm32")]
-fn run(job: Job) {
-    job();
-}
+/// The threads pictures decode on, as many as the computer has cores, shared by every screen.
 #[cfg(not(target_arch = "wasm32"))]
 fn run(job: Job) {
     use std::sync::{OnceLock, mpsc};
@@ -133,7 +129,7 @@ impl Pictures {
     /// The picture `src` decoded for a box of `device` pixels by `decode`, and its tile in the atlas: once it's there,
     /// at once; before, decoded in the background, with the same picture as it was last put there at another size, if
     /// it was, in the meantime.
-    pub(super) fn get(&mut self, atlas: &Atlas, src: &str, device: Size<u32>, decode: fn(&str, Size<u32>) -> Option<Decoded>) -> Option<(Picture, AtlasTile)> {
+    pub(super) fn get(&mut self, atlas: &Atlas, src: &str, device: Size<u32>) -> Option<(Picture, AtlasTile)> {
         let device = fitting(device, atlas);
         let id = hash((device.width, device.height, src));
         let address = hash(src);
@@ -159,8 +155,7 @@ impl Pictures {
         if self.asked.insert(id) {
             let (decoding, wake, src) = (self.decoding.clone(), self.wake.clone(), src.to_owned());
             decoding.0.lock().unwrap_or_else(std::sync::PoisonError::into_inner).running += 1;
-            run(Box::new(move || {
-                let decoded = decode(&src, device);
+            let done = move |decoded: Option<Decoded>| {
                 let mut state = decoding.0.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
                 state.done.push((id, decoded));
                 state.running -= 1;
@@ -169,7 +164,12 @@ impl Pictures {
                 if let Some(wake) = wake {
                     wake();
                 }
-            }));
+            };
+            // The browser decodes it, as it's asked with a promise, on the web.
+            #[cfg(target_arch = "wasm32")]
+            wasm_bindgen_futures::spawn_local(async move { done(crate::platform::web::decode(&src, device).await) });
+            #[cfg(not(target_arch = "wasm32"))]
+            run(Box::new(move || done(super::paint::decode(&src, device))));
         }
         latest(self)
     }

@@ -43,15 +43,15 @@ pub(super) struct Span {
 
 /// A picture's size in device pixels, as the atlas holds it: its pixels are the atlas's alone once it has them.
 #[derive(Clone, Copy)]
-pub(super) struct Picture {
-    pub(super) width: u32,
-    pub(super) height: u32,
+pub(crate) struct Picture {
+    pub(crate) width: u32,
+    pub(crate) height: u32,
 }
 
 /// A picture, decoded, in the atlas's byte order (BGRA).
-pub(super) struct Decoded {
-    pub(super) picture: Picture,
-    pub(super) bgra: Vec<u8>,
+pub(crate) struct Decoded {
+    pub(crate) picture: Picture,
+    pub(crate) bgra: Vec<u8>,
 }
 
 /// Where a node's layout is drawn in the window: moved by `offset` and grown by `scale`, as its translates and
@@ -1222,7 +1222,7 @@ impl Painter<'_> {
     /// A picture by its `data:` address at `bounds`, its corners rounded `radius`.
     pub(super) fn picture(&mut self, src: &str, bounds: Bounds<f32>, radius: f32) {
         let device = Size { width: (bounds.size.width * self.scale).round() as u32, height: (bounds.size.height * self.scale).round() as u32 };
-        if let Some((_, tile)) = self.pictures.get(self.atlas, src, device, decode) {
+        if let Some((_, tile)) = self.pictures.get(self.atlas, src, device) {
             let window = self.window;
             self.sprite(tile, bounds, Corners::all(radius), 1.0, window);
         }
@@ -1269,7 +1269,7 @@ impl Painter<'_> {
         if device.width == 0 || device.height == 0 {
             return;
         }
-        let Some((picture, tile)) = self.pictures.get(self.atlas, src, device, decode) else { return };
+        let Some((picture, tile)) = self.pictures.get(self.atlas, src, device) else { return };
         let fit = (content.size.width / picture.width as f32).min(content.size.height / picture.height as f32);
         let size = Size { width: picture.width as f32 * fit, height: picture.height as f32 * fit };
         let bounds = Bounds {
@@ -1294,20 +1294,25 @@ impl Painter<'_> {
             Paint::Current => Some(current),
             Paint::None => None,
         };
-        let css = |colour: Option<Hsla>| colour.map_or_else(|| "none".to_owned(), |colour| {
+        let css = |colour: Hsla| {
             let rgba = crate::geometry::Rgba::from(colour);
             format!("rgba({},{},{},{})", (rgba.r * 255.0).round(), (rgba.g * 255.0).round(), (rgba.b * 255.0).round(), rgba.a)
-        });
+        };
         let svg = format!(
             r#"<svg xmlns="http://www.w3.org/2000/svg" width="{w}" height="{h}" viewBox="{view_box}" preserveAspectRatio="none"><path d="{d}" fill="{fill}" stroke="{stroke}" stroke-width="{width}" vector-effect="non-scaling-stroke" stroke-linecap="round" stroke-linejoin="round"/></svg>"#,
             w = device.width,
             h = device.height,
             d = d.replace('"', ""),
-            fill = css(paint(look.fill)),
-            stroke = css(paint(look.stroke)),
+            fill = paint(look.fill).map_or_else(|| "none".to_owned(), css),
+            stroke = paint(look.stroke).map_or_else(|| "none".to_owned(), css),
             width = look.stroke_width * self.scale,
         );
-        let Some(tile) = self.pictures.now(self.atlas, &format!("path{svg}"), || decode(&format!("data:image/svg+xml;base64,{}", data_encoding::BASE64.encode(svg.as_bytes())), device)) else { return };
+        // The web's canvas draws it, from its `d`, as the browser's own SVG would.
+        #[cfg(target_arch = "wasm32")]
+        let draw = || crate::platform::web::path(d, view_box, device, paint(look.fill).map(css), paint(look.stroke).map(css), look.stroke_width * self.scale);
+        #[cfg(not(target_arch = "wasm32"))]
+        let draw = || decode(&format!("data:image/svg+xml;base64,{}", data_encoding::BASE64.encode(svg.as_bytes())), device);
+        let Some(tile) = self.pictures.now(self.atlas, &format!("path{svg}"), draw) else { return };
         self.sprite(tile, content, Corners::default(), opacity, mask);
     }
 }
@@ -1328,6 +1333,7 @@ pub(super) fn chrome_type(conditions: Conditions) -> (crate::text::TextStyle, cr
     (words, crate::text::TextStyle { weight: weight.round() as u16, ..words })
 }
 
+#[cfg(not(target_arch = "wasm32"))]
 /// An SVG, parsed as a browser reads it: its `oklch()` colours as sRGB, which resvg's parser (svgtypes) doesn't read
 /// and draws black, and its text in Allo, the typeface a host has everywhere, for `sans-serif` and `system-ui`.
 pub(super) fn svg(bytes: &[u8]) -> Option<resvg::usvg::Tree> {
@@ -1363,6 +1369,7 @@ pub(super) fn svg(bytes: &[u8]) -> Option<resvg::usvg::Tree> {
 /// smallest of its size halved again and again that still covers what of the box it fills, as a mipmap's levels are, so its pixels
 /// beyond what the box shows aren't kept, and a box that grows and shrinks (a window resized) decodes it at a few
 /// sizes, not one for each.
+#[cfg(not(target_arch = "wasm32"))]
 pub(super) fn decode(src: &str, device: Size<u32>) -> Option<Decoded> {
     let (head, body) = src.strip_prefix("data:")?.split_once(',')?;
     let bytes = if head.ends_with(";base64") {

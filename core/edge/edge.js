@@ -168,7 +168,8 @@ const gatewayConfig = relative(here, `${built}/gateway.jsonc`);
 
 const wrangler = (...args) => Bun.spawn(["bun", "x", "wrangler", ...args], { cwd: here, env: process.env, stdio: ["inherit", "inherit", "inherit"] }).exited;
 const webWorker = (await import(`${here}/web/wrangler.jsonc`)).default;
-await Bun.write(`${built}/web.jsonc`, JSON.stringify({ ...webWorker, assets: { directory: "web" } }, null, 2));
+// Its worker runs first only for the renderer's files, which it sends as they're kept compressed (web.ts).
+await Bun.write(`${built}/web.jsonc`, JSON.stringify({ ...webWorker, main: relative(built, `${here}/web/${webWorker.main}`), assets: { directory: "web", binding: "ASSETS", run_worker_first: ["/renderer/*"] } }, null, 2));
 const config = {
   web: relative(here, `${built}/web.jsonc`),
   presigner: "presigner/wrangler.jsonc",

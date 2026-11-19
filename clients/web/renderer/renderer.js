@@ -44,7 +44,7 @@
     const spoken = semantics(/** @type {HTMLElement} */ (document.getElementById("semantics")), (id, action) => renderer.act(id, action))
     const sized = (/** @type {number} */ width, /** @type {number} */ height) => [Math.max(1, Math.round(width)), Math.max(1, Math.round(height))]
     ;[canvas.width, canvas.height] = sized(innerWidth * devicePixelRatio, innerHeight * devicePixelRatio)
-    await renderer.open(canvas, devicePixelRatio, tables, page.searchParams.get("theme"), matchMedia("(pointer: coarse)").matches, {
+    await renderer.open(canvas, devicePixelRatio, base.href, tables, page.searchParams.get("theme"), matchMedia("(pointer: coarse)").matches, {
       post: (/** @type {object} */ message) => parent.postMessage(message, "*"),
       cursor: (/** @type {string} */ cursor) => void (canvas.style.cursor = cursor),
       textInput: (/** @type {[string, unknown][]} */ calls) => calls.forEach(([method, args]) => typing.call(method, args)),

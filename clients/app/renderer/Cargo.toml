@@ -11,13 +11,11 @@ bytemuck = { version = "1", features = ["derive"] }
 data-encoding = "2"
 # Where glyphs and images are packed into the atlas's textures.
 etagere = "0.2"
-# Images a page shows, and the inspector's `snap`, a PNG.
-image = { version = "0.25", default-features = false, features = ["png", "jpeg", "gif", "webp"] }
+# The inspector's `snap`, a PNG, and natively the images a page shows, which the browser decodes on the web.
+image = { version = "0.25", default-features = false, features = ["png"] }
 log = "0.4"
 parking_lot = "0.12"
 raw-window-handle = "0.6"
-# Its `text`, an SVG's `<text>`, drawn in Allo (`view::svg`).
-resvg = { version = "0.47", default-features = false, features = ["text"] }
 # Text, the same everywhere (`text`): Parley lays it out (HarfRust shapes it, ICU4X breaks its lines) in fonts fontique
 # finds, the system's where `system` is on, which every target but the web has; swash rasterizes its glyphs, and a
 # COLRv1 emoji (Android's, Linux's Noto Color Emoji), which swash doesn't draw, skrifa walks the paint graph of and
@@ -45,9 +43,12 @@ wuff = "0.2"
 # The memory the headless harness's `--measure` says drawing took.
 memory-stats = "1"
 
-# What only a native host's QuickJS sandbox has (`js`): on the web, a page's JS is the browser's own, with its own Web
-# APIs and Intl.
+# What only a native host has: its QuickJS sandbox (`js`), where on the web a page's JS is the browser's own, with its
+# own Web APIs and Intl; and what draws a page's pictures (an SVG, its `text` in Allo, `view::svg`, and a JPEG, a GIF
+# or a WebP) and a COLRv1 emoji (`text::colr`), which on the web the browser draws.
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+image = { version = "0.25", default-features = false, features = ["png", "jpeg", "gif", "webp"] }
+resvg = { version = "0.47", default-features = false, features = ["text"] }
 parley = { version = "0.13", features = ["system"] }
 # QuickJS, with its module loader: a page's module imports the UI library's. Its async runtime runs what the Web APIs
 # below answer with a promise.
@@ -85,7 +86,7 @@ wgpu = { version = "30.0.2", default-features = false, features = ["webgpu"] }
 wasm-bindgen = "=0.2.130"
 wasm-bindgen-futures = "0.4"
 js-sys = "0.3"
-web-sys = { version = "0.3", features = ["console", "HtmlCanvasElement", "MediaQueryList", "Window"] }
+web-sys = { version = "0.3", features = ["console", "CanvasRenderingContext2d", "DomMatrix2dInit", "Headers", "HtmlCanvasElement", "HtmlImageElement", "ImageData", "MediaQueryList", "OffscreenCanvas", "OffscreenCanvasRenderingContext2d", "Path2d", "Response", "Window"] }
 
 [target.'cfg(any(target_os = "linux", target_os = "macos"))'.dependencies]
 # The windows' thread's event loop, as GPUI's Linux platform has it; a Mac's wakes it from AppKit's main thread.

@@ -22,6 +22,7 @@ use crate::text::{Paragraph, TextRun, TextSystem};
 use crate::tokens::{Conditions, Radius};
 use crate::tree::{Id, Kind, Node, Tree};
 use paint::*;
+pub(crate) use paint::{Decoded, Picture};
 
 mod bridge;
 pub use bridge::TextInputConnection;

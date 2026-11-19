@@ -12,6 +12,7 @@ use crate::geometry::Rgba;
 const REM: f32 = 16.0;
 
 /// `oklch(L C H)` or `oklch(L C H / A%)`, as sRGB (Björn Ottosson's OKLab, which CSS Color 4 uses).
+#[cfg(not(target_arch = "wasm32"))]
 pub(crate) fn oklch(value: &str) -> Option<Rgba> {
     let inner = value.strip_prefix("oklch(")?.strip_suffix(')')?;
     let (lch, alpha) = match inner.split_once('/') {

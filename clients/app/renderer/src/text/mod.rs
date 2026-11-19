@@ -24,6 +24,7 @@ use crate::render::Atlas;
 use crate::render::atlas::AtlasKey;
 use crate::render::scene::{MonochromeSprite, PolychromeSprite, Scene, TransformationMatrix};
 
+#[cfg(not(target_arch = "wasm32"))]
 mod colr;
 
 /// How many positions between device pixels a glyph is rasterized at, along the line and across it, as GPUI does on a
@@ -409,6 +410,8 @@ impl TextSystem {
         let face = &self.faces[params.font_id.0];
         let (data, index) = (face.font.data.data(), face.font.index);
         let ppem = params.font_size() * params.scale_factor();
+        // A COLRv1 emoji, which only a system's emoji face is: the web has none of its own.
+        #[cfg(not(target_arch = "wasm32"))]
         if params.is_emoji {
             let coords: Vec<skrifa::instance::NormalizedCoord> = face.coords.iter().map(|coord| skrifa::instance::NormalizedCoord::from_bits(*coord)).collect();
             let colr = skrifa::FontRef::from_index(data, index).ok().and_then(|font| colr::render(&font, params.glyph_id.0.try_into().ok()?, ppem, &coords));
