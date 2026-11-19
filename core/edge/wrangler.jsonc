@@ -21,17 +21,7 @@
     ],
     "code_update_strategy": { "mode": "deferred", "max_delay": 5 }
   },
-  // v1 moved them, with what they keep, from the Workers each was in before the edge was one.
-  "migrations": [
-    {
-      "tag": "v1",
-      "transferred_classes": [
-        { "from": "Relay", "from_script": "network-relay", "to": "Relay" },
-        { "from": "NetworkUpdater", "from_script": "network-updater", "to": "NetworkUpdater" },
-        { "from": "Changes", "from_script": "network-presigner", "to": "Changes" }
-      ]
-    }
-  ],
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["Relay", "NetworkUpdater", "Changes"] }],
   // Its secrets, which only it holds: BUCKET is the bucket's S3 address with the bucket's name as its path, and
   // FIRST_SERVER is what the network's first server shows once. `wrangler dev` takes them from its environment.
   "secrets": { "required": ["BUCKET", "ACCESS_KEY_ID", "SECRET_ACCESS_KEY", "FIRST_SERVER"] }
