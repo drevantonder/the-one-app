@@ -68,10 +68,13 @@ struct Layouts {
     instances: wgpu::BindGroupLayout,
     blur_params: wgpu::BindGroupLayout,
     texture: wgpu::BindGroupLayout,
+    /// A 64×64 tile of blue noise (`blue-noise.png`, made by Ulichney's void-and-cluster, σ 1.5), which the shaders
+    /// dither what would band with (`dither`), bound with the globals.
+    noise: wgpu::TextureView,
 }
 
 impl Layouts {
-    fn new(device: &wgpu::Device, format: wgpu::TextureFormat, premultiplied: bool) -> Self {
+    fn new(device: &wgpu::Device, queue: &wgpu::Queue, format: wgpu::TextureFormat, premultiplied: bool) -> Self {
         let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: None,
             source: wgpu::ShaderSource::Wgsl(include_str!("shaders.wgsl").into()),
@@ -84,7 +87,17 @@ impl Layouts {
             count: None,
         };
         let layout = |entries: &[wgpu::BindGroupLayoutEntry]| device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor { label: None, entries });
-        let globals = layout(&[uniform(0), uniform(1)]);
+        let noise = wgpu::BindGroupLayoutEntry {
+            binding: 2,
+            visibility,
+            ty: wgpu::BindingType::Texture {
+                sample_type: wgpu::TextureSampleType::Float { filterable: false },
+                view_dimension: wgpu::TextureViewDimension::D2,
+                multisampled: false,
+            },
+            count: None,
+        };
+        let globals = layout(&[uniform(0), uniform(1), noise]);
         // A batch's instances are at an offset of their own in the frame's data, which one bind group of it gives.
         let instances = layout(&[wgpu::BindGroupLayoutEntry {
             binding: 0,
@@ -113,7 +126,40 @@ impl Layouts {
         ]);
         // See https://apoorvaj.io/alpha-compositing-opengl-blending-and-premultiplied-alpha/
         let blend = if premultiplied { wgpu::BlendState::PREMULTIPLIED_ALPHA_BLENDING } else { wgpu::BlendState::ALPHA_BLENDING };
-        Self { device: device.clone(), shader, format, blend, globals, instances, blur_params, texture }
+        let pixels = image::load_from_memory(include_bytes!("blue-noise.png")).expect("it's a PNG").to_luma8();
+        let size = wgpu::Extent3d { width: pixels.width(), height: pixels.height(), depth_or_array_layers: 1 };
+        let tile = device.create_texture(&wgpu::TextureDescriptor {
+            label: None,
+            size,
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: wgpu::TextureFormat::R8Unorm,
+            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::COPY_DST,
+            view_formats: &[],
+        });
+        queue.write_texture(
+            wgpu::TexelCopyTextureInfo { texture: &tile, mip_level: 0, origin: wgpu::Origin3d::ZERO, aspect: wgpu::TextureAspect::All },
+            &pixels,
+            wgpu::TexelCopyBufferLayout { offset: 0, bytes_per_row: Some(size.width), rows_per_image: None },
+            size,
+        );
+        let noise = tile.create_view(&wgpu::TextureViewDescriptor::default());
+        Self { device: device.clone(), shader, format, blend, globals, instances, blur_params, texture, noise }
+    }
+
+    /// The frame's globals and its gamma, at their places in `buffer`, with the noise.
+    fn globals(&self, buffer: &wgpu::Buffer, globals: (u64, u64), gamma: (u64, u64)) -> wgpu::BindGroup {
+        let binding = |(offset, size): (u64, u64)| wgpu::BindingResource::Buffer(wgpu::BufferBinding { buffer, offset, size: wgpu::BufferSize::new(size) });
+        self.device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: None,
+            layout: &self.globals,
+            entries: &[
+                wgpu::BindGroupEntry { binding: 0, resource: binding(globals) },
+                wgpu::BindGroupEntry { binding: 1, resource: binding(gamma) },
+                wgpu::BindGroupEntry { binding: 2, resource: wgpu::BindingResource::TextureView(&self.noise) },
+            ],
+        })
     }
 
     /// A pipeline of `vertex` and `fragment` binding `data` as group 1, and where it samples a texture, the texture
@@ -164,8 +210,8 @@ fn side_by_side<const N: usize>(compile: [Compile; N]) -> [wgpu::RenderPipeline;
 }
 
 impl WgpuPipelines {
-    fn new(device: &wgpu::Device, format: wgpu::TextureFormat, premultiplied: bool) -> Self {
-        let layouts = Layouts::new(device, format, premultiplied);
+    fn new(device: &wgpu::Device, queue: &wgpu::Queue, format: wgpu::TextureFormat, premultiplied: bool) -> Self {
+        let layouts = Layouts::new(device, queue, format, premultiplied);
         let (l, blend) = (&layouts, Some(layouts.blend));
         let [quads, shadows, underlines, mono_sprites, poly_sprites, rasters] = side_by_side([
             &|| l.pipeline(&l.instances, "vs_quad", "fs_quad", blend, false),
@@ -204,7 +250,7 @@ impl WgpuPipelines {
         if let Some((_, _, pipelines)) = compiled.iter().find(|(f, p, _)| *f == format && *p == premultiplied) {
             return pipelines.clone();
         }
-        let pipelines = Arc::new(WgpuPipelines::new(&context.device, format, premultiplied));
+        let pipelines = Arc::new(WgpuPipelines::new(&context.device, &context.queue, format, premultiplied));
         compiled.push((format, premultiplied, pipelines.clone()));
         // The rest compiled in the background where there are threads; on the web, as each is first drawn.
         #[cfg(not(target_arch = "wasm32"))]
@@ -629,11 +675,7 @@ impl WgpuRenderer {
         self.write_data();
         let buffer = self.buffer.clone().expect("written above");
         let binding = |(offset, size): (u64, u64)| wgpu::BindingResource::Buffer(wgpu::BufferBinding { buffer: &buffer, offset, size: wgpu::BufferSize::new(size) });
-        let globals = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: None,
-            layout: &self.pipelines.layouts.globals,
-            entries: &[wgpu::BindGroupEntry { binding: 0, resource: binding(globals) }, wgpu::BindGroupEntry { binding: 1, resource: binding(gamma) }],
-        });
+        let globals = self.pipelines.layouts.globals(&buffer, globals, gamma);
         if self.instances.as_ref().is_none_or(|(bound, bound_window, _)| *bound != buffer || *bound_window != window) {
             let group = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
                 label: None,
@@ -845,12 +887,7 @@ impl WgpuRenderer {
             view_formats: &[],
         });
         let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
-        let binding = |(offset, size): (u64, u64)| wgpu::BindingResource::Buffer(wgpu::BufferBinding { buffer, offset, size: wgpu::BufferSize::new(size) });
-        let globals = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: None,
-            layout: &self.pipelines.layouts.globals,
-            entries: &[wgpu::BindGroupEntry { binding: 0, resource: binding(globals) }, wgpu::BindGroupEntry { binding: 1, resource: binding(gamma) }],
-        });
+        let globals = self.pipelines.layouts.globals(buffer, globals, gamma);
         let batches: Vec<PrimitiveBatch<'_>> = recording.scene.batches().collect();
         let instances = Instances { group: group.clone(), offsets: offsets.iter().map(|(offset, _)| *offset as u32).collect() };
         let blurs: Vec<Vec<Blur>> = batches.iter().map(|_| Vec::new()).collect();
@@ -902,12 +939,7 @@ impl WgpuRenderer {
             view_formats: &[],
         });
         let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
-        let binding = |(offset, size): (u64, u64)| wgpu::BindingResource::Buffer(wgpu::BufferBinding { buffer, offset, size: wgpu::BufferSize::new(size) });
-        let globals = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
-            label: None,
-            layout: &self.pipelines.layouts.globals,
-            entries: &[wgpu::BindGroupEntry { binding: 0, resource: binding(globals) }, wgpu::BindGroupEntry { binding: 1, resource: binding(gamma) }],
-        });
+        let globals = self.pipelines.layouts.globals(buffer, globals, gamma);
         {
             let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
                 label: None,
