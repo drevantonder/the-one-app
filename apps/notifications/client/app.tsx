@@ -2,8 +2,11 @@
 // a browser that isn't woken by them says so first, and why, and a browser turns them on here. Which apps may notify you
 // is in Settings (settings.tsx).
 import { createMemo, Errored, For, Loading, refresh, Show } from "solid-js"
-import { call, changed, client, confirm, Empty, List, Menu, open, Problem, render, Row, Screen, Section, since, Skeleton, Text, toast } from "ui"
+import { call, changed, client, confirm, Empty, List, Menu, open, Problem, render, Row, Screen, Section, since, Skeleton, styles, Text, toast, tokens } from "ui"
 import { type Push, PushState } from "./push.tsx"
+
+/** What hasn't been read is in a heavier weight. */
+const look = styles({ unread: { fontWeight: tokens.weight.medium } })
 
 /** A notification, as `notifications_inbox` answers it. */
 interface Received {
@@ -84,7 +87,7 @@ function Inbox(props: { inbox: Inbox }) {
             <For each={props.inbox.notifications}>
               {(notification) => (
                 <Row
-                  heading={<Text style={{ font: notification.read ? "body" : "label" }}>{notification.title}</Text>}
+                  heading={<Text style={!notification.read && look.unread}>{notification.title}</Text>}
                   text={[notification.from, notification.text].filter(Boolean).join(" · ")}
                   end={since(notification.at, "narrow")}
                   onPress={() => tapped(notification)}

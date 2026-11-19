@@ -3,7 +3,7 @@
 // runner (core/ui/scenes.js) draws each to compare the DOM's with a native host's; `#scenes` lists them for it.
 // Nothing here calls a tool.
 import { For, Show } from "solid-js"
-import { link, render, type Scene, type Scenes, ScrollView, Section, Text, View } from "ui"
+import { link, render, type Scene, type Scenes, ScrollView, Section, styles, Text, tokens, View } from "ui"
 import actions from "./actions.scenes.tsx"
 import buttons from "./buttons.scenes.tsx"
 import fields from "./fields.scenes.tsx"
@@ -16,6 +16,14 @@ import styling from "./styling.scenes.tsx"
 import tabs from "./tabs.scenes.tsx"
 import text from "./text.scenes.tsx"
 import widgets from "./widgets.scenes.tsx"
+
+const look = styles({
+  page: { padding: tokens.grid[4], gap: tokens.grid[6] },
+  title: { font: tokens.type.title },
+  scene: { gap: tokens.grid[2] },
+  name: { font: tokens.type.caption, color: tokens.colour.secondaryLabel },
+  alone: { padding: tokens.grid[4], gap: tokens.grid[4] },
+})
 
 const scenes: Scenes = { ...text, ...images, ...buttons, ...lists, ...fields, ...states, ...tabs, ...widgets, ...over, ...actions, ...live, ...styling }
 const draw = (scene: Scene) => (typeof scene === "function" ? scene() : scene.render())
@@ -33,8 +41,8 @@ render(() => (
   <Show
     when={named() ? scenes[named()!] : undefined}
     fallback={
-      <ScrollView style={{ padding: 16, gap: 24 }}>
-        <Text role="heading" aria-level={1} style={{ font: "title" }}>
+      <ScrollView style={look.page}>
+        <Text role="heading" aria-level={1} style={look.title}>
           Gallery
         </Text>
         <For each={families}>
@@ -42,8 +50,8 @@ render(() => (
             <Section heading={family}>
               <For each={Object.keys(scenes).filter((name) => name.startsWith(`${family}/`) && typeof scenes[name] === "function")}>
                 {(name) => (
-                  <View style={{ gap: 8 }}>
-                    <Text style={{ font: "footnote", color: "muted-foreground" }}>{name.slice(family.length + 1)}</Text>
+                  <View style={look.scene}>
+                    <Text style={look.name}>{name.slice(family.length + 1)}</Text>
                     {draw(scenes[name])}
                   </View>
                 )}
@@ -54,7 +62,7 @@ render(() => (
       </ScrollView>
     }
   >
-    {(scene) => <View style={{ padding: 16, gap: 16 }}>{draw(scene())}</View>}
+    {(scene) => <View style={look.alone}>{draw(scene())}</View>}
   </Show>
   </Show>
 ))

@@ -1,8 +1,10 @@
-import { Button, Empty, Problem, type Scenes, Skeleton, Status, Steps, View } from "ui"
+import { Button, Empty, Problem, type Scenes, Skeleton, Status, Steps, styles, tokens, View } from "ui"
+
+const look = styles({ column: { gap: tokens.grid[4] } })
 
 export default {
   "States/Every kind": () => (
-    <View style={{ gap: 16 }}>
+    <View style={look.column}>
       <Empty>Nothing here yet.</Empty>
       <Problem heading="Couldn't load" text="The server didn't answer." action={<Button variant="outline">Try Again</Button>} />
       <Problem warn heading="Needs you" text="Sign in again." />

@@ -1,5 +1,12 @@
 import { For } from "solid-js"
-import { Image, type Scenes, Text, View } from "ui"
+import { Image, type Scenes, styles, Text, tokens, View } from "ui"
+
+const look = styles({
+  column: { gap: tokens.grid[3] },
+  row: { flexDirection: "row", alignItems: "center", gap: tokens.grid[3] },
+  tile: { width: tokens.grid[8], height: tokens.grid[8], borderRadius: tokens.radius.medium },
+  large: (width: number, height: number) => ({ width, height, borderRadius: tokens.radius.medium }),
+})
 
 /// A letter on a colour, as an SVG an app draws for an item with no icon of its own: its fill in oklch(), as CSS
 /// colours are, and its letter as SVG text.
@@ -20,16 +27,16 @@ const tiles = [
 
 export default {
   "Images/SVG tiles": () => (
-    <View style={{ gap: 12 }}>
+    <View style={look.column}>
       <For each={tiles}>
         {(tile_) => (
-          <View style={{ flexDirection: "row", alignItems: "center", gap: 12 }}>
-            <Image src={tile(tile_[0], tile_[1])} alt="" style={{ width: 32, height: 32, borderRadius: "md" }} />
+          <View style={look.row}>
+            <Image src={tile(tile_[0], tile_[1])} alt="" style={look.tile} />
             <Text>{tile_[1]}</Text>
           </View>
         )}
       </For>
     </View>
   ),
-  "Images/Slow to decode": () => <Image src={blurred} alt="" style={{ width: 358, height: 268, borderRadius: "md" }} />,
+  "Images/Slow to decode": () => <Image src={blurred} alt="" style={look.large(358, 268)} />,
 } satisfies Scenes

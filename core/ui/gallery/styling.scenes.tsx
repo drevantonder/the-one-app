@@ -5,6 +5,7 @@ import { brand } from "./brand.ts"
 const look = styles({
   row: { flexDirection: "row", gap: tokens.grid[3], alignItems: "flex-end" },
   column: { gap: tokens.grid[1], alignItems: "center" },
+  stack: { gap: tokens.grid[4] },
   tile: { width: brand.tile, height: brand.tile, borderRadius: tokens.radius.medium, backgroundColor: brand.accent },
   ours: { width: brand.tile, height: brand.tile, borderRadius: tokens.radius.medium, backgroundColor: tokens.colour.magenta },
   tint: { width: brand.tile, height: brand.tile, borderRadius: tokens.radius.medium, backgroundColor: tokens.colour.magentaTint },
@@ -40,7 +41,7 @@ export default {
     </View>
   ),
   "Styling/Dynamic styles": () => (
-    <View style={{ gap: 16 }}>
+    <View style={look.stack}>
       <View style={look.row}>
         <For each={bars}>{([height, colour]) => <View style={look.bar(height, colour)} />}</For>
       </View>

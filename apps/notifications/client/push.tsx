@@ -1,7 +1,9 @@
 // Where this phone or browser is with being woken by its notifications, which the inbox and Settings' Notifications
 // both show: fine is silent, and a phone or browser that isn't woken says so, and why, with what turns them on.
 import { Show } from "solid-js"
-import { Button, client, List, Problem, Row, Spinner, Text, toast, View } from "ui"
+import { Button, client, List, Problem, Row, Spinner, styles, Text, toast, tokens, View } from "ui"
+
+const look = styles({ waiting: { flexDirection: "row", alignItems: "center", gap: tokens.grid[2], color: tokens.colour.secondaryLabel } })
 
 /** Where this phone or browser is with being woken by its notifications, as `client()` says: nothing on a computer. */
 export type Push = { state: "notAsked" | "denied" | "registering" | "registered" | "homeScreen" } | { state: "failed"; why: string }
@@ -34,7 +36,7 @@ export function PushState(props: { push: Push; settings: boolean; again: () => v
   return (
     <>
       <Show when={props.push.state === "registering"}>
-        <View role="status" style={{ flexDirection: "row", alignItems: "center", gap: 8, color: "muted-foreground" }}>
+        <View role="status" style={look.waiting}>
           <Spinner />
           <Text>Turning on notifications…</Text>
         </View>

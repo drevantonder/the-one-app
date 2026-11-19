@@ -1,13 +1,20 @@
 import { createSignal } from "solid-js"
-import { Badge, Button, Icon, type Scenes, Spinner, Text, View } from "ui"
+import { Badge, Button, Icon, type Scenes, Spinner, styles, Text, tokens, View } from "ui"
+
+const look = styles({
+  column: { gap: tokens.grid[2], alignItems: "flex-start" },
+  moved: (translateX: number) => ({ translateX }),
+  wrap: { flexDirection: "row", flexWrap: "wrap", gap: tokens.grid[2] },
+  row: { flexDirection: "row", gap: tokens.grid[2], alignItems: "center" },
+})
 
 /// A button moved from where it's laid out, pressed where it's drawn: a press goes to what's on screen, as GPUI's
 /// hitboxes are from what was painted, not to where its layout is.
 const Moved = () => {
   const [pressed, setPressed] = createSignal(0)
   return (
-    <View style={{ gap: 8, alignItems: "flex-start" }}>
-      <View style={{ translateX: 160 }}>
+    <View style={look.column}>
+      <View style={look.moved(160)}>
         <Button onPress={() => setPressed(pressed() + 1)}>Moved</Button>
       </View>
       <Text>{`Pressed ${pressed()} times`}</Text>
@@ -17,7 +24,7 @@ const Moved = () => {
 
 export default {
   "Buttons/Variants": () => (
-    <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 8 }}>
+    <View style={look.wrap}>
       <Button>Default</Button>
       <Button variant="secondary">Secondary</Button>
       <Button variant="outline">Outline</Button>
@@ -31,7 +38,7 @@ export default {
     </View>
   ),
   "Buttons/Badges and spinner": () => (
-    <View style={{ flexDirection: "row", gap: 8, alignItems: "center" }}>
+    <View style={look.row}>
       <Badge>3</Badge>
       <Badge variant="secondary">New</Badge>
       <Badge variant="destructive">12</Badge>

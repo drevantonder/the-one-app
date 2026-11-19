@@ -1,57 +1,75 @@
 import { createSignal } from "solid-js"
-import { type Scenes, Text, View } from "ui"
+import { type Scenes, styles, Text, tokens, View } from "ui"
+
+const look = styles({
+  column: { gap: tokens.grid[2] },
+  largeTitle: { font: tokens.type.largeTitle },
+  title: { font: tokens.type.title },
+  figure: { font: tokens.type.figure },
+  barTitle: { font: tokens.type.barTitle },
+  large: { font: tokens.type.large },
+  small: { font: tokens.type.small },
+  caption: { font: tokens.type.caption },
+  strong: { fontWeight: tokens.weight.medium },
+  quiet: { color: tokens.colour.secondaryLabel },
+  wrong: { color: tokens.colour.red },
+  accent: { color: tokens.colour.blue },
+  highlight: { backgroundColor: tokens.colour.quinaryLabel },
+  width: (width: number) => ({ width }),
+})
 
 /// A link in a sentence's words, which says how often it's been pressed.
 function InlineLink() {
   const [pressed, setPressed] = createSignal(0)
   return (
-    <View style={{ gap: 8 }}>
+    <View style={look.column}>
       <Text>
         Read the{" "}
-        <Text role="link" tabIndex={0} onPress={() => setPressed(pressed() + 1)} style={{ color: "primary", font: "label" }}>
+        <Text role="link" tabIndex={0} onPress={() => setPressed(pressed() + 1)} style={[look.accent, look.strong]}>
           terms of use
         </Text>{" "}
         before you go on.
       </Text>
-      <Text style={{ font: "footnote", color: "muted-foreground" }}>Pressed {pressed()} times</Text>
+      <Text style={[look.caption, look.quiet]}>Pressed {pressed()} times</Text>
     </View>
   )
 }
 
 export default {
   "Text/Type styles": () => (
-    <View style={{ gap: 8 }}>
-      <Text style={{ font: "title" }}>Title</Text>
-      <Text style={{ font: "figure" }}>1,234</Text>
-      <Text style={{ font: "label" }}>Label</Text>
-      <Text>Body text, which runs on over more than one line where there isn't room for all of it in one.</Text>
-      <Text style={{ font: "subheadline" }}>Subheadline</Text>
-      <Text style={{ font: "footnote", color: "muted-foreground" }}>Footnote, muted</Text>
-      <Text style={{ font: "caption-1" }}>Caption 1</Text>
-      <Text style={{ font: "caption-2" }}>Caption 2</Text>
+    <View style={look.column}>
+      <Text style={look.largeTitle}>Large Title</Text>
+      <Text style={look.title}>Title</Text>
+      <Text style={look.figure}>1,234</Text>
+      <Text style={look.barTitle}>Bar Title</Text>
+      <Text style={look.large}>Large</Text>
+      <Text>Medium, the body's, which runs on over more than one line where there isn't room for all of it in one.</Text>
+      <Text style={look.strong}>Medium, its weight medium</Text>
+      <Text style={[look.caption, look.quiet]}>Caption, quiet</Text>
+      <Text style={look.small}>Small</Text>
     </View>
   ),
   "Text/Styled spans": () => (
-    <View style={{ gap: 8 }}>
-      <Text style={{ color: "muted-foreground" }}>
-        12 calls · <Text style={{ color: "destructive" }}>3 failed</Text>
+    <View style={look.column}>
+      <Text style={look.quiet}>
+        12 calls · <Text style={look.wrong}>3 failed</Text>
       </Text>
       <Text>
-        Body, <Text style={{ font: "label" }}>label weight</Text> and <Text style={{ font: "caption-1", color: "muted-foreground" }}>a caption</Text> beside{" "}
-        <Text style={{ backgroundColor: "muted" }}>a highlight</Text> here
+        Body, <Text style={look.strong}>medium weight</Text> and <Text style={[look.caption, look.quiet]}>a caption</Text> beside{" "}
+        <Text style={look.highlight}>a highlight</Text> here
       </Text>
-      <Text style={{ font: "title" }}>
-        Title with <Text style={{ color: "primary" }}>a coloured word</Text>
+      <Text style={look.title}>
+        Title with <Text style={look.accent}>a coloured word</Text>
       </Text>
     </View>
   ),
   "Text/Inline link": () => <InlineLink />,
   "Text/Inline link, pressed": { render: () => <InlineLink />, taps: ["terms of use"] },
   "Text/Runs wrapping": () => (
-    <View style={{ width: 220 }}>
+    <View style={look.width(220)}>
       <Text>
-        A sentence that wraps, with <Text style={{ color: "destructive" }}>a red stretch that runs on over the end of a line</Text> and{" "}
-        <Text style={{ font: "label", backgroundColor: "muted" }}>a highlighted bold one that wraps too</Text> then plain words to its end
+        A sentence that wraps, with <Text style={look.wrong}>a red stretch that runs on over the end of a line</Text> and{" "}
+        <Text style={[look.strong, look.highlight]}>a highlighted bold one that wraps too</Text> then plain words to its end
       </Text>
     </View>
   ),

@@ -1,12 +1,17 @@
 import { createSignal } from "solid-js"
-import { Checkbox, createListCollection, Field, Input, RadioGroup, type Scenes, Search, Select, Switch, Text, Textarea, View } from "ui"
+import { Checkbox, createListCollection, Field, Input, RadioGroup, type Scenes, Search, Select, styles, Switch, Text, Textarea, tokens, View } from "ui"
+
+const look = styles({
+  form: { gap: tokens.grid[4] },
+  narrow: (width: number) => ({ gap: tokens.grid[2], width }),
+})
 
 const fruits = createListCollection({ items: [{ value: "apple", label: "Apple" }, { value: "pear", label: "Pear" }] })
 
 const Fields = () => {
   const [code, setCode] = createSignal("")
   return (
-    <View style={{ gap: 16 }}>
+    <View style={look.form}>
       <Field label="Name" hint="As people see it">
         <Input placeholder="Your name" />
       </Field>
@@ -49,7 +54,7 @@ const Fields = () => {
 const Echoed = (props: { label: string; value?: string; multiline?: boolean }) => {
   const [value, setValue] = createSignal(props.value ?? "")
   return (
-    <View style={{ gap: 8, width: 240 }}>
+    <View style={look.narrow(240)}>
       <Field label={props.label}>
         {props.multiline ? <Textarea value={value()} onChangeText={setValue} /> : <Input value={value()} onChangeText={setValue} />}
       </Field>

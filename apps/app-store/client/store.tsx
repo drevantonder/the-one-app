@@ -4,7 +4,42 @@
 // Library does for an app with no screen of its own.
 import { createEffect, createMemo, createSignal, Errored, For, Loading, Match, refresh, Show, Switch } from "solid-js"
 import type { Element } from "solid-js"
-import { Button, call, changed, confirm, Empty, go, Icon, Image, link, List, Menu, open, Pressable, Problem, Row, Screen, Search, Section, Skeleton, Spinner, Text, toast, View } from "ui"
+import { Button, call, changed, confirm, Empty, go, Icon, Image, link, List, Menu, open, Pressable, Problem, Row, Screen, ScrollView, Search, Section, Skeleton, Spinner, styles, Text, toast, tokens, View } from "ui"
+import { sizes } from "./sizes.ts"
+
+const look = styles({
+  /// An app's tile: its icon and its name under it, the size it is on a Home Screen, or as wide as a grid's column.
+  tile: { alignItems: "center", gap: tokens.grid[1.5], width: sizes.tile, flexShrink: 0 },
+  fills: { width: "100%" },
+  icon: { width: sizes.icon, height: sizes.icon, borderRadius: tokens.radius.large },
+  largeIcon: { width: sizes.largeIcon, height: sizes.largeIcon, borderRadius: tokens.radius.large },
+  /// Where an app has no icon.
+  blank: { backgroundColor: tokens.colour.quinaryLabel },
+  name: { font: tokens.type.caption, textAlign: "center", lineClamp: 1, width: "100%" },
+  shelf: { gap: tokens.grid[3] },
+  shelfHeading: { flexDirection: "row", alignItems: "baseline", justifyContent: "space-between", minHeight: tokens.length.control },
+  heading: { fontWeight: tokens.weight.medium },
+  more: { font: tokens.type.caption },
+  shelfApps: { flexDirection: "row", gap: tokens.grid[3] },
+  shelves: { display: "grid", gridTemplateColumns: { fill: sizes.shelf }, rowGap: tokens.grid[7], columnGap: tokens.grid[10] },
+  grid: { display: "grid", gridTemplateColumns: { fill: tokens.grid[20] }, rowGap: tokens.grid[6], columnGap: tokens.grid[3] },
+  chips: { flexDirection: "row", gap: tokens.grid[2] },
+  /// A category to choose, a pill: the one chosen is dark.
+  chip: { flexShrink: 0, height: tokens.length.control, paddingInline: tokens.grid[4], alignItems: "center", justifyContent: "center", borderRadius: tokens.radius.full, backgroundColor: tokens.colour.quinaryLabel, color: tokens.colour.label },
+  chosen: { backgroundColor: tokens.colour.label, color: tokens.colour.background },
+  quiet: { color: tokens.colour.secondaryLabel },
+  busy: { flexDirection: "row", alignItems: "center", gap: tokens.grid[2] },
+  page: { gap: tokens.grid[6], maxWidth: tokens.length.readable },
+  top: { flexDirection: "row", gap: tokens.grid[4] },
+  about: { flexGrow: 1, flexShrink: 1, minWidth: 0, justifyContent: "space-between", gap: tokens.grid[1] },
+  titles: { gap: tokens.grid[1] },
+  title: { font: tokens.type.title, lineClamp: 2 },
+  row: { flexDirection: "row" },
+  requires: { display: "grid", gridTemplateColumns: { fill: tokens.grid[20] }, rowGap: tokens.grid[4], columnGap: tokens.grid[3] },
+  tools: { flexDirection: "row", flexWrap: "wrap", columnGap: tokens.grid[4], rowGap: tokens.grid[1] },
+  grows: { flexGrow: 1 },
+  hidden: { display: "none" },
+})
 
 /** An app the network can install, as `app-store_marketplace` lists it. */
 interface Listed {
@@ -152,11 +187,11 @@ async function trust(market: Market, owner: Owner, done: Install) {
 function Tile(props: { listed: { title?: string; name?: string; icon: string | null }; onPress?: () => void; fills?: boolean }) {
   const name = () => props.listed.title ?? props.listed.name
   return (
-    <Pressable role={props.onPress ? "button" : undefined} aria-label={props.onPress ? name() : undefined} onPress={props.onPress} style={{ alignItems: "center", gap: 7, width: props.fills ? "100%" : 68, flexShrink: 0 }}>
-      <Show when={props.listed.icon} fallback={<View style={{ width: 60, height: 60, borderRadius: "xl", backgroundColor: "muted" }} />}>
-        <Image src={props.listed.icon!} alt="" style={{ width: 60, height: 60, borderRadius: "xl" }} />
+    <Pressable role={props.onPress ? "button" : undefined} aria-label={props.onPress ? name() : undefined} onPress={props.onPress} style={[look.tile, props.fills && look.fills]}>
+      <Show when={props.listed.icon} fallback={<View style={[look.icon, look.blank]} />}>
+        <Image src={props.listed.icon!} alt="" style={look.icon} />
       </Show>
-      <Text aria-hidden={props.onPress ? "true" : undefined} style={{ font: "caption-1", textAlign: "center", lineClamp: 1, width: "100%" }}>{name()}</Text>
+      <Text aria-hidden={props.onPress ? "true" : undefined} style={look.name}>{name()}</Text>
     </Pressable>
   )
 }
@@ -164,20 +199,20 @@ function Tile(props: { listed: { title?: string; name?: string; icon: string | n
 /// A category's apps in one row, sideways, with See All once more are there than a phone shows.
 function Shelf(props: { category: string; apps: Listed[] }) {
   return (
-    <View style={{ gap: 12 }}>
-      <View style={{ flexDirection: "row", alignItems: "baseline", justifyContent: "space-between", minHeight: "control" }}>
-        <Text role="heading" aria-level={2} style={{ font: "label" }}>{props.category}</Text>
+    <View style={look.shelf}>
+      <View style={look.shelfHeading}>
+        <Text role="heading" aria-level={2} style={look.heading}>{props.category}</Text>
         <Show when={props.apps.length > 4}>
           <Pressable role="button" onPress={() => to({ category: props.category })}>
-            <Text style={{ font: "footnote" }}>See All</Text>
+            <Text style={look.more}>See All</Text>
           </Pressable>
         </Show>
       </View>
-      <View style={{ flexDirection: "row", gap: 12, overflow: "scroll" }}>
+      <ScrollView style={look.shelfApps}>
         <For each={props.apps} keyed={key}>
           {(listed) => <Tile listed={listed()} onPress={() => to({ category: view().category, app: key(listed()) })} />}
         </For>
-      </View>
+      </ScrollView>
     </View>
   )
 }
@@ -185,7 +220,7 @@ function Shelf(props: { category: string; apps: Listed[] }) {
 /// Apps as a grid of tiles: a category's every one, or what a search found.
 function Grid(props: { apps: Listed[] }) {
   return (
-    <View style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(80px, 1fr))", rowGap: 24, columnGap: 12 }}>
+    <View style={look.grid}>
       <For each={props.apps} keyed={key}>
         {(listed) => <Tile fills listed={listed()} onPress={() => to({ category: view().category, app: key(listed()) })} />}
       </For>
@@ -206,17 +241,17 @@ function Marketplace(props: { market: Market }) {
     <>
       <Search placeholder="Search" aria-label="Search apps" value={query()} onChangeText={setQuery} />
       <Show when={!query()}>
-        <View role="toolbar" aria-label="Categories" style={{ flexDirection: "row", gap: 8, overflow: "scroll" }}>
+        <ScrollView role="toolbar" aria-label="Categories" style={look.chips}>
           <Chip chosen={!chosen()} onPress={() => choose()}>All</Chip>
           <For each={categories()} keyed={({ category }) => category}>
             {(shelf) => <Chip chosen={chosen() === shelf().category} onPress={() => choose(shelf().category)}>{shelf().category}</Chip>}
           </For>
-        </View>
+        </ScrollView>
       </Show>
       <Show
         when={query()}
         fallback={
-          <Show when={chosen()} fallback={<View style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(320px, 1fr))", rowGap: 28, columnGap: 40 }}><For each={categories()} keyed={({ category }) => category}>{(shelf) => <Shelf category={shelf().category} apps={shelf().apps} />}</For></View>}>
+          <Show when={chosen()} fallback={<View style={look.shelves}><For each={categories()} keyed={({ category }) => category}>{(shelf) => <Shelf category={shelf().category} apps={shelf().apps} />}</For></View>}>
             <Grid apps={props.market.apps.filter((listed) => listed.category === chosen())} />
           </Show>
         }
@@ -232,8 +267,8 @@ function Marketplace(props: { market: Market }) {
 /// A category to choose, a pill: the one chosen is dark.
 function Chip(props: { chosen: boolean; onPress: () => void; children: Element }) {
   return (
-    <Pressable role="button" aria-pressed={props.chosen ? "true" : "false"} onPress={props.onPress} style={{ flexShrink: 0, height: "control", paddingInline: 16, alignItems: "center", justifyContent: "center", borderRadius: "full", backgroundColor: props.chosen ? "primary" : "muted", color: props.chosen ? "primary-foreground" : "foreground" }}>
-      <Text style={{ font: "label" }}>{props.children}</Text>
+    <Pressable role="button" aria-pressed={props.chosen ? "true" : "false"} onPress={props.onPress} style={[look.chip, props.chosen && look.chosen]}>
+      <Text style={look.heading}>{props.children}</Text>
     </Pressable>
   )
 }
@@ -276,11 +311,11 @@ function Get(props: { all: Owners; listed: Listed }) {
 }
 
 /// Words that are only so, in grey.
-const Quiet = (props: { children: Element }) => <Text style={{ color: "muted-foreground" }}>{props.children}</Text>
+const Quiet = (props: { children: Element }) => <Text style={look.quiet}>{props.children}</Text>
 
 /// What's under way, with its spinner.
 const Busy = (props: { children: Element }) => (
-  <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+  <View style={look.busy}>
     <Spinner />
     <Quiet>{props.children}</Quiet>
   </View>
@@ -304,7 +339,7 @@ function Where(props: { market: Market; all: Owners; owner: Owner; listed: Liste
         <Button variant="secondary" onPress={() => open("settings#soft-delete/deleted", { subject: props.owner.subject })}>Recently Deleted</Button>
       </Match>
       <Match when={state() === "installed"}>
-        <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+        <View style={look.busy}>
           <Show when={now().trusted === false}>
             <Quiet>Untrusted</Quiet>
           </Show>
@@ -368,20 +403,20 @@ function Page(props: { market: Market; all: Owners; listed: Listed }) {
     ),
   ]
   return (
-    <View style={{ gap: 24, maxWidth: "readable" }}>
-      <View style={{ flexDirection: "row", gap: 16 }}>
-        <Show when={props.listed.icon} fallback={<View style={{ width: 120, height: 120, borderRadius: "xl", backgroundColor: "muted" }} />}>
-          <Image src={props.listed.icon!} alt="" style={{ width: 120, height: 120, borderRadius: "xl" }} />
+    <View style={look.page}>
+      <View style={look.top}>
+        <Show when={props.listed.icon} fallback={<View style={[look.largeIcon, look.blank]} />}>
+          <Image src={props.listed.icon!} alt="" style={look.largeIcon} />
         </Show>
-        <View style={{ flexGrow: 1, flexShrink: 1, minWidth: 0, justifyContent: "space-between", gap: 4 }}>
-          <View style={{ gap: 4 }}>
-            <Text role="heading" aria-level={2} style={{ font: "title", lineClamp: 2 }}>{props.listed.title}</Text>
+        <View style={look.about}>
+          <View style={look.titles}>
+            <Text role="heading" aria-level={2} style={look.title}>{props.listed.title}</Text>
             <Show when={props.listed.subtitle}>
               <Quiet>{props.listed.subtitle!}</Quiet>
             </Show>
           </View>
           <Show when={props.listed.app}>
-            <View style={{ flexDirection: "row" }}>
+            <View style={look.row}>
               <Get all={props.all} listed={props.listed} />
             </View>
           </Show>
@@ -402,7 +437,7 @@ function Page(props: { market: Market; all: Owners; listed: Listed }) {
       </Show>
       <Show when={props.listed.entrypoints.length}>
         <Section heading="On the Home Screen">
-          <View style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(80px, 1fr))", rowGap: 16, columnGap: 12 }}>
+          <View style={look.requires}>
             <For each={props.listed.entrypoints}>{(entrypoint) => <Tile fills listed={entrypoint} />}</For>
           </View>
         </Section>
@@ -419,7 +454,7 @@ function Page(props: { market: Market; all: Owners; listed: Listed }) {
               <Text>
                 {requirement.title}
                 <Show when={requirement.why}>
-                  <Text style={{ color: "muted-foreground" }}> {requirement.why}</Text>
+                  <Text style={look.quiet}> {requirement.why}</Text>
                 </Show>
               </Text>
             )}
@@ -451,8 +486,8 @@ function Details(props: { listed: Listed }) {
     <Screen heading={props.listed.title} back onBack={out}>
       <Section heading="Tools">
         <Text>{String(props.listed.tools.length)}</Text>
-        <View style={{ flexDirection: "row", flexWrap: "wrap", columnGap: 16, rowGap: 4 }}>
-          <For each={props.listed.tools}>{(tool) => <Text style={{ color: "muted-foreground" }}>{tool}</Text>}</For>
+        <View style={look.tools}>
+          <For each={props.listed.tools}>{(tool) => <Text style={look.quiet}>{tool}</Text>}</For>
         </View>
       </Section>
       <Show when={props.listed.trusted !== null}>
@@ -472,7 +507,7 @@ function AppStore(props: { market: Market; all: Owners }) {
   // a navigation stack keeps the screen before.
   return (
     <>
-      <View style={{ display: covered() ? "none" : "flex", flexGrow: 1 }}>
+      <View style={[look.grows, covered() && look.hidden]}>
         <Screen heading="App Store" back={!!view().category} onBack={out}>
           <Marketplace market={props.market} />
         </Screen>

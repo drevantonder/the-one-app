@@ -3,8 +3,7 @@
 // closes. A file and a commit open in the repo's place, with Back.
 import { createMemo, createSignal, Errored, For, Loading, refresh, Show } from "solid-js"
 import { marked, type Token, type Tokens } from "marked"
-import { Button, call, changed, confirm, createListCollection, Empty, Field, go, Icon, Image, Input, List, Menu, Pressable, Problem, render, Row, Screen, Section, Select, share, Sheet, since, size, Skeleton, Split, Tabs, Text, toast, View } from "ui"
-import type { Style } from "ui"
+import { Button, call, changed, confirm, createListCollection, Empty, Field, go, Icon, Image, Input, List, Menu, Pressable, Problem, render, Row, Screen, Section, Select, share, Sheet, since, size, Skeleton, Split, styles, Tabs, Text, toast, tokens, View } from "ui"
 
 /** A commit, as the tools answer it. */
 interface Commit {
@@ -52,8 +51,8 @@ const plural = (count: number, one: string) => `${count} ${one}${count === 1 ? "
 const svg = (markup: string) => `data:image/svg+xml,${encodeURIComponent(markup)}`
 const FOLDER = svg('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="#8a8a8a"><path d="M216,72H131.31L104,44.69A15.86,15.86,0,0,0,92.69,40H40A16,16,0,0,0,24,56V200.62A15.4,15.4,0,0,0,39.38,216H216.89A15.13,15.13,0,0,0,232,200.89V88A16,16,0,0,0,216,72Z"/></svg>')
 const BRANCH = svg('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 256 256" fill="#8a8a8a"><path d="M232,64a32,32,0,1,0-40,31v17a8,8,0,0,1-8,8H96a23.84,23.84,0,0,0-8,1.38V95a32,32,0,1,0-16,0v66a32,32,0,1,0,16,0V144a8,8,0,0,1,8-8h88a24,24,0,0,0,24-24V95A32.06,32.06,0,0,0,232,64ZM64,64A16,16,0,1,1,80,80,16,16,0,0,1,64,64ZM96,192a16,16,0,1,1-16-16A16,16,0,0,1,96,192Z"/></svg>')
-const Folder = () => <Image src={FOLDER} alt="" aria-hidden="true" style={{ width: "icon", height: "icon" }} />
-const Branchy = () => <Image src={BRANCH} alt="" aria-hidden="true" style={{ width: "icon", height: "icon" }} />
+const Folder = () => <Image src={FOLDER} alt="" aria-hidden="true" style={look.glyph} />
+const Branchy = () => <Image src={BRANCH} alt="" aria-hidden="true" style={look.glyph} />
 
 /// Does something that changes a repo, and says why if it couldn't. → whether it did.
 async function does(tool: string, inputs: object, options?: { subject?: string }) {
@@ -70,10 +69,47 @@ async function does(tool: string, inputs: object, options?: { subject?: string }
 /// Goes somewhere in the open repo, as a move.
 const to = (where: At, back?: boolean) => go(() => setAt(where), { back })
 
-// What a repo's page is laid out with: a bordered card the readable width, and a bar of what's where.
-const card: Style = { maxWidth: "readable", borderWidth: 1, borderRadius: "md", overflow: "hidden", backgroundColor: "card" }
-const bar: Style = { flexDirection: "row", flexWrap: "wrap", alignItems: "center", gap: "gutter", maxWidth: "readable" }
-const head: Style = { paddingBlock: 10, paddingInline: 16, borderBottomWidth: 1, backgroundColor: "muted" }
+const look = styles({
+  // What a repo's page is laid out with: a bordered card the readable width, and a bar of what's where.
+  card: { maxWidth: tokens.length.readable, borderWidth: tokens.length.hairline, borderColor: tokens.colour.quinaryLabel, borderRadius: tokens.radius.medium, overflow: "hidden", backgroundColor: tokens.colour.card },
+  bar: { flexDirection: "row", flexWrap: "wrap", alignItems: "center", gap: tokens.length.gutter, maxWidth: tokens.length.readable },
+  head: { paddingBlock: tokens.grid[2.5], paddingInline: tokens.grid[4], borderBottomWidth: tokens.length.hairline, borderColor: tokens.colour.quinaryLabel, backgroundColor: tokens.colour.quinaryLabel },
+  commitHead: { flexDirection: "row", alignItems: "baseline", gap: tokens.grid[2] },
+  readmeHead: { backgroundColor: tokens.colour.card },
+  foot: { borderBottomWidth: 0, borderTopWidth: tokens.length.hairline },
+  page: { gap: tokens.length.gutter, paddingTop: tokens.length.gutter },
+  glyph: { width: tokens.length.icon, height: tokens.length.icon },
+  actions: { flexDirection: "row", alignItems: "center", gap: tokens.grid[2] },
+  strong: { fontWeight: tokens.weight.medium },
+  title: { font: tokens.type.title },
+  footnote: { font: tokens.type.caption, color: tokens.colour.secondaryLabel },
+  quiet: { color: tokens.colour.secondaryLabel },
+  removed: { color: tokens.colour.red },
+  oneLine: { lineClamp: 1 },
+  shrinks: { flexGrow: 1, flexShrink: 1 },
+  crumbs: { flexDirection: "row", flexWrap: "wrap", alignItems: "center", gap: tokens.grid[1] },
+  branch: { flexDirection: "row", alignItems: "center", gap: tokens.grid[1.5], paddingBlock: tokens.grid[1.5], paddingInline: tokens.grid[3], borderWidth: tokens.length.hairline, borderColor: tokens.colour.quinaryLabel, borderRadius: tokens.radius.medium },
+  between: { borderTopWidth: tokens.length.hairline, borderColor: tokens.colour.quinaryLabel },
+  entry: { flexDirection: "row", alignItems: "center", gap: tokens.grid[3], paddingBlock: tokens.grid[2.5], paddingInline: tokens.grid[4] },
+  markdown: { gap: tokens.grid[3], paddingBlock: tokens.grid[3], paddingInline: tokens.grid[6] },
+  heading: { paddingTop: tokens.grid[2] },
+  majorHeading: { paddingBottom: tokens.grid[1], borderBottomWidth: tokens.length.hairline, borderColor: tokens.colour.quinaryLabel },
+  items: { gap: tokens.grid[1] },
+  item: { flexDirection: "row", gap: tokens.grid[2] },
+  bullet: { width: tokens.grid[6], flexShrink: 0, textAlign: "end", color: tokens.colour.secondaryLabel },
+  itemBody: { flexGrow: 1, flexShrink: 1, gap: tokens.grid[1] },
+  code: { borderRadius: tokens.radius.small, backgroundColor: tokens.colour.quinaryLabel },
+  quote: { gap: tokens.grid[3], paddingStart: tokens.grid[3], borderStartWidth: tokens.length.hairline, borderColor: tokens.colour.quinaryLabel, color: tokens.colour.secondaryLabel },
+  rule: { borderBottomWidth: tokens.length.hairline, borderColor: tokens.colour.quinaryLabel },
+  tableRow: { flexDirection: "row", gap: tokens.grid[4], paddingBlock: tokens.grid[1.5], borderBottomWidth: tokens.length.hairline, borderColor: tokens.colour.quinaryLabel },
+  cell: { flexGrow: 1, flexBasis: 0 },
+  lines: { paddingBlock: tokens.grid[2] },
+  line: { flexDirection: "row", gap: tokens.grid[4], paddingInline: tokens.grid[4] },
+  number: { width: tokens.grid[8], flexShrink: 0, textAlign: "end" },
+  lineText: { flexShrink: 1, color: tokens.colour.label },
+  message: { padding: tokens.grid[4] },
+  messageMore: { paddingBottom: tokens.grid[2] },
+})
 
 /// The name a new repo may have.
 const NAME = /^[a-z0-9][a-z0-9_-]*$/
@@ -156,7 +192,7 @@ function Repo(props: { repo: string }) {
       heading={short(props.repo)}
       back
       action={
-        <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+        <View style={look.actions}>
           <Button onPress={clone}>Clone</Button>
           <Show when={about().owns}>
             <Menu.Root onSelect={({ value }) => value === "remove" && remove()}>
@@ -173,7 +209,7 @@ function Repo(props: { repo: string }) {
         </View>
       }
     >
-      <Text style={{ font: "footnote", color: "muted-foreground" }}>
+      <Text style={look.footnote}>
         {short(about().whose)} · {about().pushes ? "You push to it" : "You read it"}
       </Text>
       <Tabs.Root value={at().tab} onValueChange={({ value }) => setAt({ tab: value!, path: "" })}>
@@ -208,17 +244,17 @@ function Crumbs(props: { repo: string; path: string; folder?: boolean }) {
   const parts = () => props.path.split("/").filter(Boolean)
   const crumb = (name: string, where: At) => (
     <Pressable role="button" onPress={() => to(where, true)}>
-      <Text style={{ font: "label" }}>{name}</Text>
+      <Text style={look.strong}>{name}</Text>
     </Pressable>
   )
   return (
-    <View role="navigation" aria-label="Path" style={{ flexDirection: "row", flexWrap: "wrap", alignItems: "center", gap: 4 }}>
+    <View role="navigation" aria-label="Path" style={look.crumbs}>
       {crumb(short(props.repo), { tab: "code", path: "" })}
       <For each={parts()}>
         {(part, index) => (
           <>
-            <Text aria-hidden="true" style={{ color: "muted-foreground" }}>/</Text>
-            <Show when={index() < parts().length - 1 || props.folder} fallback={<Text style={{ font: "label" }}>{part}</Text>}>
+            <Text aria-hidden="true" style={look.quiet}>/</Text>
+            <Show when={index() < parts().length - 1 || props.folder} fallback={<Text style={look.strong}>{part}</Text>}>
               {crumb(part, { tab: "code", path: parts().slice(0, index() + 1).join("/") })}
             </Show>
           </>
@@ -229,12 +265,12 @@ function Crumbs(props: { repo: string; path: string; folder?: boolean }) {
 }
 
 function Branch(props: { about: About; branch: string }) {
-  const name = () => <Text style={{ font: "label" }}>{props.branch}</Text>
+  const name = () => <Text style={look.strong}>{props.branch}</Text>
   return (
     <Show
       when={props.about.branches.length > 1}
       fallback={
-        <View style={{ flexDirection: "row", alignItems: "center", gap: 6, paddingBlock: 6, paddingInline: 12, borderWidth: 1, borderRadius: "md" }}>
+        <View style={look.branch}>
           <Branchy />
           {name()}
         </View>
@@ -268,20 +304,20 @@ function Code(props: { repo: string; about: About; branch: string }) {
   return (
     <Show when={!at().file} fallback={<File repo={props.repo} branch={props.branch} path={at().file!} />}>
       <Show when={!tree()!.empty} fallback={<Empty>Nothing's been pushed yet. Clone it, commit and push.</Empty>}>
-        <View style={{ gap: "gutter", paddingTop: "gutter" }}>
-          <View style={bar}>
+        <View style={look.page}>
+          <View style={look.bar}>
             <Branch about={props.about} branch={props.branch} />
             <Show when={at().path}>
               <Crumbs repo={props.repo} path={at().path!} folder />
             </Show>
           </View>
-          <View style={card}>
+          <View style={look.card}>
             <Show when={tree()!.commit}>
               {(commit) => (
-                <Pressable role="button" onPress={() => to({ tab: "history", commit: commit().sha })} style={{ ...head, flexDirection: "row", alignItems: "baseline", gap: 8 }}>
-                  <Text style={{ font: "label", lineClamp: 1 }}>{commit().author}</Text>
-                  <Text style={{ font: "footnote", flexGrow: 1, flexShrink: 1, color: "muted-foreground", lineClamp: 1 }}>{commit().subject}</Text>
-                  <Text style={{ font: "footnote", color: "muted-foreground", lineClamp: 1 }}>
+                <Pressable role="button" onPress={() => to({ tab: "history", commit: commit().sha })} style={[look.head, look.commitHead]}>
+                  <Text style={[look.strong, look.oneLine]}>{commit().author}</Text>
+                  <Text style={[look.footnote, look.oneLine, look.shrinks]}>{commit().subject}</Text>
+                  <Text style={[look.footnote, look.oneLine]}>
                     {commit().sha.slice(0, 7)} · {since(commit().at)}
                   </Text>
                 </Pressable>
@@ -290,17 +326,17 @@ function Code(props: { repo: string; about: About; branch: string }) {
             <View role="list">
               <For each={tree()!.entries}>
                 {(entry, index) => (
-                  <View role="listitem" style={{ borderTopWidth: index() ? 1 : 0 }}>
+                  <View role="listitem" style={index() > 0 && look.between}>
                     <Pressable
                       role="button"
                       onPress={() => to(entry.type === "tree" ? { tab: "code", path: [at().path, entry.name].filter(Boolean).join("/") } : { tab: "code", path: at().path, file: [at().path, entry.name].filter(Boolean).join("/") })}
-                      style={{ flexDirection: "row", alignItems: "center", gap: 12, paddingBlock: 10, paddingInline: 16 }}
+                      style={look.entry}
                     >
-                      <View style={{ color: "muted-foreground" }}>
+                      <View style={look.quiet}>
                         {entry.type === "tree" ? <Folder /> : <Icon name="file" />}
                       </View>
-                      <Text style={{ flexGrow: 1, flexShrink: 1, lineClamp: 1 }}>{entry.name}</Text>
-                      <Text style={{ font: "footnote", color: "muted-foreground" }}>{entry.size != null ? size(entry.size) : ""}</Text>
+                      <Text style={[look.shrinks, look.oneLine]}>{entry.name}</Text>
+                      <Text style={look.footnote}>{entry.size != null ? size(entry.size) : ""}</Text>
                     </Pressable>
                   </View>
                 )}
@@ -308,7 +344,7 @@ function Code(props: { repo: string; about: About; branch: string }) {
             </View>
           </View>
           <Show when={!at().path}>
-            <Text style={{ font: "footnote", color: "muted-foreground" }}>
+            <Text style={look.footnote}>
               {plural(tree()!.commits, "commit")} on {props.branch}
             </Text>
           </Show>
@@ -323,12 +359,12 @@ function Code(props: { repo: string; about: About; branch: string }) {
 function Readme(props: { readme: { name: string; text: string } }) {
   const markdown = () => /\.(md|markdown)$/i.test(props.readme.name)
   return (
-    <View style={card}>
-      <Text role="heading" aria-level={2} style={{ ...head, font: "label", backgroundColor: "card" }}>
+    <View style={look.card}>
+      <Text role="heading" aria-level={2} style={[look.head, look.strong, look.readmeHead]}>
         {props.readme.name}
       </Text>
       <Show when={markdown()} fallback={<Plain text={props.readme.text} />}>
-        <View style={{ gap: 12, paddingBlock: 12, paddingInline: 24 }}>
+        <View style={look.markdown}>
           <Blocks tokens={marked.lexer(props.readme.text)} />
         </View>
       </Show>
@@ -355,8 +391,8 @@ function Block(props: { token: Token }) {
     case "heading": {
       const { depth, tokens } = token as Tokens.Heading
       return (
-        <View style={{ paddingTop: 8, paddingBottom: depth <= 2 ? 4 : 0, borderBottomWidth: depth <= 2 ? 1 : 0 }}>
-          <Text role="heading" aria-level={depth} style={{ font: depth <= 2 ? "title" : "label" }}>
+        <View style={[look.heading, depth <= 2 && look.majorHeading]}>
+          <Text role="heading" aria-level={depth} style={depth <= 2 ? look.title : look.strong}>
             <Inline tokens={tokens} />
           </Text>
         </View>
@@ -372,14 +408,14 @@ function Block(props: { token: Token }) {
     case "list": {
       const { ordered, start, items } = token as Tokens.List
       return (
-        <View role="list" style={{ gap: 4 }}>
+        <View role="list" style={look.items}>
           <For each={items}>
             {(item, index) => (
-              <View role="listitem" style={{ flexDirection: "row", gap: 8 }}>
-                <Text aria-hidden="true" style={{ width: 24, flexShrink: 0, textAlign: "end", color: "muted-foreground" }}>
+              <View role="listitem" style={look.item}>
+                <Text aria-hidden="true" style={look.bullet}>
                   {item.task ? (item.checked ? "☑" : "☐") : ordered ? `${(Number(start) || 1) + index()}.` : "•"}
                 </Text>
-                <View style={{ flexGrow: 1, flexShrink: 1, gap: 4 }}>
+                <View style={look.itemBody}>
                   <Blocks tokens={item.tokens} />
                 </View>
               </View>
@@ -390,25 +426,25 @@ function Block(props: { token: Token }) {
     }
     case "code":
       return (
-        <View style={{ borderRadius: "sm", backgroundColor: "muted" }}>
+        <View style={look.code}>
           <Plain text={(token as Tokens.Code).text} />
         </View>
       )
     case "blockquote":
       return (
-        <View style={{ gap: 12, paddingLeft: 12, borderLeftWidth: 1, color: "muted-foreground" }}>
+        <View style={look.quote}>
           <Blocks tokens={(token as Tokens.Blockquote).tokens} />
         </View>
       )
     case "hr":
-      return <View role="separator" style={{ borderBottomWidth: 1 }} />
+      return <View role="separator" style={look.rule} />
     case "table": {
       const { header, rows } = token as Tokens.Table
-      const row = (cells: Tokens.TableCell[], font: "label" | "body") => (
-        <View role="listitem" style={{ flexDirection: "row", gap: 16, paddingBlock: 6, borderBottomWidth: 1 }}>
+      const row = (cells: Tokens.TableCell[], heading: boolean) => (
+        <View role="listitem" style={look.tableRow}>
           <For each={cells}>
             {(cell) => (
-              <Text style={{ font, flexGrow: 1, flexBasis: 0 }}>
+              <Text style={[look.cell, heading && look.strong]}>
                 <Inline tokens={cell.tokens} />
               </Text>
             )}
@@ -417,8 +453,8 @@ function Block(props: { token: Token }) {
       )
       return (
         <View role="list">
-          {row(header, "label")}
-          <For each={rows}>{(cells) => row(cells, "body")}</For>
+          {row(header, true)}
+          <For each={rows}>{(cells) => row(cells, false)}</For>
         </View>
       )
     }
@@ -442,7 +478,7 @@ function Span(props: { token: Token }) {
     case "strong":
     case "link":
       return (
-        <Text style={{ font: "label" }}>
+        <Text style={look.strong}>
           <Inline tokens={(token as Tokens.Strong).tokens} />
         </Text>
       )
@@ -450,7 +486,7 @@ function Span(props: { token: Token }) {
     case "del":
       return <Inline tokens={(token as Tokens.Em).tokens} />
     case "codespan":
-      return <Text style={{ backgroundColor: "muted", borderRadius: "sm" }}> {plain((token as Tokens.Codespan).text)} </Text>
+      return <Text style={look.code}> {plain((token as Tokens.Codespan).text)} </Text>
     case "br":
       return <>{"\n"}</>
     case "image":
@@ -465,16 +501,16 @@ function File(props: { repo: string; branch: string; path: string }) {
   const file = createMemo(() => json<{ text?: string | null; size: number; binary?: boolean }>("git-repos_file", { repo: props.repo, ref: props.branch, path: props.path }))
   const lines = () => file().text!.replace(/\n$/, "").split("\n")
   return (
-    <View style={{ gap: "gutter", paddingTop: "gutter" }}>
-      <View style={bar}>
-        <View style={{ flexDirection: "row", alignItems: "center", gap: 6, paddingBlock: 6, paddingInline: 12, borderWidth: 1, borderRadius: "md" }}>
+    <View style={look.page}>
+      <View style={look.bar}>
+        <View style={look.branch}>
           <Branchy />
-          <Text style={{ font: "label" }}>{props.branch}</Text>
+          <Text style={look.strong}>{props.branch}</Text>
         </View>
         <Crumbs repo={props.repo} path={props.path} />
       </View>
-      <View style={card}>
-        <Text style={{ ...head, font: "footnote", color: "muted-foreground" }}>
+      <View style={look.card}>
+        <Text style={[look.head, look.footnote]}>
           {file().text != null ? `${plural(lines().length, "line")} · ` : ""}
           {size(file().size)}
         </Text>
@@ -494,14 +530,14 @@ const kept = (text: string) => text.replace(/^[ \t]+/, (space) => space.replace(
 /// Lines of code, each with its number where it has one.
 function Lines(props: { lines: { text: string; number?: number; removed?: boolean; muted?: boolean }[] }) {
   return (
-    <View style={{ paddingBlock: 8 }}>
+    <View style={look.lines}>
       <For each={props.lines}>
         {(line) => (
-          <View style={{ flexDirection: "row", gap: 16, paddingInline: 16 }}>
+          <View style={look.line}>
             <Show when={line.number}>
-              <Text style={{ font: "footnote", width: 32, flexShrink: 0, textAlign: "end", color: "muted-foreground" }}>{line.number}</Text>
+              <Text style={[look.footnote, look.number]}>{line.number}</Text>
             </Show>
-            <Text style={{ font: "footnote", flexShrink: 1, color: line.removed ? "destructive" : line.muted ? "muted-foreground" : undefined }}>{kept(line.text)}</Text>
+            <Text style={[look.footnote, look.lineText, line.removed ? look.removed : line.muted && look.quiet]}>{kept(line.text)}</Text>
           </View>
         )}
       </For>
@@ -538,22 +574,22 @@ function CommitScreen(props: { repo: string; sha: string }) {
   }
   const more = () => commit().message.split("\n").slice(1).join("\n").trim()
   return (
-    <View style={{ gap: "gutter", paddingTop: "gutter" }}>
-      <View style={bar}>
+    <View style={look.page}>
+      <View style={look.bar}>
         <Button variant="ghost" onPress={() => to({ tab: "history" }, true)}>
           <Icon name="caret-left" along /> History
         </Button>
       </View>
-      <View style={card}>
-        <Text role="heading" aria-level={2} style={{ font: "label", padding: 16, paddingBottom: more() ? 8 : 16 }}>
+      <View style={look.card}>
+        <Text role="heading" aria-level={2} style={[look.strong, look.message, !!more() && look.messageMore]}>
           {commit().message.split("\n")[0]}
         </Text>
         <Show when={more()}>{(more) => <Plain text={more()} />}</Show>
-        <Text style={{ ...head, font: "footnote", color: "muted-foreground", borderBottomWidth: 0, borderTopWidth: 1 }}>
+        <Text style={[look.head, look.footnote, look.foot]}>
           {commit().author} committed {since(commit().at)} · {commit().sha.slice(0, 7)}
         </Text>
       </View>
-      <View style={card}>
+      <View style={look.card}>
         <Lines lines={commit().diff.replace(/^---\n/, "").split("\n").map(line)} />
       </View>
     </View>
@@ -579,7 +615,7 @@ function PullRequests(props: { repo: string; pushes: boolean }) {
                   text={line(one)}
                   end={
                     <Show when={props.pushes}>
-                      <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
+                      <View style={look.actions}>
                         <Button variant="secondary" onPress={() => merge(one)}>
                           Merge
                         </Button>

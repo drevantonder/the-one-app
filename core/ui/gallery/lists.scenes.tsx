@@ -1,11 +1,17 @@
 import { createSignal, For } from "solid-js"
-import { Badge, Button, Checkbox, Icon, List, Menu, Metadata, Row, type Scenes, Section, Text, View } from "ui"
+import { Badge, Button, Checkbox, Icon, List, Menu, Metadata, Row, type Scenes, Section, styles, Text, tokens, View } from "ui"
+
+const look = styles({
+  column: { gap: tokens.grid[2] },
+  row: { flexDirection: "row", gap: tokens.grid[2] },
+  time: { color: tokens.colour.secondaryLabel },
+})
 
 const Rows = () => {
   const [notes, setNotes] = createSignal(["First note", "Second note", "Third note"])
   return (
-    <View style={{ gap: 8 }}>
-      <View style={{ flexDirection: "row", gap: 8 }}>
+    <View style={look.column}>
+      <View style={look.row}>
         <Button variant="outline" onPress={() => setNotes([...notes().slice(0, 1), `Note ${notes().length + 1}`, ...notes().slice(1)])}>
           Add Row
         </Button>
@@ -57,7 +63,7 @@ export default {
     <List>
       <Row heading="A row" text="Its grey line, which says up to two lines of what it says before it's cut off at the end" onPress={() => {}} />
       <Row heading="The current one" text="Open beside the list" current onPress={() => {}} />
-      <Row heading="With an end" end={<Text style={{ color: "muted-foreground", fontVariantNumeric: "tabular-nums" }}>12:30</Text>} />
+      <Row heading="With an end" end={<Text style={look.time}>12:30</Text>} />
       <Row
         heading="With a control"
         control={<Checkbox aria-label="Done" checked />}

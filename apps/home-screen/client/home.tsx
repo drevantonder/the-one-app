@@ -21,6 +21,7 @@ import { ACROSS, at as gridAt, BAR, type Box as Place, card as cardOf, cell as c
 import { type At, carries, type Drop, type Editing, fitted, type Held, type Kind, machine, nearest, pack, type Page, type Placed, shown, spans } from "./machine.ts"
 import type { Entrypoint, Category, Item, Listed, Pages, Size, Widget as WidgetItem } from "./types.ts"
 import { src } from "./types.ts"
+import { sizes } from "./sizes.ts"
 
 /// The Home Screen's own looks, by the design tokens' roles: Liquid Glass for its pills, + and Done, what's opened or
 /// held over a frosted Home Screen, and the window's shadow on what floats.
@@ -85,6 +86,126 @@ const looks = styles({
   moved: (translateX: number, translateY: number) => ({ translateX, translateY }),
   popup: (start: number, width: number, opacity: number, scale: number) => ({ start, width, opacity, scale }),
   chosen: { position: "absolute", top: negative(tokens.grid[1]), bottom: negative(tokens.grid[1]), start: negative(tokens.grid[1]), end: negative(tokens.grid[1]), borderRadius: tokens.radius.large, backgroundColor: tokens.colour.selection },
+  sized: (width: number, height: number) => ({ width, height }),
+  padded: (paddingTop: number, paddingBottom: number) => ({ paddingTop, paddingBottom }),
+  padBottom: (paddingBottom: number) => ({ paddingBottom }),
+  lowered: (translateY: number) => ({ translateY }),
+  turned: (rotate: number) => ({ rotate }),
+  absolute: { position: "absolute" },
+  rigid: { flexShrink: 0 },
+  shrinks: { flexShrink: 1 },
+  narrow: { maxWidth: "100%" },
+  centred: { alignItems: "center" },
+  live: { pointerEvents: "auto" },
+  smaller: { scale: 0.75 },
+  note: { font: tokens.type.caption, color: tokens.colour.secondaryLabel },
+  destructive: { color: tokens.colour.red },
+  // The whole of it: the window, its two sections side by side, each owner's pages over another's, and a screenful.
+  root: { position: "relative", overflow: "hidden", color: tokens.colour.label },
+  sections: { position: "absolute", top: 0, start: 0, flexDirection: "row" },
+  clipped: { position: "relative", overflow: "hidden" },
+  owners: { position: "absolute", top: 0, start: 0 },
+  screens: { position: "absolute", top: 0, start: 0, flexDirection: "row" },
+  placedPage: (top: number, start: number, scale: number) => ({ top, start, scale }),
+  topRow: { position: "absolute", zIndex: 6, start: 0, end: 0, alignItems: "center", justifyContent: "center", pointerEvents: "none" },
+  bottomRow: { position: "absolute", zIndex: 6, start: 0, end: 0, alignItems: "center", pointerEvents: "none" },
+  broken: { justifyContent: "center", padding: tokens.grid[5] },
+  // A page's apps and widgets: each where it's laid, moved as it's carried and swung as it jiggles.
+  widgetCell: { position: "relative", display: "grid", flexGrow: 1 },
+  count: { position: "absolute", top: negative(tokens.grid[1.5]), end: negative(tokens.grid[1.5]) },
+  tileBox: { alignItems: "center", gap: sizes.iconGap, minWidth: 0, width: "100%" },
+  iconImage: { borderRadius: tokens.radius.large },
+  name: { font: tokens.type.caption, lineClamp: 1, textAlign: "center", maxWidth: "100%" },
+  smallName: { font: tokens.type.small },
+  empty: { position: "absolute", start: 0, end: 0 },
+  placed: (start: number, top: number, width: number, height: number, translateX: number, translateY: number, rotate: number, opacity: number) => ({ position: "absolute", start, top, width, height, translateX, translateY, rotate, opacity }),
+  installing: { position: "absolute", borderRadius: tokens.radius.full, backgroundColor: tokens.colour.overlay, color: tokens.colour.background, alignItems: "center", justifyContent: "center" },
+  minus: { position: "absolute", zIndex: 2, borderRadius: tokens.radius.full, backgroundColor: tokens.colour.secondaryLabel, color: tokens.colour.background, alignItems: "center", justifyContent: "center" },
+  // The App Library: its categories, each a square of its first apps, as many across as fit, and what's found.
+  categories: { flexDirection: "row", flexWrap: "wrap", gap: tokens.grid[5] },
+  category: { alignItems: "center", gap: tokens.grid[1.5], minWidth: 0 },
+  folder: { position: "relative", display: "grid", gridTemplateColumns: { repeat: 2 } },
+  folderBox: (columnGap: number, rowGap: number, size: number, paddingTop: number, paddingInline: number, paddingBottom: number) => ({ columnGap, rowGap, width: size, height: size, paddingTop, paddingInline, paddingBottom }),
+  more: { display: "grid", gridTemplateColumns: { repeat: 2 }, gap: sizes.folderGap, alignSelf: "center", justifyContent: "center", marginInline: "auto" },
+  mini: { borderRadius: tokens.radius.medium },
+  categoryName: { font: tokens.type.caption, color: tokens.colour.secondaryLabel, lineClamp: 1 },
+  found: { display: "grid", gridTemplateColumns: { fill: sizes.found }, rowGap: tokens.grid[4], columnGap: tokens.grid[3] },
+  library: { flexShrink: 0 },
+  libraryScroll: { flexGrow: 1, flexBasis: 0 },
+  libraryPadding: (paddingInline: number, paddingTop: number, paddingBottom: number) => ({ paddingInline, paddingTop, paddingBottom }),
+  libraryColumn: { gap: tokens.grid[5], marginInline: "auto" },
+  background: { gap: tokens.grid[3] },
+  fold: { flexDirection: "row", alignItems: "center", alignSelf: "flex-start", gap: tokens.grid[1], marginBlock: tokens.grid[1], paddingBlock: tokens.grid[1], color: tokens.colour.secondaryLabel },
+  foldName: { font: tokens.type.medium },
+  chevron: { scale: 0.875 },
+  entry: { alignItems: "center", gap: tokens.grid[1.5], minWidth: 0 },
+  entrySmall: { gap: tokens.grid[1] },
+  // An opened category, and what's held with its menu.
+  dialog: { position: "absolute", top: 0, start: 0 },
+  categoryLayer: { zIndex: 10 },
+  heldLayer: { zIndex: 20 },
+  categoryTitle: { position: "absolute", font: tokens.type.title, textAlign: "center" },
+  titled: (start: number, width: number, top: number, opacity: number, translateY: number) => ({ start, width, top, opacity, translateY }),
+  opened: { display: "grid", gridTemplateColumns: { repeat: 3 }, rowGap: tokens.grid[4], columnGap: tokens.grid[3] },
+  copy: { position: "absolute", display: "grid", pointerEvents: "none" },
+  copyAt: (start: number, top: number, width: number, height: number, scale: number) => ({ start, top, width, height, scale }),
+  installedFor: { paddingInline: tokens.grid[4], paddingBlock: tokens.grid[2.5], borderBottomWidth: tokens.length.hairline, borderColor: tokens.colour.quinaryLabel },
+  holdItem: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: tokens.grid[4], minHeight: sizes.menuRow, paddingInline: tokens.grid[4], borderTopWidth: tokens.length.hairline, borderColor: tokens.colour.quinaryLabel },
+  holdWhy: { paddingBlock: tokens.grid[2.5], color: tokens.colour.secondaryLabel },
+  // Adding a widget: its sizes, each a preview, the one chosen ringed.
+  widgetIcon: { width: tokens.grid[8], height: tokens.grid[8], borderRadius: tokens.radius.medium },
+  sizes: { gap: tokens.grid[4] },
+  sizesRow: { flexDirection: "row", gap: tokens.grid[4], padding: tokens.grid[1] },
+  sizeOption: { alignItems: "center", gap: tokens.grid[2], flexShrink: 0, color: tokens.colour.secondaryLabel },
+  sizeChosen: { color: tokens.colour.label },
+  preview: { display: "grid", padding: tokens.grid[0.5], borderRadius: tokens.radius.large, borderWidth: 0, borderColor: tokens.colour.secondaryLabel, pointerEvents: "none" },
+  previewChosen: { borderWidth: tokens.length.hairline },
+  sizeName: { font: tokens.type.caption },
+  // The pages' overview: Done, and each page's miniature with its tick.
+  overviewBar: { flexDirection: "row", justifyContent: "flex-end", alignItems: "center", paddingInline: tokens.grid[4] },
+  topRowAt: (paddingTop: number, height: number) => ({ paddingTop, height }),
+  overviewScroll: { flexGrow: 1, flexBasis: 0, paddingTop: tokens.grid[4], paddingInline: tokens.grid[6] },
+  thumb: { position: "absolute", pointerEvents: "none" },
+  thumbAt: (start: number, top: number, scale: number, opacity: number) => ({ start, top, scale, opacity }),
+  check: { width: tokens.grid[7], height: tokens.grid[7], alignItems: "center", justifyContent: "center", borderRadius: tokens.radius.full, borderWidth: tokens.length.hairline, borderColor: tokens.colour.label, backgroundColor: tokens.colour.label, color: tokens.colour.background },
+  unchecked: { borderColor: tokens.colour.secondaryLabel, backgroundColor: tokens.colour.transparent },
+  // The pills: the owner's name, rolling, and the page dots.
+  roll: { position: "relative", overflow: "hidden", alignItems: "center" },
+  rollSizer: { opacity: 0, justifyContent: "center" },
+  dots: { flexDirection: "row", alignItems: "center", height: "100%" },
+  dotButton: { height: "100%", justifyContent: "center", paddingInline: tokens.length.hairline },
+  dot: { borderRadius: tokens.radius.full, backgroundColor: tokens.colour.secondaryLabel },
+  dotLit: { backgroundColor: tokens.colour.label },
+  dotAt: (size: number, marginInline: number, opacity: number) => ({ width: size, height: size, marginInline, opacity }),
+  ownerRow: { flexDirection: "row", alignItems: "center", gap: sizes.ownerGap },
+  ownerName: { font: tokens.type.medium, fontWeight: tokens.weight.medium, lineClamp: 1, maxWidth: sizes.ownerName },
+  caret: { color: tokens.colour.secondaryLabel, scale: 0.75 },
+  ownerItem: { flexDirection: "row", alignItems: "center", gap: tokens.grid[2] },
+  libraryGlyph: { height: "100%", justifyContent: "center", paddingStart: tokens.grid[0.5], paddingEnd: tokens.grid[1], color: tokens.colour.secondaryLabel },
+  lit: { color: tokens.colour.label },
+  editBar: { position: "absolute", zIndex: 7, flexDirection: "row", alignItems: "center", justifyContent: "space-between", pointerEvents: "none" },
+  editBarPad: (paddingInline: number, opacity: number) => ({ paddingInline, opacity }),
+  // The launcher's search and what it found.
+  launcherSearch: { flexGrow: 1, flexDirection: "row", alignItems: "center", paddingInline: sizes.searchInline },
+  heading: { font: tokens.type.caption, color: tokens.colour.secondaryLabel, paddingInline: tokens.grid[1] },
+  results: { gap: tokens.grid[3] },
+  nothingFound: { paddingBlock: tokens.grid[6] },
+  apps: { flexDirection: "row", gap: tokens.grid[3], alignItems: "flex-start" },
+  lead: { flexShrink: 0, display: "grid" },
+  foundApps: { flexGrow: 1, flexDirection: "row", flexWrap: "wrap", rowGap: tokens.grid[3] },
+  result: { position: "relative", width: sizes.found, height: sizes.foundHeight, paddingTop: tokens.grid[1.5] },
+  widgets: { flexDirection: "row", flexWrap: "wrap", gap: tokens.grid[3] },
+  widgetCard: { display: "grid" },
+  // Installing an app for an owner, or being told you can't.
+  ask: { alignItems: "center", gap: tokens.grid[3] },
+  askIcons: { flexDirection: "row", flexWrap: "wrap", justifyContent: "center", gap: tokens.grid[3] },
+  askIcon: { width: tokens.grid[16], height: tokens.grid[16], borderRadius: tokens.radius.large },
+  askWhy: { color: tokens.colour.secondaryLabel, textAlign: "center" },
+  askButtons: { alignSelf: "stretch", gap: tokens.grid[3], paddingTop: tokens.grid[2] },
+  askButton: { alignSelf: "stretch", paddingTop: tokens.grid[2] },
+  // What a finger carries, drawn from where it was lifted.
+  carry: { position: "absolute", zIndex: 30, display: "grid", pointerEvents: "none" },
+  carryAt: (start: number, top: number, width: number, height: number, translateX: number, translateY: number, scale: number) => ({ start, top, width, height, translateX, translateY, scale }),
 })
 
 const SIZES: Record<Size, string> = { "2x2": "Small", "4x2": "Medium", "4x4": "Large" }
@@ -241,7 +362,7 @@ function Card(props: { item: WidgetItem; owner: Owner; still?: boolean }) {
     launch(props.item.opens, props.owner, false, { x, y, width, height, radius: 22 * (width / (props.item.size === "2x2" ? 170 : 352)) })
   }
   return (
-    <View style={{ position: "relative", display: "grid", flexGrow: 1 }}>
+    <View style={looks.widgetCell}>
       <Errored fallback={(error) => <Widget name={props.item.name} size={props.item.size} problem={String((error() as Error).message ?? error())} />}>
         <Loading fallback={<Widget name={props.item.name} size={props.item.size} />}>
           <Widget name={props.item.name} size={props.item.size} layout={layout()} problem={problem()} onCall={props.still ? undefined : act} onOpen={problem() ? retry : props.item.opens ? opens : undefined} />
@@ -268,7 +389,7 @@ function Refresh(props: { every?: number; then: () => void }) {
 /// What waits in an app, as its app counts it (`badge`): a red count at its icon's corner, as an iPhone's.
 const Count = (props: { count?: number }) => (
   <Show when={props.count}>
-    <View aria-hidden="true" style={{ position: "absolute", top: -6, right: -6 }}>
+    <View aria-hidden="true" style={looks.count}>
       <Badge variant="destructive">{props.count}</Badge>
     </View>
   </Show>
@@ -289,13 +410,13 @@ function Tile(props: { name: string; icon: string; size: number; scale: number; 
       aria-description={props.badge ? `${props.badge} waiting` : undefined}
       onPointerDown={(event) => event.button === 0 && props.onPress?.(true)}
       onPress={(event) => tapping() && props.onPress?.(false, from(event))}
-      style={{ alignItems: "center", gap: 7, minWidth: 0, width: "100%" }}
+      style={looks.tileBox}
     >
       <View style={[looks.icon, looks.square(props.size)]}>
-        <Image src={src(props.icon)} alt="" style={{ width: props.size, height: props.size, borderRadius: "xl" }} />
+        <Image src={src(props.icon)} alt="" style={[looks.iconImage, looks.square(props.size)]} />
         <Count count={props.badge} />
       </View>
-      <Text style={{ font: "caption-1", lineClamp: 1, textAlign: "center", maxWidth: "100%" }}>{props.name}</Text>
+      <Text style={looks.name}>{props.name}</Text>
     </Pressable>
   )
 }
@@ -443,9 +564,9 @@ function HomePage(props: { owner: Owner; index: number; page: number; placed: Pl
       role="group"
       aria-label={`Page ${props.page + 1}`}
       {...gestures}
-      style={{ position: "relative", width: props.laid.width, height: props.laid.height }}
+      style={[looks.slots, looks.sized(props.laid.width, props.laid.height)]}
     >
-      <Show when={props.placed.length || editingHere()} fallback={<View style={{ position: "absolute", top: props.laid.top, left: 0, right: 0 }}><Empty>No apps on this page.</Empty></View>}>
+      <Show when={props.placed.length || editingHere()} fallback={<View style={[looks.empty, looks.top(props.laid.top)]}><Empty>No apps on this page.</Empty></View>}>
         <For each={props.placed} keyed={({ item }) => (item.item.widget ?? item.item.entrypoint) + (item.item.size ?? "")}>
           {(placed) => (
             <HomeCell
@@ -528,17 +649,7 @@ function HomeCell(props: {
     <View
       {...gestures}
       onPointerMove={(event) => (props.onPoint(), gestures.onPointerMove?.(event))}
-      style={{
-        position: "absolute",
-        left: box().x,
-        top: box().y,
-        width: box().width,
-        height: box().height,
-        translateX: dx(),
-        translateY: dy(),
-        rotate: props.jiggles ? swing(props.placed.item.index, widget()) : 0,
-        opacity: props.lifted || landingHere() ? 0 : 1,
-      }}
+      style={looks.placed(box().x, box().y, box().width, box().height, dx(), dy(), props.jiggles ? swing(props.placed.item.index, widget()) : 0, props.lifted || landingHere() ? 0 : 1)}
     >
       <Show when={props.picked}>
         {/* What's chosen has the highlight behind it: an app's, and a widget's own tint brightened by it. */}
@@ -547,7 +658,7 @@ function HomeCell(props: {
       <Show
         when={widget()}
         fallback={
-          <View style={{ position: "relative", opacity: props.waiting ? 0.45 : 1 }}>
+          <View style={[looks.slots, looks.opacity(props.waiting ? 0.45 : 1)]}>
             <Tile
               name={(item() as Entrypoint).name}
               icon={(item() as Entrypoint).icon}
@@ -562,7 +673,7 @@ function HomeCell(props: {
         <Card item={item() as WidgetItem} owner={props.owner} still={props.small || props.jiggles} />
       </Show>
       <Show when={props.waiting && state().matches({ editing: "installing" })}>
-        <View role="status" aria-label={`Installing ${item().name}`} style={{ position: "absolute", top: props.laid.tile / 2 - 16, left: box().width / 2 - 16, width: 32, height: 32, borderRadius: "full", backgroundColor: "overlay", color: "primary-foreground", alignItems: "center", justifyContent: "center" }}>
+        <View role="status" aria-label={`Installing ${item().name}`} style={[looks.installing, looks.at(box().width / 2 - 16, props.laid.tile / 2 - 16, 32, 32)]}>
           <Spinner />
         </View>
       </Show>
@@ -580,7 +691,7 @@ function Minus(props: { label: string; left: number; top: number; onPress: () =>
       role="button"
       aria-label={props.label}
       onPress={() => tapping() && props.onPress()}
-      style={{ position: "absolute", zIndex: 2, left: props.left, top: props.top, width: 24, height: 24, borderRadius: "full", backgroundColor: "muted-foreground", color: "background", alignItems: "center", justifyContent: "center" }}
+      style={[looks.minus, looks.at(props.left, props.top, 24, 24)]}
     >
       <Icon name="minus" />
     </Pressable>
@@ -625,12 +736,13 @@ const places: Record<string, Rect> = {}
 /// across as fit at an iPhone's size, each its icons in a square, whose padding and gaps follow its width.
 function shelf(width: number) {
   const across = Math.max(2, Math.floor((width + 20) / (152 + 20)))
-  const category = (width - (across - 1) * 20) / across
+  // A row of them wraps after `across`: each a 64th of a pixel narrower at most than its share, so rounding never
+  // wraps one early.
+  const category = Math.floor(((width - (across - 1) * 20) / across) * 64) / 64
   const padding = { top: category * 0.072, inline: category * 0.066, bottom: category * 0.054 }
   const [columnGap, rowGap] = [category * 0.06, category * 0.036]
   const icon = (category - padding.inline * 2 - columnGap) / 2 - 18 - 4
-  const found = Math.max(1, Math.floor((width + 12) / (76 + 12)))
-  return { across, category, padding, columnGap, rowGap, icon, found }
+  return { category, padding, columnGap, rowGap, icon }
 }
 
 /// The App Library: one page, which scrolls, as an iPhone's does, with every app you can reach once, whether it's
@@ -666,45 +778,34 @@ function Library(props: { owner: Owner; size?: { width: number; height: number }
   const open = () => (searching() ? !shut() : unfolded())
   // Components, not JSX made again whenever the App Library's asked again: its rows stay, each with its icon.
   const Categories = (inner: { list: Category[]; prefix: string }) => (
-    <View style={{ display: "grid", gridTemplateColumns: `repeat(${laid().across}, 1fr)`, gap: 20 }}>
+    <View style={looks.categories}>
       <For each={inner.list} keyed={(category) => category.category}>
         {(category) => {
           const key = () => inner.prefix + category().category
           const shown = () => (category().entrypoints.length > 4 ? category().entrypoints.slice(0, 3) : category().entrypoints)
           return (
-            <View style={{ alignItems: "center", gap: 6, minWidth: 0 }}>
+            <View style={[looks.category, looks.wide(laid().category)]}>
               <Pressable
                 role="group"
                 aria-label={category().category}
                 onPress={opening(key)}
-                style={{
-                  display: "grid",
-                  gridTemplateColumns: "repeat(2, 1fr)",
-                  columnGap: laid().columnGap,
-                  rowGap: laid().rowGap,
-                  width: laid().category,
-                  height: laid().category,
-                  paddingTop: laid().padding.top,
-                  paddingInline: laid().padding.inline,
-                  paddingBottom: laid().padding.bottom,
-                  position: "relative",
-                }}
+                style={[looks.folder, looks.folderBox(laid().columnGap, laid().rowGap, laid().category, laid().padding.top, laid().padding.inline, laid().padding.bottom)]}
               >
                 <View aria-hidden="true" style={looks.tint} />
                 <For each={shown()} keyed={(entrypoint) => entrypoint.entrypoint ?? entrypoint.app}>
                   {(entrypoint) => <LibraryEntrypoint entrypoint={entrypoint()} owner={props.owner} icon={laid().icon} small />}
                 </For>
                 <Show when={category().entrypoints.length > 4}>
-                  <Pressable role="button" aria-label={`All of ${category().category}`} onPress={opening(key)} style={{ display: "grid", gridTemplateColumns: "repeat(2, 1fr)", gap: 5, alignSelf: "center", justifyContent: "center", width: laid().icon + 14, height: laid().icon + 14, marginInline: "auto" }}>
+                  <Pressable role="button" aria-label={`All of ${category().category}`} onPress={opening(key)} style={[looks.more, looks.square(laid().icon + 14)]}>
                     <For each={category().entrypoints.slice(3, 7)} keyed={(entrypoint) => entrypoint.entrypoint ?? entrypoint.app}>
-                      {(entrypoint) => <Image src={src(entrypoint().icon)} alt="" style={{ width: (laid().icon + 9) / 2, height: (laid().icon + 9) / 2, borderRadius: "md" }} />}
+                      {(entrypoint) => <Image src={src(entrypoint().icon)} alt="" style={[looks.mini, looks.square((laid().icon + 9) / 2)]} />}
                     </For>
                   </Pressable>
                 </Show>
               </Pressable>
               {/* Its apps take the focus, and its small icons, which open it, so its name doesn't again: it's for a finger. */}
-              <Pressable onPress={opening(key)} style={{ maxWidth: "100%" }}>
-                <Text style={{ font: "footnote", color: "muted-foreground", lineClamp: 1 }}>{category().category}</Text>
+              <Pressable onPress={opening(key)} style={looks.narrow}>
+                <Text style={looks.categoryName}>{category().category}</Text>
               </Pressable>
             </View>
           )
@@ -713,37 +814,37 @@ function Library(props: { owner: Owner; size?: { width: number; height: number }
     </View>
   )
   const Found = (inner: { list: Listed[] }) => (
-    <View style={{ display: "grid", gridTemplateColumns: `repeat(${laid().found}, 1fr)`, rowGap: 16, columnGap: 12 }}>
+    <View style={looks.found}>
       <For each={inner.list} keyed={(entrypoint) => entrypoint.entrypoint ?? entrypoint.app}>
         {(entrypoint) => <LibraryEntrypoint entrypoint={entrypoint()} owner={props.owner} icon={60} />}
       </For>
     </View>
   )
   return (
-    <View role="region" aria-label="App Library" style={{ width: props.size?.width ?? room().width, height: props.size?.height ?? room().height, flexShrink: 0 }}>
+    <View role="region" aria-label="App Library" style={[looks.library, looks.sized(props.size?.width ?? room().width, props.size?.height ?? room().height)]}>
       <Show when={!launcher()}>
-        <View style={{ paddingTop: room().safe.top + (TOP_ROW - BAR) / 2, paddingBottom: (TOP_ROW - BAR) / 2 - 12, alignItems: "center" }}>
-          <View style={{ width: Math.min(room().width - 2 * BAR - 16, 384) }}>
+        <View style={[looks.centred, looks.padded(room().safe.top + (TOP_ROW - BAR) / 2, (TOP_ROW - BAR) / 2 - 12)]}>
+          <View style={looks.wide(Math.min(room().width - 2 * BAR - 16, 384))}>
             <Search placeholder="App Library" aria-label="Search the App Library" value={query()} onChangeText={(text) => (setQuery(text), setShut(false))} />
           </View>
         </View>
       </Show>
-      <View style={{ flexGrow: 1, flexBasis: 0, overflow: "scroll", paddingInline: inline(), paddingTop: props.size ? 0 : 12, paddingBottom: props.size ? 0 : 96 + room().safe.bottom }}>
-        <View style={{ gap: 20, width: width(), marginInline: "auto" }}>
+      <ScrollView style={[looks.libraryScroll, looks.libraryPadding(inline(), props.size ? 0 : 12, props.size ? 0 : 96 + room().safe.bottom)]}>
+        <View style={[looks.libraryColumn, looks.wide(width())]}>
           <Show when={searching() ? found(false).length || found(true).length : props.owner.library.length} fallback={<Empty>{searching() ? "No apps match." : "No apps yet."}</Empty>}>
             <Show when={searching()} fallback={<Show when={apps().length}><Categories list={apps()} prefix="" /></Show>}>
               <Show when={found(false).length}><Found list={found(false)} /></Show>
             </Show>
             <Show when={searching() ? found(true).length : background().length}>
-              <View role="region" aria-label="Background Apps" style={{ gap: 12 }}>
+              <View role="region" aria-label="Background Apps" style={looks.background}>
                 <Pressable
                   role="button"
                   aria-expanded={open() ? "true" : "false"}
                   onPress={() => (searching() ? setShut(!shut()) : unfold(!unfolded()))}
-                  style={{ flexDirection: "row", alignItems: "center", alignSelf: "flex-start", gap: 4, marginBlock: 4, paddingBlock: 4, color: "muted-foreground" }}
+                  style={looks.fold}
                 >
-                  <Text style={{ font: "subheadline" }}>Background Apps</Text>
-                  <View style={{ rotate: open() ? 90 : 0, scale: 0.875 }}>
+                  <Text style={looks.foldName}>Background Apps</Text>
+                  <View style={[looks.chevron, looks.turned(open() ? 90 : 0)]}>
                     <Icon name="caret-right" along />
                   </View>
                 </Pressable>
@@ -756,7 +857,7 @@ function Library(props: { owner: Owner; size?: { width: number; height: number }
             </Show>
           </Show>
         </View>
-      </View>
+      </ScrollView>
     </View>
   )
 }
@@ -785,13 +886,13 @@ function LibraryEntrypoint(props: { entrypoint: Listed; owner: Owner; icon: numb
         pressedApp = Date.now()
         if (tapping() && state().matches("nothing")) press(props.entrypoint, props.owner, false, from(event))
       }}
-      style={{ alignItems: "center", gap: props.small ? 4 : 6, minWidth: 0 }}
+      style={[looks.entry, props.small && looks.entrySmall]}
     >
-      <View style={{ position: "relative", width: props.icon, height: props.icon }}>
-        <Image src={src(props.entrypoint.icon)} alt="" style={{ width: props.icon, height: props.icon, borderRadius: "xl" }} />
+      <View style={[looks.slots, looks.square(props.icon)]}>
+        <Image src={src(props.entrypoint.icon)} alt="" style={[looks.iconImage, looks.square(props.icon)]} />
         <Count count={badge()} />
       </View>
-      <Text style={{ font: props.small ? "caption-2" : "caption-1", lineClamp: 1, textAlign: "center", maxWidth: "100%" }}>{props.entrypoint.name}</Text>
+      <Text style={[looks.name, props.small && looks.smallName]}>{props.entrypoint.name}</Text>
     </Pressable>
   )
 }
@@ -884,19 +985,19 @@ function OpenCategory(props: { owner: Owner; opened: string; within?: Rect }) {
     <View
       role="dialog"
       aria-label={category()?.category}
-      style={{ position: "absolute", top: 0, left: 0, width: room().width, height: viewport().height, zIndex: 10, pointerEvents: phase() === "closing" ? "none" : "auto" }}
+      style={[looks.dialog, looks.categoryLayer, phase() === "closing" && looks.inert, looks.sized(room().width, viewport().height)]}
     >
       {/* What's behind blurs through a veil. */}
       <Pressable aria-hidden="true" onPress={close} style={[looks.cover, looks.frosted, props.within && looks.round, props.within && looks.at(area().x, area().y, area().width, area().height), looks.opacity(t())]} />
-      <Text role="heading" aria-level={2} style={{ position: "absolute", left: area().x, width: area().width, top: panel().y - 54, font: "title", textAlign: "center", opacity: t(), translateY: moving() ? 12 * (1 - t()) : 0 }}>
+      <Text role="heading" aria-level={2} style={[looks.categoryTitle, looks.titled(area().x, area().width, panel().y - 54, t(), moving() ? 12 * (1 - t()) : 0)]}>
         {category()?.category}
       </Text>
       <View style={[looks.panel, looks.at(shape().x, shape().y, shape().width, shape().height), looks.opacity(moving() ? 1 : t())]}>
         <View style={[looks.inPanel, looks.at((shape().width - panel().width) / 2, (shape().height - panel().height) / 2, panel().width, panel().height)]}>
-          <View style={{ display: "grid", gridTemplateColumns: "repeat(3, 1fr)", rowGap: 16, columnGap: 12, opacity: Math.max(0, (t() - 0.3) / 0.7) }}>
+          <View style={[looks.opened, looks.opacity(Math.max(0, (t() - 0.3) / 0.7))]}>
             <For each={category()?.entrypoints ?? []} keyed={(entrypoint) => entrypoint.entrypoint ?? entrypoint.app}>
               {(entrypoint) => (
-                <View style={{ height: 88 }}>
+                <View style={looks.tall(88)}>
                   <Tile name={entrypoint().name} icon={entrypoint().icon} size={tile()} scale={1} badge={badgeOf(entrypoint() as Entrypoint, props.owner)} onPress={(behind, from) => phase() === "open" && press(entrypoint(), props.owner, behind, from)} />
                 </View>
               )}
@@ -996,13 +1097,13 @@ function Holding(props: { owner: Owner; index: number; held: Held }) {
   const [copyWidth, copyHeight] = [held.width / scale, held.height / scale]
   const tile = untrack(laidPage).tile
   return (
-    <View style={{ position: "absolute", top: 0, left: 0, width: room().width, height: viewport().height, zIndex: 20 }}>
+    <View style={[looks.dialog, looks.heldLayer, looks.sized(room().width, viewport().height)]}>
       {/* The Home Screen blurs through a veil under what's held, and its menu floats in glass, as a window does. */}
       <Pressable aria-hidden="true" onPress={dismiss} style={[looks.cover, looks.frosted, looks.opacity(Math.min(1, grow.value() * 2))]} />
       <Show when={item ?? (props.held.listed as Item | undefined)}>
         {(item) => (
-          <View aria-hidden="true" style={{ position: "absolute", display: "grid", left: held.x + (held.width - copyWidth) / 2, top: held.y + (held.height - copyHeight) / 2, width: copyWidth, height: copyHeight, scale: scale * (1 + 0.06 * motion()), pointerEvents: "none" }}>
-            <Show when={item().widget} fallback={library ? <Image src={src((item() as Entrypoint).icon)} alt="" style={{ width: copyWidth, height: copyWidth, borderRadius: "xl" }} /> : <Tile name={(item() as Entrypoint).name} icon={(item() as Entrypoint).icon} size={tile} scale={scale} />}>
+          <View aria-hidden="true" style={[looks.copy, looks.copyAt(held.x + (held.width - copyWidth) / 2, held.y + (held.height - copyHeight) / 2, copyWidth, copyHeight, scale * (1 + 0.06 * motion()))]}>
+            <Show when={item().widget} fallback={library ? <Image src={src((item() as Entrypoint).icon)} alt="" style={[looks.iconImage, looks.square(copyWidth)]} /> : <Tile name={(item() as Entrypoint).name} icon={(item() as Entrypoint).icon} size={tile} scale={scale} />}>
               <Card item={item() as WidgetItem} owner={props.owner} still />
             </Show>
           </View>
@@ -1019,8 +1120,8 @@ function Holding(props: { owner: Owner; index: number; held: Held }) {
       >
         <Show when={library && props.held.listed}>
           {(listed) => (
-            <View style={{ paddingInline: 16, paddingBlock: 10, borderBottomWidth: 1 }}>
-              <Text style={{ font: "footnote", color: "muted-foreground" }}>Installed for {whose(listed().installed.for)}</Text>
+            <View style={looks.installedFor}>
+              <Text style={looks.note}>Installed for {whose(listed().installed.for)}</Text>
             </View>
           )}
         </Show>
@@ -1049,11 +1150,11 @@ function HoldItem(props: { label: string; why?: string; icon: IconName; destruct
       aria-disabled={props.why ? "true" : undefined}
       aria-description={props.why}
       onPress={() => !props.why && props.onPress()}
-      style={{ flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: 16, minHeight: 44, paddingInline: 16, paddingBlock: props.why ? 10 : 0, borderTopWidth: 1, color: props.why ? "muted-foreground" : props.destructive ? "destructive" : undefined }}
+      style={[looks.holdItem, props.why ? looks.holdWhy : props.destructive && looks.destructive]}
     >
-      <View style={{ flexShrink: 1 }}>
+      <View style={looks.shrinks}>
         <Text>{props.label}</Text>
-        <Show when={props.why}>{(why) => <Text style={{ font: "footnote", color: "muted-foreground" }}>{why()}</Text>}</Show>
+        <Show when={props.why}>{(why) => <Text style={looks.note}>{why()}</Text>}</Show>
       </View>
       <Icon name={props.icon} />
     </Pressable>
@@ -1139,26 +1240,26 @@ function Gallery(props: { owner: Owner }) {
           <Show when={props.owner.widgets.length} fallback={<Empty>No widgets yet.</Empty>}>
             <List>
               <For each={props.owner.widgets} keyed={(widget) => widget.widget}>
-                {(widget) => <Row heading={widget().name} start={widget().opens ? <Image src={src(widget().opens!.icon)} alt="" style={{ width: 32, height: 32, borderRadius: "md" }} /> : undefined} onPress={() => (setPicked(widget()), setSize(widget().sizes[0]))} />}
+                {(widget) => <Row heading={widget().name} start={widget().opens ? <Image src={src(widget().opens!.icon)} alt="" style={looks.widgetIcon} /> : undefined} onPress={() => (setPicked(widget()), setSize(widget().sizes[0]))} />}
               </For>
             </List>
           </Show>
         }
       >
         {(widget) => (
-          <View style={{ gap: 16 }}>
-            <View role="radiogroup" aria-label="Size" style={{ flexDirection: "row", gap: 16, overflow: "scroll", padding: 4 }}>
+          <View style={looks.sizes}>
+            <ScrollView role="radiogroup" aria-label="Size" style={looks.sizesRow}>
               <For each={widget().sizes}>
                 {(one) => (
-                  <Pressable role="radio" aria-checked={size() === one ? "true" : "false"} aria-label={SIZES[one]} onPress={() => setSize(one)} style={{ alignItems: "center", gap: 8, flexShrink: 0, color: size() === one ? "foreground" : "muted-foreground" }}>
-                    <View style={{ display: "grid", width: PREVIEW[one][0], height: PREVIEW[one][1], padding: 2, borderRadius: "xl", borderWidth: size() === one ? 1 : 0, borderColor: "muted-foreground", pointerEvents: "none" }}>
+                  <Pressable role="radio" aria-checked={size() === one ? "true" : "false"} aria-label={SIZES[one]} onPress={() => setSize(one)} style={[looks.sizeOption, size() === one && looks.sizeChosen]}>
+                    <View style={[looks.preview, size() === one && looks.previewChosen, looks.sized(PREVIEW[one][0], PREVIEW[one][1])]}>
                       <Card item={{ ...widget(), size: one }} owner={props.owner} still />
                     </View>
-                    <Text style={{ font: "footnote" }}>{SIZES[one]}</Text>
+                    <Text style={looks.sizeName}>{SIZES[one]}</Text>
                   </Pressable>
                 )}
               </For>
-            </View>
+            </ScrollView>
             <Button onPress={add}>Add Widget</Button>
           </View>
         )}
@@ -1245,10 +1346,10 @@ function Overview(props: { owner: Owner; index: number; going?: boolean }) {
   return (
     // Over the blurred Home Screen, it fades out as it closes; its miniatures float, with a window's shadow.
     <View role="dialog" aria-label="Pages" style={[looks.overview, props.going && looks.gone, looks.at(0, 0, room().width, viewport().height)]}>
-      <View style={{ flexDirection: "row", justifyContent: "flex-end", alignItems: "center", paddingTop: room().safe.top, height: room().safe.top + TOP_ROW, paddingInline: 16 }}>
+      <View style={[looks.overviewBar, looks.topRowAt(room().safe.top, room().safe.top + TOP_ROW)]}>
         <Button variant="secondary" onPress={() => home.send({ type: "dismiss" })}>Done</Button>
       </View>
-      <View style={{ flexGrow: 1, flexBasis: 0, overflow: "scroll", paddingTop: 16, paddingInline: 24, paddingBottom: 48 + room().safe.bottom }}>
+      <ScrollView style={[looks.overviewScroll, looks.padBottom(48 + room().safe.bottom)]}>
         {/* Each in its place by where it is in the pages, so that, as one's dragged past the others, they glide to theirs. */}
         <View style={[looks.slots, looks.tall(Math.ceil(pages().length / across()) * pitch().y - 24)]}>
           <For each={pages()}>
@@ -1267,7 +1368,7 @@ function Overview(props: { owner: Owner; index: number; going?: boolean }) {
                   {...drag(page, index())}
                   style={[looks.miniature, looks.scaled(MINIATURE, (MINIATURE * 16) / 9, dragging() === page ? 1.05 : 1)]}
                 >
-                  <View style={{ position: "absolute", left: (MINIATURE - THUMB.width) / 2, top: ((MINIATURE * 16) / 9 - THUMB.height) / 2, scale, opacity: page.hidden ? 0.4 : 1, pointerEvents: "none" }}>
+                  <View style={[looks.thumb, looks.thumbAt((MINIATURE - THUMB.width) / 2, ((MINIATURE * 16) / 9 - THUMB.height) / 2, scale, page.hidden ? 0.4 : 1)]}>
                     <HomePage owner={props.owner} index={props.index} page={index()} placed={(pack(page.items.map((item, at): Cell => ({ item, index: at })), (cell) => spans(cell.item))[0] ?? [])} laid={THUMB} scale={scale} small />
                   </View>
                   <Show when={page.hidden}>
@@ -1279,7 +1380,7 @@ function Overview(props: { owner: Owner; index: number; going?: boolean }) {
                   aria-checked={page.hidden ? "false" : "true"}
                   aria-label={`Show page ${index() + 1}`}
                   onPress={() => home.send({ type: "hide", page: index(), hidden: !page.hidden })}
-                  style={{ width: 28, height: 28, alignItems: "center", justifyContent: "center", borderRadius: "full", borderWidth: 1, borderColor: page.hidden ? "muted-foreground" : "foreground", backgroundColor: page.hidden ? undefined : "foreground", color: "background" }}
+                  style={[looks.check, page.hidden && looks.unchecked]}
                 >
                   <Show when={!page.hidden}>
                     <Icon name="check" />
@@ -1289,7 +1390,7 @@ function Overview(props: { owner: Owner; index: number; going?: boolean }) {
             )}
           </For>
         </View>
-      </View>
+      </ScrollView>
     </View>
   )
 }
@@ -1302,8 +1403,8 @@ function Roll(props: { count: number; height: number; row: (index: number) => El
   // In the launcher each row goes where it's going by a spring, as the owners' pages roll.
   const rolling = () => launcher() && looks.rolling
   return (
-    <View style={{ position: "relative", height: props.height, overflow: "hidden", alignItems: "center" }}>
-      <View inert aria-hidden="true" style={{ height: props.height, opacity: 0, justifyContent: "center" }}>
+    <View style={[looks.roll, looks.tall(props.height)]}>
+      <View inert aria-hidden="true" style={[looks.rollSizer, looks.tall(props.height)]}>
         {props.row(nearest())}
       </View>
       <For each={Array.from({ length: props.count }, (_, index) => index)}>
@@ -1359,11 +1460,11 @@ function Dots(props: { owner: Owner; index: number; count: number; size: number;
     if (Date.now() > quietDots) home.send({ type: "go", screen: Math.max(0, Math.min(screen, last())) })
   }
   return (
-    <View role="navigation" aria-label={`${props.owner.name}'s pages`} aria-hidden={seen().owner !== props.index ? "true" : undefined} {...slide} style={{ flexDirection: "row", alignItems: "center", height: "100%" }}>
+    <View role="navigation" aria-label={`${props.owner.name}'s pages`} aria-hidden={seen().owner !== props.index ? "true" : undefined} {...slide} style={looks.dots}>
       <For each={Array.from({ length: Math.max(1, props.count) }, (_, at) => at)}>
         {(screen) => (
-          <Pressable role="button" aria-label={`Page ${screen + 1} of ${props.count}`} aria-current={lit(screen) ? "true" : undefined} onPress={press(screen)} style={{ height: "100%", justifyContent: "center", paddingInline: 1 }}>
-            <View style={{ width: props.size, height: props.size, marginInline: props.size * 0.64, borderRadius: "full", backgroundColor: shown(screen) >= 0.5 ? "foreground" : "muted-foreground", opacity: 0.4 + 0.6 * shown(screen) }} />
+          <Pressable role="button" aria-label={`Page ${screen + 1} of ${props.count}`} aria-current={lit(screen) ? "true" : undefined} onPress={press(screen)} style={looks.dotButton}>
+            <View style={[looks.dot, shown(screen) >= 0.5 && looks.dotLit, looks.dotAt(props.size, props.size * 0.64, 0.4 + 0.6 * shown(screen))]} />
           </Pressable>
         )}
       </For>
@@ -1383,9 +1484,9 @@ function OwnerPill(props: { owners: Owner[] }) {
       onSelect={({ value }) => home.send({ type: "pick", owner: Number(value) })}
     >
       <Menu.Trigger variant="secondary" aria-label={props.owners[at()]?.name}>
-        <View style={{ flexDirection: "row", alignItems: "center", gap: 5 }}>
-          <Roll count={props.owners.length} height={BAR - 8} row={(index) => <Text style={{ font: "label", lineClamp: 1, maxWidth: 144 }}>{props.owners[index]?.name}</Text>} />
-          <View style={{ color: "muted-foreground", scale: 0.75 }}>
+        <View style={looks.ownerRow}>
+          <Roll count={props.owners.length} height={BAR - 8} row={(index) => <Text style={looks.ownerName}>{props.owners[index]?.name}</Text>} />
+          <View style={looks.caret}>
             <Icon name="caret-down" />
           </View>
         </View>
@@ -1395,8 +1496,8 @@ function OwnerPill(props: { owners: Owner[] }) {
           <For each={props.owners}>
             {(owner, index) => (
               <Menu.Item value={String(index())}>
-                <View style={{ flexDirection: "row", alignItems: "center", gap: 8 }}>
-                  <View style={{ opacity: index() === at() ? 1 : 0 }}>
+                <View style={looks.ownerItem}>
+                  <View style={looks.opacity(index() === at() ? 1 : 0)}>
                     <Icon name="check" />
                   </View>
                   <Text>{owner.name}</Text>
@@ -1440,7 +1541,7 @@ const launcherKeys = (props: { move: (key: string) => boolean; open: () => void;
 /// The launcher's search, floating over its card: bare and large, with the keyboard as the launcher's summoned.
 function LauncherSearch() {
   return (
-    <View style={{ flexGrow: 1, flexDirection: "row", alignItems: "center", paddingInline: 18 }}>
+    <View style={looks.launcherSearch}>
       <TextInput inputMode="search" enterKeyHint="search" placeholder="Search apps…" aria-label="Search apps" autoFocus value={query()} onChangeText={(text) => (setQuery(text), setChosenResult(0))} style={looks.bare} />
     </View>
   )
@@ -1453,24 +1554,24 @@ function Results(props: { owner: Owner; found: Listed[]; words: string }) {
   const tile = 60
   const lead = () => leadOf(props.owner, props.found)
   const widgets = () => widgetsOf(props.owner, props.found, props.words)
-  const Heading = (inner: { children: string }) => <Text style={{ font: "footnote", color: "muted-foreground", paddingInline: 4, height: HEADING }}>{inner.children}</Text>
+  const Heading = (inner: { children: string }) => <Text style={[looks.heading, looks.tall(HEADING)]}>{inner.children}</Text>
   return (
-    <View style={{ gap: 12 }}>
-      <Show when={props.found.length || widgets().length} fallback={<View style={{ paddingBlock: 24 }}><Empty>No apps match.</Empty></View>}>
+    <View style={looks.results}>
+      <Show when={props.found.length || widgets().length} fallback={<View style={looks.nothingFound}><Empty>No apps match.</Empty></View>}>
         <Show when={props.found.length}>
           <Heading>Apps</Heading>
-          <View style={{ flexDirection: "row", gap: 12, alignItems: "flex-start" }}>
+          <View style={looks.apps}>
             <Show when={lead()}>
               {(lead) => (
-                <View style={{ width: 2 * 76 + 8, height: 2 * 88 - 8, flexShrink: 0, display: "grid" }}>
+                <View style={[looks.lead, looks.sized(2 * 76 + 8, 2 * 88 - 8)]}>
                   <Card item={{ ...lead(), size: "2x2" }} owner={props.owner} />
                 </View>
               )}
             </Show>
-            <View style={{ flexGrow: 1, flexDirection: "row", flexWrap: "wrap", rowGap: 12 }}>
+            <View style={looks.foundApps}>
               <For each={props.found} keyed={(listed) => listed.entrypoint ?? listed.app}>
                 {(listed, at) => (
-                  <View onPointerMove={() => setChosenResult(at())} style={{ position: "relative", width: 76, height: 88, paddingTop: 6 }}>
+                  <View onPointerMove={() => setChosenResult(at())} style={looks.result}>
                     <Show when={chosenResult() === at()}>
                       <View aria-hidden="true" style={looks.chosen} />
                     </Show>
@@ -1483,10 +1584,10 @@ function Results(props: { owner: Owner; found: Listed[]; words: string }) {
         </Show>
         <Show when={widgets().length}>
           <Heading>Widgets</Heading>
-          <View style={{ flexDirection: "row", flexWrap: "wrap", gap: 12 }}>
+          <View style={looks.widgets}>
             <For each={widgets()} keyed={(one) => one.widget}>
               {(one) => (
-                <View style={{ width: 2 * 76 + 8, height: 2 * 88 - 8, display: "grid" }}>
+                <View style={[looks.widgetCard, looks.sized(2 * 76 + 8, 2 * 88 - 8)]}>
                   <Card item={{ ...one(), size: "2x2" }} owner={props.owner} />
                 </View>
               )}
@@ -1536,9 +1637,9 @@ function DotsPill(props: { owners: Owner[]; laid: Kind[][]; pages?: (owner: numb
         aria-current={library() ? "true" : undefined}
         aria-disabled={state().matches("editing") ? "true" : undefined}
         onPress={go}
-        style={{ height: "100%", justifyContent: "center", paddingLeft: 2, paddingRight: 4, color: library() ? "foreground" : "muted-foreground", opacity: state().matches("editing") ? 0.35 : library() ? 1 : 0.4 }}
+        style={[looks.libraryGlyph, library() && looks.lit, looks.opacity(state().matches("editing") ? 0.35 : library() ? 1 : 0.4)]}
       >
-        <View style={{ scale: 0.75 }}>
+        <View style={looks.smaller}>
           <Icon name="squares-four" />
         </View>
       </Pressable>
@@ -1582,14 +1683,14 @@ function Asking(props: { owner: Owner; held: Held }) {
   }
   return (
     <Sheet heading={`Install ${titles()} for ${named(props.owner)}?`} open={state().matches({ editing: "asking" })} onClose={() => state().matches({ editing: "asking" }) && home.send({ type: "cancel" })}>
-      <View style={{ alignItems: "center", gap: 12 }}>
-        <View style={{ flexDirection: "row", flexWrap: "wrap", justifyContent: "center", gap: 12 }}>
+      <View style={looks.ask}>
+        <View style={looks.askIcons}>
           <For each={missing()} keyed={({ item }) => item.entrypoint}>
-            {(app) => <Image src={src(app().item.icon)} alt="" style={{ width: 64, height: 64, borderRadius: "xl" }} />}
+            {(app) => <Image src={src(app().item.icon)} alt="" style={looks.askIcon} />}
           </For>
         </View>
-        <Text style={{ color: "muted-foreground", textAlign: "center" }}>{reach()}</Text>
-        <View style={{ alignSelf: "stretch", gap: 12, paddingTop: 8 }}>
+        <Text style={looks.askWhy}>{reach()}</Text>
+        <View style={looks.askButtons}>
           <Button onPress={install}>Install</Button>
           <Button variant="secondary" onPress={() => home.send({ type: "cancel" })}>Cancel</Button>
         </View>
@@ -1612,13 +1713,13 @@ function Refused(props: { owner: Owner; held: Held }) {
   const dismiss = () => state().matches({ editing: "refused" }) && home.send({ type: "dismiss" })
   return (
     <Sheet heading={`You can't add apps for ${props.owner.name}`} open={state().matches({ editing: "refused" })} onClose={dismiss}>
-      <View style={{ alignItems: "center", gap: 12 }}>
+      <View style={looks.ask}>
         <Errored fallback={(error) => <Problem heading="Can't show who can" text={error() as Error} />}>
           <Loading fallback={<Text> </Text>}>
-            <Text style={{ color: "muted-foreground", textAlign: "center" }}>{who() ? `Only ${who()} can. Ask them to add ${title()}.` : `Ask one of its owners to add ${title()}.`}</Text>
+            <Text style={looks.askWhy}>{who() ? `Only ${who()} can. Ask them to add ${title()}.` : `Ask one of its owners to add ${title()}.`}</Text>
           </Loading>
         </Errored>
-        <View style={{ alignSelf: "stretch", paddingTop: 8 }}>
+        <View style={looks.askButton}>
           <Button onPress={dismiss}>OK</Button>
         </View>
       </View>
@@ -1641,7 +1742,7 @@ function EditBar(props: { going?: boolean; within?: Rect }) {
   const width = () => props.within?.width ?? (room().wide ? Math.min(room().width - 2 * room().side, room().fit * (laidPage().width * room().scale + room().gap) - room().gap) : room().width)
   const left = () => props.within?.x ?? (room().width - width()) / 2
   return (
-    <View style={{ position: "absolute", zIndex: 7, top: top(), left: left(), width: width(), height: height(), flexDirection: "row", alignItems: "center", justifyContent: "space-between", paddingInline: props.within ? 10 : 16, opacity: fade.value(), pointerEvents: "none" }}>
+    <View style={[looks.editBar, looks.at(left(), top(), width(), height()), looks.editBarPad(props.within ? 10 : 16, fade.value())]}>
       <View style={[looks.pill, looks.glass]}>
         <Button variant="ghost" size="icon" aria-label="Add Widget" onPress={() => state().matches({ editing: "still" }) && home.send({ type: "gallery" })}>
           <Icon name="plus" />
@@ -2317,7 +2418,7 @@ function HomeScreen(props: { owners: Owner[] }) {
   return (
     <View
       onKeyDown={launcher() ? launcherKeys({ move, open: openTarget, toggleLibrary, library, found: () => found().length }) : undefined}
-      style={{ position: "relative", width: launcher() ? viewport().width : room().width, height: viewport().height, overflow: "hidden", color: "foreground" }}
+      style={[looks.root, looks.sized(launcher() ? viewport().width : room().width, viewport().height)]}
     >
       <Show
         when={launcher()}
@@ -2326,26 +2427,21 @@ function HomeScreen(props: { owners: Owner[] }) {
         <View
           {...swipes}
           onWheel={wheel}
-          style={{ position: "absolute", top: 0, left: 0, width: room().width * 2, height: room().height, flexDirection: "row", translateX: -sectionsX() }}
+          style={[looks.sections, looks.sized(room().width * 2, room().height), looks.shifted(-sectionsX())]}
         >
-          <View role="main" aria-label="Home" style={{ position: "relative", width: room().width, height: room().height, overflow: "hidden", flexShrink: 0 }}>
-            <View style={{ position: "absolute", top: 0, left: 0, width: room().width, translateY: -downY() }}>
+          <View role="main" aria-label="Home" style={[looks.clipped, looks.rigid, looks.sized(room().width, room().height)]}>
+            <View style={[looks.owners, looks.wide(room().width), looks.lowered(-downY())]}>
               <For each={props.owners} keyed={(owner) => owner.key}>
                 {(owner, index) => (
-                  <View role="region" aria-label={owner().name} style={{ position: "relative", width: room().width, height: room().height, overflow: "hidden" }}>
-                    <View style={{ position: "absolute", top: 0, left: 0, flexDirection: "row", translateX: -Math.min(xOf(index())[0](), Math.max(0, homes(index()).length - 1) * room().width), opacity: opacityOf(index())[0]() }}>
+                  <View role="region" aria-label={owner().name} style={[looks.clipped, looks.sized(room().width, room().height)]}>
+                    <View style={[looks.screens, looks.slid(-Math.min(xOf(index())[0](), Math.max(0, homes(index()).length - 1) * room().width), opacityOf(index())[0]())]}>
                       <For each={homes(index())} keyed={false}>
                         {(screen) => (
-                          <View style={{ position: "relative", width: room().width, height: room().height }}>
+                          <View style={[looks.slots, looks.sized(room().width, room().height)]}>
                             <For each={(pages()[index()] ?? []).slice(screen().from, screen().from + screen().count)} keyed={false}>
                               {(placed, at) => (
                                 <View
-                                  style={{
-                                    position: "absolute",
-                                    top: (laidPage().height * (room().scale - 1)) / 2,
-                                    left: lefts(room(), laidPage(), screen().count)[at] + (laidPage().width * (room().scale - 1)) / 2,
-                                    scale: room().scale,
-                                  }}
+                                  style={[looks.absolute, looks.placedPage((laidPage().height * (room().scale - 1)) / 2, lefts(room(), laidPage(), screen().count)[at] + (laidPage().width * (room().scale - 1)) / 2, room().scale)]}
                                 >
                                   <HomePage owner={owner()} index={index()} page={screen().from + at} placed={placed()} laid={laidPage()} scale={room().scale} />
                                 </View>
@@ -2363,14 +2459,14 @@ function HomeScreen(props: { owners: Owner[] }) {
           <Library owner={props.owners[0]} />
         </View>
             <Show when={!library()}>
-              <View style={{ position: "absolute", zIndex: 6, top: room().safe.top, left: 0, right: 0, height: TOP_ROW, alignItems: "center", justifyContent: "center", pointerEvents: "none" }}>
-                <View style={{ pointerEvents: "auto", opacity: state().matches("editing") ? 0.6 : 1 }}>
+              <View style={[looks.topRow, looks.top(room().safe.top), looks.tall(TOP_ROW)]}>
+                <View style={[looks.live, looks.opacity(state().matches("editing") ? 0.6 : 1)]}>
                   <OwnerPill owners={props.owners} />
                 </View>
               </View>
             </Show>
-            <View style={{ position: "absolute", zIndex: 6, bottom: room().safe.bottom + 16, left: 0, right: 0, alignItems: "center", pointerEvents: "none" }}>
-              <View style={{ pointerEvents: "auto" }}>
+            <View style={[looks.bottomRow, looks.bottom(room().safe.bottom + 16)]}>
+              <View style={looks.live}>
                 <DotsPill owners={props.owners} laid={laid().screens} />
               </View>
             </View>
@@ -2387,8 +2483,8 @@ function HomeScreen(props: { owners: Owner[] }) {
               {(owner, index) => {
                 const shown = () => index() === state().context.at.owner
                 const Page = (inner: { page: number; placed: Placed<Cell>[] }) => (
-                  <View style={{ position: "relative", width: PAGE, height: room().height, flexShrink: 0 }}>
-                    <View style={{ position: "absolute", top: (laidPage().height * (room().scale - 1)) / 2, left: (laidPage().width * (room().scale - 1)) / 2, scale: room().scale }}>
+                  <View style={[looks.slots, looks.rigid, looks.sized(PAGE, room().height)]}>
+                    <View style={[looks.absolute, looks.placedPage((laidPage().height * (room().scale - 1)) / 2, (laidPage().width * (room().scale - 1)) / 2, room().scale)]}>
                       <HomePage owner={owner()} index={index()} page={inner.page} placed={inner.placed} laid={laidPage()} scale={room().scale} />
                     </View>
                   </View>
@@ -2444,19 +2540,7 @@ function HomeScreen(props: { owners: Owner[] }) {
           return (
             <View
               aria-hidden="true"
-              style={{
-                position: "absolute",
-                zIndex: 30,
-                display: "grid",
-                left: now().rect.x + (now().rect.width - width) / 2,
-                top: now().rect.y + (now().rect.height - height) / 2,
-                width,
-                height,
-                translateX: now().x,
-                translateY: now().y,
-                scale: scale() * lift(),
-                pointerEvents: "none",
-              }}
+              style={[looks.carry, looks.carryAt(now().rect.x + (now().rect.width - width) / 2, now().rect.y + (now().rect.height - height) / 2, width, height, now().x, now().y, scale() * lift())]}
             >
               <View aria-hidden="true" style={[looks.lifted, widget() ? looks.liftedWidget : looks.liftedIcon, now().settling && looks.opacity(0), widget() ? looks.at(0, 0, width, height) : looks.at((width - tile()) / 2, 0, tile(), tile())]} />
               <Show when={now().held.item}>
@@ -2498,7 +2582,7 @@ function HomeScreen(props: { owners: Owner[] }) {
 /// one meeting what's new is the likeliest cause.
 function Broken(props: { error: Error }) {
   return (
-    <View style={{ height: viewport().height, justifyContent: "center", padding: 20 }}>
+    <View style={[looks.broken, looks.tall(viewport().height)]}>
       <Problem
         heading="Home Screen didn't open."
         text={new Error(`Try again in a moment.\n\n${typeof props.error?.cause === "string" ? props.error.cause : (props.error?.message ?? props.error)}`)}

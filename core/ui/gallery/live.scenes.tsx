@@ -1,4 +1,6 @@
-import { Button, LiveScreen, type Scenes, type ScreenInputs, Steps, View } from "ui"
+import { Button, LiveScreen, type Scenes, type ScreenInputs, Steps, styles, tokens, View } from "ui"
+
+const look = styles({ column: { gap: tokens.grid[4] } })
 
 // A screen's picture, as Computer Use's `screenshot` answers it: a window on a desktop.
 const picture = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAKAAAABkCAIAAACO1KzYAAABAUlEQVR42u3ZoQ2AMBRF0Q5WgewMTMKIJLhqDAmODRoEA6AwpZST3An+ce+HOCR1XHACwAIswAIswAIswIAFWIDVAPC2H9Uq5VTlAAMGDBgwYMCABViABRgwYMCAAQMGrH8Bj9Oqe4ABAwYMGDBgwIABAwYswIAtWQIMGDBgwIABAxZgARZgwIABAwYMGLAAqy/gecl6GmDAgAEDBgwYMGDAAqzPAsuSJcACDBgwYMCAAQOWf7AsWYABAwYMGDBgwIABA5Z/sCxZAgwYMGDAgAEDFmD5Bxs6AAMGDBgwYMCAAQMWYMCGDkMHYMCAAQMGLMACLMAydBg6AAMGDBjwm8AXsFsEUUQssX8AAAAASUVORK5CYII="
@@ -21,7 +23,7 @@ export default {
   "Live screen/Pictures": {
     taps: ["Wait a Second"],
     render: () => (
-      <View style={{ gap: 16 }}>
+      <View style={look.column}>
         <LiveScreen label="The desktop" screen={pictures} />
         <Button variant="outline">Wait a Second</Button>
       </View>
@@ -35,7 +37,7 @@ export default {
   "Live screen/Can't reach it": {
     taps: Array.from({ length: 6 }, () => "Wait a Second"),
     render: () => (
-      <View style={{ gap: 16 }}>
+      <View style={look.column}>
         <LiveScreen label="The desktop" screen={gone} />
         <Button variant="outline">Wait a Second</Button>
       </View>
