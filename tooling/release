@@ -110,7 +110,9 @@ if [[ $part == client && " ${wanted[*]} " == *" client "* && -z $dry ]]; then
     iphone=$!
   fi
 fi
+# The machine's lock goes first, as waiting for Apple holds up nothing here: the next client release (19 Nov: 164 s).
 iphone_done() {
+  exec 9>&-
   [[ -z $iphone ]] || wait "$iphone" || { echo "The iPhone's app didn't reach TestFlight." >&2 && exit 1; }
 }
 trap iphone_done EXIT
