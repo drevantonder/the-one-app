@@ -73,7 +73,9 @@ fn replaced() {
     let Ok(program) = cli::serving::program() else { return };
     let (Some(folder), Some(name)) = (program.parent().map(std::path::Path::to_owned), program.file_name().map(ToOwned::to_owned)) else { return };
     let heard = move |event: notify::Result<notify::Event>| {
-        if event.is_ok_and(|event| event.paths.iter().any(|path| path.file_name() == Some(&name))) {
+        // Opening it isn't changing it: inotify says each open, and asking its build (`one --version`) opens it, which
+        // on Linux heard itself over and over, hundreds of programs started a second.
+        if event.is_ok_and(|event| !event.kind.is_access() && event.paths.iter().any(|path| path.file_name() == Some(&name))) {
             crate::spawn(in_place())
         }
     };
