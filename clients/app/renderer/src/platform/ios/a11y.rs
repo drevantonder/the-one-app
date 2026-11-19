@@ -20,6 +20,8 @@ const SCROLL_UP: i32 = 1 << 4;
 const SCROLL_DOWN: i32 = 1 << 5;
 const SHOW_ON_SCREEN: i32 = 1 << 8;
 const DID_GAIN_ACCESSIBILITY_FOCUS: i32 = 1 << 15;
+/// VoiceOver's two-finger scrub (`accessibilityPerformEscape`), which goes back.
+pub const DISMISS: i32 = 1 << 18;
 const FOCUS: i32 = 1 << 22;
 
 /// Flutter's tristate and check state (`SemanticsTristate`, `SemanticsCheckState`).
@@ -148,6 +150,9 @@ fn add(semantic: &Value, screen: &Screen, scale: f32, out: &mut Vec<Value>) -> O
     }
     if field {
         actions |= FOCUS;
+    }
+    if screen.goes_back() {
+        actions |= DISMISS;
     }
     let rect = screen.rect(id).map(|rect| [rect.x * scale, rect.y * scale, rect.width * scale, rect.height * scale]);
     // A control is read by its label, so what's in it isn't read again.

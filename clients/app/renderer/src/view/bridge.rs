@@ -210,6 +210,12 @@ impl Screen {
 
     /// The device's Back: what's open over its page shuts, as the page's Escape would (`notifications/one/back`).
     /// → whether something was.
+    /// Whether Back has somewhere to go on it: what's open over its page, or its app's window, which goes, as a phone's
+    /// is (`rail`).
+    pub fn goes_back(&self) -> bool {
+        self.over || self.rail
+    }
+
     pub fn back(&mut self) -> bool {
         if !self.over {
             return false;

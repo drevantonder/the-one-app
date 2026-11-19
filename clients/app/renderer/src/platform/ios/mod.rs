@@ -274,12 +274,21 @@ fn with_windows<R>(f: impl FnOnce(&mut Windows) -> R) -> Option<R> {
                 window.dirty = true;
             }
         }
+        let mut dismissed = Vec::new();
         for (id, window) in windows.windows.iter_mut() {
             let Ok(screen) = &mut window.screen else { continue };
             for (node, action) in a11y::take(*id) {
+                if action == a11y::DISMISS {
+                    dismissed.push(*id);
+                    continue;
+                }
                 a11y::act(screen, node, action);
                 window.dirty = true;
             }
+        }
+        // VoiceOver's two-finger scrub goes back, as Back does: what's open shuts, or the app's window closes.
+        for id in dismissed {
+            windows.back(id);
         }
         let result = f(windows);
         // Its page keeps clear of what its safe area and the keyboard leave out, as they are now: the first tao says,
