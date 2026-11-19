@@ -5,7 +5,8 @@ defmodule OneCore.Apps.Store do
   some of them (an app), the files as they were deployed are kept at `source/<the same hash>/`. Its `latest` says
   which set it runs now, with that version's number. A deploy replaces `latest` only if it's unchanged, so two
   deploys at once can't both be the app's next version, and first writes the version it replaces to
-  `versions/<number>`; only the last few versions keep their files (`prune/1`). Each deploy's set is its own
+  `versions/<number>`, with when; only the last few versions, and those replaced in the last week, keep their files
+  (`prune/1`). Each deploy's set is its own
   (`deployment/1`), so one that goes back to an earlier version's files writes them again. `latest` names the files it was deployed from too, by their
   hash, its `source`, and the git repo it was installed from, if it was, its `from`: as a lock file has it, where
   it was fetched from, the ref asked for, the commit and the hash of the files as installed (`one install`). Each
@@ -164,7 +165,8 @@ defmodule OneCore.Apps.Store do
 
     wrote =
       with {before, code, tag} <- was do
-        Bucket.write("#{artifact}/versions/" <> String.pad_leading("#{before}", 8, "0"), code)
+        replaced = JSON.encode!(%{code: code, replaced: System.os_time(:second)})
+        Bucket.write("#{artifact}/versions/" <> String.pad_leading("#{before}", 8, "0"), replaced)
         Bucket.replace("#{artifact}/latest", next, tag)
       else
         nil -> Bucket.write("#{artifact}/latest", next)
@@ -180,13 +182,17 @@ defmodule OneCore.Apps.Store do
     end
   end
 
-  # How many of an app's versions keep their files: the latest, which every server runs, and the two before it, which
-  # a server may still hold while it moves to the latest, and an app open on a device may still be reading.
+  # Which of an app's versions keep their files: the latest, which every server runs, the two before it, and every one
+  # replaced in the last week, which a server still moving to the latest may run and list, and a device open on it may
+  # still read, as a CDN keeps a site's earlier hashed assets: a server release builds every app again, so a day of
+  # releases replaces an app's version many times.
   @versions_kept 3
+  @kept_for 7 * 24 * 3600
 
   @doc """
-  Removes the files of the app `artifact`'s versions before its last few (`@versions_kept`): the set each ran, the files
-  it was deployed from and what it said of itself, and its entry in `versions/`. Nothing runs them, and nothing
+  Removes the files of the app `artifact`'s versions before its last few (`@versions_kept`) and replaced over a week
+  ago (`@kept_for`): the set each ran, the files it was deployed from and what it said of itself, and its entry in
+  `versions/`. Nothing runs them, and nothing
   goes back to one: an app goes back by being deployed again. A set a kept version runs too stays. So do the sets no
   version names, as `git gc` removes what no ref reaches: what a deploy that failed, stopped or is still under way
   wrote. Gives how many blobs went.
@@ -200,14 +206,15 @@ defmodule OneCore.Apps.Store do
     with {:ok, json, tag} <- Bucket.read("#{artifact}/latest") do
       latest = JSON.decode!(json)
       history = Bucket.list("#{artifact}/versions/")
-      codes = Enum.zip_with(history, Bucket.read_all(history), fn blob, {:ok, code, _tag} -> {blob, code} end)
+      replaced = Enum.zip_with(history, Bucket.read_all(history), fn blob, {:ok, text, _tag} -> {blob, replaced(text)} end)
+      week_ago = System.os_time(:second) - @kept_for
 
       {old, retained} =
-        Enum.split_with(codes, fn {blob, _code} ->
-          String.to_integer(Path.basename(blob)) <= latest["number"] - @versions_kept
+        Enum.split_with(replaced, fn {blob, %{"replaced" => at}} ->
+          String.to_integer(Path.basename(blob)) <= latest["number"] - @versions_kept and at < week_ago
         end)
 
-      retained = MapSet.new([latest["code"] | Enum.map(retained, &elem(&1, 1))])
+      retained = MapSet.new([latest["code"] | Enum.map(retained, &elem(&1, 1)["code"])])
 
       gone =
         for(
@@ -227,6 +234,15 @@ defmodule OneCore.Apps.Store do
       end
     else
       :absent -> 0
+    end
+  end
+
+  # An entry of `versions/`: the code of the version it replaced, and when. One written before they said when holds the
+  # code alone, and was replaced longer ago than any kept.
+  defp replaced(text) do
+    case JSON.decode(text) do
+      {:ok, %{"code" => _, "replaced" => _} = replaced} -> replaced
+      _ -> %{"code" => text, "replaced" => 0}
     end
   end
 
