@@ -3,53 +3,31 @@ defmodule OneCore.Protocol do
   The protocol the parts of the platform speak to each other, numbered as MCP's `protocolVersion` is, apart from the
   builds that speak it: what crosses the wire between a client, the edge and a server, and between servers. Every
   part built from a commit speaks the range `core/protocol.json` says there (`oldest` to `newest`), and says it: as
-  `_meta.protocol` in each request, and as a server or a device says what it is. Parts built before they said theirs
-  speak what `core/protocol.json`'s `legacy` says from its cutoff build (`from`), and none known before it. Two parts
-  talk where their ranges overlap, and are refused only where they don't, saying why, as MCP refuses a protocol
-  version it doesn't speak (-32022). A release's version, and the `!`s that move it, decide nothing here.
+  `_meta.protocol` in each request, and as a server or a device says what it is; one that says none speaks none
+  this server knows. Two parts talk where their ranges overlap, and are refused only where they don't, saying why, as
+  MCP refuses a protocol version it doesn't speak (-32022). A release's version, and the `!`s that move it, decide nothing here.
 
   A change to what crosses the wire raises `newest`, the newer part speaking the older protocol beside it; `oldest`
   is raised in a change of its own, once no part seen in 90 days speaks only an older one (`tooling/release` refuses
   it before then).
   """
-  alias OneCore.Builds
-
   @external_resource path = Path.expand("../../../protocol.json", __DIR__)
-  config = path |> File.read!() |> JSON.decode!()
-  @range Map.take(config, ["oldest", "newest"])
+  @range path |> File.read!() |> JSON.decode!()
 
   @doc "The range this server speaks: `%{\"oldest\" => 1, \"newest\" => 1}`."
   def range, do: @range
 
-  @doc """
-  The range a part speaks, as it `said`, or, where it said none, as its `build` says: `nil` for one that speaks none
-  this server knows.
-  """
-  def of(%{"oldest" => oldest, "newest" => newest}, _build)
+  @doc "The range a part speaks, as it `said`: `nil` for one that said none this server knows."
+  def of(%{"oldest" => oldest, "newest" => newest})
       when is_integer(oldest) and is_integer(newest) and oldest <= newest,
       do: %{"oldest" => oldest, "newest" => newest}
 
-  # Parts built before they said their protocol, as phones whose people haven't updated them are, speak what
-  # `core/protocol.json`'s `legacy` says from its cutoff build, and none known before it. This goes once no part seen
-  # in 90 days says none.
-  case config["legacy"] do
-    %{"from" => from, "protocol" => protocol} when is_binary(from) and is_integer(protocol) ->
-      @legacy_from Version.parse!(from)
-      @legacy_range %{"oldest" => protocol, "newest" => protocol}
+  def of(_said), do: nil
 
-      def of(_said, build) do
-        version = Builds.version(build)
-        if version && Version.compare(version, @legacy_from) != :lt, do: @legacy_range
-      end
-
-    nil ->
-      def of(_said, _build), do: nil
-  end
-
-  @doc "Whether a part that speaks `theirs` (`of/2`) talks with this one (`overlap?/2`)."
+  @doc "Whether a part that speaks `theirs` (`of/1`) talks with this one (`overlap?/2`)."
   def speaks?(theirs), do: overlap?(theirs, @range)
 
-  @doc "Whether parts that speak `a` and `b` (`of/2`) talk: their ranges overlap."
+  @doc "Whether parts that speak `a` and `b` (`of/1`) talk: their ranges overlap."
   def overlap?(%{"oldest" => a_oldest, "newest" => a_newest}, %{"oldest" => b_oldest, "newest" => b_newest}),
     do: a_oldest <= b_newest and b_oldest <= a_newest
 

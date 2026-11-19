@@ -230,7 +230,7 @@ defmodule OneCore.Builds do
   Which build each of `owner`'s servers runs, with what its machine is called and what it is (`say/1`), as it says
   it and, where the network's edge says it now, whether it's ready (`OneCore.Servers.presence/1`), and which each
   of `by`'s devices last said it is, with when it was last seen, and the latest for each kind of machine: what shows
-  whether everything is on the same build; the protocol each part speaks (`OneCore.Protocol.of/2`), which says which
+  whether everything is on the same build; the protocol each part speaks (`OneCore.Protocol.of/1`), which says which
   talk; and `apps`, whether what runs on the server that answers is what's installed, `synced`, or it's `syncing`
   (`OneCore.Apps.sync/2`).
   """
@@ -247,7 +247,7 @@ defmodule OneCore.Builds do
       for {key, read} <- Enum.zip(keys, server_reads) do
         info = with {:ok, info, _tag} <- read, do: JSON.decode!(info), else: (:absent -> %{})
         presence = Map.take(Servers.presence(key) || %{}, @presence)
-        info = Map.put(info, "protocol", Protocol.of(info["protocol"], info["build"]))
+        info = Map.put(info, "protocol", Protocol.of(info["protocol"]))
         server = Map.merge(info, Map.merge(presence, %{"server" => key, "name" => Servers.name(key)}))
         if why = why(server, edge), do: Map.put(server, "why", why), else: server
       end
@@ -259,7 +259,7 @@ defmodule OneCore.Builds do
         seen = Map.take(edge["presence"][device] || %{}, ~w(connected last_seen))
 
         Map.merge(info, Map.put(seen, "device", device))
-        |> Map.put("protocol", Protocol.of(info["protocol"], info["build"]))
+        |> Map.put("protocol", Protocol.of(info["protocol"]))
       end
 
     %{

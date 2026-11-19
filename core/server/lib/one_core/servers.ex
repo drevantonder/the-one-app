@@ -167,7 +167,7 @@ defmodule OneCore.Servers do
       response = Edge.send!(method: :get, url: at <> path, params: params, headers: Edge.signed(path, ""))
       build = List.first(Req.Response.get_header(response, "one-version"))
       body = if is_map(response.body), do: response.body, else: %{}
-      %{"build" => build, "protocol" => Protocol.of(body["protocol"], build), "presence" => body["presence"] || %{}}
+      %{"build" => build, "protocol" => Protocol.of(body["protocol"]), "presence" => body["presence"] || %{}}
     end
   rescue
     Edge.Unreachable -> nil
@@ -348,13 +348,13 @@ defmodule OneCore.Servers do
   end
 
   @doc """
-  The protocol the server whose key is `key` speaks (`OneCore.Protocol.of/2`), as it said when it last started or
+  The protocol the server whose key is `key` speaks (`OneCore.Protocol.of/1`), as it said when it last started or
   updated (`OneCore.Builds.say/1`), or `nil` where it never said.
   """
   def protocol(key) do
     cached({:protocol, key}, fn ->
       said = read("servers/#{key}/build", %{})
-      Protocol.of(said["protocol"], said["build"])
+      Protocol.of(said["protocol"])
     end)
   end
 

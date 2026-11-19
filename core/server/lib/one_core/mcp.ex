@@ -266,7 +266,7 @@ defmodule OneCore.Mcp do
   defp talks("tools/call", %{"name" => name}) when name in ["builds", "download", "update"], do: :ok
 
   defp talks(_method, params) do
-    theirs = Protocol.of(meta(params)["protocol"], meta(params)["version"])
+    theirs = Protocol.of(meta(params)["protocol"])
 
     if Protocol.speaks?(theirs) do
       :ok

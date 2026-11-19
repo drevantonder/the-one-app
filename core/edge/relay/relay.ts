@@ -79,22 +79,12 @@ const MCP_PING = JSON.stringify({ jsonrpc: "2.0", id: 0, method: "ping" });
 const SWITCH = 12_000;
 /** The protocols a part speaks, from `oldest` to `newest` (`core/protocol.json`). */
 type Protocol = { oldest: number; newest: number };
-type Legacy = { from: string; protocol: number };
 /** The protocols the edge speaks, from `oldest` to `newest`. */
 const SPEAKS: Protocol = { oldest: PROTOCOL_CONFIG.oldest, newest: PROTOCOL_CONFIG.newest };
-const LEGACY: Legacy | undefined = (PROTOCOL_CONFIG as { legacy?: Legacy }).legacy;
-/**
- * The protocols a part speaks, as it `said`, or where it said none, as its build, `version`, says: none known for
- * one that says neither. Parts built before they said theirs, as phones whose people haven't updated them are, speak
- * what `core/protocol.json`'s `legacy` says from its cutoff build, as `OneCore.Protocol.of/2` says; this goes once no
- * part seen in 90 days says none.
- */
-function spoken(said: unknown, version: string | undefined): Protocol | undefined {
+/** The protocols a part speaks, as it `said`: none known for one that said none, as `OneCore.Protocol.of/1` says. */
+function spoken(said: unknown): Protocol | undefined {
   const { oldest, newest } = (said ?? {}) as Partial<Protocol>;
-  if (Number.isInteger(oldest) && Number.isInteger(newest) && oldest! <= newest!) return { oldest: oldest!, newest: newest! };
-  // Builds are `0.23.54+3462.3dd36ee6395b`; one that isn't a version (`2934-ae4b619e8cf5`) is from before any.
-  const legacy = LEGACY && /^\d+\.\d+\.\d+/.test(version ?? "") && version!.localeCompare(LEGACY.from, "en", { numeric: true }) >= 0;
-  return legacy ? { oldest: LEGACY.protocol, newest: LEGACY.protocol } : undefined;
+  return Number.isInteger(oldest) && Number.isInteger(newest) && oldest! <= newest! ? { oldest: oldest!, newest: newest! } : undefined;
 }
 /** Whether a part that speaks `theirs` talks with the edge: their ranges overlap. */
 const talk = (theirs: Protocol | undefined) => !!theirs && theirs.oldest <= SPEAKS.newest && SPEAKS.oldest <= theirs.newest;
@@ -353,7 +343,7 @@ export default class extends WorkerEntrypoint<RelayEnv> {
       if (admitted.admitted.until !== undefined) return refuse(403, "Only a server says what it is");
       const said = admitted.said as { server_membership?: ServerMembership; server_daemon_status?: ServerDaemonStatus; version?: unknown; protocol?: unknown } & Reported;
       const version = typeof said.version === "string" ? said.version : undefined;
-      const protocol = spoken(said.protocol, version);
+      const protocol = spoken(said.protocol);
       const status = MEMBERSHIPS.includes(said.server_membership!) && SAID.includes(said.server_daemon_status!)
         ? { server_membership: said.server_membership!, server_daemon_status: said.server_daemon_status!, at: Date.now() }
         : undefined;
@@ -499,7 +489,7 @@ export class Relay extends DurableObject<RelayEnv> {
   /** The protocols each of `keys` that's a server speaks (`spoken`), by its key, leaving out one that never said what it is. */
   async protocols(keys: string[]): Promise<Record<string, Protocol | undefined>> {
     const [versions, said] = await Promise.all([this.versions(keys), this.ctx.storage.get<Protocol | null>(keys.map((key) => `protocol ${key}`))]);
-    return Object.fromEntries(Object.entries(versions).map(([key, version]) => [key, spoken(said.get(`protocol ${key}`), version)]));
+    return Object.fromEntries(Object.keys(versions).map((key) => [key, spoken(said.get(`protocol ${key}`))]));
   }
 
   /** The build each of `keys` that's a server said it is, by its key, leaving out one that never said. */

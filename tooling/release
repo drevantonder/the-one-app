@@ -186,27 +186,17 @@ survey() {
 
   # A release only while every server, the edge and every device seen in the last 90 days that talks with a server
   # now speaks a protocol it does (`OneCore.Protocol`), so one that drops an old protocol waits until nothing still in
-  # use speaks only that. A part that says none speaks what `core/protocol.json`'s `legacy` says from its cutoff build,
-  # as `OneCore.Protocol.of/2` has it.
+  # use speaks only that. A part that says none speaks none (`OneCore.Protocol.of/1`).
   behind=$(jq -r --argjson mine "$(cat core/protocol.json)" --argjson since "$((($(date +%s) - 90 * 86400) * 1000))" '
-    def version: if type == "string" then [scan("^([0-9]+)\\.([0-9]+)\\.([0-9]+)")[] | tonumber] else [] end;
-    def spoken($said; $build):
-      $said // (
-        $mine.legacy as $legacy
-        | if $legacy != null then
-            ($build | version) as $v
-            | if $v != [] and $v >= ($legacy.from | version) then {oldest: $legacy.protocol, newest: $legacy.protocol} else null end
-          else null end
-      );
     def overlaps($b): . != null and $b != null and .oldest <= $b.newest and $b.oldest <= .newest;
     def talks: overlaps($mine);
     def named: if . == null then "none" elif .oldest == .newest then "\(.oldest)" else "\(.oldest) to \(.newest)" end;
-    [.servers[] | spoken(.protocol; .build)] as $servers
-    | [(.servers[] | select(spoken(.protocol; .build) | talks | not) | "\(.name) (protocol \(spoken(.protocol; .build) | named))"),
-     (select(.edge != null and (spoken(.edge_protocol; .edge) | talks | not)) | "the edge (protocol \(spoken(.edge_protocol; .edge) | named))"),
-     (.devices[] | select(.connected or (.last_seen // 0) > $since) | spoken(.protocol; .build) as $its
+    [.servers[] | .protocol] as $servers
+    | [(.servers[] | select(.protocol | talks | not) | "\(.name) (protocol \(.protocol | named))"),
+     (select(.edge != null and (.edge_protocol | talks | not)) | "the edge (protocol \(.edge_protocol | named))"),
+     (.devices[] | select(.connected or (.last_seen // 0) > $since) | .protocol as $its
        | select(($its | talks | not) and any($servers[]; . as $server | $its | overlaps($server)))
-       | "\(.name) (protocol \(spoken(.protocol; .build) | named), on \(.build))")]
+       | "\(.name) (protocol \(.protocol | named), on \(.build))")]
     | join(", ")' <<<"$builds")
   [[ -z $behind ]] || { echo "$build speaks protocol $(jq -r 'if .oldest == .newest then "\(.oldest)" else "\(.oldest) to \(.newest)" end' core/protocol.json), which $behind, still in use, doesn't: keep the protocol they speak until none seen in 90 days does." >&2 && exit 1; }
 

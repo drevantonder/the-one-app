@@ -205,12 +205,11 @@ defmodule OneCore.Server do
   defp passed("tools/call", server, id, ask), do: State.forwarding(server, id, ask)
   defp passed(_method, _server, _id, ask), do: ask.()
 
-  # A server that doesn't speak this one's protocol refused it (`OneCore.Mcp`), saying the range it speaks, or, from
-  # before parts said theirs, its build. One that's behind is updated in its turn: it's as if it were off, so whoever
+  # A server that doesn't speak this one's protocol refused it (`OneCore.Mcp`), saying the range it speaks. One that's behind is updated in its turn: it's as if it were off, so whoever
   # asked asks another. One that's ahead was updated first, and this one is the one behind.
   defp refused(server, %{} = data) do
     Servers.protocol_again(server)
-    theirs = Protocol.of(data["supported"], data["version"])
+    theirs = Protocol.of(data["supported"])
 
     why =
       "#{named(server)} speaks protocol #{Protocol.name(theirs)} and #{named(key())} #{Protocol.name(Protocol.range())}, so they don't talk until one is updated"
