@@ -218,9 +218,17 @@ pub fn run() {
 fn launcher(home: std::path::PathBuf, link: Option<String>, started: std::time::Instant) -> anyhow::Result<()> {
     #[cfg(target_os = "linux")]
     gtk::glib::set_prgname(Some(::client::NAME));
-    let event_loop = EventLoopBuilder::<Told>::with_user_event().build();
+    #[cfg_attr(not(target_os = "macos"), allow(unused_mut))]
+    let mut event_loop = EventLoopBuilder::<Told>::with_user_event().build();
     #[cfg(target_os = "linux")]
     gtk::gdk::set_program_class(::client::NAME);
+    // On a Mac the launcher alone has no Dock icon and no Cmd-Tab entry, as Raycast's hasn't: the One App is an
+    // accessory until an app's window opens in it (strict's `Display::open`), and again once the last one closes.
+    #[cfg(target_os = "macos")]
+    {
+        use tao::platform::macos::{ActivationPolicy, EventLoopExtMacOS};
+        event_loop.set_activation_policy(ActivationPolicy::Accessory);
+    }
     let _ = PROXY.set(Mutex::new(event_loop.create_proxy()));
     *OPENED.lock().expect("nothing panics holding it") = link;
     crate::begin(Computer, started);
@@ -876,12 +884,15 @@ fn menu() -> muda::Menu {
 }
 
 /// The ring in a Mac's menu bar, as Raycast's is there, and in Windows' notification area, as a running app that has
-/// no window of its own is there: clicked, it shows the launcher or puts it away, and its menu (a right-click, or
-/// Control-click) has Open and Quit. A Mac's is a template, drawn as the menu bar's other icons are.
+/// no window of its own is there. Its menu has Open and Quit: on a Mac a click opens it, as Raycast's and every menu bar
+/// icon's does; on Windows a click shows the launcher or puts it away, and a right-click opens the menu, as a
+/// notification-area icon's does. A Mac's is a template, drawn as the menu bar's other icons are.
 #[cfg(any(target_os = "macos", windows))]
 fn ring() -> Option<tray_icon::TrayIcon> {
     use tray_icon::menu::{Menu, MenuEvent, MenuItem, PredefinedMenuItem};
-    use tray_icon::{Icon, MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
+    use tray_icon::{Icon, TrayIconBuilder};
+    #[cfg(windows)]
+    use tray_icon::{MouseButton, MouseButtonState, TrayIconEvent};
     #[cfg(target_os = "macos")]
     let picture = include_bytes!("../../../icons/MenuBarIcon@2x.png");
     #[cfg(windows)]
@@ -896,11 +907,12 @@ fn ring() -> Option<tray_icon::TrayIcon> {
         "quit" => tell(Told::Quit),
         _ => {}
     }));
+    #[cfg(windows)]
     TrayIconEvent::set_event_handler(Some(|event: TrayIconEvent| {
         if let TrayIconEvent::Click { button: MouseButton::Left, button_state: MouseButtonState::Up, .. } = event {
             tell(Told::Toggle(std::time::Instant::now(), None));
         }
     }));
-    let ring = TrayIconBuilder::new().with_icon(icon).with_icon_as_template(cfg!(target_os = "macos")).with_menu(Box::new(menu)).with_menu_on_left_click(false).with_tooltip(crate::page::NAME).build();
+    let ring = TrayIconBuilder::new().with_icon(icon).with_icon_as_template(cfg!(target_os = "macos")).with_menu(Box::new(menu)).with_menu_on_left_click(cfg!(target_os = "macos")).with_tooltip(crate::page::NAME).build();
     ring.map_err(|error| eprintln!("the menu bar has no ring: {error}")).ok()
 }

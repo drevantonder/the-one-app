@@ -63,6 +63,9 @@ impl Shared {
 
 pub struct Display {
     queue: Queue,
+    /// How many app windows are open, as against panels: while there's one, the One App is a regular app, with its
+    /// Dock icon and Cmd-Tab entry, and with none an accessory, as Raycast is with only its launcher.
+    apps: std::sync::atomic::AtomicUsize,
 }
 
 pub struct NativeWindow {
@@ -123,12 +126,17 @@ impl Display {
         let (ping, source) = calloop::ping::make_ping()?;
         // The loop's turn reads what's queued (`events`).
         handle.insert_source(source, |_, _, _| {}).map_err(|error| anyhow::anyhow!("no queue for AppKit's events: {error}"))?;
-        Ok(Display { queue: Queue { inputs: Arc::default(), ping } })
+        Ok(Display { queue: Queue { inputs: Arc::default(), ping }, apps: Default::default() })
     }
 
     pub fn open(&self, id: WindowId, options: &WindowOptions) -> anyhow::Result<NativeWindow> {
         let queue = self.queue.clone();
+        let first = options.panel.is_none() && self.apps.fetch_add(1, std::sync::atomic::Ordering::Relaxed) == 0;
         run_on_main(|main| {
+            // An app's window gives the One App its Dock icon and Cmd-Tab entry, as a regular app's.
+            if first {
+                NSApplication::sharedApplication(main).setActivationPolicy(objc2_app_kit::NSApplicationActivationPolicy::Regular);
+            }
             let shared = Arc::new(Shared { id, queue, size: Mutex::new((Size::default(), 1.0)), title_row: Mutex::default() });
             let rect = NSRect::new(NSPoint::new(0.0, 0.0), NSSize::new(options.size.width.0.into(), options.size.height.0.into()));
             let window = match options.panel {
@@ -200,9 +208,14 @@ impl Display {
     }
 
     pub fn close(&self, window: &NativeWindow) {
+        let last = !window.panel && self.apps.fetch_sub(1, std::sync::atomic::Ordering::Relaxed) == 1;
         window.window.get_on_main(|window| {
             window.setDelegate(None);
             window.close();
+            // The last app window gone, the One App is an accessory again: its launcher has no Dock icon.
+            if last {
+                NSApplication::sharedApplication(window.mtm()).setActivationPolicy(objc2_app_kit::NSApplicationActivationPolicy::Accessory);
+            }
         });
     }
 
