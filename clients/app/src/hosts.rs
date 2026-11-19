@@ -168,7 +168,7 @@ pub fn reopen(entrypoint: String, subject: Option<String>, link: String) -> Resu
 pub fn reopen(entrypoint: String, subject: Option<String>, link: String) -> Result<(), String> {
     forget(&entrypoint, subject.as_deref());
     crate::spawn(async move {
-        open_window(entrypoint, subject, link).await;
+        let _ = open_window(entrypoint, subject, link).await;
     });
     Ok(())
 }
@@ -181,21 +181,21 @@ pub fn forget(entrypoint: &str, subject: Option<&str>) {
 /// A phone opens an app in its page, as a frame, unless its page is of a version this program speaks: then
 /// its window is drawn natively over the page (`renderer`), or brought forward if it's open. → whether it was.
 #[cfg(mobile)]
-pub async fn open_window(entrypoint: String, subject: Option<String>, link: String) -> bool {
+pub async fn open_window(entrypoint: String, subject: Option<String>, link: String) -> Result<bool, String> {
     let key = format!("{}|{entrypoint}", subject.as_deref().unwrap_or_default());
     {
         let mut open = HOSTS.open.lock().expect("no host panics");
         if WEB_VIEWS.lock().expect("no host panics").contains(&key) {
-            return false;
+            return Ok(false);
         }
         if let Some(Host { to: Some(to), .. }) = open.get(&key) {
             let _ = to.send(json!({"event": "open", "payload": link}));
-            return true;
+            return Ok(true);
         }
         open.insert(key.clone(), Host { to: None, link: None });
     }
     let opened = crate::native::open(&entrypoint, subject.as_deref(), &link).await;
-    if !opened {
+    if opened != Ok(true) {
         HOSTS.open.lock().expect("no host panics").remove(&key);
     }
     opened
@@ -237,7 +237,7 @@ fn open(entrypoint: String, subject: Option<String>, link: String, native: bool)
     #[cfg(any(target_os = "linux", target_os = "macos", windows))]
     if native && std::env::var_os("ONE_WEB_VIEW").is_none() {
         crate::spawn(async move {
-            if !crate::native::open(&entrypoint, subject.as_deref(), &link).await
+            if crate::native::open(&entrypoint, subject.as_deref(), &link).await != Ok(true)
                 && let Err(error) = process(&key, &entrypoint, subject.as_deref(), &link)
             {
                 eprintln!("{error}");

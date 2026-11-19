@@ -987,16 +987,21 @@ function reloadPage(view) {
   invoke("close", { view: view.key }).finally(() => /** @type {Window} */ (view.frame.contentWindow).location.replace(located(view)))
 }
 
+/// An app whose native window didn't open, and why, until it's tried again or another opens.
+/** @type {{ entrypoint: string, link: string, subject?: string, why: string } | undefined} */
+let unopened
 /// Says over the app that's showing what its page needs of its person, if anything: that it's been updated, with
 /// Reload, or that it didn't open, with Try Again: only while the window shows its apps, as it alone owns the screen.
+/// An app whose native window didn't open says so over what's showing.
 function notes() {
   const view = showing(here())
   const now = view && shown.getSnapshot().hasTag("pages") ? pageOf(view) : undefined
   byId("update").hidden = !asksToReload || !now?.matches("stale")
-  byId("page-problem").hidden = !now?.matches("failed")
-  if (view && now?.matches("failed")) {
-    byId("page-problem-heading").textContent = `${names.get(view.entrypoint) ?? "This app"} didn't open`
-    byId("page-problem-details-text").textContent = now.context.why ?? ""
+  byId("page-problem").hidden = !unopened && !now?.matches("failed")
+  const failed = unopened ?? (view && now?.matches("failed") ? { entrypoint: view.entrypoint, why: now.context.why } : undefined)
+  if (failed) {
+    byId("page-problem-heading").textContent = `${names.get(failed.entrypoint) ?? "This app"} didn't open`
+    byId("page-problem-details-text").textContent = failed.why ?? ""
   }
 }
 byId("reload").addEventListener("click", () => {
@@ -1004,6 +1009,11 @@ byId("reload").addEventListener("click", () => {
   if (view) page(view, { type: "reload" })
 })
 byId("page-problem-button").addEventListener("click", () => {
+  if (unopened) {
+    const { link, subject } = unopened
+    go(link, subject)
+    return
+  }
   const view = showing(here())
   if (!view) return
   view.tapped = performance.now()
@@ -1662,14 +1672,20 @@ function go(link, subject, behind, from) {
     rail()
     return true
   }
-  // On Android, an app opens natively, over this page; one whose window couldn't open opens in a frame here.
+  // On a phone, an app opens natively, over this page, and one that needs a newer host in a frame here. One whose
+  // native window should have opened and didn't says why, as a frame that didn't open does (`notes`).
   const at = key(page, subject)
   const needed = needs.get(page) ?? 0
   if (runtimeVersion && needed && needed <= runtimeVersion && !framed.has(at) && at !== baseKey()) {
     if (behind) return true
+    unopened = undefined
+    notes()
     invoke("open_window", { entrypoint: page, subject, link: fragment ? `${page}#${fragment}` : page }).then(
       (opened) => opened || (framed.add(at), go(link, subject, behind, from)),
-      () => (framed.add(at), go(link, subject, behind, from)),
+      (why) => {
+        unopened = { entrypoint: page, link, subject, why: String(why) }
+        notes()
+      },
     )
     return true
   }

@@ -653,10 +653,11 @@ fn tapped(tapped: Value) {
 /// Says how long a view took to open: an app from the tap on its icon to its content on screen, and the home
 /// screen from when its page began to load, which the time since the program started is beside. Telemetry is told.
 /// Opens an app's window natively over the page, where its page is of a version this program speaks
-/// (`hosts::open_window`). → whether it did; if not, the page opens it in a frame.
+/// (`hosts::open_window`). → whether it did; if not, the page opens it in a frame, as it needs a newer host. One that
+/// should have and didn't is an error, which the page shows as its problem.
 #[cfg(mobile)]
 #[tauri::command]
-async fn open_window(entrypoint: String, subject: Option<String>, link: String) -> bool {
+async fn open_window(entrypoint: String, subject: Option<String>, link: String) -> Result<bool, String> {
     hosts::open_window(entrypoint, subject, link).await
 }
 

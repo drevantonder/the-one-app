@@ -46,22 +46,20 @@ enum Asked {
 }
 
 /// Opens `entrypoint`'s window here if its page is of a version this program speaks, at `link`, for
-/// `subject`. → whether it did; if not, it opens in a web view.
-pub(crate) async fn open(entrypoint: &str, subject: Option<&str>, link: &str) -> bool {
+/// `subject`. → whether it did; if not, it opens in a web view, as it needs a newer host. One that should have and
+/// didn't is an error, which Telemetry hears too, for whoever opened it to show.
+pub(crate) async fn open(entrypoint: &str, subject: Option<&str>, link: &str) -> Result<bool, String> {
     let started = Instant::now();
-    match window(started, entrypoint, subject, link, Kind::App).await {
-        Ok(opened) => opened,
-        Err(error) => {
-            // It opens in a web view, and Telemetry hears why.
-            eprintln!("{entrypoint} opens in a web view: {error:#}");
-            if let Ok(views) = crate::views() {
-                let app = entrypoint.split('/').next().unwrap_or_default();
-                let took = started.elapsed().as_millis() as u64;
-                views.client.report(json!({"name": "one.client.native.open", "took": took, "error": format!("{error:#}"), "attributes": {"one.view": app}}));
-            }
-            false
+    window(started, entrypoint, subject, link, Kind::App).await.map_err(|error| {
+        let why = format!("{error:#}");
+        eprintln!("{entrypoint} didn't open: {why}");
+        if let Ok(views) = crate::views() {
+            let app = entrypoint.split('/').next().unwrap_or_default();
+            let took = started.elapsed().as_millis() as u64;
+            views.client.report(json!({"name": "one.client.native.open", "took": took, "error": why, "attributes": {"one.view": app}}));
         }
-    }
+        why
+    })
 }
 
 /// Where an app's file is for its page: `oneapp://<app>[.<subject, last part first>].localhost/<path>`, as a web
