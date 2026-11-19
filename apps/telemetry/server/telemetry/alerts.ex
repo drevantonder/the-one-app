@@ -136,7 +136,8 @@ defmodule Telemetry.Alerts do
           keep(db, signals, not looked, now)
           for name <- names, do: query(db, "insert into batches (name, at) values (?, ?)", [name, now])
           query(db, "delete from batches where at < ?", [now - 2 * @gap])
-          query(db, "insert or replace into looked (id, at) values (1, ?)", [now])
+          # Said once: a minute that read nothing writes nothing, so it adds nothing to the database's log.
+          if not looked, do: query(db, "insert into looked (id, at) values (1, ?)", [now])
           step(db, now, conditions(db, now, asked), unknown(asked))
           names
         else
