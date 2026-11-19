@@ -65,7 +65,14 @@
     }).observe(canvas)
     const pointer = (/** @type {string} */ kind) => (/** @type {PointerEvent} */ event) => renderer.pointer(kind, event.offsetX, event.offsetY, event.button, event.shiftKey)
     canvas.addEventListener("pointermove", pointer("move"))
-    canvas.addEventListener("pointerdown", (event) => (canvas.setPointerCapture(event.pointerId), pointer("down")(event)))
+    // A press takes the keyboard for the frame itself, not by the browser's default after it, which would take it
+    // back from a field the press gave it to (the screen gives a field the keyboard as it's pressed).
+    canvas.addEventListener("pointerdown", (event) => {
+      event.preventDefault()
+      if (document.activeElement !== typing.field) canvas.focus({ preventScroll: true })
+      canvas.setPointerCapture(event.pointerId)
+      pointer("down")(event)
+    })
     // What a press gives the keyboard is focused in the press itself, which is when a phone brings up its keyboard.
     canvas.addEventListener("pointerup", (event) => (pointer("up")(event), renderer.flush()))
     canvas.addEventListener("pointerleave", pointer("leave"))

@@ -205,7 +205,8 @@ async function press(frame, name) {
   const found = typeof name === "object" ? frame.getByRole(name.role, { name: name.name, exact: true }).first() : frame.locator(`#semantics [aria-label="${name.replaceAll('"', '\\"')}"], #semantics :text-is("${name.replaceAll('"', '\\"')}")`).last()
   const box = await found.boundingBox({ timeout: 5000 }).catch(() => null)
   if (!box) throw new Error(`Nothing named or saying "${typeof name === "object" ? name.name : name}" to press`)
-  await page.mouse.click(at.x + box.x + box.width / 2, at.y + box.y + box.height / 2)
+  // Its box is the page's, the frame's place in it already in it.
+  await page.mouse.click(box.x + box.width / 2, box.y + box.height / 2)
 }
 
 /// A scene drawn by our renderer on the web, in headless Chromium's WebGPU, as `web.png`, once its first frame is drawn
