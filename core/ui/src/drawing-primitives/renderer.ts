@@ -163,8 +163,9 @@ export interface Rect {
  * editing state whenever it changes (what's typed, a selection, an input method's composing), and `action` when its
  * action key is pressed (a keyboard's Enter, or a phone's Done, Go, Next, Search or Send). A host offers them as
  * accessibility actions too: `click` is AccessKit's `Click`, `input` its `SetValue`, `focus` and `blur` its `Focus`
- * and `Blur`, `scroll` its `ScrollIntoView` and `ScrollDown`. */
-export type EventName = "click" | "input" | "action" | "focus" | "blur" | "keydown" | "pointerenter" | "pointerleave" | "scroll" | "layout" | "intersection" | Moved | Streamed
+ * and `Blur`, `scroll` its `ScrollIntoView` and `ScrollDown`. `drop` is files dropped on it from the system (a
+ * Finder's, an Explorer's), each its `name` and its bytes as base64 (`body`), under `files`. */
+export type EventName = "click" | "input" | "action" | "focus" | "blur" | "keydown" | "pointerenter" | "pointerleave" | "scroll" | "layout" | "intersection" | "drop" | Moved | Streamed
 
 /** What a `video` tells its page of its stream: `offer`, `state` and `size`. */
 export type Streamed = "offer" | "state" | "size"

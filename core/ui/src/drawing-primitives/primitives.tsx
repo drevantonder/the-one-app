@@ -311,6 +311,8 @@ interface Listens extends Semantics {
 
 /** A view's props. */
 export interface ViewProps extends Listens {
+  /** Files dropped on it from the system. */
+  onDrop?: (files: File[]) => void
   children?: JSX.Element
 }
 
@@ -342,7 +344,7 @@ export function View(props: ViewProps) {
 /// pressed. How it looks hovered or pressed is its style's (`backgroundColor: { default: …, pressed: … }`), not a
 /// function of its state, and a touch held is `onContextMenu`, not `onLongPress`.
 export function Pressable(props: PressableProps) {
-  const own = merge(omit(props, "style", "children", "autoFocus", "tabIndex", "onPress", "disabled", "onLayout", "onIntersection", ...moved), {
+  const own = merge(omit(props, "style", "children", "autoFocus", "tabIndex", "onPress", "disabled", "onLayout", "onIntersection", "onDrop", ...moved), droppable(props), {
     get tabindex() {
       return props.tabIndex
     },
@@ -380,7 +382,7 @@ export interface ScrollViewProps extends ViewProps {
 /// takes `horizontal` and a `contentContainerStyle` too. `onScroll` is told how far it's scrolled, as the web's
 /// (`currentTarget.scrollTop`).
 export function ScrollView(props: ScrollViewProps) {
-  const own = merge(omit(props, "style", "children", "tabIndex", ...moved), {
+  const own = merge(omit(props, "style", "children", "tabIndex", "onDrop", ...moved), droppable(props), {
     get tabindex() {
       return props.tabIndex
     },
@@ -414,6 +416,16 @@ function watched(element: HTMLElement, props: ViewProps) {
   window.addEventListener("resize", report)
   onCleanup(() => (sized.disconnect(), window.removeEventListener("resize", report)))
 }
+
+/** A view's DOM drag and drop, where it takes files dropped on it (`onDrop`). */
+const droppable = (props: ViewProps) => ({
+  get onDragOver() {
+    return props.onDrop && ((event: DragEvent) => event.preventDefault())
+  },
+  get onDrop() {
+    return props.onDrop && ((event: DragEvent) => (event.preventDefault(), props.onDrop!([...(event.dataTransfer?.files ?? [])])))
+  },
+})
 
 /** What a page moved by hand listens for (renderer.ts's `Moved`), which `movable` draws. */
 const moved = ["onPointerDown", "onPointerMove", "onPointerUp", "onPointerCancel", "onContextMenu", "onWheel"] as const

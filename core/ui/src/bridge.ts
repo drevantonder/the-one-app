@@ -324,6 +324,16 @@ export async function call(tool: string, inputs: object = {}, { subject }: Subje
 /// `await call("notes_attach", { note: 4, name: file.name, type: file.type, upload: await upload(file) })`:
 /// sends a file that's too large to go in a call straight to where the network keeps it, for a tool of this app's
 /// app. → the name that tool takes for it, in the input its app says is an upload.
+/// `const [file] = await pickFiles({ accept: [".png", "image/*"] })`: the device's own picker of files to open, from a
+/// press, as a browser shows it for `<input type="file">`. → the files chosen, none where it was cancelled.
+export function pickFiles(options: { accept?: string[]; multiple?: boolean } = {}): Promise<File[]> {
+  return new Promise((resolve) => {
+    const input = Object.assign(document.createElement("input"), { type: "file", accept: (options.accept ?? []).join(","), multiple: !!options.multiple })
+    input.addEventListener("change", () => resolve([...(input.files ?? [])]))
+    input.addEventListener("cancel", () => resolve([]))
+    input.click()
+  })
+}
 export const upload = (file: File | Blob): Promise<string> => greet().then(() => ask<{ upload: string }>("one/upload", { file })).then(({ upload }) => upload)
 
 /// `await showRecoveryKey()`: has the client show its person their recovery key, over the app. The app is told

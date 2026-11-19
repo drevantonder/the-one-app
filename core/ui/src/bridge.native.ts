@@ -171,6 +171,13 @@ export const upload: typeof Page.upload = async (file) => {
   for (let at = 0; at < bytes.length; at += 0x8000) binary += String.fromCharCode(...bytes.subarray(at, at + 0x8000))
   return (await greeted, (await ask<{ upload: string }>("one/upload", { body: btoa(binary) })).upload)
 }
+/** The device's own picker of files to open, as its client shows it (`one/files`): each file comes as base64, as an
+ * upload goes. */
+export const pickFiles: typeof Page.pickFiles = async (options = {}) => {
+  await greeted
+  const { files } = await ask<{ files: { name: string; body: string }[] }>("one/files", { accept: options.accept ?? [], multiple: !!options.multiple })
+  return files.map((file) => new File([Uint8Array.from(atob(file.body), (character) => character.charCodeAt(0))], file.name))
+}
 export const copy = async (text: string): Promise<void> => (await greeted, void (await ask("one/copy", { text })))
 
 /** Hands text to the device's share sheet, or copies it where there's none, as its client does (`one/share`). */

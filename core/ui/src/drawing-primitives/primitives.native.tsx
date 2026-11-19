@@ -19,19 +19,23 @@ const primitive = (type: Exclude<Type, "raw-text">) => (props: object) => {
 }
 
 const view = primitive("box")
+/** A view's `onDrop`, told the files dropped on it, which come as base64, as an upload goes. */
+const dropped = (it: Page.ViewProps) => it.onDrop && ((event: { files: { name: string; body: string }[] }) => it.onDrop!(event.files.map((file) => new File([Uint8Array.from(atob(file.body), (character) => character.charCodeAt(0))], file.name))))
+
 export const Pressable: typeof Page.Pressable = (props) =>
   view(
-    renamed(props, ["tabIndex", "autoFocus", "onPress", "disabled"], {
+    renamed(props, ["tabIndex", "autoFocus", "onPress", "disabled", "onDrop"], {
       tabindex: (it) => it.tabIndex,
       autofocus: (it) => it.autoFocus,
       onClick: (it) => (it.disabled ? undefined : it.onPress),
+      onDrop: dropped,
       "aria-disabled": (it) => (it.disabled ? "true" : it["aria-disabled"]),
     }),
   )
 export const View: typeof Page.View = (props) => Pressable(props)
 
 const scroll = primitive("scroll")
-export const ScrollView: typeof Page.ScrollView = (props) => scroll(renamed(props, ["tabIndex", "autoFocus"], { tabindex: (it) => it.tabIndex, autofocus: (it) => it.autoFocus }))
+export const ScrollView: typeof Page.ScrollView = (props) => scroll(renamed(props, ["tabIndex", "autoFocus", "onDrop"], { tabindex: (it) => it.tabIndex, autofocus: (it) => it.autoFocus, onDrop: dropped }))
 
 const text = primitive("text")
 export const Text: typeof Page.Text = (props) => text(renamed(props, ["onPress", "tabIndex"], { onClick: (it) => it.onPress, tabindex: (it) => it.tabIndex }))

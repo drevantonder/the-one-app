@@ -103,7 +103,10 @@ type Listens = Semantics & {
   children?: Element
 }
 
-export type ViewProps = Listens
+export type ViewProps = Listens & {
+  /** Files dropped on it from the system (a Finder's, an Explorer's). */
+  onDrop?: (files: File[]) => void
+}
 export declare function View(props: ViewProps): Element
 
 export type PressableProps = ViewProps & {
@@ -410,6 +413,9 @@ export declare function call(tool: string, inputs?: object, options?: Subject): 
 /** Sends a file the person chose where the network keeps it, for a tool of this app's: the name that tool takes for it,
  * in the input its app says is an upload. */
 export declare function upload(file: File | Blob): Promise<string>
+/** The device's own picker of files to open, from a press: of `accept`'s kinds (`.png`, `image/*`), one or
+ * `multiple`. → the files chosen, none where it was cancelled. */
+export declare function pickFiles(options?: { accept?: string[]; multiple?: boolean }): Promise<File[]>
 export declare function changed(listener: () => void): () => void
 export declare function toast(text: string | Error, options?: { action?: { label: string; run: () => void } }): Promise<void>
 export declare function confirm(question: { heading: string; text?: string; action?: string; destructive?: boolean }): Promise<boolean>
