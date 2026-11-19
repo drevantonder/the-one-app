@@ -137,6 +137,8 @@ globalThis.performance = new Performance()
 globalThis.navigator = { userAgent: "One", language: LOCALE, languages: [LOCALE], maxTouchPoints: TOUCH_POINTS }
 const events = new EventTarget()
 for (const name of ["addEventListener", "removeEventListener", "dispatchEvent"]) globalThis[name] = events[name].bind(events)
+// React Native's `window` is its global: Vite's preload helper in the UI library reports a failed `import()` (a component's) to it.
+globalThis.window = globalThis
 globalThis.onunhandledrejection = null
 // Whether nothing cancelled it: a listener or the `on…` handler.
 const told = (event, handler) => {

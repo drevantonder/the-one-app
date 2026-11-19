@@ -8,7 +8,7 @@
 // scenes are what each screen shows, by name, and what it's given to show it, as the tools' answers a client would
 // give (record.js's answers): `{ "Inbox": { "answers": { "notifications_inbox": { … } } } }`, with any of `page` (its
 // page, `client/index.html` unless said, and a link after `#`), `component` (a component its client exports, drawn alone, in
-// place of a page, as another app's page draws it), `taps` (what's done first: pressed by what each is named or
+// place of a page, as another app's page draws it), `uses` (other apps whose components the page draws, as Settings draws its sections: each is built, and served beside the page as `/<app>/client/`), `taps` (what's done first: pressed by what each is named or
 // says, or `{ role, name }`; a point pressed, `{ x, y }`; a key, `{ key }` as the DOM names it, with `ctrl`, `shift`, `alt`
 // or `meta` held; or text typed where the keyboard is, `{ type }`), `size` (`[390, 844]`, a phone's, unless said), `touch` (a finger points at it, as on a phone), and `like` (another scene's name, as Storybook's args are a
 // component's: this is that scene, with its own taps, and its answers in place of that one's, tool by tool). An answer `{ "$error": "Couldn't reach it" }` is a tool's
@@ -60,10 +60,10 @@ async function scenesOf(target, built, serve) {
     const all = JSON.parse(readFileSync(join(target, "client/scenes.json"), "utf8"))
     const whole = (scene) => (scene.like ? { ...whole(all[scene.like]), taps: undefined, ...scene, answers: { ...whole(all[scene.like]).answers, ...scene.answers } } : scene)
     return Object.entries(all).map(([name, scene]) => {
-      const { component, answers = {}, taps = [], size = sized ?? [390, 844], touch = false } = whole(scene)
+      const { component, uses = [], answers = {}, taps = [], size = sized ?? [390, 844], touch = false } = whole(scene)
       const at = whole(scene).page ?? (component ? `${COMPONENTS}/${component}.html` : "client/index.html")
       const [page, link] = at.split("#")
-      return { name, page, link, answers, taps, size, touch }
+      return { name, page, link, uses, answers, taps, size, touch }
     })
   }
   // The gallery lists its own, drawn at `#scenes`.
@@ -74,6 +74,17 @@ async function scenesOf(target, built, serve) {
 /// Where an app's exported components are built (its client, as a server builds it), for a scene that names one
 /// (`component`) rather than a page: the component alone, drawn in grouped cards, as Settings draws its sections.
 const COMPONENTS = "components"
+
+/// An app's own packages, which its client's package.json names, as a server installs them before it builds the app.
+/// → why they didn't install, if they didn't.
+function install(client) {
+  const manifest = join(client, "package.json")
+  if (!existsSync(manifest)) return
+  const about = JSON.parse(readFileSync(manifest, "utf8"))
+  if (!Object.keys({ ...about.dependencies, ...about.devDependencies }).length) return
+  const made = Bun.spawnSync(["bun", "install", "--frozen-lockfile", "--ignore-scripts"], { cwd: client })
+  if (made.exitCode !== 0) return made.stderr.toString().trim()
+}
 
 /// Builds `target`'s client into `built`'s COMPONENTS, with a page beside each module it exports that draws it, when one
 /// of its scenes names a component. → why it didn't build, if it didn't.
@@ -124,7 +135,7 @@ addEventListener("message", ({ data, source }) => {
 </script>`
 
 /// Serves a built page, what its build leaves as it is (a picture) as a server serves an app's files, the UI library, and the stand-in client around it.
-function server(built, target) {
+function server(built, target, used) {
   const pages = new Map()
   const listener = Bun.serve({
     port: 0,
@@ -133,6 +144,8 @@ function server(built, target) {
       if (url.pathname === "/host.html") return new Response(pages.get(url.searchParams.get("scene")), { headers: { "content-type": "text/html" } })
       const path = decodeURIComponent(url.pathname)
       if (path.startsWith("/renderer/")) return new Response(Bun.file(join(rendererFrame, path.slice("/renderer/".length) || "index.html")))
+      const [, app, client, ...rest] = path.split("/")
+      if (used.has(app) && client === "client") return new Response(Bun.file(join(used.get(app), rest.join("/"))))
       const file = path.startsWith("/ui/client/") ? Bun.file(here("dist/client") + path.slice("/ui/client".length)) : [join(built, path), join(target, path)].map((one) => Bun.file(one)).find((one) => one.size)
       return file?.size ? new Response(file) : new Response("Not found", { status: 404 })
     },
@@ -230,7 +243,7 @@ async function web(browser, serve, key, scene, folder) {
 }
 
 /// A scene drawn by a native host's headless harness, or nothing where it hasn't been built or can't draw the page.
-function native(built, scene, folder) {
+function native(built, scene, folder, used) {
   if (!existsSync(harness)) return { missing: "the native harness isn't built (`cargo build -p renderer --example screenshot`)" }
   if (hosted < needed) return { missing: `the native host's runtime version is ${hosted}, the UI library needs ${needed}: nothing to compare until it's ${needed}` }
   // The harness loads the module the folder's `index.html` names, from beside it: the page's, with what it loads.
@@ -242,6 +255,10 @@ function native(built, scene, folder) {
   if (scene.page.startsWith(`${COMPONENTS}/`)) {
     for (const entry of readdirSync(join(built, COMPONENTS))) if (!entry.endsWith(".html")) symlinkSync(join(built, COMPONENTS, entry), join(at, entry))
   } else symlinkSync(join(built, "assets"), join(at, "assets"))
+  for (const app of scene.uses) {
+    mkdirSync(join(at, app))
+    symlinkSync(used.get(app), join(at, app, "client"))
+  }
   if (existsSync(join(built, dirname(scene.page), "styles.json"))) cpSync(join(built, dirname(scene.page), "styles.json"), join(at, "styles.json"))
   const answers = { ...scene.answers, "ui/initialize": scene.answers["ui/initialize"] ?? { hostContext: { link: scene.link, containerDimensions: { width: scene.size[0], height: scene.size[1] }, deviceCapabilities: { touch: scene.touch, hover: !scene.touch } } } }
   writeFileSync(join(folder, "answers.json"), JSON.stringify(answers))
@@ -310,6 +327,11 @@ for (const target of targets) {
   const scenes = existsSync(join(target, "client/scenes.json")) ? JSON.parse(readFileSync(join(target, "client/scenes.json"), "utf8")) : {}
   const ofComponent = (scene) => !!scene && (scene.component || ofComponent(scenes[scene.like]))
   const pages = !Object.keys(scenes).length || Object.values(scenes).some((scene) => !ofComponent(scene))
+  const packages = install(join(target, "client"))
+  if (packages) {
+    report.push(`${name}: its packages didn't install\n${packages}`)
+    continue
+  }
   const make = pages ? Bun.spawnSync(["bun", here("dist/build/app.js"), target, built]) : { exitCode: 0 }
   if (make.exitCode !== 0) {
     report.push(`${name}: didn't build\n${make.stderr.toString().trim()}`)
@@ -320,7 +342,19 @@ for (const target of targets) {
     report.push(`${name}: its components didn't build\n${unbuilt}`)
     continue
   }
-  const serve = server(built, target)
+  // The apps whose components its scenes draw, each built once and kept in `out`.
+  const used = new Map()
+  for (const app of new Set(Object.values(scenes).flatMap((scene) => scene.uses ?? []))) {
+    const folder = join(out, ".uses", app)
+    if (!existsSync(folder)) {
+      const packages = install(join(root, "apps", app, "client"))
+      if (packages) throw new Error(`${app}'s packages didn't install: ${packages}`)
+      const made = Bun.spawnSync(["bun", here("dist/build/app.js"), join(root, "apps", app, "client"), folder])
+      if (made.exitCode !== 0) throw new Error(`${app}'s components didn't build: ${made.stderr}`)
+    }
+    used.set(app, folder)
+  }
+  const serve = server(built, target, used)
   serve.text = async (page, link) => {
     const tab = await browser.newPage()
     serve.host("list", { page, link, answers: {}, size: [390, 844] })
@@ -335,7 +369,7 @@ for (const target of targets) {
     const folder = join(out, name, scene.name.replace(/[^\w.-]+/g, "-"))
     mkdirSync(folder, { recursive: true })
     const shown = await dom(browser, serve, `${name}/${scene.name}`, scene, folder).catch((error) => ({ problems: [String(error)] }))
-    const drawn = native(built, scene, folder)
+    const drawn = native(built, scene, folder, used)
     const onWeb = await web(webgpu, serve, `${name}/${scene.name}`, scene, folder).catch((error) => ({ missing: String(error) }))
     const said = [`${name} · ${scene.name}`]
     if (shown.problems.length) said.push(`  DOM: ${shown.problems.join("; ")}`)
