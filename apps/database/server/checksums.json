@@ -1,18 +1,18 @@
 {
   "server/nif/sqlite/linux-aarch64.so": {
-    "sha256": "733bd010024942593c46a287e7dcc8ce3c301ba6a8cb793bed01783f1a79d6da",
-    "url": "https://github.com/drevantonder/the-one-app/releases/download/nifs-1f5d085ee49c/sqlite-d0c6acfb210f9fcb33047810cf48b162ab28be3816b10806dbf3e803a39fe845-linux-aarch64.so"
+    "sha256": "baca72cfe9735d82a2509c7cf1817863994890548e04e9a783e87d84e138ef6d",
+    "url": "https://github.com/drevantonder/the-one-app/releases/download/nifs-4c7ff3c7191a/sqlite-1ecdc284ab48e2380e30eeca0052bca1b007303affcc070dbbc967c0e352bd5f-linux-aarch64.so"
   },
   "server/nif/sqlite/linux-x86_64.so": {
-    "sha256": "b1a15717200001d808557c43099d0a88e8c67edbf6694333dcd7172500861a1f",
-    "url": "https://github.com/drevantonder/the-one-app/releases/download/nifs-1f5d085ee49c/sqlite-b361e638729fac456d18babcbf4661e4f4092d7351034027e305b6c3bb94b361-linux-x86_64.so"
+    "sha256": "eedfcfdecc52731048a450f7afd4a3bcad857d17a59c04d6304f56b1f8aa7c7c",
+    "url": "https://github.com/drevantonder/the-one-app/releases/download/nifs-4c7ff3c7191a/sqlite-67163196fa9cabe7ce8fe0e0a88b65a0ade2e5d6e4879c64c91790029dc92272-linux-x86_64.so"
   },
   "server/nif/sqlite/macos-aarch64.so": {
-    "sha256": "3bab9c9948faf88f3a19622d6f503c3dcb5a1b99b8046855faf2a28b8cb5cd43",
-    "url": "https://github.com/drevantonder/the-one-app/releases/download/nifs-1f5d085ee49c/sqlite-98dc50ad27c38ba820791377dfbfcd0676e71af1f83f1f7933f258d4164892ed-macos-aarch64.so"
+    "sha256": "7185336a2d5ede14c1a331b6f968b64a8350c537e8e4b1b4a134c7165dac6a6a",
+    "url": "https://github.com/drevantonder/the-one-app/releases/download/nifs-4c7ff3c7191a/sqlite-7542b092d2836458ad7384cfa5209d667dfaffb1cca7eaaf5cf4b8409d12e3a2-macos-aarch64.so"
   },
   "server/nif/sqlite/windows-x86_64.so": {
-    "sha256": "7914f28836a7a9544e514889342b75941b31c09c0396393f9e7f69ee5fa25a07",
-    "url": "https://github.com/drevantonder/the-one-app/releases/download/nifs-1f5d085ee49c/sqlite-e396841eba25fff6ddde32cfdc405013dcfc734321d406a1d5604df4fb7b0cdd-windows-x86_64.so"
+    "sha256": "6846fcd43fedc2566719247e83a738ad4024f92c3322aac69c8181d1d096e055",
+    "url": "https://github.com/drevantonder/the-one-app/releases/download/nifs-4c7ff3c7191a/sqlite-89814be3d60c89fd3da46a1d987bf595846776e660277260b23ff2f678c365af-windows-x86_64.so"
   }
 }
