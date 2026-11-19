@@ -168,7 +168,7 @@ async function claim() {
 }
 
 /// The passkey answered on this page, by its credential ID, with its PRF output if it gave one.
-let used: { credential: string; prf?: Uint8Array } | undefined
+let used: { credential: string; prf?: Uint8Array; at: number } | undefined
 
 /// What WebAuthn said as a passkey was made or used, as Better Auth hands it back.
 type Answered = { webauthn?: { response: { id: string }; clientExtensionResults?: AuthenticationExtensionsClientOutputs } }
@@ -176,7 +176,7 @@ type Answered = { webauthn?: { response: { id: string }; clientExtensionResults?
 /// Keeps the passkey just answered, and says with it which key its PRF output derives, or that it gave none (`null`),
 /// which a device that holds its person's key encrypts the key to (`edge/auth.ts`).
 async function answered(result: Answered, prf: Uint8Array | undefined | null) {
-  used = { credential: result.webauthn!.response.id, prf: prf ?? undefined }
+  used = { credential: result.webauthn!.response.id, prf: prf ?? undefined, at: Date.now() }
   if (prf !== undefined) await ask("/passkey/prf-key", { credential: used.credential, key: prf && (await prfKey(prf)) })
 }
 
@@ -204,7 +204,7 @@ async function made(result: Answered, again: boolean) {
   const prf = output(results)
   if (prf || !results?.prf?.enabled) return answered(result, prf ?? null)
   if (again) return withPasskey()
-  used = { credential: result.webauthn!.response.id }
+  used = { credential: result.webauthn!.response.id, at: Date.now() }
 }
 
 /// Calls a tool of the network's as whoever is signed in here, as the web client does (`clients/web/host.js`).
@@ -295,7 +295,8 @@ async function respond(yes: boolean) {
     await ask("/device/deny", { userCode: (flow as { code: string }).code })
     return setStage({ stage: "denied", name })
   }
-  if (!used) await withPasskey()
+  // The edge approves only for a passkey answered in the last five minutes (`edge/auth.ts`).
+  if (!used || Date.now() - used.at > 4 * 60_000) await withPasskey()
   const unlocked = await unlock(device, name)
   await ask("/device/approve", { userCode: (flow as { code: string }).code })
   setStage({ stage: "approved", name, unlocked })

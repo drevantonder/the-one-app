@@ -257,6 +257,17 @@ async function usedJustNow(ctx: { body?: { credential?: unknown } } & Parameters
   return { passkey, user: session.user as User };
 }
 
+/**
+ * Throws unless this browser's session was made with a passkey in the last few minutes: what lets another device or
+ * an app act as its person is approved only by them just now, as WebAuthn's user verification and GitHub's sudo
+ * mode have it, whatever a page asked first.
+ */
+async function signedInJustNow(ctx: Parameters<typeof getAuthoritativeSessionFromCtx>[0]) {
+  const session = (await getAuthoritativeSessionFromCtx(ctx)) as { session: { passkey?: string | null; createdAt: Date } } | null;
+  if (!session?.session.passkey || Date.now() - new Date(session.session.createdAt).getTime() >= FRESH * 1000)
+    throw new APIError("FORBIDDEN", { message: "Sign in again with your passkey to approve this." });
+}
+
 /** A device's code as Better Auth looks it up: its letters and digits, in capitals. */
 const plain = (code: unknown) => String(code).replace(/[^a-zA-Z0-9]/g, "").toUpperCase();
 
@@ -390,10 +401,13 @@ const devices = () => ({
             for (const [name, value] of denied) url.searchParams.set(name, value);
             return ctx.json({ redirect: true, url: url.href });
           }
-          const session = await getSessionFromCtx(ctx);
-          if (!session || Date.now() - new Date(session.session.createdAt).getTime() >= FRESH * 1000)
-            throw new APIError("FORBIDDEN", { message: "Sign in again to approve this." });
+          await signedInJustNow(ctx);
         }),
+      },
+      {
+        // Approving a device makes it its person's from then on, so it's asked of a passkey just now.
+        matcher: (ctx) => ctx.path === "/device/approve",
+        handler: createAuthMiddleware(signedInJustNow),
       },
     ],
     after: [
