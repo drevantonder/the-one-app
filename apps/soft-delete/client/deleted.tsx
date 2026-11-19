@@ -27,12 +27,12 @@ const called = createMemo(async () => {
   const answers = await Promise.all(
     [...asked.values()].map((some) =>
       call(`${some[0].names}_names`, { artifacts: some.flatMap((item) => item.artifacts) }, { subject: some[0].owner }).then(
-        (text): { artifact: string; name: string }[] => JSON.parse(text).names,
+        (text): { artifact: string; name: string; kind?: string | null }[] => JSON.parse(text).names,
         () => [],
       ),
     ),
   )
-  return new Map(answers.flat().map((one) => [one.artifact, one.name]))
+  return new Map(answers.flat().map((one) => [one.artifact, one]))
 })
 changed(() => refresh(items))
 
@@ -43,7 +43,7 @@ const named = (artifact: string) => artifact.split("/").pop()!
 function heading(item: Item) {
   if (item.app) return item.title
   if (!item.names) return named(item.artifacts[0])
-  return called().get(item.artifacts[0]) ?? `${item.title} item`
+  return called().get(item.artifacts[0])?.name ?? `${item.title} item`
 }
 /// What an uninstalled app took with it, as the real things: "With notes, site and 10 more".
 function along(item: Item) {
@@ -61,7 +61,8 @@ function left(item: Item) {
 function about(item: Item) {
   if (item.state === "purging") return "Deleting…"
   if (item.why) return "Couldn't delete for good. It's tried again tomorrow."
-  const needs = item.app ? along(item) : item.installed ? item.title : `Install ${item.title} to open it`
+  const kind = item.names ? called().get(item.artifacts[0])?.kind : undefined
+  const needs = item.app ? along(item) : item.installed ? (kind ?? item.title) : `Install ${item.title} to open it`
   return [needs, left(item)].filter(Boolean).join(" · ")
 }
 

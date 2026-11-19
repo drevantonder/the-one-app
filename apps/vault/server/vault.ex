@@ -530,7 +530,11 @@ defmodule Vault do
               description: "Each of them that's an item of this Vault",
               items: %{
                 type: "object",
-                properties: %{artifact: %{type: "string"}, name: %{type: "string"}},
+                properties: %{
+                  artifact: %{type: "string"},
+                  name: %{type: "string"},
+                  kind: %{type: ["string", "null"], description: "What its app calls it, as a person reads it: Chrome profile"}
+                },
                 required: ["artifact", "name"]
               }
             }
@@ -848,15 +852,15 @@ defmodule Vault do
   def call("names", %{"artifacts" => artifacts}, call) do
     names = Store.names(call, Store.own(call))
     types = Items.types(call)
-    # As a person reads it: "Personal", not "Chrome profile: Personal".
+    # As a person reads it: "Personal", not "Chrome profile: Personal", of the kind its app calls it: "Chrome profile".
     shown = fn name ->
       case Enum.find(types, &String.starts_with?(name, &1.prefix)) do
-        nil -> name
-        type -> String.replace_prefix(name, type.prefix, "")
+        nil -> %{name: name, kind: nil}
+        type -> %{name: String.replace_prefix(name, type.prefix, ""), kind: type.name}
       end
     end
 
-    %{names: for({artifact, name} <- names, artifact in artifacts, do: %{artifact: artifact, name: shown.(name)})}
+    %{names: for({artifact, name} <- names, artifact in artifacts, do: Map.put(shown.(name), :artifact, artifact))}
   end
 
   def call("security", inputs, call) do
