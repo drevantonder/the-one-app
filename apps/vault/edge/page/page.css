@@ -1,5 +1,5 @@
 /* What a sign-in is connected to, in a plain box, as the sign-in page's consent lists what an app can do. */
-.ui-sign-in .connected {
+.connected {
   width: 100%;
   padding: 1rem 1.125rem;
   border: 1px solid var(--border);
@@ -29,10 +29,10 @@
   margin-top: 0.1875rem;
   color: var(--muted-foreground);
 }
-.ui-sign-in :where(.said, .note) {
+:where(.said, .note) {
   margin: 0;
   color: var(--muted-foreground);
 }
-.ui-sign-in .note {
+.note {
   font-size: var(--text-footnote);
 }

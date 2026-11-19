@@ -336,6 +336,24 @@ export declare function Skeleton(props: { rows?: number }): Element
 export declare function Problem(props: { heading: Element; text?: Element | Error; action?: Element; warn?: boolean }): Element
 export declare function Status(props: { heading: Element; text?: Element; over?: boolean }): Element
 export declare function Steps(props: { steps: Element[]; at: number; text?: Element }): Element
+/** The one screen someone signs in on: whose it is, a heading, what they compare or are warned of, and one button. */
+export declare function SignIn(props: {
+  mark?: string | Element
+  heading?: Element
+  button?: Element
+  quiet?: boolean
+  onSignIn?: () => unknown
+  problem?: Element
+  code?: Element
+  note?: Element
+  warning?: Element
+  stop?: Element
+  onStop?: () => unknown
+  beside?: boolean
+  done?: Element
+  status?: Element
+  children?: Element
+}): Element
 
 export declare function Field(props: { label?: Element; hint?: Element; error?: string; disabled?: boolean; children?: Element }): Element
 /** An `Input`'s props: a text input's, in a field's box, with styles of its own over it. */

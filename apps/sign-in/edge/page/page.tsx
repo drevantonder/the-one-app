@@ -342,7 +342,7 @@ function shows(): Shows {
   switch (flow.flow) {
     case "deviceInApp":
       if (how() === "away") return { heading: "Sign in on another device", button: shares ? "Share Link" : copied() ? "Copied" : "Copy Link", onSignIn: share, stop: "Back", onStop: () => setHow("passkey"), elsewhere: true }
-      if (how() === "passkey") return { heading: "Sign in", note: "Check this code where you sign in", code: shown, problem: why, button: "Sign in", href: link.href, stop: "Use Another Device", onStop: () => setHow("away") }
+      if (how() === "passkey") return { heading: "Sign in", note: "Check this code where you sign in", code: shown, problem: why, button: "Sign in", onSignIn: () => location.assign(link.href), stop: "Use Another Device", onStop: () => setHow("away") }
       if (number() !== undefined)
         return { heading: "Check your devices", note: "On another of your devices, open Devices and enter", code: String(number()), status: "Waiting for approval…", quiet: true, button: "Use a Passkey Instead", onSignIn: () => setHow("passkey"), stop: "Back", onStop: () => setNumber() }
       return { heading: "Sign in", problem: why, button: "Continue", onSignIn: name, stop: "Use a Passkey", onStop: () => setHow("passkey"), asksWho: true }
@@ -384,6 +384,7 @@ function shows(): Shows {
             onSignIn: signIn,
             stop: "Cancel",
             onStop: cancel,
+            beside: true,
           }
         }
         case "failed":
@@ -455,7 +456,7 @@ begin()
 render(
   () => (
     <SignIn
-      mark={shows().mark ?? <img src={mark} alt="" />}
+      mark={shows().mark ?? mark}
       heading={shows().heading}
       note={shows().note}
       code={shows().code}
@@ -464,10 +465,10 @@ render(
       status={shows().status}
       button={shows().button}
       quiet={shows().quiet}
-      href={shows().href}
       onSignIn={shows().onSignIn}
       stop={shows().stop}
       onStop={shows().onStop}
+      beside={shows().beside}
       done={shows().done}
     >
       {shows().app && <Consent app={shows().app!} />}

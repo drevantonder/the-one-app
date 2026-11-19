@@ -1,11 +1,9 @@
 /* The consent page an assistant is let in on, as Google's and GitHub's are: its logo joined to ours, who it'd act
    as, what it will be able to do, and Cancel beside Allow. */
-.ui-sign-in .mark > .logos {
+.logos {
   display: flex;
   align-items: center;
   gap: 0.75rem;
-  width: auto;
-  height: auto;
 }
 .logos > * {
   width: 3.5rem;
@@ -34,11 +32,11 @@
   font-weight: var(--title-weight);
   letter-spacing: 0.1em;
 }
-.ui-sign-in .account {
+.account {
   margin: -0.75rem 0 0;
   color: var(--muted-foreground);
 }
-.ui-sign-in .can {
+.can {
   width: 100%;
   padding: 1rem 1.125rem;
   border: 1px solid var(--border);
@@ -67,26 +65,14 @@
   margin-top: 0.1875rem;
   color: var(--muted-foreground);
 }
-.ui-sign-in .note {
+.note {
   margin: 0;
   color: var(--muted-foreground);
   font-size: var(--text-footnote);
 }
-/* Cancel, then Allow, side by side. */
-.ui-sign-in:has(.can) .answers {
-  grid-template-columns: 1fr 1fr;
-  width: 100%;
-}
-.ui-sign-in:has(.can) .answers > :last-child {
-  order: -1;
-}
-.ui-sign-in:has(.can) .ui-button {
-  min-width: 0;
-}
-
 /* Use Another Device, in the app's own window: the link to open where they're signed in, short enough to type, and
    the code it will show there. */
-.ui-sign-in .elsewhere {
+.elsewhere {
   display: grid;
   gap: 1.25rem;
   width: 100%;
@@ -104,4 +90,14 @@
   font-family: var(--font-mono);
   overflow-wrap: anywhere;
   user-select: all;
+}
+/* The code it will show there, under a grey line, as big as the one a device shows. */
+.elsewhere .code p {
+  color: var(--muted-foreground);
+}
+.elsewhere .code .shown {
+  margin-top: 0.25rem;
+  color: var(--foreground);
+  font: var(--title-weight) var(--text-title) / 1.15 var(--font-mono);
+  letter-spacing: 0.08em;
 }

@@ -61,13 +61,12 @@ render(() => {
   const app = () => screen(began())
   return (
     <SignIn
-      mark={<img src={mark} alt="" />}
+      mark={mark}
       heading={!ended() ? "Signing in" : status() === "ok" ? "You're signed in" : status() === "cancelled" ? "Sign-in cancelled" : "Not signed in"}
       status={ended() ? undefined : "Signing in…"}
       problem={status() !== "cancelled" ? ended()?.problem : undefined}
       button={status() === "ok" ? app() && `Open ${titled(app()!)}` : began() && "Try Again"}
-      href={status() === "ok" && app() ? `/?open=${encodeURIComponent(app()!)}` : undefined}
-      onSignIn={again}
+      onSignIn={status() === "ok" && app() ? () => location.assign(`/?open=${encodeURIComponent(app()!)}`) : again}
       stop={status() !== "ok" && app() ? `Open ${titled(app()!)}` : undefined}
       onStop={() => location.assign(`/?open=${encodeURIComponent(app()!)}`)}
     >

@@ -21,6 +21,7 @@ export { seen, since, size } from "./format.ts"
 
 export { History, Screen, Section, Split } from "./styled-components/screen.tsx"
 export { Empty, Problem, Skeleton, Status, Steps } from "./styled-components/states.tsx"
+export { SignIn } from "./styled-components/sign-in.tsx"
 
 export { List, ListStyle, Row } from "./styled-components/list.tsx"
 export { createListbox } from "./headless-components/listbox.ts"
