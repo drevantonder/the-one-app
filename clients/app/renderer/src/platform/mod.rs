@@ -309,6 +309,10 @@ impl Windows {
             if let Some(clipboard) = clipboard() {
                 screen.clipboard = clipboard;
             }
+            #[cfg(any(target_os = "android", target_os = "ios"))]
+            {
+                screen.device = native.device(id);
+            }
             if let Some(native) = Native::started() {
                 let native = std::sync::Mutex::new(native);
                 screen.on_post(Arc::new(move || native.lock().unwrap_or_else(std::sync::PoisonError::into_inner).run(move |windows| windows.posted(id))));
@@ -889,6 +893,7 @@ impl Windows {
                     }
                 }
             }
+            Input::Picked(node, value) => screen.picked(node, &value),
             Input::Close => {}
         }
         // What it changed reaches the text input plugin at once, before its next key, not with the frame.
@@ -1048,4 +1053,7 @@ pub(crate) enum Input {
     Placed(String, crate::geometry::Point<f32>),
     /// The window got the keyboard, or lost it.
     Focus(bool),
+    /// The device's picker for picker node `0` chose value `1` (`Device::pick`).
+    #[cfg_attr(not(any(target_os = "android", target_os = "ios")), allow(dead_code))]
+    Picked(crate::tree::Id, String),
 }

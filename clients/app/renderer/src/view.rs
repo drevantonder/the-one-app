@@ -135,6 +135,30 @@ const BUTTON_ROLES: [&str; 9] = ["button", "menuitem", "tab", "checkbox", "radio
 const PAGE: Id = 0;
 const SHORTCUT_HELD: std::time::Duration = std::time::Duration::from_millis(600);
 
+/// What a phone does for its page itself, which its window doesn't draw (DESIGN.md: "its pickers and its share
+/// sheet"), and its haptics: each says whether the device did it. A computer does none of them (`()`).
+pub trait Device {
+    /// Shows the device's picker for picker node `picker`, drawn at `at`, of its `options` (each its `value`, `label`
+    /// and whether it's `disabled`), `chosen` the one chosen; what's chosen comes back as `Screen::picked`.
+    fn pick(&mut self, picker: Id, at: Rect, options: &Value, chosen: Option<&str>) -> bool;
+    /// Shows the device's share sheet for `text`.
+    fn share(&mut self, text: &str) -> bool;
+    /// Plays a haptic, by iOS's name (`haptic` in the UI library).
+    fn haptic(&mut self, kind: &str) -> bool;
+}
+
+impl Device for () {
+    fn pick(&mut self, _: Id, _: Rect, _: &Value, _: Option<&str>) -> bool {
+        false
+    }
+    fn share(&mut self, _: &str) -> bool {
+        false
+    }
+    fn haptic(&mut self, _: &str) -> bool {
+        false
+    }
+}
+
 pub struct Screen {
     tree: Tree,
     /// Its app's JS, on a thread of its own, and whether its module has run, or why it didn't.
@@ -196,6 +220,8 @@ pub struct Screen {
     pub when_unused: Vec<Box<dyn FnOnce() + Send>>,
     /// What copy and paste use: the computer's, which the window gives it, or one of its own.
     pub clipboard: Box<dyn Clipboard>,
+    /// What the device does for it: its pickers, its share sheet and its haptics.
+    pub device: Box<dyn Device>,
     /// How far each scrolling node (and the root, 0) has scrolled, along and down.
     scrolled: HashMap<Id, Point<f32>>,
     /// Where the pointer is, what it's over and what it pressed, for styles' states and pointer events.
@@ -292,6 +318,7 @@ impl Screen {
             active: true,
             when_unused: Vec::new(),
             clipboard: Box::new(editing::Memory::default()),
+            device: Box::new(()),
             scrolled: HashMap::new(),
             states: States::default(),
             pointer: None,
@@ -418,8 +445,19 @@ impl Screen {
     /// drawn (`rect`), which what it opens is placed by, as a menu is under its button.
     pub(crate) fn click(&mut self, id: Id, at: Option<Point<f32>>) {
         let rect = self.rects.get(&id).copied().unwrap_or(Rect { x: 0.0, y: 0.0, width: 0.0, height: 0.0 });
+        // A picker opens the device's, as a `<select>` does a phone's browser's.
+        if let Some(node) = self.tree.nodes.get(&id).filter(|node| node.kind == Kind::Picker) {
+            let (options, chosen) = (node.prop("options").cloned().unwrap_or_default(), node.str("value").map(str::to_owned));
+            self.device.pick(id, rect, &options, chosen.as_deref());
+            return;
+        }
         let at = at.unwrap_or(point(rect.x + rect.width / 2.0, rect.y + rect.height / 2.0));
         self.tell(id, "click", json!({"clientX": at.x, "clientY": at.y, "rect": {"x": rect.x, "y": rect.y, "width": rect.width, "height": rect.height}}));
+    }
+
+    /// The device's picker for picker node `id` chose `value`, which it's told as a `<select>`'s `input` says it.
+    pub fn picked(&mut self, id: Id, value: &str) {
+        self.tell(id, "input", json!({"editing": {"text": value}}));
     }
 
     /// Tells the app a message from its client: an answer to what it asked (`Asked`), or a notification.
@@ -548,12 +586,27 @@ impl Screen {
                     }
                     let Some(asked) = self.asked.as_mut() else { continue };
                     let (id, method, tool) = (message.get("id").map(Value::to_string), message["method"].as_str().map(str::to_owned), message["params"]["name"].as_str().map(str::to_owned));
-                    // What it copies, or shares, which a computer with no share sheet copies (`done`: "copied"), goes on
-                    // the clipboard.
+                    // What it shares goes to the device's share sheet; what it copies, or shares where there's none
+                    // (`done`: "copied"), on the clipboard.
                     if let (Some(id), Some(asked @ ("one/copy" | "one/share")), Some(text)) = (message.get("id"), method.as_deref(), message["params"]["text"].as_str()) {
-                        self.clipboard.write(false, text);
-                        let result = if asked == "one/share" { json!({"done": "copied"}) } else { json!({}) };
+                        let result = if asked == "one/share" && self.device.share(text) {
+                            json!({"done": "shared"})
+                        } else {
+                            self.clipboard.write(false, text);
+                            if asked == "one/share" { json!({"done": "copied"}) } else { json!({}) }
+                        };
                         self.js.send("message", json!({"jsonrpc": "2.0", "id": id, "result": result}));
+                        continue;
+                    }
+                    // A haptic plays where the device has them, and a device without them says so, as a client does.
+                    if let (Some(id), Some("one/haptic")) = (message.get("id"), method.as_deref()) {
+                        let kind = message["params"]["kind"].as_str().unwrap_or_default();
+                        let answer = if self.device.haptic(kind) {
+                            json!({"jsonrpc": "2.0", "id": id, "result": {}})
+                        } else {
+                            json!({"jsonrpc": "2.0", "id": id, "error": {"code": -32000, "message": "This device plays no haptics"}})
+                        };
+                        self.js.send("message", answer);
                         continue;
                     }
                     match asked(message, appearance) {

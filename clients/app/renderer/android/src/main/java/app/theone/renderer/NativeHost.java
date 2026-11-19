@@ -5,6 +5,7 @@ import android.content.res.Configuration;
 import android.graphics.Color;
 import android.graphics.Outline;
 import android.graphics.Rect;
+import android.view.HapticFeedbackConstants;
 import android.view.View;
 import android.view.ViewGroup;
 import android.view.ViewOutlineProvider;
@@ -178,6 +179,32 @@ public final class NativeHost {
     static void copy(String text) {
         android.content.ClipboardManager clipboard = activity.getSystemService(android.content.ClipboardManager.class);
         if (clipboard != null) clipboard.setPrimaryClip(android.content.ClipData.newPlainText(null, text));
+    }
+
+    /** Android's share sheet for `text`, as a page's `navigator.share` opens it. */
+    static void share(String text) {
+        android.content.Intent send = new android.content.Intent(android.content.Intent.ACTION_SEND).setType("text/plain").putExtra(android.content.Intent.EXTRA_TEXT, text);
+        activity.startActivity(android.content.Intent.createChooser(send, null));
+    }
+
+    /**
+     * A haptic, by iOS's name (`haptic` in the UI library), played on `view` as Android's own, which follows the
+     * system's Touch feedback: Flutter's choices for iOS's impacts and selection.
+     */
+    public static void haptic(View view, String kind) {
+        boolean modern = android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.R;
+        int played;
+        switch (kind) {
+            case "light": case "soft": played = HapticFeedbackConstants.VIRTUAL_KEY; break;
+            case "medium": played = HapticFeedbackConstants.KEYBOARD_TAP; break;
+            case "heavy": case "rigid": played = HapticFeedbackConstants.CONTEXT_CLICK; break;
+            case "selection": played = HapticFeedbackConstants.CLOCK_TICK; break;
+            case "success": played = modern ? HapticFeedbackConstants.CONFIRM : HapticFeedbackConstants.VIRTUAL_KEY; break;
+            case "warning": played = HapticFeedbackConstants.LONG_PRESS; break;
+            case "error": played = modern ? HapticFeedbackConstants.REJECT : HapticFeedbackConstants.LONG_PRESS; break;
+            default: return;
+        }
+        view.performHapticFeedback(played);
     }
 
     static float density() {

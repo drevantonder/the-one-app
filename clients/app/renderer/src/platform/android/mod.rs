@@ -333,12 +333,48 @@ impl NativeWindow {
 
     /// Asks the view to do `command` (`NativeView.apply`), once Rust has let go of the windows.
     fn apply(&self, command: Value) {
-        let command = command.to_string();
-        java(|env, _| {
-            let command = env.new_string(command)?;
-            env.call_method(&self.view, "command", "(Ljava/lang/String;)V", &[JValue::Object(&command)]).map(drop)
-        });
+        apply(&self.view, command);
     }
+
+    /// What Android does for window `id`'s page through its view: its picker, share sheet and haptics.
+    pub fn device(&self, _: WindowId) -> Box<dyn crate::view::Device> {
+        Box::new(Device(self.view.clone()))
+    }
+}
+
+/// Asks `view` to do `command` (`NativeView.apply`), once Rust has let go of the windows. → whether it was asked.
+fn apply(view: &GlobalRef, command: Value) -> bool {
+    let command = command.to_string();
+    java(|env, _| {
+        let command = env.new_string(command)?;
+        env.call_method(view, "command", "(Ljava/lang/String;)V", &[JValue::Object(&command)]).map(drop)
+    })
+    .is_some()
+}
+
+/// Android's own picker (a dialog of choices, as Chrome's `<select>` opens), share sheet and haptics, which the
+/// window's view shows (`NativeView.apply`).
+struct Device(GlobalRef);
+
+impl crate::view::Device for Device {
+    fn pick(&mut self, picker: Id, _: crate::inspect::Rect, options: &Value, chosen: Option<&str>) -> bool {
+        apply(&self.0, json!({"pick": {"node": picker, "options": options, "chosen": chosen}}))
+    }
+
+    fn share(&mut self, text: &str) -> bool {
+        apply(&self.0, json!({"share": text}))
+    }
+
+    fn haptic(&mut self, kind: &str) -> bool {
+        apply(&self.0, json!({"haptic": kind}))
+    }
+}
+
+/// Android's picker chose `value` for picker node `node` of window `id`.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_app_theone_renderer_NativeView_nativePicked(mut env: JNIEnv, _: JObject, id: jlong, node: jlong, value: JString) {
+    let Ok(value) = env.get_string(&value).map(String::from) else { return };
+    with_windows(|windows| windows.input(id as WindowId, 0, Input::Picked(node as Id, value)));
 }
 
 impl rwh::HasWindowHandle for NativeWindow {

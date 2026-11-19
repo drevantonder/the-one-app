@@ -79,10 +79,39 @@ public final class NativeView extends SurfaceView implements SurfaceHolder.Callb
         try {
             JSONObject c = new JSONObject(command);
             if (c.optBoolean("menu")) showMenu();
+            if (c.has("pick")) pick(c.getJSONObject("pick"));
+            if (c.has("share")) NativeHost.share(c.getString("share"));
+            if (c.has("haptic")) NativeHost.haptic(this, c.getString("haptic"));
             textInput(c.optString("method"), c.opt("args"));
         } catch (Exception e) {
             Log.e(TAG, "command " + command, e);
         }
+    }
+
+    /**
+     * Android's picker for picker node `node`: a dialog of its options that can be chosen, the one chosen ticked, as
+     * Chrome's `<select>` opens. What's chosen goes back to Rust (`nativePicked`).
+     */
+    private void pick(JSONObject pick) throws org.json.JSONException {
+        JSONArray options = pick.getJSONArray("options");
+        String chosen = pick.isNull("chosen") ? null : pick.getString("chosen");
+        java.util.List<String> labels = new java.util.ArrayList<>(), values = new java.util.ArrayList<>();
+        int checked = -1;
+        for (int i = 0; i < options.length(); i++) {
+            JSONObject option = options.getJSONObject(i);
+            if (option.optBoolean("disabled")) continue;
+            String value = option.getString("value");
+            if (value.equals(chosen)) checked = values.size();
+            labels.add(option.optString("label", value));
+            values.add(value);
+        }
+        long node = pick.getLong("node");
+        new android.app.AlertDialog.Builder(getContext())
+            .setSingleChoiceItems(labels.toArray(new String[0]), checked, (dialog, which) -> {
+                dialog.dismiss();
+                nativePicked(id, node, values.get(which));
+            })
+            .show();
     }
 
     /** Flutter's text input channel's method calls, as its TextInputPlugin takes them from its TextInputChannel. */
@@ -270,6 +299,8 @@ public final class NativeView extends SurfaceView implements SurfaceHolder.Callb
     private native boolean nativeTouch(long id, int action, float x, float y, float slop, boolean stopped);
     private native boolean nativePan(long id, float x, float y, float dx, float dy);
     private native void nativeLongPress(long id, float x, float y);
+
+    private native void nativePicked(long id, long node, String value);
     private native void nativeEditingState(long id, int field, String text, int base, int extent, int composingStart, int composingEnd);
     private native void nativeAction(long id, int field, String action);
     private native String nativeFields(long id);

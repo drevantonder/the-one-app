@@ -6,12 +6,10 @@ import android.graphics.BitmapFactory
 import android.graphics.Color
 import android.graphics.Rect
 import android.graphics.drawable.ColorDrawable
-import android.os.Build
 import android.net.Uri
 import android.os.Bundle
 import android.provider.Settings
 import android.util.Base64
-import android.view.HapticFeedbackConstants
 import android.webkit.WebView
 import android.window.OnBackInvokedCallback
 import android.window.OnBackInvokedDispatcher
@@ -141,21 +139,10 @@ class MainActivity : TauriActivity() {
         ShortcutManagerCompat.disableShortcuts(this, pinned.filter { it !in installed }, "This app isn't installed")
         ShortcutManagerCompat.enableShortcuts(this, ShortcutManagerCompat.getShortcuts(this, ShortcutManagerCompat.FLAG_MATCH_PINNED).filter { it.id in installed && !it.isEnabled })
       }
-      // A haptic an app asked for, by iOS's name (`one/haptic` in client.js), played as Android's own, which follows
-      // the system's Touch feedback. Flutter's choices for iOS's impacts and selection.
+      // A haptic an app asked for, by iOS's name (`one/haptic` in client.js), played as Android's own, as a native
+      // window's is (`NativeHost.haptic`).
       WebViewCompat.addWebMessageListener(webView, "androidHaptic", setOf("http://tauri.localhost")) { _, message, _, _, _ ->
-        val modern = Build.VERSION.SDK_INT >= Build.VERSION_CODES.R
-        val played = when (message.data) {
-          "light", "soft" -> HapticFeedbackConstants.VIRTUAL_KEY
-          "medium" -> HapticFeedbackConstants.KEYBOARD_TAP
-          "heavy", "rigid" -> HapticFeedbackConstants.CONTEXT_CLICK
-          "selection" -> HapticFeedbackConstants.CLOCK_TICK
-          "success" -> if (modern) HapticFeedbackConstants.CONFIRM else HapticFeedbackConstants.VIRTUAL_KEY
-          "warning" -> HapticFeedbackConstants.LONG_PRESS
-          "error" -> if (modern) HapticFeedbackConstants.REJECT else HapticFeedbackConstants.LONG_PRESS
-          else -> return@addWebMessageListener
-        }
-        webView.performHapticFeedback(played)
+        NativeHost.haptic(webView, message.data ?: return@addWebMessageListener)
       }
     }
     onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {

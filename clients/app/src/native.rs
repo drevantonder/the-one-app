@@ -856,10 +856,9 @@ fn respond(
                 return None;
             }
         }
-        // A shortcut on the device's own home screen is Android's page's to pin, and a haptic its page's to play: a
-        // native window has neither yet, which it says, as a device without them does (client.js).
+        // A shortcut on the device's own home screen is Android's page's to pin: a native window has none yet, which it
+        // says, as a device without them does (client.js).
         "one/pin-shortcut" => Some(Err(json!({"code": -32000, "message": "This device can't put that app on its home screen"}))),
-        "one/haptic" => Some(Err(json!({"code": -32000, "message": "This device plays no haptics"}))),
         // A person's recovery key is shown and typed in the client's own window over the app (`recovery`), for whoever
         // the app asks for, and the app is told only whether it was done (`whom` in client.js).
         "one/recovery-key" if state.sheet.is_none() => {

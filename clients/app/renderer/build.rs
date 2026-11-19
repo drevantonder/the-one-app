@@ -13,7 +13,7 @@ fn main() {
     match std::env::var("CARGO_CFG_TARGET_OS").as_deref() {
         Ok("macos") => text_input(&["src/platform/mac/text_input.mm"], &["flutter/flutter/shell/platform/darwin/macos/framework/Source/FlutterTextInputPlugin.mm"]),
         Ok("ios") => text_input(
-            &["src/platform/ios/text_input.mm", "src/platform/ios/accessibility.mm"],
+            &["src/platform/ios/text_input.mm", "src/platform/ios/accessibility.mm", "src/platform/ios/device.mm"],
             &[
                 "flutter/flutter/shell/platform/darwin/ios/framework/Source/FlutterTextInputPlugin.mm",
                 "flutter/flutter/fml/platform/darwin/string_range_sanitization.mm",

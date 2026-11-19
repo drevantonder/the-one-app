@@ -144,6 +144,8 @@ thread_local! {
     static SLIDES: RefCell<HashMap<WindowId, Slide>> = RefCell::new(HashMap::new());
     /// What each window's text input plugin said, until the windows hear it: it can say it while they're in use.
     static SAID: RefCell<Vec<(WindowId, TextInputClient)>> = const { RefCell::new(Vec::new()) };
+    /// What each window's picker chose, for which node, until the windows hear it (`device.mm`).
+    static PICKED: RefCell<Vec<(WindowId, crate::tree::Id, String)>> = const { RefCell::new(Vec::new()) };
     /// The display link, once a frame's been wanted, and when the display showed the last frame it said.
     static LINK: RefCell<Option<Retained<CADisplayLink>>> = const { RefCell::new(None) };
     static FRAMED: Cell<Option<Instant>> = const { Cell::new(None) };
@@ -250,6 +252,9 @@ fn with_windows<R>(f: impl FnOnce(&mut Windows) -> R) -> Option<R> {
         }
         for (id, said) in SAID.with(|said| std::mem::take(&mut *said.borrow_mut())) {
             windows.input(id, 0, Input::TextInputClient(said));
+        }
+        for (id, node, value) in PICKED.with(|picked| std::mem::take(&mut *picked.borrow_mut())) {
+            windows.input(id, 0, Input::Picked(node, value));
         }
         for (id, window) in windows.windows.iter_mut() {
             let Ok(screen) = &mut window.screen else { continue };
@@ -483,6 +488,11 @@ pub struct Handle;
 impl NativeWindow {
     pub fn handle(&self) -> Handle {
         Handle
+    }
+
+    /// What the iPhone does for window `id`'s page itself, over its view: its picker, share sheet and haptics.
+    pub fn device(&self, id: WindowId) -> Box<dyn crate::view::Device> {
+        Box::new(Device { id, view: self.window.ui_view() as usize })
     }
 
     /// What wgpu draws into: the layer of the view it draws in, a CAMetalLayer as its class says (`Card`), as a Mac's
@@ -818,6 +828,42 @@ fn touch_at(screen: &mut crate::Screen, native: &NativeWindow, id: WindowId, fin
     }
 }
 
+
+/// What an iPhone does for a window's page itself (`device.mm`): its picker, share sheet and haptics.
+struct Device {
+    id: WindowId,
+    view: usize,
+}
+
+unsafe extern "C" {
+    fn device_pick(view: *mut c_void, x: f64, y: f64, width: f64, height: f64, options: *const c_char, chosen: *const c_char, context: *mut c_void, node: i64, picked: extern "C" fn(*mut c_void, i64, *const c_char)) -> bool;
+    fn device_share(view: *mut c_void, text: *const c_char) -> bool;
+    fn device_haptic(kind: *const c_char) -> bool;
+}
+
+impl crate::view::Device for Device {
+    fn pick(&mut self, picker: crate::tree::Id, at: crate::inspect::Rect, options: &serde_json::Value, chosen: Option<&str>) -> bool {
+        let (options, chosen) = (cstring(&options.to_string()), chosen.map(cstring));
+        let (x, y, width, height) = (f64::from(at.x), f64::from(at.y), f64::from(at.width), f64::from(at.height));
+        let chosen = chosen.as_ref().map_or(std::ptr::null(), |chosen| chosen.as_ptr());
+        unsafe { device_pick(self.view as *mut c_void, x, y, width, height, options.as_ptr(), chosen, self.id as *mut c_void, picker as i64, picked) }
+    }
+
+    fn share(&mut self, text: &str) -> bool {
+        unsafe { device_share(self.view as *mut c_void, cstring(text).as_ptr()) }
+    }
+
+    fn haptic(&mut self, kind: &str) -> bool {
+        unsafe { device_haptic(cstring(kind).as_ptr()) }
+    }
+}
+
+/// Window `context`'s picker chose `value` for picker node `node`, which the windows hear once they aren't in use.
+extern "C" fn picked(context: *mut c_void, node: i64, value: *const c_char) {
+    let value = unsafe { CStr::from_ptr(value) }.to_string_lossy().into_owned();
+    PICKED.with(|picked| picked.borrow_mut().push((context as WindowId, node as crate::tree::Id, value)));
+    wake();
+}
 
 /// A window's text input plugin (`text_input.mm`): Flutter's, as a C interface.
 struct Plugin(*mut c_void);

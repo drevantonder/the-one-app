@@ -841,7 +841,8 @@ impl Painter<'_> {
                 self.shadow(shadow, bounds, radii, transform.scale, mask, opacity);
             }
         }
-        let pressable = (node.listens("click") || node.kind == Kind::Input) && !node.is("disabled") && !node.is("aria-disabled");
+        // A picker is pressed to open the device's (`Screen::click`).
+        let pressable = (node.listens("click") || matches!(node.kind, Kind::Input | Kind::Picker)) && !node.is("disabled") && !node.is("aria-disabled");
         // Tab reaches what the DOM's does: an input, what's pressed as a button is (a role the DOM draws as a
         // `<button>`, core/ui's drawing-primitives/primitives.tsx `pressed`), and what says its `tabindex`.
         let tabindex = node.prop("tabindex").and_then(|index| index.as_i64().or_else(|| index.as_str()?.parse().ok()));
