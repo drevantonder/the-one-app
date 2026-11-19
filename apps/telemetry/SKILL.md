@@ -53,11 +53,11 @@ client sent a `traceparent`.
   `one.database.lease.moves` (`one.reason`), a call kept waiting by its holder `one.database.lease.wait`
   (`one.outcome` `not_answered`, warned of, or `gone`), and an app not answering a hook in time
   `one.hook.timeouts`, each by `one.app`.
-- Telemetry tells the network's first owner, through Notifications, what needs them, as alerts: a server not
-  running or restarting over and over, the update held, a kind of error not seen in 14 days, an app's tools failing,
-  an app not answering. `alerts` lists them, the open ones and those resolved in the last day, and each kind with
-  what fires it; `mute` stops a kind being told, or has it told again, as the switches on Telemetry's screen do. A
-  problem is one notification however long it lasts, and it's told again once it's resolved, but for a new error.
+- Telemetry keeps what needs a person as alerts, and tells no one: a server not running or restarting over and over,
+  the update held, a kind of error not seen in 14 days, an app's tools failing, an app not answering. `alerts`
+  lists them, the open ones and those resolved in the last day, and each kind with what fires it; they're on
+  Telemetry's screen, its widget and its badge too. A problem is one alert however long it lasts. Whoever wants
+  them elsewhere has everything kept forwarded (`forward`).
 - `forward` sends a copy of everything kept from then on to an OpenTelemetry endpoint the network's owner names
   (Grafana Cloud, Honeycomb, a collector of their own), as OTLP over HTTP, with the headers it wants filled in from
   a Vault item of theirs switched on for Telemetry; with no endpoint it stops. It's off until then.

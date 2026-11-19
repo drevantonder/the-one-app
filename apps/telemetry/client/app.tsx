@@ -1,9 +1,9 @@
 // Telemetry: what a person acts on of what the network recorded, laid out as a trace and
-// metrics viewer is, cut down. What it alerted the network's owner of first, then calls over time, what's failing,
-// what's slowest and what AI cost, over the range picked above them, and last which alerts its owner is told. A failure opens its trace beside the list, as a waterfall; a slow tool opens how
+// metrics viewer is, cut down. The alerts first, then calls over time, what's failing,
+// what's slowest and what AI cost, over the range picked above them, and last what's kept. A failure opens its trace beside the list, as a waterfall; a slow tool opens how
 // long it took over time. What's fine is silent: with nothing failing, there's no Failing.
 import { createMemo, createSignal, Errored, For, Loading, refresh, Show } from "solid-js"
-import { call, changed, Empty, Icon, List, Problem, render, Row, Screen, Section, Skeleton, Split, Switch, Tabs, Text, toast, View } from "ui"
+import { call, changed, Empty, Icon, List, Problem, render, Row, Screen, Section, Skeleton, Split, Tabs, Text, View } from "ui"
 
 /** A slow tool, or an app slow to open, as `telemetry_overview` answers it. */
 interface Slowest {
@@ -67,17 +67,17 @@ interface Span {
 interface Alert {
   id: number
   kind: string
-  state: "firing" | "notified" | "resolving" | "resolved"
+  state: "firing" | "resolved"
   title: string
   text?: string | null
   began: number
   ended?: number | null
 }
 
-/** What `telemetry_alerts` answers: the alerts open or resolved in the last day, and each kind, muted or not. */
+/** What `telemetry_alerts` answers: the alerts open or resolved in the last day, and each kind. */
 interface Alerts {
   alerts: Alert[]
-  kinds: { kind: string; about: string; muted: boolean }[]
+  kinds: { kind: string; about: string }[]
 }
 
 const RANGES = [
@@ -90,15 +90,6 @@ const [hours, setHours] = createSignal("24")
 const overview = createMemo(() => call("telemetry_overview", { hours: Number(hours()) }).then((text): Overview => JSON.parse(text)))
 const alerts = createMemo(() => call("telemetry_alerts", {}).then((text): Alerts => JSON.parse(text)))
 changed(() => (refresh(overview), refresh(alerts)))
-
-async function mute(kind: string, muted: boolean) {
-  try {
-    await call("telemetry_mute", { kind, muted })
-  } catch (error) {
-    toast(error as Error)
-  }
-  refresh(alerts)
-}
 
 /// What's open beside the list: a failure's trace, `{ trace }`, or a slow tool or app, `{ slow }`.
 const [open, setOpen] = createSignal<{ trace?: string; where?: string; slow?: Slowest & { key: string } }>()
@@ -353,18 +344,6 @@ function Telemetry(props: { all: Overview }) {
           </Section>
         </Show>
         <Spending days={all().spending} />
-        <Section heading="Notify the Owner When">
-          <List>
-            <For each={alerts().kinds} keyed={(kind) => kind.kind}>
-              {(kind) => (
-                <Row
-                  heading={kind().about}
-                  end={<Switch aria-label={kind().about} checked={!kind().muted} onChange={(event) => mute(kind().kind, !event.currentTarget.checked)} />}
-                />
-              )}
-            </For>
-          </List>
-        </Section>
         <Text style={{ color: "muted-foreground", font: "body", maxWidth: "readable" }}>
           {`Kept for ${all().retention.days} days, up to ${size(all().retention.most_bytes)}. ${size(all().retention.bytes)} now.`}
           <Show when={all().forwarding}>{(to) => ` A copy goes to ${host(to())}.`}</Show>

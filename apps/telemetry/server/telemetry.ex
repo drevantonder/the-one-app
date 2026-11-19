@@ -11,7 +11,7 @@ defmodule Telemetry do
   for a while and then let go, which blobs by the hour are (`Telemetry.Store`). It may be lost, and holds no one's
   data.
 
-  What needs a person is told to the network's first owner, as alerts (`Telemetry.Alerts`), whose state is the one
+  What needs a person is kept as alerts (`Telemetry.Alerts`), read here and through `alerts`, whose state is the one
   thing it keeps in its database.
   """
   @behaviour OneCore.App
@@ -29,8 +29,7 @@ defmodule Telemetry do
   def requires,
     do: %{
       "core" => ">= 0.25.9",
-      "database" => "to keep its schedule and its alerts",
-      "notifications" => "to tell the network's owner what needs them"
+      "database" => "to keep its schedule and its alerts"
     }
 
   @impl true
@@ -315,7 +314,7 @@ defmodule Telemetry do
         name: "alerts",
         read_only: true,
         description:
-          "The alerts telling the network's owner what needs them, open and resolved in the last day, newest first, and each kind of alert with what fires it and whether it's muted",
+          "The alerts for what needs a person, open and resolved in the last day, newest first, and each kind of alert with what fires it",
         inputs: %{type: "object", properties: %{}},
         outputs: %{
           type: "object",
@@ -330,8 +329,8 @@ defmodule Telemetry do
                   key: %{type: "string", description: "What of its kind it's about: a server's key, a build, an app"},
                   state: %{
                     type: "string",
-                    enum: ~w(firing notified resolving resolved),
-                    description: "firing until its owner's told, notified, resolving until they're told it cleared, resolved"
+                    enum: ~w(firing resolved),
+                    description: "firing while its symptom is seen, resolved once it has cleared"
                   },
                   title: %{type: "string"},
                   text: %{type: ["string", "null"]},
@@ -348,10 +347,9 @@ defmodule Telemetry do
                 type: "object",
                 properties: %{
                   kind: %{type: "string"},
-                  about: %{type: "string", description: "What fires it"},
-                  muted: %{type: "boolean"}
+                  about: %{type: "string", description: "What fires it"}
                 },
-                required: ["kind", "about", "muted"]
+                required: ["kind", "about"]
               }
             }
           },
@@ -359,33 +357,11 @@ defmodule Telemetry do
         }
       },
       %{
-        name: "mute",
-        description:
-          "Mutes a kind of alert, so the network's owner isn't told of it, or has it told again. Only the network's owners may",
-        inputs: %{
-          type: "object",
-          properties: %{
-            kind: %{type: "string", enum: Map.keys(Alerts.kinds())},
-            muted: %{type: "boolean", description: "false has it told again"}
-          },
-          required: ["kind", "muted"]
-        },
-        outputs: %{
-          type: "object",
-          properties: %{kind: %{type: "string"}, muted: %{type: "boolean"}},
-          required: ["kind", "muted"]
-        }
-      },
-      %{
         name: "evaluate",
         description:
-          "Reads what was recorded since it last did, moves each alert on and tells the network's owner what fired and what cleared. The clock calls it every minute",
+          "Reads what was recorded since it last did, moves each alert on and sends a copy where `forward` says. The clock calls it every minute",
         inputs: %{type: "object", properties: %{}},
-        outputs: %{
-          type: "object",
-          properties: %{told: %{type: "integer", description: "How many notifications it sent"}},
-          required: ["told"]
-        }
+        outputs: %{type: "object", properties: %{}}
       },
       %{
         name: "forward",
@@ -516,8 +492,10 @@ defmodule Telemetry do
     Forward.set(call, endpoint, inputs["item"], inputs["headers"])
   end
   def call("alerts", _inputs, call), do: Alerts.list(call)
-  def call("mute", %{"kind" => kind, "muted" => muted}, call), do: Alerts.mute(call, kind, muted)
-  def call("evaluate", _inputs, call), do: Alerts.evaluate(call)
+  def call("evaluate", _inputs, call) do
+    Alerts.evaluate(call)
+    %{}
+  end
 
   # What was kept over the last `hours`, and when that is, in nanoseconds since 1970.
   defp read(call, hours) do

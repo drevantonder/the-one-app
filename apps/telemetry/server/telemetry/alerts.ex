@@ -1,39 +1,27 @@
 defmodule Telemetry.Alerts do
   @moduledoc """
-  What needs a person, told to the network's first owner through Notifications, once a problem, and again once it
-  clears. As SRE alerts are, each is a symptom someone would notice, not a cause, and it's quiet by default: a
-  problem is one notification however often it recurs, and only what lasts or is new is told.
+  What needs a person, kept as alerts that are read in the Telemetry app and by `alerts`, never sent to anyone: whoever
+  wants them elsewhere has a copy of everything kept forwarded (`Telemetry.Forward`). As SRE alerts are, each is a
+  symptom someone would notice, not a cause: a problem is one alert however often it recurs.
 
   | Kind | Fires when | Clears when |
   | --- | --- | --- |
   | `server` | One of the network's servers, as the relay says (`active`): its machine's `one serve run` said its server didn't start or stopped without being asked, and it hasn't started since, for 5 min, unless the relay says it's ready; or it said its server ended unasked 3 times in 10 min (`one.server.crash_loop`) | It says it started, or the relay says it's ready, and it hasn't looped for 10 min |
   | `update` | The network's update (`core/edge/updater/updater.ts`) is held: a server went back, or didn't finish in time | The update is under way again, or done |
-  | `error` | A kind of error logged that wasn't in the last 14 days: its first line, numbers and ids aside. A fault, a crash or a client's exception, not a tool refusing (a `RuntimeError`) | Told once, and not told resolved: it stops being new an hour later |
+  | `error` | A kind of error logged that wasn't in the last 14 days: its first line, numbers and ids aside. A fault, a crash or a client's exception, not a tool refusing (a `RuntimeError`) | It stops being new an hour later |
   | `failing` | Half or more of an app's tool calls failed, of 10 or more in 10 min | 10 min with fewer |
   | `unanswered` | An app didn't answer, in 2 or more of the last 5 minutes: a hook it didn't answer in time (`one.hook.timeouts`), or its database's server kept a call waiting without running it (`one.database.lease.wait`, `not_answered`) | 5 min without |
 
   Each alert is a row of Telemetry's database, one per kind and key (the server, the build, the error's kind, the
-  app), in this state machine, moved only by `evaluate/1`, the clock's job every minute:
-
-  ```text
-              fires                  told                        clears for its kind's while
-    (none) ─────────► firing ──────────────► notified ─────────────────────────────────────► resolving
-                        │                                                                      │ told
-                        │ clears before it's told: nobody's told of it                        ▼
-                        └─────────────────────────────────────────────────────────────────► resolved
-    an `error`, which isn't told resolved: notified ─clears─► resolved
-    the same kind and key firing again after it's resolved is a new alert, told again
-  ```
-
-  A kind its owner muted (`mute/3`) moves the same way, and nothing of it is told: as it's told, it's marked told.
-  Telling is after the transaction that moved it, and marking told after the telling, so an alert is told at least
-  once even where a server stops between them, as a job's call promises (`database`'s skill).
+  app), moved only by `evaluate/1`, the clock's job every minute: it's `firing` while its symptom is seen, and
+  `resolved` once the symptom has been gone for its kind's while. The same kind and key firing again after it's
+  resolved is a new alert.
 
   What it reads is each batch kept since it last looked that it hasn't read, by its name (`Telemetry.Store.since/3`),
   so one kept late is read all the same, and it keeps of that only what its rules need: each server's last start and
   failure, each kind of error and when it was first and last seen, and per app per minute its calls, its failures and
-  how often it didn't answer. Its first look reads the last 14 days for the kinds of error there were, and tells none
-  of them. Whether a server is one of the network's and ready, and whether the update is held, it asks of the relay
+  how often it didn't answer. Its first look reads the last 14 days for the kinds of error there were, and has no alert for
+  any of them. Whether a server is one of the network's and ready, and whether the update is held, it asks of the relay
   as it looks (`OneCore.Servers.presence/1`, `OneCore.Servers.network/0`): where the relay doesn't answer, what it
   would have said of stays as it was.
   """
@@ -64,10 +52,9 @@ defmodule Telemetry.Alerts do
     """
     create table alerts (
       id integer primary key, kind text not null, key text not null, state text not null, title text not null,
-      text text, resolved text, began integer not null, last integer not null, ended integer
+      text text, began integer not null, last integer not null, ended integer
     )
     """,
-    "create table muted (kind text primary key) without rowid",
     # Where a copy of what's kept is sent (`Telemetry.Forward`).
     "create table forward (id integer primary key check (id = 1), endpoint text not null, who text not null, item text not null, headers text not null)"
   ]
@@ -87,8 +74,7 @@ defmodule Telemetry.Alerts do
   def kinds, do: @kinds
 
   @doc """
-  The alerts not resolved, and those resolved in the last day, newest first, and each kind with whether it's
-  muted.
+  The alerts not resolved, and those resolved in the last day, newest first, and each kind of alert.
   """
   def list(call) do
     day = System.os_time(:millisecond) - 86_400_000
@@ -99,42 +85,25 @@ defmodule Telemetry.Alerts do
           db,
           """
           select id, kind, key, state, title, text, began, last, ended from alerts
-          where state in ('firing', 'notified', 'resolving') or ended > ? order by began desc
+          where state = 'firing' or ended > ? order by began desc
           """,
           [day]
         )
 
-      muted = for %{"kind" => kind} <- query(db, "select kind from muted", []), do: kind
-      kinds = for {kind, about} <- Enum.sort(@kinds), do: %{kind: kind, about: about, muted: kind in muted}
+      kinds = for {kind, about} <- Enum.sort(@kinds), do: %{kind: kind, about: about}
       %{alerts: alerts, kinds: kinds}
     end)
   end
 
-  @doc "Mutes a kind of alert, or has it told again: only the network's owners may."
-  def mute(call, kind, muted) do
-    if not Map.has_key?(@kinds, kind), do: raise("There's no kind of alert called #{kind}.\n\n`alerts` lists them.")
-    if not Call.owns?(%{call | subject: "network"}), do: raise("Only the network's owners choose which alerts they're told.")
-
-    transaction(call, fn db ->
-      if muted,
-        do: query(db, "insert or ignore into muted (kind) values (?)", [kind]),
-        else: query(db, "delete from muted where kind = ?", [kind])
-    end)
-
-    Call.changed(call)
-    %{kind: kind, muted: muted}
-  end
-
   @doc """
-  Reads what was recorded since it last looked, moves each alert on (the moduledoc's state machine), and tells the
-  network's first owner what fired and what cleared. Sends a copy of what it read where its owner said
-  (`Telemetry.Forward`). Gives how many it told.
+  Reads what was recorded since it last looked, moves each alert on (the moduledoc's state machine) and sends a copy of what it
+  read where its owner said (`Telemetry.Forward`).
   """
   def evaluate(call) do
     now = System.os_time(:millisecond)
 
     # Its first transaction, which marks the job as run: whether it has looked before, the batches it has read, and
-    # the servers it may tell are down, whose presence is asked of the relay here rather than while the database is
+    # the servers that may be down, whose presence is asked of the relay here rather than while the database is
     # held.
     {looked, read, failing} =
       transaction(call, fn db ->
@@ -154,7 +123,7 @@ defmodule Telemetry.Alerts do
 
     signals = signals(batches)
 
-    {outbox, fresh} =
+    fresh =
       transaction(call, fn db ->
         # Another evaluation read them already, as one that ran long overlapping the next does.
         if looked == (query(db, "select at from looked", []) != []) and not read?(db, names) do
@@ -163,15 +132,14 @@ defmodule Telemetry.Alerts do
           query(db, "delete from batches where at < ?", [now - 2 * @gap])
           query(db, "insert or replace into looked (id, at) values (1, ?)", [now])
           step(db, now, conditions(db, now, asked), unknown(asked))
-          {outbox(db), names}
+          names
         else
-          {[], []}
+          []
         end
       end)
 
     # What's newly kept is sent where its owner said, if they did.
     Telemetry.Forward.send(call, fresh)
-    tell(call, outbox)
   end
 
   defp read?(_db, []), do: false
@@ -343,7 +311,7 @@ defmodule Telemetry.Alerts do
 
   ## Rules
 
-  # Each alert whose symptom is there now, by its kind and key: what it's told as, and as once it clears.
+  # Each alert whose symptom is there now, by its kind and key: what it's called.
   defp conditions(db, now, asked) do
     called = fn "one" -> "The network's own tools"; app -> Map.get(asked.names, app, app) end
 
@@ -362,7 +330,7 @@ defmodule Telemetry.Alerts do
         %{"network_update_status" => "held", "build" => build, "held" => held} ->
           version = String.split(build || "", "+") |> hd()
           why = Enum.join(Enum.reject([held["name"] || held["server"], held["why"]], &is_nil/1), ": ")
-          %{{"update", build || ""} => %{title: "The update to #{version} is held", text: why, resolved: "The update to #{version} is going again"}}
+          %{{"update", build || ""} => %{title: "The update to #{version} is held", text: why}}
 
         _ ->
           %{}
@@ -370,7 +338,7 @@ defmodule Telemetry.Alerts do
 
     errors =
       for row <- query(db, "select * from seen where new = 1 and first > ?", [now - 60 * @minute]), into: %{} do
-        {{"error", row["kind"]}, %{title: "New error: #{String.slice(row["message"], 0, 100)}", text: row["place"], resolved: nil}}
+        {{"error", row["kind"]}, %{title: "New error: #{String.slice(row["message"], 0, 100)}", text: row["place"]}}
       end
 
     failing =
@@ -389,8 +357,7 @@ defmodule Telemetry.Alerts do
         {{"failing", row["app"]},
          %{
            title: "#{app} is failing",
-           text: "#{row["failed"]} of its #{row["calls"]} calls failed in the last 10 minutes.",
-           resolved: "#{app} is working again"
+           text: "#{row["failed"]} of its #{row["calls"]} calls failed in the last 10 minutes."
          }}
       end
 
@@ -407,8 +374,7 @@ defmodule Telemetry.Alerts do
         {{"unanswered", row["app"]},
          %{
            title: "#{app} isn't answering",
-           text: "It didn't answer in #{row["minutes"]} of the last 5 minutes, so what needed it failed.",
-           resolved: "#{app} is answering again"
+           text: "It didn't answer in #{row["minutes"]} of the last 5 minutes, so what needed it failed."
          }}
       end
 
@@ -426,10 +392,10 @@ defmodule Telemetry.Alerts do
         nil
 
       row["looping"] && now - row["looping"] < 10 * @minute ->
-        %{title: "#{name}'s server keeps restarting", text: row["why"], resolved: "#{name}'s server is running again"}
+        %{title: "#{name}'s server keeps restarting", text: row["why"]}
 
       row["failing"] && now - row["failing"] >= 5 * @minute && presence["server_ready"] != true ->
-        %{title: "#{name}'s server isn't running", text: row["why"], resolved: "#{name}'s server is running again"}
+        %{title: "#{name}'s server isn't running", text: row["why"]}
 
       true ->
         nil
@@ -441,22 +407,21 @@ defmodule Telemetry.Alerts do
   # Moves every alert on by what fires now, `conditions`: a new one fires, one still firing is kept up to date,
   # and one whose symptom has been gone for its kind's while clears, unless it couldn't be asked this time (`unknown`).
   defp step(db, now, conditions, unknown) do
-    open = Map.new(query(db, "select * from alerts where state in ('firing', 'notified')", []), &{{&1["kind"], &1["key"]}, &1})
+    open = Map.new(query(db, "select * from alerts where state = 'firing'", []), &{{&1["kind"], &1["key"]}, &1})
 
     for {{kind, key} = id, condition} <- conditions do
       case open[id] do
         nil ->
           query(
             db,
-            "insert into alerts (kind, key, state, title, text, resolved, began, last) values (?, ?, 'firing', ?, ?, ?, ?, ?)",
-            [kind, key, condition.title, condition.text, condition.resolved, now, now]
+            "insert into alerts (kind, key, state, title, text, began, last) values (?, ?, 'firing', ?, ?, ?, ?)",
+            [kind, key, condition.title, condition.text, now, now]
           )
 
         row ->
-          query(db, "update alerts set title = ?, text = ?, resolved = ?, last = ? where id = ?", [
+          query(db, "update alerts set title = ?, text = ?, last = ? where id = ?", [
             condition.title,
             condition.text,
-            condition.resolved,
             now,
             row["id"]
           ])
@@ -464,48 +429,8 @@ defmodule Telemetry.Alerts do
     end
 
     for {{kind, _key} = id, row} <- open, not Map.has_key?(conditions, id), not unknown.(id), now - row["last"] >= @cool[kind] do
-      state = if row["state"] == "notified" and row["resolved"], do: "resolving", else: "resolved"
-      query(db, "update alerts set state = ?, ended = ? where id = ?", [state, now, row["id"]])
+      query(db, "update alerts set state = 'resolved', ended = ? where id = ?", [now, row["id"]])
     end
-  end
-
-  # What's to be told: each alert firing, and each resolving, with whether its kind is muted.
-  defp outbox(db) do
-    muted = for %{"kind" => kind} <- query(db, "select kind from muted", []), do: kind
-
-    for row <- query(db, "select * from alerts where state in ('firing', 'resolving') order by began", []) do
-      title = if row["state"] == "firing", do: row["title"], else: row["resolved"]
-      text = if row["state"] == "firing", do: row["text"]
-      %{id: row["id"], state: row["state"], title: title, text: text, muted: row["kind"] in muted}
-    end
-  end
-
-  # Tells the network's first owner each one not muted, then marks each told: firing is notified, and resolving
-  # resolved.
-  defp tell(_call, []), do: %{told: 0}
-
-  defp tell(call, outbox) do
-    owner = OneCore.User.first_owner()
-    notifications = Call.app(call, "notifications")
-
-    told =
-      for alert <- outbox, not alert.muted, owner do
-        notification = if alert.text, do: %{"text" => String.slice(alert.text, 0, 1000)}, else: %{}
-        notifications.send(call, Map.merge(notification, %{"title" => String.slice(alert.title, 0, 120), "to" => owner}))
-      end
-
-    transaction(call, fn db ->
-      for alert <- outbox do
-        query(db, "update alerts set state = ? where id = ? and state = ?", [
-          if(alert.state == "firing", do: "notified", else: "resolved"),
-          alert.id,
-          alert.state
-        ])
-      end
-    end)
-
-    Call.changed(call)
-    %{told: length(told)}
   end
 
   ## The database

@@ -173,18 +173,15 @@
         "kinds": [
           {
             "kind": "failing",
-            "about": "A tool keeps failing",
-            "muted": false
+            "about": "A tool keeps failing"
           },
           {
             "kind": "disk",
-            "about": "A disk is nearly full",
-            "muted": false
+            "about": "A disk is nearly full"
           },
           {
             "kind": "slow",
-            "about": "A tool is slow",
-            "muted": true
+            "about": "A tool is slow"
           }
         ]
       },
@@ -276,18 +273,15 @@
         "kinds": [
           {
             "kind": "failing",
-            "about": "A tool keeps failing",
-            "muted": false
+            "about": "A tool keeps failing"
           },
           {
             "kind": "disk",
-            "about": "A disk is nearly full",
-            "muted": false
+            "about": "A disk is nearly full"
           },
           {
             "kind": "slow",
-            "about": "A tool is slow",
-            "muted": true
+            "about": "A tool is slow"
           }
         ]
       }
