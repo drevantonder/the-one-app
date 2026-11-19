@@ -90,11 +90,15 @@ export const { render: mount, effect, memo, createComponent, createElement, crea
  * `currentTarget.value`; its action key's `action`; a key as `key` with its modifiers; how far a `scroll` has
  * scrolled as `currentTarget.scrollTop`; and a pointer where it is and where the node is drawn
  * (`currentTarget.getBoundingClientRect()`). What a host does with a key by itself isn't the page's, so
- * `preventDefault()` does nothing here. */
+ * `preventDefault()` does nothing here. What a handler throws is reported (`reportError`), as a browser's listener's is. */
 export function event({ id, name, editing, action, key, shiftKey, altKey, ctrlKey, metaKey, scrollTop, scrollLeft, rect, ...told }: Event) {
   const handler = nodes.get(id)?.deref()?.handlers[name]
   const target = { value: editing?.text ?? "", scrollTop: scrollTop ?? 0, scrollLeft: scrollLeft ?? 0, getBoundingClientRect: () => rect ?? { x: 0, y: 0, width: 0, height: 0 } }
-  handler?.({ ...told, currentTarget: target, target, editing, action, key: key ?? "", shiftKey: !!shiftKey, altKey: !!altKey, ctrlKey: !!ctrlKey, metaKey: !!metaKey, preventDefault() {} })
+  try {
+    handler?.({ ...told, currentTarget: target, target, editing, action, key: key ?? "", shiftKey: !!shiftKey, altKey: !!altKey, ctrlKey: !!ctrlKey, metaKey: !!metaKey, preventDefault() {} })
+  } catch (error) {
+    reportError(error)
+  }
 }
 
 /** Takes `node` out of what it's in, as Solid takes a node out. */

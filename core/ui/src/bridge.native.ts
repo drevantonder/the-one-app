@@ -1,7 +1,7 @@
 // The bridge on a native host, as the DOM's (../../bridge.ts): the JSON-RPC a page and its client say to each other,
 // through the host, and what the client says of where the page is shown. The UI library's components import it as
 // `#bridge`, which is this in the native build and the DOM's in the DOM's.
-import { createSignal } from "solid-js"
+import { configureClientErrors, createSignal } from "solid-js"
 import { event } from "./drawing-primitives/renderer.native.ts"
 import type { Host, Sandbox } from "./calls.ts"
 import type { Event, Events } from "./drawing-primitives/renderer.ts"
@@ -31,6 +31,20 @@ const keys = new Set<(event: Page.Keyed) => void>()
     else if (message.id !== undefined) waiting.get(message.id)?.(message)
   },
 }
+
+/// A page's errors are logged to its client, as the DOM's bridge logs them (MCP's `notifications/message`), which tells
+/// Telemetry: what threw in a listener or a timer, a promise nothing handled, and what an `<Errored>` boundary caught
+/// and shows, with where it was thrown from its stack.
+const logged = (message: unknown, file?: string, line?: number) =>
+  host?.post({ jsonrpc: "2.0", method: "notifications/message", params: { level: "error", data: { message: String(message), file, line } } })
+addEventListener("error", ({ message, filename, lineno }) => logged(message, filename, lineno))
+addEventListener("unhandledrejection", ({ reason }) => logged(reason?.message ?? reason))
+configureClientErrors({
+  onError(error) {
+    const [, file, line] = /([a-z]+:\/\/[^\s()]+?):(\d+):\d+/.exec((error as Error)?.stack ?? "") ?? []
+    logged((error as Error)?.message ?? error, file, line ? Number(line) : undefined)
+  },
+})
 
 function ask<T>(method: string, params: object): Promise<T> {
   const id = ++requests

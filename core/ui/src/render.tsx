@@ -5,6 +5,7 @@ import { Errored } from "solid-js"
 import type { JSX } from "@solidjs/web"
 import { render as draw } from "#primitives"
 import { Button } from "./styled-components/button.tsx"
+import { Screen } from "./styled-components/screen.tsx"
 import { Problem } from "./styled-components/states.tsx"
 import { messages } from "./words.ts"
 
@@ -15,15 +16,17 @@ export const render = (code: () => JSX.Element): (() => void) =>
   draw(() => (
     <Errored
       fallback={(error, reset) => (
-        <Problem
-          heading={messages.cantShowPage}
-          text={error() as Error}
-          action={
-            <Button variant="outline" onPress={reset}>
-              {messages.tryAgain}
-            </Button>
-          }
-        />
+        <Screen>
+          <Problem
+            heading={messages.cantShowPage}
+            text={error() as Error}
+            action={
+              <Button variant="outline" onPress={reset}>
+                {messages.tryAgain}
+              </Button>
+            }
+          />
+        </Screen>
       )}
     >
       {code()}
