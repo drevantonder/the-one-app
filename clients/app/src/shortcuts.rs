@@ -490,16 +490,12 @@ mod device {
     /// An app's icon as a Mac app's (`badged`), as an .icns of PNGs at the sizes macOS asks for.
     fn icns(icon: &str) -> anyhow::Result<Vec<u8>> {
         let whole = super::badged_pixmap(icon)?;
-        let mut entries = Vec::new();
-        for (kind, side) in [(b"ic10", 1024u32), (b"ic09", 512), (b"ic08", 256), (b"ic07", 128), (b"ic12", 64), (b"ic11", 32)] {
-            let png = super::scaled(&whole, side)?.encode_png()?;
-            entries.extend_from_slice(kind);
-            entries.extend_from_slice(&(png.len() as u32 + 8).to_be_bytes());
-            entries.extend_from_slice(&png);
+        let mut family = icns::IconFamily::new();
+        for (kind, side) in [(*b"ic10", 1024), (*b"ic09", 512), (*b"ic08", 256), (*b"ic07", 128), (*b"ic12", 64), (*b"ic11", 32)] {
+            family.elements.push(icns::IconElement::new(icns::OSType(kind), super::scaled(&whole, side)?.encode_png()?));
         }
-        let mut icns = b"icns".to_vec();
-        icns.extend_from_slice(&(entries.len() as u32 + 8).to_be_bytes());
-        icns.extend_from_slice(&entries);
+        let mut icns = Vec::new();
+        family.write(&mut icns)?;
         Ok(icns)
     }
 }

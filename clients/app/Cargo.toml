@@ -53,6 +53,7 @@ window = [
   "dep:resvg",
   "dep:windows",
   "dep:ico",
+  "dep:icns",
   "dep:wry",
   "dep:tao",
   "dep:muda",
@@ -127,8 +128,9 @@ tray-icon = { version = "0.25", optional = true }
 [target.'cfg(target_vendor = "apple")'.dependencies]
 objc2 = { version = "0.6", optional = true }
 
-# A Mac app's menu bar (`host`, `computer`).
+# A Mac app's menu bar (`host`, `computer`), and each app's icon as its bundle's .icns (`shortcuts`).
 [target.'cfg(target_os = "macos")'.dependencies]
+icns = { version = "0.5", default-features = false, optional = true }
 muda = { version = "0.20", optional = true }
 objc2-foundation = { version = "0.3", default-features = false, features = ["std", "objc2-core-foundation", "NSGeometry"], optional = true }
 
