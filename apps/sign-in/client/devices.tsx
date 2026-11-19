@@ -54,6 +54,8 @@ interface Service {
   service: string
   called: string
   needs?: string
+  /** The systems it runs on, as npm's `os` names them; nothing for any. */
+  os?: string[] | null
   servers: string[]
 }
 
@@ -69,6 +71,7 @@ interface Thing extends ServerStatus {
   build?: string
   behind?: boolean
   subject?: string
+  target?: string
   services?: (Service & { on: boolean })[]
 }
 
@@ -259,6 +262,8 @@ function Detail(props: { thing: Thing; all: All; groups?: Groups }) {
     await doing(() => client({ serve: now }).then(({ message }) => toast(message)))
     setServing()
   }
+  // A service that runs on some systems only shows on servers of those.
+  const runnable = () => (server()?.services ?? []).filter((service) => !service.os?.length || !system(server()!.target) || service.os.includes(system(server()!.target)!))
   const stage = () => (updating(thing()) ? (thing().server_update_status as keyof typeof updates) : undefined)
   // This device becoming a server, or stopping being one, at the stage the app says.
   const membership = () => (thing().here && thing().kind === "app" ? props.all.here.server : undefined)
@@ -302,10 +307,10 @@ function Detail(props: { thing: Thing; all: All; groups?: Groups }) {
           </List>
         </Section>
       </Show>
-      <Show when={server()?.services?.length}>
+      <Show when={runnable().length}>
         <Section heading="Services">
           <List>
-            <For each={server()!.services!} keyed={(service) => `${service.app}/${service.service}`}>
+            <For each={runnable()} keyed={(service) => `${service.app}/${service.service}`}>
               {(service) => (
                 <Row
                   heading={service().called}
@@ -419,6 +424,9 @@ function Answer(props: { device?: Waiting }) {
     </Sheet>
   )
 }
+
+/// A build's target, `macos-aarch64`, as npm names its system: `darwin`.
+const system = (target?: string) => ({ linux: "linux", macos: "darwin", windows: "win32" })[target?.split("-")[0] as "linux"]
 
 /// What kind of thing a device is, by its glyph in a well, as Raycast's Settings draws one: an app on a device, a
 /// browser, an assistant or a server.
