@@ -1348,17 +1348,20 @@ impl Screen {
     }
 
     /// Whether a finger that landed at `at` and has moved `by` (its first move past the slop) pans, as a browser decides
-    /// by `touch-action`: from what it's on outwards, what can scroll that way scrolls; a node that listens for its
-    /// pointer keeps the finger, its moves its own, unless it says the device pans that way (`touchAction`); and with
-    /// neither, the device pans.
+    /// by `touch-action`: from what it's on outwards, what can still scroll that way scrolls; a node that listens for
+    /// its pointer keeps the finger, its moves its own, unless it says the device pans that way (`touchAction`); and
+    /// with neither, the device pans. So a sheet's content scrolled to its top, pulled down, is the sheet's to pull,
+    /// as an iPhone's and Android's sheets take it.
     pub fn pans(&self, at: Point<f32>, by: Point<f32>) -> bool {
         let along = by.x.abs() > by.y.abs();
         for id in self.under(at) {
             let Some(placed) = self.placed(id) else { continue };
-            if let Some((most_y, most_x, _)) = placed.scroll
-                && (if along { most_x } else { most_y }) > 0.0
-            {
-                return true;
+            if let Some((most_y, most_x, _)) = placed.scroll {
+                let now = self.scrolled.get(&id).copied().unwrap_or(point(0.0, 0.0));
+                let (finger, now, most) = if along { (by.x, now.x, most_x) } else { (by.y, now.y, most_y) };
+                if (finger < 0.0 && now < most) || (finger > 0.0 && now > 0.0) {
+                    return true;
+                }
             }
             if self.tree.nodes.get(&id).is_some_and(|node| node.listens("pointermove") || node.listens("pointerdown")) {
                 return placed.touch_action == Some(if along { style::Pan::X } else { style::Pan::Y });
