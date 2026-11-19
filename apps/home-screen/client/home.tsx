@@ -57,6 +57,7 @@ const looks = styles({
   search: { flexDirection: "row", alignItems: "center", zIndex: 6 },
   owner: { position: "absolute", overflow: "hidden" },
   track: { position: "absolute", top: 0, start: 0, flexDirection: "row" },
+  turning: { flexDirection: "row", transitionProperty: ["translateX"], transition: tokens.motion.snappy },
   layer: { position: "absolute", alignItems: "center" },
   row: { position: "absolute", start: 0, end: 0, alignItems: "center", justifyContent: "center" },
   inert: { pointerEvents: "none" },
@@ -1824,12 +1825,18 @@ function HomeScreen(props: { owners: Owner[] }) {
     { equals: (a, b) => a.width === b.width && a.height === b.height },
   )
   const cardLeft = () => (viewport().width - card().width) / 2
-  /// How far an owner's pages are moved along in the card: where they are, and past Home's last screenful, on the way
+  /// How far an owner's pages are moved along in the card, at `x`: there, and past Home's last screenful, on the way
   /// to the App Library, which cross-fades in, giving rather than sliding on.
-  const trackX = (owner: number) => {
-    const [x, end] = [xOf(owner)[0](), Math.max(0, homes(owner).length - 1) * PAGE]
+  const trackX = (owner: number, x = xOf(owner)[0]()) => {
+    const end = Math.max(0, homes(owner).length - 1) * PAGE
     return x > end ? end + give(x - end, PAGE) : x
   }
+  /// How far the arrow keys and the dots have turned an owner's pages in the card, in points, which the host's own
+  /// spring moves them by: a native host runs it beside its drawing, where a spring run in JavaScript a frame at a
+  /// time crosses to it every frame, on a timer of the page's that the display's frames don't drive, and judders.
+  /// Where the pages are is the rest, which follows the fingers, and the spring JavaScript runs as they lift.
+  const turns: [() => number, (x: number) => void][] = []
+  const turnOf = (owner: number) => (turns[owner] ??= createSignal(0))
   /// What was typed, kept a moment as it's emptied, while what it found fades.
   const [words] = lingering(() => query().trim() && query(), 400)
   const cardRect = () => ({ x: cardLeft(), y: CARD_TOP, width: card().width, height: card().height })
@@ -2013,8 +2020,16 @@ function HomeScreen(props: { owners: Owner[] }) {
     // phone's do.
     const roll = smooth && !untrack(launcher) ? glide : jump
     roll(down, at.owner * height())
-    const turn = smooth ? glide : jump
-    turn(sideways(at.owner), at.screen * pitch())
+    const [moving, to] = [sideways(at.owner), at.screen * pitch()]
+    // The launcher's turn by its host's spring, from where they're drawn, unless they're to cross-fade.
+    if (smooth && untrack(launcher) && !untrack(reducedMotion)) {
+      stop(moving)
+      const [turned, setTurned] = turnOf(at.owner)
+      setTurned(untrack(turned) + untrack(() => trackX(at.owner, to) - trackX(at.owner, moving.value)))
+      return jump(moving, to)
+    }
+    if (smooth) glide(moving, to)
+    else jump(moving, to)
   }
 
   // A finger on the pages moves them, as a phone's: once it has moved far enough to say which way, along an owner's
@@ -2426,17 +2441,19 @@ function HomeScreen(props: { owners: Owner[] }) {
                     inert={!shown() || undefined}
                     style={[looks.owner, looks.rolling, !shown() && looks.inert, looks.at(INSET, PILLS, pagesAcross(index()) * PAGE, halves(index()) ? halfHeight(room()) : room().height), looks.drifted(shown() ? 1 : 0, (index() - state().context.at.owner) * 40)]}
                   >
-                    <View style={[looks.track, looks.slid(-trackX(index()), opacityOf(index())[0]())]}>
-                      <For each={pages()[index()] ?? []} keyed={false}>
-                        {(placed, at) => (
-                          <Show when={halves(index())} fallback={<Page page={at} placed={placed()} />}>
-                            <Page page={at} placed={placed().filter((one) => one.row <= 3)} />
-                            <Show when={pagesAcross(index()) > 1}>
-                              <Page page={at} placed={placed().flatMap((one) => (one.row > 3 ? [{ ...one, row: one.row - 3 }] : []))} />
+                    <View style={[looks.track, looks.slid(turnOf(index())[0]() - trackX(index()), opacityOf(index())[0]())]}>
+                      <View style={[looks.turning, looks.shifted(-turnOf(index())[0]())]}>
+                        <For each={pages()[index()] ?? []} keyed={false}>
+                          {(placed, at) => (
+                            <Show when={halves(index())} fallback={<Page page={at} placed={placed()} />}>
+                              <Page page={at} placed={placed().filter((one) => one.row <= 3)} />
+                              <Show when={pagesAcross(index()) > 1}>
+                                <Page page={at} placed={placed().flatMap((one) => (one.row > 3 ? [{ ...one, row: one.row - 3 }] : []))} />
+                              </Show>
                             </Show>
-                          </Show>
-                        )}
-                      </For>
+                          )}
+                        </For>
+                      </View>
                     </View>
                   </View>
                 )
