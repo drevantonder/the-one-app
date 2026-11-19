@@ -83,14 +83,6 @@ type Legacy = { from: string; protocol: number };
 /** The protocols the edge speaks, from `oldest` to `newest`. */
 const SPEAKS: Protocol = { oldest: PROTOCOL_CONFIG.oldest, newest: PROTOCOL_CONFIG.newest };
 const LEGACY: Legacy | undefined = (PROTOCOL_CONFIG as { legacy?: Legacy }).legacy;
-/** Semantic version `[major, minor, patch, release]` of a build string, or `undefined` if it isn't one. */
-const semver = (version: string | undefined): [number, number, number, number] | undefined => {
-  const match = /^(\d+)\.(\d+)\.(\d+)(-[^+]+)?(?:\+.*)?$/.exec(version ?? "");
-  return match ? [Number(match[1]), Number(match[2]), Number(match[3]), match[4] ? 0 : 1] : undefined;
-};
-const LEGACY_FROM = LEGACY ? semver(LEGACY.from) : undefined;
-const atLeast = (a: [number, number, number, number], b: [number, number, number, number]) =>
-  (a[0] - b[0] || a[1] - b[1] || a[2] - b[2] || a[3] - b[3]) >= 0;
 /**
  * The protocols a part speaks, as it `said`, or where it said none, as its build, `version`, says: none known for
  * one that says neither. Parts built before they said theirs, as phones whose people haven't updated them are, speak
@@ -100,8 +92,9 @@ const atLeast = (a: [number, number, number, number], b: [number, number, number
 function spoken(said: unknown, version: string | undefined): Protocol | undefined {
   const { oldest, newest } = (said ?? {}) as Partial<Protocol>;
   if (Number.isInteger(oldest) && Number.isInteger(newest) && oldest! <= newest!) return { oldest: oldest!, newest: newest! };
-  const parsed = LEGACY_FROM && semver(version);
-  return parsed && atLeast(parsed, LEGACY_FROM) ? { oldest: LEGACY!.protocol, newest: LEGACY!.protocol } : undefined;
+  // Builds are `0.23.54+3462.3dd36ee6395b`; one that isn't a version (`2934-ae4b619e8cf5`) is from before any.
+  const legacy = LEGACY && /^\d+\.\d+\.\d+/.test(version ?? "") && version!.localeCompare(LEGACY.from, "en", { numeric: true }) >= 0;
+  return legacy ? { oldest: LEGACY.protocol, newest: LEGACY.protocol } : undefined;
 }
 /** Whether a part that speaks `theirs` talks with the edge: their ranges overlap. */
 const talk = (theirs: Protocol | undefined) => !!theirs && theirs.oldest <= SPEAKS.newest && SPEAKS.oldest <= theirs.newest;
