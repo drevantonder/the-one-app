@@ -7,8 +7,8 @@
 /// it draws with from the UI library: `import { Screen, List, Row, call } from "ui"`. The UI library looks the same in every
 /// app, light and dark, under a finger and with a mouse, and right to left. A page shows pictures only from `data:`
 /// addresses and its app's own files. An app may be TypeScript (`.tsx`, `.ts`) as well as JavaScript.
-/// **A page.** An app's page runs natively, on our renderer on a computer and Android, and unchanged on the DOM
-/// everywhere else (the web, an iPhone, MCP Apps). Its `tsconfig.json` is `{ "extends": "<ui>/tsconfig.app.json",
+/// **A page.** An app's page runs natively, on our renderer on a computer, an iPhone and Android, and unchanged on the
+/// DOM in a browser and in MCP Apps. Its `tsconfig.json` is `{ "extends": "<ui>/tsconfig.app.json",
 /// "include": ["**/*"] }` (in this repo `../../../core/ui/tsconfig.app.json`; the UI library's types are `one code
 /// --name ui`), and its entrypoint names it with the runtime version it needs: `%{page: "client/index.html",
 /// runtime_version: 4}`. It's written with the UI library alone: its components and the drawing primitives,
@@ -39,8 +39,7 @@
 export { call, changed, client, component, connection, covers, direction, go, haptic, keydown, leave, link, open, pinShortcut, reducedMotion, safeArea, showRecoveryKey, sizeChanged, upload, useRecoveryKey, viewport, visible } from "./bridge.ts"
 export { share } from "./shared.ts"
 export { seen, since, size } from "./format.ts"
-export { Button, Icon, Spinner } from "./styled-components/button.tsx"
-export { Badge } from "./styled-components/badge.tsx"
+export { Badge, Button, Icon, Spinner } from "./styled-components/button.tsx"
 export { Checkbox, Field, Input, RadioGroup, Search, Switch, Textarea } from "./styled-components/field.tsx"
 export { createVelocityTracker } from "./behavior-primitives/velocity.ts"
 export { Select } from "./styled-components/select.tsx"
