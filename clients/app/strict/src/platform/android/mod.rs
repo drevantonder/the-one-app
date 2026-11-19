@@ -208,11 +208,11 @@ impl Display {
     /// An Android view has no panel.
     pub fn set_glass(&self, _: &NativeWindow, _: &[crate::platform::Glass]) {}
 
-    /// Android's keyboard is told where the field is as it's focused (`keyboard`), not where the caret is each frame.
     /// Its title row over its page: none here, where the system's own title bar is above the page and moves the window.
     pub fn set_title_row(&self, _: &NativeWindow, _: Option<crate::view::TitleRow>) {}
 
-    pub fn set_ime(&self, _: &NativeWindow, _: Option<crate::geometry::Bounds<f32>>) {}
+    /// Android's text input plugin is told by `keyboard`, as its view's calls change the screen.
+    pub fn text_input(&self, _: &NativeWindow, _: &[crate::editing::TextInput]) {}
 
     pub fn flush(&self) {}
 

@@ -7916,6 +7916,7 @@ dependencies = [
  "blade-util",
  "bytemuck",
  "calloop",
+ "cc",
  "core-foundation 0.10.1",
  "core-graphics 0.24.0",
  "core-text",

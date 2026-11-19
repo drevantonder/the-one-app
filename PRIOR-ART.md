@@ -33,14 +33,20 @@ None of these is chosen. Each is named so it's weighed before anything like it i
   ours for our closed set of primitives and tokens, with code copied in rather than depended on, so the repo stays MIT.
   Each copied file keeps its source's notice and says where it came from and at which upstream commit.
   - **GPUI** (Zed, Apache-2.0): its scene, shaders, glyph atlas and renderers (Metal, DX11, Blade with Vulkan), its
-    text system (CoreText, DirectWrite, cosmic-text) and its desktop windows, input, IME and panel code. Not its App,
+    text system (CoreText, DirectWrite, cosmic-text) and its desktop windows, input and panel code. Not its App,
     Entity and View layers, which Solid strict replaces, and not as a dependency.
   - **Taffy**: layout.
   - **Rune** (anomalyco/rune, MIT): its text editing model (cursor, selection, bidi, undo, IME composition), and the
     design of its inspector. Rune itself as the renderer was set aside: weak IME on Windows and Linux, and it takes no
     pull requests.
-  - **Flutter's Android embedder** (BSD-3): its windowing, keyboard bridge (`InputConnection`) and autofill. Every
-    keyboard bridge speaks Flutter's editing state (text, selection, composing range, actions).
+  - **Flutter's Android embedder** (BSD-3): its windowing, keyboard bridge (`InputConnection`) and autofill.
+  - **Flutter's text input plugins** (BSD-3, 19 November 2026): typing on every platform goes through Flutter's own
+    bridge, which keeps the input's editing state itself and speaks Flutter's text input protocol (set client, editing
+    state, caret and marked text rects, editable transform, actions) with our editing model: Android's
+    `TextInputPlugin`, the Mac's `FlutterTextInputPlugin` (Objective-C, in place of GPUI's `NSTextInputClient`) and
+    Windows' `TextInputPlugin` with its IMM32 `TextInputManager` (C++, in place of GPUI's), with its shared
+    `TextInputModel`, built with the `cc` crate and their engine connections replaced by a small C interface. Linux
+    keeps GPUI's XIM: Flutter's GTK plugin needs GTK's input method context, which our X11 window hasn't.
   - **AccessKit**: accessibility, from one semantic tree, wired as GPUI wires it.
   - **React Native's JSI and Fabric**: how a page's JS tells the host what to draw. Each mutation is a direct call of a
     host function with its values as they are, applied once a turn of the sandbox has run, as Fabric's mounting layer

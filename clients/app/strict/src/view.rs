@@ -22,6 +22,7 @@ use crate::tokens::{Conditions, Radius};
 use crate::tree::{Id, Kind, Node, Tree};
 
 mod bridge;
+pub use bridge::TextInputConnection;
 pub(crate) mod inspected;
 mod transition;
 

@@ -1,18 +1,87 @@
-//! What a phone's platform asks of a screen beyond a computer's pointer and keys: its keyboard bridge (Android's
-//! `InputConnection`, through Flutter's `TextInputPlugin`), which keeps the input's whole editing state itself and
-//! says it back as the renderer's `Editing` (`editing::Value`); its autofill, which fills any field; its screen
-//! reader, which presses, focuses and scrolls by node; and a finger, which pans what scrolls and may be lifted off what
-//! it pressed.
+//! What a platform asks of a screen beyond a pointer and keys: its keyboard bridge (Flutter's text input plugin, on
+//! Android through its `InputConnection`, on a Mac and Windows through their input methods), which keeps the input's
+//! whole editing state itself and says it back (`editing::TextInputClient`), and is told of the input with the
+//! keyboard as Flutter's framework tells it (`TextInputConnection`); a phone's autofill, which fills any field; its
+//! screen reader, which presses, focuses and scrolls by node; and a finger, which pans what scrolls and may be lifted
+//! off what it pressed.
 
 use serde_json::{Value, json};
 
 use super::Screen;
-use crate::editing;
-use crate::geometry::{Point, point};
+use crate::editing::{self, TextInput, TextInputClient};
+use crate::geometry::{Bounds, Point, point};
 use crate::inspect::Rect;
 use crate::tree::{Id, Kind};
 
+/// What a window's text input plugin was last told, as Flutter's framework keeps its `TextInputConnection`: the input
+/// it's attached to, that input's editing state as the plugin has it, and where its caret is, so only what changed is
+/// told again.
+#[derive(Default)]
+pub struct TextInputConnection {
+    client: Option<Id>,
+    value: Option<editing::Value>,
+    caret: Option<Bounds<f32>>,
+}
+
 impl Screen {
+    /// What window's text input plugin is to be told, as the input with the keyboard, its editing state or its caret
+    /// changed since `connection` was: attached to an input that takes typing as it takes the keyboard, detached as it
+    /// loses it, as Flutter's `TextInput.attach` and `TextInputConnection.close` call it.
+    pub fn text_input(&self, connection: &mut TextInputConnection) -> Vec<TextInput> {
+        let typing = self.focused.filter(|id| self.fields.get(id).is_some_and(|field| !field.readonly));
+        let mut calls = Vec::new();
+        if connection.client != typing {
+            if connection.client.is_some() {
+                calls.extend([TextInput::ClearClient, TextInput::Hide]);
+            }
+            *connection = TextInputConnection::default();
+            if let (Some(id), Some(field), Some(value)) = (typing, typing.and_then(|id| self.field(id)), self.editing()) {
+                let rect = self.rects.get(&id).copied().unwrap_or(Rect { x: 0.0, y: 0.0, width: 0.0, height: 0.0 });
+                // Its own coordinates are the window's: the caret is told where it is in the window.
+                let identity = [1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0, 0.0, 0.0, 0.0, 0.0, 1.0];
+                calls.extend([
+                    TextInput::SetClient(id, editing::configuration(&field, &value)),
+                    TextInput::SetEditableSizeAndTransform { width: rect.width, height: rect.height, transform: identity },
+                    TextInput::SetEditingState(value.clone()),
+                    TextInput::Show,
+                ]);
+                (connection.client, connection.value) = (Some(id), Some(value));
+            }
+        }
+        if connection.client.is_none() {
+            return calls;
+        }
+        let value = self.editing();
+        if value.is_some() && connection.value != value {
+            calls.push(TextInput::SetEditingState(value.clone().expect("checked")));
+            connection.value = value;
+        }
+        let caret = self.caret_rect();
+        if connection.caret != caret {
+            if let Some(caret) = caret {
+                calls.extend([TextInput::SetCaretRect(caret), TextInput::SetMarkedTextRect(caret)]);
+            }
+            connection.caret = caret;
+        }
+        calls
+    }
+
+    /// What window's text input plugin says, to the input it's attached to (`connection`): its whole editing state,
+    /// which it then has, or its action key.
+    pub fn text_input_client(&mut self, connection: &mut TextInputConnection, said: TextInputClient) {
+        match said {
+            TextInputClient::UpdateEditingState(client, value) if connection.client == Some(client) => {
+                self.set_editing(client, &value);
+                connection.value = Some(value);
+            }
+            // A newline action has typed its line break; any other is the Enter key, which the page hears.
+            TextInputClient::PerformAction(client, action) if connection.client == Some(client) && action != "TextInputAction.newline" => {
+                self.key(&crate::inspect::Key { key: "Enter".into(), shift: false, alt: false, ctrl: false, meta: false });
+            }
+            _ => {}
+        }
+    }
+
     /// What has the keyboard.
     pub fn focused(&self) -> Option<Id> {
         self.focused

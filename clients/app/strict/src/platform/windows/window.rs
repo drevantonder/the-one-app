@@ -1,8 +1,8 @@
 // Copied from Zed's GPUI (github.com/zed-industries/zed, crates/gpui/src/platform/windows/window.rs and events.rs) at
 // commit 69e2130295c2649963eb639fc70b4f2ee8ea1624 (gpui 0.2.2 on crates.io), and cut down for the strict host: every
 // strict window on the windows' thread, made with one class, each drawn by DirectComposition (so it has no GDI surface of
-// its own), per-monitor DPI aware, its keys from WM_KEYDOWN and WM_CHAR, an input method's composition and result
-// through IMM32 (events.rs's `handle_ime_composition`, `handle_ime_position`), its mouse and wheel, its cursor, and its
+// its own), per-monitor DPI aware, its keys from WM_KEYDOWN and WM_CHAR, what's typed and composed through Flutter's
+// text input plugin and its IMM32 input method (`text_input.cc`, in place of events.rs's), its mouse and wheel, its cursor, and its
 // frame and caption buttons Windows' own, coloured as the page's background, light or dark as the system is. A panel
 // (a launcher's) is a popup with no frame, topmost and out of the taskbar, over Windows 11's Acrylic with its round
 // corners, as GPUI's `WindowBackgroundAppearance::Blurred` asks DWM for a system backdrop. No client-side title bar,
@@ -11,6 +11,7 @@
 // (clients/app/strict/LICENSE-APACHE); this file is changed from the original.
 
 use std::cell::{Cell, RefCell};
+use std::ffi::{CStr, CString, c_char, c_void};
 use std::collections::HashMap;
 use std::num::NonZeroIsize;
 use std::rc::Rc;
@@ -25,11 +26,7 @@ use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::UI::HiDpi::{
     AdjustWindowRectExForDpi, DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2, GetDpiForWindow, SetThreadDpiAwarenessContext,
 };
-use windows::Win32::UI::Input::Ime::{
-    CANDIDATEFORM, CFS_CANDIDATEPOS, CFS_POINT, COMPOSITIONFORM, GCS_COMPSTR, GCS_CURSORPOS, GCS_RESULTSTR, HIMC, IACE_DEFAULT,
-    IME_COMPOSITION_STRING, ImmAssociateContextEx, ImmGetCompositionStringW, ImmGetContext, ImmReleaseContext, ImmSetCandidateWindow,
-    ImmSetCompositionWindow,
-};
+use windows::Win32::UI::Input::Ime::{HIMC, IACE_DEFAULT, ImmAssociateContextEx};
 use windows::Win32::System::SystemServices::MK_SHIFT;
 use windows::Win32::UI::Input::KeyboardAndMouse::{ReleaseCapture, SetCapture, TME_LEAVE, TRACKMOUSEEVENT, TrackMouseEvent, VIRTUAL_KEY};
 use windows::Win32::UI::Controls::WM_MOUSELEAVE;
@@ -38,8 +35,8 @@ use windows::core::{BOOL, HSTRING, PCWSTR, w};
 
 use super::keyboard;
 use crate::Cursor;
-use crate::editing::Ime;
-use crate::geometry::{Bounds, DevicePixels, Pixels, Point, Size};
+use crate::editing::{TextInput, TextInputClient, Value};
+use crate::geometry::{DevicePixels, Pixels, Point, Size};
 use crate::platform::{Input, WindowId, WindowOptions};
 
 const WINDOW_CLASS_NAME: PCWSTR = w!("One::Strict");
@@ -70,9 +67,8 @@ struct State {
     tracking: Cell<bool>,
     /// The first half of a character WM_CHAR sends in two.
     high_surrogate: Cell<Option<u16>>,
-    /// Where the caret of the input that takes typing is, in device pixels, which the input method shows what it
-    /// composes at, or none when no input does, and the input method is off.
-    caret: Cell<Option<POINT>>,
+    /// Its text input plugin, Flutter's (`text_input.cc`).
+    text_input: Plugin,
 }
 
 impl rwh::HasWindowHandle for NativeWindow {
@@ -135,7 +131,7 @@ impl Display {
             cursor: Cell::new(self.cursor(Cursor::Arrow)),
             tracking: Cell::new(false),
             high_surrogate: Cell::new(None),
-            caret: Cell::new(Some(POINT::default())),
+            text_input: Plugin(Cell::new(std::ptr::null_mut())),
         });
         let panel = options.panel.is_some();
         let style = if panel { WS_POPUP } else { WS_OVERLAPPEDWINDOW };
@@ -159,6 +155,12 @@ impl Display {
             )
         }
         .context("CreateWindowExW failed")?;
+        let channel = TextInputChannel { context: Rc::as_ptr(&state).cast_mut().cast(), update_editing_state, perform_action };
+        state.text_input.0.set(unsafe { text_input_new(hwnd, channel) });
+        // Its input method is off until an input takes typing.
+        unsafe {
+            let _ = ImmAssociateContextEx(hwnd, HIMC::default(), 0);
+        }
         // Its size at the DPI of the monitor it's on, with its frame around it.
         let dpi = unsafe { GetDpiForWindow(hwnd) };
         let scale = dpi as f32 / USER_DEFAULT_SCREEN_DPI as f32;
@@ -283,24 +285,43 @@ impl Display {
         })
     }
 
-    /// The input with window `window`'s keyboard takes typing, its caret at `caret` (in the window's logical pixels),
-    /// or none does: the input method is on there, and shows what it composes under the caret, or it's off.
     /// Its title row over its page: none here, where the system's own title bar is above the page and moves the window.
     pub fn set_title_row(&self, _: &NativeWindow, _: Option<crate::view::TitleRow>) {}
 
-    pub fn set_ime(&self, window: &NativeWindow, caret: Option<Bounds<f32>>) {
-        let scale = window.scale();
-        let spot = caret.map(|caret| POINT { x: (caret.origin.x * scale) as i32, y: ((caret.origin.y + caret.size.height) * scale) as i32 });
-        let was = window.state.caret.replace(spot);
-        if was == spot {
-            return;
-        }
-        unsafe {
-            if spot.is_some() != was.is_some() {
-                // On, as the window's default; off, with no context of its own.
-                let _ = ImmAssociateContextEx(window.hwnd, HIMC::default(), if spot.is_some() { IACE_DEFAULT } else { 0 });
+    /// Tells window `window`'s text input plugin what the screen says (`editing::TextInput`), its method calls decoded.
+    /// Its input method is on while an input takes typing, and off while none does.
+    pub fn text_input(&self, window: &NativeWindow, calls: &[TextInput]) {
+        let plugin = window.state.text_input.get();
+        for call in calls {
+            unsafe {
+                match call {
+                    TextInput::SetClient(id, configuration) => {
+                        let (kind, action) = (cstring(configuration["inputType"]["name"].as_str().unwrap_or_default()), cstring(configuration["inputAction"].as_str().unwrap_or_default()));
+                        text_input_set_client(plugin, *id as i32, kind.as_ptr(), action.as_ptr());
+                        let _ = ImmAssociateContextEx(window.hwnd, HIMC::default(), IACE_DEFAULT);
+                    }
+                    TextInput::ClearClient => {
+                        text_input_clear_client(plugin);
+                        let _ = ImmAssociateContextEx(window.hwnd, HIMC::default(), 0);
+                    }
+                    TextInput::SetEditingState(value) => {
+                        let state = value.flutter();
+                        let at = |key: &str| state[key].as_i64().unwrap_or(-1) as i32;
+                        let text = cstring(&value.text);
+                        let (base, extent) = (at("selectionBase"), at("selectionExtent"));
+                        text_input_set_editing_state(plugin, text.as_ptr(), base, extent, at("composingBase"), at("composingExtent"));
+                    }
+                    TextInput::SetMarkedTextRect(rect) => {
+                        let (x, y, width, height) = (rect.origin.x.into(), rect.origin.y.into(), rect.size.width.into(), rect.size.height.into());
+                        text_input_set_marked_text_rect(plugin, x, y, width, height);
+                    }
+                    TextInput::SetEditableSizeAndTransform { transform, .. } => {
+                        let transform = transform.map(f64::from);
+                        text_input_set_editable_transform(plugin, transform.as_ptr());
+                    }
+                    TextInput::SetCaretRect(_) | TextInput::Show | TextInput::Hide => {}
+                }
             }
-            place_ime(window.hwnd, spot);
         }
     }
 
@@ -320,28 +341,62 @@ impl Display {
     }
 }
 
-/// Where the input method shows what it composes and its candidates: under the caret.
-unsafe fn place_ime(hwnd: HWND, spot: Option<POINT>) {
-    let Some(spot) = spot else { return };
-    unsafe {
-        let context = ImmGetContext(hwnd);
-        let _ = ImmSetCompositionWindow(context, &COMPOSITIONFORM { dwStyle: CFS_POINT, ptCurrentPos: spot, ..Default::default() });
-        let _ = ImmSetCandidateWindow(context, &CANDIDATEFORM { dwStyle: CFS_CANDIDATEPOS, ptCurrentPos: spot, ..Default::default() });
-        let _ = ImmReleaseContext(hwnd, context);
+/// A window's text input plugin (`text_input.cc`): Flutter's, as a C interface.
+struct Plugin(Cell<*mut c_void>);
+
+impl Plugin {
+    fn get(&self) -> *mut c_void {
+        self.0.get()
     }
 }
 
-/// The input method's composition string of `kind`, as it is now.
-unsafe fn composition(context: HIMC, kind: IME_COMPOSITION_STRING) -> Option<String> {
-    unsafe {
-        let length = ImmGetCompositionStringW(context, kind, None, 0);
-        if length < 0 {
-            return None;
-        }
-        let mut buffer = vec![0u16; length as usize / 2];
-        ImmGetCompositionStringW(context, kind, Some(buffer.as_mut_ptr().cast()), length as u32);
-        Some(String::from_utf16_lossy(&buffer))
+impl Drop for Plugin {
+    fn drop(&mut self) {
+        unsafe { text_input_free(self.0.get()) };
     }
+}
+
+/// Flutter's TextInputClient calls, as the plugin makes them (`flutter/.../windows/text_input_channel.h`).
+#[repr(C)]
+struct TextInputChannel {
+    context: *mut c_void,
+    update_editing_state: extern "C" fn(*mut c_void, i32, *const c_char, i32, i32, i32, i32),
+    perform_action: extern "C" fn(*mut c_void, i32, *const c_char),
+}
+
+unsafe extern "C" {
+    fn text_input_new(window: HWND, channel: TextInputChannel) -> *mut c_void;
+    fn text_input_free(plugin: *mut c_void);
+    fn text_input_has_client(plugin: *mut c_void) -> bool;
+    fn text_input_set_client(plugin: *mut c_void, client: i32, input_type: *const c_char, input_action: *const c_char);
+    fn text_input_clear_client(plugin: *mut c_void);
+    fn text_input_set_editing_state(plugin: *mut c_void, text: *const c_char, base: i32, extent: i32, composing_base: i32, composing_extent: i32);
+    fn text_input_set_marked_text_rect(plugin: *mut c_void, x: f64, y: f64, width: f64, height: f64);
+    fn text_input_set_editable_transform(plugin: *mut c_void, transform: *const f64);
+    fn text_input_text(plugin: *mut c_void, text: *const u16, length: usize);
+    fn text_input_ime(plugin: *mut c_void, message: u32, wparam: WPARAM, lparam: *mut LPARAM) -> bool;
+}
+
+/// The plugin says input `client`'s whole editing state, for the window's screen.
+extern "C" fn update_editing_state(state: *mut c_void, client: i32, text: *const c_char, base: i32, extent: i32, composing_base: i32, composing_extent: i32) {
+    // SAFETY: the window's, which outlives its plugin (`State`).
+    let state = unsafe { &*state.cast::<State>() };
+    let text = unsafe { CStr::from_ptr(text) }.to_string_lossy();
+    let value = Value::from_flutter(&serde_json::json!({
+        "text": text, "selectionBase": base, "selectionExtent": extent, "composingBase": composing_base, "composingExtent": composing_extent,
+    }));
+    state.queue.borrow_mut().push((state.id, Input::TextInputClient(TextInputClient::UpdateEditingState(client as u64, value))));
+}
+
+/// The plugin says input `client`'s action key was pressed.
+extern "C" fn perform_action(state: *mut c_void, client: i32, action: *const c_char) {
+    let state = unsafe { &*state.cast::<State>() };
+    let action = unsafe { CStr::from_ptr(action) }.to_string_lossy().into_owned();
+    state.queue.borrow_mut().push((state.id, Input::TextInputClient(TextInputClient::PerformAction(client as u64, action))));
+}
+
+fn cstring(text: &str) -> CString {
+    CString::new(text.replace('\0', "")).expect("no NUL in it")
 }
 
 fn register_window_class() {
@@ -517,8 +572,13 @@ fn handle_msg(hwnd: HWND, state: &State, msg: u32, wparam: WPARAM, lparam: LPARA
             }
             let units: Vec<u16> = state.high_surrogate.take().into_iter().chain([unit]).collect();
             let typed = String::from_utf16_lossy(&units);
-            // What types a control character (Enter, Tab, Backspace, Escape, Ctrl and a letter) was its key, above.
-            if !typed.chars().any(char::is_control) {
+            // What types a control character (Enter, Tab, Backspace, Escape, Ctrl and a letter) was its key, above. What
+            // types text is the text input plugin's, where an input takes typing, as Flutter's OnText gives it.
+            let plugin = state.text_input.get();
+            if typed.chars().any(char::is_control) {
+            } else if unsafe { text_input_has_client(plugin) } {
+                unsafe { text_input_text(plugin, units.as_ptr(), units.len()) };
+            } else {
                 push(Input::Key(keyboard::typed(typed)));
             }
             Some(0)
@@ -527,46 +587,17 @@ fn handle_msg(hwnd: HWND, state: &State, msg: u32, wparam: WPARAM, lparam: LPARA
             push(Input::Focus(msg == WM_SETFOCUS));
             Some(0)
         }
-        WM_IME_STARTCOMPOSITION => {
-            unsafe { place_ime(hwnd, state.caret.get()) };
-            None
-        }
-        WM_IME_COMPOSITION => {
-            let context = unsafe { ImmGetContext(hwnd) };
-            let flags = lparam.0 as u32;
-            let mut handled = false;
-            unsafe {
-                // Japanese IME may send this message with lparam = 0, which indicates that
-                // there is no composition string.
-                if flags == 0 {
-                    push(Input::Ime(Ime::Preedit(String::new(), None)));
-                    handled = true;
-                }
-                if flags & GCS_RESULTSTR.0 != 0
-                    && let Some(result) = composition(context, GCS_RESULTSTR)
-                {
-                    push(Input::Ime(Ime::Commit(result)));
-                    handled = true;
-                }
-                if flags & GCS_COMPSTR.0 != 0
-                    && let Some(composed) = composition(context, GCS_COMPSTR)
-                {
-                    // Where its cursor is, in UTF-16 units, as bytes of the text.
-                    let cursor = (flags & GCS_CURSORPOS.0 != 0)
-                        .then(|| ImmGetCompositionStringW(context, GCS_CURSORPOS, None, 0))
-                        .filter(|at| *at >= 0)
-                        .map(|at| String::from_utf16_lossy(&composed.encode_utf16().take(at as usize).collect::<Vec<_>>()).len());
-                    push(Input::Ime(Ime::Preedit(composed, cursor)));
-                    handled = true;
-                }
-                let _ = ImmReleaseContext(hwnd, context);
+        // The input method's, as Flutter's FlutterWindow handles them (`text_input.cc`).
+        // Windows' own, while the window is being made, before it has its plugin.
+        WM_IME_SETCONTEXT | WM_IME_STARTCOMPOSITION | WM_IME_COMPOSITION | WM_IME_ENDCOMPOSITION if state.text_input.get().is_null() => None,
+        // Windows' own, while the window is being made, before it has its plugin.
+        WM_IME_SETCONTEXT | WM_IME_STARTCOMPOSITION | WM_IME_COMPOSITION | WM_IME_ENDCOMPOSITION if state.text_input.get().is_null() => None,
+        WM_IME_SETCONTEXT | WM_IME_STARTCOMPOSITION | WM_IME_COMPOSITION | WM_IME_ENDCOMPOSITION => {
+            let mut lparam = lparam;
+            if unsafe { text_input_ime(state.text_input.get(), msg, wparam, &mut lparam) } {
+                return Some(0);
             }
-            // What's handled here doesn't come again as WM_IME_CHAR and WM_CHAR.
-            handled.then_some(0)
-        }
-        WM_IME_ENDCOMPOSITION => {
-            push(Input::Ime(Ime::Preedit(String::new(), None)));
-            None
+            Some(unsafe { DefWindowProcW(hwnd, msg, wparam, lparam) }.0)
         }
         WM_SETCURSOR if loword(lparam.0) == HTCLIENT as i32 => {
             unsafe { SetCursor(Some(state.cursor.get())) };

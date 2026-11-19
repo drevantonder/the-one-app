@@ -523,9 +523,19 @@ impl Display {
         }
     }
 
-    /// The input with window `window`'s keyboard takes typing, its caret at `caret` (in the window's logical pixels),
-    /// or none does: the input method's keys and where it shows what it composes, as GPUI's `update_ime_position`.
-    /// An input that stops taking typing drops what was being composed in it, as GPUI's `reset_ime`.
+    /// What window `window`'s text input plugin is told (`editing::TextInput`). X11 has none, nor does Flutter's
+    /// GTK one fit here (it's GTK's input method context, and this has no GTK): its input method (XIM) is shown where
+    /// the caret is told to be, and drops what was being composed in an input that's detached.
+    pub fn text_input(&self, window: &NativeWindow, calls: &[crate::editing::TextInput]) {
+        for call in calls {
+            match call {
+                crate::editing::TextInput::ClearClient => self.set_ime(window, None),
+                crate::editing::TextInput::SetCaretRect(caret) => self.set_ime(window, Some(*caret)),
+                _ => {}
+            }
+        }
+    }
+
     /// X11 has no material of the system's to put under a page: its panel is filled, and what asks for the system's
     /// is blurred as any material.
     pub fn set_glass(&self, _: &NativeWindow, _: &[crate::platform::Glass]) {}
@@ -533,7 +543,10 @@ impl Display {
     /// Its title row over its page: none here, where the system's own title bar is above the page and moves the window.
     pub fn set_title_row(&self, _: &NativeWindow, _: Option<crate::view::TitleRow>) {}
 
-    pub fn set_ime(&self, window: &NativeWindow, caret: Option<Bounds<f32>>) {
+    /// The input with window `window`'s keyboard takes typing, its caret at `caret` (in the window's logical pixels),
+    /// or none does: the input method's keys and where it shows what it composes, as GPUI's `update_ime_position`.
+    /// An input that stops taking typing drops what was being composed in it, as GPUI's `reset_ime`.
+    fn set_ime(&self, window: &NativeWindow, caret: Option<Bounds<f32>>) {
         let spot = caret.map(|caret| ((caret.origin.x * self.scale) as i16, ((caret.origin.y + caret.size.height) * self.scale) as i16));
         let was = match spot {
             Some(spot) => self.ime.borrow_mut().insert(window.x_window, spot),

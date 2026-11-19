@@ -128,8 +128,8 @@ core-text = "21"
 # AppKit's windows, on its main thread, by objc2's bindings, as Blade reaches Metal.
 dispatch2 = "0.3"
 objc2 = "0.6"
-objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "objc2-core-foundation", "objc2-quartz-core", "NSAccessibility", "NSAppearance", "NSApplication", "NSCursor", "NSPasteboard", "NSEvent", "NSGraphics", "NSPanel", "NSResponder", "NSRunningApplication", "NSText", "NSTextInputClient", "NSTextInputContext", "NSTrackingArea", "NSView", "NSWindow", "NSWorkspace"] }
-objc2-foundation = { version = "0.3", default-features = false, features = ["std", "objc2-core-foundation", "NSArray", "NSAttributedString", "NSGeometry", "NSNotification", "NSObjCRuntime", "NSRange", "NSString"] }
+objc2-app-kit = { version = "0.3", default-features = false, features = ["std", "objc2-core-foundation", "objc2-quartz-core", "NSAccessibility", "NSAppearance", "NSApplication", "NSCursor", "NSPasteboard", "NSEvent", "NSGraphics", "NSPanel", "NSResponder", "NSRunningApplication", "NSTrackingArea", "NSView", "NSWindow", "NSWorkspace"] }
+objc2-foundation = { version = "0.3", default-features = false, features = ["std", "objc2-core-foundation", "NSArray", "NSGeometry", "NSNotification", "NSObjCRuntime", "NSString"] }
 objc2-quartz-core = { version = "0.3", default-features = false, features = ["std", "objc2-core-foundation", "CALayer", "CAMetalLayer"] }
 # Which way a line runs, by its first strong character, as on Windows.
 unicode-bidi = "0.3"
@@ -151,3 +151,7 @@ swash = "0.2"
 unicode-script = "0.5"
 # Android has no prebuilt bindings in rquickjs-sys, so bindgen makes them against the NDK's headers.
 rquickjs = { version = "0.14", features = ["bindgen"] }
+
+[build-dependencies]
+# Flutter's text input plugins (flutter/), as its engine builds them: a Mac's Objective-C++, Windows' C++.
+cc = "1"

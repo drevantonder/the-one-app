@@ -27,18 +27,14 @@
 //! and a pointer do to it (`Field`). Offsets in a `Field` are bytes of its text, on character boundaries; a `Value`'s
 //! are UTF-16 code units, as JS, Android and AppKit count them.
 //!
-//! A platform's keyboard bridge talks to the screen's input with the keyboard through `Screen`, never to a `Field`:
-//! it reads `Screen::editing` (the `Value`: text, selection, what's composed) and `Screen::caret_rect` (where its
-//! input method's window goes), finds a character at a point with `Screen::index_at`, and says what happened with
-//! `Screen::key` (a key, by the DOM's `KeyboardEvent.key` and its modifiers, ⌘ as `meta`) and `Screen::ime` (`Ime`).
-//! AppKit's `NSTextInputClient`, for one: `setMarkedText:selectedRange:replacementRange:` is `Ime::Select` of the
-//! replacement range, where it gives one, then `Ime::Preedit`; `insertText:replacementRange:` is `Ime::Select`, then
-//! `Ime::Commit`; `unmarkText` is `Ime::Finish`; `selectedRange`, `markedRange`, `hasMarkedText` and
-//! `attributedSubstringForProposedRange:` read the `Value`; `firstRectForCharacterRange:` is the caret's rect;
-//! `characterIndexForPoint:` is `index_at`; and `doCommandBySelector:` is the key it stands for (`deleteBackward:`
-//! Backspace, `insertNewline:` Enter, `moveLeft:` ArrowLeft, `moveWordLeft:` ArrowLeft with `alt`, and so on).
-//! Android's `InputConnection` keeps the whole editing state itself, as Flutter's `TextInputPlugin` does: its bridge
-//! says each change as the whole `Value` (`Screen::set_editing`), and is told the input's when its app changes it.
+//! Every platform's keyboard bridge is Flutter's text input plugin (`TextInputPlugin`, `FlutterTextInputPlugin`),
+//! which keeps the input's whole editing state itself, as Flutter's engine does, and speaks Flutter's text input
+//! protocol (its `flutter/textinput` channel's method calls, in their JSON): the screen tells it of the input with the
+//! keyboard (`TextInput`, through `view::bridge::TextInputConnection`), and it says each change as the whole state
+//! (`TextInputClient`, taken by `Screen::set_editing`). A key the page handles (a shortcut, Enter, an arrow) goes to it
+//! as a key first (`Screen::key`), as Flutter's keyboard manager gives the framework each key before the input context;
+//! what it changes reaches the plugin as the state it says. Linux's X11 has no such plugin: its input method's
+//! composition comes as `Ime`.
 
 use std::collections::VecDeque;
 
@@ -66,6 +62,140 @@ pub struct Selection {
 pub struct Composing {
     pub start: usize,
     pub end: usize,
+}
+
+impl Value {
+    /// As Flutter's `TextEditingValue.toJSON` has it, which its text input plugins take: -1 for no composing range.
+    pub fn flutter(&self) -> serde_json::Value {
+        let (base, extent) = self.composing.map_or((-1, -1), |c| (c.start as i64, c.end as i64));
+        serde_json::json!({
+            "text": self.text,
+            "selectionBase": self.selection.base,
+            "selectionExtent": self.selection.extent,
+            "selectionAffinity": "TextAffinity.downstream",
+            "selectionIsDirectional": false,
+            "composingBase": base,
+            "composingExtent": extent,
+        })
+    }
+
+    /// What a Flutter text input plugin says, as `TextEditingValue.fromJSON` reads it, offsets clamped to its text.
+    pub fn from_flutter(value: &serde_json::Value) -> Value {
+        let text = value["text"].as_str().unwrap_or_default().to_owned();
+        let units = text.encode_utf16().count() as i64;
+        let at = |key: &str| value[key].as_i64().unwrap_or(-1);
+        let clamp = |at: i64| at.clamp(0, units) as usize;
+        let (start, end) = (at("composingBase"), at("composingExtent"));
+        Value {
+            selection: Selection { base: clamp(at("selectionBase")), extent: clamp(at("selectionExtent")) },
+            composing: (start >= 0 && end > start).then(|| Composing { start: clamp(start), end: clamp(end) }),
+            text,
+        }
+    }
+}
+
+/// What the screen tells a platform's text input plugin, as Flutter's framework calls its `TextInput` methods.
+#[derive(Clone, Debug, PartialEq)]
+pub enum TextInput {
+    /// Input `id` has the keyboard, configured as its `TextInputConfiguration` (`configuration`).
+    SetClient(u64, serde_json::Value),
+    SetEditingState(Value),
+    /// Where the input is, as a 4×4 column-major matrix from its own coordinates to the window's, in logical pixels.
+    SetEditableSizeAndTransform { width: f32, height: f32, transform: [f32; 16] },
+    /// Where its caret is, in its own coordinates: a Mac's input method shows what it composes beside it.
+    SetCaretRect(crate::geometry::Bounds<f32>),
+    /// Where what's composed is, or the caret where nothing is: Windows' input method's window goes there.
+    SetMarkedTextRect(crate::geometry::Bounds<f32>),
+    Show,
+    Hide,
+    ClearClient,
+}
+
+impl TextInput {
+    /// The method call, as Flutter's JSON method codec has it: its name and its arguments.
+    pub fn call(&self) -> (&'static str, serde_json::Value) {
+        use serde_json::json;
+        let rect = |rect: &crate::geometry::Bounds<f32>| json!({"x": rect.origin.x, "y": rect.origin.y, "width": rect.size.width, "height": rect.size.height});
+        match self {
+            TextInput::SetClient(id, configuration) => ("TextInput.setClient", json!([id, configuration])),
+            TextInput::SetEditingState(value) => ("TextInput.setEditingState", value.flutter()),
+            TextInput::SetEditableSizeAndTransform { width, height, transform } => {
+                ("TextInput.setEditableSizeAndTransform", json!({"width": width, "height": height, "transform": transform}))
+            }
+            TextInput::SetCaretRect(caret) => ("TextInput.setCaretRect", rect(caret)),
+            TextInput::SetMarkedTextRect(marked) => ("TextInput.setMarkedTextRect", rect(marked)),
+            TextInput::Show => ("TextInput.show", serde_json::Value::Null),
+            TextInput::Hide => ("TextInput.hide", serde_json::Value::Null),
+            TextInput::ClearClient => ("TextInput.clearClient", serde_json::Value::Null),
+        }
+    }
+}
+
+/// What a platform's text input plugin says, as Flutter's engine calls its framework's `TextInputClient` methods.
+#[derive(Clone, Debug, PartialEq)]
+pub enum TextInputClient {
+    /// Input `client`'s whole editing state is now this.
+    UpdateEditingState(u64, Value),
+    /// Its action key was pressed (`TextInputAction.done`…), as an input method's Return says it.
+    PerformAction(u64, String),
+}
+
+impl TextInputClient {
+    /// A method call in Flutter's JSON, if it's one of these.
+    pub fn from_call(method: &str, arguments: &serde_json::Value) -> Option<TextInputClient> {
+        let client = arguments[0].as_u64()?;
+        match method {
+            "TextInputClient.updateEditingState" => Some(TextInputClient::UpdateEditingState(client, Value::from_flutter(&arguments[1]))),
+            "TextInputClient.performAction" => Some(TextInputClient::PerformAction(client, arguments[1].as_str()?.to_owned())),
+            _ => None,
+        }
+    }
+}
+
+/// Input `field`'s props (`Screen::field`) as Flutter's `TextInputConfiguration.toJson` has them, as Chrome maps an
+/// `<input>`'s to a platform's: its keyboard (`type`, `inputmode`), its action key, its autofill hint (`autocomplete`),
+/// capitals, and whether it's corrected.
+pub fn configuration(field: &serde_json::Value, value: &Value) -> serde_json::Value {
+    let prop = |name: &str| field[name].as_str().unwrap_or_default();
+    let kind = match (prop("type"), prop("inputmode")) {
+        _ if field["multiline"] == true => "multiline",
+        ("email", _) | (_, "email") => "emailAddress",
+        ("url", _) | (_, "url") => "url",
+        ("tel", _) | (_, "tel") => "phone",
+        ("number", _) | (_, "numeric" | "decimal") => "number",
+        _ => "text",
+    };
+    let hint = match prop("autocomplete").split_whitespace().last().unwrap_or_default() {
+        "username" => Some("username"),
+        "current-password" => Some("password"),
+        "new-password" => Some("newPassword"),
+        "one-time-code" => Some("oneTimeCode"),
+        "email" => Some("email"),
+        "name" => Some("name"),
+        "tel" => Some("telephoneNumber"),
+        _ => None,
+    };
+    let capitalization = match prop("autocapitalize") {
+        "characters" => "characters",
+        "words" => "words",
+        "sentences" | "on" => "sentences",
+        _ => "none",
+    };
+    let checked = field["spellcheck"] != false;
+    let mut configuration = serde_json::json!({
+        "viewId": 0,
+        "inputType": {"name": format!("TextInputType.{kind}"), "signed": null, "decimal": prop("inputmode") == "decimal"},
+        "inputAction": format!("TextInputAction.{}", field["action"].as_str().unwrap_or("done")),
+        "obscureText": prop("type") == "password",
+        "autocorrect": checked,
+        "enableSuggestions": checked,
+        "readOnly": field["readonly"] == true,
+        "textCapitalization": format!("TextCapitalization.{capitalization}"),
+    });
+    if let Some(hint) = hint {
+        configuration["autofill"] = serde_json::json!({"uniqueIdentifier": field["id"].to_string(), "hints": [hint], "editingValue": value.flutter()});
+    }
+    configuration
 }
 
 /// What a platform's input method says (dead keys, Chinese and Japanese input, the emoji picker, dictation), as
@@ -277,10 +407,11 @@ impl Field {
         self.place = None;
     }
 
-    /// The whole editing state a keyboard that keeps its own says (Android's `InputConnection`, as Flutter's
-    /// `updateEditingState` has it): its text, selection, and what it composes, which is in that text, taken as it is.
-    /// The keyboard undoes its own, so nothing is recorded to undo.
+    /// The whole editing state a text input plugin says (Flutter's `updateEditingState`): its text, selection, and
+    /// what it composes, which is in that text, taken as it is. A change to the text outside a composition is recorded
+    /// to undo, as Flutter's `UndoHistory` records what its engine says: typing joins the open step, as a key's does.
     pub fn keyboard(&mut self, value: &Value) {
+        let before = self.snapshot();
         let at = |units: usize| byte(&value.text, units);
         match value.composing.filter(|composing| composing.start < composing.end) {
             Some(composing) => {
@@ -297,6 +428,16 @@ impl Field {
             }
         }
         self.column = None;
+        self.place = None;
+        if self.preedit.is_none() && before.text != self.text && !self.secure {
+            let kind = match self.text.len() < before.text.len() {
+                true => EditKind::Delete,
+                false if self.text.matches('\n').count() > before.text.matches('\n').count() => EditKind::LineBreak,
+                false => EditKind::Text,
+            };
+            let into_empty = before.text.is_empty();
+            self.history.record(before, self.snapshot(), kind, into_empty);
+        }
     }
 
     /// The selection as ordered byte offsets.

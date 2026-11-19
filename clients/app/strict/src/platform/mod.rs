@@ -168,6 +168,8 @@ struct Window {
     drawn: bool,
     /// Where the system's material was put under it last.
     glass: Vec<Glass>,
+    /// What its text input plugin was last told.
+    text_input: crate::view::TextInputConnection,
     on_event: Box<dyn FnMut(Event)>,
     tag: serde_json::Value,
 }
@@ -224,6 +226,7 @@ impl Windows {
                 dirty: true,
                 drawn: false,
                 glass: Vec::new(),
+                text_input: Default::default(),
                 on_event: Box::new(on_event),
                 tag: options.tag,
             },
@@ -461,7 +464,10 @@ impl Windows {
                         window.glass = screen.glass.clone();
                         self.display.set_glass(&window.native, &window.glass);
                     }
-                    self.display.set_ime(&window.native, screen.caret_rect());
+                    let calls = screen.text_input(&mut window.text_input);
+                    if !calls.is_empty() {
+                        self.display.text_input(&window.native, &calls);
+                    }
                     self.display.set_title_row(&window.native, screen.title_row());
                 }
                 Err(why) => crate::view::paint_message(why, appearance(), size, scale, &mut self.text, &self.atlas, &mut window.scene),
@@ -529,6 +535,7 @@ impl Windows {
                 screen.key(&key);
             }
             Input::Ime(ime) => screen.ime(ime),
+            Input::TextInputClient(said) => screen.text_input_client(&mut window.text_input, said),
             // A panel goes as something else takes the keyboard, as Spotlight does.
             Input::Focus(false) if window.panel && window.visible => {
                 screen.activate(false);
@@ -536,9 +543,15 @@ impl Windows {
                 if let Some(window) = self.windows.get_mut(&id) {
                     (window.on_event)(Event::PutAway);
                 }
+                return;
             }
             Input::Focus(active) => screen.activate(active),
             Input::Close => {}
+        }
+        // What it changed reaches the text input plugin at once, before its next key, not with the frame.
+        let calls = screen.text_input(&mut window.text_input);
+        if !calls.is_empty() {
+            self.display.text_input(&window.native, &calls);
         }
     }
 }
@@ -566,12 +579,14 @@ pub(crate) enum Input {
     Up(crate::geometry::Point<f32>, u8),
     /// Scrolled along and down by so many pixels (left and up negative).
     Wheel(crate::geometry::Point<f32>, crate::geometry::Point<f32>),
-    /// A key, and what an input method does: a Mac's go to the screen as AppKit asks (`mac::window`).
-    #[cfg_attr(target_os = "macos", allow(dead_code))]
+    /// A key the page hears first, as Flutter's keyboard manager gives its framework each key.
     Key(crate::inspect::Key),
-    /// What the input method composes or commits.
-    #[cfg_attr(target_os = "macos", allow(dead_code))]
+    /// What X11's input method composes or commits, which has no text input plugin.
+    #[cfg_attr(not(target_os = "linux"), allow(dead_code))]
     Ime(crate::editing::Ime),
+    /// What its text input plugin says.
+    #[cfg_attr(target_os = "linux", allow(dead_code))]
+    TextInputClient(crate::editing::TextInputClient),
     /// The window got the keyboard, or lost it.
     Focus(bool),
 }

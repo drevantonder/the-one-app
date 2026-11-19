@@ -1,3 +1,6 @@
+//! A Mac's and Windows' text input is Flutter's (`flutter/`, the plugin and its `TextInputModel`), built here with the
+//! `cc` crate as Flutter's engine builds it, with the window's side of it (`src/platform/<os>/text_input.*`).
+//!
 //! The X11 window (`platform/linux/x11.rs`) links xkbcommon's X11 half by its unversioned name (`libxkbcommon-x11.so`), which a Linux
 //! distribution ships only in its development package (Debian's and Ubuntu's `libxkbcommon-x11-dev`), while the library
 //! itself (`libxkbcommon-x11.so.0`) is wherever X11 apps run. Where only that is, it's linked by a name of its own here,
@@ -5,9 +8,43 @@
 
 fn main() {
     println!("cargo::rerun-if-changed=build.rs");
-    if std::env::var("CARGO_CFG_TARGET_OS").as_deref() != Ok("linux") {
-        return;
+    println!("cargo::rerun-if-changed=flutter");
+    match std::env::var("CARGO_CFG_TARGET_OS").as_deref() {
+        Ok("macos") => text_input("src/platform/mac/text_input.mm", &["flutter/flutter/shell/platform/darwin/macos/framework/Source/FlutterTextInputPlugin.mm"]),
+        Ok("windows") => text_input(
+            "src/platform/windows/text_input.cc",
+            &["flutter/flutter/shell/platform/windows/text_input_plugin.cc", "flutter/flutter/shell/platform/windows/text_input_manager.cc"],
+        ),
+        Ok("linux") => x11(),
+        _ => {}
     }
+}
+
+/// Flutter's text input plugin for this platform, its model, and the window's side of it, `ours`.
+fn text_input(ours: &str, plugin: &[&str]) {
+    println!("cargo::rerun-if-changed={ours}");
+    let common = ["flutter/flutter/fml/string_conversion.cc", "flutter/flutter/shell/platform/common/text_input_model.cc", "flutter/flutter/shell/platform/common/text_editing_delta.cc"];
+    let mut build = cc::Build::new();
+    build.cpp(true).std("c++20").include("flutter").files(common).files(plugin).file(ours).warnings(false);
+    if std::env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("macos") {
+        build.flag("-fobjc-arc");
+        println!("cargo::rustc-link-lib=framework=Cocoa");
+        println!("cargo::rustc-link-lib=framework=QuartzCore");
+    } else {
+        // std::wstring_convert, which Flutter's fml converts UTF-8 and UTF-16 with, is deprecated in C++17; and
+        // MSVC's library, which cargo-xwin brings, asks for a newer clang than a Linux machine may have.
+        build
+            .define("_SILENCE_CXX17_CODECVT_HEADER_DEPRECATION_WARNING", None)
+            .define("_ALLOW_COMPILER_AND_STL_VERSION_MISMATCH", None)
+            .define("UNICODE", None)
+            .define("NOMINMAX", None);
+        println!("cargo::rustc-link-lib=imm32");
+    }
+    build.compile("flutter_text_input");
+}
+
+/// xkbcommon's X11 half, by a name of its own where only its library is.
+fn x11() {
     let arch = std::env::var("CARGO_CFG_TARGET_ARCH").unwrap_or_default();
     let folders = [format!("/usr/lib/{arch}-linux-gnu"), format!("/lib/{arch}-linux-gnu"), "/usr/lib64".into(), "/usr/lib".into()];
     if folders.iter().any(|folder| std::path::Path::new(folder).join("libxkbcommon-x11.so").exists()) {

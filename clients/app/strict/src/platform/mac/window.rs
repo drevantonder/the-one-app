@@ -2,9 +2,9 @@
 // platform/blade/apple_compat.rs) at commit 69e2130295c2649963eb639fc70b4f2ee8ea1624 (gpui 0.2.2 on crates.io), and
 // cut down for the strict host, written on objc2's AppKit bindings in place of the deprecated `cocoa` crate: a window
 // with no title band and its traffic lights kept, its view's layer a CAMetalLayer Blade draws into (GPUI's
-// `macos-blade`), its size and Retina scale as AppKit says them, the mouse and the wheel, and keys through the view's
-// input context (NSTextInputClient), so a dead key or an input method composes at the caret and types what it
-// composed, and the window having the keyboard. A panel (a launcher's) is GPUI's pop-up: a non-activating NSPanel
+// `macos-blade`), its size and Retina scale as AppKit says them, the mouse and the wheel, keys, and the window having
+// the keyboard. What's typed goes through Flutter's text input plugin (`text_input.mm`), in place of GPUI's
+// NSTextInputClient. A panel (a launcher's) is GPUI's pop-up: a non-activating NSPanel
 // that can take the keyboard, with no title band or traffic lights, over every Space and full-screen app, and under
 // its view the system's glass (NSGlassEffectView on macOS 26, NSVisualEffectView before), rounded. AppKit is the main thread's: what's made or changed is changed there,
 // and what AppKit says is queued for the strict thread, which the queue wakes. No tabs, full screen callbacks, drag
@@ -13,31 +13,28 @@
 // (clients/app/strict/LICENSE-APACHE); this file is changed from the original.
 
 use std::cell::{Cell, RefCell};
-use std::ffi::c_void;
+use std::ffi::{CStr, CString, c_char, c_void};
 use std::ptr::NonNull;
 use std::sync::{Arc, Mutex};
 
 use dispatch2::{DispatchQueue, MainThreadBound, run_on_main};
 use objc2::rc::Retained;
-use objc2::runtime::{AnyObject, NSObjectProtocol, ProtocolObject, Sel};
+use objc2::runtime::{AnyObject, NSObjectProtocol, ProtocolObject};
 use objc2::{DefinedClass, MainThreadMarker, MainThreadOnly, define_class, msg_send};
 use objc2_app_kit::{
-    NSAppearanceCustomization, NSApplication, NSBackingStoreType, NSCursor, NSEvent, NSEventModifierFlags, NSPanel, NSResponder, NSTextInputClient, NSTrackingArea,
+    NSAppearanceCustomization, NSApplication, NSBackingStoreType, NSCursor, NSEvent, NSEventModifierFlags, NSPanel, NSResponder, NSTrackingArea,
     NSTrackingAreaOptions, NSView, NSViewLayerContentsRedrawPolicy, NSWindow, NSWindowDelegate, NSWindowStyleMask, NSWindowTabbingMode,
     NSWindowTitleVisibility,
 };
-use objc2_foundation::{
-    NSArray, NSAttributedString, NSAttributedStringKey, NSNotFound, NSNotification, NSObject, NSPoint, NSRange, NSRangePointer, NSRect, NSSize, NSString,
-    NSUInteger,
-};
+use objc2_foundation::{NSArray, NSNotification, NSObject, NSPoint, NSRect, NSSize, NSString};
 use objc2_quartz_core::{CAAutoresizingMask, CALayer, CAMetalLayer, kCAGravityTopLeft};
 use raw_window_handle as rwh;
 
 use super::events;
 use crate::Cursor;
-use crate::editing::{self, Ime};
+use crate::editing::{TextInput, TextInputClient};
 use crate::inspect::Key;
-use crate::geometry::{Bounds, DevicePixels, Pixels, Point, Size};
+use crate::geometry::{DevicePixels, Pixels, Point, Size};
 use crate::platform::{Input, WindowId, WindowOptions};
 
 /// What AppKit said, queued for the strict thread, which `ping` wakes.
@@ -53,12 +50,6 @@ struct Shared {
     queue: Queue,
     /// Its view's size in device pixels, and its scale, as AppKit last said.
     size: Mutex<(Size<DevicePixels>, f32)>,
-    /// The key that went down, while the input context decides what it does (GPUI's `keystroke_for_do_command`):
-    /// what it types (`insertText:`), a command (`doCommandBySelector:`), or nothing yet (a dead key).
-    pending: Mutex<Option<crate::inspect::Key>>,
-    /// Where the caret of the input that takes typing is, in the view's logical pixels from its top left, for the
-    /// input method to show what it composes beside; none where nothing takes typing.
-    caret: Mutex<Option<Bounds<f32>>>,
     /// Its title row over its page, as its page was last drawn (`Screen::title_row`): held where nothing in it takes a
     /// press, it moves the window, as AppKit's title bar does.
     title_row: Mutex<Option<crate::view::TitleRow>>,
@@ -144,7 +135,7 @@ impl Display {
     pub fn open(&self, id: WindowId, options: &WindowOptions) -> anyhow::Result<NativeWindow> {
         let queue = self.queue.clone();
         run_on_main(|main| {
-            let shared = Arc::new(Shared { id, queue, size: Mutex::new((Size::default(), 1.0)), pending: Mutex::default(), caret: Mutex::default(), title_row: Mutex::default() });
+            let shared = Arc::new(Shared { id, queue, size: Mutex::new((Size::default(), 1.0)), title_row: Mutex::default() });
             let rect = NSRect::new(NSPoint::new(0.0, 0.0), NSSize::new(options.size.width.0.into(), options.size.height.0.into()));
             let window = match options.panel {
                 // GPUI's pop-up: titled, so it can take the keyboard, with nothing of its title band shown.
@@ -316,17 +307,17 @@ impl Display {
         });
     }
 
-    /// The input with window `window`'s keyboard takes typing, its caret at `caret`, or none does. An input that
-    /// stops taking typing drops what was being composed in it, as GPUI's `reset_ime`.
-    pub fn set_ime(&self, window: &NativeWindow, caret: Option<Bounds<f32>>) {
-        let was = std::mem::replace(&mut *window.shared.caret.lock().expect("nothing panics holding it"), caret);
-        if was.is_some() && caret.is_none() {
-            window.window.get_on_main(|window| {
-                if let Some(context) = window.contentView().and_then(|view| view.inputContext()) {
-                    context.discardMarkedText();
-                }
-            });
-        }
+    /// Tells window `window`'s text input plugin what the screen says (`editing::TextInput`), on the main thread.
+    pub fn text_input(&self, window: &NativeWindow, calls: &[TextInput]) {
+        let calls: Vec<_> = calls.iter().map(|call| call.call()).map(|(method, arguments)| (cstring(method), cstring(&arguments.to_string()))).collect();
+        let view = window.view;
+        window.window.get_on_main(move |_| {
+            // SAFETY: the window's content view, which lives as long as the window, which this holds.
+            let view = unsafe { &*(view as *const View) };
+            for (method, arguments) in calls {
+                unsafe { text_input_call(view.ivars().text_input.get(), method.as_ptr(), arguments.as_ptr()) };
+            }
+        });
     }
 
     /// Its title row, as its page was last drawn: what of it moves the window (`View`'s `mouseDown:`).
@@ -343,10 +334,9 @@ impl Display {
 }
 
 struct ViewIvars {
+    /// Its text input plugin, dropped before what it tells.
+    text_input: Plugin,
     shared: Arc<Shared>,
-    /// The input method is composing: what it marked is drawn at the caret and not yet typed, so every key is its
-    /// first, and what it inserts replaces what it marked.
-    composing: Cell<bool>,
     /// The main button went down with Control held, which a Mac takes as the secondary one, so it comes up as that.
     secondary: Cell<bool>,
 }
@@ -418,16 +408,16 @@ define_class!(
             if key.meta && !key.ctrl && !key.alt && key.key.eq_ignore_ascii_case("w") {
                 return shared.send(Input::Close);
             }
-            // A key with ⌘ or Control the menu bar didn't take is the page's; the input context would type Control's.
-            // While composing, every key is the input method's first.
-            if (key.meta || key.ctrl) && !self.ivars().composing.get() {
-                return self.key(key);
+            // A shortcut (⌘ or Control) the menu bar didn't take, or a key that types nothing (Enter, an arrow,
+            // Backspace), is the page's first, as Flutter's keyboard manager gives its framework each key before the
+            // text input plugin; while its input method composes, every key is the input method's.
+            let plugin = self.ivars().text_input.get();
+            let composing = unsafe { text_input_composing(plugin) };
+            if !composing && (key.meta || key.ctrl || key.key.chars().count() > 1) {
+                return shared.send(Input::Key(key));
             }
-            *shared.pending.lock().expect("nothing panics holding it") = Some(key);
-            let handled = self.inputContext().is_some_and(|context| context.handleEvent(event));
-            let unhandled = shared.pending.lock().expect("nothing panics holding it").take().filter(|_| !handled);
-            if let Some(key) = unhandled {
-                self.key(key);
+            if !unsafe { text_input_key(plugin, event) } {
+                shared.send(Input::Key(key));
             }
         }
 
@@ -545,163 +535,19 @@ define_class!(
     }
 
     unsafe impl NSObjectProtocol for View {}
-
-    // What's typed comes through here, to the screen's input with the keyboard (`editing`): what a key types or
-    // which command it is, what an input method composes, and where.
-    unsafe impl NSTextInputClient for View {
-        #[unsafe(method(insertText:replacementRange:))]
-        fn insert_text(&self, string: &AnyObject, replacement: NSRange) {
-            let text = text_of(string);
-            let composed = self.ivars().composing.replace(false);
-            let pending = self.ivars().shared.pending.lock().expect("nothing panics holding it").take();
-            let replacing = range(replacement);
-            match pending {
-                // A key that types what it says is that key, as the DOM's `keydown` has it.
-                Some(key) if !composed && replacing.is_none() && text.chars().count() == 1 => {
-                    self.key(Key { key: text, shift: key.shift, alt: key.alt, ctrl: false, meta: false })
-                }
-                // What an input method composed, an accent picked for the character before, a key that typed more
-                // than one character: it replaces what's composed or the range given.
-                _ => self.tell(move |screen| {
-                    if let Some(replacing) = replacing {
-                        screen.ime(Ime::Select(replacing));
-                    }
-                    screen.ime(Ime::Commit(text));
-                }),
-            }
-        }
-
-        // What it stands for is the key that asked, as the user may have bound the shortcut to something else.
-        #[unsafe(method(doCommandBySelector:))]
-        fn do_command_by_selector(&self, selector: Sel) {
-            let pending = self.ivars().shared.pending.lock().expect("nothing panics holding it").take();
-            if let Some(key) = pending.or_else(|| events::command(selector.name().to_str().unwrap_or_default())) {
-                self.key(key);
-            }
-        }
-
-        #[unsafe(method(setMarkedText:selectedRange:replacementRange:))]
-        fn set_marked_text(&self, string: &AnyObject, selected: NSRange, replacement: NSRange) {
-            // Composing: the key went into what's marked.
-            self.ivars().shared.pending.lock().expect("nothing panics holding it").take();
-            let text = text_of(string);
-            self.ivars().composing.set(!text.is_empty());
-            let (cursor, replacing) = (range(selected).map(|selected| editing::byte(&text, selected.start)), range(replacement));
-            self.tell(move |screen| {
-                if let Some(replacing) = replacing {
-                    screen.ime(Ime::Select(replacing));
-                }
-                screen.ime(Ime::Preedit(text, cursor));
-            });
-        }
-
-        // The input method is done composing: what it composed is typed.
-        #[unsafe(method(unmarkText))]
-        fn unmark_text(&self) {
-            self.ivars().composing.set(false);
-            self.tell(|screen| screen.ime(Ime::Finish));
-        }
-
-        #[unsafe(method(selectedRange))]
-        fn selected_range(&self) -> NSRange {
-            self.ask(|screen| screen.editing())
-                .flatten()
-                .map_or(NSRange::new(NSNotFound as NSUInteger, 0), |value| {
-                    let (from, to) = (value.selection.base.min(value.selection.extent), value.selection.base.max(value.selection.extent));
-                    NSRange::new(from, to - from)
-                })
-        }
-
-        #[unsafe(method(markedRange))]
-        fn marked_range(&self) -> NSRange {
-            self.ask(|screen| screen.editing().and_then(|value| value.composing))
-                .flatten()
-                .map_or(NSRange::new(NSNotFound as NSUInteger, 0), |composing| NSRange::new(composing.start, composing.end - composing.start))
-        }
-
-        #[unsafe(method(hasMarkedText))]
-        fn has_marked_text(&self) -> bool {
-            self.ask(|screen| screen.editing().is_some_and(|value| value.composing.is_some())).unwrap_or(false)
-        }
-
-        // The input's text in `range`, in UTF-16 units, as much of it as there is, which `actual` says.
-        #[unsafe(method_id(attributedSubstringForProposedRange:actualRange:))]
-        fn attributed_substring_for_proposed_range(&self, wanted: NSRange, actual: NSRangePointer) -> Option<Retained<NSAttributedString>> {
-            self.substring(wanted, actual)
-        }
-
-        #[unsafe(method_id(validAttributesForMarkedText))]
-        fn valid_attributes_for_marked_text(&self) -> Retained<NSArray<NSAttributedStringKey>> {
-            NSArray::new()
-        }
-
-        // Where the input method shows what it composes: at the caret, on the screen, from the bottom up.
-        #[unsafe(method(firstRectForCharacterRange:actualRange:))]
-        fn first_rect_for_character_range(&self, _range: NSRange, _actual: NSRangePointer) -> NSRect {
-            let (Some(caret), Some(window)) = (self.ask(|screen| screen.caret_rect()).flatten(), self.window()) else { return NSRect::ZERO };
-            let height = self.frame().size.height;
-            let rect = NSRect::new(
-                NSPoint::new(caret.origin.x.into(), height - f64::from(caret.origin.y + caret.size.height)),
-                NSSize::new(caret.size.width.into(), caret.size.height.into()),
-            );
-            window.convertRectToScreen(self.convertRect_toView(rect, None))
-        }
-
-        // The character nearest a point on the screen, in UTF-16 units of the input's text.
-        #[unsafe(method(characterIndexForPoint:))]
-        fn character_index_for_point(&self, point: NSPoint) -> NSUInteger {
-            let Some(window) = self.window() else { return NSNotFound as NSUInteger };
-            let local = self.convertPoint_fromView(window.convertPointFromScreen(point), None);
-            let at = Point { x: local.x as f32, y: (self.frame().size.height - local.y) as f32 };
-            self.ask(move |screen| screen.index_at(at)).flatten().unwrap_or(NSNotFound as NSUInteger)
-        }
-    }
 );
 
 impl View {
-    /// Asks this window's screen on the strict thread, and waits a little for its answer: the strict thread may be
-    /// waiting on this one (opening or closing a window), so an input method gets nothing rather than both waiting.
-    fn ask<R: Send + 'static>(&self, f: impl FnOnce(&mut crate::Screen) -> R + Send + 'static) -> Option<R> {
-        let (id, (to, from)) = (self.ivars().shared.id, std::sync::mpsc::channel());
-        crate::platform::Strict::get().ok()?.run(move |windows| drop(to.send(windows.with(id, f))));
-        from.recv_timeout(std::time::Duration::from_millis(250)).ok().flatten()
-    }
-
-    /// Tells this window's screen something on the strict thread, in order with what it's asked.
-    fn tell(&self, f: impl FnOnce(&mut crate::Screen) + Send + 'static) {
-        let id = self.ivars().shared.id;
-        if let Ok(strict) = crate::platform::Strict::get() {
-            strict.run(move |windows| {
-                let _ = windows.with(id, f);
-            });
-        }
-    }
-
-    fn key(&self, key: Key) {
-        self.tell(move |screen| {
-            let _ = screen.key(&key);
-        });
-    }
-
-    /// The input's text in `wanted`, in UTF-16 units, as much of it as there is, which `actual` says.
-    fn substring(&self, wanted: NSRange, actual: NSRangePointer) -> Option<Retained<NSAttributedString>> {
-        let (value, wanted) = (self.ask(|screen| screen.editing()).flatten()?, range(wanted)?);
-        let units: Vec<u16> = value.text.encode_utf16().collect();
-        let (start, end) = (wanted.start.min(units.len()), wanted.end.min(units.len()));
-        if !actual.is_null() {
-            unsafe { actual.write(NSRange::new(start, end - start)) };
-        }
-        Some(NSAttributedString::from_nsstring(&NSString::from_str(&String::from_utf16_lossy(&units[start..end]))))
-    }
-
     /// ⌘ and `key`, with Shift if `shift`, as a menu's command is its key.
     fn command(&self, key: &str, shift: bool) {
-        self.key(Key { key: key.to_owned(), shift, alt: false, ctrl: false, meta: true });
+        self.ivars().shared.send(Input::Key(Key { key: key.to_owned(), shift, alt: false, ctrl: false, meta: true }));
     }
 
     fn new(main: MainThreadMarker, frame: NSRect, shared: Arc<Shared>) -> Retained<View> {
-        let this = main.alloc::<View>().set_ivars(ViewIvars { shared, composing: Cell::new(false), secondary: Cell::new(false) });
+        let this = main.alloc::<View>().set_ivars(ViewIvars { text_input: Plugin(Cell::new(std::ptr::null_mut())), shared, secondary: Cell::new(false) });
         let view: Retained<View> = unsafe { msg_send![super(this), initWithFrame: frame] };
+        let shared = Arc::as_ptr(&view.ivars().shared).cast_mut().cast();
+        view.ivars().text_input.0.set(unsafe { text_input_new(Retained::as_ptr(&view).cast_mut().cast(), shared, said) });
         // Layer-backed from the start, its layer the CAMetalLayer Blade draws into (`makeBackingLayer`).
         view.setWantsLayer(true);
         view.setLayerContentsRedrawPolicy(NSViewLayerContentsRedrawPolicy::DuringViewResize);
@@ -920,17 +766,48 @@ define_class!(
     }
 );
 
-/// A range AppKit gives, in UTF-16 units, unless it's none (`NSNotFound`).
-fn range(range: NSRange) -> Option<std::ops::Range<usize>> {
-    (range.location != NSNotFound as NSUInteger).then(|| range.location..range.location + range.length)
+/// A strict view's text input plugin (`text_input.mm`): Flutter's, as a C interface.
+struct Plugin(Cell<*mut c_void>);
+
+impl Plugin {
+    fn get(&self) -> *mut c_void {
+        self.0.get()
+    }
 }
 
-/// What an NSTextInputClient is given, a string or an attributed one, as text.
-fn text_of(string: &AnyObject) -> String {
-    match string.downcast_ref::<NSAttributedString>() {
-        Some(attributed) => attributed.string().to_string(),
-        None => string.downcast_ref::<NSString>().map(|string| string.to_string()).unwrap_or_default(),
+impl Drop for Plugin {
+    fn drop(&mut self) {
+        unsafe { text_input_free(self.0.get()) };
     }
+}
+
+unsafe extern "C" {
+    fn text_input_new(view: *mut c_void, context: *mut c_void, send: extern "C" fn(*mut c_void, *const c_char, *const c_char)) -> *mut c_void;
+    fn text_input_free(plugin: *mut c_void);
+    fn text_input_call(plugin: *mut c_void, method: *const c_char, arguments: *const c_char);
+    fn text_input_key(plugin: *mut c_void, event: &NSEvent) -> bool;
+    fn text_input_composing(plugin: *mut c_void) -> bool;
+}
+
+/// What a view's text input plugin says, as Flutter's text input channel's method calls, for its window's screen.
+/// The commands its input method gives (`doCommandBySelector:`) are the keys they stand for, as the page hears keys.
+extern "C" fn said(shared: *mut c_void, method: *const c_char, arguments: *const c_char) {
+    // SAFETY: the view's, which outlives its plugin (`ViewIvars`).
+    let shared = unsafe { &*shared.cast::<Shared>() };
+    let method = unsafe { CStr::from_ptr(method) }.to_string_lossy();
+    let arguments: serde_json::Value = serde_json::from_slice(unsafe { CStr::from_ptr(arguments) }.to_bytes()).unwrap_or_default();
+    if method == "TextInputClient.performSelectors" {
+        let selectors = arguments[1].as_array().into_iter().flatten().filter_map(|selector| selector.as_str());
+        for key in selectors.filter_map(events::command) {
+            shared.send(Input::Key(key));
+        }
+    } else if let Some(said) = TextInputClient::from_call(&method, &arguments) {
+        shared.send(Input::TextInputClient(said));
+    }
+}
+
+fn cstring(text: &str) -> CString {
+    CString::new(text.replace('\0', "")).expect("no NUL in it")
 }
 
 impl Delegate {
