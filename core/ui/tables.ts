@@ -156,10 +156,12 @@ const numbers = ["flexGrow", "flexShrink", "opacity", "zIndex", "aspectRatio", "
 /** Properties whose values are tokens, or made of several things, which a dynamic style can't take as a value. */
 const fixed = ["font", "gridTemplateColumns", "gridColumn", "boxShadow", "backdropFilter", "transitionProperty", "transition", "animationName", "animation", "lineClamp", "willChange"]
 
-/** A value as a token's reference, a token's negative's, or itself. */
+/** A value as a token's reference, a token's negative's, or itself, with those in it as references too (a grid's
+ * `{ fill: tokens.grid[20] }`). */
 function referenced(value: any): unknown {
   if (value && typeof value === "object" && "kind" in value && "id" in value) return { token: value.id }
   if (value && typeof value === "object" && value.negative && value.token) return { token: value.token.id, negative: true }
+  if (value && typeof value === "object" && !Array.isArray(value)) return Object.fromEntries(Object.entries(value).map(([key, one]) => [key, referenced(one)]))
   return value
 }
 
