@@ -1431,7 +1431,13 @@ impl Screen {
                 }
             }
         }
-        self.tell(PAGE, "keydown", key.told());
+        // Enter or Space on a button presses it alone, as every system's does: the page's `preventDefault` would come
+        // too late to stop the press, so the page isn't told of it too (a launcher opening its chosen app behind it).
+        let plain = !key.ctrl && !key.meta && !key.alt;
+        let presses = plain && matches!(key.key.as_str(), "Enter" | " ") && focused.is_some_and(|id| !self.editing.fields.contains_key(&id) && self.tree.nodes.get(&id).is_some_and(|node| node.listens("click")));
+        if !presses {
+            self.tell(PAGE, "keydown", key.told());
+        }
         let id = focused?;
         // Escape empties a search field with something typed in it, as a browser's `type="search"` does.
         let search = self.tree.nodes.get(&id).is_some_and(|node| node.str("type") == Some("search"));
