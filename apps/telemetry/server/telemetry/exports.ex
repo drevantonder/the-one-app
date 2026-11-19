@@ -17,7 +17,7 @@ defmodule Telemetry.Exports do
   def cuts(_call, [], _since), do: []
 
   def cuts(call, names, since) do
-    exports = Call.process(call, __MODULE__, :exports, nil)
+    exports = Call.process(call, __MODULE__, :cuts, nil)
     kept = GenServer.call(exports, {:kept, names})
     missing = Enum.reject(names, &is_map_key(kept, &1))
 
