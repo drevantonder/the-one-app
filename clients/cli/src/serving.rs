@@ -14,8 +14,8 @@
 //!   once it's told to go (`go`), and up to date again, kept or gone back. Verifying is loading the build into the
 //!   server while it runs, or starting both in its place (`ServerUpdateStage`). The server decides how it takes a
 //!   build; its network's updater (`core/edge/updater/updater.ts`) decides when. A build is started only by the `one` the record pairs it with, and
-//!   loaded only into a server whose `one` speaks what it does (`client::serve::protocol`): a new `one` is put in
-//!   place as its build is loaded, and runs the server from its next start, which only what needs one brings.
+//!   loaded only into a server whose `one` speaks what it does (`client::serve::protocol`): a pair with a new `one`
+//!   restarts the server on it.
 //!
 //! ```text
 //! server_membership:
@@ -883,10 +883,16 @@ async fn prepared(
     let compared = take(here, record, program, builds).await?;
     let method = match compared {
         Some(compared) => compared,
-        // A new `one` alone loads nothing: it's put in place, and runs the server from its next start.
         None if next.build == current.build => Ok(()),
         None => method(here, record, &current, &next),
     };
+    // The `one` that runs the server is the one its pair names, as every program a device runs is its install's: a new
+    // one restarts the server on it, where a hot load beside it would leave the one before running for as long as the
+    // server did (its device said it was that build for days).
+    let method = method.and_then(|()| match next.program == current.program {
+        true => Ok(()),
+        false => Err(format!("one {} runs it from now on", next.program)),
+    });
     let taking = if next.build == current.build { format!("one {}", next.program) } else { next.build.clone() };
     println!("Prepared {taking} to take by {}", method.as_ref().err().map_or("a hot load".to_owned(), |why| format!("restarting: {why}")));
     *record = here
@@ -956,12 +962,6 @@ async fn go(
             bail!("The server couldn't load {} again, and starts on it: {why:#}", current.build)
         }
     } else {
-        // This `one` runs on, as the server speaks what it does; the new one is what's used from now on, and what
-        // runs the server from its next start.
-        if next.program != current.program {
-            here.put_program(&next.program, program)?;
-            println!("one {} is in place, and runs the server from its next start.", next.program);
-        }
         *record = here.change(|record| record.took(next.clone()))?;
         reports.update(record.update_method, &current.build, &next.build, Some(began.elapsed()), None, "took");
         if next.build != current.build {

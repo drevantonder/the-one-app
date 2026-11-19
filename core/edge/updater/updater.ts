@@ -4,8 +4,7 @@
 //
 //     up to date ──a newer build published: the server's, or a `one` that runs servers──► preparing
 //       every awake server not on its latest pair (the server build, and the `one` that runs it) downloads it, checks
-//       it and says how it would take it: loaded in place, or restarted (why); a new `one` alone is put in place, and
-//       runs the server from its next start
+//       it and says how it would take it: loaded in place, or restarted (why), as a pair with a new `one` is
 //     preparing ──all checked──► loading
 //       every server that loads it in place takes it at once
 //     loading ──► restarting

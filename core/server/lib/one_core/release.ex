@@ -375,7 +375,8 @@ defmodule OneCore.Release do
   A hot load replaces only One Core's own code and NIFs (`load/1`), so it restarts for anything else, and for what its
   code can't be swapped under: a runtime built from anything else (`runtime-inputs`, which `tooling/release` writes:
   the VM, Elixir, Bun, the deps, One Core's config and `rel/`), messages to and from the `one` running the server
-  other than what that `one` speaks (`client::serve::protocol`, which it says in `ONE_PROTOCOL`), an update after one
+  other than what that `one` speaks (`client::serve::protocol`, which it says in `ONE_PROTOCOL`), a pair with a new
+  `one` (`next_program` in `ONE_SERVER_STATUS`), which runs the server from then on, an update after one
   that didn't take (`went_back`, in `ONE_SERVER_STATUS`), a breaking change
   (another 0.minor), an `.app` that changed beyond its modules, and among
   the modules that changed, `OneCore.Application`, a supervisor, a module with `-on_load`, a struct and a macro. A
@@ -392,8 +393,15 @@ defmodule OneCore.Release do
   defp restart(old, new) do
     apps = Enum.map([old, new], &app/1)
     [was, now] = Enum.map([old, new], &named/1)
+    status = JSON.decode!(System.get_env("ONE_SERVER_STATUS", "{}"))
 
     cond do
+      # The `one` that runs the server is the one its pair names, as every program a device runs is its install's: a
+      # pair with a new one restarts the server on it, where a hot load beside it would leave the one before running
+      # for as long as the server did (`prepared` in `clients/cli/src/serving.rs`, for a new `one` alone).
+      status["next_program"] && status["program"] && status["next_program"] != status["program"] ->
+        "one #{status["next_program"]} runs it from now on"
+
       inputs(old) == nil or inputs(old) != inputs(new) ->
         "its runtime is #{runtime(new)}, built from other than the server's #{runtime(old) || "whole build"}"
 
