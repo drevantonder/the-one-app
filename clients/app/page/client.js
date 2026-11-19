@@ -421,8 +421,8 @@ const moveMachine = setup({
     here: ({ event }) => "to" in event && event.to === front,
     there: ({ context, event }) => "to" in event && !!context.move && event.to === toward(context.move),
     returning: ({ context, event }) => "to" in event && !!context.move && event.to === (context.move.target === 1 ? context.move.from : context.move.to),
-    // The line takes an app home from any of its screens, as long as nothing is open over it; back only from its first.
-    backs: ({ event }) => ("home" in event && event.home ? depth > 0 && !front?.over && !covering() : home()),
+    // The line takes an app home from any of its screens, as long as nothing is drawn over it; back only from its first.
+    backs: ({ event }) => ("home" in event && event.home ? depth > 0 && !front?.layer && !covering() : home()),
   },
   actions: {
     // The frame coming is seen and takes taps from the start, over or under the one going, and its page is told
@@ -1306,10 +1306,9 @@ async function shortcut(entrypoint) {
 
 const line = byId("line")
 
-/// Whether the rail shows, and over what: while the window shows its apps and has a Home Screen to go back to
-/// (`data-rail`), the Home Screen (`home`) or an app (`app`): the line is there only over an app, unless something is
-/// open over it (`data-away`). Android is told where the line is, which its back gesture
-/// leaves to it.
+/// Whether the rail's line shows: while the window shows its apps and has a Home Screen to go back to, over an app,
+/// at any of its screens, unless something is drawn over it, a sheet or a menu (`data-away`). Android is told where
+/// the line is, which its back gesture leaves to it.
 /** @type {string | undefined} */
 let excluded
 /// The fingers on the line, by their pointers, where each came down, and the one pulling it (`pull`, below).
@@ -1321,9 +1320,7 @@ function rail() {
   const now = shown.getSnapshot()
   // A computer's windows have none: its own Dock or taskbar goes between them.
   const homed = Boolean(launcher) && !windows && now.hasTag("pages") && !now.matches("app_store")
-  const lined = homed && here() !== null && !showing(here())?.over
-  if (homed) document.body.dataset.rail = here() === null ? "home" : "app"
-  else delete document.body.dataset.rail
+  const lined = homed && here() !== null && !showing(here())?.layer
   line.toggleAttribute("data-away", !lined)
   // A line that went home under a finger comes back with its app.
   if (lined && !pull) line.toggleAttribute("data-pulled", false)
@@ -1626,6 +1623,7 @@ addEventListener("message", async ({ source, data }) => {
     // Something is open over its page, or nothing is any more, and whether it's on its first screen.
     if (method === "notifications/one/over") {
       view.over = params.over === true
+      view.layer = params.layer === true
       view.first = params.first
       gestures()
     }

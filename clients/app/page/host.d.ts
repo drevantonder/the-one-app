@@ -39,7 +39,9 @@ export interface View {
   host: string
   frame: HTMLIFrameElement
   tapped?: number
+  /** Whether something of its own is open, which the device's back shuts first, and whether any of it is drawn over it (a sheet, a menu), where its UI library says. */
   over?: boolean
+  layer?: boolean
   /** Whether it's on its first screen, with nothing of its own to go back to, where its UI library says. */
   first?: boolean
   /** Whether the device's status bar shows while it does: unless it asked otherwise (`client({ statusBar })`). */
