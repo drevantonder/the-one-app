@@ -494,10 +494,9 @@ async fn start() -> Result<Value, String> {
     // A computer opens each app in a window of its own (`hosts`).
     told["windows"] = json!(cfg!(desktop));
     // A phone draws an app's window natively, over the page, where it needs this program's runtime version or an
-    // older one (`renderer`). An iPhone does only where it's asked to (ONE_NATIVE=1, as a simulator's app is launched
-    // with), until it types and speaks to VoiceOver natively.
+    // older one (`renderer`).
     #[cfg(mobile)]
-    if cfg!(target_os = "android") || std::env::var_os("ONE_NATIVE").is_some_and(|on| on == "1") {
+    {
         told["runtimeVersion"] = json!(::renderer::RUNTIME_VERSION);
     }
     if let Some(theme) = *app.chosen.lock().expect("nothing panics holding it") {
