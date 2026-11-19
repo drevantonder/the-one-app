@@ -644,9 +644,7 @@ impl Modules {
             return Ok(());
         }
         let table = (self.files)(&table)?;
-        if serde_json::from_str::<serde_json::Value>(&table)?["tokens"].as_object().is_some_and(|tokens| !tokens.is_empty()) {
-            anyhow::bail!("its app's styles have tokens of their own (defineVars), which a native host draws only in that app's own page");
-        }
+        crate::tokens::load_component(&table)?;
         crate::load_styles(&table)?;
         Ok(())
     }

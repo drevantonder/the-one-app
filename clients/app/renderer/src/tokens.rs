@@ -131,6 +131,21 @@ pub fn load_page(json: &str) -> anyhow::Result<u32> {
     Ok(pages.len() as u32)
 }
 
+/// The tokens of the apps whose components a page draws (Settings' sections), as their `styles.json` came with them.
+/// An id starts with what its app makes it from, so no two apps' are the same, and these are every window's.
+static COMPONENTS: std::sync::RwLock<Option<HashMap<String, serde_json::Value>>> = std::sync::RwLock::new(None);
+
+/// Takes another app's own tokens, which its component brings to a page that isn't its own.
+pub fn load_component(json: &str) -> anyhow::Result<()> {
+    let parsed: serde_json::Value = serde_json::from_str(json)?;
+    let mut components = COMPONENTS.write().expect("nothing panics holding it");
+    let components = components.get_or_insert_with(HashMap::new);
+    for (id, token) in parsed["tokens"].as_object().into_iter().flatten() {
+        components.insert(id.clone(), token.clone());
+    }
+    Ok(())
+}
+
 static TABLE: std::sync::RwLock<Option<std::sync::Arc<Table>>> = std::sync::RwLock::new(None);
 
 /// Takes the token table the UI library came with (`tokens.json`). → the runtime version it needs.
@@ -179,6 +194,9 @@ impl Table {
             if let Some(token) = page.as_ref().and_then(|tokens| tokens.get(id)) {
                 return (token["kind"] == kind).then(|| Cow::Owned(varies(&token["value"], conditions).clone()));
             }
+        }
+        if let Some(token) = COMPONENTS.read().expect("nothing panics holding it").as_ref().and_then(|tokens| tokens.get(id)) {
+            return (token["kind"] == kind).then(|| Cow::Owned(varies(&token["value"], conditions).clone()));
         }
         let token = self.tokens.get(id).filter(|token| token["kind"] == kind)?;
         Some(Cow::Borrowed(varies(&token["value"], conditions)))
