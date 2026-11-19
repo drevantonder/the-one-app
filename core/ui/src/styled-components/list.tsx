@@ -10,7 +10,10 @@ import { messages } from "../words.ts"
 import type { Action } from "./actions.tsx"
 import { negative, styles } from "../styles.ts"
 import { duration, tokens } from "../tokens.ts"
-import type { Keyed, Located, Pressed } from "../types/ui.d.ts"
+import type { Located } from "../types/ui.d.ts"
+import { createHold, together } from "../behavior-primitives/drag.ts"
+import { insides, type Listbox } from "../headless-components/listbox.ts"
+import { createSwipeActions } from "../behavior-primitives/swipe-actions.ts"
 
 const look = styles({
   list: {
@@ -139,63 +142,6 @@ const CHUNK = 8
 const PER_FRAME = 3
 const BUDGET = 4
 const ROW = 38
-
-/** A listbox: which of its rows is chosen, and what's typed in that drives it. */
-export interface Listbox {
-  /** The list's id, which the field's `aria-controls` names. */
-  readonly id: string
-  chosen: () => number
-  choose: (index: number) => void
-  /** What the field that has the keyboard says of it, as WAI-ARIA's combobox: spread on it. */
-  field: () => { role: "combobox"; "aria-controls": string; "aria-expanded": "true" | "false"; "aria-activedescendant"?: string }
-  /** The field's keys: ↑ ↓ choose the row before and after, Home and End the first and last, Return opens the one
-   * chosen (`onOpen`). → whether it took the key. */
-  keys: (event: Keyed) => boolean
-}
-
-/** What its list tells it, how many rows there are, and an option's id by where it is. */
-type Inside = { option: (index: number) => string; rows: (count: number) => void }
-const insides = new WeakMap<Listbox, Inside>()
-
-let listboxes = 0
-
-/// `const results = createListbox()`, then `<Search {...results.field()} onKeyDown={results.keys} … />` and
-/// `<List listbox={results} label="Results">…rows…</List>`: a list of rows to choose from while what's typed in keeps
-/// the keyboard, as a search's results are (WAI-ARIA's combobox and listbox): ↑ ↓, Home and End in the field choose a
-/// row, Return calls `onOpen` with the one chosen, the pointer over a row chooses it (a press opens it, as its
-/// `onClick` says), and a screen reader hears which. `results.chosen()` is the
-/// one chosen, first unless it's moved; `results.choose(0)` goes back to the first, as a search does once it's typed in.
-export function createListbox({ onOpen }: { onOpen?: (index: number) => void } = {}): Listbox {
-  const id = `listbox-${++listboxes}`
-  const [chosen, setChosen] = createSignal(0)
-  const [count, setCount] = createSignal(0)
-  const option = (index: number) => `${id}-${index}`
-  const choose = (index: number) => setChosen(Math.max(0, Math.min(count() - 1, index)))
-  const keys = (event: Keyed) => {
-    if (event.altKey || event.metaKey || event.ctrlKey || !count()) return false
-    const to = { ArrowDown: chosen() + 1, ArrowUp: chosen() - 1, Home: 0, End: count() - 1 }[event.key]
-    if (to !== undefined) choose(to)
-    else if (event.key === "Enter" && onOpen) onOpen(chosen())
-    else return false
-    event.preventDefault()
-    return true
-  }
-  const listbox: Listbox = {
-    id,
-    chosen,
-    choose,
-    keys,
-    field: () => ({ role: "combobox", "aria-controls": id, "aria-expanded": count() ? "true" : "false", "aria-activedescendant": count() ? option(chosen()) : undefined }),
-  }
-  insides.set(listbox, {
-    option,
-    rows: (rows) => {
-      setCount(rows)
-      if (chosen() >= rows) setChosen(Math.max(0, rows - 1))
-    },
-  })
-  return listbox
-}
 
 /// `<List><For each={notes()}>{(note) => <Row heading={note.text} />}</For></List>`: things of one kind, one under
 /// another, in one group that stops at a readable width however wide the room is. With no rows it shows nothing. A
@@ -349,18 +295,14 @@ export function List(props: { listbox?: Listbox; label?: string; children?: JSX.
   )
 }
 
-/// How far a finger moves before it's a swipe or a scroll, not a press.
-const SLOP = 10
-/// How long a press is held before it opens a row's menu.
-const HOLD = 500
 /// How far aside a row stays to show its destructive item.
 const SHOWN = 88
 
-/// `<Row heading="Remove Device…" destructive onClick={remove} />` is a row that does something destructive, its
+/// `<Row heading="Remove Device…" destructive onPress={remove} />` is a row that does something destructive, its
 /// heading red, as iOS's Settings has one at the foot of a page.
 /// `<Row heading="Coffee with Sam" text="Meals · 12 Nov" />`: one thing in a list: its `heading`, up to two grey lines
 /// of `text`, what it starts with (`start`, an icon) and what it ends with (`end`: an amount, a switch). With
-/// `onClick` the whole row is pressed and opens in place. `current` marks the one that's open beside the list, in a
+/// `onPress` the whole row is pressed and opens in place. `current` marks the one that's open beside the list, in a
 /// split. `control` is a control before all of it, pressed apart from the row, as a checkbox that picks rows is, and
 /// `action` a button after all of it, pressed apart from the row, as Sign In is for an account that needs it; an action
 /// that would leave the words narrower than a menu goes under them. A ⋯ `Menu` in its `end` opens on a long press or a
@@ -390,6 +332,9 @@ type RowProps = {
   text?: JSX.Element
   start?: JSX.Element
   end?: JSX.Element
+  /** What pressing it does, as React Native's `onPress`. */
+  onPress?: (event?: Located) => void
+  /** `onPress`'s old name, while apps move to it. */
   onClick?: (event?: Located) => void
   current?: boolean
   control?: JSX.Element
@@ -400,69 +345,20 @@ type RowProps = {
 /// A row, drawn.
 function Drawn(props: RowProps) {
   const [menu, setMenu] = createSignal<Menu>()
-  // How far aside the row is, and whether it's on its way somewhere by itself.
-  const [swiped, setSwiped] = createSignal(0)
-  const [settling, setSettling] = createSignal(false)
-  let width = 0
-  let start: { x: number; y: number; at: number } | undefined
-  let swiping = false
-  let moves: { time: number; value: number }[] = []
-  // When a press last swiped the row, held it or put it back: the click its lifting makes isn't a press on the row.
-  let moved = -Infinity
-  let held: ReturnType<typeof setTimeout> | undefined
-  onCleanup(() => clearTimeout(held))
-  const aside = (px: number, settle = false) => (setSettling(settle), setSwiped(Math.max(0, Math.min(px, width || px))))
   const at = (event: Located) => ({ x: event.clientX, y: event.clientY, width: 0, height: 0 })
-
-  const down = (event: Pressed) => {
-    if (!menu() || event.button !== 0) return
-    width = event.currentTarget.getBoundingClientRect().width
-    if (swiped()) return void ((moved = event.timeStamp), aside(0, true))
-    start = { x: event.clientX, y: event.clientY, at: swiped() }
-    swiping = false
-    moves = []
-    held = setTimeout(() => ((moved = Infinity), (start = undefined), menu()?.open(at(event))), HOLD)
-  }
-  const move = (event: Pressed) => {
-    if (!start) return
-    const dx = (start.x - event.clientX) * (direction() === "rtl" ? -1 : 1)
-    const dy = event.clientY - start.y
-    if (!swiping && Math.hypot(dx, dy) < SLOP) return
-    clearTimeout(held)
-    if (!swiping) {
-      swiping = event.pointerType === "touch" && !!menu()?.destructive() && Math.abs(dx) > Math.abs(dy)
-      if (!swiping) return void (start = undefined)
-    }
-    aside(start.at + dx)
-    moves = [...moves.slice(-31), { time: event.timeStamp, value: swiped() }]
-  }
-  const up = (event: Pressed) => {
-    clearTimeout(held)
-    if (moved === Infinity) moved = event.timeStamp
-    if (!start) return
-    start = undefined
-    if (!swiping) return
-    moved = event.timeStamp
-    const item = menu()?.destructive()
-    if (item && swiped() > width * 0.6) {
-      aside(width, true)
-      menu()?.select(item.value)
-      setTimeout(() => aside(0, true), 400)
-      return
-    }
-    // Let go, it goes where it was heading: its speed as it was let go, carried on as a phone's scrolling slows.
-    const last = moves.at(-1)
-    const from = moves.findLast((move) => last!.time - move.time >= 80) ?? moves[0]
-    const speed = !last || event.timeStamp - last.time > 80 ? 0 : (last.value - from.value) / Math.max(1, last.time - from.time)
-    aside(swiped() + (speed * 0.998) / (1 - 0.998) > SHOWN / 2 ? SHOWN : 0, true)
-  }
-  const cancel = () => {
-    clearTimeout(held)
-    if (start && swiping) aside(0, true)
-    start = undefined
-  }
+  // Held, its menu opens where it was held; swiped toward its start by a finger, its destructive item shows.
+  const hold = createHold({ accepts: () => !!menu() && !swipe.offset(), onHold: (event) => menu()?.open(at(event)) })
+  const swipe = createSwipeActions({
+    room: SHOWN,
+    enabled: () => !!menu()?.destructive(),
+    onFullSwipe: () => {
+      const item = menu()?.destructive()
+      if (item) menu()?.select(item.value)
+    },
+  })
   // What a press that was a swipe, a held press, or put the row back would otherwise do as it lifts: open the row.
-  const pressed = (event: Located) => event.timeStamp - moved >= 600 && props.onClick?.(event)
+  const onPress = () => props.onPress ?? props.onClick
+  const pressed = (event: Located) => !hold.swallows(event) && !swipe.swallows(event) && onPress()?.(event)
 
   // On a computer, what it can do is the screen's action panel's while it's chosen: under the pointer, as Raycast's
   // rows are, or open beside the list. Open, then its menu's items.
@@ -470,7 +366,7 @@ function Drawn(props: RowProps) {
   const inListbox = useContext(InListbox)
   const choose = useContext(Choose)
   const actions = (): Action[] => [
-    ...(props.onClick ? [{ label: messages.open, onAction: () => props.onClick!() }] : []),
+    ...(onPress() ? [{ label: messages.open, onAction: () => onPress()!() }] : []),
     ...(menu()?.items() ?? []).map((item) => ({ label: item.label, destructive: item.destructive, disabled: item.disabled, onAction: () => menu()!.select(item.value) })),
   ]
   const chosen = () => choose?.set(actions, actions().length ? actions : undefined)
@@ -486,7 +382,7 @@ function Drawn(props: RowProps) {
   const sidebar = () => !touch() && style === "sidebar"
   // A row that opens something says so with a chevron, as iOS's Settings does, but not in a computer's sidebar, whose
   // rows open beside it, or a plain list's.
-  const opens = () => !!props.onClick && style !== "plain" && (touch() || style === "insetGrouped") && !props.destructive
+  const opens = () => !!onPress() && style !== "plain" && (touch() || style === "insetGrouped") && !props.destructive
   const inside = () => (
     <>
       <Show when={props.start}>
@@ -508,15 +404,12 @@ function Drawn(props: RowProps) {
       </Show>
     </>
   )
-  const moving = () => [settling() && look.settling, swiped() > 0 && look.moved(direction() === "rtl" ? swiped() : -swiped())]
+  const moving = () => [swipe.settling() && look.settling, swipe.offset() > 0 && look.moved(direction() === "rtl" ? swipe.offset() : -swipe.offset())]
   return (
     <RowMenu value={setMenu}>
       <View
         role={inListbox ? undefined : "listitem"}
-        onPointerDown={down}
-        onPointerMove={move}
-        onPointerUp={up}
-        onPointerCancel={cancel}
+        {...together(hold.gesture, swipe.gesture)}
         onContextMenu={(event) => menu()?.open(at(event))}
         onPointerEnter={chosen}
         style={[look.row, !touch() && !grouped() && look.flatRow, !!props.action && look.wraps, props.current && look.current, !!menu() && look.held]}
@@ -525,7 +418,7 @@ function Drawn(props: RowProps) {
           <View style={[look.control, moving()]}>{props.control}</View>
         </Show>
         <Show
-          when={props.onClick}
+          when={onPress()}
           fallback={<View style={[look.inside, !touch() && look.flatInside, grouped() && look.groupedInside, sidebar() && look.sidebarInside, !!props.control && look.after, moving()]}>{inside()}</View>}
         >
           <Pressable role={inListbox ? undefined : "button"} aria-current={props.current ? "true" : undefined} onPress={pressed} style={[look.inside, !touch() && look.flatInside, grouped() && look.groupedInside, sidebar() && look.sidebarInside, look.pressable, inListbox && look.quiet, !!props.control && look.after, moving()]}>
@@ -537,7 +430,7 @@ function Drawn(props: RowProps) {
         </Show>
         <Show when={menu()?.destructive()}>
           {(item) => (
-            <Pressable aria-hidden="true" onPress={() => (menu()?.select(item().value), aside(0, true))} style={[look.swipe, settling() && look.settling, look.swiped(swiped())]}>
+            <Pressable aria-hidden="true" onPress={() => (menu()?.select(item().value), swipe.close())} style={[look.swipe, swipe.settling() && look.settling, look.swiped(swipe.offset())]}>
               <Text>{item().label}</Text>
             </Pressable>
           )}

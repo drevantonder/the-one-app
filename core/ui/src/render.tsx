@@ -19,7 +19,7 @@ export const render = (code: () => JSX.Element): (() => void) =>
           heading={messages.cantShowPage}
           text={error() as Error}
           action={
-            <Button variant="outline" onClick={reset}>
+            <Button variant="outline" onPress={reset}>
               {messages.tryAgain}
             </Button>
           }

@@ -5,6 +5,7 @@
 
 export { words } from "./words.ts"
 export { createListCollection } from "./collection.ts"
+export { createVelocityTracker } from "./behavior-primitives/velocity.ts"
 export { createTheme, defineVars, negative, styles } from "./styles.ts"
 export { tokens } from "./tokens.ts"
 
@@ -23,7 +24,8 @@ export { seen } from "./seen.ts"
 export { History, Screen, Section, Split } from "./styled-components/screen.tsx"
 export { Empty, Problem, Skeleton, Status, Steps } from "./styled-components/states.tsx"
 
-export { createListbox, List, ListStyle, Row } from "./styled-components/list.tsx"
+export { List, ListStyle, Row } from "./styled-components/list.tsx"
+export { createListbox } from "./headless-components/listbox.ts"
 export { Metadata } from "./styled-components/metadata.tsx"
 
 export { Menu } from "./styled-components/menu.tsx"

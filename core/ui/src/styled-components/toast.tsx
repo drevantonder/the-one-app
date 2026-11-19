@@ -2,6 +2,7 @@
 // primitives, the same on the DOM and on a native host: a portal over the window (#primitives' `Portal`), drawn
 // while there are toasts, so it's over whatever was open when the first came.
 import { createRoot, createSignal, For, Show } from "solid-js"
+import { createToaster } from "../headless-components/toast.ts"
 import { Portal, Text, View } from "#primitives"
 import { Button } from "./button.tsx"
 import { Sheet } from "./sheet.tsx"
@@ -47,21 +48,10 @@ const look = styles({
   title: { flexShrink: 1, minWidth: 0, lineClamp: 1 },
 })
 
-/** At most this many show at once; the oldest goes for a new one. */
-const MOST = 3
 /** How long a toast takes to fade as it goes. */
 const fading = duration(tokens.motion.settle)
 
-type Toast = { id: number; title: string; action?: { label: string; run: () => void }; leaving?: boolean }
-
-const [toasts, setToasts] = createSignal<Toast[]>([])
-let made = 0
-let drawn = false
-
-const dismiss = (id: number) => {
-  setToasts((now) => now.map((one) => (one.id === id ? { ...one, leaving: true } : one)))
-  setTimeout(() => setToasts((now) => now.filter((one) => one.id !== id)), fading)
-}
+let toaster: ReturnType<typeof createToaster> | undefined
 
 /// `toast("Deleted", { action: { label: "Undo", run: restore } })`: one line about what just happened, at the foot
 /// of the window for a few seconds, with one thing to do about it. What went well needs none: fine is silent.
@@ -70,31 +60,27 @@ const dismiss = (id: number) => {
 export async function toast(text: string | Error, { action }: { action?: { label: string; run: () => void } } = {}): Promise<void> {
   const all = whole(text)
   if (all !== readable(all)) action ??= { label: messages.details, run: () => details(all) }
-  if (!drawn) {
-    drawn = true
-    createRoot(() => <Toaster />)
+  if (!toaster) {
+    const made = (toaster = createRoot(() => createToaster(fading)))
+    createRoot(() => <Toaster toaster={made} />)
   }
-  const id = ++made
-  const showing = toasts().filter((one) => !one.leaving)
-  if (showing.length >= MOST) dismiss(showing[0].id)
-  setToasts((now) => [...now, { id, title: readable(all), action }])
-  setTimeout(() => dismiss(id), action ? 8000 : 4000)
+  toaster.show(readable(all), action)
 }
 
-function Toaster() {
+function Toaster(props: { toaster: ReturnType<typeof createToaster> }) {
   return (
-    <Show when={toasts().length}>
+    <Show when={props.toaster.toasts().length}>
       <Portal>
         <View style={look.stack}>
-          <For each={toasts()} keyed={(one) => one.id}>
+          <For each={props.toaster.toasts()} keyed={(one) => one.id}>
             {(one) => (
-              <View role="status" aria-live="polite" style={[look.toast, !one().action && look.alone, one().leaving && look.leaving]}>
+              <View {...props.toaster.region()} style={[look.toast, !one().action && look.alone, one().leaving && look.leaving]}>
                 <Text style={look.title}>{one().title}</Text>
                 <Show when={one().action}>
                   {(action) => (
                     <>
                       <View style={look.rule} />
-                      <Button variant="ghost" onClick={() => (dismiss(one().id), action().run())}>
+                      <Button variant="ghost" onPress={() => (props.toaster.dismiss(one().id), action().run())}>
                         {action().label}
                       </Button>
                     </>

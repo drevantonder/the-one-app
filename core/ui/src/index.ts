@@ -37,7 +37,7 @@
 /// `AbortController`, events, streams, timers) but `fetch`, as `call()` reaches the network, so an npm package that runs
 /// in a Worker runs in it (core/ui/src/types/globals.d.ts says which). `render(() => <App />)` from `ui` draws
 /// the page, and a page that throws while drawing shows what failed and Try Again, as `<Errored>` would. Words are in a `Text`, or in a component that takes them (a
-/// `Row`'s `heading`). A press is a `Pressable`'s `onPress={() => ...}` (a `Button`'s and a `Row`'s `onClick`), what's
+/// `Row`'s `heading`). A press is `onPress={() => ...}`, a `Pressable`'s, a `Button`'s and a `Row`'s, as React Native names it; what's
 /// typed `onChangeText={setText}`, Return in it `onSubmitEditing={save}`, a key `onKeyDown={(event) => event.key ===
 /// "Escape" && close()}`, a switch's `onChange={(event) => set(event.currentTarget.checked)}`. `bun run lint:app apps/<app>/client`, from the repo's
 /// root, checks a page, as a deploy does of one whose entrypoint says its `runtime_version` and refuses it with the errors. What a page may use is `core/ui/src/types/ui.d.ts`: one that needs what isn't
@@ -49,10 +49,13 @@ export { seen } from "./seen.ts"
 export { words } from "./words.ts"
 export { Button, Icon, Spinner } from "./styled-components/button.tsx"
 export { Badge } from "./styled-components/badge.tsx"
-export { Checkbox, Field, Input, RadioGroup, Search, Switch, Textarea, useField } from "./styled-components/field.tsx"
+export { Checkbox, Field, Input, RadioGroup, Search, Switch, Textarea } from "./styled-components/field.tsx"
+export { useField } from "./headless-components/field.ts"
 export { createListCollection } from "./collection.ts"
+export { createVelocityTracker } from "./behavior-primitives/velocity.ts"
 export { Select } from "./styled-components/select.tsx"
-export { createListbox, List, ListStyle, Row, type Listbox } from "./styled-components/list.tsx"
+export { List, ListStyle, Row } from "./styled-components/list.tsx"
+export { createListbox, type Listbox } from "./headless-components/listbox.ts"
 export { Metadata } from "./styled-components/metadata.tsx"
 export { History, Screen, Section, Split } from "./styled-components/screen.tsx"
 export { LiveScreen } from "./styled-components/live-screen.tsx"

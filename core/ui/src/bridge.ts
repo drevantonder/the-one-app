@@ -108,7 +108,7 @@ export const visible = (): boolean => shown()
 /// shown either way, and the client says it's offline itself. A client that doesn't say is `"online"`.
 export const connection = () => (greet(), connected())
 
-/// `<Show when={updateReady()}><Button onClick={() => client({ update: true })}>Update</Button></Show>`: whether an
+/// `<Show when={updateReady()}><Button onPress={() => client({ update: true })}>Update</Button></Show>`: whether an
 /// update for this device is ready, as it changes, which `client({ update: true })` takes. The launcher shows it.
 export const updateReady = () => (greet(), updatable())
 

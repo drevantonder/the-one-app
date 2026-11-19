@@ -389,7 +389,7 @@ function Connected(props: { label: string; screen: (inputs: ScreenInputs) => Pro
               heading="Can't reach this screen"
               text={state().context.why}
               action={
-                <Button variant="outline" onClick={() => connection.send({ type: "again" })}>
+                <Button variant="outline" onPress={() => connection.send({ type: "again" })}>
                   Try Again
                 </Button>
               }
@@ -404,7 +404,7 @@ function Connected(props: { label: string; screen: (inputs: ScreenInputs) => Pro
       {/* Full screen has no Escape, which is the screen's: it has its own way out. */}
       <Show when={full()}>
         <View style={look.leave(Math.max(8, safeArea().top), Math.max(8, safeArea().right))}>
-          <Button variant="secondary" size="icon" aria-label={messages.exitFullScreen} onClick={toggle}>
+          <Button variant="secondary" size="icon" aria-label={messages.exitFullScreen} onPress={toggle}>
             <Icon name="corners-in" />
           </Button>
         </View>
@@ -423,7 +423,7 @@ function Connected(props: { label: string; screen: (inputs: ScreenInputs) => Pro
           <Text style={look.note}>Live video isn't connecting, so this updates each second.</Text>
         </Show>
         <BarEnd value={true}>
-          <Button variant="ghost" size="icon" aria-label={messages.fullScreen} onClick={toggle}>
+          <Button variant="ghost" size="icon" aria-label={messages.fullScreen} onPress={toggle}>
             <Icon name="corners-out" />
           </Button>
         </BarEnd>

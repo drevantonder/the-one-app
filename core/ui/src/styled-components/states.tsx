@@ -180,7 +180,7 @@ export function Details(props: { text: string }) {
         <Text style={look.mono}>{props.text.slice(readable(props.text).length).trim()}</Text>
       </ScrollView>
       <View style={look.copy}>
-        <Button variant="ghost" size="icon" aria-label={copied() ? messages.copied : messages.copy} onClick={() => void copy(props.text).then(() => setCopied(true))}>
+        <Button variant="ghost" size="icon" aria-label={copied() ? messages.copied : messages.copy} onPress={() => void copy(props.text).then(() => setCopied(true))}>
           <Icon name={copied() ? "check" : "copy"} />
         </Button>
       </View>

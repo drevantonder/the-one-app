@@ -5,6 +5,7 @@ import type { JSX } from "@solidjs/web"
 import { Path, Pressable, Svg, Text, View } from "#primitives"
 import { messages } from "../words.ts"
 import { collected } from "./collect.ts"
+import { createButton } from "../headless-components/button.ts"
 import { negative, styles, type Styles } from "../styles.ts"
 import { tokens } from "../tokens.ts"
 import type { Laid, Located } from "../types/ui.d.ts"
@@ -156,6 +157,9 @@ export interface ButtonProps {
   "aria-haspopup"?: "menu" | "dialog" | "listbox"
   "aria-expanded"?: "true" | "false"
   autofocus?: boolean
+  /** What pressing it does, as React Native's `onPress`. */
+  onPress?: (event: Located) => void
+  /** `onPress`'s old name, while apps move to it. */
   onClick?: (event: Located) => void
   /** Told where it's drawn as it's laid out, as a menu's button is, which its menu opens under. */
   onLayout?: (event: Laid) => void
@@ -168,31 +172,38 @@ export interface ButtonProps {
  * Back does at the bar's start. */
 export const BarEnd = createContext(false)
 
-/// `<Button onClick={save}>Save</Button>`: something to press. `variant` says how much it matters: one `default`
+/// `<Button onPress={save}>Save</Button>`: something to press. `variant` says how much it matters: one `default`
 /// to a view, then `secondary`, `outline` and `ghost`, and `destructive` for what can't be undone. `size="icon"`
 /// is square, for an icon alone (`<Icon name="plus" />`), named by `aria-label`. `loading` shows it's working and
 /// can't be pressed again. `style` places it, and changes nothing else of its look.
 export function Button(props: ButtonProps) {
-  const off = () => !!props.disabled || !!props.loading
+  const button = createButton({
+    get disabled() {
+      return props.disabled
+    },
+    get loading() {
+      return props.loading
+    },
+    get onPress() {
+      return props.onPress ?? props.onClick
+    },
+  })
   // What it says, made once: words in a text, or what it's given (an icon) as it is.
   const inside = children(() => props.children)
   const end = useContext(BarEnd)
   // In a computer's screen's bar, it's one of the screen's actions, in its footer and its action panel, and draws
   // nothing there itself.
   const words = () => inside.toArray().filter((part) => typeof part === "string").join(" ") || props["aria-label"] || ""
-  if (collected(() => ({ label: words(), onAction: () => props.onClick?.(undefined as never), destructive: props.variant === "destructive", disabled: off() }))) return null
+  if (collected(() => ({ label: words(), onAction: () => (props.onPress ?? props.onClick)?.(undefined as never), destructive: props.variant === "destructive", disabled: button.off() }))) return null
   return (
     <Pressable
-      role="button"
+      {...button.root()}
       aria-label={props["aria-label"]}
       aria-haspopup={props["aria-haspopup"]}
       aria-expanded={props["aria-expanded"]}
       autoFocus={props.autofocus}
       onLayout={props.onLayout}
-      aria-disabled={off() ? "true" : undefined}
-      aria-busy={props.loading ? "true" : undefined}
-      onPress={(event: Located) => !off() && props.onClick?.(event)}
-      style={[look.button, props.variant && props.variant !== "default" && look[props.variant], props.size === "icon" && look.square, end && props.variant === "ghost" && props.size === "icon" && look.pulled, off() && look.disabled, props["aria-expanded"] === "true" && (props.variant === "outline" || props.variant === "ghost") && look.open, props.style]}
+      style={[look.button, props.variant && props.variant !== "default" && look[props.variant], props.size === "icon" && look.square, end && props.variant === "ghost" && props.size === "icon" && look.pulled, button.off() && look.disabled, props["aria-expanded"] === "true" && (props.variant === "outline" || props.variant === "ghost") && look.open, props.style]}
     >
       <Show when={props.loading}>
         <Spinner />

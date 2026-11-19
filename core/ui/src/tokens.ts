@@ -395,3 +395,11 @@ export const duration = (token: Token<"motion">): number => {
   const value = (token.value as { duration: number | { default: number } }).duration
   return typeof value === "number" ? value : value.default
 }
+
+/** How long a length token is by default, in CSS pixels, at the root's 16px to a rem, for what a page places itself:
+ * a popup beside what opened it. */
+export const pixels = (token: Token<"length">): number => {
+  const value = token.value as Varies<Length>
+  const length = "default" in value ? value.default : value
+  return "px" in length ? length.px : length.rem * 16
+}

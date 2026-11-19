@@ -35,11 +35,18 @@ function layer(modal: boolean, content: () => JSX.Element) {
   let box!: HTMLDivElement
   onSettled(() => {
     if (!modal) return
+    const opener = document.activeElement as HTMLElement | null
     const others = [...document.body.children].filter((element) => element !== box.parentElement && element !== box && !(element as HTMLElement).inert) as HTMLElement[]
     for (const other of others) other.inert = true
     // The keyboard goes into it: to what asks for it (`autofocus`, a phone's keyboard with it), or to its dialog.
     box.querySelector<HTMLElement>("[autofocus], [aria-modal='true']")?.focus()
-    return () => others.forEach((other) => (other.inert = false))
+    return () => {
+      others.forEach((other) => (other.inert = false))
+      // Gone, it gives the keyboard back to what had it before, as WAI-ARIA's dialog pattern asks, unless it's gone
+      // somewhere else since.
+      const now = document.activeElement
+      if (opener?.isConnected && (!now || now === document.body || box.contains(now))) opener.focus({ preventScroll: true })
+    }
   })
   return (
     <Inserted mount={document.body}>

@@ -1,13 +1,13 @@
 // One of several, from a list that opens under it: written once on the drawing primitives (#primitives), the same
 // on the DOM and on a native host.
-import { createSignal, For, Show } from "solid-js"
-import type { CollectionItem, ListCollection } from "@zag-js/collection"
+import { For, Show } from "solid-js"
+import type { CollectionItem } from "@zag-js/collection"
 import { Picker, Portal, Pressable, Text, View } from "#primitives"
-import { touch, viewport } from "#bridge"
-import type { Keyed } from "../drawing-primitives/primitives.tsx"
-import type { Located, Rect } from "../types/ui.d.ts"
+import { touch } from "#bridge"
+import type { Located } from "../types/ui.d.ts"
+import { createSelect, type SelectProps } from "../headless-components/select.ts"
 import { Icon } from "./button.tsx"
-import { useField } from "./field.tsx"
+import { useField } from "../headless-components/field.ts"
 import { styles } from "../styles.ts"
 import { tokens } from "../tokens.ts"
 
@@ -40,14 +40,11 @@ const look = styles({
   placeholder: { color: tokens.colour.secondaryLabel },
   caret: { color: tokens.colour.secondaryLabel },
   catcher: { position: "absolute", top: 0, bottom: 0, start: 0, end: 0, pointerEvents: "auto" },
-  anchor: (top: number, start: number, width: number, height: number) => ({ position: "absolute", top, start, width, height }),
-  below: { top: "100%", marginTop: tokens.grid[1] },
-  above: { bottom: "100%", marginBottom: tokens.grid[1] },
+  // As wide as its face, under it or above it, once it's measured.
+  placed: (top: number, left: number, width: number) => ({ top, left, width, pointerEvents: "auto" }),
+  measuring: (width: number) => ({ top: 0, left: 0, width, opacity: 0 }),
   list: {
     position: "absolute",
-    start: 0,
-    end: 0,
-    pointerEvents: "auto",
     padding: tokens.grid[1],
     borderRadius: tokens.radius.medium,
     backgroundColor: tokens.colour.card,
@@ -76,17 +73,6 @@ const look = styles({
   hidden: { opacity: 0 },
 })
 
-/** A `Select.Root`'s props, as Ark UI's select names them. */
-export interface SelectProps<T extends CollectionItem = CollectionItem> {
-  collection: ListCollection<T>
-  value?: string[]
-  defaultValue?: string[]
-  placeholder?: string
-  disabled?: boolean
-  "aria-label"?: string
-  onValueChange?: (details: { value: string[] }) => void
-}
-
 /// `<Field label="Category"><Select.Root collection={categories} value={[category()]} onValueChange={({ value }) => setCategory(value[0])} /></Field>`:
 /// one of a few, from a collection (`createListCollection`), in a list that opens under it, as Ark UI's select's
 /// props have it: `value` and `onValueChange` (`({ value: ["meals"] })`), and `placeholder` until something's chosen;
@@ -96,116 +82,51 @@ export const Select = { Root: SelectRoot }
 
 function SelectRoot<T extends CollectionItem>(props: SelectProps<T>) {
   const field = useField()
-  const items = () => props.collection.items
-  const value = (item: T) => props.collection.getItemValue(item) ?? ""
-  const [own, setOwn] = createSignal<string[]>()
-  const chosen = () => props.value ?? own() ?? props.defaultValue ?? (props.placeholder ? [] : [props.collection.firstValue].filter((one): one is string => one != null))
-  // Where its face is drawn while its list is open, which the list opens from.
-  const [at, setAtRect] = createSignal<Rect>()
-  const open = () => !!at()
-  const setOpen = (now: false) => setAtRect(now || undefined)
-  const [highlighted, setHighlighted] = createSignal(0)
-  const off = () => !!props.disabled || !!field?.disabled()
-  const itemOff = (item: T) => props.collection.getItemDisabled(item)
-  const text = () => chosen().map((one) => props.collection.stringifyItem(props.collection.find(one))).filter(Boolean).join(", ")
-  const choose = (item: T) => {
-    if (itemOff(item)) return
-    setOpen(false)
-    if (chosen()[0] === value(item)) return
-    setOwn([value(item)])
-    props.onValueChange?.({ value: [value(item)] })
-  }
-  const show = (face: Rect) => {
-    if (off()) return
-    setHighlighted(Math.max(0, items().findIndex((item) => value(item) === chosen()[0])))
-    setAtRect({ x: face.x, y: face.y, width: face.width, height: face.height })
-  }
-  // The next that can be chosen, `by` one way or the other from `from`.
-  const step = (from: number, by: number) => {
-    const all = items()
-    for (let next = from + by; next >= 0 && next < all.length; next += by) if (!itemOff(all[next])) return next
-  }
-  const keyed = (event: Keyed) => {
-    if (off()) return
-    if (event.key === "ArrowDown" || event.key === "ArrowUp") {
-      event.preventDefault()
-      const by = event.key === "ArrowDown" ? 1 : -1
-      // Closed, the arrows choose the next one, as a Mac's pop-up button's do; open, they move through the list.
-      if (!open()) {
-        const next = step(items().findIndex((item) => value(item) === chosen()[0]), by)
-        if (next !== undefined) choose(items()[next])
-      } else setHighlighted((now) => step(now, by) ?? now)
-    } else if (open() && (event.key === "Enter" || event.key === " ")) {
-      event.preventDefault()
-      const item = items()[highlighted()]
-      if (item) choose(item)
-    } else if (open() && (event.key === "Escape" || event.key === "Tab")) {
-      if (event.key === "Escape") event.preventDefault()
-      setOpen(false)
-    }
-  }
+  const select = createSelect(props, { disabled: () => !!field?.disabled() })
   return (
     <View style={look.select}>
       <Pressable
-        role="combobox"
-        aria-haspopup="listbox"
-        aria-expanded={open() ? "true" : "false"}
-        aria-disabled={off() ? "true" : undefined}
+        {...select.face()}
         aria-label={props["aria-label"] ?? field?.label()}
         aria-description={field?.message()}
         aria-invalid={field?.invalid() ? "true" : undefined}
-        onPress={(event: Located) => !touch() && (open() ? setOpen(false) : show(event.currentTarget.getBoundingClientRect()))}
-        onKeyDown={keyed}
-        onBlur={() => setOpen(false)}
-        style={[look.face, field?.invalid() && look.wrong, off() && look.off]}
+        onPress={(event: Located) => !touch() && select.toggle(event)}
+        style={[look.face, field?.invalid() && look.wrong, select.off() && look.off]}
       >
-        <Text style={[look.chosen, !text() && look.placeholder]}>{text() || props.placeholder || " "}</Text>
+        <Text style={[look.chosen, !select.text() && look.placeholder]}>{select.text() || props.placeholder || " "}</Text>
         <View style={look.caret}>
           <Icon name="caret-up-down" />
         </View>
         <Show when={touch()}>
           <Picker
             aria-label={props["aria-label"] ?? field?.label()}
-            enabled={!off()}
-            selectedValue={chosen()[0]}
+            enabled={!select.off()}
+            selectedValue={select.chosen()[0]}
             onValueChange={(chose) => {
-              const item = items().find((one) => value(one) === chose)
-              if (item) choose(item)
+              const item = select.items().find((one) => select.value(one) === chose)
+              if (item) select.choose(item)
             }}
             style={look.native}
           >
-            <For each={items()}>{(item) => <Picker.Item value={value(item)} label={props.collection.stringifyItem(item) ?? ""} enabled={!itemOff(item)} />}</For>
+            <For each={select.items()}>{(item) => <Picker.Item value={select.value(item)} label={select.label(item)} enabled={!select.itemOff(item)} />}</For>
           </Picker>
         </Show>
       </Pressable>
-      <Show when={at()}>
+      <Show when={select.at()}>
         {(face) => (
           <Portal>
-            <Pressable style={look.catcher} onPress={() => setOpen(false)} />
-            <View style={look.anchor(face().y, face().x, face().width, face().height)}>
-              <View role="listbox" style={[look.list, face().y + face().height / 2 > viewport().height / 2 ? look.above : look.below]}>
-                <For each={items()}>
-                  {(item, i) => {
-                    const on = () => chosen().includes(value(item))
-                    return (
-                      <Pressable
-                        role="option"
-                        aria-selected={on() ? "true" : "false"}
-                        aria-disabled={itemOff(item) ? "true" : undefined}
-                        tabIndex={-1}
-                        onPress={() => choose(item)}
-                        onPointerEnter={() => setHighlighted(i())}
-                        style={[look.item, i() === highlighted() && look.highlighted, itemOff(item) && look.itemOff]}
-                      >
-                        <Text style={look.itemText}>{props.collection.stringifyItem(item)}</Text>
-                        <View style={[!on() && look.hidden]}>
-                          <Icon name="check" />
-                        </View>
-                      </Pressable>
-                    )
-                  }}
-                </For>
-              </View>
+            <Pressable {...select.outside()} style={look.catcher} />
+            <View {...select.list()} style={[look.list, select.placed() ? look.placed(select.placed()!.y, select.placed()!.x, face().width) : look.measuring(face().width)]}>
+              <For each={select.items()}>
+                {(item, i) => (
+                  <Pressable {...select.option(item, i)} style={[look.item, i() === select.highlighted() && look.highlighted, select.itemOff(item) && look.itemOff]}>
+                    <Text style={look.itemText}>{select.label(item)}</Text>
+                    <View style={[!select.chosen().includes(select.value(item)) && look.hidden]}>
+                      <Icon name="check" />
+                    </View>
+                  </Pressable>
+                )}
+              </For>
             </View>
           </Portal>
         )}

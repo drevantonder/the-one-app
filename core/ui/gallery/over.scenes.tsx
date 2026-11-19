@@ -35,17 +35,17 @@ export default {
   "Over the page/Toast": {
     alone: true,
     taps: ["Delete Note"],
-    render: () => <Button onClick={() => toast("Note deleted", { action: { label: "Undo", run: () => {} } })}>Delete Note</Button>,
+    render: () => <Button onPress={() => toast("Note deleted", { action: { label: "Undo", run: () => {} } })}>Delete Note</Button>,
   },
   "Over the page/A tool's error as a toast": {
     alone: true,
     taps: ["Sync"],
-    render: () => <Button onClick={() => toast(new Error("Couldn't reach the network\n\nnotes_sync: connection refused (os error 111)"))}>Sync</Button>,
+    render: () => <Button onPress={() => toast(new Error("Couldn't reach the network\n\nnotes_sync: connection refused (os error 111)"))}>Sync</Button>,
   },
   "Over the page/A tool's error in full": {
     alone: true,
     taps: ["Sync", "Details"],
-    render: () => <Button onClick={() => toast(new Error("Couldn't reach the network\n\nnotes_sync: connection refused (os error 111)"))}>Sync</Button>,
+    render: () => <Button onPress={() => toast(new Error("Couldn't reach the network\n\nnotes_sync: connection refused (os error 111)"))}>Sync</Button>,
   },
   "Over the page/Alert": {
     alone: true,

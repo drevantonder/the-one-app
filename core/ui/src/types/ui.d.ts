@@ -242,6 +242,13 @@ export interface Listbox {
   keys: (event: Keyed) => boolean
 }
 export declare function createListbox(): Listbox
+/** How fast a finger was going as it lifted, from its moves (`createVelocityTracker`): `add` each move, then
+ * `velocity` as it lifts, in pixels a millisecond. */
+export declare function createVelocityTracker(options?: { horizon?: number; staleAfter?: number; maxSpeed?: number; capacity?: number }): {
+  add(time: number, position: number): void
+  velocity(now: number): number
+  reset(): void
+}
 export declare function List(props: { listbox?: Listbox; label?: string; children?: Element }): Element
 /** How the lists in it are drawn (`ListStyle`): plain, inset grouped cards, or a window's sidebar. */
 export declare function ListStyle(props: { value: "plain" | "insetGrouped" | "sidebar"; children: Element }): Element
@@ -250,7 +257,9 @@ export declare function Row(props: {
   text?: Element
   start?: Element
   end?: Element
-  /** Pressed, with where it's drawn; Return in a listbox opens it with none. */
+  /** Pressed, with where it's drawn; Return in a listbox opens it with none. As React Native's `onPress`. */
+  onPress?: (event?: Located) => void
+  /** @deprecated `onPress`'s old name, while apps move to it. */
   onClick?: (event?: Located) => void
   current?: boolean
   control?: Element
@@ -275,6 +284,9 @@ export type ButtonProps = {
   "aria-haspopup"?: "menu" | "dialog" | "listbox"
   "aria-expanded"?: "true" | "false"
   autofocus?: boolean
+  /** What pressing it does, as React Native's `onPress`. */
+  onPress?: (event: Located) => void
+  /** @deprecated `onPress`'s old name, while apps move to it. */
   onClick?: (event: Located) => void
   onLayout?: (event: Laid) => void
   /** Where it sits in what it's in, the only part of its look a caller changes. */

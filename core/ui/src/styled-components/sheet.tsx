@@ -1,16 +1,16 @@
 // What's over the page, as a system's own: a sheet, up from the foot of a narrow window and in the middle of a wide
 // one, and an alert, a question that stops everything until it's answered. Written once on the drawing
 // primitives, the same on the DOM and on a native host: each a `Modal` (#primitives) over the window.
-import { children, createEffect, createRoot, createSignal, onCleanup, Show } from "solid-js"
+import { children, createRoot, createSignal, Show } from "solid-js"
 import type { JSX } from "@solidjs/web"
 import { Modal, Pressable, ScrollView, Text, View } from "#primitives"
-import { covers, touch, viewport } from "#bridge"
+import { touch, viewport } from "#bridge"
 import { Button, Icon } from "./button.tsx"
 import { messages } from "../words.ts"
 import { Collect } from "./collect.ts"
 import { negative, styles } from "../styles.ts"
 import { duration, tokens } from "../tokens.ts"
-import type { Pressed } from "../types/ui.d.ts"
+import { createDialog, createPull, type DialogProps } from "../headless-components/dialog.ts"
 
 /** How long what's over the page takes to go, in milliseconds: the travel pace's (tokens.ts). */
 const going = duration(tokens.motion.travel)
@@ -53,36 +53,14 @@ const look = styles({
 /// What a sheet and an alert share: shown over the window in a modal layer while `open`, with what's around it
 /// dimmed, kept until it's gone as it closes; Escape, the device's back and a press on what's around it close it,
 /// each calling `onClose`.
-function Over(props: { open?: boolean; onClose?: () => void; children: (leaving: () => boolean) => JSX.Element }) {
-  const [shown, setShown] = createSignal(false)
-  const [leaving, setLeaving] = createSignal(false)
-  let timer: ReturnType<typeof setTimeout> | undefined
-  createEffect(
-    () => !!props.open,
-    (open) => {
-      clearTimeout(timer)
-      if (open) return void (setLeaving(false), setShown(true))
-      if (!shown()) return
-      setLeaving(true)
-      timer = setTimeout(() => (setShown(false), setLeaving(false)), going)
-    },
-  )
-  // The device's back closes what's on top, as it would go back.
-  createEffect(
-    () => !!props.open,
-    (open) => {
-      if (!open) return
-      const shut = covers(() => props.onClose?.())
-      return shut
-    },
-  )
-  onCleanup(() => clearTimeout(timer))
+function Over(props: DialogProps & { children: (dialog: ReturnType<typeof createDialog>) => JSX.Element }) {
+  const dialog = createDialog(props, going)
   return (
-    <Show when={shown()}>
+    <Show when={dialog.shown()}>
       <Modal>
-        <Pressable style={[look.scrim, leaving() && look.gone]} onPress={() => props.onClose?.()} />
+        <Pressable {...dialog.outside()} style={[look.scrim, dialog.leaving() && look.gone]} />
         {/* What's over the page isn't the bar's, wherever it's written. */}
-        <Collect value={null}>{props.children(leaving)}</Collect>
+        <Collect value={null}>{props.children(dialog)}</Collect>
       </Modal>
     </Show>
   )
@@ -93,45 +71,16 @@ function Over(props: { open?: boolean; onClose?: () => void; children: (leaving:
 /// Escape, the device's back, a press outside and a pull down close it too: each calls `onClose`, which sets
 /// `open` false. `autofocus` on a field in it brings up a phone's keyboard as it opens.
 export function Sheet(props: { heading?: JSX.Element; open?: boolean; onClose?: () => void; children?: JSX.Element }) {
-  // A finger pulling it down: where it started, how far it's gone, and its last moves, for how fast it was let go.
-  const [pull, setPull] = createSignal<{ y: number; down: number; height: number; started: number; moves: { time: number; down: number }[] }>()
-  const press = (event: Pressed) => {
-    if (wide() || event.pointerType === "mouse") return
-    setPull({ y: event.clientY, down: 0, height: event.currentTarget.getBoundingClientRect().height, started: event.timeStamp, moves: [] })
-  }
-  const move = (event: Pressed) => {
-    const was = pull()
-    if (!was) return
-    const down = Math.max(0, event.clientY - was.y)
-    setPull({ ...was, down, moves: [...was.moves.slice(-31), { time: event.timeStamp, down }] })
-  }
-  /// Let go a third of the way down, or flicked down, it closes; otherwise it goes back.
-  const lift = (event: Pressed) => {
-    const was = pull()
-    setPull(undefined)
-    if (!was) return
-    const last = was.moves.at(-1)
-    const from = was.moves.findLast((move) => last!.time - move.time >= 80) ?? was.moves[0]
-    const speed = !last || event.timeStamp - last.time > 80 ? 0 : (last.down - from.down) / Math.max(1, last.time - from.time)
-    const flicked = speed > 0 && was.down / Math.max(1, event.timeStamp - was.started) > 0.11
-    if (was.down > was.height / 3 || flicked) props.onClose?.()
-  }
-  const keys = (event: { key: string }) => event.key === "Escape" && props.onClose?.()
+  const pull = createPull({ enabled: () => !wide(), onClose: () => props.onClose?.() })
   return (
     <Over open={props.open} onClose={props.onClose}>
-      {(leaving) => (
+      {(dialog) => (
         <View style={[look.place, wide() && look.middle]}>
           <View
-            role="dialog"
-            aria-modal="true"
-            tabIndex={-1}
+            {...dialog.content("dialog")}
             aria-label={typeof props.heading === "string" ? props.heading : undefined}
-            onKeyDown={keys}
-            onPointerDown={press}
-            onPointerMove={move}
-            onPointerUp={lift}
-            onPointerCancel={() => setPull(undefined)}
-            style={[look.panel, wide() && look.floating, !touch() && look.glass, leaving() && (wide() ? look.shrunk : look.down), pull() && look.pulled, pull() && look.dragged(pull()!.down)]}
+            {...pull.gesture}
+            style={[look.panel, wide() && look.floating, !touch() && look.glass, dialog.leaving() && (wide() ? look.shrunk : look.down), pull.down() !== undefined && look.pulled, pull.down() !== undefined && look.dragged(pull.down()!)]}
           >
             <Show when={!wide()}>
               <View aria-hidden="true" style={look.grabber} />
@@ -140,7 +89,7 @@ export function Sheet(props: { heading?: JSX.Element; open?: boolean; onClose?: 
               <Text role="heading" aria-level={2} style={[look.heading, !touch() && look.computerHeading]}>
                 {props.heading}
               </Text>
-              <Button variant="ghost" size="icon" aria-label={messages.close} onClick={() => props.onClose?.()}>
+              <Button variant="ghost" size="icon" aria-label={messages.close} onPress={() => props.onClose?.()}>
                 <Icon name="x" />
               </Button>
             </View>
@@ -152,7 +101,7 @@ export function Sheet(props: { heading?: JSX.Element; open?: boolean; onClose?: 
   )
 }
 
-/// `<Alert heading="Vault wants to use a key" text="Sent only to api.github.com." open={!!asking()} onClose={() => setAsking()} action={<><Button variant="outline" onClick={decline}>Don't Allow</Button><Button onClick={allow}>Allow</Button></>}>...</Alert>`:
+/// `<Alert heading="Vault wants to use a key" text="Sent only to api.github.com." open={!!asking()} onClose={() => setAsking()} action={<><Button variant="outline" onPress={decline}>Don't Allow</Button><Button onPress={allow}>Allow</Button></>}>...</Alert>`:
 /// a question that stops everything until it's answered, as a system's permission prompt does, in the middle of the
 /// window while `open`: its `heading`, its grey `text`, what's chosen or typed for it, then its buttons (`action`),
 /// sharing the row while two fit, and otherwise one over the other, the first below, as iOS lays them out.
@@ -162,15 +111,12 @@ export function Alert(props: { heading: JSX.Element; text?: JSX.Element; open?: 
   const actions = children(() => props.action)
   return (
     <Over open={props.open} onClose={props.onClose}>
-      {(leaving) => (
+      {(dialog) => (
         <View style={[look.place, look.middle]}>
           <View
-            role="alertdialog"
-            aria-modal="true"
-            tabIndex={-1}
+            {...dialog.content("alertdialog")}
             aria-label={typeof props.heading === "string" ? props.heading : undefined}
-            onKeyDown={(event) => event.key === "Escape" && props.onClose?.()}
-            style={[look.panel, look.floating, !touch() && look.glass, look.alert, leaving() && look.shrunk]}
+            style={[look.panel, look.floating, !touch() && look.glass, look.alert, dialog.leaving() && look.shrunk]}
           >
             <Text role="heading" aria-level={2} style={[look.heading, !touch() && look.computerHeading, look.centred]}>
               {props.heading}
@@ -216,10 +162,10 @@ export function confirm(question: Question): Promise<boolean> {
         onClose={() => answered(false)}
         action={
           <>
-            <Button variant="secondary" onClick={() => answered(false)}>
+            <Button variant="secondary" onPress={() => answered(false)}>
               {messages.cancel}
             </Button>
-            <Button variant={asked()?.destructive ? "destructive" : "default"} onClick={() => answered(true)}>
+            <Button variant={asked()?.destructive ? "destructive" : "default"} onPress={() => answered(true)}>
               {asked()?.action || messages.ok}
             </Button>
           </>

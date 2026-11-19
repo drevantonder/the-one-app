@@ -1,6 +1,6 @@
 // What's typed in or chosen: a field around it, a line or lines of text, a search, a checkbox, a switch and radios,
 // written once on the drawing primitives (#primitives), the same on the DOM and on a native host.
-import { createContext, createSignal, For, omit, Show, useContext } from "solid-js"
+import { createSignal, For, omit, Show, useContext } from "solid-js"
 import type { JSX } from "@solidjs/web"
 import { Path, Pressable, Svg, Text, TextInput, View } from "#primitives"
 import { touch } from "#bridge"
@@ -8,6 +8,7 @@ import type { Keyed, TextInputProps } from "../drawing-primitives/primitives.tsx
 import { Icon } from "./button.tsx"
 import { ListStyle } from "./list.tsx"
 import { messages } from "../words.ts"
+import { createField, createRadioGroup, createToggle, Field as Context, named, useField, type FieldProps, type RadioGroupProps, type ToggleProps } from "../headless-components/field.ts"
 import { styles, type Styles } from "../styles.ts"
 import { tokens } from "../tokens.ts"
 
@@ -96,44 +97,12 @@ const look = styles({
   radios: { minWidth: 0 },
 })
 
-/** What the controls inside a `Field` read of it. */
-export interface FieldContext {
-  /** Its label's words, which name what's in it. */
-  label: () => string | undefined
-  /** Its hint, or its problem. */
-  message: () => string | undefined
-  invalid: () => boolean
-  disabled: () => boolean
-}
-
-const Context = createContext<FieldContext | null>(null)
-
-/// What the controls inside a `Field` read of it: the words that name them (`label()`), its hint or problem
-/// (`message()`), whether what's in it is wrong (`invalid()`), and whether it's off (`disabled()`).
-export const useField = (): FieldContext | null => useContext(Context)
-
-/** A `Field`'s props. */
-export interface FieldProps {
-  label?: JSX.Element
-  hint?: JSX.Element
-  error?: string
-  disabled?: boolean
-  children?: JSX.Element
-}
-
 /// `<Field label="Name" hint="As your card has it" error={problem()}><Input value={name()} onInput={…} /></Field>`: a
 /// `label` above whatever's typed in or chosen, which names it, a grey `hint` below, and its problem, `error`, red in
 /// the hint's place, which the app sets: the field's edge goes red too. Every control below goes in one.
-export function Field(props: FieldProps) {
-  const words = (said: JSX.Element) => (typeof said === "string" ? said : undefined)
-  const field: FieldContext = {
-    label: () => words(props.label),
-    message: () => props.error || words(props.hint),
-    invalid: () => !!props.error,
-    disabled: () => !!props.disabled,
-  }
+export function Field(props: FieldProps & { children?: JSX.Element }) {
   return (
-    <Context value={field}>
+    <Context value={createField(props)}>
       <View style={[look.field, !touch() && !!props.label && look.beside]}>
         <Show when={props.label}>
           <Text style={[look.label, !touch() && look.besideLabel, props.disabled && look.dim]}>{props.label}</Text>
@@ -153,23 +122,6 @@ export function Field(props: FieldProps) {
 export interface InputProps extends Omit<TextInputProps, "style" | "multiline"> {
   style?: Styles
 }
-
-/// What every control in a field says of it: the field's label as its name, its hint or problem as its description,
-/// and whether it's wrong.
-const named = (field: FieldContext | null, props: { "aria-label"?: string; "aria-invalid"?: "true" | "false"; disabled?: boolean }) => ({
-  get "aria-label"() {
-    return props["aria-label"] ?? field?.label()
-  },
-  get "aria-description"() {
-    return field?.message()
-  },
-  get "aria-invalid"() {
-    return props["aria-invalid"] ?? (field?.invalid() ? ("true" as const) : undefined)
-  },
-  get disabled() {
-    return props.disabled || field?.disabled() || undefined
-  },
-})
 
 /// `<Input value={name()} onChangeText={setName} onSubmitEditing={save} />`: one line of text, in a `Field`, a
 /// `TextInput`'s props in a field's box. `inputMode` (`email`, `url`, `tel`, `numeric`), `secureTextEntry` and
@@ -237,31 +189,12 @@ export function Search(props: Omit<InputProps, "inputMode" | "style">) {
   )
 }
 
-/** What a `Checkbox`'s or a `Switch`'s `onChange` is told: whether it's ticked now. */
-export interface Ticked {
-  currentTarget: { checked: boolean }
-}
-
 /** A `Checkbox`'s or a `Switch`'s props. */
-export interface ChoiceProps {
-  label?: JSX.Element
-  hint?: JSX.Element
-  error?: string
-  checked?: boolean
-  disabled?: boolean
-  "aria-label"?: string
-  onChange?: (event: Ticked) => void
-}
+export type ChoiceProps = ToggleProps
 
 /// One thing that's so or not, pressed to change it: its mark, `mark(on, wrong)`, before or after its words.
 function Choice(props: ChoiceProps & { role: "checkbox" | "switch"; mark: (on: boolean, wrong: boolean) => JSX.Element }) {
-  const [own, setOwn] = createSignal(false)
-  const on = () => props.checked ?? own()
-  const flip = () => {
-    if (props.disabled) return
-    setOwn(!on())
-    props.onChange?.({ currentTarget: { checked: !on() } })
-  }
+  const toggle = createToggle(props, props.role)
   const words = () => (
     <Show when={props.label}>
       <View style={look.words}>
@@ -274,18 +207,9 @@ function Choice(props: ChoiceProps & { role: "checkbox" | "switch"; mark: (on: b
   )
   return (
     <View style={look.field}>
-      <Pressable
-        role={props.role}
-        aria-checked={on() ? "true" : "false"}
-        aria-disabled={props.disabled ? "true" : undefined}
-        aria-invalid={props.error ? "true" : undefined}
-        aria-label={props["aria-label"] ?? (typeof props.label === "string" ? props.label : undefined)}
-        aria-description={props.error ?? (typeof props.hint === "string" ? props.hint : undefined)}
-        onPress={flip}
-        style={[look.choice, props.disabled && look.off]}
-      >
+      <Pressable {...toggle.control()} style={[look.choice, props.disabled && look.off]}>
         <Show when={props.role === "switch"}>{words()}</Show>
-        {props.mark(on(), !!props.error)}
+        {props.mark(toggle.checked(), !!props.error)}
         <Show when={props.role === "checkbox"}>{words()}</Show>
       </Pressable>
       <Show when={props.error}>
@@ -330,49 +254,19 @@ export function Switch(props: ChoiceProps) {
   )
 }
 
-/** A `RadioGroup`'s props. */
-export interface RadioGroupProps {
-  value?: string
-  options: { value: string; label: JSX.Element; disabled?: boolean }[]
-  disabled?: boolean
-  onChange?: (value: string) => void
-}
-
 /// `<RadioGroup value={paid()} onChange={setPaid} options={[{ value: "card", label: "My card" }, ...]} />`: one of a
 /// few, all in view, in a `Field` whose label names them. For two to five things; a select holds more. The arrow keys
 /// move between them. `onChange` is told the value chosen.
 export function RadioGroup(props: RadioGroupProps) {
   const field = useField()
-  const [own, setOwn] = createSignal<string>()
-  const chosen = () => props.value ?? own()
-  const off = (option: RadioGroupProps["options"][number]) => !!props.disabled || !!option.disabled || !!field?.disabled()
-  const choose = (value: string) => {
-    setOwn(value)
-    props.onChange?.(value)
-  }
-  const keyed = (event: Keyed) => {
-    const step = { ArrowDown: 1, ArrowRight: 1, ArrowUp: -1, ArrowLeft: -1 }[event.key]
-    if (!step) return
-    event.preventDefault()
-    const open = props.options.filter((option) => !off(option))
-    const at = open.findIndex((option) => option.value === chosen())
-    const next = open[(at + step + open.length) % open.length]
-    if (next) choose(next.value)
-  }
+  const radios = createRadioGroup(props, field)
   return (
-    <View role="radiogroup" aria-label={field?.label()} aria-description={field?.message()} aria-invalid={field?.invalid() ? "true" : undefined} onKeyDown={keyed} style={look.radios}>
+    <View {...radios.group()} style={look.radios}>
       <For each={props.options}>
         {(option) => {
-          const on = () => option.value === chosen()
+          const on = () => option.value === radios.chosen()
           return (
-            <Pressable
-              role="radio"
-              aria-checked={on() ? "true" : "false"}
-              aria-disabled={off(option) ? "true" : undefined}
-              tabIndex={on() || (!chosen() && option === props.options[0]) ? 0 : -1}
-              onPress={() => !off(option) && choose(option.value)}
-              style={[look.choice, off(option) && look.off]}
-            >
+            <Pressable {...radios.radio(option)} style={[look.choice, radios.off(option) && look.off]}>
               <View style={[look.tick, look.round, on() && look.ticked, field?.invalid() && !on() && look.tickWrong]}>
                 <View style={[look.dot, on() && look.shown]} />
               </View>

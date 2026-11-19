@@ -79,7 +79,7 @@ export function SignIn(props: {
             <Show
               when={props.href}
               fallback={
-                <Button loading={working() === "sign-in"} disabled={!!working()} onClick={respond("sign-in", () => props.onSignIn?.())}>
+                <Button loading={working() === "sign-in"} disabled={!!working()} onPress={respond("sign-in", () => props.onSignIn?.())}>
                   {props.button}
                 </Button>
               }
@@ -89,7 +89,7 @@ export function SignIn(props: {
               </a>
             </Show>
             <Show when={props.stop}>
-              <Button variant="outline" loading={working() === "stop"} disabled={!!working()} onClick={respond("stop", () => props.onStop?.())}>
+              <Button variant="outline" loading={working() === "stop"} disabled={!!working()} onPress={respond("stop", () => props.onStop?.())}>
                 {props.stop}
               </Button>
             </Show>
