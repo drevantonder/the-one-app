@@ -14,125 +14,21 @@
 // whose snapshot is one signal here. It's written on the UI library's primitives, so a native host draws it as the DOM does.
 import { createEffect, createMemo, createSignal, Errored, flush, For, Loading, onSettled, refresh, Show, untrack } from "solid-js"
 import { type WheelEventData, WheelGestures } from "wheel-gestures"
-import { createActor } from "xstate"
-import { Badge, Button, ScrollView, call, changed, client, confirm, covers, createVelocityTracker, type Element, Empty, haptic, Icon, type IconName, Image, keydown, type Keyed, type Layout, leave, link, List, type Located, Menu, open, pinShortcut, Pressable, type Pressed, type PressableProps, Problem, type Rect, reducedMotion, render, Row, safeArea, Search, Sheet, sizeChanged, Spinner, Text, TextInput, toast, View, viewport, visible, type Wheeled, Widget } from "ui"
+import { Badge, Button, ScrollView, call, changed, confirm, covers, createVelocityTracker, type Element, Empty, haptic, Icon, type IconName, Image, keydown, type Keyed, type Layout, leave, link, List, type Located, Menu, pinShortcut, Pressable, type Pressed, type PressableProps, Problem, type Rect, reducedMotion, render, Row, safeArea, Search, Sheet, sizeChanged, Spinner, Text, TextInput, toast, View, viewport, visible, type Wheeled, Widget } from "ui"
 import { give, glide, jump, settle, spring, type Spring, stop, thrower } from "./pager.ts"
-import { ACROSS, at as gridAt, BAR, type Box as Place, card as cardOf, cell as cellOf, DOTS, GAP, grid, group, INSET, launcherRoom, lefts, measure, PAGE, page as pageOf, type Page as Laid, PILLS, type Room, SEARCH, SEARCH_HEIGHT, TOP_ROW } from "./layout.ts"
-import { type At, carries, type Drop, type Editing, fitted, type Held, type Kind, machine, nearest, pack, type Page, type Placed, shown, spans } from "./machine.ts"
-import type { Entrypoint, Category, Item, Listed, Pages, Size, Widget as WidgetItem } from "./types.ts"
-import { src } from "./types.ts"
+import { ACROSS, at as gridAt, BAR, type Box as Place, card as cardOf, cell as cellOf, DOTS, GAP, grid, group, INSET, launcherRoom, lefts, measure, PAGE, type Page as Laid, PILLS, SEARCH, SEARCH_HEIGHT, TOP_ROW } from "./layout.ts"
+import { type At, carries, type Drop, type Held, type Kind, nearest, pack, type Page, type Placed, shown, spans } from "./machine.ts"
+import { type Entrypoint, type Category, type Item, type Listed, type Size, type Widget as WidgetItem, src } from "./types.ts"
 import { looks } from "./looks.ts"
+import { home, state, seen, setSeen, along, setAlong, rolled, setRolled, editing, editingOwner, pins, launcher, query, setQuery, chosenResult, setChosenResult, type Selected, selected, setSelected, room, setRoom, laidPage, kept, setKept, tapping, quietFor, finger, landing, setLanding } from "./store.ts"
+import { json, type Owner, owners, badgeOf, findIn, type From, launch, draft, removal, pending, opens, press, subjectOf, and, opener, installedFor, addable, addToHome, removeFromHome, whose, keep, named } from "./owners.ts"
 
 const SIZES: Record<Size, string> = { "2x2": "Small", "4x2": "Medium", "4x4": "Large" }
-const json = <T,>(tool: string, inputs?: object, subject?: string): Promise<T> => call(tool, inputs, { subject }).then(JSON.parse)
-
-/** An owner: whose Home Screen it is, by the name a person reads, and what `home-screen_pages` answers for them. */
-interface Owner extends Pages {
-  key: string
-  subject?: string
-  name: string
-}
-
-/// You, everyone, then each of your groups, in the order they're listed. A network with nothing that keeps groups
-/// has none. Yours and everyone's are asked for beside the groups, which they don't wait on.
-const owners = createMemo(async () => {
-  const pages = (who: { subject?: string; name: string }) => json<Pages>("home-screen_pages", {}, who.subject).then((pages): Owner => ({ ...pages, ...who, key: who.subject ?? "you" }))
-  const groups = json<{ groups: { group: string; called: string }[] }>("permissions_groups").then(({ groups }) => groups, (): { group: string; called: string }[] => [])
-  const [yours, everyone, theirs] = await Promise.all([pages({ name: "You" }), pages({ subject: "network", name: "Everyone" }), groups.then((groups) => Promise.all(groups.map(({ group, called }) => pages({ subject: group, name: called }))))])
-  return [yours, everyone, ...theirs]
-})
-changed(() => refresh(owners))
-
-/// The red count on an app's icon, by who it's for and its badge tool (`badge`): what its app says waits for whoever's
-/// looking, asked again with everything else as anything changes. One that couldn't be asked has none.
-const [badges, setBadges] = createSignal<Record<string, number>>({})
-/// Who an app is opened for, as `launch` opens it, and so who its badge is asked for.
-const opensFor = (entrypoint: Entrypoint, owner: Owner) => (entrypoint.subject === "user" ? undefined : (entrypoint.subject ?? owner.subject))
-const badgeOf = (entrypoint: Entrypoint, owner: Owner) => (entrypoint.badge ? badges()[`${opensFor(entrypoint, owner) ?? ""} ${entrypoint.badge}`] : undefined)
-createEffect(owners, (all) => {
-  const asked = new Map<string, Promise<number>>()
-  for (const owner of all)
-    for (const item of [...owner.pages.flatMap((page) => page.items), ...owner.library.flatMap((category) => category.entrypoints)]) {
-      const entrypoint = item as Entrypoint
-      if (!entrypoint.badge) continue
-      const subject = opensFor(entrypoint, owner)
-      const key = `${subject ?? ""} ${entrypoint.badge}`
-      if (!asked.has(key)) asked.set(key, json<{ count?: number }>(entrypoint.badge, {}, subject).then(({ count }) => count ?? 0, () => 0))
-    }
-  Promise.all([...asked].map(async ([key, count]) => [key, await count] as const)).then((counted) => setBadges(Object.fromEntries(counted)))
-})
-
-/// The one machine, and its snapshot as one signal.
-const home = createActor(machine)
-const [state, setState] = createSignal(home.getSnapshot())
-home.subscribe(setState)
-home.start()
-
-/// The owner and screenful nearest where the pages are as they move, which the dots follow during a swipe, as a
-/// phone's do, rather than once it ends.
-const [seen, setSeen] = createSignal<At>({ owner: 0, screen: 0 }, { equals: (a, b) => a.owner === b.owner && a.screen === b.screen })
-/// Where the owner shown's pages are as they move, in screenfuls, which the dots light along continuously.
-const [along, setAlong] = createSignal(0)
-/// Where the owners are as they move up and down, in owners: what the owner pill's names and the dots pill's rows roll
-/// with.
-const [rolled, setRolled] = createSignal(0)
-
-const editing = () => state().context.editing
-const editingOwner = (owner: number) => state().matches("editing") && editing()?.owner === owner
-
-/// Whether this device puts an app on its own home screen (`pinShortcut`): Android's app does.
-const [pins, setPins] = createSignal(false)
-/// Whether this Home Screen is a computer's launcher (`client().launcher`): a panel the system summons over whatever's
-/// in front, as Spotlight and Raycast are, which goes once an app opens from it: its search floating on its own, with
-/// the keyboard as it opens, and under it a card of Home's pages, two at a time, with the owner switcher at its top and
-/// the page dots at its foot, which changes size for the App Library and for what's found as it's typed (`Pair`).
-/// The arrow keys move a highlight over Home's apps and widgets (`leave` puts it away).
-const [launcher, setLauncher] = createSignal(false)
-client().then(({ pinsShortcuts, launcher }) => (setPins(!!pinsShortcuts), setLauncher(!!launcher)), () => {})
-/// What's typed in the launcher's search, and which of what it found is chosen, which Return opens.
-const [query, setQuery] = createSignal("")
-const [chosenResult, setChosenResult] = createSignal(0)
-/// What the launcher's arrow keys have chosen on Home: an app or a widget of an owner, by which of their pages shown
-/// it's on and where on it.
-type Selected = { owner: number; page: number; index: number }
-const [selected, setSelected] = createSignal<Selected | undefined>(undefined, { equals: (a, b) => a?.owner === b?.owner && a?.page === b?.page && a?.index === b?.index })
-/// The apps of an App Library whose names have `words` in them: with a screen of their own, or `background`. Those
-/// whose name starts with them come first, then those with a word that does, then the rest, each A to Z, as
-/// Raycast's root search ranks what it finds.
-const findIn = (library: Category[], words: string, background: boolean) => {
-  const typed = words.trim().toLowerCase()
-  const rank = (name: string) => (name.toLowerCase().startsWith(typed) ? 0 : name.toLowerCase().split(/[\s&-]+/).some((word) => word.startsWith(typed)) ? 1 : 2)
-  return library
-    .flatMap((category) => category.entrypoints)
-    .filter((listed) => !listed.entrypoint === background && listed.name.toLowerCase().includes(typed))
-    .sort((a, b) => rank(a.name) - rank(b.name) || a.name.localeCompare(b.name))
-}
-
-/** Where an icon or a widget is drawn, with how round its corners are there, which an app grows out of. */
-type From = Rect & { radius: number }
-
-/// Opens an app for whoever its owner is, for the group whose install it is, or for its person where it's about
-/// whoever opens it. `behind` only starts it, as a finger lands on it. It grows out of its icon or widget, `from`, as
-/// an iPhone's does.
-const launch = (entrypoint: Entrypoint, owner: Owner, behind?: boolean, from?: From) =>
-  open(entrypoint.entrypoint, { subject: entrypoint.subject === "user" ? undefined : (entrypoint.subject ?? owner.subject), behind, from })
-
 /// How long the launcher, put away, stays where it was: Raycast's Pop to Root Search's default.
 const POP_TO_ROOT = 90_000
 
 /// Where the launcher's card's top is, under its search.
 const CARD_TOP = SEARCH_HEIGHT + GAP
-
-/// The room the pages have and how they're laid out in it, a phone's until it's known.
-const [room, setRoom] = createSignal<Room>(measure(390, 844, { top: 0, right: 0, bottom: 0, left: 0 }))
-/// A page of the room, laid out.
-const laidPage = createMemo(() => pageOf(room()))
-
-/// An owner's pages as they're kept: each with what's on it and whether it's hidden, to edit.
-const draft = (owner: Owner, index: number): Editing => ({ owner: index, pages: fitted(owner.pages.map((page) => ({ items: [...page.items], hidden: page.hidden }))) })
-
-/// Owners' pages as they were just edited, shown until the Home Screen is asked again.
-const [kept, setKept] = createSignal<Editing[]>([])
 
 // A finger that stays this long holds what it's on, as a phone's does, and on a Home page, held this much longer
 // still, it's lifted into editing, as an iPhone's menu gives way to the drag.
@@ -140,17 +36,6 @@ const HOLD = 450
 const LONGER = 800
 // What's carried makes room where it rests this long, as an iPhone's does, not at every place it passes.
 const REST = 150
-
-/// Until when a tap isn't one: just after something carried was put down, a hold, or a swipe.
-let quiet = 0
-const tapping = () => Date.now() > quiet
-/// Where the pointer was last, and where it pressed what it lifted: what's carried stays where the finger took it,
-/// `carrier`, whichever other fingers there are.
-let pointer = { x: 0, y: 0 }
-let grab = { x: 0, y: 0 }
-let carrier = -1
-/// What follows the finger carrying something, while it's dragged (`HomeScreen`'s): its moves, and its lifting.
-let carry: { move: (event: Pressed) => void; drop: (event: Pressed) => void } | undefined
 
 /// A widget on a page: what its app's tool answers, drawn, and asked again as its app says something changed. A widget
 /// whose layout says `refresh` (seconds), as one that shows what only time changes does, is also asked again that
@@ -236,11 +121,6 @@ function Tile(props: { name: string; icon: string; size: number; scale: number; 
   )
 }
 
-/// Taking an item off a Home page asks first, as an iPhone's does: an app stays in the App Library, and a widget's app
-/// and data stay.
-const removal = (item: Item): Parameters<typeof confirm>[0] =>
-  item.widget ? { heading: "Remove Widget?", action: "Remove", destructive: true } : { heading: `Remove “${item.name}”?`, text: "It stays in your App Library.", action: "Remove from Home Screen" }
-
 /// What a Home page holds as it's drawn: an item of the owner's, and where it is among the page's.
 type Cell = { item: Item; index: number }
 
@@ -269,9 +149,9 @@ function holds(held: () => Held | undefined, arranges: () => boolean, menu = arr
     clear()
     const what = held()
     if (!what?.item || !arranges()) return
-    grab = { x: from.clientX, y: from.clientY }
-    pointer = { x: at.clientX, y: at.clientY }
-    carrier = at.pointerId
+    finger.grab = { x: from.clientX, y: from.clientY }
+    finger.pointer = { x: at.clientX, y: at.clientY }
+    finger.carrier = at.pointerId
     home.send({ type: "lift", held: { ...what, rect }, editing: home.getSnapshot().matches("editing") ? undefined : pending() })
   }
   const hold = (event: Located) => {
@@ -294,7 +174,7 @@ function holds(held: () => Held | undefined, arranges: () => boolean, menu = arr
       if (!home.getSnapshot().matches("editing")) timer = setTimeout(() => start && hold(start), HOLD)
     },
     onPointerMove: (event) => {
-      if (carry && event.pointerId === carrier) return carry.move(event)
+      if (finger.carry && event.pointerId === finger.carrier) return finger.carry.move(event)
       if (!start || event.pointerId !== start.pointerId) return
       if (Math.hypot(event.clientX - start.clientX, event.clientY - start.clientY) < 8) return
       // Held, or editing, a press that moves carries what it's on; before that, it's a swipe.
@@ -302,13 +182,13 @@ function holds(held: () => Held | undefined, arranges: () => boolean, menu = arr
       else clear()
     },
     onPointerUp: (event) => {
-      if (carry && event.pointerId === carrier) return carry.drop(event)
+      if (finger.carry && event.pointerId === finger.carrier) return finger.carry.drop(event)
       if (event.pointerId !== start?.pointerId) return
-      if (fired) quiet = Date.now() + 300
+      if (fired) quietFor(300)
       clear()
     },
     onPointerCancel: (event) => {
-      if (carry && event.pointerId === carrier) return carry.drop(event)
+      if (finger.carry && event.pointerId === finger.carrier) return finger.carry.drop(event)
       if (event.pointerId === start?.pointerId) clear()
     },
     onContextMenu: (event) => {
@@ -316,12 +196,6 @@ function holds(held: () => Held | undefined, arranges: () => boolean, menu = arr
       hold(event)
     },
   }
-}
-
-/// The pages of the owner Home is on, to edit, as they're kept, for what's lifted before editing began.
-const pending = () => {
-  const at = state().context.at.owner
-  return draft(untrack(owners)![at], at)
 }
 
 /// The jiggle, as an iPhone's: everything on a page being edited swings from side to side, as far as `shake` says,
@@ -407,9 +281,6 @@ function HomePage(props: { owner: Owner; index: number; page: number; placed: Pl
     </View>
   )
 }
-
-/// Where a cell is being put down, which stays empty until what was carried has settled into it.
-const [landing, setLanding] = createSignal<{ owner: number; page: number; index: number }>()
 
 /// Something on a Home page, where it's placed. While its page is edited it glides to where it now goes, as an
 /// iPhone's do when an app is dragged among them or taken off, rather than jumping there: it's drawn where it was, then
@@ -717,21 +588,6 @@ function LibraryEntrypoint(props: { entrypoint: Listed; owner: Owner; icon: numb
 /// When an app in the App Library was last pressed, which its category's square, under it, doesn't take as its own.
 let pressedApp = 0
 
-/// An app of an App Library as an entrypoint, which it opens, or nothing, for an app with none.
-const opens = (listed: Listed): Entrypoint | undefined => (listed.entrypoint ? (listed as Entrypoint) : undefined)
-/// Opens an app of an App Library: its entrypoint, or for an app with none, the App Store at its page, by a link
-/// (`one:app-store#app=…`), growing out of its icon as any app does.
-const press = (listed: Listed, owner: Owner, behind?: boolean, from?: From) => {
-  if (opens(listed)) return launch(opens(listed)!, owner, behind, from)
-  const store = untrack(owners)?.[0]?.store
-  if (behind || !store) return
-  open(`${store}#app=${encodeURIComponent(listed.app)}`, { from })
-}
-
-/// Who a call about an install is for: a group or the network, or for a user's own, nobody said.
-const subjectOf = (installed: string) => (installed.startsWith("users/") ? undefined : installed)
-const and = (words: string[]) => new Intl.ListFormat("en", { type: "conjunction" }).format(words)
-
 /// A value that moves to where it's told, `0` to `1`, over `duration` milliseconds, eased as iOS's are, a frame at a
 /// time, and from wherever it got to when it's told to turn back: `done` is called once it's there. For whoever asked
 /// for less motion, it's there at once.
@@ -977,62 +833,6 @@ function HoldItem(props: { label: string; why?: string; icon: IconName; destruct
       <Icon name={props.icon} />
     </Pressable>
   )
-}
-
-/// The app something on a page opens: an app's own, or a widget's app.
-const opener = (item: Item): Entrypoint | undefined => (item.widget ? ((item as WidgetItem).opens ?? undefined) : (item as Entrypoint))
-
-/// Whether an app opens on an owner's pages: it's installed for them, or for everyone.
-const installedFor = (item: Entrypoint, owner: Owner) => owner.apps.some((one) => one.app === item.app)
-
-/// Whether an app can be added to an owner's pages from the App Library: whoever's adding arranges them, it opens
-/// there, and it isn't on them already, even on a page they hide.
-const addable = (item: Item, owner: Owner) =>
-  !item.widget && owner.arranges && installedFor(item as Entrypoint, owner) && !owner.pages.some((page) => page.items.some((other) => !other.widget && other.entrypoint === theirs(item as Entrypoint, owner)))
-/// Puts an app last on an owner's last page, as a phone's App Library does.
-function addToHome(owner: Owner, at: number, item: Item) {
-  const editing = draft(owner, at)
-  const last = shown(editing.pages).at(-1)
-  const pages = last === undefined ? [...editing.pages, { items: [item] }] : editing.pages.map((page, index) => (index === last ? { ...page, items: [...page.items, item] } : page))
-  keep([{ ...editing, pages: fitted(pages) }])
-}
-/// Takes what's on an owner's page off it, once its alert says that's what's wanted: `page` is which of the pages shown.
-async function removeFromHome(owner: Owner, at: number, page: number, index: number, item: Item) {
-  const editing = draft(owner, at)
-  if (!(await confirm(removal(item)))) return
-  const kept = shown(editing.pages)[page]
-  const pages = editing.pages.map((one, which) => (which === kept ? { ...one, items: one.items.toSpliced(index, 1) } : one))
-  keep([{ ...editing, pages: pages.filter((one) => one.items.length) }])
-}
-
-/// An app's entrypoint as an owner's pages name it: by the name its app is installed by for them, which may not be
-/// the one it has where it was taken from.
-const theirs = (item: Entrypoint, owner: Owner) => {
-  const name = owner.apps.find((one) => one.app === item.app)?.name
-  return name ? `${name}/${item.entrypoint.slice(item.entrypoint.indexOf("/") + 1)}` : item.entrypoint
-}
-
-/// Who an install is for, as a person reads it in a sentence: you, Everyone, or a group by its name.
-const whose = (installed: string) => {
-  const owner = untrack(owners)?.find((one) => one.who === installed)
-  return !owner ? installed : owner.subject ? owner.name : "you"
-}
-
-/// Keeps owners' pages as they were edited, each that changed, for everyone who sees them, and says why if they
-/// couldn't be.
-async function keep(edited: Editing[]) {
-  const all = untrack(owners)!
-  // Pages as `arrange` takes them, each app by the name it's installed by for the owner, and an empty page gone.
-  const asked = (pages: Page[], owner: Owner) =>
-    pages.filter((page) => page.items.length).map((page) => ({ items: page.items.map((item) => (item.widget ? { widget: item.widget, size: item.size } : { entrypoint: theirs(item as Entrypoint, owner) })), ...(page.hidden ? { hidden: true } : {}) }))
-  const changed = edited.filter((one) => JSON.stringify(asked(one.pages, all[one.owner])) !== JSON.stringify(asked(all[one.owner].pages, all[one.owner])))
-  setKept(changed)
-  await Promise.all(
-    changed.map((one) =>
-      call("home-screen_arrange", { pages: asked(one.pages, all[one.owner]) }, { subject: all[one.owner].subject }).catch((error) => toast(error as Error)),
-    ),
-  )
-  refresh(owners)
 }
 
 /// How large a widget is drawn in the gallery, small, as it would be.
@@ -1464,9 +1264,6 @@ function DotsPill(props: { owners: Owner[]; laid: Kind[][]; pages?: (owner: numb
     </View>
   )
 }
-
-/// Who an owner is in a sentence: you, Everyone, or a group by its name.
-const named = (owner: Owner) => (owner.subject ? owner.name : "you")
 
 /// What's carried and stacked on it, each as a person reads its name: an app from the App Library by its app's.
 const carriedApps = (held: Held) => [held.item, ...(held.stack ?? [])].flatMap((item) => (item && !item.widget ? [{ item: item as Entrypoint, title: item === held.item ? (held.listed?.title ?? item.name) : item.name }] : []))
@@ -1918,16 +1715,16 @@ function HomeScreen(props: { owners: Owner[] }) {
   let swipe: { id: number; x: number; y: number; axis?: "x" | "y"; owner: number; from: number; base: number; moves: ReturnType<typeof createVelocityTracker> } | undefined
   const carrying = () => home.getSnapshot().matches({ editing: "dragging" })
   /// Whether a second finger is swiping the pages under what the first carries.
-  const swiping = () => !!swipe?.axis && swipe.id !== carrier
+  const swiping = () => !!swipe?.axis && swipe.id !== finger.carrier
   /// How many screenfuls a swipe across has: Home's, while something's carried, which stays on them.
   const reach = (owner: number) => (carrying() ? untrack(() => homes(owner).length) || 1 : stops(owner))
   const swipes = {
     onPointerDown: (event: Pressed) => {
-      pointer = { x: event.clientX, y: event.clientY }
+      finger.pointer = { x: event.clientX, y: event.clientY }
       if (event.pointerType === "mouse" || event.button) return
       // A category shrinking back into its place lets the pages under it have the finger, and while something's
       // carried, every finger but the one carrying it has them, one at a time.
-      const second = carrying() && event.pointerId !== carrier && !swipe
+      const second = carrying() && event.pointerId !== finger.carrier && !swipe
       if (!second && !home.getSnapshot().matches("nothing") && !home.getSnapshot().matches({ category: "closing" }) && !home.getSnapshot().matches({ editing: "still" })) return
       const { owner } = home.getSnapshot().context.at
       stop(down)
@@ -1935,7 +1732,7 @@ function HomeScreen(props: { owners: Owner[] }) {
       swipe = { id: event.pointerId, x: event.clientX, y: event.clientY, owner, from: 0, base: 0, moves: createVelocityTracker() }
     },
     onPointerMove: (event: Pressed) => {
-      pointer = { x: event.clientX, y: event.clientY }
+      finger.pointer = { x: event.clientX, y: event.clientY }
       if (!swipe || event.pointerId !== swipe.id) return
       if (!swipe.axis) {
         const [dx, dy] = [event.clientX - swipe.x, event.clientY - swipe.y]
@@ -1943,7 +1740,7 @@ function HomeScreen(props: { owners: Owner[] }) {
         const axis = Math.abs(dx) > Math.abs(dy) ? "x" : "y"
         // A hold that began has the finger, and up and down is the page's own where it scrolls, and nobody's while
         // editing, but a second finger's while something's carried: an app, which goes to another owner, not a widget.
-        const free = home.getSnapshot().matches("nothing") || home.getSnapshot().matches({ category: "closing" }) || home.getSnapshot().matches({ editing: "still" }) || (carrying() && swipe.id !== carrier)
+        const free = home.getSnapshot().matches("nothing") || home.getSnapshot().matches({ category: "closing" }) || home.getSnapshot().matches({ editing: "still" }) || (carrying() && swipe.id !== finger.carrier)
         const vertical = carrying() ? !home.getSnapshot().context.held?.item?.widget : !home.getSnapshot().matches("editing")
         const refused = !free || (axis === "y" && (!vertical || kindOf(swipe.owner) !== "home"))
         // Either way the pages go on: all of them, or the way the finger doesn't swipe, which it takes at once below.
@@ -1974,10 +1771,10 @@ function HomeScreen(props: { owners: Owner[] }) {
     // what's carried.
     if (!done.axis) {
       slide(home.getSnapshot().context.at, true)
-      if (carrying() && done.id !== carrier && !cancelled) stack(event.clientX, event.clientY)
+      if (carrying() && done.id !== finger.carrier && !cancelled) stack(event.clientX, event.clientY)
       return
     }
-    quiet = Date.now() + 350
+    quietFor(350)
     // In points a second, as the pages' spring takes it.
     const velocity = cancelled ? 0 : done.moves.velocity(event.timeStamp) * 1000
     const { at } = home.getSnapshot().context
@@ -2002,7 +1799,7 @@ function HomeScreen(props: { owners: Owner[] }) {
     if (!under || carries(home.getSnapshot().context.held, under.placed.item.item)) return
     const before = home.getSnapshot().context.held?.stack?.length ?? 0
     // The tap opens nothing, nor takes it off with its ⊖.
-    quiet = Date.now() + 350
+    quietFor(350)
     home.send({ type: "stack", page: under.page, index: under.index })
     if ((home.getSnapshot().context.held?.stack?.length ?? 0) > before) haptic("selection")
   }
@@ -2063,13 +1860,13 @@ function HomeScreen(props: { owners: Owner[] }) {
     (dragging) => {
       if (!dragging) return
       const held = home.getSnapshot().context.held!
-      const rect = held.rect ?? { x: pointer.x - 30, y: pointer.y - 40, width: 60, height: 80 }
-      setCopy({ held, rect, x: pointer.x - grab.x, y: pointer.y - grab.y, settling: false, lifted: 0 })
+      const rect = held.rect ?? { x: finger.pointer.x - 30, y: finger.pointer.y - 40, width: 60, height: 80 }
+      setCopy({ held, rect, x: finger.pointer.x - finger.grab.x, y: finger.pointer.y - finger.grab.y, settling: false, lifted: 0 })
       const lifting = tween(200, () => {})
       lifting.to(1)
       createEffect(lifting.value, (lifted) => void setCopy((now) => now && { ...now, lifted }))
       haptic("medium")
-      const id = carrier
+      const id = finger.carrier
       const moves = thrower()
       let edge: ReturnType<typeof setTimeout> | undefined
       let side: "" | "left" | "right" | "up" | "down" = ""
@@ -2090,8 +1887,8 @@ function HomeScreen(props: { owners: Owner[] }) {
       }
       const move = (event: Pressed) => {
         if (event.pointerId !== id) return
-        pointer = { x: event.clientX, y: event.clientY }
-        setCopy((now) => now && { ...now, x: event.clientX - grab.x, y: event.clientY - grab.y })
+        finger.pointer = { x: event.clientX, y: event.clientY }
+        setCopy((now) => now && { ...now, x: event.clientX - finger.grab.x, y: event.clientY - finger.grab.y })
         moves.add(event)
         const [x, y] = [event.clientX, event.clientY]
         // The pages' edges: the window's, or the launcher's card's, inside its pills.
@@ -2114,11 +1911,11 @@ function HomeScreen(props: { owners: Owner[] }) {
         if (swiping()) return
         const { editing, held } = home.getSnapshot().context
         // Its top left, which the page's cells are counted from.
-        const under = pageUnder(x - grab.x + rect.x, y - grab.y + rect.y) ?? pageUnder(x, y)
+        const under = pageUnder(x - finger.grab.x + rect.x, y - finger.grab.y + rect.y) ?? pageUnder(x, y)
         if (!under || !editing || !held?.item) return
         const scale = untrack(room).scale
         const corner = pageAt(under.owner, under.page)
-        const [left, top] = [(x - grab.x + rect.x - corner.x) / scale, (y - grab.y + rect.y - corner.y) / scale]
+        const [left, top] = [(x - finger.grab.x + rect.x - corner.x) / scale, (y - finger.grab.y + rect.y - corner.y) / scale]
         const cells = gridAt(untrack(laidPage), left, top)
         const items = editing.pages[shown(editing.pages)[under.page]]?.items.filter((one) => !carries(held, one)) ?? []
         const index = nearest(items, held.item, cells.column, cells.row)
@@ -2137,7 +1934,7 @@ function HomeScreen(props: { owners: Owner[] }) {
       // How fast the finger was going as it let go, which the copy goes on at.
       let thrown = { x: 0, y: 0 }
       // Once the pages a second finger turned come to rest, what's carried goes where the first is.
-      settledUnder = () => !side && over(pointer.x, pointer.y)
+      settledUnder = () => !side && over(finger.pointer.x, finger.pointer.y)
       const drop = (event: Pressed) => {
         if (event.pointerId !== id) return
         left = home.getSnapshot().context.held ?? left
@@ -2148,9 +1945,9 @@ function HomeScreen(props: { owners: Owner[] }) {
         const to: Drop = !owner.arranges ? "refuse" : items.every((item) => item.widget || installedFor(item as Entrypoint, owner)) ? "place" : "ask"
         home.send({ type: "drop", to })
       }
-      carry = { move, drop }
+      finger.carry = { move, drop }
       return () => {
-        carry = undefined
+        finger.carry = undefined
         clearTimeout(edge)
         clearTimeout(resting)
         settledUnder = undefined
@@ -2159,7 +1956,7 @@ function HomeScreen(props: { owners: Owner[] }) {
           swipe = undefined
           slide(home.getSnapshot().context.at, true)
         }
-        quiet = Date.now() + 400
+        quietFor(400)
         haptic("light")
         // What was carried settles into its place as it's let go, rather than vanishing over it: a spring from where
         // the finger left it, at the speed it was going, to its place, wherever that is as it goes.
