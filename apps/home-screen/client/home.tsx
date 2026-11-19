@@ -13,6 +13,7 @@
 // carried onto any owner's pages. Where it is, what's open over it and the editing are one state machine (machine.ts),
 // whose snapshot is one signal here. It's written in strict mode, so a native host draws it as the DOM does.
 import { createEffect, createMemo, createSignal, Errored, flush, For, Loading, onSettled, refresh, Show, untrack } from "solid-js"
+import { WheelGestures } from "wheel-gestures"
 import { createActor } from "xstate"
 import {
   Badge,
@@ -97,9 +98,9 @@ const looks = styles({
   surface: { position: "absolute", overflow: "hidden", borderRadius: tokens.radius.window, backgroundColor: tokens.colour.veil, backdropFilter: tokens.material.window, boxShadow: tokens.shadow.window },
   // The card changes size by a spring, which a change on the way turns, and what's in it is carried with it.
   card: { transitionProperty: ["width", "height", "translateX"], transition: tokens.motion.snappy },
-  // Home, the App Library and what was found cross-fade in the card; an owner's pages roll up and down, and turn along.
+  // Home, the App Library and what was found cross-fade in the card; an owner's pages roll up and down.
   fading: { transitionProperty: ["opacity", "scale", "translateY"], transition: tokens.motion.smooth },
-  rolling: { transitionProperty: ["opacity", "translateY", "translateX"], transition: tokens.motion.snappy },
+  rolling: { transitionProperty: ["opacity", "translateY"], transition: tokens.motion.snappy },
   search: { flexDirection: "row", alignItems: "center", zIndex: 6 },
   owner: { position: "absolute", overflow: "hidden" },
   track: { position: "absolute", top: 0, start: 0, flexDirection: "row" },
@@ -123,6 +124,7 @@ const looks = styles({
   faded: (opacity: number, scale: number) => ({ opacity, scale }),
   drifted: (opacity: number, translateY: number) => ({ opacity, translateY }),
   shifted: (translateX: number) => ({ translateX }),
+  slid: (translateX: number, opacity: number) => ({ translateX, opacity }),
   moved: (translateX: number, translateY: number) => ({ translateX, translateY }),
   popup: (start: number, width: number, opacity: number, scale: number) => ({ start, width, opacity, scale }),
   chosen: { position: "absolute", top: negative(tokens.grid[1]), bottom: negative(tokens.grid[1]), start: negative(tokens.grid[1]), end: negative(tokens.grid[1]), borderRadius: tokens.radius.large, backgroundColor: tokens.colour.selection },
@@ -176,6 +178,8 @@ home.start()
 /// The owner and screenful nearest where the pages are as they move, which the dots follow during a swipe, as a
 /// phone's do, rather than once it ends.
 const [seen, setSeen] = createSignal<At>({ owner: 0, screen: 0 }, { equals: (a, b) => a.owner === b.owner && a.screen === b.screen })
+/// Where the owner shown's pages are as they move, in screenfuls, which the dots light along continuously.
+const [along, setAlong] = createSignal(0)
 /// Where the owners are as they move up and down, in owners: what the owner pill's names and the dots pill's rows roll
 /// with.
 const [rolled, setRolled] = createSignal(0)
@@ -1370,8 +1374,13 @@ function Roll(props: { count: number; height: number; row: (index: number) => El
 /// Only the owner shown's take a finger.
 function Dots(props: { owner: Owner; index: number; count: number; size: number; shows?: number }) {
   const current = () => (seen().owner === props.index ? seen().screen : (state().context.last[props.index] ?? 0))
-  // A dot a page, the pages shown lit: a screenful's in the launcher, which shows `shows` from its first.
+  // A dot a page, the pages shown lit: a screenful's in the launcher, which shows `shows` from its first. As the pages
+  // move, each is lit as much as its page shows.
   const lit = (screen: number) => screen >= current() && screen < current() + (props.shows ?? 1)
+  const shown = (screen: number) => {
+    const from = seen().owner === props.index ? along() : current()
+    return Math.max(0, Math.min(1, screen + 1 - from, from + (props.shows ?? 1) - screen))
+  }
   const last = () => props.count - (props.shows ?? 1)
   let slid: { x: number; from: number; sliding: boolean; id: number } | undefined
   let quietDots = 0
@@ -1406,7 +1415,7 @@ function Dots(props: { owner: Owner; index: number; count: number; size: number;
       <For each={Array.from({ length: Math.max(1, props.count) }, (_, at) => at)}>
         {(screen) => (
           <Box role="button" aria-label={`Page ${screen + 1} of ${props.count}`} aria-current={lit(screen) ? "true" : undefined} onClick={press(screen)} style={{ height: "100%", justifyContent: "center", paddingInline: 1 }}>
-            <Box style={{ width: props.size, height: props.size, marginInline: props.size * 0.64, borderRadius: "full", backgroundColor: lit(screen) ? "foreground" : "muted-foreground", opacity: lit(screen) ? 1 : 0.4 }} />
+            <Box style={{ width: props.size, height: props.size, marginInline: props.size * 0.64, borderRadius: "full", backgroundColor: shown(screen) >= 0.5 ? "foreground" : "muted-foreground", opacity: 0.4 + 0.6 * shown(screen) }} />
           </Box>
         )}
       </For>
@@ -1804,6 +1813,9 @@ function HomeScreen(props: { owners: Owner[] }) {
   const [downY, setDownY] = createSignal(0)
   const xs: [() => number, (x: number) => void][] = []
   const xOf = (owner: number) => (xs[owner] ??= createSignal(0))
+  /// How opaque each owner's pages are as they cross-fade, for whoever asked for less motion.
+  const opacities: [() => number, (opacity: number) => void][] = []
+  const opacityOf = (owner: number) => (opacities[owner] ??= createSignal(1))
   /// The owner shown, nearest where the owners are as they move up and down.
   const shownOwner = () => Math.max(0, Math.min(owned().length - 1, Math.round(down.value / height())))
   const down: Spring = spring((y) => {
@@ -1814,11 +1826,14 @@ function HomeScreen(props: { owners: Owner[] }) {
   })
   const across: Spring[] = []
   const sideways = (owner: number) =>
-    (across[owner] ??= spring((x) => {
-      xOf(owner)[1](x)
-      look()
-      rested(across[owner])
-    }))
+    (across[owner] ??= spring(
+      (x) => {
+        xOf(owner)[1](x)
+        look()
+        rested(across[owner])
+      },
+      (opacity) => opacityOf(owner)[1](opacity),
+    ))
   /// What's carried, once the pages under it come to rest.
   let settledUnder: (() => void) | undefined
   const rested = (one: Spring | undefined) => one && one.value === one.target && !one.velocity && settledUnder?.()
@@ -1826,6 +1841,7 @@ function HomeScreen(props: { owners: Owner[] }) {
   const look = () => {
     const owner = shownOwner()
     setSeen({ owner, screen: Math.round(sideways(owner).value / pitch()) })
+    setAlong(sideways(owner).value / pitch())
   }
   /// How far the sections are moved past Home, to the App Library: the owner shown's way along, past their Home.
   const sectionsX = () => {
@@ -1855,19 +1871,15 @@ function HomeScreen(props: { owners: Owner[] }) {
     { equals: (a, b) => a.width === b.width && a.height === b.height },
   )
   const cardLeft = () => (viewport().width - card().width) / 2
-  /// The first page an owner's screenful shows, as it's drawn.
-  const shownFrom = (owner: number) => {
-    const { at, last } = state().context
-    return screens()[owner]?.[owner === at.owner ? at.screen : (last[owner] ?? 0)]?.from ?? 0
+  /// How far an owner's pages are moved along in the card: where they are, and past Home's last screenful, on the way
+  /// to the App Library, which cross-fades in, giving rather than sliding on.
+  const trackX = (owner: number) => {
+    const [x, end] = [xOf(owner)[0](), Math.max(0, homes(owner).length - 1) * PAGE]
+    return x > end ? end + give(x - end, PAGE) : x
   }
   /// What was typed, kept a moment as it's emptied, while what it found fades.
   const [words] = lingering(() => query().trim() && query(), 400)
   const cardRect = () => ({ x: cardLeft(), y: CARD_TOP, width: card().width, height: card().height })
-  /// The first page an owner's screenful shows: where it is, or for another owner, where they were left.
-  const firstShown = (owner: number) => {
-    const { at, last } = home.getSnapshot().context
-    return untrack(screens)[owner]?.[owner === at.owner ? at.screen : (last[owner] ?? 0)]?.from ?? 0
-  }
   // The launcher's panel: on a see-through one, as large as its card ever is, which it never changes; else just around
   // what it shows, growing at once, and shrinking once its card has.
   let told = { width: 0, height: 0 }
@@ -1885,7 +1897,7 @@ function HomeScreen(props: { owners: Owner[] }) {
 
   /// Where a page of an owner is drawn in the window: its left and top, and how much larger it's drawn.
   const pageAt = (owner: number, page: number) => {
-    if (untrack(launcher)) return { x: untrack(cardLeft) + INSET + (page - firstShown(owner)) * PAGE, y: CARD_TOP + PILLS, scale: untrack(room).scale }
+    if (untrack(launcher)) return { x: untrack(cardLeft) + INSET + page * PAGE - Math.min(sideways(owner).value, homeEnd(owner)), y: CARD_TOP + PILLS, scale: untrack(room).scale }
     const fit = untrack(room).fit
     const screen = Math.floor(page / fit)
     const count = untrack(screens)[owner]?.[screen]?.count ?? 1
@@ -2044,10 +2056,12 @@ function HomeScreen(props: { owners: Owner[] }) {
 
   /// Moves the pages to `at`, as the machine says: gliding, or at once where they're only laid out again.
   const slide = (at: At, smooth: boolean) => {
-    // The launcher's are drawn where they're going, and its host's springs take them there.
-    const move = smooth && !untrack(launcher) ? glide : jump
-    move(down, at.owner * height())
-    move(sideways(at.owner), at.screen * pitch())
+    // The launcher's owners roll by its host's springs, so they're drawn where they're going; its pages slide as a
+    // phone's do.
+    const roll = smooth && !untrack(launcher) ? glide : jump
+    roll(down, at.owner * height())
+    const turn = smooth ? glide : jump
+    turn(sideways(at.owner), at.screen * pitch())
   }
 
   // A finger on the pages moves them, as a phone's: once it has moved far enough to say which way, along an owner's
@@ -2145,29 +2159,42 @@ function HomeScreen(props: { owners: Owner[] }) {
     if ((home.getSnapshot().context.held?.stack?.length ?? 0) > before) haptic("selection")
   }
 
-  // A trackpad or a wheel: one gesture is one screenful or one owner at most, however hard it's flicked, as macOS's
-  // Launchpad and an iPad with a trackpad page. A gesture is a run of wheel events: its momentum follows the fingers
-  // with no pause until it dies away, and is part of it. It ends once the events stop for a moment, or turn back. It
-  // steps once its pushes along its axis add up to 30 points, and the rest of it is let be. Up and down over the App
-  // Library, which scrolls itself, is its own.
-  const QUIET = 120
-  let gesture: { axis: "x" | "y"; sign: number; total: number; done: boolean } | undefined
-  let lastWheel = -Infinity
-  const wheel = (event: Wheeled) => {
-    if (!home.getSnapshot().matches("nothing")) return
-    const still = event.timeStamp - lastWheel > QUIET
-    lastWheel = event.timeStamp
-    const along = (axis: "x" | "y") => (axis === "x" ? event.deltaX : event.deltaY)
-    const back = !!gesture?.sign && Math.sign(along(gesture.axis)) === -gesture.sign && Math.abs(along(gesture.axis)) > 2
-    if (!gesture || still || back) gesture = { axis: Math.abs(event.deltaX) > Math.abs(event.deltaY) ? "x" : "y", sign: 0, total: 0, done: false }
-    gesture.sign ||= Math.sign(along(gesture.axis))
-    if (gesture.done) return
-    gesture.total += along(gesture.axis)
-    if (Math.abs(gesture.total) < 30) return
+  // A trackpad's two fingers along the pages move them one to one, as a finger does, giving at the ends, and as they
+  // lift the pages settle as a finger's do, at the speed they were going: wheel-gestures says when, by where the
+  // system's momentum, which follows, begins, and the momentum is let be. Up and down, or a wheel, is one owner a
+  // gesture at most, however hard it's flicked, as macOS's Launchpad and an iPad with a trackpad page, once its pushes
+  // add up to 30 points. Up and down over the App Library, which scrolls itself, is its own.
+  const trackpad = WheelGestures({ preventWheelAction: false, reverseSign: false })
+  let gesture: { axis: "x" | "y"; owner: number; from: number; base: number; done: boolean } | undefined
+  trackpad.on("wheel", ({ isStart, isEnding, isMomentum, axisMovement: [x, y], axisVelocity, event }) => {
+    if (isStart) {
+      gesture = undefined
+      if (!home.getSnapshot().matches("nothing")) return
+      const { owner } = home.getSnapshot().context.at
+      const moving = sideways(owner)
+      const axis = Math.abs(event.deltaX) > Math.abs(event.deltaY) ? "x" : "y"
+      if (axis === "x") stop(moving)
+      gesture = { axis, owner, base: moving.value, from: Math.round(moving.value / pitch()), done: false }
+    }
+    if (!gesture || gesture.done) return
+    if (gesture.axis === "y") {
+      if (Math.abs(y) < 30) return
+      gesture.done = true
+      return home.send({ type: "step", owner: Math.sign(y) as 1 | -1 })
+    }
+    const moving = sideways(gesture.owner)
+    const end = (stops(gesture.owner) - 1) * pitch()
+    if (!isMomentum && !isEnding) {
+      const value = gesture.base + x
+      return jump(moving, value < 0 ? give(value, pitch()) : value > end ? end + give(value - end, pitch()) : value)
+    }
     gesture.done = true
-    const by = Math.sign(gesture.total) as 1 | -1
-    home.send(gesture.axis === "y" ? { type: "step", owner: by } : { type: "step", screen: by })
-  }
+    const velocity = isEnding ? 0 : axisVelocity[0] * 1000
+    const screen = settle(gesture.from, moving.value / pitch(), velocity, stops(gesture.owner))
+    glide(moving, screen * pitch(), velocity)
+    home.send({ type: "settled", at: { owner: gesture.owner, screen } })
+  })
+  const wheel = (event: Wheeled) => trackpad.feedWheel({ deltaX: event.deltaX, deltaY: event.deltaY, deltaMode: 0, timeStamp: event.timeStamp })
 
   // What's carried, while it's dragged: a copy that lifts larger and follows the finger one to one, over what it would
   // go before. Held at a side of the screen a moment, it goes on to the next page, or the one before; at its top or
@@ -2370,7 +2397,7 @@ function HomeScreen(props: { owners: Owner[] }) {
               <For each={props.owners} keyed={(owner) => owner.key}>
                 {(owner, index) => (
                   <Box role="region" aria-label={owner().name} style={{ position: "relative", width: room().width, height: room().height, overflow: "hidden" }}>
-                    <Box style={{ position: "absolute", top: 0, left: 0, flexDirection: "row", translateX: -Math.min(xOf(index())[0](), Math.max(0, homes(index()).length - 1) * room().width) }}>
+                    <Box style={{ position: "absolute", top: 0, left: 0, flexDirection: "row", translateX: -Math.min(xOf(index())[0](), Math.max(0, homes(index()).length - 1) * room().width), opacity: opacityOf(index())[0]() }}>
                       <For each={homes(index())} keyed={false}>
                         {(screen) => (
                           <Box style={{ position: "relative", width: room().width, height: room().height }}>
@@ -2439,7 +2466,7 @@ function HomeScreen(props: { owners: Owner[] }) {
                     inert={!shown() || undefined}
                     style={[looks.owner, looks.rolling, !shown() && looks.inert, looks.at(INSET, PILLS, pagesAcross(index()) * PAGE, halves(index()) ? halfHeight(room()) : room().height), looks.drifted(shown() ? 1 : 0, (index() - state().context.at.owner) * 40)]}
                   >
-                    <Box style={[looks.track, looks.rolling, looks.shifted(-shownFrom(index()) * PAGE)]}>
+                    <Box style={[looks.track, looks.slid(-trackX(index()), opacityOf(index())[0]())]}>
                       <For each={pages()[index()] ?? []} keyed={false}>
                         {(placed, at) => (
                           <Show when={halves(index())} fallback={<Page page={at} placed={placed()} />}>

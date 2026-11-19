@@ -3,18 +3,20 @@
 // give at the first and last owner. Here, while a finger is down the pages are the finger, one to one, and past the
 // ends they give with resistance; once it lifts, a spring seeded with the finger's speed takes them to a page: the
 // next if it was flicked or dragged past half way, else back where they were. A finger that lands while they move
-// catches them where they are.
+// catches them where they are. For whoever asked for less motion, they cross-fade to where they're going instead.
 import { reducedMotion } from "ui"
 
-/** One axis of the pages: where they are, in points, where they're going, and how fast. `draw` puts them there. */
+/** One axis of the pages: where they are, in points, where they're going, and how fast. `draw` puts them there, and
+ * `fade`, where it's given, how opaque they are as they cross-fade. */
 export interface Spring {
   value: number
   target: number
   velocity: number
   draw: (value: number) => void
+  fade?: (opacity: number) => void
 }
 
-export const spring = (draw: (value: number) => void): Spring => ({ value: 0, target: 0, velocity: 0, draw })
+export const spring = (draw: (value: number) => void, fade?: (opacity: number) => void): Spring => ({ value: 0, target: 0, velocity: 0, draw, fade })
 
 // A critically damped spring that settles in about a third of a second, as a phone's pages do, with no bounce: a page
 // lands, it doesn't wobble.
@@ -47,9 +49,10 @@ function step(now: number) {
   frame = moving.size ? requestAnimationFrame(step) : 0
 }
 
-/// Takes `one` to `target`, leaving at `velocity`, or there at once for whoever asked for less motion.
+/// Takes `one` to `target`, leaving at `velocity`; for whoever asked for less motion, a quick cross-fade there, or
+/// there at once where it doesn't fade.
 export function glide(one: Spring, target: number, velocity = one.velocity) {
-  if (reducedMotion()) return jump(one, target)
+  if (reducedMotion()) return one.fade && one.value !== target ? crossFade(one, target) : jump(one, target)
   one.target = target
   one.velocity = velocity
   moving.add(one)
@@ -57,6 +60,24 @@ export function glide(one: Spring, target: number, velocity = one.velocity) {
     last = 0
     frame = requestAnimationFrame(step)
   }
+}
+
+/// How long a cross-fade takes, out and in, in ms: as quick as what settles.
+const FADE = 200
+
+/// Fades `one` out where it is, puts it at `target`, and fades it in there.
+function crossFade(one: Spring, target: number) {
+  let begun = -1
+  one.target = target
+  const step = (now: number) => {
+    if (begun < 0) begun = now
+    const t = Math.min(1, (now - begun) / FADE)
+    if (t >= 0.5 && one.value !== target) jump(one, target)
+    one.fade!(Math.abs(1 - 2 * t))
+    if (t < 1 && one.target === target) requestAnimationFrame(step)
+    else one.fade!(1)
+  }
+  requestAnimationFrame(step)
 }
 
 /// Puts `one` at `value` at once.
