@@ -1603,7 +1603,8 @@ impl Screen {
         if let Some(id) = self.focus.focused.filter(|id| !active && self.editing.fields.contains_key(id)) {
             self.edit(id, Field::finish_composition);
         }
-        if !active {
+        // What's typed and not sent stays: what waits for it to be unused waits for the next time.
+        if !active && !self.typed() {
             for unused in self.when_unused.drain(..) {
                 unused();
             }
