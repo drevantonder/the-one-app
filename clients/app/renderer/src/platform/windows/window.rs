@@ -92,6 +92,8 @@ struct State {
     shape: Cell<(i32, i32, i32)>,
     /// A panel's parts, which move with it.
     parts: RefCell<Vec<HWND>>,
+    /// The Colour Mode its frame is drawn in, where its page says one (`set_appearance`).
+    theme: Cell<Option<crate::Appearance>>,
 }
 
 impl State {
@@ -218,6 +220,7 @@ impl Display {
             placed: Cell::new(None),
             shape: Cell::new((0, 0, 0)),
             parts: RefCell::default(),
+            theme: Cell::new(None),
         });
         let panel = options.panel.is_some();
         let style = if panel { WS_POPUP } else { WS_OVERLAPPEDWINDOW };
@@ -263,7 +266,7 @@ impl Display {
         if panel {
             glass(hwnd);
         } else {
-            colour_frame(hwnd);
+            colour_frame(hwnd, &state);
         }
         let mut client = RECT::default();
         unsafe {
@@ -365,6 +368,7 @@ impl Display {
             placed: Cell::new(None),
             shape: Cell::new((0, 0, 0)),
             parts: RefCell::default(),
+            theme: Cell::new(None),
         });
         let ex_style = WS_EX_TOOLWINDOW | WS_EX_TOPMOST | WS_EX_NOACTIVATE | WS_EX_NOREDIRECTIONBITMAP;
         let module = unsafe { GetModuleHandleW(None) }.ok().map(Into::into);
@@ -462,6 +466,14 @@ impl Display {
                 let _ = ShowWindow(window.hwnd, SW_RESTORE);
             }
             let _ = SetForegroundWindow(window.hwnd);
+        }
+    }
+
+    /// Its frame's caption buttons are drawn light or dark as `theme` says, or as Windows is.
+    pub fn set_appearance(&self, window: &NativeWindow, theme: Option<crate::Appearance>) {
+        window.state.theme.set(theme);
+        if !window.state.panel {
+            colour_frame(window.hwnd, &window.state);
         }
     }
 
@@ -674,11 +686,11 @@ fn round(hwnd: HWND, width: i32, height: i32, radius: i32) {
     }
 }
 
-/// Behind the caption buttons is the page's background (`--background`), and the buttons light or dark, as the
-/// system is.
-fn colour_frame(hwnd: HWND) {
-    let dark = super::appearance() == crate::Appearance::Dark;
-    let (immersive, colour) = (BOOL::from(dark), COLORREF(if dark { 0x000a_0a0a } else { 0x00ff_ffff }));
+/// Behind the caption buttons is the page's background (`--background`, #f8f8fa or #121317), and the buttons light or
+/// dark, as its Colour Mode says, or as the system is.
+fn colour_frame(hwnd: HWND, state: &State) {
+    let dark = state.theme.get().unwrap_or_else(super::appearance) == crate::Appearance::Dark;
+    let (immersive, colour) = (BOOL::from(dark), COLORREF(if dark { 0x0017_1312 } else { 0x00fa_f8f8 }));
     unsafe {
         let _ = DwmSetWindowAttribute(hwnd, DWMWA_USE_IMMERSIVE_DARK_MODE, (&raw const immersive).cast(), size_of::<BOOL>() as u32);
         let _ = DwmSetWindowAttribute(hwnd, DWMWA_CAPTION_COLOR, (&raw const colour).cast(), size_of::<COLORREF>() as u32);
@@ -904,8 +916,8 @@ fn handle_msg(hwnd: HWND, state: &State, msg: u32, wparam: WPARAM, lparam: LPARA
         WM_SETTINGCHANGE => {
             // The system went light or dark.
             let area = if lparam.0 == 0 { None } else { Some(unsafe { PCWSTR(lparam.0 as *const u16).to_string() }.unwrap_or_default()) };
-            if area.as_deref() == Some("ImmersiveColorSet") {
-                colour_frame(hwnd);
+            if area.as_deref() == Some("ImmersiveColorSet") && !state.panel {
+                colour_frame(hwnd, state);
                 push(Input::Appearance(super::appearance()));
             }
             None

@@ -55,6 +55,7 @@ x11rb::atom_manager! {
         _NET_WM_STATE_MODAL,
         _NET_WM_WINDOW_TYPE,
         _NET_WM_WINDOW_TYPE_DIALOG,
+        _GTK_THEME_VARIANT,
     }
 }
 
@@ -550,6 +551,13 @@ impl Display {
         let message = xproto::ClientMessageEvent::new(32, x_window, self.atoms._NET_ACTIVE_WINDOW, data);
         let _ = self.xcb.send_event(false, root, xproto::EventMask::SUBSTRUCTURE_REDIRECT | xproto::EventMask::SUBSTRUCTURE_NOTIFY, message);
         let _ = self.xcb.flush();
+    }
+
+    /// Its window manager's frame is drawn light or dark as `theme` says, or as the desktop is, as a GTK window's
+    /// (`_GTK_THEME_VARIANT`, which GNOME's and KDE's read).
+    pub fn set_appearance(&self, window: &NativeWindow, theme: Option<crate::Appearance>) {
+        let variant = if theme.unwrap_or_else(super::appearance) == crate::Appearance::Dark { "dark" } else { "light" };
+        let _ = self.xcb.change_property8(xproto::PropMode::REPLACE, window.x_window, self.atoms._GTK_THEME_VARIANT, self.atoms.UTF8_STRING, variant.as_bytes());
     }
 
     pub fn set_cursor(&self, window: &NativeWindow, cursor: Cursor) {

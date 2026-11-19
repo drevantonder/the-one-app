@@ -433,6 +433,9 @@ impl Display {
 
     pub fn set_cursor(&self, _: &NativeWindow, _: crate::Cursor) {}
 
+    /// A phone's window has none of the system's own parts to draw light or dark.
+    pub fn set_appearance(&self, _: &NativeWindow, _: Option<crate::Appearance>) {}
+
     // A computer's launcher panel, which a phone has none of: its launcher is its root window (`WindowOptions::root`).
     pub fn summon(&self, _: &NativeWindow, _: &crate::platform::Places, _: Size<Pixels>) {}
     /// Hides the window, as a root window is while the page over it shows an app (`Windows::hide`); `show` shows it.

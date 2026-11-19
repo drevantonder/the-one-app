@@ -484,6 +484,15 @@ impl Display {
         });
     }
 
+    /// Its title bar and glass are drawn light or dark as `theme` says (Aqua, Dark Aqua), or as the Mac is.
+    pub fn set_appearance(&self, window: &NativeWindow, theme: Option<crate::Appearance>) {
+        window.window.get_on_main(move |window| {
+            let name = theme.map(|theme| unsafe { if theme == crate::Appearance::Dark { objc2_app_kit::NSAppearanceNameDarkAqua } else { objc2_app_kit::NSAppearanceNameAqua } });
+            let appearance = name.and_then(|name| objc2_app_kit::NSAppearance::appearanceNamed(name));
+            window.setAppearance(appearance.as_deref());
+        });
+    }
+
     pub fn set_cursor(&self, window: &NativeWindow, cursor: Cursor) {
         if window.cursor.replace(cursor) == cursor {
             return;

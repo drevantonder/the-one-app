@@ -229,6 +229,8 @@ struct Window {
     summoned: Option<web_time::Instant>,
     /// When a panel last went as something else took the keyboard (`showing`).
     left: Option<web_time::Instant>,
+    /// The Colour Mode its system's own parts were last drawn in (`Display::set_appearance`).
+    chrome: Option<Option<crate::Appearance>>,
     /// What it shows: its app's screen, or why its app didn't open.
     screen: Result<Screen, String>,
     title: String,
@@ -341,6 +343,7 @@ impl Windows {
                 visible: false,
                 summoned: None,
                 left: None,
+                chrome: None,
                 screen,
                 title: options.title,
                 scene: Default::default(),
@@ -725,6 +728,17 @@ impl Windows {
                 window.screen = Err(format!("{} didn't open", window.title));
                 window.dirty = true;
                 (window.on_event)(Event::Failed(why));
+            }
+        }
+        // The system's own parts of a window (a Mac's glass and title bar, Windows' frame, a Linux window manager's)
+        // are drawn light or dark as its Colour Mode says, or as the system is where it says nothing.
+        for window in self.windows.values_mut() {
+            let theme = window.screen.as_ref().ok().and_then(|screen| screen.theme);
+            if window.chrome != Some(theme) {
+                window.chrome = Some(theme);
+                for part in &window.parts {
+                    self.display.set_appearance(&part.native, theme);
+                }
             }
         }
         // A window whose page uses what this host can't draw says so, and why.

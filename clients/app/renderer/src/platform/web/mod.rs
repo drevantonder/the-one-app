@@ -320,6 +320,9 @@ impl Display {
     pub fn show(&self, _: &NativeWindow) {}
     pub fn activate(&self, _: &NativeWindow) {}
 
+    /// A page has none of the system's own parts to draw light or dark.
+    pub fn set_appearance(&self, _: &NativeWindow, _: Option<crate::Appearance>) {}
+
     pub fn set_cursor(&self, _: &NativeWindow, cursor: crate::Cursor) {
         let name = match cursor {
             crate::Cursor::Arrow => "default",
