@@ -7,8 +7,7 @@ defmodule AgentSkills.Writer do
 
   Each skill with its own folder in `skill://` gets one here, all its files and the skills beneath it, named
   `<network>-<its first part>`: an app's by the name it's installed by, One Core's by its own. The network's name is
-  its address in kebab case, so two networks' skills sit side by side, as the app before this one named its own
-  `the-one-app-<app>`. One named for the network alone lists them.
+  its address in kebab case, so two networks' skills sit side by side. One named for the network alone lists them.
   """
   use GenServer
   require Logger
