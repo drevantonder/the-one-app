@@ -17,6 +17,7 @@ import android.view.ViewStructure;
 import android.view.autofill.AutofillValue;
 import android.view.inputmethod.EditorInfo;
 import android.view.inputmethod.InputConnection;
+import androidx.annotation.Keep;
 import app.theone.renderer.editing.InputConnectionAdaptor;
 import app.theone.renderer.editing.TextEditState;
 import app.theone.renderer.editing.TextInputPlugin;
@@ -28,7 +29,9 @@ import org.json.JSONObject;
  * passes on what a finger does, bridges the keyboard (TextInputPlugin, from Flutter's embedder) and autofill, and does
  * what Rust asks of it (`command`): Flutter's text input method calls (`TextInput.setClient`, `setEditingState`,
  * `show`…), or showing the Cut, Copy and Paste menu.
+ * Kept whole (`@Keep`) as a release build shrinks it: Rust calls it by name.
  */
+@Keep
 public final class NativeView extends SurfaceView implements SurfaceHolder.Callback, TextInputPlugin.Framework {
     private static final String TAG = "renderer";
     private final long id;

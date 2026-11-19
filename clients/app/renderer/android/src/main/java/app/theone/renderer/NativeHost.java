@@ -5,13 +5,16 @@ import android.content.res.Configuration;
 import android.view.ViewGroup;
 import androidx.activity.ComponentActivity;
 import androidx.activity.OnBackPressedCallback;
+import androidx.annotation.Keep;
 import java.util.ArrayList;
 
 /**
  * Where an activity's native windows are (`renderer::platform::android`): each a view over its content, the newest in
  * front, which Back closes. Its activity attaches it as it's made, which makes the UI thread the native windows'
  * thread, and says when the system turns light or dark, or animations go on or off. Rust calls the rest, on the UI thread.
+ * Kept whole (`@Keep`) as a release build shrinks it: Rust calls it by name.
  */
+@Keep
 public final class NativeHost {
     private static ComponentActivity activity;
     private static Runnable changed;
