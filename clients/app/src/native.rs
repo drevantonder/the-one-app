@@ -810,11 +810,11 @@ fn respond(
                 }
                 Some(Ok(json!({})))
             }
-            // A phone's launcher opens it in the page, which draws it over the launcher, for whoever it's for, or with
-            // `behind` only starts it, as a finger lands on its icon (`go` in client.js).
+            // A phone's launcher opens it in the page, which draws it over the launcher, for whoever it's for, out of
+            // its icon (`from`), or with `behind` only starts it, as a finger lands on its icon (`go` in client.js).
             #[cfg(mobile)]
             url if url.starts_with("one:") && state.launcher => {
-                let go = json!({"link": &url["one:".len()..], "subject": params["subject"], "behind": params["behind"] == true});
+                let go = json!({"link": &url["one:".len()..], "subject": params["subject"], "behind": params["behind"] == true, "from": params["from"]});
                 crate::app().shell.emit("go", go);
                 Some(Ok(json!({})))
             }
