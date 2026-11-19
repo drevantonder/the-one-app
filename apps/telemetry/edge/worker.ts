@@ -156,7 +156,8 @@ export class Batch extends DurableObject {
   }
 
   async alarm() {
-    const exports = [...(await this.ctx.storage.list<Uint8Array>({ prefix: "otlp/" })).values()].map((otlp) => new Uint8Array(otlp));
+    const listed = await this.ctx.storage.list<Uint8Array>({ prefix: "otlp/" });
+    const exports = [...listed.values()].map((otlp) => new Uint8Array(otlp));
     let bytes = 0;
     const kept = exports.reverse().filter((otlp) => (bytes += otlp.length) <= MOST).reverse();
     const data = new Uint8Array(kept.reduce((sum, otlp) => sum + otlp.length, 0));
@@ -164,6 +165,9 @@ export class Batch extends DurableObject {
     const to = Date.now() * 1e6;
     const at = new Date(to / 1e6).toISOString();
     if (data.length) await env.OWN.write(`otlp/${at.slice(0, 10)}/${at.slice(11, 13)}/${to}-edge-${data.length}.traces`, data);
-    await this.ctx.storage.deleteAll();
+    // Only what was listed goes: what's added while it's written is the next minute's, with the alarm that adding
+    // set. Storage deletes at most 128 keys a call.
+    const keys = [...listed.keys()];
+    for (let from = 0; from < keys.length; from += 128) await this.ctx.storage.delete(keys.slice(from, from + 128));
   }
 }
