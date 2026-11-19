@@ -120,7 +120,7 @@ export function Screen(props: { heading?: JSX.Element; action?: JSX.Element; bac
     else leave()
   }
   // The device's own back calls a Back of the screen's own, as a tap on it does.
-  createEffect(() => !!props.back && !!props.onBack, (now) => (now ? covers(back) : undefined))
+  createEffect(() => !!props.back && !!props.onBack, (now) => (now ? covers(back, { layer: false }) : undefined))
   const backed = () => !!props.back && !inDetail()
   const history = useContext(History)
   const style = useContext(ListStyle)
@@ -267,7 +267,7 @@ export function Split(props: { open?: boolean; onClose?: () => void; detail?: JS
   createEffect(() => (props.open ? (beside() ? "beside" : "over") : ""), (how) => {
     if (!how) return
     open.push(close)
-    const done = how === "beside" ? covers(close) : step(close)
+    const done = how === "beside" ? covers(close, { layer: false }) : step(close)
     return () => (open.splice(open.indexOf(close), 1), done())
   })
 

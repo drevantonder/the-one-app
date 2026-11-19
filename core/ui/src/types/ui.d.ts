@@ -466,9 +466,10 @@ export type ClientChange = {
 }
 export declare function client(): Promise<Client>
 export declare function client(change: ClientChange): Promise<{ message: string }>
-/** Something of the page's own is open over it, which `shut` shuts: the device's own back calls it first. → what to
- * call once it has shut. */
-export declare function covers(shut: () => void): () => void
+/** Something of the page's own is open over it, which `shut` shuts: the device's own back calls it first. With
+ * `layer: false`, it's what the device's back does on a screen, and nothing is drawn over the page (a screen's own
+ * Back, a split's detail beside its list). → what to call once it has shut. */
+export declare function covers(shut: () => void, options?: { layer?: boolean }): () => void
 /** How large the page's content is, for a window sized by what it shows (a computer's launcher). */
 export declare function sizeChanged(size: { width?: number; height?: number }): Promise<void>
 /** Puts an app, by its entrypoint, on the device's own home screen, where `client()` says it can (`pinsShortcuts`). */

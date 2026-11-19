@@ -44,7 +44,7 @@ addEventListener("message", ({ source, data }) => {
   if (data?.method === "notifications/one/changed") for (const listener of listeners) listener()
   else if (data?.method === "ui/notifications/host-context-changed") dress(data.params)
   // The device's own back, where a device has one and something is open over the page: the last opened shuts.
-  else if (data?.method === "notifications/one/back") over.at(-1)?.()
+  else if (data?.method === "notifications/one/back") over.at(-1)?.shut()
   // A tap on an iPhone's status bar: what scrolls goes back to its top.
   else if (data?.method === "notifications/one/scroll-to-top") toTop()
   // How tall a page in one of this page's frames says its content is.
@@ -276,27 +276,30 @@ export async function tellDrawn() {
   notify("notifications/one/drawn")
 }
 
-/// What's open over the page, the last opened last, each as the function that shuts it: a sheet, an alert, a
-/// menu, a select's list, a calendar. A device's own back shuts the last of them before it goes anywhere, so the
-/// client is told whether there are any, and with it whether the page is on its first screen, with nothing of its own
-/// to go back to (the Navigation API's `canGoBack`, in its frame), where the device's back gesture leaves the app. A
-/// browser without the Navigation API doesn't say.
-const over: (() => void)[] = []
-const said = () => notify("notifications/one/over", { over: over.length > 0, first: globalThis.navigation && !navigation.canGoBack })
+/// What the device's own back shuts before it goes anywhere, the last opened last, each as the function that shuts it:
+/// a sheet, an alert, a menu, a select's list, a calendar, each a layer drawn over the page, and a screen's own Back,
+/// which isn't. The client is told whether there are any, whether any is a layer, which the window's rail keeps out of
+/// the way of, and whether the page is on its first screen, with nothing of its own to go back to (the Navigation
+/// API's `canGoBack`, in its frame), where the device's back gesture leaves the app. A browser without the Navigation
+/// API doesn't say.
+const over: { shut: () => void; layer: boolean }[] = []
+const said = () => notify("notifications/one/over", { over: over.length > 0, layer: over.some(({ layer }) => layer), first: globalThis.navigation && !navigation.canGoBack })
 // A page that hasn't said what it is yet says this as it does.
 const overNow = () => (greeted ? greeted.then(said) : greet())
 globalThis.navigation?.addEventListener("currententrychange", () => void overNow())
 
 /// `const shut = covers(close)`: says something of the app's own has opened over its page, as a sheet or a menu
 /// does, which `close` closes: the device's own back (an iPhone's swipe in from the edge, Android's Back) calls
-/// `close` before it goes anywhere else. → the function to call once it has closed, however it was.
-export function covers(shut: () => void): () => void {
-  over.push(shut)
-  if (over.length === 1) overNow()
+/// `close` before it goes anywhere else. `{ layer: false }` where nothing is drawn over the page, as a screen's own
+/// Back. → the function to call once it has closed, however it was.
+export function covers(shut: () => void, { layer = true }: { layer?: boolean } = {}): () => void {
+  const one = { shut, layer }
+  over.push(one)
+  overNow()
   return () => {
-    if (!over.includes(shut)) return
-    over.splice(over.indexOf(shut), 1)
-    if (!over.length) overNow()
+    if (!over.includes(one)) return
+    over.splice(over.indexOf(one), 1)
+    overNow()
   }
 }
 
