@@ -9,6 +9,10 @@ defmodule WebRTC do
   takes the app's SDP offer, whole, with its candidates, and answers with its end's SDP answer, as WHEP does, so a
   stream is two tool calls (`ice_servers`, then the offer) and needs nothing pushed.
 
+  The sender is this app's program, `server/bin/stream/`, one for every kind of screen: `sender` gives where each
+  kind of machine's build is published, which the streaming app's code on that machine downloads once, checks and
+  runs. Its `src/main.rs` says what it takes.
+
   Only an app gets them: it's the app that knows who may see what it streams.
   """
   @behaviour OneCore.App
@@ -51,13 +55,35 @@ defmodule WebRTC do
           },
           required: ["iceServers"]
         }
+      },
+      %{
+        name: "sender",
+        description:
+          "For an app's code that streams to a person's app over WebRTC: the program that sends a screen, `stream <file>`, built for each kind of machine (linux-x86_64, linux-aarch64, macos-aarch64, windows-x86_64), as its `url` and `sha256`. The app's code on that machine downloads it once, checks it, and runs it with the viewer's offer, the ICE servers and its screen's source. Not for a person or an agent.",
+        inputs: %{type: "object", properties: %{}},
+        outputs: %{
+          type: "object",
+          description: "By kind of machine",
+          additionalProperties: %{
+            type: "object",
+            properties: %{url: %{type: "string"}, sha256: %{type: "string"}},
+            required: ["url", "sha256"]
+          }
+        }
       }
     ]
   end
 
   @impl true
-  def call("ice_servers", _inputs, %Call{caller: nil}),
-    do: raise("ICE servers are for an app's code, which knows who may see what it streams")
+  def call(tool, _inputs, %Call{caller: nil}) when tool in ~w(ice_servers sender),
+    do: raise("WebRTC's #{tool} is for an app's code, which knows who may see what it streams")
+
+  # As published (`server/checksums.json`), each build named by its path.
+  def call("sender", _inputs, _call) do
+    for {"server/bin/stream/" <> kind, build} <- JSON.decode!(OneCore.App.file(__MODULE__, "server/checksums.json")),
+        into: %{},
+        do: {kind, Map.take(build, ["url", "sha256"])}
+  end
 
   def call("ice_servers", _inputs, call) do
     request = %{

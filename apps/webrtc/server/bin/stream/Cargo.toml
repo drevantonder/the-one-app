@@ -1,0 +1,23 @@
+[package]
+name = "stream"
+description = "WebRTC's sender: a screen as live video to one viewer, with what they do on it back over a data channel."
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "stream"
+test = false
+doctest = false
+
+[dependencies]
+anyhow.workspace = true
+serde = { version = "1", features = ["derive"] }
+serde_json.workspace = true
+# WebRTC, Sans I/O, with Rust's own crypto, so it builds for every kind of machine with no OpenSSL.
+str0m = { version = "0.25", default-features = false, features = ["rust-crypto"] }
+# TURN over TCP, which str0m leaves to whoever uses it.
+turn-client-proto = "0.8"
+
+[target.'cfg(unix)'.dependencies]
+libc = "0.2"
