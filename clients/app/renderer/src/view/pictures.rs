@@ -119,6 +119,7 @@ impl Pictures {
     /// at once; before, decoded in the background, with the same picture as it was last put there at another size, if
     /// it was, in the meantime.
     pub(super) fn get(&mut self, atlas: &Atlas, src: &str, device: Size<u32>, decode: fn(&str, Size<u32>) -> Option<Decoded>) -> Option<(Picture, AtlasTile)> {
+        let device = fitting(device, atlas);
         let id = hash((device.width, device.height, src));
         let address = hash(src);
         let latest = |pictures: &Self| {
@@ -162,6 +163,19 @@ impl Pictures {
 /// A picture's pixels as the atlas keeps them, with a clear pixel all round, so one drawn between device pixels, as a
 /// layer moving by a fraction of one draws it (`view::Layer`), samples nothing beside it in the atlas and loses none of
 /// its own edge (`Painter::sprite` draws that pixel outside its box).
+/// `device` pixels, or as large as fits its atlas's largest texture, its border and all, the same shape: a picture
+/// larger than that is drawn from that, scaled up, as a browser draws one larger than its GPU's textures.
+pub(super) fn fitting(device: Size<u32>, atlas: &Atlas) -> Size<u32> {
+    let largest = (atlas.largest().max(3) - 2) as f32;
+    let (width, height) = (device.width as f32, device.height as f32);
+    if width <= largest && height <= largest {
+        return device;
+    }
+    let by = (largest / width).min(largest / height);
+    let side = |length: f32| (length * by).round().clamp(1.0, largest) as u32;
+    Size { width: side(width), height: side(height) }
+}
+
 fn tiled(decoded: Decoded) -> (Size<DevicePixels>, std::borrow::Cow<'static, [u8]>) {
     let (width, height) = (decoded.picture.width as usize, decoded.picture.height as usize);
     let mut bgra = vec![0; (width + 2) * (height + 2) * 4];

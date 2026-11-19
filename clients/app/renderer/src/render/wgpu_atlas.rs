@@ -58,6 +58,11 @@ impl WgpuAtlas {
         self.0.lock().made
     }
 
+    /// The widest and tallest a tile can be: its GPU's largest texture.
+    pub(crate) fn largest(&self) -> i32 {
+        self.0.lock().max_texture_size
+    }
+
     /// How many times what's in it has changed (`WgpuAtlasState::generation`).
     pub(crate) fn generation(&self) -> u64 {
         self.0.lock().generation
@@ -80,6 +85,11 @@ impl WgpuAtlas {
         let Some((size, bytes)) = build()? else {
             return Ok(None);
         };
+        // What's larger than any texture its GPU makes isn't drawn: its maker draws it smaller (`view::pictures`).
+        let largest = lock.max_texture_size;
+        if size.width.0 > largest || size.height.0 > largest {
+            anyhow::bail!("a tile of {} × {} pixels is larger than this GPU's largest texture, {largest}", size.width.0, size.height.0);
+        }
         let tile = lock.allocate(size, key.texture_kind());
         lock.uploads.push(PendingUpload { id: tile.texture_id, bounds: tile.bounds, data: bytes.into_owned() });
         lock.tiles_by_key.insert(key.clone(), tile.clone());

@@ -1285,7 +1285,7 @@ impl Painter<'_> {
     pub(super) fn paint_path(&mut self, node: &Node, content: Bounds<f32>, look: &Look, current: Hsla, opacity: f32, mask: Bounds<f32>) {
         let Some(d) = node.str("d") else { return };
         let view_box = node.str("viewBox").unwrap_or("0 0 24 24");
-        let device = Size { width: (content.size.width * self.scale).round() as u32, height: (content.size.height * self.scale).round() as u32 };
+        let device = pictures::fitting(Size { width: (content.size.width * self.scale).round() as u32, height: (content.size.height * self.scale).round() as u32 }, self.atlas);
         if device.width == 0 || device.height == 0 {
             return;
         }
