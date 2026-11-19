@@ -607,7 +607,13 @@ fn mutations<'js>(ctx: &Ctx<'js>, posted: &Rc<RefCell<Vec<Posted>>>) -> rquickjs
     };
     mutations.set("create", Function::new(ctx.clone(), create)?)?;
     let to = posted.clone();
-    let set = move |id: Id, name: String, value: Value<'js>| to.borrow_mut().push(Posted::Mutation(Mutation::Set { id, name, value: data(&value) }));
+    // A value that holds itself, or is nested past what's read, is the page's error, thrown to it, as JSON.stringify
+    // throws one: the window and every other's go on.
+    let set = move |ctx: Ctx<'js>, id: Id, name: String, value: Value<'js>| -> rquickjs::Result<()> {
+        let value = data(&value, &mut Vec::new()).map_err(|why| Exception::throw_type(&ctx, why))?;
+        to.borrow_mut().push(Posted::Mutation(Mutation::Set { id, name, value }));
+        Ok(())
+    };
     mutations.set("set", Function::new(ctx.clone(), set)?)?;
     let to = posted.clone();
     let insert = move |parent: Id, id: Id, before: Option<Id>| to.borrow_mut().push(Posted::Mutation(Mutation::Insert { parent, id, before }));
@@ -623,11 +629,23 @@ fn mutations<'js>(ctx: &Ctx<'js>, posted: &Rc<RefCell<Vec<Posted>>>) -> rquickjs
     Ok(mutations)
 }
 
+/// How deep a value's arrays and objects are read at most, as each is read on the stack.
+const NESTED_MOST: usize = 512;
+
 /// A JS value as JSON's data model, read from it directly: a function, a symbol or `undefined` is `null`, and a number
-/// that's whole is an integer, as JSON's text would have it.
-fn data(value: &Value) -> serde_json::Value {
+/// that's whole is an integer, as JSON's text would have it. `within` is the arrays and objects it's in. → why it can't
+/// be: it holds itself, or it's nested too deep.
+fn data<'js>(value: &Value<'js>, within: &mut Vec<Value<'js>>) -> Result<serde_json::Value, &'static str> {
     use serde_json::Value as Data;
-    match value.type_of() {
+    if matches!(value.type_of(), Type::Array | Type::Object) {
+        if within.contains(value) {
+            return Err("cyclic object value");
+        }
+        if within.len() >= NESTED_MOST {
+            return Err("object nested too deeply");
+        }
+    }
+    Ok(match value.type_of() {
         Type::Bool => Data::Bool(value.as_bool().unwrap_or_default()),
         Type::Int => Data::from(value.as_int().unwrap_or_default()),
         Type::Float => {
@@ -635,12 +653,27 @@ fn data(value: &Value) -> serde_json::Value {
             if number.fract() == 0.0 && number.abs() < 9_007_199_254_740_992.0 { Data::from(number as i64) } else { serde_json::Number::from_f64(number).map_or(Data::Null, Data::Number) }
         }
         Type::String => value.as_string().and_then(|text| text.to_string().ok()).map_or(Data::Null, Data::String),
-        Type::Array => value.as_array().map_or(Data::Null, |array| Data::Array(array.iter::<Value>().map(|item| item.map_or(Data::Null, |item| data(&item))).collect())),
-        Type::Object => value.as_object().map_or(Data::Null, |object| {
-            Data::Object(object.props::<String, Value>().filter_map(Result::ok).filter(|(_, value)| !value.is_undefined() && !value.is_function()).map(|(name, value)| (name, data(&value))).collect())
-        }),
+        Type::Array => {
+            let Some(array) = value.as_array() else { return Ok(Data::Null) };
+            within.push(value.clone());
+            let items = array.iter::<Value>().map(|item| item.map_or(Ok(Data::Null), |item| data(&item, within))).collect::<Result<_, &'static str>>();
+            within.pop();
+            Data::Array(items?)
+        }
+        Type::Object => {
+            let Some(object) = value.as_object() else { return Ok(Data::Null) };
+            within.push(value.clone());
+            let props = object
+                .props::<String, Value>()
+                .filter_map(Result::ok)
+                .filter(|(_, value)| !value.is_undefined() && !value.is_function())
+                .map(|(name, value)| Ok((name, data(&value, within)?)))
+                .collect::<Result<_, &'static str>>();
+            within.pop();
+            Data::Object(props?)
+        }
         _ => Data::Null,
-    }
+    })
 }
 
 /// JSON's data as a JS value, made directly.
