@@ -948,8 +948,9 @@ impl Field {
                 if a != b {
                     self.replace((a, b), "", EditKind::Delete);
                 } else if a > 0 {
+                    // ⌘⌫ deletes to where the line starts as it's drawn, as a Mac's deleteToBeginningOfLine: does.
                     let from = if line {
-                        if self.secure { 0 } else { self.text[..a].rfind('\n').map_or(0, |i| i + 1) }
+                        self.line_edge(layout, upstream, false).0
                     } else if word {
                         self.prev_word(a)
                     } else {
@@ -970,8 +971,15 @@ impl Field {
                 if a != b {
                     self.replace((a, b), "", EditKind::Delete);
                 } else if a < self.text.len() {
-                    let to = if word { self.next_word(a) } else { next_char(&self.text, a) };
-                    self.replace((a, to), "", if word { EditKind::DeleteRun } else { EditKind::Delete });
+                    // ⌘⌦, and Control-K, delete to where the line ends as it's drawn.
+                    let to = if line {
+                        self.line_edge(layout, upstream, true).0
+                    } else if word {
+                        self.next_word(a)
+                    } else {
+                        next_char(&self.text, a)
+                    };
+                    self.replace((a, to), "", if line || word { EditKind::DeleteRun } else { EditKind::Delete });
                 }
             }
             "Insert" if shift && !key.ctrl => out.paste = !self.readonly,
@@ -1005,6 +1013,18 @@ impl Field {
                     if mac || key.ctrl { (if end { self.text.len() } else { 0 }, false) } else { self.line_edge(layout, upstream, end) };
                 self.set_focus(i, shift);
                 self.upstream = up;
+            }
+            // ⌥↑ and ⌥↓ go to the paragraph's start or end, then the one before or after, as a Mac's do.
+            "ArrowUp" | "ArrowDown" if mac && word && !line => {
+                let i = if key.key == "ArrowDown" {
+                    let from = (self.focus + 1).min(self.text.len());
+                    let from = if self.text[self.focus..].starts_with('\n') { from } else { self.focus };
+                    self.text[from..].find('\n').map_or(self.text.len(), |i| from + i)
+                } else {
+                    let to = if self.text[..self.focus].ends_with('\n') { self.focus - 1 } else { self.focus };
+                    self.text[..to].rfind('\n').map_or(0, |i| i + 1)
+                };
+                self.set_focus(i, shift);
             }
             "ArrowUp" | "ArrowDown" | "PageUp" | "PageDown" => {
                 let down = matches!(key.key.as_str(), "ArrowDown" | "PageDown");

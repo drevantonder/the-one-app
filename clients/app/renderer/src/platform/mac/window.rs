@@ -620,6 +620,13 @@ define_class!(
             // text input plugin; while its input method composes, every key is the input method's.
             let plugin = self.ivars().text_input.get();
             let composing = unsafe { text_input_composing(plugin) };
+            // Control with a letter a Mac binds to editing (its StandardKeyBinding.dict: ⌃A and ⌃E the line's start
+            // and end, ⌃K delete to its end, ⌃D and ⌃H delete, ⌃B ⌃F ⌃P ⌃N move) is a field's, through its
+            // input context, as in every Mac text field; with no field it's the page's.
+            let bound = key.ctrl && !key.meta && !key.alt && matches!(key.key.as_str(), "a" | "e" | "k" | "d" | "h" | "b" | "f" | "p" | "n");
+            if bound && !composing && unsafe { text_input_key(plugin, event) } {
+                return;
+            }
             if !composing && (key.meta || key.ctrl || key.key.chars().count() > 1) {
                 return shared.send(Input::Key(key));
             }
