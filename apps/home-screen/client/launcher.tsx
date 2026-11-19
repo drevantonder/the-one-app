@@ -306,6 +306,8 @@ export function LauncherPanel(props: { owners: Owner[]; layout: Screens; paging:
   const { pages, laid } = props.layout
   const { card, cardLeft, lead, trackX, turnOf, flingOf, opacityOf, wheel } = props.paging
   const { showing, words } = props.launching
+  // The owner pill's glass goes once it has faded out over the App Library or what was found, not before.
+  const [onHome] = lingering(() => showing() === "home" || undefined, 400)
   return (
     <>
         <View style={[looks.surface, looks.search, looks.at((viewport().width - SEARCH) / 2, 0, SEARCH, SEARCH_HEIGHT)]}>
@@ -355,7 +357,7 @@ export function LauncherPanel(props: { owners: Owner[]; layout: Screens; paging:
           </View>
           {/* Whose pages they are at the top, as a phone has it, and their dots at the foot, with the App Library's glyph. */}
           <View inert={showing() !== "home" || undefined} style={[looks.row, looks.fading, showing() !== "home" && looks.inert, looks.top(0), looks.tall(PILLS), looks.opacity(showing() === "home" ? (state().matches("editing") ? 0.6 : 1) : 0)]}>
-            <OwnerPill owners={props.owners} />
+            <OwnerPill owners={props.owners} hidden={!onHome()} />
           </View>
           <View inert={showing() === "search" || undefined} style={[looks.row, looks.fading, showing() === "search" && looks.inert, looks.bottom(0), looks.tall(PILLS), looks.opacity(showing() === "search" ? 0 : 1)]}>
             <DotsPill owners={props.owners} laid={laid().screens} pages={(owner) => pages()[owner]?.length ?? 1} />
