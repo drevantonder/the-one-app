@@ -76,14 +76,28 @@ writeFileSync(here("dist/client/ui.css"), transform({ filename: "ui.css", code: 
 for (const file of ["Allo-Variable.woff2", "Allo-LICENSE.txt", "UI-SDK-LICENSE.txt", "colour-mode.js"]) cpSync(here(`src/${file}`), here(`dist/client/${file}`))
 
 /// The UI library's skill: every `///` comment that starts with an example, from index.ts and then from each file it
-/// exports from, in its order.
+/// exports from, in its order. Each is of what's just under it, which a page can use (types/ui.d.ts exports it), and
+/// is the only one of it: the build fails on one that isn't, so the skill tells of nothing a page can't import.
 function skill() {
   const index = text("src/index.ts")
   const files = ["index.ts", ...new Set([...index.matchAll(/from "\.\/(.+?)"/g)].map(([, file]) => file))]
+  const page = text("src/types/ui.d.ts")
+  const exported = new Set([
+    ...[...page.matchAll(/^export (?:declare )?(?:function|const|type|interface|class) (\w+)/gm)].map(([, name]) => name),
+    ...[...page.matchAll(/^export (?:type )?\{([^}]+)\}/gm)].flatMap(([, names]) => names.split(",").map((name) => name.trim())),
+  ])
+  const told = new Set()
   return files.flatMap((file) =>
-    [...text(`src/${file}`).matchAll(/(?:^\/\/\/.*\n)+/gm)]
-      .map(([comment]) => comment.replace(/^\/\/\/ ?/gm, ""))
-      .filter((comment) => file === "index.ts" || comment.startsWith("`")),
+    [...text(`src/${file}`).matchAll(/(?:^\/\/\/.*\n)+/gm)].flatMap(({ 0: block, index: at, input }) => {
+      const comment = block.replace(/^\/\/\/ ?/gm, "")
+      if (file === "index.ts") return [comment]
+      if (!comment.startsWith("`")) return []
+      const under = input.slice(at + block.length).match(/^export (?:async )?(?:function|const|let|class|interface|type) (\w+)/)?.[1]
+      if (!exported.has(under) || told.has(under))
+        throw new Error(`src/${file}: \`///\` tells the ui skill of ${under ?? "what isn't exported under it"}, which ${told.has(under) ? "another already does" : "a page can't import (types/ui.d.ts)"}: make it a \`//\` comment, or export it`)
+      told.add(under)
+      return [comment]
+    }),
   )
 }
 

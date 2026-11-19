@@ -159,12 +159,12 @@ const [size, setSize] = createSignal({ width: innerWidth, height: innerHeight })
 addEventListener("resize", () => setSize({ width: innerWidth, height: innerHeight }))
 /// `viewport().width`: the window's size, in CSS pixels, as it changes, for what's laid out by hand.
 export const viewport = () => size()
-/// `direction()`: which way the page's words run, as its language has them: `rtl` for Arabic or Hebrew.
-/// `touch()`: whether what points at the page is a finger, as it changes: the device's own pickers are for it.
+// Whether what points at the page is a finger, as it changes: the device's own pickers are for it.
 const coarse = matchMedia("(pointer: coarse)")
 const [fingered, setFingered] = createSignal(coarse.matches)
 coarse.addEventListener("change", () => setFingered(coarse.matches))
 export const touch = () => fingered()
+/// `direction()`: which way the page's words run, as its language has them: `rtl` for Arabic or Hebrew.
 export const direction = (): "ltr" | "rtl" => (getComputedStyle(document.documentElement).direction === "rtl" ? "rtl" : "ltr")
 
 const [still, setStill] = createSignal(reduced.matches)
@@ -205,9 +205,9 @@ addEventListener("popstate", (event) => {
   setTimeout(() => (travelled = false))
 }, true)
 
-/// `go(() => setOpen(note))`: changes which screen shows, as a move. `change` puts the new screen in place, and the
-/// browser slides to it from what was there (its View Transitions): in over it, or with `back`, back out from over
-/// it. The browser takes its picture of the new screen once it's drawn, with what it was still loading, as the View
+/// `go(() => setOpen(note))`: changes which screen shows, as a move. `change` puts the new screen in place: on a native
+/// host at once, and on the DOM the browser slides to it from what was there (its View Transitions): in over it, or
+/// with `back`, back out from over it. The browser takes its picture of the new screen once it's drawn, with what it was still loading, as the View
 /// Transitions guide has it: its picture of the old one stays on screen until then. For whoever asked for less motion
 /// one fades into the other, and where the browser can't, it's a plain swap. From one page to another the browser
 /// does this by itself (ui.css).
@@ -229,10 +229,10 @@ addEventListener("pageswap", ({ activation, viewTransition }) => {
 if (history.state?.uiStep) history.replaceState({ ...history.state, uiStep: 0 }, "")
 const depth = () => Number(history.state?.uiStep ?? 0)
 
-/// `const done = step(close)`: something opened is a step in the browser's history, as a split's detail pushed over
-/// its list is, so the device's back (and the browser's) goes back from it, calling `close`. Steps open in one another
-/// are one each, so back closes the innermost first. → what to call once it's closed however it was, which takes its
-/// step out of the history if it's still there.
+// `const done = step(close)`: something opened is a step in the browser's history, as a split's detail pushed over
+// its list is, so the device's back (and the browser's) goes back from it, calling `close`. Steps open in one another
+// are one each, so back closes the innermost first. → what to call once it's closed however it was, which takes its
+// step out of the history if it's still there.
 export function step(close: () => void): () => void {
   const mine = depth() + 1
   history.pushState({ ...history.state, uiStep: mine }, "")
@@ -306,7 +306,7 @@ interface Content {
 }
 
 /// `await call("notes_add", { text: "Milk" })`: calls a tool and gives its answer, which is text. A file a
-/// tool answers with is its address, which an `<img>` takes as its `src`: a `data:` one, or for a large file, one
+/// tool answers with is its address, which an `<Image>` takes as its `src`: a `data:` one, or for a large file, one
 /// the client keeps the file at. A tool that refuses throws an `Error` whose `message` is what a person reads of
 /// what it said (`readable`), and whose `cause` is all of it, as an agent reads it. The client keeps the answer of a tool
 /// that only reads, and answers with it at once. A screen that shows what a tool answers reads it in a memo:
@@ -396,10 +396,10 @@ function follow() {
 export const component = (app: string, name: string): Promise<Record<string, (props: Record<string, unknown>) => JSX.Element>> =>
   import(/* @vite-ignore */ new URL(`../../${app}/client/${name}.js`, document.baseURI).href)
 
-/// `const { url, sandbox } = await frame("chrome-profiles/client/profile.html#work")`: where another app's page is, as
-/// its own app's, for `subject`, which `Frame` draws in an iframe: its client answers it as that app's, as it does
-/// this page as its own. Only a trusted app's page may.
-/// A frame's page that's gone, by its number, which its client forgets.
+// `const { url, sandbox } = await frame("chrome-profiles/client/profile.html#work")`: where another app's page is, as
+// its own app's, for `subject`, which `Frame` draws in an iframe: its client answers it as that app's, as it does
+// this page as its own. Only a trusted app's page may.
+// A frame's page that's gone, by its number, which its client forgets.
 export const unframe = (frame: string) => greet().then(() => ask("one/frame", { forget: frame }))
 
 /// Each frame's (`frame`) way to be told how tall its page says its content is, by its number.

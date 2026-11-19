@@ -2,15 +2,15 @@ import { createSignal, Show } from "solid-js"
 import { Button, Icon, Spinner } from "./button.tsx"
 import type { JSX } from "@solidjs/web"
 
-/// `<SignIn mark={<img src={mark} alt="" />} heading="Sign in" button="Sign in" onSignIn={passkey} />`: the one
-/// screen someone signs in on, wherever it's shown: the `mark` of whose it is, a `heading` and one `button`.
-/// `onSignIn` asks them, and what it throws is shown above the button to try again, as a `problem` given is. A
-/// `code` is shown big, under a grey `note` that says what to do with it. A `warning` says who will act as them if
-/// they do, and stays until they have. `stop` is a second button, for saying no, which `onStop` does. `done` is
-/// the one line that's left once they've answered. With `href` the button is a link to where signing in happens,
-/// for a screen that can't ask itself. `status` is what's under way while there's nothing to press yet, a spinner
-/// and one line where the buttons go. What else it asks, such as a `Field` for their name, goes in it, above
-/// the button.
+// `<SignIn mark={<img src={mark} alt="" />} heading="Sign in" button="Sign in" onSignIn={passkey} />`: the one
+// screen someone signs in on, wherever it's shown: the `mark` of whose it is, a `heading` and one `button`.
+// `onSignIn` asks them, and what it throws is shown above the button to try again, as a `problem` given is. A
+// `code` is shown big, under a grey `note` that says what to do with it. A `warning` says who will act as them if
+// they do, and stays until they have. `stop` is a second button, for saying no, which `onStop` does. `done` is
+// the one line that's left once they've answered. With `href` the button is a link to where signing in happens,
+// for a screen that can't ask itself. `status` is what's under way while there's nothing to press yet, a spinner
+// and one line where the buttons go. What else it asks, such as a `Field` for their name, goes in it, above
+// the button.
 export function SignIn(props: {
   mark?: JSX.Element
   heading?: JSX.Element

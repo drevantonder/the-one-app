@@ -9,9 +9,9 @@
 /// addresses and its app's own files. An app may be TypeScript (`.tsx`, `.ts`) as well as JavaScript.
 /// **A page.** An app's page runs natively, on our renderer on a computer, an iPhone and Android, and unchanged on the
 /// DOM in a browser and in MCP Apps. Its `tsconfig.json` is `{ "extends": "<ui>/tsconfig.app.json",
-/// "include": ["**/*"] }` (in this repo `../../../core/ui/tsconfig.app.json`; the UI library's types are `one code
-/// --name ui`), and its entrypoint names it with the runtime version it needs: `%{page: "client/index.html",
-/// runtime_version: 4}`. It's written with the UI library alone: its components and the drawing primitives,
+/// "include": ["**/*"] }` (in this repo `../../../core/ui/tsconfig.app.json`; a deploy checks it against its server's
+/// own copy), and its entrypoint names it with the runtime version it needs, the one native hosts have now:
+/// `%{page: "client/index.html", runtime_version: 5}`. It's written with the UI library alone: its components and the drawing primitives,
 /// named and shaped as React Native's core components and their props: `View`, `Pressable` (a view that's pressed),
 /// `ScrollView` (a view whose content scrolls), `Text`, `Image`, `TextInput` (bare text to type, which `Input` draws in
 /// a field's box), `Modal` and `Portal` (what's drawn over the page), react-native-svg's `Svg` and `Path` (a vector

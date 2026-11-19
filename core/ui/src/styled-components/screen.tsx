@@ -106,7 +106,8 @@ export const Middle = createContext<() => boolean>(() => false)
 /// `<Screen heading="Notes" action={<Button>Add</Button>}>...</Screen>`: a whole view of an app: a bar across its
 /// top that stays as what's under it scrolls, with its `heading` and what it does (`action`: its one main button, or a
 /// menu), then what's in it, one part under another. With `back` the bar starts with a Back button, which calls
-/// `onBack`, or goes back as the device's own back gesture does. A split's list closes what's open beside it first. An
+/// `onBack`, as the device's own back gesture does: a screen with `back` says where it goes, but in a split's detail,
+/// which it closes. A split's list closes what's open beside it first. An
 /// app's first screen has no Back: the window's rail, its title bar's Home on a computer, and the device's back leave
 /// the app. Where the window's breadcrumb names the app, its first screen's heading gives way to it.
 export function Screen(props: { heading?: JSX.Element; action?: JSX.Element; back?: boolean; onBack?: () => void; children?: JSX.Element }) {

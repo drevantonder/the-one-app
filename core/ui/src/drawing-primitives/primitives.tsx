@@ -76,9 +76,9 @@ export interface PickerItemProps {
 }
 
 
-/// `<Picker selectedValue={value()} onValueChange={setValue}><Picker.Item label="Meals" value="meals" /></Picker>`:
-/// the device's own picker of one of a few, as a phone's wheel or sheet is (renderer.ts's `picker`), as
-/// @react-native-picker/picker's: on the DOM a `<select>`, see-through over its box, which the browser opens as its own.
+// `<Picker selectedValue={value()} onValueChange={setValue}><Picker.Item label="Meals" value="meals" /></Picker>`:
+// the device's own picker of one of a few, as a phone's wheel or sheet is (renderer.ts's `picker`), as
+// @react-native-picker/picker's: on the DOM a `<select>`, see-through over its box, which the browser opens as its own.
 export const Picker = Object.assign(
   (props: PickerProps) => {
     const all = options(() => props.children)
@@ -256,9 +256,9 @@ export function Video(props: VideoProps) {
   )
 }
 
-/// `render(() => <App />)`: draws an app's first screen, where its page is: the page itself on the web, the app's
-/// window on a native host. → what takes it away again. Its client is told once the page has drawn: once what it first
-/// asked for has settled, under its `<Loading>`s.
+// `render(() => <App />)`: draws an app's first screen, where its page is: the page itself on the web, the app's
+// window on a native host. → what takes it away again. Its client is told once the page has drawn: once what it first
+// asked for has settled, under its `<Loading>`s.
 export const render = (code: () => JSX.Element): (() => void) => mount(() => (onSettled(() => void tellDrawn()), code()), document.body)
 
 /** What a primitive's element has of its `style`: its classes after the primitive's own, and its inline CSS. */

@@ -1,7 +1,7 @@
-// How an app's page draws natively, on our renderer on a computer and Android: its JS runs in a
+// How an app's page draws natively, on our renderer on a computer, an iPhone and Android: its JS runs in a
 // sandbox of its own (rquickjs), and Solid's universal renderer (@solidjs/universal) tells the host what changes in its
-// tree as mutations, which the host applies and draws. What the person does comes back as events. On the web, iOS and
-// in MCP Apps the same app draws to the DOM instead, and none of this is used.
+// tree as mutations, which the host applies and draws. What the person does comes back as events. In a browser and in
+// MCP Apps the same app draws to the DOM instead, and none of this is used.
 //
 // This file is the renderer's bridge: what crosses between the sandbox and the host to draw. Its other channel, what a
 // page asks its client (calls.ts), is MCP Apps' JSON-RPC, the same on every host. This one is ours and made to be fast,
@@ -10,7 +10,8 @@
 // has run, as one commit. Each event is a direct call the other way (`Events`).
 //
 // A host has one runtime version (`RUNTIME_VERSION`), as Expo's native runtime has, which an app's entrypoint names
-// (`runtime_version`); a host whose version is older, or that has none, opens it in a web view. A change a host of this
+// (`runtime_version`); a computer whose version is older, or a page that names none, doesn't open it, saying why, and
+// a phone's opens it in its web view. A change a host of this
 // version couldn't draw (a new type, prop, mutation, token kind, style property or condition, or a change to how they
 // cross) is a new version. A host draws every version up to its own.
 //
