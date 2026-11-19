@@ -14,6 +14,8 @@ export const looks = styles({
   menu: { position: "absolute", overflow: "hidden", borderRadius: tokens.radius.large, backgroundColor: tokens.colour.glass, backdropFilter: tokens.material.glass, boxShadow: tokens.shadow.window, color: tokens.colour.label },
   overview: { position: "absolute", zIndex: 15, backgroundColor: tokens.colour.veil, backdropFilter: tokens.material.thin, transitionProperty: ["opacity"], transition: tokens.motion.settle },
   gone: { opacity: 0 },
+  // Fades in as it's added, and out where `gone` says, at the settle pace.
+  fadeIn: { opacity: { default: 1, entering: 0 }, transitionProperty: ["opacity"], transition: tokens.motion.settle },
   slots: { position: "relative" },
   slot: { position: "absolute", top: 0, start: 0, zIndex: 0, alignItems: "center", gap: tokens.grid[3] },
   carried: { zIndex: 1 },
@@ -63,7 +65,7 @@ export const looks = styles({
   shifted: (translateX: number) => ({ translateX }),
   slid: (translateX: number, opacity: number) => ({ translateX, opacity }),
   moved: (translateX: number, translateY: number) => ({ translateX, translateY }),
-  popup: (start: number, width: number, opacity: number, scale: number) => ({ start, width, opacity, scale }),
+  popup: (start: number, width: number) => ({ start, width }),
   chosen: { position: "absolute", top: negative(tokens.grid[1]), bottom: negative(tokens.grid[1]), start: negative(tokens.grid[1]), end: negative(tokens.grid[1]), borderRadius: tokens.radius.large, backgroundColor: tokens.colour.selection },
   sized: (width: number, height: number) => ({ width, height }),
   padded: (paddingTop: number, paddingBottom: number) => ({ paddingTop, paddingBottom }),
@@ -128,6 +130,13 @@ export const looks = styles({
   titled: (start: number, width: number, top: number, opacity: number, translateY: number) => ({ start, width, top, opacity, translateY }),
   opened: { display: "grid", gridTemplateColumns: { repeat: 3 }, rowGap: tokens.grid[4], columnGap: tokens.grid[3] },
   copy: { position: "absolute", display: "grid", pointerEvents: "none" },
+  // What's held grows a little as it's lifted, and a menu opens from small, each with a spring.
+  lifting: { display: "grid", scale: { default: 1.06, entering: 1 }, transitionProperty: ["scale"], transition: tokens.motion.snappy },
+  // What a finger carries is raised from where it was lifted, and put back down as it settles.
+  raised: { display: "grid", scale: { default: 1.12, entering: 1 }, transitionProperty: ["scale"], transition: tokens.motion.snappy },
+  raisedWidget: { display: "grid", scale: { default: 1.05, entering: 1 }, transitionProperty: ["scale"], transition: tokens.motion.snappy },
+  set: { scale: 1 },
+  opens: { opacity: { default: 1, entering: 0 }, scale: { default: 1, entering: 0.25 }, transitionProperty: ["opacity", "scale"], transition: tokens.motion.snappy },
   copyAt: (start: number, top: number, width: number, height: number, scale: number) => ({ start, top, width, height, scale }),
   installedFor: { paddingInline: tokens.grid[4], paddingBlock: tokens.grid[2.5], borderBottomWidth: tokens.length.hairline, borderColor: tokens.colour.quinaryLabel },
   holdItem: { flexDirection: "row", alignItems: "center", justifyContent: "space-between", gap: tokens.grid[4], minHeight: sizes.menuRow, paddingInline: tokens.grid[4], borderTopWidth: tokens.length.hairline, borderColor: tokens.colour.quinaryLabel },
@@ -164,7 +173,7 @@ export const looks = styles({
   libraryGlyph: { height: "100%", justifyContent: "center", paddingStart: tokens.grid[0.5], paddingEnd: tokens.grid[1], color: tokens.colour.secondaryLabel },
   lit: { color: tokens.colour.label },
   editBar: { position: "absolute", zIndex: 7, flexDirection: "row", alignItems: "center", justifyContent: "space-between", pointerEvents: "none" },
-  editBarPad: (paddingInline: number, opacity: number) => ({ paddingInline, opacity }),
+  editBarPad: (paddingInline: number) => ({ paddingInline }),
   // The launcher's search and what it found.
   launcherSearch: { flexGrow: 1, flexDirection: "row", alignItems: "center", paddingInline: sizes.searchInline },
   heading: { font: tokens.type.caption, color: tokens.colour.secondaryLabel, paddingInline: tokens.grid[1] },

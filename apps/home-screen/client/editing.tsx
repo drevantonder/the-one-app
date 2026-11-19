@@ -1,6 +1,6 @@
 // What editing a Home Screen opens over it: the widget gallery, the sheets that ask to install or say no, and + and
 // Done.
-import { createEffect, createMemo, createSignal, Errored, For, Loading, refresh, Show, untrack } from "solid-js"
+import { createMemo, createSignal, Errored, For, Loading, refresh, Show, untrack } from "solid-js"
 import { Button, ScrollView, call, Empty, Icon, Image, List, Pressable, Problem, type Rect, Row, Sheet, Text, toast, View } from "ui"
 import { PILLS, TOP_ROW } from "./layout.ts"
 import { type Held } from "./machine.ts"
@@ -9,7 +9,6 @@ import { looks } from "./looks.ts"
 import { home, state, room, laidPage } from "./store.ts"
 import { json, type Owner, owners, and, installedFor, named } from "./owners.ts"
 import { Card } from "./tiles.tsx"
-import { tween } from "./tween.ts"
 
 const SIZES: Record<Size, string> = { "2x2": "Small", "4x2": "Medium", "4x4": "Large" }
 
@@ -145,18 +144,13 @@ export function Refused(props: { owner: Owner; held: Held }) {
 /// where they are, as on a phone; in the launcher, in its footer's place, each in Liquid Glass. They fade in, and out
 /// as editing ends.
 export function EditBar(props: { going?: boolean; within?: Rect }) {
-  const fade = tween(200, () => {})
-  createEffect(
-    () => !!props.going,
-    (going) => fade.to(going ? 0 : 1),
-  )
   // In the launcher, in the owner switcher's row at the top of its card.
   const top = () => props.within?.y ?? room().safe.top
   const height = () => (props.within ? PILLS : TOP_ROW)
   const width = () => props.within?.width ?? (room().wide ? Math.min(room().width - 2 * room().side, room().fit * (laidPage().width * room().scale + room().gap) - room().gap) : room().width)
   const left = () => props.within?.x ?? (room().width - width()) / 2
   return (
-    <View style={[looks.editBar, looks.at(left(), top(), width(), height()), looks.editBarPad(props.within ? 10 : 16, fade.value())]}>
+    <View style={[looks.editBar, looks.at(left(), top(), width(), height()), looks.editBarPad(props.within ? 10 : 16), looks.fadeIn, props.going && looks.gone]}>
       <View style={[looks.pill, looks.glass]}>
         <Button variant="ghost" size="icon" aria-label="Add Widget" onPress={() => state().matches({ editing: "still" }) && home.send({ type: "gallery" })}>
           <Icon name="plus" />

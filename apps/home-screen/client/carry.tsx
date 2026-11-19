@@ -8,7 +8,6 @@ import { looks } from "./looks.ts"
 import { home, state, launcher, room, laidPage, quietFor, finger, setLanding } from "./store.ts"
 import { type Owner, owners, draft, installedFor } from "./owners.ts"
 import { Card, Count, Tile } from "./tiles.tsx"
-import { tween } from "./tween.ts"
 import { type Screens } from "./screens.ts"
 import { type Paging } from "./paging.ts"
 
@@ -30,10 +29,7 @@ export function createCarry(props: { owners: Owner[] }, layout: Screens, paging:
       if (!dragging) return
       const held = home.getSnapshot().context.held!
       const rect = held.rect ?? { x: finger.pointer.x - 30, y: finger.pointer.y - 40, width: 60, height: 80 }
-      setCopy({ held, rect, x: finger.pointer.x - finger.grab.x, y: finger.pointer.y - finger.grab.y, settling: false, lifted: 0 })
-      const lifting = tween(200, () => {})
-      lifting.to(1)
-      createEffect(lifting.value, (lifted) => void setCopy((now) => now && { ...now, lifted }))
+      setCopy({ held, rect, x: finger.pointer.x - finger.grab.x, y: finger.pointer.y - finger.grab.y, settling: false })
       haptic("medium")
       const id = finger.carrier
       const moves = thrower()
@@ -155,8 +151,9 @@ export function createCarry(props: { owners: Owner[] }, layout: Screens, paging:
   return { copy }
 }
 
-/// What a finger carries as it's drawn: what's held, where it was lifted from, where it is now, and how far it has lifted.
-export type Copy = { held: Held; rect: Rect; x: number; y: number; settling: boolean; lifted: number }
+/// What a finger carries as it's drawn: what's held, where it was lifted from, where it is now, and whether it's
+/// settling into its place.
+export type Copy = { held: Held; rect: Rect; x: number; y: number; settling: boolean }
 
 /// What a finger carries, drawn from where it was lifted.
 export function Carried(props: { now: () => Copy; owner: Owner }) {
@@ -165,24 +162,25 @@ export function Carried(props: { now: () => Copy; owner: Owner }) {
   const scale = () => untrack(room).scale
   const widget = () => !!now().held.item?.widget
   const [width, height] = [now().rect.width / scale(), now().rect.height / scale()]
-  const lift = () => (now().settling ? 1 : 1 + (widget() ? 0.05 : 0.12) * now().lifted)
   const tile = () => laidPage().tile
   return (
     <View
       aria-hidden="true"
-      style={[looks.carry, looks.carryAt(now().rect.x + (now().rect.width - width) / 2, now().rect.y + (now().rect.height - height) / 2, width, height, now().x, now().y, scale() * lift())]}
+      style={[looks.carry, looks.carryAt(now().rect.x + (now().rect.width - width) / 2, now().rect.y + (now().rect.height - height) / 2, width, height, now().x, now().y, scale())]}
     >
-      <View aria-hidden="true" style={[looks.lifted, widget() ? looks.liftedWidget : looks.liftedIcon, now().settling && looks.opacity(0), widget() ? looks.at(0, 0, width, height) : looks.at((width - tile()) / 2, 0, tile(), tile())]} />
-      <Show when={now().held.item}>
-        {(item) => (
-          <Show when={item().widget} fallback={<Tile name={(item() as Entrypoint).name} icon={(item() as Entrypoint).icon} size={laidPage().tile} scale={scale()} />}>
-            <Card item={item() as WidgetItem} owner={owner()} still />
-          </Show>
-        )}
-      </Show>
-      <Show when={now().held.stack?.length}>
-        <Count count={(now().held.stack?.length ?? 0) + 1} />
-      </Show>
+      <View style={[widget() ? looks.raisedWidget : looks.raised, now().settling && looks.set]}>
+        <View aria-hidden="true" style={[looks.lifted, widget() ? looks.liftedWidget : looks.liftedIcon, now().settling && looks.opacity(0), widget() ? looks.at(0, 0, width, height) : looks.at((width - tile()) / 2, 0, tile(), tile())]} />
+        <Show when={now().held.item}>
+          {(item) => (
+            <Show when={item().widget} fallback={<Tile name={(item() as Entrypoint).name} icon={(item() as Entrypoint).icon} size={laidPage().tile} scale={scale()} />}>
+              <Card item={item() as WidgetItem} owner={owner()} still />
+            </Show>
+          )}
+        </Show>
+        <Show when={now().held.stack?.length}>
+          <Count count={(now().held.stack?.length ?? 0) + 1} />
+        </Show>
+      </View>
     </View>
   )
 }

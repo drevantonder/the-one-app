@@ -1,19 +1,11 @@
 import { onSettled, refresh, Show, untrack } from "solid-js"
-import { call, confirm, covers, haptic, Icon, type IconName, Image, keydown, pinShortcut, Pressable, reducedMotion, Text, toast, View, viewport } from "ui"
+import { call, confirm, covers, haptic, Icon, type IconName, Image, keydown, pinShortcut, Pressable, Text, toast, View, viewport } from "ui"
 import { type Held } from "./machine.ts"
 import { type Entrypoint, type Item, type Widget as WidgetItem, src } from "./types.ts"
 import { looks } from "./looks.ts"
 import { home, state, pins, room, laidPage } from "./store.ts"
 import { json, type Owner, owners, draft, subjectOf, and, addable, addToHome, removeFromHome, whose } from "./owners.ts"
 import { Card, Tile } from "./tiles.tsx"
-import { tween } from "./tween.ts"
-
-/// A spring, as iOS's menus open: quick, a little past where it goes and back, `t` from 0 to 1.
-const springy = (t: number) => {
-  const [damping, natural] = [0.7, 10]
-  const damped = natural * Math.sqrt(1 - damping ** 2)
-  return 1 - Math.exp(-damping * natural * t) * (Math.cos(damped * t) + ((damping * natural) / damped) * Math.sin(damped * t))
-}
 
 /// What a finger holds, lifted over the dimmed Home Screen, as a phone's is, with its menu beside it, which grows out of
 /// it with a spring: Edit Home Screen and Remove App on a Home page; in the App Library, who the app is installed for,
@@ -66,13 +58,11 @@ export function Holding(props: { owner: Owner; index: number; held: Held }) {
     dismiss()
     addToHome(props.owner, props.index, props.held.item!)
   }
-  const grow = tween(450, () => {})
   onSettled(() => {
     haptic("medium")
-    grow.to(1)
     const shut = covers(dismiss)
     const keys = keydown((event) => event.key === "Escape" && dismiss())
-    return () => (shut(), keys(), grow.stop())
+    return () => (shut(), keys())
   })
   // Where it is in the window, which its menu is under, or over where there's no room under it.
   const held = props.held.rect ?? { x: 0, y: 0, width: 0, height: 0 }
@@ -91,20 +81,21 @@ export function Holding(props: { owner: Owner; index: number; held: Held }) {
     dismiss()
     pinShortcut(app!.entrypoint).catch((error) => toast(error as Error))
   }
-  const motion = () => (reducedMotion() ? 1 : springy(grow.value() * 1.2))
   // Its copy is laid out at a phone's size, drawn as much larger as the pages are, from its middle.
   const [copyWidth, copyHeight] = [held.width / scale, held.height / scale]
   const tile = untrack(laidPage).tile
   return (
     <View style={[looks.dialog, looks.heldLayer, looks.sized(room().width, viewport().height)]}>
       {/* The Home Screen blurs through a veil under what's held, and its menu floats in glass, as a window does. */}
-      <Pressable aria-hidden="true" onPress={dismiss} style={[looks.cover, looks.frosted, looks.opacity(Math.min(1, grow.value() * 2))]} />
+      <Pressable aria-hidden="true" onPress={dismiss} style={[looks.cover, looks.frosted, looks.fadeIn]} />
       <Show when={item ?? (props.held.listed as Item | undefined)}>
         {(item) => (
-          <View aria-hidden="true" style={[looks.copy, looks.copyAt(held.x + (held.width - copyWidth) / 2, held.y + (held.height - copyHeight) / 2, copyWidth, copyHeight, scale * (1 + 0.06 * motion()))]}>
-            <Show when={item().widget} fallback={library ? <Image src={src((item() as Entrypoint).icon)} alt="" style={[looks.iconImage, looks.square(copyWidth)]} /> : <Tile name={(item() as Entrypoint).name} icon={(item() as Entrypoint).icon} size={tile} scale={scale} />}>
-              <Card item={item() as WidgetItem} owner={props.owner} still />
-            </Show>
+          <View aria-hidden="true" style={[looks.copy, looks.copyAt(held.x + (held.width - copyWidth) / 2, held.y + (held.height - copyHeight) / 2, copyWidth, copyHeight, scale)]}>
+            <View style={looks.lifting}>
+              <Show when={item().widget} fallback={library ? <Image src={src((item() as Entrypoint).icon)} alt="" style={[looks.iconImage, looks.square(copyWidth)]} /> : <Tile name={(item() as Entrypoint).name} icon={(item() as Entrypoint).icon} size={tile} scale={scale} />}>
+                <Card item={item() as WidgetItem} owner={props.owner} still />
+              </Show>
+            </View>
           </View>
         )}
       </Show>
@@ -113,7 +104,7 @@ export function Holding(props: { owner: Owner; index: number; held: Held }) {
         aria-label={(item ?? props.held.listed)?.name}
         style={[
           looks.menu,
-          looks.popup(left, 240, Math.min(1, grow.value() * 3), reducedMotion() ? 1 : 0.25 + 0.75 * motion()),
+          looks.popup(left, 240), looks.opens,
           below ? looks.top(held.y + held.height + 12) : looks.bottom(height - held.y + 12),
         ]}
       >
