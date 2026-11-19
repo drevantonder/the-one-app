@@ -179,6 +179,31 @@ chose the same: an app's code on a server is free, and which servers act for who
   jsign with Artifact Signing, and its installer is MSI, not ours with NSIS. It would take over only the client's
   cross-builds, about 40 lines, and move them from this machine's kept checkout and compiler cache to CI. Nothing in
   ours is worth consolidating meanwhile: `tooling/on-mac` is the one race, which `nifs` and `release` share already.
+- **Hex packages for an app's server code** (20 November 2026), for the three apps thought to hand-roll what a
+  package does. None does, or no package fits:
+  - Telemetry decodes OTLP with the protobuf modules OpenTelemetry's exporter brings already
+    (`opentelemetry_exporter_*_service_pb`); `Telemetry.Otlp` only lays them flat.
+  - Gmail reads Gmail's JSON, not MIME, and `Gmail.Mime` writes one: every part base64 and every header that isn't
+    plain ASCII, or says `{{` or `=?`, an encoded word, so the Vault fills in no placeholder on the way out. `mail`
+    (0.5.2) sends text and HTML as quoted-printable, fixed, and leaves an ASCII header as it is, so `{{` would get
+    through both.
+  - Vault's registrable domain needs the list's ICANN section alone (`googleapis.com` is in its private one).
+    `public_suffix_list` (0.7.1) has no such option and reads its list by `:code.priv_dir/1` as it compiles;
+    `domainatrex` (3.2.0) has it as compile-time config, and downloads the list as it compiles, falling back to its
+    `priv`; `public_suffix` was last released in 2018.
+
+  A package that works with an app's code would be compiled as its own is: from the app's `mix.lock`, each tarball
+  checked against its outer checksum there, every module under the version's name (`OneCore.Apps.Version.Compile`),
+  and for an untrusted app fetched by the server and compiled by its child with the rest. That covers pure Elixir
+  packages, not one that reads its `priv` or its application's config as it compiles, as two of those three do.
+  Worth building for the first app that needs a package.
+- **The official MCP SDKs, rmcp (3.11) for the client and `@modelcontextprotocol/sdk` (1.32) for the edge** (20
+  November 2026): MCP is implemented once, by the server (`OneCore.Mcp`). `one mcp` and the client (`rpc.rs`) pass
+  each message through as bytes, filling in what a device says in `_meta`, and the edge's `/mcp` forwards each to a
+  server through the relay, checking only MCP's request headers, and streams progress while it waits. Neither SDK
+  forwards: each ends a session and handles each method itself, so every message would be decoded into its types and
+  encoded again, our `_meta` and anything newer than the SDK carried through by hand, for more lines, not fewer.
+  There's no official Elixir SDK.
 - **Elixir WebRTC** for reaching by key: browsers would reach a home server directly and shells would need no
   networking code. Set aside: reaching by key would be ours to add, its relay can't be a Worker, the first connection
   is slower, and large transfers over data channels are its weak spot.
