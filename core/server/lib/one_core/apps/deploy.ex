@@ -58,7 +58,8 @@ defmodule OneCore.Apps.Deploy do
     stage = &State.stage(State.id(), &1)
 
     with :ok <- check(name, files),
-         {:ok, files} <- Precompiled.fill(files),
+         # An untrusted app runs no NIF or program of its own, so nothing is downloaded for one.
+         {:ok, files} <- if(trusted, do: Precompiled.fill(files), else: {:ok, files}),
          _ = stage.("Building its app"),
          {:ok, built} <- built(owner, name, files, trusted),
          built = Store.deployment(built),

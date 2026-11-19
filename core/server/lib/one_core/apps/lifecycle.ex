@@ -616,7 +616,7 @@ defmodule OneCore.Apps.Lifecycle do
 
         with %{"source" => source, "commit" => commit} = from <- about["from"] || :none,
              false <- from["dirty"] == true,
-             {:ok, offer} when offer != nil <- newer(source, from["ref"], commit, Path.basename(artifact)),
+             {:ok, offer} when offer != nil <- newer(source, from["ref"], commit, Path.basename(artifact), Store.trusted?(about)),
              %{} = record <-
                doing({:update, artifact}, Store.whose(artifact), "apps_update", fn task ->
                  with %{} = record <- Update.change(artifact, {:newer, offer, Store.trusted?(about), Server.key(), task}) do
@@ -653,10 +653,10 @@ defmodule OneCore.Apps.Lifecycle do
 
   # The newest commit at a git source that comes after `commit` and changed the app's folder, with the commits
   # between, or `nil`.
-  defp newer(source, ref, commit, name) do
+  defp newer(source, ref, commit, name, trusted) do
     path = "apps/#{name}"
 
-    with {:ok, copy} <- Git.fetch(source),
+    with {:ok, copy} <- Git.fetch(source, trusted),
          {:ok, newest} <- Git.commit(copy, ref) do
       cond do
         newest == commit ->
@@ -698,7 +698,7 @@ defmodule OneCore.Apps.Lifecycle do
       try do
         stage("Getting #{title}'s code")
 
-        with {:ok, copy} <- Git.fetch(source),
+        with {:ok, copy} <- Git.fetch(source, Store.trusted?(Store.about(artifact))),
              {:ok, files} <- Git.files(copy, commit, "apps/#{name}") do
           step(artifact, "building")
           stage("Building #{title}")
