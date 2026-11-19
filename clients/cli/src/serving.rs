@@ -134,6 +134,10 @@ struct Record {
     unasked: Vec<u64>,
     /// When the update being taken by restarting was told to go, in milliseconds since 1970.
     update_began: Option<u64>,
+    /// Whom the server is for (`ONE_SUBJECT`), as it was joined and says as it starts, so `one serve on` registers it
+    /// for them again whoever runs it.
+    #[serde(default)]
+    subject: Option<String>,
 }
 
 impl Record {
@@ -264,8 +268,13 @@ pub async fn on(client: &Client) -> Result<String> {
     let lock = here.lock()?.context("This device is already becoming a server, or stopping being one.")?;
     let key = here.key()?;
     let who = who(client)?;
-    match here.read()?.server_membership {
+    let record = here.read()?;
+    match record.server_membership {
         ServerMembership::Active => {
+            let who = record.subject.context(
+                "This device's server hasn't said whom it's for yet, which it does as it starts on this build: \
+                 `one serve on` registers it again once it has.",
+            )?;
             let registered = registered(&here, &key, &who).await?;
             return Ok(format!("This device is a server for {who} already, and {registered}. Its key: {key}"));
         }
@@ -283,14 +292,14 @@ pub async fn on(client: &Client) -> Result<String> {
     Ok(format!("This device is a server for {who} now, and starts whenever it does. Its key: {key}\n{address}"))
 }
 
-/// Writes again how the system runs this device's server, which is one already, as this build says to, and has the
-/// system run it, which does nothing where it runs: what `one serve run` does as it starts, for a server whose
-/// registration it couldn't rewrite itself, as one an administrator made. Says whether it changed.
+/// Writes again how the system runs this device's server, which is one already, for `who`, as this build says to: what
+/// `one serve run` does as it starts, for a server whose registration it couldn't rewrite itself, as one an
+/// administrator made. It isn't started: on Windows a task registered again doesn't hold the server that runs, which
+/// starting it would run twice. Says whether it changed.
 async fn registered(here: &Here, key: &str, who: &str) -> Result<&'static str> {
     let server = kept(here, key, &program()?, unit_env(who.to_owned(), None).await?);
     let changed = client::system::install(&server)
         .map_err(|error| anyhow::anyhow!("{error:#}\nThen `one serve on` again, as yourself, registers it as yours."))?;
-    client::system::start(&server)?;
     Ok(if changed {
         "the system runs it as this build says to from its next start (its registration changed)"
     } else {
@@ -313,7 +322,10 @@ async fn join(client: &Client, here: &Here, key: &str, who: &str) -> Result<()> 
         let build = here.take(&builds, &record.told(ServerDaemonStatus::Starting), None).await?;
         here.change(|record| record.current = Some(Pair { build, program: BUILD.to_owned() }))?;
     }
-    here.change(joining(ServerMembershipStage::Installing))?;
+    here.change(|record| {
+        joining(ServerMembershipStage::Installing)(record);
+        record.subject = Some(who.to_owned());
+    })?;
     let server = kept(here, key, &program()?, unit_env(who.to_owned(), None).await?);
     client::system::install(&server)?;
     here.change(joining(ServerMembershipStage::Starting))?;
@@ -613,6 +625,7 @@ async fn serve(client: &Arc<Client>, here: &Here, reports: &Reports) -> Result<(
     // A download cut short, as this program or the server stopped, is one that failed: it's up to date again on what
     // it was on. A build being checked when they stopped wasn't kept, and the server starts on the one it was on.
     let mut record = here.change(|record| {
+        record.subject = Some(who.clone());
         if record.server_update_status == ServerUpdateStatus::Downloading {
             record.server_update_status = ServerUpdateStatus::UpToDate;
             record.server_update_stage = None;
