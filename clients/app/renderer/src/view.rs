@@ -254,7 +254,8 @@ pub struct Screen {
     layer: bool,
     /// The last error its JS threw, which is logged, as a browser's console has it, and the screen carries on.
     pub failed: Option<String>,
-    /// What its page uses that this host can't draw (`tree::Mismatch`), which its window says in its place.
+    /// What its page uses that this host can't draw (`tree::Mismatch`), or that it refused, which its window says in
+    /// its place.
     pub mismatched: Option<String>,
 }
 
@@ -528,11 +529,11 @@ impl Screen {
         for posted in posted {
             match posted {
                 Posted::Threw(error) => self.threw(error),
-                // What comes after what this host can't draw isn't drawn: the window says why in its place.
+                // What comes after what this host can't draw, or refused, isn't drawn: the window says why in its place,
+                // rather than draw a page that's no longer what it says.
                 Posted::Mutation(_) if self.mismatched.is_some() => {}
                 Posted::Mutation(mutation) => match self.tree.apply([mutation]) {
-                    Err(error) if error.is::<crate::tree::Mismatch>() => self.mismatched = Some(error.to_string()),
-                    Err(error) => self.threw(format!("{error:#}")),
+                    Err(error) => self.mismatched = Some(format!("{error:#}")),
                     Ok(()) => self.changed(),
                 },
                 Posted::Message(message) => {

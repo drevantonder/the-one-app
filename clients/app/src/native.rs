@@ -709,6 +709,18 @@ fn respond(
         crate::app().shell.emit("launcher", json!({"over": message["params"]["over"] == true}));
         return None;
     }
+    // Its page logs its errors as an MCP App logs to its host, and Telemetry hears them as its app's, as a web view's
+    // (`exception` in clients/app/page/client.js).
+    if method == "notifications/message" && message["params"]["level"] == "error" {
+        let data = &message["params"]["data"];
+        let app = state.lock().expect("nothing panics holding it").entrypoint.split('/').next().unwrap_or_default().to_owned();
+        let error: String = data["message"].as_str().unwrap_or_default().chars().take(500).collect();
+        let path = data["file"].as_str().and_then(|file| Url::parse(file).ok()).map(|file| file.path().to_owned());
+        if let Ok(views) = crate::views() {
+            views.client.report(json!({"name": "exception", "error": error, "attributes": {"code.file.path": path, "code.line.number": data["line"], "one.app": app}}));
+        }
+        return None;
+    }
     // Any other notification needs no answer, and none is heard here yet.
     let id = message.get("id").cloned()?;
     let params = &message["params"];
