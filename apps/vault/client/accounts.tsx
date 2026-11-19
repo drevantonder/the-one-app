@@ -6,7 +6,7 @@
 // one box atop the list, with the one thing that fixes it. A request is an alert, as a system's permission prompt is.
 // It's written in strict mode (the UI library's skill), so it runs on a native host as it does on the DOM.
 import { createEffect, createMemo, createSignal, Errored, For, Loading, Match, refresh, Show, Switch as Choose, untrack } from "solid-js"
-import { Alert, Badge, Button, call, changed, Checkbox, component, confirm, createListCollection, Empty, Field, Frame, Image, Input, link, List, open as opening, Problem, render, Row, Screen, Search, Section, Select, Sheet, showRecoveryKey, Skeleton, Spinner, Split, Switch, Text, toast, useRecoveryKey, View } from "ui"
+import { Alert, Button, call, changed, Checkbox, component, confirm, createListCollection, Empty, Field, Frame, Image, Input, link, List, open as opening, Problem, Row, Screen, Section, Select, Sheet, showRecoveryKey, Skeleton, Spinner, Split, Switch, Text, toast, useRecoveryKey, View } from "ui"
 
 /** A field of an item: a secret one has no value here. */
 interface ItemField {
