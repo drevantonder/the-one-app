@@ -1004,6 +1004,37 @@ fn fs_shadow(input: ShadowVarying) -> @location(0) vec4<f32> {
     return blend_color(input.color, shadow_coverage(input.local, shadow) * saturate(0.5 + outside));
 }
 
+// A shadow's tile: how much of each point its box covers, blurred, alone (`tiled` in wgpu_renderer.rs).
+@fragment
+fn fs_shadow_coverage(input: ShadowVarying) -> @location(0) vec4<f32> {
+    return vec4<f32>(shadow_coverage(input.local, b_shadows[input.shadow_id]));
+}
+
+// A shadow drawn from its tile: each corner as the tile has it, and between them the tile's middle, which along an
+// edge is the same however far the other edge is. Along an axis no longer than two corners, its tile's box is as long
+// as its own, and drawn as it is. Outside its box only, as `fs_shadow` draws one.
+@fragment
+fn fs_shadow_tile(input: ShadowVarying) -> @location(0) vec4<f32> {
+    if (any(input.clip_distances < vec4<f32>(0.0))) {
+        return vec4<f32>(0.0);
+    }
+    let shadow = b_shadows[input.shadow_id];
+    let outside = quad_sdf(input.local, shadow.outer, shadow.outer_radii);
+    if (outside <= -0.5) {
+        return vec4<f32>(0.0);
+    }
+    let radii = shadow.corner_radii;
+    let margin = 3.0 * shadow.blur_radius;
+    let size = shadow.bounds.size;
+    let tile = min(size, vec2<f32>(2.0 * (max(max(radii.top_left, radii.top_right), max(radii.bottom_right, radii.bottom_left)) + margin)));
+    let corner = tile / 2.0;
+    let along = input.local - shadow.bounds.origin;
+    let point = select(select(corner, along - (size - tile), along > size - corner), along, along < corner);
+    let uv = (point + margin) / vec2<f32>(textureDimensions(t_sprite));
+    let alpha = textureSampleLevel(t_sprite, s_sprite, uv, 0.0).r;
+    return blend_color(input.color, alpha * saturate(0.5 + outside));
+}
+
 // How much of `point` a shadow's box covers, blurred.
 fn shadow_coverage(point: vec2<f32>, shadow: Shadow) -> f32 {
     // Not blurred, it's its box, its edge smoothed as a quad's.

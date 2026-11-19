@@ -5,7 +5,7 @@
 // Copyright 2022 - 2025 Zed Industries, Inc. Licensed under the Apache License, Version 2.0
 // (clients/app/renderer/LICENSE-APACHE); this file is changed from the original.
 
-use super::scene::{PrimitiveBatch, Scene};
+use super::scene::{PrimitiveBatch, Scene, Shadow};
 use super::wgpu_atlas::WgpuAtlas;
 use super::wgpu_context::WgpuContext;
 use crate::geometry::{DevicePixels, Size};
@@ -49,6 +49,10 @@ pub(crate) struct WgpuPipelines {
     /// A backdrop's and its blur's, which few windows draw: compiled after the rest, on a thread of their own, so a
     /// window's first frame doesn't wait for them (`backdrops`).
     backdrops: OnceLock<(wgpu::RenderPipeline, wgpu::RenderPipeline)>,
+    /// A shadow's tile's: what draws one (its blurred box, alone, into a texture of one channel), and what draws a
+    /// shadow from its tile (`tiles`). Compiled after the rest, as the backdrops' are; till then shadows are worked
+    /// out where they're drawn.
+    tiles: OnceLock<(wgpu::RenderPipeline, wgpu::RenderPipeline)>,
 }
 
 /// What every pipeline of a format is made from: the shaders, the target's format and blending, and the layouts of
@@ -112,6 +116,11 @@ impl Layouts {
     /// A pipeline of `vertex` and `fragment` binding `data` as group 1, and where it samples a texture, the texture
     /// as group 2.
     fn pipeline(&self, data: &wgpu::BindGroupLayout, vertex: &str, fragment: &str, blend: Option<wgpu::BlendState>, samples: bool) -> wgpu::RenderPipeline {
+        self.pipeline_into(self.format, data, vertex, fragment, blend, samples)
+    }
+
+    /// `pipeline`, drawing into a target of `format`.
+    fn pipeline_into(&self, format: wgpu::TextureFormat, data: &wgpu::BindGroupLayout, vertex: &str, fragment: &str, blend: Option<wgpu::BlendState>, samples: bool) -> wgpu::RenderPipeline {
         let groups = [Some(&self.globals), Some(data), Some(&self.texture)];
         let layout = self.device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: None,
@@ -129,7 +138,7 @@ impl Layouts {
                 module: &self.shader,
                 entry_point: Some(fragment),
                 compilation_options: Default::default(),
-                targets: &[Some(wgpu::ColorTargetState { format: self.format, blend, write_mask: wgpu::ColorWrites::ALL })],
+                targets: &[Some(wgpu::ColorTargetState { format, blend, write_mask: wgpu::ColorWrites::ALL })],
             }),
             multiview_mask: None,
             cache: None,
@@ -152,7 +161,17 @@ impl WgpuPipelines {
             ]
             .map(|compiling| compiling.join().expect("compiling a pipeline doesn't panic"))
         });
-        Self { layouts, quads, shadows, underlines, mono_sprites, poly_sprites, backdrops: OnceLock::new() }
+        Self { layouts, quads, shadows, underlines, mono_sprites, poly_sprites, backdrops: OnceLock::new(), tiles: OnceLock::new() }
+    }
+
+    /// A shadow's tile's pipelines (`tiles`), compiled now unless they are, or waited for where they're being.
+    fn tiles(&self) -> &(wgpu::RenderPipeline, wgpu::RenderPipeline) {
+        self.tiles.get_or_init(|| {
+            let l = &self.layouts;
+            // A tile holds how much of each point the blurred box covers, nothing else, and replaces what's there.
+            let coverage = l.pipeline_into(TILE_FORMAT, &l.instances, "vs_shadow", "fs_shadow_coverage", None, false);
+            (coverage, l.pipeline(&l.instances, "vs_shadow", "fs_shadow_tile", Some(l.blend), true))
+        })
     }
 
     /// A backdrop's pipeline and its blur's, compiled now unless they are, or waited for where they're being.
@@ -179,6 +198,7 @@ impl WgpuPipelines {
         let compiling = pipelines.clone();
         std::thread::spawn(move || {
             compiling.backdrops();
+            compiling.tiles();
         });
         pipelines
     }
@@ -192,6 +212,35 @@ enum Target {
 
 /// The format an offscreen frame is drawn in: 8-bit RGBA, as a PNG's pixels are.
 const OFFSCREEN_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8Unorm;
+
+/// A shadow's tile's format: one channel, how much of each point its box covers.
+const TILE_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::R8Unorm;
+
+/// The widest a shadow's tile is, in device pixels; a wider one's shadow is worked out where it's drawn.
+const TILE_MOST: f32 = 2048.0;
+
+/// What tells a shadow's tile from another's: its blur, its corners and its box's size in the tile, to a quarter of a
+/// device pixel.
+type TileKey = [u32; 7];
+
+/// A shadow drawn from a tile, as Skia and Chromium draw a blurred rounded box: its box blurred once, exactly, into a
+/// texture of its own, and drawn from that. Along an axis longer than two corners (each its radius and three blurs),
+/// the tile's box is two corners long, and drawn stretched: its corners as they are and between them its middle, as
+/// along an edge the blur no longer depends on how far the other edge is; along a shorter one, the box is as long as it
+/// is. One with no blur, or inside its box (`inset`), is worked out where it's drawn. → its tile's key, and its box in
+/// the tile.
+fn tiled(shadow: &Shadow) -> Option<(TileKey, [f32; 2])> {
+    let blur = shadow.blur_radius.0;
+    let radii = &shadow.corner_radii;
+    let corner = radii.top_left.0.max(radii.top_right.0).max(radii.bottom_right.0).max(radii.bottom_left.0) + 3.0 * blur;
+    let tile = [shadow.bounds.size.width.0.min(2.0 * corner), shadow.bounds.size.height.0.min(2.0 * corner)];
+    if shadow.inset != 0 || blur <= 0.0 || tile[0].max(tile[1]) + 6.0 * blur > TILE_MOST {
+        return None;
+    }
+    let quarter = |value: f32| (value * 4.0).round() as u32;
+    let key = [quarter(blur), quarter(radii.top_left.0), quarter(radii.top_right.0), quarter(radii.bottom_right.0), quarter(radii.bottom_left.0), quarter(tile[0]), quarter(tile[1])];
+    Some((key, tile))
+}
 
 /// How many times a backdrop's frame is halved at most: a sixteenth of it, for the widest blur.
 const LEVELS: usize = 4;
@@ -225,6 +274,8 @@ pub struct WgpuRenderer {
     gamma: GammaParams,
     /// What a backdrop blurs: the frame as drawn so far, halved and halved again, then blurred one way and the other.
     backdrop: Option<BackdropTextures>,
+    /// Each shadow's tile, drawn the first frame it's in, with what binds it (`tiled`).
+    tiles: std::collections::HashMap<TileKey, (wgpu::Texture, wgpu::BindGroup)>,
 }
 
 impl WgpuRenderer {
@@ -339,6 +390,7 @@ impl WgpuRenderer {
             sampler,
             gamma: GammaParams { gamma_ratios: gamma_ratios(1.8), grayscale_enhanced_contrast: 1.0, pad: [0.0; 3] },
             backdrop: None,
+            tiles: Default::default(),
         }
     }
 
@@ -430,6 +482,35 @@ impl WgpuRenderer {
                 _ => Vec::new(),
             })
             .collect();
+        // The tiles of the frame's shadows that haven't one yet, each its box alone, blurred, in a frame of its own.
+        let mut planned: Vec<(TileKey, (u32, u32), (u64, u64), (u64, u64))> = Vec::new();
+        if self.pipelines.tiles.get().is_some() {
+            for batch in &batches {
+                let PrimitiveBatch::Shadows(shadows) = batch else { continue };
+                for shadow in shadows.iter() {
+                    let Some((key, tile)) = tiled(shadow) else { continue };
+                    if self.tiles.contains_key(&key) || planned.iter().any(|(planned, ..)| *planned == key) {
+                        continue;
+                    }
+                    let blur = shadow.blur_radius.0;
+                    let side = [(tile[0] + 6.0 * blur).ceil() as u32, (tile[1] + 6.0 * blur).ceil() as u32];
+                    let globals = GlobalParams { viewport_size: [side[0] as f32, side[1] as f32], origin: [0.0; 2], premultiplied_alpha: 0, pad: [0; 3] };
+                    let globals = self.push(bytemuck::bytes_of(&globals));
+                    let mut alone = shadow.clone();
+                    alone.bounds = crate::geometry::Bounds {
+                        origin: crate::geometry::Point { x: crate::geometry::ScaledPixels(3.0 * blur), y: crate::geometry::ScaledPixels(3.0 * blur) },
+                        size: crate::geometry::Size { width: crate::geometry::ScaledPixels(tile[0]), height: crate::geometry::ScaledPixels(tile[1]) },
+                    };
+                    alone.content_mask.bounds = crate::geometry::Bounds {
+                        origin: crate::geometry::Point { x: crate::geometry::ScaledPixels(0.0), y: crate::geometry::ScaledPixels(0.0) },
+                        size: crate::geometry::Size { width: crate::geometry::ScaledPixels(side[0] as f32), height: crate::geometry::ScaledPixels(side[1] as f32) },
+                    };
+                    alone.transformation = super::scene::TransformationMatrix::unit();
+                    let instance = self.push_instances(std::slice::from_ref(&alone));
+                    planned.push((key, (side[0], side[1]), globals, instance));
+                }
+            }
+        }
         self.write_data();
         let buffer = self.buffer.clone().expect("written above");
         let binding = |(offset, size): (u64, u64)| wgpu::BindingResource::Buffer(wgpu::BufferBinding { buffer: &buffer, offset, size: wgpu::BufferSize::new(size) });
@@ -452,6 +533,9 @@ impl WgpuRenderer {
         // The frame is drawn in runs of batches, one pass each, broken at each backdrop, which blurs what's drawn
         // before it.
         let mut encoder = self.device.create_command_encoder(&wgpu::CommandEncoderDescriptor::default());
+        for (key, (width, height), globals, instance) in planned {
+            self.draw_tile(&mut encoder, &buffer, key, (width, height), globals, gamma, instance);
+        }
         let mut load = wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT);
         let mut run: Vec<usize> = Vec::new();
         for (at, batch) in batches.iter().enumerate() {
@@ -519,9 +603,13 @@ impl WgpuRenderer {
         });
         pass.set_bind_group(0, globals, &[]);
         for &at in run {
+            if let PrimitiveBatch::Shadows(shadows) = &batches[at] {
+                self.draw_shadows(&mut pass, shadows, &instances[at]);
+                continue;
+            }
             let (pipeline, texture, count) = match &batches[at] {
                 PrimitiveBatch::Quads(quads) => (&self.pipelines.quads, None, quads.len()),
-                PrimitiveBatch::Shadows(shadows) => (&self.pipelines.shadows, None, shadows.len()),
+                PrimitiveBatch::Shadows(_) => unreachable!("drawn above"),
                 PrimitiveBatch::Underlines(underlines) => (&self.pipelines.underlines, None, underlines.len()),
                 PrimitiveBatch::MonochromeSprites { texture_id, sprites } => (&self.pipelines.mono_sprites, Some(self.atlas.view(*texture_id)), sprites.len()),
                 PrimitiveBatch::PolychromeSprites { texture_id, sprites } => (&self.pipelines.poly_sprites, Some(self.atlas.view(*texture_id)), sprites.len()),
@@ -541,6 +629,80 @@ impl WgpuRenderer {
             }
             pass.draw(0..4, 0..count as u32);
         }
+    }
+
+    /// Draws a batch of shadows, each from its tile where it has one, else worked out where it's drawn, in runs.
+    fn draw_shadows(&self, pass: &mut wgpu::RenderPass<'_>, shadows: &[Shadow], instances: &wgpu::BindGroup) {
+        let tiles = self.pipelines.tiles.get();
+        pass.set_bind_group(1, instances, &[]);
+        let mut at = 0;
+        while at < shadows.len() {
+            let tile = tiles.zip(tiled(&shadows[at]).and_then(|(key, _)| self.tiles.get(&key)));
+            match tile {
+                Some(((_, pipeline), (_, group))) => {
+                    pass.set_pipeline(pipeline);
+                    pass.set_bind_group(2, group, &[]);
+                    pass.draw(0..4, at as u32..at as u32 + 1);
+                    at += 1;
+                }
+                None => {
+                    // The run of those worked out where they're drawn.
+                    let end = (at..shadows.len()).find(|one| tiles.is_some() && tiled(&shadows[*one]).is_some_and(|(key, _)| self.tiles.contains_key(&key))).unwrap_or(shadows.len());
+                    pass.set_pipeline(&self.pipelines.shadows);
+                    pass.draw(0..4, at as u32..end as u32);
+                    at = end;
+                }
+            }
+        }
+    }
+
+    /// Draws a shadow's tile, `size`, from its box alone (`instance`, with the frame's `globals` and `gamma` of its
+    /// own), and keeps it, as `key`'s. A window's shadows are few and keep their tiles; past 64 they're made again.
+    #[allow(clippy::too_many_arguments)]
+    fn draw_tile(&mut self, encoder: &mut wgpu::CommandEncoder, buffer: &wgpu::Buffer, key: TileKey, (width, height): (u32, u32), globals: (u64, u64), gamma: (u64, u64), instance: (u64, u64)) {
+        if self.tiles.len() >= 64 {
+            self.tiles.clear();
+        }
+        let texture = self.device.create_texture(&wgpu::TextureDescriptor {
+            label: None,
+            size: wgpu::Extent3d { width, height, depth_or_array_layers: 1 },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: TILE_FORMAT,
+            usage: wgpu::TextureUsages::TEXTURE_BINDING | wgpu::TextureUsages::RENDER_ATTACHMENT,
+            view_formats: &[],
+        });
+        let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+        let binding = |(offset, size): (u64, u64)| wgpu::BindingResource::Buffer(wgpu::BufferBinding { buffer, offset, size: wgpu::BufferSize::new(size) });
+        let globals = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: None,
+            layout: &self.pipelines.layouts.globals,
+            entries: &[wgpu::BindGroupEntry { binding: 0, resource: binding(globals) }, wgpu::BindGroupEntry { binding: 1, resource: binding(gamma) }],
+        });
+        let instances = self.device.create_bind_group(&wgpu::BindGroupDescriptor {
+            label: None,
+            layout: &self.pipelines.layouts.instances,
+            entries: &[wgpu::BindGroupEntry { binding: 0, resource: binding(instance) }],
+        });
+        {
+            let mut pass = encoder.begin_render_pass(&wgpu::RenderPassDescriptor {
+                label: None,
+                color_attachments: &[Some(wgpu::RenderPassColorAttachment {
+                    view: &view,
+                    depth_slice: None,
+                    resolve_target: None,
+                    ops: wgpu::Operations { load: wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT), store: wgpu::StoreOp::Store },
+                })],
+                ..Default::default()
+            });
+            pass.set_pipeline(&self.pipelines.tiles().0);
+            pass.set_bind_group(0, &globals, &[]);
+            pass.set_bind_group(1, &instances, &[]);
+            pass.draw(0..4, 0..1);
+        }
+        let group = self.texture(&view);
+        self.tiles.insert(key, (texture, group));
     }
 
     /// A bind group of `view` and the sampler, for a pass to sample.
