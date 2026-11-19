@@ -23,39 +23,60 @@ use tokio::sync::watch;
 use crate::Client;
 
 impl Client {
-    /// Asks the server for `method`, which only reads, and keeps its answer: a list of files once it's whole
-    /// (`keep_whole`).
+    /// Asks the server for `method`, which only reads, and keeps its answer. A list of files is answered once it's
+    /// whole (`keep_whole`).
     pub async fn fresh(&self, method: &str, params: &Value) -> Result<Value> {
         let response = self.request(method, params.clone()).await?;
-        match method {
-            "resources/list" => self.keep_whole(params, &response),
-            _ => self.keep(method, params, &response)?,
+        if method == "resources/list" {
+            return Ok(self.keep_whole(params, response).await);
         }
+        self.keep(method, params, &response)?;
         Ok(response)
     }
 
-    /// Keeps a list of files a server gave once every file of a version it lists (`ui://<app>/<code>/…`, which never
-    /// changes) is kept too, behind it. A server keeps only the last few versions' files, so a list kept before its
-    /// files would name some that may be gone by the time a view opens from it with no answer since, as the next
-    /// start does before it's asked again. One whose files couldn't all be kept isn't, and the list kept before it
-    /// stays, whose files all are: what went wrong is told to Telemetry.
-    fn keep_whole(&self, params: &Value, listed: &Value) {
-        let Some(client) = self.me.upgrade() else { return };
-        let (params, listed) = (params.clone(), listed.clone());
-        self.runtime.spawn(async move {
-            let files = listed["resources"].as_array().into_iter().flatten().filter_map(|resource| resource["uri"].as_str());
-            let reads = files.filter(|uri| uri.starts_with("ui://")).map(|uri| json!({"uri": uri}));
-            let missing: Vec<Value> = reads.filter(|read| !client.cache_file("resources/read", read).exists()).collect();
-            let fetch = |read: Value| {
-                let client = client.clone();
-                async move { client.fresh("resources/read", &read).await }
-            };
-            let kept = stream::iter(missing).map(fetch).buffer_unordered(8);
-            let kept = kept.try_collect::<Vec<_>>().await.and_then(|_| client.keep("resources/list", &params, &listed));
-            if let Err(error) = kept {
-                client.report(json!({"name": "one.client.cache", "error": format!("{error:#}")}));
+    /// A list of files a server gave, as a page loads its files from it: each version's files (`ui://<app>/<code>/…`,
+    /// which never change) are kept first, so a page and everything it loads are one version's, all here, as a CDN's
+    /// hashed assets are, whatever the server keeps after. A server keeps only the last few versions' files, and one
+    /// still moving to the latest may list a version whose files are gone: a list whose files couldn't all be kept
+    /// isn't taken, and the one kept before it is answered, whose files all are, while Telemetry hears why. With none
+    /// kept yet, as on a first start, it's answered at once and kept once it's whole, as its files are fetched anyway.
+    /// It's boxed, as asking a server may ask for its list of tools again (`fresh`), which this is in.
+    fn keep_whole(&self, params: &Value, listed: Value) -> futures_util::future::BoxFuture<'static, Value> {
+        let Some(client) = self.me.upgrade() else { return Box::pin(async { listed }) };
+        let kept = client.cached("resources/list", params);
+        let runtime = self.runtime.clone();
+        let keeping = {
+            let (params, listed) = (params.clone(), listed.clone());
+            async move {
+                let files = listed["resources"].as_array().into_iter().flatten().filter_map(|resource| resource["uri"].as_str());
+                // Each read as a page asks it, for whoever the list is for (`_meta.subject`), so it's what it finds.
+                let reads = files.filter(|uri| uri.starts_with("ui://")).map(|uri| {
+                    let mut read = params.clone();
+                    read["uri"] = json!(uri);
+                    read
+                });
+                let missing: Vec<Value> = reads.filter(|read| !client.cache_file("resources/read", read).exists()).collect();
+                let fetch = |read: Value| {
+                    let client = client.clone();
+                    async move { client.keep("resources/read", &read, &client.request("resources/read", read.clone()).await?) }
+                };
+                let whole = stream::iter(missing).map(fetch).buffer_unordered(8).try_collect::<Vec<_>>().await;
+                let whole = whole.and_then(|_| client.keep("resources/list", &params, &listed));
+                if let Err(error) = &whole {
+                    client.report(json!({"name": "one.client.cache", "error": format!("{error:#}")}));
+                }
+                whole.is_ok()
             }
-        });
+        };
+        Box::pin(async move {
+            match kept {
+                Some(kept) => if keeping.await { listed } else { kept },
+                None => {
+                    runtime.spawn(keeping);
+                    listed
+                }
+            }
+        })
     }
 
     /// Keeps `answer` as what `method` was last answered with.
