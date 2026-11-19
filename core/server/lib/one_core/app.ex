@@ -441,8 +441,6 @@ defmodule OneCore.App do
     rules. Beside it are Emil Kowalski's: `gestures` for drags, swipes and sheets, `apple-design` for fluid motion,
     `mobile-native` for what makes it feel at home on a phone, and `review-animations` to review its motion. Where one of
     them says otherwise (a motion library's springs, say), `design` and the UI library win: they're what every app shares.
-  - Before writing its HTML, CSS or client JavaScript, search `modern-web-guidance` for the web platform's current
-    way to do it.
   - Its screens are TypeScript (`.tsx`): `typescript-best-practices` says how to write it. Beside it are pstack's
     principles: `principle-experience-first` for what to build, `principle-model-the-domain` for the state it keeps,
     `principle-make-operations-idempotent` for tools and jobs that may run twice, `principle-fix-root-causes` when

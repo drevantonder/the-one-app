@@ -2,7 +2,7 @@
 // is the one stylesheet, ui.js every component, solid.js and web.js are Solid, native/ what a native host loads in place
 // of web.js and ui.js, internal.js is Solid's internals (`solid-js/internal`), which Solid's universal renderer reads with
 // its views. SKILL.md is the UI library's skill, and skills/ are Solid's, as the version apps are
-// built with has them, Emil Kowalski's, pstack's, Modern Web Guidance and our design rules. build/ is how an app is built and checked against it: app.js and lint-app.js, with what they need to run, which a server
+// built with has them, Emil Kowalski's, pstack's and our design rules. build/ is how an app is built and checked against it: app.js and lint-app.js, with what they need to run, which a server
 // installs and runs on an app's source.
 import { cpSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { transform } from "lightningcss"
@@ -122,9 +122,6 @@ for (const name of ["gestures", "review-animations"]) {
   writeFileSync(skill, readFileSync(skill, "utf8").replace(/^(---\n[\s\S]*?\n---\n)/,
     "$1\nOur apps are written in Solid with the UI library (the `ui` skill), not React: where this names React's APIs, use Solid's.\n"))
 }
-
-// Modern Web Guidance, as this repo's own agents have it (.agents/skills), with its LICENSE and README.
-cpSync(here("../../.agents/skills/modern-web-guidance"), here("dist/skills/modern-web-guidance"), { recursive: true })
 
 // Our design rules, from DESIGN.md as it is: its Everywhere, which every app follows.
 const everywhere = text("../../DESIGN.md").match(/^## Everywhere\n([\s\S]*?)(?=^## )/m)[1]

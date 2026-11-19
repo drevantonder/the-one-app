@@ -8,7 +8,7 @@ defmodule OneCore.Skills do
   folders of `skills/`, each a skill named as its folder: its `SKILL.md`, and any other files in the folder, which
   the skill points to. One Core has its own: `building-apps`, which is `OneCore.App.skill/1`,
   `installing-apps`, which is here, and the UI library's, `ui`, with beneath it Solid's, Emil Kowalski's,
-  pstack's, Modern Web Guidance and `design`, the Everywhere of DESIGN.md (`core/ui/build.js`, `OneCore.Entrypoint`).
+  pstack's and `design`, the Everywhere of DESIGN.md (`core/ui/build.js`, `OneCore.Entrypoint`).
 
   They reach agents as MCP's Skills Extension says (SEP-2640): each file of a skill is a resource,
   `skill://<path>/<file>`, its `SKILL.md` too, and what's listed of a skill is what its `SKILL.md` says of itself,
