@@ -5,6 +5,7 @@
 // Copyright 2022 - 2025 Zed Industries, Inc. Licensed under the Apache License, Version 2.0
 // (clients/app/renderer/LICENSE-APACHE); this file is changed from the original.
 
+use super::bindings::{self, Binding, Data, Pipeline};
 use super::scene::{PrimitiveBatch, Recording, Scene, Shadow};
 use super::atlas::Atlas;
 use super::context::Context;
@@ -61,6 +62,8 @@ pub(crate) struct Pipelines {
 /// what the pipelines bind.
 struct Layouts {
     device: wgpu::Device,
+    /// The shaders, where they're WGSL (`stages`).
+    #[cfg(not(target_os = "windows"))]
     shader: wgpu::ShaderModule,
     format: wgpu::TextureFormat,
     blend: wgpu::BlendState,
@@ -75,55 +78,36 @@ struct Layouts {
 
 impl Layouts {
     fn new(device: &wgpu::Device, queue: &wgpu::Queue, format: wgpu::TextureFormat, premultiplied: bool) -> Self {
+        #[cfg(not(target_os = "windows"))]
         let shader = device.create_shader_module(wgpu::ShaderModuleDescriptor {
             label: None,
             source: wgpu::ShaderSource::Wgsl(include_str!("shaders.wgsl").into()),
         });
-        let visibility = wgpu::ShaderStages::VERTEX_FRAGMENT;
-        let uniform = |binding| wgpu::BindGroupLayoutEntry {
-            binding,
-            visibility,
-            ty: wgpu::BindingType::Buffer { ty: wgpu::BufferBindingType::Uniform, has_dynamic_offset: false, min_binding_size: None },
-            count: None,
-        };
-        let layout = |entries: &[wgpu::BindGroupLayoutEntry]| device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor { label: None, entries });
-        let noise = wgpu::BindGroupLayoutEntry {
-            binding: 2,
-            visibility,
-            ty: wgpu::BindingType::Texture {
-                sample_type: wgpu::TextureSampleType::Float { filterable: false },
-                view_dimension: wgpu::TextureViewDimension::D2,
-                multisampled: false,
-            },
-            count: None,
-        };
-        let globals = layout(&[uniform(0), uniform(1), noise]);
         // A batch's instances are at an offset of their own in the frame's data, which one bind group of it gives.
-        let instances = layout(&[wgpu::BindGroupLayoutEntry {
-            binding: 0,
-            visibility,
-            ty: wgpu::BindingType::Buffer { ty: wgpu::BufferBindingType::Storage { read_only: true }, has_dynamic_offset: true, min_binding_size: None },
-            count: None,
-        }]);
-        let blur_params = layout(&[uniform(0)]);
-        let texture = layout(&[
-            wgpu::BindGroupLayoutEntry {
-                binding: 0,
-                visibility,
-                ty: wgpu::BindingType::Texture {
-                    sample_type: wgpu::TextureSampleType::Float { filterable: true },
-                    view_dimension: wgpu::TextureViewDimension::D2,
-                    multisampled: false,
-                },
-                count: None,
-            },
-            wgpu::BindGroupLayoutEntry {
-                binding: 1,
-                visibility,
-                ty: wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
-                count: None,
-            },
-        ]);
+        let layout = |bindings: &[Binding]| {
+            let entries: Vec<_> = bindings
+                .iter()
+                .enumerate()
+                .map(|(binding, kind)| wgpu::BindGroupLayoutEntry {
+                    binding: binding as u32,
+                    visibility: wgpu::ShaderStages::VERTEX_FRAGMENT,
+                    ty: match *kind {
+                        Binding::Uniform => wgpu::BindingType::Buffer { ty: wgpu::BufferBindingType::Uniform, has_dynamic_offset: false, min_binding_size: None },
+                        Binding::Storage => wgpu::BindingType::Buffer { ty: wgpu::BufferBindingType::Storage { read_only: true }, has_dynamic_offset: true, min_binding_size: None },
+                        Binding::Texture { filterable } => wgpu::BindingType::Texture {
+                            sample_type: wgpu::TextureSampleType::Float { filterable },
+                            view_dimension: wgpu::TextureViewDimension::D2,
+                            multisampled: false,
+                        },
+                        Binding::Sampler => wgpu::BindingType::Sampler(wgpu::SamplerBindingType::Filtering),
+                    },
+                    count: None,
+                })
+                .collect();
+            device.create_bind_group_layout(&wgpu::BindGroupLayoutDescriptor { label: None, entries: &entries })
+        };
+        let (globals, texture) = (layout(bindings::GLOBALS), layout(bindings::TEXTURE));
+        let (instances, blur_params) = (layout(Data::Instances.bindings()), layout(Data::BlurParams.bindings()));
         // See https://apoorvaj.io/alpha-compositing-opengl-blending-and-premultiplied-alpha/
         let blend = if premultiplied { wgpu::BlendState::PREMULTIPLIED_ALPHA_BLENDING } else { wgpu::BlendState::ALPHA_BLENDING };
         let pixels = image::load_from_memory(include_bytes!("blue-noise.png")).expect("it's a PNG").to_luma8();
@@ -145,7 +129,18 @@ impl Layouts {
             size,
         );
         let noise = tile.create_view(&wgpu::TextureViewDescriptor::default());
-        Self { device: device.clone(), shader, format, blend, globals, instances, blur_params, texture, noise }
+        Self {
+            device: device.clone(),
+            #[cfg(not(target_os = "windows"))]
+            shader,
+            format,
+            blend,
+            globals,
+            instances,
+            blur_params,
+            texture,
+            noise,
+        }
     }
 
     /// The frame's globals and its gamma, at their places in `buffer`, with the noise.
@@ -162,36 +157,68 @@ impl Layouts {
         })
     }
 
-    /// A pipeline of `vertex` and `fragment` binding `data` as group 1, and where it samples a texture, the texture
-    /// as group 2.
-    fn pipeline(&self, data: &wgpu::BindGroupLayout, vertex: &str, fragment: &str, blend: Option<wgpu::BlendState>, samples: bool) -> wgpu::RenderPipeline {
-        self.pipeline_into(self.format, data, vertex, fragment, blend, samples)
+    /// `pipeline`, binding its data as group 1, and where it samples a texture, the texture as group 2.
+    fn pipeline(&self, pipeline: &Pipeline, blend: Option<wgpu::BlendState>) -> wgpu::RenderPipeline {
+        self.pipeline_into(self.format, pipeline, blend)
     }
 
     /// `pipeline`, drawing into a target of `format`.
-    fn pipeline_into(&self, format: wgpu::TextureFormat, data: &wgpu::BindGroupLayout, vertex: &str, fragment: &str, blend: Option<wgpu::BlendState>, samples: bool) -> wgpu::RenderPipeline {
+    fn pipeline_into(&self, format: wgpu::TextureFormat, pipeline: &Pipeline, blend: Option<wgpu::BlendState>) -> wgpu::RenderPipeline {
+        let data = match pipeline.data {
+            Data::Instances => &self.instances,
+            Data::BlurParams => &self.blur_params,
+        };
         let groups = [Some(&self.globals), Some(data), Some(&self.texture)];
         let layout = self.device.create_pipeline_layout(&wgpu::PipelineLayoutDescriptor {
             label: None,
-            bind_group_layouts: &groups[..if samples { 3 } else { 2 }],
+            bind_group_layouts: &groups[..if pipeline.samples { 3 } else { 2 }],
             immediate_size: 0,
         });
+        let [vertex, fragment] = self.stages(pipeline);
         self.device.create_render_pipeline(&wgpu::RenderPipelineDescriptor {
             label: None,
             layout: Some(&layout),
-            vertex: wgpu::VertexState { module: &self.shader, entry_point: Some(vertex), compilation_options: Default::default(), buffers: &[] },
+            vertex: wgpu::VertexState { module: &vertex, entry_point: Some(pipeline.vertex), compilation_options: Default::default(), buffers: &[] },
             primitive: wgpu::PrimitiveState { topology: wgpu::PrimitiveTopology::TriangleStrip, ..Default::default() },
             depth_stencil: None,
             multisample: wgpu::MultisampleState::default(),
             fragment: Some(wgpu::FragmentState {
-                module: &self.shader,
-                entry_point: Some(fragment),
+                module: &fragment,
+                entry_point: Some(pipeline.fragment),
                 compilation_options: Default::default(),
                 targets: &[Some(wgpu::ColorTargetState { format, blend, write_mask: wgpu::ColorWrites::ALL })],
             }),
             multiview_mask: None,
             cache: None,
         })
+    }
+}
+
+// Each pipeline's stages as DXIL, by its shaders' names (`build.rs`).
+#[cfg(target_os = "windows")]
+include!(concat!(env!("OUT_DIR"), "/dxil.rs"));
+
+impl Layouts {
+    /// The modules of `pipeline`'s two stages: on Windows, the DXIL `build.rs` compiled, through wgpu's shader
+    /// passthrough, so no shader compiler runs on the device; elsewhere, the WGSL, which wgpu translates for the GPU.
+    #[cfg(target_os = "windows")]
+    fn stages(&self, pipeline: &Pipeline) -> [wgpu::ShaderModule; 2] {
+        let (_, _, vertex, fragment) = DXIL.iter().find(|(vertex, fragment, ..)| (*vertex, *fragment) == (pipeline.vertex, pipeline.fragment)).expect("build.rs compiles every pipeline in bindings::PIPELINES");
+        [(pipeline.vertex, *vertex), (pipeline.fragment, *fragment)].map(|(entry, dxil)| {
+            // Safety: it's what build.rs compiled from shaders.wgsl, bound as wgpu-hal binds this pipeline's layout.
+            unsafe {
+                self.device.create_shader_module_passthrough(wgpu::ShaderModuleDescriptorPassthrough {
+                    entry_points: std::borrow::Cow::Owned(vec![wgpu::PassthroughShaderEntryPoint { name: entry.into(), workgroup_size: (0, 0, 0) }]),
+                    dxil: Some(std::borrow::Cow::Borrowed(dxil)),
+                    ..Default::default()
+                })
+            }
+        })
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    fn stages(&self, _pipeline: &Pipeline) -> [wgpu::ShaderModule; 2] {
+        [self.shader.clone(), self.shader.clone()]
     }
 }
 
@@ -214,12 +241,12 @@ impl Pipelines {
         let layouts = Layouts::new(device, queue, format, premultiplied);
         let (l, blend) = (&layouts, Some(layouts.blend));
         let [quads, shadows, underlines, mono_sprites, poly_sprites, rasters] = side_by_side([
-            &|| l.pipeline(&l.instances, "vs_quad", "fs_quad", blend, false),
-            &|| l.pipeline(&l.instances, "vs_shadow", "fs_shadow", blend, false),
-            &|| l.pipeline(&l.instances, "vs_underline", "fs_underline", blend, false),
-            &|| l.pipeline(&l.instances, "vs_mono_sprite", "fs_mono_sprite", blend, true),
-            &|| l.pipeline(&l.instances, "vs_poly_sprite", "fs_poly_sprite", blend, true),
-            &|| l.pipeline(&l.instances, "vs_raster", "fs_raster", Some(wgpu::BlendState::PREMULTIPLIED_ALPHA_BLENDING), true),
+            &|| l.pipeline(&bindings::QUADS, blend),
+            &|| l.pipeline(&bindings::SHADOWS, blend),
+            &|| l.pipeline(&bindings::UNDERLINES, blend),
+            &|| l.pipeline(&bindings::MONO_SPRITES, blend),
+            &|| l.pipeline(&bindings::POLY_SPRITES, blend),
+            &|| l.pipeline(&bindings::RASTERS, Some(wgpu::BlendState::PREMULTIPLIED_ALPHA_BLENDING)),
         ]);
         Self { layouts, quads, shadows, underlines, mono_sprites, poly_sprites, rasters, backdrops: OnceLock::new(), tiles: OnceLock::new() }
     }
@@ -229,8 +256,8 @@ impl Pipelines {
         self.tiles.get_or_init(|| {
             let l = &self.layouts;
             // A tile holds how much of each point the blurred box covers, nothing else, and replaces what's there.
-            let coverage = l.pipeline_into(TILE_FORMAT, &l.instances, "vs_shadow_whole", "fs_shadow_coverage", None, false);
-            (coverage, l.pipeline(&l.instances, "vs_shadow", "fs_shadow_tile", Some(l.blend), true))
+            let coverage = l.pipeline_into(TILE_FORMAT, &bindings::SHADOW_COVERAGE, None);
+            (coverage, l.pipeline(&bindings::SHADOW_TILES, Some(l.blend)))
         })
     }
 
@@ -239,7 +266,7 @@ impl Pipelines {
         self.backdrops.get_or_init(|| {
             let l = &self.layouts;
             // Each pass of a blur replaces what's in its target.
-            let [backdrops, blur] = side_by_side([&|| l.pipeline(&l.instances, "vs_backdrop", "fs_backdrop", Some(l.blend), true), &|| l.pipeline(&l.blur_params, "vs_blur", "fs_blur", None, true)]);
+            let [backdrops, blur] = side_by_side([&|| l.pipeline(&bindings::BACKDROPS, Some(l.blend)), &|| l.pipeline(&bindings::BLUR, None)]);
             (backdrops, blur)
         })
     }

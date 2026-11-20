@@ -7366,6 +7366,7 @@ dependencies = [
  "log",
  "memory-stats",
  "muda",
+ "naga",
  "ndk",
  "ndk-sys",
  "objc2 0.6.5",

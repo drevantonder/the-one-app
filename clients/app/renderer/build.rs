@@ -6,9 +6,14 @@
 //! itself (`libxkbcommon-x11.so.0`) is wherever X11 apps run. Where only that is, it's linked by a name of its own here,
 //! so building needs nothing installed that running doesn't.
 
+#[path = "src/render/bindings.rs"]
+#[allow(dead_code)]
+mod bindings;
+
 fn main() {
     println!("cargo::rerun-if-changed=build.rs");
     quickjs();
+    shaders();
     println!("cargo::rerun-if-changed=flutter");
     match std::env::var("CARGO_CFG_TARGET_OS").as_deref() {
         Ok("macos") => text_input(&["src/platform/mac/text_input.mm"], &["flutter/flutter/shell/platform/darwin/macos/framework/Source/FlutterTextInputPlugin.mm"]),
@@ -93,4 +98,111 @@ fn quickjs() {
     // FNV-1a, as a folder's name.
     let hash = said.bytes().fold(0xcbf29ce484222325_u64, |hash, byte| (hash ^ u64::from(byte)).wrapping_mul(0x100000001b3));
     println!("cargo::rustc-env=QUICKJS={hash:016x}");
+}
+
+/// Windows' shaders, compiled here to DXIL, as a game's and Chrome's ANGLE's are, so a window draws without a shader
+/// compiler running on the device as the app starts (FXC took 0.4 to 0.6 s of the Surface's first window, 2 to 4 s
+/// as an update restarted it, issue 26): each pipeline's two stages (`bindings::PIPELINES`), as HLSL by naga with the
+/// registers wgpu-hal 30's Direct3D 12 root signature gives its layout (`create_pipeline_layout`, which this
+/// follows, so naga moves with wgpu), and that by DXC (`mise install`). The renderer loads them through wgpu's shader
+/// passthrough. Elsewhere there's nothing, and `$OUT_DIR/dxil.rs`, which lists them, lists none.
+fn shaders() {
+    println!("cargo::rerun-if-changed=src/render/shaders.wgsl");
+    println!("cargo::rerun-if-changed=src/render/bindings.rs");
+    let out = std::path::PathBuf::from(std::env::var("OUT_DIR").expect("cargo sets it"));
+    let mut listed = String::from("pub(crate) static DXIL: &[(&str, &str, &[u8], &[u8])] = &[\n");
+    if std::env::var("CARGO_CFG_TARGET_OS").as_deref() == Ok("windows") {
+        let source = std::fs::read_to_string("src/render/shaders.wgsl").expect("the shaders are there");
+        let module = naga::front::wgsl::parse_str(&source).expect("the shaders parse");
+        let info = naga::valid::Validator::new(naga::valid::ValidationFlags::all(), naga::valid::Capabilities::all())
+            .validate(&module)
+            .expect("the shaders are valid");
+        for pipeline in bindings::PIPELINES {
+            let compiled = [(naga::ShaderStage::Vertex, pipeline.vertex, "vs_6_0"), (naga::ShaderStage::Fragment, pipeline.fragment, "ps_6_0")].map(|(stage, entry, profile)| {
+                let hlsl = hlsl(&module, &info, pipeline, stage);
+                let file = |kind| out.join(format!("{}-{}-{entry}.{kind}", pipeline.vertex, pipeline.fragment));
+                std::fs::write(file("hlsl"), hlsl).expect("OUT_DIR takes it");
+                // As wgpu-hal runs DXC: HLSL 2018, which naga writes, strict.
+                let dxc = std::process::Command::new("dxc")
+                    .args(["-E", entry, "-T", profile, "-HV", "2018", "-Ges", "-no-warnings", "-Fo"])
+                    .arg(file("dxil"))
+                    .arg(file("hlsl"))
+                    .status()
+                    .expect("dxc compiles Windows' shaders: `mise install` puts it on PATH");
+                assert!(dxc.success(), "dxc couldn't compile {entry}");
+                file("dxil")
+            });
+            let [vertex, fragment] = compiled.map(|file| file.display().to_string());
+            listed += &format!("    ({:?}, {:?}, include_bytes!({vertex:?}), include_bytes!({fragment:?})),\n", pipeline.vertex, pipeline.fragment);
+        }
+    }
+    listed += "];\n";
+    std::fs::write(out.join("dxil.rs"), listed).expect("OUT_DIR takes it");
+}
+
+/// One stage of `pipeline` as HLSL, bound where wgpu-hal binds it: each group's buffers and textures in order, CBVs,
+/// SRVs and UAVs each counting up from register 0 in space 0, a group's samplers by their index in it (space 255)
+/// with an SRV of their indices after its other SRVs, a dynamic storage buffer's offset in root constants at the
+/// group's next CBV, and the special constants (first vertex and instance) at the CBV after the last group's.
+fn hlsl(module: &naga::Module, info: &naga::valid::ModuleInfo, pipeline: &bindings::Pipeline, stage: naga::ShaderStage) -> String {
+    use naga::back::hlsl;
+    let (mut cbv, mut srv) = (0, 0);
+    let target = |register| hlsl::BindTarget { space: 0, register, ..Default::default() };
+    let mut options = hlsl::Options {
+        shader_model: hlsl::ShaderModel::V6_0,
+        fake_missing_bindings: false,
+        zero_initialize_workgroup_memory: true,
+        restrict_indexing: true,
+        force_loop_bounding: true,
+        ray_query_initialization_tracking: true,
+        mesh_shader_primitive_indices_clamp: true,
+        sampler_heap_target: hlsl::SamplerHeapBindTargets { standard_samplers: target(0), comparison_samplers: target(2048) },
+        ..Default::default()
+    };
+    for (group, bindings) in pipeline.groups().into_iter().enumerate() {
+        let group = group as u32;
+        let mut storage = 0;
+        let mut samplers = 0;
+        for (binding, kind) in bindings.iter().enumerate() {
+            let at = naga::ResourceBinding { group, binding: binding as u32 };
+            let bound = match kind {
+                bindings::Binding::Uniform => {
+                    cbv += 1;
+                    target(cbv - 1)
+                }
+                bindings::Binding::Storage => {
+                    srv += 1;
+                    storage += 1;
+                    hlsl::BindTarget { dynamic_storage_buffer_offsets_index: Some(storage - 1), ..target(srv - 1) }
+                }
+                bindings::Binding::Texture { .. } => {
+                    srv += 1;
+                    target(srv - 1)
+                }
+                bindings::Binding::Sampler => {
+                    samplers += 1;
+                    hlsl::BindTarget { space: 255, ..target(samplers - 1) }
+                }
+            };
+            options.binding_map.insert(at, bound);
+        }
+        if samplers > 0 {
+            options.sampler_buffer_binding_map.insert(hlsl::SamplerIndexBufferKey { group }, target(srv));
+            srv += 1;
+        }
+        if storage > 0 {
+            options.dynamic_storage_buffer_offsets_targets.insert(group, hlsl::OffsetsBindTarget { space: 0, register: cbv, size: storage });
+            cbv += 1;
+        }
+    }
+    options.special_constants_binding = Some(target(cbv));
+    let entry = if stage == naga::ShaderStage::Vertex { pipeline.vertex } else { pipeline.fragment };
+    // A vertex stage's outputs are its fragment stage's inputs, as wgpu-hal writes it.
+    let fragment = (stage == naga::ShaderStage::Vertex).then(|| hlsl::FragmentEntryPoint::new(module, pipeline.fragment).expect("its fragment stage is there"));
+    let (module, info) = naga::back::pipeline_constants::process_overrides(module, info, Some((stage, entry)), &Default::default()).expect("the shaders have no overrides to fill");
+    let mut hlsl = String::new();
+    hlsl::Writer::new(&mut hlsl, &options, &hlsl::PipelineOptions { entry_point: Some((stage, entry.to_owned())) })
+        .write(&module, &info, fragment.as_ref())
+        .expect("naga writes the shaders as HLSL");
+    hlsl
 }

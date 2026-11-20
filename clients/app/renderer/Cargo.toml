@@ -221,6 +221,8 @@ ndk-sys = "0.6"
 [build-dependencies]
 # Flutter's text input plugins (flutter/), as its engine builds them: a Mac's Objective-C++, Windows' C++.
 cc = "1"
+# Windows' shaders as HLSL, which DXC compiles here (`build.rs`): wgpu's naga, at its version.
+naga = { version = "30.0.2", features = ["wgsl-in", "hlsl-out"] }
 
 [[example]]
 name = "screenshot"

@@ -9,6 +9,8 @@ zig = "0.15.2"
 "github:rust-cross/cargo-zigbuild" = "0.24.1"
 # And for Windows, with the MSVC CRT and Windows SDK it downloads, as Windows' own toolchain builds there.
 "github:rust-cross/cargo-xwin" = "0.23.1"
+# And DXC, which compiles Windows' shaders ahead of time (clients/app/renderer/build.rs).
+"github:microsoft/DirectXShaderCompiler" = "1.9.2609"
 # What builds the web client's renderer (`clients/web/renderer`, `core/edge/edge.js`): wasm-bindgen, at the version
 # its crate pins, and binaryen's wasm-opt.
 "github:wasm-bindgen/wasm-bindgen" = "0.2.130"

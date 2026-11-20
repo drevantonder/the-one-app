@@ -3,6 +3,7 @@
 //! WebGPU on the web), with the GPU's `Context` they share.
 
 pub mod atlas;
+mod bindings;
 mod bounds_tree;
 pub mod context;
 pub mod renderer;
