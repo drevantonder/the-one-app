@@ -885,6 +885,38 @@
             }
           }
         }
+      ],
+      "Put away, an agent opens a category": [
+        {
+          "putAway": true
+        },
+        {
+          "press": "App Library",
+          "agent": true
+        },
+        {
+          "expect": {
+            "shown": {
+              "role": "group",
+              "name": "Utilities"
+            }
+          }
+        },
+        {
+          "press": {
+            "role": "group",
+            "name": "Utilities"
+          },
+          "agent": true
+        },
+        {
+          "expect": {
+            "shown": {
+              "role": "heading",
+              "name": "Utilities"
+            }
+          }
+        }
       ]
     }
   },

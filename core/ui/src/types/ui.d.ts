@@ -458,12 +458,14 @@ export type Scene =
   | (() => Element)
   | { render: () => Element; taps?: Tap[]; alone?: boolean; size?: [number, number]; touch?: boolean; motions?: Record<string, Motion>; checks?: Record<string, CheckStep[]>; seeds?: number[] }
 /** A step of a check, as a test's (Playwright's, the UI SDK's): what's done, as a tap is (pressed, a key, typed), a
- * press held `hold` ms, a button held `down` on something and let go (`up`), input played as a device delivered it
- * (`trace`, a JSON file of `{ ms, kind, … }` beside the scenes, as the harness's `trace` takes it: a trackpad's swipe
- * with its phases and momentum, the pointer's nudges, a finger's `touch`es, each with its `phase`), time passing (`wait`, ms), or the app in the background that
- * long and back (`away`, ms), which fails where it draws meanwhile, as a phone's GPU refuses that; or what must
+ * press held `hold` ms (an `agent`'s comes as an agent's request to a device's window does, by the inspector, though
+ * nobody could press it, as on a panel put away), a button held `down` on something and let go (`up`), input played as
+ * a device delivered it (`trace`, a JSON file of `{ ms, kind, … }` beside the scenes, as the harness's `trace` takes
+ * it: a trackpad's swipe with its phases and momentum, the pointer's nudges, a finger's `touch`es, each with its
+ * `phase`), time passing (`wait`, ms), the app in the background that long and back (`away`, ms), which fails where it
+ * draws meanwhile, as a phone's GPU refuses that, or a panel put away or summoned (`putAway`, `summon`); or what must
  * hold then (`expect`), waited for a second, or `within` ms. */
-export type CheckStep = Tap | { press: Tap; hold: number } | { down: Tap } | { up: true } | { trace: string } | { wait: number } | { away: number } | { expect: Expect; within?: number }
+export type CheckStep = Tap | { press: Tap; hold?: number; agent?: true } | { down: Tap } | { up: true } | { trace: string } | { wait: number } | { away: number } | { putAway: true } | { summon: true } | { expect: Expect; within?: number }
 /** What must hold: what's drawn whole and in the window (`shown`), what isn't there (`gone`), what has the keyboard
  * (`focused`), words somewhere on it (`text`), a node's states (`states`: `{ of, is: { expanded: true } }`), how opaque
  * it's drawn (`drawn`: `{ of, opacity }`, a pressed look), and the glass's blur drawn (`blur`). */

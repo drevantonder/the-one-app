@@ -15,7 +15,8 @@
 //! lavapipe, where there's no GPU), or on Windows Direct3D 12's (WARP, Windows' own software one, where there's none). `--requests` gives it the inspector's requests first, one a line
 //! (`renderer::inspect`), as a native window takes them on its socket, from a file or stdin (`-`), each answered on
 //! stdout, a frame drawn before each: `{"v":1,"id":1,"op":"tap","text":"Backups"}`. What a person does (`tap`, `key`,
-//! `scroll`, `drag`, `replay`, and `away`, the app going to the background and back) comes as the display's input, each event at its own time, a click held down 80 ms,
+//! `scroll`, `drag`, `replay`, `away`, the app going to the background and back, and a panel's `put_away` and `summon`)
+//! comes as the display's input, each event at its own time, a click held down 80 ms,
 //! and what it presses scrolled into sight first, as Playwright's click does. Its clock is paused: `clock`'s `step`
 //! moves it, the display ticking each frame meanwhile; and after the requests, until what it shows comes to rest but
 //! for loops (at most 3 s), which is what's pictured. `--touch` draws it for a finger, as a phone's window is (`pointer: coarse`),
@@ -258,7 +259,9 @@ fn main() -> anyhow::Result<()> {
         }
         // What a person does comes as the display's input, on the platform's time, as a host's does; with a seed, a
         // moment or two after what came before, so it lands as things are on their way somewhere.
-        if INPUT.contains(&request.op.as_str()) {
+        // As an agent's request reaches a device's window, by the inspector's socket (`"inspector": true`), it goes to
+        // the window as such a request does, a press to what it selects, though nobody could, as on a panel put away.
+        if INPUT.contains(&request.op.as_str()) && !request.bool("inspector") {
             if seed != 0 && request.op != "clock" {
                 windows.run(windows.random(50) as f64);
             }
@@ -374,7 +377,7 @@ fn ask(windows: &mut Windows, id: renderer::platform::WindowId, mut request: Val
 /// The inspector's requests that a person's input answers, and its clock's: on the fake platform, the display's own
 /// events, each at its own time, with the display's frames between, as a host gives a window input, and its time
 /// moved on with the display ticking through it. On a phone's window (`--touch`), a press is a finger's.
-const INPUT: [&str; 11] = ["tap", "down", "up", "key", "scroll", "drag", "replay", "trace", "clock", "wait_for", "away"];
+const INPUT: [&str; 13] = ["tap", "down", "up", "key", "scroll", "drag", "replay", "trace", "clock", "wait_for", "away", "put_away", "summon"];
 
 /// The longest it's run for, at the end, for what it shows to come to rest.
 const SETTLE_MS: f64 = 3000.0;
@@ -457,6 +460,17 @@ fn input(windows: &mut Windows, id: renderer::platform::WindowId, request: &rend
         // The app goes to the background for `ms` and comes back, as a phone's does (`Windows::away`): `drawn` is how
         // many frames it drew meanwhile, which a phone's GPU refuses.
         "away" => Ok(json!({"drawn": windows.away(request.f64("ms").unwrap_or(1000.0))})),
+        // A panel (`--panel`) put away, as its shortcut or a click outside it does a launcher, and summoned again.
+        "put_away" => {
+            windows.put_away(id, false);
+            windows.run(0.0);
+            Ok(json!({}))
+        }
+        "summon" => {
+            windows.summon(id, web_time::Instant::now(), None);
+            windows.run(0.0);
+            Ok(json!({}))
+        }
         // As Playwright's `locator.waitFor` and its assertions do: what's selected comes to be `state` (`shown`: drawn
         // whole and in the window; `gone`: not there; `focused`: with the keyboard; `there`: there at all; `drawn`: at
         // `opacity`), with its
