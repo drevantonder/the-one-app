@@ -925,6 +925,7 @@ export default function Accounts() {
             <For each={sections()}>
               {(section) => (
                 <Section
+                  aria-label={section}
                   heading={
                     <View style={look.inline}>
                       <Show when={typeIn(section)?.icon}>{(icon) => <Image src={icon()} alt="" style={look.small} />}</Show>

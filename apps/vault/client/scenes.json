@@ -387,5 +387,29 @@
       }
     },
     "component": "accounts"
+  },
+  "Chrome Profiles": {
+    "like": "Empty",
+    "answers": {
+      "vault_list": {
+        "items": [],
+        "requests": [],
+        "apps": [],
+        "types": [
+          {
+            "id": "chrome-profiles/profile",
+            "app": "chrome-profiles",
+            "title": "Chrome Profiles",
+            "icon": "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxMCAxMCI+PGNpcmNsZSBjeD0iNSIgY3k9IjUiIHI9IjUiIGZpbGw9IiNlOTEiLz48L3N2Zz4=",
+            "trusted": true,
+            "name": "Chrome profile",
+            "prefix": "Chrome profile: ",
+            "section": "Chrome Profiles",
+            "component": null,
+            "create": null
+          }
+        ]
+      }
+    }
   }
 }

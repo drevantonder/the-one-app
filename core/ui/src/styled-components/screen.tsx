@@ -169,8 +169,12 @@ export function Screen(props: { heading?: JSX.Element; action?: JSX.Element; bac
   }
   const actions = () => [...(chosen()?.actions() ?? []).map((action) => ({ ...action, section: action.section ?? "chosen" })), ...bar()]
   const footed = () => panelled && actions().length > 0
+  // On a computer, a screen that says nothing in its bar, in a window whose title bar already names it (a dialog's),
+  // has no bar; under a finger the bar keeps clear of the status bar.
+  const barred = () => !computer || !!props.heading || !!props.action || backed() || titled() || (computer && !!history())
   return (
     <View style={look.screen}>
+      <Show when={barred()}>
       <View role="banner" style={[look.bar, computer && look.titleRow]}>
         <View style={[look.row, computer && edge().start && look.atStart, computer && edge().end && look.atEnd]}>
           <Show when={backed() || (computer && history())}>
@@ -210,6 +214,7 @@ export function Screen(props: { heading?: JSX.Element; action?: JSX.Element; bac
           </Show>
         </View>
       </View>
+      </Show>
       <ScrollView role="main" style={look.main} onScroll={props.largeTitle ? (event) => setScrolled(event.currentTarget.scrollTop) : undefined}>
         <View style={look.safe}>
           <View style={[look.parts, footed() && look.footed]}>
@@ -230,11 +235,11 @@ export function Screen(props: { heading?: JSX.Element; action?: JSX.Element; bac
 
 /** A heading: its words a `Text`, or, where it's more than words (a button at its end, an icon before it), a box
  * that's the heading, as a `Text` holds only words. */
-function Heading(props: { level: number; "aria-hidden"?: "true"; style: Parameters<typeof Text>[0]["style"]; children?: JSX.Element }) {
+function Heading(props: { level: number; "aria-label"?: string; "aria-hidden"?: "true"; style: Parameters<typeof Text>[0]["style"]; children?: JSX.Element }) {
   const inside = children(() => props.children)
   const words = () => inside.toArray().every((part) => typeof part === "string" || typeof part === "number")
   return (
-    <Show when={words()} fallback={<View role="heading" aria-level={props.level} aria-hidden={props["aria-hidden"]} style={props.style}>{inside()}</View>}>
+    <Show when={words()} fallback={<View role="heading" aria-level={props.level} aria-label={props["aria-label"]} aria-hidden={props["aria-hidden"]} style={props.style}>{inside()}</View>}>
       <Text role="heading" aria-level={props.level} aria-hidden={props["aria-hidden"]} style={props.style}>
         {inside()}
       </Text>
@@ -243,14 +248,14 @@ function Heading(props: { level: number; "aria-hidden"?: "true"; style: Paramete
 }
 
 /// `<Section heading="This week">...</Section>`: a part of a screen under a small grey heading.
-export function Section(props: { heading?: JSX.Element; children?: JSX.Element }) {
+export function Section(props: { heading?: JSX.Element; "aria-label"?: string; children?: JSX.Element }) {
   // Grouped cards head their groups, and so does a sidebar under a finger, which is drawn as them.
   const style = useContext(ListStyle)
   const grouped = () => style === "insetGrouped" || (style === "sidebar" && touch())
   return (
     <View style={look.section}>
       <Show when={props.heading}>
-        <Heading level={2} style={[look.heading, touch() && look.touchHeading, grouped() && look.groupedHeading]}>
+        <Heading level={2} aria-label={props["aria-label"]} style={[look.heading, touch() && look.touchHeading, grouped() && look.groupedHeading]}>
           {props.heading}
         </Heading>
       </Show>

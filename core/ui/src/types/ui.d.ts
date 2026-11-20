@@ -264,7 +264,7 @@ export declare function TextInput(props: TextInputProps): Element
 export declare function render(code: () => Element): () => void
 
 export declare function Screen(props: { heading?: Element; action?: Element; back?: boolean; onBack?: () => void; largeTitle?: boolean; children?: Element }): Element
-export declare function Section(props: { heading?: Element; children?: Element }): Element
+export declare function Section(props: { heading?: Element; "aria-label"?: string; children?: Element }): Element
 export declare function Split(props: { open?: boolean; onClose?: () => void; detail?: Element; children?: Element }): Element
 /** Where a window's Back and Forward go (`History`), which its screens draw in their bar. */
 export declare function History(props: { value: { back?: () => void; forward?: () => void } | null; children: Element }): Element
