@@ -1642,6 +1642,27 @@
       }
     ]
   },
+  "A category chosen": {
+    "like": "Marketplace",
+    "taps": [
+      {
+        "role": "button",
+        "name": "Productivity"
+      }
+    ],
+    "checks": {
+      "A category filters in place, with no Back": [
+        {
+          "expect": {
+            "gone": {
+              "role": "button",
+              "name": "Back"
+            }
+          }
+        }
+      ]
+    }
+  },
   "Installed App Page": {
     "like": "Category",
     "taps": [

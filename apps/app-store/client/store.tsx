@@ -120,7 +120,7 @@ interface View {
 }
 const [view, setView] = createSignal<View>({})
 const to = (next: View) => go(() => setView({ ...next, linked: undefined }))
-/// One step out: See All to the app's page, an app's page to its category, a category to every app.
+/// One step out: See All to the app's page, an app's page to the Marketplace as it was (its category stays chosen: a category is a filter of it, which changes it in place).
 const out = () => go(() => setView((now) => (now.details ? { category: now.category, app: now.app } : now.app ? { category: now.category } : {})), { back: true })
 /// The app a page is of: its artifact, or for one only the directory has, its source and name.
 const key = (listed: Listed) => listed.app ?? `${listed.source}#${listed.name}`
@@ -506,7 +506,7 @@ function AppStore(props: { market: Market; all: Owners }) {
   return (
     <>
       <View style={[look.grows, covered() && look.hidden]}>
-        <Screen heading="App Store" back={!!view().category} onBack={out}>
+        <Screen heading="App Store">
           <Marketplace market={props.market} />
         </Screen>
       </View>
