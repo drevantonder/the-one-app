@@ -1,18 +1,18 @@
 {
   "server/bin/stream/linux-aarch64": {
-    "sha256": "099fc4ab846ff2f111148a5ce46f1c8f34530219a4bd97437513a2475a6c969a",
-    "url": "https://github.com/drevantonder/the-one-app/releases/download/nifs-89cf269b033c/stream-32ff60958bcb9fb88dae9c8acbfc68cfaa62a29384074d73c51c3e3bbe53f460-linux-aarch64"
+    "sha256": "9c4822d5cf50df9571591b594b7d6fd4dd7d6a641227b2596fe0356907fe6c01",
+    "url": "https://github.com/drevantonder/the-one-app/releases/download/nifs-e46446735c7f/stream-e1d63a2362f038e1937cc9965afaa243a44fd15f8e1383f3740f009c26d87a91-linux-aarch64"
   },
   "server/bin/stream/linux-x86_64": {
-    "sha256": "d42c2ee813a2cfaaf1b7ecfce6e6ae5b96b07954a0a65dd5efad91b0965f7156",
-    "url": "https://github.com/drevantonder/the-one-app/releases/download/nifs-89cf269b033c/stream-89ad45e16fea8521a87a9183e5a2f9fe80e26f729160b51fe75ec71b9669c695-linux-x86_64"
+    "sha256": "c8806a1001eb4e7e717a18a4a7827a96fd23c7534d527ef6f83d3ae07948b0d1",
+    "url": "https://github.com/drevantonder/the-one-app/releases/download/nifs-e46446735c7f/stream-180e084452c56677022577470d1bc7225a0d06e636f3a029b2cce6a42dcb1e20-linux-x86_64"
   },
   "server/bin/stream/macos-aarch64": {
-    "sha256": "480cc0b7fef751932e69f753f94007067a50daecbeecc1b8de21b796c5fe7dd7",
-    "url": "https://github.com/drevantonder/the-one-app/releases/download/nifs-89cf269b033c/stream-93ceaf7850d80dd985ca35ac25e47f414971a2a19b8c8eeb8de48f056c64acb4-macos-aarch64"
+    "sha256": "b37d420152dad6ea71191f8dfb110df0e257d6c9e0a61978a471e060ee2ee884",
+    "url": "https://github.com/drevantonder/the-one-app/releases/download/nifs-e46446735c7f/stream-6abc1edda54fc114bfdab56c48a6e3d69b75df16248e932da5c519b462655663-macos-aarch64"
   },
   "server/bin/stream/windows-x86_64": {
-    "sha256": "eb8f037ad68950f6d3f111b8cab2b66f3785cec5ddb10525722bd8db5dfdd318",
-    "url": "https://github.com/drevantonder/the-one-app/releases/download/nifs-89cf269b033c/stream-b6a285f62e3e929a87bf2f79737ebb4d2ff4daa922881bf51e238bf8520a0da8-windows-x86_64"
+    "sha256": "ca79e2d7394ac2b7903cb5d076d859b2b7490be5b90678bde7410d722ed3bccd",
+    "url": "https://github.com/drevantonder/the-one-app/releases/download/nifs-e46446735c7f/stream-b4b84773ad6d00739f5f70aec4564c2733c60247f4591bb52dda80b35fdd9459-windows-x86_64"
   }
 }
