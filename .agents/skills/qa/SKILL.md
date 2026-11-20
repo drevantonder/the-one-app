@@ -68,7 +68,9 @@ core/ui, after `bun build.js`:
     bun motion.js --out <scratch>/after --against <scratch>/before [<folder>…] [--watch]
 
 Each motion gets a filmstrip, a position-over-time curve beside the finger's and before's, and the frames that went
-over their budget; `index.html` there is the contact sheet. `--watch` plays them again as you edit. A live window
+over their budget, and how many frames each tier of device in `core/ui/devices.json` would drop (with `--release`,
+whose CPU times are a shipped build's); `index.html` there is the contact sheet. `bun calibrate.js` measures a real
+device's GPU against the same work, keeping what it found there. `--watch` plays them again as you edit. A live window
 takes the same `replay` through the inspector.
 
 

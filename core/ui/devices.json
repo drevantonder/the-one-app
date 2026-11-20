@@ -1,0 +1,96 @@
+{
+  "about": "The devices motion.js judges a frame's work against (bun motion.js --tiers). Each tier's CPU is its Geekbench 6 single-core score, and its GPU its GFXBench Manhattan 3.1 offscreen fps (1080p), from the sources beside them; `measured` is what calibrate.js measured a real device's GPU take for each kind of work, which a tier's time is that device's scaled by their GPUs' scores. `scale` is its device pixels a point; `hz` its display's frames a second.",
+  "tiers": [
+    {
+      "name": "low-end Android",
+      "like": "a Helio G85 phone (Galaxy A05) with a Mali-G52 MP2",
+      "hz": 60,
+      "scale": 2,
+      "cpu": 420,
+      "gpu": 14.3,
+      "sources": [
+        "https://nanoreview.net/en/benchmark-ranking/mediatek-helio-g85",
+        "https://www.notebookcheck.net/Mali-G52-MP2-vs-Adreno-613-vs-Adreno-620_10399_12697_10317.247598.0.html"
+      ]
+    },
+    {
+      "name": "older iPhone",
+      "like": "an iPhone 11 (A13)",
+      "hz": 60,
+      "scale": 2,
+      "cpu": 1700,
+      "gpu": 106.4,
+      "sources": [
+        "https://browser.geekbench.com/v6/cpu/baseline/18880498",
+        "https://www.notebookcheck.net/Apple-A13-Bionic-GPU.434833.0.html"
+      ]
+    },
+    {
+      "name": "current iPhone",
+      "like": "an iPhone 16 Pro (A18 Pro)",
+      "hz": 120,
+      "scale": 3,
+      "cpu": 3400,
+      "gpu": 231.2,
+      "sources": [
+        "https://www.cpu-monkey.com/en/compare_cpu-amd_ryzen_7_9700x-vs-apple_a18",
+        "https://www.notebookcheck.net/Apple-A18-Pro-GPU-Benchmarks-and-Specs.891559.0.html"
+      ]
+    },
+    {
+      "name": "Intel UHD laptop at 4K",
+      "like": "a Core i5-7300U with HD Graphics 620 (the Surface), its windows at 2x",
+      "hz": 60,
+      "scale": 2,
+      "cpu": 1130,
+      "gpu": 50,
+      "measured": "surface",
+      "estimated": "gpu: no Manhattan 3.1 offscreen result is published for the HD/UHD 620; 50 fps puts it below the A13, as 3DMark Wild Life does (pcworld.com, below), at its FP32 throughput's share (0.4 TFLOPS)",
+      "sources": [
+        "https://browser.geekbench.com/processors/intel-core-i5-7300u",
+        "https://www.pcworld.com/article/393635/clickbait-warning-uls-wild-life-benchmark-makes-pc-vs-iphone-comparisons-way-too-easy.html"
+      ]
+    },
+    {
+      "name": "mid browser on WebGPU",
+      "like": "Chrome's WebGPU on a Core i5-1235U laptop with Iris Xe (80 EU)",
+      "hz": 60,
+      "scale": 1.5,
+      "cpu": 2200,
+      "gpu": 130,
+      "draws": 2,
+      "estimated": "gpu: Iris Xe is about 62% faster than the A13 in 3DMark Wild Life (pcworld.com, below); draws: WebGPU's validation (Dawn) costs a draw call about twice a native one's",
+      "sources": [
+        "https://www.pcworld.com/article/393635/clickbait-warning-uls-wild-life-benchmark-makes-pc-vs-iphone-comparisons-way-too-easy.html"
+      ]
+    }
+  ],
+  "hosts": {
+    "AMD Ryzen 7 9700X": 3362,
+    "Intel(R) Core(TM) i5-7300U": 1130,
+    "Apple M3": 3080,
+    "Apple M1": 2350
+  },
+  "measured": {
+    "surface": {
+      "gpu": {
+        "costs": {
+          "quads": 1.308,
+          "shadows": 0,
+          "sprites": 5.026,
+          "backdrops": 15.85,
+          "rasters": 1.652,
+          "copied": 1.305,
+          "draws": 0.02772,
+          "uploaded": 110
+        },
+        "constant": 0.4987,
+        "error": 0.35,
+        "frames": 386,
+        "scenes": 57
+      },
+      "paint_ms": 0.11,
+      "on": "2026-11-20"
+    }
+  }
+}

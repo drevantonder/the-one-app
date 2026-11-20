@@ -15,7 +15,10 @@
 //   than a frame's time to paint marked red;
 // - `frames.json`: every frame's time, position and cost, as `replay` gives it;
 //
-// and it says, motion by motion, how many frames it took to come to rest and how many went over their budget. With
+// and it says, motion by motion, how many frames it took to come to rest and how many went over their budget, and how
+// many each kind of device would drop (devices.json's tiers: a low-end Android phone, an older and a current iPhone, a
+// laptop's Intel GPU at 4K, a browser's WebGPU), from each frame's work, the same on any device, as calibrate.js
+// measured a real one's GPU take for it and as the tier's CPU and GPU score beside this machine's and that one's. With
 // `--against` (an earlier run's `--out`), each is compared with that run's: how far apart the curves come, at most, and
 // how much of the filmstrips differs (`changed.png`). `index.html` in `--out` is a contact sheet of them all, before
 // and after side by side. `--watch` plays them again as their app, the gallery or the UI library changes, a folder's
@@ -39,14 +42,12 @@ const folders = args.filter((arg, at) => !arg.startsWith("--") && !["--out", "--
 const harness = join(root, `target/${flag("--release") ? "release" : "debug"}/examples/screenshot`)
 const env = { ...process.env, VK_ICD_FILENAMES: process.env.VK_ICD_FILENAMES ?? "/usr/share/vulkan/icd.d/lvp_icd.json" }
 
-if (!existsSync(here("dist/build/app.js"))) throw new Error("Build the UI library first: `bun build.js` in core/ui")
-if (!existsSync(harness)) throw new Error("Build the native harness first: `cargo build -p renderer --example screenshot`")
 
 /// Every folder with motions: the gallery, and each app whose scenes have one.
 const everything = () => [here("gallery"), ...readdirSync(join(root, "apps")).map((app) => join(root, "apps", app)).filter((app) => existsSync(join(app, "client/scenes.json")) && readFileSync(join(app, "client/scenes.json"), "utf8").includes('"motions"'))]
 
 /// How a gesture moves, as the inspector's `replay` takes it: each stretch `{dx, dy, ms}`, and whether it lifts.
-function moves(gesture) {
+export function moves(gesture) {
   const ms = ([dx, dy], speed) => (Math.hypot(dx, dy) / speed) * 1000
   if (gesture.moves) return { moves: gesture.moves, lift: gesture.lift !== false }
   if (gesture.swipe) return { moves: [{ dx: gesture.swipe[0], dy: gesture.swipe[1], ms: ms(gesture.swipe, gesture.speed ?? 800) }], lift: true }
@@ -66,10 +67,10 @@ function moves(gesture) {
 }
 
 /// What the inspector selects for a tap's name, as `scenes.js` presses it.
-const selector = (tap) => (typeof tap === "string" ? { name: tap } : tap)
+export const selector = (tap) => (typeof tap === "string" ? { name: tap } : tap)
 
 /// A built page's folder as the harness loads it: its `index.html` with what it loads beside it.
-function pageFolder(built, page, folder) {
+export function pageFolder(built, page, folder) {
   const at = join(folder, "page")
   rmSync(at, { recursive: true, force: true })
   mkdirSync(at, { recursive: true })
@@ -89,14 +90,15 @@ async function run(at, folder, scene, requests) {
   return { answers: stdout.split("\n").filter(Boolean).map((line) => JSON.parse(line)), said: stderr.trim(), failed: harnessed.exitCode !== 0 }
 }
 
-/// A folder's scenes that have motions, each with its page, link, answers, taps, size and touch.
-async function scenesOf(target, built, folder) {
+/// A folder's scenes that have motions, or with `all`, every one an app's page draws, each with its page, link,
+/// answers, taps, size and touch.
+export async function scenesOf(target, built, folder, all = false) {
   if (existsSync(join(target, "client/scenes.json"))) {
     const all = JSON.parse(readFileSync(join(target, "client/scenes.json"), "utf8"))
     const whole = (scene) => (scene.like ? { ...whole(all[scene.like]), taps: undefined, ...scene, answers: { ...whole(all[scene.like]).answers, ...scene.answers } } : scene)
     return Object.entries(all)
       .map(([name, scene]) => ({ name, ...whole(scene) }))
-      .filter((scene) => scene.motions && !scene.component && !scene.uses)
+      .filter((scene) => (all || scene.motions) && !scene.component && !scene.uses)
       .map(({ name, page = "client/index.html", answers = {}, taps = [], size = [390, 844], touch = false, motions }) => ({ name, page: page.split("#")[0], link: page.split("#")[1], answers, taps, size, touch, motions }))
   }
   // The gallery lists its own, drawn at `#scenes`.
@@ -107,7 +109,7 @@ async function scenesOf(target, built, folder) {
   const text = JSON.stringify(JSON.parse(readFileSync(join(folder, "end.json"), "utf8"))).match(/"name":"(\[.*?\])"/)?.[1]
   if (!text) throw new Error(`The gallery listed no scenes: ${listed.said}`)
   return JSON.parse(JSON.parse(`"${text}"`))
-    .filter((scene) => scene.motions)
+    .filter((scene) => all || scene.motions)
     .map(({ name, taps = [], size = [390, 844], touch = false, motions }) => ({ name, page: "index.html", link: name, answers: {}, taps, size, touch, motions }))
 }
 
@@ -195,6 +197,37 @@ function apart(frames, values, before) {
   return Math.max(...frames.map((frame, n) => Math.abs(values[n] - at(frame.at))))
 }
 
+/// The devices frames are judged against, and what this machine's CPU scores, as devices.json says.
+const devices = JSON.parse(readFileSync(here("devices.json"), "utf8"))
+const cpuName = process.platform === "darwin" ? Bun.spawnSync(["sysctl", "-n", "machdep.cpu.brand_string"]).stdout.toString() : (readFileSync("/proc/cpuinfo", "utf8").match(/model name\s*:\s*(.*)/)?.[1] ?? "")
+const hostScore = Object.entries(devices.hosts).find(([name]) => cpuName.includes(name))?.[1]
+
+/// What each tier with `hz` frames a second would take for each of `frames`, played at one device pixel a point: its
+/// CPU's time for the frame (this machine's, as its Geekbench score is to the tier's) and its GPU's (what the device
+/// measured takes for the frame's work at the tier's pixels, as its GPU's score is to the tier's), the frame dropped
+/// where either is longer than the tier's frame. → each tier's name, the frames dropped of those drawn, the worst and why.
+export function judge(frames, hz) {
+  return devices.tiers
+    .filter((tier) => tier.hz === hz)
+    .map((tier) => {
+      const anchor = devices.tiers.find((one) => one.measured && devices.measured[one.measured])
+      const gpu = anchor && devices.measured[anchor.measured].gpu
+      const pixels = tier.scale * tier.scale
+      const times = frames
+        .filter((frame) => frame.draws > 0)
+        .map((frame) => {
+          const work = frame.work
+          const shaded = gpu ? ["quads", "shadows", "sprites", "backdrops", "rasters", "copied"].reduce((sum, kind) => sum + (work[kind] / 1e6) * pixels * gpu.costs[kind], 0) : 0
+          const gpuMs = gpu ? (shaded + (work.uploaded / 1e6) * pixels * gpu.costs.uploaded + gpu.constant) * (anchor.gpu / tier.gpu) + frame.draws * gpu.costs.draws * (tier.draws ?? 1) * (anchor.cpu / tier.cpu) : 0
+          const cpuMs = hostScore ? (frame.paint_ms * hostScore) / tier.cpu : 0
+          return { ms: Math.max(gpuMs, cpuMs), by: gpuMs >= cpuMs ? "GPU" : "CPU" }
+        })
+      const budget = 1000 / tier.hz
+      const worst = times.reduce((worst, time) => (time.ms > worst.ms ? time : worst), { ms: 0, by: "" })
+      return { tier: tier.name, dropped: times.filter((time) => time.ms > budget).length, drawn: times.length, worst }
+    })
+}
+
 /// A motion played at `hz` on a scene: its frames, filmstrip and curve kept in `folder`. → what it says, and its row in
 /// the contact sheet.
 async function play(built, scene, name, motion, hz, folder) {
@@ -219,6 +252,9 @@ async function play(built, scene, name, motion, hz, folder) {
   const worst = Math.max(...frames.map((frame) => frame.paint_ms))
   const rest = frames.at(-1).at
   const said = [`  ${hz} Hz: ${way} ${Math.round(Math.max(...values.map(Math.abs)))} pt, at rest after ${Math.round(rest)} ms (${frames.length} frames), ${over} over its ${budget} ms budget, the worst ${worst} ms, in ${Math.round(performance.now() - started)} ms`]
+  const judged = judge(frames, hz)
+  if (judged.length)
+    said.push(`  ${hz} Hz on devices: ${judged.map(({ tier, dropped, drawn, worst }) => `${tier} drops ${dropped} of ${drawn} frames (the worst ${worst.ms.toFixed(1)} ms, its ${worst.by})`).join("; ")}`)
   if (before) {
     const diff = existsSync(join(beforeAt, "filmstrip.png")) && differs(join(beforeAt, "filmstrip.png"), join(folder, "filmstrip.png"), join(folder, "changed.png"))
     said.push(`  ${hz} Hz against before: curves at most ${apart(frames, values, beforeTravel).toFixed(1)} pt apart, at rest after ${Math.round(before.frames.at(-1).at)} ms then, filmstrips ${diff === undefined ? "not the same size" : `${(diff * 100).toFixed(1)}% different`}`)
@@ -280,29 +316,37 @@ async function round(targets) {
   return said
 }
 
-const started = performance.now()
-console.log((await round(folders.length ? folders : everything())).join("\n"), `\nin ${Math.round(performance.now() - started)} ms`)
+// Run, rather than imported for what it shares (calibrate.js).
+if (import.meta.main) {
+  if (!existsSync(here("dist/build/app.js"))) throw new Error("Build the UI library first: `bun build.js` in core/ui")
+  if (!existsSync(harness)) throw new Error("Build the native harness first: `cargo build -p renderer --example screenshot`")
+  // A debug build's CPU is several times a shipped one's.
+  if (!flag("--release")) console.log("Its CPU times are a debug build's: --release for a shipped build's")
+  if (!hostScore) console.log(`This CPU (${cpuName.trim()}) has no Geekbench score in devices.json's hosts, so devices are judged by their GPUs alone`)
+  const started = performance.now()
+  console.log((await round(folders.length ? folders : everything())).join("\n"), `\nin ${Math.round(performance.now() - started)} ms`)
 
-if (flag("--watch")) {
-  // What changed, played again: the UI library's own source rebuilds it first and plays everything.
-  const watched = folders.length ? folders : everything()
-  let pending
-  const changed = new Set()
-  const again = async () => {
-    const touched = [...changed]
-    changed.clear()
-    const started = performance.now()
-    const library = touched.some((file) => file.startsWith(here("src")))
-    if (library) Bun.spawnSync(["bun", "build.js"], { cwd: here(".") })
-    const targets = library ? watched : watched.filter((target) => touched.some((file) => file.startsWith(target)))
-    console.log((await round(targets)).join("\n"), `\nin ${Math.round(performance.now() - started)} ms`)
+  if (flag("--watch")) {
+    // What changed, played again: the UI library's own source rebuilds it first and plays everything.
+    const watched = folders.length ? folders : everything()
+    let pending
+    const changed = new Set()
+    const again = async () => {
+      const touched = [...changed]
+      changed.clear()
+      const started = performance.now()
+      const library = touched.some((file) => file.startsWith(here("src")))
+      if (library) Bun.spawnSync(["bun", "build.js"], { cwd: here(".") })
+      const targets = library ? watched : watched.filter((target) => touched.some((file) => file.startsWith(target)))
+      console.log((await round(targets)).join("\n"), `\nin ${Math.round(performance.now() - started)} ms`)
+    }
+    for (const folder of [here("src"), ...watched.map((target) => (target.endsWith("core/ui/gallery") ? target : join(target, "client")))])
+      watch(folder, { recursive: true }, (_, file) => {
+        if (!file || file.includes("node_modules") || file.includes("dist/")) return
+        changed.add(join(folder, file))
+        clearTimeout(pending)
+        pending = setTimeout(again, 100)
+      })
+    console.log("Watching for changes")
   }
-  for (const folder of [here("src"), ...watched.map((target) => (target.endsWith("core/ui/gallery") ? target : join(target, "client")))])
-    watch(folder, { recursive: true }, (_, file) => {
-      if (!file || file.includes("node_modules") || file.includes("dist/")) return
-      changed.add(join(folder, file))
-      clearTimeout(pending)
-      pending = setTimeout(again, 100)
-    })
-  console.log("Watching for changes")
 }
