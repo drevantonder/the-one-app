@@ -279,6 +279,24 @@
       }
     }
   },
+  "Marketplace in a wide window": {
+    "like": "Marketplace",
+    "size": [
+      1280,
+      800
+    ],
+    "checks": {
+      "Its column is in the middle of the window": [
+        {
+          "expect": {
+            "centred": {
+              "role": "searchbox"
+            }
+          }
+        }
+      ]
+    }
+  },
   "Every Icon": {
     "like": "Marketplace",
     "size": [

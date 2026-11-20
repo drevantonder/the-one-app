@@ -6,6 +6,7 @@ import { direction, reducedMotion, touch } from "#bridge"
 import { Icon } from "./button.tsx"
 import { RowMenu, type RowMenu as Menu } from "./menu.tsx"
 import { Choose } from "./collect.ts"
+import { Room } from "./screen.tsx"
 import { messages } from "../words.ts"
 import type { Action } from "./actions.tsx"
 import { negative, styles } from "../styles.ts"
@@ -15,6 +16,9 @@ import { createHold, together } from "../behavior-primitives/drag.ts"
 import { insides, type Listbox } from "../headless-components/listbox.ts"
 import { createList } from "../headless-components/list.ts"
 import { createSwipeActions } from "../behavior-primitives/swipe-actions.ts"
+
+/** How wide a list's room is for a row's grey words to fit beside its heading, in CSS pixels: a sheet's middle. */
+const ROOMY = 640
 
 const look = styles({
   list: {
@@ -63,6 +67,8 @@ const look = styles({
     paddingInline: tokens.grid[3],
   },
   flatInside: { paddingBlock: 0, paddingInline: tokens.grid[2], borderRadius: tokens.radius.medium },
+  // Its grey words under its heading, a row has room above and below, as iOS's subtitle cells do.
+  stackedInside: { paddingBlock: tokens.grid[2] },
   // Only a row that does something when pressed lights up under the pointer, as it's pressed and as it's focused.
   pressable: {
     cursor: "pointer",
@@ -88,6 +94,8 @@ const look = styles({
   groupedText: { font: tokens.type.caption },
   destructive: { color: tokens.colour.red },
   flatText: { flexShrink: 1, minWidth: 0, lineClamp: 1 },
+  // With its grey words under it, the heading has the row's width and two lines.
+  underHeading: { flexShrink: 1, maxWidth: "100%", lineClamp: 2 },
   start: { flexShrink: 0 },
   end: { flexShrink: 0, maxWidth: "50%", color: tokens.colour.secondaryLabel, textAlign: "end" },
   control: { flexShrink: 0, minWidth: tokens.length.control, justifyContent: "center", alignItems: "center", paddingStart: tokens.grid[1] },
@@ -340,8 +348,12 @@ export function Row(props: RowProps): JSX.Element {
   }
 
   const style = useContext(ListStyle)
-  // A plain list's rows on a computer are Raycast's, the grey words beside the heading; elsewhere they're under it.
+  const room = useContext(Room)
+  // A plain list's rows on a computer are Raycast's, and where there's room, the grey words beside the heading, as
+  // Raycast's subtitle is; elsewhere they're under it, wrapping to a second line before they're cut, as iOS's
+  // subtitle cells are, so what they say (a state, who, why) isn't what's cut.
   const flat = () => !touch() && style === "plain"
+  const beside = () => flat() && room() >= ROOMY
   const grouped = () => !touch() && style === "insetGrouped"
   const sidebar = () => !touch() && style === "sidebar"
   // A row that opens something says so with a chevron, as iOS's Settings does, but not in a computer's sidebar, whose
@@ -350,9 +362,9 @@ export function Row(props: RowProps): JSX.Element {
   const inside = () => (
     <>
       <Show when={props.start}>{(start) => <View style={look.start}>{start()}</View>}</Show>
-      <View style={[look.words, flat() && look.flatWords]}>
-        <Text style={[look.heading, flat() && look.flatHeading, style !== "plain" && look.groupedHeading, grouped() && look.groupedSize, sidebar() && look.sidebarSize, props.destructive && look.destructive]}>{heading()}</Text>
-        <Show when={props.text}>{(text) => <Text style={[look.text, flat() && look.flatText, style !== "plain" && !touch() && look.groupedText]}>{text()}</Text>}</Show>
+      <View style={[look.words, beside() && look.flatWords]}>
+        <Text style={[look.heading, flat() && look.flatHeading, !beside() && look.underHeading, style !== "plain" && look.groupedHeading, grouped() && look.groupedSize, sidebar() && look.sidebarSize, props.destructive && look.destructive]}>{heading()}</Text>
+        <Show when={props.text}>{(text) => <Text style={[look.text, beside() && look.flatText, style !== "plain" && !touch() && look.groupedText]}>{text()}</Text>}</Show>
       </View>
       <Show when={props.end}>{(end) => <View style={look.end}>{end()}</View>}</Show>
       <Show when={opens()}>
@@ -393,7 +405,7 @@ export function Row(props: RowProps): JSX.Element {
         <Show when={props.control}>{(control) => <View style={[look.control, moving()]}>{control()}</View>}</Show>
         <Show
           when={props.onPress}
-          fallback={<View style={[look.inside, !touch() && look.flatInside, grouped() && look.groupedInside, sidebar() && look.sidebarInside, !!props.control && look.after, moving()]}>{inside()}</View>}
+          fallback={<View style={[look.inside, !touch() && look.flatInside, flat() && !beside() && look.stackedInside, grouped() && look.groupedInside, sidebar() && look.sidebarInside, !!props.control && look.after, moving()]}>{inside()}</View>}
         >
           <Pressable
             role={inListbox ? undefined : "button"}
@@ -403,7 +415,7 @@ export function Row(props: RowProps): JSX.Element {
             onFocus={() => (keyboard?.onFocus(), chosen())}
             onBlur={keyboard?.onBlur}
             onPress={pressed}
-            style={[look.inside, look.pressable, !touch() && look.flatInside, !touch() && look.flatPressable, grouped() && look.groupedInside, sidebar() && look.sidebarInside, inListbox && look.quiet, !!props.control && look.after, props.current && look.openFocused, moving()]}>
+            style={[look.inside, look.pressable, !touch() && look.flatInside, flat() && !beside() && look.stackedInside, !touch() && look.flatPressable, grouped() && look.groupedInside, sidebar() && look.sidebarInside, inListbox && look.quiet, !!props.control && look.after, props.current && look.openFocused, moving()]}>
             {inside()}
           </Pressable>
         </Show>

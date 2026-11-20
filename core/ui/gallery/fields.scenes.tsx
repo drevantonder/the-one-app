@@ -197,6 +197,8 @@ export default {
       "One that's off is off": [{ expect: { states: { of: { role: "textbox", name: "Off" }, is: { disabled: true } } } }],
     },
   },
+  // A form in a computer's window keeps a readable width, as macOS's forms do, not the window's.
+  "Fields/In a wide window": { render: () => <Fields />, size: [1280, 800], checks: { "Its fields stop at a readable width": [{ expect: { widest: { of: { role: "textbox" }, most: 520 } } }] } },
   // A finger selects in a field as in a phone's own: held on a word, or tapping it twice, it selects it, with handles
   // at its ends and the system's menu over it, or under it where the status bar leaves no room; held, the system's
   // magnifier shows; a tap on the caret shows Paste.

@@ -228,6 +228,15 @@
           }
         ]
       }
+    },
+    "checks": {
+      "Why each is failing is shown whole": [
+        {
+          "expect": {
+            "whole": true
+          }
+        }
+      ]
     }
   },
   "Failure Trace": {

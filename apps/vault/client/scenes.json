@@ -305,6 +305,20 @@
         "types": []
       },
       "sign-in_encrypt_for_passkeys": {}
+    },
+    "checks": {
+      "The picker shows the key's whole name": [
+        {
+          "expect": {
+            "text": "wants to use a key"
+          }
+        },
+        {
+          "expect": {
+            "whole": "Example API"
+          }
+        }
+      ]
     }
   },
   "Security": {

@@ -71,10 +71,10 @@ const look = styles({
   touchHeading: { paddingInline: tokens.grid[4] },
   // Above a card in grouped cards: the group's name, as Raycast's Settings heads one, in line with the card's words.
   groupedHeading: { font: tokens.type.medium, fontWeight: tokens.weight.medium, color: tokens.colour.label, paddingInline: tokens.grid[3], paddingTop: tokens.grid[2], paddingBottom: tokens.grid[1] },
-  // What's in a screen of grouped cards keeps a readable width in the middle of the window, as Raycast's Settings' does,
-  // so a note, a field or a button is in line with the cards.
-  column: { flexGrow: 1, gap: tokens.length.gutter },
-  groupedColumn: { width: "100%", maxWidth: tokens.length.readable, alignSelf: "center" },
+  // What's in a screen keeps a readable width in the middle of its room, as macOS's System Settings' and Raycast's
+  // Settings' do, so a note, a field or a button is in line with the lists, and a wide window doesn't leave it at
+  // one side.
+  column: { flexGrow: 1, gap: tokens.length.gutter, width: "100%", maxWidth: tokens.length.readable, alignSelf: "center" },
   split: { flexGrow: 1, flexShrink: 1, minHeight: 0, minWidth: 0, position: "relative" },
   beside: { flexDirection: "row" },
   pane: { minHeight: 0, minWidth: 0, overflow: "hidden", backgroundColor: tokens.colour.background },
@@ -104,7 +104,7 @@ const wide = 48 * 16
 const sidebarWidth = 15 * 16
 
 /** How wide what's being drawn has room for: the window, or a split's side. */
-const Room = createContext<() => number>(() => viewport().width)
+export const Room = createContext<() => number>(() => viewport().width)
 /** What closes what a split has open beside its list, for the list's Back button, while something is. */
 const Opened = createContext<() => (() => void) | undefined>(() => undefined)
 /** What a screen's Back does when it says nothing of its own: back through the history, or closing a split's detail. */
@@ -265,7 +265,7 @@ export function Screen(props: { heading?: JSX.Element; action?: JSX.Element; bac
             </View>
           </Show>
           <View style={[look.parts, footed() && look.footed]}>
-            <View style={[look.column, (style === "insetGrouped" || (style === "sidebar" && touch())) && look.groupedColumn]}>
+            <View style={look.column}>
               <Choose value={panelled ? choose : null}>
                 <Middle value={() => false}>{props.children}</Middle>
               </Choose>

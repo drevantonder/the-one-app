@@ -8,8 +8,9 @@ import { touch, viewport } from "#bridge"
 import { Button, Icon } from "./button.tsx"
 import { messages } from "../words.ts"
 import { Collect } from "./collect.ts"
+import { Room } from "./screen.tsx"
 import { negative, styles } from "../styles.ts"
-import { tokens } from "../tokens.ts"
+import { pixels, tokens } from "../tokens.ts"
 import { createDialog, createPull, type DialogProps } from "../headless-components/dialog.ts"
 
 /** Where a sheet is in the middle of the window, not at its foot: a window 40rem wide or more. */
@@ -90,7 +91,9 @@ export function Sheet(props: { heading?: JSX.Element; open?: boolean; onClose?: 
                 <Icon name="x" />
               </Button>
             </View>
-            <ScrollView style={look.body}>{props.children}</ScrollView>
+            <ScrollView style={look.body}>
+              <Room value={() => (wide() ? Math.min(viewport().width, pixels(tokens.length.sheet)) : viewport().width)}>{props.children}</Room>
+            </ScrollView>
           </View>
         </View>
       )}
@@ -122,7 +125,7 @@ export function Alert(props: { heading: JSX.Element; text?: JSX.Element; open?: 
             <Show when={props.text}>
               <Text style={[look.text, look.centred]}>{props.text}</Text>
             </Show>
-            {props.children}
+            <Room value={() => pixels(tokens.length.alert)}>{props.children}</Room>
             <Show when={props.action}>
               <View style={look.footer}>{actions.toArray().map((action) => <View style={look.half}>{action}</View>)}</View>
             </Show>

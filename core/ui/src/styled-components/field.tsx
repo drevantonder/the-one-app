@@ -8,17 +8,22 @@ import type { Keyed, TextInputProps } from "../drawing-primitives/primitives.tsx
 import { Icon } from "./button.tsx"
 import { askMac, pressed } from "./actions.tsx"
 import { ListStyle } from "./list.tsx"
+import { Room } from "./screen.tsx"
 import { messages } from "../words.ts"
 import { createField, createRadioGroup, createToggle, Field as Context, named, useField, type FieldProps, type RadioGroupProps, type ToggleProps } from "../headless-components/field.ts"
 import { styles, type Styles } from "../styles.ts"
 import { tokens } from "../tokens.ts"
 
+/** How wide a field's room is at least for its label to go beside it, in CSS pixels: the label's and a field's. */
+const BESIDE = 30 * 16
+
 const look = styles({
   field: { gap: tokens.grid[2], minWidth: 0, font: tokens.type.medium, color: tokens.colour.label },
   label: { alignSelf: "flex-start", font: tokens.type.medium, fontWeight: tokens.weight.medium, userSelect: "none" },
   // On a computer, as Raycast's and macOS's forms: the label beside what it names, grey and right-aligned, and the
-  // hint under what it names.
-  beside: { flexDirection: "row", alignItems: "flex-start", gap: tokens.grid[3] },
+  // hint under what it names; the whole stops at a readable width, as a macOS form's fields are a fixed width, not
+  // the window's.
+  beside: { flexDirection: "row", alignItems: "flex-start", gap: tokens.grid[3], maxWidth: tokens.length.readable },
   besideLabel: { flexShrink: 0, width: tokens.length.formLabel, paddingTop: tokens.grid[2], textAlign: "end", fontWeight: tokens.weight.regular, color: tokens.colour.secondaryLabel },
   control: { flexGrow: 1, flexShrink: 1, minWidth: 0, gap: tokens.grid[1.5] },
   dim: { opacity: 0.5 },
@@ -102,11 +107,14 @@ const look = styles({
 /// `label` above whatever's typed in or chosen, which names it, a grey `hint` below, and its problem, `error`, red in
 /// the hint's place, which the app sets: the field's edge goes red too. Every control below goes in one.
 export function Field(props: FieldProps & { children?: JSX.Element }) {
+  // Its label beside what it names on a computer, where there's room for both: in an alert it's above it.
+  const room = useContext(Room)
+  const beside = () => !touch() && !!props.label && room() >= BESIDE
   return (
     <Context value={createField(props)}>
-      <View style={[look.field, !touch() && !!props.label && look.beside]}>
+      <View style={[look.field, beside() && look.beside]}>
         <Show when={props.label}>
-          <Text style={[look.label, !touch() && look.besideLabel, props.disabled && look.dim]}>{props.label}</Text>
+          <Text style={[look.label, beside() && look.besideLabel, props.disabled && look.dim]}>{props.label}</Text>
         </Show>
         <View style={look.control}>
           {props.children}

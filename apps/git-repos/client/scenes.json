@@ -181,7 +181,16 @@
     "taps": [
       "notes",
       "Pull Requests"
-    ]
+    ],
+    "checks": {
+      "Each pull request's state is shown whole": [
+        {
+          "expect": {
+            "whole": true
+          }
+        }
+      ]
+    }
   },
   "Commit": {
     "like": "Code",
