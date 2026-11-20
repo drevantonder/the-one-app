@@ -19,7 +19,15 @@ defmodule Backups.Run do
   one to the same destination, as the hourly job and Back Up Now at once, is refused. It goes when the backup is done
   or has failed, and a failure is kept as the destination's problem. Its server writes `beat` every 30 seconds while
   it runs: a row whose `beat` is older than `@stale` was cut short, as by its server restarting, and the next backup
-  takes its place, sending only what the cut-short one didn't.
+  takes its place, sending only what the cut-short one didn't. Each blob read is kept in `listed` as it's sent, so
+  the next one reads only what the cut-short one didn't either. A timer has `due` called every few minutes while a
+  backup is under way (`Database.timer/5`), so one cut short carries on within minutes, not at the next hour.
+
+  A backup is made where it began. Its database's lease may move to another server meanwhile (a server restarting,
+  or another that couldn't reach it): a call's transaction then has the server holding it make the whole call again,
+  which for a backup is a second one beside this one, refused while this one beats. So once it's claimed, its
+  transactions are never passed on, as a scheduled job's aren't (`forwarded`): one the lease moved away from is cut
+  short where it is, and carries on from there on the server holding it.
   """
   alias Backups.Destination
   alias OneCore.Bucket
@@ -41,6 +49,12 @@ defmodule Backups.Run do
   def back_up(call, destination) do
     began = System.os_time(:millisecond)
 
+    # Its keys are read, and its timer set, before it's claimed: either may have the server that can do it make the
+    # whole call, and nothing's been done yet.
+    OneCore.Call.stage(call, "Opening #{destination["name"]}")
+    opened = failing(call, destination, began, fn -> Destination.open(call, destination) end)
+    OneCore.Call.app(call, "database").timer(call, "due", %{}, div(began + @stale, 1000) + 60, div(@stale, 1000))
+
     started =
       transaction(call, fn db ->
         query(
@@ -50,41 +64,65 @@ defmodule Backups.Run do
         )
       end)
 
-    if started == [], do: :running, else: run(call, destination, began)
+    if started == [], do: :running, else: run(%{call | forwarded: true}, opened, began)
   end
 
-  defp run(call, destination, began) do
+  # Does `fun`, and keeps what it raised as the destination's problem, raising it again. A scheduled backup's call is
+  # passed on to no other server, so one that needs another, as one whose keys are in a Vault only another opens, fails
+  # here too.
+  defp failing(call, destination, began, fun) do
+    try do
+      fun.()
+    catch
+      :throw, {OneCore.Call, :forwarding_loop} ->
+        raise "#{OneCore.Servers.name(call.server) || "This server"}, which makes the scheduled backups, can't do it " <>
+                "alone: the network's Vault, which holds its keys, opens only on another server. Choose the servers " <>
+                "that open it in Vault › Security."
+    end
+  rescue
+    failed ->
+      text = Exception.message(failed)
+
+      transaction(call, fn db ->
+        query(db, "insert or replace into problems (destination, at, kind, text) values (?, ?, 'backup', ?)", [destination["id"], began, text])
+      end)
+
+      OneCore.Call.changed(call)
+      reraise "Couldn't back up to #{destination["name"]}: #{text}", __STACKTRACE__
+  end
+
+  # `call` is passed on to no other server (`@moduledoc`).
+  defp run(call, %{destination: destination} = opened, began) do
     id = destination["id"]
     OneCore.Call.changed(call)
-    beat = spawn_link(fn -> beat(call, id) end)
+    beat = spawn_link(fn -> beat(call, id, began) end)
 
     try do
-      OneCore.Call.stage(call, "Opening #{destination["name"]}")
-      opened = Destination.open(call, destination)
-
-      {known, last} =
+      {known, last, kept} =
         transaction(call, fn db ->
           {Map.new(
              query(db, "select sha256, object from objects where destination = ?", [destination["id"]]),
              &{&1["sha256"], &1["object"]}
            ),
-           query(db, "select listed from backups where destination = ? order by at desc limit 1", [destination["id"]])}
+           query(db, "select listed from backups where destination = ? order by at desc limit 1", [destination["id"]]),
+           query(db, "select key, tag, object, size, sha256 from listed where destination = ?", [destination["id"]])}
         end)
 
-      # What the last backup there held of each blob by its key and tag, where what it was sent as is still there.
+      # What the last backup there held of each blob by its key and tag, and what a backup cut short read since,
+      # where what it was sent as is still there.
       unchanged =
-        for [%{"listed" => listed}] <- [last],
-            %{"key" => key, "tag" => tag, "sha256" => sha256} = blob <- listed(listed),
+        for %{"key" => key, "tag" => tag, "sha256" => sha256} = blob <- Enum.flat_map(last, &listed(&1["listed"])) ++ kept,
             known[sha256] == blob["object"],
             into: %{},
             do: {{key, tag}, %{key: key, tag: tag, object: blob["object"], size: blob["size"], sha256: sha256}}
 
       # The log is read last, once everything else is (`@moduledoc`).
       log? = &(elem(&1, 0) =~ ~r{/log/\d+$})
-      {listed, sent} = copy(opened, Enum.reject(Bucket.list_tagged(""), log?), {known, unchanged}, {[], []})
+      {listed, sent} = copy(call, opened, Enum.reject(Bucket.list_tagged(""), log?), {known, unchanged}, {[], []})
 
       {listed, sent} =
         copy(
+          call,
           opened,
           Enum.filter(Bucket.list_tagged(""), log?),
           {Map.merge(known, Map.new(sent, &{&1.sha256, &1.object})), unchanged},
@@ -101,6 +139,8 @@ defmodule Backups.Run do
       sent_bytes = Enum.sum_by(sent, & &1.stored)
 
       transaction(call, fn db ->
+        claimed!(db, id, began)
+
         query(
           db,
           "insert into backups (destination, name, at, took, blobs, bytes, sent, sent_bytes, stored, digest, listed) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
@@ -119,7 +159,7 @@ defmodule Backups.Run do
           ]
         )
 
-        query(db, "delete from problems where destination = ?", [destination["id"]])
+        for table <- ~w(problems listed), do: query(db, "delete from #{table} where destination = ?", [id])
       end)
 
       # The run holds `runs` until it has pruned, as restic holds its lock: a backup started meanwhile would send
@@ -143,52 +183,82 @@ defmodule Backups.Run do
       failed ->
         text = Exception.message(failed)
 
-        transaction(call, fn db ->
-          query(db, "insert or replace into problems (destination, at, kind, text) values (?, ?, 'backup', ?)", [
-            destination["id"],
-            began,
-            text
-          ])
+        # Kept where it can be: where the lease has moved meanwhile, the next backup takes this one's place as for
+        # one cut short.
+        moved(fn ->
+          transaction(call, fn db ->
+            query(db, "insert or replace into problems (destination, at, kind, text) values (?, ?, 'backup', ?)", [
+              destination["id"],
+              began,
+              text
+            ])
 
-          query(db, "delete from runs where destination = ?", [id])
+            query(db, "delete from runs where destination = ? and at = ?", [id, began])
+          end)
         end)
 
         # A call that fails tells no app that anything changed, as one that succeeds does once it's over.
         OneCore.Call.changed(call)
         reraise "Couldn't back up to #{destination["name"]}: #{text}", __STACKTRACE__
+    catch
+      :throw, {OneCore.Call, :forwarding_loop} ->
+        OneCore.Call.changed(call)
+
+        raise "The backup to #{destination["name"]} was cut short: its database moved to another server. It carries " <>
+                "on from where it stopped within #{div(2 * @stale, 60_000)} minutes."
     after
       Process.unlink(beat)
       Process.exit(beat, :kill)
     end
   end
 
-  # Says the backup to `id` is still under way, every `@beat`, for as long as the backup's process runs: it's linked
-  # to it, so it ends with it, however that ends.
-  defp beat(call, id) do
+  # Runs `fun`, a transaction of the run's, unless the database's lease has moved to another server.
+  defp moved(fun) do
+    fun.()
+  catch
+    :throw, {OneCore.Call, :forwarding_loop} -> :moved
+  end
+
+  # Raises if the backup that began `at` is no longer the one under way at destination `id`: it was taken to have
+  # been cut short, and another took its place.
+  defp claimed!(db, id, at) do
+    if query(db, "select 1 from runs where destination = ? and at = ?", [id, at]) == [],
+      do: raise("Another backup took its place, after it said nothing for #{div(@stale, 60_000)} minutes.")
+  end
+
+  # Says the backup to `id` that began `at` is still under way, every `@beat`, for as long as the backup's process
+  # runs: it's linked to it, so it ends with it, however that ends. It stops saying so once the database has moved
+  # to another server, and the backup finds that out at its next transaction.
+  defp beat(call, id, at) do
     receive do
     after
       @beat ->
-        transaction(call, &query(&1, "update runs set beat = ? where destination = ?", [System.os_time(:millisecond), id]))
-        beat(call, id)
+        said =
+          moved(fn ->
+            transaction(call, &query(&1, "update runs set beat = ? where destination = ? and at = ?", [System.os_time(:millisecond), id, at]))
+          end)
+
+        if said != :moved, do: beat(call, id, at)
     end
   end
 
   # Reads the blobs `tagged` from the bucket that aren't `unchanged` since the last backup, a few at once, and sends
   # what the destination doesn't have: the blobs listed, and the objects sent. A blob removed since it was listed
   # isn't there to back up.
-  defp copy(opened, tagged, {known, unchanged}, {listed, sent}) do
+  defp copy(call, opened, tagged, {known, unchanged}, {listed, sent}) do
     {kept, changed} = Enum.split_with(tagged, &is_map_key(unchanged, &1))
     listed = Enum.reduce(kept, listed, &[unchanged[&1] | &2])
+    id = opened.destination["id"]
 
     changed
     |> Enum.map(&elem(&1, 0))
     |> Enum.chunk_every(@together)
     |> Enum.reduce({listed, sent, known}, fn keys, {listed, sent, known} ->
-      OneCore.Call.stage(opened.call, "Backing up to #{opened.destination["name"]}: #{length(listed)} blobs listed")
+      OneCore.Call.stage(call, "Backing up to #{opened.destination["name"]}: #{length(listed)} blobs listed")
 
-      {listed, new, known} =
-        for {key, {:ok, data, tag}} <- Enum.zip(keys, Bucket.read_all(keys)), reduce: {listed, [], known} do
-          {listed, new, known} ->
+      {read, new, known} =
+        for {key, {:ok, data, tag}} <- Enum.zip(keys, Bucket.read_all(keys)), reduce: {[], [], known} do
+          {read, new, known} ->
             sha256 = digest(data)
 
             {object, new, known} =
@@ -201,26 +271,39 @@ defmodule Backups.Run do
                   {object, [{object, data} | new], Map.put(known, sha256, object)}
               end
 
-            {[%{key: key, tag: tag, object: object, size: byte_size(data), sha256: sha256} | listed], new, known}
+            {[%{key: key, tag: tag, object: object, size: byte_size(data), sha256: sha256} | read], new, known}
         end
 
       for {object, data} <- Enum.reverse(new), do: Destination.put(opened, "objects/" <> object, data)
 
       new = for {object, data} <- new, do: %{object: object, sha256: digest(data), stored: byte_size(data), digest: digest(data)}
 
-      # What was sent is kept as it's sent, so a backup cut short, as by its server restarting, isn't sent again.
-      transaction(opened.call, fn db ->
+      # What was sent and read is kept as it's sent, so a backup cut short, as by its server restarting, sends and
+      # reads none of it again.
+      transaction(call, fn db ->
         for object <- new do
           query(db, "insert or ignore into objects (destination, object, sha256, stored, digest) values (?, ?, ?, ?, ?)", [
-            opened.destination["id"],
+            id,
             object.object,
             object.sha256,
             object.stored,
             object.digest
           ])
         end
+
+        for blob <- read do
+          query(db, "insert or replace into listed (destination, key, tag, object, size, sha256) values (?, ?, ?, ?, ?, ?)", [
+            id,
+            blob.key,
+            blob.tag,
+            blob.object,
+            blob.size,
+            blob.sha256
+          ])
+        end
       end)
-      {listed, new ++ sent, known}
+
+      {read ++ listed, new ++ sent, known}
     end)
     |> then(fn {listed, sent, _known} -> {listed, sent} end)
   end

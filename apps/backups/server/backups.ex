@@ -33,7 +33,12 @@ defmodule Backups do
     "create table settings (name text primary key, value text not null)",
     "alter table destinations drop column whose",
     "alter table destinations drop column recipient",
-    "create table runs (destination text primary key, server text not null, at integer not null, beat integer not null)"
+    "create table runs (destination text primary key, server text not null, at integer not null, beat integer not null)",
+    # The blobs read for the backup under way, kept as they're sent, so one cut short reads none of them again.
+    """
+    create table listed (destination text not null, key text not null, tag text not null, object text not null,
+      size integer not null, sha256 text not null, primary key (destination, key))
+    """
   ]
 
   # How often each schedule backs up, in seconds.
@@ -277,15 +282,17 @@ defmodule Backups do
       },
       %{
         name: "due",
-        description: "Backs up to each destination whose time has come. The clock calls it every hour",
+        description:
+          "Backs up to each destination whose time has come, and carries on each backup cut short. The clock calls it every hour, and every few minutes while a backup is under way",
         inputs: %{type: "object", properties: %{}},
         outputs: %{
           type: "object",
           properties: %{
             backups: %{type: "array", items: made},
-            failed: %{type: "array", items: destination, description: "Where it couldn't back up, which destinations says why"}
+            failed: %{type: "array", items: destination, description: "Where it couldn't back up, which destinations says why"},
+            running: %{type: "array", items: destination, description: "Where a backup is under way already"}
           },
-          required: ["backups", "failed"]
+          required: ["backups", "failed", "running"]
         }
       }
     ]
@@ -295,30 +302,37 @@ defmodule Backups do
   def call("due", _inputs, call) do
     if call.actor, do: owner!(call)
 
-    {destinations, every, last} =
+    {destinations, every, last, runs} =
       transaction(call, fn db ->
         {destinations(db), setting(db, "every"),
-         Map.new(query(db, "select destination, max(at) as at from backups group by destination"), &{&1["destination"], &1["at"]})}
+         Map.new(query(db, "select destination, max(at) as at from backups group by destination"), &{&1["destination"], &1["at"]}),
+         MapSet.new(query(db, "select destination from runs"), & &1["destination"])}
       end)
 
     now = System.os_time(:millisecond)
+    seconds = @schedules[every]
 
-    if seconds = @schedules[every] do
-      # The clock calls every hour on the hour, and a backup that took a while finished after it.
-      made =
-        for destination <- destinations, now - (last[destination["id"]] || 0) >= seconds * 1000 - 600_000 do
-          try do
-            Run.back_up(call, destination)
-          rescue
-            _failed -> {:failed, destination["name"]}
-          end
+    # One with a backup under way or cut short is asked too, whatever the schedule: one under way says so, and one
+    # cut short carries on. The clock calls every hour on the hour, and a backup that took a while finished after it.
+    made =
+      for destination <- destinations,
+          MapSet.member?(runs, destination["id"]) or (seconds && now - (last[destination["id"]] || 0) >= seconds * 1000 - 600_000) do
+        try do
+          with :running <- Run.back_up(call, destination), do: {:running, destination["name"]}
+        rescue
+          _failed -> {:failed, destination["name"]}
         end
+      end
 
-      {failed, backups} = Enum.split_with(made, &match?({:failed, _}, &1))
-      %{backups: Enum.reject(backups, &(&1 == :running)), failed: for({:failed, name} <- failed, do: name)}
-    else
-      %{backups: [], failed: []}
-    end
+    # Its timer goes once no backup is under way (`Backups.Run`).
+    if transaction(call, &query(&1, "select 1 from runs")) == [],
+      do: Call.app(call, "database").timer(call, "due", %{}, nil)
+
+    %{
+      backups: for(%{} = backup <- made, do: backup),
+      failed: for({:failed, name} <- made, do: name),
+      running: for({:running, name} <- made, do: name)
+    }
   end
 
   def call(tool, inputs, call) do
@@ -443,7 +457,7 @@ defmodule Backups do
       [destination] = named(db, name)
       for table <- ~w(destinations), do: query(db, "delete from #{table} where id = ?", [destination["id"]])
 
-      for table <- ~w(backups objects problems runs),
+      for table <- ~w(backups objects problems runs listed),
           do: query(db, "delete from #{table} where destination = ?", [destination["id"]])
     end)
 
