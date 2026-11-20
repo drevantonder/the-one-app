@@ -427,6 +427,8 @@ struct Window {
     drawn: bool,
     /// Whether a frame of its page is drawn, not its snapshot (`Live`).
     live: bool,
+    /// What it painted isn't on the screen yet: painted while it wasn't shown, or not drawn since.
+    unshown: bool,
     /// Its page is loading again in its place (`reload`), until it's drawn.
     reloading: bool,
     /// How many frames running it had nothing to draw on (`Window::missed`).
@@ -627,6 +629,7 @@ impl Windows {
                 live: false,
                 reloading: false,
                 missed: 0,
+                unshown: false,
                 text_input: Default::default(),
                 text_menu: None,
                 magnifier: None,
@@ -1450,7 +1453,7 @@ impl Windows {
                     && let Ok(screen) = &mut window.screen
                     && window.parts[0].renderer.is_some()
                 {
-                    screen.paint(window.room, window.parts[0].native.scale(), &mut self.text, &self.atlas, &mut window.scene);
+                    window.unshown |= screen.paint(window.room, window.parts[0].native.scale(), &mut self.text, &self.atlas, &mut window.scene);
                     // Drawn once, so its surfaces have had a frame; after that it's painted alone, and the image it
                     // took as it went (`put_away`) is kept for the frame it's summoned with.
                     if !window.drawn {
@@ -1484,6 +1487,7 @@ impl Windows {
             window.dirty = false;
             let began = web_time::Instant::now();
             let (room, scale) = (window.room(), window.parts[0].native.scale());
+            let mut changed = true;
             if let Some(picture) = &window.picture {
                 if !std::mem::replace(&mut window.pictured, true)
                     && let Some(renderer) = &mut window.parts[0].renderer
@@ -1507,7 +1511,7 @@ impl Windows {
                         {
                             self.display.wrong(format!("{} was laid out {}×{} in its first second, in a window {}×{}", window.title, told.width, told.height, room.width.0, room.height.0));
                         }
-                        screen.paint(room, scale, &mut self.text, &self.atlas, &mut window.scene);
+                        changed = screen.paint(room, scale, &mut self.text, &self.atlas, &mut window.scene);
                         window.moving = screen.take_again();
                         let calls = screen.text_input(&mut window.text_input);
                         if !calls.is_empty() {
@@ -1535,10 +1539,17 @@ impl Windows {
             if window.drawn && std::mem::take(&mut window.placing) {
                 self.display.summon(&window.parts[0].native, &places(window.places.as_deref()), window.room);
             }
+            // Nothing it shows changed (its page asked for a frame, or something moved that ended where it was): the
+            // frame on the screen is it, so none is drawn or presented, as a compositor draws none without damage.
+            // On the Surface, each was half a ms of this thread and 0.7 to 2 of its GPU, for every part of a panel.
+            if !changed && !window.unshown && window.drawn && window.summoned.is_none() && window.missed == 0 {
+                continue;
+            }
             if !window.arrange(&self.display, &self.context, &self.atlas, &glass) {
                 window.missed(&self.context, &self.atlas);
                 continue;
             }
+            window.unshown = false;
             window.missed = 0;
             window.presented = true;
             window.frames += 1;

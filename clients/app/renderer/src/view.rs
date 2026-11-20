@@ -1033,13 +1033,14 @@ impl Screen {
     /// anything it shows changed, and what's styled again and what's drawn from a layer (`plan`); the tree styled, laid
     /// out and painted (`draw`); what that drew kept, for the pointer, the keyboard and the window (`keep`); and then the
     /// keyboard where a dialog came or went (`settle_focus`), and what's told of where things landed (`tell_placed`).
-    pub fn paint(&mut self, size: Size<Pixels>, scale: f32, text: &mut TextSystem, atlas: &Atlas, scene: &mut Scene) {
+    /// → whether it painted anything, which a frame that changed nothing doesn't: the scene drawn last is it.
+    pub fn paint(&mut self, size: Size<Pixels>, scale: f32, text: &mut TextSystem, atlas: &Atlas, scene: &mut Scene) -> bool {
         self.tell_room(size);
         self.paint_frames(scale, text, atlas);
         let started = crate::platform::on_cpu();
         self.cost.script += self.js.script();
         // A frame that changes nothing paints nothing: the scene drawn last is kept.
-        let Some(plan) = self.plan(size, scale) else { return };
+        let Some(plan) = self.plan(size, scale) else { return false };
         scene.clear();
         let drawn = self.draw(&plan, text, atlas, scene);
         let modal = drawn.modal;
@@ -1052,6 +1053,7 @@ impl Screen {
         self.tell_placed(intersections, plan.scrolled.then_some(plan.now));
         self.cost.paint += crate::platform::on_cpu().saturating_sub(started);
         self.cost.painted += 1;
+        true
     }
 
     /// The page is told when its room, its motion, its insets or the device's pressure change, as a frame's host tells
