@@ -3,13 +3,26 @@
 //! parts' (`renderer::platform::Windows::memory`), each in MB, and how many command encoders the GPU holds
 //! (`one.client.gpu.encoders`), each with the state it was in (`one.state`: `background`
 //! with nothing on screen, `launcher` while it's summoned, `windows` with an app's window open) and how many windows
-//! were on screen (`one.windows`), so `telemetry metric` shows each state's over time and a regression stands out.
+//! were on screen (`one.windows`), so `telemetry metric` shows each state's over time, and over its state's budget
+//! (`budget`) an error (`one.client.memory.over`).
 
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
 use renderer::platform::Native;
 use serde_json::{Value, json};
+
+/// What the app may hold in each state besides its windows' surfaces, whose images are as big as its windows and
+/// display make them, in MB: over it, Telemetry hears an error, which its `error` alert tells of the first time in 14
+/// days (numbers aside, so once a state), as a regression. Each is a little over what the app held as these were set
+/// (20 Nov: a Mac's 117 MB in the background, a Surface's 137 MB and a Mac's 116 to 250 MB with a window open).
+fn budget(state: &str) -> u64 {
+    match state {
+        "background" => 150,
+        "launcher" => 200,
+        _ => 250,
+    }
+}
 
 /// How long after a window shows, goes or opens its memory is measured: once what it let go of is gone, and its JS,
 /// still a moment, has been collected (`renderer::js`'s `IDLE`, 250 ms).
@@ -71,6 +84,12 @@ fn measure() {
             }
         }
         views.client.report(json!({"name": "one.client.gpu.encoders", "value": encoders, "attributes": attributes}));
+        if let Some(process) = process
+            && mb(process.saturating_sub(surfaces)) > budget(state) as f64
+        {
+            let error = format!("the app holds {} MB {state} beside its windows' surfaces, over its {} MB budget", mb(process.saturating_sub(surfaces)), budget(state));
+            views.client.report(json!({"name": "one.client.memory.over", "error": error, "attributes": attributes}));
+        }
     });
 }
 
