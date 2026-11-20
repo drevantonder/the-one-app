@@ -20,7 +20,7 @@ defmodule OneCore.Tools do
   What each says of itself is `OneCore.Tools.Definitions`, and what runs it the module of what it does:
   `OneCore.Tools.Agents`, `OneCore.Tools.Apps`, `OneCore.Tools.Servers` and `OneCore.Tools.Builds`.
   """
-  alias OneCore.Call
+  alias OneCore.{Call, User}
   alias OneCore.Call.State
   alias OneCore.Apps.Calls
   alias __MODULE__.{Agents, Apps, Builds, Definitions, Servers}
@@ -61,7 +61,16 @@ defmodule OneCore.Tools do
         end
 
         about = %{"app" => nil, "tool" => name, "inputs" => inputs}
-        State.run(fn -> Calls.tool(tool, about, principal, [], &run(name, &1, principal, forward, request)) end)
+        whose = User.owner(elem(principal, 1)) || "network"
+
+        # A task is kept under whoever it's for (`OneCore.Tasks.made/1`), so a server that doesn't act for them passes
+        # a call that may be one on before it's accepted, as an app's call is passed on before it's checked
+        # (`OneCore.Apps.Calls`).
+        State.run(fn ->
+          if tool[:task_support] != nil and not OneCore.Servers.here?(whose),
+            do: OneCore.Apps.held([], fn -> forward.(whose) end),
+            else: Calls.tool(tool, about, principal, [], &run(name, &1, principal, forward, request))
+        end)
     end
   end
 
