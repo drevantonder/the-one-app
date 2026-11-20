@@ -267,7 +267,9 @@ defmodule IphoneSimulator do
 
     case inputs["offer"] do
       nil -> ice_servers
-      offer -> %{"answer" => on(call, inputs, :stream, [JSON.encode!(Map.put(ice_servers, "offer", offer))])}
+      offer ->
+        sender = Call.tool(call, "webrtc", "sender", %{})
+        %{"answer" => on(call, inputs, :stream, [JSON.encode!(Map.merge(ice_servers, %{"offer" => offer, "sender" => sender}))])}
     end
   end
 

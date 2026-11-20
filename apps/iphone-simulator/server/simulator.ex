@@ -6,7 +6,8 @@ defmodule IphoneSimulator.Simulator do
   a file's time, `used/<udid>`.
 
   Its screen and touches are idb's (fbidb.io): `idb_companion`, from idb's own release, pinned here and checked, and
-  its CLI, in this service's Python with aiortc, which a stream's sender runs with. Both are installed the first time.
+  its CLI, in this service's Python. Both are installed the first time. A stream is WebRTC's sender with the companion
+  for its source.
 
   A simulator is the Mac's own processes, run as the Mac's user: it shares the Mac's network, its 127.0.0.1 among it,
   and what the Mac's user may read. Nothing here can keep an app in it from either.
@@ -53,7 +54,6 @@ defmodule IphoneSimulator.Simulator do
   @companion_sha256 "44369a2df0b62e3a1764de61bd09280999c7e9b27ea8f20bff1ea3a9db0302a2"
   # idb's CLI isn't on PyPI past 1.7.7: it's the wheel on the same release.
   @cli_sha256 "ed8557a4c54ffee53006c1fe63f070cda567949312ab24be56faf987c5a3d04b"
-  @aiortc "1.16.0"
   @max_bytes 64 * 1024
 
   @impl OneCore.Service
@@ -74,7 +74,7 @@ defmodule IphoneSimulator.Simulator do
   def init(_) do
     match?({:unix, :darwin}, :os.type()) || raise "iOS Simulators run on Macs"
     match?(%{exit: 0}, cmd(["xcrun", "simctl", "help"], 30)) || raise "This Mac has no Xcode's simctl"
-    System.find_executable("uv") || raise "This Mac has no uv, which idb and a stream's sender are installed with"
+    System.find_executable("uv") || raise "This Mac has no uv, which idb is installed with"
     {:ok, %__MODULE__{}}
   end
 
@@ -377,21 +377,41 @@ defmodule IphoneSimulator.Simulator do
 
   @doc """
   Streams the simulator's screen as WebRTC video to the app whose SDP offer `request` has, as JSON, with the ICE
-  servers to use: `server/stream/stream.py` answers it and carries on by itself until the app goes. Gives the SDP
-  answer.
+  servers to use and WebRTC's sender for each kind of machine (`webrtc`'s `sender`): this Mac's, with idb's
+  companion for its source, answers it and carries on by itself until the app goes. Gives the SDP answer.
   """
   def stream(service, udid, request) do
     OneCore.Service.touch(service, udid)
+    request = JSON.decode!(request)
     [_, "--companion-path", companion] = idb(service)
     %{"points" => points} = describe(service, udid) || raise "It isn't running.\n\n`start` starts it."
-    file = Path.join(OneCore.Service.folder(service), "stream-#{System.unique_integer([:positive])}.json")
-    config = Map.merge(JSON.decode!(request), %{"companion" => companion, "udid" => udid, "points" => points, "log" => Path.join(OneCore.Service.folder(service), "stream.log")})
-    File.write!(file, JSON.encode!(config))
+    sender = sender(service, request["sender"])
+    folder = OneCore.Service.folder(service)
+    file = Path.join(folder, "stream-#{System.unique_integer([:positive])}.json")
+    source = %{"kind" => "idb", "companion" => companion, "udid" => udid, "points" => points}
+    File.write!(file, JSON.encode!(Map.merge(Map.take(request, ["offer", "iceServers"]), %{"log" => Path.join(folder, "stream.log"), "source" => source})))
 
-    case cmd([python(service), Path.join(OneCore.Service.folder(service, "server/stream"), "stream.py"), file], 30) do
+    case cmd([sender, file], 30) do
       %{exit: 0, stdout: output} -> output
       %{stderr: why} -> raise "Couldn't stream its screen: #{String.trim(why)}"
     end
+  end
+
+  # WebRTC's sender for this Mac, downloaded the first time, and checked.
+  defp sender(service, senders) do
+    [arch | _] = String.split(to_string(:erlang.system_info(:system_architecture)), "-")
+    %{"url" => url, "sha256" => sha256} = senders["macos-" <> arch] || raise "WebRTC has no sender for macos-#{arch}"
+    file = Path.join(OneCore.Service.folder(service), "stream-#{sha256}")
+
+    if not File.exists?(file) do
+      %{status: 200, body: body} = Req.get!(url, decode_body: false, retry: false, receive_timeout: 300_000)
+      if Base.encode16(:crypto.hash(:sha256, body), case: :lower) != sha256, do: raise("#{url} isn't the file expected")
+      File.write!(file <> ".part", body)
+      File.chmod!(file <> ".part", 0o755)
+      File.rename!(file <> ".part", file)
+    end
+
+    file
   end
 
   # Its screen as idb describes it: its size in pixels, and its points for each pixel.
@@ -446,16 +466,16 @@ defmodule IphoneSimulator.Simulator do
     [Path.join([OneCore.Service.folder(service), "venv", "bin", "idb"]), "--companion-path", started]
   end
 
-  # The Python idb's CLI and a stream's sender run with, made with uv the first time.
+  # The Python idb's CLI runs with, made with uv the first time.
   defp python(service) do
     venv = Path.join(OneCore.Service.folder(service), "venv")
-    marker = Path.join(venv, "idb-#{@idb}-aiortc-#{@aiortc}")
+    marker = Path.join(venv, "idb-#{@idb}")
     cli = "https://github.com/facebook/idb/releases/download/v#{@idb}/fb_idb-#{@idb}-py3-none-any.whl#sha256=#{@cli_sha256}"
 
     if not File.exists?(marker) do
       File.rm_rf!(venv)
       %{exit: 0} = cmd(["uv", "venv", "--quiet", "--python", "3.12", venv], 300)
-      %{exit: 0} = cmd(["uv", "pip", "install", "--quiet", "--python", Path.join(venv, "bin/python"), "fb-idb @ #{cli}", "aiortc==#{@aiortc}"], 300)
+      %{exit: 0} = cmd(["uv", "pip", "install", "--quiet", "--python", Path.join(venv, "bin/python"), "fb-idb @ #{cli}"], 300)
       File.touch!(marker)
     end
 
