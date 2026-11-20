@@ -2014,8 +2014,9 @@ impl Screen {
         }
         // Enter or Space on a button presses it alone, as every system's does: the page's `preventDefault` would come
         // too late to stop the press, so the page isn't told of it too (a launcher opening its chosen app behind it).
+        // A radio or a checkbox only Space, as a browser's input of that type: Enter there is a form's.
         let plain = !key.ctrl && !key.meta && !key.alt;
-        let presses = plain && matches!(key.key.as_str(), "Enter" | " ") && focused.is_some_and(|id| id == NOTICE_ACTION || (!self.editing.fields.contains_key(&id) && self.tree.nodes.get(&id).is_some_and(|node| node.listens("click"))));
+        let presses = plain && focused.is_some_and(|id| self.pressed_by(id, key) && (id == NOTICE_ACTION || (!self.editing.fields.contains_key(&id) && self.tree.nodes.get(&id).is_some_and(|node| node.listens("click")))));
         if !presses {
             self.tell(PAGE, "keydown", key.told());
         }
@@ -2035,10 +2036,16 @@ impl Screen {
         } else if self.editing.fields.contains_key(&id) {
             self.type_key(id, key);
         } else if presses && self.press_chrome(id) {
-        } else if matches!(key.key.as_str(), "Enter" | " ") && self.tree.nodes.get(&id).is_some_and(|node| node.listens("click")) {
+        } else if self.pressed_by(id, key) && self.tree.nodes.get(&id).is_some_and(|node| node.listens("click")) {
             self.click(id, None)
         }
         Some(id)
+    }
+
+    /// Whether `key` presses node `id`, as a browser's keys press what has the keyboard: Space, and Enter but on a radio
+    /// or a checkbox, where it's a form's.
+    fn pressed_by(&self, id: Id, key: &Key) -> bool {
+        key.key == " " || (key.key == "Enter" && !self.tree.nodes.get(&id).is_some_and(|node| matches!(node.str("role"), Some("radio" | "checkbox"))))
     }
 
     /// What a key does in input `id`: typing, moving, selecting, undoing and the clipboard, by the editing model
