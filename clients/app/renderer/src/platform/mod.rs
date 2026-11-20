@@ -2194,23 +2194,37 @@ impl Windows {
         self.turn();
     }
 
+    /// Where `x`, `y` of window `id`'s page is to its system: in the uppermost of its native windows there (each of a
+    /// panel's surfaces of glass is one), at that point of it, as each says the pointer's in its own.
+    fn part_at(&self, id: WindowId, x: f32, y: f32) -> (usize, crate::geometry::Point<f32>) {
+        let at = crate::geometry::point(x, y);
+        let parts = self.windows.get(&id).map(|window| &window.parts[..]).unwrap_or_default();
+        let part = parts.iter().rposition(|part| part.bounds.contains(&at)).unwrap_or(0);
+        let origin = parts.get(part).map_or(crate::geometry::point(0.0, 0.0), |part| part.bounds.origin);
+        (part, crate::geometry::point(x - origin.x, y - origin.y))
+    }
+
     /// Finger `finger` at `x`, `y` on window `id`, as a phone's screen says it.
     pub fn finger(&mut self, id: WindowId, finger: u64, x: f32, y: f32, phase: crate::view::touch::Phase) {
-        self.display.push(id, Input::Touch(finger, crate::geometry::point(x, y), phase));
+        let (part, at) = self.part_at(id, x, y);
+        self.display.push_to(id, part, Input::Touch(finger, at, phase));
     }
 
     /// The pointer moved to `x`, `y` on window `id`, as a mouse does.
     pub fn pointer_moved(&mut self, id: WindowId, x: f32, y: f32) {
-        self.display.push(id, Input::Moved(crate::geometry::point(x, y)));
+        let (part, at) = self.part_at(id, x, y);
+        self.display.push_to(id, part, Input::Moved(at));
     }
 
     /// A button went down at `x`, `y` on window `id`: 0 the main one, 1 the middle, 2 the secondary, as the DOM's.
     pub fn pointer_down(&mut self, id: WindowId, x: f32, y: f32, button: u8, shift: bool) {
-        self.display.push(id, Input::Down(crate::geometry::point(x, y), button, shift));
+        let (part, at) = self.part_at(id, x, y);
+        self.display.push_to(id, part, Input::Down(at, button, shift));
     }
 
     pub fn pointer_up(&mut self, id: WindowId, x: f32, y: f32, button: u8) {
-        self.display.push(id, Input::Up(crate::geometry::point(x, y), button));
+        let (part, at) = self.part_at(id, x, y);
+        self.display.push_to(id, part, Input::Up(at, button));
     }
 
     /// A wheel's or a trackpad's scroll at `at` on window `id`, by `by` in points, in a trackpad's phase where it says
@@ -2220,7 +2234,8 @@ impl Windows {
         let fingers = fingers.and_then(|named| crate::view::Phase::FINGERS.into_iter().find(|one| *one == named));
         let phase = (fingers.is_some() || momentum).then_some(crate::view::Phase { fingers, momentum });
         let notches = notches.map(|(x, y)| crate::geometry::point(x, y));
-        self.display.push(id, Input::Wheel(crate::geometry::point(at.0, at.1), crate::geometry::point(by.0, by.1), phase, notches));
+        let (part, at) = self.part_at(id, at.0, at.1);
+        self.display.push_to(id, part, Input::Wheel(at, crate::geometry::point(by.0, by.1), phase, notches));
     }
 
     /// A key on window `id`, as an inspector's `key` request says it.

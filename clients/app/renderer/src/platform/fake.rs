@@ -163,7 +163,12 @@ impl Display {
 
     /// Something happened to window `id`, which the loop hears on its next turn.
     pub(crate) fn push(&self, id: WindowId, input: Input) {
-        self.events.borrow_mut().push_back((id, 0, input));
+        self.push_to(id, 0, input);
+    }
+
+    /// Something happened to native window `part` of window `id` (a panel's surface of glass), where it is in that.
+    pub(crate) fn push_to(&self, id: WindowId, part: usize, input: Input) {
+        self.events.borrow_mut().push_back((id, part, input));
     }
 
     /// The display showed a frame, at `at`, which the loop hears on its next turn.
