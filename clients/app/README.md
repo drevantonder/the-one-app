@@ -22,9 +22,9 @@ network with no file there. It starts on that network's sign-in page.
 
 ## On a Mac
 
-A Mac's app is its bundle, which `cargo tauri build --bundles app` makes in `target/release/bundle/macos`. It goes in
-`/Applications`, and `~/.local/bin/one` is a link to the program in it, so the CLI, a server and `one update` all run
-and replace that one program.
+A Mac's app is its bundle, `macos/` with the program as `Contents/MacOS/one`, which `tooling/release` signs in it. It
+goes in `/Applications`, and `~/.local/bin/one` is a link to the program in it, so the CLI, a server and `one update`
+all run and replace that one program.
 
 ## On Windows
 

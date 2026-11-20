@@ -1176,11 +1176,59 @@ async fn fetched_program(one: &Value, program: &Path) -> Result<PathBuf> {
     unpacked.with_context(|| format!("The build {build} of one didn't unpack."))?;
     #[cfg(unix)]
     fs::set_permissions(&new, std::os::unix::fs::PermissionsExt::from_mode(0o755))?;
-    if build_of(&new).as_deref() != Some(build) {
+    #[cfg(target_os = "macos")]
+    let started = bundled(&new)?;
+    #[cfg(not(target_os = "macos"))]
+    let started = build_of(&new);
+    if started.as_deref() != Some(build) {
         fs::remove_file(&new)?;
         bail!("The build {build} of one doesn't start here.")
     }
     Ok(new)
+}
+
+/// A Mac's app bundle but its program: its Info.plist, icon and seal, the same for every build, which each build of
+/// `one` is signed in (`tooling/release`), so an update replaces the program alone, as before it was signed. macOS
+/// runs a program signed in a bundle only as that bundle's program, and kills it anywhere else in it, or in a bundle
+/// that isn't the one it was signed in. A change to these files goes out in a build signed without them first.
+#[cfg(target_os = "macos")]
+const BUNDLE: &[(&str, &[u8])] = &[
+    ("Info.plist", include_bytes!("../../app/macos/Contents/Info.plist")),
+    ("Resources/The One App.icns", include_bytes!("../../app/macos/Contents/Resources/The One App.icns")),
+    ("_CodeSignature/CodeResources", include_bytes!("../../app/macos/Contents/_CodeSignature/CodeResources")),
+];
+
+/// The build the program `new` says it is (`build_of`), downloaded beside a Mac's: where that's in an app bundle,
+/// it's run as the program of a bundle of its own inside it (`Contents/Updates/<pid>.app`), and `BUNDLE` is put in
+/// place around both, so it starts there, and as the bundle's program once it's put in place.
+#[cfg(target_os = "macos")]
+fn bundled(new: &Path) -> Result<Option<String>> {
+    let Some(contents) = new.parent().filter(|folder| folder.ends_with("Contents/MacOS")).and_then(Path::parent) else {
+        return Ok(build_of(new));
+    };
+    let updates = contents.join("Updates");
+    let checking = updates.join(format!("{}.app/Contents", std::process::id()));
+    for folder in [contents, checking.as_path()] {
+        for (file, bytes) in BUNDLE {
+            let path = folder.join(file);
+            if fs::read(&path).is_ok_and(|was| was == *bytes) {
+                continue;
+            }
+            fs::create_dir_all(path.parent().context("a file is in a folder")?)?;
+            let writing = path.with_extension(format!("{}.new", std::process::id()));
+            fs::write(&writing, bytes)?;
+            fs::rename(&writing, &path)?;
+        }
+    }
+    let program = checking.join("MacOS/one");
+    fs::create_dir_all(checking.join("MacOS"))?;
+    fs::rename(new, &program)?;
+    let build = build_of(&program);
+    fs::rename(&program, new)?;
+    fs::remove_dir_all(checking.parent().context("a bundle is in a folder")?)?;
+    // Another's may be checking beside it, as the app and the server take a build at once.
+    let _ = fs::remove_dir(&updates);
+    Ok(build)
 }
 
 /// The build the program `program` says it is (`one --version`), if it starts.

@@ -226,9 +226,15 @@ mod imp {
             }
             false => "",
         };
+        // The app it's of, by its bundle's identifier, which System Settings' Login Items lists it under, by that app's
+        // name and icon, where it named its program's signer.
+        let bundle = match program.command.first().and_then(|program| bundle_identifier(Path::new(program))) {
+            Some(id) => format!("<key>AssociatedBundleIdentifiers</key><array><string>{}</string></array>", text(&id)),
+            None => String::new(),
+        };
         let plist = format!(
             "<?xml version=\"1.0\" encoding=\"UTF-8\"?>\n<plist version=\"1.0\"><dict>\
-             <key>Label</key><string>{name}</string>\
+             <key>Label</key><string>{name}</string>{bundle}\
              <key>ProgramArguments</key><array>{}</array>\
              <key>EnvironmentVariables</key><dict>{env}</dict>{desktop}\
              <key>RunAtLoad</key><true/><key>KeepAlive</key><dict><key>SuccessfulExit</key><false/></dict>\
@@ -239,6 +245,15 @@ mod imp {
             program.stop_within.as_secs(),
         );
         written(&agent(name)?, plist.as_bytes())
+    }
+
+    /// The identifier of the app bundle the program `program` is in, through any link to it, as `~/.local/bin/one`
+    /// is to the One App's.
+    fn bundle_identifier(program: &Path) -> Option<String> {
+        let program = program.canonicalize().ok()?;
+        let contents = program.parent().filter(|folder| folder.ends_with("Contents/MacOS"))?.parent()?;
+        let info = plist::Value::from_file(contents.join("Info.plist")).ok()?;
+        Some(info.as_dictionary()?.get("CFBundleIdentifier")?.as_string()?.to_owned())
     }
 
     pub fn start(_program: &Program, name: &str, again: bool) -> Result<()> {

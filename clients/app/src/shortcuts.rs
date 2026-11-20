@@ -376,8 +376,9 @@ mod device {
 }
 
 /// A Mac's are app bundles in `~/Applications/<this app's name>/`, each with the app's name and icon, whose program is
-/// a copy of this one (a clone, which takes no room on APFS) told which app it is (`LSEnvironment`'s `ONE_APP`), as the
-/// program its window runs (`program`): macOS knows a process by its bundle, so it's the copy that gives an app its own
+/// a clone of this one signed on its own (`unbundled`), which takes no room on APFS, told which app it is
+/// (`LSEnvironment`'s `ONE_APP`), as the program its window runs (`program`): macOS knows a process by its bundle, so
+/// it's the copy that gives an app its own
 /// Dock icon, Cmd-Tab entry and menu bar. A bundle already as it would be made is left as it is, and one whose program
 /// isn't this build's is made again, as this one is updated.
 #[cfg(target_os = "macos")]
@@ -399,13 +400,14 @@ mod device {
         }
         std::fs::create_dir_all(&folder)?;
         let program = cli::serving::program()?;
+        let copy = unbundled(&program)?;
         let mut made = Vec::new();
         for shortcut in shortcuts {
             let bundle = bundle(&folder, &shortcut.name);
             if made.contains(&bundle) {
                 continue;
             }
-            match make(&bundle, shortcut, &program) {
+            match make(&bundle, shortcut, &program, &copy) {
                 Ok(()) => made.push(bundle),
                 Err(error) => eprintln!("{} isn't one of this Mac's apps: {error:#}", shortcut.entrypoint),
             }
@@ -434,7 +436,25 @@ mod device {
         Ok(home.join("Applications").join(crate::NAME))
     }
 
-    fn make(bundle: &Path, shortcut: &Shortcut, program: &Path) -> anyhow::Result<()> {
+    /// This program signed on its own, ad hoc, which each app's bundle has a copy of: it's signed in the One App's
+    /// bundle (`cli::serving::bundled`), and macOS kills it in any other, but signed on its own it runs in any. It's
+    /// one copy for every bundle's clone of it, where signing each for its own bundle took a whole program's room.
+    fn unbundled(program: &Path) -> anyhow::Result<PathBuf> {
+        let folder = ::client::home()?.join("shortcuts");
+        let copy = folder.join(format!("one-{}", ::client::BUILD));
+        if !copy.exists() {
+            let _ = std::fs::remove_dir_all(&folder);
+            std::fs::create_dir_all(&folder)?;
+            let signing = folder.join("one.signing");
+            std::fs::copy(program, &signing)?;
+            let signed = std::process::Command::new("/usr/bin/codesign").args(["--force", "--sign", "-"]).arg(&signing).output()?;
+            anyhow::ensure!(signed.status.success(), "codesign didn't sign it: {}", String::from_utf8_lossy(&signed.stderr).trim());
+            std::fs::rename(&signing, &copy)?;
+        }
+        Ok(copy)
+    }
+
+    fn make(bundle: &Path, shortcut: &Shortcut, program: &Path, copy: &Path) -> anyhow::Result<()> {
         let text = |text: &str| text.replace('&', "&amp;").replace('<', "&lt;").replace('>', "&gt;");
         let plist = format!(
             r#"<?xml version="1.0" encoding="UTF-8"?>
@@ -475,7 +495,7 @@ mod device {
         std::fs::create_dir_all(making.join("Contents/Resources"))?;
         // A clone: APFS shares its blocks until either changes, and this program is replaced as it's updated, never
         // changed, so its bundles are made again then (their `CFBundleVersion`).
-        std::fs::copy(program, making.join("Contents/MacOS/one"))?;
+        std::fs::copy(copy, making.join("Contents/MacOS/one"))?;
         std::fs::write(making.join("Contents/Resources/AppIcon.icns"), icon)?;
         std::fs::write(making.join("Contents/Info.plist"), plist)?;
         let _ = std::fs::remove_dir_all(bundle);
