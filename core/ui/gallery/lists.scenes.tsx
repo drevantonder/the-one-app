@@ -108,6 +108,33 @@ export default {
   "Lists/A long list": () => (
     <List each={Array.from({ length: 10000 }, (_, at) => `Note ${at + 1}`)}>{(note) => <Row heading={note()} text="19 Nov" />}</List>
   ),
+  "Lists/A long list by the keyboard": {
+    size: [750, 475],
+    render: () => (
+      <List each={Array.from({ length: 10000 }, (_, at) => `Note ${at + 1}`)}>{(note) => <Row heading={note()} text="19 Nov" onPress={() => {}} />}</List>
+    ),
+    checks: {
+      // Only the rows near the window are drawn, but End goes to the last of the 10,000 and Home to the first, which
+      // scroll into view, as NSTableView's and Windows' ListView's do; so do the arrows past the rows that show.
+      "Home and End reach the real ends": [
+        { key: "Tab" },
+        { expect: { focused: "Note 1 19 Nov" } },
+        { key: "End" },
+        { expect: { focused: "Note 10000 19 Nov" } },
+        { expect: { shown: "Note 10000 19 Nov" } },
+        { key: "ArrowUp" },
+        { expect: { focused: "Note 9999 19 Nov" } },
+        { expect: { shown: "Note 9999 19 Nov" } },
+        { key: "Home" },
+        { expect: { focused: "Note 1 19 Nov" } },
+        { expect: { shown: "Note 1 19 Nov" } },
+        ...Array.from({ length: 25 }, () => ({ key: "ArrowDown" })),
+        // Each key waits for the page, which a seed holds busy up to 120 ms.
+        { expect: { focused: "Note 26 19 Nov" }, within: 8000 },
+        { expect: { shown: "Note 26 19 Nov" } },
+      ],
+    },
+  },
   "Lists/Rows with headings of their own, by the keyboard": {
     size: [750, 475],
     render: () => (

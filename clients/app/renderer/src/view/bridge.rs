@@ -277,6 +277,10 @@ impl Screen {
             let was = now.y;
             now.y = (now.y + by).clamp(0.0, most);
             moved += now.y - was;
+            let scrolled = *now;
+            if scrolled.y != was && self.tree.nodes.get(&container).is_some_and(|node| node.listens("scroll")) {
+                self.tell(container, "scroll", json!({"scrollTop": scrolled.y, "scrollLeft": scrolled.x}));
+            }
         }
         moved != 0.0
     }

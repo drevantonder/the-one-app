@@ -2,7 +2,7 @@
 // (renderer.ts's `Props`), which Solid's universal renderer tells the host as mutations (renderer.native.ts). The UI
 // library's components import them as `#primitives`, which is these in the native build and the DOM's (primitives.tsx)
 // in the DOM's, so each component is the same code on both.
-import { createContext, createMemo, createRoot, createSignal, getOwner, merge, omit, onCleanup, onSettled, Repeat, runWithOwner, Show, untrack, useContext, type Element } from "solid-js"
+import { createContext, createEffect, createMemo, createRoot, createSignal, getOwner, merge, omit, onCleanup, onSettled, Repeat, runWithOwner, Show, untrack, useContext, type Element } from "solid-js"
 import { tellDrawn } from "../bridge.native.ts"
 import { createElement, detach, insert, insertNode, render as draw, root, spread, type Node } from "./renderer.native.ts"
 import { layer } from "./layer.ts"
@@ -160,7 +160,7 @@ type Cell = { at: () => number; place: (index: number) => void; box: Element; di
  * theirs: its item changes, so a row isn't made again, only what it says. A host that doesn't draw one draws every
  * row in a box. */
 export const VirtualizedList: typeof Page.VirtualizedList = (props) => {
-  const rest = () => omit(props, "data", "renderItem", "estimatedItemSize")
+  const rest = () => omit(props, "data", "renderItem", "estimatedItemSize", "keep")
   /** What `renderItem` is told of row `index`, as it changes. */
   const info = (index: () => number) => ({
     get item() {
@@ -211,8 +211,12 @@ export const VirtualizedList: typeof Page.VirtualizedList = (props) => {
     const all = cells()
     const held = new Set(all.map((one) => one.at()))
     const away = (index: number) => Math.max(0, wanted.shownFirst - index, index - wanted.shownLast + 1)
-    const missing = Array.from({ length: last - first }, (_, at) => first + at).filter((index) => !held.has(index)).sort((a, b) => away(a) - away(b))
-    const free = all.filter((one) => one.at() < first || one.at() >= last)
+    // A row kept (`keep`) is drawn wherever the host places it, as a page reusing a row for another does.
+    const kept = props.keep !== undefined && props.keep < count ? props.keep : undefined
+    const inRange = (index: number) => index >= first && index < last
+    const needed = (index: number) => inRange(index) || index === kept
+    const missing = [...Array.from({ length: last - first }, (_, at) => first + at), ...(kept === undefined || inRange(kept) ? [] : [kept])].filter((index) => !held.has(index)).sort((a, b) => away(a) - away(b))
+    const free = all.filter((one) => !needed(one.at()))
     const made: Cell[] = []
     let filled = 0
     for (const index of missing) {
@@ -231,6 +235,7 @@ export const VirtualizedList: typeof Page.VirtualizedList = (props) => {
     if (missing.length > filled) soon()
   }
   fill(FIRST_ROWS, FIRST_ROWS)
+  createEffect(() => props.keep, (keep) => void (keep !== undefined && soon()))
   const node = createElement("list")
   spread(
     node,

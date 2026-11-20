@@ -226,6 +226,8 @@ export function List<T>(props: { listbox?: Listbox; label?: string; each?: reado
   const rows = each ? undefined : children(() => <Keys value={keys}><InListbox value={!!props.listbox}>{props.children as JSX.Element}</InListbox></Keys>)
   const values = (): readonly unknown[] => (each ? (props.each ?? []) : rows!.toArray())
   const { slots, laid } = createSlots(values, (value) => (each && props.keyed ? props.keyed(value as T) : value))
+  // Home and End reach a long list's real ends, which its rows are placed by their index in.
+  if (each && keys) keys.keys.sized(keys.list, () => slots().length)
   createEffect(() => slots().filter((one) => one.state() !== "going").length, (count) => void (props.listbox && insides.get(props.listbox)!.rows(count)))
   /// A row, held as it opens up or closes up, and as a listbox's option, by where it is in the list. In a long list a
   /// row is reused for another as it goes out of sight (`VirtualizedList`), so what it shows is its slot as that changes
@@ -269,7 +271,7 @@ export function List<T>(props: { listbox?: Listbox; label?: string; each?: reado
         >
           <Keys value={keys}>
             <InListbox value={!!props.listbox}>
-              <VirtualizedList style={[look.rows, flat() && look.flatRows]} data={slots()} renderItem={(row) => slotted(() => row.item, () => row.index)} />
+              <VirtualizedList style={[look.rows, flat() && look.flatRows]} data={slots()} keep={keys?.keys.keeping(keys.list)} renderItem={(row) => slotted(() => row.item, () => row.index)} />
             </InListbox>
           </Keys>
         </Show>

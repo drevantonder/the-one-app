@@ -31,10 +31,45 @@ export function createList(props: { opens: () => boolean }) {
   const roving = createRovingFocus({ items: () => ordered().map((row) => ({ key: row.key, preferred: row.current() })) })
   const typeahead = createTypeahead()
   const moved = (key: string) => props.opens() && ordered().find((row) => row.key === key)?.open()
+  // How many rows each long list has, whose rows are mostly not drawn, and the row of one the keyboard is being sent
+  // to, which the list keeps drawn (`keep`) and which takes the keyboard when it's there.
+  const lengths = new Map<object, () => number>()
+  const [wanted, setWanted] = createSignal<{ list: object; index: number }>()
   return {
+    /** A long list's row count, so Home and End reach its real ends. */
+    sized(list: object, count: () => number) {
+      lengths.set(list, count)
+      onCleanup(() => lengths.delete(list))
+    },
+    /** The row of `list` the keyboard is being sent to, which isn't drawn yet. */
+    keeping: (list: object) => (wanted()?.list === list ? wanted()!.index : undefined),
     keydown(event: Keyed) {
       // Only where a row has it: a field or a switch in one keeps its own keys.
       if (roving.focused() === undefined) return
+      setWanted(undefined)
+      // Home and End go to the first and last row of the lists, which a long list may not have drawn: its list keeps
+      // that row, and it takes the keyboard where it's drawn.
+      if ((event.key === "Home" || event.key === "End") && !event.altKey && !event.ctrlKey && !event.metaKey) {
+        const rows = ordered()
+        const edge = event.key === "Home" ? rows[0] : rows.at(-1)
+        const count = edge && lengths.get(edge.list)
+        if (edge && count) {
+          const index = event.key === "Home" ? 0 : count() - 1
+          const drawn = rows.find((row) => row.list === edge.list && row.at?.() === index)
+          event.preventDefault()
+          typeahead.reset()
+          if (drawn) return (roving.focus(drawn.key), moved(drawn.key))
+          return setWanted({ list: edge.list, index })
+        }
+      }
+      // The next row of a long list is the one after it by its index, drawn or not, where the rows drawn have a gap.
+      const step = event.key === "ArrowDown" ? 1 : event.key === "ArrowUp" ? -1 : 0
+      const here = step ? ordered().find((row) => row.key === roving.focused()) : undefined
+      const length = here && lengths.get(here.list)
+      if (here?.at && length && !event.altKey && !event.ctrlKey && !event.metaKey) {
+        const index = here.at() + step
+        if (index >= 0 && index < length() && !ordered().some((row) => row.list === here.list && row.at?.() === index)) return (event.preventDefault(), typeahead.reset(), setWanted({ list: here.list, index }))
+      }
       const to = roving.keydown(event)
       if (to !== undefined) return (typeahead.reset(), moved(to))
       if (!isTypeaheadKey(event)) return
@@ -51,7 +86,17 @@ export function createList(props: { opens: () => boolean }) {
       setRows((now) => [...now, entry])
       onSettled(() => void setDrawn((times) => times + 1))
       onCleanup(() => setRows((now) => now.filter((one) => one !== entry)))
-      return roving.item(entry.key)
+      const item = roving.item(entry.key)
+      return {
+        get tabIndex() {
+          return item.tabIndex
+        },
+        get autoFocus() {
+          return item.autoFocus || (wanted()?.list === row.list && row.at?.() === wanted()?.index)
+        },
+        onFocus: () => (setWanted(undefined), item.onFocus()),
+        onBlur: item.onBlur,
+      }
     },
   }
 }

@@ -436,6 +436,9 @@ export interface VirtualizedListProps<T> extends Semantics {
   renderItem: (info: { item: T; index: number }) => JSX.Element
   /** How tall a row is taken to be until one's drawn, in CSS pixels, as FlashList's. */
   estimatedItemSize?: number
+  /** A row to keep drawn wherever the list is scrolled, one the keyboard is being sent to (Home, End): here the page
+   * scrolls to it, which draws it. */
+  keep?: number
 }
 
 /** How many rows a list draws before it knows where it is: a window's. */
@@ -489,8 +492,18 @@ export function VirtualizedList<T>(props: VirtualizedListProps<T>) {
   addEventListener("scroll", ask, { capture: true, passive: true })
   addEventListener("resize", ask)
   onSettled(ask)
+  // A row kept is scrolled to, as far as its list's scroller goes, which draws it.
+  createEffect(
+    () => props.keep,
+    (keep) => {
+      if (keep === undefined || !box) return
+      const scroller = box.closest("[data-scrolls]") ?? document.scrollingElement
+      const top = scroller === document.scrollingElement ? 0 : scroller!.getBoundingClientRect().top
+      scroller?.scrollBy({ top: box.getBoundingClientRect().top + offsets()[Math.min(keep, props.data.length)] - top, behavior: "instant" })
+    },
+  )
   onCleanup(() => (sized.disconnect(), removeEventListener("scroll", ask, { capture: true }), removeEventListener("resize", ask)))
-  const own = omit(props, "style", "data", "renderItem", "estimatedItemSize")
+  const own = omit(props, "style", "data", "renderItem", "estimatedItemSize", "keep")
   return (
     <div {...own} ref={(element: HTMLDivElement) => (box = element)} {...drawn("ui-view", props.style)}>
       <div style={{ height: `${shown().top}px`, "flex-shrink": 0 }} />

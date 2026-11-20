@@ -155,6 +155,9 @@ export type VirtualizedListProps<T> = Semantics & {
   data: readonly T[]
   renderItem: (info: { item: T; index: number }) => Element
   estimatedItemSize?: number
+  /** A row to keep drawn wherever the list is scrolled, one the keyboard is being sent to (Home, End), which scrolls
+   * into view as it takes it. */
+  keep?: number
 }
 export declare function VirtualizedList<T>(props: VirtualizedListProps<T>): Element
 

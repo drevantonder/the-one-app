@@ -931,6 +931,7 @@ impl Screen {
             if let Some(id) = wants.into_iter().filter(|id| !self.focus.autofocused.contains(id)).max() {
                 self.focus.autofocused.insert(id);
                 self.focus(Some(id));
+                self.focus.reveal = Some(id);
             }
             self.sync_fields();
             self.sync_frames();
@@ -1393,6 +1394,14 @@ impl Screen {
     /// What's told of where things landed: what a still pointer is over now, as a browser finds again after layout;
     /// where each node listening for `layout` is; and whether each listening for `intersection` is near the window.
     fn tell_placed(&mut self, intersections: Vec<(Id, bool)>) {
+        // What took the keyboard as its page said so (`autofocus`) is scrolled into view once it's drawn, as a browser's
+        // `focus()` does it, which is how the arrow keys on a list's rows go on past what shows.
+        if let Some(id) = self.focus.reveal.take() {
+            if self.reveal(id) {
+                self.changed();
+                self.again = true;
+            }
+        }
         self.ask_lists(self.painted.0.height);
         // What moved under a pointer that's still is what it's over now, as a browser finds again after layout.
         if let Some(at) = self.pointer.filter(|_| !self.touch) {
@@ -2360,6 +2369,8 @@ struct Focus {
     blurred: Option<Id>,
     modals: Vec<(Id, Option<Id>)>,
     autofocused: HashSet<Id>,
+    /// What took the keyboard as it said `autofocus`, to be scrolled into view once it's drawn.
+    reveal: Option<Id>,
     tab_order: Vec<Id>,
 }
 
