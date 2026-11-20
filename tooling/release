@@ -91,10 +91,13 @@ publish() {
       // A runtime and a client are told by what they were built from, which the network keeps with them.
       const from = Bun.file(path.replace(/(\.tar\.gz|\.gz|\.exe)$/, ".inputs"));
       const inputs = (await from.exists()) ? { inputs: (await from.text()).trim() } : {};
+      // And a `one`, by what a server runs of it (`serve_inputs`).
+      const serving = Bun.file(path.replace(/(\.tar\.gz|\.gz|\.exe)$/, ".serves"));
+      const serves = (await serving.exists()) ? { serves: (await serving.text()).trim() } : {};
       const name = kind ? `${what}/${kind}` : what;
       const sha256 = new Bun.CryptoHasher("sha256").update(bytes).digest("hex");
       const signature = sign(null, Buffer.from(`${name} ${BUILD} ${sha256}`), key).toString("base64");
-      return { path, name, build: BUILD, ...inputs, sha256, signature, size: bytes.length };
+      return { path, name, build: BUILD, ...inputs, ...serves, sha256, signature, size: bytes.length };
     }));
     const publish = () => {
       const published = Bun.spawnSync([ONE, "publish", "--builds", JSON.stringify(builds.map(({ path, ...build }) => build))], { stderr: "inherit" });
@@ -209,6 +212,13 @@ client_inputs() {
   { echo "$key" && tooling/input-hash clients/app "$(triple "$1")" && sha256sum core/protocol.json &&
     git ls-files -z core/ui/src core/ui/build.js core/ui/tables.ts core/ui/package.json core/ui/bun.lock | xargs -0 sha256sum; } |
     sha256sum | cut -d' ' -f1
+}
+
+# What a server runs of a client, `one serve run`: the crate it's in (`clients/cli`) and what that's built with, and the
+# protocols it speaks. Kept with a `one` as its `serves`, so the network's servers restart for a new `one` only where
+# this changed (`OneCore.Builds`), not for each change to the app around it.
+serve_inputs() {
+  { echo "$key" && tooling/input-hash clients/cli "$(triple "$1")" && sha256sum core/protocol.json; } | sha256sum | cut -d' ' -f1
 }
 
 # Whether a client is the network's latest already: built from what it would be now.
@@ -389,7 +399,8 @@ client() {
         makensis -V2 -DVERSION="${build%%+*}" -DPROGRAM="$exe" -DOUTFILE="$setup" -DCOPYRIGHT="$(grep -m1 '^Copyright' LICENSE)" clients/app/installer.nsi &&
         signed "$setup" && client_inputs "${name#*/}" >"${setup%.exe}.inputs"
     }; } &&
-    gzip -9 -c "$exe" >"$out/$file.gz" && rm -r "$out/$file.d" && client_inputs "${name#*/}" >"$out/$file.inputs"
+    gzip -9 -c "$exe" >"$out/$file.gz" && rm -r "$out/$file.d" && client_inputs "${name#*/}" >"$out/$file.inputs" &&
+    serve_inputs "${name#*/}" >"$out/$file.serves"
 }
 clients=()
 for name in "${mine[@]}"; do
@@ -399,7 +410,8 @@ for name in "${mine[@]}"; do
       tooling/on-mac mac-client.yml "$file.gz" "$out" \
         'export RUSTUP_TOOLCHAIN=$RUST && cargo build --release -p app && gzip -9 -c target/release/one >'"$file.gz" \
         -f rust="$(rustc -V | cut -d' ' -f2)" &&
-      client_inputs "${name#*/}" >"$out/$file.inputs" || { echo "$name wasn't built." >&2 && exit 1; }) &
+      client_inputs "${name#*/}" >"$out/$file.inputs" && serve_inputs "${name#*/}" >"$out/$file.serves" ||
+      { echo "$name wasn't built." >&2 && exit 1; }) &
     clients+=($!)
   elif [[ $name == one/* || $name == one-cli/* ]]; then
     client "$name" &

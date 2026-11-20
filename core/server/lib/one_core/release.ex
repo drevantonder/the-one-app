@@ -240,9 +240,13 @@ defmodule OneCore.Release do
     {latest["server-code"] || update["build"], latest[server["program_name"]]}
   end
 
-  @doc "Whether a server on the pair `server`, its `build` and `program`, is on `target`, any `one` where either doesn't say."
+  @doc """
+  Whether a server on the pair `server`, its `build` and `program`, is on `target`, any `one` where either doesn't say,
+  and any `one` as new as the target's or newer: the target is the `one` that first ran a server as it's run now
+  (`OneCore.Builds`), and one taken since with a server build runs it the same.
+  """
   def on?({build, program}, server),
-    do: server["build"] == build and (program == nil or server["program"] in [nil, program])
+    do: server["build"] == build and (program == nil or server["program"] == nil or Builds.count(server["program"]) >= Builds.count(program))
 
   # How long Update Now waits for the network's update to finish, in milliseconds: a restart is seconds, and each server
   # restarts in turn.

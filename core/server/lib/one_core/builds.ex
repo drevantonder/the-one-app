@@ -137,9 +137,16 @@ defmodule OneCore.Builds do
 
   # The network's updater is told the latest of what servers take, the server build and each `one`, and takes the
   # network's servers to it (`core/edge/updater/updater.ts`): `published`, the newest of them, and the `latest` of
-  # each name, so a new `one` alone reaches every server it runs.
+  # each name, so a new `one` alone reaches every server it runs. A `one` is told by the build that first ran a server
+  # as it runs it (`serving`): one that changed only the app around `one serve run` restarts no server, which takes
+  # it with the next server build, and any `one` that new or newer is on it.
   defp published(latest) do
-    taken = for {name, %{"build" => build}} <- latest, taken?(String.split(name, "/")), into: %{}, do: {name, build}
+    taken =
+      for {name, %{"build" => build} = latest} <- latest,
+          taken?(String.split(name, "/")),
+          into: %{},
+          do: {name, latest["serving"] || build}
+
     newest = taken |> Map.values() |> Enum.max_by(&count/1, fn -> nil end)
 
     case newest && Servers.network(%{published: newest, latest: taken}) do
@@ -175,7 +182,7 @@ defmodule OneCore.Builds do
         :absent -> {%{}, nil}
       end
 
-    now = Map.merge(was, Map.new(builds, &{&1["name"], Map.take(&1, ~w(build sha256 size inputs signature))}))
+    now = Map.merge(was, Map.new(builds, &{&1["name"], kept(&1, was[&1["name"]])}))
 
     written =
       if tag, do: Bucket.replace(@latest, JSON.encode!(now), tag), else: Bucket.write(@latest, JSON.encode!(now))
@@ -186,6 +193,18 @@ defmodule OneCore.Builds do
       now
     else
       latest(builds)
+    end
+  end
+
+  # A build as it's kept, and for a `one`, `serving`: the build that first had what a server runs of it (`serves`,
+  # `tooling/release`), which a later one with the same `serves` keeps.
+  defp kept(build, was) do
+    kept = Map.take(build, ~w(build sha256 size inputs serves signature))
+
+    cond do
+      build["serves"] == nil -> kept
+      was && was["serves"] == build["serves"] -> Map.put(kept, "serving", was["serving"] || was["build"])
+      true -> Map.put(kept, "serving", build["build"])
     end
   end
 

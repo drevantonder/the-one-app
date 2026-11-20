@@ -333,11 +333,13 @@ function said(state: State, status: ReturnType<NetworkUpdater["status"]>) {
 
 /**
  * Whether a server that says `said` is on the pair the network takes it to (`OneCore.Release.target/2`): the latest
- * server build and the latest of the `one` that runs it, any `one` where it, or what's published, doesn't say.
+ * server build and the `one` that runs it, any `one` where it, or what's published, doesn't say. That `one` is the
+ * build that first ran a server as it's run now (`OneCore.Builds`), so one as new or newer is on it: a `one` that
+ * changed only the app around `one serve run` restarts no server.
  */
 function on(state: State, said: Reported) {
   const program = said.program_name ? state.latest?.[said.program_name] : undefined;
-  return said.version === (state.latest?.["server-code"] ?? state.build) && (!program || !said.program || said.program === program);
+  return said.version === (state.latest?.["server-code"] ?? state.build) && (!program || !said.program || !newer(program, said.program));
 }
 
 /** Whether the build `a` is newer than `b`: `<version>+<count>.<commit>`, by its commit's count. */
