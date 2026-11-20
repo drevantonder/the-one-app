@@ -11,7 +11,7 @@ defmodule Telemetry.Alerts do
   | `error` | A kind of error logged that wasn't in the last 14 days: its first line, numbers and ids aside. A fault, a crash or a client's exception, not a tool refusing (a `RuntimeError`) | It isn't logged for 10 min, or it stops being new an hour after it was first |
   | `failing` | Half or more of an app's tool calls failed, of 10 or more in 10 min | 10 min with fewer |
   | `unanswered` | An app didn't answer, in 2 or more of the last 5 minutes: a hook it didn't answer in time (`one.hook.timeouts`), or its database's server kept a call waiting without running it (`one.database.lease.wait`, `not_answered`) | 5 min without |
-| `deploy` | An app's deploy took over its 500 ms budget to show in a window, from when it began (`one.client.deploy.window`), in 2 or more of the last 10 minutes: a server release building every app again is one | 10 min without |
+  | `deploy` | An app's deploy took over its 500 ms budget to show in a window, from when it began (`one.client.deploy.window`), in 2 or more of the last 10 minutes: a server release building every app again is one | 10 min without |
 
   Each alert is a row of Telemetry's database, one per kind and key (the server, the build, the error's kind, the
   app), moved only by `evaluate/1`, the clock's job every minute: it's `firing` while its symptom is seen, and
