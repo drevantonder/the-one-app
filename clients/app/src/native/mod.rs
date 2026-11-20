@@ -131,24 +131,24 @@ fn listed_page<'a>(listed: &'a Value, entrypoint: &str) -> Option<&'a Value> {
     })
 }
 
-/// Whether `entrypoint`'s page is needs a runtime version this program has, its tables too, and if it is, what
+/// Whether `entrypoint`'s page needs a runtime version this program has, its tables too, and if it does, what
 /// it's drawn with.
-async fn probe(entrypoint: &str, subject: Option<&str>, framed: bool) -> anyhow::Result<Option<Page>> {
-    match listing(entrypoint, subject, framed).await? {
+async fn probe(entrypoint: &str, subject: Option<&str>) -> anyhow::Result<Option<Page>> {
+    match listing(entrypoint, subject).await? {
         Some(resource) => read(entrypoint, subject, &resource).await,
         None => Ok(None),
     }
 }
 
 /// `entrypoint`'s page as its app lists it for `subject`, where it needs a runtime version this program has.
-async fn listing(entrypoint: &str, subject: Option<&str>, framed: bool) -> anyhow::Result<Option<Value>> {
+async fn listing(entrypoint: &str, subject: Option<&str>) -> anyhow::Result<Option<Value>> {
     let listed = crate::hosts::command("native", "apps", json!({"subject": subject})).await.map_err(|error| anyhow::anyhow!(error))?;
     Opening::step(&format!("{}|{entrypoint}", subject.unwrap_or_default()), "listed");
     let Some(resource) = listed_page(&listed, entrypoint) else { return Ok(None) };
-    // A page in a frame that names no runtime version (a component's, which no entrypoint names) is tried: one that
-    // isn't drawn natively doesn't start, and the page the frame's in opens in a web view instead.
+    // A page that names no runtime version (a component's or a sign-in page's, which no entrypoint names) is tried, as
+    // every page is drawn natively: one this program can't draw says so as it starts.
     let needed = resource["_meta"]["runtimeVersion"].as_u64();
-    Ok(needed.map_or(framed, |needed| needed <= u64::from(renderer::RUNTIME_VERSION)).then(|| resource.clone()))
+    Ok(needed.is_none_or(|needed| needed <= u64::from(renderer::RUNTIME_VERSION)).then(|| resource.clone()))
 }
 
 /// What `entrypoint`'s page, listed as `resource`, is drawn with, where its tables need a runtime version this program
@@ -309,7 +309,7 @@ async fn shows(kind: &Kind, entrypoint: &str, subject: Option<&str>) -> anyhow::
         Kind::Unopened(unopened) | Kind::Launcher(_, Some(Instead::Unopened(unopened))) => Some((Some(client_page(UNOPENED, &unopened.name).await?), None)),
         Kind::Launcher(_, Some(Instead::SignIn)) => Some((Some(client_page(SIGN_IN, NAME).await?), None)),
         Kind::Launcher(_, Some(Instead::Behind)) => Some((Some(client_page(UPDATE, NAME).await?), None)),
-        Kind::App(_) | Kind::Launcher(_, None) => listing(entrypoint, subject, false).await?.map(|resource| (None, Some(resource))),
+        Kind::App(_) | Kind::Launcher(_, None) => listing(entrypoint, subject).await?.map(|resource| (None, Some(resource))),
     })
 }
 
@@ -589,7 +589,7 @@ fn frames(window: Arc<OnceLock<WindowId>>) -> renderer::MakeFrame {
 async fn reloaded(window: Arc<OnceLock<WindowId>>, entrypoint: String, subject: Option<String>, link: String, to: UnboundedSender<Value>, asked: Arc<Mutex<HashMap<String, Asked>>>) -> anyhow::Result<bool> {
     let view = format!("{}|{entrypoint}", subject.as_deref().unwrap_or_default());
     Opening::begin(&view, Instant::now());
-    let Some(Page { page, module, trusted, tables, .. }) = probe(&entrypoint, subject.as_deref(), false).await? else {
+    let Some(Page { page, module, trusted, tables, .. }) = probe(&entrypoint, subject.as_deref()).await? else {
         OPENING.lock().expect("nothing panics holding it").remove(&view);
         anyhow::bail!("its new version is no page this host draws")
     };
@@ -629,7 +629,7 @@ async fn reloaded(window: Arc<OnceLock<WindowId>>, entrypoint: String, subject: 
 /// own window's page would, and drawn in the frame's box.
 async fn frame(window: Arc<OnceLock<WindowId>>, node: renderer::tree::Id, src: &str, subject: Option<&str>) -> anyhow::Result<()> {
     let entrypoint = src.split_once('#').map_or(src, |(page, _)| page);
-    let Some(Page { page, module, trusted, tables, .. }) = probe(entrypoint, subject, true).await? else {
+    let Some(Page { page, module, trusted, tables, .. }) = probe(entrypoint, subject).await? else {
         anyhow::bail!("it's no page of an app's this host draws")
     };
     let tokens_page = load(&tables)?;
