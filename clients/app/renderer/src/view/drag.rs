@@ -69,7 +69,14 @@ impl Screen {
         drag.velocity.add(at, time);
         let by = point(if drag.along { at.x - drag.start.x } else { 0.0 }, if drag.down { at.y - drag.start.y } else { 0.0 });
         if !drag.began {
-            if by.x.hypot(by.y) < threshold {
+            let moved = point(at.x - drag.start.x, at.y - drag.start.y);
+            if moved.x.hypot(moved.y) < threshold {
+                return;
+            }
+            // It's dragged only where the press goes mostly its way, as Motion's `dragDirectionLock`: one dragged along
+            // isn't moved by a swipe up and down (an owner's pages under a swipe between owners), which is left be.
+            if (moved.x.abs() > moved.y.abs() && !drag.along) || (moved.y.abs() > moved.x.abs() && !drag.down) {
+                self.drag = None;
                 return;
             }
             drag.began = true;
