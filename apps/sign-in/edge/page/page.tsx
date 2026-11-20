@@ -525,7 +525,7 @@ function shows(): Shows {
       switch (now.stage) {
         case "unlocked": {
           const held = [now.name, ...now.servers].filter((name): name is string => !!name)
-          return { mark: <DoneMark />, heading: "Unlock with Passkey", done: held.length ? `${held.join(", ")} ${held.length === 1 ? "holds" : "hold"} ${now.whose} key now. You can close this page.` : `Nothing is waiting for ${now.whose} key. You can close this page.` }
+          return { heading: "Unlock with Passkey", done: held.length ? `${held.join(", ")} ${held.length === 1 ? "holds" : "hold"} ${now.whose} key now. You can close this page.` : `Nothing is waiting for ${now.whose} key. You can close this page.` }
         }
         case "failed":
           return failed === NO_PRF

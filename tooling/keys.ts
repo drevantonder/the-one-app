@@ -27,7 +27,7 @@ function tool(name: string, subject?: string, inputs?: object) {
   const env = { ...process.env, ...(subject && { ONE_SUBJECT: subject }) }
   const args = name.split(" ")
   // What's handed over is encrypted, so it may be seen on the command line.
-  for (const [input, value] of Object.entries(inputs ?? {})) args.push(`--${input}`, JSON.stringify(value))
+  for (const [input, value] of Object.entries(inputs ?? {})) args.push(`--${input}`, typeof value === "string" ? value : JSON.stringify(value))
   const ran = Bun.spawnSync([one, ...args], { env, stderr: "inherit" })
   if (ran.exitCode !== 0) throw new Error(`one ${name} failed`)
   return JSON.parse(ran.stdout.toString())
