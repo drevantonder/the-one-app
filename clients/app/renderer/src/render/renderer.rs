@@ -1165,7 +1165,9 @@ impl Renderer {
                     resolve_target: None,
                     ops: wgpu::Operations { load: wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT), store: wgpu::StoreOp::Store },
                 })],
-                timestamp_writes: self.stamps.as_ref().and_then(Stamps::pass),
+                // No timestamps: on an iPhone's GPU a tile drawn in a pass that took them was kept as if wholly covered,
+                // its shadow a dark square round what casts it, for as long as the tile was kept; it's drawn once a
+                // shadow's shape, no frame's cost.
                 ..Default::default()
             });
             pass.set_pipeline(&self.pipelines.tiles().0);
