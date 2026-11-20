@@ -83,6 +83,10 @@ const PROGRAM: &str = if cfg!(feature = "window") { "one" } else { "one-cli" };
 /// The public half of the key the platform signs each build it publishes with, BUILD_SIGNING_KEY in `tooling/release`
 /// (in 1Password, "The One App build signing key").
 const KEY: &str = "3fd5f3516020dafc3690044ac56dceef578b1f162b72ec4687af2d764192d2f2";
+/// Where the core's latest builds are, for a new network's first server, which has no network to download from yet:
+/// a list for each kind of machine, `<target>.json`, as the network's `download` gives it, which `tooling/release`
+/// keeps as the network's latest.
+const RELEASES: &str = "https://github.com/ptc-au/the-one-app/releases/download/builds";
 /// How long every start of a build has to say it's running at the network's edge.
 const START: Duration = Duration::from_secs(180);
 /// How long a server is given to stop: longer than it takes to answer what it took (`OneCore.Application`).
@@ -345,14 +349,21 @@ async fn join(client: &Client, here: &Here, key: &str, who: &str) -> Result<()> 
 /// and its folder goes. Gives all of that couldn't be done, to say with why joining failed.
 async fn undo_joining(client: &Client, here: &Here, key: &str) -> String {
     let mut left = Vec::new();
+    if let Err(why) = listed(client, here, "remove_server", key).await {
+        left.push(format!("it's still on the list of servers: {why:#}"));
+    }
+    said_left(left.into_iter().chain(removed(here, key)).collect())
+}
+
+/// Takes what joining put on this device away: the system no longer runs it, and its folder goes. Gives what of
+/// that couldn't be done.
+fn removed(here: &Here, key: &str) -> Vec<String> {
+    let mut left = Vec::new();
     // Joining that stopped before the system had it has nothing there to remove.
     match client::system::installed(SERVER, key) {
         Ok(true) => left.extend(client::system::remove(SERVER, key).err().map(|why| format!("the system still has it: {why:#}"))),
         Ok(false) => {}
         Err(why) => left.push(format!("the system may still have it: {why:#}")),
-    }
-    if let Err(why) = listed(client, here, "remove_server", key).await {
-        left.push(format!("it's still on the list of servers: {why:#}"));
     }
     match fs::remove_dir_all(&here.folder) {
         Err(why) if why.kind() != std::io::ErrorKind::NotFound => {
@@ -360,7 +371,70 @@ async fn undo_joining(client: &Client, here: &Here, key: &str) -> String {
         }
         _ => {}
     }
+    left
+}
+
+/// What couldn't be undone, as said after why something failed.
+fn said_left(left: Vec<String>) -> String {
     if left.is_empty() { String::new() } else { format!(", though {}", left.join("; ")) }
+}
+
+/// Makes this device the first server of a new network, at `address`, whose edge was deployed with the secret
+/// `first` (`core/edge/README.md`), with the user `owner` its first owner. There's no server yet to sign in to or to
+/// download from, so this device isn't signed in, its build is the core's latest release (`RELEASES`), and the server
+/// says the secret as it first starts, which writes the network's first list of servers, and then makes `owner` its
+/// first owner, saying where they join (`OneCore.Apps.Lifecycle.found/1`). Otherwise it's a server as `on` makes one,
+/// the network's, run by the system: its device signs in once its owner has joined, as any does.
+pub async fn first(address: &str, first: &str, owner: &str) -> Result<String> {
+    let home = client::home()?;
+    let network = home.join("network");
+    ensure!(!network.exists(), "This device is in a network already, and a new network's first server is in none.");
+    fs::create_dir_all(&home)?;
+    fs::write(&network, json!({"address": address}).to_string())?;
+    let here = Here::of(&home);
+    fs::create_dir_all(&here.folder)?;
+    let lock = here.lock()?.context("This device is already becoming a server, or stopping being one.")?;
+    let key = here.key()?;
+    let joining = |stage| {
+        move |record: &mut Record| {
+            record.server_membership = ServerMembership::Joining;
+            record.server_membership_stage = Some(stage);
+        }
+    };
+    let joined = async {
+        let record = here.change(|record| {
+            joining(ServerMembershipStage::Downloading)(record);
+            record.subject = Some("network".to_owned());
+        })?;
+        let url = format!("{RELEASES}/{}.json", target());
+        let builds: Map<String, Value> = client::web()?.get(&url).send().await?.error_for_status()?.json().await?;
+        let build = here.take(&builds, &record.told(ServerDaemonStatus::Starting), None).await?;
+        here.change(|record| record.current = Some(Pair { build, program: BUILD.to_owned() }))?;
+        here.change(joining(ServerMembershipStage::Installing))?;
+        // Said only to the first start: `serve run` writes the system's registration again without them.
+        let mut env = unit_env("network".to_owned(), None).await?;
+        env.extend([("ONE_FIRST", first.to_owned()), ("ONE_FIRST_OWNER", owner.to_owned())]);
+        let server = kept(&here, &key, &program()?, env);
+        client::system::install(&server)?;
+        here.change(joining(ServerMembershipStage::Starting))?;
+        system::start(&here, &server).await?;
+        ensure!(here.read()?.server_membership == ServerMembership::Active, "It started, and didn't answer by its key");
+        anyhow::Ok(())
+    }
+    .await;
+    if let Err(error) = joined {
+        drop(lock);
+        let mut left = removed(&here, &key);
+        left.extend(fs::remove_file(&network).err().map(|why| format!("{} is still here: {why}", network.display())));
+        return Err(error.context(format!("This device isn't the network's first server{}", said_left(left))));
+    }
+    let log = here.folder.join("server.log");
+    Ok(format!(
+        "This device is the first server of {address} now, and starts whenever it does. Its key: {key}\n\
+         It deploys the core's apps for the network and makes users/{owner} its first owner, which takes a few \
+         minutes, and then says in its log, {}, the link they join at (`grep 'joins at'`), shown once.",
+        log.display()
+    ))
 }
 
 /// Joining or leaving that nothing is doing any more, as one the machine went off during, goes back to where it

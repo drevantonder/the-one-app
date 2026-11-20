@@ -87,6 +87,41 @@ defmodule OneCore.Apps.Lifecycle do
   # deleted, notifications tells people things, and home-screen is the launcher every client opens first.
   @starting ~w(database encryption permissions sign-in sandbox vault soft-delete notifications home-screen)
 
+  # Where the core is published, whose releases a new network's first server is installed from, with the apps at the
+  # same commit.
+  @core "https://github.com/ptc-au/the-one-app"
+
+  @doc """
+  Makes a new network of `who`, its first owner, on its first server, installed from the core's releases, as
+  `one serve on` installs it (`clients/cli/src/serving.rs`): every app of the core at this server's commit is deployed
+  for the network from git, as their author publishes them, which then offers each one's updates, and the ones a
+  network starts with are installed (`make_first_owner/1`). A network that has a first owner has nothing done:
+  `:ok`, or `{:error, why}`.
+  """
+  def found(who) do
+    if OneCore.User.first_owner() == nil and Servers.here?("network") do
+      [_version, metadata] = String.split(OneCore.Builds.build(), "+", parts: 2)
+      [_count, short | _] = String.split(metadata, ".")
+
+      with {:ok, copy} <- Git.fetch(@core, true),
+           {:ok, commit} <- Git.commit(copy, short),
+           {:ok, files} <- Git.files(copy, commit, "apps") do
+        from = %{"source" => @core, "ref" => nil, "commit" => commit}
+
+        for {name, files} <- Enum.group_by(files, &hd(Path.split(elem(&1, 0))), fn {path, data} -> {Path.relative_to(path, hd(Path.split(path))), data} end) do
+          case Deploy.deploy("network", name, Map.new(files), from, true, fn _version -> false end) do
+            {:ok, _number, _warnings} -> Logger.info("#{name} is deployed for the network")
+            failed -> Logger.error("#{name} wasn't deployed for the network: #{inspect(failed)}")
+          end
+        end
+
+        make_first_owner(who)
+      end
+    else
+      :ok
+    end
+  end
+
   @doc """
   Makes the user `who` the network's first owner, which a network gets once: `:ok`, or `{:error, why}`. Then the
   apps a network starts with are installed for it as the first owner installs any, from what the network has

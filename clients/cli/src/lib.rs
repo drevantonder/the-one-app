@@ -65,6 +65,8 @@ pub fn main() -> ExitCode {
 /// making it a server (`serving`), and updating it.
 const COMMANDS: &str = "Besides the tools:\n\n\
                            one serve on       makes it a server of yours, which starts whenever it does\n\
+                           one serve on --address <address> --first <secret> --owner <name>\n\
+                                              makes it a new network's first server (core/edge/README.md)\n\
                            one serve off      stops it being one, and removes it\n\
                            one update         takes the latest build: this device's, or on a server the network's Update Now\n\
                            one search <words> finds the tools for a task, each with its command\n\
@@ -87,9 +89,17 @@ async fn run(args: Vec<String>) -> Result<ExitCode> {
     if args.first().is_some_and(|word| word == "restore") {
         return Ok(printed(backups_client::restore(&args[1..]).await?));
     }
-    let client = Client::open(client::home()?, resolvers(), Vec::new()).await?;
-    signed_in(&client).await?;
     let words: Vec<&str> = args.iter().map(String::as_str).collect();
+    // A new network's first server, which has no network to sign in to yet.
+    if let ["serve", "on", "--address", address, "--first", first, "--owner", owner] = words.as_slice() {
+        return Ok(printed(serving::first(address, first, owner).await?));
+    }
+    let client = Client::open(client::home()?, resolvers(), Vec::new()).await?;
+    // A server runs whether or not its device is signed in, as a new network's first server's isn't until its owner
+    // has joined: the network knows a server by its own key.
+    if !matches!(words.as_slice(), ["serve", "run", ..]) {
+        signed_in(&client).await?;
+    }
     let code = match words.as_slice() {
         ["mcp"] | ["mcp", "--code"] => {
             mcp::serve(client.clone(), words.len() == 2).await?;

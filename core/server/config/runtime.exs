@@ -36,6 +36,10 @@ if home = System.get_env("ONE_SERVER_HOME") do
     # A network being built has its person's commands say who they act as, which only it lets them (`OneCore.User`),
     # and it was one of those that installed this server.
     development: System.get_env("ONE_AS") != nil,
+    # A new network's first server, as `one serve on` starts it the first time: the secret its edge was deployed with,
+    # which writes the network's first list of servers, and the user who becomes its first owner (`OneCore.Apps.Lifecycle.found/1`).
+    first: System.get_env("ONE_FIRST"),
+    first_owner: System.get_env("ONE_FIRST_OWNER"),
     installed: true,
     bun: program.("bun"),
     git: program.("git"),

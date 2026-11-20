@@ -67,6 +67,8 @@ done
 # a PKCS#8 DER in base64 (in 1Password, "The One App build signing key"), whose public half, `key`, is built into `one`,
 # which takes no build without it (`clients/cli/src/serving.rs`), as Tauri's updater and Sparkle take theirs.
 key=3fd5f3516020dafc3690044ac56dceef578b1f162b72ec4687af2d764192d2f2
+# The core's own release, which keeps what's published here for networks that have none yet (`mirror`).
+repo=ptc-au/the-one-app tag=builds
 # Without BUILD_SIGNING_KEY in the environment (an override, for a machine without 1Password) it's read from 1Password,
 # into this process only.
 [[ -n $dry || -n ${BUILD_SIGNING_KEY:-} ]] ||
@@ -115,7 +117,38 @@ publish() {
     }
     if (published.send) throw new Error("The network didn'"'"'t take them");
     for (const { name, size } of builds) console.log(`${name}  ${BUILD}  ${(size / 1e6).toFixed(1)} MB`);
-  ' "$@"
+  ' "$@" && mirror
+}
+
+# Keeps the network's latest builds as the core's release too, `builds` on GitHub, which a new network's first server
+# is installed from, having no network to download from yet (`one serve on --first`, `clients/cli/src/serving.rs`):
+# each file by its SHA-256, and for each kind of machine, `<target>.json`, what `one download` gives for it, its links
+# there. What no list names any more goes.
+mirror() {
+  echo "Keeping the network's latest as the core's release, $repo $tag"
+  local lists named=() have target sha url
+  lists=$(mktemp -d)
+  gh release view "$tag" -R "$repo" >/dev/null 2>&1 ||
+    gh release create "$tag" -R "$repo" --latest=false --title "The latest builds" \
+      --notes "What a new network's first server is installed from: \`one serve on --address <address> --first <secret> --owner <name>\` (core/edge/README.md)." >/dev/null
+  have=$(gh release view "$tag" -R "$repo" --json assets -q '.assets[].name')
+  for target in $(one builds | jq -r '.latest | keys[] | select(contains("/")) | split("/")[1]' | sort -u); do
+    # `server` is the build before a server came as its code and its runtime, which nothing takes any more.
+    one download --target "$target" | jq 'del(.server)' >"$lists/$target.raw"
+    while read -r sha url; do
+      named+=("$sha")
+      grep -qx "$sha" <<<"$have" && continue
+      curl -fsSL -o "$lists/$sha" "$url" && gh release upload "$tag" -R "$repo" "$lists/$sha" >/dev/null && rm "$lists/$sha" || return 1
+      have+=$'\n'$sha
+    done < <(jq -r '.[] | "\(.sha256) \(.link.url)"' "$lists/$target.raw")
+    jq --arg at "https://github.com/$repo/releases/download/$tag" 'map_values(.link = {method: "GET", url: "\($at)/\(.sha256)"})' \
+      "$lists/$target.raw" >"$lists/$target.json"
+    gh release upload "$tag" -R "$repo" --clobber "$lists/$target.json" >/dev/null || return 1
+  done
+  for sha in $(grep -E '^[0-9a-f]{64}$' <<<"$have"); do
+    printf '%s\n' "${named[@]}" | grep -qx "$sha" || gh release delete-asset "$tag" "$sha" -R "$repo" -y >/dev/null
+  done
+  rm -rf "$lists"
 }
 
 # Servers and clients share nothing but the network they publish to, so each is its own release, with its own lock and

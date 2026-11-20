@@ -1,6 +1,7 @@
 defmodule OneCore.Application do
   @moduledoc false
   use Application
+  require Logger
   alias OneCore.{Iroh, Jobs, Apps, Release, Server, Servers, Services}
   alias OneCore.Apps.Deploy
 
@@ -66,6 +67,11 @@ defmodule OneCore.Application do
           Apps.started()
           OneCore.Hooks.observe("started", %{"server" => key}, {nil, OneCore.Servers.owner()})
           if not Application.get_env(:one_core, :installed, false), do: Release.told(%{"server_daemon_status" => "running"})
+          # A new network's first server makes it, once it's running (`OneCore.Apps.Lifecycle.found/1`).
+          if owner = Application.get_env(:one_core, :first_owner) do
+            with {:error, why} <- OneCore.Apps.Lifecycle.found("users/" <> owner),
+                 do: Logger.error("users/#{owner} isn't the network's first owner: #{why}")
+          end
         end
 
         Supervisor.start_child(OneCore.Supervisor, Supervisor.child_spec({Task, rebuild}, id: :rebuild))
