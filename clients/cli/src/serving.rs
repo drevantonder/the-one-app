@@ -428,12 +428,11 @@ pub async fn first(address: &str, first: &str, owner: &str) -> Result<String> {
         left.extend(fs::remove_file(&network).err().map(|why| format!("{} is still here: {why}", network.display())));
         return Err(error.context(format!("This device isn't the network's first server{}", said_left(left))));
     }
-    let log = here.folder.join("server.log");
     Ok(format!(
         "This device is the first server of {address} now, and starts whenever it does. Its key: {key}\n\
          It deploys the core's apps for the network and makes users/{owner} its first owner, which takes a few \
          minutes, and then says in its log, {}, the link they join at (`grep 'joins at'`), shown once.",
-        log.display()
+        system::log(&here, &key)
     ))
 }
 
@@ -1509,6 +1508,11 @@ mod system {
         Ok(())
     }
 
+    /// Where to read what the server says: its unit's journal.
+    pub fn log(_here: &Here, key: &str) -> String {
+        format!("`journalctl --user -u {}`", client::system::name(SERVER, key))
+    }
+
     /// Tells systemd the server is running, as `Type=notify` has it wait for.
     pub fn ready(_key: &str) -> Result<()> {
         use std::os::linux::net::SocketAddrExt;
@@ -1546,6 +1550,11 @@ mod system {
             format!("The server didn't start: its log is {}", here.folder.join("server.log").display())
         })?;
         Ok(())
+    }
+
+    /// Where to read what the server says: `server.log` in its folder.
+    pub fn log(here: &Here, _key: &str) -> String {
+        here.folder.join("server.log").display().to_string()
     }
 
     /// Keeps `server.log` under `LOG`, as launchd keeps no bounds of its own: past it, the log is `server.log.1`, in
@@ -1649,6 +1658,11 @@ mod system {
     /// The log this program writes, which its output and errors are, as a task's go nowhere.
     static LOG: Mutex<Option<fs::File>> = Mutex::new(None);
 
+    /// Where to read what the server says: `server.log` in its folder.
+    pub fn log(here: &Here, _key: &str) -> String {
+        here.folder.join("server.log").display().to_string()
+    }
+
     /// Has this program's output and errors go to `server.log`, kept under 10 MB: past it, the log is
     /// `server.log.1`, in place of the one before, and a new one is begun.
     pub fn bound(log: &Path) -> Result<()> {
@@ -1715,4 +1729,5 @@ mod system {
     pub async fn start(_: &Here, _: &client::system::Program) -> Result<()> { bail!(NONE) }
     pub fn ready(_: &str) -> Result<()> { bail!(NONE) }
     pub fn bound(_: &Path) -> Result<()> { bail!(NONE) }
+    pub fn log(_: &Here, _: &str) -> String { NONE.to_owned() }
 }
