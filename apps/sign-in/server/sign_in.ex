@@ -278,76 +278,18 @@ defmodule SignIn do
         outputs: %{type: "object", properties: %{called: %{type: "string"}}, required: ["called"]}
       },
       %{
-        name: "waiting",
-        read_only: true,
-        description:
-          "Lists the devices waiting to sign in as you: each named you, and shows a number its person types to let it in",
-        inputs: none,
-        outputs: %{
-          type: "object",
-          properties: %{
-            count: %{type: "integer", description: "How many are waiting"},
-            waiting: %{
-              type: "array",
-              items: %{
-                type: "object",
-                properties: %{
-                  request: %{type: "string", description: "What approve and deny take"},
-                  device: %{type: "string", description: "Its key, which `encryption_approve` takes to hand it yours"},
-                  name: %{type: "string", description: "What the device calls itself"},
-                  at: %{type: "string", description: "When it named you, ISO 8601"},
-                  place: %{type: ["string", "null"], description: "Roughly where it asked from: a city"},
-                  ends: %{type: "string", description: "When it stops waiting, ISO 8601"}
-                },
-                required: ["request", "device", "name", "at", "place", "ends"]
-              }
-            }
-          },
-          required: ["count", "waiting"]
-        }
-      },
-      %{
         name: "approve",
-        description:
-          "Approves a device as yours: by the code it shows, or one that's waiting by the number its person reads off it. A wrong number blocks it",
+        description: "Approves a device as yours by the code it shows, which your person passed on from it",
         inputs: %{
           type: "object",
-          properties: %{
-            code: %{type: "string", description: "The code the device shows, as WDJB-MJHT"},
-            request: %{type: "string", description: "A device waiting to sign in as you, as `waiting` lists it"},
-            number: %{type: "integer", description: "With `request`: the number the device shows, as its person says it"}
-          }
+          properties: %{code: %{type: "string", description: "The code the device shows, as WDJB-MJHT"}},
+          required: ["code"]
         },
         outputs: %{
           type: "object",
           properties: %{approved: %{type: "string", description: "The device's name, which is yours now"}},
           required: ["approved"]
         }
-      },
-      %{
-        name: "deny",
-        description: "Blocks a device waiting to sign in as you, which you didn't ask for",
-        inputs: %{
-          type: "object",
-          properties: %{request: %{type: "string", description: "As `waiting` lists it"}},
-          required: ["request"]
-        },
-        outputs: %{type: "object", properties: %{denied: %{type: "string", description: "Its name"}}, required: ["denied"]}
-      },
-      %{
-        name: "notify",
-        by_link: true,
-        description:
-          "Notifies someone that a device is waiting to sign in as them. The network's edge calls this as the device names them",
-        inputs: %{
-          type: "object",
-          properties: %{
-            who: %{type: "string", pattern: "^users/[a-z][a-z0-9-]*$"},
-            request: %{type: "string"}
-          },
-          required: ["who", "request"]
-        },
-        outputs: %{type: "object", properties: %{notified: %{type: "boolean"}}, required: ["notified"]}
       },
       %{
         name: "remove_device",
@@ -408,14 +350,14 @@ defmodule SignIn do
     end
   end
 
-  # Its sections of Settings: whoever's looking (Sign In & Security under their name), Devices, with the devices waiting
-  # to sign in as its red count, AI, and People & Groups, an admin thing, for the network's owners alone.
+  # Its sections of Settings: whoever's looking (Sign In & Security under their name), Devices, AI, and People & Groups,
+  # an admin thing, for the network's owners alone.
   def hook("settings.sections", _about, call) do
     people = %{in: "settings", name: "People & Groups", component: "people", icon: "client/users.svg", group: "network", order: 2}
 
     [
       %{in: "settings", name: "Sign In & Security", component: "passkeys", icon: "client/security.svg", group: "you", order: 0},
-      %{in: "settings", name: "Devices", component: "devices", icon: "client/icon.svg", group: "network", order: 1, badge: "waiting"},
+      %{in: "settings", name: "Devices", component: "devices", icon: "client/icon.svg", group: "network", order: 1},
       %{in: "settings", name: "AI", component: "ai", icon: "client/connect.svg", group: "general", order: 3}
     ] ++ if(Call.owns?(%{call | subject: "network"}), do: [people], else: [])
   end
@@ -572,54 +514,9 @@ defmodule SignIn do
     %{called: called}
   end
 
-  def call("waiting", _inputs, call) do
-    %{"waiting" => waiting} = ask(%{ask: "waiting", who: person(call)})
-    %{count: length(waiting), waiting: waiting}
-  end
-
-  def call("approve", %{"request" => request, "number" => number}, call) do
-    %{"approved" => name} = ask(%{ask: "approve", who: person(call), request: request, number: number})
-    Call.changed(call)
-    %{approved: name}
-  end
-
   def call("approve", %{"code" => code}, call) do
     %{"approved" => name} = ask(%{ask: "approve", who: person(call), code: code})
     %{approved: name}
-  end
-
-  def call("approve", _inputs, _call), do: raise("Say the code the device shows, or the request and the number it shows.")
-
-  def call("deny", %{"request" => request}, call) do
-    %{"denied" => name} = ask(%{ask: "deny", who: person(call), request: request})
-    Call.changed(call)
-    %{denied: name}
-  end
-
-  # The edge says a device named someone, as the holder of a link it makes of them and the request. It's believed
-  # only as far as the edge, asked as this server, lists that request as waiting for them: then they're notified,
-  # and their Devices shows it.
-  def call("notify", %{"who" => who, "request" => request}, %Call{actor: actor} = call) do
-    if actor != OneCore.User.link("#{who}/#{request}"), do: raise("Only the network's edge says a device named someone.")
-    %{"waiting" => waiting} = ask(%{ask: "waiting", who: who})
-
-    case Enum.find(waiting, &(&1["request"] == request)) do
-      nil ->
-        %{notified: false}
-
-      %{"name" => name} ->
-        call = %{call | actor: nil, subject: who}
-        Call.changed(call)
-
-        Call.tool(call, "notifications", "send", %{
-          "title" => "#{name} wants to sign in as you",
-          "text" => "Open Settings › Devices to let it in.",
-          "to" => who,
-          "section" => "devices#waiting=#{request}"
-        })
-
-        %{notified: true}
-    end
   end
 
   def call("remove_device", %{"device" => device}, call) do

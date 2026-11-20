@@ -5,10 +5,9 @@
 // This device becomes a server and stops being one; a server's services are switched on and off; and a device is
 // taken out, or this one signs out. Each server says whether it's ready, active and running, or why not, and an
 // update it's taking as it moves on (`OneCore.Release`). This device becoming a server, or stopping being one, says
-// each stage. Above them all are the devices waiting to sign in as whoever's looking, each let in by typing the
-// number it shows, as Microsoft Authenticator has it, or blocked.
+// each stage.
 import { createMemo, createSignal, Errored, For, Loading, refresh, Show } from "solid-js"
-import { Badge, Button, call, changed, client, confirm, type Element, Empty, Field, haptic, Icon, Input, link, List, Problem, Row, Screen, Section, seen, Sheet, since, Skeleton, Spinner, Split, Steps, styles, Switch, Text, toast, tokens, View } from "ui"
+import { Badge, Button, call, changed, client, confirm, type Element, Empty, Icon, List, Problem, Row, Screen, Section, seen, Skeleton, Spinner, Split, Steps, styles, Switch, Text, toast, tokens, View } from "ui"
 import { on } from "./mine.tsx"
 
 /** A build a machine is on, as `builds` answers it. */
@@ -75,15 +74,6 @@ interface Thing extends ServerStatus {
   services?: (Service & { on: boolean })[]
 }
 
-/** A device waiting to sign in as whoever's looking, as `sign-in_waiting` lists it. */
-interface Waiting {
-  request: string
-  device: string
-  name: string
-  at: string
-  place: string | null
-}
-
 /** What Settings draws of what other apps add to a place a section offers: a device's page (`settings.sections`). */
 type Groups = (props: { in: "device"; device: string; kind: string; server?: string; services?: string[] }) => Element
 
@@ -91,9 +81,8 @@ const json = <T,>(tool: string, inputs?: object, who?: string): Promise<T> => ca
 
 /// What's known of the devices and servers, each as a row says it. Whoever owns the network sees its servers too.
 const mine = createMemo(async () => {
-  const [{ devices }, { waiting }, here, builds, network, services, networkServices] = await Promise.all([
+  const [{ devices }, here, builds, network, services, networkServices] = await Promise.all([
     json<{ devices: Omit<Thing, "here">[] }>("sign-in_devices"),
-    json<{ waiting: Waiting[] }>("sign-in_waiting"),
     client(),
     json<Builds>("builds"),
     json<Builds>("builds", {}, "network"),
@@ -122,7 +111,7 @@ const mine = createMemo(async () => {
     }
   }
   const update = network?.network ?? builds.network ?? undefined
-  return { waiting, devices: rows, servers: [...servers.values()].toSorted((a, b) => Number(b.here) - Number(a.here)), here, update, who: network ? "network" : undefined }
+  return { devices: rows, servers: [...servers.values()].toSorted((a, b) => Number(b.here) - Number(a.here)), here, update, who: network ? "network" : undefined }
 })
 changed(() => refresh(mine))
 
@@ -243,11 +232,9 @@ const look = styles({
   },
   /// What isn't a list stops at the width a list does, so a button isn't a line across a wide window.
   readable: { gap: tokens.length.gutter, maxWidth: tokens.length.readable },
-  answer: { gap: tokens.length.gutter },
   muted: { color: tokens.colour.secondaryLabel },
   glyph: { width: tokens.length.control, height: tokens.length.control, alignItems: "center", justifyContent: "center", borderRadius: tokens.radius.small, backgroundColor: tokens.colour.quinaryLabel, color: tokens.colour.secondaryLabel },
-  /// The number typed, big as figures are.
-  number: { height: "auto", paddingBlock: tokens.grid[4], font: tokens.type.largeTitle, fontVariantNumeric: "tabular-nums", textAlign: "center" },
+
 })
 
 /// A device or a server, opened: Update when one's ready, this device's server, its services, and taking it out.
@@ -364,65 +351,6 @@ function Detail(props: { thing: Thing; all: All; groups?: Groups }) {
 /// What kind of thing a device is, as About says it.
 const kinds = { app: "the One App", assistant: "Assistant", browser: "Browser", server: "Server" }
 
-/// The device waiting to sign in that's being answered, by its request: tapping its row, or a notification's link to
-/// it (`#waiting=<request>`), opens it.
-const [answering, setAnswering] = createSignal<string | undefined>(() => /(?:^|&)waiting=([^&]+)/.exec(link() ?? "")?.[1])
-
-/// The person's answer to a device waiting to sign in as them: the number they typed, which lets it in if it's the
-/// one it shows and blocks it if not, or Not Me, which blocks it. Once it's in, this device hands it its person's key if
-/// it holds it, as `encryption_approve` does, which a device without it, and a browser, leave.
-async function answer(device: Waiting, number?: number) {
-  setAnswering()
-  let unlocked = false
-  const done = await doing(async () => {
-    if (number === undefined) return call("sign-in_deny", { request: device.request })
-    await call("sign-in_approve", { request: device.request, number })
-    if (JSON.parse(await call("encryption_key")).slot == null) return
-    await call("encryption_approve", { device: device.device, name: device.name })
-    unlocked = true
-  })
-  if (!done) return haptic("error")
-  haptic("success")
-  toast(number === undefined ? `${device.name} was blocked.` : `${device.name} is signed in as you${unlocked ? ", with your key" : ""}.`)
-}
-
-/// Is this you signing in? The number the device shows, typed, as Microsoft Authenticator asks for it: picking one of
-/// a few could be a lucky guess. It's typed, never filled in: the device's one-time-code autofill is off. It takes
-/// two digits and nothing else, big as figures are. Then Yes, or Not Me.
-function Answer(props: { device?: Waiting }) {
-  return (
-    <Sheet heading="Is this you signing in?" open={!!props.device} onClose={() => setAnswering()}>
-      <Show when={props.device}>
-        {(device) => {
-          // Set again with every key, so what isn't a digit, or is a third, is taken out of the field as it's typed.
-          const [number, setNumber] = createSignal("", { equals: false })
-          const [error, setError] = createSignal<string>()
-          const yes = () => (number().length === 2 ? answer(device(), Number(number())) : setError(`Enter the 2 digits showing on ${device().name}.`))
-          return (
-            <View style={look.answer}>
-              <Field label={`Enter the number showing on ${device().name}`} error={error()}>
-                <Input
-                  name="number"
-                  inputMode="numeric"
-                  autoComplete="off"
-                  required
-                  autoFocus
-                  value={number()}
-                  onChangeText={(text) => (setNumber(text.replace(/[^0-9]/g, "").slice(0, 2)), setError())}
-                  onSubmitEditing={yes}
-                  style={look.number}
-                />
-              </Field>
-              <Button onPress={yes}>Yes</Button>
-              <Button variant="outline" onPress={() => answer(device())}>Not Me</Button>
-            </View>
-          )
-        }}
-      </Show>
-    </Sheet>
-  )
-}
-
 /// A build's target, `macos-aarch64`, as npm names its system: `darwin`.
 const system = (target?: string) => ({ linux: "linux", macos: "darwin", windows: "win32" })[target?.split("-")[0] as "linux"]
 
@@ -451,21 +379,6 @@ function Things(props: { all: All; groups?: Groups }) {
   return (
     <Split open={!!opened()} onClose={() => setOpen()} detail={<Show when={opened()}><Detail thing={opened()!} all={props.all} groups={props.groups} /></Show>}>
       <Screen heading="Devices" back>
-        <Show when={props.all.waiting.length}>
-          <Section heading="Waiting to sign in">
-            <List each={props.all.waiting} keyed={(device) => device.request}>
-              {(device) => (
-                <Row
-                  heading={`${device().name} · the One App`}
-                  text={[since(device().at), device().place && `near ${device().place}`].filter(Boolean).join(" · ")}
-                  current={answering() === device().request}
-                  onPress={() => setAnswering(device().request)}
-                />
-              )}
-            </List>
-          </Section>
-        </Show>
-        <Answer device={props.all.waiting.find((device) => device.request === answering())} />
         <Section heading="Your Devices">
           <Show when={props.all.devices.length} fallback={<Empty>No devices yet.</Empty>}>
             <List each={props.all.devices} keyed={(device) => device.id}>{row}</List>

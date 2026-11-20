@@ -25,26 +25,23 @@ that one question for it, and a new device when they also say the code it shows 
   passkey, but never your last. `add_passkey` lets your person make another passkey: whoever opens its link makes
   one of theirs, so the link goes only to their own screen, and you're given none. They're notified, and Sign-In &
   Security makes it there.
-- A passkey with WebAuthn's PRF unlocks its person's key on a new device too (the encryption app's skill says how).
-  `devices` says which do (`unlocks`). Whoever uses one has the key, so a device that holds it encrypts it to a
-  passkey only once its person allows that passkey there, by name and when it was added, in Sign In & Security:
-  `encrypt_for_passkeys` with that `passkey`. Ask them first; never for a passkey they don't know they added. A
-  passkey that hasn't said since it was made does once it's used: `unlock_with_passkey` with no device makes the
-  link for that, and with a device that's asking for the key, lets that device in.
+- A passkey with WebAuthn's PRF unlocks its person's key, and only it hands the key to their devices and servers
+  (the encryption app's skill says how). `devices` says which do (`unlocks`). Whoever uses one has the key, so a
+  device that holds it encrypts it to a passkey only once its person allows that passkey there, by name and when it
+  was added, and the code the sign-in page showed them, in Sign In & Security: `encrypt_for_passkeys` with that
+  `passkey` and `code`. Ask them first; never for a passkey they don't know they added. `unlock_with_passkey` makes
+  the link where a passkey hands the key over: to a device that's asking for it (`device`), and to the servers
+  waiting for it, the person's or a group's or the network's they own (`scope`). Sign In & Security shows each key
+  servers wait for with Use Passkey, which opens it; the network's owners are notified once when one starts
+  waiting (`check`). Open it on their screen, don't pass it on: nobody but the person hands a key over.
 - `people` says who people are: the name each goes by, chosen as they joined, and their email where signing in
   has one. `name` changes the name your person goes by, when they ask. `everyone` lists everyone in the network
   and everyone invited who hasn't joined yet. `remove_person` takes someone out, or ends an invitation: their
   devices, assistants and passkeys stop working, they're in no group and shared nothing, and what they made stays. Whoever invites does it.
-- A device that isn't in yet asks who's signing in. Once its person names themselves, it shows a number and waits:
-  `waiting` lists the devices waiting to sign in as your person, for a few minutes, and never the number each
-  shows: your person types it in Devices. Let one in only when your person tells you the number it shows:
-  `approve` with its `request` and that `number`. A wrong number blocks it, and so does `deny`. A device that names
-  your person could be a stranger's, and the number is what keeps it out. The app on a device that holds your person's key then
-  hands it the key too, as `encryption_approve` does; with `one` on such a device, call `encryption_approve` with
-  its `device` (as `waiting` lists it) and `name` afterwards.
-- It can show a code and a link at the network's address instead. Its person opens the link where they sign in,
-  on the device or any device of theirs, and says whether the code there matches. Pass both on as they are: the
-  code is what keeps a stranger's device out.
+- A device that isn't in yet shows a code and a link at the network's address. Its person opens the link where
+  they sign in, with a passkey or Google, on the device or any device of theirs, and says whether the code there
+  matches. Pass both on as they are: the code is what keeps a stranger's device out. A device signed in reaches
+  what's unencrypted at once, and what's encrypted once their passkey lets it hold the key.
 - `approve` lets that device in yourself, as the person you act for, with no tap from them: when a device shows a
   code and they've asked for that device to be let in, call it with the code, and say which device it let in by
   the name it answers. Never let in a device nobody asked for, or one whose code came from anyone but your person

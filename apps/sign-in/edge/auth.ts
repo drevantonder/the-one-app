@@ -3,13 +3,11 @@
 // invited joins with their Google account as with a passkey, and anyone whose Google Workspace domain the network's
 // owner named (`domains`) joins by signing in. An assistant becomes theirs when they answer that one question
 // for it, and a new device when they also say the code it shows matches the one they're shown, as Better Auth's
-// device authorization has it, or when a device or assistant of theirs lets it in by that code. A new device may
-// instead name whose it is (`/device/claim`): that person's devices list it as waiting, and one of them lets it in by
-// typing the number it shows (`RequestState`). Each is then a line
+// device authorization has it, or when a device or assistant of theirs lets it in by that code. Each is then a line
 // in this app's own artifact, `devices/<device>`, saying whose it is: that's where a server reads it, so no call
 // asks anything here. What a person goes by is a line there too, `people/<name>`: the name they chose as they
 // joined, and their email where how they signed in has one, which a server tells apps of by `people`.
-import { env, waitUntil } from "cloudflare:workers";
+import { env } from "cloudflare:workers";
 import { betterAuth, getCurrentAdapter } from "better-auth";
 import { APIError, createAuthEndpoint, createAuthMiddleware, getAuthoritativeSessionFromCtx, getOAuthState, getSessionFromCtx } from "better-auth/api";
 import { jwt } from "better-auth/plugins";
@@ -76,11 +74,7 @@ interface Device {
   createdAt: Date;
 }
 
-/**
- * A device's code, as Better Auth's device authorization keeps it, with what the device calls itself, and once the
- * device named whose it is, the request that makes (`RequestState`): who, the number it shows them, when, and roughly where
- * it asked from.
- */
+/** A device's code, as Better Auth's device authorization keeps it, with what the device calls itself. */
 interface DeviceCode {
   id: string;
   deviceCode: string;
@@ -90,25 +84,12 @@ interface DeviceCode {
   status: "pending" | "approved" | "denied";
   expiresAt: Date;
   name: string;
-  person?: string | null;
-  number?: number | null;
-  named?: Date | null;
-  place?: string | null;
 }
 
 /**
- * A request to sign in: a new device's code, once the device named whose it is. It's in one of four states, and moves
- * only as `answer` moves it, each move with its guard:
- *
- *     waiting → approved   that person types the number it shows on one of their devices (`approve` with `number`),
- *                          or anyone signed in lets it in by its code, as before (`/device/approve`, `approve`)
- *     waiting → denied     that person types another number, or Not Me (`deny`), or stops it by its code
- *     waiting → expired    `ASKS_FOR` passes with neither: its code ends, and the device asks for another
- *     waiting → waiting    the device names someone again: a new number, and no more time than it had left
- *
- * Each guard is that it's waiting: Better Auth's status is still `pending`, it hasn't expired, and nobody else
- * opened its code. Only the person it named sees it, and only its number or its code lets it in. Approved, denied and
- * expired are ends: the device learns which as it next asks (`/device/token`), and Better Auth forgets its code.
+ * Where a new device's code is: waiting until someone signed in says it matches, or lets it in by it (`approve`), and
+ * then approved; denied when they stop it; expired when its time passes with neither. Approved, denied and expired
+ * are ends: the device learns which as it next asks (`/device/token`), and Better Auth forgets its code.
  */
 type RequestState = "waiting" | "approved" | "denied" | "expired";
 
@@ -141,15 +122,6 @@ const WRONG_CODES = { max: 5, window: 15 * 60 };
 const wrongCodes = (adapter: Adapter, user: { id: string }) => limit(adapter, `wrong-codes/${user.id}`, WRONG_CODES);
 /** What a person who tried too many codes no device shows is told. */
 const tooManyCodes = (minutes: number) => `That's too many codes no device showed. Try again in ${minutes} minute${minutes === 1 ? "" : "s"}.`;
-/** How long a request to sign in waits for its person once its device names them, in seconds (`RequestState`). */
-const ASKS_FOR = 5 * 60;
-/**
- * How many times devices may name one person, and over how long, in seconds: each is a notification on all their
- * devices. `max` from one address, and `everywhere` from all of them. Naming anyone at all is limited by the address
- * it's asked from too (`rateLimit` in `devices`).
- */
-const NAMED = { max: 5, everywhere: 20, window: 15 * 60 };
-
 const sha256 = async (text: string) => bytesToHex(new Uint8Array(await crypto.subtle.digest("SHA-256", new TextEncoder().encode(text))));
 
 /** What a browser is called, from what it says of itself: "Chrome on Linux". */
@@ -339,25 +311,14 @@ const devices = () => ({
       },
     },
     invite: { fields: { userId: { type: "string", references: { model: "user", field: "id" } }, expiresAt: { type: "date" } } },
-    // What a device that asked to be let in calls itself, which its person is shown with its code, and the request it
-    // makes once it names whose it is (`RequestState`).
-    deviceCode: {
-      fields: {
-        name: { type: "string", required: false },
-        person: { type: "string", required: false, references: { model: "user", field: "id", onDelete: "cascade" } },
-        number: { type: "number", required: false },
-        named: { type: "date", required: false },
-        place: { type: "string", required: false },
-      },
-    },
+    // What a device that asked to be let in calls itself, which its person is shown with its code.
+    deviceCode: { fields: { name: { type: "string", required: false } } },
     // What lets a passkey unlock its person's key on a new device (`page/passkey.ts`): the public key its PRF output
     // derives, empty for a passkey that said it has none, and their key, encrypted to it by a device that holds it.
     passkey: { fields: { prfKey: { type: "string", required: false }, encryptedKey: { type: "string", required: false } } },
     // The passkey a browser's session was made with, by its credential ID.
     session: { fields: { passkey: { type: "string", required: false } } },
   },
-  // Naming whoever's signing in says whether they're here, and notifies them, so one address names only so many.
-  rateLimit: [{ pathMatcher: (path: string) => path === "/device/claim", window: NAMED.window, max: 10 }],
   endpoints: {
     /**
      * Where a device's code is (`RequestState`), or `unknown` for one Better Auth has forgotten or never made, so the
@@ -370,45 +331,6 @@ const devices = () => ({
     /** The ways besides a passkey someone signs in here, which the sign-in page offers: Google, where it's set up. */
     socialProviders: createAuthEndpoint("/social-providers", { method: "GET" }, async (ctx) =>
       ctx.json({ providers: env.GOOGLE_CLIENT_ID ? ["google"] : [] }),
-    ),
-    /**
-     * A new device names whose it is, by their name or an email they signed in with, from the page that shows its
-     * code (`page/`): its code is a request to sign in from then on (`RequestState`), waiting on their devices for the
-     * number it's given to show. Naming someone again names them instead, with a new number.
-     */
-    claimDevice: createAuthEndpoint(
-      "/device/claim",
-      { method: "POST", body: z.object({ userCode: z.string(), person: z.string() }) },
-      async (ctx) => {
-        const { adapter } = ctx.context;
-        const code = await adapter.findOne<DeviceCode>({ model: "deviceCode", where: [{ field: "userCode", value: plain(ctx.body.userCode) }] });
-        if (!code || state(code) !== "waiting") throw new APIError("BAD_REQUEST", { message: "This sign-in ended. It starts again in a moment." });
-        if (code.userId) throw new APIError("FORBIDDEN", { message: "Someone opened this device's link, and is letting it in there." });
-        const said = ctx.body.person.trim().toLowerCase().replace(/^users\//, "");
-        const where = said.includes("@") ? [{ field: "email", value: said }, { field: "emailVerified", value: true }] : [{ field: "name", value: said }];
-        const [user] = said ? await adapter.findMany<User>({ model: "user", where }) : [];
-        if (!user) throw new APIError("NOT_FOUND", { message: `Nobody in this network goes by ${said || "that"}.` });
-        // Asked from one place a few times, and from everywhere a few times more, as a sign-in's push prompts are
-        // limited: so asking them over and over from elsewhere neither floods their devices nor stops them asking.
-        const ip = ctx.request?.headers.get("cf-connecting-ip") ?? "";
-        const [here, everywhere] = await Promise.all([limit(adapter, `named/${user.id}/${ip}`, NAMED), limit(adapter, `named/${user.id}`, NAMED)]);
-        const asked = here.count >= NAMED.max ? here : everywhere.count >= NAMED.everywhere ? everywhere : undefined;
-        if (asked) throw new APIError("TOO_MANY_REQUESTS", { message: `${said} was asked too many times. Try again in ${asked.minutes} minutes.` });
-        await Promise.all([here.again(), everywhere.again()]);
-        const cf = (ctx.request as { cf?: { city?: string; region?: string; country?: string } } | undefined)?.cf;
-        const set = {
-          person: user.id,
-          number: 10 + (crypto.getRandomValues(new Uint32Array(1))[0] % 90),
-          named: new Date(),
-          place: cf?.city || cf?.region || cf?.country || null,
-          expiresAt: new Date(Math.min(new Date(code.expiresAt).getTime(), Date.now() + ASKS_FOR * 1000)),
-        };
-        const waiting = [{ field: "id", value: code.id }, { field: "status", value: "pending" }];
-        if (!(await adapter.incrementOne({ model: "deviceCode", where: waiting, increment: {}, set }))) throw new APIError("BAD_REQUEST", { message: "This sign-in ended. It starts again in a moment." });
-        // Their devices are told as it's answered: the page doesn't wait for a server to.
-        waitUntil(tell(user, code.id).catch((error) => console.error(`Couldn't notify ${user.name}: ${error}`)));
-        return ctx.json({ number: set.number });
-      },
     ),
     // The sign-in page says which key a passkey's PRF output derives, or that it gave none, as it's just been used.
     passkeyPrfKey: createAuthEndpoint("/passkey/prf-key", { method: "POST" }, async (ctx) => {
@@ -739,17 +661,6 @@ async function answer(adapter: Adapter, code: DeviceCode, user: { id: string; na
 }
 
 /**
- * Has a server acting for `user` notify them that a device is waiting to sign in as them (`sign-in_notify`). It
- * comes as a sharing link's holder does, since the edge is nobody, and the server checks with the edge that it is.
- */
-async function tell(user: User, request: string) {
-  const params = { name: "sign-in_notify", arguments: { who: who(user), request }, _meta: { link: `${who(user)}/${request}` } };
-  const servers = new Set([...(await env.NETWORK.servers(`${who(user)}/`)), ...(await env.NETWORK.servers())]);
-  const reached = await env.RELAY.forward([...servers], JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/call", params }));
-  if (!reached) throw new Error("none of its servers answered");
-}
-
-/**
  * A link that `name` joins the network by, as that user, made for them if they're new. It's their only one: an
  * earlier link to join as them no longer works. Whoever joins by it is them, so for someone who has joined already
  * it's made only when the server says it may be (`again`): the network's owner asked, for someone who isn't an
@@ -836,8 +747,6 @@ export interface Ask {
   called?: unknown;
   device?: string;
   code?: unknown;
-  request?: unknown;
-  number?: unknown;
   passkey?: string;
   /** What `encrypt_for_passkeys` keeps, by credential ID. */
   keys?: unknown;
@@ -940,25 +849,6 @@ export async function asked(auth: Auth, origin: string, { ask, who: name, buildi
     if (!signed_in) return { error: "That isn't one of your devices." };
     await internalAdapter.deleteSession(signed_in.token);
     return { removed: browser(signed_in.userAgent), device: await browserDevice(signed_in.id) };
-  }
-  // The devices waiting to sign in as this person (`RequestState`). Nothing here says the number each shows: its
-  // person reads it off the device and types it, as Microsoft Authenticator has them, so picking isn't guessing.
-  if (ask === "waiting") {
-    const named = await adapter.findMany<DeviceCode>({ model: "deviceCode", where: [{ field: "person", value: user.id }, { field: "status", value: "pending" }] });
-    const waiting = named.filter((code) => state(code) === "waiting").toSorted((a, b) => +new Date(b.named!) - +new Date(a.named!));
-    return {
-      waiting: waiting.map((code) => ({ request: code.id, device: code.clientId, name: code.name, at: code.named, place: code.place ?? null, ends: code.expiresAt })),
-    };
-  }
-  // A request answered on one of its person's devices: the number typed lets it in if it's the one it shows, and
-  // stops it if not, as Not Me does.
-  if ((ask === "approve" && about.request) || ask === "deny") {
-    const code = await adapter.findOne<DeviceCode>({ model: "deviceCode", where: [{ field: "id", value: String(about.request) }, { field: "person", value: user.id }] });
-    if (!code || state(code) !== "waiting") return { error: "That device isn't waiting to sign in any more." };
-    const right = ask === "approve" && Number(about.number) === code.number;
-    if (!(await answer(adapter, code, user, right ? "approved" : "denied"))) return { error: "That device isn't waiting to sign in any more." };
-    if (ask === "approve" && !right) return { error: `That isn't the number ${code.name} showed, so it was blocked. If it was you, start again on it.` };
-    return right ? { approved: code.name } : { denied: code.name };
   }
   if (ask === "approve") {
     // A person lets a device in by its code from one of their own devices or assistants, which a passkey let in.

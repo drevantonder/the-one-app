@@ -4,9 +4,8 @@
 // device's code, as that device's link has it, its person signs in if they aren't yet, and is shown the code to
 // compare with the device's before they let it in or stop it (`Stage`). Opened from the app's Sign In & Security, someone
 // makes another passkey. Whichever it was, this browser is signed in after, and is one of that person's devices,
-// whose Home Screen it goes on to when there's nothing else to answer. In the app's own window, the page first asks
-// who's signing in, then shows the number that person types on one of their devices to let this one in, as it waits
-// (`Request` in `edge/auth.ts`). Use a Passkey shows the device's code instead, its button goes on to the passkey there (one the app may use, its network's, as `/.well-known`
+// whose Home Screen it goes on to when there's nothing else to answer. In the app's own window, the page shows the
+// device's code, its button goes on to the passkey there (one the app may use, its network's, as `/.well-known`
 // says), and Use Another Device gives the link and the code to open where they're signed in, for a passkey the app
 // can't reach. Every passkey is asked for its PRF output, which unlocks its person's key (`passkey.ts`): a device
 // approved with one that can holds the key as it comes in, and a device that's in but doesn't hold it opens this page
@@ -84,12 +83,9 @@ type Stage =
   | { stage: "failed"; why: string; ended?: boolean }
 
 const [stage, setStage] = createSignal<Stage>({ stage: "checking" })
-/// How the app's own window lets its device in: by who's signing in, whose devices are asked, by a passkey with the
-/// device's code, or with the link and the code to open elsewhere (Use Another Device).
-const [how, setHow] = createSignal<"named" | "passkey" | "away">("named")
-/// Who's signing in on a new device, as they type it, and once their devices are asked, the number it shows them.
-const [person, setPerson] = createSignal("")
-const [number, setNumber] = createSignal<number>()
+/// How the app's own window lets its device in: by a passkey with the device's code, or with the link and the code to
+/// open elsewhere (Use Another Device).
+const [how, setHow] = createSignal<"passkey" | "away">("passkey")
 /// Whether the link was copied, where there's no share sheet.
 const [copied, setCopied] = createSignal(false)
 /// The name someone joining goes by, as they type it.
@@ -450,16 +446,8 @@ async function share() {
   })
 }
 
-/// Names who's signing in on this device, which asks their devices, and shows the number they tap on one of them. The
-/// device learns it's in by itself, and the app moves on from this page then.
-async function name() {
-  if (!person().trim()) throw new Error("Say who's signing in first.")
-  const { number } = await ask<{ number: number }>("/device/claim", { userCode: (flow as { code: string }).code, person: person() })
-  setNumber(number)
-}
-
 /// What a stage shows, as `SignIn` takes it, whether it asks for a name, and the assistant it asks about.
-type Shows = Parameters<typeof SignIn>[0] & { asksName?: boolean; asksWho?: boolean; app?: App; elsewhere?: boolean }
+type Shows = Parameters<typeof SignIn>[0] & { asksName?: boolean; app?: App; elsewhere?: boolean }
 
 /// What each stage shows: its heading, the spinner's line while something's under way, the code, the warning, the
 /// problem, the button and what it does, and the one line left once it's answered.
@@ -469,10 +457,7 @@ function shows(): Shows {
   switch (flow.flow) {
     case "deviceInApp":
       if (how() === "away") return { heading: "Sign in on another device", button: shares ? "Share Link" : copied() ? "Copied" : "Copy Link", onSignIn: share, stop: "Back", onStop: () => setHow("passkey"), elsewhere: true }
-      if (how() === "passkey") return { heading: "Sign in", note: "Check this code where you sign in", code: shown, problem: why, button: "Sign in", onSignIn: () => location.assign(link.href), stop: "Use Another Device", onStop: () => setHow("away") }
-      if (number() !== undefined)
-        return { heading: "Check your devices", note: "On another of your devices, open Devices and enter", code: String(number()), status: "Waiting for approval…", quiet: true, button: google() ? "Use Google or a Passkey Instead" : "Use a Passkey Instead", onSignIn: () => setHow("passkey"), stop: "Back", onStop: () => setNumber() }
-      return { heading: "Sign in", problem: why, button: "Continue", onSignIn: name, stop: google() ? "Use Google or a Passkey" : "Use a Passkey", onStop: () => setHow("passkey"), asksWho: true }
+      return { heading: "Sign in", note: "Check this code where you sign in", code: shown, problem: why, button: "Sign in", onSignIn: () => location.assign(link.href), stop: "Use Another Device", onStop: () => setHow("away") }
     case "device":
       switch (now.stage) {
         case "checking":
@@ -622,11 +607,6 @@ render(
             <p class="shown">{shown}</p>
           </div>
         </div>
-      )}
-      {shows().asksWho && (
-        <Field>
-          <Input name="person" aria-label="Who's signing in?" autoFocus autoComplete="username" autoCapitalize="none" placeholder="Name or email" required value={person()} onChangeText={setPerson} />
-        </Field>
       )}
       {shows().asksName && !shows().done && (
         <Field>

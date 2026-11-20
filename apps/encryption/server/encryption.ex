@@ -414,28 +414,8 @@ defmodule Encryption do
         }
       },
       %{
-        name: "approve",
-        description: """
-        Lets a device hold your key: this device the first time, which makes the key, and then any other, from a
-        device that holds it. With your recovery key as `key`, it lets in a device that isn't in yet.
-        """,
-        inputs: %{
-          type: "object",
-          properties: %{
-            device: device,
-            name: %{type: "string", format: "device-name", description: "What to call the device"},
-            key: %{
-              type: "string",
-              format: "owner-key",
-              description: "Your recovery key, to approve this device with it"
-            }
-          }
-        },
-        outputs: named
-      },
-      %{
         name: "ask",
-        description: "Asks to be trusted: your trusted devices show this one, to approve it",
+        description: "Asks for your key: Unlock with Passkey, on the sign-in page, then lets this device hold it",
         inputs: %{
           type: "object",
           properties: %{device: device, name: %{type: "string", format: "device-name", description: "What to call it"}}
@@ -530,34 +510,6 @@ defmodule Encryption do
     %{device: device, wrapped: wrapped == true, artifacts: Enum.map(inputs["artifacts"] || [], &choose(call, &1))}
   end
 
-  @on_a_device "A device is approved from a device: in the app there, or with `one` on it. An assistant somewhere else has none."
-
-  # The first key written is the owner's key from then on: what a device hands over is kept only if it's that one.
-  def call("approve", %{"device" => device, "key" => given} = inputs, call) do
-    key = key(owner!(call, call.subject))
-
-    with {:ok, %{"check" => check, "slot" => slot}} when is_binary(check) and is_binary(slot) <- JSON.decode(given),
-         true <- device =~ ~r/^[0-9a-f]{64}$/ do
-      checked!(key, check)
-
-      name = inputs["name"] || "A device"
-      Artifact.remove(key, "devices/" <> device)
-      :ok = Artifact.write(key, "devices/" <> device, JSON.encode!(%{name: name, slot: slot}))
-      Artifact.remove(key, "asking/" <> device)
-      %{device: device, name: name}
-    else
-      _ -> raise @on_a_device
-    end
-  end
-
-  def call("approve", %{"device" => _}, _call),
-    do:
-      raise(
-        "Only a device that holds your key lets another hold it. Approve this one from there, or with your recovery key."
-      )
-
-  def call("approve", _inputs, _call), do: raise(@on_a_device)
-
   def call("ask", %{"device" => device} = inputs, call) do
     key = key(call)
     if not (device =~ ~r/^[0-9a-f]{64}$/), do: raise("A device is named by its key.")
@@ -565,7 +517,7 @@ defmodule Encryption do
     %{device: device}
   end
 
-  def call("ask", _inputs, _call), do: raise(@on_a_device)
+  def call("ask", _inputs, _call), do: raise("A device asks for your key from itself: in the app there, or with `one` on it.")
 
   def call("revoke", %{"device" => device}, call) do
     key = key(owner!(call, call.subject))
@@ -576,7 +528,7 @@ defmodule Encryption do
 
   # Where an owner's key is kept, encrypted to each of their devices. It's theirs alone: nobody asks for a user.
   # Who holds a group's or the network's key is its owners' to say, as which servers open what's theirs is
-  # (`owner!/2`): approve and revoke ask that first. Anyone it's for reads what their own device holds.
+  # (`owner!/2`): store and revoke ask that first. Anyone it's for reads what their own device holds.
   defp key(%Call{subject: subject, actor: actor} = call) do
     if String.starts_with?(subject, "users/") and actor != subject, do: raise("#{subject}'s key is theirs alone.")
     Call.make(call, "key")

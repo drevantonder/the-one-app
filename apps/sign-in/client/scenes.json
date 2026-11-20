@@ -66,17 +66,6 @@
           }
         ]
       },
-      "sign-in_waiting": {
-        "waiting": [
-          {
-            "request": "w1",
-            "device": "dev9",
-            "name": "Pixel Tablet",
-            "at": "2025-12-31T23:58:00Z",
-            "place": "Sydney"
-          }
-        ]
-      },
       "builds": {
         "network": {
           "network_update_status": "up_to_date",
@@ -141,17 +130,17 @@
         ]
       },
       "encryption_key": {
-        "slot": 1
+        "owner": "users/alex",
+        "slot": 1,
+        "wrapped": null,
+        "access": []
       },
-      "sign-in_encrypt_for_passkeys": {}
+      "sign-in_encrypt_for_passkeys": {},
+      "permissions_groups": {
+        "groups": []
+      }
     },
     "component": "devices"
-  },
-  "Sign in request": {
-    "like": "Devices",
-    "taps": [
-      "Pixel Tablet · the One App"
-    ]
   },
   "Server": {
     "like": "Devices",
@@ -162,9 +151,6 @@
   "Update failed": {
     "like": "Server",
     "answers": {
-      "sign-in_waiting": {
-        "waiting": []
-      },
       "builds": {
         "network": {
           "network_update_status": "held",
@@ -254,6 +240,34 @@
     "errors": [
       "Couldn't reach it"
     ]
+  },
+  "Passkeys, servers waiting": {
+    "like": "Passkeys",
+    "answers": {
+      "encryption_key": {
+        "owner": "users/alex",
+        "slot": 1,
+        "wrapped": null,
+        "access": [
+          {
+            "artifact": "users/alex/made/vault/items",
+            "epoch": 1,
+            "servers": [],
+            "missing": [
+              {
+                "key": "be1c7056e56656d73f68c49afb1c83caa58db4183a35dcb3fc98111edb8099c5",
+                "name": "linux"
+              },
+              {
+                "key": "26c6f5d1c0baee602ca801fbb7127ffe4f61728ec6ed320946dc215be51ec994",
+                "name": "surface"
+              }
+            ],
+            "extra": []
+          }
+        ]
+      }
+    }
   },
   "People & Groups": {
     "answers": {
