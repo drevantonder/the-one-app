@@ -46,6 +46,13 @@ impl Screen {
         Ok(match request.op.as_str() {
             "window" => {
                 let (size, scale) = self.painted;
+                // What its JS holds, collected first, as a browser's heap snapshot is taken.
+                self.js.collect();
+                self.js.wait();
+                for child in self.frames.values_mut() {
+                    child.screen.js.collect();
+                    child.screen.js.wait();
+                }
                 json!({
                     "width": size.width,
                     "height": size.height,
@@ -58,6 +65,7 @@ impl Screen {
                     "moving": self.transitions.moving().len(),
                     "blank": self.pictures.blank + self.frames.values().map(|child| child.screen.pictures.blank).sum::<usize>(),
                     "picture_ms": self.frames.values().map(|child| child.screen.pictures.slowest).fold(self.pictures.slowest, Duration::max).as_millis() as u64,
+                    "js_bytes": self.js_memory(),
                 })
             }
             "tree" => self.inspected_tree(),

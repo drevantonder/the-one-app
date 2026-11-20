@@ -15,10 +15,11 @@
 //! A point is `x` and `y`, in CSS pixels from the window's top left, as `rect`s are.
 //!
 //! - `window` → `{entrypoint, width, height, scale, time, paused, failed, focused, leaving, moving, blank,
-//!   picture_ms}`: what it shows, its size, its clock, why it can't draw, if it can't (its JS threw, or sent what this
-//!   host doesn't speak), the node with the keyboard, how many nodes taken out are still drawn going, how many are on
-//!   their way somewhere, how many pictures the frame drawn last drew empty (decoding, or that didn't decode or come),
-//!   and the longest a picture took from being asked for to its window having it to draw.
+//!   picture_ms, js_bytes}`: what it shows, its size, its clock, why it can't draw, if it can't (its JS threw, or sent
+//!   what this host doesn't speak), the node with the keyboard, how many nodes taken out are still drawn going, how
+//!   many are on their way somewhere, how many pictures the frame drawn last drew empty (decoding, or that didn't
+//!   decode or come), the longest a picture took from being asked for to its window having it to draw, and the bytes
+//!   its JS holds, and its frames' pages', collected first, as a browser's heap snapshot is.
 //! - `tree` → `{tree}`: the semantic tree (`Tree::semantics`), as a screen reader reads it, each node with its `rect`.
 //! - `query` (a selector) → `{nodes}`: each node that matches, with its `node`, `kind`, `role`, `name`, `rect`, the
 //!   `style` and `class` it was given, its colours and lengths `resolved` from the design tokens, `source`, the

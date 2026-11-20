@@ -300,6 +300,8 @@ enum Call {
     Frame(f64),
     /// Calls that came while its thread was busy with something else, which it runs together in one turn.
     Batch(Vec<Call>),
+    /// Collects what its JS no longer holds, now, as a heap snapshot does first (`Thread::collect`).
+    Collect,
 }
 
 impl Call {
@@ -311,12 +313,13 @@ impl Call {
         }
     }
 
-    fn run(self, sandbox: &Sandbox, threw: &mut Vec<anyhow::Error>) {
+    fn run(self, sandbox: &Sandbox, threw: &mut Vec<anyhow::Error>, memory: &std::sync::atomic::AtomicUsize) {
         match self {
             Call::Send(to, message) => threw.extend(sandbox.send(to, &message).err()),
             Call::Frame(time) => threw.extend(sandbox.frame(time).err()),
             Call::Fire => {}
-            Call::Batch(calls) => calls.into_iter().for_each(|call| call.run(sandbox, threw)),
+            Call::Collect => memory.store(sandbox.collect(), Ordering::Relaxed),
+            Call::Batch(calls) => calls.into_iter().for_each(|call| call.run(sandbox, threw, memory)),
         }
     }
 }
@@ -466,8 +469,8 @@ impl Thread {
                 let apart = || roll(&mut on.split.lock().unwrap_or_else(std::sync::PoisonError::into_inner), 3) == 0;
                 for call in first.into_iter().chain(std::iter::from_fn(|| (!apart()).then(|| queue.try_recv().ok()).flatten())) {
                     ran += call.len();
-                    worked |= !matches!(call, Call::Fire);
-                    call.run(&sandbox, &mut threw);
+                    worked |= !matches!(call, Call::Fire | Call::Collect);
+                    call.run(&sandbox, &mut threw, &on.memory);
                 }
                 spent += crate::platform::on_cpu().saturating_sub(running);
             }
@@ -490,6 +493,12 @@ impl Thread {
     /// A frame is shown at `time`, on its clock: what asked for one runs (`requestAnimationFrame`).
     pub fn frame(&mut self, time: f64) {
         self.call(Call::Frame(time));
+    }
+
+    /// Has it collect what its JS no longer holds now, rather than once it's been still a moment, so `memory`, once it's
+    /// run (`wait`), is what it holds now.
+    pub fn collect(&mut self) {
+        self.post(Call::Collect);
     }
 
     /// The bytes its JS held as it was last collected, once it had been still a moment.

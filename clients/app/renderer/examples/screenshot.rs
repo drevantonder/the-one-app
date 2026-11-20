@@ -20,7 +20,9 @@
 //! comes as the display's input, each event at its own time, a click held down 80 ms,
 //! and what it presses scrolled into sight first, as Playwright's click does. Its clock is paused: `clock`'s `step`
 //! moves it, the display ticking each frame meanwhile; and after the requests, until what it shows comes to rest but
-//! for loops (at most 3 s), which is what's pictured. `--touch` draws it for a finger, as a phone's window is (`pointer: coarse`),
+//! for loops (at most 3 s), which is what's pictured. `changed` is a server saying something changed, as its client
+//! tells a page on screen, with what its tools answer from then on (`answers`, as `--answers` has them). A run whose
+//! page crashed fails, saying why, and so does one whose process grows past `HARNESS_MEMORY`, at once, wherever it is. `--touch` draws it for a finger, as a phone's window is (`pointer: coarse`),
 //! and presses are a finger's, as the display's touches, which its window takes as every phone's host does
 //! (`view::touch`): its slop, pans, a sheet taking the finger, and the swipe back from the left edge.
 //! `--panel` opens it as a computer's panel is (a Mac's launcher, its corners `<corner>` round), summoned: what its page
@@ -60,7 +62,20 @@ use renderer::render::renderer::Renderer;
 use renderer::{Appearance, Screen};
 use url::Url;
 
+/// The most the harness's process may hold: a run takes 200 to 500 MB, so one past it is running away, and is stopped
+/// before it takes a machine others share (20 Nov: a page out of memory took 14 GB and swap with it).
+const HARNESS_MEMORY: usize = 2 << 30;
+
 fn main() -> anyhow::Result<()> {
+    // Watched from a thread of its own, as whatever runs away may be holding the one that would notice.
+    std::thread::spawn(|| loop {
+        let held = memory_stats::memory_stats().map_or(0, |memory| memory.physical_mem);
+        if held > HARNESS_MEMORY {
+            eprintln!("Error: the harness grew to {} MB, past its {} MB, so it stopped", held >> 20, HARNESS_MEMORY >> 20);
+            std::process::exit(1);
+        }
+        std::thread::sleep(std::time::Duration::from_millis(100));
+    });
     let args: Vec<String> = std::env::args().skip(1).collect();
     let [folder, png, tree, ..] = &args[..] else {
         anyhow::bail!("screenshot <folder> <out.png> <out.json> [--ui <dir>] [--answers <json>] [--size WxH] [--scale N] [--dark] [--click id]...")
@@ -88,6 +103,9 @@ fn main() -> anyhow::Result<()> {
         Some(answers) => serde_json::from_str(&std::fs::read_to_string(answers)?)?,
         None => json!({}),
     };
+    // What its tools answer now, which a `changed` request moves on.
+    let answers = std::rc::Rc::new(std::cell::RefCell::new(answers));
+    let answering = answers.clone();
 
     let latency: f64 = flag("--latency").and_then(|ms| ms.parse().ok()).unwrap_or(0.0);
     if let Some(times) = flag("--slower").and_then(|times| times.parse().ok()) {
@@ -135,6 +153,7 @@ fn main() -> anyhow::Result<()> {
     let js = Thread::start(&page, files, None, clock.clone(), touch)?;
     // What the page asks its client, answered from `answers`, as record.js answers it.
     let asked: renderer::Asked = Box::new(move |message, _| {
+        let answers = answering.borrow();
         let id = message.get("id")?.clone();
         let (method, params) = (message["method"].as_str().unwrap_or_default(), &message["params"]);
         let answer = match (method, params["name"].as_str()) {
@@ -285,6 +304,20 @@ fn main() -> anyhow::Result<()> {
                 continue;
             }
         };
+        // A server said something changed, as a client tells a page on screen (`notifications/one/changed`), with what
+        // its tools answer now (`answers`), as what the network keeps moved on.
+        if request.op == "changed" {
+            if let Some(now) = request.inputs.get("answers").and_then(Value::as_object) {
+                let mut answers = answers.borrow_mut();
+                for (tool, answer) in now {
+                    answers[tool] = answer.clone();
+                }
+            }
+            windows.with(id, |screen| screen.message(&json!({"jsonrpc": "2.0", "method": "notifications/one/changed"})));
+            windows.run(0.0);
+            println!("{}", renderer::inspect::answer(&request.id, Ok(json!({}))));
+            continue;
+        }
         // What a person does comes as the display's input, on the platform's time, as a host's does; with a seed, a
         // moment or two after what came before, so it lands as things are on their way somewhere.
         // As an agent's request reaches a device's window, by the inspector's socket (`"inspector": true`), it goes to
