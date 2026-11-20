@@ -38,7 +38,9 @@ const look = styles({
   heading: { flexGrow: 1, minWidth: 0, font: tokens.type.large, fontWeight: tokens.weight.semibold, lineClamp: 2 },
   computerHeading: { font: tokens.type.barTitle, fontWeight: tokens.weight.semibold },
   centred: { textAlign: "center" },
-  body: { gap: tokens.length.gutter, paddingTop: tokens.grid[1], paddingInline: tokens.length.gutter, paddingBottom: tokens.length.gutter },
+  // It scrolls within the panel, as long as the panel lets it be: a flex item is otherwise never shorter than what's
+  // in it.
+  body: { minHeight: 0, gap: tokens.length.gutter, paddingTop: tokens.grid[1], paddingInline: tokens.length.gutter, paddingBottom: tokens.length.gutter },
   alert: { width: "100%", maxWidth: tokens.length.alert, gap: tokens.grid[2.5], paddingTop: tokens.grid[5], paddingInline: tokens.grid[4], paddingBottom: tokens.grid[4], borderRadius: tokens.radius.window },
   text: { color: tokens.colour.secondaryLabel },
   footer: { flexDirection: "row", flexWrap: "wrap-reverse", gap: tokens.grid[2], marginTop: tokens.grid[1.5] },
