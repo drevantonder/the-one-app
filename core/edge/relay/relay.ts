@@ -2,8 +2,7 @@
 // it passes a call that came in at the address over the web to a server, tells every server what a piece here has to
 // say, and says who's here. The rest of the edge calls it as functions (`forward`, `notify`, `presence`), and an app's
 // part through `RelayEntrypoint`, which `edge.js` binds it to as RELAY. It reaches the relay's Durable Object by its
-// binding RELAY, and the relay's Worker by RELAY_WORKER, to which it passes the relay's own paths where they reach the
-// edge: where the network has no address, and on a network run on one machine.
+// binding RELAY, and the relay's Worker by RELAY_WORKER, to which it passes the relay's own paths.
 //
 // A server says what it is here as that changes (`/relay/seen`), and a build published and Update Now
 // (`/relay/update`), which the relay tells the network's updater (`updater/updater.ts`); only a ready server is sent

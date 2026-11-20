@@ -1,6 +1,5 @@
 {
-  // The relay, a Worker of its own (`worker.ts`), which `edge.js` deploys only when it changed, with Workers Routes for
-  // its paths at the network's address.
+  // The relay, a Worker of its own (`worker.ts`), which `edge.js` deploys only when it changed.
   "name": "network-relay",
   "main": "worker.ts",
   "compatibility_date": "2026-11-01",

@@ -21,7 +21,7 @@
     "code_update_strategy": { "mode": "deferred", "max_delay": 5 }
   },
   "migrations": [{ "tag": "v1", "new_sqlite_classes": ["NetworkUpdater", "Changes"] }],
-  // The relay's Worker, which the edge passes the relay's paths to where they reach it (`relay/relay.ts`).
+  // The relay's Worker, which the edge passes the relay's paths to (`relay/relay.ts`).
   "services": [{ "binding": "RELAY_WORKER", "service": "network-relay" }],
   // Its secrets, which only it holds: BUCKET is the bucket's S3 address with the bucket's name as its path, and
   // FIRST_SERVER is what the network's first server shows once. `wrangler dev` takes them from its environment.

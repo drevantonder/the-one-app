@@ -5,8 +5,8 @@
 //
 // It's apart from the rest of the edge (`edge.ts`) because it holds every server's and device's connection, which a
 // deploy of the Worker holding them ends: the edge changes with every page and MCP change, this rarely, and is deployed
-// only when it has (`edge.js`). The network's address sends it its own paths (`/relay`, `/relay/outside`, `/ping`)
-// by Workers Routes, so they don't pass through the edge's Worker.
+// only when it has (`edge.js`). The edge passes it its own paths (`/relay`, `/relay/outside`, `/ping`) through a
+// service binding, and the connection is then this Worker's, which an edge deploy leaves open.
 //
 // An endpoint's connection is held by the Worker it reached, where waiting costs nothing: there it proves its key,
 // and iroh's question every 15 seconds, whether the relay is still there, is answered. Once proved, it's joined to

@@ -151,14 +151,9 @@ const full = tailed({
 await Bun.write(`${built}/edge.jsonc`, JSON.stringify(full, null, 2));
 const edgeConfig = relative(here, `${built}/edge.jsonc`);
 const partConfigs = workers.map(({ part }) => relative(here, `${part}/wrangler.jsonc`));
-// The relay, a Worker of its own (`relay/worker.ts`), with Workers Routes for its own paths at the network's address,
-// which take them before the edge's Custom Domain does.
+// The relay, a Worker of its own (`relay/worker.ts`), which the edge passes its paths to.
 const relayWorker = (await import(`${here}/relay/wrangler.jsonc`)).default;
-const relayed = tailed({
-  ...relayWorker,
-  main: relative(built, `${here}/relay/${relayWorker.main}`),
-  ...(at && { routes: ["relay", "relay/outside", "ping"].map((path) => `${at.hostname}/${path}`) }),
-});
+const relayed = tailed({ ...relayWorker, main: relative(built, `${here}/relay/${relayWorker.main}`) });
 await Bun.write(`${built}/relay.jsonc`, JSON.stringify(relayed, null, 2));
 const relayConfig = relative(here, `${built}/relay.jsonc`);
 
