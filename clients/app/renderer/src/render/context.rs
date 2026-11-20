@@ -40,12 +40,16 @@ impl Context {
     /// Compiles, in the background, the pipelines a window of this platform draws its frames with, as it starts, so its
     /// first window's first frame doesn't wait for its GPU to compile them (half a second on a Mac's Metal): its
     /// format (`Renderer::new`), see-through first, as the Home Screen's panel is, then opaque, then a snapshot's.
+    /// Metal composites no surface premultiplied (it offers Opaque and PostMultiplied), so a Mac's and an iPhone's
+    /// windows draw only straight alpha: compiling the premultiplied pipelines first had a Mac's Home Screen wait for
+    /// them and then compile its own (its renderer 279 ms, 20 Nov).
     #[cfg(not(target_arch = "wasm32"))]
     pub fn prepare(&self) {
         let (device, queue, compiled) = (self.device.clone(), self.queue.clone(), self.pipelines.clone());
         let format = if cfg!(target_os = "android") { wgpu::TextureFormat::Rgba8Unorm } else { wgpu::TextureFormat::Bgra8Unorm };
+        let kinds: &'static [bool] = if cfg!(target_vendor = "apple") { &[false] } else { &[true, false] };
         std::thread::spawn(move || {
-            for premultiplied in [true, false] {
+            for &premultiplied in kinds {
                 super::renderer::Pipelines::shared(&device, &queue, &compiled, format, premultiplied);
             }
             // Then a window's snapshot's, drawn offscreen as a phone's app goes to the background.
