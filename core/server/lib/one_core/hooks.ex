@@ -241,12 +241,24 @@ defmodule OneCore.Hooks do
   end
 
   @doc """
-  Asks each app that collects `hook` for its part, for `asked`. Gives `{:ok, parts, failed}`: each app's part
-  by its name, leaving out those that answered `nil`, and why each app that couldn't answer couldn't, by its name.
+  Asks each app that collects `hook` for its part, for `asked`, all at once, each under its own time
+  (`within/3`). Gives `{:ok, parts, failed}`: each app's part by its name, leaving out those that answered `nil`, and
+  why each app that couldn't answer couldn't, by its name.
   """
   def collect(hook, about, {_actor, subject} = principal) do
-    Enum.reduce(hooking(hook, subject), {:ok, %{}, %{}}, fn {_at, app} = installed, {:ok, parts, failed} ->
-      case call_hook(installed, :collect, hook, about, principal) do
+    # Each is asked as part of this call, in its trace.
+    {trace, call} = {OpenTelemetry.Ctx.get_current(), OneCore.Call.State.id()}
+
+    asked = fn {_at, app} = installed ->
+      OpenTelemetry.Ctx.attach(trace)
+      OneCore.Call.State.follow(call)
+      {app, call_hook(installed, :collect, hook, about, principal)}
+    end
+
+    hooking(hook, subject)
+    |> Task.async_stream(asked, max_concurrency: 16, timeout: :infinity)
+    |> Enum.reduce({:ok, %{}, %{}}, fn {:ok, {app, answered}}, {:ok, parts, failed} ->
+      case answered do
         {:ok, nil} -> {:ok, parts, failed}
         {:ok, part} -> {:ok, Map.put(parts, app, part), failed}
         {:error, why} -> {:ok, parts, Map.put(failed, app, why)}
