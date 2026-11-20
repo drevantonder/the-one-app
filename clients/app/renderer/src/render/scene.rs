@@ -347,14 +347,7 @@ impl Primitive {
     /// whose box is out of its mask but whose blur isn't is still drawn, and ordered with what's over its blur.
     pub fn bounds(&self) -> Bounds<ScaledPixels> {
         match self {
-            Primitive::Shadow(shadow) => {
-                let reach = 3.0 * shadow.blur_radius.0;
-                let Bounds { origin, size } = shadow.bounds;
-                Bounds {
-                    origin: crate::geometry::Point { x: ScaledPixels(origin.x.0 - reach), y: ScaledPixels(origin.y.0 - reach) },
-                    size: crate::geometry::Size { width: ScaledPixels(size.width.0 + 2.0 * reach), height: ScaledPixels(size.height.0 + 2.0 * reach) },
-                }
-            }
+            Primitive::Shadow(shadow) => shadow.reach(),
             Primitive::Quad(quad) => quad.bounds,
             Primitive::Underline(underline) => underline.bounds,
             Primitive::MonochromeSprite(sprite) => sprite.bounds,
@@ -482,6 +475,24 @@ impl<'a> Iterator for BatchIterator<'a> {
     }
 }
 
+impl PrimitiveBatch<'_> {
+    /// Whether anything in it is drawn in `area`, cut to where it's drawn inside.
+    pub(crate) fn reaches(&self, area: &Bounds<ScaledPixels>) -> bool {
+        fn any<'a>(mut all: impl Iterator<Item = (Bounds<ScaledPixels>, &'a ContentMask<ScaledPixels>)>, area: &Bounds<ScaledPixels>) -> bool {
+            all.any(|(bounds, mask)| bounds.intersect(&mask.bounds).intersects(area))
+        }
+        match self {
+            PrimitiveBatch::Shadows(all) => any(all.iter().map(|one| (one.reach(), &one.content_mask)), area),
+            PrimitiveBatch::Quads(all) => any(all.iter().map(|one| (one.bounds, &one.content_mask)), area),
+            PrimitiveBatch::Underlines(all) => any(all.iter().map(|one| (one.bounds, &one.content_mask)), area),
+            PrimitiveBatch::MonochromeSprites { sprites, .. } => any(sprites.iter().map(|one| (one.bounds, &one.content_mask)), area),
+            PrimitiveBatch::PolychromeSprites { sprites, .. } => any(sprites.iter().map(|one| (one.bounds, &one.content_mask)), area),
+            PrimitiveBatch::Backdrops(all) => any(all.iter().map(|one| (one.bounds, &one.content_mask)), area),
+            PrimitiveBatch::Rasters(all) => any(all.iter().map(|one| (one.bounds, &one.content_mask)), area),
+        }
+    }
+}
+
 #[derive(Debug)]
 pub(crate) enum PrimitiveBatch<'a> {
     Shadows(&'a [Shadow]),
@@ -546,6 +557,18 @@ pub(crate) struct Shadow {
     pub pad: u32,
     pub outer: Bounds<ScaledPixels>,
     pub outer_radii: Corners<ScaledPixels>,
+}
+
+impl Shadow {
+    /// Its box grown by its blur's reach, three deviations, as its shader draws it.
+    fn reach(&self) -> Bounds<ScaledPixels> {
+        let reach = 3.0 * self.blur_radius.0;
+        let Bounds { origin, size } = self.bounds;
+        Bounds {
+            origin: crate::geometry::Point { x: ScaledPixels(origin.x.0 - reach), y: ScaledPixels(origin.y.0 - reach) },
+            size: crate::geometry::Size { width: ScaledPixels(size.width.0 + 2.0 * reach), height: ScaledPixels(size.height.0 + 2.0 * reach) },
+        }
+    }
 }
 
 impl From<Shadow> for Primitive {

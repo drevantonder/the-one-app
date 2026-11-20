@@ -925,7 +925,11 @@ impl Renderer {
         let globals = self.push(bytemuck::bytes_of(&globals));
         let gamma = self.gamma;
         let gamma = self.push(bytemuck::bytes_of(&gamma));
-        let batches: Vec<PrimitiveBatch<'_>> = scene.batches().collect();
+        // Only what reaches its box of the scene: a panel's pane of glass (`platform::Window::arrange`) draws a strip of
+        // its page, not all of it again.
+        let px = crate::geometry::ScaledPixels;
+        let area = Bounds { origin: crate::geometry::Point { x: px(origin[0]), y: px(origin[1]) }, size: crate::geometry::Size { width: px(size.0 as f32), height: px(size.1 as f32) } };
+        let batches: Vec<PrimitiveBatch<'_>> = scene.batches().filter(|batch| batch.reaches(&area)).collect();
         let instances: Vec<(u64, u64)> = batches.iter().map(|batch| self.push_batch(batch)).collect();
         // What each batch is, and what of the frame's start is the same as the last's.
         let drawn = {
