@@ -52,11 +52,12 @@ export function createMenu(props: MenuProps) {
   const close = () => open(undefined)
   const select = (value: string) => (close(), props.onSelect?.(value))
   const layer = createDismissable({ open: () => !!at(), onDismiss: close })
-  // Opened, the keyboard is on its first item; closed, it's measured again as it next opens.
+  // Opened, the keyboard is on its first item. Its size stays what it was last laid out as, which its host says again
+  // whenever it changes: a host tells a node's layout only as it changes, so one moved into the layer at the size it had
+  // says nothing, and waiting to be told again would leave it unplaced, unseen.
   createEffect(
     () => !!at(),
     (opened) => {
-      setSize(undefined)
       typeahead.reset()
       const first = usable()[0]
       if (opened && first) roving.focus(first.value)
