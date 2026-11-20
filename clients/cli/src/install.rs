@@ -8,7 +8,7 @@
 
 use std::collections::{BTreeMap, HashSet};
 use std::future::Future;
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 use std::pin::Pin;
 use std::process::{Command, ExitCode};
 use std::time::Duration;
@@ -40,7 +40,7 @@ impl Source {
             }
             _ => (written, None),
         };
-        let spec = if Path::new(repo).exists() || repo.starts_with(['.', '/', '~']) {
+        let spec = if Path::new(repo).exists() || Path::new(repo).is_absolute() || repo.starts_with(['.', '~']) {
             fs::canonicalize(repo).with_context(|| format!("There's no folder {repo}"))?.to_string_lossy().into_owned()
         } else if repo.contains("://") || repo.starts_with("git@") {
             repo.to_owned()
@@ -62,7 +62,7 @@ impl Source {
     }
 
     fn local(&self) -> bool {
-        self.spec.starts_with('/')
+        Path::new(&self.spec).is_absolute()
     }
 
     /// `owner/repo`, for a repo on GitHub.
@@ -74,12 +74,18 @@ impl Source {
 
     /// Where this device keeps its copy of the repo, which an agent reads an app's code in before installing it.
     fn folder(&self) -> Result<PathBuf> {
-        let named = self.spec.split_once("://").map_or(self.spec.as_str(), |(_, rest)| rest);
-        let named = named.replace(':', "/");
         let mut folder = client::home()?.join("git");
         if self.local() {
             folder.push("local");
-        } else if !self.spec.contains("://") && !self.spec.starts_with("git@") {
+            folder.extend(Path::new(&self.spec).components().filter_map(|part| match part {
+                Component::Normal(part) => Some(part),
+                _ => None,
+            }));
+            return Ok(folder);
+        }
+        let named = self.spec.split_once("://").map_or(self.spec.as_str(), |(_, rest)| rest);
+        let named = named.replace(':', "/");
+        if !self.spec.contains("://") && !self.spec.starts_with("git@") {
             folder.push("github.com");
         }
         for part in named.trim_start_matches("git@").trim_end_matches(".git").split('/') {
