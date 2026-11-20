@@ -342,7 +342,11 @@ defmodule OneCore.Server do
     :persistent_term.put({__MODULE__, :wake}, options.wake)
     {:ok, machine} = :inet.gethostname()
     name = Application.get_env(:one_core, :name) || to_string(machine)
-    Servers.started(key, address, name, Application.get_env(:one_core, :owner, "network"))
+    owner = Application.get_env(:one_core, :owner, "network")
+    Servers.started(key, address, name, owner)
+    # The servers that answer for whom it's for (the network's too) look again at who acts for them: one that cached
+    # them before this one said it's theirs, as a group's server's first start, otherwise took it for nobody's.
+    Task.start(fn -> notify_servers([owner]) end)
     # The clients that were watching before it stopped may have missed something meanwhile, a new build of its
     # apps among them, so they're told to ask again.
     options.started.()
