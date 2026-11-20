@@ -23,6 +23,8 @@ else.
   `Enter`, `Escape`, `Tab`, `Backspace`, a letter.
 - `settle` waits until the app has heard back from whatever it asked and its timers are done, and says what's still
   pending if its `deadline` passes first. Settle after an action before you read or snap.
+- `close` closes the window as its system does (its close button, ⌘W or Alt-F4): what a person does to an app's
+  window, which a launcher's put away instead.
 - `snap` takes a PNG of the window. `clock` pauses, steps or seeks the app's clock, for what moves or waits on time.
 - `profile` checks what moves, and what's slow: it pauses the clock, steps it to each time in `at` (ms from now, 0,
   80, 200 and 400 unless you say), and gives a picture of each frame there with what it cost: the JS `mutations`

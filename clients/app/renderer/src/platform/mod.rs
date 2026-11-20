@@ -743,6 +743,12 @@ impl Windows {
         let Some(window) = self.windows.get_mut(&id) else {
             return reply(crate::inspect::answer(&request.id, Err(anyhow::anyhow!("there's no window {id} open"))));
         };
+        // Closed as its system closes it, as its close button, ⌘W or Alt-F4 do: a panel's put away.
+        if request.op == "close" {
+            let closed = !window.panel;
+            self.input(id, 0, Input::Close);
+            return reply(crate::inspect::answer(&request.id, Ok(serde_json::json!({"closed": closed}))));
+        }
         // Whether the host keeps its contract: its window kept moving, then still, what it does meanwhile recorded.
         if request.op == "host" {
             if self.check.is_some() {

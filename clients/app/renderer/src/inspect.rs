@@ -50,6 +50,8 @@
 //!   keeps the renderer's contract with it (`platform`'s), its window kept moving for a second, then still, each check
 //!   `{check, ok, said}`: a tick each refresh, a frame presented each tick, nothing while still, and inputs timed by
 //!   the device, in order. A native window answers it; the headless harness, which has no host, doesn't.
+//! - `close` → `{closed}`: the window closes as its system closes it, by its close button, ⌘W or Alt-F4, which puts
+//!   a panel away instead (`closed` false).
 //! - `hover` (a selector, or a point) → `{hovered}`: the pointer moves to the point, or the node's middle, pressing
 //!   nothing, as Playwright's `hover`: what's under it is hovered and told the pointer moved.
 //! - `tap` (a selector, or a point) → `{tapped, editing}`: the pointer moves to the point, or the node's middle, and
