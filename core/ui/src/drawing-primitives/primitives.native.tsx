@@ -38,6 +38,9 @@ export const Pressable: typeof Page.Pressable = (props) =>
   )
 export const View: typeof Page.View = (props) => Pressable(props)
 
+/** The words in what a page drew (a node, or the string or number it was given): what a screen reader says of it. */
+export const textOf = (drawn: unknown): string => (typeof drawn === "string" || typeof drawn === "number" ? String(drawn) : drawn && typeof drawn === "object" ? ((drawn as Node).text ?? (drawn as Node).children.map(textOf).join("")) : "")
+
 /** Which of two nodes comes first in the page's tree, as a sort compares them: as the DOM's `compareDocumentPosition`
  * says. Anything not in it is as early as anything. */
 export const documentOrder = (a: unknown, b: unknown) => {

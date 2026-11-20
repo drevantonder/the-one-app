@@ -15,6 +15,8 @@ export interface Node {
   parent?: Node
   children: Node[]
   handlers: Record<string, (event: object) => void>
+  /** The words of a run of text (`raw-text`), which `textOf` reads. */
+  text?: string
 }
 
 const mutations = (globalThis as unknown as { mutations: Mutations }).mutations
@@ -31,7 +33,7 @@ const held = new FinalizationRegistry<number>((id) => {
 export const root: Node = { id: 0, type: "box", children: [], handlers: {} }
 
 function node(type: Type, value?: string): Node {
-  const made: Node = { id: next++, type, children: [], handlers: {} }
+  const made: Node = { id: next++, type, children: [], handlers: {}, text: value }
   nodes.set(made.id, new WeakRef(made))
   held.register(made, made.id)
   mutations.create(made.id, type, value)
@@ -48,6 +50,7 @@ export const { render: mount, effect, memo, createComponent, createElement, crea
   // Solid hands over what the page wrote, a number too (`{count()}`), which the DOM makes text of itself.
   createTextNode: (value) => node("raw-text", String(value)),
   replaceText(text, value) {
+    text.text = String(value)
     mutations.set(text.id, "value", String(value))
   },
   isTextNode: (node) => node.type === "raw-text",

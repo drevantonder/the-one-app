@@ -108,4 +108,26 @@ export default {
   "Lists/A long list": () => (
     <List each={Array.from({ length: 10000 }, (_, at) => `Note ${at + 1}`)}>{(note) => <Row heading={note()} text="19 Nov" />}</List>
   ),
+  "Lists/Rows with headings of their own, by the keyboard": {
+    size: [750, 475],
+    render: () => (
+      <List>
+        <Row heading={<Text>Alpha</Text>} onPress={() => {}} />
+        <Row heading={<Text>Bravo</Text>} onPress={() => {}} />
+        <Row heading={<Text>Charlie</Text>} onPress={() => {}} />
+      </List>
+    ),
+    checks: {
+      // A heading that's a component, as Settings' person row is, has its words for a name: letters typed find it.
+      "Letters find a row by its heading": [
+        { key: "Tab" },
+        { expect: { focused: "Alpha" } },
+        { key: "c" },
+        { expect: { focused: "Charlie" } },
+        { wait: 2000 },
+        { key: "b" },
+        { expect: { focused: "Bravo" } },
+      ],
+    },
+  },
 } satisfies Scenes

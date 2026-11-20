@@ -1,7 +1,7 @@
 // A list and its rows: written once on the drawing primitives, the same on the DOM and on a native host.
 import { children, createContext, createEffect, createSignal, For, onCleanup, Show, useContext } from "solid-js"
 import type { JSX } from "@solidjs/web"
-import { Pressable, Text, View, VirtualizedList } from "#primitives"
+import { Pressable, Text, textOf, View, VirtualizedList } from "#primitives"
 import { direction, reducedMotion, touch } from "#bridge"
 import { Icon } from "./button.tsx"
 import { RowMenu, type RowMenu as Menu } from "./menu.tsx"
@@ -306,6 +306,8 @@ type RowProps = {
 /// its start, as a phone's lists do: pressed, or swiped most of the way, it's done.
 export function Row(props: RowProps): JSX.Element {
   const [menu, setMenu] = createSignal<Menu>()
+  // The heading is drawn once, and its words are the row's name, which letters typed find it by.
+  const heading = children(() => props.heading)
   const at = (event: Located) => ({ x: event.clientX, y: event.clientY, width: 0, height: 0 })
   // Held, its menu opens where it was held; swiped toward its start by a finger, its destructive item shows.
   const hold = createHold({ accepts: () => !!menu() && !swipe.offset(), onHold: (event) => menu()?.open(at(event)) })
@@ -349,7 +351,7 @@ export function Row(props: RowProps): JSX.Element {
         <View style={look.start}>{props.start}</View>
       </Show>
       <View style={[look.words, flat() && look.flatWords]}>
-        <Text style={[look.heading, flat() && look.flatHeading, style !== "plain" && look.groupedHeading, grouped() && look.groupedSize, sidebar() && look.sidebarSize, props.destructive && look.destructive]}>{props.heading}</Text>
+        <Text style={[look.heading, flat() && look.flatHeading, style !== "plain" && look.groupedHeading, grouped() && look.groupedSize, sidebar() && look.sidebarSize, props.destructive && look.destructive]}>{heading()}</Text>
         <Show when={props.text}>
           <Text style={[look.text, flat() && look.flatText, style !== "plain" && !touch() && look.groupedText]}>{props.text}</Text>
         </Show>
@@ -372,7 +374,7 @@ export function Row(props: RowProps): JSX.Element {
     node: () => drawn(),
     list: list.list,
     at: useContext(At) ?? undefined,
-    label: () => (typeof props.heading === "string" ? props.heading : ""),
+    label: () => heading.toArray().map(textOf).join(""),
     pressable: () => !!props.onPress,
     current: () => !!props.current,
     open: () => props.onPress?.(),
