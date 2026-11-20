@@ -359,6 +359,11 @@ pub struct Renderer {
     /// The frame's globals, its batches' instances and its blurs' parameters, written once a frame.
     data: Vec<u8>,
     buffer: Option<wgpu::Buffer>,
+    /// What the frame's data is copied into its buffer from, in the frame's own commands. `Queue::write_buffer` copies
+    /// it in commands of the queue's own, a second command encoder each frame; wgpu keeps four idle (our wgpu's
+    /// change), so a few frames in flight make and free encoders as they go, and Intel's Direct3D 12 driver waits for
+    /// the GPU to make one: a Surface took twice the CPU to draw a frame (p95 10 ms, 6.7 with one).
+    belt: wgpu::util::StagingBelt,
     atlas: Arc<Atlas>,
     sampler: wgpu::Sampler,
     gamma: GammaParams,
@@ -622,6 +627,7 @@ impl Renderer {
             alignment: u64::from(limits.min_storage_buffer_offset_alignment.max(limits.min_uniform_buffer_offset_alignment)),
             data: Vec::new(),
             buffer: None,
+            belt: wgpu::util::StagingBelt::new(context.device.clone(), 1 << 20),
             atlas,
             sampler,
             gamma: GammaParams { gamma_ratios: gamma_ratios(1.8), grayscale_enhanced_contrast: 1.0, pad: [0.0; 3] },
@@ -969,7 +975,8 @@ impl Renderer {
             .unwrap_or(4);
         let window = self.instances.as_ref().map_or(0, |(_, window, _)| *window).max(largest.next_power_of_two().max(256));
         self.data.resize(self.data.len() + window as usize, 0);
-        self.write_data();
+        let mut encoder = self.device.create_command_encoder(&wgpu::CommandEncoderDescriptor::default());
+        self.write_data(&mut encoder);
         let buffer = self.buffer.clone().expect("written above");
         let binding = |(offset, size): (u64, u64)| wgpu::BindingResource::Buffer(wgpu::BufferBinding { buffer: &buffer, offset, size: wgpu::BufferSize::new(size) });
         let globals = self.pipelines.layouts.globals(&buffer, globals, gamma);
@@ -986,7 +993,6 @@ impl Renderer {
 
         // The frame is drawn in runs of batches, one pass each, broken at each backdrop, which blurs what's drawn
         // before it.
-        let mut encoder = self.device.create_command_encoder(&wgpu::CommandEncoderDescriptor::default());
         for (key, (width, height), globals, instance) in planned {
             self.draw_tile(&mut encoder, &buffer, &instances.group, key, (width, height), globals, gamma, instance);
         }
@@ -1039,6 +1045,7 @@ impl Renderer {
         if let Some(stamps) = &self.stamps {
             stamps.resolve(&mut encoder);
         }
+        self.belt.finish_and_recall_on_submit(&encoder);
         self.queue.submit([encoder.finish()]);
         if let Some(stamps) = &mut self.stamps {
             stamps.submitted();
@@ -1062,7 +1069,7 @@ impl Renderer {
     }
 
     /// Writes the frame's data into its buffer, grown to hold it.
-    fn write_data(&mut self) {
+    fn write_data(&mut self, encoder: &mut wgpu::CommandEncoder) {
         let needed = (self.data.len() as u64).next_multiple_of(wgpu::COPY_BUFFER_ALIGNMENT);
         self.data.resize(needed as usize, 0);
         if self.buffer.as_ref().is_none_or(|buffer| buffer.size() < needed) {
@@ -1073,7 +1080,8 @@ impl Renderer {
                 mapped_at_creation: false,
             }));
         }
-        self.queue.write_buffer(self.buffer.as_ref().expect("made above"), 0, &self.data);
+        let size = wgpu::BufferSize::new(needed).expect("a frame has its globals");
+        self.belt.write_buffer(encoder, self.buffer.as_ref().expect("made above"), 0, size).copy_from_slice(&self.data);
     }
 
     /// Draws the batches `run` names into `view` in one pass; a backdrop with what's behind it blurred, and which
