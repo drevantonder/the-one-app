@@ -304,12 +304,7 @@ fn main() -> anyhow::Result<()> {
             let at = |edge: &str| from[edge].as_f64().unwrap_or_default() as f32;
             let icon = from.is_object().then(|| renderer::geometry::Bounds { origin: renderer::geometry::point(at("x"), at("y")), size: Size { width: at("width"), height: at("height") } });
             let options = WindowOptions { title: app.clone(), app_id: "screenshot".into(), size: Size { width: Pixels(1024.0), height: Pixels(720.0) }, tag: json!({"entrypoint": app}), panel: None, places: None, frame: None, root: false, icon, owner: None, snapshot: snapshot.clone(), title_row: false };
-            // Its window first, its page given it once started, as the app opens one (`Windows::opening`).
-            opened = windows.opening(options, |_| {}).ok();
-            if let Some(id) = opened {
-                windows.run(1000.0 / 60.0);
-                windows.attach(id, screen);
-            }
+            opened = windows.open(options, Ok(screen), |_| {}).ok();
         })));
     }
     let ran = started.elapsed();
@@ -439,7 +434,7 @@ fn main() -> anyhow::Result<()> {
     // for at most SETTLE_MS.
     let settling = renderer::platform::fake_time();
     frame(&mut windows);
-    while (windows.revealing(id) || windows.with(id, |screen| screen.arriving()).unwrap_or(false)) && renderer::platform::fake_time() - settling < SETTLE_MS {
+    while windows.with(id, |screen| screen.arriving()).unwrap_or(false) && renderer::platform::fake_time() - settling < SETTLE_MS {
         windows.run(1000.0 / 60.0);
     }
     let drawn = started.elapsed();
@@ -922,9 +917,6 @@ fn replay(windows: &mut Windows, id: renderer::platform::WindowId, request: &ren
         }
         frames.push(frame);
         windows.run((tick - elapsed()).max(0.0));
-        // What its page asked for as it ended (an app opened) is done before it's taken as still.
-        between(windows);
-        windows.run(0.0);
         let still = !windows.wanted();
         if next == samples.len() && (still || tick >= length + after) {
             break;

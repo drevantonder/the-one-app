@@ -18,19 +18,10 @@ fn file(stem: &Path) -> PathBuf {
     PathBuf::from(name)
 }
 
-/// How old a snapshot may be and still be shown: one older is of what has likely changed (Device Activity's showed
-/// devices removed the day before), and the window shows its canvas instead.
-const KEPT_FOR: std::time::Duration = std::time::Duration::from_secs(60 * 60);
-
-/// The snapshot kept at `stem`, as RGBA rows, where there's one `width` by `height` device pixels, kept within the
-/// last hour (`KEPT_FOR`): one of another size is of a window that isn't this one's now.
+/// The snapshot kept at `stem`, as RGBA rows, where there's one `width` by `height` device pixels: one of another
+/// size is of a window that isn't this one's now.
 pub(super) fn read(stem: &Path, (width, height): (u32, u32)) -> Option<Vec<u8>> {
-    let file = file(stem);
-    let age = std::fs::metadata(&file).ok()?.modified().ok()?.elapsed().unwrap_or_default();
-    if age > KEPT_FOR {
-        return None;
-    }
-    let bytes = std::fs::read(file).ok()?;
+    let bytes = std::fs::read(file(stem)).ok()?;
     let picture = image::load_from_memory_with_format(&bytes, image::ImageFormat::Png).ok()?.into_rgba8();
     (picture.dimensions() == (width, height)).then(|| picture.into_raw())
 }

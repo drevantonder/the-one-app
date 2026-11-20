@@ -89,10 +89,10 @@ impl Scene {
         }
     }
 
-    /// Draws raster `id`'s image (`Renderer::picture`) over `bounds`, `opacity` as opaque, over what's drawn there.
-    pub fn picture(&mut self, id: u32, bounds: Bounds<ScaledPixels>, opacity: f32) {
+    /// Draws raster `id`'s image (`Renderer::picture`) over `bounds`, as it is.
+    pub fn picture(&mut self, id: u32, bounds: Bounds<ScaledPixels>) {
         let transformation = TransformationMatrix::unit();
-        self.insert_primitive(Raster { order: 0, raster: id, opacity, pad: 0, bounds, content_mask: ContentMask { bounds }, transformation });
+        self.insert_primitive(Raster { order: 0, raster: id, opacity: 1.0, pad: 0, bounds, content_mask: ContentMask { bounds }, transformation });
     }
 
     /// Draws `recording` in this scene as an image of it, drawn once, grown `scale` times and moved `by` (`p ↦

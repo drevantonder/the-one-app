@@ -4,15 +4,10 @@
 // handled. What throws in a timer or a listener is reported (`reportError`), as a browser does, and runs nothing less.
 const timers = new Map()
 let nextTimer = 1
-// How deep the timer running now, and what its promises run after it, is nested in timers that set each other, as
-// HTML's timer nesting level: past five, a timer waits at least 4 ms, so one that sets itself again at once (a page
-// waiting on its answers) doesn't spin, and the display's frames come between.
-let nesting = 0
 globalThis.host = { post: (message) => __post(JSON.stringify(message)) }
 globalThis.setTimeout = (callback, delay = 0, ...args) => {
   const id = nextTimer++
-  const level = nesting + 1
-  timers.set(id, { due: __now() + Math.max(level > 5 ? 4 : 0, delay), level, run: () => callback(...args) })
+  timers.set(id, { due: __now() + Math.max(0, delay), run: () => callback(...args) })
   return id
 }
 globalThis.clearTimeout = (id) => void timers.delete(id)
@@ -191,11 +186,9 @@ if (FIXED !== null) {
   timers: () => JSON.stringify([...timers.values()].map((timer) => ({ in: timer.due - __now(), every: timer.every }))),
   fire: () => {
     const now = __now()
-    nesting = 0
     for (const [id, timer] of [...timers]) {
       if (timer.due > now || !timers.has(id)) continue
       timers.delete(id)
-      nesting = timer.level ?? 0
       try {
         timer.run()
       } catch (error) {
@@ -207,7 +200,6 @@ if (FIXED !== null) {
   // the next, as a browser's do.
   framing: () => frames.size > 0,
   frame: (time) => {
-    nesting = 0
     const asked = [...frames.values()]
     frames.clear()
     for (const callback of asked) {
