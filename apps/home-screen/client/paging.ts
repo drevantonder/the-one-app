@@ -44,16 +44,29 @@ export function createPaging(props: { owners: Owner[] }, layout: Screens) {
   /// What's carried, once the pages under it come to rest.
   const underCarry: { settled?: () => void } = {}
   const rested = (one: Spring | undefined) => one && one.value === one.target && !one.velocity && underCarry.settled?.()
-  /// The owner and screenful nearest where they are, which the pills follow.
+  /// How far the host holds the pages dragged along from where they are, as they're dragged (`along`), and none while
+  /// they aren't: where they're drawn is where they are less it. `held` is it as it's said, which `look` reads in the
+  /// same turn, where the signal, which draws, says it once that turn is done.
+  const [dragged, setDragged] = createSignal<number>()
+  let held = 0
+  const drag = (offset: number | undefined) => {
+    held = offset ?? 0
+    setDragged(offset)
+  }
+  /// The owner and screenful nearest where they're drawn, which the dots light.
   const look = () => {
     const owner = shownOwner()
-    setSeen({ owner, screen: Math.round(sideways(owner).value / pitch()) })
-    setAlong(sideways(owner).value / pitch())
+    const drawn = sideways(owner).value - held
+    // Past an end, as a rubber band, it's the end's.
+    setSeen({ owner, screen: Math.max(0, Math.min(stops(owner) - 1, Math.round(drawn / pitch()))) })
+    setAlong(drawn / pitch())
   }
-  /// How far the sections are moved past Home, to the App Library: the owner shown's way along, past their Home.
+  /// How far the sections are drawn past Home, to the App Library: the owner shown's way along, past their Home, as the
+  /// host drags them too. What's over Home and not its pages, the owner pill and the dots, goes as far with it, as an
+  /// iPhone's dots go with its last page.
   const sectionsX = () => {
     const owner = Math.max(0, Math.min(props.owners.length - 1, Math.round(downY() / Math.max(1, room().height))))
-    return Math.max(0, xOf(owner)[0]() - Math.max(0, homes(owner).length - 1) * room().width)
+    return Math.max(0, xOf(owner)[0]() - (dragged() ?? 0) - Math.max(0, homes(owner).length - 1) * room().width)
   }
 
   const card = () => cardOf(room())
@@ -61,9 +74,6 @@ export function createPaging(props: { owners: Owner[] }, layout: Screens) {
   /// Whether a wheel's turns are moving the pages one to one, as a trackpad's fingers do where the system says nothing
   /// of when they lift, which their spring doesn't follow.
   const [wheeling, setWheeling] = createSignal(false)
-  /// Whether the pages are dragged from Home's last screenful, on the way to the App Library maybe: the owner pill over
-  /// them, which the host's drag doesn't move, steps out of its way until they're back on Home.
-  const [leaving, setLeaving] = createSignal(false)
   /// Where a page of an owner is drawn in the window: its left and top, and how much larger it's drawn.
   const pageAt = (owner: number, page: number) => {
     if (untrack(launcher)) return { x: untrack(cardLeft) + INSET + alongOf(untrack(room), page) - Math.min(sideways(owner).value, homeEnd(owner)), y: CARD_TOP + PILLS, scale: untrack(room).scale }
@@ -127,13 +137,14 @@ export function createPaging(props: { owners: Owner[] }, layout: Screens) {
     },
     // UIScrollView's rubber band.
     dragElastic: 0.55,
-    onDragStart: () => {
-      const { at } = home.getSnapshot().context
-      setLeaving(at.screen === homes(at.owner).length - 1)
+    onDragStart: () => drag(0),
+    onDrag: ({ offset }: Pick<Dragged, "offset">) => {
+      drag(offset.x)
+      look()
     },
     onDragEnd: ({ offset, velocity, canceled }: Dragged) => {
-      setLeaving(false)
-      if (canceled) return
+      drag(undefined)
+      if (canceled) return look()
       const owner = home.getSnapshot().context.at.owner
       const from = Math.round(sideways(owner).value / pitch())
       const screen = settle(from, from - offset.x / pitch(), -velocity.x, stops(owner), pitch())
@@ -324,7 +335,7 @@ export function createPaging(props: { owners: Owner[] }, layout: Screens) {
       slide(home.getSnapshot().context.at, true)
     }
   }
-  return { height, pitch, downY, xOf, opacityOf, underCarry, sectionsX, card, cardLeft, wheeling, leaving, pageAt, pageUnder, swiping, swipes, along, wheel, release }
+  return { height, pitch, downY, xOf, opacityOf, underCarry, sectionsX, dragged, card, cardLeft, wheeling, pageAt, pageUnder, swiping, swipes, along, wheel, release }
 }
 
 export type Paging = ReturnType<typeof createPaging>

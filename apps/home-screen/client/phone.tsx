@@ -14,13 +14,16 @@ import { type Paging } from "./paging.ts"
 
 export function Phone(props: { owners: Owner[]; layout: Screens; paging: Paging }) {
   const { homes, pages, laid, library } = props.layout
-  const { downY, xOf, opacityOf, sectionsX, swipes, along, leaving, wheel } = props.paging
+  const { downY, xOf, opacityOf, sectionsX, dragged, wheeling, swipes, along, wheel } = props.paging
   // The owner shown, how far along their pages and the App Library are, and how wide their Home is.
   const shown = () => state().context.at.owner
   const across = () => xOf(shown())[0]()
   // How opaque the pages, the App Library and the owner pill over them are: for whoever asked for less motion, they fade
   // out, go there and fade in, as iOS's pages do (`glide`).
   const opacity = () => opacityOf(shown())[0]()
+  // What's over Home but not its pages, the owner pill and the dots, goes with its last page to the App Library, one to
+  // one as the pages are dragged or a wheel moves them, and by their spring otherwise.
+  const withHome = () => [!wheeling() && dragged() === undefined && !reducedMotion() && looks.paging, looks.shifted(-sectionsX())]
   const homeWidth = (owner: number) => Math.max(1, homes(owner).length) * room().width
   // Each other owner's pages are moved so the page they were last on is where the shown owner's is, ready for a swipe
   // up or down to them.
@@ -74,13 +77,14 @@ export function Phone(props: { owners: Owner[]; layout: Screens; paging: Paging 
           <Library owner={props.owners[0]} />
         </View>
         {/* Whose pages they are, over Home's, which goes with them as they slide off to the App Library. */}
-        <View inert={library() || undefined} style={[looks.topRow, !reducedMotion() && looks.paging, looks.top(room().safe.top), looks.tall(TOP_ROW), looks.shifted(-sectionsX())]}>
-          <View style={[looks.live, !reducedMotion() && looks.sliding, looks.opacity(leaving() ? 0 : (state().matches("editing") ? 0.6 : 1) * opacity())]}>
+        <View inert={library() || undefined} style={[looks.topRow, ...withHome(), looks.top(room().safe.top), looks.tall(TOP_ROW)]}>
+          <View style={[looks.live, looks.opacity((state().matches("editing") ? 0.6 : 1) * opacity())]}>
             <OwnerPill owners={props.owners} />
           </View>
         </View>
-        <View style={[looks.bottomRow, looks.bottom(room().safe.bottom + 16)]}>
-          <View style={looks.live}>
+        {/* The dots, floating over Home as an iPhone's are, and going with it to the App Library, which has none. */}
+        <View inert={library() || undefined} style={[looks.bottomRow, ...withHome(), looks.bottom(room().safe.bottom + 16)]}>
+          <View style={[looks.live, looks.opacity(opacity())]}>
             <DotsPill owners={props.owners} laid={laid().screens} />
           </View>
         </View>

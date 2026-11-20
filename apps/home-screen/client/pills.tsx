@@ -130,12 +130,12 @@ export function OwnerPill(props: { owners: Owner[] }) {
   )
 }
 
-/// The dots pill, at the bottom in the middle, just clear of the home indicator: the dots of the owner shown, then the
-/// App Library's glyph, which says there's one more page and goes there, lit while it's shown, as the dots are. It
-/// stays where it is as the owners move, and on the App Library too, its dots rolling to the next owner's and taking
-/// their number. While pages are edited the glyph stays, dimmed, and goes nowhere. In the launcher's footer it's
-/// `flat`: no pill of its own.
-export function DotsPill(props: { owners: Owner[]; laid: Kind[][]; flat?: boolean }) {
+/// The dots, at the bottom in the middle, just clear of the home indicator, floating with nothing behind them, as an
+/// iPhone's are: the dots of the owner shown, then the App Library's glyph, which says there's one more page and goes
+/// there, lit as it's reached, as the dots are. They stay where they are as the owners move, their dots rolling to the
+/// next owner's and taking their number, and go with Home to the App Library, which has none. While pages are edited
+/// the glyph stays, dimmed, and goes nowhere.
+export function DotsPill(props: { owners: Owner[]; laid: Kind[][] }) {
   const count = (owner: number) => (props.laid[owner] ?? []).filter((kind) => kind === "home").length
   const library = () => props.laid[seen().owner]?.[seen().screen] === "library"
   const go = () => {
@@ -143,12 +143,9 @@ export function DotsPill(props: { owners: Owner[]; laid: Kind[][]; flat?: boolea
     const screen = props.laid[state().context.at.owner]?.indexOf("library") ?? -1
     if (screen >= 0) home.send({ type: "go", screen })
   }
-  const height = () => (props.flat ? 36 : DOTS)
   return (
-    // iOS 26's Liquid Glass, the pages blurred through it with a rim of light and a soft shadow, but in the launcher's
-    // footer, which is flat.
-    <View style={[looks.pill, !props.flat && looks.glass, looks.tall(height())]}>
-      <Roll count={props.owners.length} height={height()} row={(index) => <Dots owner={props.owners[index]} index={index} count={count(index)} size={props.flat ? 5 : 7} />} />
+    <View style={[looks.pill, looks.live, looks.tall(DOTS)]}>
+      <Roll count={props.owners.length} height={DOTS} row={(index) => <Dots owner={props.owners[index]} index={index} count={count(index)} size={7} />} />
       <Pressable
         role="button"
         aria-label="App Library"

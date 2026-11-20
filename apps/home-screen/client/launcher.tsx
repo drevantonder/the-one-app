@@ -304,20 +304,20 @@ export function createLauncher(props: { owners: Owner[] }, layout: Screens, pagi
 /// The launcher's panel: its search, and its card with Home, the App Library or what was found in it.
 export function LauncherPanel(props: { owners: Owner[]; layout: Screens; paging: Paging; launching: Launching }) {
   const { pages, laid } = props.layout
-  const { card, cardLeft, xOf, pitch, wheeling, leaving, opacityOf, along, wheel } = props.paging
+  const { card, cardLeft, xOf, pitch, wheeling, dragged, sectionsX, opacityOf, along, wheel } = props.paging
   const { showing, words } = props.launching
   // The owner shown, how far along their pages and the App Library are drawn, and how opaque they are: for whoever
   // asked for less motion, they fade out, go there and fade in, as iOS's pages do (`glide`).
   const shown = () => state().context.at.owner
-  const homeEnd = (owner: number) => Math.max(0, props.layout.homes(owner).length - 1) * pitch()
   const across = () => xOf(shown())[0]()
   const opacity = () => opacityOf(shown())[0]()
   // Home and the App Library are both there, side by side, but fade out while what was found shows.
   const browsing = () => showing() !== "search"
+  // What's over Home but not its pages, the owner pill and the dots, goes with its last screenful to the App Library,
+  // one to one as the pages are dragged or a wheel moves them, and by their spring otherwise.
+  const withHome = () => [!wheeling() && dragged() === undefined && !reducedMotion() && looks.sliding, looks.shifted(-sectionsX())]
   // Where the App Library is drawn along: the screenful after the shown owner's last.
   const libraryAt = () => props.layout.homes(shown()).length * pitch()
-  // How far the owner shown's pages have gone past their last screenful, on the way to the App Library.
-  const pastHome = () => Math.max(0, xOf(shown())[0]() - homeEnd(shown()))
   // The strip slides by its spring as it goes along, but not as another owner comes to be shown in its place, whose
   // pages are lined up where they go already, nor as a wheel moves it one to one.
   let was = untrack(shown)
@@ -373,7 +373,7 @@ export function LauncherPanel(props: { owners: Owner[]; layout: Screens; paging:
           </View>
           </View>
           {/* Whose pages they are at the top, as a phone has it: over Home, sliding off with it to the App Library. */}
-          <View inert={showing() !== "home" || undefined} style={[looks.row, looks.top(0), looks.tall(PILLS), !wheeling() && !reducedMotion() && looks.sliding, looks.shifted(-pastHome()), looks.opacity(!browsing() || leaving() ? 0 : (state().matches("editing") ? 0.6 : 1) * opacity())]}>
+          <View inert={showing() !== "home" || undefined} style={[looks.row, looks.top(0), looks.tall(PILLS), ...withHome(), looks.opacity(!browsing() ? 0 : (state().matches("editing") ? 0.6 : 1) * opacity())]}>
             <OwnerPill owners={props.owners} />
           </View>
           {/* What was typed found, as it's typed, and as it goes, what it last found. */}
@@ -382,8 +382,9 @@ export function LauncherPanel(props: { owners: Owner[]; layout: Screens; paging:
               <Show when={words()}>{(typed) => <Results owner={props.owners[0]} found={findAll(props.owners[0]?.library ?? [], typed())} words={typed()} />}</Show>
             </ScrollView>
           </View>
-          {/* Their dots at the foot, with the App Library's glyph. */}
-          <View inert={showing() === "search" || undefined} style={[looks.row, looks.fading, showing() === "search" && looks.inert, looks.bottom(0), looks.tall(PILLS), looks.opacity(showing() === "search" ? 0 : 1)]}>
+          {/* Their dots at the foot, with the App Library's glyph, floating, as an iPhone's are: over Home, sliding off with
+              it to the App Library, which has none. */}
+          <View inert={showing() !== "home" || undefined} style={[looks.row, looks.bottom(0), looks.tall(PILLS), ...withHome(), looks.opacity(browsing() ? opacity() : 0)]}>
             <DotsPill owners={props.owners} laid={laid().screens} />
           </View>
         </View>
