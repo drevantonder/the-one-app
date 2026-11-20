@@ -56,9 +56,36 @@ impl Client {
                     read
                 });
                 let missing: Vec<Value> = reads.filter(|read| !client.cache_file("resources/read", read).exists()).collect();
+                // What's in each file, by its SHA-256, where the server says: one kept from a version before is kept
+                // for this one from that, not read again, as a CDN's content-addressed assets are.
+                let hashes: HashMap<String, String> = listed["resources"]
+                    .as_array()
+                    .into_iter()
+                    .flatten()
+                    .filter_map(|resource| Some((resource["uri"].as_str()?.to_owned(), resource["_meta"]["sha256"].as_str()?.to_owned())))
+                    .filter(|(_, hash)| hash.len() == 64 && hash.bytes().all(|byte| byte.is_ascii_hexdigit()))
+                    .collect();
                 let fetch = |read: Value| {
                     let client = client.clone();
-                    async move { client.keep("resources/read", &read, &client.request("resources/read", read.clone()).await?) }
+                    let hash = read["uri"].as_str().and_then(|uri| hashes.get(uri)).cloned();
+                    async move {
+                        let uri = read["uri"].clone();
+                        let kept = hash.as_deref().and_then(|hash| fs::read(client.home.join("cache").join("sha256").join(hash)).ok());
+                        if let Some(content) = kept.and_then(|kept| serde_json::from_slice::<Value>(&kept).ok()) {
+                            let mut content = content;
+                            content["uri"] = uri;
+                            return client.keep("resources/read", &read, &json!({"contents": [content]}));
+                        }
+                        let response = client.request("resources/read", read.clone()).await?;
+                        if let Some(hash) = &hash {
+                            let mut content = response["contents"][0].clone();
+                            if let Some(content) = content.as_object_mut() {
+                                content.remove("uri");
+                            }
+                            write(&client.home.join("cache").join("sha256").join(hash), content.to_string().as_bytes())?;
+                        }
+                        client.keep("resources/read", &read, &response)
+                    }
                 };
                 let whole = stream::iter(missing).map(fetch).buffer_unordered(8).try_collect::<Vec<_>>().await;
                 let whole = whole.and_then(|_| client.keep("resources/list", &params, &listed));
