@@ -63,6 +63,7 @@ jobs:
           name: tunnel-${{ matrix.os }}
           path: ~/tunnel/tunnel
           retention-days: 1
+      - uses: Swatinem/rust-cache@v2
       - uses: oven-sh/setup-bun@v2
         with:
           bun-version: 1.4.4
@@ -70,7 +71,7 @@ jobs:
       # output beside it, until ~/done or four hours.
       - name: Serve commands
         run: |
-          mkdir -p ~/cmd; end=$((SECONDS + 240 * 60))
+          set +e; mkdir -p ~/cmd; end=$((SECONDS + 240 * 60))
           until [ -e ~/done ] || [ $SECONDS -ge $end ]; do
             for f in ~/cmd/*.sh; do [ -e "$f" ] || continue; mv "$f" "$f.run"; bash "$f.run" >"$f.out" 2>&1; echo "exit $?" >>"$f.out"; done
             sleep 1
