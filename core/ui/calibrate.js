@@ -12,9 +12,10 @@
 // time for the same frames (`paint_ms`, a frame's styling, layout and scene).
 import { cpSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs"
 import { join, resolve } from "node:path"
+import { fileURLToPath } from "node:url"
 import { moves, pageFolder, scenesOf, selector } from "./motion.js"
 
-const here = (path) => new URL(path, import.meta.url).pathname
+const here = (path) => fileURLToPath(new URL(path, import.meta.url))
 const args = process.argv.slice(2)
 const option = (name) => (args.includes(name) ? args[args.indexOf(name) + 1] : undefined)
 const host = option("--ssh")

@@ -26,13 +26,14 @@
 // `--measure`): its first frame, a frame when nothing changes, as its first field is typed in and as its first list
 // scrolls, the memory drawing took and what a second window adds, to compare a change's before and after.
 import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs"
-import { dirname, join, resolve } from "node:path"
+import { basename, dirname, join, resolve } from "node:path"
+import { fileURLToPath } from "node:url"
 import { chromium } from "playwright-core"
 import { PNG } from "pngjs"
 import pixelmatch from "pixelmatch"
 import { outline } from "./src/drawing-primitives/outline.ts"
 
-const here = (path) => new URL(path, import.meta.url).pathname
+const here = (path) => fileURLToPath(new URL(path, import.meta.url))
 const root = here("../../")
 const args = process.argv.slice(2)
 const flag = (name) => args.includes(name)
@@ -149,7 +150,7 @@ function server(built, target, used) {
       if (path.startsWith("/renderer/")) return new Response(Bun.file(join(rendererFrame, path.slice("/renderer/".length) || "index.html")))
       const [, app, client, ...rest] = path.split("/")
       if (used.has(app) && client === "client") return new Response(Bun.file(join(used.get(app), rest.join("/"))))
-      const file = path.startsWith("/ui/client/") ? Bun.file(here("dist/client") + path.slice("/ui/client".length)) : [join(built, path), join(target, path)].map((one) => Bun.file(one)).find((one) => one.size)
+      const file = path.startsWith("/ui/client/") ? Bun.file(join(here("dist/client"), path.slice("/ui/client/".length))) : [join(built, path), join(target, path)].map((one) => Bun.file(one)).find((one) => one.size)
       return file?.size ? new Response(file) : new Response("Not found", { status: 404 })
     },
   })
@@ -326,7 +327,7 @@ const framed = onTheWeb && Bun.spawnSync(["bun", join(root, "clients/web/rendere
 if (framed && framed.exitCode !== 0) throw new Error(`The renderer's frame didn't build: ${framed.stderr}`)
 const report = []
 for (const target of targets) {
-  const name = target.endsWith("core/ui/gallery") ? "gallery" : target.split("/").at(-1)
+  const name = basename(target)
   const built = join(out, name, "build")
   // An app whose scenes are all of components has no page to build, and may have none at all.
   const scenes = existsSync(join(target, "client/scenes.json")) ? JSON.parse(readFileSync(join(target, "client/scenes.json"), "utf8")) : {}
@@ -390,7 +391,7 @@ for (const target of targets) {
       const part = differs(join(folder, "native.png"), join(folder, "web.png"), join(folder, "web-diff.png"))
       said.push(`  native and web: pictures ${part === undefined ? "aren't the same size" : `${(part * 100).toFixed(1)}% different${part > 0.02 ? " (over 2%)" : ""}`}`)
     }
-    const before = against && join(against, name, folder.split("/").at(-1))
+    const before = against && join(against, name, basename(folder))
     // What changed is our renderer's, where it drew the scene both times, and the DOM's where it didn't.
     const [kind, tree] = drawn.tree !== undefined && before && existsSync(join(before, "native.png")) ? ["native", drawn.tree] : ["dom", shown.tree]
     if (tree === undefined) {

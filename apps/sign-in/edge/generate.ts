@@ -4,6 +4,7 @@
 // (`core/edge/edge.js`). Better Auth's own CLI can't load `auth.ts`, which runs only in a Worker.
 import { Database } from "bun:sqlite";
 import { readdirSync } from "node:fs";
+import { join } from "node:path";
 import { getMigrations } from "better-auth/db/migration";
 
 // `auth.ts` is a Worker's, and reads its bindings only as it answers a request, which this never does.
@@ -17,10 +18,10 @@ Bun.plugin({
 });
 const { options } = await import("./auth.ts");
 
-const folder = `${import.meta.dir}/migrations`;
+const folder = join(import.meta.dir, "migrations");
 const applied = readdirSync(folder).filter((name) => name.endsWith(".sql")).sort();
 const database = new Database(":memory:");
-for (const name of applied) database.exec(await Bun.file(`${folder}/${name}`).text());
+for (const name of applied) database.exec(await Bun.file(join(folder, name)).text());
 
 const { toBeCreated, toBeAdded, compileMigrations } = await getMigrations(options("http://localhost", "generating", database));
 if (!toBeCreated.length && !toBeAdded.length) {

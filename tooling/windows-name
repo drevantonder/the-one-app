@@ -8,11 +8,12 @@
 import * as ResEdit from "resedit@3.1.1";
 import * as PE from "pe-library@1.0.1";
 import { readFileSync, writeFileSync } from "node:fs";
-import { basename } from "node:path";
+import { basename, join } from "node:path";
+import { fileURLToPath } from "node:url";
 
-const root = new URL("..", import.meta.url).pathname;
-const copyright = readFileSync(root + "LICENSE", "utf8").match(/^Copyright .*$/m)[0];
-const icon = ResEdit.Data.IconFile.from(readFileSync(root + "icons/AppIcon.ico"));
+const root = fileURLToPath(new URL("..", import.meta.url));
+const copyright = readFileSync(join(root, "LICENSE"), "utf8").match(/^Copyright .*$/m)[0];
+const icon = ResEdit.Data.IconFile.from(readFileSync(join(root, "icons/AppIcon.ico")));
 
 for (const file of process.argv.slice(2)) {
   const exe = PE.NtExecutable.from(readFileSync(file), { ignoreCert: true });

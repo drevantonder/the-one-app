@@ -6,9 +6,10 @@
 // page's tree on the DOM is to match (`outlineOf` in a page, from `bun record.js --dom`). Build the UI library first.
 import { readFileSync } from "node:fs"
 import { join } from "node:path"
+import { fileURLToPath } from "node:url"
 import { outline } from "./src/drawing-primitives/outline.ts"
 
-const dist = new URL("dist/client/", import.meta.url).pathname
+const dist = fileURLToPath(new URL("dist/client/", import.meta.url))
 // What a page imports of the UI library, as a native host loads it.
 const native = { "/ui/client/solid.js": "solid.js", "/ui/client/internal.js": "internal.js", "/ui/client/web.js": "native/web.js", "/ui/client/ui.js": "native/ui.js" }
 Bun.plugin({
@@ -75,7 +76,7 @@ export function semantic(node) {
 if (import.meta.main) {
   if (process.argv[2] === "--dom") {
     // What a page runs to have `outlineOf(document.body)`, its tree as text.
-    const [built] = (await Bun.build({ entrypoints: [new URL("src/drawing-primitives/outline.ts", import.meta.url).pathname], minify: true })).outputs
+    const [built] = (await Bun.build({ entrypoints: [fileURLToPath(new URL("src/drawing-primitives/outline.ts", import.meta.url))], minify: true })).outputs
     const code = await built.text()
     const named = Object.fromEntries([...code.match(/export\s*\{([^}]*)\}/)[1].matchAll(/(\w+) as (\w+)/g)].map(([, inner, outer]) => [outer, inner]))
     console.log(`(()=>{${code.replace(/export\s*\{[^}]*\};?/, "")};window.outlineOf=(element)=>${named.outline}(${named.fromDom}(element))})()`)

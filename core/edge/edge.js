@@ -118,7 +118,7 @@ const parts = {};
 const workers = [];
 let who = null;
 for (const config of new Glob("*/edge/wrangler.jsonc").scanSync(`${root}/apps`)) {
-  const app = config.split("/")[0];
+  const app = dirname(dirname(config));
   const part = `${built}/${app}`;
   cpSync(`${root}/apps/${dirname(config)}`, part, { recursive: true });
   const about = await Bun.file(`${part}/package.json`).json();

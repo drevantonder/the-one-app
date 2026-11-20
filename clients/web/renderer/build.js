@@ -3,10 +3,11 @@
 // wasm-bindgen and made smaller by binaryen's wasm-opt (mise.toml has both).
 import { $ } from "bun"
 import { copyFileSync, mkdirSync, readFileSync, renameSync, writeFileSync } from "node:fs"
+import { fileURLToPath } from "node:url"
 import { brotliCompressSync, constants } from "node:zlib"
 
 const [out] = process.argv.slice(2)
-const here = (path) => new URL(path, import.meta.url).pathname
+const here = (path) => fileURLToPath(new URL(path, import.meta.url))
 const root = here("../../../")
 mkdirSync(out, { recursive: true })
 for (const file of ["index.html", "renderer.js", "text-input.js", "semantics.js", "video.js", "check.html", "check.js"]) copyFileSync(here(file), `${out}/${file}`)

@@ -25,11 +25,12 @@
 // and after side by side. `--watch` plays them again as their app, the gallery or the UI library changes, a folder's
 // own motions alone where only it changed, each round said with how long it took.
 import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, symlinkSync, watch, writeFileSync } from "node:fs"
-import { join, relative, resolve } from "node:path"
+import { basename, join, relative, resolve } from "node:path"
+import { fileURLToPath } from "node:url"
 import { PNG } from "pngjs"
 import pixelmatch from "pixelmatch"
 
-const here = (path) => new URL(path, import.meta.url).pathname
+const here = (path) => fileURLToPath(new URL(path, import.meta.url))
 const root = here("../../")
 const args = process.argv.slice(2)
 const flag = (name) => args.includes(name)
@@ -359,7 +360,7 @@ const rows = new Map()
 async function round(targets) {
   const said = []
   for (const target of targets) {
-    const name = target.endsWith("core/ui/gallery") ? "gallery" : target.split("/").at(-1)
+    const name = basename(target)
     const built = join(out, name, ".build")
     const make = Bun.spawnSync(["bun", here("dist/build/app.js"), target, built])
     if (make.exitCode !== 0) {
