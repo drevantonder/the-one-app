@@ -7,7 +7,7 @@
 // A raw colour or length in a static style is a warning, not an error: "make it a token" (a line each, as an error's, but
 // `warning:`), which a deploy gives with its own.
 import { readdirSync, readFileSync } from "node:fs"
-import { extname, join, resolve } from "node:path"
+import { extname, join, resolve, sep } from "node:path"
 import { fileURLToPath } from "node:url"
 import { parseAst } from "vite"
 import { newMade, styled } from "./tables.ts"
@@ -29,7 +29,7 @@ function dom() {
   const found = []
   const root = resolve(folder)
   for (const path of readdirSync(root, { recursive: true })) {
-    if (!/\.[mc]?[jt]sx?$/.test(path) || path.endsWith(".d.ts") || path.split("/").includes("node_modules")) continue
+    if (!/\.[mc]?[jt]sx?$/.test(path) || path.endsWith(".d.ts") || path.split(sep).includes("node_modules")) continue
     const code = readFileSync(join(root, path), "utf8")
     let ast
     try {
@@ -111,7 +111,7 @@ const root = resolve(folder)
 const made = newMade()
 let refused = false
 for (const path of readdirSync(root, { recursive: true })) {
-  if (!/\.[jt]sx?$/.test(path) || path.split("/").includes("node_modules")) continue
+  if (!/\.[jt]sx?$/.test(path) || path.split(sep).includes("node_modules")) continue
   try {
     styled(readFileSync(join(root, path), "utf8"), join(root, path), made)
   } catch (error) {
