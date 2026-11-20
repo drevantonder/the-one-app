@@ -50,6 +50,10 @@ defmodule Database.Lease do
   key, or a server that's stopping, would have everyone pass their calls to it and wait. It still holds the lease
   the log gave it before it started, which everyone passes their calls to already.
 
+  A server whose own work on the database fails, as one out of files does, hands its lease on as well, and takes
+  none for a while: an app's own error is its caller's, but one opening its copy or reading SQLite's log is this
+  server's, and every call passed to it would fail the same way while it kept the lease.
+
   A server that stops as it's asked to hands its leases on: it writes the log's next entry naming nobody, once it
   answers nothing more from its copy, and whoever asks next takes it and writes at once, with nothing to wait out. A
   server that stopped without saying so is taken over from only once the relay at the network's address can't reach it
@@ -88,7 +92,11 @@ defmodule Database.Lease do
   # scheduled jobs being called here: each one's `job` and the time it was due `at`, by its call's process, and
   # whether it's `marked` as run yet. A field's default is what's safe for a database that was open under a version
   # of this module without it (`code_change/4`): never seen free, so it looks before it answers.
-  defstruct [:artifact, :server, :folder, :db, :proved, :settled, number: 0, logged: 0, pages: 0, firing: %{}]
+  defstruct [:artifact, :server, :folder, :db, :proved, :settled, :failed, number: 0, logged: 0, pages: 0, firing: %{}]
+
+  # How long, in milliseconds, a server whose own copy of the database failed takes no lease after it handed this one
+  # on, so a server that can open files takes it rather than this one again (`failed/4`).
+  @failed_for 60_000
 
   @doc """
   The scheduled job of the database `lease` that this process is the call of, `{job, at}`, until a transaction it
@@ -148,6 +156,9 @@ defmodule Database.Lease do
           not OneCore.Server.up?() ->
             {:keep_state_and_data, {:reply, from, :not_up}}
 
+          failed?(data) ->
+            {:keep_state_and_data, {:reply, from, :failed}}
+
           not cannot_run and staying?(server) ->
             {:keep_state_and_data, {:reply, from, :connected}}
 
@@ -157,9 +168,11 @@ defmodule Database.Lease do
         end
 
       free when free in [nil, %{server: nil}] ->
-        if OneCore.Server.up?(),
-          do: moved(take(data, if(free, do: "handed_on", else: "free")), [{:reply, from, :ok}]),
-          else: {:keep_state, data, {:reply, from, :not_up}}
+        cond do
+          not OneCore.Server.up?() -> {:keep_state, data, {:reply, from, :not_up}}
+          failed?(data) -> {:keep_state, data, {:reply, from, :failed}}
+          true -> moved(take(data, if(free, do: "handed_on", else: "free")), [{:reply, from, :ok}])
+        end
 
       %{server: holder} when holder != data.server ->
         Logger.info("#{data.artifact.prefix}: its lease is held by #{holder}")
@@ -246,6 +259,13 @@ defmodule Database.Lease do
   # waits, with nothing it did kept, to run again once settled, which is the state it changes to next; one that raised
   # for anything else is answered with that now. The rest of what `data` changed for it is left as it was, for then.
   defp transact(event, state, data, work) do
+    transacted(event, state, data, work)
+  rescue
+    unreachable in OneCore.Edge.Unreachable -> reraise unreachable, __STACKTRACE__
+    error -> failed(event, data, error, __STACKTRACE__)
+  end
+
+  defp transacted(event, state, data, work) do
     ran = run(data.db, work)
 
     case {Log.changed(file(data)), state, read_only?(ran)} do
@@ -268,6 +288,33 @@ defmodule Database.Lease do
 
   defp read_only?({:raised, :error, error, _stacktrace}) when is_exception(error), do: Exception.message(error) =~ @read_only
   defp read_only?(_ran), do: false
+
+  # This server's own work on the database failed, not the app's (`run/2` answers that): its lease is handed on, and
+  # a call is answered with what failed, to be asked of whoever takes the lease. Not reaching the bucket isn't this:
+  # nothing could be handed on then, and nobody else would reach it either.
+  defp failed({{:call, from}, _content}, data, error, stacktrace),
+    do: {:next_state, {:following, nil}, hand_on_failed(data, error), {:reply, from, {:raised, :error, error, stacktrace}}}
+
+  defp failed({:info, _message}, data, error, _stacktrace),
+    do: {:next_state, {:following, nil}, hand_on_failed(data, error)}
+
+  # Its copy is thrown away, which may fail too where files can't be opened, and is made anew where it's opened next:
+  # then the log's next entry names nobody, as a server stopping writes it.
+  defp hand_on_failed(data, error) do
+    data =
+      try do
+        close(data)
+      rescue
+        _closing -> %{data | db: nil}
+      end
+
+    wrote = Log.write(data.artifact, data.number + 1, %{server: nil})
+    Logger.error("#{data.artifact.prefix}: this server's copy failed (#{Exception.message(error)}), so it hands its lease on at #{data.number + 1}: #{wrote}")
+    %{data | failed: System.monotonic_time(:millisecond)}
+  end
+
+  defp failed?(%{failed: nil}), do: false
+  defp failed?(%{failed: at}), do: System.monotonic_time(:millisecond) - at < @failed_for
 
   defp answered(event, ran, data) do
     {data, actions} = done(event, ran, data)
@@ -386,7 +433,9 @@ defmodule Database.Lease do
 
     case List.last(entries) || Log.entry(data.artifact, snapshot) do
       free when free in [nil, %{server: nil}] ->
-        if OneCore.Server.up?(), do: take(data, if(free, do: "handed_on", else: "free")), else: {{:following, nil}, data}
+        if OneCore.Server.up?() and not failed?(data),
+          do: take(data, if(free, do: "handed_on", else: "free")),
+          else: {{:following, nil}, data}
 
       %{server: server} when server == data.server ->
         Logger.info("#{data.artifact.prefix}: holds its lease, from snapshot #{snapshot} and the log to #{data.number}")
@@ -442,7 +491,8 @@ defmodule Database.Lease do
     end
   end
 
-  # The copy is made anew each time: one left by an earlier run may hold what was never in the bucket.
+  # The copy is made anew each time: one left by an earlier run may hold what was never in the bucket. One this server
+  # can't make, as one out of files can't, has its lease handed on (`failed/4`).
   defp open(data, snapshot, entries) do
     File.rm_rf!(data.folder)
     File.mkdir_p!(data.folder)
@@ -451,6 +501,9 @@ defmodule Database.Lease do
       :ok -> {:settling, opened(data, snapshot, entries)}
       :gone -> look(data)
     end
+  rescue
+    unreachable in OneCore.Edge.Unreachable -> reraise unreachable, __STACKTRACE__
+    error -> {{:following, nil}, hand_on_failed(data, error)}
   end
 
   # It writes nothing for `@writes_after` from when it began reading the log (`proved`), by when one that held the

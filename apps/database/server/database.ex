@@ -69,8 +69,11 @@ defmodule Database do
   # `gone` where it said at once that it wouldn't, and `connected` where the relay still reached it.
   defp taken_over(call, lease, server) do
     began = System.monotonic_time(:millisecond)
-    first = if server, do: Call.forward_to(call, server, @reach)
-    again = if server && System.monotonic_time(:millisecond) - began < @waited, do: Call.forward_to(call, server, @reach)
+    # A call another server passed here to run, as one whose own copy failed passes its own (`:failed`), can't be
+    # passed on again (`Call.forward_to/3`): this server takes the lease where the log or the relay lets it.
+    ask = server && call.forwarded != "to"
+    first = if ask, do: Call.forward_to(call, server, @reach)
+    again = if ask && System.monotonic_time(:millisecond) - began < @waited, do: Call.forward_to(call, server, @reach)
     waited = System.monotonic_time(:millisecond) - began
     # One that answered it would pass the call on in turn is there, and can't run it: it isn't asked of the relay.
     took = :gen_statem.call(lease, {:take_over, server, :forwarding_loop in [first, again]})
@@ -95,6 +98,13 @@ defmodule Database do
       :not_up ->
         held = if server, do: "#{holder} holds it and didn't answer", else: "nobody holds it"
         raise "This server is starting or stopping, so it doesn't take a database over, and #{held}. Try again in a moment."
+
+      # This server's own copy failed just now, and it handed the lease on: a call asked here is passed to another of
+      # the servers acting for whoever the database is, which takes the lease and runs it, and one passed on here is
+      # answered as one this server would pass on again, so the server that passed it takes the lease (`Call.forward/2`).
+      :failed ->
+        Call.forward(call, OneCore.Apps.servers(OneCore.User.owner(OneCore.Artifact.name(call.own))))
+        raise "This server's copy of #{app}'s database failed just now, so it handed its lease on, and no other server took it. Try again in a moment."
     end
   end
 
