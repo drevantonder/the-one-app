@@ -595,8 +595,9 @@ defmodule OneCore.Sandbox do
 
     policy = %{read: Enum.uniq([erts, boot <> ".boot", child | apps] ++ List.wrap(cache)), env: env, memory: @memory}
 
-    # The VM's own program, which on Windows is `erl.exe`, with the VM in it rather than started by it.
-    vm = if match?({:win32, _}, :os.type()), do: "bin/erl.exe", else: "bin/erlexec"
+    # The VM's own program, which on Windows is `one-server.exe` (the release's `erl.exe`, `tooling/release`), with the VM
+    # in it rather than started by it.
+    vm = if match?({:win32, _}, :os.type()), do: "bin/one-server.exe", else: "bin/erlexec"
     walled(Path.join(erts, vm), arguments, policy)
   end
 

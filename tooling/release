@@ -550,10 +550,16 @@ for kind in "${servers[@]}"; do
     crate=$(basename "$(dirname "$nif")")
     if [[ $kind == windows-* ]]; then cp "$nif" "$priv/$crate.dll"; else cp "$nif" "$priv/$crate.so"; fi
   done
-  # Windows' VM keeps its debugging symbols apart already. It's the One App's there, by name, icon and publisher, which
-  # Windows Firewall asks a person about as the server takes connections, rather than Erlang, which nobody there knows
-  # they have.
-  if [[ $kind == windows-* ]]; then DESCRIPTION="the One App server" tooling/windows-name "$(echo "$release"/erts-*/bin/erl.exe)"; else
+  # Windows' VM keeps its debugging symbols apart already. It's the One App server there, by file name, description, icon
+  # and publisher, which Windows Firewall asks a person about as the server takes connections and Task Manager lists,
+  # rather than Erlang, which nobody there knows they have. Its file is `one-server.exe` (the release's scripts that start
+  # it, and the sandbox, say so), since Windows keeps the name and icon it first showed for a path.
+  if [[ $kind == windows-* ]]; then
+    erts=$(echo "$release"/erts-*/bin)
+    mv "$erts/erl.exe" "$erts/one-server.exe"
+    sed -i 's/erl\.exe/one-server.exe/g' "$release"/releases/*/elixir.bat "$release"/releases/*/iex.bat
+    DESCRIPTION="the One App server" tooling/windows-name "$erts/one-server.exe"
+  else
     "$objcopy" --strip-all "$(echo "$release"/erts-*/bin/beam.smp)"; fi
   # A Mac's VM is signed with the Developer ID, on the Mac and in the background there, as macOS's firewall lets
   # signed software take connections without asking. Without the hardened runtime, which would need entitlements for
