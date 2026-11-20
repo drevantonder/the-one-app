@@ -41,6 +41,18 @@ export default {
       </View>
     ),
   },
+  // A trackpad's swipe drags it as a finger does, the fingers' alone: the pointer, nudged as they go, doesn't move it.
+  "Motion/Card swiped by a trackpad": {
+    motions: { "Swiped, the pointer nudged": { follow: "Swipe me", gesture: { trace: "traces/trackpad-swipe-right.json" }, steady: true } },
+    render: () => (
+      <View style={look.page}>
+        <View aria-label="Swipe me" drag="x" dragConstraints={{ left: 0, right: 0 }} style={look.card}>
+          <Text>Swipe me</Text>
+          <Text>It gives as a rubber band and springs back.</Text>
+        </View>
+      </View>
+    ),
+  },
   // The springs the tokens name, each moving a box 200 pt as Move is pressed: SwiftUI's `.smooth` and `.snappy`.
   "Motion/Springs": Springs,
   "Motion/Long list": {

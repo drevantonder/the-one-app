@@ -333,7 +333,12 @@ impl Screen {
     /// Whether what it shows is still on its way somewhere: a transition, a node let go springing back, a list
     /// flung, or what its page asked a frame for. A loop (a spinner) never arrives, so isn't.
     pub fn arriving(&self) -> bool {
-        self.transitions.arriving() || self.coasting() || self.js.framing()
+        self.transitions.arriving() || self.coasting() || self.js.framing() || self.late.as_ref().is_some_and(super::Late::holding)
+    }
+
+    /// Where the pointer is on it, if it's on it.
+    pub fn pointer(&self) -> Option<crate::geometry::Point<f32>> {
+        self.pointer
     }
 
     /// When its page's next timer is due, in ms from now on its clock, if it has one.

@@ -43,6 +43,8 @@ export default {
       "A press presses it": ["Save", { expect: { text: "Pressed 1 times" } }],
       "Enter and Space press it": [{ key: "Tab" }, { key: "Enter" }, { key: " " }, { expect: { text: "Pressed 2 times" } }],
       "One that's off does nothing": [{ role: "button", name: "Delete" }, { expect: { text: "Pressed 0 times" } }],
+      // Its pressed look is drawn on the first frame of the press, as a Mac's buttons' is, not faded in.
+      "Held down, it looks pressed at once": [{ down: "Save" }, { expect: { drawn: { of: { role: "button", name: "Save" }, opacity: 0.7 } }, within: 17 }, { up: true }, { expect: { text: "Pressed 1 times" } }],
     },
   },
   "Buttons/Variants": () => (

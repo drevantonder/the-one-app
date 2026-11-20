@@ -62,6 +62,8 @@ const everything = () => [here("gallery"), ...readdirSync(join(root, "apps")).ma
 export function moves(gesture) {
   const ms = ([dx, dy], speed) => (Math.hypot(dx, dy) / speed) * 1000
   if (gesture.moves) return { moves: gesture.moves, lift: gesture.lift !== false }
+  // Input as a device delivered it: its events, which move nothing by a finger's moves.
+  if (gesture.trace) return { moves: [], lift: false, trace: gesture.trace }
   if (gesture.swipe) return { moves: [{ dx: gesture.swipe[0], dy: gesture.swipe[1], ms: ms(gesture.swipe, gesture.speed ?? 800) }], lift: true }
   // A flick: a short way, quickly, as a thumb flicks a list.
   if (gesture.fling) return { moves: [{ dx: gesture.fling[0], dy: gesture.fling[1], ms: 80 }], lift: true }
@@ -298,9 +300,10 @@ export function judge(frames, hz) {
 async function play(built, scene, name, motion, hz, folder) {
   mkdirSync(folder, { recursive: true })
   const at = pageFolder(built, scene.page, folder)
-  const { moves: stretches, lift } = moves(motion.gesture)
+  const { moves: stretches, lift, trace } = moves(motion.gesture)
+  const events = trace && JSON.parse(readFileSync(join(scene.from, trace), "utf8"))
   const taps = scene.taps.flatMap((tap) => [tap.key ? { op: "key", ...tap } : tap.type ? { op: "type", text: tap.type } : { op: "tap", ...selector(tap) }, { op: "clock", step: 1000 }])
-  const replay = { op: "replay", ...selector(motion.from), moves: stretches, lift, hz, snap: true, ...(motion.follow ? { track: selector(motion.follow) } : {}), ...(motion.frameMs ? { frame_ms: motion.frameMs } : {}) }
+  const replay = { op: "replay", ...(motion.from ? selector(motion.from) : {}), ...(events ? { events } : { moves: stretches, lift }), hz, snap: true, ...(motion.follow ? { track: selector(motion.follow) } : {}), ...(motion.frameMs ? { frame_ms: motion.frameMs } : {}) }
   const started = performance.now()
   const ran = await run(at, folder, scene, [{ op: "clock", step: 1000 }, ...taps, replay])
   const answer = ran.answers.at(-1)
@@ -323,6 +326,12 @@ async function play(built, scene, name, motion, hz, folder) {
   const failed = []
   if (leaving) failed.push(`${leaving} taken out still drawn going once it settled`)
   const plain = motion.blurred ? frames.findIndex((frame, n) => n > 0 && !frame.work?.backdrops) : -1
+  // What a swipe moves goes one way while it's under the fingers, a trace's till they lift: never back.
+  const lifted = events?.findLast((event) => event.kind === "up" || ["ended", "cancelled"].includes(event.phase))
+  const end = events ? (lifted ?? events.at(-1)).ms : stretches.reduce((sum, stretch) => sum + stretch.ms, 0)
+  const toward = Math.sign(values.at(-1) - values[0])
+  const back = motion.steady ? values.findIndex((value, n) => n > 0 && frames[n].at <= end && (value - values[n - 1]) * toward < -1) : -1
+  if (back >= 0) failed.push(`it went back ${Math.abs(values[back] - values[back - 1]).toFixed(0)} pt at frame ${back + 1} (${frames[back].at} ms)`)
   if (plain >= 0) failed.push(`glass not blurred from frame ${plain + 1} of ${frames.length} (${frames[plain].at} ms, pressure ${frames[plain].pressure})`)
   if (failed.length) {
     process.exitCode = 1
@@ -361,22 +370,30 @@ const why = (answer, is) => {
 }
 
 /// A check's steps as the harness's requests, each with what judges its answer: why it failed, or nothing.
-function requests(steps) {
+function requests(steps, folder) {
   const named = (tap) => (typeof tap === "string" ? tap : tap.name ?? tap.text ?? JSON.stringify(tap))
   const out = []
   for (const [at, step] of steps.entries()) {
     const from = out.length
     if (step.wait !== undefined) out.push({ request: { op: "clock", step: step.wait } })
     else if (step.press) out.push({ request: { op: "tap", ...selector(step.press), hold: step.hold } })
+    else if (step.down) out.push({ request: { op: "down", ...selector(step.down) } })
+    else if (step.up) out.push({ request: { op: "up" } })
+    else if (step.trace) out.push({ request: { op: "trace", events: JSON.parse(readFileSync(join(folder, step.trace), "utf8")) } })
     else if (!step.expect) out.push({ request: pressed(step) })
     else {
-      const { shown, gone, focused, text, states, blur } = step.expect
-      // Each waited for, as Playwright's assertions are, a second at most.
-      const until = (tap, state, said, is) => ({ request: { op: "wait_for", ...selector(tap), state, ...(is ? { is } : {}) }, judge: (answer) => !answer?.result?.met && said(answer) })
+      const { shown, gone, focused, text, states, drawn, blur } = step.expect
+      // Each waited for, as Playwright's assertions are, a second at most, or `within` ms.
+      const until = (tap, state, said, is) => ({ request: { op: "wait_for", ...selector(tap), state, ...(is ? { is } : {}), ...(step.within !== undefined ? { timeout: step.within } : {}) }, judge: (answer) => !answer?.result?.met && said(answer) })
       if (shown) out.push(until(shown, "shown", (answer) => `${named(shown)} isn't shown: ${why(answer)}`))
       if (gone) out.push(until(gone, "gone", () => `${named(gone)} is still there`))
       if (text) out.push(until({ text }, "there", () => `nothing says "${text}"`))
       if (focused) out.push(until(focused, "focused", () => `${named(focused)} hasn't the keyboard`))
+      if (drawn)
+        out.push({
+          ...until(drawn.of, "drawn", (answer) => `${named(drawn.of)} is drawn at opacity ${answer?.result?.node?.opacity}, not ${drawn.opacity}`),
+          request: { op: "wait_for", ...selector(drawn.of), state: "drawn", opacity: drawn.opacity, ...(step.within !== undefined ? { timeout: step.within } : {}) },
+        })
       if (states) out.push(until(states.of, "there", (answer) => `${named(states.of)}: ${why(answer, states.is)}`, states.is))
       if (blur) out.push({ request: { op: "profile", at: [0], snap: false }, judge: (answer) => !(answer?.result?.frames?.[0]?.work?.backdrops > 0) && "no blur is drawn" })
     }
@@ -404,7 +421,7 @@ async function check(built, scene, folder) {
     results.push(
       ...(await Promise.all(
         played.slice(from, from + 4).map(async ({ name, steps, seed }) => {
-          const ran = requests(steps)
+          const ran = requests(steps, scene.from)
           const own = join(folder, name.replace(/[^\w.-]+/g, "-"), String(seed))
           mkdirSync(own, { recursive: true })
           const done = await run(at, own, scene, [{ op: "clock", step: 1000 }, ...taps, ...ran.map(({ request }) => request)], seed)
@@ -435,6 +452,8 @@ async function checks(targets) {
     }
     const scenes = (await scenesOf(target, built, join(out, name, ".scenes"))).filter((scene) => !only || scene.name.toLowerCase().includes(only))
     for (const scene of scenes) {
+      // A trace a check plays is beside its scenes: the gallery's, or an app's client.
+      scene.from = target.endsWith("core/ui/gallery") ? target : join(target, "client")
       const results = await check(built, scene, join(out, name, scene.name.replace(/[^\w.-]+/g, "-")))
       for (const [check, runs] of Object.entries(Object.groupBy(results, (result) => result.name))) {
         const bad = runs.filter((run) => run.failed)
@@ -484,6 +503,8 @@ async function round(targets) {
       continue
     }
     const scenes = (await scenesOf(target, built, join(out, name, ".scenes"))).filter((scene) => !only || scene.name.toLowerCase().includes(only))
+    // A trace a motion plays is beside its scenes.
+    for (const scene of scenes) scene.from = target.endsWith("core/ui/gallery") ? target : join(target, "client")
     // Each motion at each rate on a harness of its own, a few at once.
     const jobs = scenes.flatMap((scene) => Object.entries(scene.motions).flatMap(([motion, played]) => rates.map((hz) => ({ scene, motion, played, hz }))))
     const results = []

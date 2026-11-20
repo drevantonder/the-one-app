@@ -25,7 +25,7 @@ mod video;
 
 pub use style::load_styles;
 pub use view::inspected::Reply;
-pub use view::{Appearance, Asked, Cursor, FONT, MakeFrame, Notice, Panel, Screen, Title, TitleRow, WindowButton, fonts};
+pub use view::{Appearance, Asked, Cursor, FONT, Late, MakeFrame, Notice, Panel, Screen, Title, TitleRow, WindowButton, fonts};
 
 /// This host's runtime version (`RUNTIME_VERSION` in core/ui/src/drawing-primitives/renderer.ts). An entrypoint that needs a
 /// later one isn't drawn: a computer's window says so, and a phone opens it in its page.

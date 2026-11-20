@@ -458,18 +458,23 @@ export type Scene =
   | (() => Element)
   | { render: () => Element; taps?: Tap[]; alone?: boolean; size?: [number, number]; touch?: boolean; motions?: Record<string, Motion>; checks?: Record<string, CheckStep[]>; seeds?: number[] }
 /** A step of a check, as a test's (Playwright's, the UI SDK's): what's done, as a tap is (pressed, a key, typed), a
- * press held `hold` ms, or time passing (`wait`, ms); or what must hold then (`expect`). */
-export type CheckStep = Tap | { press: Tap; hold: number } | { wait: number } | { expect: Expect }
+ * press held `hold` ms, a button held `down` on something and let go (`up`), input played as a device delivered it
+ * (`trace`, a JSON file of `{ ms, kind, … }` beside the scenes, as the harness's `trace` takes it: a trackpad's swipe
+ * with its phases and momentum, the pointer's nudges), or time passing (`wait`, ms); or what must
+ * hold then (`expect`), waited for a second, or `within` ms. */
+export type CheckStep = Tap | { press: Tap; hold: number } | { down: Tap } | { up: true } | { trace: string } | { wait: number } | { expect: Expect; within?: number }
 /** What must hold: what's drawn whole and in the window (`shown`), what isn't there (`gone`), what has the keyboard
- * (`focused`), words somewhere on it (`text`), a node's states (`states`: `{ of, is: { expanded: true } }`), and the
- * glass's blur drawn (`blur`). */
-export type Expect = { shown?: Tap; gone?: Tap; focused?: Tap; text?: string; states?: { of: Tap; is: Record<string, boolean | string> }; blur?: boolean }
-/** A press that goes down on what `from` names (as a tap does) and moves as `gesture` says, with what's watched move
- * (`follow`, named as a tap is; what scrolls under it is always watched). `frameMs`: its frames drawn only that often,
+ * (`focused`), words somewhere on it (`text`), a node's states (`states`: `{ of, is: { expanded: true } }`), how opaque
+ * it's drawn (`drawn`: `{ of, opacity }`, a pressed look), and the glass's blur drawn (`blur`). */
+export type Expect = { shown?: Tap; gone?: Tap; focused?: Tap; text?: string; states?: { of: Tap; is: Record<string, boolean | string> }; drawn?: { of: Tap; opacity: number }; blur?: boolean }
+/** A press that goes down on what `from` names (as a tap does) and moves as `gesture` says, or input played as a device
+ * delivered it (a `trace` file of events, as a check's `trace`), with what's watched move (`follow`, named as a tap is;
+ * what scrolls under it is always watched). `steady`: what moves never goes back against its way before its input
+ * ends, as a swipe that bounces does. `frameMs`: its frames drawn only that often,
  * as a device others load draws them (Telemetry's frame interval), which presses it as a window's late frames do.
  * `blurred`: glass shows blurred in every frame after its first, as a veil it opens does. However it's played, what it
  * takes out is gone once it settles. */
-export type Motion = { from: Tap; gesture: Gesture; follow?: Tap; frameMs?: number; blurred?: boolean }
+export type Motion = { from?: Tap; gesture: Gesture; follow?: Tap; frameMs?: number; blurred?: boolean; steady?: boolean }
 /** How a press moves, in points and points a second: swiped at a steady `speed` (800 unless said) and let go; flung,
  * a short quick flick; dragged with `pauses` of a fifth of a second along the way; a sheet pulled down and let go; or
  * each stretch it moves (`moves`, a stretch with neither `dx` nor `dy` holding still), held at the end unless `lift`. */
@@ -479,6 +484,7 @@ export type Gesture =
   | { drag: [number, number]; pauses?: number; speed?: number }
   | { pull: number }
   | { moves: { dx?: number; dy?: number; ms: number }[]; lift?: boolean }
+  | { trace: string }
 /** What's done, in order (core/ui/scenes.js runs them): pressed by what it's named or says, or that and its role
  * where a name alone is two things (a field's label and its select), or by its role alone (the menu open); a point pressed; a key as the DOM names it, with
  * any of `ctrl`, `shift`, `alt` or `meta` held; or text typed where the keyboard is. */

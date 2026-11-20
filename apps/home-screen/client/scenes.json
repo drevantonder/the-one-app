@@ -832,6 +832,32 @@
         "launcher": true,
         "mac": true
       }
+    },
+    "checks": {
+      "A trackpad's swipe goes to the App Library, the pointer nudged as it goes and its momentum after": [
+        {
+          "trace": "traces/mac-swipe-to-app-library.json"
+        },
+        {
+          "expect": {
+            "shown": {
+              "role": "group",
+              "name": "Productivity"
+            }
+          }
+        },
+        {
+          "wait": 1000
+        },
+        {
+          "expect": {
+            "shown": {
+              "role": "group",
+              "name": "Productivity"
+            }
+          }
+        }
+      ]
     }
   },
   "Launcher, swiped": {
@@ -877,6 +903,13 @@
           ],
           "speed": 400
         }
+      },
+      "A trackpad's swipe, the pointer nudged, then its momentum": {
+        "gesture": {
+          "trace": "traces/mac-swipe-to-app-library.json"
+        },
+        "follow": "Notes",
+        "steady": true
       }
     }
   },

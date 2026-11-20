@@ -93,6 +93,24 @@ impl Phase {
     pub const FINGERS: [&'static str; 5] = ["began", "changed", "ended", "cancelled", "mayBegin"];
 }
 
+/// How a page's batches are held back (`Screen::late`): `hold` says how many of the window's turns each waits, and
+/// `held` is each waiting, with the calls it had run by then.
+pub struct Late {
+    pub hold: Box<dyn FnMut() -> u32>,
+    held: std::collections::VecDeque<(u32, Vec<crate::js::Posted>, u64)>,
+}
+
+impl Late {
+    pub fn new(hold: Box<dyn FnMut() -> u32>) -> Late {
+        Late { hold, held: Default::default() }
+    }
+
+    /// Whether a batch is waiting.
+    pub fn holding(&self) -> bool {
+        !self.held.is_empty()
+    }
+}
+
 /// A panel's own background, which its window has no frame for (`WindowOptions::panel`): its corners' radius, and
 /// whether the host fills where its page asks for the system's glass with a popover's colour, where the system has
 /// none to draw under it (Linux); and with `whole`, the whole panel is on the glass, for a page that floats nothing over
@@ -367,6 +385,9 @@ pub struct Screen {
     layer: bool,
     /// The last error its JS threw, which is logged, as a browser's console has it, and the screen carries on.
     pub failed: Option<String>,
+    /// Its page's batches held back a few of the window's turns each, as its host's harness says (the fake platform's
+    /// seed): a page slower than its window, the window drawing and telling it what it has meanwhile.
+    pub late: Option<Late>,
     /// What its page made that this host refused (a mutation it can't apply), which its window says in
     /// its place.
     pub mismatched: Option<String>,
@@ -478,6 +499,7 @@ impl Screen {
             over: false,
             layer: false,
             failed: None,
+            late: None,
             mismatched: None,
             cost: Cost::default(),
             heard: 0,
@@ -720,8 +742,32 @@ impl Screen {
     /// Applies what the app's JS has posted since it was last asked, all at once, as it's one turn's or more, and
     /// answers what it asked that the host answers at once. → whether anything came.
     pub fn pump(&mut self) -> bool {
-        let posted;
-        (posted, self.editing.heard) = self.js.take();
+        let (posted, heard) = self.js.take();
+        // Where its page's batches are held back (`late`), each is applied once its turns have gone by, in order, as a
+        // page slower than its window gets there.
+        let posted = match self.late.as_mut() {
+            None => {
+                self.editing.heard = heard;
+                posted
+            }
+            Some(late) => {
+                if !posted.is_empty() {
+                    let turns = (late.hold)();
+                    late.held.push_back((turns, posted, heard));
+                }
+                let mut ready = Vec::new();
+                while let Some((turns, ..)) = late.held.front_mut() {
+                    if *turns > 0 {
+                        *turns -= 1;
+                        break;
+                    }
+                    let (_, batch, heard) = late.held.pop_front().expect("there's one");
+                    ready.extend(batch);
+                    self.editing.heard = heard;
+                }
+                ready
+            }
+        };
         let mut came = !posted.is_empty() || self.started.is_none() || self.pictures.take();
         #[cfg(not(target_arch = "wasm32"))]
         {

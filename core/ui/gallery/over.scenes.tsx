@@ -38,7 +38,9 @@ const Chosen = () => {
 }
 
 /// A menu whose items are asked for again and again, each answer new objects, as a page's data refreshing does (the
-/// Home Screen's owners, asked for as it shows): a press must reach what's under it however often they come.
+/// Home Screen's owners, asked for as it shows), kept by their keys (`For`'s `keyed`) so a press reaches what's under
+/// it however often they come: made afresh instead, a press that goes down on one and up on its new one is lost, as on
+/// the DOM, which a seed's page arriving late shows.
 const Refreshed = () => {
   const owners = () => [{ value: "me", label: "Just Me" }, { value: "family", label: "Family" }, { value: "everyone", label: "Everyone" }]
   const [items, setItems] = createSignal(owners())
@@ -51,7 +53,9 @@ const Refreshed = () => {
         <Menu.Trigger aria-label="Open Menu" />
         <Menu.Positioner>
           <Menu.Content>
-            <For each={items()}>{(owner) => <Menu.Item value={owner.value}>{owner.label}</Menu.Item>}</For>
+            <For each={items()} keyed={(owner) => owner.value}>
+              {(owner) => <Menu.Item value={owner().value}>{owner().label}</Menu.Item>}
+            </For>
           </Menu.Content>
         </Menu.Positioner>
       </Menu.Root>
@@ -74,6 +78,7 @@ const menuChecks = {
   "A press on an item chooses it and closes it": ["Open Menu", { wait: 300 }, item("Rename"), { expect: { text: "Chosen: rename" } }, { expect: { gone: { role: "menu" } } }],
   "A press on an item that's off does nothing": ["Open Menu", { wait: 300 }, item("Turn Off"), { expect: { shown: { role: "menu" } } }, { key: "Escape" }, { expect: { text: "Chosen: nothing" } }],
   "Opened again, it's drawn where it opens": ["Open Menu", { expect: { shown: { role: "menu" } } }, { key: "Escape" }, { expect: { gone: { role: "menu" } } }, "Open Menu", { expect: { shown: { role: "menu" } } }],
+  "Closed and opened again at once by its keys, it's drawn where it opens": [{ key: "Tab" }, { key: "Enter" }, { wait: 300 }, { key: "Escape" }, { key: "Enter" }, { expect: { shown: { role: "menu" } } }],
   "Opened again as it closes, it's drawn where it opens": ["Open Menu", { wait: 300 }, { key: "Escape" }, "Open Menu", { expect: { shown: { role: "menu" } } }],
   "Escape closes it, its button with the keyboard": ["Open Menu", { key: "Escape" }, { expect: { gone: { role: "menu" } } }, { expect: { focused: trigger } }],
   "A press outside closes it": ["Open Menu", { wait: 300 }, { x: 380, y: 830 }, { expect: { gone: { role: "menu" } } }, { expect: { text: "Chosen: nothing" } }],

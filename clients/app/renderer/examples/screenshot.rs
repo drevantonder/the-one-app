@@ -24,7 +24,8 @@
 //! over the system's glass, a flat grey here, and its picture is theirs put together.
 //! `--seed` makes it adversarial, the same way each time for the same seed, as GPUI's randomized executor is: one
 //! refresh in five comes late (up to three in a row), what a person does comes a moment after what came before, as
-//! things are on their way somewhere, and a click is held from 30 ms to a quarter of a second.
+//! things are on their way somewhere, a click is held from 30 ms to a quarter of a second, and one batch in four of
+//! what its page changed reaches the window one to three of its turns late, as a page slower than its window's does.
 //! `--gpu` waits for the GPU after each frame drawn, and says how long that took with its cost (`gpu_ms`): on a real
 //! GPU, its time for the frame, as a device that draws it would take.
 //! `--measure` says, on stderr after the rest, how quickly it draws, as a line `measured {…}`: its first
@@ -133,6 +134,19 @@ fn main() -> anyhow::Result<()> {
     screen.theme = Some(if dark { Appearance::Dark } else { Appearance::Light });
     screen.touch = touch;
     screen.panel = panel.map(|corner| renderer::Panel { corner, fill: false, whole: false });
+    // With a seed, a page slower than its window: one batch in four of what it changed held back one to three of the
+    // window's turns, the window drawing and telling it what it has meanwhile.
+    let seed: u64 = flag("--seed").and_then(|seed| seed.parse().ok()).unwrap_or(0);
+    if seed != 0 {
+        let mut state = seed.wrapping_mul(0xD1B5_4A32_D192_ED03) | 1;
+        let mut random = move |below: u64| {
+            state ^= state << 13;
+            state ^= state >> 7;
+            state ^= state << 17;
+            state % below
+        };
+        screen.late = Some(renderer::Late::new(Box::new(move || if random(4) == 0 { 1 + random(3) as u32 } else { 0 })));
+    }
     // Its JS runs on a thread of its own, as in a window: each step is drawn once what it set off has run.
     screen.idle();
     let ran = started.elapsed();
@@ -145,7 +159,6 @@ fn main() -> anyhow::Result<()> {
     let before = resident();
     let mut windows = Windows::fake(scale, 60.0, clock)?;
     // With a seed, adversarial as a busy device and a person are: refreshes late, input as things move.
-    let seed: u64 = flag("--seed").and_then(|seed| seed.parse().ok()).unwrap_or(0);
     windows.seed(seed);
     let options = WindowOptions { title: "screenshot".into(), app_id: "screenshot".into(), size: Size { width: Pixels(width), height: Pixels(height) }, tag: json!({}), panel, places: None, frame: None, root: false, icon: None, owner: None, snapshot: None };
     let said = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
@@ -306,7 +319,7 @@ fn ask(windows: &mut Windows, id: renderer::platform::WindowId, mut request: Val
 /// events, each at its own time, with the display's frames between, as a host gives a window input, and its time
 /// moved on with the display ticking through it. A finger's (`--touch`) are the
 /// inspector's own, as a phone's host hands a window's screen each touch.
-const INPUT: [&str; 7] = ["tap", "key", "scroll", "drag", "replay", "clock", "wait_for"];
+const INPUT: [&str; 10] = ["tap", "down", "up", "key", "scroll", "drag", "replay", "trace", "clock", "wait_for"];
 
 /// The longest it's run for, at the end, for what it shows to come to rest.
 const SETTLE_MS: f64 = 3000.0;
@@ -384,7 +397,8 @@ fn input(windows: &mut Windows, id: renderer::platform::WindowId, request: &rend
             Ok(json!({"time": renderer::platform::fake_time(), "paused": true}))
         }
         // As Playwright's `locator.waitFor` and its assertions do: what's selected comes to be `state` (`shown`: drawn
-        // whole and in the window; `gone`: not there; `focused`: with the keyboard; `there`: there at all), with its
+        // whole and in the window; `gone`: not there; `focused`: with the keyboard; `there`: there at all; `drawn`: at
+        // `opacity`), with its
         // states as `is` says where it says, within `timeout` ms (1000 unless said), the display ticking meanwhile.
         "wait_for" => {
             let state = request.str("state").unwrap_or("shown");
@@ -406,6 +420,8 @@ fn input(windows: &mut Windows, id: renderer::platform::WindowId, request: &rend
                     "gone" => nodes.is_empty(),
                     "focused" => nodes.iter().any(|node| node["focused"] == true && states(node)),
                     "there" => node.is_some_and(states),
+                    // Drawn at `opacity` (within a hundredth), as its look says it is now.
+                    "drawn" => node.is_some_and(|node| node["opacity"].as_f64().zip(request.f64("opacity")).is_some_and(|(drawn, want)| (drawn - want).abs() <= 0.01)),
                     _ => node.is_some_and(|node| node["opacity"].as_f64().is_some_and(|opacity| opacity >= 0.99) && node["seen"].as_f64().is_some_and(|seen| seen >= 0.99) && states(node)),
                 };
                 let waited = renderer::platform::fake_time() - started;
@@ -414,6 +430,34 @@ fn input(windows: &mut Windows, id: renderer::platform::WindowId, request: &rend
                 }
                 windows.run(1000.0 / 60.0);
             }
+        }
+        // A button held down where `tap` would press it, and let go where it was held, for what shows mid-press.
+        "down" => {
+            let (x, y) = point_of(windows, id, request)?;
+            windows.pointer_moved(id, x, y);
+            windows.pointer_down(id, x, y, 0, request.bool("shift"));
+            windows.run(0.0);
+            Ok(json!({"down": {"x": x, "y": y}}))
+        }
+        "up" => {
+            let at = windows.with(id, |screen| screen.pointer()).flatten().ok_or_else(|| anyhow::anyhow!("no pointer is on the window"))?;
+            windows.pointer_up(id, at.x, at.y, 0);
+            windows.run(0.0);
+            Ok(json!({"up": {"x": at.x, "y": at.y}}))
+        }
+        // A trace of input as a device delivered it (`events`, each at its `ms` from the first): a trackpad's scrolls
+        // with their phases and momentum, the pointer's moves, presses and keys, played as the display's events at their
+        // own times, then `after` ms (1000 unless said) to come to rest.
+        "trace" => {
+            let events = request.inputs.get("events").and_then(Value::as_array).cloned().ok_or_else(|| anyhow::anyhow!("say what it plays: `events`, each {{ms, kind, …}}"))?;
+            let begun = renderer::platform::fake_time();
+            for event in &events {
+                let ms = event["ms"].as_f64().unwrap_or(0.0);
+                windows.run((begun + ms - renderer::platform::fake_time()).max(0.0));
+                deliver(windows, id, event)?;
+            }
+            windows.run(request.f64("after").unwrap_or(1000.0));
+            Ok(json!({"played": events.len()}))
         }
         "key" => {
             windows.key(id, request)?;
@@ -450,11 +494,16 @@ fn input(windows: &mut Windows, id: renderer::platform::WindowId, request: &rend
 }
 
 /// The inspector's `replay`, as the display's events: the press goes down, moves along `moves` (`{dx, dy, ms}`,
-/// sampled `input_hz` times a second) and lifts unless `lift` is false, on a display of `hz`, each of its frames
+/// sampled `input_hz` times a second) and lifts unless `lift` is false, or a trace's `events` (as `trace` takes them), on a display of `hz`, each of its frames
 /// reported as `replay` reports one (`renderer::inspect`'s), until `after` ms past its end or nothing moves.
 fn replay(windows: &mut Windows, id: renderer::platform::WindowId, request: &renderer::inspect::Request) -> anyhow::Result<Value> {
-    let (x, y) = point_of(windows, id, request)?;
-    let moves: Vec<(f32, f32, f64)> = request.inputs.get("moves").and_then(Value::as_array).ok_or_else(|| anyhow::anyhow!("say how it moves: `moves`, each {{dx, dy, ms}}"))?
+    // A trace's own events (`events`, as `trace` takes them), or a press along `moves`.
+    let traced = request.inputs.get("events").and_then(Value::as_array).cloned();
+    let (x, y) = match &traced {
+        Some(events) if !request.selects() && request.f32("x").is_none() => events.first().map_or((0.0, 0.0), |first| (first["x"].as_f64().unwrap_or(0.0) as f32, first["y"].as_f64().unwrap_or(0.0) as f32)),
+        _ => point_of(windows, id, request)?,
+    };
+    let moves: Vec<(f32, f32, f64)> = request.inputs.get("moves").and_then(Value::as_array).or(traced.as_ref().map(|_| &EMPTY)).ok_or_else(|| anyhow::anyhow!("say how it moves: `moves`, each {{dx, dy, ms}}, or its `events`"))?
         .iter()
         .map(|one| (one["dx"].as_f64().unwrap_or(0.0) as f32, one["dy"].as_f64().unwrap_or(0.0) as f32, one["ms"].as_f64().unwrap_or(0.0).max(0.0)))
         .collect();
@@ -487,17 +536,26 @@ fn replay(windows: &mut Windows, id: renderer::platform::WindowId, request: &ren
         }
         at
     };
-    let samples: Vec<(f64, (f32, f32))> = (1..=(length / every).ceil() as usize).map(|n| (n as f64 * every).min(length)).map(|t| (t, at(t))).collect();
+    let samples: Vec<(f64, Value)> = match &traced {
+        Some(events) => events.iter().map(|event| (event["ms"].as_f64().unwrap_or(0.0), event.clone())).collect(),
+        None => {
+            let mut events = vec![(0.0, json!({"kind": "move", "x": x, "y": y})), (0.0, json!({"kind": "down", "x": x, "y": y}))];
+            events.extend((1..=(length / every).ceil() as usize).map(|n| (n as f64 * every).min(length)).map(|t| (t, at(t))).map(|(t, (mx, my))| (t, json!({"kind": "move", "x": mx, "y": my}))));
+            if lift {
+                let (ux, uy) = at(length);
+                events.push((length, json!({"kind": "up", "x": ux, "y": uy})));
+            }
+            events
+        }
+    };
+    let length = samples.last().map_or(0.0, |(t, _)| *t);
     windows.set_refresh(hz);
     // With `frame_ms`, each frame takes that long to draw, as on a device others load, which presses it as a window's
     // late frames do.
     windows.set_frame_ms(request.f64("frame_ms").unwrap_or(0.0));
     let refresh = 1000.0 / hz;
     let begun = renderer::platform::fake_time();
-    windows.pointer_moved(id, x, y);
-    windows.pointer_down(id, x, y, 0, false);
-    windows.run(0.0);
-    let (mut next, mut lifted, mut frames) = (0, !lift, Vec::new());
+    let (mut next, mut frames, mut drawn) = (0, Vec::new(), windows.frames(id));
     let elapsed = || renderer::platform::fake_time() - begun;
     loop {
         // The display's next refresh, and each move before it at its own time, as a device delivers them.
@@ -505,20 +563,16 @@ fn replay(windows: &mut Windows, id: renderer::platform::WindowId, request: &ren
         let now = renderer::platform::fake_time();
         let boundary = ((now / refresh).floor() + 1.0) * refresh;
         let tick = if boundary - now < 0.001 { boundary + refresh } else { boundary } - begun;
-        while let Some((t, (mx, my))) = samples.get(next).copied().filter(|(t, _)| *t <= tick) {
+        while let Some((t, event)) = samples.get(next).filter(|(t, _)| *t <= tick) {
             windows.run((t - elapsed()).max(0.0));
-            windows.pointer_moved(id, mx, my);
+            deliver(windows, id, event)?;
             next += 1;
         }
-        if next == samples.len() && !lifted {
-            let (ux, uy) = at(length);
-            windows.run((length - elapsed()).max(0.0));
-            windows.pointer_up(id, ux, uy, 0);
-            lifted = true;
-        }
-        let before = windows.frames(id);
-        windows.run((tick - elapsed()).max(0.0));
-        let drew = windows.frames(id) > before;
+        // What the display shows at a refresh is the frame drawn last before it (on the refresh before, or at once as
+        // input came since), so each is read just before its refresh, and the refresh then taken.
+        windows.run((tick - JUST_BEFORE - elapsed()).max(0.0));
+        let drew = windows.frames(id) > drawn;
+        drawn = windows.frames(id);
         let mut frame = match drew {
             true => windows.cost(id).unwrap_or_default(),
             false => json!({"mutations": 0, "script_ms": 0.0, "layout_ms": 0.0, "paint_ms": 0.0, "draws": 0, "work": {"quads": 0, "shadows": 0, "sprites": 0, "backdrops": 0, "rasters": 0, "copied": 0, "uploaded": 0}}),
@@ -542,8 +596,9 @@ fn replay(windows: &mut Windows, id: renderer::platform::WindowId, request: &ren
             }
         }
         frames.push(frame);
+        windows.run((tick - elapsed()).max(0.0));
         let still = !windows.wanted();
-        if lifted && next == samples.len() && (still || tick >= length + after) {
+        if next == samples.len() && (still || tick >= length + after) {
             break;
         }
     }
@@ -555,3 +610,28 @@ fn replay(windows: &mut Windows, id: renderer::platform::WindowId, request: &ren
     let over = frames.iter().filter(|frame| frame["paint_ms"].as_f64().is_some_and(|ms| ms > budget)).count();
     Ok(json!({"hz": hz, "budget_ms": (budget * 100.0).round() / 100.0, "over": over, "leaving": leaving, "frames": frames, "time": renderer::platform::fake_time(), "paused": true}))
 }
+
+/// No moves: a trace's replay has its events instead.
+static EMPTY: Vec<Value> = Vec::new();
+
+/// One event of a trace, as the display's (`trace`'s `events`): a wheel's or a trackpad's scroll (`dx`, `dy`, its
+/// `phase` and `momentum`), the pointer moved, a button down or up, each at `x`, `y`, or a `key`.
+fn deliver(windows: &mut Windows, id: renderer::platform::WindowId, event: &Value) -> anyhow::Result<()> {
+    let at = |name: &str| event[name].as_f64().unwrap_or(0.0) as f32;
+    let (x, y) = (at("x"), at("y"));
+    match event["kind"].as_str().unwrap_or_default() {
+        "wheel" => windows.wheel(id, (x, y), (at("dx"), at("dy")), event["phase"].as_str(), event["momentum"].as_bool().unwrap_or(false)),
+        "move" => windows.pointer_moved(id, x, y),
+        "down" => windows.pointer_down(id, x, y, 0, false),
+        "up" => windows.pointer_up(id, x, y, 0),
+        "key" => {
+            let key = renderer::inspect::Request::parse(&json!({"v": renderer::inspect::VERSION, "op": "key", "key": event["key"]}).to_string()).map_err(|refused| anyhow::anyhow!("{refused}"))?;
+            windows.key(id, &key)?;
+        }
+        kind => anyhow::bail!("there's no kind of event {kind}: wheel, move, down, up and key are"),
+    }
+    Ok(())
+}
+
+/// How long before a refresh what the display shows at it is read: what's drawn after is shown at the next.
+const JUST_BEFORE: f64 = 0.01;
