@@ -860,7 +860,15 @@
             }
           ]
         },
-        "keeps": "older iPhone"
+        "keeps": "older iPhone",
+        "follow": {
+          "role": "dialog",
+          "name": "Utilities"
+        },
+        "opensFrom": {
+          "role": "group",
+          "name": "Utilities"
+        }
       }
     },
     "answers": {
@@ -2487,7 +2495,15 @@
             }
           ]
         },
-        "keeps": "mid browser on WebGPU"
+        "keeps": "mid browser on WebGPU",
+        "follow": {
+          "role": "dialog",
+          "name": "Utilities"
+        },
+        "opensFrom": {
+          "role": "group",
+          "name": "Utilities"
+        }
       }
     }
   },

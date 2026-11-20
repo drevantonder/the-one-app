@@ -131,11 +131,20 @@ export const looks = styles({
   // It grows out of its square and shrinks back into it, and the veil over what's behind blurs and dims with it, on
   // one spring, which a change on the way turns from where it is.
   veils: { opacity: { default: 1, entering: 0 }, transitionProperty: ["opacity"], transition: tokens.motion.smooth },
-  grows: { position: "absolute", pointerEvents: "none", scale: { default: 1, entering: 0.3 }, opacity: { default: 1, entering: 0 }, transitionProperty: ["scale", "opacity"], transition: tokens.motion.smooth },
-  // Closed, kept made in its square for the next time it opens.
+  grows: {
+    position: "absolute",
+    overflow: "hidden",
+    pointerEvents: "none",
+    borderRadius: 0,
+    transitionProperty: ["width", "height", "translateX", "translateY", "opacity", "borderTopStartRadius", "borderTopEndRadius", "borderBottomEndRadius", "borderBottomStartRadius"],
+    transition: tokens.motion.smooth,
+  },
+  // Closed, kept made in its square, its corners the square's, for the next time it opens.
   unveiled: { opacity: 0 },
-  shrunk: { scale: 0.3, opacity: 0 },
-  openedArea: { position: "absolute", overflow: "hidden", pointerEvents: "auto" },
+  shrunk: { opacity: 0, borderRadius: tokens.radius.large },
+  openedArea: { position: "absolute", top: 0, start: 0, overflow: "hidden", pointerEvents: "auto" },
+  contents: { transitionProperty: ["scale", "translateX", "translateY"], transition: tokens.motion.smooth },
+  scaledAt: (scale: number, translateX: number, translateY: number) => ({ scale, translateX, translateY }),
   opened: { gap: tokens.grid[8] },
   categoryTitle: { font: tokens.type.largeTitle },
   // Its apps as Home's, spread across, four on a phone.
