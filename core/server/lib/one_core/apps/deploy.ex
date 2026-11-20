@@ -442,7 +442,9 @@ defmodule OneCore.Apps.Deploy do
           built_with(artifact) not in [nil, code],
           do: {whose, artifact}
 
-    ours = for whose <- Enum.uniq(for {whose, _} <- stale, do: whose), rebuilds?(whose, code), do: whose
+    # One server builds each one's apps again: four building the same apps at once wrote the same blobs at once,
+    # which R2 refuses ("Reduce your concurrent request rate for the same object"), and lost to each other.
+    ours = for whose <- Enum.uniq(for {whose, _} <- stale, do: whose), Servers.claims?("#{whose}/rebuild", code), do: whose
 
     for {whose, artifact} <- stale,
         whose in ours,
@@ -460,34 +462,6 @@ defmodule OneCore.Apps.Deploy do
     with {:error, why, _details} <- deploy(whose, name, files, :stored, :stored, install?), do: {:error, why}
   rescue
     error -> {:error, Exception.message(error)}
-  end
-
-  # Whether this server builds the apps of `whose` apps again against the UI library `code`. The first to ask
-  # writes that it does, `<whose>/rebuild`, and the others leave it to that one while it's on: four servers building
-  # the same apps at once wrote the same blobs at once, which R2 refuses ("Reduce your concurrent request rate for the
-  # same object"), and lost to each other. One that's not on any more left it unfinished, and the next to ask carries
-  # on from what's left.
-  defp rebuilds?(whose, code) do
-    {blob, me} = {"#{whose}/rebuild", Server.key()}
-    claim = JSON.encode!(%{ui: code, server: me})
-
-    case Bucket.read(blob) do
-      :absent ->
-        Bucket.write(blob, claim) == :ok or rebuilds?(whose, code)
-
-      {:ok, was, tag} ->
-        case JSON.decode!(was) do
-          %{"ui" => ^code, "server" => ^me} ->
-            true
-
-          %{"ui" => ^code, "server" => server} ->
-            Servers.ready?(server) == false and
-              (Bucket.replace(blob, claim, tag) == :ok or rebuilds?(whose, code))
-
-          _another ->
-            Bucket.replace(blob, claim, tag) == :ok or rebuilds?(whose, code)
-        end
-    end
   end
 
   # The code of the UI library the latest version of an app's entrypoint was built against, as the bucket has it, or `nil`

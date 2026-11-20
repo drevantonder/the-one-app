@@ -121,6 +121,9 @@ defmodule OneCore.Apps.Lifecycle do
     with true <- Servers.here?("network") and latest in [nil, OneCore.Builds.build()],
          {:ok, copy} <- Git.fetch(@core, true),
          {:ok, commit} <- Git.commit(copy, short),
+         # One of the network's servers does it for each commit, and the others leave it to that one: two deploying
+         # the same app at once, one of them was refused.
+         true <- Servers.claims?("network/core-apps", commit),
          {:ok, files} <- Git.files(copy, commit, "apps") do
       from = %{"source" => @core, "ref" => nil, "commit" => commit}
       folders = Enum.group_by(files, &hd(Path.split(elem(&1, 0))), fn {path, data} -> {Path.relative_to(path, hd(Path.split(path))), data} end)

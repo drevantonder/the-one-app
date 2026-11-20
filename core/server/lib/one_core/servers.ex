@@ -137,6 +137,29 @@ defmodule OneCore.Servers do
   def ready?(key), do: presence(key)["server_ready"]
 
   @doc """
+  Whether this server is the one to do `what` (a JSON value, such as the build or the commit it's for), of all the
+  servers that would, as the blob `blob` says: the first to ask writes that it does, and the others leave it to that
+  one while it's ready. One that isn't any more left it unfinished, and the next to ask takes it on, as it does
+  whatever was claimed there for something else.
+  """
+  def claims?(blob, what) do
+    me = Server.key()
+    claim = JSON.encode!(%{what: what, server: me})
+
+    case Bucket.read(blob) do
+      :absent ->
+        Bucket.write(blob, claim) == :ok or claims?(blob, what)
+
+      {:ok, was, tag} ->
+        case JSON.decode!(was) do
+          %{"what" => ^what, "server" => ^me} -> true
+          %{"what" => ^what, "server" => server} -> ready?(server) == false and (Bucket.replace(blob, claim, tag) == :ok or claims?(blob, what))
+          _another -> Bucket.replace(blob, claim, tag) == :ok or claims?(blob, what)
+        end
+    end
+  end
+
+  @doc """
   What was kept of who's ready is read again, once one of the network's servers came or went, and whoever waits for
   one to be back (`back/1`) looks again.
   """
