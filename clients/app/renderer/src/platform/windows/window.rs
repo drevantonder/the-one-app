@@ -734,11 +734,11 @@ fn round(hwnd: HWND, width: i32, height: i32, radius: i32) {
     }
 }
 
-/// Behind the caption buttons is the page's background (`--background`, #f8f8fa or #121317), and the buttons light or
+/// Behind the caption buttons is the page's background (`--background`, #f8f8fa or #000000), and the buttons light or
 /// dark, as its Colour Mode says, or as the system is.
 fn colour_frame(hwnd: HWND, state: &State) {
     let dark = state.theme.get().unwrap_or_else(super::appearance) == crate::Appearance::Dark;
-    let (immersive, colour) = (BOOL::from(dark), COLORREF(if dark { 0x0017_1312 } else { 0x00fa_f8f8 }));
+    let (immersive, colour) = (BOOL::from(dark), COLORREF(if dark { 0x0000_0000 } else { 0x00fa_f8f8 }));
     unsafe {
         let _ = DwmSetWindowAttribute(hwnd, DWMWA_USE_IMMERSIVE_DARK_MODE, (&raw const immersive).cast(), size_of::<BOOL>() as u32);
         let _ = DwmSetWindowAttribute(hwnd, DWMWA_CAPTION_COLOR, (&raw const colour).cast(), size_of::<COLORREF>() as u32);

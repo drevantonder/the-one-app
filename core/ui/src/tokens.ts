@@ -54,22 +54,22 @@ const motion = (duration: Varies<number>, easing: Varies<[number, number, number
  * from where it is, at the speed it has. `easing` is for a host that draws only Béziers. */
 const spring = (duration: number, bounce: number): Token<"motion"> => ({ kind: "motion", id: "", value: { duration, bounce, easing: [0.22, 1, 0.36, 1] } })
 
-// Raycast's values as round two measured them beside it (raycast-mockups-v2): a near-black blue-grey or a near-white
-// window, one text colour, and Apple's accents but red, orange and blue, which are the mockup's. Colours CSS names
-// are written in OKLCH.
+// Raycast's values as round two measured them beside it (raycast-mockups-v2): a near-white window, one text colour,
+// and Apple's accents but red, orange and blue, which are the mockup's. Dark is true black, an OLED's (20 Nov), with
+// what's raised off it neutral greys, no tint. Colours CSS names are written in OKLCH.
 const ink = ["oklch(0.224 0.008 285.76)", "oklch(1 0 0)"] as const
 const red = ["oklch(0.614 0.204 25.56)", "oklch(0.7 0.191 23.4)"] as const
 const orange = ["oklch(0.677 0.164 57.12)", "oklch(0.782 0.171 67.22)"] as const
 const blue = ["oklch(0.573 0.199 261.84)", "oklch(0.714 0.139 249.06)"] as const
 const colours = {
-  background: colour("oklch(0.977 0.003 286.35)", "oklch(0.183 0.01 276.41)"),
+  background: colour("oklch(0.977 0.003 286.35)", "oklch(0 0 0)"),
   foreground: colour(...ink),
   /** What's raised off the page: a list, a menu, a sheet. */
-  card: colour("oklch(1 0 0)", "oklch(0.24 0.01 276.67)"),
+  card: colour("oklch(1 0 0)", "oklch(0.145 0 0)"),
   primary: colour(...ink),
-  primaryForeground: colour("oklch(1 0 0)", "oklch(0.183 0.01 276.41)"),
+  primaryForeground: colour("oklch(1 0 0)", "oklch(0 0 0)"),
   /** A quiet fill: a secondary button, what's hovered, a skeleton: the text at 10% over the page. */
-  muted: colour("oklch(0.919 0.003 286.35)", "oklch(0.286 0.007 274.7)"),
+  muted: colour("oklch(0.919 0.003 286.35)", "oklch(0.269 0 0)"),
   /** Grey words, and where the keyboard is: the text at 60%. */
   mutedForeground: colour("oklch(0.224 0.008 285.76 / 60%)", "oklch(1 0 0 / 60%)"),
   destructive: colour(...red),
@@ -200,16 +200,19 @@ const roles = {
   background: colours.background,
   /** What's raised off the page: a group of rows, a menu, a problem, what's loading in place of a list. */
   card: colours.card,
-  backgroundGradient: colour("oklch(0.962 0.004 286.32)", "oklch(0.16 0.009 274.31)"),
+  backgroundGradient: colour("oklch(0.962 0.004 286.32)", "oklch(0 0 0)"),
   selection: alpha(label, 10),
   /** Every other row of metadata: the text at 2.5%. */
   stripe: alpha(label, 2.5),
   /** What dims the page under a sheet or an alert. */
   overlay: colours.overlay,
-  /** A panel over the window, its glass a little lighter than the window's: the action panel, an alert. */
-  panel: colour("oklch(0.991 0.001 286.38 / 92%)", "oklch(0.266 0.011 278.1 / 92%)"),
-  /** Liquid Glass's fill, over what's blurred behind it: white, two thirds see-through in light and mostly in dark. */
-  glass: colour("oklch(1 0 0 / 66%)", "oklch(1 0 0 / 13%)"),
+  /** A panel of glass, over the window or the desktop: the action panel, an alert, the launcher. Tinted as macOS's
+   * widgets and Control Center are, so text stays readable over any window behind it: secondary text holds WCAG AA's
+   * 4.5:1 over a white one in dark. */
+  panel: colour("oklch(0.991 0.001 286.38 / 92%)", "oklch(0.185 0 0 / 92%)"),
+  /** Liquid Glass's fill, over what's blurred behind it: mostly white in light, a grey a little lighter than black in
+   * dark, a fifth see-through, so it reads over anything. */
+  glass: colour("oklch(1 0 0 / 80%)", "oklch(0.26 0 0 / 80%)"),
   /** What veils a page behind something opened over it, over what's blurred. */
   veil: alpha(colours.background, 55),
   /** A tile's tint, as an App Library category's square is. */
@@ -343,7 +346,7 @@ export const tokens = {
     /** A floating pill's, as Raycast's footer has them: a hairline round it and a line of light along its top. */
     pill: lightDark(
       [{ x: 0, y: 0, blur: 0, spread: 0.5, colour: "oklch(0 0 0 / 12%)" }, { x: 0, y: 1, blur: 3, spread: 0, colour: "oklch(0 0 0 / 6%)" }, { x: 0, y: 0.5, blur: 0, spread: 0, colour: "oklch(1 0 0 / 90%)", inset: true }],
-      [{ x: 0, y: 0, blur: 0, spread: 0.5, colour: "oklch(0 0 0 / 25%)" }, { x: 0, y: 0.5, blur: 0, spread: 0, colour: "oklch(1 0 0 / 18%)", inset: true }],
+      [{ x: 0, y: 0, blur: 0, spread: 0.5, colour: "oklch(1 0 0 / 12%)", inset: true }, { x: 0, y: 0.5, blur: 0, spread: 0, colour: "oklch(1 0 0 / 18%)", inset: true }],
     ),
     /** A field's edge: a half-pixel line inside. */
     field: lightDark([{ x: 0, y: 0, blur: 0, spread: 0.5, colour: "oklch(0 0 0 / 14%)", inset: true }], [{ x: 0, y: 0, blur: 0, spread: 0.5, colour: "oklch(1 0 0 / 12%)", inset: true }]),

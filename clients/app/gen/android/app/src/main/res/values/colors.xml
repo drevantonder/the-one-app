@@ -3,6 +3,6 @@
     <!-- The page's own background, light and dark (core/ui/src/tokens.css), which shows behind the system's bars:
          the system's (`background`), or Colour Mode's (`MainActivity`). -->
     <color name="light">#FFFFFFFF</color>
-    <color name="dark">#FF0A0A0A</color>
+    <color name="dark">#FF000000</color>
     <color name="background">@color/light</color>
 </resources>
