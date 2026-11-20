@@ -871,6 +871,14 @@ function Banner(props: { request: Request }) {
 /// each other kind of item an app keeps here, under its app's icon and name; then Security. An item opens over the
 /// page, drawn by its own app where it has a component.
 export default function Accounts() {
+  return (
+    <Errored fallback={(error) => <Screen heading="Vault" back><Problem heading="Can't show the Vault" text={error() as Error} /></Screen>}>
+      <Vault />
+    </Errored>
+  )
+}
+
+function Vault() {
   // A link to a request, `one:settings#vault/accounts&request=<id>`, as a request's own link leads to: its alert,
   // once the Vault has listed it.
   const [linked, setLinked] = createSignal<string>()
