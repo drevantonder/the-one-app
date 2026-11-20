@@ -7,8 +7,6 @@ license.workspace = true
 
 [dependencies]
 anyhow.workspace = true
-# The threads a person waits on run first, and what nobody waits on last, as each system's own apps' do.
-thread-priority = "3"
 bytemuck = { version = "1", features = ["derive"] }
 # How a colour moving to another is mixed: through Oklch, as CSS Color 4 does (Linebender's).
 color = "0.3.3"
@@ -51,6 +49,9 @@ memory-stats = "1"
 # own Web APIs and Intl; and what draws a page's pictures (an SVG, its `text` in Allo, `view::svg`, and a JPEG, a GIF
 # or a WebP) and a COLRv1 emoji (`text::colr`), which on the web the browser draws.
 [target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+# The threads a person waits on run first, and what nobody waits on last, as each system's own apps' do: a browser
+# decides its page's own.
+thread-priority = "3"
 image = { version = "0.25", default-features = false, features = ["png", "jpeg", "gif", "webp"] }
 resvg = { version = "0.47", default-features = false, features = ["text"] }
 parley = { version = "0.13", features = ["system"] }

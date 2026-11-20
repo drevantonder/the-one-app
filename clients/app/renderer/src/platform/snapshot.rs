@@ -32,6 +32,7 @@ pub(super) fn keep(stem: &Path, width: u32, height: u32, rgba: Vec<u8>) {
     let file = file(stem);
     std::thread::spawn(move || {
         // Nobody waits on it.
+        #[cfg(not(target_arch = "wasm32"))]
         let _ = thread_priority::set_current_thread_priority(thread_priority::ThreadPriority::Min);
         let written = (|| -> anyhow::Result<()> {
             let folder = file.parent().ok_or_else(|| anyhow::anyhow!("a snapshot is kept in a folder"))?;
