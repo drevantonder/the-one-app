@@ -20,7 +20,20 @@ defmodule Encryption.Keys do
   @looks_after 10_000
 
   @impl true
-  def init({artifact, server}), do: {:ok, %{artifact: artifact, server: server, keys: nil, slot: nil, looked: nil}}
+  def init({artifact, server}),
+    do: {:ok, %{artifact: artifact, server: server, keys: nil, slot: nil, looked: nil}, {:continue, :index}}
+
+  # It's listed with what's encrypted for its owner (`Encryption.access/1`) by a server that should hold its keys,
+  # which acts for its owner and so writes their blobs, whether or not it holds them yet.
+  @impl true
+  def handle_continue(:index, state) do
+    name = OneCore.Artifact.name(state.artifact)
+
+    if state.server in Encryption.should(name),
+      do: OneCore.Artifact.write(Encryption.index(OneCore.User.owner(name)), name, "")
+
+    {:noreply, state}
+  end
 
   @impl true
   def handle_call(:keys, _from, state) do

@@ -40,8 +40,11 @@ Its words:
 - When every device that held the key is gone, its person lets a new one in with their recovery key, which the
   first device showed them: in the app, or as `approve`'s `key`. Without it, or a device that's in, nobody is
   let in again. A recovery key is a secret: never ask for one in a chat, and never repeat one.
-- "No server may open it yet" means its owner hasn't chosen one. "No server that may open it is up" means the
-  ones they chose aren't running. Neither is fixed from a server.
+- Every server that acts for whose it is should hold their key for it, since any of them may run its calls, and no
+  other should. `key`'s `access` says, for each artifact encrypted for someone, which servers hold it, which are
+  waiting for it (`missing`) and which hold it and no longer act for them (`extra`), and Telemetry has an alert
+  open while that's so (`check`, every 10 minutes). A call that no server can open says which are waiting. None
+  of it is fixed from a server.
 - An assistant that reaches the network over the web has no device, so it lets nothing in and chooses no
   server: its person does that in the app, or an agent with `one` on a device of theirs.
 

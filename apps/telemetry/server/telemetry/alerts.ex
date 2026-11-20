@@ -14,6 +14,7 @@ defmodule Telemetry.Alerts do
   | `deploy` | An app's deploy took over its 500 ms budget to show in a window, from when it began (`one.client.deploy.window`), in 2 or more of the last 10 minutes: a server release building every app again is one | 10 min without |
   | `open` | An app's window took over its 300 ms budget, from being asked to open to its page's first frame, the last time it opened on a device (`one.client.native.open`, which a client says of each open, with each step's time) | It opens within its budget there, or hasn't opened there for a day |
   | `backup` | A destination's last backup is older than its schedule and a day, or its last backup failed, as Backups last said (`one.backup`, which it says each hour and as each backup ends) | Backups says it's backed up, or that the destination is gone |
+  | `access` | A server that acts for someone lacks the keys of something encrypted for them, or one that doesn't act for them has them, as Encryption last said (`one.encryption.access`, which it says every 10 minutes) | Encryption says every server that should hold its keys does, and no other |
 
   Each alert is a row of Telemetry's database, one per kind and key (the server, the build, the error's kind, the
   app), moved only by `evaluate/1`, the clock's job every minute: it's `firing` while its symptom is seen, and
@@ -23,7 +24,7 @@ defmodule Telemetry.Alerts do
   What it reads is each batch kept since it last looked that it hasn't read, by its name (`Telemetry.Store.since/3`),
   so one kept late is read all the same, and it keeps of that only what its rules need: each server's last start and
   failure, each kind of error and when it was first and last seen, and per app per minute its calls, its failures and
-  how often it didn't answer, and what Backups last said of each destination. Its first look reads the last 14 days for the kinds of error there were, and has no alert for
+  how often it didn't answer, what Backups last said of each destination, and what Encryption last said of each encrypted artifact. Its first look reads the last 14 days for the kinds of error there were, and has no alert for
   any of them. Whether a server is one of the network's and ready, and whether the update is held, it asks of the relay
   as it looks (`OneCore.Servers.presence/1`, `OneCore.Servers.network/0`): where the relay doesn't answer, what it
   would have said of stays as it was.
@@ -74,7 +75,9 @@ defmodule Telemetry.Alerts do
     # What Backups last said of each destination (`one.backup`).
     "create table backups (destination text primary key, at integer not null, last integer not null, every integer not null, outcome text not null, problem text)",
     # Each app's window's last open on each device, and its steps (`one.client.native.open`).
-    "create table opens (device text not null, view text not null, name text, at integer not null, took integer not null, steps text, primary key (device, view)) without rowid"
+    "create table opens (device text not null, view text not null, name text, at integer not null, took integer not null, steps text, primary key (device, view)) without rowid",
+    # What Encryption last said of who holds each encrypted artifact's keys (`one.encryption.access`).
+    "create table access (artifact text primary key, at integer not null, outcome text not null, problem text) without rowid"
   ]
 
   @kinds %{
@@ -85,7 +88,8 @@ defmodule Telemetry.Alerts do
     "unanswered" => "An app doesn't answer for more than a minute",
     "deploy" => "An app's deploys take over 500 ms to show in its window, in 2 or more of the last 10 minutes",
     "backup" => "A backup isn't made within its schedule and a day, or the last one failed",
-    "open" => "An app's window took over 300 ms to show its page the last time it opened on a device"
+    "open" => "An app's window took over 300 ms to show its page the last time it opened on a device",
+    "access" => "A server that acts for someone can't open what's encrypted for them, or one that doesn't can"
   }
 
   # How long a deploy has to show in a window, from when it began, in milliseconds.
@@ -95,7 +99,7 @@ defmodule Telemetry.Alerts do
   @open_budget 300
 
   # How long each kind's alert stays after its symptom was last seen before it's resolved, in milliseconds.
-  @cool %{"server" => 0, "update" => 0, "error" => 0, "failing" => 10 * 60_000, "unanswered" => 5 * 60_000, "deploy" => 10 * 60_000, "backup" => 0, "open" => 0}
+  @cool %{"server" => 0, "update" => 0, "error" => 0, "failing" => 10 * 60_000, "unanswered" => 5 * 60_000, "deploy" => 10 * 60_000, "backup" => 0, "open" => 0, "access" => 0}
 
   @doc "Each kind of alert, with what fires it."
   def kinds, do: @kinds
@@ -237,6 +241,9 @@ defmodule Telemetry.Alerts do
   defp log(%{"eventName" => "one.backup", "attributes" => %{"one.destination" => destination} = a} = log),
     do: [{:backup, destination, ms(log["time"]), a["one.backup.last"] || 0, a["one.backup.every"] || 0, a["one.outcome"], a["one.problem"]}]
 
+  defp log(%{"eventName" => "one.encryption.access", "attributes" => %{"one.artifact" => artifact} = a} = log),
+    do: [{:access, artifact, ms(log["time"]), a["one.outcome"], a["one.problem"]}]
+
   # What a server's own program says of it is its alert's, not a new kind of error.
   defp log(%{"eventName" => "one.server." <> _}), do: []
 
@@ -369,6 +376,18 @@ defmodule Telemetry.Alerts do
             """,
             [destination, at, last, every, outcome, problem]
           )
+    end
+
+    for {:access, artifact, at, outcome, problem} <- signals do
+      query(
+        db,
+        """
+        insert into access (artifact, at, outcome, problem) values (?, ?, ?, ?)
+        on conflict (artifact) do update set at = excluded.at, outcome = excluded.outcome, problem = excluded.problem
+        where excluded.at >= access.at
+        """,
+        [artifact, at, outcome, problem]
+      )
     end
 
     for {:open, device, view, from, at, took, steps} <- signals do
@@ -509,7 +528,12 @@ defmodule Telemetry.Alerts do
          }}
       end
 
-    Enum.reduce([servers, update, errors, failing, unanswered, deploys, opens, backups], &Map.merge/2)
+    access =
+      for row <- query(db, "select * from access where outcome = 'incomplete'", []), into: %{} do
+        {{"access", row["artifact"]}, %{title: "A server is waiting for a key to #{row["artifact"]}", text: row["problem"]}}
+      end
+
+    Enum.reduce([servers, update, errors, failing, unanswered, deploys, opens, backups, access], &Map.merge/2)
   end
 
   # When the last backup was, as a person says it.

@@ -20,7 +20,16 @@ defmodule Encryption do
 
   # It reads which apps run inside a call as `call.loaded` names them.
   @impl true
-  def requires, do: %{"core" => ">= 0.32.202"}
+  def requires,
+    do: %{
+      "core" => ">= 0.32.202",
+      "database" => "to keep when it last checked who holds your keys",
+      "telemetry" => "to raise an alert while a server that acts for you is waiting for your key"
+    }
+
+  # Whether each server that should hold what's encrypted for someone does, said to Telemetry (`check`).
+  @impl true
+  def jobs, do: [%{tool: "check", every: 600}]
 
   # Nothing looks into it as it runs (`server-debug`): what it's given and keeps are keys, and what they decrypt.
   @impl true
@@ -34,13 +43,14 @@ defmodule Encryption do
   def hook("settings.sections", _about, _call), do: [%{in: "device", component: "device", kinds: ["app"]}]
 
   alias Encryption.Keys
-  alias OneCore.{Artifact, Call, Hooks, Server, User}
+  alias OneCore.{Artifact, Call, Hooks, Server, Servers, User}
   alias OneCore.Apps.Calls
 
   @doc """
   `artifact`, encrypted: its blobs are encrypted as they're written and opened as they're read, by everything that
-  uses what this gives. Only a server the artifact's owner chose gives it. Any other has a server that was chosen
-  run the call instead, which ends here with that server's answer, and raises if none is up.
+  uses what this gives. Only a server the artifact's owner chose gives it. Any other has a server that was chosen and
+  acts for whose it is run the call instead, which ends here with that server's answer, and raises if none is up,
+  saying which servers should hold its keys and don't (`access/1`).
   """
   def encrypted(%Call{} = call, %Artifact{codec: nil} = artifact) do
     name = Artifact.name(artifact)
@@ -53,17 +63,73 @@ defmodule Encryption do
       refused ->
         # A server that's no longer chosen lets go of the keys it held, whatever still holds them.
         with {:refuse, _why} <- refused, do: GenServer.call(keys, :forget)
-        chosen = servers(artifact)
-        :no_response = Call.forward(call, chosen)
-
-        if chosen == [],
-          do:
-            raise(
-              "#{name} is encrypted, and no server may open it yet. Its owner chooses one, from a device that holds their key."
-            ),
-          else: raise("#{name} is encrypted, and no server that may open it is up.")
+        should = should(name)
+        held = servers(artifact)
+        :no_response = Call.forward(call, Enum.filter(held, &(&1 in should)))
+        raise unopened(name, should, held)
     end
   end
+
+  # Why nothing opens an encrypted artifact for a call: which servers that act for whose it is lack its keys, and which
+  # hold them but don't act for them, so can't run the call.
+  defp unopened(name, should, held) do
+    owner = User.owner(name)
+    open = Enum.filter(held, &(&1 in should))
+
+    said =
+      cond do
+        held == [] -> "#{name} is encrypted, and no server holds #{whose(owner)} key for it yet."
+        open == [] -> "#{name} is encrypted, and no server that acts for #{whom(owner)} holds #{whose(owner)} key for it."
+        true -> "#{name} is encrypted, and no server that may open it is up: #{named(open)}."
+      end
+
+    Enum.join([said | gaps(owner, should -- held, held -- should)], " ")
+  end
+
+  # What's missing of an owner's servers holding an artifact's keys, as a person reads it, a sentence each: `missing`
+  # act for them and wait for the keys, and `extra` hold them and don't act for them.
+  defp gaps(owner, missing, extra) do
+    Enum.map(missing, &"#{named([&1])} is waiting for #{whose(owner)} key.") ++
+      Enum.map(extra, &"#{named([&1])} holds #{whose(owner)} key and no longer acts for #{whom(owner)}.")
+  end
+
+  defp named(servers), do: servers |> Enum.map(&(Servers.name(&1) || String.slice(&1, 0, 8))) |> Enum.join(", ")
+  defp whom("network"), do: "the network"
+  defp whom(owner), do: owner |> String.split("/") |> List.last()
+  defp whose(owner), do: whom(owner) <> "'s"
+
+  @doc """
+  The keys of the servers that should hold an encrypted artifact's keys: those acting for whose it is, as scopes nest,
+  their own first, then a group's they're in, then the network's (`OneCore.Apps.covering/1`). They're who run its
+  calls, so one that lacks them can't, and one that holds them and isn't here has access it doesn't need.
+  """
+  def should(name), do: OneCore.Apps.covering(User.owner(name))
+
+  @doc """
+  How each artifact encrypted for `owner` stands: the servers that hold its keys, those that should and don't
+  (`missing`), and those that hold them and shouldn't (`extra`), each with what its machine is called, and each of
+  those as a person reads it (`problems`). An artifact is known once a server that should hold its keys ran a call of it (`Encryption.Keys`).
+  """
+  def access(owner) do
+    for name <- Artifact.list(index(owner)) do
+      held = servers(%Artifact{prefix: name <> "/"})
+      should = should(name)
+      {missing, extra} = {should -- held, held -- should}
+
+      %{
+        artifact: name,
+        servers: names(held),
+        missing: names(missing),
+        extra: names(extra),
+        problems: gaps(owner, missing, extra)
+      }
+    end
+  end
+
+  defp names(servers), do: for(server <- servers, do: %{key: server, name: Servers.name(server)})
+
+  @doc "Where the artifacts encrypted for `owner` are listed: an empty blob each, named by the artifact."
+  def index(owner), do: %Artifact{prefix: "#{owner}/made/encryption/encrypted/"}
 
   # Whether the artifact's owner chose a server: a relation tuple names it as an `editor`, which the apps that
   # decide `reach` say. One Core keeps their answer, so a call asks once.
@@ -82,7 +148,7 @@ defmodule Encryption do
   @doc """
   What a device needs of an artifact to encrypt for it, for an app's read-only tool to answer: the artifact's
   name, its `epoch`, the `servers` that open it, by their keys, and the ones that `may` be chosen, which are those
-  that cover whose it is, their own first, then a group's they're in, then the network's (`OneCore.Apps.covering/1`),
+  that act for whose it is (`should/1`),
   each with what its machine is called.
   """
   def unlocked_on(%Call{} = _call, %Artifact{} = artifact) do
@@ -91,11 +157,7 @@ defmodule Encryption do
         artifact: Artifact.name(artifact),
         epoch: epoch(artifact),
         servers: servers(artifact),
-        may:
-          for(
-            server <- OneCore.Apps.covering(OneCore.User.owner(Artifact.name(artifact))),
-            do: %{key: server, name: OneCore.Servers.name(server)}
-          )
+        may: names(should(Artifact.name(artifact)))
       },
       signed(artifact)
     )
@@ -252,11 +314,37 @@ defmodule Encryption do
       required: ["device", "name"]
     }
 
+    server = %{
+      type: "object",
+      properties: %{key: %{type: "string"}, name: %{type: ["string", "null"], description: "What its machine is called"}},
+      required: ["key", "name"]
+    }
+
+    access = %{
+      type: "array",
+      description: """
+      Each artifact encrypted for you, and which servers hold your key for it: every server that acts for you
+      should, as it runs what uses it, and none other. One that lacks it is waiting for it, and its calls of that
+      artifact fail until it has it.
+      """,
+      items: %{
+        type: "object",
+        properties: %{
+          artifact: %{type: "string"},
+          servers: %{type: "array", items: server, description: "The servers that hold it"},
+          missing: %{type: "array", items: server, description: "Servers that act for you and are waiting for it"},
+          extra: %{type: "array", items: server, description: "Servers that hold it and don't act for you"},
+          problems: %{type: "array", items: %{type: "string"}, description: "Each of those, as a person reads it"}
+        },
+        required: ["artifact", "servers", "missing", "extra", "problems"]
+      }
+    }
+
     [
       %{
         name: "key",
         read_only: true,
-        description: "Says which of your devices are trusted, which want to be, and what this device holds of your key",
+        description: "Says which of your devices are trusted, which want to be, what this device holds of your key, and which servers hold the keys of what's encrypted for you, and which should",
         inputs: %{type: "object", properties: %{device: device}},
         outputs: %{
           type: "object",
@@ -269,10 +357,21 @@ defmodule Encryption do
               description: "The key, encrypted to the device asked about, if it holds it"
             },
             devices: %{type: "array", items: named, description: "The devices that hold it"},
-            asking: %{type: "array", items: named, description: "The devices asking to"}
+            asking: %{type: "array", items: named, description: "The devices asking to"},
+            access: access
           },
-          required: ["owner", "device", "check", "slot", "devices", "asking"]
+          required: ["owner", "device", "check", "slot", "devices", "asking", "access"]
         }
+      },
+      %{
+        name: "check",
+        description: """
+        Says to Telemetry how what's encrypted for you stands, as the clock does every 10 minutes: an alert is open
+        while a server that acts for you is waiting for your key, or one that doesn't holds it. Answers as `key`'s
+        `access`.
+        """,
+        inputs: %{type: "object", properties: %{}},
+        outputs: %{type: "object", properties: %{access: access}, required: ["access"]}
       },
       %{
         name: "approve",
@@ -325,7 +424,22 @@ defmodule Encryption do
            else: (_ -> nil)
 
     check = with {:ok, check, _tag} <- Artifact.read(key, "check"), do: check, else: (:absent -> nil)
-    %{owner: call.subject, device: inputs["device"], check: check, slot: slot, devices: held, asking: asking}
+    %{owner: call.subject, device: inputs["device"], check: check, slot: slot, devices: held, asking: asking, access: access(call.subject)}
+  end
+
+  # Each artifact as a record Telemetry keeps, whose alert is open while it says what's missing (`Telemetry.Alerts`).
+  def call("check", _inputs, call) do
+    access = access(call.subject)
+
+    records =
+      for artifact <- access do
+        outcome = if artifact.problems == [], do: "complete", else: "incomplete"
+        attributes = %{"one.artifact" => artifact.artifact, "one.outcome" => outcome, "one.problem" => Enum.join(artifact.problems, " ")}
+        %{"name" => "one.encryption.access", "attributes" => Map.reject(attributes, &match?({_, ""}, &1))}
+      end
+
+    if records != [], do: Call.tool(call, "telemetry", "record", %{"records" => records})
+    %{access: access}
   end
 
   @on_a_device "A device is approved from a device: in the app there, or with `one` on it. An assistant somewhere else has none."

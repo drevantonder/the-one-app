@@ -55,7 +55,8 @@ client sent a `traceparent`.
   `one.hook.timeouts`, each by `one.app`.
 - Telemetry keeps what needs a person as alerts, and tells no one: a server not running or restarting over and over,
   the update held, a kind of error not seen in 14 days, an app's tools failing, an app not answering, an app's
-  deploys slow to show in its window (over 500 ms, `one.client.deploy.window`). `alerts`
+  deploys slow to show in its window (over 500 ms, `one.client.deploy.window`), a server that acts for someone unable to
+  open what's encrypted for them, or one that doesn't able to (`one.encryption.access`). `alerts`
   lists them, the open ones and those resolved in the last `hours` (a day if not said), and each kind with what fires it; they're on
   Telemetry's screen, its widget and its badge too. A problem is one alert however long it lasts. Whoever wants
   them elsewhere has everything kept forwarded (`forward`).
