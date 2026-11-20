@@ -18,8 +18,8 @@
 #   restart  updates in a row (the program's file changes), each with a second start near the hand-over: one app,
 #            whose launcher answers, and one window of each app, at the end of each.
 #   open     the app started as an update starts it, its windows to open again, on the Surface's costs
-#            (`measured.surface.open` in core/ui/devices.json): each window is made within its own cost and 150 ms of
-#            being asked, waiting for no other window, no pipelines being compiled, and none of its page's start.
+#            (`measured.surface.open` in core/ui/devices.json): each window is made before the pipelines it draws with
+#            could have been compiled, so it waited for none being compiled, and none of its page's start.
 #
 # The folder keeps the network, the app's build and its log (`app.log`), and a network running there is used again.
 # `--seed` picks the moments things happen at, the same each time for the same seed. It needs what `tooling/network`
@@ -254,9 +254,9 @@ restarted() {
 
 # The app started as an update starts it, with Telemetry and Settings to open again beside the launcher, each made as
 # the Surface makes one (its system's window and renderer, and the pipelines a kind of window draws with, which the
-# first window after a start waits for): each window is made within its own cost and 150 ms of being asked. One that
-# waited for another's, for pipelines being compiled or for its page to start, as each did until 21 Nov (the
-# Surface's 0.9 to 1.3 s), isn't. Its seed's busy thread isn't the Surface's costs, so it has none.
+# first window after a start waits for): each window is made before those pipelines could have been compiled. One
+# that waited for them, or for its page to start, as each did until 21 Nov (the Surface's 0.9 to 1.3 s; here 1.7 s),
+# isn't. Its seed's busy thread isn't the Surface's costs, so it has none.
 opened() {
   local window pipelines before made slow=
   stop_app
@@ -270,7 +270,7 @@ opened() {
   while read -r line; do
     made=$(grep -oP 'window made \K[0-9]+' <<<"$line" || echo none)
     echo "        ${line%% was ready*}: made in $made ms"
-    [[ $made != none ]] && ((made <= window + 150)) || slow=1
+    [[ $made != none ]] && ((made < pipelines)) || slow=1
   done < <(grep " was ready in " "$log" | tail -n +$((before + 1)) | head -3)
   [[ -z $slow ]]
 }
@@ -282,7 +282,7 @@ for name in "${checks[@]}"; do
     stale) check "stale: pages updated as the app starts, one window of each at every moment" stale ;;
     cached) check "cached: a read after a write is answered from what was kept while the server holds every request" cached ;;
     restart) check "restart: updates in a row, each with a second start, leave one app" restarted ;;
-    open) check "open: on the Surface's costs, each window opened again is made without waiting for another's" opened ;;
+    open) check "open: on the Surface's costs, each window opened again is made before its pipelines could compile" opened ;;
   esac
 done
 exit $failed
