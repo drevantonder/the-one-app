@@ -7,28 +7,11 @@
        nothing it can send anywhere else; the renderer is WebAssembly, the import map the page's modules are
        resolved by is written here, and a frame's page runs in a frame of its own from here (renderer.js). -->
   <meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval'; connect-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; frame-src 'self'; base-uri 'none'">
-  <style>
-    html, body { margin: 0; height: 100%; overflow: hidden; background: Canvas; color-scheme: light dark; }
-    canvas { display: block; width: 100%; height: 100%; touch-action: none; outline: none; }
-    /* What a screen reader reads, where each part is drawn, see-through to the pointer (semantics.js). */
-    #semantics { position: absolute; inset: 0; pointer-events: none; color: transparent; }
-    #semantics * { pointer-events: none; }
-    /* The real field typed through (text-input.js) shows nothing of its own, its selection neither, as Flutter web's. */
-    .field::selection { background: transparent; color: transparent; }
-    /* What's selected of a text that isn't a field, mirrored for the browser's own Copy (renderer.js), unseen: off the
-       page, or under the pointer for its menu. */
-    #selection { position: fixed; left: -9999px; top: 0; margin: 0; font-size: 16px; white-space: pre; color: transparent; pointer-events: none; user-select: text; }
-    #selection::selection { background: transparent; color: transparent; }
-  </style>
   <!-- From its opaque origin, this address is another: the renderer it imports is found beside it once it's a CORS
        request. -->
   <!-- The renderer, which is most of what the frame loads, fetched from the start (renderer.js compiles it). -->
   <link rel="preload" href="web_renderer_bg.wasm" as="fetch" crossorigin>
   <script src="renderer.js" crossorigin></script>
 </head>
-<body>
-  <canvas tabindex="0" aria-hidden="true"></canvas>
-  <div id="semantics"></div>
-  <div id="selection" aria-hidden="true"></div>
-</body>
+<!-- What it draws on, the canvas and what a screen reader reads, renderer.js makes. -->
 </html>

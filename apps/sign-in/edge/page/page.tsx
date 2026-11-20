@@ -12,15 +12,41 @@
 // to Unlock with Passkey. Where the network signs people in with Google too, Continue with Google is the first way,
 // and the passkey the second: Google sends them back here, to carry on with what the page was opened for.
 import { createSignal, Show } from "solid-js"
-import { render } from "@solidjs/web"
 import mark from "../../../../icons/Logo.png"
-import { Field, Icon, Input, SignIn } from "ui"
+import { Field, Icon, Image, Input, render, SignIn, styles, Text, tokens, View } from "ui"
 import { createAuthClient } from "better-auth/client"
 import { deviceAuthorizationClient } from "better-auth/client/plugins"
 import { passkeyClient } from "@better-auth/passkey/client"
 import Bowser from "bowser"
 import { check, code, forDevice, forPasskey, forServers, NO_PRF, opened as openedKey, output, PRF, prfKey, unwrap } from "./passkey.ts"
-import "./page.css"
+
+const look = styles({
+  /// The consent page an assistant is let in on, as Google's and GitHub's are: its logo joined to ours.
+  logos: { flexDirection: "row", alignItems: "center", gap: tokens.grid[3] },
+  logo: { width: tokens.grid[12], height: tokens.grid[12] },
+  /// An app's initial, where it has no logo of its own.
+  tile: { width: tokens.grid[12], height: tokens.grid[12], alignItems: "center", justifyContent: "center", borderRadius: tokens.radius.large, backgroundColor: tokens.colour.quinaryLabel },
+  initial: { font: tokens.type.title },
+  joins: { color: tokens.colour.secondaryLabel, font: tokens.type.headline },
+  grey: { color: tokens.colour.secondaryLabel },
+  /// Who it would act as, and where.
+  account: { alignSelf: "stretch", color: tokens.colour.secondaryLabel, textAlign: "center" },
+  /// What it will be able to do, in a plain box.
+  can: { alignSelf: "stretch", gap: tokens.grid[2.5], padding: tokens.grid[4], borderWidth: tokens.length.hairline, borderColor: tokens.colour.quinaryLabel, borderRadius: tokens.radius.medium },
+  heading: { font: tokens.type.headline },
+  row: { flexDirection: "row", gap: tokens.grid[2.5], alignItems: "flex-start" },
+  tick: { color: tokens.colour.secondaryLabel, paddingTop: tokens.grid[0.5] },
+  grows: { flexShrink: 1 },
+  warning: { flexDirection: "row", gap: tokens.grid[2.5], alignItems: "flex-start", color: tokens.colour.orange },
+  note: { color: tokens.colour.secondaryLabel, font: tokens.type.small, textAlign: "center" },
+  /// Use Another Device, in the app's own window: the link to open where they're signed in, short enough to type, and
+  /// the code it will show there, as big as the one a device shows.
+  elsewhere: { alignSelf: "stretch", gap: tokens.grid[2], alignItems: "center" },
+  link: { alignSelf: "stretch", paddingBlock: tokens.grid[3], paddingInline: tokens.grid[4], borderWidth: tokens.length.hairline, borderColor: tokens.colour.quinaryLabel, borderRadius: tokens.radius.medium, fontFamily: tokens.font.mono, textAlign: "center" },
+  shown: { font: tokens.type.largeTitle, fontFamily: tokens.font.mono },
+  /// Done, as Google's and GitHub's device pages show it: a check mark where the network's mark was.
+  done: { width: tokens.grid[20], height: tokens.grid[20], alignItems: "center", justifyContent: "center", borderRadius: tokens.radius.full, backgroundColor: tokens.colour.green, color: tokens.colour.onAccent },
+})
 
 const auth = createAuthClient({ basePath: "/sign-in/auth", plugins: [passkeyClient(), deviceAuthorizationClient()] })
 const opened = new URLSearchParams(location.hash.slice(1))
@@ -150,7 +176,8 @@ async function begin() {
         stage: "ready",
         app: {
           name: client.client_name || (site ? new URL(site).hostname : "An app"),
-          logo: client.logo_uri?.startsWith("https://") ? client.logo_uri : undefined,
+          // From here, where the network passes it on (`logo` in `edge/worker.ts`): a page draws only pictures of its own.
+          logo: client.logo_uri?.startsWith("https://") ? `/sign-in/logo?${new URLSearchParams({ client_id: flow.client, oauth_query: flow.request })}` : undefined,
           ...elsewhere(site, params.get("redirect_uri")),
           person: user && (user.called || user.name),
         },
@@ -530,7 +557,11 @@ function shows(): Shows {
 
 /// The check mark a device page shows once it's done.
 function DoneMark() {
-  return <span class="done-mark"><Icon name="check" /></span>
+  return (
+    <View style={look.done}>
+      <Icon name="check" />
+    </View>
+  )
 }
 
 /// Continue with Google as the button, and the passkey as the second way, `passkey` saying what that does.
@@ -538,15 +569,21 @@ const withGoogleFirst = (passkey: string) => ({ button: "Continue with Google", 
 
 /// The app's logo, or its initial on a plain tile when it has none or it doesn't load, joined to the network's mark.
 function Logos(props: { app: App }) {
-  const [failed, setFailed] = createSignal(false)
   return (
-    <div class="logos">
-      <Show when={props.app.logo && !failed()} fallback={<span class="tile">{[...props.app.name][0].toUpperCase()}</span>}>
-        <img class="tile" src={props.app.logo} alt="" referrerpolicy="no-referrer" onError={() => setFailed(true)} />
+    <View style={look.logos}>
+      <Show
+        when={props.app.logo}
+        fallback={
+          <View style={look.tile}>
+            <Text style={look.initial}>{[...props.app.name][0].toUpperCase()}</Text>
+          </View>
+        }
+      >
+        {(logo) => <Image src={logo()} alt="" style={look.logo} />}
       </Show>
-      <span class="joins" aria-hidden="true">···</span>
-      <img src={mark} alt="" />
-    </div>
+      <Text style={look.joins} aria-hidden="true">···</Text>
+      <Image src={mark} alt="" style={look.logo} />
+    </View>
   )
 }
 
@@ -557,23 +594,35 @@ function Consent(props: { app: App }) {
   const stays = params.get("scope")?.split(" ").includes("offline_access")
   return (
     <>
-      <p class="account">{[props.app.person && `as ${props.app.person}`, location.host].filter(Boolean).join(" · ")}</p>
-      <section class="can">
-        <h2>{props.app.name} will be able to</h2>
-        <ul>
-          <li><Icon name="check" />Use your apps' tools as you, like email, calendar and files</li>
-          <li><Icon name="check" />Reach only what you can, nothing more</li>
-          {stays && <li><Icon name="check" />Stay connected until you remove it</li>}
-        </ul>
-      </section>
+      <Text style={look.account}>{[props.app.person && `as ${props.app.person}`, location.host].filter(Boolean).join(" · ")}</Text>
+      <View style={look.can} role="group">
+        <Text style={look.heading} role="heading">{props.app.name} will be able to</Text>
+        <Can>Use your apps' tools as you, like email, calendar and files</Can>
+        <Can>Reach only what you can, nothing more</Can>
+        {stays && <Can>Stay connected until you remove it</Can>}
+      </View>
       <Show when={props.app.to}>
-        <p class="warning">
-          <Icon name="warning-circle" />
-          <span>{props.app.name} says it's from {props.app.from} but sends you back to {props.app.to}. Allow only if you trust {props.app.to}.</span>
-        </p>
+        <View style={look.warning}>
+          <View style={look.tick}>
+            <Icon name="warning-circle" />
+          </View>
+          <Text style={look.grows}>{props.app.name} says it's from {props.app.from} but sends you back to {props.app.to}. Allow only if you trust {props.app.to}.</Text>
+        </View>
       </Show>
-      <p class="note">Allow only apps you trust. You can remove {props.app.name} anytime in Devices.</p>
+      <Text style={look.note}>Allow only apps you trust. You can remove {props.app.name} anytime in Devices.</Text>
     </>
+  )
+}
+
+/// One thing an app will be able to do, with a check mark before it.
+function Can(props: { children: string }) {
+  return (
+    <View style={look.row}>
+      <View style={look.tick}>
+        <Icon name="check" />
+      </View>
+      <Text style={look.grows}>{props.children}</Text>
+    </View>
   )
 }
 
@@ -599,14 +648,12 @@ render(
     >
       {shows().app && <Consent app={shows().app!} />}
       {shows().elsewhere && (
-        <div class="elsewhere">
-          <p>Open this where you're signed in</p>
-          <p class="link">{typed}</p>
-          <div class="code">
-            <p>It will show</p>
-            <p class="shown">{shown}</p>
-          </div>
-        </div>
+        <View style={look.elsewhere}>
+          <Text style={look.grey}>Open this where you're signed in</Text>
+          <Text style={look.link}>{typed}</Text>
+          <Text style={look.grey}>It will show</Text>
+          <Text style={look.shown}>{shown}</Text>
+        </View>
       )}
       {shows().asksName && !shows().done && (
         <Field>
@@ -615,5 +662,4 @@ render(
       )}
     </SignIn>
   ),
-  document.body,
 )

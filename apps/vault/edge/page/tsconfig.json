@@ -1,23 +1,16 @@
 {
+  // A page written against the UI library alone, as an app's is, that a browser shows by itself at the network's
+  // address, with what a web page reaches (the DOM's lib): `fetch`, `location`, `navigator.credentials`.
+  "extends": "../../../../core/ui/tsconfig.app.json",
   "compilerOptions": {
-    "target": "es2024",
-    "module": "esnext",
-    "moduleResolution": "bundler",
     "lib": ["es2024", "dom", "dom.iterable"],
-    "types": [],
-    "jsx": "preserve",
-    "jsxImportSource": "@solidjs/web",
-    "strict": true,
-    "noEmit": true,
-    "skipLibCheck": true,
-    "allowImportingTsExtensions": true,
-    "verbatimModuleSyntax": true,
     "paths": {
-      "ui": ["../../../../core/ui/src/index.ts"],
+      "ui": ["../../../../core/ui/src/types/ui.d.ts"],
+      "ui/jsx-runtime": ["../../../../core/ui/src/types/jsx-runtime.d.ts"],
       "solid-js": ["../../../../core/ui/node_modules/solid-js"],
-      "@solidjs/web": ["../../../../core/ui/node_modules/@solidjs/web"],
-      "@solidjs/web/jsx-runtime": ["../../../../core/ui/node_modules/@solidjs/web/types/jsx.d.ts"]
+      "@solidjs/web": ["../../../../core/ui/src/types/web.d.ts"]
     }
   },
+  "files": ["../../../../core/ui/src/types/globals.d.ts", "../../../../core/ui/src/types/solid.d.ts"],
   "include": ["**/*", "../../../../core/ui/node_modules/vite/client.d.ts"]
 }

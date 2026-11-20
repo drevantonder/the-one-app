@@ -17,6 +17,7 @@ export default {
     const auth = await at(url.origin);
     if (url.pathname === "/privacy") return privacy(auth, url);
     if (url.pathname === "/sign-in/ask") return ask(request, auth, url);
+    if (url.pathname === "/sign-in/logo") return logo(auth, url);
     if (url.pathname.startsWith("/sign-in/auth/") || url.pathname.startsWith("/.well-known/")) return auth.handler(request);
     return env.ASSETS.fetch(request);
   },
@@ -56,6 +57,21 @@ async function privacy(auth: Auth, url: URL) {
     .on("html", { element: (html) => void html.prepend(`<base href="/sign-in/">`, { html: true }) })
     .on("[data-network]", fill(url.host));
   return (user ? rewriter.on("[data-owner]", fill(user.called || user.name)) : rewriter).transform(page);
+}
+
+/**
+ * The logo of the app an assistant's request to be let in is from, as its metadata names it, for the consent page,
+ * which draws only pictures from here (the renderer's): `?client_id=…&oauth_query=…` as the page has them, which
+ * Better Auth says the app of, from the query it signed. Anything that isn't a picture at an `https:` address isn't.
+ */
+async function logo(auth: Auth, url: URL) {
+  const asked = Object.fromEntries(url.searchParams);
+  const prelogin = new Request(new URL("/sign-in/auth/oauth2/public-client-prelogin", url), { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ client_id: asked.client_id, oauth_query: asked.oauth_query }) });
+  const { logo_uri } = await (await auth.handler(prelogin)).json<{ logo_uri?: string }>().catch(() => ({ logo_uri: undefined }));
+  const image = logo_uri?.startsWith("https://") ? await fetch(logo_uri).catch(() => null) : null;
+  const kind = image?.ok ? image.headers.get("content-type") ?? "" : "";
+  if (!image || !kind.startsWith("image/")) return new Response(null, { status: 404 });
+  return new Response(image.body, { headers: { "content-type": kind, "cache-control": "private, max-age=3600" } });
 }
 
 /** Where Better Auth hands out the keys its tokens are signed with. */

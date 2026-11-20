@@ -93,7 +93,10 @@ export function SignIn(props: {
         respond("sign-in", () => props.onSignIn?.())()
       }}
     >
-      <Show when={props.mark}>{(mark) => (typeof mark() === "string" ? <Image src={mark() as string} alt="" style={look.mark} /> : mark())}</Show>
+      {/* Drawn afresh as it changes, as a picture's address may give way to what draws one (a consent page's logos). */}
+      <Show when={props.mark} keyed>
+        {(mark) => (typeof mark === "string" ? <Image src={mark} alt="" style={look.mark} /> : mark)}
+      </Show>
       <Text role="heading" aria-level={1} style={look.heading}>
         {props.heading}
       </Text>

@@ -6,7 +6,10 @@
 // any module loads.
 ;(async () => {
   const started = performance.now()
-  const page = new URL(location.hash.slice(1), location.href)
+  // A page shown in a browser's tab by itself, as the sign-in and Vault pages are, names itself (`<meta name="page">`),
+  // its own address being the page's; any other is named after the frame's address.
+  const named = document.querySelector('meta[name="page"]')?.getAttribute("content")
+  const page = new URL(named ?? location.hash.slice(1), location.href)
   // A frame's page (the UI library's `Frame`), another app's in one of the page's, which the frame's page draws, as a
   // native host's frame is drawn in its page's window: this is only its JS, as a native host's runs on a thread of its
   // own. Its client knows it by its number (`frame`), as its own app's.
@@ -29,7 +32,7 @@
   const seen = (/** @type {string} */ kind, /** @type {unknown} */ value = true) => {
     if (said.has(kind)) return
     said.add(kind)
-    parent.postMessage({ jsonrpc: "2.0", method: "notifications/one/seen", params: { [kind]: value } }, "*")
+    if (!named) parent.postMessage({ jsonrpc: "2.0", method: "notifications/one/seen", params: { [kind]: value } }, "*")
   }
   /** Where the renderer can't open the page: its client shows that it didn't open, and why. */
   const unopened = (/** @type {unknown} */ why) => {
@@ -66,24 +69,23 @@
       },
       host: { post: (/** @type {object} */ message) => renderer.post(JSON.stringify(message)) },
     })
-    const canvas = /** @type {HTMLCanvasElement} */ (document.querySelector("canvas"))
+    const { canvas, selection, reading } = await made()
     // Typing, through a real field (text-input.js), and what a screen reader reads (semantics.js).
     // What the pointer does on the field typed in is the canvas's, as it would be with no field over it.
     const pointed = (/** @type {PointerEvent | WheelEvent} */ event) => canvas.dispatchEvent(event instanceof WheelEvent ? new WheelEvent(event.type, event) : new PointerEvent(event.type, event))
     const typing = textInput((method, args) => renderer.text_input_client(method, args), (edit) => seen(`edit:${edit}`), pointed)
     // What's selected of a text that isn't a field, as the page's own selection, so the browser's Copy (its key, and its
     // menu where the mirror is under a right click) copies it, as a web page's text is copied.
-    const selection = /** @type {HTMLElement} */ (document.getElementById("selection"))
     const mirror = (/** @type {string | null} */ text) => {
       selection.textContent = text ?? ""
       if (text && document.activeElement !== typing.field) getSelection()?.selectAllChildren(selection)
       else if (getSelection()?.anchorNode && selection.contains(getSelection()?.anchorNode ?? null)) getSelection()?.removeAllRanges()
     }
-    const spoken = semantics(/** @type {HTMLElement} */ (document.getElementById("semantics")), (id, action) => (seen(`screen reader:${action}`), renderer.act(id, action)))
+    const spoken = semantics(reading, (id, action) => (seen(`screen reader:${action}`), renderer.act(id, action)))
     const sized = (/** @type {number} */ width, /** @type {number} */ height) => [Math.max(1, Math.round(width)), Math.max(1, Math.round(height))]
     ;[canvas.width, canvas.height] = sized(innerWidth * devicePixelRatio, innerHeight * devicePixelRatio)
     await renderer.open(canvas, devicePixelRatio, base.href, decodeURIComponent(page.hash.slice(1)), tables, page.searchParams.get("theme"), matchMedia("(pointer: coarse)").matches, {
-      post: (/** @type {object} */ message) => parent.postMessage(message, "*"),
+      post: named ? alone(renderer) : (/** @type {object} */ message) => parent.postMessage(message, "*"),
       cursor: (/** @type {string} */ cursor) => void (canvas.style.cursor = cursor),
       textInput: (/** @type {[string, unknown][]} */ calls) => calls.forEach(([method, args]) => typing.call(method, args)),
       semantics: spoken,
@@ -162,7 +164,7 @@
     // The page's place in itself, a link's fragment, which its client names after its address in the frame's
     // (client.js's `load`), and which a native host tells a page as its host context's `link`: as it opens, and as its
     // client takes it somewhere else in it.
-    addEventListener("hashchange", () => {
+    if (!named) addEventListener("hashchange", () => {
       const link = decodeURIComponent(new URL(location.hash.slice(1), location.href).hash.slice(1))
       renderer.message({ jsonrpc: "2.0", method: "ui/notifications/host-context-changed", params: { link } })
     })
@@ -329,4 +331,50 @@ async function frame(page, pageHtml, framed) {
   } catch (error) {
     drawing.postMessage({ one: "started", error: String(/** @type {Error} */ (error)?.stack ?? error) }, "*")
   }
+}
+
+/**
+ * What a page shown in a browser's tab by itself asks, with no client around it: it's answered here, as a browser
+ * answers a web page, with nothing but what the page is (`ui/initialize`), and a web address it opens, in a tab of its
+ * own. It reaches anything else itself, as a web page does (`fetch`, `navigator.credentials`).
+ * @param {any} renderer
+ */
+function alone(renderer) {
+  return (/** @type {{ id?: unknown, method?: string, params?: any }} */ message) => {
+    if (message.id === undefined) return
+    const answer = (/** @type {object} */ body) => queueMicrotask(() => renderer.message({ jsonrpc: "2.0", id: message.id, ...body }))
+    if (message.method === "ui/initialize") return answer({ result: { protocolVersion: "2026-01-26", hostInfo: { name: location.host, version: "1" }, hostCapabilities: {}, hostContext: { platform: "web" } } })
+    if (message.method === "ping") return answer({ result: {} })
+    if (message.method === "ui/open-link" && /^https?:/.test(message.params?.url ?? "")) return (open(message.params.url, "_blank", "noopener"), answer({ result: {} }))
+    answer({ error: { code: -32601, message: `This page has no client to ask ${message.method}` } })
+  }
+}
+
+/**
+ * What the page is drawn on, made in the document once it's there: the canvas, what a screen reader reads where each
+ * part is drawn (semantics.js), and what's selected of a text that isn't a field, mirrored for the browser's own Copy.
+ */
+async function made() {
+  if (document.readyState === "loading") await new Promise((loaded) => addEventListener("DOMContentLoaded", loaded, { once: true }))
+  document.head.append(
+    Object.assign(document.createElement("style"), {
+      textContent: `
+        html, body { margin: 0; height: 100%; overflow: hidden; background: Canvas; color-scheme: light dark; }
+        canvas { display: block; width: 100%; height: 100%; touch-action: none; outline: none; }
+        /* See-through to the pointer. */
+        #semantics { position: absolute; inset: 0; pointer-events: none; color: transparent; }
+        #semantics * { pointer-events: none; }
+        /* The real field typed through (text-input.js) shows nothing of its own, its selection neither, as Flutter web's. */
+        .field::selection { background: transparent; color: transparent; }
+        /* Unseen: off the page, or under the pointer for its menu. */
+        #selection { position: fixed; left: -9999px; top: 0; margin: 0; font-size: 16px; white-space: pre; color: transparent; pointer-events: none; user-select: text; }
+        #selection::selection { background: transparent; color: transparent; }`,
+    }),
+  )
+  const canvas = Object.assign(document.createElement("canvas"), { tabIndex: 0 })
+  const reading = Object.assign(document.createElement("div"), { id: "semantics" })
+  const selection = Object.assign(document.createElement("div"), { id: "selection" })
+  for (const hidden of [canvas, selection]) hidden.setAttribute("aria-hidden", "true")
+  document.body.append(canvas, reading, selection)
+  return { canvas, selection, reading }
 }

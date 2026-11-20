@@ -3,4 +3,8 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <title>Vault</title>
-<script type="module" src="./page.tsx"></script>
+<!-- Drawn by the web's renderer (clients/web/renderer), as the web client's apps are: its page, page.html, here, which
+     reaches what a web page at the network's address does, and nothing elsewhere. -->
+<meta http-equiv="Content-Security-Policy" content="default-src 'none'; script-src 'self' 'unsafe-inline' 'wasm-unsafe-eval'; connect-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; base-uri 'none'; form-action 'self'">
+<meta name="page" content="page.html">
+<script src="/renderer/renderer.js"></script>

@@ -5,10 +5,19 @@
 // agent's site: the network doesn't know the conversation's address, and a page that sends people where it's told
 // to is an open redirect. Cancelled or failed, it says so, with Try Again.
 import { createSignal, For, Show } from "solid-js"
-import { render } from "@solidjs/web"
 import mark from "../../../../icons/Logo.png"
-import { Icon, SignIn } from "ui"
-import "./page.css"
+import { Icon, render, SignIn, styles, Text, tokens, View } from "ui"
+
+const look = styles({
+  /// What a sign-in is connected to, in a plain box, as the sign-in page's consent lists what an app can do.
+  connected: { alignSelf: "stretch", gap: tokens.grid[2.5], padding: tokens.grid[4], borderWidth: tokens.length.hairline, borderColor: tokens.colour.quinaryLabel, borderRadius: tokens.radius.medium },
+  heading: { font: tokens.type.headline },
+  row: { flexDirection: "row", gap: tokens.grid[2.5], alignItems: "flex-start" },
+  tick: { color: tokens.colour.secondaryLabel, paddingTop: tokens.grid[0.5] },
+  grows: { flexShrink: 1 },
+  said: { color: tokens.colour.secondaryLabel, textAlign: "center" },
+  note: { color: tokens.colour.secondaryLabel, textAlign: "center", font: tokens.type.small },
+})
 
 /// Where a sign-in began, as the server kept it: an app's screen, an agent by its own name, or `one` in a terminal.
 type Began = { screen: string } | { agent: string } | { cli: true }
@@ -71,28 +80,28 @@ render(() => {
       onStop={() => location.assign(`/?open=${encodeURIComponent(app()!)}`)}
     >
       <Show when={status() === "ok"}>
-        <section class="connected">
-          <h2>{ended()!.account ?? ended()!.item} is connected to</h2>
-          <ul>
-            <For each={ended()!.apps?.length ? ended()!.apps : [ended()!.service!]}>
-              {(name) => (
-                <li>
+        <View style={look.connected} role="group">
+          <Text style={look.heading} role="heading">{ended()!.account ?? ended()!.item} is connected to</Text>
+          <For each={ended()!.apps?.length ? ended()!.apps : [ended()!.service!]}>
+            {(name) => (
+              <View style={look.row}>
+                <View style={look.tick}>
                   <Icon name="check" />
-                  {name}
-                </li>
-              )}
-            </For>
-          </ul>
-        </section>
+                </View>
+                <Text style={look.grows}>{name}</Text>
+              </View>
+            )}
+          </For>
+        </View>
       </Show>
       <Show when={status() === "cancelled"}>
-        <p class="said">
+        <Text style={look.said}>
           You didn't let {listed(ended()!.apps?.length ? ended()!.apps! : ["the One App"])} use your {ended()!.service} account.
-        </p>
+        </Text>
       </Show>
       <Show when={ended() && after()}>
-        <p class="note">You can close this tab and go back to {after()}.</p>
+        <Text style={look.note}>You can close this tab and go back to {after()}.</Text>
       </Show>
     </SignIn>
   )
-}, document.body)
+})
