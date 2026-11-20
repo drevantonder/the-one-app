@@ -95,9 +95,12 @@ defmodule Database do
       :connected ->
         raise "#{holder} holds #{app}'s database and answers the network's relay, but it didn't answer this server within #{waited} ms, so this server doesn't take it over. Check this server's connection, then try again."
 
+      # This server is stopping, or not one of its network's yet, so it takes no lease that others would then come
+      # to it for: the call goes to one of the servers that are, which takes it.
       :not_up ->
+        Call.forward(call, OneCore.Apps.servers(OneCore.User.owner(OneCore.Artifact.name(call.own))))
         held = if server, do: "#{holder} holds it and didn't answer", else: "nobody holds it"
-        raise "This server is starting or stopping, so it doesn't take a database over, and #{held}. Try again in a moment."
+        raise "This server is starting or stopping, so it doesn't take a database over, #{held}, and no other server took it. Try again in a moment."
 
       # This server's own copy failed just now, and it handed the lease on: a call asked here is passed to another of
       # the servers acting for whoever the database is, which takes the lease and runs it, and one passed on here is
