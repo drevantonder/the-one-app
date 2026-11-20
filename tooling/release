@@ -84,13 +84,16 @@ export BUILD_SIGNING_KEY
 # kind of machine, `<target>.json`, the latest of each name for it, `server-code` in every one, with its link there.
 # A `one` keeps `serving`, the build that first had what a server runs of it (`serves`), so one that changed only the
 # app around `one serve run` restarts no server. The builds before stay, as a machine may be downloading one as the
-# next is published, and what neither the lists before nor now name goes.
+# next is published, and what neither the lists before nor now name goes. A server and a client release publish one at
+# a time, each reading the lists as the one before left them: at once, each wrote the lists it read before the other
+# published, so the other's builds went from them, and its files with them (20 Nov: server-code back from 0.34.18 to
+# 0.34.12, and a Mac's download of a `one` 404).
 publish() {
   echo "Publishing to the core's release, $repo $tag"
   gh release view "$tag" -R "$repo" >/dev/null 2>&1 ||
     gh release create "$tag" -R "$repo" --latest=false --title "The latest builds" \
       --notes "What every network's servers and devices take, and a new network's first server is installed from: \`one serve on --address <address> --first <secret> --owner <name>\` (core/edge/README.md)." >/dev/null
-  REPO=$repo TAG=$tag BUILD=$build bun -e '
+  REPO=$repo TAG=$tag BUILD=$build flock "${XDG_CACHE_HOME:-$HOME/.cache}/the-one-app/publish.lock" bun -e '
     const { REPO, TAG, BUILD, BUILD_SIGNING_KEY } = process.env;
     const { readdirSync, mkdtempSync, copyFileSync, writeFileSync, rmSync } = require("node:fs");
     const { tmpdir } = require("node:os");
