@@ -306,6 +306,8 @@ impl Thread {
         let shared = Arc::new(Shared::default());
         let (page, on, time) = (page.clone(), shared.clone(), clock.clone());
         std::thread::Builder::new().name(format!("js {}", page.host_str().unwrap_or_default())).stack_size(THREAD_STACK).spawn(move || {
+            // Its page answers its person's keys and taps and says what's drawn, so it runs as the windows' thread does.
+            let _ = thread_priority::set_current_thread_priority(thread_priority::ThreadPriority::Max);
             // Told as it ends, however it does, so nothing waits on it for ever.
             struct Ended(Arc<Shared>);
             impl Drop for Ended {

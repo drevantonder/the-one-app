@@ -287,6 +287,9 @@ fn start() -> anyhow::Result<Native> {
     let (sender, channel) = calloop::channel::channel::<Job>();
     let (ready_to, ready) = std::sync::mpsc::channel();
     std::thread::Builder::new().name("native".into()).spawn(move || {
+        // It takes the person's input and draws what they see, so it runs ahead of work nobody's waiting on, as an
+        // app's main thread does: as far as the system lets it.
+        let _ = thread_priority::set_current_thread_priority(thread_priority::ThreadPriority::Max);
         let mut event_loop = match calloop::EventLoop::<Windows>::try_new() {
             Ok(event_loop) => event_loop,
             Err(error) => return drop(ready_to.send(Err(anyhow::anyhow!("{error}")))),

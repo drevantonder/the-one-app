@@ -7,6 +7,8 @@ license.workspace = true
 
 [dependencies]
 anyhow.workspace = true
+# The threads a person waits on run first, and what nobody waits on last, as each system's own apps' do.
+thread-priority = "3"
 bytemuck = { version = "1", features = ["derive"] }
 # How a colour moving to another is mixed: through Oklch, as CSS Color 4 does (Linebender's).
 color = "0.3.3"

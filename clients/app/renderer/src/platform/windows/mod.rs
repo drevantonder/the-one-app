@@ -38,6 +38,9 @@ pub(super) fn start() -> anyhow::Result<Native> {
     let (jobs_to, jobs) = mpsc::channel::<Job>();
     let (ready_to, ready) = mpsc::channel();
     std::thread::Builder::new().name("native".into()).spawn(move || {
+        // It takes the person's input and draws what they see, so it runs ahead of work nobody's waiting on, as an
+        // app's main thread does: as far as the system lets it.
+        let _ = thread_priority::set_current_thread_priority(thread_priority::ThreadPriority::Max);
         let mut windows = match Display::connect().and_then(Windows::new) {
             Ok(windows) => windows,
             Err(error) => return drop(ready_to.send(Err(error))),

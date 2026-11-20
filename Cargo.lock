@@ -7314,6 +7314,7 @@ dependencies = [
  "sys-locale",
  "taffy",
  "tao",
+ "thread-priority",
  "unicode-segmentation",
  "url",
  "wasm-bindgen",
@@ -9369,6 +9370,20 @@ dependencies = [
  "proc-macro2",
  "quote",
  "syn 3.0.10",
+]
+
+[[package]]
+name = "thread-priority"
+version = "3.1.1"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "8d2e834949be5111506bb252643498af1514f600d9e1dceedaa42afae155b67f"
+dependencies = [
+ "bitflags 2.13.2",
+ "cfg-if",
+ "libc",
+ "log",
+ "rustversion",
+ "windows",
 ]
 
 [[package]]

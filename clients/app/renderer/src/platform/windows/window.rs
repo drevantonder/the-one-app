@@ -184,6 +184,8 @@ impl Display {
         let frames = std::sync::Arc::new(Frames::default());
         let (waiting, thread) = (frames.clone(), unsafe { windows::Win32::System::Threading::GetCurrentThreadId() });
         std::thread::Builder::new().name("frames".into()).spawn(move || {
+            // It wakes the windows' thread for each frame, so it runs as that does.
+            let _ = thread_priority::set_current_thread_priority(thread_priority::ThreadPriority::Max);
             // Windows 11's, looked up as it runs, so the program still starts on Windows 10, which hasn't it.
             type Wait = unsafe extern "system" fn(u32, *const windows::Win32::Foundation::HANDLE, u32) -> u32;
             let wait: Option<Wait> = unsafe {
