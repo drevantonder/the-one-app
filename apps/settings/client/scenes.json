@@ -773,6 +773,24 @@
       ]
     }
   },
+  "Settings, a search with no match": {
+    "like": "Settings",
+    "taps": [
+      "Search Settings",
+      {
+        "type": "hello world"
+      }
+    ],
+    "checks": {
+      "It says it found nothing": [
+        {
+          "expect": {
+            "text": "No Results"
+          }
+        }
+      ]
+    }
+  },
   "An app": {
     "like": "Settings",
     "page": "client/index.html#app:network:containers"

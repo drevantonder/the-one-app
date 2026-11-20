@@ -134,6 +134,8 @@ function Sidebar(props: { shown?: string }) {
     />
   )
   const own = () => wanted("Updates")
+  // What a search found: sections, Updates or apps.
+  const found = () => groups.slice(1).some((group) => of(group).length) || own() || apps().some((app) => wanted(app.title))
   return (
     <Screen heading="Settings">
       <Search placeholder="Search settings…" aria-label="Search Settings" value={words()} onChangeText={setWords} />
@@ -164,6 +166,9 @@ function Sidebar(props: { shown?: string }) {
           </Show>
         )}
       </For>
+      <Show when={words().trim() && !found()}>
+        <Empty>{`No Results for "${words().trim()}"`}</Empty>
+      </Show>
       <Show when={apps().filter((app) => wanted(app.title)).length}>
         <Section heading="Apps">
           <List each={apps().filter((app) => wanted(app.title))} keyed={(app) => `${app.for}:${app.name}`}>
