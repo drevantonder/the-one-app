@@ -49,7 +49,7 @@ defmodule OneCore.Apps.Update do
 
   @doc """
   The transition table, from up to date (`nil`): `{:newer, offer, trusted, by, task}`, a newer commit found, which a
-  trusted app takes at once and an untrusted one offers; `{:update, by, task}` (Update, and Try Again); `{:stage,
+  trusted app takes at once and an untrusted one offers; `:current`, nothing newer than what runs, which drops an offer or a failure left behind; `{:update, by, task}` (Update, and Try Again); `{:stage,
   stage}`; `:done`; and `{:fail, why}`. `by` is the server that takes it, which alone runs it, as `task`.
   """
   def move(record, event)
@@ -64,6 +64,9 @@ defmodule OneCore.Apps.Update do
       true -> {:ok, moved(offer, "available")}
     end
   end
+
+  # What runs is as new as the source: an offer or a failure still kept is of a commit it has gone past.
+  def move(%{"state" => state}, :current) when state in ~w(available failed), do: {:ok, nil}
 
   def move(%{"state" => state} = record, {:update, by, task}) when state in ~w(available failed),
     do: {:ok, record |> Map.merge(%{"by" => by, "task" => task}) |> moved("updating", "fetching")}

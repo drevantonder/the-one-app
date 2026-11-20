@@ -696,6 +696,14 @@ defmodule OneCore.Apps.Lifecycle do
             Logger.warning("#{artifact}'s git source wasn't checked: #{why}")
             Update.read(artifact)
 
+          # Nothing at the source is newer than what runs. An offer or a failure still kept is of a commit it has gone
+          # past since, as a deploy from a later one does, and is no update.
+          {:ok, nil} ->
+            case Update.read(artifact) do
+              %{"state" => state} when state != "updating" -> told(artifact, Update.change(artifact, :current))
+              record -> record
+            end
+
           _ ->
             Update.read(artifact)
         end
