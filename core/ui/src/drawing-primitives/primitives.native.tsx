@@ -9,7 +9,7 @@ import { layer } from "./layer.ts"
 import type { Mutations, Type } from "./renderer.ts"
 import type * as Page from "../types/ui.d.ts"
 import type { PickerProps } from "./primitives.tsx"
-import { literal, options, renamed } from "./props.ts"
+import { focusable, literal, options, renamed } from "./props.ts"
 import { styles } from "../styles.ts"
 import { Problem } from "../styled-components/states.tsx"
 import { messages } from "../words.ts"
@@ -27,7 +27,8 @@ const dropped = (it: Page.ViewProps) => it.onDrop && ((event: { files: { name: s
 
 export const Pressable: typeof Page.Pressable = (props) =>
   view(
-    renamed(props, ["tabIndex", "autoFocus", "onPress", "disabled", "onDrop"], {
+    renamed(props, ["tabIndex", "autoFocus", "onPress", "disabled", "onDrop", "style"], {
+      style: focusable,
       tabindex: (it) => it.tabIndex,
       autofocus: (it) => it.autoFocus,
       onClick: (it) => (it.disabled ? undefined : it.onPress),
@@ -41,7 +42,7 @@ const scroll = primitive("scroll")
 export const ScrollView: typeof Page.ScrollView = (props) => scroll(renamed(props, ["tabIndex", "autoFocus", "onDrop"], { tabindex: (it) => it.tabIndex, autofocus: (it) => it.autoFocus, onDrop: dropped }))
 
 const text = primitive("text")
-export const Text: typeof Page.Text = (props) => text(renamed(props, ["onPress", "tabIndex"], { onClick: (it) => it.onPress, tabindex: (it) => it.tabIndex }))
+export const Text: typeof Page.Text = (props) => text(renamed(props, ["onPress", "tabIndex", "style"], { style: (it) => focusable(it, true), onClick: (it) => it.onPress, tabindex: (it) => it.tabIndex }))
 
 export const Image: typeof Page.Image = primitive("image")
 

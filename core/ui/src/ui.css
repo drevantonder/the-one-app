@@ -596,10 +596,6 @@ html[data-launcher],
 html[data-launcher] body {
   background: transparent;
 }
-button.ui-view:focus-visible {
-  outline: 2px solid var(--ring);
-  outline-offset: 2px;
-}
 /* What the keyboard is put on but never tabs to (a dialog as it opens, a menu) draws no ring of the browser's, as a
    native one has none. */
 .ui-view[tabindex="-1"]:focus {

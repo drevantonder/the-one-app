@@ -309,6 +309,9 @@ function compile(style: Record<string, any>, made: Made, dynamic: Record<string,
       })
       .join(" ")
   }
+  // One that says how it looks with the keyboard on it takes the place of the focus ring a pressable draws by itself.
+  const focused = Object.keys(entry).filter((property) => byState(entry[property as keyof Entry2])?.focused !== undefined)
+  if (focused.length) (out as Record<string, unknown>).$focused = focused
   // A spring's speed is its easing on the web, which `web()` makes from its spring as it's given.
   if (dynamic.transitionVelocity) {
     const spring = style.transition?.value

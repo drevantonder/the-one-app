@@ -70,6 +70,8 @@ const look = styles({
     transition: tokens.motion.quick,
   },
   flatPressable: { backgroundColor: { hover: tokens.colour.selection, pressed: tokens.colour.quaternaryLabel, focused: tokens.colour.selection } },
+  // The row open beside its list is filled already, so the keyboard on it is the focus ring.
+  openFocused: { boxShadow: { focused: tokens.shadow.focus } },
   after: { paddingStart: 0 },
   settling: { transitionProperty: ["translateX", "width"], transition: tokens.motion.settle },
   words: { flexGrow: 1, flexShrink: 1, minWidth: 0 },
@@ -367,7 +369,7 @@ export function Row(props: RowProps): JSX.Element {
           when={props.onPress}
           fallback={<View style={[look.inside, !touch() && look.flatInside, grouped() && look.groupedInside, sidebar() && look.sidebarInside, !!props.control && look.after, moving()]}>{inside()}</View>}
         >
-          <Pressable role={inListbox ? undefined : "button"} aria-current={props.current ? "true" : undefined} onPress={pressed} style={[look.inside, look.pressable, !touch() && look.flatInside, !touch() && look.flatPressable, grouped() && look.groupedInside, sidebar() && look.sidebarInside, inListbox && look.quiet, !!props.control && look.after, moving()]}>
+          <Pressable role={inListbox ? undefined : "button"} aria-current={props.current ? "true" : undefined} onPress={pressed} style={[look.inside, look.pressable, !touch() && look.flatInside, !touch() && look.flatPressable, grouped() && look.groupedInside, sidebar() && look.sidebarInside, inListbox && look.quiet, !!props.control && look.after, props.current && look.openFocused, moving()]}>
             {inside()}
           </Pressable>
         </Show>

@@ -4,12 +4,12 @@
 // Library does for an app with no screen of its own.
 import { createEffect, createMemo, createSignal, Errored, For, Loading, Match, refresh, Show, Switch } from "solid-js"
 import type { Element } from "solid-js"
-import { Button, call, changed, confirm, Empty, go, Icon, Image, link, List, Menu, open, Pressable, Problem, Row, Screen, ScrollView, Search, Section, Skeleton, Spinner, styles, Text, toast, tokens, View } from "ui"
+import { Button, call, changed, confirm, Empty, go, Icon, Image, link, List, Menu, negative, open, Pressable, Problem, Row, Screen, ScrollView, Search, Section, Skeleton, Spinner, styles, Text, toast, tokens, View } from "ui"
 import { sizes } from "./sizes.ts"
 
 const look = styles({
   /// An app's tile: its icon and its name under it, the size it is on a Home Screen, or as wide as a grid's column.
-  tile: { alignItems: "center", gap: tokens.grid[1.5], width: sizes.tile, flexShrink: 0 },
+  tile: { alignItems: "center", gap: tokens.grid[1.5], width: sizes.tile, flexShrink: 0, borderRadius: tokens.radius.medium },
   fills: { width: "100%" },
   icon: { width: sizes.icon, height: sizes.icon, borderRadius: tokens.radius.large },
   largeIcon: { width: sizes.largeIcon, height: sizes.largeIcon, borderRadius: tokens.radius.large },
@@ -20,10 +20,11 @@ const look = styles({
   shelfHeading: { flexDirection: "row", alignItems: "baseline", justifyContent: "space-between", minHeight: tokens.length.control },
   heading: { fontWeight: tokens.weight.medium },
   more: { font: tokens.type.caption },
-  shelfApps: { flexDirection: "row", gap: tokens.grid[3] },
+  // A row that scrolls sideways leaves room round what's in it for the focus ring, which it would clip.
+  shelfApps: { flexDirection: "row", gap: tokens.grid[3], padding: tokens.grid[1], margin: negative(tokens.grid[1]) },
   shelves: { display: "grid", gridTemplateColumns: { fill: sizes.shelf }, rowGap: tokens.grid[7], columnGap: tokens.grid[10] },
   grid: { display: "grid", gridTemplateColumns: { fill: tokens.grid[20] }, rowGap: tokens.grid[6], columnGap: tokens.grid[3] },
-  chips: { flexDirection: "row", gap: tokens.grid[2] },
+  chips: { flexDirection: "row", gap: tokens.grid[2], padding: tokens.grid[1], margin: negative(tokens.grid[1]) },
   /// A category to choose, a pill: the one chosen is dark.
   chip: { flexShrink: 0, height: tokens.length.control, paddingInline: tokens.grid[4], alignItems: "center", justifyContent: "center", borderRadius: tokens.radius.full, backgroundColor: tokens.colour.quinaryLabel, color: tokens.colour.label },
   chosen: { backgroundColor: tokens.colour.label, color: tokens.colour.background },

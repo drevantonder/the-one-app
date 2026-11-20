@@ -32,7 +32,8 @@
 // each seed a check once failed on (`seeds`). Every check also comes to rest, leaves nothing drawn going, draws every
 // picture, each within a few hundred ms of its page asking for it as the slowest device of its kind decodes it
 // (devices.json's CPU scores, the harness's `--slower`), and any menu, list or dialog open at its end is drawn whole
-// in the window. It says, check by check, which passed, and for
+// in the window. Every scene on a computer (not `touch`) is walked round by Tab too, and what the keyboard comes to
+// must draw otherwise than it does without it. It says, check by check, which passed, and for
 // one that failed, its seed, which step and why; it exits 1 where one failed.
 import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, symlinkSync, watch, writeFileSync } from "node:fs"
 import { basename, dirname, join, relative, resolve } from "node:path"
@@ -57,8 +58,8 @@ const harness = join(root, `target/${flag("--release") ? "release" : "debug"}/ex
 const env = { ...process.env, VK_ICD_FILENAMES: process.env.VK_ICD_FILENAMES ?? "/usr/share/vulkan/icd.d/lvp_icd.json" }
 
 
-/// Every folder with motions, or with `--checks` checks: the gallery, and each app whose scenes have one.
-const everything = () => [here("gallery"), ...readdirSync(join(root, "apps")).map((app) => join(root, "apps", app)).filter((app) => existsSync(join(app, "client/scenes.json")) && readFileSync(join(app, "client/scenes.json"), "utf8").includes(checking ? '"checks"' : '"motions"'))]
+/// Every folder with motions, or with `--checks` every folder with scenes: the gallery, and each app's.
+const everything = () => [here("gallery"), ...readdirSync(join(root, "apps")).map((app) => join(root, "apps", app)).filter((app) => existsSync(join(app, "client/scenes.json")) && (checking || readFileSync(join(app, "client/scenes.json"), "utf8").includes('"motions"')))]
 
 /// How a gesture moves, as the inspector's `replay` takes it: each stretch `{dx, dy, ms}`, and whether it lifts.
 export function moves(gesture) {
@@ -500,6 +501,48 @@ async function check(built, scene, folder) {
   return results
 }
 
+/// How many times a scene's keyboard is moved on by Tab, at most, as `walk` goes round it.
+const STOPS = 40
+
+/// The keyboard walked round a scene by Tab, as a person at a computer moves it: what it comes to must draw otherwise
+/// where it is than it did before it came or after it left, as the OS's focus ring and the web's `:focus-visible` show
+/// where it is. What scrolls into sight as it comes is judged by the picture it isn't moved in. → why it failed, or
+/// nothing.
+async function walk(built, scene, folder) {
+  mkdirSync(folder, { recursive: true })
+  const at = pageFolder(built, scene.page, folder)
+  const taps = scene.taps.flatMap((tap) => [pressed(tap), { op: "clock", step: 1000 }])
+  const look = [{ op: "query" }, { op: "snap" }]
+  // Each picture two of the caret's blinks after the keyboard came, where a field's caret shows.
+  const asked = [{ op: "clock", step: 1000 }, ...taps, ...look, ...Array.from({ length: STOPS }, () => [{ op: "key", key: "Tab" }, { op: "clock", step: 2400 }, ...look]).flat()]
+  const done = await run(at, folder, scene, asked)
+  if (done.failed) return `the harness failed: ${done.said.split("\n").at(-1)}`
+  const answers = done.answers.slice(1 + taps.length)
+  // Each stop: what had the keyboard, where it was drawn, and the picture.
+  const stops = []
+  for (let n = 0; n <= STOPS; n++) {
+    const [query, snap] = [answers[n * 4], answers[n * 4 + 1]]
+    const node = query?.result?.nodes?.find((node) => node.focused)
+    if (!snap?.result?.png) return `step ${n}: ${snap?.error ?? query?.error ?? "no picture"}`
+    stops.push({ node, picture: PNG.sync.read(Buffer.from(snap.result.png, "base64")) })
+    // Round to where it started.
+    if (n > 1 && node && node.node === stops[1].node?.node) break
+  }
+  const same = (one, other, rect) => {
+    const [x0, y0] = [Math.max(0, Math.floor(rect.x) - 4), Math.max(0, Math.floor(rect.y) - 4)]
+    const [x1, y1] = [Math.min(one.width, Math.ceil(rect.x + rect.width) + 4), Math.min(one.height, Math.ceil(rect.y + rect.height) + 4)]
+    for (let y = y0; y < y1; y++) if (one.data.compare(other.data, (y * one.width + x0) * 4, (y * one.width + x1) * 4, (y * one.width + x0) * 4, (y * one.width + x1) * 4) !== 0) return false
+    return true
+  }
+  const unseen = []
+  for (const [n, { node, picture }] of stops.entries()) {
+    if (!n || !node?.rect || !(node.opacity > 0) || !(node.seen > 0)) continue
+    const around = [stops[n - 1], stops[n + 1]].filter((other) => other && other.node?.node !== node.node)
+    if (around.some((other) => same(picture, other.picture, node.rect))) unseen.push(`${node.role ?? node.kind} "${node.name ?? ""}"`)
+  }
+  return unseen.length ? `Tab's keyboard focus draws nothing on ${[...new Set(unseen)].join(", ")}` : undefined
+}
+
 /// Plays every check of `targets`' scenes. → each line it says, and how many failed.
 async function checks(targets) {
   const said = []
@@ -515,11 +558,14 @@ async function checks(targets) {
       failed++
       continue
     }
-    const scenes = (await scenesOf(target, built, join(out, name, ".scenes"))).filter((scene) => !only || scene.name.toLowerCase().includes(only))
+    // Every scene on a computer is walked by Tab too, and those with checks played.
+    const scenes = (await scenesOf(target, built, join(out, name, ".scenes"), true)).filter((scene) => (scene.checks || !scene.touch) && (!only || scene.name.toLowerCase().includes(only)))
     for (const scene of scenes) {
       // A trace a check plays is beside its scenes: the gallery's, or an app's client.
       scene.from = target.endsWith("core/ui/gallery") ? target : join(target, "client")
-      const results = await check(built, scene, join(out, name, scene.name.replace(/[^\w.-]+/g, "-")))
+      const own = join(out, name, scene.name.replace(/[^\w.-]+/g, "-"))
+      const results = scene.checks ? await check(built, scene, own) : []
+      if (!scene.touch) results.push({ name: "Tab shows where the keyboard is", seed: 0, failed: await walk(built, scene, join(own, "tab")) })
       for (const [check, runs] of Object.entries(Object.groupBy(results, (result) => result.name))) {
         const bad = runs.filter((run) => run.failed)
         bad.length ? failed++ : passed++

@@ -134,6 +134,9 @@ export type Styled<P extends keyof Look = keyof Look> = {
   readonly $dynamic?: Dynamic
   /** A style whose `transitionVelocity` is a value: its spring's duration and bounce, for the web's easing. */
   readonly $spring?: readonly [duration: number, bounce: number]
+  /** What it says of how something looks with the keyboard on it (a `focused` state), which takes the place of a
+   * pressable's focus ring where it isn't said again after it. */
+  readonly $focused?: readonly string[]
   readonly properties?: P
 }
 

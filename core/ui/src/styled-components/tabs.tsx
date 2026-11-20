@@ -37,7 +37,7 @@ const look = styles({
   chosen: { color: tokens.colour.label },
   // What marks the chosen tab: the tab itself, until the indicator knows where the tabs are, and then the indicator,
   // which slides to the one chosen.
-  mark: { backgroundColor: tokens.colour.card, boxShadow: tokens.shadow.edge },
+  mark: { backgroundColor: tokens.colour.card, boxShadow: { default: tokens.shadow.edge, focused: tokens.shadow.focus } },
   indicator: (translateX: number, translateY: number, width: number, height: number) => ({
     position: "absolute",
     top: 0,

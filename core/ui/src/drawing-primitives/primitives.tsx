@@ -10,7 +10,7 @@ import type { Ice, Props, TextInputAction } from "./renderer.ts"
 import { fullScreen, mods, named, type Input } from "./input.ts"
 import type { Dragged, Intersected, Laid, Located, Pressed, Wheeled } from "../types/ui.d.ts"
 import { flat, web, type Styles } from "../styles.ts"
-import { literal, options } from "./props.ts"
+import { focusable, literal, options, pressed } from "./props.ts"
 
 /// `<Modal visible={open()}>…</Modal>`: what's drawn over the whole window while it's `visible` (unless it says, it
 /// is), over the page and everything over it before, with everything else inert: nothing else is pressed, focused or
@@ -345,8 +345,6 @@ export interface PressableProps extends ViewProps {
   disabled?: boolean
 }
 
-/** The roles of what's pressed, which the DOM draws as a button, so the keyboard reaches it too. */
-const pressed = new Set(["button", "menuitem", "tab", "checkbox", "radio", "switch", "option", "link", "combobox"])
 /** The roles of what's chosen from a list another holds the keyboard for, which a press takes no focus from it. */
 const chosen = new Set(["option"])
 
@@ -367,7 +365,8 @@ export function View(props: ViewProps) {
 /// pressed. How it looks hovered or pressed is its style's (`backgroundColor: { default: …, pressed: … }`), not a
 /// function of its state, and a touch held is `onContextMenu`, not `onLongPress`. A press is the innermost one's under
 /// it, as React Native's responder, UIKit's hit-testing and Flutter's gesture arena give it: one in another (an app's
-/// icon in its category's square) is pressed alone, as a native host presses it.
+/// icon in its category's square) is pressed alone, as a native host presses it. Where Tab reaches it, it draws the
+/// focus ring as the keyboard comes to it (`tokens.shadow.focus`), unless its style says how it looks `focused`.
 export function Pressable(props: PressableProps) {
   const own = merge(omit(props, "style", "children", "autoFocus", "tabIndex", "onPress", "disabled", "onLayout", "onIntersection", "onDrop", ...moved), droppable(props), {
     get tabindex() {
@@ -391,7 +390,7 @@ export function Pressable(props: PressableProps) {
       {...moves}
       ref={[moves.ref, (element: HTMLElement) => watched(element, props)]}
       onMouseDown={(event: MouseEvent) => props.role && chosen.has(props.role) && event.preventDefault()}
-      {...drawn("ui-view", props.style)}
+      {...drawn("ui-view", focusable(props))}
     >
       {props.children}
     </Dynamic>
@@ -628,7 +627,7 @@ export function Text(props: TextProps) {
   })
   const tag = () => (props.role === "heading" ? `h${props["aria-level"] ?? 2}` : "span")
   return (
-    <Dynamic component={tag()} {...own} role={props.role === "heading" ? undefined : props.role} {...drawn("ui-text", props.style)}>
+    <Dynamic component={tag()} {...own} role={props.role === "heading" ? undefined : props.role} {...drawn("ui-text", focusable(props, true))}>
       {props.children}
     </Dynamic>
   )
