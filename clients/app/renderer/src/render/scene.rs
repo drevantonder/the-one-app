@@ -218,6 +218,7 @@ impl Scene {
     }
 
     pub fn finish(&mut self) {
+        self.occlude();
         self.shadows.sort_by_key(|shadow| shadow.order);
         self.quads.sort_by_key(|quad| quad.order);
         self.underlines.sort_by_key(|underline| underline.order);
@@ -225,6 +226,70 @@ impl Scene {
         self.polychrome_sprites.sort_by_key(|sprite| (sprite.order, sprite.tile.tile_id));
         self.backdrops.sort_by_key(|backdrop| backdrop.order);
         self.rasters.sort_by_key(|raster| raster.order);
+    }
+
+    /// What an opaque quad drawn later covers isn't drawn, as a compositor's occlusion culling leaves it out: a quad
+    /// wholly under one goes, and one mostly under it (a window's background under a card) is drawn only in the bands
+    /// around it. A GPU's fill rate is what a scrolled page spends, and a long list drew its window and its card both,
+    /// whole, every frame. Nothing goes where something blurs what's behind it (a backdrop), which reads what's under.
+    fn occlude(&mut self) {
+        if !self.backdrops.is_empty() {
+            return;
+        }
+        let px = ScaledPixels;
+        // What each opaque quad covers for certain: inside its corners and any border that isn't opaque, cut to its mask.
+        let opaque: Vec<(DrawOrder, Bounds<ScaledPixels>)> = self
+            .quads
+            .iter()
+            .filter(|quad| quad.transformation == TransformationMatrix::unit() && quad.background.tag == 0 && quad.background.solid.a >= 1.0)
+            .map(|quad| {
+                let radii = &quad.corner_radii;
+                let corner = radii.top_left.0.max(radii.top_right.0).max(radii.bottom_left.0).max(radii.bottom_right.0);
+                let widths = &quad.border_widths;
+                let border = if quad.border_color.a >= 1.0 && quad.border_style == BorderStyle::Solid { 0.0 } else { widths.top.0.max(widths.right.0).max(widths.bottom.0).max(widths.left.0) };
+                let inset = corner.max(border);
+                let Bounds { origin, size } = quad.bounds;
+                let inside = Bounds { origin: crate::geometry::Point { x: px(origin.x.0 + inset), y: px(origin.y.0 + inset) }, size: crate::geometry::Size { width: px(size.width.0 - 2.0 * inset), height: px(size.height.0 - 2.0 * inset) } };
+                (quad.order, inside.intersect(&quad.content_mask.bounds))
+            })
+            .filter(|(_, covered)| !covered.is_empty())
+            .collect();
+        if opaque.is_empty() {
+            return;
+        }
+        let area = |bounds: &Bounds<ScaledPixels>| bounds.size.width.0 * bounds.size.height.0;
+        let mut kept = Vec::with_capacity(self.quads.len());
+        for quad in std::mem::take(&mut self.quads) {
+            let mut pieces = vec![quad.content_mask.bounds.intersect(&quad.bounds)];
+            if quad.transformation == TransformationMatrix::unit() {
+                for (_, covered) in opaque.iter().filter(|(order, _)| *order > quad.order) {
+                    pieces = pieces
+                        .into_iter()
+                        .flat_map(|shown| {
+                            let under = shown.intersect(covered);
+                            // Wholly shown, or little of it under: drawn as it is.
+                            if under.is_empty() || area(&under) < area(&shown) / 4.0 {
+                                return vec![shown];
+                            }
+                            let (left, top) = (shown.origin, shown.bottom_right());
+                            let (low, high) = (under.origin, under.bottom_right());
+                            let band = |x0: f32, y0: f32, x1: f32, y1: f32| Bounds::from_corners(crate::geometry::Point { x: px(x0), y: px(y0) }, crate::geometry::Point { x: px(x1), y: px(y1) });
+                            [
+                                band(left.x.0, left.y.0, top.x.0, low.y.0),
+                                band(left.x.0, high.y.0, top.x.0, top.y.0),
+                                band(left.x.0, low.y.0, low.x.0, high.y.0),
+                                band(high.x.0, low.y.0, top.x.0, high.y.0),
+                            ]
+                            .into_iter()
+                            .filter(|band| !band.is_empty())
+                            .collect()
+                        })
+                        .collect();
+                }
+            }
+            kept.extend(pieces.into_iter().map(|shown| Quad { content_mask: ContentMask { bounds: shown }, ..quad.clone() }));
+        }
+        self.quads = kept;
     }
 
     pub(crate) fn batches(&self) -> impl Iterator<Item = PrimitiveBatch<'_>> {
@@ -278,15 +343,24 @@ pub(crate) enum Primitive {
 }
 
 impl Primitive {
-    pub fn bounds(&self) -> &Bounds<ScaledPixels> {
+    /// What it draws over: a shadow's box grown by its blur's reach, three deviations, as its shader draws it, so one
+    /// whose box is out of its mask but whose blur isn't is still drawn, and ordered with what's over its blur.
+    pub fn bounds(&self) -> Bounds<ScaledPixels> {
         match self {
-            Primitive::Shadow(shadow) => &shadow.bounds,
-            Primitive::Quad(quad) => &quad.bounds,
-            Primitive::Underline(underline) => &underline.bounds,
-            Primitive::MonochromeSprite(sprite) => &sprite.bounds,
-            Primitive::PolychromeSprite(sprite) => &sprite.bounds,
-            Primitive::Backdrop(backdrop) => &backdrop.bounds,
-            Primitive::Raster(raster) => &raster.bounds,
+            Primitive::Shadow(shadow) => {
+                let reach = 3.0 * shadow.blur_radius.0;
+                let Bounds { origin, size } = shadow.bounds;
+                Bounds {
+                    origin: crate::geometry::Point { x: ScaledPixels(origin.x.0 - reach), y: ScaledPixels(origin.y.0 - reach) },
+                    size: crate::geometry::Size { width: ScaledPixels(size.width.0 + 2.0 * reach), height: ScaledPixels(size.height.0 + 2.0 * reach) },
+                }
+            }
+            Primitive::Quad(quad) => quad.bounds,
+            Primitive::Underline(underline) => underline.bounds,
+            Primitive::MonochromeSprite(sprite) => sprite.bounds,
+            Primitive::PolychromeSprite(sprite) => sprite.bounds,
+            Primitive::Backdrop(backdrop) => backdrop.bounds,
+            Primitive::Raster(raster) => raster.bounds,
         }
     }
 
