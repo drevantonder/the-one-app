@@ -925,6 +925,7 @@ impl Windows {
 
     /// A turn of the loop: what the display said, timers that are due, then each window that changed drawn.
     fn turned(&mut self) {
+        let turned = web_time::Instant::now();
         if self.context.lost() {
             self.recover();
         }
@@ -1120,7 +1121,10 @@ impl Windows {
             }
             if let Some(asked) = window.summoned.take() {
                 let ms = |time: std::time::Duration| time.as_secs_f64() * 1000.0;
-                eprintln!("the launcher's first frame as it was summoned took {:.1} ms to paint and {:.1} ms to draw", ms(painted - began), ms(painted.elapsed()));
+                // Where its time went: to the turn it's drawn on, on that turn before it (input, timers, other windows
+                // drawn first), painting it and drawing it.
+                let (before, on) = (turned.saturating_duration_since(asked), began - turned);
+                eprintln!("the launcher's first frame as it was summoned: {:.1} ms before its turn, {:.1} ms on it before it was painted, {:.1} ms to paint and {:.1} ms to draw", ms(before), ms(on), ms(painted - began), ms(painted.elapsed()));
                 (window.on_event)(Event::Shown(asked.elapsed()));
             }
         }
