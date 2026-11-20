@@ -45,7 +45,7 @@ mod mac;
 use mac::{Display, Handle, NativeWindow, appearance, clipboard, open_files, reduced_motion};
 /// A computer's host with nothing behind it, for a harness (`fake`'s top).
 #[cfg(feature = "fake")]
-mod fake;
+pub(crate) mod fake;
 #[cfg(feature = "fake")]
 use fake::{Display, Handle, NativeWindow, appearance, button_layout, clipboard, open_files, reduced_motion};
 #[cfg(target_os = "android")]
@@ -2421,17 +2421,9 @@ pub(crate) fn since(at: web_time::Instant) -> std::time::Duration {
 
 /// Whether what draws on `native` would draw at once: the pipelines its surface draws with are compiled
 /// (`Context::compiled`).
-#[cfg(not(feature = "fake"))]
 fn drawable(context: &Context, native: &NativeWindow) -> bool {
     let (format, premultiplied) = crate::render::context::surface_pipelines(native.transparent());
     context.compiled(format, premultiplied)
-}
-
-/// Whether what draws on `native` on the fake platform would draw at once: its offscreen image's pipelines are
-/// compiled.
-#[cfg(feature = "fake")]
-fn drawable(context: &Context, _: &NativeWindow) -> bool {
-    context.compiled(crate::render::renderer::OFFSCREEN_FORMAT, false)
 }
 
 /// What draws on `native`: its surface, which the system shows.

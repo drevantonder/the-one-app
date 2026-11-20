@@ -88,6 +88,11 @@ impl NativeWindow {
         Handle
     }
 
+    /// Whether what isn't drawn on it is see-through: never, as it draws offscreen.
+    pub fn transparent(&self) -> bool {
+        false
+    }
+
     /// It draws offscreen from the start (`super::drawn_on`).
     pub fn has_surface(&self) -> bool {
         true
@@ -221,6 +226,7 @@ impl Display {
     }
 
     pub fn open(&self, id: WindowId, options: &WindowOptions) -> anyhow::Result<NativeWindow> {
+        std::thread::sleep(costs().window);
         let device = |points: f32| DevicePixels((points * self.scale).round() as i32);
         let size = match self.phone.get() {
             Some(screen) if options.panel.is_none() => screen,
@@ -355,6 +361,19 @@ impl Display {
 static TIME: std::sync::Mutex<Option<(web_time::Instant, crate::js::Clock)>> = std::sync::Mutex::new(None);
 
 /// Tells time by `clock` from now on.
+/// What a device a harness stands for takes to make what the fake platform makes at once, as a tier's `measured`
+/// costs say in core/ui/devices.json: its system's window and the renderer for it (`ONE_WINDOW_MS`), and the
+/// pipelines a kind of window draws with (`ONE_PIPELINES_MS`). None unless it's told.
+pub(crate) struct Costs {
+    pub window: std::time::Duration,
+    pub pipelines: std::time::Duration,
+}
+
+pub(crate) fn costs() -> Costs {
+    let ms = |name: &str| std::time::Duration::from_millis(std::env::var(name).ok().and_then(|ms| ms.parse().ok()).unwrap_or(0));
+    Costs { window: ms("ONE_WINDOW_MS"), pipelines: ms("ONE_PIPELINES_MS") }
+}
+
 pub fn keep_time(clock: crate::js::Clock) {
     *TIME.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = Some((web_time::Instant::now() - std::time::Duration::from_secs_f64(clock.now().max(0.0) / 1000.0), clock));
 }

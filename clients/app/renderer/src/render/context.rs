@@ -28,8 +28,11 @@ pub(crate) type Compiled = Arc<Mutex<Vec<(wgpu::TextureFormat, bool, Arc<OnceLoc
 
 /// The pipelines a window's surface draws with on this platform, as `Renderer::new` picks them where its surface offers
 /// them: BGRA (Android's RGBA), premultiplied where it's see-through on Windows and Linux (Metal composites no surface
-/// premultiplied, and a phone's windows are never see-through).
+/// premultiplied, and a phone's windows are never see-through). The fake platform's windows draw offscreen.
 pub(crate) fn surface_pipelines(transparent: bool) -> (wgpu::TextureFormat, bool) {
+    if cfg!(feature = "fake") {
+        return (super::renderer::OFFSCREEN_FORMAT, false);
+    }
     let format = if cfg!(target_os = "android") { wgpu::TextureFormat::Rgba8Unorm } else { wgpu::TextureFormat::Bgra8Unorm };
     (format, transparent && cfg!(any(target_os = "windows", target_os = "linux")))
 }

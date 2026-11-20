@@ -90,6 +90,11 @@
         "scenes": 57
       },
       "paint_ms": 0.11,
+      "open": {
+        "about": "An app window's opening, from the app's log after an update restart (20 Nov, shaders as DXIL): window_ms its system's window and renderer once its pipelines are compiled (the median of 24 to 135 ms), pipelines_ms the pipelines a kind of window draws with, which the first window after a start waited for (401 to 563 ms)",
+        "window_ms": 40,
+        "pipelines_ms": 550
+      },
       "on": "2026-11-20"
     }
   }

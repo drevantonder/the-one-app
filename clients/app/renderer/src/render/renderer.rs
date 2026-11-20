@@ -238,6 +238,9 @@ fn side_by_side<const N: usize>(compile: [Compile; N]) -> [wgpu::RenderPipeline;
 
 impl Pipelines {
     fn new(device: &wgpu::Device, queue: &wgpu::Queue, format: wgpu::TextureFormat, premultiplied: bool) -> Self {
+        // As long as a device a harness stands for takes to compile them (`fake::costs`).
+        #[cfg(feature = "fake")]
+        std::thread::sleep(crate::platform::fake::costs().pipelines);
         let layouts = Layouts::new(device, queue, format, premultiplied);
         let (l, blend) = (&layouts, Some(layouts.blend));
         let [quads, shadows, underlines, mono_sprites, poly_sprites, rasters] = side_by_side([
