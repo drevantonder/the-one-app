@@ -23,9 +23,11 @@ defmodule ChromeProfiles do
   says, and every app watching is told as it does: `starting` (its container made, which may mean building or
   pulling its image), `opening` (the profile going in), `ready`, then `saving` or `discarding`, and the note is gone
   once it's closed. `failed`, with `why`, is one that couldn't start. Each call is one step from the state it finds,
-  so a step that isn't one (Save while it's starting, Update while it's saving) is refused, and one a server left
+  so a step that isn't one (Save while it's starting, Update while it's saving) is refused, and a close a server left
   half done is carried on by the next call or `save_updates`. A save that fails leaves the browser's container as it
-  was, with why, so nothing in it is lost, and it's saved once its person tries again. A browser an agent `open`s
+  was, with why, so nothing in it is lost, and it's saved once its person tries again. So does one `save_updates`
+  finds with its browser gone, or that hasn't moved in @lost_minutes, as one is whose server stopped midway: it's
+  ended as one that couldn't be saved, saying which, so its person can Try Again or Discard. A browser an agent `open`s
   is `ready` from the start and has no end.
   """
   @behaviour OneCore.App
@@ -33,9 +35,10 @@ defmodule ChromeProfiles do
 
   @item "Chrome profile: "
   @update_minutes 15
-  # A save or a close says each stage it reaches, so one at a stage longer than this was lost with the server running
-  # it, which says nothing as it goes: `save_updates` carries it on, as it tries again one that couldn't be saved.
-  @lost_minutes 30
+  # A save or a close says each stage it reaches, and a profile of hundreds of MB saves in a minute or so, so one at a
+  # stage longer than this was lost with the server running it, which says nothing as it goes: `save_updates` ends a
+  # save like that as one that couldn't be, carries on a close, and tries again one that couldn't be saved.
+  @lost_minutes 10
   @profile %{type: "string", description: "the profile, by its name, like Personal or Work"}
   @browser %{type: "string", description: "a browser you opened on it, by its session; default the one your person is updating it in"}
   # What a profile shows of itself, read from it in its container once Chrome has quit, as it's saved, into @shown as
@@ -281,12 +284,16 @@ defmodule ChromeProfiles do
       %{
         name: "save_updates",
         task_support: :optional,
-        description: "Save and close the updates past their #{@update_minutes} minutes. It's run every minute.",
+        description:
+          "Save and close the updates past their #{@update_minutes} minutes, and end as couldn't be saved, saying why, a save whose browser is gone or that hasn't moved in #{@lost_minutes} minutes, so its person can try again or discard it. It's run every minute.",
         inputs: %{type: "object", properties: %{}},
         outputs: %{
           type: "object",
-          properties: %{saved: %{type: "array", items: %{type: "string"}, description: "The browsers saved and closed"}},
-          required: ["saved"]
+          properties: %{
+            saved: %{type: "array", items: %{type: "string"}, description: "The browsers saved and closed"},
+            stopped: %{type: "array", items: %{type: "string"}, description: "The browsers whose save was ended as couldn't be saved"}
+          },
+          required: ["saved", "stopped"]
         }
       }
     ]
@@ -388,20 +395,36 @@ defmodule ChromeProfiles do
   end
 
   # One past its end is saved, or closed if it never started. One that couldn't be saved waits for its person to try
-  # again, and is tried again only once it hasn't moved in @lost_minutes, as one a server lost midway is.
+  # again, and is tried again only once it hasn't moved in @lost_minutes, as a close a server lost midway is. A save
+  # whose browser is gone, or that hasn't moved in @lost_minutes, is ended as one that couldn't be, saying why.
   def call("save_updates", _inputs, call) do
     now = System.system_time(:millisecond)
     lost = now - @lost_minutes * 60_000
+    notes = notes(call)
+    saving = for {session, %{"state" => "saving"} = note} <- notes, do: {session, note}
+    open = if saving == [], do: [], else: for(%{"session" => session} <- Call.tool(call, "chrome", "list", %{})["browsers"], do: session)
+
+    stopped =
+      for {session, note} <- saving, (note["at"] || 0) < lost or session not in open do
+        why =
+          if session in open,
+            do: "Its save stopped at #{note["stage"] || "its start"} and said nothing for #{@lost_minutes} minutes, as one does when the server saving it stops.",
+            else: "Its browser closed before it was saved."
+
+        step(call, session, "fail", %{"why" => why})
+        session
+      end
 
     saved =
-      for {session, %{"update" => until, "profile" => name, "state" => state} = note} <- notes(call),
+      for {session, %{"update" => until, "profile" => name, "state" => state} = note} <- notes,
+          state != "saving",
           until && until < now,
           state in ~w(starting opening failed) or (state == "ready" and note["why"] == nil) or (note["at"] || 0) < lost do
         close(call, name, session, "expire")
         session
       end
 
-    %{saved: saved}
+    %{saved: saved, stopped: stopped}
   end
 
   # A profile is an item of the Vault's, in a section of its own, drawn by `client/profile.tsx`.
