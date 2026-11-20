@@ -286,8 +286,8 @@ pub struct Screen {
     editing: Editing,
     /// Its window has the keyboard, so the caret shows.
     pub active: bool,
-    /// What's done once its window isn't in use, as it loses the keyboard: a page updated under it loads again then,
-    /// as a desktop app or a phone's updates, never under its person.
+    /// What's done once its page isn't in use (`in_use`): a page updated under it loads again then, never under a
+    /// press, a drag or what its person is typing.
     pub when_unused: Vec<Box<dyn FnOnce() + Send>>,
     /// What copy and paste use: the computer's, which the window gives it, or one of its own.
     pub clipboard: Box<dyn Clipboard>,
@@ -502,6 +502,11 @@ impl Screen {
 
     pub fn tree(&self) -> &Tree {
         &self.tree
+    }
+
+    /// The room its page has, in logical pixels (`room`).
+    pub fn room(&self) -> Size<f32> {
+        self.room
     }
 
     /// Calls `wake` as its app's JS thread, or a frame's, posts what this hasn't applied (`pump`).
@@ -1987,12 +1992,58 @@ impl Screen {
         if let Some(id) = self.focus.focused.filter(|id| !active && self.editing.fields.contains_key(id)) {
             self.edit(id, Field::finish_composition);
         }
-        // What's typed and not sent stays: what waits for it to be unused waits for the next time.
-        if !active && !self.typed() {
-            for unused in self.when_unused.drain(..) {
+        self.unused();
+    }
+
+    /// Whether something is under way on its page that a new version of it would lose: a press held or dragged, text
+    /// being selected or composed, or what its person typed that its app hasn't taken (`typed`).
+    pub fn in_use(&self) -> bool {
+        self.captured.is_some()
+            || self.drag.is_some()
+            || self.editing.selecting.is_some()
+            || self.editing.fields.values().any(Field::composing)
+            || self.typed()
+    }
+
+    /// Does what waits for its page not to be in use (`when_unused`), if it isn't: as input ends, and as its app takes
+    /// what was typed.
+    pub fn unused(&mut self) {
+        if !self.when_unused.is_empty() && !self.in_use() {
+            for unused in std::mem::take(&mut self.when_unused) {
                 unused();
             }
         }
+    }
+
+    /// Shows `page`, a new version of its app's page made for the same window, in its page's place, as a browser's tab
+    /// loads again: what's the window's stays (its room and insets, its title, theme and buttons, what it says over its
+    /// page, the device and its clipboard, and what wakes it), and what was the page's goes with it.
+    pub fn reload(&mut self, mut page: Screen) {
+        page.room = self.room;
+        page.insets = self.insets;
+        page.theme = self.theme;
+        page.appearance = self.appearance;
+        page.reduced_motion = self.reduced_motion;
+        page.pressure = self.pressure;
+        page.text_size = self.text_size;
+        page.title = self.title.take();
+        page.window_buttons = std::mem::take(&mut self.window_buttons);
+        page.full_screen = self.full_screen;
+        page.panel = self.panel.take();
+        page.notice = self.notice.take();
+        page.visible = self.visible;
+        page.active = self.active;
+        page.touch = self.touch;
+        page.rail = self.rail;
+        page.hz = self.hz;
+        page.shortcut = self.shortcut.take();
+        page.make_frame = page.make_frame.or_else(|| self.make_frame.take());
+        page.clipboard = std::mem::replace(&mut self.clipboard, Box::new(editing::Memory::default()));
+        page.device = std::mem::replace(&mut self.device, Box::new(()));
+        if let Some(wake) = self.wake.take() {
+            page.on_post(wake);
+        }
+        *self = page;
     }
 
     /// Whether an input holds something its person typed that its app hasn't taken (`Field::typed`).

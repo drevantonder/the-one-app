@@ -368,6 +368,8 @@ struct Window {
     dirty: bool,
     moving: bool,
     drawn: bool,
+    /// Its page is loading again in its place (`reload`), until it's drawn.
+    reloading: bool,
     /// How many frames running it had nothing to draw on (`Window::missed`).
     missed: u32,
     /// What its text input plugin was last told.
@@ -527,6 +529,7 @@ impl Windows {
                 dirty: true,
                 moving: false,
                 drawn: false,
+                reloading: false,
                 missed: 0,
                 text_input: Default::default(),
                 on_event: Box::new(on_event),
@@ -554,6 +557,7 @@ impl Windows {
             if screen.pump() {
                 window.dirty = true;
             }
+            screen.unused();
             window.timing.applied(started.elapsed());
         }
     }
@@ -570,6 +574,18 @@ impl Windows {
     /// a panel while it's showing.
     pub fn typed(&self) -> bool {
         self.windows.values().any(|window| (!window.panel || window.visible) && window.screen.as_ref().is_ok_and(Screen::typed))
+    }
+
+    /// Window `id` shows `page`, a new version of its page, in that one's place (`Screen::reload`), as a browser's tab
+    /// loads again: its frame stays on screen until the new page has heard back from what it first asked, or has waited
+    /// long enough, as a new window shows (`open`), and it says it's drawn again then (`Drawn`). → whether it's open.
+    pub fn reload(&mut self, id: WindowId, page: Screen) -> bool {
+        let Some(window) = self.windows.get_mut(&id) else { return false };
+        let Ok(screen) = &mut window.screen else { return false };
+        screen.reload(page);
+        window.opened = web_time::Instant::now();
+        (window.drawn, window.reloading, window.dirty) = (false, true, true);
+        true
     }
 
     /// Does `f` to window `id`'s screen, if it's open, and draws what it changed.
@@ -888,7 +904,7 @@ impl Windows {
     /// enough.
     fn due(&self) -> Option<std::time::Duration> {
         let screens = self.windows.values().filter_map(|window| window.screen.as_ref().ok()?.due());
-        let showing = self.windows.values().filter(|window| !window.shown || window.picture.is_some()).map(|window| SHOWN_WITHIN.saturating_sub(window.opened.elapsed()));
+        let showing = self.windows.values().filter(|window| !window.shown || window.picture.is_some() || window.reloading).map(|window| SHOWN_WITHIN.saturating_sub(window.opened.elapsed()));
         // Where the display says nothing of its frames, or hasn't yet since they were asked for, the next is a 60 Hz
         // display's.
         let frame = (self.framing() && !self.ticking()).then(|| FRAME.saturating_sub(self.framed.elapsed()));
@@ -1053,6 +1069,11 @@ impl Windows {
                 window.shown = true;
                 self.display.show(&window.parts[0].native);
             }
+            // Its page loading again in its place (`reload`) is drawn as a new window shows, the frame before staying
+            // on screen until then.
+            if window.reloading && starting {
+                continue;
+            }
             // A panel put away is painted as its page changes, never shown, so its text is shaped and its glyphs and
             // pictures are in the atlas, and drawn once, so its surfaces have had a frame, by the time it's summoned,
             // and the frame it shows with is as quick as any after (26 to 52 ms on Linux's first summon after the app started, where
@@ -1157,6 +1178,7 @@ impl Windows {
             }
             if !window.drawn {
                 window.drawn = true;
+                window.reloading = false;
                 (window.on_event)(Event::Drawn);
             }
             if let Some(asked) = window.summoned.take() {
@@ -1367,6 +1389,7 @@ impl Windows {
             Input::Picked(node, value) => screen.picked(node, &value),
             Input::Close => {}
         }
+        screen.unused();
         // What it changed reaches the text input plugin at once, before its next key, not with the frame.
         let calls = screen.text_input(&mut window.text_input);
         if !calls.is_empty() {

@@ -640,7 +640,7 @@ async fn window(started: Instant, entrypoint: &str, subject: Option<&str>, link:
     let name = listed.or_else(|| start["name"].as_str().map(str::to_owned)).unwrap_or_else(|| entrypoint.split('/').next().unwrap_or_default().to_owned());
 
     let fragment = link.split_once('#').map(|(_, fragment)| fragment.to_owned());
-    let state = State { chosen: chosen.clone(), trusted, entrypoint: entrypoint.to_owned(), subject: subject.map(str::to_owned), view, next: 0, launcher, framed: false, fragment, sheet: sheet.clone(), unopened, signing_in, behind, window: window.clone() };
+    let state = State { chosen: chosen.clone(), trusted, entrypoint: entrypoint.to_owned(), subject: subject.map(str::to_owned), view, page: 0, next: 0, launcher, framed: false, fragment, sheet: sheet.clone(), unopened, signing_in, behind, window: window.clone() };
     let (entrypoint, subject) = (entrypoint.to_owned(), subject.map(str::to_owned));
     let link = link.to_owned();
     // Whether it opened, as the windows' thread says: a job that's dropped, as a phone's is where its windows
@@ -675,13 +675,17 @@ async fn window(started: Instant, entrypoint: &str, subject: Option<&str>, link:
         let on_event = {
             let (to, app, entrypoint, sheet) = (to.clone(), app.clone(), entrypoint.clone(), sheet.clone());
             let (subject, link, shown) = (subject.clone(), link.clone(), window.clone());
+            let mut opened = false;
             move |event: Event| match event {
-                // How long it took to open, from being asked to, as a page tells the app's window it has drawn.
+                // How long it took to open, from being asked to, as a page tells the app's window it has drawn: once, as
+                // a page loaded again in it (`reloaded`) says its own (`Opening`).
                 Event::Drawn => {
                     let ms = started.elapsed().as_millis() as u64;
                     Opening::drawn(&format!("{}|{entrypoint}", subject.as_deref().unwrap_or_default()), &app);
                     crate::deployed(&app);
-                    let _ = to.send(json!({"id": "opened", "command": "opened", "args": {"view": app, "ms": ms}}));
+                    if !std::mem::replace(&mut opened, true) {
+                        let _ = to.send(json!({"id": "opened", "command": "opened", "args": {"view": app, "ms": ms}}));
+                    }
                     // A computer's launcher is drawn put away, and is on screen once it's summoned (`Shown`).
                     if !(launcher && cfg!(desktop)) {
                         let _ = to.send(json!({"id": "visible", "command": "visible", "args": {"onScreen": true}}));
@@ -782,25 +786,7 @@ async fn window(started: Instant, entrypoint: &str, subject: Option<&str>, link:
                 // first frame (pointer: coarse), as the page is told (`deviceCapabilities`).
                 screen.touch = cfg!(mobile);
                 screen.page = tokens_page;
-                // What its frames show, each another app's page in a sandbox of its own (`frame`): only a trusted
-                // app's page shows one, as on the DOM (`one/frame` in page/client.js).
-                let frames = window.clone();
-                screen.make_frame = trusted.then(|| -> renderer::MakeFrame { Box::new(move |node, src, subject| {
-                    let (frames, src, subject) = (frames.clone(), src.to_owned(), subject.map(str::to_owned));
-                    crate::spawn(async move {
-                        if let Err(error) = frame(frames.clone(), node, &src, subject.as_deref()).await {
-                            eprintln!("{src} isn't drawn in its frame: {error:#}");
-                            // The page it's in can't be drawn here without it: it opens in a web view instead.
-                            if let Ok(native) = Native::get() {
-                                native.run(move |windows| {
-                                    if let Some(id) = frames.get() {
-                                        windows.with(*id, |screen| screen.mismatched = Some(format!("its frame's page, {src}, isn't drawn natively: {error:#}")));
-                                    }
-                                })
-                            }
-                        }
-                    });
-                }) });
+                screen.make_frame = trusted.then(|| frames(window.clone()));
                 if launcher && cfg!(desktop) {
                     // Its glass is the system's, under its page, where there's one; Linux has none, so it's a
                     // popover's colour (DESIGN.md, Launcher).
@@ -895,6 +881,8 @@ struct Started {
     to: UnboundedSender<Value>,
     asked: Arc<Mutex<HashMap<String, Asked>>>,
     page: Url,
+    /// Which page it is, of every one started on this device (`STARTED`).
+    number: u64,
 }
 
 /// Starts `entrypoint`'s page, its `module`, at `link`, for `subject`, drawn at `place`: its channel to its app's
@@ -903,7 +891,17 @@ fn start(entrypoint: &str, subject: Option<&str>, link: &str, launcher: bool, pl
     let native = Native::get()?;
     let asked: Arc<Mutex<HashMap<String, Asked>>> = Arc::default();
     let to = channel(entrypoint, subject, link, launcher, asked.clone(), native, place)?;
-    let kept = crate::app().shell.home()?.join("native");
+    Ok(started(entrypoint, subject, to, asked, module, page))
+}
+
+/// Starts a page, its `module`, on a thread of its own, over its window's channel `to`, its files each asked for over
+/// that as the sandbox imports it.
+fn started(entrypoint: &str, subject: Option<&str>, to: UnboundedSender<Value>, asked: Arc<Mutex<HashMap<String, Asked>>>, module: &Url, page: Url) -> Started {
+    let number = STARTED.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let Ok(home) = crate::app().shell.home() else {
+        return Started { js: Err(anyhow::anyhow!("the client has no home folder")), to, asked, page, number };
+    };
+    let kept = home.join("native");
     // Pages' compiled JS is kept for the QuickJS that compiled it (`renderer::js::QUICKJS`), so a newer build on the
     // same QuickJS starts its pages from it, and an update's first start doesn't compile each again (V8's code cache is
     // kept so): what another QuickJS kept goes, once, as this one first starts a page, behind it, as it may be a folder
@@ -923,7 +921,7 @@ fn start(entrypoint: &str, subject: Option<&str>, link: &str, launcher: bool, pl
     let (files_to, files_asked, files_view) = (to.clone(), asked.clone(), format!("{}|{entrypoint}", subject.unwrap_or_default()));
     let next = std::sync::atomic::AtomicU64::new(0);
     let files: Files = Box::new(move |url: &Url| {
-        let id = format!("f{}", next.fetch_add(1, std::sync::atomic::Ordering::Relaxed));
+        let id = format!("f{number}.{}", next.fetch_add(1, std::sync::atomic::Ordering::Relaxed));
         let (answer_to, answer) = mpsc::channel();
         files_asked.lock().expect("nothing panics holding it").insert(id.clone(), Asked::File(answer_to));
         Opening::asked(&files_view, &id, "file".to_owned());
@@ -932,14 +930,15 @@ fn start(entrypoint: &str, subject: Option<&str>, link: &str, launcher: bool, pl
         Ok(String::from_utf8(file)?)
     });
     let js = Thread::start(module, files, Some(cache), Clock::real(), cfg!(mobile));
-    Ok(Started { js, to, asked, page })
+    Started { js, to, asked, page, number }
 }
 
 impl Started {
     /// Its screen, on the native thread: what its page asks answered as `state` says, and a picture it names by an
     /// address fetched as one of its app's files, as a web view's page loads it.
-    fn screen(self, state: State, room: Size<f32>, insets: renderer::geometry::Edges<f32>) -> anyhow::Result<Screen> {
-        let Started { js, to, asked, page } = self;
+    fn screen(self, mut state: State, room: Size<f32>, insets: renderer::geometry::Edges<f32>) -> anyhow::Result<Screen> {
+        let Started { js, to, asked, page, number } = self;
+        state.page = number;
         let state = Arc::new(Mutex::new(state));
         let (respond_to, respond_asked) = (to.clone(), asked.clone());
         let asked_by_app: renderer::Asked = Box::new(move |message, appearance| respond(message, appearance, &state, &respond_to, &respond_asked));
@@ -947,12 +946,78 @@ impl Started {
         let next_picture = std::cell::Cell::new(0u64);
         screen.fetch = Some(Box::new(move |src: &str| {
             let Ok(address) = page.join(src) else { return };
-            let id = format!("i{}", next_picture.replace(next_picture.get() + 1));
+            let id = format!("i{number}.{}", next_picture.replace(next_picture.get() + 1));
             asked.lock().expect("nothing panics holding it").insert(id.clone(), Asked::Picture(src.to_owned()));
             let _ = to.send(json!({"id": id, "file": address.as_str()}));
         }));
         Ok(screen)
     }
+}
+
+/// What makes the pages a window's frames show, each another app's page in a sandbox of its own (`frame`): only a
+/// trusted app's page shows one, as on the DOM (`one/frame` in page/client.js).
+fn frames(window: Arc<OnceLock<WindowId>>) -> renderer::MakeFrame {
+    Box::new(move |node, src, subject| {
+        let (frames, src, subject) = (window.clone(), src.to_owned(), subject.map(str::to_owned));
+        crate::spawn(async move {
+            if let Err(error) = frame(frames.clone(), node, &src, subject.as_deref()).await {
+                eprintln!("{src} isn't drawn in its frame: {error:#}");
+                // The page it's in can't be drawn here without it: it opens in a web view instead.
+                if let Ok(native) = Native::get() {
+                    native.run(move |windows| {
+                        if let Some(id) = frames.get() {
+                            windows.with(*id, |screen| screen.mismatched = Some(format!("its frame's page, {src}, isn't drawn natively: {error:#}")));
+                        }
+                    })
+                }
+            }
+        });
+    })
+}
+
+/// An app's window loads its page again in place, on its app's new version, as a browser's tab reloads (`stale`): the
+/// new page starts over the window's channel, `to`, beside the one it shows, and takes its place in the same window
+/// (`Windows::reload`), whose frame stays on screen until the new page has started. What the page before asked that's
+/// still unanswered is forgotten, so nothing meant for it reaches the new one. → whether its window was open.
+async fn reloaded(window: Arc<OnceLock<WindowId>>, entrypoint: String, subject: Option<String>, link: String, to: UnboundedSender<Value>, asked: Arc<Mutex<HashMap<String, Asked>>>) -> anyhow::Result<bool> {
+    let started_at = Instant::now();
+    let Some(Page { page, module, trusted, tables, .. }) = probe(&entrypoint, subject.as_deref(), false).await? else {
+        anyhow::bail!("its new version is no page this host draws")
+    };
+    let view = format!("{}|{entrypoint}", subject.as_deref().unwrap_or_default());
+    let opening = Opening { started: started_at, steps: Vec::new(), asking: HashMap::new(), files: (0, 0), drawn: None, settled: false, app: String::new() };
+    OPENING.lock().expect("nothing panics holding it").insert(view.clone(), opening);
+    Opening::step(&view, "listed");
+    let tokens_page = load(&tables)?;
+    let begun = started(&entrypoint, subject.as_deref(), to.clone(), asked.clone(), &module, page);
+    let number = begun.number;
+    let (start_to, start) = tokio::sync::oneshot::channel();
+    asked.lock().expect("nothing panics holding it").insert("start".into(), Asked::Start(start_to));
+    let _ = to.send(json!({"id": "start", "command": "start", "args": {"entrypoint": entrypoint}}));
+    let start = start.await?;
+    Opening::step(&view, "started");
+    let chosen = start["theme"].as_str().map(str::to_owned);
+    let fragment = link.split_once('#').map(|(_, fragment)| fragment.to_owned());
+    let state = State { chosen: chosen.clone(), trusted, entrypoint: entrypoint.clone(), subject: subject.clone(), view, page: 0, next: 0, launcher: false, framed: false, fragment, sheet: None, unopened: None, signing_in: false, behind: false, window: window.clone() };
+    let (reloaded_to, reloaded) = tokio::sync::oneshot::channel::<anyhow::Result<bool>>();
+    Native::get()?.run(move |windows| {
+        let Some(id) = window.get().copied() else { return drop(reloaded_to.send(Ok(false))) };
+        let Some((room, insets)) = windows.with(id, |screen| (screen.room(), screen.insets)) else { return drop(reloaded_to.send(Ok(false))) };
+        let screen = begun.screen(state, room, insets).map(|mut screen| {
+            screen.theme = theme(chosen.as_deref());
+            screen.page = tokens_page;
+            screen.make_frame = trusted.then(|| frames(window.clone()));
+            screen
+        });
+        let outcome = screen.map(|screen| {
+            // What the page before asked is no one's now: its answers go nowhere.
+            let ours = |key: &str| key == "start" || key.get(1..).and_then(|rest| rest.split('.').next()) == Some(number.to_string().as_str());
+            asked.lock().expect("nothing panics holding it").retain(|key, _| ours(key));
+            windows.reload(id, screen)
+        });
+        let _ = reloaded_to.send(outcome);
+    });
+    reloaded.await?
 }
 
 /// Starts the page that frame `node` of `window`'s page shows, `src` (`<app>/<page>[#<fragment>]`), for `subject`, and
@@ -967,7 +1032,7 @@ async fn frame(window: Arc<OnceLock<WindowId>>, node: renderer::tree::Id, src: &
     let started = start(entrypoint, subject, src, false, Place::Frame(window.clone(), node), &module, page)?;
     let view = format!("{}|{entrypoint}", subject.unwrap_or_default());
     let fragment = src.split_once('#').map(|(_, fragment)| fragment.to_owned());
-    let state = State { chosen: None, trusted, entrypoint: entrypoint.to_owned(), subject: subject.map(str::to_owned), view, next: 0, launcher: false, framed: true, fragment, sheet: None, unopened: None, signing_in: false, behind: false, window: window.clone() };
+    let state = State { chosen: None, trusted, entrypoint: entrypoint.to_owned(), subject: subject.map(str::to_owned), view, page: 0, next: 0, launcher: false, framed: true, fragment, sheet: None, unopened: None, signing_in: false, behind: false, window: window.clone() };
     let src = src.to_owned();
     Native::get()?.run(move |windows| {
         let Some(id) = window.get() else { return };
@@ -1098,8 +1163,14 @@ struct State {
     /// The window it's in, once it's open.
     window: Arc<OnceLock<WindowId>>,
     view: String,
+    /// Its page's number (`Started::page`), which what it asks is named by with `next`, so what a page loaded again in
+    /// its place (`reloaded`) is answered is never the one before's.
+    page: u64,
     next: u64,
 }
+
+/// How many pages have started on this device, which numbers each, its window's requests named by it (`State::page`).
+static STARTED: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 
 fn theme(chosen: Option<&str>) -> Option<Appearance> {
     match chosen {
@@ -1254,7 +1325,7 @@ fn respond(
             } else {
                 // The rest change the device, which the client does (`change` in hosts.rs), answered as it's heard.
                 state.next += 1;
-                let at = format!("m{}", state.next);
+                let at = format!("m{}.{}", state.page, state.next);
                 asked.lock().expect("nothing panics holding it").insert(at.clone(), Asked::Message(id));
                 let _ = to.send(json!({"id": at, "command": "change", "args": params}));
                 return None;
@@ -1269,7 +1340,7 @@ fn respond(
             let said = params["subject"].as_str().filter(|_| state.trusted).map(str::to_owned);
             let subject = said.or_else(|| state.subject.clone());
             state.next += 1;
-            let at = format!("m{}", state.next);
+            let at = format!("m{}.{}", state.page, state.next);
             asked.lock().expect("nothing panics holding it").insert(at.clone(), Asked::Message(id));
             let _ = to.send(json!({"id": at, "command": "recovery", "args": {"typed": params["typed"] == true, "subject": subject, "owner": state.window.get()}}));
             return None;
@@ -1287,7 +1358,7 @@ fn respond(
                         _ => return Some(json!({"jsonrpc": "2.0", "id": id, "error": {"code": -32601, "message": format!("This window doesn't ask {method}")}})),
                     };
                     state.next += 1;
-                    let at = format!("m{}", state.next);
+                    let at = format!("m{}.{}", state.page, state.next);
                     asked.lock().expect("nothing panics holding it").insert(at.clone(), Asked::Message(id));
                     let _ = to.send(json!({"id": at, "command": command, "args": args}));
                     return None;
@@ -1338,7 +1409,7 @@ fn respond(
                 _ => ("open_url", json!({"url": signing_in().map(|signing_in| signing_in["link"].clone())})),
             };
             state.next += 1;
-            let at = format!("m{}", state.next);
+            let at = format!("m{}.{}", state.page, state.next);
             asked.lock().expect("nothing panics holding it").insert(at.clone(), Asked::Message(id));
             let _ = to.send(json!({"id": at, "command": command, "args": args}));
             return None;
@@ -1348,7 +1419,7 @@ fn respond(
         "one/update" | "one/update/retry" if state.behind => {
             let command = if method == "one/update" { "update" } else { "retry" };
             state.next += 1;
-            let at = format!("m{}", state.next);
+            let at = format!("m{}.{}", state.page, state.next);
             asked.lock().expect("nothing panics holding it").insert(at.clone(), Asked::Message(id));
             let _ = to.send(json!({"id": at, "command": command, "args": {}}));
             return None;
@@ -1363,7 +1434,7 @@ fn respond(
     // A file the page chose goes where the network keeps it, for a tool of this window's app (`upload` in hosts.rs).
     if answered.is_none() && method == "one/upload" {
         state.next += 1;
-        let at = format!("m{}", state.next);
+        let at = format!("m{}.{}", state.page, state.next);
         let app = state.entrypoint.split('/').next().unwrap_or_default().to_owned();
         asked.lock().expect("nothing panics holding it").insert(at.clone(), Asked::Message(id));
         let _ = to.send(json!({"id": at, "command": "upload", "args": {"app": app, "body": params["body"]}}));
@@ -1375,7 +1446,7 @@ fn respond(
         None => {
             // What the client answers, as from the app, for whoever this window is for.
             state.next += 1;
-            let at = format!("m{}", state.next);
+            let at = format!("m{}.{}", state.page, state.next);
             let app = state.entrypoint.split('/').next().unwrap_or_default().to_owned();
             let mut params = params.clone();
             let mut meta = if state.trusted { params["_meta"].as_object().cloned().unwrap_or_default() } else { Default::default() };
@@ -1472,12 +1543,14 @@ fn channel(
         let _ = write.shutdown().await;
     });
     let to_window = to.clone();
+    let (to_page, asked_page) = (to.clone(), asked.clone());
     let (entrypoint, subject, link) = (entrypoint.to_owned(), subject.map(str::to_owned), link.to_owned());
     // Its app's host, as a server says which were loaded against what's gone (`stale`): `<app>[.<subject, last part first>]`.
     let app_host = origin(&entrypoint, subject.as_deref()).trim_start_matches("oneapp://").trim_end_matches(".localhost/").to_owned();
     crate::spawn(async move {
         let mut lines = BufReader::new(read).lines();
-        // Reload, in its notice that its page was updated: the window opens again, on the page's new version.
+        // Reload, in its notice that its page was updated: an app's window loads its page's new version in place
+        // (`reloaded`), and one whose new version this host can't draw opens again, as a new window would, saying why.
         let reload = {
             let (native, window) = (native.clone(), window.clone());
             let (entrypoint, subject, link) = (entrypoint.clone(), subject.clone(), link.clone());
@@ -1496,15 +1569,23 @@ fn channel(
                     });
                 }
                 let (entrypoint, subject, link) = (entrypoint.clone(), subject.clone(), link.clone());
-                let window = window.clone();
-                native.run(move |windows| {
-                    if let Some(id) = window.get() {
-                        windows.close(*id);
+                let (window, native, to, asked) = (window.clone(), native.clone(), to_page.clone(), asked_page.clone());
+                crate::spawn(async move {
+                    match reloaded(window.clone(), entrypoint.clone(), subject.clone(), link.clone(), to, asked).await {
+                        Ok(_) => {}
+                        Err(error) => {
+                            eprintln!("{entrypoint} didn't load again in its window, which opens again: {error:#}");
+                            native.run(move |windows| {
+                                if let Some(id) = window.get() {
+                                    windows.close(*id);
+                                }
+                                if let Err(error) = crate::hosts::reopen(entrypoint, subject, link) {
+                                    eprintln!("{error}");
+                                }
+                            })
+                        }
                     }
-                    if let Err(error) = crate::hosts::reopen(entrypoint, subject, link) {
-                        eprintln!("{error}");
-                    }
-                })
+                });
             }
         };
         // The window this is, once the native thread has opened it, a job running after the one that opened it; or the
@@ -1547,15 +1628,15 @@ fn channel(
                         }
                     })),
                     // Its page, or the UI library it runs, was loaded against a version that's gone: it loads again by
-                    // itself once its window isn't in use, now if it isn't, as a desktop app or a phone's updates,
-                    // never under its person (adf8f19b8). A frame's page waits on the window it's in.
+                    // itself as soon as nothing is under way on it (`Screen::idle`), never under a press, a drag or
+                    // what its person is typing (adf8f19b8). A frame's page waits on the window it's in.
                     "stale" if payload.as_array().is_some_and(|stale| stale.iter().filter_map(Value::as_str).any(|host| host.split('.').next() == Some("ui") || host == app_host)) => {
                         let (reload, window) = (reload.clone(), window.clone());
                         native.run(move |windows| {
                             if let Some(id) = window.get() {
-                                windows.with(*id, |screen| match screen.active {
-                                    true => screen.when_unused.push(Box::new(reload)),
-                                    false => reload(),
+                                windows.with(*id, |screen| {
+                                    screen.when_unused.push(Box::new(reload));
+                                    screen.unused();
                                 });
                             }
                         });
