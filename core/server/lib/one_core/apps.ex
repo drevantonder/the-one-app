@@ -243,25 +243,26 @@ defmodule OneCore.Apps do
 
   @doc """
   Whether this server loads the code of the apps installed for `owner`: where it runs them (`runs?/1`), and the
-  network's on a server of one of the network's owners (`owners/0`) too, whose services run there for them, since
-  what a service does is on its machine, which is theirs (`OneCore.Service.acts_for/0`). What else of them is asked
-  there still runs on the network's servers.
+  network's on a server of a person's own (`serves/0`) too, which runs them for that person (`runs?/4`).
   """
-  def loads?(owner), do: runs?(owner) or (owner == @network and owners() != [])
+  def loads?(owner), do: runs?(owner) or (owner == @network and serves() != [])
 
   @doc """
-  Whom of the network's owners this server acts for as one of their own servers, and not as one of the network's:
-  the network's apps' services run here for them (`loads?/1`).
+  The people this server serves as one of their own servers, and not as one of the network's, who run any of the
+  network's apps on it (`runs?/4`).
   """
-  def owners do
-    if Servers.here?(@network), do: [], else: Enum.filter(Servers.here(), &owns_network?/1)
+  def serves do
+    if Servers.here?(@network), do: [], else: Enum.filter(Servers.here(), &String.starts_with?(&1, "users/"))
   end
 
   @doc """
-  Whether the server whose key is `key` asks the network's apps for `who`, as a service of theirs it runs for them
-  does (`owners/0`): it acts for them, and they own the network.
+  Whether this server runs a call of an app installed for `at`, which is `trusted` or not, that keeps `whose` data
+  and is asked by `actor`: where it runs `at`'s apps (`runs?/2`), and a network's app on a server of the person it
+  serves (`serves/0`), for a call from them, or from nobody for them as their services' are, that keeps their own
+  data. The network's shared data, and everyone else's calls, go to the network's servers.
   """
-  def asks_for?(key, who), do: who in Servers.acts_for(key) and owns_network?(who)
+  def runs?(at, trusted, whose, actor),
+    do: runs?(at, trusted) or (at == @network and whose in serves() and actor in [nil, whose])
 
   @doc """
   Whether this server runs an app installed for `owner`, which is `trusted` or not: a trusted one where it runs the

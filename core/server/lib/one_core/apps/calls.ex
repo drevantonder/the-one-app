@@ -489,12 +489,14 @@ defmodule OneCore.Apps.Calls do
   end
 
   # What a function of an app is called with: who asked, who it runs for, and what was asked, to pass on. It's run
-  # by a server that runs the apps of whoever it was installed for, or by any server acting for them where the
-  # app is untrusted: this one, or one that it's passed on to.
-  defp called(at, name, versions, ask, principal, forwarded) do
+  # by a server that runs the apps of whoever it was installed for, by any server acting for them where the app is
+  # untrusted, or for a network's app, by the person's own server, for them (`Apps.runs?/4`): this one, or one that
+  # it's passed on to.
+  defp called(at, name, versions, ask, {actor, subject} = principal, forwarded) do
     call = new_call(at, name, versions, ask, principal, forwarded)
+    whose = whose(at, versions[name], subject)
 
-    if Apps.runs?(at, versions[name].trusted),
+    if Apps.runs?(at, versions[name].trusted, whose, actor),
       do: call,
       else: Call.run_elsewhere(call, at)
   end
