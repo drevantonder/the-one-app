@@ -371,15 +371,19 @@ const STAMPED: u32 = 32;
 struct Stamps {
     set: wgpu::QuerySet,
     resolved: wgpu::Buffer,
-    /// Each buffer read back, whether it's mapped, and how many timestamps it holds, while it's in use.
-    read: Vec<(wgpu::Buffer, Arc<std::sync::atomic::AtomicBool>, Option<u32>)>,
-    /// The buffer this frame's go to, and how many it's taken.
+    /// Each buffer read back, whether it's mapped, and while it's in use, which of its passes blurred.
+    read: Vec<(wgpu::Buffer, Arc<std::sync::atomic::AtomicBool>, Option<Vec<bool>>)>,
+    /// The buffer this frame's go to, and which of its passes so far blur (a backdrop's glass).
     writing: Option<usize>,
-    taken: std::cell::Cell<u32>,
+    passes: std::cell::RefCell<Vec<bool>>,
     /// Nanoseconds a tick.
     period: f64,
-    gpu: Option<web_time::Duration>,
+    /// The last frame read back's GPU time, all of it and its blurs'.
+    gpu: Option<(web_time::Duration, web_time::Duration)>,
 }
+
+/// A pass longer than this on the GPU is a timestamp it didn't take, and left as an earlier frame's.
+const LONGEST_PASS: u64 = 100_000_000;
 
 impl Stamps {
     fn new(device: &wgpu::Device, queue: &wgpu::Queue) -> Option<Stamps> {
@@ -392,7 +396,7 @@ impl Stamps {
         let read = (0..3)
             .map(|_| (device.create_buffer(&wgpu::BufferDescriptor { label: None, size: bytes, usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ, mapped_at_creation: false }), Arc::default(), None))
             .collect();
-        Some(Stamps { set, resolved, read, writing: None, taken: Default::default(), period: f64::from(queue.get_timestamp_period()), gpu: None })
+        Some(Stamps { set, resolved, read, writing: None, passes: Default::default(), period: f64::from(queue.get_timestamp_period()), gpu: None })
     }
 
     /// As a frame starts: what the GPU has finished of the frames before is read, and a buffer free for this one's
@@ -400,45 +404,58 @@ impl Stamps {
     fn begin(&mut self, device: &wgpu::Device) {
         let _ = device.poll(wgpu::PollType::Poll);
         for (buffer, mapped, held) in &mut self.read {
-            let Some(count) = *held else { continue };
+            let Some(passes) = held.as_ref() else { continue };
             if !mapped.swap(false, std::sync::atomic::Ordering::Acquire) {
                 continue;
             }
-            if let Ok(view) = buffer.get_mapped_range(..u64::from(count) * 8) {
+            if let Ok(view) = buffer.get_mapped_range(..passes.len() as u64 * 16) {
                 let ticks: &[u64] = bytemuck::cast_slice(&view);
-                let total: u64 = ticks.chunks_exact(2).map(|pass| pass[1].saturating_sub(pass[0])).sum();
-                self.gpu = Some(web_time::Duration::from_nanos((total as f64 * self.period) as u64));
+                let (mut all, mut blurs) = (0, 0);
+                for (pass, blurs_it) in ticks.chunks_exact(2).zip(passes) {
+                    let took = pass[1].wrapping_sub(pass[0]);
+                    if pass[1] >= pass[0] && took < LONGEST_PASS {
+                        all += took;
+                        blurs += if *blurs_it { took } else { 0 };
+                    }
+                }
+                let time = |ticks: u64| web_time::Duration::from_nanos((ticks as f64 * self.period) as u64);
+                self.gpu = Some((time(all), time(blurs)));
             }
             buffer.unmap();
             *held = None;
         }
         self.writing = self.read.iter().position(|(_, _, held)| held.is_none());
-        self.taken.set(0);
+        self.passes.borrow_mut().clear();
     }
 
-    /// The timestamps of a pass about to begin, while there's room for them this frame.
-    fn pass(&self) -> Option<wgpu::RenderPassTimestampWrites<'_>> {
-        let at = self.taken.get();
+    /// The timestamps of a pass about to begin, one that draws, and `blurs` (a backdrop's glass), while there's room
+    /// for them this frame. A pass that draws nothing is never given them: a tiled GPU takes its timestamps where its
+    /// stages begin and end, and one with no vertex stage would keep an earlier frame's.
+    fn pass(&self, blurs: bool) -> Option<wgpu::RenderPassTimestampWrites<'_>> {
+        let mut passes = self.passes.borrow_mut();
+        let at = passes.len() as u32 * 2;
         (self.writing.is_some() && at + 2 <= STAMPED * 2).then(|| {
-            self.taken.set(at + 2);
+            passes.push(blurs);
             wgpu::RenderPassTimestampWrites { query_set: &self.set, beginning_of_pass_write_index: Some(at), end_of_pass_write_index: Some(at + 1) }
         })
     }
 
     /// As the frame's commands are finished: its timestamps resolved and copied out to be read back.
     fn resolve(&self, encoder: &mut wgpu::CommandEncoder) {
-        let (Some(writing), count @ 1..) = (self.writing, self.taken.get()) else { return };
+        let count = self.passes.borrow().len() as u32 * 2;
+        let (Some(writing), 1..) = (self.writing, count) else { return };
         encoder.resolve_query_set(&self.set, 0..count, &self.resolved, 0);
         encoder.copy_buffer_to_buffer(&self.resolved, 0, &self.read[writing].0, 0, u64::from(count) * 8);
     }
 
     /// Once they're submitted: read back when the GPU's done with them.
     fn submitted(&mut self) {
-        let (Some(writing), count @ 1..) = (self.writing.take(), self.taken.get()) else { return };
+        let passes = std::mem::take(&mut *self.passes.borrow_mut());
+        let (Some(writing), false) = (self.writing.take(), passes.is_empty()) else { return };
         let (buffer, mapped, held) = &mut self.read[writing];
         let mapped = mapped.clone();
-        buffer.map_async(wgpu::MapMode::Read, ..u64::from(count) * 8, move |done| mapped.store(done.is_ok(), std::sync::atomic::Ordering::Release));
-        *held = Some(count);
+        buffer.map_async(wgpu::MapMode::Read, ..passes.len() as u64 * 16, move |done| mapped.store(done.is_ok(), std::sync::atomic::Ordering::Release));
+        *held = Some(passes);
     }
 }
 
@@ -941,8 +958,9 @@ impl Renderer {
         true
     }
 
-    /// The GPU time of the last frame it has, summed over its passes, where the GPU says (a frame or two behind).
-    pub fn gpu(&self) -> Option<web_time::Duration> {
+    /// The GPU time of the last frame it has, summed over its passes, and its blurs' (a backdrop's glass), where the
+    /// GPU says (a frame or two behind).
+    pub fn gpu(&self) -> Option<(web_time::Duration, web_time::Duration)> {
         self.stamps.as_ref()?.gpu
     }
 
@@ -992,7 +1010,7 @@ impl Renderer {
                 resolve_target: None,
                 ops: wgpu::Operations { load, store: wgpu::StoreOp::Store },
             })],
-            timestamp_writes: self.stamps.as_ref().and_then(Stamps::pass),
+            timestamp_writes: self.stamps.as_ref().filter(|_| !run.is_empty()).and_then(|stamps| stamps.pass(false)),
             ..Default::default()
         });
         pass.set_bind_group(0, globals, &[]);
@@ -1286,7 +1304,7 @@ impl Renderer {
                     resolve_target: None,
                     ops: wgpu::Operations { load: wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT), store: wgpu::StoreOp::Store },
                 })],
-                timestamp_writes: self.stamps.as_ref().and_then(Stamps::pass),
+                timestamp_writes: self.stamps.as_ref().and_then(|stamps| stamps.pass(true)),
                 ..Default::default()
             });
             pass.set_pipeline(&self.pipelines.backdrops().1);

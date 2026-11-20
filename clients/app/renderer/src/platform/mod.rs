@@ -1086,9 +1086,10 @@ impl Windows {
             let refresh = self.display.refresh();
             let drawn = window.parts.iter().filter_map(|part| part.renderer.as_ref());
             let (acquire, gpu) = drawn.fold((std::time::Duration::ZERO, None), |(acquire, gpu), renderer| {
-                (acquire + renderer.acquired(), renderer.gpu().map(|part| gpu.unwrap_or_default() + part).or(gpu))
+                let (all, blur) = gpu.unwrap_or_default();
+                (acquire + renderer.acquired(), renderer.gpu().map(|(part, blurs)| (all + part, blur + blurs)).or(gpu))
             });
-            let frame = frame_timing::Frame { at: web_time::Instant::now(), paint: painted - began, draw: painted.elapsed(), acquire, gpu };
+            let frame = frame_timing::Frame { at: web_time::Instant::now(), paint: painted - began, draw: painted.elapsed(), acquire, gpu: gpu.map(|(all, _)| all), blur: gpu.map(|(_, blur)| blur) };
             let (interval, frames) = window.timing.drawn(frame, moving, refresh);
             if let Some(interval) = interval {
                 self.deadlines.frame(frame_timing::Timing::long(interval, refresh.unwrap_or(FRAME)));

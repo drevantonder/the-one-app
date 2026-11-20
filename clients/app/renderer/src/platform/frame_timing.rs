@@ -35,6 +35,8 @@ pub struct Frames {
     pub draw: Duration,
     pub acquire: Duration,
     pub gpu: Option<Duration>,
+    /// Of `gpu`, its blurs': what's behind a backdrop's glass.
+    pub blur: Option<Duration>,
     /// The first long frame, what it took.
     pub first_long: Option<Frame>,
 }
@@ -50,6 +52,8 @@ pub struct Frame {
     pub draw: Duration,
     pub acquire: Duration,
     pub gpu: Option<Duration>,
+    /// Of `gpu`, its blurs': what's behind a backdrop's glass.
+    pub blur: Option<Duration>,
 }
 
 /// A window's frames while something on it moves.
@@ -104,6 +108,7 @@ impl Timing {
         let refresh = refresh.unwrap_or_else(|| at(between.clone(), 0.5));
         let long_at: Vec<u32> = (0..between.len() as u32).filter(|index| Timing::long(between[*index as usize], refresh)).collect();
         let gpu: Vec<Duration> = frames.iter().filter_map(|frame| frame.gpu).collect();
+        let blur: Vec<Duration> = frames.iter().filter_map(|frame| frame.blur).collect();
         Some(Frames {
             kind,
             frames: frames.len() as u32,
@@ -119,6 +124,7 @@ impl Timing {
             draw: at(frames.iter().map(|frame| frame.draw).collect(), 0.95),
             acquire: at(frames.iter().map(|frame| frame.acquire).collect(), 0.95),
             gpu: (!gpu.is_empty()).then(|| at(gpu, 0.95)),
+            blur: (!blur.is_empty()).then(|| at(blur, 0.95)),
         })
     }
 }

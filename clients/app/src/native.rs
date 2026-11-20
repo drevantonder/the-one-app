@@ -174,7 +174,7 @@ fn frames_reported(app: &str, frames: &renderer::platform::Frames) {
     let ms = |time: std::time::Duration| (time.as_secs_f64() * 100_000.0).round() / 100.0;
     let hz = (1.0 / frames.refresh.as_secs_f64()).round();
     let load = Load::now();
-    let gpu = frames.gpu.map_or("unknown".to_owned(), |gpu| format!("{} ms", ms(gpu)));
+    let gpu = frames.gpu.map_or("unknown".to_owned(), |gpu| format!("{} ms (blurs {} ms)", ms(gpu), ms(frames.blur.unwrap_or_default())));
     // The first long frame, by its parts, and where each long one was, so a cost one moment pays shows where it is.
     let first = frames.first_long.map_or(String::new(), |frame| {
         let gpu = frame.gpu.map_or("unknown".to_owned(), |gpu| format!("{} ms", ms(gpu)));
@@ -199,6 +199,7 @@ fn frames_reported(app: &str, frames: &renderer::platform::Frames) {
         views.client.report(json!({"name": "system.cpu.load_average.1m", "value": average, "attributes": attributes}));
     }
     let gpu = frames.gpu.map(|gpu| ("one.client.native.frame.gpu.p95", ms(gpu)));
+    let blur = frames.blur.map(|blur| ("one.client.native.frame.gpu.blur.p95", ms(blur)));
     let records = [
         ("one.client.native.frames", f64::from(frames.frames)),
         ("one.client.native.frames.long", f64::from(frames.long)),
@@ -207,7 +208,7 @@ fn frames_reported(app: &str, frames: &renderer::platform::Frames) {
         ("one.client.native.frame.draw.p95", ms(frames.draw)),
         ("one.client.native.frame.acquire.p95", ms(frames.acquire)),
     ];
-    for (name, value) in records.into_iter().chain(gpu) {
+    for (name, value) in records.into_iter().chain(gpu).chain(blur) {
         views.client.report(json!({"name": name, "value": value, "attributes": attributes}));
     }
     // Where in a motion each long frame was, 0 the interval after its first frame.
