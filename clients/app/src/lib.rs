@@ -825,6 +825,20 @@ fn chose(theme: Option<Theme>) {
     app().shell.emit("theme", json!(theme));
 }
 
+/// An iPhone's page runs under its status bar and home indicator, as its `viewport-fit=cover` asks, and keeps clear of
+/// them itself (`env(safe-area-inset-*)`), as a page in Safari does: its web view doesn't inset it as well, which left
+/// it that much short of the screen's foot, with the web view's own white under it.
+#[cfg(target_os = "ios")]
+fn cover(window: &tauri::WebviewWindow) -> tauri::Result<()> {
+    window.with_webview(|webview| {
+        use objc2_ui_kit::{UIScrollView, UIScrollViewContentInsetAdjustmentBehavior, UIView};
+        // Tauri hands over the window's WKWebView on the main thread.
+        let web = unsafe { &*webview.inner().cast::<UIView>() };
+        let page: objc2::rc::Retained<UIScrollView> = unsafe { objc2::msg_send![web, scrollView] };
+        page.setContentInsetAdjustmentBehavior(UIScrollViewContentInsetAdjustmentBehavior::Never);
+    })
+}
+
 /// A tap on an iPhone's status bar scrolls the app that's showing to its top, as it does in every iPhone app. iOS
 /// scrolls the one scroll view that asks to be (`scrollsToTop`), which in the web view is its page, and that doesn't
 /// scroll: its apps' frames do. So the page's says no, and an unseen scroll view a point high along the window's top
@@ -1475,6 +1489,8 @@ fn window(app: &AppHandle) -> Result<tauri::WebviewWindow, Box<dyn std::error::E
             }
         });
     let window = window.build()?;
+    #[cfg(target_os = "ios")]
+    cover(&window)?;
     #[cfg(target_os = "ios")]
     status_bar::watch(&window)?;
     #[cfg(target_os = "ios")]
