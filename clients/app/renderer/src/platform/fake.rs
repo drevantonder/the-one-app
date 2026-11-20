@@ -380,6 +380,16 @@ pub fn now() -> web_time::Instant {
     }
 }
 
+/// The faces a Linux device falls back to where Allo hasn't a character, a symbol's (⇧, ⋮) and an emoji's, from the
+/// harness's host (Debian's and Ubuntu's `fonts-dejavu-core` and `fonts-noto-color-emoji`), so it draws what a device
+/// does and not a gap.
+pub fn fallback_fonts() -> anyhow::Result<Vec<Vec<u8>>> {
+    ["/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", "/usr/share/fonts/truetype/noto/NotoColorEmoji.ttf"]
+        .into_iter()
+        .map(|path| std::fs::read(path).map_err(|error| anyhow::anyhow!("the harness falls back to {path}, which it couldn't read (apt install fonts-dejavu-core fonts-noto-color-emoji): {error}")))
+        .collect()
+}
+
 pub fn appearance() -> crate::Appearance {
     crate::Appearance::Light
 }

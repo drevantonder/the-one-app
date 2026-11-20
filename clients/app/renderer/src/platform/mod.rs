@@ -541,8 +541,13 @@ impl Windows {
             #[cfg(not(target_arch = "wasm32"))]
             context.prepare();
             let atlas = Arc::new(Atlas::new(&context));
-            // The system's fonts where ours lack a character: a fake platform has none, so it draws the same everywhere.
-            let text = TextSystem::new(crate::FONT, crate::fonts()?, !cfg!(feature = "fake"));
+            // The system's fonts where ours lack a character: a fake platform has only those the harness's host is
+            // given for it (`fake::fallback_fonts`), so it draws the same everywhere.
+            #[allow(unused_mut)]
+            let mut fonts = crate::fonts()?;
+            #[cfg(feature = "fake")]
+            fonts.extend(fake::fallback_fonts()?);
+            let text = TextSystem::new(crate::FONT, fonts, !cfg!(feature = "fake"));
             Ok(Windows { display, context, atlas, text, windows: HashMap::new(), next: 1, framed: now(), wanted: false, ticked: false, check: None, record: Default::default(), recording: None, deadlines: Default::default(), pressure: Pressure::Nominal, system: (now(), Pressure::Nominal), background: false })
         })();
         if let Err(error) = &made {
@@ -1559,6 +1564,14 @@ impl Windows {
                     }
                     Err(why) => crate::view::paint_message(why, appearance(), room, scale, &mut self.text, &self.atlas, &mut window.scene),
                 }
+            }
+            // A character no font had draws as a font's missing glyph: a gap where a symbol or an emoji goes.
+            for character in self.text.undrawn() {
+                let what = format!("{} drew {character:?} (U+{:04X}) as a missing glyph: no font has it", window.title, u32::from(character));
+                #[cfg(feature = "fake")]
+                self.display.wrong(what);
+                #[cfg(not(feature = "fake"))]
+                log::warn!("{what}");
             }
             let painted = web_time::Instant::now();
             let glass = window.screen.as_ref().map(|screen| screen.glass().to_vec()).unwrap_or_default();

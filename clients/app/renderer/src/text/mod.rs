@@ -261,6 +261,8 @@ pub struct TextSystem {
     /// The faces the system said have a character none before them had, after its emoji face and its UI face
     /// (`fallback`).
     fallbacks: Vec<String>,
+    /// The characters no face had, since it was last asked (`undrawn`): each draws as its font's missing glyph.
+    undrawn: Vec<char>,
     shaped: HashMap<u64, Shaped>,
     faces: Vec<Face>,
     scaler: ScaleContext,
@@ -281,6 +283,7 @@ impl TextSystem {
             layouts: LayoutContext::new(),
             family: family.to_owned(),
             fallbacks: Vec::new(),
+            undrawn: Vec::new(),
             shaped: HashMap::new(),
             faces: Vec::new(),
             scaler: ScaleContext::new(),
@@ -334,7 +337,13 @@ impl TextSystem {
             }
             let mut layout = self.shape(text, style, fonts);
             // A character no face had takes the face the system says has it, as a browser's does, from then on.
-            while let Some(family) = missing(&mut layout, text).and_then(|(at, character)| self.fallback(text, at, character)).filter(|family| !self.fallbacks.contains(family)) {
+            while let Some((at, character)) = missing(&mut layout, text) {
+                let Some(family) = self.fallback(text, at, character).filter(|family| !self.fallbacks.contains(family)) else {
+                    if !self.undrawn.contains(&character) {
+                        self.undrawn.push(character);
+                    }
+                    break;
+                };
                 self.fallbacks.push(family);
                 self.shaped.clear();
                 layout = self.shape(text, style, fonts);
@@ -345,6 +354,11 @@ impl TextSystem {
         let layout = &mut self.shaped.get_mut(&key).expect("shaped above").layout;
         layout.break_all_lines(width);
         drawn(layout, text, offset, &mut self.faces)
+    }
+
+    /// The characters no face had, the system's or ours, since this was last asked.
+    pub fn undrawn(&mut self) -> Vec<char> {
+        std::mem::take(&mut self.undrawn)
     }
 
     /// The family of a face that has the character of `text` at byte `at`, which none it's tried had: the system's
@@ -361,10 +375,15 @@ impl TextSystem {
             self.fallbacks.retain(|family| !browser::is_family(family));
             Some(family)
         }
-        #[cfg(not(target_arch = "wasm32"))]
+        #[cfg(target_vendor = "apple")]
         {
             let _ = (text, at);
             fallback(character)
+        }
+        #[cfg(not(any(target_vendor = "apple", target_arch = "wasm32")))]
+        {
+            let _ = (text, at);
+            fallback(&mut self.fonts, character)
         }
     }
 
@@ -683,9 +702,22 @@ fn fallback(character: char) -> Option<String> {
     Some(unsafe { font.family_name() }.to_string())
 }
 
+/// The family of the first face, by name, that has `character`, as Android's Skia walks its
+/// fallback fonts for one: fontique's own fallback goes by script, and a symbol's (Common, as ⇧ and ⋮ are) finds
+/// nothing in Windows', Android's or Linux's.
 #[cfg(not(any(target_vendor = "apple", target_arch = "wasm32")))]
-fn fallback(_: char) -> Option<String> {
-    None
+fn fallback(fonts: &mut FontContext, character: char) -> Option<String> {
+    let collection = &mut fonts.collection;
+    let mut families: Vec<String> = collection.family_names().map(str::to_owned).collect();
+    families.sort();
+    families.into_iter().find(|family| {
+        collection.family_by_name(family).is_some_and(|family| {
+            family.default_font().is_some_and(|font| {
+                font.load(Some(&mut fonts.source_cache))
+                    .is_some_and(|blob| font.charmap_index().charmap(blob.data()).and_then(|charmap| charmap.map(character)).is_some_and(|glyph| glyph != 0))
+            })
+        })
+    })
 }
 
 /// The face a run's set in, and whether it's an emoji font's, kept so its glyphs are drawn as they were shaped.
