@@ -24,6 +24,10 @@ defmodule ComputerUse do
   # How often what a screen was last used for is written again while it's the same: the app says "2 min ago".
   @written_every 60_000
 
+  # How long, in milliseconds, listing the screens waits for all of them: a second past what the apps' `screens` hook
+  # waits for each app (`OneCore.Hooks.collect/3`), which is longer than what each computer and phone has.
+  @listing 12_000
+
   @screen %{type: "string", description: "the screen, as `screens` names it"}
   @doing %{type: "string", description: "what you're doing on it, in a few words, for whoever watches"}
   # What a screen's tool answers: a screenshot, what it did in a few words, or what a stream connects with.
@@ -326,25 +330,29 @@ defmodule ComputerUse do
 
   # Every screen the caller may use, each with the app it's from, its own computers' and phones' first, and why each
   # app, or each of its own computers or another app's machines (`<app>/<name>`), that couldn't say its own couldn't. Its computers are
-  # `Desktop.screens/1`, or for an action, which needs only their names, `Desktop.named/1`.
+  # `Desktop.screens/1`, or for an action, which needs only their names, `Desktop.named/1`. The apps, the computers
+  # and the phones are asked at once, each asking its own under a deadline (`OneCore.Asks.each/3`), and all of them
+  # under `@listing`, so none waits for another's slowest.
   defp screens(call, desktops) do
-    {:ok, lists, failed} = Call.run_hook(call, "screens", %{})
+    stages = %{
+      "apps" => fn -> Call.run_hook(call, "screens", %{}) end,
+      "computers" => fn -> desktops.(call) end,
+      "phones" => fn -> Phone.screens(call) end
+    }
+
+    {answers, unanswered} = OneCore.Asks.each(Map.keys(stages), &stages[&1].(), @listing)
+    answered = Map.new(answers)
+    {:ok, lists, failed} = answered["apps"] || {:ok, %{}, %{}}
     theirs = for {app, %{"screens" => list}} <- lists, s <- list, do: Map.put(s, "app", app)
-    {desktops, unanswered} = desktops.(call)
-    failed = Map.merge(failed, Map.new(unanswered, fn {name, why} -> {"computer-use/#{name}", why} end))
+    {desktops, from_desktops} = answered["computers"] || {[], %{}}
+    {phones, from_phones} = answered["phones"] || {[], %{}}
 
     failed =
       Enum.reduce(lists, failed, fn {app, part}, failed ->
         Enum.into(part["failed"], failed, fn {machine, why} -> {"#{app}/#{machine}", why} end)
       end)
-
-    {phones, failed} =
-      try do
-        {phones, unanswered} = Phone.screens(call)
-        {phones, Map.merge(failed, Map.new(unanswered, fn {name, why} -> {"computer-use/#{name}", why} end))}
-      rescue
-        problem -> {[], Map.put(failed, "computer-use", Exception.message(problem))}
-      end
+      |> Map.merge(Map.new(Map.merge(from_desktops, from_phones), fn {name, why} -> {"computer-use/#{name}", why} end))
+      |> Map.merge(Map.new(unanswered, fn {stage, why} -> {"computer-use/#{stage}", why} end))
 
     {Enum.map(desktops ++ phones, &Map.put(&1, "app", "computer-use")) ++ theirs, failed}
   end
