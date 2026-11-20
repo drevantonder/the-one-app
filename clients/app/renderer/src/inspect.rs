@@ -51,6 +51,11 @@
 //!   keeps the renderer's contract with it (`platform`'s), its window kept moving for a second, then still, each check
 //!   `{check, ok, said}`: a tick each refresh, a frame presented each tick, nothing while still, and inputs timed by
 //!   the device, in order. A native window answers it; the headless harness, which has no host, doesn't.
+//! - `record` (`ms`, 5000 unless given) → `{events}`, after `ms`: every input the window got meanwhile, as it came, each
+//!   `{ms, kind, …}` from when it started (by the device's own time where it says), as the headless harness's `trace`
+//!   plays them: `touch` (`phase`, `finger`, `x`, `y`), `move`, `down` and `up` (`x`, `y`, `button`), `wheel` (`x`,
+//!   `y`, `dx`, `dy`, a trackpad's `phase` and `momentum`) and `key` (`key` and its modifiers), so input a device took
+//!   is played headless as it came.
 //! - `close` → `{closed}`: the window closes as its system closes it, by its close button, ⌘W or Alt-F4, which puts
 //!   a panel away instead (`closed` false).
 //! - `hover` (a selector, or a point) → `{hovered}`: the pointer moves to the point, or the node's middle, pressing

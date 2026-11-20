@@ -506,6 +506,8 @@ pub struct Windows {
     /// The inspector's `host` check under way, and what the host has done since it started.
     check: Option<conformance::Check>,
     record: conformance::Record,
+    /// The inspector's `record` under way.
+    recording: Option<conformance::Recording>,
     /// Whether the last frames met the display's refresh, and how pressed the device is, as that and its system say.
     deadlines: pressure::Deadlines,
     pressure: Pressure,
@@ -533,7 +535,7 @@ impl Windows {
             let atlas = Arc::new(Atlas::new(&context));
             // The system's fonts where ours lack a character: a fake platform has none, so it draws the same everywhere.
             let text = TextSystem::new(crate::FONT, crate::fonts()?, !cfg!(feature = "fake"));
-            Ok(Windows { display, context, atlas, text, windows: HashMap::new(), next: 1, framed: now(), wanted: false, ticked: false, check: None, record: Default::default(), deadlines: Default::default(), pressure: Pressure::Nominal, system: (now(), Pressure::Nominal), background: false })
+            Ok(Windows { display, context, atlas, text, windows: HashMap::new(), next: 1, framed: now(), wanted: false, ticked: false, check: None, record: Default::default(), recording: None, deadlines: Default::default(), pressure: Pressure::Nominal, system: (now(), Pressure::Nominal), background: false })
         })();
         if let Err(error) = &made {
             *UNSTARTED.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = Some(format!("{error:#}"));
@@ -806,6 +808,16 @@ impl Windows {
             self.input(id, 0, Input::Close);
             return reply(crate::inspect::answer(&request.id, Ok(serde_json::json!({"closed": closed}))));
         }
+        // Every input the window gets for `ms`, as a trace's events.
+        if request.op == "record" {
+            if self.recording.is_some() {
+                return reply(crate::inspect::answer(&request.id, Err(anyhow::anyhow!("a recording is under way: ask again once it's said what came"))));
+            }
+            let started = web_time::Instant::now();
+            let until = started + std::time::Duration::from_secs_f64(request.f64("ms").unwrap_or(5000.0).clamp(0.0, 60_000.0) / 1000.0);
+            self.recording = Some(conformance::Recording { window: id, started, until, events: Vec::new(), id: request.id, reply });
+            return;
+        }
         // Whether the host keeps its contract: its window kept moving, then still, what it does meanwhile recorded.
         if request.op == "host" {
             if self.check.is_some() {
@@ -1038,8 +1050,12 @@ impl Windows {
     /// system differs. → whether it pans, which a host that flings flings as it lifts.
     /// A finger that lands, or lifts to press, waits for its page, and its moves behind it (`waits`).
     pub(crate) fn touch(&mut self, id: WindowId, finger: u64, at: Point<f32>, phase: crate::view::touch::Phase, ago: Option<f64>, fingers: crate::view::touch::Fingers) -> bool {
+        let happened = ago.and_then(|ago| now().checked_sub(std::time::Duration::from_secs_f64(ago / 1000.0)));
         if self.check.is_some() {
-            self.record.input("touch", ago.and_then(|ago| now().checked_sub(std::time::Duration::from_secs_f64(ago / 1000.0))));
+            self.record.input("touch", happened);
+        }
+        if let Some(recording) = &mut self.recording {
+            recording.input(id, serde_json::json!({"kind": "touch", "phase": format!("{phase:?}").to_lowercase(), "finger": finger, "x": at.x, "y": at.y}), happened);
         }
         #[cfg(any(target_os = "android", target_os = "ios"))]
         if self.line(id, finger, at, phase) {
@@ -1204,7 +1220,7 @@ impl Windows {
         let frame = (self.framing() && !self.ticking()).then(|| FRAME.saturating_sub(since(self.framed)));
         // A pull's spring steps at a 120 Hz display's frames.
         let pulled = self.windows.values().any(|window| window.pull.as_ref().is_some_and(rail::Pull::springing)).then_some(std::time::Duration::from_micros(8_333));
-        let check = self.check.as_ref().map(conformance::Check::due);
+        let check = self.check.as_ref().map(conformance::Check::due).into_iter().chain(self.recording.as_ref().map(|recording| recording.until.saturating_duration_since(now()))).min();
         let idle = self.renderers().filter_map(Renderer::idle_in);
         screens.chain(showing).chain(frame).chain(pulled).chain(check).chain(idle).min()
     }
@@ -1575,6 +1591,9 @@ impl Windows {
         self.wanted = wanted;
         self.display.request_frame(wanted);
         self.display.flush();
+        if let Some(recording) = self.recording.take_if(|recording| recording.until <= now()) {
+            (recording.reply)(crate::inspect::answer(&recording.id, Ok(serde_json::json!({"events": recording.events}))));
+        }
         if let Some(check) = self.check.take_if(|check| check.over()) {
             let said = check.said(&self.record, self.display.paced());
             (check.reply)(crate::inspect::answer(&check.id, Ok(said)));
@@ -1639,6 +1658,9 @@ impl Windows {
         }
         if self.check.is_some() {
             self.record.input(input.kind(), None);
+        }
+        if let Some((recording, event)) = self.recording.as_mut().zip(input.traced()) {
+            recording.input(id, event, None);
         }
         if let Some(discrete) = input.waits()
             && self.waits(id, discrete)
@@ -2322,6 +2344,20 @@ impl Input {
             Input::Left => "left",
             _ => "other",
         }
+    }
+
+    /// It as a trace's event (`{kind, x, y, …}`, as the headless harness's `trace` plays it), where it's one a person
+    /// gives: the pointer, a button, the wheel or a key.
+    fn traced(&self) -> Option<serde_json::Value> {
+        use serde_json::json;
+        Some(match self {
+            Input::Moved(at) => json!({"kind": "move", "x": at.x, "y": at.y}),
+            Input::Down(at, button, shift) => json!({"kind": "down", "x": at.x, "y": at.y, "button": button, "shift": shift}),
+            Input::Up(at, button) => json!({"kind": "up", "x": at.x, "y": at.y, "button": button}),
+            Input::Wheel(at, by, phase) => json!({"kind": "wheel", "x": at.x, "y": at.y, "dx": by.x, "dy": by.y, "phase": phase.as_ref().and_then(|phase| phase.fingers), "momentum": phase.as_ref().is_some_and(|phase| phase.momentum)}),
+            Input::Key(key) => json!({"kind": "key", "key": key.key, "shift": key.shift, "alt": key.alt, "ctrl": key.ctrl, "meta": key.meta}),
+            _ => return None,
+        })
     }
 
     /// The same, at `by` further along and down: a part's point, in its page.

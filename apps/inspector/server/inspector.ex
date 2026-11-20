@@ -117,6 +117,12 @@ defmodule Inspector do
         "Whether the device's host keeps the renderer's contract with it: the window is kept moving for a second, then still, and it says what held: a tick each display refresh, a frame presented each tick, nothing while still, and inputs with the device's own times, in order (move the pointer or a finger over it as it runs).",
         %{}
       ),
+      op(
+        "record",
+        true,
+        "Records every input the window gets for `ms` (5000 unless given): each as it came, `{ms, kind, …}` from when it started, by the device's own time where it says, as a scene's `trace` plays it headless: `touch` (phase, finger, x, y), `move`, `down`, `up`, `wheel` (dx, dy, a trackpad's phase and momentum) and `key`. Use a finger, the mouse or the trackpad on the window as it runs.",
+        %{ms: %{type: "number", minimum: 0, maximum: 60000}}
+      ),
       op("close", false, "Closes the window as its system does, by its close button, ⌘W or Alt-F4: a launcher's put away instead. Gives whether it `closed`.", %{}),
       op(
         "tap",

@@ -42,6 +42,9 @@ else.
 - `host` checks the device's host keeps the renderer's contract: a tick each display refresh, a frame presented each
   tick while something moves, nothing while still, and inputs with the device's own times. Move the pointer over the
   window while it runs (a second and a half).
+- `record` gives every input the window gets for `ms` (5 s unless you say), each as it came (`touch`, `move`, `down`,
+  `up`, `wheel` with a trackpad's phase and momentum, `key`), timed by the device: save its `events` as a JSON file
+  beside a scene's and play them headless as a check's or a motion's `trace`. Someone uses the window as it runs.
 
 A device is its person's: you inspect only theirs. Tapping and typing act as they would, so don't send, buy or delete
 there unless they asked.

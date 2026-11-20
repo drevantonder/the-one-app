@@ -906,7 +906,7 @@ fn deliver(windows: &mut Windows, id: renderer::platform::WindowId, event: &Valu
             windows.finger(id, event["finger"].as_u64().unwrap_or(0), x, y, phase);
         }
         "key" => {
-            let key = renderer::inspect::Request::parse(&json!({"v": renderer::inspect::VERSION, "op": "key", "key": event["key"]}).to_string()).map_err(|refused| anyhow::anyhow!("{refused}"))?;
+            let key = renderer::inspect::Request::parse(&json!({"v": renderer::inspect::VERSION, "op": "key", "key": event["key"], "shift": event["shift"], "alt": event["alt"], "ctrl": event["ctrl"], "meta": event["meta"]}).to_string()).map_err(|refused| anyhow::anyhow!("{refused}"))?;
             windows.key(id, &key)?;
         }
         kind => anyhow::bail!("there's no kind of event {kind}: wheel, move, down, up, touch and key are"),

@@ -116,3 +116,27 @@ impl Check {
         json!({"paced": paced, "refresh_hz": if median.is_zero() { Value::Null } else { json!((1.0 / median.as_secs_f64() * 10.0).round() / 10.0) }, "ticks": ticks.len(), "presented": record.presents.iter().filter(|at| **at >= start && **at < stop).count(), "inputs": inputs.len(), "checks": checks, "ok": checks.iter().all(|check| check["ok"] == true)})
     }
 }
+
+/// The inspector's `record` under way: every input its window gets, as it comes, for `ms`, as the events a trace plays
+/// (the headless harness's `trace`, a scene's `trace` gesture), so a device's input is played headless as it came.
+pub(super) struct Recording {
+    pub window: super::WindowId,
+    pub started: Instant,
+    pub until: Instant,
+    pub events: Vec<Value>,
+    pub id: Value,
+    pub reply: crate::Reply,
+}
+
+impl Recording {
+    /// Input `event` (`{kind, …}`) to window `window`, `happened` when the device says it did, where it says: kept with
+    /// its `ms` from when it started, for its window.
+    pub fn input(&mut self, window: super::WindowId, mut event: Value, happened: Option<Instant>) {
+        if window != self.window {
+            return;
+        }
+        let at = happened.unwrap_or_else(Instant::now).saturating_duration_since(self.started);
+        event["ms"] = json!((at.as_secs_f64() * 100_000.0).round() / 100.0);
+        self.events.push(event);
+    }
+}
