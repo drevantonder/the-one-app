@@ -311,11 +311,11 @@ defmodule OneCore.Mcp do
   end
 
   # An app's own functions and jobs are asked of it only by a server that runs it too: one acting for whoever it's
-  # installed for.
-  defp result("apps/call", %{"installed" => at, "app" => app} = params, from, principal, forwarded) do
+  # installed for, or for a network's app, one whose service of it runs for one of the network's owners.
+  defp result("apps/call", %{"installed" => at, "app" => app} = params, from, {_actor, subject} = principal, forwarded) do
     function = fn -> Calls.function(at, app, params["function"], params["arguments"], principal, true) end
-
-    between(Servers.acts_for?(from, at) && forwarded, function)
+    asks = Servers.acts_for?(from, at) or (at == "network" and Apps.asks_for?(from, subject))
+    between(asks && forwarded, function)
   end
 
   defp result("apps/schedule", %{"installed" => at, "app" => app}, from, {_actor, subject}, forwarded) do

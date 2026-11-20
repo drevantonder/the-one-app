@@ -11,12 +11,12 @@ defmodule OneCore.Apps do
 
   A server looks in the bucket at what's installed for the network and for whoever it acts for when it starts, and at
   what's installed for anyone else when it's first asked for them. Only a server that runs the apps of whoever a
-  app was installed for (`runs?/1`) loads it and runs it for them: another knows it only by what it
-  says of itself (`OneCore.Apps.Version.Description`), which lists it, and passes every call to it on to one
-  that does. It looks again when it's told to, when it's asked for
-  an app it doesn't run, when it comes back (`reconnected/0`), and behind a request for someone it
-  last looked at more than five minutes ago: the request runs on what the server has, and the look is for what it
-  wasn't told. So nothing is read for someone nobody uses.
+  app was installed for (`runs?/1`) loads it and runs it for them, and one of a network's owner's own servers the
+  network's, for their services (`loads?/1`): another knows it only by what it says of itself
+  (`OneCore.Apps.Version.Description`), which lists it, and passes every call to it on to one that runs it. It looks
+  again when it's told to, when it's asked for an app it doesn't run, when it comes back (`reconnected/0`), and
+  behind a request for someone it last looked at more than five minutes ago: the request runs on what the server has,
+  and the look is for what it wasn't told. So nothing is read for someone nobody uses.
   """
   use GenServer
   require Logger
@@ -236,10 +236,32 @@ defmodule OneCore.Apps do
   def runs?(owner) do
     cond do
       owner == @network -> Servers.here?(@network)
-      owner in Servers.acts_for(Server.key()) -> true
+      owner in Servers.here() -> true
       true -> Servers.here?(@network) and owns_network?(owner)
     end
   end
+
+  @doc """
+  Whether this server loads the code of the apps installed for `owner`: where it runs them (`runs?/1`), and the
+  network's on a server of one of the network's owners (`owners/0`) too, whose services run there for them, since
+  what a service does is on its machine, which is theirs (`OneCore.Service.acts_for/0`). What else of them is asked
+  there still runs on the network's servers.
+  """
+  def loads?(owner), do: runs?(owner) or (owner == @network and owners() != [])
+
+  @doc """
+  Whom of the network's owners this server acts for as one of their own servers, and not as one of the network's:
+  the network's apps' services run here for them (`loads?/1`).
+  """
+  def owners do
+    if Servers.here?(@network), do: [], else: Enum.filter(Servers.here(), &owns_network?/1)
+  end
+
+  @doc """
+  Whether the server whose key is `key` asks the network's apps for `who`, as a service of theirs it runs for them
+  does (`owners/0`): it acts for them, and they own the network.
+  """
+  def asks_for?(key, who), do: who in Servers.acts_for(key) and owns_network?(who)
 
   @doc """
   Whether this server runs an app installed for `owner`, which is `trusted` or not: a trusted one where it runs the
@@ -304,7 +326,7 @@ defmodule OneCore.Apps do
   defp sync_once(owner, loaded) do
     installed = Installed.running(owner)
     known = for {artifact, _number, _loaded} <- loaded, do: artifact
-    runs = runs?(owner)
+    runs = loads?(owner)
     {latest, here} = ask({:latest, runs})
     newer = Store.newer(Enum.uniq(Map.values(installed)) -- (known ++ here), latest, runs)
     {changed, any} = ask({:looked, owner, installed, loaded ++ newer, Map.keys(latest) ++ here})

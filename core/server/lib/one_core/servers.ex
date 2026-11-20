@@ -45,17 +45,16 @@ defmodule OneCore.Servers do
   Who this server is for: its owner, as it acts for them, or the network for one of the network's. What happens on it
   is about them, so it tells their apps, and the network's, as nobody (`OneCore.Mcp.Principal.asking/3`).
   """
-  def owner, do: List.first(acts_for(Server.key() || elem(OneCore.Iroh.key(Server.key_file()), 1))) || @network
+  def owner, do: List.first(here()) || @network
 
   @doc """
-  Whether this server acts for `owner`: it's a member of this server that has it on their list, or the network
-  is, which is everyone. It's asked while the server starts its apps too, before it's reached, whose key is
-  then only in its file.
+  Who this server acts for (`acts_for/1`). It's asked while the server starts its apps too, before it's reached,
+  whose key is then only in its file.
   """
-  def here?(owner) do
-    key = Server.key() || elem(OneCore.Iroh.key(Server.key_file()), 1)
-    Enum.any?(acts_for(key), &(&1 in [owner, @network]))
-  end
+  def here, do: acts_for(Server.key() || elem(OneCore.Iroh.key(Server.key_file()), 1))
+
+  @doc "Whether this server acts for `owner`: it's a member of this server that has it on their list, or the network is, which is everyone."
+  def here?(owner), do: Enum.any?(here(), &(&1 in [owner, @network]))
 
   @doc """
   What whoever asked for `what`, an app installed for `owner`, is told when none of `servers`, the ones that run

@@ -386,10 +386,7 @@ defmodule OneCore.Apps.Calls do
       for {hook, about, principal} <- observed, hook in version.hooks do
         ask = {"hooks/call", %{installed: at, app: name, kind: :observe, hook: hook, about: about}}
 
-        call =
-          if Version.runs(version) == :here,
-            do: new_call(at, name, versions, ask, principal, false),
-            else: called(at, name, versions, ask, principal, false)
+        call = called(at, name, versions, ask, principal, false)
 
         # Each is told apart from the others: what one raised is logged, and one it passed on ended there.
         Apps.held(Map.values(versions), fn ->

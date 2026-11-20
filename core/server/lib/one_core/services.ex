@@ -62,7 +62,7 @@ defmodule OneCore.Services do
   def install(app, service) do
     with :ok <- known(app, service),
          {:ok, instance} <- call({:install, {app, service}}) do
-      Server.notify_servers(Servers.acts_for(Server.key()))
+      Server.notify_servers(Servers.here())
 
       case instance && Apps.Process.started(instance) do
         :ok ->
@@ -79,7 +79,7 @@ defmodule OneCore.Services do
   def remove(app, service) do
     with {:ok, instance} <- call({:remove, {app, service}}) do
       if instance, do: Apps.Process.stop(instance, {:shutdown, :removed})
-      Server.notify_servers(Servers.acts_for(Server.key()))
+      Server.notify_servers(Servers.here())
     end
   end
 
@@ -239,7 +239,7 @@ defmodule OneCore.Services do
 
   defp called(from, {:install, {app, name} = service}, stages) do
     cond do
-      Servers.acts_for(Server.key()) == [] ->
+      Servers.here() == [] ->
         {:keep_state_and_data, [{:reply, from, {:error, "This server acts for nobody yet, so it runs no services"}}]}
 
       service in here() ->
@@ -323,7 +323,7 @@ defmodule OneCore.Services do
   # The other copy of the app `copy` that runs by its name for whoever this server acts for, and has the service
   # `name`, or `nil`.
   defp successor(copy, name) do
-    Enum.find_value(Servers.acts_for(Server.key()), fn owner ->
+    Enum.find_value(Servers.here(), fn owner ->
       case Apps.running(owner)[Path.basename(copy)] do
         %Version{artifact: to, services: services} when to != copy ->
           if Enum.any?(services, &(&1.name == name)), do: to

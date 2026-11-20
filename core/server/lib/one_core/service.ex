@@ -96,7 +96,9 @@ defmodule OneCore.Service do
   each machine has. A machine that's off has nothing to give now: `machines/2` says which.
   """
   def each(%Call{} = call, service, function, arguments \\ []) do
-    for server <- servers(call, service), not is_integer(seen(server)), item <- call(call, service, function, arguments, server),
+    for server <- servers(call, service),
+        not is_integer(seen(server)),
+        item <- call(call, service, function, arguments, server),
         do: {server, item}
   end
 
@@ -176,7 +178,8 @@ defmodule OneCore.Service do
   @doc """
   Who the service that asks runs for on its server, each as `app/4` takes it: everyone its app was installed
   for, a user, a group or the network, whose apps its server runs (`OneCore.Apps.runs?/1`), and where it keeps
-  each person's data apart, each who keeps something with it (`OneCore.Apps.Installed.subjects/2`). Whoever the server
+  each person's data apart, each who keeps something with it (`OneCore.Apps.Installed.subjects/2`). A network's app's
+  service on a server of one of the network's owners runs for them (`OneCore.Apps.owners/0`). Whoever the server
   is for comes first, as its owner chose them, so a service that's for one of them at a time, its machine's person,
   takes the first.
   """
@@ -186,13 +189,20 @@ defmodule OneCore.Service do
 
     whos =
       for at <- Apps.installed_for(app),
-          Apps.runs?(at),
           {name, %Version{artifact: ^app} = version} <- Apps.versions([at]),
-          who <- [at | if(version.own == :subject, do: Installed.subjects(at, name), else: [])],
+          who <- runs_for(at, name, version),
           uniq: true,
           do: who
 
     Enum.sort_by(whos, &(Enum.find_index(members, fn member -> member == &1 end) || length(members)))
+  end
+
+  defp runs_for(at, name, version) do
+    cond do
+      Apps.runs?(at) -> [at | if(version.own == :subject, do: Installed.subjects(at, name), else: [])]
+      at == "network" -> Apps.owners()
+      true -> []
+    end
   end
 
   @doc "The key of the server a service runs on, as `call/5` takes it."

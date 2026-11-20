@@ -74,7 +74,7 @@ defmodule OneCore.Apps.Lifecycle do
     Process.send_after(self(), :daily, @day)
 
     Task.start(fn ->
-      for owner <- Servers.acts_for(Server.key()), do: reconcile(owner)
+      for owner <- Servers.here(), do: reconcile(owner)
       for %{app: artifact} = app <- Deploy.deployed(), takes?(app), installed?(artifact), do: check(artifact)
     end)
 
@@ -328,7 +328,7 @@ defmodule OneCore.Apps.Lifecycle do
   what it ran before, and when a server came or went.
   """
   def settle do
-    for owner <- Servers.acts_for(Server.key()), {name, record} <- Installed.read(owner), do: settled(owner, name, record)
+    for owner <- Servers.here(), {name, record} <- Installed.read(owner), do: settled(owner, name, record)
     for %{app: artifact} = app <- Deploy.deployed(), takes?(app), do: settled(artifact)
     :ok
   end
