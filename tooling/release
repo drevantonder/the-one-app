@@ -85,9 +85,9 @@ export BUILD_SIGNING_KEY
 # A `one` keeps `serving`, the build that first had what a server runs of it (`serves`), so one that changed only the
 # app around `one serve run` restarts no server. The builds before stay, as a machine may be downloading one as the
 # next is published, and what neither the lists before nor now name goes. A server and a client release publish one at
-# a time, each reading the lists as the one before left them: at once, each wrote the lists it read before the other
-# published, so the other's builds went from them, and its files with them (20 Nov: server-code back from 0.34.18 to
-# 0.34.12, and a Mac's download of a `one` 404).
+# a time, each reading the lists as the one before left them, by GitHub's API: at once, or reading them by their links,
+# which give them a minute or more old, each wrote lists from before the other published, so the other's builds went
+# from them, and its files with them (20 Nov: server-code back from 0.34.18 to 0.34.12, and a Mac's download 404).
 publish() {
   echo "Publishing to the core's release, $repo $tag"
   gh release view "$tag" -R "$repo" >/dev/null 2>&1 ||
@@ -117,10 +117,9 @@ publish() {
     }));
     const at = `https://github.com/${REPO}/releases/download/${TAG}`;
     const TARGETS = ["linux-x86_64", "linux-aarch64", "macos-aarch64", "windows-x86_64"];
-    const before = Object.fromEntries(await Promise.all(TARGETS.map(async (target) => {
-      const listed = await fetch(`${at}/${target}.json`);
-      return [target, listed.ok ? await listed.json() : null];
-    })));
+    // Read by the GitHub API, as each list by its link (`${at}/<target>.json`) is a minute or more old.
+    const have = new Set(JSON.parse(gh("release", "view", TAG, "--json", "assets")).assets.map(({ name }) => name));
+    const before = Object.fromEntries(TARGETS.map((target) => [target, have.has(`${target}.json`) ? JSON.parse(gh("release", "download", TAG, "-p", `${target}.json`, "-O", "-")) : null]));
     const lists = structuredClone(before);
     for (const { what, kind, build, inputs, serves, sha256, signature, size } of builds) {
       for (const target of kind ? [kind] : TARGETS.filter((target) => lists[target] || builds.some((other) => other.kind === target))) {
@@ -130,7 +129,6 @@ publish() {
         if (serves) list[what].serving = was?.serves === serves ? (was.serving ?? was.build) : build;
       }
     }
-    const have = new Set(JSON.parse(gh("release", "view", TAG, "--json", "assets")).assets.map(({ name }) => name));
     const out = mkdtempSync(`${tmpdir()}/release-`);
     try {
       for (const { path, sha256 } of builds.filter(({ sha256 }) => !have.has(sha256))) {
