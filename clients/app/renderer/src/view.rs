@@ -1883,6 +1883,11 @@ impl Screen {
         if let Some(None) = self.frame_key(key) {
             return focused;
         }
+        // A key pressed without a shortcut's modifier is the keyboard in use: what has it shows it from now on, as a
+        // browser's `:focus-visible` does, so the arrows moving through a list a click went into show where they are.
+        if !key.ctrl && !key.meta && !key.alt {
+            self.states.focus_visible = true;
+        }
         // Tab is told to what has the keyboard and what it's in, as any key is, then moves the keyboard, as a
         // browser's does unless the page stops it, which a native host can't hear in time.
         if key.key == "Tab" && !key.ctrl && !key.meta && !key.alt {
@@ -1894,7 +1899,6 @@ impl Screen {
                 }
             }
             self.tell(PAGE, "keydown", key.told());
-            self.states.focus_visible = true;
             // It goes round, but out of a frame's page at its ends, back to the page the frame's in; into a frame's
             // page, to its first stop or its last, and past a frame whose page has none.
             let order = self.focus.tab_order.clone();
