@@ -428,5 +428,105 @@
         ]
       }
     }
+  },
+  "An untrusted app's item, in its own frame": {
+    "like": "Empty",
+    "taps": [
+      "Inbox"
+    ],
+    "uses": [
+      "notifications"
+    ],
+    "answers": {
+      "vault_list": {
+        "items": [
+          {
+            "name": "Notes: Inbox",
+            "artifact": "notes/inbox",
+            "kind": "app_item",
+            "type": "notes/inbox",
+            "status": null,
+            "fields": [],
+            "hosts": [],
+            "access": []
+          }
+        ],
+        "requests": [],
+        "apps": [],
+        "types": [
+          {
+            "id": "notes/inbox",
+            "app": "notifications",
+            "title": "Notes",
+            "icon": "data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciIHZpZXdCb3g9IjAgMCAxMCAxMCI+PGNpcmNsZSBjeD0iNSIgY3k9IjUiIHI9IjUiIGZpbGw9IiNlOTEiLz48L3N2Zz4=",
+            "trusted": false,
+            "name": "Note",
+            "prefix": "Notes: ",
+            "section": "Notes",
+            "component": "index",
+            "create": null
+          }
+        ]
+      },
+      "notifications_inbox": {
+        "notifications": [
+          {
+            "id": "n1",
+            "title": "Backup finished",
+            "text": "Your network was backed up to Backblaze B2.",
+            "from": "Backups",
+            "app": "backups",
+            "at": "2025-12-31T23:55:00Z",
+            "read": false
+          },
+          {
+            "id": "n2",
+            "title": "GitHub wants a key",
+            "text": "Vault was asked for a token for api.github.com.",
+            "from": "Vault",
+            "app": "vault",
+            "at": "2025-12-31T21:00:00Z",
+            "read": false
+          },
+          {
+            "id": "n3",
+            "title": "Sam joined Family",
+            "from": "Sign-In",
+            "app": "sign-in",
+            "at": "2025-12-29T10:00:00Z",
+            "read": true
+          }
+        ]
+      },
+      "notifications_apps": {
+        "apps": [
+          {
+            "app": "backups",
+            "name": "Backups",
+            "allowed": true
+          },
+          {
+            "app": "vault",
+            "name": "Vault",
+            "allowed": true
+          },
+          {
+            "app": "sign-in",
+            "name": "Sign-In",
+            "allowed": false
+          }
+        ]
+      },
+      "one/client": {
+        "device": "Laptop",
+        "build": "0.26.0",
+        "theme": null
+      },
+      "one/frame": {
+        "url": "/renderer/?frame=f1#/notifications/client/index.html",
+        "sandbox": "allow-scripts allow-forms",
+        "frame": "f1"
+      }
+    }
   }
 }

@@ -177,6 +177,12 @@ fn main() -> anyhow::Result<()> {
         }
     });
     let mut screen = Screen::new(js, Some(asked));
+    // Another app's page in a frame of its own (`Frame`), its app's client built beside the page at `<app>/client/`,
+    // as a scene's `uses` has it: started between the display's frames and handed to the frame, as a native host
+    // starts one on its own thread and hands it over (`clients/app/src/native`), its tools answered from `answers`.
+    let framing: std::rc::Rc<std::cell::RefCell<Vec<(renderer::tree::Id, String)>>> = Default::default();
+    let asking = framing.clone();
+    screen.make_frame = Some(Box::new(move |node, src, _| asking.borrow_mut().push((node, src.to_owned()))));
     screen.insets = insets;
     screen.page = tokens_page;
     screen.touch = touch;
@@ -244,6 +250,19 @@ fn main() -> anyhow::Result<()> {
         Event::Crashed(why) => *crashing.borrow_mut() = Some(why),
         _ => {}
     })?;
+    {
+        let (folder, ui, clock, answers) = (folder.clone(), ui.clone(), clock.clone(), answers.clone());
+        FRAMES.set(Some(Box::new(move |windows: &mut Windows| {
+            for (node, src) in framing.borrow_mut().drain(..) {
+                let page = src.split_once('#').map_or(src.as_str(), |(page, _)| page);
+                let made = framed(&folder, page, ui.clone(), clock.clone(), touch, answers.clone());
+                windows.with(id, |parent| match made {
+                    Ok(screen) => parent.framed(node, &src, screen),
+                    Err(error) => parent.failed = Some(format!("its frame's page, {src}, didn't start: {error:#}")),
+                });
+            }
+        })));
+    }
     // Its JS runs on a thread of its own, as in a window: each step is drawn once what it set off has run. A panel is
     // summoned as it opens, its page still starting, as a launcher's first summon can come as the app starts.
     if panel.is_some() {
@@ -440,6 +459,7 @@ fn main() -> anyhow::Result<()> {
     let settling = renderer::platform::fake_time();
     frame(&mut windows);
     while (windows.revealing(id) || windows.with(id, |screen| screen.arriving()).unwrap_or(false)) && renderer::platform::fake_time() - settling < SETTLE_MS {
+        between(&mut windows);
         windows.run(1000.0 / 60.0);
     }
     let drawn = started.elapsed();
@@ -1057,6 +1077,8 @@ thread_local! {
     /// What the harness does between the display's frames, as a host's app does around its windows: an app's window
     /// opened over the Home Screen as its page asked (`--open`), and what its tools answered as it's due.
     static BETWEEN: std::cell::RefCell<Option<Box<dyn FnMut(&mut Windows)>>> = const { std::cell::RefCell::new(None) };
+    /// The frames' pages a window's page asked for since, started and handed to their frames (`framed`).
+    static FRAMES: std::cell::RefCell<Option<Box<dyn FnMut(&mut Windows)>>> = const { std::cell::RefCell::new(None) };
 }
 
 fn between(windows: &mut Windows) {
@@ -1065,13 +1087,51 @@ fn between(windows: &mut Windows) {
         hook(windows);
         BETWEEN.set(Some(hook));
     }
+    let frames = FRAMES.take();
+    if let Some(mut frames) = frames {
+        frames(windows);
+        FRAMES.set(Some(frames));
+    }
+}
+
+/// The page `page` (`<app>/client/<page>.html`) of the app built beside the page in `folder`, started as a frame's
+/// page, its tools answered from `answers`.
+fn framed(folder: &std::path::Path, page: &str, ui: Option<PathBuf>, clock: Clock, touch: bool, answers: std::rc::Rc<std::cell::RefCell<Value>>) -> anyhow::Result<Screen> {
+    let at = folder.join(page);
+    let (module, files, tokens_page) = built_page(folder, &at, ui)?;
+    let js = Thread::start(&module, files, None, clock, touch)?;
+    let asked: renderer::Asked = Box::new(move |message, _| {
+        let id = message.get("id")?.clone();
+        let (method, params) = (message["method"].as_str().unwrap_or_default(), &message["params"]);
+        let answers = answers.borrow();
+        Some(match (method, params["name"].as_str()) {
+            ("tools/call", Some(tool)) => match answers.get(tool) {
+                Some(answer) => json!({"jsonrpc": "2.0", "id": id, "result": {"content": [{"type": "text", "text": answer.to_string()}]}}),
+                None => json!({"jsonrpc": "2.0", "id": id, "result": {"isError": true, "content": [{"type": "text", "text": format!("No answer for {tool}")}]}}),
+            },
+            _ => match answers.get(method) {
+                Some(result) => json!({"jsonrpc": "2.0", "id": id, "result": result}),
+                None => json!({"jsonrpc": "2.0", "id": id, "error": {"code": -32601, "message": format!("{method} isn't answered here")}}),
+            },
+        })
+    });
+    let mut screen = Screen::new(js, Some(asked));
+    screen.page = tokens_page;
+    screen.touch = touch;
+    Ok(screen)
 }
 
 /// The page `bun app.js` built in `folder`: its module, what reads its files (at `file:///`, its own folder, with the UI
 /// library's under /ui/client/, from `ui`), and its own table of tokens (`Screen::page`), loaded with the UI library's.
 fn built(folder: &std::path::Path, ui: Option<PathBuf>) -> anyhow::Result<(Url, Files, u32)> {
     let folder = std::fs::canonicalize(folder)?;
-    let root = folder.clone();
+    built_page(&folder, &folder.join("index.html"), ui)
+}
+
+/// The page at `page` of what's built in `folder`, which is where the page's addresses start from: its module, its
+/// files, and its own styles' tokens, its tables loaded.
+fn built_page(folder: &std::path::Path, page: &std::path::Path, ui: Option<PathBuf>) -> anyhow::Result<(Url, Files, u32)> {
+    let root = folder.to_owned();
     let mut files: Files = Box::new(move |url: &Url| {
         let path = url.path();
         let file = match (path.strip_prefix("/ui/client/"), &ui) {
@@ -1080,24 +1140,26 @@ fn built(folder: &std::path::Path, ui: Option<PathBuf>) -> anyhow::Result<(Url, 
         };
         std::fs::read_to_string(&file).map_err(|error| anyhow::anyhow!("{}: {error}", file.display()))
     });
-    let html = std::fs::read_to_string(folder.join("index.html"))?;
+    let html = std::fs::read_to_string(page)?;
     let module = html
         .split("<script")
         .find_map(|tag| tag.contains("type=\"module\"").then(|| tag.split("src=\"").nth(1)?.split('"').next()).flatten())
-        .ok_or_else(|| anyhow::anyhow!("index.html loads no module"))?;
-    let page = Url::parse("file:///index.html")?.join(module)?;
+        .ok_or_else(|| anyhow::anyhow!("{} loads no module", page.display()))?;
+    let at = Url::parse("file:///")?.join(&page.strip_prefix(folder)?.to_string_lossy())?;
+    let module = at.join(module)?;
     // The tables: the UI library's tokens and styles, and the page's own styles, where it has them.
     let mut tokens_page = 0;
-    for table in ["file:///ui/client/tokens.json", "file:///ui/client/styles.json", "file:///styles.json"] {
-        let Ok(text) = files(&Url::parse(table)?) else { continue };
-        if table.ends_with("tokens.json") {
+    let own = at.join("styles.json")?;
+    for table in [Url::parse("file:///ui/client/tokens.json")?, Url::parse("file:///ui/client/styles.json")?, own.clone()] {
+        let Ok(text) = files(&table) else { continue };
+        if table.path().ends_with("tokens.json") {
             renderer::tokens::load_table(&text)?;
         } else {
             renderer::load_styles(&text)?;
-            if table == "file:///styles.json" {
+            if table == own {
                 tokens_page = renderer::tokens::load_page(&text)?;
             }
         }
     }
-    Ok((page, files, tokens_page))
+    Ok((module, files, tokens_page))
 }

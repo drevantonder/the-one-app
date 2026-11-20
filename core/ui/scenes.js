@@ -120,11 +120,14 @@ function server(built, target, used) {
       const url = new URL(request.url)
       if (url.pathname === "/host.html") return new Response(pages.get(url.searchParams.get("scene")), { headers: { "content-type": "text/html" } })
       const path = decodeURIComponent(url.pathname)
-      if (path.startsWith("/renderer/")) return new Response(Bun.file(join(rendererFrame, path.slice("/renderer/".length) || "index.html")))
+      // Each to a frame's page too, whose origin is its own, as the edge serves an app's files, the UI library and the
+      // renderer's frame (`file` in core/edge/mcp/mcp.ts, clients/web/_headers).
+      const cors = { headers: { "access-control-allow-origin": "*" } }
+      if (path.startsWith("/renderer/")) return new Response(Bun.file(join(rendererFrame, path.slice("/renderer/".length) || "index.html")), cors)
       const [, app, client, ...rest] = path.split("/")
-      if (used.has(app) && client === "client") return new Response(Bun.file(join(used.get(app), rest.join("/"))))
+      if (used.has(app) && client === "client") return new Response(Bun.file(join(used.get(app), rest.join("/"))), cors)
       const file = path.startsWith("/ui/client/") ? Bun.file(join(library("client"), path.slice("/ui/client/".length))) : [join(built, path), join(target, path)].map((one) => Bun.file(one)).find((one) => one.size)
-      return file?.size ? new Response(file) : new Response("Not found", { status: 404 })
+      return file?.size ? new Response(file, cors) : new Response("Not found", { status: 404 })
     },
   })
   return {

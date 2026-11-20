@@ -56,15 +56,8 @@ thread_local! {
     static FRAMED: Cell<Option<web_time::Instant>> = const { Cell::new(None) };
     /// The timer set for when the windows next have something to do, and when that is.
     static TIMER: Cell<Option<(i32, f64)>> = const { Cell::new(None) };
-    /// What the page's JS gave its host since the screen last took it, how many of the calls the screen sent it it's
-    /// run, whether its module ran (or why not), and what wakes the screen as more comes.
-    static POSTED: RefCell<Vec<Posted>> = const { RefCell::new(Vec::new()) };
-    static RAN: Cell<u64> = const { Cell::new(0) };
-    static STARTED: RefCell<Option<Result<(), String>>> = const { RefCell::new(None) };
-    static WAKE: RefCell<Option<Box<dyn Fn()>>> = const { RefCell::new(None) };
-    static WOKEN: Cell<bool> = const { Cell::new(false) };
-    /// What the screen sent the page that it hasn't been called with yet: `ui.event` or `ui.message`.
-    static OUTBOX: RefCell<VecDeque<(&'static str, Value)>> = const { RefCell::new(VecDeque::new()) };
+    /// The JS of the page, and of each frame's page by its frame's node (`Thread`), as its screen hears it.
+    static CHANNELS: RefCell<std::collections::HashMap<Option<crate::tree::Id>, Channel>> = RefCell::new(std::collections::HashMap::new());
     /// The page's frame, as `open` was given it: its canvas, how dark the device is and whether it asked for less
     /// motion, and what tells the frame's own JS what the screen says of itself (its cursor, its client's messages).
     static HOST: RefCell<Option<Host>> = const { RefCell::new(None) };
@@ -73,6 +66,26 @@ thread_local! {
     static LINK: RefCell<String> = const { RefCell::new(String::new()) };
     /// Each video's latest frame, as the browser played it, and where it was last drawn (`video`).
     static VIDEOS: RefCell<std::collections::HashMap<crate::tree::Id, Video>> = RefCell::new(std::collections::HashMap::new());
+}
+
+/// What a page's JS gave its host since the screen last took it, how many of the calls the screen sent it it's run,
+/// whether its module ran (or why not), whether it asked for a frame (a frame's page, whose `requestAnimationFrame`
+/// is the screen's, as a native host's is), what wakes the screen as more comes, and what the screen sent it that it
+/// hasn't been called with yet: `ui.event` or `ui.message`.
+#[derive(Default)]
+struct Channel {
+    posted: Vec<Posted>,
+    ran: u64,
+    started: Option<Result<(), String>>,
+    framing: bool,
+    wake: Option<std::rc::Rc<dyn Fn()>>,
+    woken: bool,
+    outbox: VecDeque<(&'static str, Value)>,
+}
+
+/// Does `change` to the channel of the page in frame `frame`, or the frame's own page's with none.
+fn channel<T: Default>(frame: Option<crate::tree::Id>, change: impl FnOnce(&mut Channel) -> T) -> T {
+    CHANNELS.with_borrow_mut(|channels| channels.get_mut(&frame).map(change).unwrap_or_default())
 }
 
 struct Host {
@@ -176,6 +189,11 @@ pub fn mac_keys() -> bool {
     MAC.with(|mac| *mac)
 }
 
+/// Calls the frame's own JS: `calls[name](argument)`, or with several, `calls[name]([...arguments])`.
+fn call_with(name: &str, arguments: &[JsValue]) {
+    call(name, &arguments.iter().collect::<js_sys::Array>());
+}
+
 /// Calls the frame's own JS: `calls[name](argument)`.
 fn call(name: &str, argument: &JsValue) {
     HOST.with_borrow(|host| {
@@ -266,60 +284,81 @@ pub fn flush() {
     turn();
 }
 
-/// Calls the page with what the screen sent it, in order, once its module has run, as a native host's JS thread runs
-/// each call it's sent.
+/// Calls each page with what its screen sent it, in order, once its module has run, as a native host's JS thread runs
+/// each call it's sent: the frame's own page here, and a frame's page in its own frame (`frameCall`), which says what
+/// it's run as it says what it gave (`frame_posted`).
 fn deliver() {
-    if !matches!(STARTED.with_borrow(Clone::clone), Some(Ok(()))) {
-        return;
-    }
-    let ran = RAN.get();
-    while let Some((to, message)) = OUTBOX.with_borrow_mut(VecDeque::pop_front) {
-        let ui = js_sys::Reflect::get(&js_sys::global(), &"ui".into()).unwrap_or(JsValue::UNDEFINED);
-        if let Ok(function) = js_sys::Reflect::get(&ui, &to.into()).and_then(|function| function.dyn_into::<js_sys::Function>()) {
+    let frames: Vec<Option<crate::tree::Id>> = CHANNELS.with_borrow(|channels| channels.iter().filter(|(_, channel)| matches!(channel.started, Some(Ok(())))).map(|(frame, _)| *frame).collect());
+    for frame in frames {
+        let mut ran = false;
+        while let Some((to, message)) = channel(frame, |channel| channel.outbox.pop_front()) {
             let message = js_sys::JSON::parse(&message.to_string()).unwrap_or(JsValue::NULL);
-            if let Err(error) = function.call1(&ui, &message) {
-                POSTED.with_borrow_mut(|posted| posted.push(Posted::Threw(format!("{error:?}"))));
-            }
+            let Some(node) = frame else {
+                let ui = js_sys::Reflect::get(&js_sys::global(), &"ui".into()).unwrap_or(JsValue::UNDEFINED);
+                if let Ok(function) = js_sys::Reflect::get(&ui, &to.into()).and_then(|function| function.dyn_into::<js_sys::Function>())
+                    && let Err(error) = function.call1(&ui, &message)
+                {
+                    channel(None, |channel| channel.posted.push(Posted::Threw(format!("{error:?}"))));
+                }
+                channel(None, |channel| channel.ran += 1);
+                ran = true;
+                continue;
+            };
+            call_with("frameCall", &[JsValue::from(node as f64), to.into(), message]);
         }
-        RAN.set(RAN.get() + 1);
+        if ran {
+            wake(frame);
+        }
     }
-    if RAN.get() != ran {
+}
+
+/// Wakes the screen to take what a page gave it and what it's run, once until it has (`Thread::take`).
+fn wake(frame: Option<crate::tree::Id>) {
+    let wake = channel(frame, |channel| (!std::mem::replace(&mut channel.woken, true)).then(|| channel.wake.clone()).flatten());
+    if let Some(wake) = wake {
         wake();
     }
 }
 
-/// Wakes the screen to take what the page gave it and what it's run, once until it has (`Thread::take`).
-fn wake() {
-    if !WOKEN.replace(true) {
-        WAKE.with_borrow(|wake| wake.as_ref().map(|wake| wake()));
-    }
-}
-
-/// The page's JS, as its screen reads it: the browser's own, which `globalThis.mutations` and `host.post` queue
-/// what it gives, and which is called with what it's sent between the windows' turns (`deliver`). Its timers and
-/// frames are the browser's.
+/// A page's JS, as its screen reads it: the browser's own, which `globalThis.mutations` and `host.post` queue
+/// what it gives, and which is called with what it's sent between the windows' turns (`deliver`). The frame's own
+/// page's timers and frames are the browser's. A frame's page (`frame`) runs in a frame of its own (renderer.js), as a
+/// native host's runs on a thread of its own: what it gives comes from there, and its frames are the screen's.
 pub struct Thread {
     clock: Clock,
     sent: u64,
+    frame: Option<crate::tree::Id>,
 }
 
 impl Thread {
     pub fn new(clock: Clock) -> Thread {
-        Thread { clock, sent: 0 }
+        Thread::of(clock, None)
+    }
+
+    /// The JS of the page frame `node` shows.
+    fn of(clock: Clock, frame: Option<crate::tree::Id>) -> Thread {
+        CHANNELS.with_borrow_mut(|channels| channels.insert(frame, Channel::default()));
+        Thread { clock, sent: 0, frame }
     }
 
     pub fn send(&mut self, to: &'static str, message: Value) {
-        OUTBOX.with_borrow_mut(|outbox| outbox.push_back((to, message)));
+        channel(self.frame, |channel| channel.outbox.push_back((to, message)));
         self.sent += 1;
         soon();
     }
 
     pub fn fire(&mut self) {}
 
-    pub fn frame(&mut self, _: f64) {}
+    /// A frame's page is told the display showed a frame, as it asked: what asked for one runs.
+    pub fn frame(&mut self, time: f64) {
+        if let Some(node) = self.frame {
+            channel(self.frame, |channel| channel.framing = false);
+            call_with("frameFrame", &[JsValue::from(node as f64), JsValue::from(time)]);
+        }
+    }
 
     pub fn framing(&self) -> bool {
-        false
+        channel(self.frame, |channel| channel.framing)
     }
 
     /// Nothing: the browser runs the page's JS, beside the renderer, and its own Performance panel times it.
@@ -328,8 +367,10 @@ impl Thread {
     }
 
     pub fn take(&self) -> (Vec<Posted>, u64) {
-        WOKEN.set(false);
-        (POSTED.with_borrow_mut(std::mem::take), RAN.get())
+        channel(self.frame, |channel| {
+            channel.woken = false;
+            (std::mem::take(&mut channel.posted), channel.ran)
+        })
     }
 
     pub fn sent(&self) -> u64 {
@@ -338,7 +379,7 @@ impl Thread {
 
     /// Whether it's posted what its window hasn't taken yet (`take`).
     pub fn has_posted(&self) -> bool {
-        POSTED.with_borrow(|posted| !posted.is_empty())
+        channel(self.frame, |channel| !channel.posted.is_empty())
     }
 
     /// Nothing seeds a browser's page's thread.
@@ -352,13 +393,15 @@ impl Thread {
     }
 
     pub fn on_post(&self, wake: impl Fn() + Send + 'static) {
-        WAKE.set(Some(Box::new(wake)));
-        WOKEN.set(false);
-        self::wake();
+        channel(self.frame, |channel| {
+            channel.wake = Some(std::rc::Rc::new(wake));
+            channel.woken = false;
+        });
+        self::wake(self.frame);
     }
 
     pub fn started(&self) -> Option<Result<(), String>> {
-        STARTED.with_borrow(Clone::clone)
+        channel(self.frame, |channel| channel.started.clone())
     }
 
     /// Never: a page the browser runs that crashes is its browser's to say (Chrome's "Aw, Snap!").
@@ -367,7 +410,7 @@ impl Thread {
     }
 
     pub fn busy(&self) -> bool {
-        STARTED.with_borrow(Option::is_none) || RAN.get() < self.sent
+        channel(self.frame, |channel| channel.started.is_none() || channel.ran < self.sent)
     }
 
     /// A browser's JS never ends.
@@ -396,6 +439,16 @@ impl Thread {
 
     pub fn clock(&self) -> &Clock {
         &self.clock
+    }
+}
+
+/// A frame's page that went: its frame goes, and its client forgets it.
+impl Drop for Thread {
+    fn drop(&mut self) {
+        CHANNELS.with_borrow_mut(|channels| channels.remove(&self.frame));
+        if let Some(node) = self.frame {
+            call("unframe", &JsValue::from(node as f64));
+        }
     }
 }
 
@@ -661,8 +714,8 @@ pub(crate) async fn decode(src: &str, device: Size<u32>) -> Option<crate::view::
 }
 
 /// A picture a page names by an address, fetched as one of its app's files by the browser, which the screen then has
-/// as a `data:` address (`Screen::fetched`).
-fn fetch(page: &url::Url, src: &str) {
+/// as a `data:` address (`Screen::fetched`): the frame's own page's, or that of the page in frame `frame`.
+fn fetch(page: &url::Url, src: &str, frame: Option<crate::tree::Id>) {
     let (src, address) = (src.to_owned(), page.join(src).map(String::from).unwrap_or_default());
     wasm_bindgen_futures::spawn_local(async move {
         let fetched = async {
@@ -677,7 +730,10 @@ fn fetch(page: &url::Url, src: &str) {
         };
         let data = fetched.await;
         let _ = Native::get().map(|native| native.run(move |windows| {
-            windows.with(WINDOW, |screen| screen.fetched(&src, data));
+            windows.with(WINDOW, |screen| match frame {
+                Some(node) => screen.frame_mut(node).map_or((), |screen| screen.fetched(&src, data)),
+                None => screen.fetched(&src, data),
+            });
         }));
     });
 }
@@ -771,7 +827,9 @@ pub async fn open(canvas: web_sys::HtmlCanvasElement, scale: f32, page: String, 
     let mut screen = Screen::new(Thread::new(Clock::real()), Some(Box::new(asked)));
     screen.page = tokens;
     let page = url::Url::parse(&page).map_err(|error| JsError::new(&format!("{error}")))?;
-    screen.fetch = Some(Box::new(move |src: &str| fetch(&page, src)));
+    screen.fetch = Some(Box::new(move |src: &str| fetch(&page, src, None)));
+    // Another app's page, in a frame of its own of the frame's, which its client says where it is (renderer.js).
+    screen.make_frame = Some(Box::new(|node, src, subject| call_with("frame", &[JsValue::from(node as f64), src.into(), subject.map_or(JsValue::NULL, JsValue::from)])));
     screen.touch = touch;
     screen.theme = match theme.as_deref() {
         Some("dark") => Some(Appearance::Dark),
@@ -841,9 +899,9 @@ fn console_log() {
 /// The page's module ran, or why it didn't.
 #[wasm_bindgen]
 pub fn started(error: Option<String>) {
-    STARTED.set(Some(error.map_or(Ok(()), Err)));
+    channel(None, |channel| channel.started = Some(error.map_or(Ok(()), Err)));
     soon();
-    wake();
+    wake(None);
 }
 
 /// A message from the page's client: an answer to what it asked, or a notification. What it says of where the page is
@@ -978,8 +1036,8 @@ pub fn appearance_changed(dark: bool) {
 // the screen to apply after its turn.
 
 fn posted(posted: Posted) {
-    POSTED.with_borrow_mut(|queue| queue.push(posted));
-    wake();
+    channel(None, |channel| channel.posted.push(posted));
+    wake(None);
 }
 
 #[wasm_bindgen(js_name = create)]
@@ -1017,6 +1075,85 @@ pub fn drop_node(id: f64) {
 #[wasm_bindgen(js_name = post)]
 pub fn post(json: String) {
     posted(Posted::Message(json));
+}
+
+// A frame's page, in a frame of its own (renderer.js): what it gives and what it hears, by its frame's node.
+
+/// The page frame `node` shows, `src`, has started in its own frame, where what it names is from `page`, drawn with its
+/// app's `styles`: its screen is made, and drawn in the frame from now on, as a native host's is (`Screen::framed`).
+#[wasm_bindgen]
+pub fn framed(node: f64, src: String, page: String, styles: String) -> Result<(), JsError> {
+    let node = node as crate::tree::Id;
+    let page = url::Url::parse(&page).map_err(|error| JsError::new(&format!("{error}")))?;
+    crate::load_styles(&styles).map_err(|error| JsError::new(&format!("{error:#}")))?;
+    let tokens = crate::tokens::load_page(&styles).map_err(|error| JsError::new(&format!("{error:#}")))?;
+    let _ = Native::get().map(|native| {
+        native.run(move |windows| {
+            let asked: crate::view::Asked = Box::new(move |message, _| {
+                call_with("frameAsk", &[JsValue::from(node as f64), js_sys::JSON::parse(&message.to_string()).unwrap_or(JsValue::NULL)]);
+                None
+            });
+            let mut screen = Screen::new(Thread::of(Clock::real(), Some(node)), Some(asked));
+            screen.page = tokens;
+            screen.fetch = Some(Box::new(move |src: &str| fetch(&page, src, Some(node))));
+            windows.with(WINDOW, |parent| {
+                screen.touch = parent.touch;
+                parent.framed(node, &src, screen)
+            });
+        })
+    });
+    Ok(())
+}
+
+/// The page in frame `node` ran its module, or why it didn't.
+#[wasm_bindgen]
+pub fn frame_started(node: f64, error: Option<String>) {
+    let frame = Some(node as crate::tree::Id);
+    channel(frame, |channel| channel.started = Some(error.map_or(Ok(()), Err)));
+    soon();
+    wake(frame);
+}
+
+/// What the page in frame `node` gave its host since it last said, each as its call was (`["create", id, kind,
+/// value]`, `["set", …]`, `["insert", …]`, `["remove", …]`, `["drop", id]`, `["post", json]`, `["threw", why]`), how
+/// many of the calls it was sent it's run, and whether it asks for a frame.
+#[wasm_bindgen]
+pub fn frame_posted(node: f64, calls: js_sys::Array, ran: f64, framing: bool) {
+    let frame = Some(node as crate::tree::Id);
+    let number = |value: JsValue| value.as_f64().unwrap_or_default() as u64;
+    let posted: Vec<Posted> = calls
+        .iter()
+        .filter_map(|call| {
+            let call: js_sys::Array = call.dyn_into().ok()?;
+            Some(match call.get(0).as_string()?.as_str() {
+                "create" => Posted::Mutation(Mutation::Create { id: number(call.get(1)), kind: Kind::deserialize(call.get(2).as_string()?.as_str().into_deserializer()).map_err(|_: serde::de::value::Error| ()).ok()?, value: call.get(3).as_string() }),
+                "set" => Posted::Mutation(Mutation::Set { id: number(call.get(1)), name: call.get(2).as_string()?, value: data(&call.get(3), &mut Vec::new()).ok()? }),
+                "insert" => Posted::Mutation(Mutation::Insert { parent: number(call.get(1)), id: number(call.get(2)), before: call.get(3).as_f64().map(|before| before as u64) }),
+                "remove" => Posted::Mutation(Mutation::Remove { parent: number(call.get(1)), id: number(call.get(2)) }),
+                "drop" => Posted::Mutation(Mutation::Drop { id: number(call.get(1)) }),
+                "post" => Posted::Message(call.get(1).as_string()?),
+                _ => Posted::Threw(call.get(1).as_string().unwrap_or_default()),
+            })
+        })
+        .collect();
+    channel(frame, |channel| {
+        channel.posted.extend(posted);
+        channel.ran = ran as u64;
+        channel.framing = framing;
+    });
+    wake(frame);
+    soon();
+}
+
+/// A message from its client for the page in frame `node`, which it was sent there: its screen hears it as its page's.
+#[wasm_bindgen]
+pub fn frame_message(node: f64, message: JsValue) {
+    let Ok(message) = data(&message, &mut Vec::new()) else { return };
+    let _ = Native::get().map(|native| {
+        native.run(move |windows| {
+            windows.with(WINDOW, |screen| screen.frame_mut(node as crate::tree::Id).map(|screen| screen.message(&message)));
+        })
+    });
 }
 
 /// How deep a value's arrays and objects are read at most, as each is read on the stack.
