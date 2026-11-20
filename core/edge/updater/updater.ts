@@ -117,6 +117,14 @@ export class NetworkUpdater extends DurableObject<Env> {
   async update(input: Input, presence: Record<string, Presence | null>): Promise<{ status: object; broadcast?: string }> {
     const state: State = (await this.ctx.storage.get<State>("state")) ?? { network_update_status: "up_to_date", servers: [], skipped: [], timings: {} };
     const reported = await this.reported();
+    // A server the relay no longer knows, which it forgot as it was gone too long, is forgotten here too.
+    const gone = Object.keys(reported).filter((key) => !(key in presence));
+    if (gone.length) {
+      await this.ctx.storage.delete(gone.map((key) => `reported ${key}`));
+      for (const key of gone) delete reported[key];
+      state.skipped = state.skipped.filter((key) => !gone.includes(key));
+      state.went_back = state.went_back?.filter((server) => !gone.includes(server.server));
+    }
     // A server the relay knows that hasn't said more of itself here, as every one hasn't when this is first deployed,
     // is on the build the relay says, with no update under way.
     for (const [key, here] of Object.entries(presence)) reported[key] ??= { version: here?.version, server_update_status: "up_to_date" };

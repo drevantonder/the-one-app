@@ -64,6 +64,12 @@ const SEEN = JSON.stringify({ jsonrpc: "2.0", method: "notifications/one/seen" }
  */
 const STARTING = 60_000;
 const STOPPING = 60_000;
+/**
+ * How long a server isn't heard from before it's forgotten, as Consul reaps a node gone longer than its
+ * `reconnect_timeout`: a server whose machine was reinstalled with a new key never says it's leaving. One that comes
+ * back is known again as it says what it is, so forgetting loses nothing.
+ */
+const REAP = 24 * 60 * 60_000;
 
 /** An endpoint joined to the relay: the connection its datagrams are passed over, and when its token expires. */
 interface Joined {
@@ -231,7 +237,7 @@ export class Relay extends DurableObject<RelayEnv> {
    * and says so: what the updater missed it's told again as each server next says what it is.
    */
   async updated(input: Input): Promise<object | null> {
-    const keys = [...(await this.ctx.storage.list({ prefix: "version " })).keys()].map((at) => at.slice("version ".length));
+    const keys = await this.reap([...(await this.ctx.storage.list({ prefix: "version " })).keys()].map((at) => at.slice("version ".length)));
     const [presence, versions] = await Promise.all([this.presence(keys), this.versions(keys)]);
     const servers = Object.fromEntries(keys.map((key) => [key, presence[key] && { ...presence[key], version: versions[key] }]));
     try {
@@ -243,6 +249,20 @@ export class Relay extends DurableObject<RelayEnv> {
       console.log(JSON.stringify({ telemetry: { start: Date.now(), end: Date.now(), attributes: { "one.updater": Object.keys(input)[0] }, error: `The network's updater wasn't told: ${error}` } }));
       return null;
     }
+  }
+
+  /** Forgets each of the servers `keys` not heard from in `REAP`, and gives the rest. */
+  async reap(keys: string[]): Promise<string[]> {
+    const [left, said] = await Promise.all([
+      this.ctx.storage.get<number>(keys.map((key) => `seen ${key}`)),
+      this.ctx.storage.get<ServerStatus>(keys.map((key) => `presence ${key}`)),
+    ]);
+    const heard = (key: string) => Math.max(left.get(`seen ${key}`) ?? 0, said.get(`presence ${key}`)?.at ?? 0);
+    const gone = new Set(keys.filter((key) => !this.on(key) && Date.now() - heard(key) > REAP));
+    for (let at = 0; at < gone.size; at += 32) {
+      await this.ctx.storage.delete([...gone].slice(at, at + 32).flatMap((key) => [`version ${key}`, `protocol ${key}`, `presence ${key}`, `seen ${key}`]));
+    }
+    return keys.filter((key) => !gone.has(key));
   }
 
   /** The protocols each of `keys` that's a server speaks (`spoken`), by its key, leaving out one that never said what it is. */
