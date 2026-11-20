@@ -1,5 +1,5 @@
-import { createSignal, For, onCleanup } from "solid-js"
-import { Alert, Button, Menu, Sheet, Text, toast, View, type Scenes } from "ui"
+import { createSignal, For, onCleanup, Show } from "solid-js"
+import { Alert, Button, Menu, Screen, Sheet, Text, toast, View, type Scenes } from "ui"
 
 const OwnMenu = (props: { onSelect?: (value: string) => void; onOpenChange?: (open: boolean) => void }) => (
   <Menu.Root onSelect={props.onSelect} onOpenChange={props.onOpenChange}>
@@ -113,6 +113,24 @@ const Adding = () => {
   )
 }
 
+/// A pushed screen with a sheet over it, as Vault's Add Item is, whose own state outlives the screen. The screen says where
+/// its Back goes after the sheet is open, so it registers with the device's Back later than the sheet does.
+const Pushed = () => {
+  const [adding, setAdding] = createSignal(false)
+  const [pushed, setPushed] = createSignal(true)
+  const [armed, setArmed] = createSignal(false)
+  return (
+    <Show when={pushed()} fallback={<Button onPress={() => setPushed(true)}>Vault</Button>}>
+      <Screen heading="Vault" back onBack={armed() ? () => setPushed(false) : undefined}>
+        <Button onPress={() => (setAdding(true), void setTimeout(() => setArmed(true), 100))}>Add Item</Button>
+        <Sheet heading="New Item" open={adding()} onClose={() => setAdding(false)}>
+          <Text>What a sheet holds.</Text>
+        </Sheet>
+      </Screen>
+    </Show>
+  )
+}
+
 export default {
   "Over the page/Sheet": {
     alone: true,
@@ -173,6 +191,16 @@ export default {
       "Escape closes it": ["Add Note", { wait: 400 }, { key: "Escape" }, { expect: { gone: { role: "dialog" } } }],
       "A press outside closes it": ["Add Note", { wait: 400 }, { x: 195, y: 20 }, { expect: { gone: { role: "dialog" } } }],
       "Its button closes it": ["Add Note", { wait: 400 }, "Save", { expect: { gone: { role: "dialog" } } }],
+    },
+  },
+  // Android's OnBackPressedDispatcher and the web's top layer: what's drawn over the screen closes before it, however the
+  // two registered.
+  "Over the page/A sheet over a pushed screen": {
+    render: () => <Pushed />,
+    checks: {
+      "Back closes only the sheet": ["Add Item", { wait: 400 }, { back: true }, { expect: { gone: { role: "dialog" } } }, { expect: { shown: "Add Item" } }],
+      "Escape closes only the sheet": ["Add Item", { wait: 400 }, { key: "Escape" }, { expect: { gone: { role: "dialog" } } }, { expect: { shown: "Add Item" } }],
+      "Back then closes the screen": ["Add Item", { wait: 400 }, { back: true }, { expect: { gone: { role: "dialog" } } }, { back: true }, { expect: { gone: "Add Item" } }, { expect: { shown: { role: "button", name: "Vault" } } }],
     },
   },
   "Over the page/Menu, closed": () => <OwnMenu />,

@@ -15,7 +15,8 @@
 //! lavapipe, where there's no GPU), or on Windows Direct3D 12's (WARP, Windows' own software one, where there's none). `--requests` gives it the inspector's requests first, one a line
 //! (`renderer::inspect`), as a native window takes them on its socket, from a file or stdin (`-`), each answered on
 //! stdout, a frame drawn before each: `{"v":1,"id":1,"op":"tap","text":"Backups"}`. What a person does (`tap`, `key`,
-//! `scroll`, `drag`, `replay`, `away`, the app going to the background and back, and a panel's `put_away` and `summon`)
+//! `scroll`, `drag`, `replay`, `away`, the app going to the background and back, a panel's `put_away` and `summon`, and the
+//! device's `back`)
 //! comes as the display's input, each event at its own time, a click held down 80 ms,
 //! and what it presses scrolled into sight first, as Playwright's click does. Its clock is paused: `clock`'s `step`
 //! moves it, the display ticking each frame meanwhile; and after the requests, until what it shows comes to rest but
@@ -384,7 +385,7 @@ fn ask(windows: &mut Windows, id: renderer::platform::WindowId, mut request: Val
 /// events, each at its own time, with the display's frames between, as a host gives a window input, and its time
 /// moved on with the display ticking through it. On a phone's window (`--touch`), a press is a finger's. And what the
 /// platform's keyboard was told (`keyboard`), which only the fake platform knows.
-const INPUT: [&str; 14] = ["tap", "down", "up", "key", "scroll", "drag", "replay", "trace", "clock", "wait_for", "away", "put_away", "summon", "keyboard"];
+const INPUT: [&str; 15] = ["tap", "down", "up", "key", "scroll", "drag", "replay", "trace", "clock", "wait_for", "away", "put_away", "summon", "back", "keyboard"];
 
 /// The longest it's run for, at the end, for what it shows to come to rest.
 const SETTLE_MS: f64 = 3000.0;
@@ -477,6 +478,13 @@ fn input(windows: &mut Windows, id: renderer::platform::WindowId, request: &rend
             windows.summon(id, web_time::Instant::now(), None);
             windows.run(0.0);
             Ok(json!({}))
+        }
+        // The device's Back, as Android's Back key is (`Windows::back`): what's open over the page shuts, or the window
+        // leaves; `went` is whether it took it.
+        "back" => {
+            let went = windows.back(id);
+            windows.run(0.0);
+            Ok(json!({"went": went}))
         }
         // What the input with the keyboard asked the platform's keyboard for (Flutter's `TextInputConfiguration`:
         // `textCapitalization`, `autocorrect`, `inputType`…), as a phone's keyboard is told; null where none has it.

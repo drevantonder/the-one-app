@@ -463,9 +463,10 @@ export type Scene =
  * a device delivered it (`trace`, a JSON file of `{ ms, kind, … }` beside the scenes, as the harness's `trace` takes
  * it: a trackpad's swipe with its phases and momentum, the pointer's nudges, a finger's `touch`es, each with its
  * `phase`), time passing (`wait`, ms), the app in the background that long and back (`away`, ms), which fails where it
- * draws meanwhile, as a phone's GPU refuses that, or a panel put away or summoned (`putAway`, `summon`); or what must
+ * draws meanwhile, as a phone's GPU refuses that, a panel put away or summoned (`putAway`, `summon`), or the device's own
+ * Back (`back`), as Android's key is; or what must
  * hold then (`expect`), waited for a second, or `within` ms. */
-export type CheckStep = Tap | { press: Tap; hold?: number; agent?: true } | { down: Tap } | { up: true } | { trace: string } | { wait: number } | { away: number } | { putAway: true } | { summon: true } | { expect: Expect; within?: number }
+export type CheckStep = Tap | { press: Tap; hold?: number; agent?: true } | { down: Tap } | { up: true } | { trace: string } | { wait: number } | { away: number } | { putAway: true } | { summon: true } | { back: true } | { expect: Expect; within?: number }
 /** What must hold: what's drawn whole and in the window (`shown`), what isn't there (`gone`), what has the keyboard
  * (`focused`), words somewhere on it (`text`), a node's states (`states`: `{ of, is: { expanded: true } }`), how opaque
  * it's drawn (`drawn`: `{ of, opacity }`, a pressed look), the glass's blur drawn (`blur`), and what the input with the

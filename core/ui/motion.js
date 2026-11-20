@@ -395,6 +395,7 @@ function requests(steps, folder) {
     else if (step.away !== undefined) out.push({ request: { op: "away", ms: step.away }, judge: (answer) => answer?.result?.drawn > 0 && `it drew ${answer.result.drawn} frames in the background, which an iPhone's GPU refuses, with the glyphs and pictures they uploaded` })
     else if (step.putAway) out.push({ request: { op: "put_away" } })
     else if (step.summon) out.push({ request: { op: "summon" } })
+    else if (step.back) out.push({ request: { op: "back" } })
     // An agent's press comes the inspector's way, as to a device's window, though nobody could press it (a panel put away).
     else if (step.press) out.push({ request: { op: "tap", ...selector(step.press), hold: step.hold, ...(step.agent ? { inspector: true } : {}) } })
     else if (step.down) out.push({ request: { op: "down", ...selector(step.down) } })
