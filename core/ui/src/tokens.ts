@@ -1,7 +1,7 @@
 // The design tokens: every colour, length, radius, shadow, material, font, weight, type style and pace the UI library
 // and every app draw with, as typed values, each the same everywhere or varying by condition (dark, touch, phone,
 // reduced motion: drawing-primitives/renderer.ts's `Condition`). This is their one source. `tokens` are by role, as Raycast's
-// model has them (text at 100, 60, 40, 20 and 10%, a background, a selection, a loader, seven accents each with a
+// model has them (text at 100, 60 (66 in light), 40, 20 and 10%, a background, a selection, a loader, seven accents each with a
 // tint, a 4px grid, three radii, a window's shadow and edge, three sizes of text and a large title), and a page's code
 // names only those, so their values change here alone. `legacy` are what the UI library's components drawn with CSS
 // name, until each is written on the drawing primitives. The UI library's build makes from it the web's
@@ -70,8 +70,8 @@ const colours = {
   primaryForeground: colour("oklch(1 0 0)", "oklch(0 0 0)"),
   /** A quiet fill: a secondary button, what's hovered, a skeleton: the text at 10% over the page. */
   muted: colour("oklch(0.919 0.003 286.35)", "oklch(0.269 0 0)"),
-  /** Grey words, and where the keyboard is: the text at 60%. */
-  mutedForeground: colour("oklch(0.224 0.008 285.76 / 60%)", "oklch(1 0 0 / 60%)"),
+  /** Grey words, and where the keyboard is: the text at 60%, 66% in light (`secondaryLabel`). */
+  mutedForeground: colour("oklch(0.224 0.008 285.76 / 66%)", "oklch(1 0 0 / 60%)"),
   destructive: colour(...red),
   /** Warn: "this needs you", but it can wait. */
   warning: colour(...orange),
@@ -193,7 +193,9 @@ const accents = {
  * loading, and the accents, each with its tint. */
 const roles = {
   label,
-  secondaryLabel: alpha(label, 60),
+  /** The text at 60%, and at 66% in light, where 60% on a widget's tile over a dark window behind the launcher fell
+   * short of WCAG AA's 4.5:1 (3.9:1; 4.6:1 at 66%). */
+  secondaryLabel: colour("oklch(0.224 0.008 285.76 / 66%)", "oklch(1 0 0 / 60%)"),
   tertiaryLabel: alpha(label, 40),
   quaternaryLabel: alpha(label, 20),
   quinaryLabel: alpha(label, 10),

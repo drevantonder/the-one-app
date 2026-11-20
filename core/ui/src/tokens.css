@@ -1,7 +1,7 @@
 /* The design tokens as CSS variables, made from tokens.ts by the UI library's build (tables.ts). Don't edit it: edit tokens.ts. */
 :root {
   --label: light-dark(oklch(0.224 0.008 285.76), oklch(1 0 0));
-  --secondary-label: color-mix(in oklab, var(--label) 60%, transparent);
+  --secondary-label: light-dark(oklch(0.224 0.008 285.76 / 66%), oklch(1 0 0 / 60%));
   --tertiary-label: color-mix(in oklab, var(--label) 40%, transparent);
   --quaternary-label: color-mix(in oklab, var(--label) 20%, transparent);
   --quinary-label: color-mix(in oklab, var(--label) 10%, transparent);
@@ -139,7 +139,7 @@
   --primary: light-dark(oklch(0.224 0.008 285.76), oklch(1 0 0));
   --primary-foreground: light-dark(oklch(1 0 0), oklch(0 0 0));
   --muted: light-dark(oklch(0.919 0.003 286.35), oklch(0.269 0 0));
-  --muted-foreground: light-dark(oklch(0.224 0.008 285.76 / 60%), oklch(1 0 0 / 60%));
+  --muted-foreground: light-dark(oklch(0.224 0.008 285.76 / 66%), oklch(1 0 0 / 60%));
   --destructive: light-dark(oklch(0.614 0.204 25.56), oklch(0.7 0.191 23.4));
   --warning: light-dark(oklch(0.677 0.164 57.12), oklch(0.782 0.171 67.22));
   --border: light-dark(oklch(0.224 0.008 285.76 / 10%), oklch(1 0 0 / 10%));
