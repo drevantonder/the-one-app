@@ -1,0 +1,73 @@
+# A Mac or a Windows PC of GitHub's for an agent to use over ssh, to try what only runs there (a Mac's screen
+# capture, Windows' own) on a machine that isn't the owner's: it lets in the ssh key it's given through a Cloudflare
+# quick tunnel, whose address, user and the checkout's folder are the run's artifact `tunnel`, there as soon as it's
+# up. It's at the commit given, and stays up until a file `done` exists in the home folder or `minutes` pass. Reach it
+# with `ssh -o ProxyCommand="cloudflared access ssh --hostname %h" <user>@<address>`.
+name: Runner
+
+on:
+  workflow_dispatch:
+    inputs:
+      os:
+        description: The runner, macos-26 or windows-2025
+        default: macos-26
+      commit:
+        description: The commit to check out
+        required: true
+      ssh_key:
+        description: The public key let in over ssh
+        required: true
+      minutes:
+        description: How long it stays up at most
+        default: "60"
+
+permissions:
+  contents: read
+
+jobs:
+  runner:
+    runs-on: ${{ inputs.os }}
+    timeout-minutes: 180
+    defaults:
+      run:
+        shell: bash
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.commit }}
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Let the key in over ssh (a Mac)
+        if: runner.os == 'macOS'
+        env:
+          KEY: ${{ inputs.ssh_key }}
+        run: |
+          mkdir -p ~/.ssh && echo "$KEY" >>~/.ssh/authorized_keys && chmod 600 ~/.ssh/authorized_keys
+          sudo systemsetup -f -setremotelogin on
+          brew install cloudflared
+      # Windows' OpenSSH server lets an administrator in only by the key in ProgramData, and starts in cmd: bash is
+      # Git's, as these steps' is.
+      - name: Let the key in over ssh (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        env:
+          KEY: ${{ inputs.ssh_key }}
+        run: |
+          if (-not (Get-Service sshd -ErrorAction SilentlyContinue)) { Add-WindowsCapability -Online -Name OpenSSH.Server~~~~0.0.1.0 }
+          Set-Content -Path C:\ProgramData\ssh\administrators_authorized_keys -Value $env:KEY
+          icacls C:\ProgramData\ssh\administrators_authorized_keys /inheritance:r /grant "Administrators:F" /grant "SYSTEM:F"
+          New-ItemProperty -Path HKLM:\SOFTWARE\OpenSSH -Name DefaultShell -Value "C:\Program Files\Git\bin\bash.exe" -PropertyType String -Force
+          Start-Service sshd
+          choco install cloudflared -y --no-progress
+      - name: Open a tunnel
+        run: |
+          cloudflared tunnel --no-autoupdate --url ssh://localhost:22 >~/tunnel.log 2>&1 &
+          until grep -q -o 'https://[a-z0-9-]*\.trycloudflare\.com' ~/tunnel.log; do sleep 1; done
+          mkdir -p ~/tunnel
+          { grep -o -m1 'https://[a-z0-9-]*\.trycloudflare\.com' ~/tunnel.log | sed 's|https://||'; whoami; echo "$PWD"; } >~/tunnel/tunnel
+      - uses: actions/upload-artifact@v4
+        with:
+          name: tunnel
+          path: ~/tunnel/tunnel
+          retention-days: 1
+      - name: Stay up
+        run: timeout "${{ inputs.minutes }}m" bash -c 'until [ -e ~/done ]; do sleep 5; done' || true
