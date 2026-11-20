@@ -119,8 +119,18 @@ defmodule OneCore.Apps.Deploy do
   defp committed(owner, name, number, %Version{artifact: artifact} = version, install) do
     forget()
     moved = step("installed", fn -> if install, do: Installed.change(owner, name, {:deployed, artifact, nil}), else: %{} end)
-    step("sync", fn -> if install, do: Apps.sync(owner, [{artifact, number, {:ok, version}}]) end)
-    step("notify", fn -> Server.notify_servers(Enum.uniq([owner | Installed.installed_for(artifact)])) end)
+    # The other servers load it while this one takes it over.
+    owners = Enum.uniq([owner | Installed.installed_for(artifact)])
+    trace = OpenTelemetry.Ctx.get_current()
+
+    notified =
+      Task.async(fn ->
+        OpenTelemetry.Ctx.attach(trace)
+        step("notify", fn -> Server.notify_servers(owners, "reload", %{apps: [artifact]}) end)
+      end)
+
+    step("sync", fn -> if install, do: Apps.sync(owner, [{artifact, number, {:ok, version}}], [artifact]) end)
+    Task.await(notified, :infinity)
 
     case moved do
       {:error, why} ->

@@ -210,10 +210,12 @@ defmodule OneCore.Mcp do
   # since changed.
   defp told("invalidate", params), do: Hooks.invalidate(for hook <- List.wrap(params["hooks"]), is_binary(hook), do: hook)
 
-  # Another server saying there's something new in the bucket for some owners, or with none, this server saying it can
-  # reach its network's address again.
-  defp told("reload", %{"owners" => owners}) when owners != nil,
-    do: for(owner <- List.wrap(owners), User.owner?(owner), do: Apps.reload(owner))
+  # Another server saying there's something new in the bucket for some owners, in some apps if it says which, or with
+  # no owners, this server saying it can reach its network's address again.
+  defp told("reload", %{"owners" => owners} = params) when owners != nil do
+    only = if is_list(params["apps"]), do: Enum.filter(params["apps"], &is_binary/1), else: :all
+    for owner <- List.wrap(owners), User.owner?(owner), do: Apps.reload(owner, only)
+  end
 
   defp told("reload", _params), do: Apps.reconnected()
 

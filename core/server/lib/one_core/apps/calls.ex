@@ -65,7 +65,7 @@ defmodule OneCore.Apps.Calls do
             try do
               call = %{called(at, name, versions, ask, principal, forwarded) | caller: caller, state: State.id()}
               result = tool(found, about, principal, Map.values(versions), &invoked(versions, name, {:tool, tool, &1}, call))
-              if cached != [], do: Server.notify_servers(Enum.uniq([at | Apps.chain(subject)]), "invalidate", cached)
+              if cached != [], do: Server.notify_servers(Enum.uniq([at | Apps.chain(subject)]), "invalidate", %{hooks: cached})
               {:ran, result}
             after
               Hooks.invalidate(cached)

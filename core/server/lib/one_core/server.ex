@@ -240,11 +240,12 @@ defmodule OneCore.Server do
 
   @doc """
   Tells the other servers running what's `owners'` that there's something new of theirs in the bucket to `look` for: a
-  app's version, a server, a service installed. Or that what they kept of `hooks` was `decided` from what has
-  since changed. Each has looked or forgotten, or couldn't be reached, when this returns.
+  app's version, a server, a service installed, with `params` saying more: `apps`, which changed, or for `invalidate`,
+  the `hooks` whose results were decided from what has since changed. Each has looked or forgotten, or couldn't be
+  reached, when this returns.
   """
-  def notify_servers(owners, what \\ "reload", hooks \\ []),
-    do: notify(Enum.uniq(Enum.flat_map(owners, &told/1)), owners, what, hooks)
+  def notify_servers(owners, what \\ "reload", params \\ %{}),
+    do: notify(Enum.uniq(Enum.flat_map(owners, &told/1)), owners, what, params)
 
   # The network's apps run on every server, a person's own too, for them (`OneCore.Apps.loads?/1`), and anyone else's on
   # the servers acting for them.
@@ -259,8 +260,8 @@ defmodule OneCore.Server do
   end
 
   @doc "Tells `servers`, by their keys, what `notify_servers/3` tells the servers acting for `owners`."
-  def notify(servers, owners, what \\ "reload", hooks \\ []) do
-    params = %{owners: owners, hooks: hooks}
+  def notify(servers, owners, what \\ "reload", params \\ %{}) do
+    params = Map.put(params, :owners, owners)
     notification = JSON.encode!(%{jsonrpc: "2.0", method: "notifications/one/" <> what, params: params})
     Stream.run(Task.async_stream(servers -- [key()], &ask(&1, notification), timeout: :infinity))
   end

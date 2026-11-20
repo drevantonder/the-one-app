@@ -199,16 +199,16 @@ defmodule OneCore.Apps do
 
   @doc """
   Looks in the bucket at what other servers put there for `owner`: the servers on their list, what each acts for
-  and the services it runs, and what's installed for them, running the latest version of each app. Its clients are
-  told if an app changed.
+  and the services it runs, and what's installed for them, running the latest version of each app, or with `only`,
+  of those apps. Its clients are told if an app changed.
 
   A server looks at someone when it's told to, when it's asked for them and last looked more than five minutes
   ago, and when it comes back (`reconnected/0`). Nothing else has it look, so someone nobody uses costs nothing.
   """
-  def reload(owner) do
+  def reload(owner, only \\ :all) do
     Servers.reload(owner)
     OneCore.Apps.Deploy.forget()
-    if sync(owner), do: changed([owner])
+    if sync(owner, [], only), do: changed([owner])
     # An app updated by a server elsewhere may require what isn't installed for them yet.
     if Servers.here?(owner), do: Task.start(fn -> OneCore.Apps.Lifecycle.required(owner) end)
     :ok
@@ -349,8 +349,8 @@ defmodule OneCore.Apps do
   @doc """
   Says what's installed for `owner` changed, and returns once a sync that read it after that has finished: whether
   anything that runs here changed. A sync reads what runs for them (`OneCore.Apps.Installed.running/1`), and runs
-  each app's latest version. `loaded` are versions already loaded here, each as `OneCore.Apps.Store.newer/3`
-  gives one, held by the caller. An app whose latest version took over has its processes follow it, and its services installed here
+  each app's latest version, or with `only`, a list of apps, only theirs, as a deploy knows which changed. `loaded` are
+  versions already loaded here, each as `OneCore.Apps.Store.newer/3` gives one, held by the caller. An app whose latest version took over has its processes follow it, and its services installed here
   that weren't running start.
 
   Each owner's apps are in one state, `app_sync`, with one sync in flight, as a Kubernetes controller's work
@@ -360,8 +360,8 @@ defmodule OneCore.Apps do
       synced ─installs changed─► syncing ─done─► synced
       syncing ─installs changed─► out_of_sync ─done─► syncing   (reads what's installed again)
   """
-  def sync(owner, loaded \\ []) do
-    case ask({:sync, owner, loaded}) do
+  def sync(owner, loaded \\ [], only \\ :all) do
+    case ask({:sync, owner, loaded, only}) do
       {:crashed, why} -> exit(why)
       any -> any
     end
@@ -371,12 +371,13 @@ defmodule OneCore.Apps do
   def synced, do: if(ask(:syncing) == [], do: "synced", else: "syncing")
 
   # One sync: what runs for `owner` is read, the versions newer than what's here are loaded, and they take over.
-  defp sync_once(owner, loaded) do
+  defp sync_once(owner, loaded, only) do
     installed = Installed.running(owner)
     known = for {artifact, _number, _loaded} <- loaded, do: artifact
     runs = loads?(owner)
     {latest, here} = ask({:latest, runs})
-    newer = Store.newer(Enum.uniq(Map.values(installed)) -- (known ++ here), latest, runs)
+    looked = Enum.uniq(Map.values(installed)) -- (known ++ here)
+    newer = Store.newer(if(only == :all, do: looked, else: Enum.filter(looked, &(&1 in only))), latest, runs)
     {changed, any} = ask({:looked, owner, installed, loaded ++ newer, Map.keys(latest) ++ here})
     # A process waiting for a sync, as one whose own code brought the newer version in does, can't follow until it ends.
     waiting = ask(:waiting)
@@ -477,25 +478,25 @@ defmodule OneCore.Apps do
   @impl true
   def handle_call(:started, _from, state), do: {:reply, :ok, state}
 
-  def handle_call({:sync, owner, loaded}, from, state) do
+  def handle_call({:sync, owner, loaded, only}, from, state) do
     LoadedVersion.hold(handed(loaded), self())
 
     case state.syncs do
-      %{^owner => %{next: {waiting, more}} = sync} ->
-        {:noreply, put_in(state.syncs[owner], %{sync | next: {[from | waiting], more ++ loaded}})}
+      %{^owner => %{next: {waiting, more, was}} = sync} ->
+        {:noreply, put_in(state.syncs[owner], %{sync | next: {[from | waiting], more ++ loaded, wider(was, only)}})}
 
       %{^owner => sync} ->
-        {:noreply, put_in(state.syncs[owner], %{sync | next: {[from], loaded}})}
+        {:noreply, put_in(state.syncs[owner], %{sync | next: {[from], loaded, only}})}
 
       _ ->
-        {:noreply, syncing(state, owner, [from], loaded)}
+        {:noreply, syncing(state, owner, [from], loaded, only)}
     end
   end
 
   def handle_call(:syncing, _from, state), do: {:reply, Map.keys(state.syncs), state}
 
   def handle_call(:waiting, _from, state) do
-    waiting = for {_owner, sync} <- state.syncs, {pid, _tag} <- sync.waiting ++ elem(sync.next || {[], []}, 0), do: pid
+    waiting = for {_owner, sync} <- state.syncs, {pid, _tag} <- sync.waiting ++ elem(sync.next || {[], [], []}, 0), do: pid
     {:reply, waiting, state}
   end
 
@@ -507,7 +508,7 @@ defmodule OneCore.Apps do
     gone =
       for artifact <- Map.values(installed), artifact in here, not is_map_key(state.running, artifact), do: artifact
 
-    state = if gone != [] and state.syncs[owner].next == nil, do: put_in(state.syncs[owner].next, {[], []}), else: state
+    state = if gone != [] and state.syncs[owner].next == nil, do: put_in(state.syncs[owner].next, {[], [], :all}), else: state
     {:reply, {changed, any}, state}
   end
 
@@ -599,8 +600,8 @@ defmodule OneCore.Apps do
   defp sync?(state, ref), do: Enum.any?(state.syncs, fn {_owner, sync} -> sync.ref == ref end)
 
   # A sync runs beside this, which it asks what it needs, so whatever's asked meanwhile is answered.
-  defp syncing(state, owner, waiting, loaded) do
-    task = Task.Supervisor.async_nolink(OneCore.Asks, fn -> sync_once(owner, loaded) end)
+  defp syncing(state, owner, waiting, loaded, only) do
+    task = Task.Supervisor.async_nolink(OneCore.Asks, fn -> sync_once(owner, loaded, only) end)
     put_in(state.syncs[owner], %{ref: task.ref, waiting: waiting, loaded: loaded, next: nil})
   end
 
@@ -612,9 +613,14 @@ defmodule OneCore.Apps do
 
     case sync.next do
       nil -> %{state | syncs: Map.delete(state.syncs, owner)}
-      {waiting, loaded} -> syncing(state, owner, waiting, loaded)
+      {waiting, loaded, only} -> syncing(state, owner, waiting, loaded, only)
     end
   end
+
+  # What two syncs waiting as one look at: every app, if either does.
+  defp wider(:all, _only), do: :all
+  defp wider(_only, :all), do: :all
+  defp wider(was, only), do: Enum.uniq(was ++ only)
 
   # Whoever a request is for, and the network, whose apps it may run, are looked at behind it if this server last
   # looked at them more than five minutes ago, once however many requests come meanwhile. One it has never looked at
