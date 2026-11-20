@@ -234,6 +234,7 @@ dependencies = [
  "open",
  "renderer",
  "resvg",
+ "rfd",
  "semver",
  "serde",
  "serde_json",
@@ -249,10 +250,7 @@ dependencies = [
  "tokio",
  "tray-icon",
  "url",
- "webkit2gtk",
- "window-vibrancy",
  "windows",
- "wry",
 ]
 
 [[package]]

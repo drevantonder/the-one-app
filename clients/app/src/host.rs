@@ -6,11 +6,6 @@ use std::process::ExitCode;
 
 use serde_json::{Value, json};
 use tokio::io::{AsyncBufReadExt, AsyncRead, AsyncWrite, AsyncWriteExt, BufReader};
-use wry::http::{Response, StatusCode, header};
-
-/// What the window's page reaches of Tauri's in an app's own window, where there's no Tauri (`invoke` and `listen`),
-/// by a key no app's frame knows, which replaces `__KEY__`.
-pub(crate) const BRIDGE: &str = include_str!("host-initialization-script.js");
 
 /// Who this window is: its app and who it's for, and where it was opened at.
 struct Opened {
@@ -85,32 +80,4 @@ async fn open(address: &str) -> std::io::Result<tokio::net::UnixStream> {
 #[cfg(windows)]
 async fn open(address: &str) -> std::io::Result<tokio::net::windows::named_pipe::NamedPipeClient> {
     tokio::net::windows::named_pipe::ClientOptions::new().open(address)
-}
-
-/// An app's file, or why there isn't one, as the web view's answer for it, with what an app's page may load.
-pub(crate) fn app_file(file: Result<(String, Vec<u8>), String>) -> Response<std::borrow::Cow<'static, [u8]>> {
-    let response = match file {
-        Ok((kind, file)) => Response::builder()
-            .header(header::CONTENT_TYPE, kind)
-            .header(header::CONTENT_SECURITY_POLICY, crate::APP_MAY_LOAD)
-            .header(header::CACHE_CONTROL, "no-store")
-            .body(file.into()),
-        Err(error) => Response::builder().status(StatusCode::NOT_FOUND).body(error.into_bytes().into()),
-    };
-    response.expect("these headers are valid")
-}
-
-/// The script that answers the page's ask `id`.
-pub(crate) fn answer(id: &Value, result: Result<Value, Value>) -> String {
-    let (ok, value) = match result {
-        Ok(value) => (true, value),
-        Err(value) => (false, value),
-    };
-    format!("window.__ONE_HOST__.answer({id}, {ok}, {value})")
-}
-
-/// A random number, from the hasher the standard library seeds randomly.
-pub(crate) fn random() -> u64 {
-    use std::hash::{BuildHasher, Hasher};
-    std::collections::hash_map::RandomState::new().build_hasher().finish()
 }

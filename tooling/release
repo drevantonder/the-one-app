@@ -201,13 +201,13 @@ triple() {
   esac
 }
 
-# What a client for a kind of machine is built from: its crate and what it's built with (`tooling/input-hash`), the
-# files its window shows from outside the crate (Tauri's `frontendDist`), and the protocols it speaks
-# (`core/protocol.json`). Its own build isn't in it: that's the version `one --version` says, so a client built for an
-# earlier build still says what it is.
+# What a client for a kind of machine is built from: its crate and what it's built with (`tooling/input-hash`), the UI
+# library it has built in (`ui` in clients/app/build.rs), and the protocols it speaks (`core/protocol.json`). Its own
+# build isn't in it: that's the version `one --version` says, so a client built for an earlier build still says what
+# it is.
 client_inputs() {
   { echo "$key" && tooling/input-hash clients/app "$(triple "$1")" && sha256sum core/protocol.json &&
-    jq -r '.build.frontendDist[]' clients/app/tauri.conf.json | (cd clients/app && xargs sha256sum); } |
+    git ls-files -z core/ui/src core/ui/build.js core/ui/tables.ts core/ui/package.json core/ui/bun.lock | xargs -0 sha256sum; } |
     sha256sum | cut -d' ' -f1
 }
 

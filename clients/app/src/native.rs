@@ -31,7 +31,7 @@ use tokio::sync::mpsc::{UnboundedSender, unbounded_channel};
 use url::Url;
 
 #[cfg(desktop)]
-use crate::{computer, page::NAME};
+use crate::{NAME, computer};
 #[cfg(mobile)]
 use computer::NAME;
 
@@ -199,8 +199,8 @@ async fn tables(addresses: &[Url]) -> anyhow::Result<Option<Vec<String>>> {
 
 /// A page of the client's own (`RECOVERY`, `UNOPENED`), called `name`, drawn with the UI library as an app's page is,
 /// which it loads as one does, and no styles of its own.
-async fn client_page(address: &str, name: &str) -> anyhow::Result<Page> {
-    let module = Url::parse(address)?;
+async fn client_page(path: &str, name: &str) -> anyhow::Result<Page> {
+    let module = Url::parse(CLIENT)?.join(path)?;
     let Some(tables) = tables(&[module.join("/ui/client/tokens.json")?, module.join("/ui/client/styles.json")?]).await? else {
         anyhow::bail!("the UI library needs a newer runtime than this program's")
     };
@@ -210,7 +210,7 @@ async fn client_page(address: &str, name: &str) -> anyhow::Result<Page> {
 /// Opens the launcher's page natively: on a computer in a panel put away until it's summoned (`computer`), on a phone
 /// as its root window, under every app's. → its window, once it's open. A computer's whose page this program can't
 /// draw, or that didn't open, is a panel that says why, and Telemetry hears it; where its native windows can't start,
-/// there's none, and the web launcher says so (`computer::unnative`). A phone's is its page's.
+/// there's none, and the system's alert says so (`computer::unnative`). A phone's is its page's.
 pub(crate) async fn launcher(entrypoint: &str) -> Option<WindowId> {
     let started = Instant::now();
     let (opened_to, opened) = tokio::sync::oneshot::channel();
@@ -237,15 +237,8 @@ async fn unopened_launcher(entrypoint: &str, why: String) -> Option<WindowId> {
     let name = named(entrypoint, None).await;
     let said = format!("{name} didn't open: {why}");
     let unopened = Unopened { entrypoint: entrypoint.to_owned(), subject: None, link: entrypoint.to_owned(), name, why: why.clone() };
-    let (opened_to, opened) = tokio::sync::oneshot::channel();
-    match window(Instant::now(), entrypoint, None, entrypoint, Kind::Launcher(Some(opened_to), Some(unopened))).await {
-        Ok(true) => {
-            if let Some(id) = opened.await.ok().flatten() {
-                return Some(id);
-            }
-        }
-        Ok(false) => {}
-        Err(error) => eprintln!("{entrypoint}'s problem didn't open: {error:#}"),
+    if let Some(id) = launcher_instead(Instead::Unopened(unopened)).await {
+        return Some(id);
     }
     let (shown_to, shown) = tokio::sync::oneshot::channel();
     if let Ok(native) = Native::get() {
@@ -295,14 +288,44 @@ fn replace_launcher(entrypoint: String, why: String, old: Option<WindowId>) {
     });
 }
 
+/// What a computer's launcher shows in place of the Home Screen, on a page of the client's own: why the Home Screen's
+/// page didn't open, with Try Again; where the device signs in, while it isn't in its network; or Update Required,
+/// while its servers say this program is behind them.
+pub(crate) enum Instead {
+    Unopened(Unopened),
+    SignIn,
+    Behind,
+}
+
+/// Opens the launcher, put away until it's summoned, with `instead` in place of the Home Screen. → its window, once
+/// it's open.
+#[cfg(desktop)]
+pub(crate) async fn launcher_instead(instead: Instead) -> Option<WindowId> {
+    let entrypoint = match &instead {
+        Instead::Unopened(unopened) => unopened.entrypoint.clone(),
+        Instead::SignIn => SIGN_IN.trim_start_matches('/').to_owned(),
+        Instead::Behind => UPDATE.trim_start_matches('/').to_owned(),
+    };
+    // In place of the one it had, if it had one, which goes.
+    crate::hosts::forget(&entrypoint, None);
+    let (opened_to, opened) = tokio::sync::oneshot::channel();
+    match window(Instant::now(), &entrypoint, None, &entrypoint, Kind::Launcher(Some(opened_to), Some(instead))).await {
+        Ok(_) => opened.await.ok().flatten(),
+        Err(error) => {
+            eprintln!("the launcher's {entrypoint} didn't open: {error:#}");
+            None
+        }
+    }
+}
+
 /// What a native window is: an app's own, or the launcher, a panel the system summons, which tells whoever opens it
 /// its window once it's open, or that it didn't.
 enum Kind {
     /// An app's, opened from where its icon is on the screen, if it was.
     App(Option<Bounds<f32>>),
-    /// The launcher, which tells whoever opens it its window, and with `Unopened`, the client's page in place of one
-    /// that didn't open (`unopened_launcher`).
-    Launcher(Option<tokio::sync::oneshot::Sender<Option<WindowId>>>, Option<Unopened>),
+    /// The launcher, which tells whoever opens it its window, and with `Instead`, a page of the client's own in place
+    /// of the Home Screen's.
+    Launcher(Option<tokio::sync::oneshot::Sender<Option<WindowId>>>, Option<Instead>),
     /// The client's own, over an app's, where a recovery key is shown or typed (`recovery`).
     Sheet(Sheet),
     /// The client's own, in place of an app's that didn't open (`unopened`).
@@ -319,6 +342,14 @@ pub(crate) struct Unopened {
     why: String,
 }
 
+impl Unopened {
+    /// The Home Screen, which didn't open for `why` before its page was known.
+    #[cfg(desktop)]
+    pub(crate) fn launcher(why: String) -> Self {
+        Unopened { entrypoint: UNOPENED.trim_start_matches('/').to_owned(), subject: None, link: String::new(), name: "The Home Screen".to_owned(), why }
+    }
+}
+
 /// What the client's recovery key window is for: showing the key of this device's person, or of `subject`, a group or
 /// the network, or with `typed`, letting this device in with the one they type; and who hears whether it was done.
 #[derive(Clone)]
@@ -330,11 +361,24 @@ struct Sheet {
     done: Arc<Mutex<Option<tokio::sync::oneshot::Sender<bool>>>>,
 }
 
-/// The client's own page, which only the recovery key window shows: its JS, the client's and no app's, at an address
-/// of its own (`hosts::file`).
-pub(crate) const RECOVERY: &str = "oneapp://client.localhost/client/recovery.js";
-/// The client's own page in an app's window that didn't open, its JS too (`hosts::file`).
-pub(crate) const UNOPENED: &str = "oneapp://client.localhost/client/unopened.js";
+/// Where the client's own pages are, the client's and no app's (`hosts::file`), with the UI library they're drawn with,
+/// which is built into this program too.
+pub(crate) const CLIENT: &str = "oneapp://client.localhost";
+/// The client's own pages, by their paths there: the recovery key window's, and the one in an app's window that didn't
+/// open.
+pub(crate) const PAGES: &[(&str, &[u8])] = &[
+    (RECOVERY, include_bytes!("recovery.js")),
+    (UNOPENED, include_bytes!("unopened.js")),
+    (SIGN_IN, include_bytes!("sign-in.js")),
+    (UPDATE, include_bytes!("update.js")),
+    ("/client/ask.js", include_bytes!("ask.js")),
+];
+const RECOVERY: &str = "/client/recovery.js";
+const UNOPENED: &str = "/client/unopened.js";
+/// The launcher's while the device isn't in its network, where it signs in, and while its servers say it's behind
+/// them, where it updates (`Instead`).
+const SIGN_IN: &str = "/client/sign-in.js";
+const UPDATE: &str = "/client/update.js";
 
 /// Shows its person the recovery key, theirs or `subject`'s, or with `typed` asks them for it, in a window of the
 /// client's own over the app that asked, which is told only whether they saw it or the device is in now: no app's
@@ -353,7 +397,9 @@ pub(crate) fn recovery(typed: bool, subject: Option<String>, owner: Option<Windo
 async fn window(started: Instant, entrypoint: &str, subject: Option<&str>, link: &str, mut kind: Kind) -> anyhow::Result<bool> {
     let page = match &kind {
         Kind::Sheet(_) => Some(client_page(RECOVERY, "Recovery Key").await?),
-        Kind::Unopened(unopened) | Kind::Launcher(_, Some(unopened)) => Some(client_page(UNOPENED, &unopened.name).await?),
+        Kind::Unopened(unopened) | Kind::Launcher(_, Some(Instead::Unopened(unopened))) => Some(client_page(UNOPENED, &unopened.name).await?),
+        Kind::Launcher(_, Some(Instead::SignIn)) => Some(client_page(SIGN_IN, NAME).await?),
+        Kind::Launcher(_, Some(Instead::Behind)) => Some(client_page(UPDATE, NAME).await?),
         _ => probe(entrypoint, subject, false).await?,
     };
     let Some(Page { page, module, trusted, tables, name: listed, icon }) = page else { return Ok(false) };
@@ -363,12 +409,16 @@ async fn window(started: Instant, entrypoint: &str, subject: Option<&str>, link:
         _ => None,
     };
     let unopened = match &kind {
-        Kind::Unopened(unopened) | Kind::Launcher(_, Some(unopened)) => Some(unopened.clone()),
+        Kind::Unopened(unopened) | Kind::Launcher(_, Some(Instead::Unopened(unopened))) => Some(unopened.clone()),
         _ => None,
     };
+    let signing_in = matches!(kind, Kind::Launcher(_, Some(Instead::SignIn)));
+    let behind = matches!(kind, Kind::Launcher(_, Some(Instead::Behind)));
+    // A page of the client's own in the launcher's place floats nothing of its own: the whole panel is its card.
+    let instead = matches!(kind, Kind::Launcher(_, Some(_)));
     // A launcher whose page fails as it starts has its problem box in its place, in a panel of its own.
     #[cfg(desktop)]
-    let launcher_page = launcher && unopened.is_none();
+    let launcher_page = matches!(kind, Kind::Launcher(_, None));
     // An app's own window, which says why in a window of the client's own if its page doesn't start (`unopened`).
     let app_window = matches!(kind, Kind::App(_));
     let from = match kind {
@@ -393,7 +443,7 @@ async fn window(started: Instant, entrypoint: &str, subject: Option<&str>, link:
     let name = listed.or_else(|| start["name"].as_str().map(str::to_owned)).unwrap_or_else(|| entrypoint.split('/').next().unwrap_or_default().to_owned());
 
     let fragment = link.split_once('#').map(|(_, fragment)| fragment.to_owned());
-    let state = State { chosen: chosen.clone(), trusted, entrypoint: entrypoint.to_owned(), subject: subject.map(str::to_owned), view, next: 0, launcher, framed: false, fragment, sheet: sheet.clone(), unopened, window: window.clone() };
+    let state = State { chosen: chosen.clone(), trusted, entrypoint: entrypoint.to_owned(), subject: subject.map(str::to_owned), view, next: 0, launcher, framed: false, fragment, sheet: sheet.clone(), unopened, signing_in, behind, window: window.clone() };
     let (entrypoint, subject) = (entrypoint.to_owned(), subject.map(str::to_owned));
     let link = link.to_owned();
     // Whether it opened, as the windows' thread says: a job that's dropped, as a phone's is where its windows
@@ -542,7 +592,7 @@ async fn window(started: Instant, entrypoint: &str, subject: Option<&str>, link:
                 if launcher && cfg!(desktop) {
                     // Its glass is the system's, under its page, where there's one; Linux has none, so it's a
                     // popover's colour (DESIGN.md, Launcher).
-                    screen.panel = Some(renderer::Panel { corner: computer::CORNER as f32, fill: cfg!(target_os = "linux") });
+                    screen.panel = Some(renderer::Panel { corner: computer::CORNER as f32, fill: cfg!(target_os = "linux"), whole: instead });
                 } else if cfg!(desktop) && sheet.is_none() {
                     // Its way Home, as an app's window on a computer has (DESIGN.md, App windows): Home brings the
                     // launcher forward and keeps this window open, as Window → Home Screen does.
@@ -697,7 +747,7 @@ async fn frame(window: Arc<OnceLock<WindowId>>, node: renderer::tree::Id, src: &
     let started = start(entrypoint, subject, src, false, Place::Frame(window.clone(), node), &module, page)?;
     let view = format!("{}|{entrypoint}", subject.unwrap_or_default());
     let fragment = src.split_once('#').map(|(_, fragment)| fragment.to_owned());
-    let state = State { chosen: None, trusted, entrypoint: entrypoint.to_owned(), subject: subject.map(str::to_owned), view, next: 0, launcher: false, framed: true, fragment, sheet: None, unopened: None, window: window.clone() };
+    let state = State { chosen: None, trusted, entrypoint: entrypoint.to_owned(), subject: subject.map(str::to_owned), view, next: 0, launcher: false, framed: true, fragment, sheet: None, unopened: None, signing_in: false, behind: false, window: window.clone() };
     let src = src.to_owned();
     Native::get()?.run(move |windows| {
         let Some(id) = window.get() else { return };
@@ -773,6 +823,11 @@ pub(crate) mod computer {
     pub fn hide(_: bool) {}
     pub fn resize(_: Option<f64>, _: Option<f64>) {}
 
+    /// Behind its servers, the page says Update Required.
+    pub fn behind() {
+        native(None)
+    }
+
     /// The launcher can't be drawn natively after all (its page needs a newer host, or its servers are ahead): its
     /// window closes, and the page shows the web launcher.
     pub fn native(_: Option<renderer::platform::WindowId>) {
@@ -817,6 +872,9 @@ struct State {
     sheet: Option<Sheet>,
     /// It's the client's window in place of an app's that didn't open (`unopened`).
     unopened: Option<Unopened>,
+    /// It's the launcher's sign-in page, or its Update Required (`Instead`).
+    signing_in: bool,
+    behind: bool,
     /// The window it's in, once it's open.
     window: Arc<OnceLock<WindowId>>,
     view: String,
@@ -829,6 +887,17 @@ fn theme(chosen: Option<&str>) -> Option<Appearance> {
         Some("light") => Some(Appearance::Light),
         _ => None,
     }
+}
+
+/// Where this device signs in, while it isn't in its network, as its sign-in page shows it: the link its person opens
+/// where they're signed in, as short as it's typed, the code it shows there, why there's a new one if there is, and the
+/// network's mark.
+fn signing_in() -> Option<Value> {
+    let ::client::State::SignIn { code, why } = crate::app().start.borrow().as_ref()?.1.clone() else { return None };
+    let link = Url::parse(&code.link).ok()?;
+    let typed = format!("{}{}{}", link.host_str().unwrap_or_default(), link.port().map(|port| format!(":{port}")).unwrap_or_default(), &link[url::Position::BeforePath..]);
+    let mark = format!("data:image/png;base64,{}", BASE64.encode(include_bytes!("../../../icons/Logo.png")));
+    Some(json!({"link": code.link, "typed": typed, "code": code.code, "why": why.map(|why| why.why()), "mark": mark}))
 }
 
 /// Answers what the app's JS posted its client: what the window page answers itself, here, at once, and the rest by
@@ -1025,8 +1094,33 @@ fn respond(
                 Some(Ok(json!({})))
             }
         },
+        // What the launcher's sign-in page asks, which only it may: where the device signs in, and what it does there:
+        // asks the devices of whoever its person names (`claim`), or opens its link in the device's browser, where
+        // their passkey is.
+        "one/sign-in" if state.signing_in => Some(signing_in().ok_or_else(|| json!({"code": -32000, "message": "This device is signed in"}))),
+        "one/sign-in/claim" | "one/sign-in/browser" if state.signing_in => {
+            let (command, args) = match method {
+                "one/sign-in/claim" => ("claim", json!({"person": params["person"]})),
+                _ => ("open_url", json!({"url": signing_in().map(|signing_in| signing_in["link"].clone())})),
+            };
+            state.next += 1;
+            let at = format!("m{}", state.next);
+            asked.lock().expect("nothing panics holding it").insert(at.clone(), Asked::Message(id));
+            let _ = to.send(json!({"id": at, "command": command, "args": args}));
+            return None;
+        }
+        // What the launcher's Update Required asks, which only it may: Update, which starts again on the new build, and
+        // Try Again, which asks its network afresh.
+        "one/update" | "one/update/retry" if state.behind => {
+            let command = if method == "one/update" { "update" } else { "retry" };
+            state.next += 1;
+            let at = format!("m{}", state.next);
+            asked.lock().expect("nothing panics holding it").insert(at.clone(), Asked::Message(id));
+            let _ = to.send(json!({"id": at, "command": command, "args": {}}));
+            return None;
+        }
         // The client's own windows ask nothing else: they're no app's, and call no tool.
-        method if (state.sheet.is_some() || state.unopened.is_some()) && !method.starts_with("ui/") && method != "ping" && method != "one/client" => {
+        method if (state.sheet.is_some() || state.unopened.is_some() || state.signing_in || state.behind) && !method.starts_with("ui/") && method != "ping" && method != "one/client" => {
             Some(Err(json!({"code": -32601, "message": format!("This window doesn't ask {method}")})))
         }
         method if method.starts_with("ui/") => Some(Err(json!({"code": -32601, "message": format!("This client has no {method}")}))),
@@ -1206,8 +1300,8 @@ fn channel(
                     "changed" if payload.as_str() == Some(view.as_str()) => {
                         on(Box::new(move |screen| screen.message(&json!({"jsonrpc": "2.0", "method": "notifications/one/changed"}))))
                     }
-                    // Behind its servers, the launcher is the web launcher's, which says Update Required.
-                    "state" if launcher && payload["connection"] == "behind" => computer::native(None),
+                    // Behind its servers, the launcher says Update Required in the Home Screen's place.
+                    "state" if launcher && payload["connection"] == "behind" => computer::behind(),
                     // Over its page, while its network doesn't answer, as over an app on a phone (DESIGN.md).
                     "state" if framed.is_none() => on(Box::new(move |screen| {
                         screen.notice = match payload["connection"].as_str() {

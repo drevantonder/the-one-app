@@ -5,23 +5,7 @@
 // On the web, the window page's own dialog does the same (`recoveryKey` in page/client.js), in the same words.
 import { createComponent as h, createSignal, Show } from "/ui/client/solid.js"
 import { Button, Input, render, Screen, Section, Text } from "/ui/client/native/ui.js"
-
-// What this page asks its host, apart from the UI library's own asks, by ids of its own.
-const waiting = new Map()
-let asked = 0
-const heard = globalThis.ui.message
-globalThis.ui.message = (message) => {
-  const answer = typeof message.id === "string" ? waiting.get(message.id) : undefined
-  if (!answer) return heard(message)
-  waiting.delete(message.id)
-  answer(message)
-}
-const ask = (method, params = {}) =>
-  new Promise((done, failed) => {
-    const id = `recovery-${++asked}`
-    waiting.set(id, ({ result, error }) => (error ? failed(new Error(error.message)) : done(result)))
-    globalThis.host.post({ jsonrpc: "2.0", id, method, params })
-  })
+import { ask } from "/client/ask.js"
 
 const { typed } = await ask("one/recovery")
 const [key, setKey] = createSignal("")

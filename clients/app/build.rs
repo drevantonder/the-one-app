@@ -13,34 +13,56 @@ fn main() {
     }
     #[cfg(feature = "window")]
     if !phone {
-        page();
+        name();
     }
+    #[cfg(feature = "window")]
+    ui();
     if target == "windows" {
         embed_manifest::embed_manifest_file("one.manifest").expect("the manifest is embedded");
     }
 }
 
-/// A computer's window's page, served from inside the program (`page` in lib.rs): the files `tauri.conf.json` lists as
-/// the page's (`frontendDist`), each at its name, and what they may load (`csp`). With them, the app's name, from the
-/// same file and whatever a network's build merges over it (`TAURI_CONFIG`), as a phone's Tauri build has it.
+/// A computer's app's name (`NAME` in lib.rs), as `tauri.conf.json` has it and whatever a network's build merges over
+/// it (`TAURI_CONFIG`), as a phone's Tauri build has it.
 #[cfg(feature = "window")]
-fn page() {
-    use std::fmt::Write;
+fn name() {
     let folder = std::path::PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").expect("cargo says"));
     println!("cargo::rerun-if-changed=tauri.conf.json");
     println!("cargo::rerun-if-env-changed=TAURI_CONFIG");
     let config: serde_json::Value = serde_json::from_slice(&std::fs::read(folder.join("tauri.conf.json")).expect("tauri.conf.json")).expect("it's JSON");
     let merged: Option<serde_json::Value> = std::env::var("TAURI_CONFIG").ok().and_then(|config| serde_json::from_str(&config).ok());
     let name = merged.as_ref().and_then(|merged| merged["productName"].as_str()).or(config["productName"].as_str()).expect("the app has a name");
-    let csp = config["app"]["security"]["csp"].as_str().unwrap_or_default();
-    let mut out = format!("/// The app's name.\npub const NAME: &str = {name:?};\n/// What the page may load.\npub const CSP: &str = {csp:?};\n/// The page's files, by the path each is served at.\npub const FILES: &[(&str, &[u8])] = &[\n");
-    for file in config["build"]["frontendDist"].as_array().expect("frontendDist lists the page's files") {
-        let path = folder.join(file.as_str().expect("a path")).canonicalize().expect("each of the page's files is there");
-        println!("cargo::rerun-if-changed={}", path.display());
-        let served = format!("/{}", path.file_name().expect("a file").to_string_lossy());
-        writeln!(out, "    ({served:?}, include_bytes!({:?})),", path.display().to_string()).expect("a String takes it");
+    let to = std::path::PathBuf::from(std::env::var("OUT_DIR").expect("cargo says")).join("name.rs");
+    std::fs::write(to, format!("pub(crate) const NAME: &str = {name:?};\n")).expect("OUT_DIR takes it");
+}
+
+/// The UI library, as the client's own pages draw with it (`hosts::file`): built for this program from `core/ui` as it is
+/// (`bun build.js <folder>`), so they show before the device is in its network, and while its network's is newer than
+/// this program draws, as a system's own screens come with it. What a native host loads of it: Solid, the UI library
+/// built for one, and its tables.
+#[cfg(feature = "window")]
+fn ui() {
+    use std::fmt::Write;
+    let folder = std::path::PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").expect("cargo says"));
+    let ui = folder.join("../../core/ui").canonicalize().expect("the UI library is in the repo");
+    for made_from in ["src", "build.js", "tables.ts", "package.json", "bun.lock"] {
+        println!("cargo::rerun-if-changed={}", ui.join(made_from).display());
     }
-    out.push_str("];\n");
-    let to = std::path::PathBuf::from(std::env::var("OUT_DIR").expect("cargo says")).join("page.rs");
-    std::fs::write(to, out).expect("OUT_DIR takes it");
+    let out = std::path::PathBuf::from(std::env::var("OUT_DIR").expect("cargo says")).join("ui");
+    let bun = |args: &[&std::ffi::OsStr]| {
+        let status = std::process::Command::new("bun").args(args).current_dir(&ui).status().expect("bun builds the UI library: `mise install` has it");
+        assert!(status.success(), "the UI library didn't build: bun {args:?} in {}", ui.display());
+    };
+    bun(&["install".as_ref(), "--frozen-lockfile".as_ref()]);
+    bun(&["build.js".as_ref(), out.as_os_str()]);
+    // Its JS, but the DOM's own UI library (`ui.js`, `web.js`), which a native host loads from `native/` in their place,
+    // and what puts a DOM page in its Colour Mode; Solid's (`solid.js`, `internal.js`) is in a chunk they share.
+    let files = |folder: &'static str| std::fs::read_dir(out.join(folder)).expect("the UI library built").map(move |file| format!("{folder}{}", file.expect("a file").file_name().to_string_lossy()));
+    let files = files("").filter(|file| file.ends_with(".js") && !["ui.js", "web.js", "colour-mode.js"].contains(&file.as_str())).chain(files("native/").filter(|file| file.ends_with(".js"))).chain(["tokens.json".to_owned(), "styles.json".to_owned()]);
+    let mut table = "/// The UI library's files the client's own pages load, by the path each is served at.\npub const UI: &[(&str, &[u8])] = &[\n".to_owned();
+    for file in files {
+        writeln!(table, "    (\"/ui/client/{file}\", include_bytes!({:?})),", out.join(&file).display().to_string()).expect("a String takes it");
+    }
+    table.push_str("];\n");
+    std::fs::write(out.with_file_name("ui.rs"), table).expect("OUT_DIR takes it");
 }

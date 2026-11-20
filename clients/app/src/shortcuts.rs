@@ -265,7 +265,7 @@ mod device {
     use super::Shortcut;
 
     pub fn keep(shortcuts: &[Shortcut]) -> anyhow::Result<()> {
-        let start = super::data_dir()?.join("Microsoft/Windows/Start Menu/Programs").join(crate::page::NAME);
+        let start = super::data_dir()?.join("Microsoft/Windows/Start Menu/Programs").join(crate::NAME);
         let icons = super::local_data_dir()?.join("shortcuts");
         super::renamed(&start)?;
         std::fs::create_dir_all(&start)?;
@@ -427,7 +427,7 @@ mod device {
     /// The folder this app's apps are in.
     pub fn folder() -> anyhow::Result<PathBuf> {
         let home = dirs::home_dir().ok_or_else(|| anyhow::anyhow!("this user has no home folder"))?;
-        Ok(home.join("Applications").join(crate::page::NAME))
+        Ok(home.join("Applications").join(crate::NAME))
     }
 
     fn make(bundle: &Path, shortcut: &Shortcut, program: &Path) -> anyhow::Result<()> {

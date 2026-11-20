@@ -11,7 +11,7 @@
 //! restarts on it, `cli::serving`), or keeps a newer page, and starts again on it (`computer::restart`), its app windows
 //! opening again where they were. A phone's app reloads a newer page once it's off screen; its own builds come from
 //! its store (TestFlight). Either waits while a window on screen holds something its person typed and hasn't sent: in
-//! a web view a field typed in that still holds text, which its page says (`editing`, from `initialization-script.js`),
+//! a web view a field typed in that still holds text, which its page says (`editing`),
 //! and in a native window an input with typing to undo (`renderer::typed`), until that window is put away or closed, or
 //! what's typed is sent.
 
@@ -28,6 +28,7 @@ static EDITING: Mutex<BTreeSet<String>> = Mutex::new(BTreeSet::new());
 /// A newer build or page is in place, to start again on, or reload, once nothing typed is in the way.
 static DUE: AtomicBool = AtomicBool::new(false);
 /// The edge's build the network last said, whose page has been asked for.
+#[cfg(mobile)]
 static EDGE: Mutex<Option<String>> = Mutex::new(None);
 /// One build taken at a time.
 #[cfg(desktop)]
@@ -94,6 +95,7 @@ pub async fn heard(update: Value) {
     if let Some(latest) = update["latest"][cli::serving::name()].as_str() {
         take(latest).await
     }
+    #[cfg(mobile)]
     if let Some(edge) = update["edge"].as_str() {
         let before = EDGE.lock().expect("nothing panics holding it").replace(edge.to_owned());
         if before.as_deref() != Some(edge) {
@@ -112,6 +114,7 @@ pub async fn caught_up() {
             Err(error) => eprintln!("couldn't ask the network for its latest build: {error:#}"),
         }
     }
+    #[cfg(mobile)]
     page().await
 }
 
@@ -151,7 +154,8 @@ async fn in_place() {
 }
 
 /// Asks the network for its page, which is due once a newer one is kept: one ask at a time, as each keeps what it
-/// downloads in the same folder (`page::update`).
+/// downloads in the same folder (`page::update`). A computer's windows are native, with no page.
+#[cfg(mobile)]
 pub async fn page() {
     static ASKING: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
     let _one = ASKING.lock().await;
@@ -167,6 +171,7 @@ pub async fn page() {
     }
 }
 
+#[cfg(mobile)]
 async fn due() {
     DUE.store(true, Ordering::Relaxed);
     WAITING.store(false, Ordering::Relaxed);

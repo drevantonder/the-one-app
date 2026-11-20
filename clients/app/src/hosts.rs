@@ -1,10 +1,10 @@
-//! A computer's app windows: an app's is drawn by this process (`renderer`), and any other app's is a web view in
-//! a process of its own (`host`), as an app the system lists by its own name and icon; the launcher (`computer`)
-//! starts them. On a phone an app's window, drawn natively over the page, talks over this channel too, in
+//! A computer's app windows: each is drawn by this process (`renderer`), as an app the system lists by its own name
+//! and icon, whose shortcut starts a process of its own that hands over to this one (`host`); the launcher
+//! (`computer`) starts them. On a phone an app's window, drawn natively over the page, talks over this channel too, in
 //! memory, and every other app is a frame in the page, as on any phone. They have no client of
 //! their own: each asks through this one, over a local channel that only this user on this machine reaches, a Unix
 //! socket (`address`), or on Windows a named pipe, so there's one connection to the network, one sign-in
-//! and one set of what's kept. What one asks is what the launcher's page asks (`invoke`), by the same commands
+//! and one set of what's kept. What one asks is what a phone's page asks (`invoke`), by the same commands
 //! (`command`), and it hears the same events.
 //!
 //! Each line on the channel is a JSON message. An app's window says first which app it is (`hello`), then asks (`id`,
@@ -327,14 +327,17 @@ pub(crate) async fn talk(stream: impl AsyncRead + AsyncWrite + Send + 'static) {
     crate::updater::gone(&label);
 }
 
+// The UI library built into this program (`ui` in build.rs).
+include!(concat!(env!("OUT_DIR"), "/ui.rs"));
+
 /// One file of an app's, for an app's window, as the launcher's page loads one (`Views::file`).
 pub(crate) async fn file(address: &str) -> Result<Value, String> {
-    // The client's own page is in this program, not the network's.
-    if address == crate::native::RECOVERY {
-        return Ok(json!({"kind": "text/javascript", "body": BASE64.encode(include_bytes!("recovery.js"))}));
-    }
-    if address == crate::native::UNOPENED {
-        return Ok(json!({"kind": "text/javascript", "body": BASE64.encode(include_bytes!("unopened.js"))}));
+    // The client's own pages are in this program, not the network's, and the UI library they're drawn with too.
+    if let Some(path) = address.strip_prefix(crate::native::CLIENT) {
+        let page = crate::native::PAGES.iter().find(|(page, _)| *page == path).map(|(_, file)| ("text/javascript", *file));
+        let ui = UI.iter().find(|(file, _)| *file == path).map(|(file, body)| (if file.ends_with(".json") { "application/json" } else { "text/javascript" }, *body));
+        let (kind, body) = page.or(ui).ok_or_else(|| format!("the client has no {path}"))?;
+        return Ok(json!({"kind": kind, "body": BASE64.encode(body)}));
     }
     let (kind, file) = crate::views()?.file(address).await.map_err(|error| format!("{error:#}"))?;
     Ok(json!({"kind": kind, "body": BASE64.encode(&file)}))
@@ -385,11 +388,6 @@ pub(crate) async fn command(label: &str, command: &str, args: Value) -> Result<V
             if !launcher {
                 started["name"] = json!(text("entrypoint").and_then(|entrypoint| crate::shortcuts::name(&entrypoint)));
             }
-            // The web launcher says why there's no Home Screen, where this device's native windows can't start.
-            #[cfg(desktop)]
-            if launcher {
-                started["unnative"] = json!(computer::unnatived());
-            }
             Ok(started)
         }
         // An app opened from the launcher comes in front, and the launcher goes.
@@ -423,6 +421,7 @@ pub(crate) async fn command(label: &str, command: &str, args: Value) -> Result<V
             app().shell.open_url(&url).map(done)
         }
         "retry" => retry().await.map(done),
+        "claim" => claim(text("person").unwrap_or_default()).await,
         "apps" => apps(text("subject")).await,
         "request" => request(text("view").unwrap_or_default(), text("method").unwrap_or_default(), args["params"].clone()).await,
         "refresh" => refresh(text("view").unwrap_or_default()).await.map(done),

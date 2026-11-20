@@ -3,22 +3,7 @@
 // host only what it's for (`one/unopened`, in native.rs).
 import { createComponent as h } from "/ui/client/solid.js"
 import { Button, Problem, render, Screen } from "/ui/client/native/ui.js"
-
-const waiting = new Map()
-let asked = 0
-const heard = globalThis.ui.message
-globalThis.ui.message = (message) => {
-  const answer = typeof message.id === "string" ? waiting.get(message.id) : undefined
-  if (!answer) return heard(message)
-  waiting.delete(message.id)
-  answer(message)
-}
-const ask = (method, params = {}) =>
-  new Promise((done, failed) => {
-    const id = `unopened-${++asked}`
-    waiting.set(id, ({ result, error }) => (error ? failed(new Error(error.message)) : done(result)))
-    globalThis.host.post({ jsonrpc: "2.0", id, method, params })
-  })
+import { ask } from "/client/ask.js"
 
 const { name, why } = await ask("one/unopened")
 const said = why.charAt(0).toUpperCase() + why.slice(1)

@@ -6,25 +6,20 @@
 //! app window's Home. The program runs on with it put away, holding the device's one connection to its network, its
 //! notifications and its app windows, until it's quit (its menu, Cmd-Q, or Ctrl-Q on Linux).
 //!
-//! Where the Home Screen's page is of a version this program speaks, the launcher is drawn natively, in a
-//! panel of this process's own (`renderer::launcher`), as every app's native window is, and it shows within a frame of
-//! being summoned. Otherwise, and while the device signs in or needs updating, which its page doesn't show, it's a
-//! window and a web view (tao and wry): its page is the window's own (`page/`), which shows the Home Screen, and asks
-//! what it asks of the app (`hosts::command`) through its bridge (`host-initialization-script.js`). Put away a while,
-//! it discards its page (`discard`).
+//! The launcher is drawn natively, in a panel of this process's own, as every app's native window is, and it shows
+//! within a frame of being summoned: the Home Screen's page, or in its place a page of the client's own
+//! (`native::Instead`), where the device signs in, or says Update Required while its servers say this program is
+//! behind them, or says why the Home Screen didn't open.
 
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 
 use serde_json::{Value, json};
-use tao::dpi::{LogicalSize, PhysicalPosition};
-use tao::event::{Event, WindowEvent};
+use tao::dpi::LogicalSize;
+use tao::event::Event;
 use tao::event_loop::{ControlFlow, EventLoopBuilder, EventLoopProxy};
-use tao::window::{Theme, Window, WindowBuilder};
-use wry::http::Request;
-use wry::{RequestAsyncResponder, WebView, WebViewBuilder, WebViewId};
 
-use crate::discard::Discarding;
+use crate::native::Instead;
 use crate::{hosts, notifications};
 
 /// The launcher's width and tallest height, in points: Raycast's panel's width, its search bar, two of a phone's pages
@@ -37,30 +32,41 @@ const MOST: LogicalSize<f64> = LogicalSize::new(1200.0, 900.0);
 /// How round the launcher's corners are, in points, as Raycast's are, and the edge its page draws inside them.
 pub(crate) const CORNER: f64 = 18.0;
 
-/// What the program is told to do on its main thread, where its window and web view are.
+/// What the launcher shows: the Home Screen, or in its place (`Instead`), where the device signs in, Update Required,
+/// or why the Home Screen didn't open.
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Shows {
+    Home,
+    SignIn,
+    Behind,
+    Unopened,
+}
+
+/// What the program is told to do on its main thread, where its event loop is.
 pub(crate) enum Told {
-    /// Runs script in the launcher's page.
-    Script(String),
     /// Shows the launcher, or puts it away if it's showing: its shortcut, or the ring in a Mac's menu bar, when it
     /// was pressed, and the key the shortcut ends with, as the DOM names it.
     Toggle(std::time::Instant, Option<String>),
     Summon,
-    /// The launcher is drawn natively in this window (`renderer::launcher`), or with none, it's the web launcher.
-    Native(Option<renderer::platform::WindowId>),
+    /// The launcher is open in this window, showing what it shows, or with none, there's none, as the `prepare` it's
+    /// from opened it: one from before the latest is gone already.
+    Native(Option<renderer::platform::WindowId>, Shows, u64),
+    /// This device's native windows can't start, so there's no launcher: the system's own alert says why.
+    Unnative(String),
     /// Puts it away, and with `true` gives the keyboard back to the app that had it (Escape, or its page done).
     Hide(bool),
-    Theme(Option<crate::Theme>),
     /// Makes it as tall as its page's content, or its tallest, and as wide where it says (`resize`).
     Resize(Option<f64>, Option<f64>),
-    /// Loads its page again, as the device's session starts again.
+    /// Opens it again, as the device's session starts again, or its page was updated.
     Reload,
     /// The program before it, which started it as it updated, has ended: what only one may have is its now, the
     /// channel and the launcher's shortcut (`opened`).
     Handed,
     /// The program it started as it updated is up: it lets go of the launcher's shortcut and ends (`restart`).
     Ending,
-    /// Its servers talk with it again after they said it was behind, which made it the web launcher (`native`): which
-    /// launcher it is is decided again, the native one where it can be.
+    /// Its servers say this program is behind them: it says Update Required.
+    Behind,
+    /// Its servers talk with it again after they said it was behind: the Home Screen is back.
     Talks,
     /// Opens a `one:` link.
     Open(String),
@@ -97,27 +103,25 @@ pub(crate) fn resize(width: Option<f64>, height: Option<f64>) {
     tell(Told::Resize(width, height))
 }
 
-/// The launcher is drawn natively in window `id`, or with none, it's the web launcher, as its page turns out to need.
+/// The launcher is open in window `id`, or with none, there's none.
 pub(crate) fn native(id: Option<renderer::platform::WindowId>) {
-    tell(Told::Native(id))
+    tell(Told::Native(id, Shows::Unopened, PREPARED.load(std::sync::atomic::Ordering::Relaxed)))
 }
 
-/// Why this device's native windows couldn't start, where they couldn't: the web launcher says so in place of the
-/// Home Screen (`unnative` in its page's `start`).
-static UNNATIVE: Mutex<Option<String>> = Mutex::new(None);
+/// Which `prepare` is the latest: each opens the launcher as the device is then, and only the latest's is it.
+static PREPARED: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
 
-/// This device's native windows couldn't start, so there's no Home Screen: the web launcher says why.
+/// This device's native windows couldn't start, so there's no launcher: the system's own alert says why.
 pub(crate) fn unnative(why: String) {
-    *UNNATIVE.lock().expect("nothing panics holding it") = Some(why);
-    tell(Told::Native(None))
+    tell(Told::Unnative(why))
 }
 
-/// Why this device's native windows couldn't start, if they couldn't (`unnative`).
-pub(crate) fn unnatived() -> Option<String> {
-    UNNATIVE.lock().expect("nothing panics holding it").clone()
+/// Its servers say this program is behind them: the launcher says Update Required (`Told::Behind`).
+pub(crate) fn behind() {
+    tell(Told::Behind)
 }
 
-/// Its servers talk with it again: a launcher that's the web one for being behind them is native again (`Told::Talks`).
+/// Its servers talk with it again: a launcher that says Update Required shows the Home Screen again (`Told::Talks`).
 pub(crate) fn talks() {
     tell(Told::Talks)
 }
@@ -135,30 +139,48 @@ pub(crate) fn is_launcher(page: &str) -> bool {
     LAUNCHER.lock().expect("nothing panics holding it").as_deref() == Some(page)
 }
 
-/// Opens the launcher natively, where it can be, and tells the main thread which it is (`Told::Native`): where the
-/// device is in its network,. Signing in, it's the web launcher's. The `one:` link the app was started with, or that
-/// came before, opens once the native launcher has, or is the web launcher's to open.
+/// Opens the launcher, and tells the main thread its window (`Told::Native`): the Home Screen, or in its place where the
+/// device signs in, Update Required, or why the Home Screen didn't open (`Instead`). The `one:` link the app was
+/// started with, or that came before, opens once the Home Screen has.
 async fn prepare() {
-    let mut link = None;
-    let opened = async {
-        let started = crate::start().await.ok()?;
-        link = started["open"].as_str().map(str::to_owned);
-        if started["state"]["session"]["state"] == "signIn" {
-            return None;
-        }
-        let listed = hosts::command("main", "apps", json!({})).await.ok()?;
-        let (page, _) = crate::native::pages(&listed).find(|(_, meta)| meta["category"] == "launcher")?;
-        *LAUNCHER.lock().expect("nothing panics holding it") = Some(page.clone());
-        crate::native::launcher(&page).await
-    };
-    let opened = opened.await;
-    match (link, opened.is_some()) {
-        (Some(link), true) => crate::spawn(crate::native::go(link, None)),
-        // The web launcher's page asks for it as it starts (`start`).
-        (Some(link), false) => *OPENED.lock().expect("nothing panics holding it") = Some(link),
-        (None, _) => {}
+    // One at a time: two opening the same page at once would each take the other's place as its client knows it.
+    static ONE: tokio::sync::Mutex<()> = tokio::sync::Mutex::const_new(());
+    let prepared = PREPARED.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
+    let _one = ONE.lock().await;
+    if prepared != PREPARED.load(std::sync::atomic::Ordering::Relaxed) {
+        return;
     }
-    tell(Told::Native(opened))
+    let opened = |id, shows| tell(Told::Native(id, shows, prepared));
+    let instead = |instead| crate::native::launcher_instead(instead);
+    let unopened = |why| Instead::Unopened(crate::native::Unopened::launcher(why));
+    crate::settled().await;
+    let started = match crate::start().await {
+        Ok(started) => started,
+        Err(why) => return opened(instead(unopened(format!("the One App didn't start: {why}"))).await, Shows::Unopened),
+    };
+    // The link it was asked to open waits for the Home Screen, through signing in and updating.
+    if let Some(link) = started["open"].as_str() {
+        *OPENED.lock().expect("nothing panics holding it") = Some(link.to_owned());
+    }
+    if started["state"]["session"]["state"] == "signIn" {
+        return opened(instead(Instead::SignIn).await, Shows::SignIn);
+    }
+    if started["state"]["connection"] == "behind" {
+        return opened(instead(Instead::Behind).await, Shows::Behind);
+    }
+    let listed = match hosts::command("main", "apps", json!({})).await {
+        Ok(listed) => listed,
+        Err(why) => return opened(instead(unopened(format!("its apps weren't listed: {why}"))).await, Shows::Unopened),
+    };
+    let Some((page, _)) = crate::native::pages(&listed).find(|(_, meta)| meta["category"] == "launcher") else {
+        return opened(instead(unopened("no app on your network is a Home Screen".to_owned())).await, Shows::Unopened);
+    };
+    *LAUNCHER.lock().expect("nothing panics holding it") = Some(page.clone());
+    let id = crate::native::launcher(&page).await;
+    if let Some(link) = OPENED.lock().expect("nothing panics holding it").take().filter(|_| id.is_some()) {
+        crate::spawn(crate::native::go(link, None));
+    }
+    opened(id, if id.is_some() { Shows::Home } else { Shows::Unopened })
 }
 
 /// The app was started again: its icon in the Dock or taskbar, which shows the launcher, or a `one:` link it opens.
@@ -180,8 +202,7 @@ pub(crate) fn runtime() -> &'static tokio::runtime::Runtime {
     RUNTIME.get_or_init(|| tokio::runtime::Builder::new_multi_thread().enable_all().build().expect("a runtime starts"))
 }
 
-/// A `one:` link for the page to open once it asks where it is: what the app was started with, or one that came
-/// while its page was loading.
+/// A `one:` link for the Home Screen to open once it has: what the app was started with, or one that came before.
 static OPENED: Mutex<Option<String>> = Mutex::new(None);
 
 /// A computer's window, as what's here tells and asks it (`Shell`).
@@ -196,7 +217,6 @@ impl crate::Shell for Computer {
         if event == "open" {
             return tell(Told::Open(payload.as_str().unwrap_or_default().to_owned()));
         }
-        tell(Told::Script(format!("window.__ONE_HOST__.event({}, {payload})", Value::from(event))));
         if hosts::EVENTS.contains(&event) {
             hosts::tell_all(json!({"event": event, "payload": payload}));
         }
@@ -224,9 +244,8 @@ impl crate::Shell for Computer {
         crate::spawn(notifications::listen(client, ::client::NAME, |app| crate::app().shell.emit("open", json!(app))));
     }
 
-    fn theme(&self, theme: Option<crate::Theme>) {
-        tell(Told::Theme(theme))
-    }
+    /// Each window is native, and told the Colour Mode chosen as it's chosen (`chose`): the app has none of its own.
+    fn theme(&self, _: Option<crate::Theme>) {}
 }
 
 /// Starts the app, unless it's running already, which it then tells it was started again (`hosts::again`), and runs
@@ -317,56 +336,16 @@ fn launcher(home: std::path::PathBuf, link: Option<String>, started: std::time::
     let _ = PROXY.set(Mutex::new(event_loop.create_proxy()));
     *OPENED.lock().expect("nothing panics holding it") = link;
     crate::begin(Computer, started);
-    crate::page::load(&home);
 
     menu_events();
     #[cfg(target_os = "macos")]
     let _menu = menu();
     let _ring = ring();
 
-    let window = WindowBuilder::new().with_title(crate::page::NAME).with_inner_size(SIZE).with_decorations(false).with_resizable(false).with_visible(false).with_always_on_top(true);
-    #[cfg(not(target_os = "linux"))]
-    let window = window.with_transparent(true);
-    #[cfg(target_os = "macos")]
-    let window = window.with_visible_on_all_workspaces(true);
-    #[cfg(target_os = "linux")]
-    let window = {
-        use tao::platform::unix::WindowBuilderExtUnix;
-        // GTK keeps a window that isn't resizable the size it was made, so here it's resizable, held to the size it's
-        // given (`Told::Resize`).
-        window.with_skip_taskbar(true).with_resizable(true).with_min_inner_size(SIZE).with_max_inner_size(SIZE)
-    };
-    #[cfg(windows)]
-    let window = {
-        use tao::platform::windows::WindowBuilderExtWindows;
-        window.with_skip_taskbar(true).with_undecorated_shadow(true)
-    };
-    let window = window.build(&event_loop)?;
-    glass(&window);
-
-    // The web launcher's page, made once it's known the launcher isn't native (`Told::Native`): its own pages and
-    // apps' it asks the app for, and has nothing else load.
-    let page_started = Arc::new(AtomicBool::new(false));
-    #[cfg(target_os = "linux")]
-    keys(&window);
-    // Its data is where Tauri kept it, which Windows' WebView2 shares with each app's window.
-    #[cfg(any(target_os = "linux", windows))]
-    let data_directory = crate::shortcuts::local_data_dir().ok();
-    #[cfg(target_os = "macos")]
-    let data_directory: Option<std::path::PathBuf> = None;
-    let make_page = {
-        let page_started = page_started.clone();
-        move |window: &Window| match Discarding::new(window, Page { started: page_started.clone() }, data_directory.clone()) {
-            Ok(page) => Some(page),
-            Err(error) => {
-                eprintln!("the launcher's page didn't load: {error:#}");
-                None
-            }
-        }
-    };
-    let mut page: Option<Discarding<Page>> = None;
-    // The native launcher's window, once it's open, and whether it's been decided which it is.
+    // The launcher's window, once it's open, whether it says Update Required, and whether it's been decided which it
+    // is.
     let mut native: Option<renderer::platform::WindowId> = None;
+    let mut shows = Shows::Home;
     let mut decided = false;
     crate::spawn(prepare());
 
@@ -383,9 +362,8 @@ fn launcher(home: std::path::PathBuf, link: Option<String>, started: std::time::
         eprintln!("this device shows this app's notifications as another app's: {error:#}");
     }
     let mut _shortcut = if restarted { None } else { shortcut(&home) };
-    // Started again as it updated, the app windows that were open open again.
-    // The windows open before it updated, once it's signed in: before, an app's page can't be read. The launcher, open
-    // as the native one is, isn't an app's window.
+    // Started again as it updated, the app windows that were open open again, once it's signed in: before, an app's
+    // page can't be read. The launcher, open as the native one is, isn't an app's window.
     if let Some(reopen) = std::env::var("ONE_REOPEN").ok().and_then(|reopen| serde_json::from_str::<Vec<(String, Option<String>)>>(&reopen).ok()) {
         crate::spawn(async move {
             crate::signed_in().await;
@@ -398,30 +376,13 @@ fn launcher(home: std::path::PathBuf, link: Option<String>, started: std::time::
             }
         });
     }
-    eprintln!("the window was made {} ms after the app started", started.elapsed().as_millis());
 
     // Started for an app's own window alone, or as it updated with it put away, the launcher stays put away. Until
-    // it's decided which launcher it is, it's shown once it is, if it's wanted then.
-    let mut shown = false;
+    // it's open, it's shown once it is, if it's wanted then.
     let mut wanted = std::env::var_os("ONE_HIDDEN").is_none();
-    let mut focused = false;
     event_loop.run(move |event, _, flow| {
-        if let (Event::WindowEvent { event, .. }, Some(page)) = (&event, page.as_mut()) {
-            page.heard(&window, event);
-        }
+        *flow = ControlFlow::Wait;
         match event {
-            Event::WindowEvent { event: WindowEvent::Focused(true), .. } => focused = true,
-            // Something else was clicked, or came in front: it goes, as Spotlight does.
-            Event::WindowEvent { event: WindowEvent::Focused(false), .. } if shown && focused => {
-                focused = false;
-                shown = false;
-                put_away(&window, page.as_mut(), false);
-            }
-            // Alt-F4, which closes nothing but puts it away.
-            Event::WindowEvent { event: WindowEvent::CloseRequested, .. } => {
-                shown = false;
-                put_away(&window, page.as_mut(), true);
-            }
             // The Dock's icon clicked.
             #[cfg(target_os = "macos")]
             Event::Reopen { .. } => tell(Told::Summon),
@@ -432,98 +393,55 @@ fn launcher(home: std::path::PathBuf, link: Option<String>, started: std::time::
                     tell(Told::Open(link));
                 }
             }
-            Event::UserEvent(Told::Script(script)) => {
-                if let Some(webview) = page.as_ref().and_then(|page| page.webview()) {
-                    drop(webview.evaluate_script(&script))
+            // The launcher's open, put away, and shown now if it's wanted.
+            // One from before the latest `prepare` is the device as it was: it goes.
+            Event::UserEvent(Told::Native(id, _, from)) if from != PREPARED.load(std::sync::atomic::Ordering::Relaxed) => {
+                if let Some(id) = id {
+                    on_native(move |windows| windows.close(id));
                 }
             }
-            // The native launcher's ready, put away, and shown now if it's wanted: the web launcher goes.
-            Event::UserEvent(Told::Native(Some(id))) => {
+            Event::UserEvent(Told::Native(id, showing, _)) => {
                 decided = true;
-                native = Some(id);
-                if shown {
-                    put_away(&window, page.as_mut(), false);
-                    shown = false;
-                }
-                page = None;
-                if std::mem::take(&mut wanted) {
+                native = id;
+                shows = showing;
+                if let Some(id) = native.filter(|_| std::mem::take(&mut wanted)) {
                     let asked = std::time::Instant::now();
                     on_native(move |windows| windows.summon(id, asked, None));
                 }
             }
-            // It's the web launcher: its page loads, and it shows if it's wanted.
-            Event::UserEvent(Told::Native(None)) => {
-                decided = true;
-                if let Some(id) = native.take() {
-                    wanted = true;
-                    on_native(move |windows| windows.close(id));
-                }
-                if page.is_none() {
-                    page = make_page(&window);
-                    if let Some(page) = page.as_mut().filter(|_| !wanted) {
-                        page.shown(&window, false);
-                    }
-                }
-                if std::mem::take(&mut wanted) {
-                    show(&window, page.as_mut());
-                    shown = true;
-                }
+            // There's no launcher, nor any window: the system's alert says why, and the app ends.
+            Event::UserEvent(Told::Unnative(why)) => {
+                alert(&format!("The One App can't open its windows on this device: {why}"));
+                *flow = ControlFlow::Exit;
             }
             Event::UserEvent(Told::Toggle(asked, key)) if native.is_some() => {
-                let id = native.expect("it's native");
+                let id = native.expect("it's open");
                 on_native(move |windows| if windows.showing(id) { windows.put_away(id, true) } else { windows.summon(id, asked, key.as_deref()) });
             }
             Event::UserEvent(Told::Summon) if native.is_some() => {
-                let (id, asked) = (native.expect("it's native"), std::time::Instant::now());
+                let (id, asked) = (native.expect("it's open"), std::time::Instant::now());
                 on_native(move |windows| windows.summon(id, asked, None));
             }
             Event::UserEvent(Told::Toggle(..) | Told::Summon) if !decided => wanted = true,
-            Event::UserEvent(Told::Toggle(..)) if shown => {
-                shown = false;
-                put_away(&window, page.as_mut(), true);
-            }
-            Event::UserEvent(Told::Toggle(..) | Told::Summon) => {
-                show(&window, page.as_mut());
-                shown = true;
-                focused = false;
-            }
-            Event::UserEvent(Told::Hide(give_back)) if native.is_some() => {
-                let id = native.expect("it's native");
-                on_native(move |windows| windows.put_away(id, give_back));
-            }
             Event::UserEvent(Told::Hide(give_back)) => {
-                shown = false;
-                focused = false;
-                put_away(&window, page.as_mut(), give_back);
+                if let Some(id) = native {
+                    on_native(move |windows| windows.put_away(id, give_back));
+                }
             }
-            Event::UserEvent(Told::Theme(theme)) => window.set_theme(theme.map(|theme| match theme {
-                crate::Theme::Light => Theme::Light,
-                crate::Theme::Dark => Theme::Dark,
-            })),
             // Its top stays where it is, as Raycast's and Spotlight's grow and shrink downwards.
             Event::UserEvent(Told::Resize(width, height)) => {
                 if let Some(id) = native {
                     let width = width.map(|width| width.clamp(1.0, MOST.width) as f32);
                     let height = height.unwrap_or(SIZE.height).clamp(1.0, MOST.height) as f32;
                     on_native(move |windows| windows.resize(id, width, height));
-                    return;
-                }
-                let height = height.unwrap_or(SIZE.height).clamp(1.0, SIZE.height);
-                let size = LogicalSize::new(SIZE.width, height);
-                let at = window.outer_position();
-                #[cfg(target_os = "linux")]
-                {
-                    window.set_min_inner_size(Some(size));
-                    window.set_max_inner_size(Some(size));
-                }
-                window.set_inner_size(size);
-                if let Ok(at) = at {
-                    window.set_outer_position(at);
                 }
             }
-            // The device's session started again, or the native launcher's page was updated: which launcher it is
-            // is decided again, the native one open again where it can be.
-            Event::UserEvent(Told::Reload) if native.is_some() || !decided => {
+            // The device's session started again, or its page was updated; its servers say it's behind them, or talk
+            // with it again after they did: it opens again, as what it is now, and shows again if it was showing.
+            Event::UserEvent(told @ (Told::Reload | Told::Behind | Told::Talks)) if matches!(told, Told::Reload) || matches!(told, Told::Behind) != (shows == Shows::Behind) => {
+                // Signed in just now, its person sees their Home Screen, as an app opens to it once they're in: the
+                // sign-in page is gone already, as every window is as the session starts again (`Shell::reload`).
+                wanted |= shows == Shows::SignIn;
                 if let Some(id) = native.take() {
                     on_native(move |windows| {
                         if windows.showing(id) {
@@ -536,36 +454,21 @@ fn launcher(home: std::path::PathBuf, link: Option<String>, started: std::time::
                     hosts::forget(launcher, None);
                 }
                 decided = false;
-                crate::spawn(prepare());
-            }
-            Event::UserEvent(Told::Talks) if native.is_some() || !decided => {}
-            // Its page is made again, and may be native now.
-            Event::UserEvent(Told::Reload | Told::Talks) => {
-                page_started.store(false, Ordering::Relaxed);
-                page = None;
-                decided = false;
-                wanted = shown;
-                if shown {
-                    put_away(&window, None, false);
-                    shown = false;
-                }
-                crate::spawn(prepare());
-            }
-            // The native launcher opens a link to an app in that app's window.
-            Event::UserEvent(Told::Open(link)) if native.is_some() => crate::spawn(crate::native::go(link, None)),
-            // The page opens it once it's there to (`start`), and if it isn't yet, once it asks where it is.
-            Event::UserEvent(Told::Open(link)) => {
-                if let Some(webview) = page.as_ref().and_then(|page| page.webview()).filter(|_| page_started.load(Ordering::Relaxed)) {
-                    let _ = webview.evaluate_script(&format!("window.__ONE_HOST__.event(\"open\", {})", Value::from(link)));
-                } else {
-                    *OPENED.lock().expect("nothing panics holding it") = Some(link);
-                    // Discarded, its page loads again to open it, out of sight if it's put away.
-                    if let Some(page) = page.as_mut() {
-                        page.needed(&window);
-                    }
+                match told {
+                    Told::Behind => crate::spawn(async {
+                        let prepared = PREPARED.fetch_add(1, std::sync::atomic::Ordering::Relaxed) + 1;
+                        tell(Told::Native(crate::native::launcher_instead(Instead::Behind).await, Shows::Behind, prepared))
+                    }),
+                    _ => crate::spawn(prepare()),
                 }
             }
-            Event::UserEvent(Told::Restart) => restart(shown),
+            // The Home Screen opens a link to an app in that app's window; until it's open, the link waits for it.
+            Event::UserEvent(Told::Open(link)) if native.is_some() && shows == Shows::Home => crate::spawn(crate::native::go(link, None)),
+            Event::UserEvent(Told::Open(link)) => *OPENED.lock().expect("nothing panics holding it") = Some(link),
+            Event::UserEvent(Told::Restart) => match native {
+                Some(id) => on_native(move |windows| restart(windows.showing(id))),
+                None => restart(false),
+            },
             Event::UserEvent(Told::Quit) => *flow = ControlFlow::Exit,
             // The shortcut is let go of before it ends, which the system has done once this returns, so the new
             // program, which takes it as this one ends, finds it free.
@@ -583,208 +486,21 @@ fn launcher(home: std::path::PathBuf, link: Option<String>, started: std::time::
             }
             _ => {}
         }
-        if *flow != ControlFlow::Exit {
-            *flow = page.as_mut().map_or(ControlFlow::Wait, |page| page.discard_due(&window));
-        }
     })
 }
 
-/// Shows the launcher, centred near the top of the screen the pointer is on, with the keyboard.
-fn show(window: &Window, mut page: Option<&mut Discarding<Page>>) {
-    // Discarded while it was put away, its page loads again.
-    if let Some(page) = page.as_mut() {
-        page.shown(window, true);
-    }
-    let pointer = window.cursor_position().ok();
-    let screen = pointer
-        .and_then(|at| {
-            window.available_monitors().find(|monitor| {
-                let (corner, size) = (monitor.position(), monitor.size());
-                at.x >= corner.x as f64 && at.y >= corner.y as f64 && at.x < (corner.x + size.width as i32) as f64 && at.y < (corner.y + size.height as i32) as f64
-            })
-        })
-        .or_else(|| window.current_monitor())
-        .or_else(|| window.primary_monitor());
-    if let Some(screen) = screen {
-        let scale = screen.scale_factor();
-        let (corner, size) = (screen.position(), screen.size());
-        let panel = SIZE.to_physical::<f64>(scale);
-        let x = corner.x as f64 + (size.width as f64 - panel.width) / 2.0;
-        // A fifth of the way down, as Spotlight sits, and never off the bottom of a short screen.
-        let y = corner.y as f64 + (size.height as f64 * 0.2).min((size.height as f64 - panel.height).max(0.0));
-        window.set_outer_position(PhysicalPosition::new(x, y));
-    }
-    window.set_visible(true);
-    // A Mac's app comes in front with it, so an app opened from it comes in front in turn (`hosts::open_window`).
-    #[cfg(target_os = "macos")]
-    activate();
-    window.set_focus();
-    if let Some(webview) = page.and_then(|page| page.webview()) {
-        let _ = webview.focus();
-    }
-}
-
-/// Puts the launcher away. Given back, the keyboard goes to the app that had it before, as a Mac hides an app.
-fn put_away(
-    window: &Window,
-    page: Option<&mut Discarding<Page>>,
-    #[cfg_attr(not(target_os = "macos"), expect(unused_variables))] give_back: bool,
-) {
-    window.set_visible(false);
-    if let Some(page) = page {
-        page.shown(window, false);
-    }
-    #[cfg(target_os = "macos")]
-    if give_back {
-        unsafe {
-            use objc2::runtime::AnyObject;
-            let application: *mut AnyObject = objc2::msg_send![objc2::class!(NSApplication), sharedApplication];
-            let nothing: *mut AnyObject = std::ptr::null_mut();
-            let () = objc2::msg_send![application, hide: nothing];
-        }
-    }
-}
-
-/// The page's web view: its own files and its apps', what it asks (`hosts::command`), and the device's own browser for
-/// anywhere else, as an app's own window has them (`host`).
-struct Page {
-    /// Whether the page has asked where it is (`start`), once it's there to open a link.
-    started: Arc<AtomicBool>,
-}
-
-impl crate::discard::Page for Page {
-    fn make<'a>(&mut self, builder: WebViewBuilder<'a>) -> WebViewBuilder<'a> {
-        let key = format!("{:016x}{:016x}", crate::host::random(), crate::host::random());
-        let own = |_: WebViewId, request: Request<Vec<u8>>| crate::page::respond(request.uri().path());
-        let apps_file = |_: WebViewId, request: Request<Vec<u8>>, responder: RequestAsyncResponder| {
-            let address = request.uri().to_string();
-            crate::spawn(async move {
-                let file = match crate::views() {
-                    Ok(views) => views.file(&address).await.map_err(|error| format!("{error:#}")),
-                    Err(error) => Err(error),
-                };
-                responder.respond(crate::host::app_file(file));
-            });
-        };
-        let (page_key, started) = (key.clone(), self.started.clone());
-        let ipc = move |request: Request<String>| {
-            let Ok(message) = serde_json::from_str::<Value>(request.body()) else { return };
-            if message["key"] != page_key.as_str() {
-                return;
-            }
-            let (id, command, args) =
-                (message["id"].clone(), message["command"].as_str().unwrap_or_default().to_owned(), message["args"].clone());
-            if command == "start" {
-                started.store(true, Ordering::Relaxed);
-            }
-            crate::spawn(async move {
-                let answer = hosts::command("main", &command, args).await;
-                tell(Told::Script(crate::host::answer(&id, answer.map_err(Value::from))));
-            });
-        };
-        let builder = builder
-            .with_custom_protocol("tauri".into(), own)
-            .with_asynchronous_custom_protocol("oneapp".into(), apps_file)
-            .with_ipc_handler(ipc)
-            .with_initialization_script_for_main_only(crate::host::BRIDGE.replace("__KEY__", &key), true)
-            // The page draws the launcher's own glass where the window has none (`data-launcher` in client.css).
-            .with_initialization_script_for_main_only(
-                format!(
-                    "document.documentElement.dataset.launcher = {:?}",
-                    if cfg!(target_os = "linux") { "solid" } else { "glass" }
-                ),
-                true,
-            )
-            .with_navigation_handler(|to| crate::stays(&to))
-            .with_new_window_req_handler(|_, _| wry::NewWindowResponse::Deny)
-            .with_transparent(!cfg!(target_os = "linux"))
-            .with_devtools(cfg!(debug_assertions))
-            .with_url(crate::HOME);
-        #[cfg(any(target_os = "macos", target_os = "linux"))]
-        let builder = builder.with_initialization_script_for_main_only(crate::INITIALIZATION_SCRIPT, false);
-        builder
-    }
-
-    /// A developer's build writes what its pages say to their console to its stdout, as WebKitGTK offers: its web
-    /// view has no other console to read without a window of its own.
-    fn loaded(&mut self, _webview: &WebView) {
-        #[cfg(all(target_os = "linux", debug_assertions))]
-        {
-            use webkit2gtk::{SettingsExt, WebViewExt};
-            use wry::WebViewExtUnix;
-            if let Some(settings) = _webview.webview().settings() {
-                settings.set_enable_write_console_messages_to_stdout(true);
-            }
-        }
-    }
-
-    /// Gone, it opens a link once it's loaded again and asks where it is.
-    fn discarded(&mut self) {
-        self.started.store(false, Ordering::Relaxed);
-    }
-}
-
-/// The launcher's glass, the system's own material under its page, rounded: a Mac's Liquid Glass where it has it
-/// (macOS 26), and its window vibrancy before that, and Windows' Acrylic. Linux has none, so the page draws its own
-/// (`data-launcher`).
-fn glass(#[cfg_attr(target_os = "linux", expect(unused_variables))] window: &Window) {
-    #[cfg(target_os = "macos")]
-    unsafe {
-        use objc2::runtime::{AnyClass, AnyObject};
-        use objc2_foundation::NSRect;
-        use tao::platform::macos::WindowExtMacOS;
-        let panel = window.ns_window().cast::<AnyObject>();
-        // On every Space, over a full-screen app's too, and out of Cmd-` and Mission Control, as a menu bar app's
-        // panel is (`NSWindowCollectionBehavior`: canJoinAllSpaces, stationary, ignoresCycle, fullScreenAuxiliary).
-        let behaviour: usize = (1 << 0) | (1 << 4) | (1 << 6) | (1 << 8);
-        let () = objc2::msg_send![panel, setCollectionBehavior: behaviour];
-        // NSStatusWindowLevel: over other apps' windows, as Spotlight is.
-        let () = objc2::msg_send![panel, setLevel: 25isize];
-        let () = objc2::msg_send![panel, setHasShadow: true];
-        let content: *mut AnyObject = objc2::msg_send![panel, contentView];
-        let bounds: NSRect = objc2::msg_send![content, bounds];
-        match AnyClass::get(c"NSGlassEffectView") {
-            Some(glass) => {
-                let view: *mut AnyObject = objc2::msg_send![glass, alloc];
-                let view: *mut AnyObject = objc2::msg_send![view, initWithFrame: bounds];
-                let () = objc2::msg_send![view, setCornerRadius: CORNER];
-                // Width and height follow the window's.
-                let () = objc2::msg_send![view, setAutoresizingMask: 18usize];
-                let nothing: *mut AnyObject = std::ptr::null_mut();
-                // NSWindowBelow: under the web view.
-                let () = objc2::msg_send![content, addSubview: view, positioned: -1isize, relativeTo: nothing];
-            }
-            None => {
-                use window_vibrancy::{NSVisualEffectMaterial, NSVisualEffectState, apply_vibrancy};
-                if let Err(error) = apply_vibrancy(window, NSVisualEffectMaterial::HudWindow, Some(NSVisualEffectState::Active), Some(CORNER)) {
-                    eprintln!("the launcher has no glass: {error}");
-                }
-            }
-        }
-    }
-    #[cfg(windows)]
+/// The system's own alert, as an app shows what it can't go on from: rfd's (NSAlert, Windows' message box), and
+/// GTK's on Linux, as rfd's GTK is another GTK's than the one tao runs.
+fn alert(said: &str) {
+    #[cfg(any(target_os = "macos", windows))]
+    rfd::MessageDialog::new().set_level(rfd::MessageLevel::Error).set_title(crate::NAME).set_description(said).show();
+    #[cfg(target_os = "linux")]
     {
-        if let Err(error) = window_vibrancy::apply_acrylic(window, None) {
-            eprintln!("the launcher has no glass: {error}");
-        }
-        // Windows 11's own round corners, which a window with no frame doesn't have unless it asks.
-        use tao::platform::windows::WindowExtWindows;
-        use windows::Win32::Graphics::Dwm::{DWMWA_WINDOW_CORNER_PREFERENCE, DWMWCP_ROUND, DwmSetWindowAttribute};
-        let round = DWMWCP_ROUND;
-        let window = windows::Win32::Foundation::HWND(window.hwnd() as _);
-        if let Err(error) = unsafe { DwmSetWindowAttribute(window, DWMWA_WINDOW_CORNER_PREFERENCE, std::ptr::from_ref(&round).cast(), size_of_val(&round) as u32) } {
-            eprintln!("the launcher has square corners: {error}");
-        }
-    }
-}
-
-/// A Mac's app comes in front, as a person summoned it.
-#[cfg(target_os = "macos")]
-fn activate() {
-    unsafe {
-        use objc2::runtime::AnyObject;
-        let application: *mut AnyObject = objc2::msg_send![objc2::class!(NSApplication), sharedApplication];
-        let () = objc2::msg_send![application, activateIgnoringOtherApps: true];
+        use gtk::prelude::*;
+        let alert = gtk::MessageDialog::new(None::<&gtk::Window>, gtk::DialogFlags::MODAL, gtk::MessageType::Error, gtk::ButtonsType::Ok, said);
+        alert.set_title(crate::NAME);
+        alert.run();
+        alert.close();
     }
 }
 
@@ -926,7 +642,7 @@ fn links() -> anyhow::Result<()> {
         std::fs::create_dir_all(&entries)?;
         let entry = format!(
             "[Desktop Entry]\nType=Application\nName={}\nExec=\"{}\" %u\nMimeType=x-scheme-handler/one;\nNoDisplay=true\nTerminal=false\n",
-            crate::page::NAME,
+            crate::NAME,
             program.display()
         );
         let file = entries.join("one-handler.desktop");
@@ -966,7 +682,7 @@ fn toasts() -> anyhow::Result<()> {
         std::fs::write(&icon, drawn)?;
     }
     let key = format!(r"Software\Classes\AppUserModelId\{}", ::client::NAME);
-    for (name, value) in [("DisplayName", crate::page::NAME.to_owned()), ("IconUri", icon.display().to_string())] {
+    for (name, value) in [("DisplayName", crate::NAME.to_owned()), ("IconUri", icon.display().to_string())] {
         let value: Vec<u16> = value.encode_utf16().chain([0]).collect();
         unsafe {
             RegSetKeyValueW(HKEY_CURRENT_USER, &HSTRING::from(&key), &HSTRING::from(name), REG_SZ.0, Some(value.as_ptr().cast()), (value.len() * 2) as u32)
@@ -974,23 +690,6 @@ fn toasts() -> anyhow::Result<()> {
         .ok()?;
     }
     Ok(())
-}
-
-/// Ctrl-Q quits the app, as it does a Linux app.
-#[cfg(target_os = "linux")]
-fn keys(window: &Window) {
-    use gtk::gdk::{ModifierType, keys::constants as key};
-    use gtk::glib::Propagation;
-    use gtk::prelude::*;
-    use tao::platform::unix::WindowExtUnix;
-    window.gtk_window().connect_key_press_event(move |_, pressed| {
-        let held = pressed.state() & (ModifierType::CONTROL_MASK | ModifierType::SHIFT_MASK | ModifierType::MOD1_MASK | ModifierType::SUPER_MASK);
-        if held != ModifierType::CONTROL_MASK || pressed.keyval().to_lower() != key::q {
-            return Propagation::Proceed;
-        }
-        tell(Told::Quit);
-        Propagation::Stop
-    });
 }
 
 /// What a Mac app's About says of it: the build that's running, as `one --version` says it, `0.26.90 (3810.a2b17a3b510d)`,
@@ -1013,7 +712,7 @@ fn menu() -> muda::Menu {
     let settings = MenuItem::with_id("settings", "Settings…", true, Some(Accelerator::new(Modifiers::META, Code::Comma)));
     let home = MenuItem::with_id("open", "Home Screen", true, Some(Accelerator::new(Modifiers::META | Modifiers::SHIFT, Code::KeyH)));
     let app = Submenu::with_items(
-        crate::page::NAME,
+        crate::NAME,
         true,
         &[
             &PredefinedMenuItem::about(None, Some(about())),
@@ -1091,10 +790,10 @@ fn ring() -> Option<tray_icon::TrayIcon> {
     let picture = include_bytes!("../../../icons/AppIcon@2x.png");
     let picture = resvg::tiny_skia::Pixmap::decode_png(picture).ok()?;
     let icon = Icon::from_rgba(picture.data().to_vec(), picture.width(), picture.height()).ok()?;
-    let open = MenuItem::with_id("open", format!("Open {}", crate::page::NAME), true, None);
+    let open = MenuItem::with_id("open", format!("Open {}", crate::NAME), true, None);
     // Settings…, the Settings app's window, as Raycast's menu has its own settings.
     let settings = MenuItem::with_id("settings", "Settings…", true, None);
-    let quit = MenuItem::with_id("quit", format!("Quit {}", crate::page::NAME), true, None);
+    let quit = MenuItem::with_id("quit", format!("Quit {}", crate::NAME), true, None);
     let menu = Menu::with_items(&[&open, &settings, &PredefinedMenuItem::separator(), &quit]).ok()?;
     #[cfg(windows)]
     TrayIconEvent::set_event_handler(Some(|event: TrayIconEvent| {
@@ -1102,6 +801,6 @@ fn ring() -> Option<tray_icon::TrayIcon> {
             tell(Told::Toggle(std::time::Instant::now(), None));
         }
     }));
-    let ring = TrayIconBuilder::new().with_icon(icon).with_icon_as_template(cfg!(target_os = "macos")).with_menu(Box::new(menu)).with_menu_on_left_click(cfg!(target_os = "macos")).with_tooltip(crate::page::NAME).build();
+    let ring = TrayIconBuilder::new().with_icon(icon).with_icon_as_template(cfg!(target_os = "macos")).with_menu(Box::new(menu)).with_menu_on_left_click(cfg!(target_os = "macos")).with_tooltip(crate::NAME).build();
     ring.map_err(|error| eprintln!("the menu bar has no ring: {error}")).ok()
 }

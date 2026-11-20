@@ -28,6 +28,10 @@ jobs:
       - uses: dtolnay/rust-toolchain@master
         with:
           toolchain: ${{ inputs.rust }}
+      # The UI library the app has built in, which its build makes with bun (clients/app/build.rs), at mise.toml's.
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.4
       - uses: Swatinem/rust-cache@v2
       # The workspace's own crates, which cargo builds again in each new checkout, from the last build of the same.
       - uses: mozilla-actions/sccache-action@v0.0.9

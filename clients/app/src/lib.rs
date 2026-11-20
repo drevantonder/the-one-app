@@ -35,19 +35,23 @@ mod shortcuts;
 #[cfg(desktop)]
 pub mod computer;
 #[cfg(desktop)]
-mod discard;
-#[cfg(desktop)]
 pub mod host;
 mod hosts;
 mod native;
 
+#[cfg(mobile)]
 pub(crate) mod page;
+// The app's name, as `tauri.conf.json` has it, and whatever a network's build merges over it (`TAURI_CONFIG`), as a
+// phone's Tauri build has it (`build.rs`).
+#[cfg(desktop)]
+include!(concat!(env!("OUT_DIR"), "/name.rs"));
 mod updater;
 
 /// What an app's page may load, which is what an MCP App may by default: its own app's files and the files of
 /// the apps it uses, which are all at its own address, and nothing from anywhere else; and in a frame, another app's
 /// page at that app's own address (`oneapp://<app>.localhost`, or `http://oneapp.<app>.localhost` where a web view
 /// has no scheme of its own), which the window answers as that app's (the UI library's `Frame`).
+#[cfg(mobile)]
 pub(crate) const APP_MAY_LOAD: &str = "default-src 'none'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; \
                             img-src 'self' data:; media-src 'self' data:; font-src 'self' data:; connect-src 'none'; \
                             frame-src oneapp: http://*.localhost; object-src 'none'; base-uri 'self'";
@@ -477,7 +481,7 @@ async fn retry() -> Result<(), String> {
         spawn(opens());
         return Ok(());
     };
-    // A computer's launcher, which was the web one for being behind, is native again.
+    // A computer's launcher, which said Update Required for being behind, shows the Home Screen again.
     #[cfg(desktop)]
     let behind = matches!(views.client.state().borrow().connection(), Connection::Behind(_));
     views.client.retry().await.map_err(|error| error.to_string())?;
@@ -486,6 +490,24 @@ async fn retry() -> Result<(), String> {
         computer::talks();
     }
     Ok(())
+}
+
+/// Names whose this device is, while it signs in, which asks their devices to let it in, as the network's sign-in page
+/// does (`/device/claim`, apps/sign-in/edge/auth.ts). → the number they enter on one of them, or what the network
+/// said instead (nobody goes by that, asked too often).
+async fn claim(person: String) -> Result<Value, String> {
+    let Some((_, State::SignIn { code, .. })) = app().start.borrow().clone() else { return Err("This device is signed in".into()) };
+    let link = Url::parse(&code.link).map_err(|error| error.to_string())?;
+    let user_code = link.query_pairs().find(|(name, _)| name == "user_code").map(|(_, code)| code.into_owned()).unwrap_or_default();
+    let at = link.join("/sign-in/auth/device/claim").map_err(|error| error.to_string())?;
+    let web = ::client::web().map_err(|error| format!("{error:#}"))?;
+    let response = web.post(at).json(&json!({"userCode": user_code, "person": person})).send().await.map_err(|_| "Can't reach your network. Try again.".to_owned())?;
+    let ok = response.status().is_success();
+    let said: Value = response.json().await.unwrap_or_default();
+    if !ok {
+        return Err(said["message"].as_str().unwrap_or("That didn't work. Try again.").to_owned());
+    }
+    Ok(json!({"number": said["number"]}))
 }
 
 /// The device is back online or the window in front again, so a client whose network didn't answer asks it again
@@ -534,6 +556,14 @@ async fn start() -> Result<Value, String> {
 
 /// Once the device is signed in to its network, which it's told only once its views are open (`follows`).
 #[cfg(desktop)]
+/// Waits until this device's session is settled: in its network, or signing in, which it is once its client has opened
+/// and asked.
+#[cfg(desktop)]
+pub(crate) async fn settled() {
+    let mut session = app().start.subscribe();
+    let _ = session.wait_for(|now| matches!(now, Some((_, State::SignedIn { .. } | State::SignIn { .. })))).await;
+}
+
 pub(crate) async fn signed_in() {
     let mut session = app().start.subscribe();
     let _ = session.wait_for(|now| matches!(now, Some((_, State::SignedIn { .. })))).await;
@@ -899,12 +929,6 @@ mod edge {
     }
 }
 
-/// What a computer's app does in every page of its window, which Mac's and Linux's web views leave to it: a browser
-/// window's keys and mouse buttons for back and forward, and no menu of the web view's own on a right-click but for
-/// text.
-#[cfg(any(target_os = "macos", target_os = "linux"))]
-pub(crate) const INITIALIZATION_SCRIPT: &str = include_str!("initialization-script.js");
-
 /// Reports what the window's page saw go wrong (`Client::report`): what it showed its person, a page's error, an
 /// app that never drew.
 #[cfg_attr(mobile, tauri::command)]
@@ -1129,14 +1153,15 @@ async fn follows(client: Arc<Client>) {
     }
 }
 
-/// The home screen, as the window is sent to it. Android's and Windows' web views load only http.
-#[cfg(any(windows, target_os = "android"))]
+/// The home screen, as a phone's window is sent to it. Android's web view loads only http.
+#[cfg(target_os = "android")]
 pub(crate) const HOME: &str = "http://tauri.localhost/index.html";
-#[cfg(not(any(windows, target_os = "android")))]
+#[cfg(target_os = "ios")]
 pub(crate) const HOME: &str = "tauri://localhost/index.html";
 
 /// Whether the window goes where it's sent: to its own pages and its apps', and to the sign-in page it starts on.
 /// Anywhere else is the device's own browser's to open, as the sign-in page's button asks.
+#[cfg(mobile)]
 pub(crate) fn stays(to: &str) -> bool {
     let Ok(to) = Url::parse(to) else { return false };
     let own = ["tauri", "oneapp", "about", "data", "blob"].contains(&to.scheme())

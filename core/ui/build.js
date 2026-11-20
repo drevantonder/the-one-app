@@ -13,10 +13,14 @@ import { $ } from "bun"
 
 const here = (path) => new URL(path, import.meta.url).pathname
 const text = (path) => readFileSync(here(path), "utf8")
+/// Where what a client runs goes: dist/client, or with `bun build.js <folder>`, that folder, and nothing else is built,
+/// as a program that has the UI library built in builds it for itself (clients/app/build.rs).
+const into = process.argv[2]
+const client = into ?? here("dist/client")
 
 // Built afresh, but for dist/client itself, which Vite empties: a local network's edge serves it where it is, by a
 // link (core/edge/edge.js), and stops if what it serves goes.
-for (const made of existsSync(here("dist")) ? readdirSync(here("dist")) : []) if (made !== "client") rmSync(here(`dist/${made}`), { recursive: true, force: true })
+if (!into) for (const made of existsSync(here("dist")) ? readdirSync(here("dist")) : []) if (made !== "client") rmSync(here(`dist/${made}`), { recursive: true, force: true })
 // The UI library's styles (src/styles.ts), made as each module is built, for both builds alike.
 const made = newMade()
 await build({
@@ -27,7 +31,8 @@ await build({
   logLevel: "warn",
   plugins: [stylesPlugin(made), solid()],
   build: {
-    outDir: "dist/client",
+    outDir: client,
+    emptyOutDir: true,
     sourcemap: true,
     rolldownOptions: {
       input: { ui: here("src/index.ts"), solid: "solid-js", internal: "solid-js/internal", web: "@solidjs/web" },
@@ -50,7 +55,7 @@ await build({
   plugins: [stylesPlugin(made), solid()],
   resolve: { alias: { "@solidjs/web": here("src/drawing-primitives/renderer.native.ts"), "#primitives": here("src/drawing-primitives/primitives.native.tsx"), "#bridge": here("src/bridge.native.ts") } },
   build: {
-    outDir: "dist/client/native",
+    outDir: `${client}/native`,
     emptyOutDir: false,
     sourcemap: true,
     rolldownOptions: {
@@ -66,14 +71,16 @@ await build({
 
 // The tokens (src/tokens.ts) as the web's CSS variables, which the app's window also loads as they are
 // (clients/app/tauri.conf.json), and as a native host's table.
-writeFileSync(here("src/tokens.css"), tokensCss())
-writeFileSync(here("dist/client/tokens.json"), JSON.stringify(tokensTable()))
-writeFileSync(here("dist/client/styles.json"), JSON.stringify(stylesTable(made)))
+// Written only as it changes: a program that builds the UI library in (clients/app/build.rs) builds again as src/ does.
+if (!existsSync(here("src/tokens.css")) || text("src/tokens.css") !== tokensCss()) writeFileSync(here("src/tokens.css"), tokensCss())
+writeFileSync(`${client}/tokens.json`, JSON.stringify(tokensTable()))
+writeFileSync(`${client}/styles.json`, JSON.stringify(stylesTable(made)))
 const css = text("src/tokens.css") + text("src/ui.css") + stylesCss(made)
-writeFileSync(here("dist/client/ui.css"), transform({ filename: "ui.css", code: Buffer.from(css), minify: true }).code)
+writeFileSync(`${client}/ui.css`, transform({ filename: "ui.css", code: Buffer.from(css), minify: true }).code)
 // The typeface, beside the stylesheet that names it (tokens.css), the licence of the UI SDK code it holds, and what puts a page in its Colour Mode before it
 // draws, which every page loads first (app.js).
-for (const file of ["Allo-Variable.woff2", "Allo-LICENSE.txt", "UI-SDK-LICENSE.txt", "colour-mode.js"]) cpSync(here(`src/${file}`), here(`dist/client/${file}`))
+for (const file of ["Allo-Variable.woff2", "Allo-LICENSE.txt", "UI-SDK-LICENSE.txt", "colour-mode.js"]) cpSync(here(`src/${file}`), `${client}/${file}`)
+if (into) process.exit()
 
 /// The UI library's skill: every `///` comment that starts with an example, from index.ts and then from each file it
 /// exports from, in its order. Each is of what's just under it, which a page can use (types/ui.d.ts exports it), and

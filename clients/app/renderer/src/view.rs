@@ -95,11 +95,13 @@ impl Phase {
 
 /// A panel's own background, which its window has no frame for (`WindowOptions::panel`): its corners' radius, and
 /// whether the host fills where its page asks for the system's glass with a popover's colour, where the system has
-/// none to draw under it (Linux).
+/// none to draw under it (Linux); and with `whole`, the whole panel is on the glass, for a page that floats nothing over
+/// the desktop of its own (the client's own pages in the launcher's place).
 #[derive(Clone, Copy, Debug)]
 pub struct Panel {
     pub corner: f32,
     pub fill: bool,
+    pub whole: bool,
 }
 
 /// What the window says over its page of where the page is, as a phone's app says it over an app (DESIGN.md, App
@@ -1051,8 +1053,17 @@ impl Screen {
         // The window, as a page's body: its root's background and text, scrolling what's taller than it.
         let (body, background) = Text::root(conditions);
         // A panel has no background of its own: what its page draws is over the system's glass, or the host's fill.
-        if self.panel.is_none() {
-            painter.quad(window, window, background.unwrap_or_default(), Edges::default(), Hsla::default(), Corners::default(), false, 1.0);
+        match self.panel {
+            None => painter.quad(window, window, background.unwrap_or_default(), Edges::default(), Hsla::default(), Corners::default(), false, 1.0),
+            Some(panel) if panel.whole => {
+                if let Some(glass) = painter.glass.as_mut() {
+                    glass.push(crate::platform::Glass { bounds: window, radius: panel.corner, opacity: 1.0 });
+                }
+                if let Some(fill) = painter.fill {
+                    painter.quad(window, window, fill, Edges::default(), Hsla::default(), Corners::all(panel.corner), false, 1.0);
+                }
+            }
+            Some(_) => {}
         }
         let root = painter.build(0, body, true);
         // What's no longer in the tree goes, unless it moved elsewhere in it.

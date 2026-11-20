@@ -22,11 +22,6 @@ use semver::Version;
 use serde::Deserialize;
 use sha2::{Digest, Sha256};
 
-// A computer's built-in copy, which is this program's own files (`build.rs`), and the app's name. A phone's is
-// Tauri's.
-#[cfg(desktop)]
-include!(concat!(env!("OUT_DIR"), "/page.rs"));
-
 /// The public half of the key the platform signs the page's `update.json` with, PAGE_SIGNING_KEY at the edge's
 /// deploy (in 1Password, "The One App page signing key").
 const KEY: &str = "58a090e1ddf4e3dc9bec1cfe5ba83fe987c54a8ed05455d871ae3514e33fc4ef";
@@ -165,23 +160,6 @@ pub async fn update(client: &::client::Client, home: &Path) -> anyhow::Result<bo
     }
     eprintln!("kept the network's page {}, for the next start", update.version);
     Ok(true)
-}
-
-/// One of the page's files as the web view's answer for it, with what it may load: the kept page's, or the one
-/// built in.
-#[cfg(desktop)]
-pub fn respond(path: &str) -> wry::http::Response<std::borrow::Cow<'static, [u8]>> {
-    use wry::http::{Response, StatusCode, header};
-    let kept = KEPT.read().expect("nothing panics holding it").clone();
-    let file: Option<std::borrow::Cow<'static, [u8]>> = match kept {
-        Some(files) => files.get(path.trim_start_matches('/')).cloned().map(Into::into),
-        None => FILES.iter().find(|(served, _)| *served == path).map(|(_, file)| (*file).into()),
-    };
-    let response = match file {
-        Some(file) => Response::builder().header(header::CONTENT_TYPE, kind(path)).header(header::CONTENT_SECURITY_POLICY, CSP).body(file),
-        None => Response::builder().status(StatusCode::NOT_FOUND).body(Vec::new().into()),
-    };
-    response.expect("these headers are valid")
 }
 
 /// What kind of file one of the page's own is.

@@ -49,11 +49,10 @@ of `MainActivity`), so a network's Android app with an identifier of its own is 
 
 ## Its page from the network
 
-The window's page (`page/`) is built into the app, and its network's edge serves it too, at `<address>/page/`, from
+A phone's window's page (`page/`) is built into its app (a computer's windows are all native), and its network's edge serves it too, at `<address>/page/`, from
 the commit the edge was deployed from (`core/edge/edge.js`). As the app opens, it asks for that, keeps a newer one it
 runs on, and loads it from its next start, as Expo Updates do by default (`src/page.rs`); without one, or with no
-network, it loads its own. So a change to the page goes live with an edge deploy, on phones too, with no build of
-the app. It takes one only signed by the platform's key, whose public half is built in, checked again each start: the
+network, it loads its own. So a change to the page goes live with an edge deploy, with no build of the app. It takes one only signed by the platform's key, whose public half is built in, checked again each start: the
 deploy signs it with `PAGE_SIGNING_KEY` (read from 1Password's "The One App page signing key" when unset), and refuses
 without a key. `page/update.json` says the lowest build of the app the page runs on (`native`): a change to the page that
 needs something new of the app's Rust half (a command, an event) raises it to the build that adds that, so an app

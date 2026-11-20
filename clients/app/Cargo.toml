@@ -14,8 +14,8 @@ name = "one"
 path = "src/main.rs"
 
 # The window, which is all of the program but its CLI and MCP. A Linux machine with no screen has a build without
-# it (`cargo build --no-default-features`), which needs none of GTK or WebKitGTK there. A phone's window is Tauri's;
-# a computer's launcher, while it signs in, is a window and a web view alone (tao and wry, which Tauri is built on) (`computer`).
+# it (`cargo build --no-default-features`), which needs no GTK there. A phone's window is Tauri's; a computer's are
+# native, in tao's event loop (`computer`).
 [features]
 default = ["window"]
 window = [
@@ -40,7 +40,7 @@ window = [
   "dep:global-hotkey",
   "dep:notify",
   "dep:tray-icon",
-  "dep:window-vibrancy",
+  "dep:rfd",
   "dep:encryption_client",
   "dep:notifications_client",
   "dep:computer_use_client",
@@ -48,13 +48,11 @@ window = [
   "dep:objc2-core-foundation",
   "dep:objc2-foundation",
   "dep:objc2-ui-kit",
-  "dep:webkit2gtk",
   "dep:gtk",
   "dep:resvg",
   "dep:windows",
   "dep:ico",
   "dep:icns",
-  "dep:wry",
   "dep:tao",
   "dep:muda",
   "dep:renderer",
@@ -64,7 +62,7 @@ window = [
 [build-dependencies]
 # A phone's app is Tauri's, which its build script makes ready (a computer's builds it, and doesn't run it).
 tauri-build = { version = "2", features = [], optional = true }
-# A computer's window's page is served from its own files (`page`), which `tauri.conf.json` lists.
+# A computer's app's name, which `tauri.conf.json` says (`build.rs`).
 serde_json.workspace = true
 # The manifest of `one` without its window on Windows (`build.rs`).
 embed-manifest = "1"
@@ -94,10 +92,8 @@ encryption_client = { path = "../../apps/encryption/client/native", optional = t
 notifications_client = { path = "../../apps/notifications/client/native", optional = true }
 computer_use_client = { path = "../../apps/computer-use/client/native", optional = true }
 
-# A computer's web launcher, as it signs in (`computer`): a window and a web view alone, Tauri's own libraries, at the
-# versions Tauri uses.
+# A computer's app's event loop, which its native windows open in (`computer`), Tauri's own, at the version Tauri uses.
 [target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
-wry = { version = "0.57", optional = true }
 tao = { version = "0.37", optional = true }
 # Opens a web address in the device's own browser, where a passkey works.
 open = { version = "5", optional = true }
@@ -107,8 +103,6 @@ dirs = { version = "7", optional = true }
 global-hotkey = { version = "0.7", optional = true }
 # Hears the app's own program replaced by a newer build, as its device's server or `one update` does (`updater`).
 notify = { version = "8", optional = true }
-# The launcher's glass, as the system's own (NSVisualEffectView on a Mac, Acrylic on Windows).
-window-vibrancy = { version = "0.8", optional = true }
 
 [target.'cfg(not(target_os = "android"))'.dependencies]
 # Each app's icon where the device lists it (`shortcuts`), which is an SVG or a PNG, drawn as a PNG of the size it
@@ -121,9 +115,11 @@ resvg = { version = "0.47", default-features = false, optional = true }
 ico = { version = "0.6", optional = true }
 windows = { version = "0.62", features = ["Win32_Foundation", "Win32_Graphics_Dwm", "Win32_Graphics_Gdi", "Win32_System_Com", "Win32_System_Console", "Win32_System_Com_StructuredStorage", "Win32_System_Registry", "Win32_System_Variant", "Win32_Storage_EnhancedStorage", "Win32_UI_Controls", "Win32_UI_HiDpi", "Win32_UI_Shell", "Win32_UI_Shell_PropertiesSystem", "Win32_UI_WindowsAndMessaging"], optional = true }
 
-# The ring in a Mac's menu bar and Windows' notification area that summons the launcher (`computer::ring`).
+# The ring in a Mac's menu bar and Windows' notification area that summons the launcher (`computer::ring`), and the
+# system's alert (`computer::alert`).
 [target.'cfg(any(target_os = "macos", windows))'.dependencies]
 tray-icon = { version = "0.25", optional = true }
+rfd = { version = "0.18", default-features = false, optional = true }
 
 # What a computer's app says goes to its own log where nothing it was started from keeps it (`computer::keep_log`).
 [target.'cfg(unix)'.dependencies]
@@ -141,8 +137,7 @@ objc2-foundation = { version = "0.3", default-features = false, features = ["std
 [target.'cfg(target_os = "linux")'.dependencies]
 # Its ring, as a StatusNotifierItem over D-Bus, as KDE's and GNOME's (with its extension) panels show one, Wayland's too.
 tray-icon = { version = "0.25", optional = true, default-features = false, features = ["ksni"] }
-webkit2gtk = { version = "=2.0.2", features = ["v2_38"], optional = true }
-# Ctrl-Q and Ctrl-W, as a Linux app's window has them (`linux_keys`).
+# The program's name and class, as GTK's windows have them (`computer::launcher`), and GTK's alert (`alert`).
 gtk = { version = "0.18", optional = true }
 
 # A push that wakes the phone starts the client without its window (`Java_app_theone_client_Notifications_wake`).
