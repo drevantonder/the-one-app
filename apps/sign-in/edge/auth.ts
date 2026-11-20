@@ -421,6 +421,11 @@ const devices = () => ({
       if (passkey.prfKey !== key) await ctx.context.adapter.update({ model: "passkey", where: [{ field: "id", value: passkey.id }], update: { prfKey: key, encryptedKey: null } });
       return ctx.json({});
     }),
+    // Where a passkey just used has no PRF, the sign-in page makes one that has, as Sign In & Security's Add Passkey does.
+    passkeyAnother: createAuthEndpoint("/passkey/another", { method: "POST" }, async (ctx) => {
+      const { user } = await usedJustNow(ctx);
+      return ctx.json({ link: `/sign-in/#passkey=${await invitation(ctx.context.adapter, user, 15 * 60 * 1000)}` });
+    }),
     // What the sign-in page opens with a passkey's PRF output, on a new device: the person's key, encrypted to it.
     passkeyEncryptedKey: createAuthEndpoint("/passkey/encrypted-key", { method: "POST" }, async (ctx) => {
       const { passkey, user } = await usedJustNow(ctx);

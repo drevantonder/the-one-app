@@ -239,19 +239,18 @@ function Tile(props: { item: Item }) {
   return <Image src={typeOf(props.item)?.icon ?? letter()} alt="" style={look.tile} />
 }
 
-/// Asks a trusted device to let this one hold the key.
-const askAnother = async () => (await does("encryption_ask", {})) && toast("Asked. Approve this device on a trusted one, in Vault's Security.")
-
 /// Whether this Vault is kept with its person's own key, which their passkeys unlock: a group's or the network's isn't.
 const own = () => security().owner.startsWith("users/")
 
-/// Lets this device hold its person's key with a passkey that unlocks it: it asks as it does another device, and the
-/// network's sign-in page, in the device's browser, lets it in once the passkey's used there (`sign-in`'s
-/// `unlock_with_passkey`). Coming back, the Vault shows it holds the key.
+/// Unlock with Passkey, every step of a Vault's readiness: the network's sign-in page, in the device's browser, makes
+/// its person's key if there's none, lets this device hold it, and hands it to the servers waiting for it, once the
+/// passkey's used there (`sign-in`'s `unlock_with_passkey`). A group's or the network's Vault is handed to its
+/// servers by the key of whoever owns it. Coming back, the Vault shows what changed.
 async function unlockWithPasskey() {
   try {
-    await call("encryption_ask", {})
-    await opening(JSON.parse(await call("sign-in_unlock_with_passkey", { device: security().device })).link)
+    if (own()) await call("encryption_ask", {})
+    const link = await call("sign-in_unlock_with_passkey", own() ? { device: security().device } : { scope: whose() })
+    await opening(JSON.parse(link).link)
   } catch (error) {
     toast(error as Error)
   }
@@ -259,39 +258,30 @@ async function unlockWithPasskey() {
 
 /// What's missing before the Vault works, atop the list: one box, saying what and the one thing that fixes it.
 function Readiness() {
-  const setUp = async () => {
-    if (!(await does("encryption_approve", {}))) return
-    await showRecoveryKey({ subject: whose() })
-  }
   return (
     <Choose>
       <Match when={security().readiness === "not_set_up"}>
-        <Problem warn heading={`Set up ${whom()} Vault`} text="Passwords, keys and sign-ins are kept here, encrypted with a key only your devices hold." action={<Button onPress={setUp}>Set Up</Button>} />
+        <Problem warn heading={`Set up ${whom()} Vault`} text="Passwords, keys and sign-ins are kept here, encrypted with a key your passkey unlocks." action={<Button onPress={unlockWithPasskey}>Set Up with Passkey</Button>} />
       </Match>
       <Match when={security().readiness === "no_server"}>
         <Problem
           warn
           heading={`No server can open ${whom()} Vault`}
-          text={security().holds ? "Until one can, it keeps nothing." : "Until one can, it keeps nothing. Choose one on a trusted device."}
-          action={
-            <Show when={!secure()}>
-              <Button variant="outline" onPress={() => enter()}>{security().holds ? "Choose a Server" : "Open Security"}</Button>
-            </Show>
-          }
+          text="Until one can, it keeps nothing. Your passkey hands its key to the servers that run it."
+          action={<Button onPress={unlockWithPasskey}>Use Passkey</Button>}
         />
       </Match>
       <Match when={security().readiness === "device_lacks_key"}>
         <Problem
           warn
           heading={`This device doesn't hold ${whom()} key`}
-          text="It adds and uses items. Approving devices and choosing servers takes a trusted device."
+          text="It adds and uses items. Your passkey lets it hold the key, to show the recovery key."
           action={
-            // Security lists the same three, under Trust This Device.
+            // Security lists the same two, under Trust This Device.
             <Show when={!secure()}>
               <Show when={own()}>
                 <Button onPress={unlockWithPasskey}>Unlock with Passkey</Button>
               </Show>
-              <Button variant="outline" onPress={askAnother}>Ask Another Device</Button>
               <Button variant="outline" onPress={() => useRecoveryKey({ subject: whose() }).then(again)}>Use Recovery Key</Button>
             </Show>
           }
@@ -710,31 +700,12 @@ function RequestAlert() {
 /// asking to be; the recovery key; and the servers that can open it.
 function SecurityScreen() {
   const others = () => security().devices.filter((device) => device.device !== security().device)
-  const choose = (server: string, on: boolean) => {
-    const servers = security().servers.filter((chosen) => chosen !== server)
-    return does("vault_grant", { servers: on ? [...servers, server] : servers })
-  }
   return (
     <Screen heading="Security" back>
       <Readiness />
       <Show when={security().readiness !== "not_set_up"}>
         <Section heading="Trusted Devices">
           <List>
-            <For each={security().asking}>
-              {(device) => (
-                <Row
-                  heading={device.name}
-                  text="Wants to be trusted"
-                  action={
-                    security().holds ? (
-                      <Button variant="secondary" onPress={() => does("encryption_approve", { device: device.device, name: device.name })}>
-                        Approve
-                      </Button>
-                    ) : undefined
-                  }
-                />
-              )}
-            </For>
             <Row heading="This Device" text={security().holds ? "Holds the key" : "Doesn't hold the key"} />
             <For each={others()}>{(device) => <Row heading={device.name} text="Holds the key" />}</For>
           </List>
@@ -747,7 +718,6 @@ function SecurityScreen() {
                 <Show when={own()}>
                   <Row heading="Unlock with Passkey" text="Use a passkey that unlocks your key" onPress={unlockWithPasskey} />
                 </Show>
-                <Row heading="Ask Another Device" text="Approve this one on a trusted device" onPress={askAnother} />
                 <Row heading="Use Recovery Key" text="Type the key you wrote down" onPress={() => useRecoveryKey({ subject: whose() }).then(again)} />
               </List>
             </Section>
@@ -760,13 +730,13 @@ function SecurityScreen() {
           </Section>
         </Show>
         <Section heading="Servers">
-          <Text style={look.note}>{`A server that can open ${whom()} Vault runs what uses its secrets.${security().holds ? "" : " Choosing them takes a trusted device."}`}</Text>
+          <Text style={look.note}>{`The servers that run ${whom()} apps open ${whom()} Vault, once your passkey hands them its key.`}</Text>
           <List each={security().may}>
             {(server) => (
               <Row
-                heading={server().name ?? "A server()"}
-                text={security().servers.includes(server().key) ? `Opens ${whom()} Vault` : undefined}
-                end={<Switch aria-label={server().name ?? "A server()"} value={security().servers.includes(server().key)} disabled={!security().holds} onValueChange={(on) => choose(server().key, on)} />}
+                heading={server().name ?? "A server"}
+                text={security().servers.includes(server().key) ? `Opens ${whom()} Vault` : "Waiting for its key"}
+                action={security().servers.includes(server().key) ? undefined : <Button variant="secondary" onPress={unlockWithPasskey}>Use Passkey</Button>}
               />
             )}
           </List>

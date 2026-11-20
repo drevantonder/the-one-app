@@ -19,8 +19,8 @@ their own device, where they pick or type it; `save_from_browser` saves one a we
 with `request`; only as a plain tool on a device (`one mcp`, `one vault set`) keep it with `set`.
 
 - `security` says how ready the Vault is, first of all: `not_set_up` (no key yet), `no_server` (no server opens it,
-  so it keeps nothing), `device_lacks_key` (it works, but this device can't choose servers or approve devices) or
-  `ready`; and the devices holding its person's key, those asking to, and the servers that open it.
+  so it keeps nothing), `device_lacks_key` (it works, but this device doesn't hold the key, so can't show the
+  recovery key) or `ready`; and the devices holding its person's key, those asking to, and the servers that open it.
 - `list` shows what's there: each item's `kind` (`password`, `account` or `app_item`, an app's type), its fields, a
   secret one without its value, its websites (`hosts`), its `access` (`agents` and the apps switched on for it), its
   `status` and its `artifact`; every request kept, with its `state`; the apps that use the Vault, by name and title;
@@ -55,13 +55,14 @@ with `request`; only as a plain tool on a device (`one mcp`, `one vault set`) ke
   which trusts its code with it. `who: "agents"` lets agents use it with `fetch`. Giving access, to an app or to
   agents, is the person's alone, in the Vault on their device: an agent asks with `request` (with `app` for an
   app), and `access` refuses it. Taking access away is anyone's.
-- `grant` chooses the servers that open the Vault, from a device that holds its person's key (the skill
-  `encryption` says how one comes to). A Vault no server opens keeps no secret, so that comes first.
+- The servers that open the Vault are those that act for whose it is, and they're handed its key only by its
+  person's passkey, on the network's sign-in page (the skill `encryption` says how). No tool does it: a Vault no
+  server opens keeps no secret, so tell the person to open Sign In & Security, where a server waiting for it says so.
 - Someone's Vault is theirs alone: nobody asks for another user's, and the network's owner reads none. A group's
-  or the network's is its members' to use (`ONE_SUBJECT=groups/family`), and its owner's to choose servers for.
+  or the network's is its members' to use (`ONE_SUBJECT=groups/family`), and its owners' to hand to its servers.
 - Deleting an item is soft delete's, as for anything an app made: `soft-delete delete --artifact` with its
   `artifact`, as `list` gives it, and it can be restored for 30 days. `remove_field` takes one field out of an item.
-- Deleting an item and choosing servers are a person's decisions. Do them when asked to, and say what you did.
+- Deleting an item is a person's decision. Do it when asked to, and say what you did.
   Giving access, adding an item's sites and answering a request are theirs to do on their device, never yours.
 
 An app uses an account through this app's tools, which act for the app that calls them (its `caller`),

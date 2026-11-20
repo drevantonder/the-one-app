@@ -108,6 +108,23 @@ defmodule SignIn do
         outputs: %{type: "object", properties: %{who: %{type: "string"}}, required: ["who"]}
       },
       %{
+        name: "check",
+        description: """
+        Notifies the network's owners once when a server starts waiting for the network's key, which their passkey
+        hands it in Sign In & Security, as the encryption app's `check` has it do every 10 minutes. Says which servers
+        are waiting, and which it told them of just now
+        """,
+        inputs: none,
+        outputs: %{
+          type: "object",
+          properties: %{
+            waiting: %{type: "array", items: %{type: "string"}, description: "The servers waiting, by what their machines are called"},
+            told: %{type: "array", items: %{type: "string"}, description: "Those it notified the owners of just now"}
+          },
+          required: ["waiting", "told"]
+        }
+      },
+      %{
         name: "add_passkey",
         description: """
         Lets you make another passkey, in a browser, within a quarter of an hour. Whoever opens its link makes a
@@ -152,14 +169,17 @@ defmodule SignIn do
       %{
         name: "unlock_with_passkey",
         description: """
-        Makes a link that lets a device of yours that's asking for your key hold it, once you use a passkey that
-        unlocks it there, in a browser. Without a device, using the passkey there says the key it unlocks with, which
-        a device that holds yours encrypts it to once you allow it there (`encrypt_for_passkeys`). Open it, don't pass
-        it on.
+        Makes a link where a passkey of yours that unlocks your key hands it on, in a browser: to a device of yours
+        that's asking for it, and to the servers waiting for it, yours or those of a group or the network you own
+        (`scope`), whose key yours opens. A passkey that hasn't said yet says the key it unlocks with there, which a
+        device that holds yours encrypts it to once you allow it (`encrypt_for_passkeys`). Open it, don't pass it on.
         """,
         inputs: %{
           type: "object",
-          properties: %{device: %{type: "string", description: "The device's key, as `encryption_key` lists it asking"}}
+          properties: %{
+            device: %{type: "string", description: "The device's key, as `encryption_key` lists it asking"},
+            scope: %{type: "string", pattern: "^(network|groups/[a-z0-9-]+)$", description: "A group or the network you own"}
+          }
         },
         outputs: %{type: "object", properties: %{link: %{type: "string"}}, required: ["link"]}
       },
@@ -460,6 +480,29 @@ defmodule SignIn do
     %{who: who}
   end
 
+  # The servers the network's owners were told are waiting are kept, so each is told of once while it waits, and again
+  # if it waits again after it was handed the key.
+  def call("check", _inputs, call) do
+    %{"access" => access} = Call.tool(call, "encryption", "key", %{})
+    waiting = Enum.uniq(for artifact <- access, server <- artifact["missing"], do: server)
+    told = with {:ok, told, _tag} <- Artifact.read(call.own, "told/network"), do: JSON.decode!(told), else: (:absent -> [])
+    new = Enum.reject(waiting, &(&1["key"] in told))
+    named = &Enum.map(&1, fn server -> server["name"] || String.slice(server["key"], 0, 8) end)
+
+    if new != [] do
+      {names, are} = {named.(new), if(length(new) == 1, do: "is", else: "are")}
+      title = "#{Enum.join(names, ", ")} #{are} waiting for the network's key"
+      owners = Enum.filter(Call.tool(call, "permissions", "members", %{"of" => "network"})["members"], &owns_network?(call, &1))
+
+      for owner <- owners,
+          do: Call.tool(call, "notifications", "send", %{"title" => title, "text" => "Open Sign In & Security and use your passkey.", "to" => owner, "section" => "passkeys"})
+    end
+
+    Artifact.remove(call.own, "told/network")
+    :ok = Artifact.write(call.own, "told/network", JSON.encode!(Enum.map(waiting, & &1["key"])))
+    %{waiting: named.(waiting), told: named.(new)}
+  end
+
   # The link makes a passkey of theirs for whoever opens it, so it's shown only on their own screen, which opens it.
   # Anything else that asks, an assistant or `one`, has them notified, and Sign In & Security makes it there.
   def call("add_passkey", _inputs, call) do
@@ -498,7 +541,8 @@ defmodule SignIn do
   def call("unlock_with_passkey", inputs, _call) do
     device = inputs["device"] || ""
     if not (device =~ ~r/^([0-9a-f]{64})?$/), do: raise("A device is named by its key.")
-    %{link: address() <> "/sign-in/#unlock=" <> device}
+    scope = if inputs["scope"], do: "&scope=" <> inputs["scope"], else: ""
+    %{link: address() <> "/sign-in/#unlock=" <> device <> scope}
   end
 
   # Whoever may see who's in the network sees who each of them is: a member of it, as the apps that validate

@@ -27,12 +27,13 @@ defmodule Vault do
   # How ready someone's Vault is, which `security` says and its screen shows, worked out each time from their key and
   # the servers they chose, never kept. Each state is the first thing missing, in the order they're done:
   #
-  #   not_set_up --Set Up (a device makes the key)--> no_server --a server is chosen--> device_lacks_key
-  #   device_lacks_key --this device is approved--> ready
+  #   not_set_up --a passkey makes the key--> no_server --a passkey hands it to the servers--> device_lacks_key
+  #   device_lacks_key --a passkey hands it to this device--> ready
   #
-  # and back as they're undone: the last server switched off is no_server again, this device's key revoked is
+  # and back as they're undone: the last server taken off is no_server again, this device's key revoked is
   # device_lacks_key. A device that lacks the key still adds and uses items (a secret is encrypted for the servers,
-  # not with the key); only choosing servers and approving devices need it.
+  # not with the key); only showing the recovery key needs it. Every step is Unlock with Passkey, on the network's
+  # sign-in page (`sign-in`'s `unlock_with_passkey`).
   @readiness ~w(not_set_up no_server device_lacks_key ready)
 
   # The most of an answer's body that a tool answers with, in bytes.
@@ -480,36 +481,6 @@ defmodule Vault do
         }
       },
       %{
-        name: "grant",
-        description: """
-        Chooses the servers that open your Vault: they hold its key, and run what uses your secrets. `servers` is
-        all of them from now on, so one left out no longer opens it. Only a device that holds your key does this
-        (`encryption_approve`), and a Vault no server opens keeps no secret.
-        """,
-        inputs: %{
-          type: "object",
-          properties: %{
-            servers: %{
-              type: "array",
-              items: %{type: "string"},
-              description: "The servers' keys, as `security` lists them"
-            },
-            keys: %{
-              type: "string",
-              format: "artifact-keys",
-              unlocked_on: "security",
-              description: "Your device fills this in"
-            }
-          },
-          required: ["servers"]
-        },
-        outputs: %{
-          type: "object",
-          properties: %{servers: %{type: "array", items: %{type: "string"}, description: "The servers that open it now"}},
-          required: ["servers"]
-        }
-      },
-      %{
         name: "names",
         read_only: true,
         description:
@@ -587,7 +558,7 @@ defmodule Vault do
         Says everything about the key that keeps your Vault, in one answer: how ready it is, the devices that hold
         the key and those asking to, and which servers open the Vault and which may be chosen to. `readiness` is
         not_set_up (there's no key yet), no_server (no server opens it, so it keeps nothing), device_lacks_key (it
-        works, but this device can't choose servers or approve devices) or ready.
+        works, but this device doesn't hold the key) or ready.
         """,
         inputs: %{
           type: "object",
@@ -864,14 +835,6 @@ defmodule Vault do
     opened = Store.encryption(call).unlocked_on(call, Store.items_artifact(call))
     key = Call.tool(call, "encryption", "key", Map.take(inputs, ["device"]))
     Map.merge(opened, %{readiness: readiness(key, opened.servers), owner: key["owner"], holds: key["slot"] != nil, device: key["device"], devices: key["devices"], asking: key["asking"]})
-  end
-
-  def call("grant", %{"servers" => _servers} = inputs, call) do
-    keys =
-      inputs["keys"] ||
-        raise "Which servers open your Vault is chosen in the Vault's app on a trusted device.\n\nOr with `one vault grant` on it."
-
-    %{servers: Store.encryption(call).choose(call, Store.items_artifact(call), keys)}
   end
 
   def call("list", _inputs, call) do

@@ -146,14 +146,15 @@ start server
 
 # In a network being built, its people's encryption is set up as each one's first device sets it up: their key is
 # made on the client's device, which holds it from then on, as the app run from that home does, and their Vault is
-# opened by every server. So the Vault and what's kept encrypted open at once, with no setup screen. A user not set
-# up here is set up as a person is, in the app or with `one encryption approve`.
+# opened by every server, as their passkey would hand it over (`tooling/keys.ts`), once a server has listed it by
+# being asked for it. So the Vault and what's kept encrypted open at once, with no setup screen. A user not set up
+# here is set up as a person is, with Unlock with Passkey.
 ready() {
   export ONE_AS=$1 ONE_HOME=$folder/client
   [[ $("$one" encryption key | jq -r .check) == null ]] || return 0
   "$one" encryption approve >/dev/null
-  # shellcheck disable=SC2046 # one server's key per word
-  "$one" vault grant --servers $("$one" vault security | jq -r '.may[].key') >/dev/null
+  "$one" vault list >/dev/null 2>&1 || true
+  ONE_PROGRAM=$one bun "$root/tooling/keys.ts" servers >/dev/null
 }
 if [[ -z $owner ]]; then
   users=(owner alice bob)

@@ -20,7 +20,7 @@ import { createAuthClient } from "better-auth/client"
 import { deviceAuthorizationClient } from "better-auth/client/plugins"
 import { passkeyClient } from "@better-auth/passkey/client"
 import Bowser from "bowser"
-import { code, forDevice, NO_PRF, opened as openedKey, output, PRF, prfKey } from "./passkey.ts"
+import { check, code, forDevice, forPasskey, forServers, NO_PRF, opened as openedKey, output, PRF, prfKey, unwrap } from "./passkey.ts"
 import "./page.css"
 
 const auth = createAuthClient({ basePath: "/sign-in/auth", plugins: [passkeyClient(), deviceAuthorizationClient()] })
@@ -46,7 +46,7 @@ type Flow =
   | { flow: "assistant"; request: string; client: string }
   | { flow: "device"; code: string }
   | { flow: "deviceInApp"; code: string }
-  | { flow: "unlock"; device?: string }
+  | { flow: "unlock"; device?: string; scope?: string }
   | { flow: "signIn" }
 
 const flow: Flow = params.has("client_id")
@@ -56,7 +56,7 @@ const flow: Flow = params.has("client_id")
     : opened.has("passkey")
       ? { flow: "addPasskey", another: opened.get("passkey")! }
       : opened.has("unlock")
-      ? { flow: "unlock", device: opened.get("unlock") || undefined }
+      ? { flow: "unlock", device: opened.get("unlock") || undefined, scope: opened.get("scope") || undefined }
       : params.has("user_code")
         ? { flow: params.has("app") ? "deviceInApp" : "device", code: params.get("user_code")! }
         : { flow: "signIn" }
@@ -80,7 +80,7 @@ type Stage =
   | { stage: "denied"; name: string }
   | { stage: "ready"; app: App }
   | { stage: "created" }
-  | { stage: "unlocked"; name?: string }
+  | { stage: "unlocked"; name?: string; servers: string[]; whose: string }
   | { stage: "failed"; why: string; ended?: boolean }
 
 const [stage, setStage] = createSignal<Stage>({ stage: "checking" })
@@ -255,42 +255,108 @@ async function made(result: Answered, again: boolean) {
   used = { credential: result.webauthn!.response.id, at: Date.now() }
 }
 
-/// Calls a tool of the network's as whoever is signed in here, as the web client does (`clients/web/host.js`).
-async function tool<T>(name: string, inputs: object): Promise<T> {
-  const response = await fetch("/mcp", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/call", params: { name, arguments: inputs } }) })
+/// Calls a tool of the network's as whoever is signed in here, as the web client does (`clients/web/host.js`), for
+/// them or for a group or the network they own (`subject`).
+async function tool<T>(name: string, inputs: object, subject?: string): Promise<T> {
+  const params = { name, arguments: inputs, ...(subject && { _meta: { subject } }) }
+  const response = await fetch("/mcp", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ jsonrpc: "2.0", id: 1, method: "tools/call", params }) })
   const { result, error } = await response.json()
   const said = result?.content?.[0]?.text
   if (error || result?.isError) throw new Error(error?.message ?? said ?? "That didn't work. Try again.")
   return JSON.parse(said)
 }
 
+/// What the encryption app says of someone's key (`encryption_key`): what tells it from another, once there's one, the
+/// devices asking for it, a group's or the network's sealed to the person's own, and which servers should hold the
+/// keys of what's encrypted for them and don't.
+interface Held {
+  check: string | null
+  asking: { device: string; name: string }[]
+  wrapped: string | null
+  access: { artifact: string; epoch: number; servers: Server[]; missing: Server[]; extra: Server[] }[]
+}
+type Server = { key: string; name: string | null }
+
+/// Someone's whose a key is, as a person reads it.
+const whose = (scope: string) => (scope === "network" ? "the network's" : `${scope.split("/").pop()}'s`)
+
 /**
- * Lets the device whose key is `device` hold its person's key, with the passkey just answered here, if its PRF
- * output opens the key a device that holds it encrypted to it: it's encrypted to the device, as a device that holds
- * it approves one. Whether it did.
+ * The person's own key, which the passkey just answered here opens, with whose it is. Where they have none yet, it's
+ * made here, sealed to this passkey, which is how anyone's key is first made. Where they have one this passkey can't
+ * open, it says how to allow it.
  */
-async function unlock(device: string, name: string) {
-  if (!used?.prf) return false
+async function ownKey(): Promise<{ owner: string; key: Uint8Array<ArrayBuffer>; made: boolean }> {
+  if (!used?.prf) throw new Error(NO_PRF)
   const { owner, key } = await ask<{ owner: string; key: string | null }>("/passkey/encrypted-key", { credential: used.credential })
-  if (!key) return false
-  const opened = await openedKey(used.prf, owner, used.credential, key)
-  try {
-    await tool("encryption_approve", { device, name, key: await forDevice(opened, owner, device) })
-  } finally {
-    opened.fill(0)
-  }
-  return true
+  if (key) return { owner, key: await openedKey(used.prf, owner, used.credential, key), made: false }
+  if ((await tool<Held>("encryption_key", {})).check) throw new Error("This passkey can't unlock your key yet. Allow it in Sign In & Security on a device that holds your key, then try again.")
+  const made = crypto.getRandomValues(new Uint8Array(32))
+  const { passkeys } = await tool<{ passkeys: { id: string; credential: string; prf_key: string | null }[] }>("sign-in_devices", {})
+  const passkey = passkeys.find((passkey) => passkey.credential === used!.credential)
+  if (!passkey?.prf_key) throw new Error(NO_PRF)
+  await tool("encryption_store", { check: await check(made) }, owner)
+  const keys = JSON.stringify({ [passkey.credential]: { prf_key: passkey.prf_key, key: await forPasskey(made, owner, passkey.credential, passkey.prf_key) } })
+  await tool("sign-in_encrypt_for_passkeys", { passkey: passkey.id, keys })
+  return { owner, key: made, made: true }
 }
 
-/// The device a link to Unlock with Passkey names, once a passkey's opened it: it's one of this person's that's
-/// asking for their key, as the Vault asks before it opens the link.
-async function unlockAsked(device: string) {
-  if (!used?.prf) throw new Error(NO_PRF)
-  const { asking } = await tool<{ asking: { device: string; name: string }[] }>("encryption_key", {})
-  const name = asking.find((asked) => asked.device === device)?.name
+/// Lets the device a link to Unlock with Passkey names hold its person's key: it's one of theirs that's asking for
+/// it, as the Vault asks before it opens the link. What it's called.
+async function toDevice(key: Uint8Array<ArrayBuffer>, owner: string, device: string) {
+  const name = (await tool<Held>("encryption_key", {})).asking.find((asked) => asked.device === device)?.name
   if (!name) throw new Error("That device isn't asking for your key. Choose Unlock with Passkey on it again.")
-  if (!(await unlock(device, name))) throw new Error("This passkey can't unlock your key yet. Allow it in Sign In & Security on a device that holds your key, then try again.")
-  setStage({ stage: "unlocked", name })
+  await tool("encryption_store", { device: { key: device, name, ...(await forDevice(key, owner, device)) } }, owner)
+  return name
+}
+
+/**
+ * Hands the keys of what's encrypted for `scope` to the servers that act for it and are waiting for them, and takes
+ * them from any that hold them and no longer do: its person's own, or a group's or the network's they own, which is
+ * sealed to their key. The names of the servers that were waiting.
+ */
+async function toServers(key: Uint8Array<ArrayBuffer>, owner: string, scope: string) {
+  const held = await tool<Held>("encryption_key", {}, scope)
+  let opened = key
+  if (scope !== owner) {
+    if (!held.wrapped) throw new Error(`Your key doesn't open ${whose(scope)} key yet.`)
+    opened = await unwrap(key, owner, scope, held.wrapped)
+    if ((await check(opened)) !== held.check) throw new Error(`What's kept as ${whose(scope)} key isn't it, so nothing was handed over.`)
+  }
+  try {
+    const waiting = held.access.filter((artifact) => artifact.missing.length || artifact.extra.length)
+    const artifacts = []
+    for (const { artifact, epoch, servers, missing, extra } of waiting) {
+      const should = [...servers, ...missing].map((server) => server.key).filter((server) => !extra.some((other) => other.key === server))
+      artifacts.push(await forServers(opened, artifact, epoch, should))
+    }
+    if (artifacts.length) await tool("encryption_store", { artifacts }, scope)
+    return [...new Set(waiting.flatMap((artifact) => artifact.missing.map((server) => server.name ?? server.key.slice(0, 8))))]
+  } finally {
+    if (opened !== key) opened.fill(0)
+  }
+}
+
+/**
+ * Unlock with Passkey: the passkey just answered opens its person's key, or makes it, and hands it to the device the
+ * link names, if it does, and to the servers waiting for it, of the person or of the group or network the link
+ * names (`scope`), which their key opens.
+ */
+async function unlock(device: string | undefined, scope: string | undefined) {
+  const { owner, key } = await ownKey()
+  try {
+    const name = device && (await toDevice(key, owner, device))
+    const servers = await toServers(key, owner, scope ?? owner)
+    setStage({ stage: "unlocked", name: name || undefined, servers, whose: scope && scope !== owner ? whose(scope) : "your" })
+  } finally {
+    key.fill(0)
+  }
+}
+
+/// A passkey that can unlock: made from here, where the one just used can't, as Sign In & Security's Add Passkey does.
+async function another() {
+  const { link } = await ask<{ link: string }>("/passkey/another", { credential: used?.credential })
+  location.replace(link)
+  location.reload()
 }
 
 /// What a passkey made here is called, by where it was made, as its person's Sign In & Security lists it, and asks
@@ -323,7 +389,7 @@ async function signIn() {
     // Someone who signs in with Google does so again, and comes back here to Allow.
     return withGoogle()
   } else await withPasskey()
-  if (flow.flow === "unlock") return flow.device ? unlockAsked(flow.device) : setStage(used?.prf ? { stage: "unlocked" } : { stage: "failed", why: NO_PRF })
+  if (flow.flow === "unlock") return unlock(flow.device, flow.scope)
   if (flow.flow === "assistant") {
     // They allowed it and signed in, so the assistant is sent back with what it came for.
     const { url } = await ask<{ url: string }>("/oauth2/consent", { accept: true, oauth_query: flow.request })
@@ -350,9 +416,22 @@ async function respond(yes: boolean) {
   }
   // The edge approves only for someone who signed in in the last five minutes (`edge/auth.ts`).
   if (!(used && Date.now() - used.at < 4 * 60_000) && !(await signedInJustNow())) await (google() && !used ? withGoogle() : withPasskey())
-  const unlocked = await unlock(device, name)
   await ask("/device/approve", { userCode: (flow as { code: string }).code })
-  setStage({ stage: "approved", name, unlocked })
+  setStage({ stage: "approved", name, unlocked: await handedTo(device, name) })
+}
+
+/// Lets a device just approved hold its person's key too, where the passkey just answered unlocks it. Whether it does.
+async function handedTo(device: string, name: string) {
+  if (!used?.prf) return false
+  const { owner, key } = await ask<{ owner: string; key: string | null }>("/passkey/encrypted-key", { credential: used.credential })
+  if (!key) return false
+  const opened = await openedKey(used.prf, owner, used.credential, key)
+  try {
+    await tool("encryption_store", { device: { key: device, name, ...(await forDevice(opened, owner, device)) } }, owner)
+  } finally {
+    opened.fill(0)
+  }
+  return true
 }
 
 /// The link the device gives, as it's opened anywhere else, and as it's shown, which is short enough to type.
@@ -444,12 +523,16 @@ function shows(): Shows {
       }
     case "unlock":
       switch (now.stage) {
-        case "unlocked":
-          return { heading: "Unlock with Passkey", done: now.name ? `Unlocked: ${now.name} holds your key now. Go back to it.` : `Your passkey is set up. Allow it in Sign In & Security on a device that holds your key, if it shows this code: ${shownCode}` }
+        case "unlocked": {
+          const held = [now.name, ...now.servers].filter((name): name is string => !!name)
+          return { mark: <DoneMark />, heading: "Unlock with Passkey", done: held.length ? `${held.join(", ")} ${held.length === 1 ? "holds" : "hold"} ${now.whose} key now. You can close this page.` : `Nothing is waiting for ${now.whose} key. You can close this page.` }
+        }
         case "failed":
-          return { heading: "Unlock with Passkey", problem: failed, button: "Try Again", onSignIn: signIn }
+          return failed === NO_PRF
+            ? { heading: "Unlock with Passkey", problem: "This passkey can't unlock your key. Create one that can, as iCloud Keychain, Google Password Manager, 1Password and Windows Hello do.", button: "Create a Passkey", onSignIn: another, stop: "Try Another Passkey", onStop: signIn }
+            : { heading: "Unlock with Passkey", problem: failed, button: "Try Again", onSignIn: signIn }
         default:
-          return { heading: "Unlock with Passkey", note: flow.device ? "Use a passkey of yours to let the device hold your key." : "Use the passkey that should unlock your key on a new device.", button: "Continue", onSignIn: signIn }
+          return { heading: "Unlock with Passkey", note: flow.device ? "Use a passkey of yours to let the device hold your key." : flow.scope ? `Use your passkey to hand ${whose(flow.scope)} key to the servers waiting for it.` : "Use your passkey to hand your key to the servers waiting for it.", button: "Continue", onSignIn: signIn }
       }
     case "addPasskey":
       return now.stage === "created" ? { heading: "Add a passkey", done: shownCode ? `Your passkey is created. Go back to the app, and allow it there if it shows this code: ${shownCode}` : "Your passkey is created. Go back to the app." } : { heading: "Add a passkey", button: "Create a passkey", onSignIn: signIn }

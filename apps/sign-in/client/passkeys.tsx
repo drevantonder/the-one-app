@@ -2,9 +2,11 @@
 // it's pressed. Another is made in the device's own browser, which has passkeys where an app's web view doesn't,
 // by a link that works once. Each says whether it unlocks their key on a new device: one whose PRF output derives a
 // key, which it says the next time it's used, gets the key encrypted to it by a device that holds it, here, once its
-// person says it may. Whoever uses it has their key from then on, so a passkey nobody here allowed never does.
+// person says it may. Whoever uses it has their key from then on, so a passkey nobody here allowed never does. Above
+// them are the servers waiting for a key that a passkey hands over, their person's own or a group's or the
+// network's they own, each with Use Passkey, which opens the sign-in page to do it (`unlock_with_passkey`).
 import { createEffect, createMemo, Errored, Loading, refresh, Show } from "solid-js"
-import { Button, call, changed, confirm, Empty, List, open, Problem, Row, Screen, Skeleton, toast, visible } from "ui"
+import { Button, call, changed, confirm, Empty, List, open, Problem, Row, Screen, Section, Skeleton, toast, visible } from "ui"
 import { on, Remove } from "./mine.tsx"
 
 /** A passkey, as `sign-in_devices` answers it. */
@@ -20,7 +22,25 @@ interface Passkey {
 const mine = createMemo(() => call("sign-in_devices").then((text): { passkeys: Passkey[] } => JSON.parse(text)))
 /// Whether this device holds its person's key, which it encrypts to their passkeys.
 const holds = createMemo(() => call("encryption_key").then((text): boolean => JSON.parse(text).slot != null))
-const again = () => [mine, holds].forEach(refresh)
+/** What `encryption_key` says of a key: whose it is, a group's or the network's encrypted to the person's own, and the servers that should hold the keys of what it encrypts and don't. */
+interface Held {
+  owner: string
+  wrapped: string | null
+  access: { missing: { key: string; name: string | null }[] }[]
+}
+
+/// The servers waiting for a key a passkey of this person's hands them: their own, and those of the network and the
+/// groups they own, whose keys are encrypted to theirs. One row each, by whose key it is.
+const waitingFor = createMemo(async () => {
+  const me: Held = JSON.parse(await call("encryption_key"))
+  const groups: { group: string; owners: string[] }[] = JSON.parse(await call("permissions_groups")).groups
+  const scopes = ["network", ...groups.filter((group) => group.owners.includes(me.owner)).map((group) => group.group)]
+  const theirs = await Promise.all(scopes.map((subject) => call("encryption_key", {}, { subject }).then((text): Held => JSON.parse(text), () => null)))
+  return [me, ...theirs.filter((held): held is Held => !!held?.wrapped)]
+    .map((held) => ({ scope: held.owner === me.owner ? undefined : held.owner, servers: [...new Set(held.access.flatMap((artifact) => artifact.missing.map((server) => server.name ?? server.key.slice(0, 8))))] }))
+    .filter((waiting) => waiting.servers.length)
+})
+const again = () => [mine, holds, waitingFor].forEach(refresh)
 changed(again)
 // A passkey made or used in the browser says its key there, which nothing here hears of: it's looked at again as
 // this screen comes back.
@@ -68,6 +88,29 @@ const opens = (tool: string, inputs?: object) => async () => {
   }
 }
 
+/// Whose key servers wait for, as a row says it.
+const whose = (scope?: string) => (scope === undefined ? "your" : scope === "network" ? "the network's" : `${scope.split("/").pop()}'s`)
+const listed = (names: string[]) => (names.length < 3 ? names.join(" and ") : `${names.slice(0, -1).join(", ")} and ${names.at(-1)}`)
+
+/// The servers waiting for a key, each row with the passkey that hands it to them.
+function Waiting() {
+  return (
+    <Show when={waitingFor()?.length}>
+      <Section heading="Waiting for Your Passkey">
+        <List each={waitingFor()} keyed={(waiting) => waiting.scope ?? ""}>
+          {(waiting) => (
+            <Row
+              heading={`${listed(waiting().servers)} ${waiting().servers.length === 1 ? "is" : "are"} waiting for ${whose(waiting().scope)} key`}
+              text="Your passkey hands it over."
+              action={<Button variant="secondary" onPress={opens("sign-in_unlock_with_passkey", waiting().scope ? { scope: waiting().scope } : {})}>Use Passkey</Button>}
+            />
+          )}
+        </List>
+      </Section>
+    </Show>
+  )
+}
+
 // A button of its own for each screen that has it: one made here would be shared by all, outside any of them.
 const opening = () => <Button onPress={opens("sign-in_add_passkey")}>Add Passkey</Button>
 
@@ -90,6 +133,7 @@ export default function SignInAndSecurity() {
       <Show when={mine()}>
         {(all) => (
           <Screen heading="Sign In & Security" back action={opening()}>
+            <Waiting />
             <Show when={all().passkeys.length} fallback={<Empty>No passkeys yet.</Empty>}>
             <List each={all().passkeys} keyed={(passkey) => passkey.id}>
           {(passkey) => {

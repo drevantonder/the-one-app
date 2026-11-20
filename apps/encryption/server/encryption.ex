@@ -3,11 +3,12 @@ defmodule Encryption do
   Encryption: a kind of artifact whose blobs are encrypted before they're stored, so that whoever runs the bucket
   can't read them, and nor can a server its owner didn't choose.
 
-  An encrypted artifact's key is its owner's to give. Their key is made on a device of theirs and kept only
-  encrypted to the devices they let in, in an artifact this app makes for them, so no server ever holds it. A
-  server opens an artifact once its owner chose it: a relation tuple names the server, and a device of theirs
-  hands it that artifact's keys, encrypted to the server's own key, as the blobs `keys/<server>` in the artifact.
-  A server that isn't chosen passes a call on to one that is, and reads nothing.
+  An encrypted artifact's key is its owner's to give. Their key is made on the network's sign-in page, the first
+  time their passkey unlocks it, and kept only encrypted to their passkeys and the devices they let in, in an
+  artifact this app makes for them, so no server ever holds it. A server opens an artifact once its owner's passkey
+  handed it the artifact's keys there, encrypted to the server's own key, as the blobs `keys/<server>` in the
+  artifact (`store`), with a relation tuple naming it. A server that holds none passes a call on to one that does,
+  and reads nothing.
 
   What a device does is the client's (`apps/encryption/client/native/src/lib.rs`), and what each thing is encrypted with is
   `apps/encryption/client/native/src/cipher.rs`, which a server runs too (`Cipher`).
@@ -109,7 +110,7 @@ defmodule Encryption do
   def should(name), do: OneCore.Apps.covering(User.owner(name))
 
   @doc """
-  How each artifact encrypted for `owner` stands: the servers that hold its keys, those that should and don't
+  How each artifact encrypted for `owner` stands: its epoch, the servers that hold its keys, those that should and don't
   (`missing`), and those that hold them and shouldn't (`extra`), each with what its machine is called, and each of
   those as a person reads it (`problems`). An artifact is known once a server that should hold its keys ran a call of it (`Encryption.Keys`).
   """
@@ -121,6 +122,7 @@ defmodule Encryption do
 
       %{
         artifact: name,
+        epoch: epoch(%Artifact{prefix: name <> "/"}),
         servers: names(held),
         missing: names(missing),
         extra: names(extra),
@@ -182,19 +184,17 @@ defmodule Encryption do
     end
   end
 
-  @doc """
-  Makes the servers that open an artifact the ones its owner's device handed keys: `given` is what the device
-  filled in for an input whose format is `artifact-keys`. Each server newly chosen gets a relation tuple naming it
-  as an `editor`, and each one taken off loses its tuple and its keys. Only whoever the artifact belongs to
-  chooses: the call is theirs, and by them.
-  """
-  def choose(%Call{} = call, %Artifact{} = artifact, given) do
-    artifact = %{artifact | codec: nil}
-    name = Artifact.name(artifact)
-    owner!(call, name)
-
-    with {:ok, %{"artifact" => ^name, "epoch" => epoch, "was" => was, "slots" => %{} = slots}} <- JSON.decode(given),
+  # Makes the servers that open an artifact the ones its owner's passkey handed keys on the sign-in page (`store`):
+  # `given` is the artifact's keys encrypted to each, with its owner's signature of which. Each server newly chosen gets a
+  # relation tuple naming it as an `editor`, and each one taken off loses its tuple and its keys. Only whoever the
+  # artifact belongs to chooses: the call is theirs, and by them.
+  defp choose(%Call{} = call, given) do
+    with %{"artifact" => name, "epoch" => epoch, "was" => was, "slots" => %{} = slots} = given when is_binary(name) <- given,
+         %{"signature" => signature, "signer" => signer} when is_binary(signature) and is_binary(signer) <- given,
          true <- is_integer(was) and epoch in [was, was + 1] do
+      artifact = %Artifact{prefix: name <> "/"}
+      owner!(call, name)
+
       if was != epoch(artifact),
         do: raise("Which servers open #{name} was changed from another device just now. Look, and do this again.")
 
@@ -203,15 +203,7 @@ defmodule Encryption do
       for server <- Map.keys(slots) -- had, do: share(call, "share", name, server)
       for {server, slot} <- slots, do: put(artifact, "keys/" <> server, Base.decode64!(slot))
       put(artifact, "keys/epoch", Integer.to_string(epoch))
-
-      # A device from before lists were signed signs none, and the signature of a list before isn't this one's.
-      case JSON.decode!(given) do
-        %{"signature" => signature, "signer" => signer} when is_binary(signature) and is_binary(signer) ->
-          put(artifact, "keys/signed", JSON.encode!(%{signature: signature, signer: signer}))
-
-        _ ->
-          Artifact.remove(artifact, "keys/signed")
-      end
+      put(artifact, "keys/signed", JSON.encode!(%{signature: signature, signer: signer}))
 
       for server <- had -- Map.keys(slots) do
         Artifact.remove(artifact, "keys/" <> server)
@@ -220,17 +212,16 @@ defmodule Encryption do
 
       GenServer.call(Call.process(call, Keys, name, {artifact, call.server}), :look)
       look(call, name, Enum.uniq(had ++ Map.keys(slots)))
-      Map.keys(slots)
+      %{artifact: name, servers: Map.keys(slots)}
     else
-      _ ->
-        raise "That isn't an artifact's keys as a device hands them over. A trusted device fills them in."
+      _ -> raise "That isn't an artifact's keys as the sign-in page encrypts them with your passkey."
     end
   end
 
   # Has each of `servers` look at what it's handed of an artifact now, so one that was taken off lets go of its
   # keys at once, and one that was handed a new epoch's writes with them. One that isn't up looks when it starts.
-  defp look(%Call{loaded: %{"encryption" => {encryption, _module}}} = call, name, servers) do
-    {at, app} = OneCore.Apps.installed(call.subject, encryption)
+  defp look(%Call{} = call, name, servers) do
+    {at, app} = OneCore.Apps.installed(call.subject, call.app_artifact)
     meta = %{actor: nil, subject: User.owner(name), forwarded: true}
     ask = %{installed: at, app: app, function: "looked", arguments: [name], _meta: meta}
     for server <- servers -- [call.server], do: Server.request(server, "apps/call", ask)
@@ -361,20 +352,66 @@ defmodule Encryption do
             },
             devices: %{type: "array", items: named, description: "The devices that hold it"},
             asking: %{type: "array", items: named, description: "The devices asking to"},
+            wrapped: %{
+              type: ["string", "null"],
+              description: "A group's or the network's key, encrypted to your own, which your passkey opens on the sign-in page"
+            },
             access: access
           },
-          required: ["owner", "device", "check", "slot", "devices", "asking", "access"]
+          required: ["owner", "device", "check", "slot", "devices", "asking", "wrapped", "access"]
         }
       },
       %{
         name: "check",
         description: """
         Says to Telemetry how what's encrypted for you stands, as the clock does every 10 minutes: an alert is open
-        while a server that acts for you is waiting for your key, or one that doesn't holds it. Answers as `key`'s
-        `access`.
+        while a server that acts for you is waiting for your key, or one that doesn't holds it. For the network, its
+        owners are notified once when a server starts waiting (`sign-in`'s `check`). Answers as `key`'s `access`.
         """,
         inputs: %{type: "object", properties: %{}},
         outputs: %{type: "object", properties: %{access: access}, required: ["access"]}
+      },
+      %{
+        name: "store",
+        description: """
+        Stores what the network's sign-in page encrypted with your passkey, which nothing else can make: your new key's
+        check, as it's first made (`check`), your key for a
+        device of yours (`device`), the keys of what's encrypted for you for the servers that act for you
+        (`artifacts`), or a group's or the network's key encrypted to your own (`wrapped`). Only the sign-in page calls it.
+        """,
+        inputs: %{
+          type: "object",
+          properties: %{
+            check: %{type: "string", description: "What tells your key from another, as it's first made"},
+            device: %{
+              type: "object",
+              properties: %{key: %{type: "string"}, name: %{type: "string"}, check: %{type: "string"}, slot: %{type: "string"}},
+              required: ["key", "name", "check", "slot"]
+            },
+            wrapped: %{
+              type: "object",
+              properties: %{check: %{type: "string"}, slot: %{type: "string"}},
+              required: ["check", "slot"]
+            },
+            artifacts: %{type: "array", items: %{type: "object"}}
+          }
+        },
+        outputs: %{
+          type: "object",
+          properties: %{
+            device: %{type: ["string", "null"]},
+            wrapped: %{type: "boolean"},
+            artifacts: %{
+              type: "array",
+              items: %{
+                type: "object",
+                properties: %{artifact: %{type: "string"}, servers: %{type: "array", items: %{type: "string"}}},
+                required: ["artifact", "servers"]
+              }
+            }
+          },
+          required: ["device", "wrapped", "artifacts"]
+        }
       },
       %{
         name: "approve",
@@ -427,7 +464,18 @@ defmodule Encryption do
            else: (_ -> nil)
 
     check = with {:ok, check, _tag} <- Artifact.read(key, "check"), do: check, else: (:absent -> nil)
-    %{owner: call.subject, device: inputs["device"], check: check, slot: slot, devices: held, asking: asking, access: access(call.subject)}
+    wrapped = with {:ok, wrapped, _tag} <- Artifact.read(key, "owners/" <> call.actor), do: wrapped, else: (:absent -> nil)
+
+    %{
+      owner: call.subject,
+      device: inputs["device"],
+      check: check,
+      slot: slot,
+      devices: held,
+      asking: asking,
+      wrapped: wrapped,
+      access: access(call.subject)
+    }
   end
 
   # Each artifact as a record Telemetry keeps, whose alert is open while it says what's missing (`Telemetry.Alerts`).
@@ -442,7 +490,39 @@ defmodule Encryption do
       end
 
     if records != [], do: Call.tool(call, "telemetry", "record", %{"records" => records})
+    # The network's owners are told once when a server starts waiting for its key, by Sign-In, whose Sign In & Security
+    # hands it over, so its notification opens there.
+    if call.subject == "network", do: Call.tool(call, "sign-in", "check", %{})
     %{access: access}
+  end
+
+  # What the sign-in page encrypted with a passkey: each part is checked against the key it says it's of, by the key's
+  # `check`, so nothing but a holder of that key makes one that's kept.
+  def call("store", inputs, call) do
+    key = key(owner!(call, call.subject))
+    if check = inputs["check"], do: checked!(key, check)
+
+    device =
+      with %{"key" => device, "name" => name, "check" => check, "slot" => slot} <- inputs["device"] do
+        if not (device =~ ~r/^[0-9a-f]{64}$/), do: raise("A device is named by its key.")
+        checked!(key, check)
+        Artifact.remove(key, "devices/" <> device)
+        :ok = Artifact.write(key, "devices/" <> device, JSON.encode!(%{name: name, slot: slot}))
+        Artifact.remove(key, "asking/" <> device)
+        device
+      end
+
+    wrapped =
+      with %{"check" => check, "slot" => slot} <- inputs["wrapped"] do
+        if String.starts_with?(call.subject, "users/"), do: raise("Your own key is encrypted to your passkeys, not to itself.")
+        with {:ok, held, _tag} when held != check <- Artifact.read(key, "check"), do: raise("That isn't #{whose(call.subject)} key.")
+        if Artifact.read(key, "check") == :absent, do: raise("#{whom(call.subject)} has no key yet.")
+        Artifact.remove(key, "owners/" <> call.actor)
+        :ok = Artifact.write(key, "owners/" <> call.actor, slot)
+        true
+      end
+
+    %{device: device, wrapped: wrapped == true, artifacts: Enum.map(inputs["artifacts"] || [], &choose(call, &1))}
   end
 
   @on_a_device "A device is approved from a device: in the app there, or with `one` on it. An assistant somewhere else has none."
@@ -453,13 +533,7 @@ defmodule Encryption do
 
     with {:ok, %{"check" => check, "slot" => slot}} when is_binary(check) and is_binary(slot) <- JSON.decode(given),
          true <- device =~ ~r/^[0-9a-f]{64}$/ do
-      Artifact.write(key, "check", check)
-
-      if Artifact.read(key, "check") |> elem(1) != check,
-        do:
-          raise(
-            "That isn't your key: one was made on another device. Approve this one from there, or with your recovery key."
-          )
+      checked!(key, check)
 
       name = inputs["name"] || "A device"
       Artifact.remove(key, "devices/" <> device)
@@ -501,6 +575,14 @@ defmodule Encryption do
   defp key(%Call{subject: subject, actor: actor} = call) do
     if String.starts_with?(subject, "users/") and actor != subject, do: raise("#{subject}'s key is theirs alone.")
     Call.make(call, "key")
+  end
+
+  # The first key's check written is the owner's from then on: what's handed over is kept only if it's that one's.
+  defp checked!(key, check) do
+    Artifact.write(key, "check", check)
+
+    if Artifact.read(key, "check") |> elem(1) != check,
+      do: raise("That isn't your key: another was made before it. Use your passkey that unlocks it, or your recovery key.")
   end
 
   defp devices(key, prefix) do
