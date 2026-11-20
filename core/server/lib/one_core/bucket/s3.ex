@@ -22,8 +22,14 @@ defmodule OneCore.Bucket.S3 do
     end
   end
 
-  # Each read is a trip across the internet, so they're made at once. One that couldn't be made is raised as it would
-  # be alone.
+  # At most this many requests to the presigner, and as many to the bucket, are sent at once, and the rest wait their
+  # turn, however long. A server that starts asks for hundreds at once, and an uplink at home that's sent them all
+  # stalls every one of them past its timeout. Each one's timeout runs from when it's sent.
+  @at_once 16
+
+  # Each read is a trip across the internet, so they're made together, as many at once as the pool has connections
+  # (`@at_once`): a day of Telemetry is some 700 blobs, and a process each, all asking at once, only waited on the pool
+  # while holding everything they'd read. One that couldn't be made is raised as it would be alone.
   @impl true
   def read_all(address, keys) do
     read = fn key ->
@@ -34,7 +40,7 @@ defmodule OneCore.Bucket.S3 do
       end
     end
 
-    for {:ok, outcome} <- Task.async_stream(keys, read, max_concurrency: max(length(keys), 1), timeout: :infinity) do
+    for {:ok, outcome} <- Task.async_stream(keys, read, max_concurrency: @at_once, timeout: :infinity) do
       case outcome do
         {:read, read} -> read
         {:raised, error, stacktrace} -> reraise error, stacktrace
@@ -185,10 +191,6 @@ defmodule OneCore.Bucket.S3 do
 
   defp refused_by(address, _status, why), do: %RuntimeError{message: "The presigner at #{address} refused: #{why}"}
 
-  # At most this many requests to the presigner, and as many to the bucket, are sent at once, and the rest wait their
-  # turn, however long. A server that starts asks for hundreds at once, and an uplink at home that's sent them all
-  # stalls every one of them past its timeout. Each one's timeout runs from when it's sent.
-  @at_once 16
   @pool [finch: [size: @at_once, pool_timeout: :infinity]]
 
   defp sent(request), do: Edge.send!(request ++ @pool)
