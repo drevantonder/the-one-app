@@ -167,6 +167,11 @@ defmodule Database.Lease do
           not cannot_run and staying?(server) ->
             {:keep_state_and_data, {:reply, from, :connected}}
 
+          # A laptop doesn't take it from a holder that didn't answer either, while a server that stays on is up: that
+          # one takes it, as the call passed to it finds the same.
+          gives_way?(data) ->
+            {:keep_state_and_data, {:reply, from, :gives_way}}
+
           true ->
             Logger.info("#{data.artifact.prefix}: #{server}, which holds its lease, didn't run a call passed to it")
             moved(take(data, "unanswered"), [{:reply, from, :ok}])
