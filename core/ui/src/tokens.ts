@@ -161,6 +161,10 @@ const motions = {
    * beside it, with no bounce. */
   snappy: spring(500, 0.15),
   smooth: spring(500, 0),
+  /** Pages settling where a swipe let them go, as UIScrollView's paging, SpringBoard's pages', does: its curve recorded
+   * on iOS 26's simulator and fitted, a spring from the finger's speed (a stiffness of 420 and damping of 39.5), at
+   * rest in a third of a second. */
+  paging: spring(307, 0.036),
 }
 
 // By role.
