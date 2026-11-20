@@ -8,7 +8,9 @@ use anyhow::{Context, Result, bail};
 use serde::Deserialize;
 use serde_json::{Value, json};
 
-use crate::{Client, BUILD, PROTOCOL, telemetry, resolve, state::{State, Connection}, transport::RequestError};
+use std::time::Duration;
+
+use crate::{Client, BUILD, PROTOCOL, telemetry, resolve, state::{State, Connection}, transport::{Reached, RequestError}};
 
 /// The `progressToken` a request carries, with which MCP asks for progress notifications while it runs.
 pub fn progress_token(message: &[u8]) -> Option<Value> {
@@ -100,6 +102,12 @@ pub(crate) const UNANSWERED: &str = "No server is answering. Check this device i
 /// The JSON-RPC error a server answers a device that's nobody's (`OneCore.User`).
 pub(crate) const NOBODY: i64 = -32003;
 
+/// How long a request that only reads waits for its server's answer before it's asked of another server too, the
+/// first answer of the two being its answer, as gRPC's hedging policy and "The Tail at Scale" hedge what's safe to
+/// ask twice. Most reads are answered within a second, and a server that's connected but stuck says it's still
+/// running what it was asked however long, as a busy one does (`Client::elsewhere`).
+const HEDGE: Duration = Duration::from_secs(3);
+
 impl Client {
     /// Asks a server one JSON-RPC message and gives its answer, which for a notification is nothing. A server that
     /// has gone was asked nothing, so whichever answers now is asked instead.
@@ -160,7 +168,11 @@ impl Client {
                     }
                     _ => message.clone(),
                 };
-                match open.ask(&sending, &notified).await {
+                let asked = match reads {
+                    true => self.hedged(&open, &sending, &notified).await,
+                    false => open.ask(&sending, &notified).await,
+                };
+                match asked {
                     Ok(response) => return Ok(response),
                     Err(RequestError::Unreachable) => {}
                     Err(RequestError::Stopped) if reads => stopped = true,
@@ -219,6 +231,30 @@ impl Client {
                 Ok(self.taken_out(response).await)
             }
             refused => refused,
+        }
+    }
+
+    /// What `open`'s server answers `message`, which only reads, or if it hasn't within `HEDGE`, what another server
+    /// answers it, if first, which what's asked from then on is asked of. Either one's failing leaves the other's.
+    async fn hedged(&self, open: &Arc<Reached>, message: &[u8], notified: &impl Fn(&[u8])) -> Result<Vec<u8>, RequestError> {
+        let first = open.ask(message, notified);
+        tokio::pin!(first);
+        let other = tokio::select! {
+            answered = &mut first => return answered,
+            other = async { tokio::time::sleep(HEDGE).await; self.elsewhere(open).await } => other,
+        };
+        let Some(other) = other else { return first.await };
+        let second = other.ask(message, notified);
+        tokio::pin!(second);
+        tokio::select! {
+            answered = &mut first => match answered { Ok(answer) => Ok(answer), Err(_) => second.await },
+            answered = &mut second => match answered {
+                Ok(answer) => {
+                    self.instead(open, other.clone()).await;
+                    Ok(answer)
+                }
+                Err(_) => first.await,
+            },
         }
     }
 

@@ -553,6 +553,36 @@ impl Client {
         bail!(UNANSWERED)
     }
 
+    /// A server acting for this client's user other than `asked`'s, connected to as `reached` connects: for what
+    /// `asked` hasn't answered in time, as a hedged request is (`rpc::HEDGE`). A server that's connected but stuck
+    /// answers whether it's there and says it's still running what it was asked, so only another answering first
+    /// tells it apart from one that's busy, and then it's asked in its place (`instead`). Nothing if no other server
+    /// answers.
+    pub(crate) async fn elsewhere(&self, asked: &Reached) -> Option<Arc<Reached>> {
+        let stuck = asked.connection().remote_id();
+        for now in [false, true] {
+            let Ok(Some(servers)) = self.servers(now).await else { continue };
+            let mut connecting = FuturesUnordered::from_iter(
+                servers.into_iter().filter(|server| server.id != stuck).map(|server| self.connect(server)),
+            );
+            while let Some(connected) = connecting.next().await {
+                if let Some(open) = connected {
+                    return Some(Arc::new(open));
+                }
+            }
+        }
+        None
+    }
+
+    /// Has what's asked from now on asked over `answered`, which answered before `was` did, unless something else
+    /// is asked over already.
+    pub(crate) async fn instead(&self, was: &Arc<Reached>, answered: Arc<Reached>) {
+        let mut reach = self.reach.lock().await;
+        if reach.open.as_ref().is_none_or(|open| Arc::ptr_eq(open, was)) {
+            reach.open = Some(answered);
+        }
+    }
+
     /// The servers acting for this client's user: the ones it kept, or with `now` the ones it's told when it asks.
     /// Nothing if it kept none, or has nobody to ask.
     async fn servers(&self, now: bool) -> Result<Option<Vec<EndpointAddr>>> {
