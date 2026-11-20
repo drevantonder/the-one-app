@@ -87,10 +87,15 @@ if [[ -n $latest ]]; then
   fi
 fi
 
-echo "Building $build for iPhone, plain, on GitHub's macOS runner"
-run=$(gh workflow run iphone.yml --ref main -f commit="$commit" -f rust="$(rustc -V | cut -d' ' -f2)" 2>&1 |
-  grep -o 'https://github.com/.*/actions/runs/[0-9]*') || { echo "GitHub wasn't asked to build it" >&2 && exit 1; }
-id=${run##*/}
+# The commit's plain build, as GitHub's runner made it already where it did, as for a release tried again.
+id=$(gh run list -w iphone.yml -L 100 --json databaseId,displayTitle,conclusion \
+  --jq "[.[] | select(.displayTitle == \"iPhone app $commit\" and .conclusion == \"success\")][0].databaseId // empty")
+if [[ -z $id ]]; then
+  echo "Building $build for iPhone, plain, on GitHub's macOS runner"
+  run=$(gh workflow run iphone.yml --ref main -f commit="$commit" -f rust="$(rustc -V | cut -d' ' -f2)" 2>&1 |
+    grep -o 'https://github.com/.*/actions/runs/[0-9]*') || { echo "GitHub wasn't asked to build it" >&2 && exit 1; }
+  id=${run##*/}
+fi
 # `gh run watch` ends at the first of GitHub's API calls that fails, as some do while many releases watch at once, so
 # one that ends early is started again, after the 30 s GitHub asks a client to wait.
 until [[ $(gh run view "$id" --json status --jq .status 2>/dev/null) == completed ]]; do
@@ -166,7 +171,10 @@ PYTHON
 op document get "Apple Distribution identity" --vault ptc-nosudo --out-file "$work/distribution.p12" >/dev/null
 op read -n "op://ptc-nosudo/Apple Distribution identity password/password" >"$work/distribution.password"
 rcodesign=$(mise which rcodesign)
-sign() { "$rcodesign" sign --p12-file "$work/distribution.p12" --p12-password-file "$work/distribution.password" "$@" >/dev/null; }
+sign() {
+  "$rcodesign" sign --p12-file "$work/distribution.p12" --p12-password-file "$work/distribution.password" "$@" >"$work/signing" 2>&1 ||
+    { cat "$work/signing" >&2 && return 1; }
+}
 sign --entitlements-xml-file "$work/notifications.entitlements" "$bundle/PlugIns/Notifications.appex"
 sign --entitlements-xml-file "$work/app.entitlements" --exclude 'PlugIns/**' "$bundle"
 rm "$work/distribution.p12" "$work/distribution.password"
@@ -183,7 +191,7 @@ file=$(asc /v1/buildUploadFiles POST "$(jq -nc --arg upload "$upload" --argjson 
 # Its parts, each where App Store Connect says, as it says.
 while read -r part; do
   mapfile -t headers < <(jq -r '.requestHeaders[] | "-H", "\(.name): \(.value)"' <<<"$part")
-  tail -c +$(($(jq .offset <<<"$part") + 1)) "$ipa" | head -c "$(jq .length <<<"$part")" |
+  dd if="$ipa" iflag=skip_bytes,count_bytes skip="$(jq .offset <<<"$part")" count="$(jq .length <<<"$part")" bs=1M status=none |
     curl -fsS -o /dev/null -X "$(jq -r .method <<<"$part")" "${headers[@]}" --data-binary @- "$(jq -r .url <<<"$part")"
 done < <(jq -c '.data.attributes.uploadOperations[]' <<<"$file")
 file=$(jq -r .data.id <<<"$file")
