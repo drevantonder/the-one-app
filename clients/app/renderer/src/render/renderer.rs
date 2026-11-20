@@ -335,7 +335,13 @@ struct BackdropTextures {
     levels: [[Option<(wgpu::Texture, wgpu::TextureView)>; 3]; LEVELS],
 }
 
+/// How long after its last frame a renderer lets go of what only makes frames drawn one after another quicker
+/// (`Renderer::idle`).
+const IDLE: web_time::Duration = web_time::Duration::from_secs(2);
+
 pub struct Renderer {
+    /// When it last drew a frame (`idle`).
+    drew: web_time::Instant,
     /// An image of its surface taken ahead, as its window went from the screen (`reserve`), drawn on first as it's
     /// back; let go before the surface it's of.
     reserved: Option<wgpu::SurfaceTexture>,
@@ -604,6 +610,7 @@ impl Renderer {
             ..Default::default()
         });
         Self {
+            drew: web_time::Instant::now(),
             reserved: None,
             device: context.device.clone(),
             queue: context.queue.clone(),
@@ -774,6 +781,21 @@ impl Renderer {
         })
     }
 
+    /// How long until it's drawn nothing for a while (`IDLE`), where it holds what it lets go of then (`idle`).
+    pub fn idle_in(&self) -> Option<web_time::Duration> {
+        (self.kept.is_some() || self.backdrop.is_some() || !self.blurred.is_empty()).then(|| IDLE.saturating_sub(self.drew.elapsed()))
+    }
+
+    /// It's drawn nothing for a while (`IDLE`): it lets go of the frame it kept and its backdrops' textures and blurs,
+    /// each its window's size or a part of it (12 MB a kept frame of 1024 × 720 points at 2x), which make frames
+    /// drawn one after another quicker and are made again by the next that need them, as browsers let go of an idle
+    /// tab's tiles.
+    pub fn idle(&mut self) {
+        self.kept = None;
+        self.backdrop = None;
+        self.blurred.clear();
+    }
+
     /// Lets go of its surface, waiting for what's drawn on it, before its window goes.
     pub fn destroy(&mut self) {
         self.reserved = None;
@@ -797,6 +819,7 @@ impl Renderer {
 
     /// Draws the box of `scene` whose top left is `origin`, in device pixels, as big as the target.
     pub fn draw(&mut self, scene: &Scene, origin: [f32; 2]) -> bool {
+        self.drew = web_time::Instant::now();
         self.atlas.before_frame();
         self.draws.set(0);
         self.work.set(Work { uploaded: self.atlas.uploaded(), ..Work::default() });

@@ -942,8 +942,13 @@ impl Windows {
         }
     }
 
-    /// How long until any window's screen has something to do by itself, or a window waiting to show has waited long
-    /// enough.
+    /// Every window's renderers, each part's that has one.
+    fn renderers(&self) -> impl Iterator<Item = &Renderer> {
+        self.windows.values().flat_map(|window| window.parts.iter().filter_map(|part| part.renderer.as_ref()))
+    }
+
+    /// How long until any window's screen has something to do by itself, a window waiting to show has waited long
+    /// enough, or a renderer has drawn nothing for a while (`Renderer::idle`).
     pub fn due(&self) -> Option<std::time::Duration> {
         let screens = self.windows.values().filter_map(|window| window.screen.as_ref().ok()?.due());
         let showing = self.windows.values().filter(|window| !window.shown || window.picture.is_some() || window.reloading).map(|window| SHOWN_WITHIN.saturating_sub(since(window.opened)));
@@ -953,7 +958,8 @@ impl Windows {
         // A pull's spring steps at a 120 Hz display's frames.
         let pulled = self.windows.values().any(|window| window.pull.as_ref().is_some_and(rail::Pull::springing)).then_some(std::time::Duration::from_micros(8_333));
         let check = self.check.as_ref().map(conformance::Check::due);
-        screens.chain(showing).chain(frame).chain(pulled).chain(check).min()
+        let idle = self.renderers().filter_map(Renderer::idle_in);
+        screens.chain(showing).chain(frame).chain(pulled).chain(check).chain(idle).min()
     }
 
     /// Whether the display says when it shows each frame, and has since its frames were last asked for: a display link
@@ -1027,6 +1033,13 @@ impl Windows {
         }
         for (id, part, input) in self.display.events() {
             self.input(id, part, input);
+        }
+        for window in self.windows.values_mut() {
+            for renderer in window.parts.iter_mut().filter_map(|part| part.renderer.as_mut()) {
+                if renderer.idle_in().is_some_and(|due| due.is_zero()) {
+                    renderer.idle();
+                }
+            }
         }
         #[cfg(any(target_os = "android", target_os = "ios"))]
         self.spring();
