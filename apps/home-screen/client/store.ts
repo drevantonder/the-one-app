@@ -83,5 +83,8 @@ export const quietFor = (ms: number) => void (quiet = Date.now() + ms)
 /// dragged: its moves, and its lifting.
 export const finger: { pointer: { x: number; y: number }; grab: { x: number; y: number }; carrier: number; carry?: { move: (event: Pressed) => void; drop: (event: Pressed) => void } } = { pointer: { x: 0, y: 0 }, grab: { x: 0, y: 0 }, carrier: -1 }
 
+/// How far the App Library is scrolled down, as it last said: a mouse's wheel turned up at its top goes back to Home.
+export const libraryScroll = { scrollTop: 0 }
+
 /// Where a cell is being put down, which stays empty until what was carried has settled into it.
 export const [landing, setLanding] = createSignal<{ owner: number; page: number; index: number }>()

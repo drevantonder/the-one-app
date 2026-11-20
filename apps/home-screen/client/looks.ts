@@ -181,6 +181,9 @@ export const looks = styles({
   ownerName: { font: tokens.type.medium, fontWeight: tokens.weight.medium, lineClamp: 1, maxWidth: sizes.ownerName },
   caret: { color: tokens.colour.secondaryLabel, scale: 0.75 },
   ownerItem: { flexDirection: "row", alignItems: "center", gap: tokens.grid[2] },
+  // The launcher's chevrons, fading in and out under the pointer, and its way to the App Library and back.
+  turn: { position: "absolute", zIndex: 6, alignItems: "center", justifyContent: "center", transitionProperty: ["opacity"], transition: tokens.motion.snappy },
+  libraryToggle: { position: "absolute", zIndex: 6, end: tokens.grid[4], justifyContent: "center", transitionProperty: ["opacity"], transition: tokens.motion.snappy },
   libraryGlyph: { height: "100%", justifyContent: "center", paddingStart: tokens.grid[0.5], paddingEnd: tokens.grid[1], color: tokens.colour.secondaryLabel },
   lit: { color: tokens.colour.label },
   editBar: { position: "absolute", zIndex: 7, flexDirection: "row", alignItems: "center", justifyContent: "space-between", pointerEvents: "none" },

@@ -1,5 +1,5 @@
 // The pills: the owner's name, which opens the list of every owner, and the page dots with the App Library's glyph.
-import { For } from "solid-js"
+import { For, Show } from "solid-js"
 import { type Element, haptic, Icon, Menu, Pressable, type Pressed, Text, View } from "ui"
 import { BAR, DOTS } from "./layout.ts"
 import { type Kind } from "./machine.ts"
@@ -134,8 +134,8 @@ export function OwnerPill(props: { owners: Owner[] }) {
 /// iPhone's are: the dots of the owner shown, then the App Library's glyph, which says there's one more page and goes
 /// there, lit as it's reached, as the dots are. They stay where they are as the owners move, their dots rolling to the
 /// next owner's and taking their number, and go with Home to the App Library, which has none. While pages are edited
-/// the glyph stays, dimmed, and goes nowhere.
-export function DotsPill(props: { owners: Owner[]; laid: Kind[][] }) {
+/// the glyph stays, dimmed, and goes nowhere. The launcher's have no glyph (`glyph`): its App Library button does that.
+export function DotsPill(props: { owners: Owner[]; laid: Kind[][]; glyph?: boolean }) {
   const count = (owner: number) => (props.laid[owner] ?? []).filter((kind) => kind === "home").length
   const library = () => props.laid[seen().owner]?.[seen().screen] === "library"
   const go = () => {
@@ -146,18 +146,20 @@ export function DotsPill(props: { owners: Owner[]; laid: Kind[][] }) {
   return (
     <View style={[looks.pill, looks.live, looks.tall(DOTS)]}>
       <Roll count={props.owners.length} height={DOTS} row={(index) => <Dots owner={props.owners[index]} index={index} count={count(index)} size={7} />} />
-      <Pressable
-        role="button"
-        aria-label="App Library"
-        aria-current={library() ? "true" : undefined}
-        aria-disabled={editingNow() ? "true" : undefined}
-        onPress={go}
-        style={[looks.libraryGlyph, library() && looks.lit, looks.opacity(editingNow() ? 0.35 : library() ? 1 : 0.4)]}
-      >
-        <View style={looks.smaller}>
-          <Icon name="squares-four" />
-        </View>
-      </Pressable>
+      <Show when={props.glyph !== false}>
+        <Pressable
+          role="button"
+          aria-label="App Library"
+          aria-current={library() ? "true" : undefined}
+          aria-disabled={editingNow() ? "true" : undefined}
+          onPress={go}
+          style={[looks.libraryGlyph, library() && looks.lit, looks.opacity(editingNow() ? 0.35 : library() ? 1 : 0.4)]}
+        >
+          <View style={looks.smaller}>
+            <Icon name="squares-four" />
+          </View>
+        </Pressable>
+      </Show>
     </View>
   )
 }

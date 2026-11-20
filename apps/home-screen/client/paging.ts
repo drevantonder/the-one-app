@@ -3,7 +3,7 @@ import { createVelocityTracker, type Dragged, haptic, keydown, type Pressed, red
 import { give, glide, jump, settle, spring, type Spring, stop } from "./pager.ts"
 import { along as alongOf, card as cardOf, cell as cellOf, INSET, lefts, PILLS, CARD_TOP } from "./layout.ts"
 import { type At, carries } from "./machine.ts"
-import { home, setSeen, setAlong, setRolled, launcher, room, laidPage, quietFor, finger, state, at } from "./store.ts"
+import { home, setSeen, setAlong, setRolled, launcher, room, laidPage, quietFor, finger, state, at, libraryScroll } from "./store.ts"
 import { type Owner, draft, keep } from "./owners.ts"
 import { type Screens } from "./screens.ts"
 
@@ -249,15 +249,29 @@ export function createPaging(props: { owners: Owner[] }, layout: Screens) {
     if ((home.getSnapshot().context.held?.stack?.length ?? 0) > before) haptic("selection")
   }
 
-  // A wheel's turns, and a trackpad's fingers where the host doesn't drag the pages along with them (up and down, and
-  // wherever it says nothing of them), page as macOS's Launchpad and an iPad with a trackpad do: one screenful along or
-  // one owner up and down a gesture, however hard it's flicked, once its pushes add up to 30 points one way. A gesture
-  // starts as the fingers touch (`began`) or the wheel turns after a quiet moment, as a wheel has no phases, and what
-  // the system scrolls on with once the fingers have lifted (`momentum`) is the gesture's, which moves nothing, as a
-  // Mac's paging scroll view and Safari's swipe between pages let it be. Up and down over the App Library, which
-  // scrolls itself, is its own.
+  // A mouse's wheel, which turns by notches, turns the pages a screenful a notch, each by the pages' spring, as an
+  // iPad's Home Screen does with a mouse: down or right on, past the last on to the App Library, and up or left back,
+  // out of the App Library once it's scrolled to its top, which it otherwise scrolls. It never moves between owners:
+  // the owner pill does.
+  const notched = (notches: number, down: boolean) => {
+    const { at, screens } = home.getSnapshot().context
+    if (!home.getSnapshot().matches("nothing")) return
+    if (screens[at.owner]?.[at.screen] === "library") {
+      if (notches < 0 && (!down || libraryScroll.scrollTop <= 0)) home.send({ type: "step", screen: -1 })
+      return
+    }
+    for (let turned = 0; turned < Math.abs(notches); turned++) home.send({ type: "step", screen: Math.sign(notches) as 1 | -1 })
+  }
+  // A trackpad's fingers where the host doesn't drag the pages along with them (up and down, and wherever it says
+  // nothing of them), and a wheel that turns smoothly, page as macOS's Launchpad and an iPad with a trackpad do: one
+  // screenful along or one owner up and down a gesture, however hard it's flicked, once its pushes add up to 30 points
+  // one way. A gesture starts as the fingers touch (`began`) or the wheel turns after a quiet moment, as a wheel has no
+  // phases, and what the system scrolls on with once the fingers have lifted (`momentum`) is the gesture's, which
+  // moves nothing, as a Mac's paging scroll view and Safari's swipe between pages let it be. Up and down over the App
+  // Library, which scrolls itself, is its own.
   let gesture: { at: number; x: number; y: number; done: boolean } | undefined
   const wheel = (event: Wheeled) => {
+    if (event.notchesY || event.notchesX) return notched(event.notchesY || event.notchesX!, !!event.notchesY)
     if (event.momentum) return
     const quiet = !gesture || event.timeStamp - gesture.at > 250
     if (event.phase === "began" || (quiet && event.phase !== "ended" && event.phase !== "cancelled")) gesture = { at: event.timeStamp, x: 0, y: 0, done: false }

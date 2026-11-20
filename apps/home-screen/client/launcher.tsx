@@ -1,6 +1,6 @@
 // The computer's launcher: its keys, its search floating over its card, and what the search found.
-import { createEffect, createMemo, For, Show, untrack } from "solid-js"
-import { ScrollView, Empty, type Keyed, leave, reducedMotion, sizeChanged, Text, TextInput, View, viewport, visible } from "ui"
+import { createEffect, createMemo, createSignal, For, Show, untrack } from "solid-js"
+import { Button, ScrollView, Empty, Icon, type Keyed, leave, reducedMotion, sizeChanged, Text, TextInput, View, viewport, visible } from "ui"
 import { along as alongOf, cell as cellOf, group, INSET, PAGE, PILLS, SEARCH, SEARCH_HEIGHT, CARD_TOP } from "./layout.ts"
 import { type At, type Placed } from "./machine.ts"
 import { type Item, type Listed } from "./types.ts"
@@ -151,6 +151,9 @@ const widgetsOf = (owner: Owner | undefined, found: Listed[], words: string) => 
 }
 
 const HEADING = 20
+/// The chevrons at the card's sides: how big, and how far in.
+const TURN = 36
+const TURN_INSET = 6
 
 /// What the launcher's Return opens: an app it found, or what's chosen on Home, with where it is on Home, if it's there.
 type Target = { item?: Item; listed?: Listed; place?: { page: number; index: number } }
@@ -306,7 +309,13 @@ export function createLauncher(props: { owners: Owner[] }, layout: Screens, pagi
 export function LauncherPanel(props: { owners: Owner[]; layout: Screens; paging: Paging; launching: Launching }) {
   const { pages, laid } = props.layout
   const { card, cardLeft, xOf, pitch, dragged, sectionsX, opacityOf, along, wheel } = props.paging
-  const { showing, words } = props.launching
+  const { showing, words, toggleLibrary } = props.launching
+  // Under the pointer, the card shows a chevron at each side there's a screenful that way, which turns to it.
+  const [hovered, setHovered] = createSignal(false)
+  const turns = (by: 1 | -1) => {
+    const to = at().screen + by
+    return hovered() && browsing() && state().matches("nothing") && to >= 0 && to < (screensOf()[at().owner]?.length ?? 1)
+  }
   // The owner shown, how far along their pages and the App Library are drawn, and how opaque they are: for whoever
   // asked for less motion, they fade out, go there and fade in, as iOS's pages do (`glide`).
   const shown = () => at().owner
@@ -333,7 +342,7 @@ export function LauncherPanel(props: { owners: Owner[]; layout: Screens; paging:
         <View style={[looks.surface, looks.search, looks.at((viewport().width - SEARCH) / 2, 0, SEARCH, SEARCH_HEIGHT)]}>
           <LauncherSearch />
         </View>
-        <View onWheel={wheel} style={[looks.surface, looks.card, looks.at(0, CARD_TOP, card().width, card().height), looks.shifted(cardLeft())]}>
+        <View onWheel={wheel} onPointerEnter={() => setHovered(true)} onPointerLeave={() => setHovered(false)} style={[looks.surface, looks.card, looks.at(0, CARD_TOP, card().width, card().height), looks.shifted(cardLeft())]}>
           {/* Home's pages and the App Library after them, in one strip the host drags along as a trackpad's fingers or
               the pointer go (`along`) and slides to where they're going by its spring, as an iPhone's are. */}
           <View {...along} style={[looks.cover, slides() && looks.paging, looks.shifted(-across()), looks.opacity(opacity())]}>
@@ -387,7 +396,38 @@ export function LauncherPanel(props: { owners: Owner[]; layout: Screens; paging:
           {/* Their dots at the foot, with the App Library's glyph, floating, as an iPhone's are: over Home, sliding off with
               it to the App Library, which has none. */}
           <View inert={showing() !== "home" || undefined} style={[looks.row, looks.bottom(0), looks.tall(PILLS), ...withHome(), looks.opacity(browsing() ? opacity() : 0)]}>
-            <DotsPill owners={props.owners} laid={laid().screens} />
+            <DotsPill owners={props.owners} laid={laid().screens} glyph={false} />
+          </View>
+          {/* The chevrons at its sides, under the pointer, each where there's a screenful that way. */}
+          <For each={[-1, 1] as const}>
+            {(by) => (
+              <View inert={!turns(by) || undefined} style={[looks.turn, looks.at(by < 0 ? TURN_INSET : card().width - TURN - TURN_INSET, PILLS + (room().height - TURN) / 2, TURN, TURN), looks.opacity(turns(by) ? 1 : 0)]}>
+                <View style={[looks.pill, looks.glass, looks.ownerPill]}>
+                  <Button variant="ghost" size="icon" shape="capsule" aria-label={by < 0 ? "Previous Page" : "Next Page"} onPress={() => home.send({ type: "step", screen: by })}>
+                    <Icon name={by < 0 ? "caret-left" : "caret-right"} />
+                  </Button>
+                </View>
+              </View>
+            )}
+          </For>
+          {/* To the App Library and back, in one click, in the same place: its corner of the dots' row. */}
+          <View inert={!browsing() || editingNow() || undefined} style={[looks.libraryToggle, looks.bottom(0), looks.tall(PILLS), looks.opacity(browsing() ? (editingNow() ? 0.35 : 1) : 0)]}>
+            <View style={[looks.pill, looks.glass, looks.ownerPill]}>
+              <Button variant="ghost" shape="capsule" onPress={toggleLibrary}>
+                <Show
+                  when={showing() === "library"}
+                  fallback={
+                    <>
+                      <Icon name="squares-four" along />
+                      App Library
+                    </>
+                  }
+                >
+                  <Icon name="caret-left" along />
+                  Home
+                </Show>
+              </Button>
+            </View>
           </View>
         </View>
     </>

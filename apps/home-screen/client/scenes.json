@@ -1618,7 +1618,427 @@
         ]
       }
     },
+    "motions": {
+      "A mouse's wheel turns a page": {
+        "gesture": {
+          "trace": "traces/mouse-wheel-down.json"
+        },
+        "follow": "Notes",
+        "steady": true
+      },
+      "A mouse's wheel spun on to the App Library": {
+        "gesture": {
+          "trace": "traces/mouse-wheel-spin.json"
+        },
+        "follow": "Notes",
+        "steady": true
+      }
+    },
     "checks": {
+      "A mouse's wheel turns a page a notch, on to the App Library and back, and never to another owner": [
+        {
+          "expect": {
+            "shown": "Notes"
+          }
+        },
+        {
+          "trace": "traces/mouse-wheel-down.json"
+        },
+        {
+          "expect": {
+            "states": {
+              "of": "Page 2 of 2",
+              "is": {
+                "current": true
+              }
+            }
+          }
+        },
+        {
+          "trace": "traces/mouse-wheel-down.json"
+        },
+        {
+          "expect": {
+            "shown": {
+              "role": "button",
+              "name": "Home"
+            }
+          }
+        },
+        {
+          "trace": "traces/mouse-wheel-up.json"
+        },
+        {
+          "expect": {
+            "states": {
+              "of": "Page 2 of 2",
+              "is": {
+                "current": true
+              }
+            }
+          }
+        },
+        {
+          "trace": "traces/mouse-wheel-up.json"
+        },
+        {
+          "expect": {
+            "states": {
+              "of": "Page 1 of 2",
+              "is": {
+                "current": true
+              }
+            }
+          }
+        },
+        {
+          "trace": "traces/mouse-wheel-up.json"
+        },
+        {
+          "expect": {
+            "states": {
+              "of": "Page 1 of 2",
+              "is": {
+                "current": true
+              }
+            }
+          }
+        },
+        {
+          "expect": {
+            "shown": {
+              "role": "button",
+              "name": "You"
+            }
+          }
+        }
+      ],
+      "A Mac's wheel turns a page a notch": [
+        {
+          "expect": {
+            "shown": "Notes"
+          }
+        },
+        {
+          "trace": "traces/mac-wheel-down.json"
+        },
+        {
+          "expect": {
+            "states": {
+              "of": "Page 2 of 2",
+              "is": {
+                "current": true
+              }
+            }
+          }
+        },
+        {
+          "trace": "traces/mac-wheel-down.json"
+        },
+        {
+          "expect": {
+            "shown": {
+              "role": "button",
+              "name": "Home"
+            }
+          }
+        },
+        {
+          "trace": "traces/mac-wheel-up.json"
+        },
+        {
+          "expect": {
+            "states": {
+              "of": "Page 2 of 2",
+              "is": {
+                "current": true
+              }
+            }
+          }
+        }
+      ],
+      "A mouse's wheel spun quickly turns a page a notch, on to the App Library": [
+        {
+          "expect": {
+            "shown": "Notes"
+          }
+        },
+        {
+          "trace": "traces/mouse-wheel-spin.json"
+        },
+        {
+          "expect": {
+            "shown": {
+              "role": "button",
+              "name": "Home"
+            }
+          }
+        }
+      ],
+      "Up in the App Library scrolls it to its top, and only then goes back": [
+        {
+          "expect": {
+            "shown": "Notes"
+          }
+        },
+        {
+          "press": "App Library"
+        },
+        {
+          "expect": {
+            "shown": {
+              "role": "button",
+              "name": "Home"
+            }
+          }
+        },
+        {
+          "wait": 500
+        },
+        {
+          "trace": "traces/mouse-wheel-down-four.json"
+        },
+        {
+          "trace": "traces/mouse-wheel-up-four.json"
+        },
+        {
+          "expect": {
+            "shown": {
+              "role": "button",
+              "name": "Home"
+            }
+          }
+        },
+        {
+          "trace": "traces/mouse-wheel-up.json"
+        },
+        {
+          "expect": {
+            "states": {
+              "of": "Page 2 of 2",
+              "is": {
+                "current": true
+              }
+            }
+          }
+        }
+      ],
+      "A trackpad's swipe up and down still goes to another owner, and along a page": [
+        {
+          "expect": {
+            "shown": "Notes"
+          }
+        },
+        {
+          "trace": "traces/windows-touchpad-down.json"
+        },
+        {
+          "expect": {
+            "gone": {
+              "role": "button",
+              "name": "You"
+            }
+          }
+        },
+        {
+          "trace": "traces/windows-touchpad-up.json"
+        },
+        {
+          "expect": {
+            "shown": {
+              "role": "button",
+              "name": "You"
+            }
+          }
+        },
+        {
+          "expect": {
+            "states": {
+              "of": "Page 1 of 2",
+              "is": {
+                "current": true
+              }
+            }
+          }
+        },
+        {
+          "trace": "traces/windows-touchpad-along.json"
+        },
+        {
+          "expect": {
+            "states": {
+              "of": "Page 2 of 2",
+              "is": {
+                "current": true
+              }
+            }
+          }
+        }
+      ],
+      "Hovered, the card has a chevron each way there's a page, which turns to it": [
+        {
+          "expect": {
+            "shown": "Notes"
+          }
+        },
+        {
+          "trace": "traces/pointer-in.json"
+        },
+        {
+          "expect": {
+            "shown": {
+              "role": "button",
+              "name": "Next Page"
+            }
+          }
+        },
+        {
+          "expect": {
+            "gone": {
+              "role": "button",
+              "name": "Previous Page"
+            }
+          }
+        },
+        {
+          "press": "Next Page"
+        },
+        {
+          "expect": {
+            "states": {
+              "of": "Page 2 of 2",
+              "is": {
+                "current": true
+              }
+            }
+          }
+        },
+        {
+          "expect": {
+            "shown": {
+              "role": "button",
+              "name": "Previous Page"
+            }
+          }
+        },
+        {
+          "expect": {
+            "shown": {
+              "role": "button",
+              "name": "Next Page"
+            }
+          }
+        },
+        {
+          "press": "Next Page"
+        },
+        {
+          "expect": {
+            "shown": {
+              "role": "button",
+              "name": "Home"
+            }
+          }
+        },
+        {
+          "expect": {
+            "gone": {
+              "role": "button",
+              "name": "Next Page"
+            }
+          }
+        },
+        {
+          "press": "Previous Page"
+        },
+        {
+          "expect": {
+            "states": {
+              "of": "Page 2 of 2",
+              "is": {
+                "current": true
+              }
+            }
+          }
+        },
+        {
+          "trace": "traces/pointer-out.json"
+        },
+        {
+          "expect": {
+            "gone": {
+              "role": "button",
+              "name": "Next Page"
+            }
+          }
+        },
+        {
+          "expect": {
+            "gone": {
+              "role": "button",
+              "name": "Previous Page"
+            }
+          }
+        }
+      ],
+      "The App Library and back are a click each, in the same place": [
+        {
+          "expect": {
+            "shown": "Notes"
+          }
+        },
+        {
+          "trace": "traces/pointer-in.json"
+        },
+        {
+          "press": "Next Page"
+        },
+        {
+          "expect": {
+            "states": {
+              "of": "Page 2 of 2",
+              "is": {
+                "current": true
+              }
+            }
+          }
+        },
+        {
+          "press": "App Library"
+        },
+        {
+          "expect": {
+            "shown": {
+              "role": "button",
+              "name": "Home"
+            }
+          }
+        },
+        {
+          "press": {
+            "role": "button",
+            "name": "Home"
+          }
+        },
+        {
+          "expect": {
+            "shown": {
+              "role": "button",
+              "name": "App Library"
+            }
+          }
+        },
+        {
+          "expect": {
+            "states": {
+              "of": "Page 2 of 2",
+              "is": {
+                "current": true
+              }
+            }
+          }
+        }
+      ],
       "Its second screenful of pages shows, turned to by a key": [
         {
           "expect": {
