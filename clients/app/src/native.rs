@@ -1543,7 +1543,10 @@ fn channel(
         let _ = write.shutdown().await;
     });
     let to_window = to.clone();
-    let (to_page, asked_page) = (to.clone(), asked.clone());
+    // Held weakly, as what reads the channel holds it for as long as the channel runs: the window, as it closes, by
+    // its system's close too, drops what it holds, and the channel ends with it. Held strongly, it kept it open, so
+    // its app's window was never forgotten and wouldn't open again (21 Nov).
+    let (to_page, asked_page) = (to.downgrade(), asked.clone());
     let (entrypoint, subject, link) = (entrypoint.to_owned(), subject.map(str::to_owned), link.to_owned());
     // Its app's host, as a server says which were loaded against what's gone (`stale`): `<app>[.<subject, last part first>]`.
     let app_host = origin(&entrypoint, subject.as_deref()).trim_start_matches("oneapp://").trim_end_matches(".localhost/").to_owned();
@@ -1569,7 +1572,8 @@ fn channel(
                     });
                 }
                 let (entrypoint, subject, link) = (entrypoint.clone(), subject.clone(), link.clone());
-                let (window, native, to, asked) = (window.clone(), native.clone(), to_page.clone(), asked_page.clone());
+                let (window, native, asked) = (window.clone(), native.clone(), asked_page.clone());
+                let Some(to) = to_page.upgrade() else { return };
                 crate::spawn(async move {
                     match reloaded(window.clone(), entrypoint.clone(), subject.clone(), link.clone(), to, asked).await {
                         Ok(_) => {}
