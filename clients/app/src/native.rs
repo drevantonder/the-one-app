@@ -1126,12 +1126,17 @@ fn respond(
 ) -> Option<Value> {
     let method = message["method"].as_str()?;
     let launcher = state.lock().expect("nothing panics holding it").launcher;
-    // The app asks to be left (`leave`): on a computer, where its window stays open, the Home Screen; the launcher is
-    // put away, the keyboard back with the app that had it.
+    // The app asks to be left (`leave`, Escape on its first screen): the launcher is put away, the keyboard back with the
+    // app that had it, as Spotlight and Raycast are; a phone's app goes home; a computer's app window stays as it is, as
+    // a Mac's and Windows' apps do.
     let framed = state.lock().expect("nothing panics holding it").framed;
     // A page in a frame is its frame's page's, which stays: it leaves nothing.
     if method == "ui/notifications/request-teardown" && !framed {
-        if launcher { computer::hide(true) } else { computer::summon() }
+        if launcher {
+            computer::hide(true)
+        } else if cfg!(mobile) {
+            computer::summon()
+        }
         return None;
     }
     // The launcher is as tall as its page says it is, as Raycast's and Spotlight's panels grow and shrink, and as wide.
