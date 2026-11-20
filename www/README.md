@@ -11,7 +11,7 @@ Run it all on this machine, from this folder:
 
     bun install
     bunx wrangler d1 execute one-www-app-directory --local --file app-directory/schema.sql
-    (cd app-directory && one apps marketplace | bun seed.js drevantonder/the-one-app ../../apps > seed.sql && bunx wrangler d1 execute one-www-app-directory --local --file seed.sql)
+    (cd app-directory && one apps marketplace | bun seed.js ptc-au/the-one-app ../../apps > seed.sql && bunx wrangler d1 execute one-www-app-directory --local --file seed.sql)
     bunx wrangler dev -c gateway/wrangler.jsonc -c app-directory/wrangler.jsonc -c marketing/wrangler.jsonc
 
 The Workers are TypeScript, which wrangler builds without checking. `bun run typecheck` checks them;

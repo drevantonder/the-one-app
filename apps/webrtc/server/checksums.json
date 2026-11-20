@@ -1,18 +1,18 @@
 {
   "server/bin/stream/linux-aarch64": {
     "sha256": "9c4822d5cf50df9571591b594b7d6fd4dd7d6a641227b2596fe0356907fe6c01",
-    "url": "https://github.com/drevantonder/the-one-app/releases/download/nifs-e46446735c7f/stream-e1d63a2362f038e1937cc9965afaa243a44fd15f8e1383f3740f009c26d87a91-linux-aarch64"
+    "url": "https://github.com/ptc-au/the-one-app/releases/download/nifs-e46446735c7f/stream-e1d63a2362f038e1937cc9965afaa243a44fd15f8e1383f3740f009c26d87a91-linux-aarch64"
   },
   "server/bin/stream/linux-x86_64": {
     "sha256": "c8806a1001eb4e7e717a18a4a7827a96fd23c7534d527ef6f83d3ae07948b0d1",
-    "url": "https://github.com/drevantonder/the-one-app/releases/download/nifs-e46446735c7f/stream-180e084452c56677022577470d1bc7225a0d06e636f3a029b2cce6a42dcb1e20-linux-x86_64"
+    "url": "https://github.com/ptc-au/the-one-app/releases/download/nifs-e46446735c7f/stream-180e084452c56677022577470d1bc7225a0d06e636f3a029b2cce6a42dcb1e20-linux-x86_64"
   },
   "server/bin/stream/macos-aarch64": {
     "sha256": "b37d420152dad6ea71191f8dfb110df0e257d6c9e0a61978a471e060ee2ee884",
-    "url": "https://github.com/drevantonder/the-one-app/releases/download/nifs-e46446735c7f/stream-6abc1edda54fc114bfdab56c48a6e3d69b75df16248e932da5c519b462655663-macos-aarch64"
+    "url": "https://github.com/ptc-au/the-one-app/releases/download/nifs-e46446735c7f/stream-6abc1edda54fc114bfdab56c48a6e3d69b75df16248e932da5c519b462655663-macos-aarch64"
   },
   "server/bin/stream/windows-x86_64": {
     "sha256": "ca79e2d7394ac2b7903cb5d076d859b2b7490be5b90678bde7410d722ed3bccd",
-    "url": "https://github.com/drevantonder/the-one-app/releases/download/nifs-e46446735c7f/stream-b4b84773ad6d00739f5f70aec4564c2733c60247f4591bb52dda80b35fdd9459-windows-x86_64"
+    "url": "https://github.com/ptc-au/the-one-app/releases/download/nifs-e46446735c7f/stream-b4b84773ad6d00739f5f70aec4564c2733c60247f4591bb52dda80b35fdd9459-windows-x86_64"
   }
 }

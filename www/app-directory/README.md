@@ -7,7 +7,7 @@ and it's listed the first time an installer says it installed it. Each is listed
 what its SKILL.md says, and what its code says (`listing`), as the network that installed it gave it. `seed.js` lists
 a repo's apps as a network's Marketplace lists them, so the list isn't empty before anyone has installed them:
 
-    one apps marketplace | bun seed.js drevantonder/the-one-app ../../apps > seed.sql
+    one apps marketplace | bun seed.js ptc-au/the-one-app ../../apps > seed.sql
 
 ## The installer's call
 
@@ -16,7 +16,7 @@ After installing an app, unless `DO_NOT_TRACK` is set (`1`, or any value but emp
     POST https://one.drevan.me/apps/api/installs
     Content-Type: application/json
 
-    {"source": "drevantonder/the-one-app", "app": "gmail", "commit": "c6ebcc7", "listing": {"title": "Gmail",
+    {"source": "ptc-au/the-one-app", "app": "gmail", "commit": "c6ebcc7", "listing": {"title": "Gmail",
       "icon": "data:image/png;base64,…", "entrypoints": [{"name": "Gmail", "icon": "data:…", "category": null}],
       "widgets": [{"name": "Inbox", "sizes": ["small"]}], "requires": ["google-account"]}}
 
@@ -33,10 +33,10 @@ An installer doesn't wait on it or retry it, and nothing it installs depends on 
 
     GET https://one.drevan.me/apps/api/apps[?period=week]
 
-    {"period": "all", "apps": [{"source": "drevantonder/the-one-app", "name": "gmail", "title": "Gmail",
+    {"period": "all", "apps": [{"source": "ptc-au/the-one-app", "name": "gmail", "title": "Gmail",
       "icon": "data:…", "subtitle": "…", "about": "…", "category": "Connectors", "entrypoints": […], "widgets": […],
       "requires": […], "description": "…", "installs": 12, "code": "https://github.com/…/tree/HEAD/apps/gmail",
-      "install": "one install drevantonder/the-one-app --app gmail"}]}
+      "install": "one install ptc-au/the-one-app --app gmail"}]}
 
 Most installs first; `week` counts the last seven days (UTC). Any origin may read it.
 

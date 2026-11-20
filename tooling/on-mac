@@ -46,7 +46,7 @@ github() {
 }
 mac() {
   ssh -o ConnectTimeout=15 mac "zsh -lc $(printf %q "set -e; export PATH=\$HOME/.local/bin:\$HOME/.cargo/bin:\$PATH CARGO_BUILD_JOBS=4 ${env[*]}
-lockf -k ~/scratch/one-release.lock bash -c $(printf %q "cd ~/scratch/one-release && git fetch -q https://github.com/drevantonder/the-one-app.git $commit && git reset -q --hard $commit &&
+lockf -k ~/scratch/one-release.lock bash -c $(printf %q "cd ~/scratch/one-release && git fetch -q https://github.com/ptc-au/the-one-app.git $commit && git reset -q --hard $commit &&
 nice -n 19 taskpolicy -d throttle bash -c $(printf %q "$command") >&2 && cat $file && rm $file")")" >"$folder/.mac/$file"
 }
 github &

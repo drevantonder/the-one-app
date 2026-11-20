@@ -129,7 +129,7 @@ mac() { ssh -o ConnectTimeout=15 mac "zsh -lc $(printf %q "set -e; export PATH=\
 git -C "$network" archive --format=tar origin/main app |
   mac "rm -rf ~/scratch/testflight-network && mkdir -p ~/scratch/testflight-network && tar -x -C ~/scratch/testflight-network"
 mac "lockf -k ~/scratch/testflight.lock bash -c $(printf %q "set -e
-  [[ -d ~/scratch/testflight ]] || git clone -q https://github.com/drevantonder/the-one-app.git ~/scratch/testflight
+  [[ -d ~/scratch/testflight ]] || git clone -q https://github.com/ptc-au/the-one-app.git ~/scratch/testflight
   cd ~/scratch/testflight && git fetch -q origin $commit && git reset -q --hard $commit
   nice -n 19 taskpolicy -d throttle tooling/testflight --on-mac")" <<<"$ASC_KEY"
 echo "Uploaded $number ($build): Apple processes it, then its testers' phones take it by themselves"

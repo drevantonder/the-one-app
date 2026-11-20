@@ -1,18 +1,18 @@
 {
   "server/nif/encryption/linux-aarch64.so": {
     "sha256": "e2417d53fa09dc2e6ff01299099347169e2a5c07a45b85416078de5875645216",
-    "url": "https://github.com/drevantonder/the-one-app/releases/download/nifs-4c7ff3c7191a/encryption-99f61a4c2b8e961b8281b3ded494f9e137ab730fc47227003f2be56b917b4ae8-linux-aarch64.so"
+    "url": "https://github.com/ptc-au/the-one-app/releases/download/nifs-4c7ff3c7191a/encryption-99f61a4c2b8e961b8281b3ded494f9e137ab730fc47227003f2be56b917b4ae8-linux-aarch64.so"
   },
   "server/nif/encryption/linux-x86_64.so": {
     "sha256": "2ce1d9932bc70f1dc3f4da13fdcabcf7caac05912e61e7fcc3f47aa66d22a56b",
-    "url": "https://github.com/drevantonder/the-one-app/releases/download/nifs-4c7ff3c7191a/encryption-ae4ae1312d60203fb2005af7e63aee947b24ebd6d7402596ddbeef030edf746c-linux-x86_64.so"
+    "url": "https://github.com/ptc-au/the-one-app/releases/download/nifs-4c7ff3c7191a/encryption-ae4ae1312d60203fb2005af7e63aee947b24ebd6d7402596ddbeef030edf746c-linux-x86_64.so"
   },
   "server/nif/encryption/macos-aarch64.so": {
     "sha256": "d6d8c013a6277beefc73c1ea3fb8342b2a225472a3bd651c8c09c6842f91c964",
-    "url": "https://github.com/drevantonder/the-one-app/releases/download/nifs-4c7ff3c7191a/encryption-de99773ab037aa2be3d05f46ffabc020b4ed2f497e9318efb5d6444ec3a15a48-macos-aarch64.so"
+    "url": "https://github.com/ptc-au/the-one-app/releases/download/nifs-4c7ff3c7191a/encryption-de99773ab037aa2be3d05f46ffabc020b4ed2f497e9318efb5d6444ec3a15a48-macos-aarch64.so"
   },
   "server/nif/encryption/windows-x86_64.so": {
     "sha256": "f012aea79444edcfc317e01b87de339eee134eac233088d8296133991027e2dd",
-    "url": "https://github.com/drevantonder/the-one-app/releases/download/nifs-4c7ff3c7191a/encryption-543666494f828b4ae5e99117fcfc0a8132fa471402e8b0d0580a548034373c81-windows-x86_64.so"
+    "url": "https://github.com/ptc-au/the-one-app/releases/download/nifs-4c7ff3c7191a/encryption-543666494f828b4ae5e99117fcfc0a8132fa471402e8b0d0580a548034373c81-windows-x86_64.so"
   }
 }
