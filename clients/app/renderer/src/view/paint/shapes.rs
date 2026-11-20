@@ -10,8 +10,8 @@ impl Painter<'_> {
         self.scene.insert_primitive(Quad {
             order: 0,
             border_style: if dashed { BorderStyle::Dashed } else { BorderStyle::Solid },
-            bounds: bounds.scale_to(scale),
-            content_mask: ContentMask { bounds: mask.scale_to(scale) },
+            bounds: bounds.snap_to(scale),
+            content_mask: ContentMask { bounds: mask.snap_to(scale) },
             background: Background::from(background.opacity(opacity)),
             border_color: border_color.opacity(opacity),
             corner_radii: Corners {

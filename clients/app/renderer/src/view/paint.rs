@@ -341,6 +341,7 @@ pub(super) struct Painter<'a> {
 
 pub(super) trait Scale {
     fn scale_to(&self, factor: f32) -> Bounds<ScaledPixels>;
+    fn snap_to(&self, factor: f32) -> Bounds<ScaledPixels>;
 }
 impl Scale for Bounds<f32> {
     fn scale_to(&self, factor: f32) -> Bounds<ScaledPixels> {
@@ -348,6 +349,19 @@ impl Scale for Bounds<f32> {
             origin: Point { x: ScaledPixels(self.origin.x * factor), y: ScaledPixels(self.origin.y * factor) },
             size: Size { width: ScaledPixels(self.size.width * factor), height: ScaledPixels(self.size.height * factor) },
         }
+    }
+
+    /// In device pixels, its edges on whole ones, as Chromium and Flutter snap a box's: a GPU fills a pixel whose
+    /// middle is on an edge as its own rule says, so a hairline on half a pixel was one pixel on one GPU and two on
+    /// another. What has any size keeps at least a pixel of it.
+    fn snap_to(&self, factor: f32) -> Bounds<ScaledPixels> {
+        let edges = |start: f32, length: f32| {
+            let from = (start * factor).round();
+            let to = ((start + length) * factor).round();
+            (from, if length > 0.0 { to.max(from + 1.0) } else { to })
+        };
+        let ((left, right), (top, bottom)) = (edges(self.origin.x, self.size.width), edges(self.origin.y, self.size.height));
+        Bounds { origin: Point { x: ScaledPixels(left), y: ScaledPixels(top) }, size: Size { width: ScaledPixels(right - left), height: ScaledPixels(bottom - top) } }
     }
 }
 
