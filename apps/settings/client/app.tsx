@@ -22,6 +22,8 @@ interface Added {
   count: number | null
   kinds: string[] | null
   service: boolean
+  /** What this device must say of itself (a `client()` field that isn't `null`) for the section to be listed: where it has none, the section has nothing to show. */
+  needs: string | null
 }
 
 /** Where an app's update is, as `apps` answers it. */
@@ -55,7 +57,10 @@ interface Builds {
 
 const json = <T,>(tool: string, inputs?: object, subject?: string): Promise<T> => call(tool, inputs, { subject }).then(JSON.parse)
 
-const added = createMemo(() => json<{ sections: Added[] }>("settings_sections").then(({ sections }) => sections))
+const added = createMemo(async () => {
+  const [{ sections }, here] = await Promise.all([json<{ sections: Added[] }>("settings_sections"), client()])
+  return sections.filter((one) => !one.needs || (here as Record<string, unknown>)[one.needs] != null)
+})
 const apps = createMemo(async () => {
   const [{ apps: listed }, { apps: installed }] = await Promise.all([json<{ apps: App[] }>("settings_apps"), json<{ apps: App[] }>("apps")])
   return listed.map((app) => ({ ...installed.find((one) => one.name === app.name && one.for === app.for), ...app }))
@@ -122,6 +127,7 @@ function Sidebar(props: { shown?: string }) {
     <Row
       start={<Tile icon={section().icon ?? section().app_icon} />}
       heading={section().name!}
+      text={words() ? "Settings" : undefined}
       end={<Show when={section().count}><Badge variant="destructive">{section().count}</Badge></Show>}
       current={props.shown === section().id}
       onPress={() => choose(section().id)}
@@ -165,6 +171,7 @@ function Sidebar(props: { shown?: string }) {
               <Row
                 start={<Tile icon={app().icon} />}
                 heading={app().title}
+                text={words() ? "App" : undefined}
                 end={<Show when={app().update}><Badge variant="secondary">Update</Badge></Show>}
                 current={props.shown === `app:${app().for}:${app().name}`}
                 onPress={() => choose(`app:${app().for}:${app().name}`)}
