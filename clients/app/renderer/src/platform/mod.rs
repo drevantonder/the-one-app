@@ -286,10 +286,49 @@ impl Native {
 
 #[cfg(all(target_os = "windows", not(feature = "fake")))]
 use windows::start;
-/// The fake platform's windows are its driver's, on its own thread (`Windows::fake`).
+/// The fake platform's windows for an app that asks for them as it would a system's, as the app does built with it
+/// (`clients/app`'s `fake`, the app harness): a thread of their own, as a host's, on real time, whose display refreshes
+/// at 60 Hz while something moves, its pages' posts and its jobs taken in between, as each host's loop does. With a
+/// seed (`ONE_SEED`), it's as busy as a loaded device's: one job in four waits up to 2 s for the thread, as a Surface's
+/// launcher waited 4.5 s to be made as the app started (21 Nov). A harness that drives them itself, frame by frame, has
+/// them by `Windows::fake` instead (`examples/screenshot.rs`).
 #[cfg(feature = "fake")]
 fn start() -> anyhow::Result<Native> {
-    anyhow::bail!("the fake platform's windows are its driver's: Windows::fake")
+    let (sender, jobs) = std::sync::mpsc::channel::<Job>();
+    let (ready_to, ready) = std::sync::mpsc::channel();
+    let seed: u64 = std::env::var("ONE_SEED").ok().and_then(|seed| seed.parse().ok()).unwrap_or(0);
+    std::thread::Builder::new().name("native".into()).spawn(move || {
+        let mut windows = match Windows::fake(1.0, 60.0, crate::js::Clock::real()) {
+            Ok(windows) => windows,
+            Err(error) => return drop(ready_to.send(Err(error))),
+        };
+        windows.seed(seed);
+        let _ = ready_to.send(Ok(()));
+        let mut ticked = web_time::Instant::now();
+        loop {
+            match jobs.recv_timeout(windows.due().unwrap_or(FRAME).min(FRAME)) {
+                Ok(job) => {
+                    if seed != 0 && windows.random(4) == 0 {
+                        std::thread::sleep(std::time::Duration::from_millis(windows.random(2000)));
+                    }
+                    job(&mut windows)
+                }
+                Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {}
+                Err(std::sync::mpsc::RecvTimeoutError::Disconnected) => return,
+            }
+            while let Ok(job) = jobs.try_recv() {
+                job(&mut windows);
+            }
+            windows.wait();
+            if windows.wanted() && ticked.elapsed() >= FRAME {
+                ticked = web_time::Instant::now();
+                windows.tick();
+            }
+            windows.turn();
+        }
+    })?;
+    ready.recv()??;
+    Ok(Native(sender))
 }
 #[cfg(target_os = "android")]
 use android::start;

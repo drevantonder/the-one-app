@@ -18,6 +18,9 @@ path = "src/main.rs"
 # native, in tao's event loop (`computer`).
 [features]
 default = ["window"]
+# The app on the renderer's fake platform, its native windows drawn offscreen on a thread of their own, for the app
+# harness (`tooling/app-harness`), which drives them with the inspector.
+fake = ["window", "renderer/fake"]
 window = [
   "dep:tauri-build",
   "dep:anyhow",

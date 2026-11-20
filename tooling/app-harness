@@ -1,0 +1,261 @@
+#!/usr/bin/env bash
+# The app harness: the app itself (its client, the channel its windows talk over, its launcher, a second start, an
+# update's restart) on the renderer's fake platform, its native windows drawn offscreen on a thread of their own
+# (`clients/app`'s `fake`), against a network on this machine (`tooling/network`), driven by the inspector as an agent
+# drives a device's. What the headless harness (`examples/screenshot.rs`) can't reach, as it draws one page with no
+# app around it.
+#
+#     tooling/app-harness <folder> [--seed <n>] [<check>…]
+#
+# Each check says `ok` or `FAILED` and why, and it exits 1 if one failed. With none named, all run:
+#
+#   start    after a start, the launcher is open, and no app has two windows.
+#   reopen   an app's window closed as its system closes it (`inspector close`) opens again from a `one:` link.
+#   stale    the app started as an update starts it, its Home Screen and Settings updated while it wasn't running
+#            (the files it kept then stale): one window of each app, at every moment.
+#   cached   a view's read while the server holds every request, after a write of its own: answered at once, from
+#            what its client kept.
+#   restart  updates in a row (the program's file changes), each with a second start near the hand-over: one app,
+#            whose launcher answers, and one window of each app, at the end of each.
+#
+# The folder keeps the network, the app's build and its log (`app.log`), and a network running there is used again.
+# `--seed` picks the moments things happen at, the same each time for the same seed. It needs what `tooling/network`
+# does, and `xvfb-run` and `dbus-run-session`, as the app's event loop is GTK's on Linux.
+set -euo pipefail
+shopt -s extglob
+root=$(cd "$(dirname "$0")/.." && pwd)
+usage="tooling/app-harness <folder> [--seed <n>] [start|reopen|stale|cached|restart]…"
+folder= seed=1 checks=()
+while (($#)); do
+  case $1 in
+    --seed) seed=${2:?$usage} && shift ;;
+    start | reopen | stale | cached | restart) checks+=("$1") ;;
+    -*) echo "$usage" >&2 && exit 1 ;;
+    *) folder=$1 ;;
+  esac
+  shift
+done
+[[ -n $folder ]] || { echo "$usage" >&2 && exit 1; }
+((${#checks[@]})) || checks=(start reopen stale cached restart)
+mkdir -p "$folder/app"
+folder=$(cd "$folder" && pwd)
+RANDOM=$seed
+one=$root/target/debug/one
+
+# The app's build, beside the network's `one`, which it doesn't replace. Its program is a script that says it's a
+# newer build than any, so a change to it is an update the app starts again on (`updater::in_place`), as one does.
+(cd "$root" && cargo build -p app --bin one --features fake)
+cp "$one" "$folder/app/one-real.new" && mv -f "$folder/app/one-real.new" "$folder/app/one-real"
+cat >"$folder/app/one" <<'EOF'
+#!/bin/sh
+[ "$1" = --version ] && exec echo "one 0.0.0+999999999.harness"
+exec "$(dirname "$0")/one-real" "$@"
+EOF
+chmod +x "$folder/app/one"
+
+net=$folder/network
+if ! { [[ -s $net/pid ]] && kill -0 "$(cat "$net/pid")" 2>/dev/null; }; then
+  setsid "$root/tooling/network" "$net" >"$folder/network.log" 2>&1 &
+  grep -q -m1 "Its address is" <(tail -F --pid=$! -n +1 "$folder/network.log") || { cat "$folder/network.log" >&2 && exit 1; }
+fi
+# The seed makes the app's windows' thread as busy as a loaded device's, too (`platform::start`, fake).
+export ONE_HOME=$net/client ONE_AS=owner ONE_PROGRAM=$folder/app/one ONE_SEED=$seed
+for wanted in inspector settings; do
+  ONE_SUBJECT=network "$one" apps | jq -e --arg app "$wanted" 'any(.apps[]; .name == $app)' >/dev/null ||
+    ONE_SUBJECT=network "$one" install --app "network/apps/$wanted" >/dev/null
+done
+
+log=$folder/app.log
+: >"$log"
+app=
+# A desktop of its own, its display and session bus, which outlives each app started on it, as a person's does: the
+# app's event loop is GTK's, and without `dbus-run-session` GTK waits half a minute for a desktop that isn't there.
+rm -f "$folder/desktop.env"
+setsid dbus-run-session -- xvfb-run -a sh -c 'env | grep -E "^(DISPLAY|XAUTHORITY|DBUS_SESSION_BUS_ADDRESS)=" >"$0"; exec sleep infinity' "$folder/desktop.env" >/dev/null 2>&1 &
+desktop=$!
+# Within `$1` seconds, the condition `$2` holds, asked again every fifth of a second, as Playwright's expect polls.
+within() {
+  local until=$((SECONDS + $1))
+  until eval "$2"; do
+    ((SECONDS < until)) || return 1
+    sleep 0.2
+  done
+}
+said() { grep -c -- "$1" "$log" || true; }
+# The app's windows, each `<window> <entrypoint>`.
+windows() { "$one" inspector windows 2>/dev/null | jq -r '.windows[] | "\(.window) \(.entrypoint | split("/")[0])"'; }
+open_window() { windows | awk -v app="$1" '$2 == app { print $1 }'; }
+# The app's processes: the program it is, by its file, which a new build replaced is `(deleted)`.
+programs() { for exe in /proc/[0-9]*/exe; do [[ $(readlink "$exe" 2>/dev/null) == "$folder/app/one-real"?(" (deleted)") ]] && echo "${exe//[^0-9]/}"; done; true; }
+failed=0
+check() { if "${@:2}"; then echo "ok      $1"; else echo "FAILED  $1" && failed=1; fi; }
+# No app has two windows, now.
+one_each() {
+  local twice
+  twice=$(windows | awk '{ print $2 }' | sort | uniq -d)
+  [[ -z $twice ]] || { echo "        two windows of $twice: $(windows | tr '\n' ' ')" && return 1; }
+}
+
+start_app() {
+  stop_app
+  local opened
+  opened=$(said "home-screen opened")
+  setsid "$folder/app/one" >>"$log" 2>&1 &
+  app=$!
+  within 60 '(($(said "home-screen opened") > opened))' || { echo "        the app didn't open its launcher within a minute" && return 1; }
+}
+stop_app() {
+  [[ -z $app ]] || kill -- "-$app" 2>/dev/null || true
+  local pids
+  pids=$(programs)
+  [[ -z $pids ]] || kill $pids 2>/dev/null || true
+  within 10 '[[ -z $(programs) ]]'
+  app=
+}
+# A server the `cached` check stopped goes on, whatever happens to the check.
+held=
+trap '[[ -z $held ]] || kill -CONT "$held"; stop_app; kill -- "-$desktop" 2>/dev/null || true' EXIT
+within 30 '[[ -s $folder/desktop.env ]]'
+set -a && source "$folder/desktop.env" && set +a
+
+started() {
+  start_app || return 1
+  within 10 '[[ -n $(open_window home-screen) ]]' || { echo "        the inspector lists no launcher" && return 1; }
+  sleep 2
+  one_each
+}
+
+reopened() {
+  [[ -n $app ]] || start_app || return 1
+  "$folder/app/one" one:settings
+  within 20 '[[ -n $(open_window settings) ]]' || { echo "        Settings didn't open" && return 1; }
+  "$one" inspector close --window "$(open_window settings)" >/dev/null
+  within 5 '[[ -z $(open_window settings) ]]' || { echo "        Settings didn't close" && return 1; }
+  "$folder/app/one" one:settings
+  within 20 '[[ -n $(open_window settings) ]]' || { echo "        Settings closed by its system didn't open again" && return 1; }
+}
+
+# New versions of the Home Screen and of Settings while the app isn't running, then the app started as an update
+# starts it, with Settings' window to open again: each page opens from the files its client kept, which it then hears
+# are stale, as after an update of the client. One window of each app at every moment.
+stale() {
+  local twice name
+  stop_app
+  for name in home-screen settings; do
+    rm -rf "$folder/$name" && cp -r "$root/apps/$name" "$folder/$name"
+    echo "// a version of its own: $seed $(date +%s%N)" >>"$(find "$folder/$name/client" -maxdepth 1 -name '*.tsx' | head -1)"
+    ONE_SUBJECT=network "$one" deploy --name "$name" --files-from "$folder/$name" >/dev/null
+  done
+  ONE_REOPEN='[["settings/client/index.html",null]]' setsid "$folder/app/one" >>"$log" 2>&1 &
+  app=$!
+  # And another of the Home Screen a moment later (0-3 s, as the seed says), as it opens again on the first.
+  local delay=$((RANDOM % 3000))
+  sleep "$(printf '%d.%03d' $((delay / 1000)) $((delay % 1000)))"
+  echo "// and another: $(date +%s%N)" >>"$(find "$folder/home-screen/client" -maxdepth 1 -name '*.tsx' | head -1)"
+  ONE_SUBJECT=network "$one" deploy --name home-screen --files-from "$folder/home-screen" >/dev/null &
+  local deployed=$!
+  for _ in $(seq 75); do
+    twice=$(windows | awk '{ print $2 }' | sort | uniq -d | tr '\n' ' ')
+    [[ -z $twice ]] || break
+    sleep 0.2
+  done
+  wait $deployed
+  [[ -z $twice ]] || { echo "        another Home Screen ${delay} ms after the start: two windows of $twice: $(windows | tr '\n' ' ')" && return 1; }
+  one_each
+}
+
+# The network's server, the program of its node (`tooling/network`'s `node_name`), by the port it's listening on.
+server() {
+  local port
+  port=$(epmd -names | awk -v node="server-$(printf %s "$net" | cksum | cut -d' ' -f1)" '$2 == node { print $5 }')
+  ss -Hltnp "sport = :$port" | grep -o 'pid=[0-9]*' | head -1 | cut -d= -f2
+}
+
+# A view's read while its server holds every request (stopped, as one is that's restarting), after a write of its
+# own: answered at once from what its client kept, as stale-while-revalidate has it, where it waited until the
+# server was given up for gone (issue 26: windows ready in 22-34 s). It's asked as an app's window asks, over the
+# app's own channel (`hosts::talk`), as a view of its own: a read another view kept, a write (a group made), the
+# server stopped, then the read.
+cached() {
+  [[ -n $app ]] || start_app || return 1
+  local channel
+  channel=$(ss -Hxlp | awk -v pid="pid=$(programs | head -1)," 'index($0, pid) && /app\.theone\.client/ { print $5 }' | head -1)
+  held=$(server)
+  [[ -n $channel && -n $held ]] || { echo "        no channel ($channel) or no server ($held)" && return 1; }
+  python3 - "$channel" "$held" <<'PY'
+import json, os, signal, socket, sys, time
+channel, held = sys.argv[1], int(sys.argv[2])
+def view(name):
+    talk = socket.socket(socket.AF_UNIX)
+    talk.connect(channel)
+    talk.settimeout(30)
+    lines = talk.makefile("rw")
+    lines.write(json.dumps({"hello": {"entrypoint": name, "subject": None, "link": name}}) + "\n")
+    def ask(id, tool, arguments):
+        lines.write(json.dumps({"id": id, "command": "request", "args": {"view": "|" + name, "method": "tools/call", "params": {"name": tool, "arguments": arguments}}}) + "\n")
+        lines.flush()
+        while True:
+            line = lines.readline()
+            if not line:
+                raise SystemExit(f"        the app ended the channel as {name} asked {tool}")
+            said = json.loads(line)
+            if said.get("id") == id:
+                if "error" in said:
+                    raise SystemExit(f"        {tool} wasn't answered: {said['error'][:200]}")
+                return said
+    return talk, ask
+_, warm = view("harness/kept")
+warm("kept", "settings_apps", {})
+talk, mine = view("harness/view")
+mine("write", "permissions_group", {"name": f"harness {time.time_ns()}"})
+os.kill(held, signal.SIGSTOP)
+try:
+    talk.settimeout(10)
+    asked = time.monotonic()
+    try:
+        mine("read", "settings_apps", {})
+        took = time.monotonic() - asked
+    except TimeoutError:
+        took = None
+finally:
+    os.kill(held, signal.SIGCONT)
+if took is None or took > 1:
+    print(f"        its read, after its write, with the server holding every request: {'no answer in 10 s' if took is None else f'{took:.1f} s'}")
+    sys.exit(1)
+print(f"        its read, after its write, with the server holding every request: {took * 1000:.0f} ms")
+PY
+  local answered=$?
+  held=
+  return $answered
+}
+
+# Updates in a row, each a second start 0-3 ms after the program before ends, or 0-1 s after.
+restarted() {
+  local round before old delay
+  [[ -n $app ]] || start_app || return 1
+  for round in 1 2 3 4 5; do
+    before=$(said "the client opened")
+    old=$(programs)
+    touch "$folder/app/one"
+    within 30 '! programs | grep -qx "$old"' || { echo "        update $round: the program before ($old) didn't end: $(programs | tr "\n" " ")" && return 1; }
+    delay=$((round % 2 ? RANDOM % 4 : RANDOM % 1000))
+    sleep "$(printf '0.%03d' "$delay")"
+    "$folder/app/one" >>"$log" 2>&1
+    within 30 '(($(said "the client opened") > before))' || { echo "        update $round: the new program didn't open" && return 1; }
+    sleep 3
+    [[ $(programs | wc -l) -eq 1 ]] || { echo "        update $round, a second start ${delay} ms after: $(programs | wc -l) apps" && return 1; }
+    within 10 '[[ -n $(open_window home-screen) ]]' || { echo "        update $round: no launcher answers" && return 1; }
+    one_each || { echo "        after update $round" && return 1; }
+  done
+}
+
+for name in "${checks[@]}"; do
+  case $name in
+    start) check "start: the launcher, and one window of each app" started ;;
+    reopen) check "reopen: an app closed by its system opens again" reopened ;;
+    stale) check "stale: pages updated as the app starts, one window of each at every moment" stale ;;
+    cached) check "cached: a read after a write is answered from what was kept while the server holds every request" cached ;;
+    restart) check "restart: updates in a row, each with a second start, leave one app" restarted ;;
+  esac
+done
+exit $failed

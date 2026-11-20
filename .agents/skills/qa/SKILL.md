@@ -123,6 +123,18 @@ protocol). Find nodes by role and text, tap, type, `settle`, then `snap`, never 
   1024×720 at first). They reach the window through the launcher, as an agent on another device does: it draws every
   native window itself.
 
+### The app around its windows: every change to `clients/app/src/`
+
+What a device does with the app itself, not one page (its launcher, an app's window opened, closed and opened
+again, a second start, an update's restart, pages gone stale as it starts), is checked by the app harness: the app
+on the fake platform, its windows drawn offscreen, against a network of its own, driven by the inspector:
+
+    tooling/app-harness <folder> [--seed <n>] [start|reopen|stale|restart]…
+
+Each check says `ok` or `FAILED` with why (a few minutes for all, the first a few more to start the network). A bug
+a device found in the app around its windows is made to fail here first, as a check of its own, then fixed. The
+seed picks when things happen; a failure says the moment, and its seed is run again after the fix.
+
 ### Android
 
 An emulator with the AVD `one-phone` (Android 36, x86_64, KVM) is set up here:
