@@ -518,17 +518,22 @@ defmodule AndroidEmulator.Emulator do
   defp processes do
     {ps, 0} = System.cmd("ps", ["-axo", "pid=,args="])
 
+    # By its words, as a pattern of the whole line backtracks past its limit on the long ones some programs have.
     for line <- String.split(ps, "\n", trim: true),
-        [_, pid, program, id] <- [Regex.run(~r/^\s*(\d+)\s+(\S+).*\s-avd\s(\S+)\s/, line <> " ")],
+        [pid, program | args] <- [String.split(line)],
+        id = after_flag(args, "-avd"),
+        id != nil,
         reduce: %{} do
       running ->
         pid = String.to_integer(pid)
-        port = with [_, port] <- Regex.run(~r/\s-port\s(\d+)/, line), do: String.to_integer(port)
+        port = with port when port != nil <- after_flag(args, "-port"), do: String.to_integer(port)
         emulator = if Path.basename(program) =~ ~r/^(qemu-system|emulator)/, do: pid
         was = Map.get(running, id, %{pids: [], port: nil, emulator: nil})
         Map.put(running, id, %{pids: [pid | was.pids], port: was.port || port, emulator: was.emulator || emulator})
     end
   end
+
+  defp after_flag(args, flag), do: args |> Enum.drop_while(&(&1 != flag)) |> Enum.at(1)
 
   # An emulator's state as the machine says it, by its processes: none is stopped, and one a stop left its file
   # beside is stopping.
