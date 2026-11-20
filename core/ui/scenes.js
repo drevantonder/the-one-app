@@ -37,6 +37,7 @@ import { chromium } from "playwright-core"
 import { PNG } from "pngjs"
 import pixelmatch from "pixelmatch"
 import { outline } from "./src/drawing-primitives/outline.ts"
+import { messages } from "./src/words.ts"
 import { build, COMPONENTS, pageFolder, usedApp } from "./motion.js"
 
 const here = (path) => fileURLToPath(new URL(path, import.meta.url))
@@ -367,6 +368,12 @@ for (const target of targets) {
       said.push(`  the screen says a word that isn't a person's: ${line}`)
       process.exitCode = 1
     }
+    // A page that threw while drawing shows `render`'s Problem, whose scene says nothing of the page, on either host.
+    for (const [host, tree] of [["DOM", shown.tree], ["native", drawn.tree]])
+      if (tree?.includes(messages.cantShowPage)) {
+        said.push(`  ${host}: the page crashed, showing "${messages.cantShowPage}"`)
+        process.exitCode = 1
+      }
     if (drawn.missing) said.push(`  native: ${drawn.missing}`)
     else if (shown.tree !== undefined) compared(said, "DOM and native", shown.tree, drawn.tree, join(folder, "dom.png"), join(folder, "native.png"), join(folder, "diff.png"))
     if (drawn.measured) said.push(`  native: ${timings(drawn.measured)}`)

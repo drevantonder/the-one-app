@@ -40,6 +40,7 @@ import { basename, dirname, join, relative, resolve } from "node:path"
 import { fileURLToPath } from "node:url"
 import { PNG } from "pngjs"
 import pixelmatch from "pixelmatch"
+import { messages } from "./src/words.ts"
 
 const here = (path) => fileURLToPath(new URL(path, import.meta.url))
 const root = here("../../")
@@ -553,6 +554,20 @@ function requests(steps, folder) {
   return out
 }
 
+/// A page that threw while drawing shows `render`'s Problem, "Can't show this page", with the error under it, and nothing
+/// to press but Try Again, so what a check or the Tab walk finds there says nothing of the page. The request that finds it
+/// at a run's end, and from its answer, why the run failed, if it did.
+const crash = { op: "query" }
+const crashed = (answer) => {
+  const nodes = answer?.result?.nodes ?? []
+  const heading = nodes.find((node) => node.name === messages.cantShowPage)
+  if (!heading) return
+  const said = (node) => node?.name ?? (node?.children ?? []).map((id) => said(nodes.find((other) => other.node === id))).join("")
+  const siblings = nodes.find((node) => node.children?.includes(heading.node))?.children ?? []
+  const error = said(nodes.find((node) => node.node === siblings[siblings.indexOf(heading.node) + 1]))
+  return `the page crashed, showing "${messages.cantShowPage}": ${error || "no error"}`
+}
+
 /// Plays each check of `scene`, once as it is and with each seed. → each check's name and how each run went.
 async function check(built, scene, folder) {
   const at = pageFolder(built, scene.page, folder, scene.uses)
@@ -568,11 +583,11 @@ async function check(built, scene, folder) {
           const ran = requests(steps, scene.from)
           const own = join(folder, name.replace(/[^\w.-]+/g, "-"), String(seed))
           mkdirSync(own, { recursive: true })
-          const done = await run(at, own, scene, [{ op: "clock", step: 1000 }, ...taps, ...ran.map(({ request }) => request)], seed)
+          const done = await run(at, own, scene, [{ op: "clock", step: 1000 }, ...taps, ...ran.map(({ request }) => request), crash], seed)
           const answers = done.answers.slice(1 + taps.length)
           const failed = done.failed
             ? `the harness failed: ${done.said.split("\n").at(-1)}`
-            : ran.map(({ judge, request, step }, n) => (answers[n]?.error ? `${step} (${request.op}): ${answers[n].error}` : judge && judge(answers[n]) ? `${step}: ${judge(answers[n])}` : undefined)).find(Boolean)
+            : crashed(answers[ran.length]) ?? ran.map(({ judge, request, step }, n) => (answers[n]?.error ? `${step} (${request.op}): ${answers[n].error}` : judge && judge(answers[n]) ? `${step}: ${judge(answers[n])}` : undefined)).find(Boolean)
           return { name, seed, failed }
         }),
       )),
@@ -597,6 +612,7 @@ async function walk(built, scene, folder) {
   const done = await run(at, folder, scene, asked)
   if (done.failed) return `the harness failed: ${done.said.split("\n").at(-1)}`
   const answers = done.answers.slice(1 + taps.length)
+  if (crashed(answers[0])) return crashed(answers[0])
   // Each stop: what had the keyboard, where it was drawn, and the picture.
   const stops = []
   for (let n = 0; n <= STOPS; n++) {
