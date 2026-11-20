@@ -851,8 +851,9 @@ impl Windows {
     fn due(&self) -> Option<std::time::Duration> {
         let screens = self.windows.values().filter_map(|window| window.screen.as_ref().ok()?.due());
         let showing = self.windows.values().filter(|window| !window.shown || window.picture.is_some()).map(|window| SHOWN_WITHIN.saturating_sub(window.opened.elapsed()));
-        // Where the display says nothing of its frames, the next is a 60 Hz display's.
-        let frame = (self.framing() && !self.display.paced()).then(|| FRAME.saturating_sub(self.framed.elapsed()));
+        // Where the display says nothing of its frames, or hasn't yet since they were asked for, the next is a 60 Hz
+        // display's.
+        let frame = (self.framing() && !self.ticking()).then(|| FRAME.saturating_sub(self.framed.elapsed()));
         // A pull's spring steps at a 120 Hz display's frames.
         let pulled = self.windows.values().any(|window| window.pull.as_ref().is_some_and(rail::Pull::springing)).then_some(std::time::Duration::from_micros(8_333));
         let check = self.check.as_ref().map(conformance::Check::due);
@@ -860,7 +861,8 @@ impl Windows {
     }
 
     /// Whether the display says when it shows each frame, and has since its frames were last asked for: a display link
-    /// just started takes a while to tick (a Mac's two or three refreshes).
+    /// just started takes a while to tick (a Mac's two or three refreshes), and the loop's own clock stands in for it
+    /// till then, so what started moving isn't held on its first frame.
     fn ticking(&self) -> bool {
         self.display.paced() && self.ticked
     }
@@ -936,7 +938,7 @@ impl Windows {
         let framing = self.framing();
         let ticked = self.display.frame();
         self.ticked |= ticked.is_some();
-        let shown = ticked.or_else(|| (framing && !self.display.paced() && self.framed.elapsed() >= FRAME).then(web_time::Instant::now));
+        let shown = ticked.or_else(|| (framing && !self.ticking() && self.framed.elapsed() >= FRAME).then(web_time::Instant::now));
         if let Some(at) = shown {
             self.framed = at;
             if let Some(check) = &self.check {
