@@ -469,7 +469,7 @@ export type Scene =
 export type CheckStep = Tap | { press: Tap; hold?: number; agent?: true } | { down: Tap } | { up: true } | { trace: string } | { wait: number } | { away: number } | { putAway: true } | { summon: true } | { back: true } | { expect: Expect; within?: number }
 /** What must hold: what's drawn whole and in the window (`shown`), what isn't there (`gone`), what has the keyboard
  * (`focused`), words somewhere on it (`text`), a node's states (`states`: `{ of, is: { expanded: true } }`), how opaque
- * it's drawn (`drawn`: `{ of, opacity }`, a pressed look), the glass's blur drawn (`blur`), and what the input with the
+ * it's drawn (`drawn`: `{ of, opacity }`, a pressed look), the glass's blur drawn or not (`blur`), and what the input with the
  * keyboard asks the platform's keyboard for (`keyboard`, as Flutter's `TextInputConfiguration` says it to iOS and
  * Android: `{ textCapitalization: "TextCapitalization.none", autocorrect: false }`), and every text drawn in the window
  * at least `margins` points in from its sides, as a page's margins keep it. */

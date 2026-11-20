@@ -17,13 +17,23 @@ const look = styles({
   screen: { position: "relative", flexGrow: 1, flexShrink: 1, minHeight: 0, minWidth: 0 },
   // The bar keeps clear of what the device keeps for itself at the top.
   bar: { paddingTop: tokens.length.safeTop, paddingStart: tokens.length.safeLeft, paddingEnd: tokens.length.safeRight, userSelect: "none" },
+  // Under a finger, what's in it scrolls under the bar, as UINavigationBar's and Android's top app bar's does: clear of
+  // it where it's scrolled to its top (`clear`), and the bar takes its material and a hairline as what's in it goes
+  // under, as a scroll edge's appearance gives way to the standard one.
+  floating: { position: "absolute", top: 0, start: 0, end: 0, zIndex: 1 },
+  backdrop: { position: "absolute", top: 0, bottom: 0, start: 0, end: 0, zIndex: -1, backgroundColor: tokens.colour.glass, backdropFilter: tokens.material.glass, borderBottomWidth: tokens.length.hairline, borderColor: tokens.colour.quinaryLabel },
+  clear: { paddingTop: tokens.length.safeTop },
+  clearRow: { height: tokens.length.bar },
+  clearBy: (height: number) => ({ height }),
+  faded: (opacity: number) => ({ opacity }),
+  // A phone's first screen's name, large, at the top of what scrolls, as iOS's large titles and Android's large top
+  // app bar have it: it goes under the bar as what's in it scrolls, and the bar's own small title takes its place.
+  large: { paddingInline: tokens.length.gutter, paddingTop: tokens.grid[1], paddingBottom: tokens.grid[1], font: tokens.type.largeTitle, textAlign: "start" },
   row: { flexDirection: "row", alignItems: "center", gap: tokens.grid[2], minHeight: tokens.length.bar, paddingInline: tokens.length.gutter },
   // A long name, which may be all the screen says of what it's about, takes two lines, as Android's bars do.
   title: { flexGrow: 1, flexShrink: 1, minWidth: 0, paddingBlock: tokens.grid[1], font: tokens.type.title, lineClamp: 2, textAlign: "start" },
   // On a computer, Raycast's: its title beside Back, 15px, on one line.
   computerTitle: { font: tokens.type.barTitle, lineClamp: 1 },
-  // Where the window names the app above it, its first screen doesn't name it again, and keeps its place.
-  unnamed: { opacity: 0 },
   // On a computer the bar is the window's title row, its unified toolbar, as macOS's System Settings and Raycast have
   // it: at the window's top, after the window's controls and title where it's at the window's start, and before
   // the controls at its end where it's at its end.
@@ -79,8 +89,12 @@ const look = styles({
   detail: { flexGrow: 1, flexShrink: 1 },
 })
 
-/** How far a screen with a large title is scrolled when that's gone under its bar, in CSS pixels. */
+/** How far a screen whose own page draws its large title (`largeTitle`) is scrolled when that's gone under its bar, in
+ * CSS pixels. */
 const LARGE = 56
+/** How far what's in a screen with no large title scrolls under its bar while the bar takes its material, in CSS
+ * pixels. */
+const UNDER = 16
 
 /** How wide a split's list is beside what it opens (tokens.length.columnMin, 38%, tokens.length.column), and how
  * wide it has to be for both, in CSS pixels. */
@@ -130,8 +144,11 @@ export const Middle = createContext<() => boolean>(() => false)
 /// `onBack`, as the device's own back gesture does: a screen with `back` says where it goes, but in a split's detail,
 /// which it closes. A split's list closes what's open beside it first. An
 /// app's first screen has no Back: the window's rail and the device's back leave the app. Where the window's title
-/// names the app, its first screen's heading gives way to it. With `largeTitle`
-/// the screen draws its name large itself, as iOS's App Store's pages do, and the bar's shows once that has scrolled away.
+/// names the app, its first screen's heading gives way to it. Under a finger, a first screen's heading is large at the top
+/// of what scrolls, as iOS's large titles and Android's large top app bar are, and goes under the bar as it scrolls,
+/// the bar's small one taking its place, every step of it following the scroll; what scrolls under the bar gives it
+/// its material and a hairline. With `largeTitle` the screen's page draws its name large itself, as iOS's App Store's
+/// pages do, and the bar's shows as that scrolls away.
 export function Screen(props: { heading?: JSX.Element; action?: JSX.Element; back?: boolean; onBack?: () => void; largeTitle?: boolean; children?: JSX.Element }) {
   const opened = useContext(Opened)
   const leave = useContext(Leave)
@@ -148,12 +165,25 @@ export function Screen(props: { heading?: JSX.Element; action?: JSX.Element; bac
   const history = useContext(Went)
   const style = useContext(ListStyle)
   const edge = useContext(Edge)
-  // Only an app's first screen, which has no Back, gives way to the window's title.
-  const [scrolled, setScrolled] = createSignal(0)
-  const named = () => (!!props.back || !titled()) && (!props.largeTitle || scrolled() > LARGE)
   // On a computer, as Raycast's: the bar's buttons and menus' items are the screen's actions, in the footer's pills and
   // its action panel (⌘K), after what the row chosen can do; under a finger they stay in the bar.
   const computer = !touch()
+  // Under a finger, a first screen draws its heading large itself.
+  const large = !computer && !props.back && !props.largeTitle
+  const [scrolled, setScrolled] = createSignal(0)
+  const [largeHeight, setLargeHeight] = createSignal(LARGE)
+  const [barHeight, setBarHeight] = createSignal<number>()
+  // How far its large title has gone under the bar, or what's in it has, from 0 to 1, as Compose's top app bar's
+  // `collapsedFraction` is: a large title from halfway under it to all the way.
+  const under = () => {
+    const height = large ? largeHeight() : props.largeTitle ? LARGE : 0
+    const [from, span] = height ? [height / 2, height / 2] : [0, UNDER]
+    return Math.min(1, Math.max(0, (scrolled() - from) / span))
+  }
+  // Only an app's first screen, which has no Back, gives way to the window's title; a large title's bar shows its
+  // heading as that goes.
+  const titleShown = () => (!(!!props.back || !titled()) ? 0 : large || props.largeTitle ? under() : 1)
+  const named = () => titleShown() >= 0.5
   // Its action panel is where a list's rows and the bar's buttons go on a computer; a window of grouped cards has none,
   // as Raycast's Settings window has none, so they stay in the bar and on their rows.
   const panelled = computer && style === "plain"
@@ -175,7 +205,10 @@ export function Screen(props: { heading?: JSX.Element; action?: JSX.Element; bac
   return (
     <View style={look.screen}>
       <Show when={barred()}>
-      <View role="banner" style={[look.bar, computer && look.titleRow]}>
+      <View role="banner" style={[look.bar, computer ? look.titleRow : look.floating]} onLayout={computer ? undefined : (event) => setBarHeight(event.currentTarget.getBoundingClientRect().height)}>
+        <Show when={!computer}>
+          <View style={[look.backdrop, look.faded(under())]} />
+        </Show>
         <View style={[look.row, computer && edge().start && look.atStart, computer && edge().end && look.atEnd]}>
           <Show when={backed() || (computer && history())}>
             <View role="group" style={[look.pill, !(computer && history()) && look.round]}>
@@ -202,7 +235,7 @@ export function Screen(props: { heading?: JSX.Element; action?: JSX.Element; bac
               </Show>
             </View>
           </Show>
-          <Heading level={1} aria-hidden={named() ? undefined : "true"} style={[look.title, computer && look.computerTitle, !named() && look.unnamed]}>
+          <Heading level={1} aria-hidden={named() ? undefined : "true"} style={[look.title, computer && look.computerTitle, titleShown() < 1 && look.faded(titleShown())]}>
             {props.heading}
           </Heading>
           <Show when={props.action}>
@@ -215,8 +248,20 @@ export function Screen(props: { heading?: JSX.Element; action?: JSX.Element; bac
         </View>
       </View>
       </Show>
-      <ScrollView role="main" style={look.main} onScroll={props.largeTitle ? (event) => setScrolled(event.currentTarget.scrollTop) : undefined}>
+      <ScrollView role="main" style={look.main} onScroll={!computer || props.largeTitle ? (event) => setScrolled(event.currentTarget.scrollTop) : undefined}>
         <View style={look.safe}>
+          <Show when={!computer}>
+            <Show when={barHeight()} fallback={<View style={look.clear}><View style={look.clearRow} /></View>}>
+              <View style={look.clearBy(barHeight()!)} />
+            </Show>
+          </Show>
+          <Show when={large}>
+            <View onLayout={(event) => setLargeHeight(event.currentTarget.getBoundingClientRect().height)}>
+              <Heading level={1} aria-hidden={named() ? "true" : undefined} style={[look.large, under() > 0 && look.faded(1 - under())]}>
+                {props.heading}
+              </Heading>
+            </View>
+          </Show>
           <View style={[look.parts, footed() && look.footed]}>
             <View style={[look.column, (style === "insetGrouped" || (style === "sidebar" && touch())) && look.groupedColumn]}>
               <Choose value={panelled ? choose : null}>

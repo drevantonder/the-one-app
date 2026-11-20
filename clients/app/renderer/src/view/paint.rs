@@ -900,7 +900,8 @@ impl Painter<'_> {
                 if let Some(fill) = self.fill {
                     self.quad(bounds, mask, fill, Edges::default(), Hsla::default(), radii, false, opacity);
                 }
-            } else if let Some((blur, saturate, _)) = look.material {
+            } else if let Some((blur, saturate, _)) = look.material.filter(|_| opacity > 0.0) {
+                // Faded all the way out, nothing of it shows, so nothing behind it is blurred.
                 self.scene.insert_primitive(Backdrop {
                     order: 0,
                     opacity,

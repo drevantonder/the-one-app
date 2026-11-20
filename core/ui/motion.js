@@ -437,7 +437,7 @@ function requests(steps, folder) {
           },
         })
       }
-      if (blur) out.push({ request: { op: "profile", at: [0], snap: false }, judge: (answer) => !(answer?.result?.frames?.[0]?.work?.backdrops > 0) && "no blur is drawn" })
+      if (blur !== undefined) out.push({ request: { op: "profile", at: [0], snap: false }, judge: (answer) => (answer?.result?.frames?.[0]?.work?.backdrops > 0) !== blur && (blur ? "no blur is drawn" : "a blur is drawn") })
     }
     for (const one of out.slice(from)) one.step = `step ${at + 1}`
   }

@@ -1,6 +1,8 @@
 import { Button, History, List, ListStyle, Menu, Row, type Scenes, Screen, Section, Split, styles, Text, View } from "ui"
 
-const look = styles({ window: { height: 720 }, narrow: { height: 475 } })
+const look = styles({ window: { height: 720 }, narrow: { height: 475 }, phone: { height: 844 } })
+
+const notes = Array.from({ length: 30 }, (_, at) => `Note ${at + 1}`)
 
 const More = () => (
   <Menu.Root onSelect={() => {}}>
@@ -49,6 +51,23 @@ const settings = () => (
 )
 
 export default {
+  // A phone's first screen: its name large at the top of what scrolls, which goes under the bar as it scrolls, the
+  // bar's small name taking its place and the bar its glass and hairline, as UINavigationBar's large titles do.
+  "Screens/A phone's first screen": {
+    alone: true,
+    touch: true,
+    render: () => (
+      <View style={look.phone}>
+        <Screen heading="Notes" action={<Button>Add</Button>}>
+          <List>{notes.map((note) => <Row heading={note} />)}</List>
+        </Screen>
+      </View>
+    ),
+    checks: {
+      "Scrolled, its large title goes under the bar, which takes its glass": [{ expect: { blur: false } }, { trace: "traces/finger-pans-up.json" }, { expect: { blur: true } }, { expect: { shown: { role: "heading", name: "Notes" } } }],
+    },
+    motions: { "Scrolled under its bar": { from: { x: 195, y: 600 }, gesture: { swipe: [0, -200], speed: 400 }, follow: { role: "heading", name: "Notes" } } },
+  },
   "Screens/Settings": { alone: true, size: [1100, 720], render: () => <View style={look.window}>{settings()}</View> },
   "Screens/A large title": {
     alone: true,
