@@ -115,7 +115,7 @@ defmodule OneCore.Apps.Deploy do
 
   # After `latest`: its author has it installed by the installation machine's own move for an app they deployed, and
   # the servers of whoever has it take it, this one at once, with the version the deploy loaded. It supersedes the
-  # narrower copies of itself.
+  # narrower copies of itself, once it's answered.
   defp committed(owner, name, number, %Version{artifact: artifact} = version, install) do
     forget()
     moved = step("installed", fn -> if install, do: Installed.change(owner, name, {:deployed, artifact, nil}), else: %{} end)
@@ -127,7 +127,8 @@ defmodule OneCore.Apps.Deploy do
         {:error, "#{name} is deployed as version #{number}, and isn't installed for #{owner}: #{why}"}
 
       _ ->
-        step("supersede", fn -> if install, do: Lifecycle.supersede(owner, artifact) end)
+        # What it supersedes is moved after the deploy answers: it reads every app anyone has deployed.
+        if install, do: Task.Supervisor.start_child(OneCore.Asks, fn -> Lifecycle.supersede(owner, artifact) end)
         :ok
     end
   end
