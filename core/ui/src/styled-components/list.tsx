@@ -60,12 +60,16 @@ const look = styles({
     minHeight: tokens.length.row,
     paddingBlock: tokens.grid[2],
     paddingInline: tokens.grid[3],
+  },
+  flatInside: { paddingBlock: 0, paddingInline: tokens.grid[2], borderRadius: tokens.radius.medium },
+  // Only a row that does something when pressed lights up under the pointer, as it's pressed and as it's focused.
+  pressable: {
+    cursor: "pointer",
     backgroundColor: { hover: tokens.colour.quinaryLabel, pressed: tokens.colour.quaternaryLabel, focused: tokens.colour.quinaryLabel },
     transitionProperty: ["backgroundColor"],
     transition: tokens.motion.quick,
   },
-  flatInside: { paddingBlock: 0, paddingInline: tokens.grid[2], borderRadius: tokens.radius.medium, backgroundColor: { hover: tokens.colour.selection, pressed: tokens.colour.quaternaryLabel, focused: tokens.colour.selection } },
-  pressable: { cursor: "pointer" },
+  flatPressable: { backgroundColor: { hover: tokens.colour.selection, pressed: tokens.colour.quaternaryLabel, focused: tokens.colour.selection } },
   after: { paddingStart: 0 },
   settling: { transitionProperty: ["translateX", "width"], transition: tokens.motion.settle },
   words: { flexGrow: 1, flexShrink: 1, minWidth: 0 },
@@ -363,7 +367,7 @@ export function Row(props: RowProps): JSX.Element {
           when={props.onPress}
           fallback={<View style={[look.inside, !touch() && look.flatInside, grouped() && look.groupedInside, sidebar() && look.sidebarInside, !!props.control && look.after, moving()]}>{inside()}</View>}
         >
-          <Pressable role={inListbox ? undefined : "button"} aria-current={props.current ? "true" : undefined} onPress={pressed} style={[look.inside, !touch() && look.flatInside, grouped() && look.groupedInside, sidebar() && look.sidebarInside, look.pressable, inListbox && look.quiet, !!props.control && look.after, moving()]}>
+          <Pressable role={inListbox ? undefined : "button"} aria-current={props.current ? "true" : undefined} onPress={pressed} style={[look.inside, look.pressable, !touch() && look.flatInside, !touch() && look.flatPressable, grouped() && look.groupedInside, sidebar() && look.sidebarInside, inListbox && look.quiet, !!props.control && look.after, moving()]}>
             {inside()}
           </Pressable>
         </Show>
