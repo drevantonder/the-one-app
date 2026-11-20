@@ -3,7 +3,7 @@
 //!
 //! The file is JSON, `{"offer": <the viewer's SDP offer>, "iceServers": [<as RTCPeerConnection takes them>], "log":
 //! <a file>, "source": {"kind": ..., ...}}`, and is removed once read. It prints the SDP answer and carries on in a
-//! process of its own until the viewer goes, saying what happened in the log. Both ends reach each other only
+//! process of its own (`stream --serve`) until the viewer goes, saying what happened in the log. Both ends reach each other only
 //! through TURN (`relay`), here over TCP, so neither learns the other's addresses.
 //!
 //! The source is where the frames come from and where what the viewer does goes (`source`): `scrcpy`, an Android
@@ -24,7 +24,6 @@ use std::sync::mpsc::Sender;
 pub struct Config {
     offer: String,
     ice_servers: Vec<IceServer>,
-    log: Option<String>,
     source: SourceConfig,
 }
 
@@ -82,82 +81,104 @@ fn one_or_many<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Vec<String>, D:
 }
 
 fn main() {
-    let path = std::env::args().nth(1).expect("usage: stream <file>");
-    let config: Config = serde_json::from_slice(&std::fs::read(&path).expect("can't read the file")).expect("the file isn't a stream's");
-    let _ = std::fs::remove_file(&path);
-    std::process::exit(answered(config));
+    match std::env::args().nth(1).as_deref() {
+        Some("--serve") => serve(),
+        Some(path) => std::process::exit(started(path)),
+        None => {
+            eprintln!("usage: stream <file>");
+            std::process::exit(64);
+        }
+    }
 }
 
-/// The answer comes back up a pipe, and the stream carries on in a process of its own once it has, so the command
-/// that started it ends.
-#[cfg(unix)]
-fn answered(config: Config) -> i32 {
-    use std::io::{Read, Write};
-    use std::os::fd::FromRawFd;
+/// Starts the stream in a process of its own, which carries on once it has answered, so this command ends with the
+/// answer: the file goes to it on its stdin, and its answer comes back as a line of JSON on its stdout.
+fn started(path: &str) -> i32 {
+    use std::io::{BufRead, Write};
+    use std::process::{Command, Stdio};
 
-    let mut fds = [0; 2];
-    assert_eq!(unsafe { libc::pipe(fds.as_mut_ptr()) }, 0);
-    // Closed in what the stream starts (adb, say), or the command would wait for them to end, not for the answer.
-    for fd in fds {
-        unsafe { libc::fcntl(fd, libc::F_SETFD, libc::FD_CLOEXEC) };
-    }
-    match unsafe { libc::fork() } {
-        -1 => panic!("couldn't fork"),
-        0 => {
-            unsafe {
-                libc::close(fds[0]);
-                libc::setsid();
-                let null = libc::open(c"/dev/null".as_ptr(), libc::O_RDONLY);
-                libc::dup2(null, 0);
-                if let Some(log) = &config.log {
-                    let log = std::ffi::CString::new(log.as_str()).unwrap();
-                    let fd = libc::open(log.as_ptr(), libc::O_WRONLY | libc::O_CREAT | libc::O_APPEND, 0o644);
-                    libc::dup2(fd, 1);
-                    libc::dup2(fd, 2);
-                }
-            }
-            let mut pipe = Some(unsafe { std::fs::File::from_raw_fd(fds[1]) });
-            let mut answer = |response: Result<String, String>| {
-                if let Some(mut pipe) = pipe.take() {
-                    let response = match response {
-                        Ok(sdp) => serde_json::json!({"answer": sdp}),
-                        Err(why) => serde_json::json!({"error": why}),
-                    };
-                    let _ = pipe.write_all(response.to_string().as_bytes());
-                }
-            };
-            match session::run(config, &mut answer) {
-                Ok(why) => eprintln!("the stream ended: {why}"),
-                Err(why) => {
-                    eprintln!("the stream failed: {why:#}");
-                    answer(Err(format!("{why:#}")));
-                }
-            }
+    let answered = (|| -> anyhow::Result<String> {
+        let file = std::fs::read(path)?;
+        let _ = std::fs::remove_file(path);
+        let log = serde_json::from_slice::<serde_json::Value>(&file)?["log"].as_str().map(String::from);
+        let stderr = match log.and_then(|log| std::fs::OpenOptions::new().create(true).append(true).open(log).ok()) {
+            Some(log) => Stdio::from(log),
+            None => Stdio::null(),
+        };
+        let mut command = Command::new(std::env::current_exe()?);
+        command.arg("--serve").stdin(Stdio::piped()).stdout(Stdio::piped()).stderr(stderr);
+        detach(&mut command);
+        let mut child = command.spawn()?;
+        child.stdin.take().unwrap().write_all(&file)?;
+        let mut line = String::new();
+        std::io::BufReader::new(child.stdout.take().unwrap()).read_line(&mut line)?;
+        let response: serde_json::Value = serde_json::from_str(&line).map_err(|_| anyhow::anyhow!("it stopped before it answered"))?;
+        match (response["answer"].as_str(), response["error"].as_str()) {
+            (Some(sdp), _) => Ok(sdp.to_string()),
+            (_, why) => anyhow::bail!("{}", why.unwrap_or("it stopped before it answered")),
+        }
+    })();
+    match answered {
+        Ok(sdp) => {
+            print!("{sdp}");
             0
         }
-        _ => {
-            unsafe { libc::close(fds[1]) };
-            let mut response = String::new();
-            let _ = unsafe { std::fs::File::from_raw_fd(fds[0]) }.read_to_string(&mut response);
-            let response: serde_json::Value =
-                serde_json::from_str(&response).unwrap_or_else(|_| serde_json::json!({"error": "it stopped before it answered"}));
-            match (response["answer"].as_str(), response["error"].as_str()) {
-                (Some(sdp), _) => {
-                    print!("{sdp}");
-                    0
-                }
-                (_, why) => {
-                    eprint!("{}", why.unwrap_or("it stopped before it answered"));
-                    1
-                }
-            }
+        Err(why) => {
+            eprint!("{why:#}");
+            1
         }
     }
 }
 
-/// No source streams from Windows yet.
-#[cfg(not(unix))]
-fn answered(_config: Config) -> i32 {
-    eprint!("A stream can't be sent from Windows yet");
-    1
+/// Out of the session and the job of whatever started it, so it carries on once that ends.
+#[cfg(unix)]
+fn detach(command: &mut std::process::Command) {
+    use std::os::unix::process::CommandExt;
+    unsafe {
+        command.pre_exec(|| {
+            libc::setsid();
+            Ok(())
+        });
+    }
+}
+
+#[cfg(windows)]
+fn detach(command: &mut std::process::Command) {
+    use std::os::windows::process::CommandExt;
+    // DETACHED_PROCESS, CREATE_NEW_PROCESS_GROUP, CREATE_BREAKAWAY_FROM_JOB
+    command.creation_flags(0x0000_0008 | 0x0000_0200 | 0x0100_0000);
+}
+
+/// `stream --serve`: the stream itself, its config on stdin, answering on stdout and saying what happens on stderr.
+fn serve() {
+    use std::io::Write;
+
+    let mut answering = Some(std::io::stdout());
+    let mut answer = |response: Result<String, String>| {
+        if let Some(mut out) = answering.take() {
+            let response = match response {
+                Ok(sdp) => serde_json::json!({"answer": sdp}),
+                Err(why) => serde_json::json!({"error": why}),
+            };
+            let _ = writeln!(out, "{response}");
+            let _ = out.flush();
+            // Nothing more goes up the pipe, whose reader has gone: what's said, here or by what the stream starts,
+            // goes to the log.
+            #[cfg(unix)]
+            unsafe {
+                libc::dup2(2, 1);
+            }
+        }
+    };
+    let config = match serde_json::from_reader::<_, Config>(std::io::stdin()) {
+        Ok(config) => config,
+        Err(why) => return answer(Err(format!("the file isn't a stream's: {why}"))),
+    };
+    match session::run(config, &mut answer) {
+        Ok(why) => eprintln!("the stream ended: {why}"),
+        Err(why) => {
+            eprintln!("the stream failed: {why:#}");
+            answer(Err(format!("{why:#}")));
+        }
+    }
 }
