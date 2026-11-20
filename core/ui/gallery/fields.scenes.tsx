@@ -173,6 +173,8 @@ export default {
     render: () => <Top />,
     touch: true,
     safeArea: [62, 0, 34, 0],
+    // Each failed once, the menu looked for before the second tap's lift, which waited for the page, had come.
+    seeds: [6, 9],
     checks: {
       "Held, a word is selected, magnified, and the menu shows as it lifts, under the status bar": [
         { down: search },

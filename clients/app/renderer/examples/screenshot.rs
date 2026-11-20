@@ -575,6 +575,22 @@ fn point_of(windows: &mut Windows, id: renderer::platform::WindowId, request: &r
     Ok((at("x") + at("width") / 2.0, at("y") + at("height") / 2.0))
 }
 
+/// Window `id` has handled the input given it and drawn what that changed: what its system was told (its keyboard,
+/// its menu for text) is told as it draws, and input waits for a busy page (`Windows::waiting`) and a late refresh puts
+/// a frame off, so it's looked at once it has, as Playwright's assertions wait, the display ticking meanwhile, a second
+/// at most.
+fn drawn(windows: &mut Windows, id: renderer::platform::WindowId) {
+    let (started, mut frames) = (renderer::platform::fake_time(), windows.frames(id));
+    while renderer::platform::fake_time() - started < 1000.0 {
+        match windows.waiting(id) {
+            true => frames = windows.frames(id),
+            false if !windows.wanted() || windows.frames(id) != frames => return,
+            false => {}
+        }
+        windows.run(1000.0 / 60.0 * 1.01);
+    }
+}
+
 /// What a person's input request does, played as the display's events (`INPUT`).
 fn input(windows: &mut Windows, id: renderer::platform::WindowId, request: &renderer::inspect::Request) -> anyhow::Result<Value> {
     match request.op.as_str() {
@@ -638,10 +654,16 @@ fn input(windows: &mut Windows, id: renderer::platform::WindowId, request: &rend
         }
         // What the input with the keyboard asked the platform's keyboard for (Flutter's `TextInputConfiguration`:
         // `textCapitalization`, `autocorrect`, `inputType`…), as a phone's keyboard is told; null where none has it.
-        "keyboard" => Ok(json!({"keyboard": windows.keyboard(id)})),
+        "keyboard" => {
+            drawn(windows, id);
+            Ok(json!({"keyboard": windows.keyboard(id)}))
+        }
         // What the system's menu for text was asked to show (its items, what it's for and where the system put it),
         // where its magnifier shows, and the handles drawn, as a phone's are, with the window's safe area.
-        "text_selection" => Ok(windows.text_selection(id)),
+        "text_selection" => {
+            drawn(windows, id);
+            Ok(windows.text_selection(id))
+        }
         // As Playwright's `locator.waitFor` and its assertions do: what's selected comes to be `state` (`shown`: drawn
         // whole and in the window; `gone`: not there; `focused`: with the keyboard; `there`: there at all; `drawn`: at
         // `opacity`), with its

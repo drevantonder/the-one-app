@@ -2361,6 +2361,11 @@ impl Windows {
         self.windows.get(&id).map_or(0, |window| window.frames)
     }
 
+    /// Whether input to window `id` waits for its page to catch up (`waits`), not handled yet.
+    pub fn waiting(&self, id: WindowId) -> bool {
+        self.windows.get(&id).is_some_and(|window| !window.waiting.is_empty())
+    }
+
     /// What window `id`'s frames cost since this was last asked, as the inspector's `profile` says it (`Screen::cost`),
     /// its GPU waited for, to say its time for the last.
     pub fn cost(&mut self, id: WindowId) -> Option<serde_json::Value> {
