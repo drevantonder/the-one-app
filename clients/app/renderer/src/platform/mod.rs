@@ -2311,33 +2311,35 @@ impl Windows {
         Some((width, height, rgba))
     }
 
-    /// What window `id` last presented, as its compositor shows it: its width, height and pixels. A panel's parts are
-    /// put together where each is, over the system's glass, a flat grey of its Colour Mode here.
+    /// What window `id` last presented, as its compositor shows it: its width, height and pixels (`composed`).
     pub fn presented(&mut self, id: WindowId) -> Option<(u32, u32, Vec<u8>)> {
         let window = self.windows.get_mut(&id)?;
-        if window.parts.len() == 1 && !window.panel {
-            return window.parts[0].renderer.as_mut()?.read();
-        }
-        let scale = window.parts[0].native.scale();
-        let (width, height) = ((window.room.width.0 * scale).round() as u32, (window.room.height.0 * scale).round() as u32);
-        let glass = glass(window);
-        let mut rgba: Vec<u8> = (0..width * height).flat_map(|_| [glass[0], glass[1], glass[2], 255]).collect();
-        for part in &mut window.parts {
-            let (left, top) = ((part.bounds.origin.x * scale).round() as i64, (part.bounds.origin.y * scale).round() as i64);
-            let Some((w, h, drawn)) = part.renderer.as_mut().and_then(crate::render::renderer::Renderer::read) else { continue };
-            for (y, x) in (0..h).flat_map(|y| (0..w).map(move |x| (y, x))) {
-                let (to_x, to_y) = (i64::from(x) + left, i64::from(y) + top);
-                if to_x < 0 || to_y < 0 || to_x >= i64::from(width) || to_y >= i64::from(height) {
-                    continue;
-                }
-                let (from, to) = (((y * w + x) * 4) as usize, ((to_y as u32 * width + to_x as u32) * 4) as usize);
-                let alpha = u32::from(drawn[from + 3]);
-                for channel in 0..3 {
-                    rgba[to + channel] = ((u32::from(drawn[from + channel]) * alpha + u32::from(rgba[to + channel]) * (255 - alpha)) / 255) as u8;
-                }
-            }
-        }
-        Some((width, height, rgba))
+        let drawn = window.parts.iter_mut().map(|part| part.renderer.as_mut().and_then(Renderer::read)).collect();
+        composed(window, drawn)
+    }
+
+    /// Window `id` drawn afresh as it is now, as its compositor would show it (`presented`): its page painted afresh,
+    /// and each of its parts drawn where it is by a renderer of its own, so nothing a frame before kept (a layer, a
+    /// blur, a surface's last image) is in it. A frame drawn on what was kept must be the same.
+    pub fn afresh(&mut self, id: WindowId) -> Option<(u32, u32, Vec<u8>)> {
+        let window = self.windows.get_mut(&id)?;
+        let (room, scale) = (window.room(), window.parts[0].native.scale());
+        let mut scene = crate::render::scene::Scene::default();
+        window.screen.as_mut().ok()?.paint_afresh(room, scale, &mut self.text, &self.atlas, &mut scene);
+        let size = |length: f32| DevicePixels((length * scale).round() as i32);
+        let drawn = window
+            .parts
+            .iter()
+            .map(|part| {
+                let device = if window.panel { Size { width: size(part.bounds.size.width), height: size(part.bounds.size.height) } } else { part.native.device_size() };
+                let mut renderer = Renderer::offscreen(&self.context, self.atlas.clone(), device);
+                renderer.draw(&scene, [(part.bounds.origin.x * scale).round(), (part.bounds.origin.y * scale).round()]);
+                let read = renderer.read();
+                renderer.destroy();
+                read
+            })
+            .collect();
+        composed(window, drawn)
     }
 
     /// The fake platform's time moves on by `ms`, its pages' clock with it: each of their timers due meanwhile runs at
@@ -2490,28 +2492,17 @@ impl Windows {
         self.windows.get(&id).map_or(0, |window| window.frames)
     }
 
+    /// Whether window `id` is on screen (`Window::on_screen`): not a panel put away.
+    pub fn on_screen(&self, id: WindowId) -> bool {
+        self.windows.get(&id).is_some_and(Window::on_screen)
+    }
+
     /// The system's appearance becomes `appearance`, as a person switching between Light and Dark makes it (or their
     /// schedule does): every window is told, as its host tells it.
     pub fn appearance(&mut self, appearance: crate::Appearance) {
         fake::appear(appearance);
         for id in self.windows.keys().copied().collect::<Vec<_>>() {
             self.display.push(id, Input::Appearance(appearance));
-        }
-    }
-
-    /// `rgba`, a picture of window `id`'s page `width` pixels wide, as its compositor shows it (`presented`): a
-    /// panel's only where its parts are, on the system's glass.
-    pub fn on_glass(&self, id: WindowId, width: u32, rgba: &mut [u8]) {
-        let Some(window) = self.windows.get(&id).filter(|window| window.parts.len() > 1 || window.panel) else { return };
-        let (glass, scale) = (glass(window), window.parts[0].native.scale());
-        let shown = |x: f32, y: f32| window.parts.iter().any(|part| part.bounds.contains(&crate::geometry::point(x, y)));
-        for (at, pixel) in rgba.chunks_mut(4).enumerate() {
-            let (x, y) = ((at as u32 % width) as f32 + 0.5, (at as u32 / width) as f32 + 0.5);
-            let alpha = if shown(x / scale, y / scale) { u32::from(pixel[3]) } else { 0 };
-            for channel in 0..3 {
-                pixel[channel] = ((u32::from(pixel[channel]) * alpha + u32::from(glass[channel]) * (255 - alpha)) / 255) as u8;
-            }
-            pixel[3] = 255;
         }
     }
 
@@ -2550,6 +2541,35 @@ pub use fake::time as fake_time;
 /// How long since `at`, by `now`.
 pub(crate) fn since(at: web_time::Instant) -> std::time::Duration {
     now().saturating_duration_since(at)
+}
+
+/// What `window`'s parts drew (`drawn`, each part's, where it drew), as its compositor shows them: a window's one part
+/// as it is, and a panel's put together where each is, over the system's glass, a flat grey of its Colour Mode here.
+#[cfg(feature = "fake")]
+fn composed(window: &Window, drawn: Vec<Option<(u32, u32, Vec<u8>)>>) -> Option<(u32, u32, Vec<u8>)> {
+    if window.parts.len() == 1 && !window.panel {
+        return drawn.into_iter().next().flatten();
+    }
+    let scale = window.parts[0].native.scale();
+    let (width, height) = ((window.room.width.0 * scale).round() as u32, (window.room.height.0 * scale).round() as u32);
+    let glass = glass(window);
+    let mut rgba: Vec<u8> = (0..width * height).flat_map(|_| [glass[0], glass[1], glass[2], 255]).collect();
+    for (part, drawn) in window.parts.iter().zip(drawn) {
+        let (left, top) = ((part.bounds.origin.x * scale).round() as i64, (part.bounds.origin.y * scale).round() as i64);
+        let Some((w, h, drawn)) = drawn else { continue };
+        for (y, x) in (0..h).flat_map(|y| (0..w).map(move |x| (y, x))) {
+            let (to_x, to_y) = (i64::from(x) + left, i64::from(y) + top);
+            if to_x < 0 || to_y < 0 || to_x >= i64::from(width) || to_y >= i64::from(height) {
+                continue;
+            }
+            let (from, to) = (((y * w + x) * 4) as usize, ((to_y as u32 * width + to_x as u32) * 4) as usize);
+            let alpha = u32::from(drawn[from + 3]);
+            for channel in 0..3 {
+                rgba[to + channel] = ((u32::from(drawn[from + channel]) * alpha + u32::from(rgba[to + channel]) * (255 - alpha)) / 255) as u8;
+            }
+        }
+    }
+    Some((width, height, rgba))
 }
 
 /// The system's glass a panel is shown over, a flat grey of its Colour Mode here.

@@ -669,25 +669,27 @@ fn input(windows: &mut Windows, id: renderer::platform::WindowId, request: &rend
             Ok(json!({}))
         }
         // The frame the window's page presented last, drawn on what it kept from frames before, beside one drawn
-        // afresh as it is now (`snap`): how many of their pixels differ, and where, as a frame must be the same however
+        // afresh as it is now (`Windows::afresh`): how many of their pixels differ, and where, as a frame must be the same however
         // it was come to; with both pictures where they differ. What's still moving (a spinner, which never comes to
-        // rest) is drawn afresh a moment on from its last frame, so is only said to be moving.
+        // rest) is drawn afresh a moment on from its last frame, so is only said to be moving; what isn't on the screen
+        // (a panel put away) shows nothing, and is judged as it's shown again.
         "fresh" => {
             drawn(windows, id);
             if windows.wanted() {
                 return Ok(json!({"moving": true}));
             }
-            let (width, height, kept) = windows.presented(id).ok_or_else(|| anyhow::anyhow!("it has presented nothing"))?;
-            let snap = ask(windows, id, json!({"op": "snap"})).ok_or_else(|| anyhow::anyhow!("its window didn't answer"))?;
-            let png = snap["result"]["png"].as_str().ok_or_else(|| anyhow::anyhow!("it drew nothing afresh: {}", snap["error"]))?;
-            let mut afresh = image::load_from_memory(&data_encoding::BASE64.decode(png.as_bytes())?)?.to_rgba8();
-            windows.on_glass(id, width, &mut afresh);
-            if afresh.dimensions() != (width, height) {
-                anyhow::bail!("it presented {width}×{height} px, and drew {:?} afresh", afresh.dimensions());
+            if !windows.on_screen(id) {
+                return Ok(json!({"shown": false}));
             }
+            let (width, height, kept) = windows.presented(id).ok_or_else(|| anyhow::anyhow!("it has presented nothing"))?;
+            let afresh = windows.afresh(id).ok_or_else(|| anyhow::anyhow!("it drew nothing afresh"))?;
+            if (afresh.0, afresh.1) != (width, height) {
+                anyhow::bail!("it presented {width}×{height} px, and drew {}×{} afresh", afresh.0, afresh.1);
+            }
+            let afresh = afresh.2;
             // A channel more than a few levels apart, past what blending in another order or a curve's edge rounds to.
             let (mut differ, mut left, mut top, mut right, mut bottom) = (0u32, width, height, 0, 0);
-            for (at, (was, now)) in kept.chunks(4).zip(afresh.as_raw().chunks(4)).enumerate() {
+            for (at, (was, now)) in kept.chunks(4).zip(afresh.chunks(4)).enumerate() {
                 if was.iter().zip(now).any(|(was, now)| was.abs_diff(*now) > 8) {
                     let (x, y) = (at as u32 % width, at as u32 / width);
                     (differ, left, top, right, bottom) = (differ + 1, left.min(x), top.min(y), right.max(x + 1), bottom.max(y + 1));
@@ -697,7 +699,7 @@ fn input(windows: &mut Windows, id: renderer::platform::WindowId, request: &rend
             if differ > 0 {
                 answer["box"] = json!({"x": left, "y": top, "width": right - left, "height": bottom - top});
                 answer["kept"] = renderer::inspect::png(width, height, kept)?["png"].clone();
-                answer["afresh"] = renderer::inspect::png(width, height, afresh.into_raw())?["png"].clone();
+                answer["afresh"] = renderer::inspect::png(width, height, afresh)?["png"].clone();
             }
             Ok(answer)
         }

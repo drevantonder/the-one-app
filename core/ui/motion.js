@@ -333,14 +333,19 @@ async function presentThere(at, folder, scene, events) {
   return { said: said.filter((line) => line.trim().startsWith("{")).map((line) => JSON.parse(line)), stderr, failed: exit.trim() !== "0" }
 }
 
+/// Whether `scene`'s window is a panel: a computer's launcher is drawn as one (a Mac's, its glass the system's), as its
+/// client says it is.
+const panelled = (scene) => {
+  const client = scene.answers?.["one/client"]
+  return Boolean(client?.launcher && client?.mac)
+}
+
 /// The harness run on a scene, with `requests`: each answer, and its stderr. → `{ answers, said }`.
 async function run(at, folder, scene, requests, seed = 0) {
   const answers = { ...scene.answers, "ui/initialize": scene.answers?.["ui/initialize"] ?? { hostContext: { link: scene.link, containerDimensions: { width: scene.size[0], height: scene.size[1] }, deviceCapabilities: { touch: scene.touch, hover: !scene.touch } } } }
   writeFileSync(join(folder, "answers.json"), JSON.stringify(answers))
   const lines = requests.map((request, id) => JSON.stringify({ v: 1, id: id + 1, ...request })).join("\n")
-  // A computer's launcher is a panel, drawn as one (a Mac's, its glass the system's), as its client says it is.
-  const client = scene.answers?.["one/client"]
-  const panel = client?.launcher && client?.mac ? ["--panel", "0"] : []
+  const panel = panelled(scene) ? ["--panel", "0"] : []
   // Its pictures decode as slowly as on the slowest device of its kind: as this machine's CPU is to that one's, at
   // that one's device pixels a point, where it's drawn at one here; on a device, as that decodes them.
   const slowest = devices.tiers.find((tier) => tier.name === (scene.touch ? "low-end Android" : "Intel UHD laptop at 4K"))
@@ -961,8 +966,9 @@ const unlike = (answer, folder) => {
 
 /// A scene drawn the same however it came to be, as a frame drawn on what was kept from frames before must be, by what
 /// changes under a page that isn't its own: opened and at rest, then after the app's been in the background and back
-/// (`away`, which on an iPhone draws it in the other appearance and back for the app switcher), the system's
-/// appearance switched, and on a computer its window made smaller. → why it failed, or nothing.
+/// (`away`, which on an iPhone draws it in the other appearance and back for the app switcher, and puts a Mac's launcher
+/// away as it takes the keyboard, so it's summoned again, as its person does), the system's appearance switched, and on
+/// a computer its window made smaller. → why it failed, or nothing.
 async function agrees(built, scene, folder) {
   mkdirSync(folder, { recursive: true })
   const at = pageFolder(built, scene.page, folder, scene.uses)
@@ -970,7 +976,7 @@ async function agrees(built, scene, folder) {
   const rest = { op: "clock", step: 2000 }
   const changes = [
     ["at rest", []],
-    ["back from the background", [{ op: "away", ms: 1000 }]],
+    ["back from the background", [{ op: "away", ms: 1000 }, ...(panelled(scene) ? [{ op: "summon" }] : [])]],
     [`switched to ${dark ? "Light" : "Dark"}`, [{ op: "appearance", dark: !dark }]],
     ...(scene.touch ? [] : [["made smaller", [{ op: "resize", width: scene.size[0] - 120, height: scene.size[1] - 80 }]]]),
   ]
