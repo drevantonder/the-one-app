@@ -85,13 +85,22 @@ export function stale(harness) {
   if (!existsSync(here("dist/build/app.js")) || changed(here("src"), here("tables.ts"), here("build.js")) > statSync(here("dist/build/app.js")).mtimeMs) return "Build the UI library: `bun build.js` in core/ui"
   if (existsSync(harness) && changed(join(root, "clients/app/renderer/src"), join(root, "clients/app/renderer/examples")) > statSync(harness).mtimeMs) return `Build the native harness again, which is older than the renderer: \`cargo build -p renderer --example screenshot --features fake${harness.includes("/release/") ? " --release" : ""}\``
 }
-/// The harness a run starts with, copied into `out`, so one built again while the run goes on (by whoever else works in
-/// the same checkout) can't change what draws the rest of it. → the copy.
+/// The UI library's build a pass runs: its own, until the pass copies it (`copied`).
+let dist = here("dist")
+/// `path` in the UI library's build a pass runs.
+export const library = (path) => join(dist, path)
+
+/// What a pass runs, copied into `out` as it starts: the UI library's build, and the harness where it's this machine's,
+/// so either built again while the pass goes on (by whoever else works in the same checkout) can't change what draws
+/// the rest of it. → the harness to run.
 export function copied(harness, out) {
-  const copy = join(out, ".harness", basename(harness))
-  mkdirSync(dirname(copy), { recursive: true })
-  cpSync(harness, copy)
-  return copy
+  const kept = join(out, ".built")
+  rmSync(kept, { recursive: true, force: true })
+  cpSync(here("dist"), join(kept, "dist"), { recursive: true, dereference: true })
+  dist = join(kept, "dist")
+  if (!harness || !existsSync(harness)) return harness
+  cpSync(harness, join(kept, basename(harness)))
+  return join(kept, basename(harness))
 }
 
 /// Why a capped harness was stopped, by its exit status, if it was.
@@ -189,14 +198,14 @@ export function build(target, built) {
   const scenes = existsSync(join(target, "client/scenes.json")) ? JSON.parse(readFileSync(join(target, "client/scenes.json"), "utf8")) : {}
   const ofComponent = (scene) => !!scene && (scene.component || ofComponent(scenes[scene.like]))
   if (!Object.keys(scenes).length || Object.values(scenes).some((scene) => !ofComponent(scene))) {
-    const made = Bun.spawnSync(["bun", here("dist/build/app.js"), target, built])
+    const made = Bun.spawnSync(["bun", library("build/app.js"), target, built])
     servedAsIs(target, built)
     if (made.exitCode !== 0) return `didn't build\n${made.stderr.toString().trim()}`
   }
   const named = [...new Set(Object.values(scenes).map((scene) => scene.component).filter(Boolean))]
   if (!named.length) return
   const at = join(built, COMPONENTS)
-  const made = Bun.spawnSync(["bun", here("dist/build/app.js"), join(target, "client"), at])
+  const made = Bun.spawnSync(["bun", library("build/app.js"), join(target, "client"), at])
   if (made.exitCode !== 0) return `its components didn't build\n${made.stderr.toString().trim()}`
   for (const component of named) {
     writeFileSync(join(at, `${component}.scene.js`), `import { ListStyle, render } from "/ui/client/ui.js"
@@ -223,7 +232,7 @@ export function usedApp(app, out) {
     const client = join(root, "apps", app, "client")
     const packages = install(client)
     if (packages) throw new Error(`${app}'s packages didn't install: ${packages}`)
-    const made = Bun.spawnSync(["bun", here("dist/build/app.js"), client, folder])
+    const made = Bun.spawnSync(["bun", library("build/app.js"), client, folder])
     if (made.exitCode !== 0) throw new Error(`${app}'s components didn't build: ${made.stderr}`)
     usedApps.set(app, folder)
   }
@@ -243,7 +252,7 @@ function onDevice() {
   remote = `${said("echo %TEMP%")}\\one-motion-${process.pid}`
   const staged = join(out, ".device")
   rmSync(staged, { recursive: true, force: true })
-  cpSync(here("dist/client"), join(staged, "ui"), { recursive: true, dereference: true })
+  cpSync(library("client"), join(staged, "ui"), { recursive: true, dereference: true })
   cpSync(harness, join(staged, "screenshot.exe"))
   const sent = Bun.spawnSync(["sh", "-c", `tar -C "${staged}" -cf - . | ssh ${ssh} 'mkdir "${remote}" && tar -xf - -C "${remote}"'`], { stdout: "pipe", stderr: "pipe" })
   if (sent.exitCode !== 0) throw new Error(`${ssh}: the harness didn't go there: ${sent.stderr.toString().trim()}`)
@@ -261,7 +270,7 @@ async function runThere(at, folder, args, lines) {
   cpSync(at, join(staged, "page"), { recursive: true, dereference: true })
   cpSync(join(folder, "answers.json"), join(staged, "answers.json"))
   writeFileSync(join(staged, "requests.jsonl"), lines)
-  const there = args.map((arg) => (arg === at ? `${run}\\page` : arg === join(folder, "answers.json") ? `${run}\\answers.json` : arg === "-" ? `${run}\\requests.jsonl` : arg.startsWith(folder) ? `${run}\\${basename(arg)}` : arg === here("dist/client") ? `${base}\\ui` : arg))
+  const there = args.map((arg) => (arg === at ? `${run}\\page` : arg === join(folder, "answers.json") ? `${run}\\answers.json` : arg === "-" ? `${run}\\requests.jsonl` : arg.startsWith(folder) ? `${run}\\${basename(arg)}` : arg === library("client") ? `${base}\\ui` : arg))
   const command = `mkdir "${run}" && tar -xf - -C "${run}" && "${base}\\screenshot.exe" ${there.map((arg) => `"${arg}"`).join(" ")} & type "${run}\\end.json" 1>&2 & rmdir /s /q "${run}"`
   const ran = Bun.spawn(["sh", "-c", `tar -C "${staged}" -cf - . | ssh ${ssh} '${command}'`], { stdout: "pipe", stderr: "pipe" })
   const [stdout, stderr] = await Promise.all([new Response(ran.stdout).text(), new Response(ran.stderr).text(), ran.exited])
@@ -325,7 +334,7 @@ async function run(at, folder, scene, requests, seed = 0) {
   // that one's device pixels a point, where it's drawn at one here; on a device, as that decodes them.
   const slowest = devices.tiers.find((tier) => tier.name === (scene.touch ? "low-end Android" : "Intel UHD laptop at 4K"))
   const slower = hostScore && !ssh ? ["--slower", String((hostScore / slowest.cpu) * slowest.scale ** 2)] : []
-  const args = [at, join(folder, "end.png"), join(folder, "end.json"), "--ui", here("dist/client"), "--answers", join(folder, "answers.json"), "--size", `${scene.size[0]}x${scene.size[1]}`, "--scale", String(device?.scale ?? 1), "--requests", "-", ...(dark ? ["--dark"] : []), ...(scene.touch ? ["--touch"] : []), ...(scene.errors ? ["--errors", JSON.stringify(scene.errors)] : []), ...(scene.safeArea ? ["--safe-area", scene.safeArea.join(",")] : []), "--time-zone", scene.timeZone ?? "UTC", ...(seed ? ["--seed", String(seed)] : []), ...panel, ...slower]
+  const args = [at, join(folder, "end.png"), join(folder, "end.json"), "--ui", library("client"), "--answers", join(folder, "answers.json"), "--size", `${scene.size[0]}x${scene.size[1]}`, "--scale", String(device?.scale ?? 1), "--requests", "-", ...(dark ? ["--dark"] : []), ...(scene.touch ? ["--touch"] : []), ...(scene.errors ? ["--errors", JSON.stringify(scene.errors)] : []), ...(scene.safeArea ? ["--safe-area", scene.safeArea.join(",")] : []), "--time-zone", scene.timeZone ?? "UTC", ...(seed ? ["--seed", String(seed)] : []), ...panel, ...slower]
   if (ssh) {
     const { stdout, stderr, failed } = await runThere(at, folder, args, lines)
     return { answers: stdout.split("\n").filter(Boolean).map((line) => JSON.parse(line)), said: stderr.trim(), failed }
@@ -943,7 +952,8 @@ async function round(targets) {
 if (import.meta.main) {
   if (stale(ssh ? undefined : harness)) throw new Error(stale(ssh ? undefined : harness))
   if (!existsSync(harness)) throw new Error("Build the native harness first: `cargo build -p renderer --example screenshot --features fake`")
-  if (!ssh) harness = copied(harness, out)
+  // `--watch` plays what it builds again as it changes.
+  if (!flag("--watch")) harness = copied(ssh ? undefined : harness, out) ?? harness
   // A debug build's CPU is several times a shipped one's.
   if (!flag("--release") && !ssh) console.log("Its CPU times are a debug build's: --release for a shipped build's")
   if (!hostScore && !ssh) console.log(`This CPU (${cpuName.trim()}) has no Geekbench score in devices.json's hosts, so devices are judged by their GPUs alone`)

@@ -38,7 +38,7 @@ import { PNG } from "pngjs"
 import pixelmatch from "pixelmatch"
 import { outline } from "./src/drawing-primitives/outline.ts"
 import { messages } from "./src/words.ts"
-import { build, capped, COMPONENTS, copied, env, pageFolder, stale, stopped, usedApp } from "./motion.js"
+import { build, capped, COMPONENTS, copied, env, library, pageFolder, stale, stopped, usedApp } from "./motion.js"
 
 const here = (path) => fileURLToPath(new URL(path, import.meta.url))
 const root = here("../../")
@@ -61,7 +61,7 @@ const needed = speaks("core/ui/src/drawing-primitives/renderer.ts", /export cons
 const hosted = speaks("clients/app/renderer/src/lib.rs", /pub const RUNTIME_VERSION: u32 = (\d+)/)
 
 if (stale(harness)) throw new Error(stale(harness))
-if (existsSync(harness)) harness = copied(harness, out)
+harness = copied(harness, out)
 
 // What a page runs to have its semantic tree as text, as `bun record.js --dom` makes it.
 const outlined = Bun.spawnSync(["bun", here("record.js"), "--dom"]).stdout.toString()
@@ -118,7 +118,7 @@ function server(built, target, used) {
       if (path.startsWith("/renderer/")) return new Response(Bun.file(join(rendererFrame, path.slice("/renderer/".length) || "index.html")))
       const [, app, client, ...rest] = path.split("/")
       if (used.has(app) && client === "client") return new Response(Bun.file(join(used.get(app), rest.join("/"))))
-      const file = path.startsWith("/ui/client/") ? Bun.file(join(here("dist/client"), path.slice("/ui/client/".length))) : [join(built, path), join(target, path)].map((one) => Bun.file(one)).find((one) => one.size)
+      const file = path.startsWith("/ui/client/") ? Bun.file(join(library("client"), path.slice("/ui/client/".length))) : [join(built, path), join(target, path)].map((one) => Bun.file(one)).find((one) => one.size)
       return file?.size ? new Response(file) : new Response("Not found", { status: 404 })
     },
   })
@@ -271,7 +271,7 @@ function native(built, scene, folder, used) {
   // settles, as the DOM's is, and what's laid out once it's drawn (onLayout) is drawn again.
   const requests = [{ op: "clock", step: 1000 }, ...scene.taps.flatMap((tap) => [tap.key ? { op: "key", ...tap } : tap.type ? { op: "type", text: tap.type } : { op: "tap", ...(typeof tap === "object" ? tap : { name: tap }) }, { op: "clock", step: 1000 }])].map((request, at) => JSON.stringify({ v: 1, id: at + 1, ...request })).join("\n")
   const run = Bun.spawnSync(
-    capped([harness, at, join(folder, "native.png"), join(folder, "native.json"), "--ui", here("dist/client"), "--answers", join(folder, "answers.json"), "--size", `${scene.size[0]}x${scene.size[1]}`, "--scale", "2", "--measure", "--latency", String(LATENCY_MS), "--cached", kept.join(","), ...(dark ? ["--dark"] : []), ...(scene.touch ? ["--touch"] : []), ...(scene.errors ? ["--errors", JSON.stringify(scene.errors)] : []), "--time-zone", scene.timeZone, ...(requests ? ["--requests", "-"] : [])]),
+    capped([harness, at, join(folder, "native.png"), join(folder, "native.json"), "--ui", library("client"), "--answers", join(folder, "answers.json"), "--size", `${scene.size[0]}x${scene.size[1]}`, "--scale", "2", "--measure", "--latency", String(LATENCY_MS), "--cached", kept.join(","), ...(dark ? ["--dark"] : []), ...(scene.touch ? ["--touch"] : []), ...(scene.errors ? ["--errors", JSON.stringify(scene.errors)] : []), "--time-zone", scene.timeZone, ...(requests ? ["--requests", "-"] : [])]),
     { stdin: requests ? new TextEncoder().encode(requests) : undefined, env },
   )
   if (run.exitCode !== 0 || !existsSync(join(folder, "native.json"))) return { missing: stopped(run.exitCode) ?? (run.stderr.toString().trim().split("\n").at(-1) || "the harness drew nothing") }
