@@ -33,8 +33,9 @@ behind. `tooling/testflight` is how a build is finished; this is what it and the
   in the `ptc-nosudo` vault, and on the Mac in `~/.config/ptc/build-keychain-pw`. Its Apple Distribution identity,
   for TestFlight, and its Developer ID Application identity, which `tooling/release` signs a Mac's server and app
   with, are each a .p12 in 1Password ("Apple Distribution identity", "Developer ID Application identity", each with
-  its "... password" item, in `ptc-nosudo`) and the repo's GitHub secrets (`DISTRIBUTION_P12`, `DEVELOPER_ID_P12`,
-  each with its `_PASSWORD`), and on no Mac.
+  its "... password" item, in `ptc-nosudo`), the Developer ID one in the repo's GitHub secrets too
+  (`DEVELOPER_ID_P12`, `DEVELOPER_ID_P12_PASSWORD`), and on no Mac. The public repo's runs sign nothing for the App
+  Store: `tooling/testflight` signs on Linux.
 - The team's App Store Connect API key (Admin, `R49QVKSHMK`; its item is in Agent Memory) makes App IDs
   (`/v1/bundleIds`, `/v1/bundleIdCapabilities`) and profiles (`POST /v1/profiles` with the App ID and the team's
   certificate: `IOS_APP_DEVELOPMENT`, its `DEVELOPMENT` certificate and the phone from `/v1/devices`, or
