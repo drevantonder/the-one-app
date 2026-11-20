@@ -2819,9 +2819,28 @@
         ]
       },
       "encryption_key": {
-        "slot": 1
+        "owner": "users/alex",
+        "slot": 1,
+        "wrapped": null,
+        "access": [
+          {
+            "artifact": "users/alex/made/vault/items",
+            "epoch": 1,
+            "servers": [],
+            "missing": [
+              {
+                "key": "be1c7056e56656d73f68c49afb1c83caa58db4183a35dcb3fc98111edb8099c5",
+                "name": "linux"
+              }
+            ],
+            "extra": []
+          }
+        ]
       },
-      "sign-in_encrypt_for_passkeys": {}
+      "sign-in_encrypt_for_passkeys": {},
+      "permissions_groups": {
+        "groups": []
+      }
     },
     "size": [
       1100,
