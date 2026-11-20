@@ -38,8 +38,10 @@ function layer(modal: boolean, content: () => JSX.Element) {
     const opener = document.activeElement as HTMLElement | null
     const others = [...document.body.children].filter((element) => element !== box.parentElement && element !== box && !(element as HTMLElement).inert) as HTMLElement[]
     for (const other of others) other.inert = true
-    // The keyboard goes into it: to what asks for it (`autofocus`, a phone's keyboard with it), or to its dialog.
-    box.querySelector<HTMLElement>("[autofocus], [aria-modal='true']")?.focus()
+    // The keyboard goes into it: to what asks for it (`autofocus`, a phone's keyboard with it), an alert's first action,
+    // what does least by convention, as WAI-ARIA's alertdialog pattern has it, or its dialog.
+    const first = box.querySelector("[role='alertdialog']")?.querySelector<HTMLElement>("button:not([disabled]), [tabindex]:not([tabindex='-1'])")
+    ;(box.querySelector<HTMLElement>("[autofocus]") ?? first ?? box.querySelector<HTMLElement>("[aria-modal='true']"))?.focus()
     return () => {
       others.forEach((other) => (other.inert = false))
       // Gone, it gives the keyboard back to what had it before, as WAI-ARIA's dialog pattern asks, unless it's gone

@@ -101,7 +101,8 @@ export function Sheet(props: { heading?: JSX.Element; open?: boolean; onClose?: 
 /// `<Alert heading="Vault wants to use a key" text="Sent only to api.github.com." open={!!asking()} onClose={() => setAsking()} action={<><Button variant="outline" onPress={decline}>Don't Allow</Button><Button onPress={allow}>Allow</Button></>}>...</Alert>`:
 /// a question that stops everything until it's answered, as a system's permission prompt does, in the middle of the
 /// window while `open`: its `heading`, its grey `text`, what's chosen or typed for it, then its buttons (`action`),
-/// sharing the row while two fit, and otherwise one over the other, the first below, as iOS lays them out.
+/// sharing the row while two fit, and otherwise one over the other, the first below, as iOS lays them out. The first is
+/// what does least (Cancel, Don't Allow), which has the keyboard as it opens, as WAI-ARIA's alertdialog pattern asks.
 /// `confirm` asks a question with only Cancel and OK; this is for one that needs more. Escape and the device's back
 /// close it too, which calls `onClose`, and the app sets `open` false.
 export function Alert(props: { heading: JSX.Element; text?: JSX.Element; open?: boolean; onClose?: () => void; action?: JSX.Element; children?: JSX.Element }) {

@@ -1347,8 +1347,12 @@ impl Screen {
                 let was = [self.focus.focused, self.focus.blurred].into_iter().flatten().find(|had| !self.within(*had, modal));
                 self.focus.modals.push((modal, was));
             }
+            // The keyboard goes into it: an alert's to its first action, what does least by convention (Cancel, Don't
+            // Allow), as WAI-ARIA's alertdialog pattern has it and the UI SDK's alert does; any other dialog's to itself.
             if !self.focus.focused.is_some_and(|focused| self.within(focused, modal)) {
-                self.focus(Some(modal));
+                let alert = self.tree.nodes.get(&modal).is_some_and(|node| node.str("role") == Some("alertdialog"));
+                let first = alert.then(|| self.focus.tab_order.iter().copied().find(|id| self.within(*id, modal))).flatten();
+                self.focus(Some(first.unwrap_or(modal)));
                 self.again = true;
             }
         }

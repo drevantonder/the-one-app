@@ -163,9 +163,7 @@ export default {
       "It opens over the page, its glass blurred": ["Use Key", { expect: { shown: { role: "alertdialog" } } }, { expect: { blur: true } }],
       "Its answer closes it": ["Use Key", { wait: 400 }, "Allow", { expect: { text: "Answered: yes" } }, { expect: { gone: { role: "alertdialog" } } }],
       "Escape closes it, its button with the keyboard": [{ key: "Tab" }, { key: "Enter" }, { wait: 400 }, { key: "Escape" }, { expect: { gone: { role: "alertdialog" } } }, { expect: { focused: { role: "button", name: "Use Key" } } }],
-      // The keyboard goes to the alert itself, so a screen reader reads its heading first (the UI SDK's goes to its
-      // least harmful action), and Tab goes round its actions.
-      "Its keyboard is in it, and Tab stays in it": ["Use Key", { wait: 400 }, { expect: { focused: { role: "alertdialog" } } }, { key: "Tab" }, { expect: { focused: { role: "button", name: "Don't Allow" } } }, { key: "Tab" }, { expect: { focused: { role: "button", name: "Allow" } } }, { key: "Tab" }, { expect: { focused: { role: "button", name: "Don't Allow" } } }],
+      "Its keyboard starts on what does least, and Tab stays in it": ["Use Key", { wait: 400 }, { expect: { focused: { role: "button", name: "Don't Allow" } } }, { key: "Tab" }, { expect: { focused: { role: "button", name: "Allow" } } }, { key: "Tab" }, { expect: { focused: { role: "button", name: "Don't Allow" } } }],
     },
   },
   "Over the page/A sheet opened": {
