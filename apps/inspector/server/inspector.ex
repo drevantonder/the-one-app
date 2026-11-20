@@ -141,12 +141,14 @@ defmodule Inspector do
       op(
         "scroll",
         false,
-        "Scrolls what's around a node, by a selector, or at a point (the window's top left unless given), by dx and dy CSS pixels, down and right positive, as a wheel's turn or, with `phase` and `momentum`, a trackpad's scroll. Gives how far it's `scrolled`.",
+        "Scrolls what's around a node, by a selector, or at a point (the window's top left unless given), by dx and dy CSS pixels, down and right positive, as a wheel's turn, with `notchesX` and `notchesY` a mouse wheel's clicks, or, with `phase` and `momentum`, a trackpad's scroll. Gives how far it's `scrolled`.",
         Map.merge(Map.merge(@selector, @point), %{
           dx: %{type: "number"},
           dy: %{type: "number"},
           phase: %{type: "string", enum: ["began", "changed", "ended", "cancelled", "mayBegin"], description: "a trackpad's fingers, as AppKit says their phase"},
-          momentum: %{type: "boolean", description: "the trackpad's momentum after its fingers lift"}
+          momentum: %{type: "boolean", description: "the trackpad's momentum after its fingers lift"},
+          notchesX: %{type: "number", description: "a mouse wheel's clicks along, as the system says them: 1 a click right"},
+          notchesY: %{type: "number", description: "a mouse wheel's clicks down: 1 a click down, -1 up"}
         })
       ),
       op(
