@@ -60,7 +60,6 @@ defmodule AndroidEmulator.Emulator do
   # scrcpy's server, which a stream runs in the phone for its H.264 and its input, and the file's SHA-256.
   @scrcpy "5.0.1"
   @scrcpy_sha256 "764eb6f79811d5211fe9df341120882ba9994c7a61b897d7bf3fb662e53bc536"
-  @aiortc "1.16.0"
   @max_bytes 64 * 1024
 
   @impl OneCore.Service
@@ -71,7 +70,7 @@ defmodule AndroidEmulator.Emulator do
 
   @impl OneCore.Service
   def needs do
-    "A Linux x86 machine with KVM (/dev/kvm) and pasta (the passt package), or a Mac, with uv and Java. It runs " <>
+    "A Linux x86 machine with KVM (/dev/kvm) and pasta (the passt package), or a Mac, with Java. It runs " <>
       "Android emulators as the user this server runs as, about 2 GB of memory and a CPU or two each while they " <>
       "run. It uses the Android SDK where ANDROID_HOME or ~/Android/Sdk has one, and otherwise installs Google's " <>
       "command-line tools, emulator and an Android 16 system image in its own folder, accepting Google's SDK " <>
@@ -93,7 +92,6 @@ defmodule AndroidEmulator.Emulator do
         raise "Android's emulator runs on Linux and Macs"
     end
 
-    System.find_executable("uv") || raise "This machine has no uv, which a stream's sender is installed with"
     {:ok, %__MODULE__{}, {:continue, :watch}}
   end
 
@@ -409,26 +407,20 @@ defmodule AndroidEmulator.Emulator do
 
   @doc """
   Streams the phone's screen as WebRTC video to the app whose SDP offer `request` has, as JSON, with the ICE servers
-  to use: `server/stream/stream.py` answers it and carries on by itself until the app goes. Gives the SDP answer.
+  to use and WebRTC's sender for each kind of machine (`webrtc`'s `sender`): this machine's, with scrcpy's server
+  for its source, answers it and carries on by itself until the app goes. Gives the SDP answer.
   """
   def stream(service, id, request) do
     OneCore.Service.touch(service, id)
-    python = sender(service)
+    request = JSON.decode!(request)
+    sender = sender(service, request["sender"])
     adb!(service, id, ["push", scrcpy(service), "/data/local/tmp/scrcpy-server.jar"], 30)
     folder = OneCore.Service.folder(service)
     file = Path.join(folder, "stream-#{System.unique_integer([:positive])}.json")
+    source = %{"kind" => "scrcpy", "adb" => adb_path(service), "serial" => serial(id), "version" => @scrcpy}
+    File.write!(file, JSON.encode!(Map.merge(Map.take(request, ["offer", "iceServers"]), %{"log" => Path.join(folder, "stream.log"), "source" => source})))
 
-    config =
-      Map.merge(JSON.decode!(request), %{
-        "adb" => adb_path(service),
-        "serial" => serial(id),
-        "version" => @scrcpy,
-        "log" => Path.join(folder, "stream.log")
-      })
-
-    File.write!(file, JSON.encode!(config))
-
-    case run(service, [python, Path.join(OneCore.Service.folder(service, "server/stream"), "stream.py"), file], 30) do
+    case run(service, [sender, file], 30) do
       %{exit: 0, stdout: output} -> output
       %{stderr: why} -> raise "Couldn't stream its screen: #{String.trim(why)}"
     end
@@ -480,37 +472,32 @@ defmodule AndroidEmulator.Emulator do
     if String.starts_with?(to_string(:erlang.system_info(:system_architecture)), "aarch64"), do: "arm64-v8a", else: "x86_64"
   end
 
-  # The Python a stream's sender runs with, aiortc in it, made with uv the first time.
-  defp sender(service) do
-    venv = Path.join(OneCore.Service.folder(service), "venv")
-    python = Path.join(venv, "bin/python")
-    marker = Path.join(venv, "aiortc-#{@aiortc}")
-
-    if not File.exists?(marker) do
-      File.rm_rf!(venv)
-      run!(service, ["uv", "venv", "--quiet", "--python", "3.12", venv], 300)
-      run!(service, ["uv", "pip", "install", "--quiet", "--python", python, "aiortc==#{@aiortc}"], 300)
-      File.touch!(marker)
-    end
-
-    python
+  # WebRTC's sender for this kind of machine, downloaded the first time, and checked.
+  defp sender(service, senders) do
+    [arch | _] = String.split(to_string(:erlang.system_info(:system_architecture)), "-")
+    kind = if match?({:unix, :darwin}, :os.type()), do: "macos-" <> arch, else: "linux-" <> arch
+    %{"url" => url, "sha256" => sha256} = senders[kind] || raise "WebRTC has no sender for #{kind}"
+    file = Path.join(OneCore.Service.folder(service), "stream-#{sha256}")
+    downloaded(url, sha256, file)
+    File.chmod!(file, 0o755)
+    file
   end
 
-  # scrcpy's server, downloaded from its releases the first time, and checked.
+  # scrcpy's server, downloaded the first time, and checked.
   defp scrcpy(service) do
     file = Path.join(OneCore.Service.folder(service), "scrcpy-server-v#{@scrcpy}")
-
-    if not File.exists?(file) do
-      url = "https://github.com/Genymobile/scrcpy/releases/download/v#{@scrcpy}/scrcpy-server-v#{@scrcpy}"
-      %{status: 200, body: body} = Req.get!(url, decode_body: false, retry: false)
-
-      if Base.encode16(:crypto.hash(:sha256, body), case: :lower) != @scrcpy_sha256,
-        do: raise("scrcpy's server from GitHub isn't the one expected")
-
-      File.write!(file, body)
-    end
-
+    downloaded("https://github.com/Genymobile/scrcpy/releases/download/v#{@scrcpy}/scrcpy-server-v#{@scrcpy}", @scrcpy_sha256, file)
     file
+  end
+
+  # `url`'s file at `file`, once it's the one whose SHA-256 is `sha256`.
+  defp downloaded(url, sha256, file) do
+    if not File.exists?(file) do
+      %{status: 200, body: body} = Req.get!(url, decode_body: false, retry: false, receive_timeout: 300_000)
+      if Base.encode16(:crypto.hash(:sha256, body), case: :lower) != sha256, do: raise("#{url} isn't the file expected")
+      File.write!(file <> ".part", body)
+      File.rename!(file <> ".part", file)
+    end
   end
 
   # Each running emulator here, by its AVD: its processes (the emulator's, and on Linux its pasta and scope), which

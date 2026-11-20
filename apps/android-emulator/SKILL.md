@@ -29,4 +29,4 @@ An emulator costs about 2 GB of memory and a CPU or two while it runs. Stop it w
 unused for two hours is stopped on the hour. Yours are yours: nobody else sees them but the network's owner.
 
 A machine runs emulators once its service is installed there: `install_service --app android-emulator --service
-AndroidEmulator.Emulator --server <key>`. It needs KVM and pasta on Linux, or a Mac, and uv and Java.
+AndroidEmulator.Emulator --server <key>`. It needs KVM and pasta on Linux, or a Mac, and Java.
