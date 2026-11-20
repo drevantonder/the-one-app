@@ -142,12 +142,24 @@ defmodule OneCore.Apps.Store do
   """
   def keep(artifact, name, version, files, deployed, from, trusted, was) do
     code = Version.code(files)
-    for {path, text} <- files, do: Bucket.write("#{artifact}/code/#{code}/#{path}", text)
+    sources = if deployed != Map.delete(files, @deployment), do: deployed, else: %{}
 
-    if deployed != Map.delete(files, @deployment),
-      do: for({path, text} <- deployed, do: Bucket.write("#{artifact}/source/#{code}/#{path}", text))
+    # The version being replaced goes to the history.
+    history =
+      with {before, code, _tag} <- was do
+        replaced = JSON.encode!(%{code: code, replaced: System.os_time(:second)})
+        [fn -> Bucket.write("#{artifact}/versions/" <> String.pad_leading("#{before}", 8, "0"), replaced) end]
+      else
+        nil -> []
+      end
 
-    :ok = describe(version)
+    # Each blob is written at once beside the others, as a bucket at an address takes a round trip for each.
+    writes =
+      [fn -> :ok = describe(version) end | history] ++
+        for({path, text} <- files, do: fn -> Bucket.write("#{artifact}/code/#{code}/#{path}", text) end) ++
+        for({path, text} <- sources, do: fn -> Bucket.write("#{artifact}/source/#{code}/#{path}", text) end)
+
+    Stream.run(Task.async_stream(writes, & &1.(), max_concurrency: 16, timeout: :infinity))
     number = if was, do: elem(was, 0) + 1, else: 1
     source = Version.code(deployed)
 
@@ -164,18 +176,16 @@ defmodule OneCore.Apps.Store do
       |> JSON.encode!()
 
     wrote =
-      with {before, code, tag} <- was do
-        replaced = JSON.encode!(%{code: code, replaced: System.os_time(:second)})
-        Bucket.write("#{artifact}/versions/" <> String.pad_leading("#{before}", 8, "0"), replaced)
+      with {_before, _code, tag} <- was do
         Bucket.replace("#{artifact}/latest", next, tag)
       else
         nil -> Bucket.write("#{artifact}/latest", next)
       end
 
     # Another deploy of this app got there first, or a prune began since this one read `latest`, and whoever asked
-    # for this one hasn't seen it.
+    # for this one hasn't seen it. What's pruned is nobody's to wait for.
     if wrote == :ok do
-      prune(artifact)
+      Task.Supervisor.start_child(OneCore.Asks, fn -> prune(artifact) end)
       {:ok, number}
     else
       {:error, "#{name} was deployed by someone else just now. Look at it, and do this again."}
