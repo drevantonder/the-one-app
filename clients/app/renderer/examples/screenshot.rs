@@ -551,7 +551,9 @@ fn input(windows: &mut Windows, id: renderer::platform::WindowId, request: &rend
                 if met || waited >= timeout {
                     return Ok(json!({"met": met, "ms": waited, "node": node}));
                 }
-                windows.run(1000.0 / 60.0);
+                // A hair over a frame, as the display's refresh is a hair over 1000/60 ms, so a frame is always drawn
+                // between one look and the next.
+                windows.run(1000.0 / 60.0 * 1.01);
             }
         }
         // A button held down where `tap` would press it, and let go where it was held, for what shows mid-press.
