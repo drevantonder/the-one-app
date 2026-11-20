@@ -67,9 +67,11 @@ export function launcherRoom(safe: Insets): Room {
   return { width: ACROSS * PAGE + 2 * INSET, height: (ROWS * ROW + (ROWS - 1) * ROW_GAP) * scale + 8, wide: true, fit: ACROSS, scale, side: INSET, gap: 0, launcher: true, safe }
 }
 
-/// Where a launcher's page is along its owner's pages, from the first's left: in its screenful's columns, the first
-/// page of a screenful in the first, so fewer pages than fit leave the last columns empty, as a full screenful has them.
-export const along = (room: Room, page: number) => Math.floor(page / ACROSS) * room.width + (page % ACROSS) * PAGE
+/// Where a launcher's page is along its owner's `count` pages, from the first's left: in its screenful's columns, the
+/// first page of a screenful in the first, so a last screenful of fewer leaves its last columns empty, as a full one has
+/// them; an owner with fewer pages than a screenful has them in its middle (DESIGN.md, Launcher).
+export const along = (room: Room, page: number, count: number) =>
+  Math.floor(page / ACROSS) * room.width + (page % ACROSS) * PAGE + (count < ACROSS ? ((ACROSS - Math.max(1, count)) * PAGE) / 2 : 0)
 
 /// A launcher's card, its one size: a screenful of `room`'s pages, each its six rows, with the owner switcher over them
 /// and the dots under them.

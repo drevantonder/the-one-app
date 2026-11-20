@@ -2543,6 +2543,20 @@
         "launcher": true,
         "mac": true
       }
+    },
+    "checks": {
+      "Its words are in the middle of the page": [
+        {
+          "expect": {
+            "text": "No apps on this page."
+          }
+        },
+        {
+          "expect": {
+            "centred": "No apps on this page."
+          }
+        }
+      ]
     }
   },
   "Colour Mode": {

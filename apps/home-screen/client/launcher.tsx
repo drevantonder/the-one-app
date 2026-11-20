@@ -352,7 +352,7 @@ export function LauncherPanel(props: { owners: Owner[]; layout: Screens; paging:
               {(owner, index) => {
                 const shown = () => index() === at().owner
                 const Page = (inner: { page: number; placed: Placed<Cell>[] }) => (
-                  <View style={[looks.absolute, looks.at(INSET + alongOf(room(), inner.page), 0, PAGE, room().height)]}>
+                  <View style={[looks.absolute, looks.at(INSET + alongOf(room(), inner.page, pages()[index()]?.length ?? 1), 0, PAGE, room().height)]}>
                     <View style={[looks.absolute, looks.placedPage((laidPage().height * (room().scale - 1)) / 2, (laidPage().width * (room().scale - 1)) / 2, room().scale)]}>
                       <HomePage owner={owner()} index={index()} page={inner.page} placed={inner.placed} laid={laidPage()} scale={room().scale} />
                     </View>

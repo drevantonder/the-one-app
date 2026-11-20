@@ -17,6 +17,8 @@ const look = styles({
   middle: { maxWidth: "none", alignItems: "center", justifyContent: "center", padding: tokens.length.gutter, textAlign: "center" },
   fill: { flexGrow: 1 },
   grey: { color: tokens.colour.secondaryLabel },
+  // All there is, its line is body text, as iOS's ContentUnavailableView's description is.
+  body: { font: tokens.type.large, fontWeight: tokens.weight.regular },
   // A list's card, and each line a row of it, a heading's line over a grey line's, as tall as such a row, so what
   // replaces it takes the room it took.
   skeleton: {
@@ -61,7 +63,7 @@ const look = styles({
     color: tokens.colour.label,
     textAlign: "start",
   },
-  centred: { alignSelf: "center", maxWidth: tokens.length.readable },
+  centred: { alignSelf: "center", width: "100%", maxWidth: tokens.length.readable },
   warn: { backgroundColor: tokens.colour.orangeTint },
   symbol: { alignSelf: "flex-start", paddingTop: tokens.grid[0.5], color: tokens.colour.red },
   warnSymbol: { color: tokens.colour.orange },
@@ -116,7 +118,7 @@ export function Empty(props: { children?: JSX.Element; action?: JSX.Element }) {
   const middle = useContext(Middle)
   return (
     <View style={[look.state, middle() && look.middle, middle() && look.fill]}>
-      <Text style={look.grey}>{props.children}</Text>
+      <Text style={[look.grey, middle() && look.body]}>{props.children}</Text>
       {props.action}
     </View>
   )

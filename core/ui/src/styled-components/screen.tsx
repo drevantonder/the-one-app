@@ -135,8 +135,10 @@ export function History(props: { value: Went; children?: JSX.Element }) {
 /** Which of the window's edges a screen's bar reaches, where its title row's controls and title are: a split's
  * list beside what it opens reaches the start, and what it opens the end. */
 const Edge = createContext<() => { start: boolean; end: boolean }>(() => ({ start: true, end: true }))
-/** Whether a state is all there is of a split's detail beside its list, which it fills, in its middle. */
-export const Middle = createContext<() => boolean>(() => false)
+/** Whether a state is all there is of where it is, which it fills, in its middle, inside the gutter: a split's
+ * detail beside its list, or a page or a part of one with no screen around it (an app that couldn't show its first
+ * screen, an empty Home page), as iOS's ContentUnavailableView is. In a screen's parts, it's one of them. */
+export const Middle = createContext<() => boolean>(() => true)
 
 /// `<Screen heading="Notes" action={<Button>Add</Button>}>...</Screen>`: a whole view of an app: a bar across its
 /// top that stays as what's under it scrolls, with its `heading` and what it does (`action`: its one main button, or a
