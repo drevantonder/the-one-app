@@ -8,10 +8,16 @@ defmodule OneCore.Jobs do
   each person's data apart, for each who keeps something with it (`OneCore.Apps.Installed.subjects/2`). Every server asks,
   and the app keeping the schedule is what makes one of them make each call, once, of those acting for whoever the
   app was installed for: a time that passed with no server up is made up for by the first that's back.
+
+  An app also sets a timer for someone as they do something (`Database.timer/5` in the `database` app), kept with
+  their data and said by an alarm, a key `<whose>/alarms/<installed for>/<app>/<due>`, which the database holding
+  it keeps at its next one. Each minute a server acting for the network looks at everyone's alarms, as it acts for
+  everyone, and any other server at those of whoever it's for, and one that's due has its app make what's due, on the
+  server the one rule picks (`OneCore.Apps.Calls.schedule/4`), once.
   """
   use GenServer
   require Logger
-  alias OneCore.{Apps, Edge}
+  alias OneCore.{Apps, Bucket, Edge, Servers}
   alias OneCore.Apps.Calls
 
   def start_link(_), do: GenServer.start_link(__MODULE__, nil, name: __MODULE__)
@@ -38,6 +44,9 @@ defmodule OneCore.Jobs do
   # `RandomizedDelaySec`, so that machines don't all fire together. It's well short of the shortest job's `every`.
   @spread 10_000
 
+  # How often alarms are looked for, in seconds: a timer fires within a minute of when it was set for.
+  @alarms 60
+
   # Asks for each app that has a job due since `at` and runs here, apart from the others, and waits for the next time
   # any app has one.
   defp schedule_next(%{at: at, timer: timer} = clock) do
@@ -49,9 +58,8 @@ defmodule OneCore.Jobs do
     next =
       for {_owner, _name, jobs, _trusted, _own} <- scheduled, job <- jobs, do: (div(now, job.every) + 1) * job.every
 
-    timer =
-      if next != [],
-        do: Process.send_after(self(), :due, max(Enum.min(next) * 1000 - System.os_time(:millisecond), 0) + :rand.uniform(@spread))
+    next = Enum.min([(div(now, @alarms) + 1) * @alarms | next])
+    timer = Process.send_after(self(), :due, max(next * 1000 - System.os_time(:millisecond), 0) + :rand.uniform(@spread))
 
     %{clock | timer: timer}
   end
@@ -68,6 +76,8 @@ defmodule OneCore.Jobs do
       Task.Supervisor.start_child(OneCore.Asks, fn -> Calls.schedule(owner, name, subject) end)
     end
 
+    if div(now, @alarms) > div(at, @alarms), do: alarmed(now)
+
     if clock.unreachable, do: Logger.info("Scheduled jobs are asked for again: the bucket answers")
     %{clock | at: now, unreachable: false}
   rescue
@@ -76,5 +86,32 @@ defmodule OneCore.Jobs do
         do: Logger.warning("No scheduled job is asked for until the bucket answers: #{Exception.message(unreachable)}")
 
       %{clock | unreachable: true}
+  end
+
+  # Has each alarm that's due, of whoever this server looks at, make what's due.
+  defp alarmed(now) do
+    for whose <- looked_at(),
+        key <- Bucket.list(whose <> "/alarms/"),
+        {at, name, due} = alarm(whose, key),
+        due <= now do
+      Task.Supervisor.start_child(OneCore.Asks, fn -> Calls.schedule(at, name, whose) end)
+    end
+  end
+
+  # Whose alarms this server looks at: everyone's, and the network's, for one acting for the network, which it lists
+  # by their folders, and whoever else it's for.
+  defp looked_at do
+    everyone =
+      if Servers.here?("network"),
+        do: ["network" | for(folder <- Bucket.folders("users/") ++ Bucket.folders("groups/"), do: String.trim_trailing(folder, "/"))],
+        else: []
+
+    Enum.uniq(everyone ++ Servers.here())
+  end
+
+  # An alarm's key: whoever the app was installed for, the app's name, and when it's due, in seconds since 1970.
+  defp alarm(whose, key) do
+    {at, [name, due]} = Enum.split(String.split(String.replace_prefix(key, whose <> "/alarms/", ""), "/"), -2)
+    {Enum.join(at, "/"), name, String.to_integer(due)}
   end
 end

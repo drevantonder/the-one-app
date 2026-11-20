@@ -69,6 +69,24 @@ defmodule OneCore.Bucket.S3 do
   @impl true
   def list(address, prefix), do: for({key, _tag} <- list_tagged(address, prefix), do: key)
 
+  # A bucket lists the folders just under a prefix as its common prefixes, a thousand at a time.
+  @impl true
+  def folders(address, prefix, next \\ nil) do
+    case send_request(address, %{list: prefix, after: next, folders: true}) do
+      %{status: 200, body: listed} ->
+        listed = parse(listed)
+        here = xpath(listed, ~x"/ListBucketResult/CommonPrefixes/Prefix/text()"ls)
+
+        case xpath(listed, ~x"/ListBucketResult/NextContinuationToken/text()"s) do
+          "" -> here
+          next -> here ++ folders(address, prefix, next)
+        end
+
+      refused ->
+        raise refusal(refused)
+    end
+  end
+
   # A bucket lists a thousand keys at a time, each with its ETag, as a read gives it, and says where the next ones
   # start.
   @impl true

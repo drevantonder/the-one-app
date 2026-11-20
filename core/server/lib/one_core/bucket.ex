@@ -20,6 +20,7 @@ defmodule OneCore.Bucket do
   @callback write(where :: term, key, binary) :: :ok | :exists
   @callback replace(where :: term, key, binary, tag) :: :ok | :changed
   @callback list(where :: term, prefix :: String.t()) :: [key]
+  @callback folders(where :: term, prefix :: String.t()) :: [String.t()]
   @callback list_tagged(where :: term, prefix :: String.t()) :: [{key, tag}]
   @callback remove(where :: term, key) :: :ok
   @callback size(where :: term, key) :: {:ok, non_neg_integer} | :absent
@@ -61,6 +62,9 @@ defmodule OneCore.Bucket do
 
   @doc "The keys starting with `prefix`, in order."
   def list(prefix), do: bucket(:list, [prefix])
+
+  @doc "The folders just under `prefix`, which ends in `/`, each as `<prefix><name>/`, in order: `users/` lists each user's."
+  def folders(prefix), do: bucket(:folders, [prefix])
 
   @doc """
   The keys starting with `prefix`, in order, each with its blob's tag, as `read/1` gives it: a blob whose tag is the

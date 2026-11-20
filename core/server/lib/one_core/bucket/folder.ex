@@ -75,6 +75,14 @@ defmodule OneCore.Bucket.Folder do
   end
 
   @impl true
+  def folders(folder, prefix) do
+    case File.ls(Path.join(folder, prefix)) do
+      {:ok, names} -> Enum.sort(for name <- names, File.dir?(Path.join([folder, prefix, name])), do: prefix <> name <> "/")
+      {:error, :enoent} -> []
+    end
+  end
+
+  @impl true
   def list_tagged(folder, prefix) do
     for key <- list(folder, prefix), {:ok, _data, tag} <- [read(folder, key)], do: {key, tag}
   end
