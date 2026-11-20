@@ -5255,8 +5255,7 @@ dependencies = [
 [[package]]
 name = "naga"
 version = "30.0.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "fd0dd362bf26c0ffdd143df6da66a25d287e196eff482f117771010b207ad163"
+source = "git+https://github.com/ptc-au/wgpu?rev=814498b9d05fb622cd7912cb5eded5ac55022d0f#814498b9d05fb622cd7912cb5eded5ac55022d0f"
 dependencies = [
  "arrayvec",
  "bit-set 0.10.0",
@@ -5281,8 +5280,7 @@ dependencies = [
 [[package]]
 name = "naga-types"
 version = "30.0.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "14474170feb673cfb18b3565111a9869797cc1d290fb9ec969c53f5e1e231c6d"
+source = "git+https://github.com/ptc-au/wgpu?rev=814498b9d05fb622cd7912cb5eded5ac55022d0f#814498b9d05fb622cd7912cb5eded5ac55022d0f"
 dependencies = [
  "hashbrown 0.17.1",
  "indexmap 2.14.2",
@@ -10561,8 +10559,7 @@ checksum = "a28ac98ddc8b9274cb41bb4d9d4d5c425b6020c50c46f25559911905610b4a88"
 [[package]]
 name = "wgpu"
 version = "30.0.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "146fc3d654250e6207921a66c87534c621bc886c70df83dcf466c1d66813810e"
+source = "git+https://github.com/ptc-au/wgpu?rev=814498b9d05fb622cd7912cb5eded5ac55022d0f#814498b9d05fb622cd7912cb5eded5ac55022d0f"
 dependencies = [
  "arrayvec",
  "bitflags 2.13.2",
@@ -10590,8 +10587,7 @@ dependencies = [
 [[package]]
 name = "wgpu-core"
 version = "30.0.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "ad661da2ee99f208c30090b585284b2ab5b8bf2358ddf2d2215592808ec62f1a"
+source = "git+https://github.com/ptc-au/wgpu?rev=814498b9d05fb622cd7912cb5eded5ac55022d0f#814498b9d05fb622cd7912cb5eded5ac55022d0f"
 dependencies = [
  "arrayvec",
  "bit-set 0.10.0",
@@ -10623,8 +10619,7 @@ dependencies = [
 [[package]]
 name = "wgpu-core-deps-apple"
 version = "30.0.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "7d3f2f24aee039ffe9ef527300daf6b7428c58edeefdaa1700f4fa0fd754df16"
+source = "git+https://github.com/ptc-au/wgpu?rev=814498b9d05fb622cd7912cb5eded5ac55022d0f#814498b9d05fb622cd7912cb5eded5ac55022d0f"
 dependencies = [
  "wgpu-hal",
 ]
@@ -10632,8 +10627,7 @@ dependencies = [
 [[package]]
 name = "wgpu-core-deps-windows-linux-android"
 version = "30.0.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1331b08fa2362c5d454eccc4448e6e4f01eccfea569a00e310adbfc4415f2bdc"
+source = "git+https://github.com/ptc-au/wgpu?rev=814498b9d05fb622cd7912cb5eded5ac55022d0f#814498b9d05fb622cd7912cb5eded5ac55022d0f"
 dependencies = [
  "wgpu-hal",
 ]
@@ -10641,8 +10635,7 @@ dependencies = [
 [[package]]
 name = "wgpu-hal"
 version = "30.0.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a57452fe453658e141aafdb09de1028afa498805fab518238ddf372a518813ff"
+source = "git+https://github.com/ptc-au/wgpu?rev=814498b9d05fb622cd7912cb5eded5ac55022d0f#814498b9d05fb622cd7912cb5eded5ac55022d0f"
 dependencies = [
  "android_system_properties",
  "arrayvec",
@@ -10688,8 +10681,7 @@ dependencies = [
 [[package]]
 name = "wgpu-naga-bridge"
 version = "30.0.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "44a62ead68aad7cd40ac9e2cd2b8ec64f32dfbad2765f429b9fb74b8b735869f"
+source = "git+https://github.com/ptc-au/wgpu?rev=814498b9d05fb622cd7912cb5eded5ac55022d0f#814498b9d05fb622cd7912cb5eded5ac55022d0f"
 dependencies = [
  "naga",
  "wgpu-types",
@@ -10698,8 +10690,7 @@ dependencies = [
 [[package]]
 name = "wgpu-types"
 version = "30.0.2"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a9f6ee0bd50f5ab79fb8c25e3f33afb27126f034af4ba5909c7a0967058659e6"
+source = "git+https://github.com/ptc-au/wgpu?rev=814498b9d05fb622cd7912cb5eded5ac55022d0f#814498b9d05fb622cd7912cb5eded5ac55022d0f"
 dependencies = [
  "bitflags 2.13.2",
  "bytemuck",
