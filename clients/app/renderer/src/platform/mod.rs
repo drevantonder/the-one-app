@@ -478,10 +478,18 @@ impl Windows {
             {
                 screen.device = Box::new(Computer);
             }
-            // An app's window on Linux is unframed, its title row a GNOME header bar with the desktop's window buttons.
-            #[cfg(target_os = "linux")]
+            // An app's window on Linux is unframed, its title row a GNOME header bar with the desktop's window buttons, and
+            // on Windows its title row has Windows' caption buttons, drawn by the window.
+            #[cfg(any(target_os = "linux", target_os = "windows"))]
             if screen.title.is_some() {
-                screen.window_buttons = linux::button_layout();
+                #[cfg(target_os = "linux")]
+                {
+                    screen.window_buttons = linux::button_layout();
+                }
+                #[cfg(target_os = "windows")]
+                {
+                    screen.window_buttons = (Vec::new(), vec![crate::WindowButton::Minimize, crate::WindowButton::Maximize, crate::WindowButton::Close]);
+                }
                 self.display.unframe(&native);
             }
             if let Some(native) = Native::started() {

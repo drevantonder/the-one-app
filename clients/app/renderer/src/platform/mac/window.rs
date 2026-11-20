@@ -922,11 +922,12 @@ define_class!(
 );
 
 /// Where its traffic lights are in its title row, 52 points tall as its page's top bar is (a unified toolbar), as
-/// AppKit puts them in one: the first's left edge, and how far below the window's top they start, in the middle of it.
-const LIGHTS: (f64, f64) = (20.0, (52.0 - 14.0) / 2.0);
+/// AppKit puts them in one: the first's left edge, and the row's height, in the middle of which they are.
+const LIGHTS: (f64, f64) = (20.0, 52.0);
 
-/// Puts `window`'s traffic lights where a unified toolbar has them (`LIGHTS`): their title bar container as tall as
-/// that, and each light along it, as far apart as AppKit put them.
+/// Puts `window`'s traffic lights where a unified toolbar has them (`LIGHTS`): their title bar container and the view
+/// the lights are in as tall as that row, at the window's top, and each light in the row's middle, as far apart as
+/// AppKit put them, which is where the title beside them is centred.
 unsafe fn place_lights(window: &NSWindow) {
     unsafe {
         let buttons: [*mut AnyObject; 3] = [0usize, 1, 2].map(|button| msg_send![window, standardWindowButton: button]);
@@ -940,13 +941,18 @@ unsafe fn place_lights(window: &NSWindow) {
         let container: *mut AnyObject = if lights.is_null() { lights } else { msg_send![lights, superview] };
         if !container.is_null() {
             let mut frame: NSRect = msg_send![container, frame];
-            frame.size.height = first.size.height + LIGHTS.1;
+            frame.size.height = LIGHTS.1;
             frame.origin.y = window.frame().size.height - frame.size.height;
             let () = msg_send![container, setFrame: frame];
+            let mut inside: NSRect = msg_send![lights, frame];
+            inside.size.height = LIGHTS.1;
+            inside.origin.y = 0.0;
+            let () = msg_send![lights, setFrame: inside];
         }
         for (at, button) in buttons.into_iter().enumerate() {
             let mut origin: NSRect = msg_send![button, frame];
             origin.origin.x = LIGHTS.0 + at as f64 * apart;
+            origin.origin.y = (LIGHTS.1 - origin.size.height) / 2.0;
             let () = msg_send![button, setFrameOrigin: origin.origin];
         }
     }

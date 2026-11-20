@@ -116,6 +116,10 @@ pub enum WindowButton {
     Maximize,
 }
 
+/// How wide one of Windows' caption buttons is, in points, which its window draws in its title row, flush with the
+/// window's edge (`WindowButton`) and as tall as the row.
+pub const CAPTION_BUTTON: f32 = 46.0;
+
 /// The system's own menu for text in a field a secondary click was on, where it was, in points of the page, and what
 /// of it can be done: as every system's fields have (`Screen::take_text_menu`), whose choice comes back as its key.
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -1171,7 +1175,15 @@ impl Screen {
             buttons.push((*kind, Bounds { origin: point(EDGE_GAP + at as f32 * (BUTTON + 8.0), (self.insets.top - BUTTON) / 2.0), size: Size { width: BUTTON, height: BUTTON } }));
         }
         for (at, kind) in ends.iter().rev().enumerate() {
-            buttons.push((*kind, Bounds { origin: point(window.size.width - EDGE_GAP - BUTTON - at as f32 * (BUTTON + 8.0), (self.insets.top - BUTTON) / 2.0), size: Size { width: BUTTON, height: BUTTON } }));
+            // Windows' are Windows' own shape: flush with the window's edge and as tall as the row, in a row.
+            buttons.push((
+                *kind,
+                if cfg!(windows) {
+                    Bounds { origin: point(window.size.width - (at + 1) as f32 * CAPTION_BUTTON, 0.0), size: Size { width: CAPTION_BUTTON, height: self.insets.top } }
+                } else {
+                    Bounds { origin: point(window.size.width - EDGE_GAP - BUTTON - at as f32 * (BUTTON + 8.0), (self.insets.top - BUTTON) / 2.0), size: Size { width: BUTTON, height: BUTTON } }
+                },
+            ));
         }
         for (kind, bounds) in &buttons {
             painter.window_button(*kind, *bounds, hovering(bounds) || self.chrome.pressing_button == Some(*kind));
@@ -1182,7 +1194,11 @@ impl Screen {
         // The page's top bar starts after it, and ends before the buttons at the end, which it's laid out again for
         // once either moves.
         let start = title.map_or(0, |end| (end + 12.0).ceil() as u16);
-        let end = if ends.is_empty() { 0 } else { (EDGE_GAP + ends.len() as f32 * (BUTTON + 8.0) + 4.0).ceil() as u16 };
+        let end = match (ends.len(), cfg!(windows)) {
+            (0, _) => 0,
+            (count, true) => (count as f32 * CAPTION_BUTTON).ceil() as u16,
+            (count, false) => (EDGE_GAP + count as f32 * (BUTTON + 8.0) + 4.0).ceil() as u16,
+        };
         if (start, end) != (self.chrome.title_start, self.chrome.title_end) {
             (self.chrome.title_start, self.chrome.title_end) = (start, end);
             self.again = true;

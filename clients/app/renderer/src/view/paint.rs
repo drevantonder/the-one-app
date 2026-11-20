@@ -1269,26 +1269,38 @@ impl Painter<'_> {
         x + name.size().width.ceil()
     }
 
-    /// One of the window's own buttons (`WindowButton`), as a GNOME header bar's: a round button, lit under the
-    /// pointer, with its symbol in the label's colour.
+    /// One of the window's own buttons (`WindowButton`): on Windows as its caption buttons are, as wide as they are
+    /// and as tall as the row, lit under the pointer (the close one in red) with a thin symbol; elsewhere as a GNOME
+    /// header bar's, a round button with its symbol in the label's colour.
     pub(super) fn window_button(&mut self, kind: super::WindowButton, bounds: Bounds<f32>, hovered: bool) {
         let conditions = self.conditions;
         let window = self.window;
         let colour = |id: &str| colour_token(id, conditions);
-        let fill = if hovered { colour("quaternary-label") } else { colour("quinary-label") };
-        self.quad(bounds, window, fill, Edges::default(), Hsla::default(), Corners::all(bounds.size.width / 2.0), false, 1.0);
-        let (middle, ink) = (point(bounds.origin.x + bounds.size.width / 2.0, bounds.origin.y + bounds.size.height / 2.0), colour("label"));
+        let windows = cfg!(windows);
+        let closing = windows && hovered && kind == super::WindowButton::Close;
+        let fill = if closing { colour("destructive") } else if hovered { colour("quaternary-label") } else if windows { Hsla::default() } else { colour("quinary-label") };
+        if windows {
+            self.quad(bounds, window, fill, Edges::default(), Hsla::default(), Corners::default(), false, 1.0);
+        } else {
+            self.quad(bounds, window, fill, Edges::default(), Hsla::default(), Corners::all(bounds.size.width / 2.0), false, 1.0);
+        }
+        let (middle, ink) = (point(bounds.origin.x + bounds.size.width / 2.0, bounds.origin.y + bounds.size.height / 2.0), if closing { colour("on-accent") } else { colour("label") });
+        let (size, thick, rise) = if windows { (10.0, 1.0, 0.0) } else { (8.0, 1.5, 3.0) };
         let line = |width: f32, height: f32, y: f32| Bounds { origin: point(middle.x - width / 2.0, middle.y + y - height / 2.0), size: Size { width, height } };
         match kind {
-            super::WindowButton::Minimize => self.quad(line(8.0, 1.5, 3.0), window, ink, Edges::default(), Hsla::default(), Corners::default(), false, 1.0),
-            super::WindowButton::Maximize => self.quad(line(8.0, 8.0, 0.0), window, Hsla::default(), Edges { top: 1.5, right: 1.5, bottom: 1.5, left: 1.5 }, ink, Corners::all(1.0), false, 1.0),
+            super::WindowButton::Minimize => self.quad(line(size, thick, rise), window, ink, Edges::default(), Hsla::default(), Corners::default(), false, 1.0),
+            super::WindowButton::Maximize => self.quad(line(size, size, 0.0), window, Hsla::default(), Edges { top: thick, right: thick, bottom: thick, left: thick }, ink, Corners::all(if windows { 0.0 } else { 1.0 }), false, 1.0),
+            // A cross of two diagonals, a row of small squares each: a line turned by `turn` that thin isn't drawn whole.
             super::WindowButton::Close => {
-                let was = self.turn;
-                for degrees in [45.0, -45.0] {
-                    self.turn = TransformationMatrix::rotation(degrees, [middle.x, middle.y]).then(&was);
-                    self.quad(line(11.0, 1.5, 0.0), window, ink, Edges::default(), Hsla::default(), Corners::default(), false, 1.0);
+                let half = if windows { 5.0 } else { 4.0 };
+                let (steps, dot) = (((2.0 * half) / 0.5) as i32, thick.max(1.0));
+                for step in 0..=steps {
+                    let along = -half + step as f32 * 0.5;
+                    for across in [along, -along] {
+                        let square = Bounds { origin: point(middle.x + along - dot / 2.0, middle.y + across - dot / 2.0), size: Size { width: dot, height: dot } };
+                        self.quad(square, window, ink, Edges::default(), Hsla::default(), Corners::default(), false, 1.0);
+                    }
                 }
-                self.turn = was;
             }
         }
     }

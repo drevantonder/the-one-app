@@ -24,12 +24,15 @@ use windows::Win32::Graphics::Dwm::{DWMWA_CAPTION_COLOR, DWMWA_USE_IMMERSIVE_DAR
 use windows::Win32::Graphics::Gdi::{ScreenToClient, ValidateRect};
 use windows::Win32::System::LibraryLoader::GetModuleHandleW;
 use windows::Win32::UI::HiDpi::{
-    AdjustWindowRectExForDpi, DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2, GetDpiForWindow, SetThreadDpiAwarenessContext,
+    AdjustWindowRectExForDpi, DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2, GetDpiForWindow, GetSystemMetricsForDpi, SetThreadDpiAwarenessContext,
 };
 use windows::Win32::UI::Input::Ime::{HIMC, IACE_DEFAULT, ImmAssociateContextEx};
 use windows::Win32::System::SystemServices::MK_SHIFT;
-use windows::Win32::UI::Input::KeyboardAndMouse::{ReleaseCapture, SetCapture, TME_LEAVE, TRACKMOUSEEVENT, TrackMouseEvent, VIRTUAL_KEY};
+use windows::Win32::UI::Input::KeyboardAndMouse::{ReleaseCapture, SetCapture, TME_LEAVE, TME_NONCLIENT, TRACKMOUSEEVENT, TrackMouseEvent, VIRTUAL_KEY};
 use windows::Win32::UI::Controls::WM_MOUSELEAVE;
+
+/// Sent as the pointer leaves the non-client area `TrackMouseEvent` was asked about (winuser.h's `WM_NCMOUSELEAVE`).
+const WM_NCMOUSELEAVE: u32 = 0x02A2;
 use windows::Win32::UI::WindowsAndMessaging::*;
 use windows::core::{BOOL, HSTRING, PCWSTR, w};
 
@@ -99,6 +102,13 @@ struct State {
     theme: Cell<Option<crate::Appearance>>,
     /// An app window's file of where it was left (`WindowOptions::frame`), kept as it's moved, resized or maximized.
     frame: Option<std::path::PathBuf>,
+    /// Whether its page is under its title row, which has no frame of the system's above it (`unframe`): the window's
+    /// caption buttons are its own, drawn in that row, and a press in it moves it.
+    unframed: Cell<bool>,
+    /// Whether it was put where it was left, as an outer size that has no caption of its own to take off.
+    restored: Cell<bool>,
+    /// Whether Windows tells it when the pointer leaves its caption buttons, until it does.
+    tracking_caption: Cell<bool>,
 }
 
 impl State {
@@ -229,6 +239,9 @@ impl Display {
             parts: RefCell::default(),
             theme: Cell::new(None),
             frame: options.frame.clone(),
+            unframed: Cell::new(false),
+            restored: Cell::new(false),
+            tracking_caption: Cell::new(false),
         });
         let panel = options.panel.is_some();
         let style = if panel { WS_POPUP } else { WS_OVERLAPPEDWINDOW };
@@ -287,6 +300,7 @@ impl Display {
         // An app's window opens where it was left, as big, and maximized if it was, as Windows' own apps keep their
         // placement.
         let left = options.frame.as_deref().and_then(crate::platform::Frame::read);
+        state.restored.set(left.is_some());
         if let Some(left) = left {
             let mut placement = WINDOWPLACEMENT { length: size_of::<WINDOWPLACEMENT>() as u32, ..Default::default() };
             placement.showCmd = SW_HIDE.0 as u32;
@@ -394,6 +408,9 @@ impl Display {
             parts: RefCell::default(),
             theme: Cell::new(None),
             frame: None,
+            unframed: Cell::new(false),
+            restored: Cell::new(false),
+            tracking_caption: Cell::new(false),
         });
         let ex_style = WS_EX_TOOLWINDOW | WS_EX_TOPMOST | WS_EX_NOACTIVATE | WS_EX_NOREDIRECTIONBITMAP;
         let module = unsafe { GetModuleHandleW(None) }.ok().map(Into::into);
@@ -530,11 +547,26 @@ impl Display {
         })
     }
 
-    /// Where a press moves it: a panel's page says where (`appRegion`); an app's window has the system's own title bar
-    /// above its page, which moves it.
+    /// Where a press moves it, as its page says (`appRegion`): a panel's, and an app's window's title row.
     pub fn set_title_row(&self, window: &NativeWindow, row: Option<crate::view::TitleRow>) {
-        if window.panel {
-            *window.state.row.borrow_mut() = row;
+        *window.state.row.borrow_mut() = row;
+    }
+
+    /// An app window with no frame of the system's: its page runs to its top, under its title row, which has its own
+    /// caption buttons, as Edge's, Teams' and File Explorer's windows do, and a press there moves it, a double
+    /// press zooms it, and Snap Layouts opens over its maximize button (`HTMAXBUTTON`).
+    pub fn unframe(&self, window: &NativeWindow) {
+        use windows::Win32::Graphics::Dwm::DwmExtendFrameIntoClientArea;
+        use windows::Win32::UI::Controls::MARGINS;
+        window.state.unframed.set(true);
+        unsafe {
+            // A line of frame on top keeps its shadow.
+            let _ = DwmExtendFrameIntoClientArea(window.hwnd, &MARGINS { cxLeftWidth: 0, cxRightWidth: 0, cyTopHeight: 1, cyBottomHeight: 0 });
+            // It was made with room for a caption, which is the page's now; one put where it was left already has none.
+            let mut frame = RECT::default();
+            let _ = GetWindowRect(window.hwnd, &mut frame);
+            let caption = if window.state.restored.get() { 0 } else { caption(window.hwnd) };
+            let _ = SetWindowPos(window.hwnd, None, 0, 0, frame.right - frame.left, frame.bottom - frame.top - caption, SWP_NOMOVE | SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED);
         }
     }
 
@@ -788,6 +820,50 @@ fn hiword(value: isize) -> i32 {
     ((value >> 16) & 0xffff) as i16 as i32
 }
 
+/// How tall the system's caption is at `hwnd`'s DPI, in pixels.
+fn caption(hwnd: HWND) -> i32 {
+    unsafe { GetSystemMetricsForDpi(SM_CYCAPTION, GetDpiForWindow(hwnd)) }
+}
+
+/// Where in its window a point is, in pixels from the client's top left, when it has no frame of the system's:
+/// its sides and bottom keep the system's own borders, which it asks (`DefWindowProc`); its top edge and corners, and
+/// the caption buttons and the rest of the title row, are its own.
+fn hit(hwnd: HWND, state: &State, point: POINT, default: isize, scale: f32) -> isize {
+    let (x, y) = (point.x as f32 / scale, point.y as f32 / scale);
+    let mut client = RECT::default();
+    unsafe {
+        let _ = GetClientRect(hwnd, &mut client);
+    }
+    let width = (client.right - client.left) as f32 / scale;
+    let zoomed = unsafe { IsZoomed(hwnd) }.as_bool();
+    // The window's edge, which resizes it where it isn't maximized: its top and the corners, since the system's
+    // are on the sides and bottom.
+    const EDGE: f32 = 5.0;
+    if !zoomed && matches!(default as u32, HTLEFT | HTRIGHT | HTBOTTOM | HTBOTTOMLEFT | HTBOTTOMRIGHT) {
+        return default;
+    }
+    if !zoomed && y < EDGE {
+        return match (x < EDGE, x >= width - EDGE) {
+            (true, _) => HTTOPLEFT as isize,
+            (_, true) => HTTOPRIGHT as isize,
+            _ => HTTOP as isize,
+        };
+    }
+    let row = state.row.borrow();
+    let height = row.as_ref().map_or(0.0, |row| row.height);
+    if y < height {
+        // Its caption buttons, flush with the window's end: minimize, maximize, close.
+        let from_end = width - x;
+        if from_end >= 0.0 && from_end < 3.0 * crate::view::CAPTION_BUTTON {
+            return [HTCLOSE, HTMAXBUTTON, HTMINBUTTON][(from_end / crate::view::CAPTION_BUTTON) as usize] as isize;
+        }
+        if row.as_ref().is_some_and(|row| row.moves(Point { x, y })) {
+            return HTCAPTION as isize;
+        }
+    }
+    HTCLIENT as isize
+}
+
 /// What a message is as input, sent to the queue; → what the procedure answers, or `None` for Windows' own answer.
 fn handle_msg(hwnd: HWND, state: &State, msg: u32, wparam: WPARAM, lparam: LPARAM) -> Option<isize> {
     let push = |input: Input| state.queue.borrow_mut().push((state.id, state.part, input));
@@ -856,7 +932,9 @@ fn handle_msg(hwnd: HWND, state: &State, msg: u32, wparam: WPARAM, lparam: LPARA
                 let style = WINDOW_STYLE(GetWindowLongW(hwnd, GWL_STYLE) as u32);
                 let _ = AdjustWindowRectExForDpi(&mut frame, style, false, WINDOW_EX_STYLE(GetWindowLongW(hwnd, GWL_EXSTYLE) as u32), GetDpiForWindow(hwnd));
             }
-            info.ptMinTrackSize = POINT { x: frame.right - frame.left, y: frame.bottom - frame.top };
+            // With no caption of the system's, its page's title row is what's above it.
+            let bare = if state.unframed.get() { caption(hwnd) } else { 0 };
+            info.ptMinTrackSize = POINT { x: frame.right - frame.left, y: frame.bottom - frame.top - bare };
             Some(0)
         }
         WM_CLOSE => {
@@ -872,6 +950,63 @@ fn handle_msg(hwnd: HWND, state: &State, msg: u32, wparam: WPARAM, lparam: LPARA
             }
             push(Input::Moved(at(loword(lparam.0), hiword(lparam.0))));
             Some(0)
+        }
+        // With no frame of the system's, its page is to its top: its client area is all of it but the borders on its
+        // sides and bottom, and what's at its top is told by where its title row is.
+        WM_NCCALCSIZE if state.unframed.get() && wparam.0 != 0 => {
+            let params = unsafe { &mut *(lparam.0 as *mut NCCALCSIZE_PARAMS) };
+            let top = params.rgrc[0].top;
+            unsafe { DefWindowProcW(hwnd, msg, wparam, lparam) };
+            params.rgrc[0].top = top;
+            // Maximized, the window is as far over the screen's top as its frame is thick.
+            if unsafe { IsZoomed(hwnd) }.as_bool() {
+                let dpi = unsafe { GetDpiForWindow(hwnd) };
+                params.rgrc[0].top += unsafe { GetSystemMetricsForDpi(SM_CYFRAME, dpi) + GetSystemMetricsForDpi(SM_CXPADDEDBORDER, dpi) };
+            }
+            Some(0)
+        }
+        WM_NCHITTEST if state.unframed.get() => {
+            let default = unsafe { DefWindowProcW(hwnd, msg, wparam, lparam) }.0;
+            let mut point = POINT { x: loword(lparam.0), y: hiword(lparam.0) };
+            unsafe {
+                let _ = ScreenToClient(hwnd, &mut point);
+            }
+            Some(hit(hwnd, state, point, default, scale()))
+        }
+        // Its caption buttons are pressed in the non-client area, as Windows' are, which is what has Snap Layouts open
+        // over the maximize one; they do what they say as they're let go.
+        WM_NCLBUTTONDOWN if state.unframed.get() && matches!(wparam.0 as u32, HTMINBUTTON | HTMAXBUTTON | HTCLOSE) => Some(0),
+        WM_NCLBUTTONUP if state.unframed.get() && matches!(wparam.0 as u32, HTMINBUTTON | HTMAXBUTTON | HTCLOSE) => {
+            let command = match wparam.0 as u32 {
+                HTMINBUTTON => SC_MINIMIZE,
+                HTMAXBUTTON if unsafe { IsZoomed(hwnd) }.as_bool() => SC_RESTORE,
+                HTMAXBUTTON => SC_MAXIMIZE,
+                _ => SC_CLOSE,
+            };
+            unsafe {
+                let _ = PostMessageW(Some(hwnd), WM_SYSCOMMAND, WPARAM(command as usize), LPARAM(0));
+            }
+            Some(0)
+        }
+        // The pointer over a caption button, which the page's window draws lit, moves in the non-client area.
+        WM_NCMOUSEMOVE if state.unframed.get() => {
+            if !state.tracking_caption.replace(true) {
+                let mut track = TRACKMOUSEEVENT { cbSize: size_of::<TRACKMOUSEEVENT>() as u32, dwFlags: TME_LEAVE | TME_NONCLIENT, hwndTrack: hwnd, dwHoverTime: 0 };
+                unsafe {
+                    let _ = TrackMouseEvent(&mut track);
+                }
+            }
+            let mut point = POINT { x: loword(lparam.0), y: hiword(lparam.0) };
+            unsafe {
+                let _ = ScreenToClient(hwnd, &mut point);
+            }
+            push(Input::Moved(at(point.x, point.y)));
+            None
+        }
+        WM_NCMOUSELEAVE if state.unframed.get() => {
+            state.tracking_caption.set(false);
+            push(Input::Left);
+            None
         }
         // Where a panel's page says a press moves it, the press is on its caption, which Windows moves it by.
         WM_NCHITTEST if state.panel => {
