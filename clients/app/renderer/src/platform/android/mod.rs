@@ -268,9 +268,15 @@ impl Display {
 
     pub fn flush(&self) {}
 
-    /// How pressed the device is, as its system says: it says nothing here yet.
+    /// How pressed the device is, as its system says: its thermal status and Battery Saver (`NativeHost.pressure`).
     pub fn pressure(&self) -> crate::platform::Pressure {
-        crate::platform::Pressure::Nominal
+        use crate::platform::Pressure;
+        match java(|env, host| env.call_static_method(<&JClass>::from(host.as_obj()), "pressure", "()I", &[])?.i()) {
+            Some(3) => Pressure::Critical,
+            Some(2) => Pressure::Serious,
+            Some(1) => Pressure::Fair,
+            _ => Pressure::Nominal,
+        }
     }
 
     /// The display's refresh interval, where it says: it doesn't here, so frame timing takes its frames' median.

@@ -211,6 +211,24 @@ public final class NativeHost {
         return activity.getResources().getDisplayMetrics().density;
     }
 
+    /**
+     * How pressed the phone is, as the Compute Pressure API's states, 0 nominal to 3 critical: its thermal status
+     * (Android 10's), light or moderate fair, severe serious and worse critical, and Battery Saver serious, as Android
+     * has apps do less then.
+     */
+    static int pressure() {
+        android.os.PowerManager power = activity == null ? null : activity.getSystemService(android.os.PowerManager.class);
+        if (power == null) return 0;
+        int state = 0;
+        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.Q) {
+            int thermal = power.getCurrentThermalStatus();
+            if (thermal >= android.os.PowerManager.THERMAL_STATUS_CRITICAL) state = 3;
+            else if (thermal >= android.os.PowerManager.THERMAL_STATUS_SEVERE) state = 2;
+            else if (thermal >= android.os.PowerManager.THERMAL_STATUS_LIGHT) state = 1;
+        }
+        return power.isPowerSaveMode() ? Math.max(state, 2) : state;
+    }
+
     private static void changed() {
         if (back != null) back.setEnabled(!open.isEmpty() || root != null);
         if (changed != null) changed.run();

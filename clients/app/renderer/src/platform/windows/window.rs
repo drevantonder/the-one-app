@@ -577,9 +577,12 @@ impl Display {
 
     pub fn flush(&self) {}
 
-    /// How pressed the device is, as its system says: it says nothing here yet.
+    /// How pressed the device is, as its system says: serious while battery saver is on, as Windows has apps do less
+    /// then (`SYSTEM_POWER_STATUS.SystemStatusFlag`).
     pub fn pressure(&self) -> crate::platform::Pressure {
-        crate::platform::Pressure::Nominal
+        let mut status = windows::Win32::System::Power::SYSTEM_POWER_STATUS::default();
+        let saving = unsafe { windows::Win32::System::Power::GetSystemPowerStatus(&mut status) }.is_ok() && status.SystemStatusFlag == 1;
+        if saving { crate::platform::Pressure::Serious } else { crate::platform::Pressure::Nominal }
     }
 
     /// The display's refresh interval, where it says: it doesn't here, so frame timing takes its frames' median.

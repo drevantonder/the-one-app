@@ -412,6 +412,8 @@ pub struct Windows {
     /// Whether the last frames met the display's refresh, and how pressed the device is, as that and its system say.
     deadlines: pressure::Deadlines,
     pressure: Pressure,
+    /// What the system last said of its pressure, and when it was asked, which is once a second.
+    system: (web_time::Instant, Pressure),
 }
 
 /// How often frames come where a platform says nothing of its display's: a 60 Hz display's.
@@ -429,7 +431,7 @@ impl Windows {
             let context = context?;
             let atlas = Arc::new(Atlas::new(&context));
             let text = TextSystem::new(crate::FONT, crate::fonts()?, true);
-            Ok(Windows { display, context, atlas, text, windows: HashMap::new(), next: 1, framed: web_time::Instant::now(), check: None, record: Default::default(), deadlines: Default::default(), pressure: Pressure::Nominal })
+            Ok(Windows { display, context, atlas, text, windows: HashMap::new(), next: 1, framed: web_time::Instant::now(), check: None, record: Default::default(), deadlines: Default::default(), pressure: Pressure::Nominal, system: (web_time::Instant::now(), Pressure::Nominal) })
         })();
         if let Err(error) = &made {
             *UNSTARTED.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = Some(format!("{error:#}"));
@@ -1070,7 +1072,10 @@ impl Windows {
     /// How pressed the device is, the worse of what its system and its frames say, given to each window's screen as
     /// it changes, which draws as it says (`Screen::pressure`).
     fn pressed(&mut self) {
-        let pressure = self.display.pressure().max(self.deadlines.pressure());
+        if self.system.0.elapsed() >= std::time::Duration::from_secs(1) {
+            self.system = (web_time::Instant::now(), self.display.pressure());
+        }
+        let pressure = self.system.1.max(self.deadlines.pressure());
         if pressure == self.pressure {
             return;
         }
