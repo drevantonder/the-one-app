@@ -187,7 +187,23 @@ pub fn relay(endpoint: &Endpoint) -> String {
 
 impl Reached {
     /// Connects to the server at `address`, or says why not if it doesn't answer `within` that long.
+    ///
+    /// While this endpoint is connected to its relay, a server is connected to through the relay alone, and iroh
+    /// moves the connection onto a direct path once one answers both ways (its hole punching), as Tailscale starts on
+    /// DERP and ICE sends only over a pair that answered. Given the server's own addresses too, iroh sends its first
+    /// packets over all of them at once, and the server answers only where the first of those arrived: a path that's
+    /// open one way only, as a firewall or a Mac's local network privacy leaves one, took every connection down with
+    /// it, the relay unused. A path that opened is remembered, and the next connection to that server starts on it;
+    /// one that stopped answering one way since is tried until iroh forgets it, a minute after the last connection to
+    /// that server closed. Without the relay, its own addresses are all there is to try.
     pub async fn connect(endpoint: &Endpoint, address: EndpointAddr, within: Duration) -> Result<Self, Unreached> {
+        use iroh::Watcher;
+        let relayed = endpoint.home_relay_status().get().iter().any(|status| status.is_connected());
+        let relay = address.relay_urls().next().filter(|_| relayed).cloned();
+        let address = match relay {
+            Some(relay) => EndpointAddr::new(address.id).with_relay_url(relay),
+            None => address,
+        };
         let connection = match timeout(within, endpoint.connect(address, ALPN)).await {
             Err(_) => return Err(Unreached::TimedOut(within)),
             Ok(Err(error)) => return Err(Unreached::Failed(format!("{error:#}"))),

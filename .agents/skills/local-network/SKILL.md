@@ -58,6 +58,13 @@ one sign-in devices>`.
 Each server is an Erlang node: `iex --sname dbg-$$ --cookie $(cat <folder>/cookie) --remsh <node>` attaches, with the
 node's name as `tooling/network` prints it. `:recon`, `:recon_trace` and `:observer_cli.start()` are there.
 
+## A network path that's open one way
+
+`--standby` gives two servers on this machine, each listening on the UDP port in its home's `port` file. To have one
+reach the other only one way on an address, as a firewall or a Mac's local network privacy does, drop that direction
+with `sudo iptables -I OUTPUT -p udp --sport <from's port> --dport <to's port> -d <address> -j DROP` (the relay is
+TCP, so it's untouched), and remove it with `-D` in place of `-I` when you're done: the machine is shared.
+
 ## Logs and stopping
 
 Everything is in the folder: `server.log`, `reloader.log`, `edge.log`, `bucket.log` (and `standby.log` with that flag), the
