@@ -26,6 +26,12 @@ defmodule Containers do
   }
   @key %{type: "string", contentEncoding: "base64", description: "The 32-byte key it's sealed with, made for this one blob"}
 
+  @failed %{
+    type: "object",
+    additionalProperties: %{type: "string"},
+    description: "Why each machine that didn't answer couldn't, by its name: what it has is left out"
+  }
+
   # A container, as `list` answers each: on a machine that's off, only its name, its machine and when that was last on.
   @listed %{
     type: "object",
@@ -80,7 +86,7 @@ defmodule Containers do
   @impl true
   def requires do
     %{
-      "core" => ">= 0.32.109",
+      "core" => ">= 0.34.128",
       "database" => "to keep your containers",
       "webrtc" => "to show a container's screen live"
     }
@@ -99,15 +105,15 @@ defmodule Containers do
         name: "list",
         read_only: true,
         description:
-          "The containers you can use, on every machine: each one's name, image, state as Podman says it (created, running, exited, with its exit code and when, or removing), machine, size, restart policy, what it's for, who created it, when it was created and last used (ms since 1970), and its ports, each published on the machine's own loopback. One on a machine that's off is unknown, with when its machine was last on.",
+          "The containers you can use, on every machine: each one's name, image, state as Podman says it (created, running, exited, with its exit code and when, or removing), machine, size, restart policy, what it's for, who created it, when it was created and last used (ms since 1970), and its ports, each published on the machine's own loopback. One on a machine that's off is unknown, with when its machine was last on. A machine that didn't answer is in `failed`, with why.",
         inputs: %{type: "object", properties: %{}},
-        outputs: %{type: "object", properties: %{containers: %{type: "array", items: @listed}}, required: ["containers"]}
+        outputs: %{type: "object", properties: %{containers: %{type: "array", items: @listed}, failed: @failed}, required: ["containers", "failed"]}
       },
       %{
         name: "machines",
         read_only: true,
         description:
-          "The machines that run containers, each by the name `create` takes, whether it's on now, and if not when it last was (ms since 1970), and where it's on and has no desktop image yet, how far its build is. Each machine builds it by itself as Containers starts there, in about a minute, and again each week.",
+          "The machines that run containers, each by the name `create` takes, whether it's on now, and if not when it last was (ms since 1970), and where it's on and has no desktop image yet, how far its build is. Each machine builds it by itself as Containers starts there, in about a minute, and again each week. One that's on and doesn't answer says why, as `failed`.",
         inputs: %{type: "object", properties: %{}},
         outputs: %{
           type: "object",
@@ -123,7 +129,8 @@ defmodule Containers do
                   desktop: %{
                     type: ["string", "null"],
                     description: ~s(How far the image desktop's build is, as a person reads it, while the machine has none yet: "Installing packages: 40%". Null otherwise.)
-                  }
+                  },
+                  failed: %{type: "string", description: "Why it didn't answer, if it's on and didn't: it has no `desktop` then"}
                 },
                 required: ["machine", "on"]
               }
@@ -154,9 +161,10 @@ defmodule Containers do
                 },
                 required: ["name", "tags", "size", "created", "machine"]
               }
-            }
+            },
+            failed: @failed
           },
-          required: ["images"]
+          required: ["images", "failed"]
         }
       },
       %{
@@ -425,9 +433,10 @@ defmodule Containers do
                 properties: %{machine: %{type: ["string", "null"]}, name: %{type: "string"}},
                 required: ["machine", "name"]
               }
-            }
+            },
+            failed: @failed
           },
-          required: ["stopped"]
+          required: ["stopped", "failed"]
         }
       }
     ]
@@ -441,23 +450,40 @@ defmodule Containers do
   def call(tool, _inputs, %Call{caller: nil}) when tool in ~w(upload download),
     do: raise("containers_#{tool} is for an app's code, which says where the file goes and what it's sealed with.")
 
-  def call("list", _inputs, call), do: %{containers: listed(call)}
+  def call("list", _inputs, call) do
+    {containers, failed} = listed(call)
+    %{containers: containers, failed: failed}
+  end
 
   def call("machines", _inputs, call) do
     servers = Service.servers(call, Podman)
 
     machines =
-      for {m, server} <- Enum.zip(Service.machines(call, Podman), servers),
-          do: if(m.on, do: Map.put(m, :desktop, Service.call(call, Podman, :progress, [], server)), else: m)
+      for {m, server} <- Enum.zip(Service.machines(call, Podman), servers) do
+        if m.on do
+          try do
+            Map.put(m, :desktop, Service.call(call, Podman, :progress, [], server))
+          rescue
+            problem -> Map.put(m, :failed, Exception.message(problem))
+          end
+        else
+          m
+        end
+      end
 
     %{machines: machines}
   end
 
-  def call("images", _inputs, call), do: %{images: Enum.map(images(call), &Map.drop(&1, [:server, :artifact, :id, :ours]))}
+  def call("images", _inputs, call) do
+    {images, failed} = images(call)
+    %{images: Enum.map(images, &Map.drop(&1, [:server, :artifact, :id, :ours])), failed: failed}
+  end
 
   def call("create", inputs, call) do
     name = inputs["name"]
-    if Enum.any?(containers(call), &(&1.name == name)), do: raise("You have a container called #{name} already")
+    # A name on a machine that doesn't answer is caught below, where it's taken (`take_name!/3`).
+    {containers, _failed} = containers(call)
+    if Enum.any?(containers, &(&1.name == name)), do: raise("You have a container called #{name} already")
     servers = Service.servers(call, Podman)
     if servers == [], do: raise("No computer runs containers yet. Ask your network's admin to set one up.\n\n`install_service` runs Containers.Podman on one.")
     {image, server} = image(call, inputs["image"], inputs["machine"] && Service.machine!(call, Podman, inputs["machine"]))
@@ -499,7 +525,7 @@ defmodule Containers do
 
     Call.stage(call, "Starting #{name} on #{machine}")
     Service.call(call, Podman, :create, [spec], server)
-    Enum.find(listed(call), &(&1.name == name))
+    Enum.find(elem(listed(call), 0), &(&1.name == name))
   end
 
   def call(tool, %{"container" => name} = inputs, call) when tool in ~w(start stop) do
@@ -545,7 +571,8 @@ defmodule Containers do
     do: %{path: path, size: on(call, inputs, String.to_existing_atom(tool), [path, link, key])}
 
   def call("commit", %{"name" => name} = inputs, call) do
-    if Enum.any?(images(call), &(&1.artifact && &1.name == name)), do: raise("You have an image called #{name} already")
+    {images, _failed} = images(call)
+    if Enum.any?(images, &(&1.artifact && &1.name == name)), do: raise("You have an image called #{name} already")
     id = Base.encode16(:crypto.strong_rand_bytes(4), case: :lower)
     labels = %{"artifact" => Artifact.name(Call.make(call, "image-" <> id)), "name" => name}
     on(call, inputs, :commit, ["localhost/#{name}-#{id}", labels])
@@ -553,7 +580,8 @@ defmodule Containers do
   end
 
   def call("remove_image", %{"name" => name}, call) do
-    image = Enum.find(images(call), &(&1.artifact && &1.name == name)) || raise "You have no image called #{name}"
+    {images, failed} = images(call)
+    image = Enum.find(images, &(&1.artifact && &1.name == name)) || raise "You have no image called #{name}#{Service.unanswered(failed)}"
     Service.call(call, Podman, :remove_image, [image.id], image.server)
     %{image: name}
   end
@@ -622,26 +650,31 @@ defmodule Containers do
   def call("stop_idle", _inputs, call) do
     idle = settings(call)["idle_hours"] * 3_600_000
 
-    stopped = Service.stop_idle(call, Podman, idle)
+    {stopped, failed} = Service.stop_idle(call, Podman, idle)
 
     if stopped != [], do: Call.changed(call)
-    %{stopped: stopped}
+    %{stopped: stopped, failed: failed}
   end
 
   # Computer Use asks for the caller's screens: each running container of theirs with a display is one, called what
   # the container is, and acted on with `screen`.
   @impl true
   def hook("computer-use.screens", _about, call) do
-    for {server, s} <- Service.each(call, Podman, :screens), reaches?(call, s) do
-      %{
-        "name" => s["name"],
-        "description" => "#{s["description"]}, a container on #{Service.name(server)}",
-        "width" => s["width"],
-        "height" => s["height"],
-        "tool" => "screen",
-        "inputs" => %{"container" => s["name"]}
-      }
-    end
+    {answers, failed} = Service.each(call, Podman, :screens)
+
+    screens =
+      for {server, s} <- answers, reaches?(call, s) do
+        %{
+          "name" => s["name"],
+          "description" => "#{s["description"]}, a container on #{Service.name(server)}",
+          "width" => s["width"],
+          "height" => s["height"],
+          "tool" => "screen",
+          "inputs" => %{"container" => s["name"]}
+        }
+      end
+
+    %{"screens" => screens, "failed" => failed}
   end
 
   # Computer Use's actions, as xdotool's words.
@@ -701,7 +734,8 @@ defmodule Containers do
   # The image to create from, and the machine it's on: one of the caller's own made with `commit`, by its name or
   # Podman's, or any other, which Podman pulls, but never another's made with `commit`, nor another network's.
   defp image(call, image, server) do
-    all = images(call, :all)
+    # An image on a machine that doesn't answer is as one pulled there: created where it's asked to be.
+    {all, _failed} = images(call, :all)
     named? = &(image in [&1.name | &1.tags] or image =~ ~r/^(sha256:)?[0-9a-f]{3,}$/ and String.contains?(&1.id, image))
 
     case Enum.find(all, &(&1.artifact && &1.ours && named?.(&1) && reaches?(call, &1))) do
@@ -723,8 +757,12 @@ defmodule Containers do
     Service.call(call, Podman, function, [c.id | arguments], c.server)
   end
 
-  # The containers this call may use, as `list` answers them, and those on a machine that's off, unknown till it's on.
-  defp listed(call), do: Enum.map(containers(call), &Map.drop(&1, [:server, :artifact, :id])) ++ off(call)
+  # The containers this call may use, as `list` answers them, and those on a machine that's off, unknown till it's on,
+  # and why each machine that didn't answer couldn't, by its name.
+  defp listed(call) do
+    {containers, failed} = containers(call)
+    {Enum.map(containers, &Map.drop(&1, [:server, :artifact, :id])) ++ off(call), failed}
+  end
 
   # A container on a machine that's off is known only by its name, kept with its machine: whoever may reach what this
   # app made for whose it is sees it. Podman, which holds the rest, is on that machine.
@@ -740,25 +778,31 @@ defmodule Containers do
   end
 
   defp container!(call, %{"container" => name}) do
-    Enum.find(containers(call), &(&1.name == name)) ||
+    {containers, failed} = containers(call)
+
+    Enum.find(containers, &(&1.name == name)) ||
       case Enum.find(off(call), &(&1.name == name)) do
-        nil -> raise "You have no container called #{name}"
+        nil -> raise "You have no container called #{name}#{Service.unanswered(failed)}"
         c -> raise "#{name} is on #{c.machine}, which is off"
       end
   end
 
-  # The containers this call may use, on every machine that's up.
+  # The containers this call may use, on every machine that's up, and why each that didn't answer couldn't.
   defp containers(call) do
-    for {server, c} <- Service.each(call, Podman, :list),
-        reaches?(call, c),
-        do: Map.merge(Map.new(c, fn {key, value} -> {String.to_atom(key), value} end), %{server: server, machine: Service.name(server)})
+    {answers, failed} = Service.each(call, Podman, :list)
+
+    {for({server, c} <- answers, reaches?(call, c), do: Map.merge(Map.new(c, fn {key, value} -> {String.to_atom(key), value} end), %{server: server, machine: Service.name(server)})),
+     failed}
   end
 
   # The images this call may create from, or `:all` of them, with whose each is, on every machine that's up.
   defp images(call, which \\ :reached) do
-    for {server, i} <- Service.each(call, Podman, :images),
-        which == :all or i["artifact"] == nil or (i["ours"] and reaches?(call, i)),
-        do: Map.merge(Map.new(i, fn {key, value} -> {String.to_atom(key), value} end), %{server: server, machine: Service.name(server)})
+    {answers, failed} = Service.each(call, Podman, :images)
+
+    {for({server, i} <- answers,
+         which == :all or i["artifact"] == nil or (i["ours"] and reaches?(call, i)),
+         do: Map.merge(Map.new(i, fn {key, value} -> {String.to_atom(key), value} end), %{server: server, machine: Service.name(server)})),
+     failed}
   end
 
   defp reaches?(call, %{artifact: artifact}), do: Call.reaches?(call, artifact)

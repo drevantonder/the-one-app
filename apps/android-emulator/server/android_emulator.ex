@@ -14,6 +14,12 @@ defmodule AndroidEmulator do
   @idle_hours 2
   @emulator %{type: "string", description: "the emulator, by its name"}
 
+  @failed %{
+    type: "object",
+    additionalProperties: %{type: "string"},
+    description: "Why each machine that didn't answer couldn't, by its name: what it has is left out"
+  }
+
   # One, as `list` answers each.
   @listed %{
     type: "object",
@@ -37,7 +43,7 @@ defmodule AndroidEmulator do
   @impl true
   def requires do
     %{
-      "core" => ">= 0.32.109",
+      "core" => ">= 0.34.128",
       "database" => "to keep your emulators",
       "webrtc" => "to show an emulator's screen live"
     }
@@ -63,9 +69,9 @@ defmodule AndroidEmulator do
         name: "list",
         read_only: true,
         description:
-          "The emulators you can use, on every machine: each one's name, state (stopped, starting, running, stopping, removing), machine, what it's for, who created it, and when it was created and last used (ms since 1970).",
+          "The emulators you can use, on every machine: each one's name, state (stopped, starting, running, stopping, removing), machine, what it's for, who created it, and when it was created and last used (ms since 1970). A machine that didn't answer is in `failed`, with why.",
         inputs: %{type: "object", properties: %{}},
-        outputs: %{type: "object", properties: %{emulators: %{type: "array", items: @listed}}, required: ["emulators"]}
+        outputs: %{type: "object", properties: %{emulators: %{type: "array", items: @listed}, failed: @failed}, required: ["emulators", "failed"]}
       },
       %{
         name: "machines",
@@ -211,9 +217,10 @@ defmodule AndroidEmulator do
                 properties: %{machine: %{type: ["string", "null"]}, name: %{type: "string"}},
                 required: ["machine", "name"]
               }
-            }
+            },
+            failed: @failed
           },
-          required: ["stopped"]
+          required: ["stopped", "failed"]
         }
       }
     ]
@@ -224,12 +231,16 @@ defmodule AndroidEmulator do
   end
 
   @impl true
-  def call("list", _inputs, call), do: %{emulators: listed(call)}
+  def call("list", _inputs, call) do
+    {emulators, failed} = listed(call)
+    %{emulators: emulators, failed: failed}
+  end
 
   def call("machines", _inputs, call), do: %{machines: Service.machines(call, Emulator)}
 
   def call("create", %{"name" => name} = inputs, call) do
-    if Enum.any?(emulators(call), &(&1["name"] == name)), do: raise("You have an emulator called #{name} already")
+    {emulators, _failed} = emulators(call)
+    if Enum.any?(emulators, &(&1["name"] == name)), do: raise("You have an emulator called #{name} already")
     servers = Service.servers(call, Emulator)
     if servers == [], do: raise("No computer runs Android emulators yet. Ask your network's admin to set one up.\n\n`install_service` runs AndroidEmulator.Emulator on one.")
     server = if inputs["machine"], do: Service.machine!(call, Emulator, inputs["machine"]), else: hd(servers)
@@ -245,7 +256,7 @@ defmodule AndroidEmulator do
 
     Service.call(call, Emulator, :create, [spec], server)
     timed(call)
-    Enum.find(listed(call), &(&1["name"] == name))
+    Enum.find(elem(listed(call), 0), &(&1["name"] == name))
   end
 
   def call(tool, %{"emulator" => name} = inputs, call) when tool in ~w(start stop remove) do
@@ -306,15 +317,16 @@ defmodule AndroidEmulator do
   end
 
   def call("stop_idle", _inputs, call) do
-    stopped = Service.stop_idle(call, Emulator, @idle_hours * 3_600_000)
+    {stopped, failed} = Service.stop_idle(call, Emulator, @idle_hours * 3_600_000)
     timed(call)
-    %{stopped: stopped}
+    %{stopped: stopped, failed: failed}
   end
 
   # Has its person's timer call `stop_idle` when the first of their running emulators would have gone unused for
   # @idle_hours, set as one is created or started and again each time it's called (`Database.timer/5`).
   defp timed(call) do
-    used = for %{"state" => "running", "last_used" => at} <- listed(call), do: at
+    {all, _failed} = listed(call)
+    used = for %{"state" => "running", "last_used" => at} <- all, do: at
     next = if used != [], do: div(Enum.min(used), 1000) + @idle_hours * 3600 + 1
     Call.app(call, "database").timer(call, "stop_idle", %{}, next)
   end
@@ -327,16 +339,21 @@ defmodule AndroidEmulator do
   # on with `screen`.
   @impl true
   def hook("computer-use.screens", _about, call) do
-    for {server, s} <- Service.each(call, Emulator, :screens), Call.reaches?(call, s["artifact"]) do
-      %{
-        "name" => s["name"],
-        "description" => "#{s["description"]}, an Android emulator on #{Service.name(server)}",
-        "width" => s["width"],
-        "height" => s["height"],
-        "tool" => "screen",
-        "inputs" => %{"emulator" => s["name"]}
-      }
-    end
+    {answers, failed} = Service.each(call, Emulator, :screens)
+
+    screens =
+      for {server, s} <- answers, Call.reaches?(call, s["artifact"]) do
+        %{
+          "name" => s["name"],
+          "description" => "#{s["description"]}, an Android emulator on #{Service.name(server)}",
+          "width" => s["width"],
+          "height" => s["height"],
+          "tool" => "screen",
+          "inputs" => %{"emulator" => s["name"]}
+        }
+      end
+
+    %{"screens" => screens, "failed" => failed}
   end
 
   # Computer Use's actions, as Android's `input` takes them: each a list of its words, run one after another.
@@ -399,15 +416,21 @@ defmodule AndroidEmulator do
     Service.call(call, Emulator, function, [e["id"] | arguments], e["server"])
   end
 
-  defp emulator!(call, %{"emulator" => name}),
-    do: Enum.find(emulators(call), &(&1["name"] == name)) || raise("You have no emulator called #{name}")
+  defp emulator!(call, %{"emulator" => name}) do
+    {emulators, failed} = emulators(call)
+    Enum.find(emulators, &(&1["name"] == name)) || raise("You have no emulator called #{name}#{Service.unanswered(failed)}")
+  end
 
   # The emulators this call may use, on every machine that's up.
-  defp listed(call), do: Enum.map(emulators(call), &Map.drop(&1, ["server", "artifact", "id"]))
+  defp listed(call) do
+    {emulators, failed} = emulators(call)
+    {Enum.map(emulators, &Map.drop(&1, ["server", "artifact", "id"])), failed}
+  end
 
   defp emulators(call) do
-    for {server, e} <- Service.each(call, Emulator, :list),
-        Call.reaches?(call, e["artifact"]),
-        do: Map.merge(e, %{"server" => server, "machine" => Service.name(server)})
+    {answers, failed} = Service.each(call, Emulator, :list)
+
+    {for({server, e} <- answers, Call.reaches?(call, e["artifact"]), do: Map.merge(e, %{"server" => server, "machine" => Service.name(server)})),
+     failed}
   end
 end

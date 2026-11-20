@@ -5,7 +5,8 @@ defmodule ComputerUse do
   Its own screens are computers' own (`ComputerUse.Desktop`, its service on a Mac, Linux or Windows desktop), and
   Android phones' own, which their app answers for (`ComputerUse.Phone`). Other apps bring theirs: it offers the hook `screens`, which an app with screens hooks into
   (`computer-use.screens`): a hook that collects, answered with the app's list of the screens the caller may
-  use, so lists from many apps sit side by side, and one app that can't answer takes away only its own. Each screen there says
+  use, and why each of its machines that couldn't list its own couldn't, so lists from many apps sit side by side,
+  and one app, or one of an app's machines, that can't answer takes away only its own. Each screen there says
   which of that app's tools acts on it and with what inputs; acting is a call of that tool, as the same caller,
   with the action's inputs added. So who may use a screen is the app's to decide, and nothing here checks it again.
 
@@ -72,7 +73,7 @@ defmodule ComputerUse do
   def icon, do: "client/icon.svg"
 
   @impl true
-  def requires, do: %{"core" => ">= 0.32.111", "sign-in" => "to name a phone as its person knows it", "webrtc" => "to show a computer's screen live"}
+  def requires, do: %{"core" => ">= 0.34.128", "sign-in" => "to name a phone as its person knows it", "webrtc" => "to show a computer's screen live"}
 
   @impl true
   def offers do
@@ -81,7 +82,7 @@ defmodule ComputerUse do
         name: "screens",
         kind: :collect,
         description:
-          "The screens the caller may use. It's about nothing. An app with screens answers with its list of them: each screen a map of its `name`, what it is (`description`, a few words), its `width` and `height` in pixels, and how it's acted on: the app's `tool` and the `inputs` that name the screen to it. That tool is then called as the caller, with those inputs and an `action`: `screenshot` (answered with a PNG as `{:blob, \"image/png\", data}`), `click` (x, y, button: left, right or middle), `double_click` (x, y), `move` (x, y), `drag` (path: a list of {x, y}), `scroll` (x, y, direction: up, down, left or right, amount: steps), `type` (text) or `key` (keys, as xdotool names them: ctrl+l, Return; space between presses one after another). It answers anything but a screenshot as `%{done: ...}`, what it did in a few words. A screen that a person's app can show as live video over WebRTC takes `stream` too: with no `offer`, it answers the ICE servers to connect with (WebRTC's `ice_servers`); with the app's whole SDP `offer`, `%{\"answer\" => sdp}`."
+          "The screens the caller may use. It's about nothing. An app with screens answers `%{\"screens\" => list, \"failed\" => failed}`: its list of them, and why each of its machines that couldn't list its own couldn't, by the machine's name (`failed` is `%{}` where none). Each screen is a map of its `name`, what it is (`description`, a few words), its `width` and `height` in pixels, and how it's acted on: the app's `tool` and the `inputs` that name the screen to it. That tool is then called as the caller, with those inputs and an `action`: `screenshot` (answered with a PNG as `{:blob, \"image/png\", data}`), `click` (x, y, button: left, right or middle), `double_click` (x, y), `move` (x, y), `drag` (path: a list of {x, y}), `scroll` (x, y, direction: up, down, left or right, amount: steps), `type` (text) or `key` (keys, as xdotool names them: ctrl+l, Return; space between presses one after another). It answers anything but a screenshot as `%{done: ...}`, what it did in a few words. A screen that a person's app can show as live video over WebRTC takes `stream` too: with no `offer`, it answers the ICE servers to connect with (WebRTC's `ice_servers`); with the app's whole SDP `offer`, `%{\"answer\" => sdp}`."
       }
     ]
   end
@@ -134,7 +135,7 @@ defmodule ComputerUse do
             failed: %{
               type: "object",
               additionalProperties: %{type: "string"},
-              description: "Why each app that couldn't list its screens couldn't, by its name, and each computer whose own screen couldn't be listed, as `computer-use/<its name>`"
+              description: "Why each app that couldn't list its screens couldn't, by its name, and each computer or machine whose own screens couldn't be listed, as `<app>/<its name>`"
             }
           },
           required: ["screens", "failed"]
@@ -324,13 +325,18 @@ defmodule ComputerUse do
   end
 
   # Every screen the caller may use, each with the app it's from, its own computers' and phones' first, and why each
-  # app, or each of its own computers (`computer-use/<name>`), that couldn't say its own couldn't. Its computers are
+  # app, or each of its own computers or another app's machines (`<app>/<name>`), that couldn't say its own couldn't. Its computers are
   # `Desktop.screens/1`, or for an action, which needs only their names, `Desktop.named/1`.
   defp screens(call, desktops) do
     {:ok, lists, failed} = Call.run_hook(call, "screens", %{})
-    theirs = for {app, list} <- lists, s <- List.wrap(list), do: Map.put(s, "app", app)
+    theirs = for {app, %{"screens" => list}} <- lists, s <- list, do: Map.put(s, "app", app)
     {desktops, unanswered} = desktops.(call)
     failed = Map.merge(failed, Map.new(unanswered, fn {name, why} -> {"computer-use/#{name}", why} end))
+
+    failed =
+      Enum.reduce(lists, failed, fn {app, part}, failed ->
+        Enum.into(part["failed"], failed, fn {machine, why} -> {"#{app}/#{machine}", why} end)
+      end)
 
     {phones, failed} =
       try do

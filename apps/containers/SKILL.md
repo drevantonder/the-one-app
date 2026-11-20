@@ -16,7 +16,7 @@ machines that run them.
   large), and says each stage: pulling an image its machine hasn't got, waiting for `desktop` to be built, starting. A
   shell image such as `docker.io/library/ubuntu:24.04` keeps running with no command. Then `exec` runs commands in it, `read_file`
   and `write_file` move files up to 16 MB, and `logs` reads what its own command printed. `list` shows yours and their
-  state, Podman's (an exited one with its exit code); one on a machine that's off is `unknown`. An app's code moves
+  state, Podman's (an exited one with its exit code); one on a machine that's off is `unknown`, and a machine that doesn't answer is in `failed`, with why, while the others' are still listed. An app's code moves
   a file of any size with `upload` and `download`: to the bucket and back, sealed with a key it's given, a chunk at a
   time.
 - `restart` at `create` is Docker's restart policy, which `list` shows: `no` (the default) leaves it stopped once its

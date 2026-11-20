@@ -90,17 +90,56 @@ defmodule OneCore.Service do
     end
   end
 
+  # How long each server has to answer `each/4`, in milliseconds: short of the ten seconds an app has to answer a hook
+  # (`OneCore.Hooks.within/3`), so a hook that asks every server still has what the others said when one doesn't.
+  @each_deadline 8_000
+
   @doc """
   Calls `function` of a service of this call's app, as `call/5` does, on each of the servers running it that's on,
-  and gives each of what it gave with its server's key, `{server, item}`, for a function that gives a list: what
-  each machine has. A machine that's off has nothing to give now: `machines/2` says which.
+  all at once, each under its own deadline of eight seconds, as `Promise.allSettled` does. Gives `{answers, failed}`:
+  `answers` is each of what they gave with its server's key, `{server, item}`, for a function that gives a list: what
+  each machine has; and `failed` is why each server that couldn't answer couldn't, by its machine's name, as it raised
+  or didn't answer in time. One that doesn't answer takes away only its own part. A machine that's off has nothing to
+  give now: `machines/2` says which.
   """
   def each(%Call{} = call, service, function, arguments \\ []) do
-    for server <- servers(call, service),
-        not is_integer(seen(server)),
-        item <- call(call, service, function, arguments, server),
-        do: {server, item}
+    servers = for server <- servers(call, service), not is_integer(seen(server)), do: server
+    {trace, id} = {OpenTelemetry.Ctx.get_current(), Call.State.id()}
+
+    asked = fn server ->
+      OpenTelemetry.Ctx.attach(trace)
+      Call.State.follow(id)
+
+      try do
+        {:ok, call(call, service, function, arguments, server)}
+      rescue
+        problem -> {:error, Exception.message(problem)}
+      end
+    end
+
+    results =
+      servers
+      |> Task.async_stream(asked, max_concurrency: max(length(servers), 1), timeout: @each_deadline, on_timeout: :kill_task)
+      |> Enum.zip(servers)
+
+    answers = for {{:ok, {:ok, items}}, server} <- results, item <- items, do: {server, item}
+
+    failed =
+      for {result, server} <- results, why = why(result), into: %{}, do: {name(server) || server, why}
+
+    {answers, failed}
   end
+
+  @doc """
+  What to add to saying that something isn't there, where `failed` (from `each/4`) holds the machines that didn't
+  answer, as it may be on one of them: `""` where none.
+  """
+  def unanswered(failed) when failed == %{}, do: ""
+  def unanswered(failed), do: ", and #{Enum.map_join(failed, ", ", fn {machine, why} -> "#{machine} didn't answer: #{why}" end)}"
+
+  defp why({:ok, {:ok, _items}}), do: nil
+  defp why({:ok, {:error, why}}), do: why
+  defp why({:exit, :timeout}), do: "didn't answer within #{div(@each_deadline, 1000)} seconds"
 
   @doc "The key of the server running a service of this call's app on the machine called `name`, whatever its case."
   def machine!(%Call{} = call, service, name) do
@@ -111,11 +150,13 @@ defmodule OneCore.Service do
   end
 
   @doc """
-  Calls the service's `stop_idle(service, idle)` on each of its machines that's on, which stops what it runs there
-  that's gone unused for `idle` ms (`used/1`) and gives their names, and gives each with its machine.
+  Calls the service's `stop_idle(service, idle)` on each of its machines that's on, as `each/4` does, which stops what
+  it runs there that's gone unused for `idle` ms (`used/1`) and gives their names. Gives `{stopped, failed}`: each
+  name with its machine, and why each machine that couldn't answer couldn't.
   """
   def stop_idle(%Call{} = call, service, idle) do
-    for {server, name} <- each(call, service, :stop_idle, [idle]), do: %{machine: name(server), name: name}
+    {stopped, failed} = each(call, service, :stop_idle, [idle])
+    {for({server, name} <- stopped, do: %{machine: name(server), name: name}), failed}
   end
 
   @doc """
