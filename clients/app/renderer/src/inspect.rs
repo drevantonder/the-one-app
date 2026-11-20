@@ -14,12 +14,15 @@
 //! `id` names an element), every one given matching, in the tree's order; `nth` picks a later match than the first.
 //! A point is `x` and `y`, in CSS pixels from the window's top left, as `rect`s are.
 //!
-//! - `window` → `{entrypoint, width, height, scale, time, paused, failed}`: what it shows, its size, its clock, and
-//!   why it can't draw, if it can't (its JS threw, or sent what this host doesn't speak).
+//! - `window` → `{entrypoint, width, height, scale, time, paused, failed, focused, leaving, moving}`: what it shows,
+//!   its size, its clock, why it can't draw, if it can't (its JS threw, or sent what this host doesn't speak), the
+//!   node with the keyboard, how many nodes taken out are still drawn going, and how many are on their way somewhere.
 //! - `tree` → `{tree}`: the semantic tree (`Tree::semantics`), as a screen reader reads it, each node with its `rect`.
 //! - `query` (a selector) → `{nodes}`: each node that matches, with its `node`, `kind`, `role`, `name`, `rect`, the
 //!   `style` and `class` it was given, its colours and lengths `resolved` from the design tokens, `source`, the
-//!   `file:line` of the JSX that made it, where its build says, and an input's `editing` state as the host has it.
+//!   `file:line` of the JSX that made it, where its build says, an input's `editing` state as the host has it, what a
+//!   person sees of it as the last frame drew it (`opacity`, with what it's in, and `seen`, how much of its box is in
+//!   the window, not clipped away), and whether it has the keyboard (`focused`).
 //! - `snap` → `{png, width, height}`: the window as drawn, a PNG in base64, at its scale.
 //! - `profile` (`at`, ms from now, in order: `[0, 80, 200, 400]` unless given; `snap`: false for no pictures) →
 //!   `{frames, time, paused}`: the clock paused and stepped to each time, as `clock` steps it, and the frame there

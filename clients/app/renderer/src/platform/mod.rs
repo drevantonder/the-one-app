@@ -31,18 +31,23 @@ use crate::render::{atlas::Atlas, context::Context, renderer::Renderer};
 use crate::text::TextSystem;
 use crate::Screen;
 
-#[cfg(target_os = "linux")]
+#[cfg(all(target_os = "linux", not(feature = "fake")))]
 mod linux;
-#[cfg(target_os = "linux")]
-use linux::{Display, Handle, NativeWindow, appearance, clipboard, open_files, reduced_motion};
-#[cfg(target_os = "windows")]
+#[cfg(all(target_os = "linux", not(feature = "fake")))]
+use linux::{Display, Handle, NativeWindow, appearance, button_layout, clipboard, open_files, reduced_motion};
+#[cfg(all(target_os = "windows", not(feature = "fake")))]
 mod windows;
-#[cfg(target_os = "windows")]
+#[cfg(all(target_os = "windows", not(feature = "fake")))]
 use windows::{Display, Handle, NativeWindow, appearance, clipboard, open_files, reduced_motion};
-#[cfg(target_os = "macos")]
+#[cfg(all(target_os = "macos", not(feature = "fake")))]
 mod mac;
-#[cfg(target_os = "macos")]
+#[cfg(all(target_os = "macos", not(feature = "fake")))]
 use mac::{Display, Handle, NativeWindow, appearance, clipboard, open_files, reduced_motion};
+/// A computer's host with nothing behind it, for a harness (`fake`'s top).
+#[cfg(feature = "fake")]
+mod fake;
+#[cfg(feature = "fake")]
+use fake::{Display, Handle, NativeWindow, appearance, button_layout, clipboard, open_files, reduced_motion};
 #[cfg(target_os = "android")]
 mod android;
 /// A native screen's semantic tree as AccessKit's, for each phone's screen reader.
@@ -118,7 +123,7 @@ pub enum Event {
 
 /// Where an app's window was left on the screen and how big, in device pixels, and whether it was maximized, as its
 /// `frame` file keeps it.
-#[cfg(any(target_os = "windows", target_os = "linux"))]
+#[cfg(all(any(target_os = "windows", target_os = "linux"), not(feature = "fake")))]
 #[derive(serde::Serialize, serde::Deserialize, Clone, Copy, Debug, PartialEq)]
 pub(crate) struct Frame {
     pub x: i32,
@@ -129,7 +134,7 @@ pub(crate) struct Frame {
     pub maximized: bool,
 }
 
-#[cfg(any(target_os = "windows", target_os = "linux"))]
+#[cfg(all(any(target_os = "windows", target_os = "linux"), not(feature = "fake")))]
 impl Frame {
     pub fn read(file: &std::path::Path) -> Option<Frame> {
         serde_json::from_slice(&std::fs::read(file).ok()?).ok()
@@ -145,7 +150,7 @@ impl Frame {
 
 /// A field's menu for text, Cut, Copy, Paste and Select All, as muda makes a menu each system shows its own way
 /// (`Display::text_menu`), for window `window`: each item's id names the window and its key (`menu_chosen`).
-#[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
+#[cfg(all(any(target_os = "macos", target_os = "windows", target_os = "linux"), not(feature = "fake")))]
 fn text_menu_of(menu: crate::view::TextMenu, window: WindowId) -> muda::Menu {
     use muda::accelerator::{Accelerator, Code, Modifiers};
     use muda::{Menu, MenuItem, PredefinedMenuItem};
@@ -249,10 +254,12 @@ pub struct Native(Sender);
 
 static STARTED: OnceLock<Result<Native, String>> = OnceLock::new();
 
-#[cfg(any(target_os = "linux", target_os = "macos"))]
+#[cfg(all(any(target_os = "linux", target_os = "macos"), not(feature = "fake")))]
 type Sender = calloop::channel::Sender<Job>;
-#[cfg(target_os = "windows")]
+#[cfg(all(target_os = "windows", not(feature = "fake")))]
 type Sender = windows::Sender;
+#[cfg(feature = "fake")]
+type Sender = std::sync::mpsc::Sender<Job>;
 #[cfg(target_os = "android")]
 type Sender = android::Sender;
 #[cfg(target_os = "ios")]
@@ -277,8 +284,13 @@ impl Native {
     }
 }
 
-#[cfg(target_os = "windows")]
+#[cfg(all(target_os = "windows", not(feature = "fake")))]
 use windows::start;
+/// The fake platform's windows are its driver's, on its own thread (`Windows::fake`).
+#[cfg(feature = "fake")]
+fn start() -> anyhow::Result<Native> {
+    anyhow::bail!("the fake platform's windows are its driver's: Windows::fake")
+}
 #[cfg(target_os = "android")]
 use android::start;
 #[cfg(target_os = "ios")]
@@ -286,7 +298,7 @@ use ios::start;
 #[cfg(target_arch = "wasm32")]
 use web::start;
 
-#[cfg(any(target_os = "linux", target_os = "macos"))]
+#[cfg(all(any(target_os = "linux", target_os = "macos"), not(feature = "fake")))]
 fn start() -> anyhow::Result<Native> {
     let (sender, channel) = calloop::channel::channel::<Job>();
     let (ready_to, ready) = std::sync::mpsc::channel();
@@ -394,6 +406,8 @@ struct Window {
     timing: frame_timing::Timing,
     /// Whether it's handed the display a frame since the display's last tick (`Windows::turned`).
     presented: bool,
+    /// How many frames it's presented, all told.
+    frames: u64,
 }
 
 /// What a panel's file of places says, or nothing where it hasn't one yet.
@@ -430,7 +444,7 @@ pub struct Windows {
 const FRAME: std::time::Duration = std::time::Duration::from_micros(16_667);
 
 impl Windows {
-    #[cfg(not(target_arch = "wasm32"))]
+    #[cfg(not(any(target_arch = "wasm32", feature = "fake")))]
     fn new(display: Display) -> anyhow::Result<Windows> {
         Self::made(display, Context::new())
     }
@@ -442,8 +456,9 @@ impl Windows {
             #[cfg(not(target_arch = "wasm32"))]
             context.prepare();
             let atlas = Arc::new(Atlas::new(&context));
-            let text = TextSystem::new(crate::FONT, crate::fonts()?, true);
-            Ok(Windows { display, context, atlas, text, windows: HashMap::new(), next: 1, framed: web_time::Instant::now(), wanted: false, ticked: false, check: None, record: Default::default(), deadlines: Default::default(), pressure: Pressure::Nominal, system: (web_time::Instant::now(), Pressure::Nominal) })
+            // The system's fonts where ours lack a character: a fake platform has none, so it draws the same everywhere.
+            let text = TextSystem::new(crate::FONT, crate::fonts()?, !cfg!(feature = "fake"));
+            Ok(Windows { display, context, atlas, text, windows: HashMap::new(), next: 1, framed: now(), wanted: false, ticked: false, check: None, record: Default::default(), deadlines: Default::default(), pressure: Pressure::Nominal, system: (now(), Pressure::Nominal) })
         })();
         if let Err(error) = &made {
             *UNSTARTED.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = Some(format!("{error:#}"));
@@ -486,11 +501,11 @@ impl Windows {
             // on Windows its title row has Windows' caption buttons, drawn by the window.
             #[cfg(any(target_os = "linux", target_os = "windows"))]
             if screen.title.is_some() {
-                #[cfg(target_os = "linux")]
+                #[cfg(any(target_os = "linux", feature = "fake"))]
                 {
-                    screen.window_buttons = linux::button_layout();
+                    screen.window_buttons = button_layout();
                 }
-                #[cfg(target_os = "windows")]
+                #[cfg(all(target_os = "windows", not(feature = "fake")))]
                 {
                     screen.window_buttons = (Vec::new(), vec![crate::WindowButton::Minimize, crate::WindowButton::Maximize, crate::WindowButton::Close]);
                 }
@@ -505,7 +520,7 @@ impl Windows {
         let renderer = self.renderer(&native)?;
         // Where a window's opening went, which a page's own (`Opening` in clients/app/src/native.rs) has as one step.
         eprintln!("{} opened in {} ms: the system's window {} ms, its renderer {} ms", options.title, asked.elapsed().as_millis(), windowed.as_millis(), rendering.elapsed().as_millis());
-        let opened = web_time::Instant::now();
+        let opened = now();
         let device = native.device_size();
         let picture = options.snapshot.as_deref().filter(|_| screen.is_ok()).and_then(|stem| snapshot::read(stem, (device.width.0 as u32, device.height.0 as u32)));
         let panel = options.panel.is_some();
@@ -542,6 +557,7 @@ impl Windows {
                 picture,
                 pictured: false,
                 presented: false,
+                frames: 0,
                 timing: Default::default(),
             },
         );
@@ -567,7 +583,7 @@ impl Windows {
         if !native.has_surface() {
             return Ok(None);
         }
-        Renderer::new(&self.context, self.atlas.clone(), native.surface()?, native.device_size(), native.transparent()).map(Some)
+        drawn_on(&self.context, self.atlas.clone(), native).map(Some)
     }
 
     /// Whether a window holds something its person typed that its app hasn't taken (`Screen::typed`): any app's, and
@@ -583,7 +599,7 @@ impl Windows {
         let Some(window) = self.windows.get_mut(&id) else { return false };
         let Ok(screen) = &mut window.screen else { return false };
         screen.reload(page);
-        window.opened = web_time::Instant::now();
+        window.opened = now();
         (window.drawn, window.reloading, window.dirty) = (false, true, true);
         true
     }
@@ -650,6 +666,7 @@ impl Windows {
         let mut scene = crate::render::scene::Scene::default();
         let (text, atlas) = (&mut self.text, &self.atlas);
         let snaps = crate::inspect::snaps(&request);
+        let gpu = request.bool("gpu");
         let mut afresh = true;
         let mut draw = |screen: &mut Screen| -> anyhow::Result<serde_json::Value> {
             if std::mem::take(&mut afresh) {
@@ -657,8 +674,14 @@ impl Windows {
             } else {
                 screen.paint(room, scale, text, atlas, &mut scene);
             }
+            let drawing = web_time::Instant::now();
             renderer.draw(&scene, [0.0, 0.0]);
             let mut frame = screen.cost(&renderer);
+            // How long its GPU took, waited for, where it's asked: on a real GPU, that GPU's time for the frame.
+            if gpu {
+                renderer.finish();
+                frame["gpu_ms"] = serde_json::json!((drawing.elapsed().as_secs_f64() * 100_000.0).round() / 100.0);
+            }
             if snaps {
                 let (width, height, rgba) = renderer.read().ok_or_else(|| anyhow::anyhow!("nothing was drawn"))?;
                 for (name, value) in crate::inspect::png(width, height, rgba)?.as_object().into_iter().flatten() {
@@ -874,7 +897,7 @@ impl Windows {
     /// it away would show it again.
     pub fn showing(&self, id: WindowId) -> bool {
         const CLICK: std::time::Duration = std::time::Duration::from_millis(300);
-        self.windows.get(&id).is_some_and(|window| window.visible || window.left.is_some_and(|left| left.elapsed() < CLICK))
+        self.windows.get(&id).is_some_and(|window| window.visible || window.left.is_some_and(|left| since(left) < CLICK))
     }
 
     /// Lays panel `id`'s page out `height` points tall, and `width` wide where it's said, as its page asks: its parts'
@@ -902,12 +925,12 @@ impl Windows {
 
     /// How long until any window's screen has something to do by itself, or a window waiting to show has waited long
     /// enough.
-    fn due(&self) -> Option<std::time::Duration> {
+    pub fn due(&self) -> Option<std::time::Duration> {
         let screens = self.windows.values().filter_map(|window| window.screen.as_ref().ok()?.due());
-        let showing = self.windows.values().filter(|window| !window.shown || window.picture.is_some() || window.reloading).map(|window| SHOWN_WITHIN.saturating_sub(window.opened.elapsed()));
+        let showing = self.windows.values().filter(|window| !window.shown || window.picture.is_some() || window.reloading).map(|window| SHOWN_WITHIN.saturating_sub(since(window.opened)));
         // Where the display says nothing of its frames, or hasn't yet since they were asked for, the next is a 60 Hz
         // display's.
-        let frame = (self.framing() && !self.ticking()).then(|| FRAME.saturating_sub(self.framed.elapsed()));
+        let frame = (self.framing() && !self.ticking()).then(|| FRAME.saturating_sub(since(self.framed)));
         // A pull's spring steps at a 120 Hz display's frames.
         let pulled = self.windows.values().any(|window| window.pull.as_ref().is_some_and(rail::Pull::springing)).then_some(std::time::Duration::from_micros(8_333));
         let check = self.check.as_ref().map(conformance::Check::due);
@@ -953,7 +976,7 @@ impl Windows {
             for part in &mut window.parts {
                 part.renderer = None;
                 if part.native.has_surface() {
-                    match part.native.surface().and_then(|surface| Renderer::new(&context, atlas.clone(), surface, part.native.device_size(), part.native.transparent())) {
+                    match drawn_on(&context, atlas.clone(), &part.native) {
                         Ok(renderer) => part.renderer = Some(renderer),
                         Err(error) => log::error!("a native window can't draw: {error:#}"),
                     }
@@ -969,7 +992,7 @@ impl Windows {
     }
 
     /// After each wait for what's due, a turn of the loop (`turned`), whose time each window's frame timing hears.
-    fn turn(&mut self) {
+    pub fn turn(&mut self) {
         let started = web_time::Instant::now();
         self.turned();
         for window in self.windows.values_mut() {
@@ -979,7 +1002,7 @@ impl Windows {
 
     /// A turn of the loop: what the display said, timers that are due, then each window that changed drawn.
     fn turned(&mut self) {
-        let turned = web_time::Instant::now();
+        let turned = now();
         if self.context.lost() {
             self.recover();
         }
@@ -993,7 +1016,7 @@ impl Windows {
         let framing = self.framing();
         let ticked = self.display.frame();
         self.ticked |= ticked.is_some();
-        let shown = ticked.or_else(|| (framing && !self.ticking() && self.framed.elapsed() >= FRAME).then(web_time::Instant::now));
+        let shown = ticked.or_else(|| (framing && !self.ticking() && since(self.framed) >= FRAME).then(now));
         if let Some(at) = shown {
             self.framed = at;
             if let Some(check) = &self.check {
@@ -1061,7 +1084,7 @@ impl Windows {
         for window in self.windows.values_mut() {
             // A new window shows once its page has heard back from what it asked, or has waited long enough: at once
             // where it has a snapshot, which it shows until then.
-            let starting = window.screen.as_ref().is_ok_and(Screen::starting) && window.opened.elapsed() < SHOWN_WITHIN;
+            let starting = window.screen.as_ref().is_ok_and(Screen::starting) && since(window.opened) < SHOWN_WITHIN;
             if !window.shown {
                 if starting && window.picture.is_none() {
                     continue;
@@ -1152,6 +1175,7 @@ impl Windows {
             }
             window.missed = 0;
             window.presented = true;
+            window.frames += 1;
             if self.check.is_some() {
                 self.record.present();
             }
@@ -1165,7 +1189,7 @@ impl Windows {
                 let (all, blur) = gpu.unwrap_or_default();
                 (acquire + renderer.acquired(), renderer.gpu().map(|(part, blurs)| (all + part, blur + blurs)).or(gpu))
             });
-            let frame = frame_timing::Frame { at: web_time::Instant::now(), paint: painted - began, draw: painted.elapsed(), acquire, gpu: gpu.map(|(all, _)| all), blur: gpu.map(|(_, blur)| blur), applied: Default::default(), turned: Default::default() };
+            let frame = frame_timing::Frame { at: now(), paint: painted - began, draw: painted.elapsed(), acquire, gpu: gpu.map(|(all, _)| all), blur: gpu.map(|(_, blur)| blur), applied: Default::default(), turned: Default::default() };
             let (interval, frames) = window.timing.drawn(frame, moving, refresh);
             if let Some(interval) = interval {
                 self.deadlines.frame(frame_timing::Timing::long(interval, refresh.unwrap_or(FRAME)));
@@ -1185,7 +1209,7 @@ impl Windows {
                 let ms = |time: std::time::Duration| time.as_secs_f64() * 1000.0;
                 // Where its time went: to the turn it's drawn on, on that turn before it (input, timers, other windows
                 // drawn first), painting it and drawing it.
-                let (before, on) = (turned.saturating_duration_since(asked), began - turned);
+                let (before, on) = (turned.saturating_duration_since(asked), began.saturating_duration_since(turned));
                 eprintln!("the launcher's first frame as it was summoned: {:.1} ms before its turn, {:.1} ms on it before it was painted, {:.1} ms to paint and {:.1} ms to draw", ms(before), ms(on), ms(painted - began), ms(painted.elapsed()));
                 (window.on_event)(Event::Shown(asked.elapsed()));
             }
@@ -1208,8 +1232,8 @@ impl Windows {
     /// How pressed the device is, the worse of what its system and its frames say, given to each window's screen as
     /// it changes, which draws as it says (`Screen::pressure`).
     fn pressed(&mut self) {
-        if self.system.0.elapsed() >= std::time::Duration::from_secs(1) {
-            self.system = (web_time::Instant::now(), self.display.pressure());
+        if since(self.system.0) >= std::time::Duration::from_secs(1) {
+            self.system = (now(), self.display.pressure());
         }
         let pressure = self.system.1.max(self.deadlines.pressure());
         if pressure == self.pressure {
@@ -1297,7 +1321,7 @@ impl Windows {
                     renderer.destroy();
                 }
                 if part.native.has_surface() {
-                    match part.native.surface().and_then(|surface| Renderer::new(&self.context, self.atlas.clone(), surface, part.native.device_size(), part.native.transparent())) {
+                    match drawn_on(&self.context, self.atlas.clone(), &part.native) {
                         Ok(renderer) => part.renderer = Some(renderer),
                         Err(error) => log::error!("native window {id} can't draw: {error:#}"),
                     }
@@ -1359,7 +1383,7 @@ impl Windows {
             Input::TextInputClient(said) => screen.text_input_client(&mut window.text_input, said),
             // A panel goes as something else takes the keyboard, as Spotlight does.
             Input::Focus(false) if window.panel && window.visible => {
-                window.left = Some(web_time::Instant::now());
+                window.left = Some(now());
                 screen.activate(false);
                 self.put_away(id, false);
                 if let Some(window) = self.windows.get_mut(&id) {
@@ -1428,7 +1452,7 @@ impl Window {
             if let Some(mut renderer) = part.renderer.take() {
                 renderer.destroy();
             }
-            match part.native.surface().and_then(|surface| Renderer::new(context, atlas.clone(), surface, part.native.device_size(), part.native.transparent())) {
+            match drawn_on(context, atlas.clone(), &part.native) {
                 Ok(renderer) => part.renderer = Some(renderer),
                 Err(error) => log::error!("a native window can't draw: {error:#}"),
             }
@@ -1445,7 +1469,7 @@ impl Window {
         };
         while self.panel && self.parts.len() < boxes.len() {
             let made = display.open_part(&self.parts[0].native, self.parts.len()).and_then(|native| {
-                let renderer = Renderer::new(context, atlas.clone(), native.surface()?, native.device_size(), native.transparent())?;
+                let renderer = drawn_on(context, atlas.clone(), &native)?;
                 Ok(Part { native, renderer: Some(renderer), bounds: whole, radius: 0.0 })
             });
             match made {
@@ -1489,6 +1513,232 @@ impl Window {
     }
 }
 
+/// What a harness drives the fake platform's windows by (`fake`), as GPUI's `TestAppContext` drives its test windows:
+/// it owns them, on its own thread, and says when their pages have run, when the display shows a frame and what input
+/// comes, and the loop (`turn`) does the rest as it does on every host.
+#[cfg(feature = "fake")]
+impl Windows {
+    /// The windows of a display of `scale` device pixels a point, refreshing `hz` times a second, whose time is
+    /// `clock`'s, which their pages' JS reads too: paused, it moves only as the driver moves it.
+    pub fn fake(scale: f32, hz: f64, clock: crate::js::Clock) -> anyhow::Result<Windows> {
+        fake::keep_time(clock);
+        Self::made(Display::new(scale, hz), Context::new())
+    }
+
+    /// Whether the loop wants the display's next frame: something on a window moves.
+    pub fn wanted(&self) -> bool {
+        self.display.wanted()
+    }
+
+    /// The display's refreshes come late as `seed` decides (`fake::Display::seed`), and `random` draws from it too.
+    pub fn seed(&self, seed: u64) {
+        self.display.seed(seed);
+    }
+
+    /// A number from 0 to below `below`, as the seed decides: always 0 with none.
+    pub fn random(&self, below: u64) -> u64 {
+        self.display.random(below)
+    }
+
+    /// Each frame takes `ms` to draw from now on, the windows' thread busy meanwhile and the display's refreshes going
+    /// by unseen, as on a device others load (the Home Screen on a loaded Mac); 0 for none.
+    pub fn set_frame_ms(&self, ms: f64) {
+        self.display.set_frame_ms(ms);
+    }
+
+    /// How pressed the windows are, by Compute Pressure's names, as their frames and the system say.
+    pub fn pressure(&self) -> &'static str {
+        self.pressure.name()
+    }
+
+    /// The display refreshes `hz` times a second from now on.
+    pub fn set_refresh(&self, hz: f64) {
+        self.display.set_refresh(hz);
+    }
+
+    /// Each window's page has run all it's been sent, and what it posted is applied, as `posted` applies it once its
+    /// JS wakes the loop. → whether any window has something to draw.
+    pub fn wait(&mut self) -> bool {
+        for window in self.windows.values_mut() {
+            if let Ok(screen) = &mut window.screen
+                && screen.idle()
+            {
+                window.dirty = true;
+            }
+        }
+        self.windows.values().any(|window| window.dirty)
+    }
+
+    /// The display shows a frame now, which the loop hears on its turn.
+    pub fn tick(&mut self) {
+        self.display.tick(now());
+    }
+
+    /// Window `id` is drawn again on the next turn, though nothing on it changed.
+    pub fn redraw(&mut self, id: WindowId) {
+        if let Some(window) = self.windows.get_mut(&id) {
+            window.dirty = true;
+        }
+    }
+
+    /// What window `id` last presented, as its compositor shows it: its width, height and pixels. A panel's parts are
+    /// put together where each is, over the system's glass, a flat grey of its Colour Mode here.
+    pub fn presented(&mut self, id: WindowId) -> Option<(u32, u32, Vec<u8>)> {
+        let window = self.windows.get_mut(&id)?;
+        if window.parts.len() == 1 && !window.panel {
+            return window.parts[0].renderer.as_mut()?.read();
+        }
+        let scale = window.parts[0].native.scale();
+        let (width, height) = ((window.room.width.0 * scale).round() as u32, (window.room.height.0 * scale).round() as u32);
+        let dark = window.screen.as_ref().ok().and_then(|screen| screen.theme).unwrap_or(appearance()) == crate::Appearance::Dark;
+        let glass: [u8; 3] = if dark { [30, 30, 32] } else { [236, 236, 238] };
+        let mut rgba: Vec<u8> = (0..width * height).flat_map(|_| [glass[0], glass[1], glass[2], 255]).collect();
+        for part in &mut window.parts {
+            let (left, top) = ((part.bounds.origin.x * scale).round() as i64, (part.bounds.origin.y * scale).round() as i64);
+            let Some((w, h, drawn)) = part.renderer.as_mut().and_then(crate::render::renderer::Renderer::read) else { continue };
+            for (y, x) in (0..h).flat_map(|y| (0..w).map(move |x| (y, x))) {
+                let (to_x, to_y) = (i64::from(x) + left, i64::from(y) + top);
+                if to_x < 0 || to_y < 0 || to_x >= i64::from(width) || to_y >= i64::from(height) {
+                    continue;
+                }
+                let (from, to) = (((y * w + x) * 4) as usize, ((to_y as u32 * width + to_x as u32) * 4) as usize);
+                let alpha = u32::from(drawn[from + 3]);
+                for channel in 0..3 {
+                    rgba[to + channel] = ((u32::from(drawn[from + channel]) * alpha + u32::from(rgba[to + channel]) * (255 - alpha)) / 255) as u8;
+                }
+            }
+        }
+        Some((width, height, rgba))
+    }
+
+    /// The fake platform's time moves on by `ms`, its pages' clock with it: each of their timers due meanwhile runs at
+    /// its own time, and while the loop wants frames the display ticks each refresh, the loop taking a turn for each,
+    /// as a host's do. What each page sent is run before each turn (`wait`).
+    pub fn run(&mut self, ms: f64) {
+        let refresh = self.display.refresh().unwrap_or(FRAME).as_secs_f64() * 1000.0;
+        let started = fake::time();
+        let mut late = 0;
+        loop {
+            self.wait();
+            let drawn: u64 = self.windows.values().map(|window| window.frames).sum();
+            self.turn();
+            // A frame drawn on a device others load keeps its thread busy, the display's refreshes going by unseen.
+            let busy = self.display.frame_ms();
+            if busy > 0.0 && self.windows.values().map(|window| window.frames).sum::<u64>() > drawn {
+                fake::advance(busy);
+                for window in self.windows.values_mut() {
+                    if let Ok(screen) = &mut window.screen {
+                        screen.advance(0.0);
+                    }
+                }
+            }
+            let now = fake::time();
+            let left = started + ms - now;
+            // The display's next refresh, at least a microsecond on, so a clock a hair short of one isn't moved by nothing.
+            let tick = self.display.wanted().then(|| refresh - now.rem_euclid(refresh)).map(|next| if next < 0.001 { next + refresh } else { next });
+            let timer = self.windows.values().filter_map(|window| window.screen.as_ref().ok()?.timer_due()).reduce(f64::min).map(|due| due.max(0.0));
+            let next = tick.into_iter().chain(timer).reduce(f64::min).filter(|next| *next <= left);
+            // The platform's time moves on once, its pages' clock with it, then each page runs what's due by then.
+            let by = next.unwrap_or(left.max(0.0));
+            fake::advance(by);
+            for window in self.windows.values_mut() {
+                if let Ok(screen) = &mut window.screen {
+                    screen.advance(0.0);
+                }
+            }
+            if next.is_none() {
+                break;
+            }
+            if next == tick {
+                // A late refresh shows nothing new: what's waiting is shown on the next.
+                match self.display.late(late) {
+                    true => late += 1,
+                    false => {
+                        late = 0;
+                        self.tick();
+                    }
+                }
+            }
+        }
+        self.wait();
+        self.turn();
+    }
+
+    /// The pointer moved to `x`, `y` on window `id`, as a mouse does.
+    pub fn pointer_moved(&mut self, id: WindowId, x: f32, y: f32) {
+        self.display.push(id, Input::Moved(crate::geometry::point(x, y)));
+    }
+
+    /// A button went down at `x`, `y` on window `id`: 0 the main one, 1 the middle, 2 the secondary, as the DOM's.
+    pub fn pointer_down(&mut self, id: WindowId, x: f32, y: f32, button: u8, shift: bool) {
+        self.display.push(id, Input::Down(crate::geometry::point(x, y), button, shift));
+    }
+
+    pub fn pointer_up(&mut self, id: WindowId, x: f32, y: f32, button: u8) {
+        self.display.push(id, Input::Up(crate::geometry::point(x, y), button));
+    }
+
+    /// A wheel's or a trackpad's scroll at `at` on window `id`, by `by` in points, in a trackpad's phase where it says
+    /// one (its fingers' by AppKit's names, `crate::view::Phase::FINGERS`, and whether it's the momentum after).
+    pub fn wheel(&mut self, id: WindowId, at: (f32, f32), by: (f32, f32), fingers: Option<&str>, momentum: bool) {
+        let fingers = fingers.and_then(|named| crate::view::Phase::FINGERS.into_iter().find(|one| *one == named));
+        let phase = (fingers.is_some() || momentum).then_some(crate::view::Phase { fingers, momentum });
+        self.display.push(id, Input::Wheel(crate::geometry::point(at.0, at.1), crate::geometry::point(by.0, by.1), phase));
+    }
+
+    /// A key on window `id`, as an inspector's `key` request says it.
+    pub fn key(&mut self, id: WindowId, request: &crate::inspect::Request) -> anyhow::Result<()> {
+        self.display.push(id, Input::Key(crate::inspect::Key::of(request)?));
+        Ok(())
+    }
+
+    /// How many frames window `id` has presented, all told.
+    pub fn frames(&self, id: WindowId) -> u64 {
+        self.windows.get(&id).map_or(0, |window| window.frames)
+    }
+
+    /// What window `id`'s last frame cost, as the inspector's `profile` says it (`Screen::cost`).
+    pub fn cost(&self, id: WindowId) -> Option<serde_json::Value> {
+        let window = self.windows.get(&id)?;
+        Some(window.screen.as_ref().ok()?.cost(window.parts[0].renderer.as_ref()?))
+    }
+
+    /// What window `id` last drew, the GPU it drew it with and its atlas.
+    pub fn drawn(&self, id: WindowId) -> Option<(&crate::render::scene::Scene, &Context, &Arc<Atlas>)> {
+        Some((&self.windows.get(&id)?.scene, &self.context, &self.atlas))
+    }
+}
+
+/// Now, as the windows' loop tells the time a frame or an input came: the system's, or on the fake platform its
+/// driver's, which moves only as it's moved (`fake::now`). How long work took is the system's everywhere.
+#[cfg(not(feature = "fake"))]
+pub(crate) fn now() -> web_time::Instant {
+    web_time::Instant::now()
+}
+#[cfg(feature = "fake")]
+pub(crate) use fake::now;
+/// The fake platform's time, in ms on its pages' clock.
+#[cfg(feature = "fake")]
+pub use fake::time as fake_time;
+
+/// How long since `at`, by `now`.
+pub(crate) fn since(at: web_time::Instant) -> std::time::Duration {
+    now().saturating_duration_since(at)
+}
+
+/// What draws on `native`: its surface, which the system shows.
+#[cfg(not(feature = "fake"))]
+fn drawn_on(context: &Context, atlas: Arc<Atlas>, native: &NativeWindow) -> anyhow::Result<Renderer> {
+    Renderer::new(context, atlas, native.surface()?, native.device_size(), native.transparent())
+}
+
+/// What draws on `native` on the fake platform: an image offscreen, as its compositor would show it, which its driver
+/// reads back (`Windows::presented`).
+#[cfg(feature = "fake")]
+fn drawn_on(context: &Context, atlas: Arc<Atlas>, native: &NativeWindow) -> anyhow::Result<Renderer> {
+    Ok(Renderer::offscreen(context, atlas, native.device_size()))
+}
+
 /// `bounds` with its edges on whole points, as a window's frame is.
 fn whole_points(bounds: crate::geometry::Bounds<f32>) -> crate::geometry::Bounds<f32> {
     let (left, top) = (bounds.origin.x.round(), bounds.origin.y.round());
@@ -1527,7 +1777,7 @@ impl Input {
 }
 
 /// What the display says happened to a window.
-#[cfg_attr(any(target_os = "android", target_os = "ios", target_arch = "wasm32"), allow(dead_code))]
+#[cfg_attr(any(target_os = "android", target_os = "ios", target_arch = "wasm32", feature = "fake"), allow(dead_code))]
 pub(crate) enum Input {
     Resized(Size<crate::geometry::DevicePixels>),
     /// It has a surface to draw on, or a new one (Android's view's).

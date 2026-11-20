@@ -1,6 +1,6 @@
 // Measures what a frame's work costs a real device, to calibrate the device tiers motion.js judges by (devices.json):
 // `bun calibrate.js --ssh <host> --harness <its build of the harness> [--name <device>] [--out <dir>]` in core/ui, after
-// `bun build.js`, with a harness built for that host (`cargo xwin build --release -p renderer --example screenshot
+// `bun build.js`, with a harness built for that host (`cargo xwin build --release -p renderer --example screenshot --features fake
 // --target x86_64-pc-windows-msvc` for a Windows one, which draws on its own GPU over ssh with Direct3D 12).
 //
 // It draws every scene of the gallery there, the first frames of each as it opens and every frame of each of its

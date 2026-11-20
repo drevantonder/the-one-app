@@ -549,17 +549,18 @@ impl Screen {
     }
 
     /// Waits for its app's JS to run all it's been sent, and what the host answers at once of what that asked, applying
-    /// what it posts: for a harness, which draws what a step left once it's done.
-    pub fn idle(&mut self) {
+    /// what it posts: for a harness, which draws what a step left once it's done. → whether anything came.
+    pub fn idle(&mut self) -> bool {
+        let mut came = false;
         loop {
             self.js.wait();
             self.pictures.wait();
             for child in self.frames.values_mut() {
                 child.screen.idle();
             }
-            self.pump();
+            came |= self.pump();
             if !self.busy() {
-                return;
+                return came;
             }
         }
     }
@@ -2241,6 +2242,9 @@ pub(crate) struct Placed {
     pub parent: Option<Id>,
     /// Where it shows, clipped, in the window.
     pub shown: Bounds<f32>,
+    /// How opaque it's drawn, with what it's in, as it's moving now: what a person sees of it, which the inspector
+    /// says.
+    pub opacity: f32,
     /// Whether it takes the pointer (`pointerEvents`): what doesn't is still in the chain of what's in it.
     pub pointer: bool,
     pub cursor: Option<Cursor>,

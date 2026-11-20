@@ -451,11 +451,19 @@ export declare function Widget(props: {
 // (core/ui/gallery) and for comparing what the DOM and a native host draw (core/ui/scenes.js). A scene is what to
 // draw, or that with what to press first (`taps`, by what each is named or says), whether it's drawn only by itself
 // (`alone`: something over the page), how big its window is (`size`, a phone's 390 × 844 unless said) and whether a
-// finger points at it (`touch`), and the gestures played on it, frame by frame (`motions`, core/ui/motion.js). Its
-// name is its family's and its own: "Buttons/Variants".
+// finger points at it (`touch`), the gestures played on it, frame by frame (`motions`, core/ui/motion.js), and what
+// people do with it and what must hold as they do (`checks`, `bun motion.js --checks`), with the seeds a check once
+// failed on (`seeds`). Its name is its family's and its own: "Buttons/Variants".
 export type Scene =
   | (() => Element)
-  | { render: () => Element; taps?: Tap[]; alone?: boolean; size?: [number, number]; touch?: boolean; motions?: Record<string, Motion> }
+  | { render: () => Element; taps?: Tap[]; alone?: boolean; size?: [number, number]; touch?: boolean; motions?: Record<string, Motion>; checks?: Record<string, CheckStep[]>; seeds?: number[] }
+/** A step of a check, as a test's (Playwright's, the UI SDK's): what's done, as a tap is (pressed, a key, typed), a
+ * press held `hold` ms, or time passing (`wait`, ms); or what must hold then (`expect`). */
+export type CheckStep = Tap | { press: Tap; hold: number } | { wait: number } | { expect: Expect }
+/** What must hold: what's drawn whole and in the window (`shown`), what isn't there (`gone`), what has the keyboard
+ * (`focused`), words somewhere on it (`text`), a node's states (`states`: `{ of, is: { expanded: true } }`), and the
+ * glass's blur drawn (`blur`). */
+export type Expect = { shown?: Tap; gone?: Tap; focused?: Tap; text?: string; states?: { of: Tap; is: Record<string, boolean | string> }; blur?: boolean }
 /** A press that goes down on what `from` names (as a tap does) and moves as `gesture` says, with what's watched move
  * (`follow`, named as a tap is; what scrolls under it is always watched). `frameMs`: its frames drawn only that often,
  * as a device others load draws them (Telemetry's frame interval), which presses it as a window's late frames do.
@@ -472,11 +480,11 @@ export type Gesture =
   | { pull: number }
   | { moves: { dx?: number; dy?: number; ms: number }[]; lift?: boolean }
 /** What's done, in order (core/ui/scenes.js runs them): pressed by what it's named or says, or that and its role
- * where a name alone is two things (a field's label and its select); a point pressed; a key as the DOM names it, with
+ * where a name alone is two things (a field's label and its select), or by its role alone (the menu open); a point pressed; a key as the DOM names it, with
  * any of `ctrl`, `shift`, `alt` or `meta` held; or text typed where the keyboard is. */
 export type Tap =
   | string
-  | { role: string; name: string }
+  | { role: string; name?: string }
   | { x: number; y: number }
   | { key: string; ctrl?: boolean; shift?: boolean; alt?: boolean; meta?: boolean }
   | { type: string }

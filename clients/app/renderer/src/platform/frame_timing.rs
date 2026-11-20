@@ -110,7 +110,7 @@ impl Timing {
 
     /// Whether what moved has been still long enough to be said, though its page still asks for frames.
     pub(crate) fn idle(&self) -> bool {
-        self.frames.last().is_some_and(|last| last.at.elapsed() >= STILL)
+        self.frames.last().is_some_and(|last| super::since(last.at) >= STILL)
     }
 
     /// What its frames did, and it's ready for the next: none, under three frames.

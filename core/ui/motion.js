@@ -1,6 +1,6 @@
 // Plays every scene's gestures (its `motions`) on a native host's headless harness, frame by frame, on its paused
 // clock: `bun motion.js [<folder>…] [--scene <words>] [--hz 60,120] [--out <dir>] [--against <dir>] [--dark]
-// [--release] [--watch]` in core/ui, after `bun build.js` and `cargo build -p renderer --example screenshot`
+// [--release] [--watch]` in core/ui, after `bun build.js` and `cargo build -p renderer --example screenshot --features fake`
 // (`--release` too for `--release`, whose costs are a shipped build's).
 //
 // A folder is the gallery (core/ui/gallery, its scenes in `*.scenes.tsx`) or an app's (apps/<app>, in
@@ -24,6 +24,14 @@
 // how much of the filmstrips differs (`changed.png`). `index.html` in `--out` is a contact sheet of them all, before
 // and after side by side. `--watch` plays them again as their app, the gallery or the UI library changes, a folder's
 // own motions alone where only it changed, each round said with how long it took.
+//
+// `--checks` plays each scene's checks instead (`checks`, the `CheckStep` type): what people do with it, as the UI
+// SDK's own tests do (keyboard, pointer, focus, dismissing, typeahead, placement), and what must hold as they do, on
+// the fake platform's window, once as it is and again with `--seeds` (3 unless said) seeds that make it adversarial
+// (the harness's `--seed`: refreshes late, input as things move, presses held as long as a person might), and with
+// each seed a check once failed on (`seeds`). Every check also comes to rest, leaves nothing drawn going, and any
+// menu, list or dialog open at its end is drawn whole in the window. It says, check by check, which passed, and for
+// one that failed, its seed, which step and why; it exits 1 where one failed.
 import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, symlinkSync, watch, writeFileSync } from "node:fs"
 import { basename, join, relative, resolve } from "node:path"
 import { fileURLToPath } from "node:url"
@@ -40,13 +48,15 @@ const against = option("--against") && resolve(option("--against"))
 const rates = (option("--hz") ?? "60,120").split(",").map(Number)
 const only = option("--scene")?.toLowerCase()
 const dark = flag("--dark")
-const folders = args.filter((arg, at) => !arg.startsWith("--") && !["--out", "--against", "--hz", "--scene"].includes(args[at - 1])).map((folder) => resolve(folder))
+const checking = flag("--checks")
+const seeds = Number(option("--seeds") ?? 3)
+const folders = args.filter((arg, at) => !arg.startsWith("--") && !["--out", "--against", "--hz", "--scene", "--seeds"].includes(args[at - 1])).map((folder) => resolve(folder))
 const harness = join(root, `target/${flag("--release") ? "release" : "debug"}/examples/screenshot`)
 const env = { ...process.env, VK_ICD_FILENAMES: process.env.VK_ICD_FILENAMES ?? "/usr/share/vulkan/icd.d/lvp_icd.json" }
 
 
-/// Every folder with motions: the gallery, and each app whose scenes have one.
-const everything = () => [here("gallery"), ...readdirSync(join(root, "apps")).map((app) => join(root, "apps", app)).filter((app) => existsSync(join(app, "client/scenes.json")) && readFileSync(join(app, "client/scenes.json"), "utf8").includes('"motions"'))]
+/// Every folder with motions, or with `--checks` checks: the gallery, and each app whose scenes have one.
+const everything = () => [here("gallery"), ...readdirSync(join(root, "apps")).map((app) => join(root, "apps", app)).filter((app) => existsSync(join(app, "client/scenes.json")) && readFileSync(join(app, "client/scenes.json"), "utf8").includes(checking ? '"checks"' : '"motions"'))]
 
 /// How a gesture moves, as the inspector's `replay` takes it: each stretch `{dx, dy, ms}`, and whether it lifts.
 export function moves(gesture) {
@@ -83,14 +93,14 @@ export function pageFolder(built, page, folder) {
 }
 
 /// The harness run on a scene, with `requests`: each answer, and its stderr. → `{ answers, said }`.
-async function run(at, folder, scene, requests) {
+async function run(at, folder, scene, requests, seed = 0) {
   const answers = { ...scene.answers, "ui/initialize": scene.answers?.["ui/initialize"] ?? { hostContext: { link: scene.link, containerDimensions: { width: scene.size[0], height: scene.size[1] }, deviceCapabilities: { touch: scene.touch, hover: !scene.touch } } } }
   writeFileSync(join(folder, "answers.json"), JSON.stringify(answers))
   const lines = requests.map((request, id) => JSON.stringify({ v: 1, id: id + 1, ...request })).join("\n")
   // A computer's launcher is a panel, drawn as one (a Mac's, its glass the system's), as its client says it is.
   const client = scene.answers?.["one/client"]
   const panel = client?.launcher && client?.mac ? ["--panel", "0"] : []
-  const harnessed = Bun.spawn([harness, at, join(folder, "end.png"), join(folder, "end.json"), "--ui", here("dist/client"), "--answers", join(folder, "answers.json"), "--size", `${scene.size[0]}x${scene.size[1]}`, "--scale", "1", "--requests", "-", ...(dark ? ["--dark"] : []), ...(scene.touch ? ["--touch"] : []), ...panel], { stdin: new TextEncoder().encode(lines), stdout: "pipe", stderr: "pipe", env })
+  const harnessed = Bun.spawn([harness, at, join(folder, "end.png"), join(folder, "end.json"), "--ui", here("dist/client"), "--answers", join(folder, "answers.json"), "--size", `${scene.size[0]}x${scene.size[1]}`, "--scale", "1", "--requests", "-", ...(dark ? ["--dark"] : []), ...(scene.touch ? ["--touch"] : []), ...(seed ? ["--seed", String(seed)] : []), ...panel], { stdin: new TextEncoder().encode(lines), stdout: "pipe", stderr: "pipe", env })
   const [stdout, stderr] = await Promise.all([new Response(harnessed.stdout).text(), new Response(harnessed.stderr).text(), harnessed.exited])
   return { answers: stdout.split("\n").filter(Boolean).map((line) => JSON.parse(line)), said: stderr.trim(), failed: harnessed.exitCode !== 0 }
 }
@@ -103,8 +113,8 @@ export async function scenesOf(target, built, folder, all = false) {
     const whole = (scene) => (scene.like ? { ...whole(scenes[scene.like]), taps: undefined, ...scene, answers: { ...whole(scenes[scene.like]).answers, ...scene.answers } } : scene)
     return Object.entries(scenes)
       .map(([name, scene]) => ({ name, ...whole(scene) }))
-      .filter((scene) => (all || scene.motions) && !scene.component && !scene.uses)
-      .map(({ name, page = "client/index.html", answers = {}, taps = [], size = [390, 844], touch = false, motions }) => ({ name, page: page.split("#")[0], link: page.split("#")[1], answers, taps, size, touch, motions }))
+      .filter((scene) => (all || (checking ? scene.checks : scene.motions)) && !scene.component && !scene.uses)
+      .map(({ name, page = "client/index.html", answers = {}, taps = [], size = [390, 844], touch = false, motions, checks, seeds }) => ({ name, page: page.split("#")[0], link: page.split("#")[1], answers, taps, size, touch, motions, checks, seeds }))
   }
   // The gallery lists its own, drawn at `#scenes`.
   const listing = { link: "scenes", size: [390, 844], answers: {} }
@@ -114,8 +124,8 @@ export async function scenesOf(target, built, folder, all = false) {
   const text = JSON.stringify(JSON.parse(readFileSync(join(folder, "end.json"), "utf8"))).match(/"name":"(\[.*?\])"/)?.[1]
   if (!text) throw new Error(`The gallery listed no scenes: ${listed.said}`)
   return JSON.parse(JSON.parse(`"${text}"`))
-    .filter((scene) => all || scene.motions)
-    .map(({ name, taps = [], size = [390, 844], touch = false, motions }) => ({ name, page: "index.html", link: name, answers: {}, taps, size, touch, motions }))
+    .filter((scene) => all || (checking ? scene.checks : scene.motions))
+    .map(({ name, taps = [], size = [390, 844], touch = false, motions, checks, seeds }) => ({ name, page: "index.html", link: name, answers: {}, taps, size, touch, motions, checks, seeds }))
 }
 
 /// How far what moved had gone at each frame: what `follow` names where it's said and moved, else what scrolls.
@@ -332,6 +342,112 @@ async function play(built, scene, name, motion, hz, folder) {
   return { said: said.join("\n"), row: { scene: scene.name, motion: name, hz, folder: relative(out, folder), before: before && beforeAt } }
 }
 
+/// A tap as the harness's request, as scenes.js presses it.
+const pressed = (tap) => (tap.key ? { op: "key", ...tap } : tap.type ? { op: "type", text: tap.type } : { op: "tap", ...selector(tap) })
+
+/// The roles a layer over the page has, which a check's end finds drawn whole in the window wherever it's open.
+const LAYERS = ["menu", "listbox", "dialog", "alertdialog"]
+
+/// Why a node `wait_for` waited on isn't as it should be: what a person sees of it, or its states.
+const why = (answer, is) => {
+  const node = answer?.result?.node
+  if (!node) return "it isn't there"
+  const off = Object.entries(is ?? {}).filter(([state, want]) => (node.states?.[state] ?? false) !== want)
+  if (off.length) return off.map(([state]) => `${state} is ${node.states?.[state] ?? false}`).join(", ")
+  if (node.opacity === undefined) return "it isn't drawn"
+  if (node.opacity < 0.99) return `it's drawn at opacity ${node.opacity}`
+  if (node.seen < 0.99) return `${Math.round(node.seen * 100)}% of it is in the window`
+  return "it isn't"
+}
+
+/// A check's steps as the harness's requests, each with what judges its answer: why it failed, or nothing.
+function requests(steps) {
+  const named = (tap) => (typeof tap === "string" ? tap : tap.name ?? tap.text ?? JSON.stringify(tap))
+  const out = []
+  for (const [at, step] of steps.entries()) {
+    const from = out.length
+    if (step.wait !== undefined) out.push({ request: { op: "clock", step: step.wait } })
+    else if (step.press) out.push({ request: { op: "tap", ...selector(step.press), hold: step.hold } })
+    else if (!step.expect) out.push({ request: pressed(step) })
+    else {
+      const { shown, gone, focused, text, states, blur } = step.expect
+      // Each waited for, as Playwright's assertions are, a second at most.
+      const until = (tap, state, said, is) => ({ request: { op: "wait_for", ...selector(tap), state, ...(is ? { is } : {}) }, judge: (answer) => !answer?.result?.met && said(answer) })
+      if (shown) out.push(until(shown, "shown", (answer) => `${named(shown)} isn't shown: ${why(answer)}`))
+      if (gone) out.push(until(gone, "gone", () => `${named(gone)} is still there`))
+      if (text) out.push(until({ text }, "there", () => `nothing says "${text}"`))
+      if (focused) out.push(until(focused, "focused", () => `${named(focused)} hasn't the keyboard`))
+      if (states) out.push(until(states.of, "there", (answer) => `${named(states.of)}: ${why(answer, states.is)}`, states.is))
+      if (blur) out.push({ request: { op: "profile", at: [0], snap: false }, judge: (answer) => !(answer?.result?.frames?.[0]?.work?.backdrops > 0) && "no blur is drawn" })
+    }
+    for (const one of out.slice(from)) one.step = `step ${at + 1}`
+  }
+  // Its end: at rest, nothing drawn going, and each layer open drawn whole in the window.
+  const end = out.length
+  out.push({ request: { op: "clock", step: 2000 } })
+  out.push({ request: { op: "window" }, judge: (answer) => (answer?.result?.leaving ? `${answer.result.leaving} nodes taken out are still drawn` : answer?.result?.moving ? `${answer.result.moving} nodes are still moving` : undefined) })
+  for (const role of LAYERS)
+    out.push({ request: { op: "wait_for", role, state: "shown", timeout: 0 }, judge: (answer) => answer?.result?.node && !answer.result.met && `the ${role} open isn't shown: ${why(answer)}` })
+  for (const one of out.slice(end)) one.step = "at its end"
+  return out
+}
+
+/// Plays each check of `scene`, once as it is and with each seed. → each check's name and how each run went.
+async function check(built, scene, folder) {
+  const at = pageFolder(built, scene.page, folder)
+  const taps = scene.taps.flatMap((tap) => [pressed(tap), { op: "clock", step: 1000 }])
+  const played = Object.entries(scene.checks).flatMap(([name, steps]) =>
+    [0, ...Array.from({ length: seeds }, (_, n) => n + 1), ...(scene.seeds ?? [])].map((seed) => ({ name, steps, seed })),
+  )
+  const results = []
+  for (let from = 0; from < played.length; from += 4)
+    results.push(
+      ...(await Promise.all(
+        played.slice(from, from + 4).map(async ({ name, steps, seed }) => {
+          const ran = requests(steps)
+          const own = join(folder, name.replace(/[^\w.-]+/g, "-"), String(seed))
+          mkdirSync(own, { recursive: true })
+          const done = await run(at, own, scene, [{ op: "clock", step: 1000 }, ...taps, ...ran.map(({ request }) => request)], seed)
+          const answers = done.answers.slice(1 + taps.length)
+          const failed = done.failed
+            ? `the harness failed: ${done.said.split("\n").at(-1)}`
+            : ran.map(({ judge, request, step }, n) => (answers[n]?.error ? `${step} (${request.op}): ${answers[n].error}` : judge && judge(answers[n]) ? `${step}: ${judge(answers[n])}` : undefined)).find(Boolean)
+          return { name, seed, failed }
+        }),
+      )),
+    )
+  return results
+}
+
+/// Plays every check of `targets`' scenes. → each line it says, and how many failed.
+async function checks(targets) {
+  const said = []
+  let failed = 0
+  let passed = 0
+  for (const target of targets) {
+    const name = target.endsWith("core/ui/gallery") ? "gallery" : target.split("/").at(-1)
+    const built = join(out, name, ".build")
+    const make = Bun.spawnSync(["bun", here("dist/build/app.js"), target, built])
+    if (make.exitCode !== 0) {
+      said.push(`${name}: didn't build\n${make.stderr.toString().trim()}`)
+      failed++
+      continue
+    }
+    const scenes = (await scenesOf(target, built, join(out, name, ".scenes"))).filter((scene) => !only || scene.name.toLowerCase().includes(only))
+    for (const scene of scenes) {
+      const results = await check(built, scene, join(out, name, scene.name.replace(/[^\w.-]+/g, "-")))
+      for (const [check, runs] of Object.entries(Object.groupBy(results, (result) => result.name))) {
+        const bad = runs.filter((run) => run.failed)
+        bad.length ? failed++ : passed++
+        said.push(`${bad.length ? "✗" : "✓"} ${name} · ${scene.name} · ${check}${bad.length ? "" : ` (${runs.length} runs)`}`)
+        for (const run of bad) said.push(`    ${run.seed ? `seed ${run.seed}` : "as it is"}: ${run.failed}`)
+      }
+    }
+  }
+  said.push(`${passed} checks passed, ${failed} failed`)
+  return { said, failed }
+}
+
 /// How much of two pictures differs, from 0 to 1, where they're the same size, with where in `diff`.
 function differs(one, other, diff) {
   const [a, b] = [one, other].map((file) => PNG.sync.read(readFileSync(file)))
@@ -389,11 +505,16 @@ async function round(targets) {
 // Run, rather than imported for what it shares (calibrate.js).
 if (import.meta.main) {
   if (!existsSync(here("dist/build/app.js"))) throw new Error("Build the UI library first: `bun build.js` in core/ui")
-  if (!existsSync(harness)) throw new Error("Build the native harness first: `cargo build -p renderer --example screenshot`")
+  if (!existsSync(harness)) throw new Error("Build the native harness first: `cargo build -p renderer --example screenshot --features fake`")
   // A debug build's CPU is several times a shipped one's.
   if (!flag("--release")) console.log("Its CPU times are a debug build's: --release for a shipped build's")
   if (!hostScore) console.log(`This CPU (${cpuName.trim()}) has no Geekbench score in devices.json's hosts, so devices are judged by their GPUs alone`)
   const started = performance.now()
+  if (checking) {
+    const { said, failed } = await checks(folders.length ? folders : everything())
+    console.log(said.join("\n"), `\nin ${Math.round(performance.now() - started)} ms`)
+    process.exit(failed ? 1 : 0)
+  }
   console.log((await round(folders.length ? folders : everything())).join("\n"), `\nin ${Math.round(performance.now() - started)} ms`)
 
   if (flag("--watch")) {

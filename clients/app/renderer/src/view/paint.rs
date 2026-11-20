@@ -722,7 +722,7 @@ impl Painter<'_> {
             }
         }
         let layer = &self.layers[&id];
-        self.placed.extend(layer.placed.iter().map(|(id, placed)| (*id, Placed { shown: moved(placed.shown).intersect(&mask), ..placed.clone() })));
+        self.placed.extend(layer.placed.iter().map(|(id, placed)| (*id, Placed { shown: moved(placed.shown).intersect(&mask), opacity: placed.opacity * opacity, ..placed.clone() })));
         self.rects.extend(layer.rects.iter().map(|(id, rect)| {
             let drawn = moved(Bounds { origin: point(rect.x, rect.y), size: Size { width: rect.width, height: rect.height } });
             (*id, Rect { x: drawn.origin.x, y: drawn.origin.y, width: drawn.size.width, height: drawn.size.height })
@@ -935,7 +935,7 @@ impl Painter<'_> {
             _ if (node.kind == Kind::Input && !node.is("disabled")) || button || tabindex.is_some() || node.kind == Kind::Frame => Clicked::Takes,
             _ => Clicked::Passes,
         };
-        let mut placed = Placed { parent, shown, pointer, cursor: look.cursor, pressable, input: node.kind == Kind::Input, focus, scroll: None, touch_action: look.touch_action };
+        let mut placed = Placed { parent, shown, opacity, pointer, cursor: look.cursor, pressable, input: node.kind == Kind::Input, focus, scroll: None, touch_action: look.touch_action };
         match node.kind {
             Kind::Text | Kind::RawText => {
                 let width = laid.content_box_width().max(1.0);
@@ -982,7 +982,7 @@ impl Painter<'_> {
                 }
                 if !spans.is_empty() {
                     self.placed.push((id, placed));
-                    self.place_spans(id, &spans, &paragraph, content, width, transform.scale, text.align, mask, pointer);
+                    self.place_spans(id, &spans, &paragraph, content, width, transform.scale, text.align, mask, pointer, opacity);
                     return;
                 }
             }
@@ -1209,7 +1209,7 @@ impl Painter<'_> {
     /// stretch of its words, after what it's in, so a press, hover and cursor find the innermost; each reached by Tab
     /// where the DOM's would be, a span with its `tabindex`; and each where an agent or a screen reader finds it.
     #[allow(clippy::too_many_arguments)]
-    pub(super) fn place_spans(&mut self, id: Id, spans: &[Span], paragraph: &Paragraph, content: Bounds<f32>, width: f32, grown: f32, align: f32, mask: Bounds<f32>, pointer: bool) {
+    pub(super) fn place_spans(&mut self, id: Id, spans: &[Span], paragraph: &Paragraph, content: Bounds<f32>, width: f32, grown: f32, align: f32, mask: Bounds<f32>, pointer: bool, opacity: f32) {
         let tree = self.tree;
         let line_height = paragraph.line_height;
         let mut pointers: HashMap<Id, bool> = HashMap::from([(id, pointer)]);
@@ -1243,7 +1243,7 @@ impl Painter<'_> {
             }
             for rect in rects {
                 let focus = if tabindex.is_some() { Clicked::Takes } else { Clicked::Passes };
-                let placed = Placed { parent: Some(parent), shown: rect.intersect(&mask), pointer, cursor: span.cursor, pressable, input: false, focus, scroll: None, touch_action: None };
+                let placed = Placed { parent: Some(parent), shown: rect.intersect(&mask), opacity, pointer, cursor: span.cursor, pressable, input: false, focus, scroll: None, touch_action: None };
                 self.placed.push((span.id, placed));
             }
         }

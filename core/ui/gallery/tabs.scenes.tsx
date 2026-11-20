@@ -21,7 +21,16 @@ const views = () => (
 )
 
 export default {
-  "Tabs/The first chosen": views,
+  // What people expect of tabs, from the UI SDK's own tests (tests/specs/tabs.spec.ts at the commit tabs.ts names).
+  "Tabs/The first chosen": {
+    render: views,
+    checks: {
+      "A press chooses a tab and shows its view": [{ role: "tab", name: "History" }, { expect: { states: { of: { role: "tab", name: "History" }, is: { selected: true } } } }, { expect: { text: "Twelve commits on main." } }, { expect: { gone: "Three files, last changed an hour ago." } }],
+      "The arrows choose the next tab, wrapping": [{ key: "Tab" }, { expect: { focused: { role: "tab", name: "Code" } } }, { key: "ArrowRight" }, { expect: { states: { of: { role: "tab", name: "History" }, is: { selected: true } } } }, { key: "ArrowLeft" }, { key: "ArrowLeft" }, { expect: { focused: { role: "tab", name: "Pull Requests" } } }, { expect: { text: "No pull requests." } }],
+      "Home and End choose its ends": [{ key: "Tab" }, { key: "End" }, { expect: { states: { of: { role: "tab", name: "Pull Requests" }, is: { selected: true } } } }, { key: "Home" }, { expect: { states: { of: { role: "tab", name: "Code" }, is: { selected: true } } } }],
+      "Up and down do nothing to tabs along": [{ key: "Tab" }, { key: "ArrowDown" }, { expect: { focused: { role: "tab", name: "Code" } } }, { expect: { states: { of: { role: "tab", name: "Code" }, is: { selected: true } } } }],
+    },
+  },
   "Tabs/Another chosen": { render: views, taps: ["History"] },
   "Tabs/Without an indicator": () => (
     <Tabs.Root defaultValue="day">

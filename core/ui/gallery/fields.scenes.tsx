@@ -63,7 +63,39 @@ const Echoed = (props: { label: string; value?: string; multiline?: boolean }) =
   )
 }
 
+/// A select alone, and what's chosen, as text.
+const Picked = () => {
+  const [fruit, setFruit] = createSignal("apple")
+  const items = [...fruits, { value: "grape", label: "Grape", disabled: true }, { value: "lemon", label: "Lemon" }]
+  return (
+    <View style={look.form}>
+      <Field label="Fruit">
+        <Select.Root items={items} value={fruit()} onValueChange={setFruit} />
+      </Field>
+      <Text>{`Chosen: ${fruit()}`}</Text>
+    </View>
+  )
+}
+
+const face = { role: "combobox", name: "Fruit" }
+
 export default {
+  // What people expect of a select, from the UI SDK's own tests (tests/specs/select.spec.ts at the commit select.ts
+  // names).
+  "Fields/A select chosen by its keys": { render: () => <Picked />, taps: [{ key: "Tab" }, { key: "Enter" }, { key: "ArrowDown" }, { key: "Enter" }] },
+  "Fields/A select and what's chosen": {
+    render: () => <Picked />,
+    checks: {
+      "A press opens its list, drawn whole": [face, { expect: { shown: { role: "listbox" } } }, { expect: { states: { of: face, is: { expanded: true } } } }],
+      "A press on its face again closes it": [face, { wait: 300 }, face, { expect: { gone: { role: "listbox" } } }],
+      "A press on an option chooses it and closes it": [face, { wait: 300 }, { role: "option", name: "Pear" }, { expect: { text: "Chosen: pear" } }, { expect: { gone: { role: "listbox" } } }],
+      "A press on one that's off does nothing": [face, { wait: 300 }, { role: "option", name: "Grape" }, { expect: { text: "Chosen: apple" } }, { expect: { shown: { role: "listbox" } } }],
+      "Enter opens it, the arrows move past what's off, Enter chooses": [{ key: "Tab" }, { key: "Enter" }, { key: "ArrowDown" }, { key: "ArrowDown" }, { key: "Enter" }, { expect: { text: "Chosen: lemon" } }, { expect: { gone: { role: "listbox" } } }, { expect: { focused: face } }],
+      "Escape closes it, choosing nothing": [{ key: "Tab" }, { key: "Enter" }, { key: "ArrowDown" }, { key: "Escape" }, { expect: { text: "Chosen: apple" } }, { expect: { gone: { role: "listbox" } } }, { expect: { focused: face } }],
+      "Closed, the arrows choose": [{ key: "Tab" }, { key: "ArrowDown" }, { expect: { text: "Chosen: pear" } }, { expect: { gone: { role: "listbox" } } }],
+      "A press outside closes it": [face, { wait: 300 }, { x: 380, y: 830 }, { expect: { gone: { role: "listbox" } } }, { expect: { text: "Chosen: apple" } }],
+    },
+  },
   "Fields/Every kind": () => <Fields />,
   "Fields/A select open": { render: () => <Fields />, taps: [{ role: "combobox", name: "Fruit" }] },
   // The caret steps over an emoji, a flag and a letter with its accent whole, and Backspace takes an emoji whole:

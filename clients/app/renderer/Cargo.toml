@@ -41,6 +41,10 @@ web-time = "1"
 # The typeface the UI library ships as WOFF2 (core/ui/src/Allo-Variable.woff2), which the text system reads as TTF.
 wuff = "0.2"
 
+[features]
+# The platform with nothing behind it, for the headless harness (`platform::fake`), in place of the system's.
+fake = []
+
 [dev-dependencies]
 # The memory the headless harness's `--measure` says drawing took.
 memory-stats = "1"
@@ -206,3 +210,7 @@ ndk-sys = "0.6"
 [build-dependencies]
 # Flutter's text input plugins (flutter/), as its engine builds them: a Mac's Objective-C++, Windows' C++.
 cc = "1"
+
+[[example]]
+name = "screenshot"
+required-features = ["fake"]

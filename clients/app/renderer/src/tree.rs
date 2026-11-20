@@ -149,6 +149,10 @@ impl Default for Tree {
     }
 }
 
+/// The roles a node is named by what's in it where it isn't named otherwise, as WAI-ARIA's "name from content" has
+/// them (and the DOM's accessibility tree): a menu's items, a list's options and tabs as a button is.
+const NAMED_BY_CONTENT: [&str; 13] = ["button", "radio", "checkbox", "switch", "link", "menuitem", "menuitemcheckbox", "menuitemradio", "option", "tab", "treeitem", "cell", "tooltip"];
+
 impl Tree {
     pub fn root(&self) -> &Node {
         &self.nodes[&0]
@@ -446,7 +450,7 @@ impl Tree {
             .or_else(|| node.str("label"))
             .map(str::to_owned)
             .or_else(|| text.then(|| self.text(id)))
-            .or_else(|| (node.str("role") == Some("button") || node.str("role") == Some("radio")).then(|| self.label(id)));
+            .or_else(|| node.str("role").is_some_and(|role| NAMED_BY_CONTENT.contains(&role)).then(|| self.label(id)));
         let actions: Vec<&str> =
             ["click", "input", "focus", "blur"].into_iter().filter(|event| node.listens(event)).collect();
         // A live region, whose words a screen reader reads as they change: as it says, or as its role is one (ARIA's

@@ -1,6 +1,6 @@
 // Draws every scene on the DOM and on a native host, and compares the two: `bun scenes.js [<folder>…] [--out <dir>]
 // [--against <dir>] [--dark] [--size <width>x<height>] [--release] [--web]` in core/ui, after `bun build.js` (and, for the native half, `cargo build -p renderer
-// --example screenshot`, `--release` too for `--release`, whose timings are a shipped build's). `--against` compares each scene with an earlier run's too, our renderer's drawing where both have one (the DOM's where not), kept in that
+// --example screenshot --features fake`, `--release` too for `--release`, whose timings are a shipped build's). `--against` compares each scene with an earlier run's too, our renderer's drawing where both have one (the DOM's where not), kept in that
 // `--out`: what a change did to how things look, drawn before it (on main) and after.
 //
 // A folder is the gallery (core/ui/gallery, its scenes the components': `*.scenes.tsx`) or an app's (apps/<app>,
@@ -248,7 +248,7 @@ async function web(browser, serve, key, scene, folder) {
 
 /// A scene drawn by a native host's headless harness, or nothing where it hasn't been built or can't draw the page.
 function native(built, scene, folder, used) {
-  if (!existsSync(harness)) return { missing: "the native harness isn't built (`cargo build -p renderer --example screenshot`)" }
+  if (!existsSync(harness)) return { missing: "the native harness isn't built (`cargo build -p renderer --example screenshot --features fake`)" }
   if (hosted < needed) return { missing: `the native host's runtime version is ${hosted}, the UI library needs ${needed}: nothing to compare until it's ${needed}` }
   // The harness loads the module the folder's `index.html` names, from beside it: the page's, with what it loads.
   const at = join(folder, "page")

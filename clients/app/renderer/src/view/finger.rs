@@ -74,6 +74,14 @@ impl Screen {
         Ok(point(x, y))
     }
 
+    /// How far what scrolls under `at` shows scrolled, with its stretch past an end, if something scrolls there.
+    pub fn scrolled_under(&self, at: Point<f32>) -> Option<Point<f32>> {
+        let scrolled = self.under(at).into_iter().find_map(|id| self.scrolled.get(&id).copied())?;
+        let stretched = self.stretched();
+        let stretch = self.under(at).into_iter().find_map(|id| stretched.get(&id).copied()).unwrap_or(point(0.0, 0.0));
+        Some(point(scrolled.x + stretch.x, scrolled.y + stretch.y))
+    }
+
     /// A press goes down at `at`, at `time` (ms on its clock).
     pub(super) fn finger_down(&mut self, at: Point<f32>, time: f64) -> Finger {
         let mut velocity = Velocity::default();
@@ -181,12 +189,8 @@ impl Screen {
                 drawn["x"] = json!((rect.x * 100.0).round() / 100.0);
                 drawn["y"] = json!((rect.y * 100.0).round() / 100.0);
             }
-            let scrolled = self.under(trace.start).into_iter().find_map(|id| self.scrolled.get(&id).copied());
-            let stretched = self.stretched();
-            let stretch = self.under(trace.start).into_iter().find_map(|id| stretched.get(&id).copied());
-            if let Some(scrolled) = scrolled {
-                let stretch = stretch.unwrap_or(point(0.0, 0.0));
-                drawn["scroll"] = json!({"x": scrolled.x + stretch.x, "y": scrolled.y + stretch.y});
+            if let Some(scrolled) = self.scrolled_under(trace.start) {
+                drawn["scroll"] = json!({"x": scrolled.x, "y": scrolled.y});
             }
             frames.push(drawn);
             let still = !self.animating && !self.framing() && !self.coasting() && self.transitions.len() == 0;

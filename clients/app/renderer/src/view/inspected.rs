@@ -53,16 +53,31 @@ impl Screen {
                     "time": self.js.clock().now(),
                     "paused": self.js.clock().paused(),
                     "failed": self.failed,
+                    "focused": self.focus.focused,
+                    "leaving": self.tree.going().count(),
+                    "moving": self.transitions.moving().len(),
                 })
             }
             "tree" => self.inspected_tree(),
             "query" => {
                 let mut found = inspect::query(&self.tree, &self.rects, request);
                 // An input's editing state as the host has it, which is ahead of what its app set.
+                let window = crate::geometry::Bounds { origin: crate::geometry::point(0.0, 0.0), size: crate::geometry::Size { width: self.room.width, height: self.room.height } };
                 for node in found["nodes"].as_array_mut().into_iter().flatten() {
-                    if let Some(field) = node["node"].as_u64().and_then(|id| self.editing.fields.get(&id)) {
+                    let Some(id) = node["node"].as_u64() else { continue };
+                    if let Some(field) = self.editing.fields.get(&id) {
                         node["editing"] = json!(field.value());
                     }
+                    // What a person sees of it: how opaque it's drawn, and how much of it is in the window, not
+                    // clipped away.
+                    if let Some(placed) = self.placed(id) {
+                        let rect = self.rects.get(&id).map_or(0.0, |rect| rect.width * rect.height);
+                        let shown = placed.shown.intersect(&window);
+                        let seen = if rect > 0.0 { (shown.size.width.max(0.0) * shown.size.height.max(0.0) / rect).min(1.0) } else { 0.0 };
+                        node["opacity"] = json!((placed.opacity * 1000.0).round() / 1000.0);
+                        node["seen"] = json!((seen * 1000.0).round() / 1000.0);
+                    }
+                    node["focused"] = json!(self.focus.focused == Some(id));
                 }
                 found
             }
@@ -303,9 +318,30 @@ impl Screen {
     }
 
     /// Moves the clock on by `ms`, paused, running each timer due in that time at its own time, in order, each once
-    /// what came before it has run: this waits on the app's JS thread.
+    /// what came before it has run, and while its page asks for frames, each as a display's would come, on its clock:
+    /// for an inspector's request, which no display ticks for. This waits on the app's JS thread.
     pub(super) fn step(&mut self, ms: f64) {
-        // While its page asks for frames, they come as its display's would, on its clock.
+        self.moved(ms, true);
+    }
+
+    /// Moves the clock on by `ms`, paused, running each timer due in that time at its own time, in order: for a host
+    /// whose display ticks of its own (the fake platform's), which this waits on the app's JS thread for.
+    pub fn advance(&mut self, ms: f64) {
+        self.moved(ms, false);
+    }
+
+    /// Whether what it shows is still on its way somewhere: a transition, a node let go springing back, a list
+    /// flung, or what its page asked a frame for. A loop (a spinner) never arrives, so isn't.
+    pub fn arriving(&self) -> bool {
+        self.transitions.arriving() || self.coasting() || self.js.framing()
+    }
+
+    /// When its page's next timer is due, in ms from now on its clock, if it has one.
+    pub fn timer_due(&self) -> Option<f64> {
+        self.js.due()
+    }
+
+    fn moved(&mut self, ms: f64, frames: bool) {
         let frame_ms = 1000.0 / self.hz;
         let clock = self.js.clock().clone();
         clock.pause();
@@ -313,7 +349,7 @@ impl Screen {
         let mut left = ms;
         loop {
             // The next frame's, at least a microsecond on, so a clock a hair short of one isn't stepped by nothing.
-            let frame = self.framing().then(|| frame_ms - clock.now().rem_euclid(frame_ms)).map(|next| if next < 0.001 { next + frame_ms } else { next });
+            let frame = (frames && self.framing()).then(|| frame_ms - clock.now().rem_euclid(frame_ms)).map(|next| if next < 0.001 { next + frame_ms } else { next });
             let Some(next) = self.js.due().into_iter().chain(frame).reduce(f64::min).filter(|next| *next <= left) else { break };
             let framed = frame == Some(next);
             let next = next.max(0.0);

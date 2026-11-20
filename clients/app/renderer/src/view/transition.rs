@@ -588,6 +588,11 @@ impl Transitions {
         }
     }
 
+    /// Whether something's on its way somewhere it'll arrive at: what moves but a loop (`animation`), which never does.
+    pub fn arriving(&self) -> bool {
+        !self.moving.is_empty() || !self.dragged.is_empty() || !self.flips.is_empty()
+    }
+
     /// The nodes with something on its way, which are styled again each frame until it's arrived.
     pub fn moving(&self) -> HashSet<Id> {
         self.moving.keys().map(|(id, _)| *id).chain(self.dragged.keys().copied()).chain(self.animated.iter().copied()).chain(self.flips.keys().copied()).collect()

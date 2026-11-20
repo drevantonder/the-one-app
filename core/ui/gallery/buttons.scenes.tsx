@@ -22,7 +22,29 @@ const Moved = () => {
   )
 }
 
+/// Buttons, and how often each was pressed, as text.
+const Counted = () => {
+  const [count, setCount] = createSignal(0)
+  return (
+    <View style={look.column}>
+      <Button onPress={() => setCount(count() + 1)}>Save</Button>
+      <Button disabled onPress={() => setCount(count() + 100)}>Delete</Button>
+      <Text>{`Pressed ${count()} times`}</Text>
+    </View>
+  )
+}
+
 export default {
+  // What people expect of a button, from the UI SDK's own tests (tests/specs/button.spec.ts at the commit button.ts
+  // names).
+  "Buttons/Pressed": {
+    render: () => <Counted />,
+    checks: {
+      "A press presses it": ["Save", { expect: { text: "Pressed 1 times" } }],
+      "Enter and Space press it": [{ key: "Tab" }, { key: "Enter" }, { key: " " }, { expect: { text: "Pressed 2 times" } }],
+      "One that's off does nothing": [{ role: "button", name: "Delete" }, { expect: { text: "Pressed 0 times" } }],
+    },
+  },
   "Buttons/Variants": () => (
     <View style={look.wrap}>
       <Button>Default</Button>

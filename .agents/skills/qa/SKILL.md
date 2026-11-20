@@ -50,12 +50,27 @@ It draws every scene, or those of the folders named, on the DOM in headless Chro
 `bunx playwright-core install chromium` fetches where it's missing), with `--web` by our renderer on the web there (its
 WebGPU on SwiftShader, which draws on the CPU, so only for a change to the web platform: `web.png`, compared with
 `native.png`) and on a native host by its headless
-harness (`cargo build -p renderer --example screenshot`). What counts is **what changed since `--against`** on our renderer
+harness (`cargo build -p renderer --example screenshot --features fake`). What counts is **what changed since `--against`** on our renderer
 (`changed.png`): a tree that changed, or pictures more than 2% apart, is looked at. A difference that's meant is said
 in the commit; one that isn't is fixed. Our renderer is the reference, judged against DESIGN.md (Raycast-inspired), not
 the browser: it will draw the web too. Until it does, browsers, MCP hosts and older phones still show the DOM, so a
 large DOM-vs-native difference it reports (`dom.png`, `native.png`, `diff.png`) is worth a look, but matching the DOM
 isn't the goal. A native host that hasn't the runtime version the UI library needs draws nothing, which it says.
+
+### Checks: every change to the UI library or the renderer
+
+A change under `core/ui/` or `clients/app/renderer/` runs the checks before it's committed, in core/ui, after `bun
+build.js` and `cargo build -p renderer --example screenshot --features fake` (about 20 s for the gallery):
+
+    bun motion.js --checks [<folder>…]
+
+A scene's `checks` (the `CheckStep` type in `core/ui/src/types/ui.d.ts`) are what people do with it and what must
+hold, as the UI SDK's own tests have them, played on the headless harness's window, a fake platform's under the loop
+every host's windows run, once as it is and again with seeds that make it adversarial (refreshes late, input as
+things move, presses held as long as a person's). A failure says its seed; a fix keeps it in the scene's `seeds`. A
+component or primitive changed or added gets checks for what it promises, ported from its upstream file's tests where
+it's copied from the UI SDK. A bug a device showed that the checks passed is the harness's too: make a check fail on
+it first (a scene shaped like where it happened), say why the harness missed it, then fix both.
 
 ### Motion: every change to how something moves
 
@@ -85,11 +100,11 @@ inspector, which every native window answers (`clients/app/renderer/src/inspect.
 protocol). Find nodes by role and text, tap, type, `settle`, then `snap`, never a sleep:
 
 - Offscreen, the same on every run, with no network: `bun dist/build/app.js apps/<app>/client <out>` in `core/ui`
-  (after `bun build.js`), then `cargo run -p renderer --example screenshot -- <out> <png> <json>
+  (after `bun build.js`), then `cargo run -p renderer --example screenshot --features fake -- <out> <png> <json>
   --ui core/ui/dist/client --answers <answers.json> --requests <requests.jsonl>`, its header says how. Its clock is
   paused: `clock` `step` moves it.
 - On Windows (the Surface, `ssh surface`): build with `cargo xwin build --target x86_64-pc-windows-msvc` (the
-  harness as `--example screenshot`, the app as `-p app`) and copy it to a folder of your own in `%TEMP%`; the harness
+  harness as `--example screenshot --features fake`, the app as `-p app`) and copy it to a folder of your own in `%TEMP%`; the harness
   runs over ssh as it is (Direct3D 12 draws offscreen without a desktop). The app's windows need the logged-in
   session: start it there with a scheduled task (`schtasks /Create … /IT`, `conhost.exe --headless <a .cmd setting
   ONE_HOME>`), and a second `one.exe one:<app>` with the same `ONE_HOME`, even over ssh, hands it the link. A local

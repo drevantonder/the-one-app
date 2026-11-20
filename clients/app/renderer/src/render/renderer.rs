@@ -272,6 +272,25 @@ enum Target {
     Offscreen { texture: wgpu::Texture, view: wgpu::TextureView, readback: wgpu::Buffer, row: u32 },
 }
 
+/// An image `size` device pixels to draw into offscreen, and what it's read back through.
+fn offscreen_target(device: &wgpu::Device, (width, height): (u32, u32)) -> Target {
+    let texture = device.create_texture(&wgpu::TextureDescriptor {
+        label: None,
+        size: wgpu::Extent3d { width, height, depth_or_array_layers: 1 },
+        mip_level_count: 1,
+        sample_count: 1,
+        dimension: wgpu::TextureDimension::D2,
+        format: OFFSCREEN_FORMAT,
+        usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC | wgpu::TextureUsages::COPY_DST | wgpu::TextureUsages::TEXTURE_BINDING,
+        view_formats: &[],
+    });
+    let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
+    // A row of the copy is a multiple of 256 bytes.
+    let row = (width * 4).next_multiple_of(wgpu::COPY_BYTES_PER_ROW_ALIGNMENT);
+    let readback = device.create_buffer(&wgpu::BufferDescriptor { label: None, size: u64::from(row) * u64::from(height), usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ, mapped_at_creation: false });
+    Target::Offscreen { texture, view, readback, row }
+}
+
 /// The format an offscreen frame is drawn in: 8-bit RGBA, as a PNG's pixels are.
 pub(crate) const OFFSCREEN_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rgba8Unorm;
 
@@ -573,26 +592,7 @@ impl Renderer {
     /// A renderer that draws offscreen, `size` device pixels, read back by `read`.
     pub fn offscreen(context: &Context, atlas: Arc<Atlas>, size: Size<DevicePixels>) -> Self {
         let (width, height) = extent(size);
-        let texture = context.device.create_texture(&wgpu::TextureDescriptor {
-            label: None,
-            size: wgpu::Extent3d { width, height, depth_or_array_layers: 1 },
-            mip_level_count: 1,
-            sample_count: 1,
-            dimension: wgpu::TextureDimension::D2,
-            format: OFFSCREEN_FORMAT,
-            usage: wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC | wgpu::TextureUsages::COPY_DST | wgpu::TextureUsages::TEXTURE_BINDING,
-            view_formats: &[],
-        });
-        let view = texture.create_view(&wgpu::TextureViewDescriptor::default());
-        // A row of the copy is a multiple of 256 bytes.
-        let row = (width * 4).next_multiple_of(wgpu::COPY_BYTES_PER_ROW_ALIGNMENT);
-        let readback = context.device.create_buffer(&wgpu::BufferDescriptor {
-            label: None,
-            size: u64::from(row) * u64::from(height),
-            usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ,
-            mapped_at_creation: false,
-        });
-        Self::with_target(context, atlas, Target::Offscreen { texture, view, readback, row }, OFFSCREEN_FORMAT, false, (width, height))
+        Self::with_target(context, atlas, offscreen_target(&context.device, (width, height)), OFFSCREEN_FORMAT, false, (width, height))
     }
 
     /// A renderer drawing into `target`, from `atlas`, which every renderer on the context shares.
@@ -636,13 +636,19 @@ impl Renderer {
     /// The window's new size, in device pixels.
     pub fn update_drawable_size(&mut self, size: Size<DevicePixels>) {
         let size = extent(size);
-        if let Target::Surface { surface, config } = &mut self.target
-            && (config.width, config.height) != size
-        {
-            (config.width, config.height) = size;
-            self.reserved = None;
-            surface.configure(&self.device, config);
-            self.size = size;
+        match &mut self.target {
+            Target::Surface { surface, config } if (config.width, config.height) != size => {
+                (config.width, config.height) = size;
+                self.reserved = None;
+                surface.configure(&self.device, config);
+                self.size = size;
+            }
+            // An image drawn offscreen as a window would be (the fake platform's) is made again at its new size.
+            Target::Offscreen { .. } if self.size != size => {
+                self.target = offscreen_target(&self.device, size);
+                self.size = size;
+            }
+            _ => {}
         }
     }
 

@@ -42,7 +42,7 @@ pub(crate) struct Deadlines {
 impl Deadlines {
     /// A frame was shown, `late` or on time.
     pub(crate) fn frame(&mut self, late: bool) {
-        self.frame_at(Instant::now(), late);
+        self.frame_at(super::now(), late);
     }
 
     /// A frame was shown at `at`, `late` or on time: a window's frames now, the inspector's `replay` on its clock.
@@ -56,7 +56,7 @@ impl Deadlines {
     /// What the frames say: fair with one late, serious with a tenth of them late (at least three), critical with a
     /// quarter (at least six); a late frame counts for five seconds, so with nothing moving it eases by itself.
     pub(crate) fn pressure(&mut self) -> Pressure {
-        self.pressure_at(Instant::now())
+        self.pressure_at(super::now())
     }
 
     /// What the frames say at `now`, as `pressure`.
