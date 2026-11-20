@@ -91,11 +91,11 @@ function Inbox(props: { inbox: Inbox }) {
           <List each={props.inbox.notifications}>
             {(notification) => (
               <Row
-                start={<View style={[look.dot, !notification.read && look.blue]} />}
-                heading={<Text style={!notification.read && look.unread}>{notification.title}</Text>}
-                text={[notification.from, notification.text].filter(Boolean).join(" · ")}
-                end={since(notification.at, "narrow")}
-                onPress={() => tapped(notification)}
+                start={<View style={[look.dot, !notification().read && look.blue]} />}
+                heading={<Text style={!notification().read && look.unread}>{notification().title}</Text>}
+                text={[notification().from, notification().text].filter(Boolean).join(" · ")}
+                end={since(notification().at, "narrow")}
+                onPress={() => tapped(notification())}
               />
             )}
           </List>

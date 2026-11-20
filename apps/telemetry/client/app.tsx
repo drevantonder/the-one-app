@@ -300,9 +300,9 @@ function Spending(props: { days: Spent[] }) {
         <List each={models()}>
           {(model) => (
             <Row
-              heading={model.model}
-              text={[`${count(model.input)} in`, `${count(model.output)} out`, model.cost != null && dollars(model.cost)].filter(Boolean).join(" · ")}
-              end={<Show when={model.days.length > 1}><Spark values={model.days} /></Show>}
+              heading={model().model}
+              text={[`${count(model().input)} in`, `${count(model().output)} out`, model().cost != null && dollars(model().cost!)].filter(Boolean).join(" · ")}
+              end={<Show when={model().days.length > 1}><Spark values={model().days} /></Show>}
             />
           )}
         </List>

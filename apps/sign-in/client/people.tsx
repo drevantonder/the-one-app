@@ -228,11 +228,11 @@ function GroupScreen(props: { group: Group; all: All }) {
         <List each={props.group.members}>
           {(member) => (
             <Row
-              heading={props.all.named(member)}
-              text={props.group.owners.includes(member) ? "Owner" : undefined}
+              heading={props.all.named(member())}
+              text={props.group.owners.includes(member()) ? "Owner" : undefined}
               end={
-                <Show when={owns() && member !== props.all.me}>
-                  <Button variant="ghost" size="icon" aria-label={`Remove ${props.all.named(member)}`} onPress={() => remove(member)}>
+                <Show when={owns() && member() !== props.all.me}>
+                  <Button variant="ghost" size="icon" aria-label={`Remove ${props.all.named(member())}`} onPress={() => remove(member())}>
                     <Icon name="trash" />
                   </Button>
                 </Show>

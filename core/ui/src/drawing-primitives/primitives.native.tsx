@@ -2,7 +2,7 @@
 // (renderer.ts's `Props`), which Solid's universal renderer tells the host as mutations (renderer.native.ts). The UI
 // library's components import them as `#primitives`, which is these in the native build and the DOM's (primitives.tsx)
 // in the DOM's, so each component is the same code on both.
-import { createContext, createSignal, merge, omit, onCleanup, onSettled, Repeat, Show, useContext, type Element } from "solid-js"
+import { createContext, createMemo, createRoot, createSignal, getOwner, merge, omit, onCleanup, onSettled, Repeat, runWithOwner, Show, untrack, useContext, type Element } from "solid-js"
 import { tellDrawn } from "../bridge.native.ts"
 import { createElement, detach, insert, insertNode, render as draw, root, spread, unsupported } from "./renderer.native.ts"
 import { layer } from "./layer.ts"
@@ -122,21 +122,92 @@ export const Frame: typeof Page.Frame = (props) => {
 /** How many rows a `list` has before its host first asks for some: a window's. */
 const FIRST_ROWS = 24
 
+/** How many rows a `list` fills a frame at most as it's scrolled, those that show first, as RecyclerView's prefetch
+ * spreads its work over frames: a fling's frames keep their time, and a row is filled frames before it shows. A row
+ * reused costs what it says changing; one made, its whole making, so one a frame at most is made. */
+const PER_FRAME = 4
+
+/** A row of a `list`, kept as it goes out of the range and reused for one coming into it (`VirtualizedList`): its
+ * index, and what it's drawn as. */
+type Cell = { at: () => number; place: (index: number) => void; box: Element; dispose: () => void }
+
 /** A list of rows of which only those near the window are drawn, as the host asks for them (renderer.ts's `list`): the
- * host lays them out and owns where it is, and the page draws only the rows it's asked for, each as its index comes
- * into the range and gone as it leaves it. A host that doesn't draw one draws every row in a box. */
+ * host lays them out and owns where it is, and the page fills only the rows it's asked for, those that show first, a
+ * few a frame, each from a row that's gone out of the range where there's one, as RecyclerView and FlashList recycle
+ * theirs: its item changes, so a row isn't made again, only what it says. A host that doesn't draw one draws every
+ * row in a box. */
 export const VirtualizedList: typeof Page.VirtualizedList = (props) => {
   const rest = () => omit(props, "data", "renderItem", "estimatedItemSize")
-  const row = (index: number) => props.renderItem({ get item() { return props.data[index] }, index })
-  if (!(globalThis as { mutations?: Mutations }).mutations?.list) {
+  /** What `renderItem` is told of row `index`, as it changes. */
+  const info = (index: () => number) => ({
+    get item() {
+      return props.data[index()]
+    },
+    get index() {
+      return index()
+    },
+  })
+  if (Number((globalThis as { mutations?: Mutations }).mutations?.list ?? 0) < 2) {
     const node = createElement("box")
     spread(node, rest())
-    insert(node, () => <Repeat count={props.data.length}>{row}</Repeat>)
+    insert(node, () => <Repeat count={props.data.length}>{(index) => props.renderItem(info(() => index))}</Repeat>)
     return node as unknown as Element
   }
-  const [range, setRange] = createSignal({ first: 0, last: FIRST_ROWS })
-  const last = () => Math.min(range().last, props.data.length)
-  const first = () => Math.min(range().first, last())
+  const owner = getOwner()
+  const [cells, setCells] = createSignal<Cell[]>([])
+  /** A row, made under the list, so it has what the list's in (its style, a listbox), and drawn only while its index
+   * is one of the list's. */
+  const cell = (index: number): Cell =>
+    runWithOwner(owner, () =>
+      createRoot((dispose) => {
+        const [at, place] = createSignal(index)
+        const box = createElement("box")
+        spread(box, {
+          get index() {
+            return at()
+          },
+        })
+        const there = createMemo(() => at() < props.data.length)
+        insert(box, () => (there() ? untrack(() => props.renderItem(info(at))) : null))
+        return { at, place: (index: number) => void place(index), box: box as unknown as Element, dispose }
+      }),
+    )
+  let wanted = { first: 0, last: FIRST_ROWS, shownFirst: 0, shownLast: FIRST_ROWS }
+  let waiting = false
+  /// The rows it's asked for that it hasn't, filled the next frame, as its display draws it.
+  const soon = () => {
+    if (waiting) return
+    waiting = true
+    requestAnimationFrame(() => ((waiting = false), fill(PER_FRAME, 1)))
+  }
+  /// Fills the rows it's asked for that it hasn't (`most` of them, those that show first, then those nearest them),
+  /// each from a row out of the range where there's one, making `making` at most; the rest the next frame.
+  const fill = (most: number, making: number) => {
+    const count = props.data.length
+    const [first, last] = [Math.min(wanted.first, count), Math.min(wanted.last, count)]
+    const all = cells()
+    const held = new Set(all.map((one) => one.at()))
+    const away = (index: number) => Math.max(0, wanted.shownFirst - index, index - wanted.shownLast + 1)
+    const missing = Array.from({ length: last - first }, (_, at) => first + at).filter((index) => !held.has(index)).sort((a, b) => away(a) - away(b))
+    const free = all.filter((one) => one.at() < first || one.at() >= last)
+    const made: Cell[] = []
+    let filled = 0
+    for (const index of missing) {
+      const reused = free.pop()
+      if (reused) reused.place(index)
+      else if (made.length < making) made.push(cell(index))
+      else break
+      if (++filled === most) break
+    }
+    // What the range no longer needs, as it shrinks, goes, but a frame's worth kept for the next.
+    const extra = free.slice(PER_FRAME)
+    if (made.length || extra.length) {
+      extra.forEach((one) => one.dispose())
+      setCells([...all.filter((one) => !extra.includes(one)), ...made])
+    }
+    if (missing.length > filled) soon()
+  }
+  fill(FIRST_ROWS, FIRST_ROWS)
   const node = createElement("list")
   spread(
     node,
@@ -147,19 +218,13 @@ export const VirtualizedList: typeof Page.VirtualizedList = (props) => {
       get estimate() {
         return props.estimatedItemSize
       },
-      onRange: (event: { first: number; last: number }) => setRange({ first: event.first, last: event.last }),
+      onRange: (event: { first: number; last: number; shownFirst?: number; shownLast?: number }) => {
+        wanted = { first: event.first, last: event.last, shownFirst: event.shownFirst ?? event.first, shownLast: event.shownLast ?? event.last }
+        soon()
+      },
     }),
   )
-  insert(node, () => (
-    <Repeat count={last() - first()} from={first()}>
-      {(index) => {
-        const box = createElement("box")
-        spread(box, { index })
-        insert(box, () => row(index))
-        return box as unknown as Element
-      }}
-    </Repeat>
-  ))
+  insert(node, () => cells().map((one) => one.box))
   return node as unknown as Element
 }
 

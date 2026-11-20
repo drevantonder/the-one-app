@@ -64,10 +64,12 @@ export type Id = number
  *   as any box does. Only a trusted app's page shows one. A host that doesn't draw it says so (`Mutations.frame`).
  * - `list`: a column of `count` rows of which the page gives only those the host asks for, each a node with its
  *   `index`, as UIKit's collection view and Android's RecyclerView hold only those near the window: it's as tall as all
- *   of them, the host laying out those it has in their order and holding the room of the rest, as tall as those it has
- *   drawn are on average (`estimate` until it's drawn one), and as it's scrolled, it says `range` with the rows a
- *   window either side of what shows (`first`, and `last`, which isn't one), so a fling finds them drawn. A host that
- *   doesn't draw it says so (`Mutations.list`), and the page draws every row in a `box`.
+ *   of them, the host laying each it has at its own place, those it hasn't as tall as those it has drawn are on
+ *   average (`estimate` until it's drawn one), so a page may reuse a row going out of sight for one coming into it,
+ *   changing its `index`. As it's scrolled it says `range` with the rows it needs (`first`, and `last`, which isn't
+ *   one), half a window behind what shows to two ahead the way it's going, so a fling finds them drawn, and which of
+ *   them show (`shownFirst`, `shownLast`). A host that doesn't draw it says so (`Mutations.list`), and the page draws
+ *   every row in a `box`.
  * A `raw-text` outside a `text` is drawn as if in one. */
 export type Type = "box" | "scroll" | "text" | "image" | "path" | "input" | "picker" | "video" | "frame" | "list" | "raw-text"
 
@@ -95,8 +97,9 @@ export interface Mutations {
   video?: boolean
   /** Whether it draws a `frame`, as `video`. */
   frame?: boolean
-  /** Whether it draws a `list`. */
-  list?: boolean
+  /** Which `list` it draws: 2 lays each row at its own place, so a page may reuse rows; one before (`true`) laid them
+   * out as a run, and is drawn every row of in a `box`. */
+  list?: boolean | number
 }
 
 /** What the UI library gives the host, as `globalThis.ui` (with calls.ts's `Sandbox`), once it's loaded. */
@@ -125,9 +128,12 @@ export interface Event {
   scrollLeft?: number
   /** `intersection`'s: whether it's near the window now. */
   isIntersecting?: boolean
-  /** A `list`'s `range`: the rows it needs, from `first` to `last`, which isn't one. */
+  /** A `list`'s `range`: the rows it needs, from `first` to `last`, which isn't one, and which of them show, from
+   * `shownFirst` to `shownLast`. */
   first?: number
   last?: number
+  shownFirst?: number
+  shownLast?: number
   /** When it happened, in milliseconds on the host's own clock, which `requestAnimationFrame` is on too. */
   timeStamp?: number
   /** A pointer's, `contextmenu`'s and `click`'s: where it is in the window, in CSS pixels. */

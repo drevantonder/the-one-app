@@ -19,7 +19,7 @@ const Rows = () => {
           Remove Row
         </Button>
       </View>
-      <List each={notes()}>{(note) => <Row heading={note} />}</List>
+      <List each={notes()}>{(note) => <Row heading={note()} />}</List>
     </View>
   )
 }
@@ -84,6 +84,6 @@ export default {
   "Lists/Rows coming and going": () => <Rows />,
   "Lists/A row added": { render: () => <Rows />, taps: ["Add Row"] },
   "Lists/A long list": () => (
-    <List each={Array.from({ length: 10000 }, (_, at) => `Note ${at + 1}`)}>{(note) => <Row heading={note} text="19 Nov" />}</List>
+    <List each={Array.from({ length: 10000 }, (_, at) => `Note ${at + 1}`)}>{(note) => <Row heading={note()} text="19 Nov" />}</List>
   ),
 } satisfies Scenes

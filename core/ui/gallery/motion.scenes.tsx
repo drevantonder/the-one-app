@@ -49,6 +49,6 @@ export default {
       Flung: { from: { x: 195, y: 600 }, gesture: { fling: [0, -300] } },
       "Pulled past its top": { from: { x: 195, y: 300 }, gesture: { swipe: [0, 240], speed: 800 } },
     },
-    render: () => <List each={notes}>{(note) => <Row heading={note} />}</List>,
+    render: () => <List each={notes}>{(note) => <Row heading={note()} />}</List>,
   },
 } satisfies Scenes

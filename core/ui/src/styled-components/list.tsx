@@ -183,14 +183,15 @@ const InListbox = createContext(false)
 
 /// `<List><Row heading="Notes" /><Row heading="Reminders" /></List>`: things of one kind, one under another, in one
 /// group that stops at a readable width however wide the room is. With no rows it shows nothing.
-/// `<List each={notes()} keyed={(note) => note.id}>{(note) => <Row heading={note.text} />}</List>`: a row for each
+/// `<List each={notes()} keyed={(note) => note.id}>{(note) => <Row heading={note().text} />}</List>`: a row for each
 /// item, as `For` draws them, drawn only as it comes near the window, as UIKit's and Android's lists and FlashList
 /// draw them (`VirtualizedList`), so 10,000 are as quick as 20. A row added to a list that has some opens up where it
 /// goes, and one taken out closes up, the rest making room or closing the gap, at the settle pace; for whoever asked
 /// for less motion a new row fades in and one taken out just goes. A list that changes in any other way (filled, a
 /// row changed for another) just shows what it's given. Its rows are its items, by `keyed` (as `For`'s), by
-/// themselves where it says none.
-export function List<T>(props: { listbox?: Listbox; label?: string; each?: readonly T[]; keyed?: (item: T) => unknown; children?: JSX.Element | ((item: any, index: () => number) => JSX.Element) }) {
+/// themselves where it says none, and each is given its item as an accessor, `(note) => <Row heading={note().text} />`,
+/// as a row going out of sight is reused for one coming into it, as RecyclerView's are.
+export function List<T>(props: { listbox?: Listbox; label?: string; each?: readonly T[]; keyed?: (item: T) => unknown; children?: JSX.Element | ((item: () => T, index: () => number) => JSX.Element) }) {
   const style = useContext(ListStyle)
   // On a computer a plain list and a sidebar are rows on the window; grouped cards are cards there too.
   const flat = () => !touch() && style !== "insetGrouped"
@@ -200,14 +201,18 @@ export function List<T>(props: { listbox?: Listbox; label?: string; each?: reado
   const values = (): readonly unknown[] => (each ? (props.each ?? []) : rows!.toArray())
   const { slots, laid } = createSlots(values, (value) => (each && props.keyed ? props.keyed(value as T) : value))
   createEffect(() => slots().filter((one) => one.state() !== "going").length, (count) => void (props.listbox && insides.get(props.listbox)!.rows(count)))
-  /// A row, held as it opens up or closes up, and as a listbox's option, by where it is in the list.
-  const slotted = (one: Slot<unknown>, at: () => number) => {
-    // As `For` gives its rows: an item by itself, or one by its key as an accessor, as it changes.
-    const row = props.children as (item: T | (() => T), index: () => number) => JSX.Element
-    const node = each ? row(props.keyed ? (one.value as () => T) : (one.value() as T), at) : (one.value() as JSX.Element)
-    const measured = (event: { currentTarget: { getBoundingClientRect(): { height: number } } }) => laid(one, event.currentTarget.getBoundingClientRect().height)
+  /// A row, held as it opens up or closes up, and as a listbox's option, by where it is in the list. In a long list a
+  /// row is reused for another as it goes out of sight (`VirtualizedList`), so what it shows is its slot as that changes
+  /// (`one`), and `each`'s rows are given their item as an accessor, as `For`'s are by a key.
+  const slotted = (one: () => Slot<unknown>, at: () => number) => {
+    const node = each ? (props.children as (item: () => T, index: () => number) => JSX.Element)(() => one().value() as T, at) : (one().value() as JSX.Element)
+    // How tall it was laid out, which a slot it's given as it's reused is told too: its height didn't change, so no
+    // layout says so.
+    let height: number | undefined
+    const measured = (event: { currentTarget: { getBoundingClientRect(): { height: number } } }) => laid(one(), (height = event.currentTarget.getBoundingClientRect().height))
+    createEffect(one, (slot) => void (height !== undefined && laid(slot, height)))
     return (
-      <View style={[look.slot, one.state() === "coming" && look.entering, one.state() === "going" && look.leaving, one.to() !== undefined && look.tall(one.to()!)]}>
+      <View style={[look.slot, one().state() === "coming" && look.entering, one().state() === "going" && look.leaving, one().to() !== undefined && look.tall(one().to()!)]}>
         <Show when={props.listbox} fallback={<View onLayout={measured}>{node}</View>}>
           {(listbox) => (
             <View
@@ -232,7 +237,7 @@ export function List<T>(props: { listbox?: Listbox; label?: string; each?: reado
           when={each}
           fallback={
             <View style={[look.rows, flat() && look.flatRows]}>
-              <For each={slots()}>{(one, at) => slotted(one, at)}</For>
+              <For each={slots()}>{(one, at) => slotted(() => one, at)}</For>
             </View>
           }
         >
@@ -240,11 +245,7 @@ export function List<T>(props: { listbox?: Listbox; label?: string; each?: reado
             <VirtualizedList
               style={[look.rows, flat() && look.flatRows]}
               data={slots()}
-              renderItem={(row) => (
-                <Show when={row.item} keyed>
-                  {(one) => slotted(one, () => row.index)}
-                </Show>
-              )}
+              renderItem={(row) => slotted(() => row.item, () => row.index)}
             />
           </InListbox>
         </Show>

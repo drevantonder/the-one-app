@@ -1101,36 +1101,20 @@ impl Screen {
         }
         painter.layout.place_fixed(painter.tree);
         let available = taffy::geometry::Size { width: AvailableSpace::Definite(window.size.width), height: AvailableSpace::Definite(window.size.height) };
-        let Painter { layout, text, .. } = &mut painter;
         let laying_out = Instant::now();
-        let measured = layout.taffy.compute_layout_with_measure(root, available, |input, _, leaf, style| {
-            // A node with nothing under it is its style's size, or its padding and border around what it measures (a
-            // text's words, an input's lines), as CSS has them; `space` is the room for that content, inside them.
-            taffy::compute_leaf_layout(input, style, |_, _| 0.0, |_, space| {
-                let Some(Leaf { measure: Some(measure), .. }) = leaf else {
-                    return taffy::geometry::Size::ZERO;
-                };
-                let width = match space.width {
-                    AvailableSpace::Definite(width) => Some(width),
-                    AvailableSpace::MinContent => Some(0.0),
-                    AvailableSpace::MaxContent => None,
-                };
-                let size = match measure {
-                    Measure::Text { words, runs, text: style, lines } => text.paragraph(words, &style.style, runs, width.filter(|_| style.wrap), *lines).size(),
-                    Measure::Input { words, text: style, multiline } => {
-                        let paragraph = text.paragraph(words, &style.style, &[], multiline.then_some(width).flatten(), None);
-                        Size { width: if *multiline { paragraph.size().width } else { 0.0 }, height: paragraph.size().height }
-                    }
-                    Measure::Frame { height } => Size { width: width.unwrap_or(300.0), height: height.unwrap_or(150.0) },
-                };
-                taffy::geometry::Size { width: size.width.ceil(), height: size.height }
-            })
-        });
-        self.cost.layout = laying_out.elapsed();
-        // A list's rows laid out as other than it held room for are held for as they are in the next frame.
-        if painter.layout.measure_lists(painter.tree) {
-            self.again = true;
+        let mut measured = lay_out(painter.layout, painter.text, root, available);
+        // A list's rows laid out as other than it placed them for (a row grown, or one it hadn't drawn) are placed again
+        // as they are, and laid out again, in this frame, as rows in a column would be.
+        if measured.is_ok() && painter.layout.measure_lists(painter.tree) {
+            for id in painter.layout.lists.iter().filter(|(_, listed)| listed.stale).map(|(id, _)| *id).collect::<Vec<_>>() {
+                if let Some(node) = painter.tree.nodes.get(&id) {
+                    painter.layout.hold(id, node, painter.tree);
+                }
+            }
+            measured = lay_out(painter.layout, painter.text, root, available);
+            self.again |= painter.layout.measure_lists(painter.tree);
         }
+        self.cost.layout = laying_out.elapsed();
         match measured {
             Err(error) => log::error!("its layout failed: {error}"),
             Ok(()) => {
@@ -2076,6 +2060,33 @@ impl Screen {
 
 /// Files the device gave a page, as it's told them: each one's name, and its bytes as base64, the only way a file
 /// crosses its JSON channel. One that can't be read is left out, saying why.
+/// Lays `layout` out from `root` in `available`, measuring a text's words and an input's lines with `text`, as CSS
+/// sizes what has nothing in it: its style's size, or its padding and border around what it measures.
+fn lay_out(layout: &mut Retained, text: &mut TextSystem, root: NodeId, available: taffy::geometry::Size<AvailableSpace>) -> Result<(), taffy::TaffyError> {
+    layout.taffy.compute_layout_with_measure(root, available, |input, _, leaf, style| {
+        // `space` is the room for its content, inside its padding and border.
+        taffy::compute_leaf_layout(input, style, |_, _| 0.0, |_, space| {
+            let Some(Leaf { measure: Some(measure), .. }) = leaf else {
+                return taffy::geometry::Size::ZERO;
+            };
+            let width = match space.width {
+                AvailableSpace::Definite(width) => Some(width),
+                AvailableSpace::MinContent => Some(0.0),
+                AvailableSpace::MaxContent => None,
+            };
+            let size = match measure {
+                Measure::Text { words, runs, text: style, lines } => text.paragraph(words, &style.style, runs, width.filter(|_| style.wrap), *lines).size(),
+                Measure::Input { words, text: style, multiline } => {
+                    let paragraph = text.paragraph(words, &style.style, &[], multiline.then_some(width).flatten(), None);
+                    Size { width: if *multiline { paragraph.size().width } else { 0.0 }, height: paragraph.size().height }
+                }
+                Measure::Frame { height } => Size { width: width.unwrap_or(300.0), height: height.unwrap_or(150.0) },
+            };
+            taffy::geometry::Size { width: size.width.ceil(), height: size.height }
+        })
+    })
+}
+
 pub(crate) fn files_told(files: &[std::path::PathBuf]) -> Vec<Value> {
     let told = |file: &std::path::PathBuf| -> anyhow::Result<Value> {
         let name = file.file_name().map(|name| name.to_string_lossy().into_owned()).unwrap_or_default();

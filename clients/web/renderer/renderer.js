@@ -73,7 +73,7 @@
         drop: (/** @type {number} */ id) => (streams.dropped(id), renderer.drop(id)),
         unsupported: renderer.unsupported,
         frame: false,
-        list: true,
+        list: 2,
         video: true,
       },
       host: { post: (/** @type {object} */ message) => renderer.post(JSON.stringify(message)) },

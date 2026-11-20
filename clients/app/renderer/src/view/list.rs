@@ -1,15 +1,18 @@
 //! A `list` (`tree::Kind::List`): a column of `count` rows of which its page gives only those near the window, each by
 //! its `index`, as UIKit's collection view and Android's RecyclerView hold only those, so a list of 10,000 is as quick
-//! as one of 20. The renderer owns where it is: it lays the rows it has out in their order, holds the room of those
-//! before and after them as its padding (each row it has drawn as tall as it was, the rest as tall as the drawn ones
-//! are on average, its `estimate` until there's one), and as it's scrolled, asks its page for the rows a window
-//! either side of what shows (`range`, `{first, last}`, the last not included), as FlashList's draw distance has it,
-//! so a fling finds them drawn.
+//! as one of 20. The renderer owns where it is: it's as tall as all its rows, and lays each it has at its own place, as
+//! a collection view's layout does (each row it has drawn as tall as it was, the rest as tall as the drawn ones are on
+//! average, its `estimate` until there's one), so the rows it has needn't be a run: a page reuses a row going out of
+//! sight for one coming into it, as RecyclerView does. As it's scrolled it asks its page for the rows it needs
+//! (`range`, the last not included): from half a window behind what shows to two ahead of it, the way it's going, so
+//! a fling's are drawn before they show, or a window and a quarter each way while it's still, as many rows, so the
+//! rows a page made while it was still are all a fling needs; and which of them show (`shownFirst`, `shownLast`), which
+//! a page fills first.
 
 use std::collections::HashMap;
 
 use serde_json::json;
-use taffy::prelude::LengthPercentage;
+use taffy::prelude::{Dimension, LengthPercentageAuto, Position};
 
 use super::Screen;
 use super::paint::Retained;
@@ -28,11 +31,11 @@ pub(super) fn index(node: &Node) -> usize {
 pub(crate) struct Listed {
     /// How tall each row it has drawn was, by its index.
     heights: HashMap<usize, f32>,
-    /// The room it holds before and after the rows it has, as its padding.
-    padding: (f32, f32),
-    /// The rows it last asked its page for.
-    told: Option<(usize, usize)>,
-    /// A row's height changed, so its padding is worked out again in the next frame.
+    /// The rows it last asked its page for, and which of them showed: first, last, shown first, shown last.
+    told: Option<[usize; 4]>,
+    /// Where it was in the window as it last asked, which says the way it's moving.
+    was: Option<f32>,
+    /// A row's height changed, so its rows are placed again in the next frame.
     pub(super) stale: bool,
 }
 
@@ -61,27 +64,39 @@ impl Listed {
 }
 
 impl Retained {
-    /// Holds list `id`'s room before and after the rows it has as its padding, which its style (styled again or not)
-    /// is given here, every frame it's built.
+    /// Lays list `id` out as tall as all its rows, and each row it has at its own place in it, absolutely, which their
+    /// styles (styled again or not) are given here, every frame it's built.
     pub(super) fn hold(&mut self, id: Id, node: &Node, tree: &Tree) {
         let Some(kept) = self.kept.get(&id) else { return };
         let listed = self.lists.entry(id).or_default();
         let (count, estimate) = Listed::rows(node, &listed.heights);
         listed.heights.retain(|row, _| *row < count);
         let offsets = listed.offsets(count, estimate);
-        let rows: Vec<usize> = kept.children.iter().filter_map(|child| tree.nodes.get(child)).map(index).filter(|row| *row < count).collect();
-        let (first, last) = match (rows.iter().min(), rows.iter().max()) {
-            (Some(first), Some(last)) => (*first, last + 1),
-            _ => listed.told.map_or((0, 0), |(first, _)| (first.min(count), first.min(count))),
-        };
-        listed.padding = (offsets[first], offsets[count] - offsets[last]);
         listed.stale = false;
-        let (top, bottom) = listed.padding;
-        let Ok(style) = self.taffy.style(kept.node) else { return };
-        if style.padding.top != LengthPercentage::length(top) || style.padding.bottom != LengthPercentage::length(bottom) {
-            let mut style = style.clone();
-            (style.padding.top, style.padding.bottom) = (LengthPercentage::length(top), LengthPercentage::length(bottom));
-            self.taffy.set_style(kept.node, style).expect("taffy takes any style");
+        let rows: Vec<(taffy::NodeId, f32)> = kept
+            .children
+            .iter()
+            .filter_map(|child| Some((self.kept.get(child)?.node, offsets[index(tree.nodes.get(child)?).min(count)])))
+            .collect();
+        let (list, tall) = (kept.node, offsets[count]);
+        // It's what its rows are placed in, as a box positioned in CSS is what what's absolute in it is placed in.
+        self.restyle_as(list, |style| (style.position, style.size.height) = (Position::Relative, Dimension::length(tall)));
+        for (row, top) in rows {
+            self.restyle_as(row, |style| {
+                style.position = Position::Absolute;
+                style.inset.top = LengthPercentageAuto::length(top);
+                (style.inset.left, style.inset.right) = (LengthPercentageAuto::length(0.0), LengthPercentageAuto::length(0.0));
+            });
+        }
+    }
+
+    /// Changes Taffy node `node`'s style as `change` does, telling Taffy only where that's a change.
+    fn restyle_as(&mut self, node: taffy::NodeId, change: impl FnOnce(&mut taffy::Style)) {
+        let Ok(style) = self.taffy.style(node) else { return };
+        let mut changed = style.clone();
+        change(&mut changed);
+        if changed != *style {
+            self.taffy.set_style(node, changed).expect("taffy takes any style");
         }
     }
 
@@ -110,8 +125,9 @@ impl Screen {
         self.layout.lists.iter().filter(|(_, listed)| listed.stale).map(|(id, _)| *id).collect()
     }
 
-    /// Asks each list that listens for `range` for the rows a window either side of what shows of it, where that's
-    /// changed, as it was drawn in a window `height` tall.
+    /// Asks each list that listens for `range` for the rows it needs, as it was drawn in a window `height` tall, where
+    /// that's changed: from half a window behind what shows to two ahead, the way it's moving, or a window and a
+    /// quarter each way.
     pub(super) fn ask_lists(&mut self, height: f32) {
         let mut asks = Vec::new();
         for (id, listed) in &mut self.layout.lists {
@@ -121,17 +137,25 @@ impl Screen {
             }
             let (count, estimate) = Listed::rows(node, &listed.heights);
             let offsets = listed.offsets(count, estimate);
-            // What shows of it, from its top, a window either side.
-            let (from, to) = (-rect.y - height, -rect.y + 2.0 * height);
-            let first = offsets.partition_point(|start| *start <= from).saturating_sub(1).min(count);
-            let last = offsets.partition_point(|start| *start < to).min(count).max(first);
-            if listed.told != Some((first, last)) {
-                listed.told = Some((first, last));
-                asks.push((*id, first, last));
+            let starting = |at: f32| offsets.partition_point(|start| *start <= at).saturating_sub(1).min(count);
+            let ending = |at: f32| offsets.partition_point(|start| *start < at).min(count);
+            // What shows of it, from its top, and the way it's going: up the window (on down the list), or down it.
+            let (top, bottom) = (-rect.y, -rect.y + height);
+            let (behind, ahead) = match listed.was.map(|was| rect.y - was) {
+                Some(moved) if moved < -0.5 => (height / 2.0, 2.0 * height),
+                Some(moved) if moved > 0.5 => (2.0 * height, height / 2.0),
+                _ => (1.25 * height, 1.25 * height),
+            };
+            listed.was = Some(rect.y);
+            let (first, shown) = (starting(top - behind), starting(top));
+            let told = [first, ending(bottom + ahead).max(first), shown, ending(bottom).max(shown)];
+            if listed.told != Some(told) {
+                listed.told = Some(told);
+                asks.push((*id, told));
             }
         }
-        for (id, first, last) in asks {
-            self.tell(id, "range", json!({"first": first, "last": last}));
+        for (id, [first, last, shown_first, shown_last]) in asks {
+            self.tell(id, "range", json!({"first": first, "last": last, "shownFirst": shown_first, "shownLast": shown_last}));
         }
     }
 }

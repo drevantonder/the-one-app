@@ -438,7 +438,7 @@ function ItemScreen(props: { item: Item }) {
       </Section>
       <Section heading={item().hosts.length === 1 ? "Website" : "Websites"}>
         <Show when={item().hosts.length} fallback={<Empty>None: its secrets go nowhere.</Empty>}>
-          <List each={item().hosts}>{(host) => <Row heading={host} />}</List>
+          <List each={item().hosts}>{(host) => <Row heading={host()} />}</List>
         </Show>
       </Section>
       <Section heading="Access">
@@ -762,9 +762,9 @@ function SecurityScreen() {
           <List each={security().may}>
             {(server) => (
               <Row
-                heading={server.name ?? "A server"}
-                text={security().servers.includes(server.key) ? `Opens ${whom()} Vault` : undefined}
-                end={<Switch aria-label={server.name ?? "A server"} value={security().servers.includes(server.key)} disabled={!security().holds} onValueChange={(on) => choose(server.key, on)} />}
+                heading={server().name ?? "A server()"}
+                text={security().servers.includes(server().key) ? `Opens ${whom()} Vault` : undefined}
+                end={<Switch aria-label={server().name ?? "A server()"} value={security().servers.includes(server().key)} disabled={!security().holds} onValueChange={(on) => choose(server().key, on)} />}
               />
             )}
           </List>

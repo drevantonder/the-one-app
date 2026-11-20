@@ -41,7 +41,7 @@ defmodule Vault do
   @impl true
   def requires do
     %{
-      "core" => ">= 0.32.107",
+      "core" => ">= 0.32.167",
       "encryption" => "to keep your secrets from whoever runs the bucket",
       "database" => "to keep your items",
       "notifications" => "to tell you when an agent saves something to your Vault"

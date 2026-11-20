@@ -156,10 +156,10 @@ function GitRepos() {
         <List each={repos()}>
           {(repo) => (
             <Row
-              heading={short(repo.repo)}
-              text={`${short(repo.whose)} · ${repo.pushed ? `Pushed ${since(repo.pushed)}` : "Empty"}`}
-              current={repo.repo === open()}
-              onPress={() => go(() => (setAt({ tab: "code", path: "" }), setRef(), setOpen(repo.repo)))}
+              heading={short(repo().repo)}
+              text={`${short(repo().whose)} · ${repo().pushed ? `Pushed ${since(repo().pushed!)}` : "Empty"}`}
+              current={repo().repo === open()}
+              onPress={() => go(() => (setAt({ tab: "code", path: "" }), setRef(), setOpen(repo().repo)))}
             />
           )}
         </List>
@@ -557,7 +557,7 @@ function History(props: { repo: string; branch: string }) {
   return (
     <Show when={!at().commit} fallback={<CommitScreen repo={props.repo} sha={at().commit!} />}>
       <Show when={commits().length} fallback={<Empty>No commits yet.</Empty>}>
-        <List each={commits()}>{(commit) => <Row heading={commit.subject} text={`${commit.author} · ${since(commit.at)} · ${commit.sha.slice(0, 7)}`} onPress={() => to({ tab: "history", commit: commit.sha })} />}</List>
+        <List each={commits()}>{(commit) => <Row heading={commit().subject} text={`${commit().author} · ${since(commit().at)} · ${commit().sha.slice(0, 7)}`} onPress={() => to({ tab: "history", commit: commit().sha })} />}</List>
         <Show when={log().at(-1)!.more}>
           <Button variant="outline" onPress={() => setPages(pages() + 1)}>
             Older
@@ -616,15 +616,15 @@ function PullRequests(props: { repo: string; pushes: boolean }) {
           <List each={open()}>
             {(one) => (
               <Row
-                heading={one.title}
-                text={line(one)}
+                heading={one().title}
+                text={line(one())}
                 end={
                   <Show when={props.pushes}>
                     <View style={look.actions}>
-                      <Button variant="secondary" onPress={() => merge(one)}>
+                      <Button variant="secondary" onPress={() => merge(one())}>
                         Merge
                       </Button>
-                      <Button variant="ghost" onPress={() => close(one)}>
+                      <Button variant="ghost" onPress={() => close(one())}>
                         Close
                       </Button>
                     </View>
@@ -637,7 +637,7 @@ function PullRequests(props: { repo: string; pushes: boolean }) {
       </Show>
       <Show when={closed().length}>
         <Section heading="Closed">
-          <List each={closed()}>{(one) => <Row heading={one.title} text={`${one.state === "merged" ? "Merged" : "Closed"} · ${line(one)}`} />}</List>
+          <List each={closed()}>{(one) => <Row heading={one().title} text={`${one().state === "merged" ? "Merged" : "Closed"} · ${line(one())}`} />}</List>
         </Section>
       </Show>
     </Show>
