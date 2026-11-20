@@ -30,11 +30,6 @@ const held = new FinalizationRegistry<number>((id) => {
 /** The root the host gives: the app's window, or its frame. */
 export const root: Node = { id: 0, type: "box", children: [], handlers: {} }
 
-/** Tells the host the page uses `what`, which it doesn't draw yet, so it opens the page another way. */
-export function unsupported(what: string) {
-  mutations.unsupported(what)
-}
-
 function node(type: Type, value?: string): Node {
   const made: Node = { id: next++, type, children: [], handlers: {} }
   nodes.set(made.id, new WeakRef(made))

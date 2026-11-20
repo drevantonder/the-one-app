@@ -4,13 +4,15 @@
 // in the DOM's, so each component is the same code on both.
 import { createContext, createMemo, createRoot, createSignal, getOwner, merge, omit, onCleanup, onSettled, Repeat, runWithOwner, Show, untrack, useContext, type Element } from "solid-js"
 import { tellDrawn } from "../bridge.native.ts"
-import { createElement, detach, insert, insertNode, render as draw, root, spread, unsupported } from "./renderer.native.ts"
+import { createElement, detach, insert, insertNode, render as draw, root, spread } from "./renderer.native.ts"
 import { layer } from "./layer.ts"
 import type { Mutations, Type } from "./renderer.ts"
 import type * as Page from "../types/ui.d.ts"
 import type { PickerProps } from "./primitives.tsx"
 import { options, renamed } from "./props.ts"
 import { styles } from "../styles.ts"
+import { Problem } from "../styled-components/states.tsx"
+import { messages } from "../words.ts"
 
 /** A primitive: a node of its type, with its props. */
 const primitive = (type: Exclude<Type, "raw-text">) => (props: object) => {
@@ -100,23 +102,25 @@ export const Picker = Object.assign(
   { Item: (props: { label: string; value: string; enabled?: boolean }) => props as unknown as Element },
 )
 
+/** A part of the UI library this host doesn't draw yet (`what`, renderer.ts's `Mutations`), in its place: a problem
+ * saying so, which Telemetry's told too (`reportError`), so only that part of its page fails. */
+const undrawn = (what: string) => {
+  reportError(new Error(`${what} isn't drawn by this native host yet (core/ui/src/drawing-primitives/renderer.ts's \`${what.toLowerCase()}\`)`))
+  return <Problem heading={messages.cantShowHere(what)} text={messages.notDrawnHere} />
+}
+
 /** A screen's live video, which the host connects, plays and sends what's done on it to (renderer.ts's `video`),
- * where it draws one (`Mutations.video`). Where it doesn't, it's told so, which opens the page another way, and it throws,
- * as a part of the UI library a native host doesn't draw does (../index.native.tsx). */
+ * where it draws one (`Mutations.video`); where it doesn't, it's `undrawn`. */
 export const Video: typeof Page.Video = (props) => {
-  if (!(globalThis as { mutations?: Mutations }).mutations?.video) {
-    unsupported("Video")
-    throw new Error("Video isn't drawn by this native host (core/ui/src/drawing-primitives/renderer.ts's `video`)")
-  }
+  if (!(globalThis as { mutations?: Mutations }).mutations?.video) return undrawn("Video")
   return primitive("video")(renamed(props, ["aria-label", "autoFocus"], { label: (it) => it["aria-label"], autofocus: (it) => it.autoFocus }))
 }
 
-/** Another app's page, in a sandbox of its own (renderer.ts's `frame`), where the host draws one (`Mutations.frame`).
- * Where it doesn't, it's told so, which opens the page another way, and it throws, as `Video` does. */
+/** Another app's page, in a sandbox of its own (renderer.ts's `frame`), where the host draws one (`Mutations.frame`);
+ * where it doesn't, it's `undrawn`. */
 export const Frame: typeof Page.Frame = (props) => {
   if ((globalThis as { mutations?: Mutations }).mutations?.frame) return primitive("frame")(props)
-  unsupported("Frame")
-  throw new Error("Frame isn't drawn by this native host (core/ui/src/drawing-primitives/renderer.ts's `frame`)")
+  return undrawn("Frame")
 }
 
 /** How many rows a `list` has before its host first asks for some: a window's. */

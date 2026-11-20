@@ -41,7 +41,6 @@ export async function record(folder, answers) {
       node.parent = undefined
     }),
     drop: mutation("drop", (id) => void drawn.delete(id)),
-    unsupported: mutation("unsupported", () => {}),
   }
   globalThis.host = {
     post({ id, method, params }) {

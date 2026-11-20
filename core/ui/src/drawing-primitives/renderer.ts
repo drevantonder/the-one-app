@@ -89,11 +89,8 @@ export interface Mutations {
   remove(parent: Id, id: Id): void
   /** JS no longer holds `id` (it was garbage collected), so it's never inserted again and the host frees it. */
   drop(id: Id): void
-  /** The page uses `what`, a part of the UI library a native host doesn't draw yet, so the host opens it another way:
-   * a computer's or a phone's in a web view. */
-  unsupported(what: string): void
-  /** Whether it draws `video`. A page that uses one where it doesn't tells it `unsupported`, so it's opened another
-   * way. */
+  /** Whether it draws `video`. Where it doesn't, a page's video shows a problem in its place (primitives.native.tsx's
+   * `undrawn`). */
   video?: boolean
   /** Whether it draws a `frame`, as `video`. */
   frame?: boolean
