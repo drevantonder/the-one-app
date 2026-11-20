@@ -463,8 +463,13 @@ defmodule OneCore.Mcp do
           do: %{uri: "ui://ui/#{code}/#{path}", name: path, mimeType: Version.kind(path)}
 
     resources =
-      for {app, version} <- running, path <- Version.files(version) do
+      for {app, version} <- running, hashes = Version.hashes(version), path <- Version.files(version) do
         resource = %{uri: "ui://#{app}/#{version.code}/#{path}", name: path, mimeType: Version.kind(path)}
+
+        # What's in it, by its SHA-256, so a client that has the same file of a version before keeps that rather than
+        # read it again. A page is served with its import map in it (`mapped`), so it's read each time.
+        hash = if Path.extname(path) != ".html", do: hashes[path]
+        resource = if hash, do: Map.put(resource, :_meta, %{sha256: Base.encode16(hash, case: :lower)}), else: resource
 
         # An entrypoint's category goes as it is: a client opens the launcher first, and what the rest mean is the
         # launcher's. A page that's a tool's UI is an MCP App's page too.
