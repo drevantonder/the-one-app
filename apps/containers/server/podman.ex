@@ -276,13 +276,21 @@ defmodule Containers.Podman do
         [spec["image"] | spec["command"] || []]
 
     podman!(service, args)
-    podman!(service, ["start", spec["id"]])
-    OneCore.Service.touch(service, spec["id"])
-    :ok
+    start(service, spec["id"])
   end
 
+  # Started in a systemd scope of its own where this server is a systemd service (it has systemd's INVOCATION_ID),
+  # as `systemd-run --user --scope` makes one, so it outlives the server: Podman's conmon, which `start` leaves
+  # running beside the container and holds its terminal, would be in the service's cgroup, which systemd kills whole
+  # as the server stops for an update, and the container's init hangs up with it.
   def start(service, id) do
-    podman!(service, ["start", id])
+    scope = if System.get_env("INVOCATION_ID"), do: ~w(systemd-run --user --scope --collect --quiet), else: []
+
+    case OneCore.Command.run(scope ++ ["podman", "start", id], 60) do
+      %{exit: 0} -> :ok
+      %{stderr: stderr} -> raise why(stderr)
+    end
+
     OneCore.Service.touch(service, id)
     :ok
   end
