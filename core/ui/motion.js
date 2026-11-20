@@ -14,7 +14,8 @@
 // each rate of `--hz` (a display's frames a second: 60 and 120 unless said) by the inspector's `replay`, through the
 // gesture and spring code a window runs, and for each it keeps, in `--out`:
 //
-// - `filmstrip.png`: eight of its frames, from the press to where it comes to rest;
+// - `filmstrip.png`: eight of its frames, from the press to where it comes to rest, and `frames/` every one, each a
+//   picture numbered as it was drawn (`000.png` the first), to look at frame by frame;
 // - `curve.svg`: how far what moved had gone at each frame, beside where the finger was and where iOS would have it
 //   from the lift (a node let go springing back by SwiftUI's `.spring`, a list flung slowing as UIScrollView does),
 //   each frame that took longer than a frame's time to paint marked red;
@@ -508,6 +509,9 @@ async function play(built, scene, name, motion, hz, folder) {
   const apple = ios(frames, way, values, stretches)
   writeFileSync(join(folder, "curve.svg"), curve(frames, way, values, stretches, budget, beforeTravel, apple))
   filmstrip(frames, join(folder, "filmstrip.png"))
+  rmSync(join(folder, "frames"), { recursive: true, force: true })
+  mkdirSync(join(folder, "frames"))
+  frames.forEach((frame, n) => writeFileSync(join(folder, "frames", `${String(n).padStart(3, "0")}.png`), Buffer.from(frame.png, "base64")))
   const worst = Math.max(...frames.map((frame) => frame.paint_ms))
   const script = Math.max(...frames.map((frame) => frame.script_ms ?? 0))
   const rest = frames.at(-1).at
