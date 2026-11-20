@@ -96,7 +96,52 @@ interface Context {
   deviceCapabilities?: { touch?: boolean; hover?: boolean }
   /** Whether its window is on screen, as a computer's launcher put away isn't: the DOM's `visibilityState`. */
   visible?: boolean
+  /** How pressed the device is, as the Compute Pressure API's `PressureRecord.state` says it. */
+  pressure?: PressureState
 }
+
+type PressureState = "nominal" | "fair" | "serious" | "critical"
+type PressureRecord = { source: "cpu"; state: PressureState; time: number; toJSON(): object }
+type PressureCallback = (records: PressureRecord[], observer: PressureObserving) => void
+let pressure: PressureState = "nominal"
+const observing = new Set<PressureObserving>()
+/** The W3C Compute Pressure API's `PressureObserver`, as a browser that has it gives a page, told by the host as the
+ * device's pressure changes (`hostContext.pressure`): its frames missing the display's refresh, its heat, a battery
+ * saver. Its source is `cpu`, as Chromium's is. */
+class PressureObserving {
+  static readonly knownSources = Object.freeze(["cpu"])
+  #callback: PressureCallback
+  #records: PressureRecord[] = []
+  constructor(callback: PressureCallback) {
+    this.#callback = callback
+  }
+  async observe(source: string) {
+    // A browser's is a DOMException, which a native page's JS hasn't: an error of the same name.
+    if (source !== "cpu") throw Object.assign(new Error(`There's no source ${source}: cpu is`), { name: "NotSupportedError" })
+    observing.add(this)
+    this.said(pressure)
+  }
+  unobserve() {
+    observing.delete(this)
+  }
+  disconnect() {
+    observing.delete(this)
+    this.#records = []
+  }
+  takeRecords() {
+    return this.#records.splice(0)
+  }
+  /** The device's pressure is `state`, which its callback hears soon after. */
+  said(state: PressureState) {
+    const record = { source: "cpu" as const, state, time: performance.now(), toJSON: () => ({ source: "cpu", state, time: record.time }) }
+    if (this.#records.push(record) > 1) return
+    void Promise.resolve().then(() => {
+      const records = this.takeRecords()
+      if (records.length && observing.has(this)) this.#callback(records, this)
+    })
+  }
+}
+;(globalThis as { PressureObserver?: unknown }).PressureObserver ??= PressureObserving
 // Under a finger from the start where the device is, as its host says before it's greeted, so what's drawn before then
 // (a screen in its loading fallback) is drawn for a finger too.
 const [fingered, setFingered] = createSignal(navigator.maxTouchPoints > 0)
@@ -110,6 +155,10 @@ function dress(context?: Context) {
   if (context?.containerDimensions) setSize(context.containerDimensions)
   if (context && "reducedMotion" in context) setStill(context.reducedMotion === true)
   if (context && "visible" in context) setShown(context.visible !== false)
+  if (context?.pressure && context.pressure !== pressure) {
+    pressure = context.pressure
+    for (const observer of observing) observer.said(pressure)
+  }
 }
 
 /** A client answers a page once it has said what it is, which it does as it loads. */
