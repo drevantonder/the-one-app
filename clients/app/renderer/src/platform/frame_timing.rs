@@ -37,8 +37,9 @@ pub struct Frames {
     pub gpu: Option<Duration>,
     /// Of `gpu`, its blurs': what's behind a backdrop's glass.
     pub blur: Option<Duration>,
-    /// The first long frame, what it took.
+    /// The first long frame, what it took, and the frame after the longest interval, where that's long.
     pub first_long: Option<Frame>,
+    pub longest_gap: Option<(Duration, Frame)>,
 }
 
 /// One frame: when it was handed to the display, and what it took. `paint` is this thread laying it out and making
@@ -54,6 +55,10 @@ pub struct Frame {
     pub gpu: Option<Duration>,
     /// Of `gpu`, its blurs': what's behind a backdrop's glass.
     pub blur: Option<Duration>,
+    /// Since the frame before, this thread's time applying what its page changed, and in the loop's turns, the
+    /// frame's own among them: where a long gap's time went on this thread, or that it went elsewhere.
+    pub applied: Duration,
+    pub turned: Duration,
 }
 
 /// A window's frames while something on it moves.
@@ -62,6 +67,9 @@ pub(crate) struct Timing {
     /// What moved it, as the last input said (`input`).
     kind: Option<&'static str>,
     frames: Vec<Frame>,
+    /// This thread's time since the last frame (`Frame::applied`, `Frame::turned`).
+    applied: Duration,
+    turned: Duration,
 }
 
 impl Timing {
@@ -73,9 +81,21 @@ impl Timing {
         }
     }
 
+    /// This thread spent `time` applying what the page changed.
+    pub(crate) fn applied(&mut self, time: Duration) {
+        self.applied += time;
+    }
+
+    /// This thread spent `time` on a turn of the loop.
+    pub(crate) fn turned(&mut self, time: Duration) {
+        self.turned += time;
+    }
+
     /// `frame` was drawn: `moving` says whether something on it still moves. → how long after the frame before it was,
     /// while something moves, and what its frames did, once it's still after moving.
-    pub(crate) fn drawn(&mut self, frame: Frame, moving: bool, refresh: Option<Duration>) -> (Option<Duration>, Option<Frames>) {
+    pub(crate) fn drawn(&mut self, mut frame: Frame, moving: bool, refresh: Option<Duration>) -> (Option<Duration>, Option<Frames>) {
+        frame.applied = std::mem::take(&mut self.applied);
+        frame.turned = std::mem::take(&mut self.turned);
         let interval = self.frames.last().map(|last| frame.at.duration_since(last.at));
         if moving || !self.frames.is_empty() {
             self.frames.push(frame);
@@ -115,9 +135,10 @@ impl Timing {
             took: frames[frames.len() - 1].at.duration_since(frames[0].at),
             p50: at(between.clone(), 0.5),
             p95: at(between.clone(), 0.95),
-            longest: at(between, 1.0),
+            longest: at(between.clone(), 1.0),
             long: long_at.len() as u32,
             first_long: long_at.first().map(|index| frames[*index as usize + 1]),
+            longest_gap: (0..between.len()).max_by_key(|index| between[*index]).filter(|index| long_at.contains(&(*index as u32))).map(|index| (between[index], frames[index + 1])),
             long_at,
             refresh,
             paint: at(frames.iter().map(|frame| frame.paint).collect(), 0.95),

@@ -537,11 +537,14 @@ impl Windows {
 
     /// Window `id`'s app's JS posted what it changed: it's applied, and drawn on the loop's turn.
     fn posted(&mut self, id: WindowId) {
+        let started = web_time::Instant::now();
         if let Some(window) = self.windows.get_mut(&id)
             && let Ok(screen) = &mut window.screen
-            && screen.pump()
         {
-            window.dirty = true;
+            if screen.pump() {
+                window.dirty = true;
+            }
+            window.timing.applied(started.elapsed());
         }
     }
 
@@ -909,8 +912,17 @@ impl Windows {
         log::info!("drawing again on a new GPU device");
     }
 
-    /// After each turn of the loop: what the display said, timers that are due, then each window that changed drawn.
+    /// After each wait for what's due, a turn of the loop (`turned`), whose time each window's frame timing hears.
     fn turn(&mut self) {
+        let started = web_time::Instant::now();
+        self.turned();
+        for window in self.windows.values_mut() {
+            window.timing.turned(started.elapsed());
+        }
+    }
+
+    /// A turn of the loop: what the display said, timers that are due, then each window that changed drawn.
+    fn turned(&mut self) {
         if self.context.lost() {
             self.recover();
         }
@@ -1089,7 +1101,7 @@ impl Windows {
                 let (all, blur) = gpu.unwrap_or_default();
                 (acquire + renderer.acquired(), renderer.gpu().map(|(part, blurs)| (all + part, blur + blurs)).or(gpu))
             });
-            let frame = frame_timing::Frame { at: web_time::Instant::now(), paint: painted - began, draw: painted.elapsed(), acquire, gpu: gpu.map(|(all, _)| all), blur: gpu.map(|(_, blur)| blur) };
+            let frame = frame_timing::Frame { at: web_time::Instant::now(), paint: painted - began, draw: painted.elapsed(), acquire, gpu: gpu.map(|(all, _)| all), blur: gpu.map(|(_, blur)| blur), applied: Default::default(), turned: Default::default() };
             let (interval, frames) = window.timing.drawn(frame, moving, refresh);
             if let Some(interval) = interval {
                 self.deadlines.frame(frame_timing::Timing::long(interval, refresh.unwrap_or(FRAME)));

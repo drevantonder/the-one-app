@@ -180,8 +180,11 @@ fn frames_reported(app: &str, frames: &renderer::platform::Frames) {
         let gpu = frame.gpu.map_or("unknown".to_owned(), |gpu| format!("{} ms", ms(gpu)));
         format!(" at {:?}; the first's paint {} ms, draw {} ms (waiting {} ms for an image), GPU {gpu}", frames.long_at, ms(frame.paint), ms(frame.draw), ms(frame.acquire))
     });
+    // The longest gap, where it's long: how much of it this thread spent applying the page's changes and on the loop's
+    // turns, the rest elsewhere (an iPhone's main thread, the system's work on it).
+    let gap = frames.longest_gap.map_or(String::new(), |(gap, frame)| format!("; the longest gap {} ms: applying the page's changes {} ms, turns {} ms", ms(gap), ms(frame.applied), ms(frame.turned)));
     eprintln!(
-        "{app}'s {} took {} ms: {} frames, interval p50 {} ms, p95 {} ms, longest {} ms, {} long at {hz} Hz{first}; p95 paint {} ms, draw {} ms, waiting for an image {} ms, GPU {gpu}; {load}",
+        "{app}'s {} took {} ms: {} frames, interval p50 {} ms, p95 {} ms, longest {} ms, {} long at {hz} Hz{first}; p95 paint {} ms, draw {} ms, waiting for an image {} ms, GPU {gpu}{gap}; {load}",
         frames.kind,
         ms(frames.took),
         frames.frames,
@@ -208,7 +211,10 @@ fn frames_reported(app: &str, frames: &renderer::platform::Frames) {
         ("one.client.native.frame.draw.p95", ms(frames.draw)),
         ("one.client.native.frame.acquire.p95", ms(frames.acquire)),
     ];
-    for (name, value) in records.into_iter().chain(gpu).chain(blur) {
+    let gap = frames.longest_gap.into_iter().flat_map(|(gap, frame)| {
+        [("one.client.native.frame.gap", ms(gap)), ("one.client.native.frame.gap.applied", ms(frame.applied)), ("one.client.native.frame.gap.turned", ms(frame.turned))]
+    });
+    for (name, value) in records.into_iter().chain(gpu).chain(blur).chain(gap) {
         views.client.report(json!({"name": name, "value": value, "attributes": attributes}));
     }
     // Where in a motion each long frame was, 0 the interval after its first frame.
