@@ -144,6 +144,12 @@ impl Screen {
                         node["seen"] = json!((seen * 1000.0).round() / 1000.0);
                     }
                     node["focused"] = json!(self.focus.focused == Some(id));
+                    // A text cut short with an ellipsis as it was last drawn, as a check finds a name that didn't fit.
+                    if let Some(kept) = self.layout.kept.get(&id) {
+                        if let Some((_, paragraph)) = &self.layout.leaf(kept.node).paragraph {
+                            node["cut"] = json!(paragraph.cut);
+                        }
+                    }
                 }
                 found
             }

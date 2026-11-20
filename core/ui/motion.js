@@ -705,7 +705,7 @@ function requests(steps, folder) {
     else if (step.trace) out.push({ request: { op: "trace", events: JSON.parse(readFileSync(join(folder, step.trace), "utf8")) } })
     else if (!step.expect) out.push({ request: pressed(step) })
     else {
-      const { shown, gone, focused, text, states, drawn, blur, keyboard, margins, tall, textMenu, handles, magnifier, dimmed, js } = step.expect
+      const { shown, gone, focused, text, states, drawn, blur, keyboard, margins, tall, whole, centred, widest, contrast, textMenu, handles, magnifier, dimmed, js } = step.expect
       // Whether `settle` says it's settled, waiting a moment, as a check after it reads the page: never while an answer
       // it waits on is on its way (Playwright's network idle).
       if (step.expect.settled !== undefined) out.push({ request: { op: "settle", deadline: 300 }, judge: (answer) => answer?.result?.settled !== step.expect.settled && (step.expect.settled ? `it hadn't settled: ${JSON.stringify(answer?.result?.pending)}` : "it said it had settled, with what it waits for on its way") })
@@ -753,6 +753,66 @@ function requests(steps, folder) {
             return !heights.some((height) => Math.abs(height - tall.height) <= 1) && `${named(tall.of)} is ${heights.length ? heights.map((height) => `${height} pt`).join(" and ") : "not drawn"} tall, not ${tall.height} pt`
           },
         })
+      // Every text in sight drawn whole, or the one named: none cut short with "…".
+      if (whole)
+        out.push({
+          request: { op: "query", ...(whole === true ? { text: "" } : selector(whole)) },
+          judge: (answer) => {
+            const cut = (answer?.result?.nodes ?? []).filter((node) => node.cut && node.opacity > 0 && node.seen > 0)
+            return cut.length ? cut.map((node) => `"${node.name}" is cut short`).join(", ") : undefined
+          },
+        })
+      // What's named is in the middle of the window across, within a point, as a lone column or an empty page's words are.
+      if (centred) {
+        let width
+        out.push({ request: { op: "window" }, judge: (answer) => void (width = answer?.result?.width) })
+        out.push({
+          request: { op: "query", ...selector(centred) },
+          judge: (answer) => {
+            const rect = answer?.result?.nodes?.[0]?.rect
+            if (!rect) return `${named(centred)} isn't drawn`
+            const off = rect.x + rect.width / 2 - width / 2
+            return Math.abs(off) > 1 && `${named(centred)}'s middle is ${Math.round(off)} pt from the window's`
+          },
+        })
+      }
+      // Nothing named so is wider than `most` points, as a form's fields and a page's column stop at a readable width.
+      if (widest)
+        out.push({
+          request: { op: "query", ...selector(widest.of) },
+          judge: (answer) => {
+            const wide = (answer?.result?.nodes ?? []).filter((node) => node.rect?.width > widest.most + 0.5)
+            return wide.length ? `${named(widest.of)} is ${wide.map((node) => Math.round(node.rect.width)).join(" and ")} pt wide, over ${widest.most}` : undefined
+          },
+        })
+      // What's named stands off what's around it: the most contrast (WCAG's ratio) between the colour 3 pt outside its
+      // start, at its middle, and any along its first 4 pt in, where a control's ring or a card's edge and fill are.
+      if (contrast) {
+        let found, points
+        out.push({ request: { op: "window" }, judge: (answer) => void (points = answer?.result?.width) })
+        out.push({ request: { op: "query", ...selector(contrast.of) }, judge: (answer) => void (found = answer?.result?.nodes?.[0]?.rect) })
+        out.push({
+          request: { op: "snap" },
+          judge: (answer) => {
+            if (!found) return `${named(contrast.of)} isn't drawn`
+            const { data, width } = PNG.sync.read(Buffer.from(answer.result.png, "base64"))
+            const scale = width / points
+            const luminance = (x, y) => {
+              const at = (Math.round(y * scale) * width + Math.round(x * scale)) * 4
+              const linear = (c) => ((c /= 255) <= 0.04045 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4)
+              return 0.2126 * linear(data[at]) + 0.7152 * linear(data[at + 1]) + 0.0722 * linear(data[at + 2])
+            }
+            const y = found.y + found.height / 2
+            const outside = luminance(Math.max(0, found.x - 3), y)
+            let most = 1
+            for (let x = found.x; x < found.x + 4; x += 1 / scale) {
+              const inside = luminance(x, y)
+              most = Math.max(most, (Math.max(inside, outside) + 0.05) / (Math.min(inside, outside) + 0.05))
+            }
+            return most < contrast.least && `${named(contrast.of)} stands off what's around it at ${most.toFixed(2)}:1, under ${contrast.least}:1`
+          },
+        })
+      }
       // What's over the page dims it: the window's corner, which no layer over it covers, is darker than it was.
       if (dimmed)
         out.push({

@@ -25,7 +25,7 @@
 //!   `style` and `class` it was given, its colours and lengths `resolved` from the design tokens, `source`, the
 //!   `file:line` of the JSX that made it, where its build says, an input's `editing` state as the host has it, what a
 //!   person sees of it as the last frame drew it (`opacity`, with what it's in, and `seen`, how much of its box is in
-//!   the window, not clipped away), and whether it has the keyboard (`focused`).
+//!   the window, not clipped away), whether it has the keyboard (`focused`), and a text's whether it was cut short with an ellipsis (`cut`).
 //! - `snap` → `{png, width, height}`: the window as drawn, a PNG in base64, at its scale.
 //! - `profile` (`at`, ms from now, in order: `[0, 80, 200, 400]` unless given; `snap`: false for no pictures) →
 //!   `{frames, time, paused}`: the clock paused and stepped to each time, as `clock` steps it, and the frame there

@@ -126,6 +126,8 @@ pub struct Line {
 pub struct Paragraph {
     pub lines: Vec<Line>,
     pub line_height: f32,
+    /// Whether it was cut short with an ellipsis, past its `max_lines`.
+    pub cut: bool,
 }
 
 impl Paragraph {
@@ -302,6 +304,7 @@ impl TextSystem {
         // `line-height`: a larger run makes its lines taller.
         let line_height = fonts.iter().map(|(_, run)| run.size * style.line_height / style.size).fold(style.line_height, f32::max);
         let mut lines = self.lines(text, style, &fonts, width, 0);
+        let cut = max_lines.is_some_and(|max| max > 0 && lines.len() > max);
         if let Some(max) = max_lines.filter(|max| *max > 0 && lines.len() > *max) {
             lines.truncate(max);
             let last = lines.pop().expect("max > 0");
@@ -318,7 +321,7 @@ impl TextSystem {
             cut_fonts.push((kept - last.start..cut_text.len(), tail));
             lines.extend(self.lines(&cut_text, style, &cut_fonts, None, last.start));
         }
-        Paragraph { lines, line_height }
+        Paragraph { lines, line_height, cut }
     }
 
     /// `text` set in `style`, each of `fonts` its range in its own, broken into lines no wider than `width` and each

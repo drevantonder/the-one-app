@@ -485,14 +485,18 @@ export type CheckStep = Tap | { press: Tap; hold?: number; clicks?: number; agen
  * keyboard asks the platform's keyboard for (`keyboard`, as Flutter's `TextInputConfiguration` says it to iOS and
  * Android: `{ textCapitalization: "TextCapitalization.none", autocorrect: false }`), and every text drawn in the window
  * at least `margins` points in from its sides, as a page's margins keep it, and what's drawn as tall as it should be (`tall`:
- * a node of that name, `height` points, within one), as a type size is; and what a phone's system is asked to show of
+ * a node of that name, `height` points, within one), as a type size is; every text in sight drawn whole, none cut
+ * short with "…", or the one named (`whole`); what's named in the middle of the window across, within a point
+ * (`centred`); nothing named so wider than `most` points (`widest`: `{ of, most }`); what's named standing off what's
+ * around it by at least `least`:1, WCAG's contrast between the colour just outside its start and its first 4 points in,
+ * where a control's ring or a card's edge is (`contrast`: `{ of, least }`); and what a phone's system is asked to show of
  * a finger's selection: its menu for text with these items, inside the safe area, or none (`textMenu`:
  * `{ items: ["cut", "copy", "paste", "selectAll"] }`, or false), so many handles drawn (`handles`), and its magnifier
  * or not (`magnifier`), what's over the page dimming it (`dimmed`, as a sheet's or an alert's scrim does), and at most `js`
  * MB held by its page's JS, collected first (the inspector's `js_bytes`), as a page that keeps what it no longer shows
  * grows past it, whether `settle` says it's `settled`, and where something is drawn (`at`: `{ of, y }`, in points,
  * within one), so what comes in above it is seen not to push it. */
-export type Expect = { shown?: Tap; gone?: Tap; focused?: Tap; text?: string; states?: { of: Tap; is: Record<string, boolean | string> }; drawn?: { of: Tap; opacity: number }; blur?: boolean; dimmed?: boolean; keyboard?: Record<string, unknown>; margins?: number; tall?: { of: Tap; height: number }; textMenu?: { items?: string[] } | false; handles?: number; magnifier?: boolean; js?: number; settled?: boolean; at?: { of: Tap; y: number } }
+export type Expect = { shown?: Tap; gone?: Tap; focused?: Tap; text?: string; states?: { of: Tap; is: Record<string, boolean | string> }; drawn?: { of: Tap; opacity: number }; blur?: boolean; dimmed?: boolean; keyboard?: Record<string, unknown>; margins?: number; tall?: { of: Tap; height: number }; whole?: true | Tap; centred?: Tap; widest?: { of: Tap; most: number }; contrast?: { of: Tap; least: number }; textMenu?: { items?: string[] } | false; handles?: number; magnifier?: boolean; js?: number; settled?: boolean; at?: { of: Tap; y: number } }
 /** A press that goes down on what `from` names (as a tap does) and moves as `gesture` says, or input played as a device
  * delivered it (a `trace` file of events, as a check's `trace`), with what's watched move (`follow`, named as a tap is;
  * what scrolls under it is always watched). `steady`: what moves never goes back against its way before its input
