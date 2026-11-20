@@ -156,6 +156,11 @@ impl Display {
         self.phone.set(Some(screen));
     }
 
+    /// Whether it's a phone's screen.
+    pub fn is_phone(&self) -> bool {
+        self.phone.get().is_some()
+    }
+
     /// Something happened to window `id`, which the loop hears on its next turn.
     pub(crate) fn push(&self, id: WindowId, input: Input) {
         self.events.borrow_mut().push_back((id, 0, input));
@@ -309,7 +314,6 @@ impl Display {
         self.keyboard.borrow().get(&id).cloned()
     }
 
-    #[allow(dead_code)]
     pub fn set_moved(&self, window: &NativeWindow, moved: super::rail::Moved) {
         window.moved.set(moved);
     }

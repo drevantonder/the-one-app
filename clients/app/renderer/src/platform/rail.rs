@@ -6,8 +6,12 @@
 //! closes; short of that, it springs back. A tap does nothing, and the first finger to come in takes it: another on the
 //! line meanwhile, as the hand holding the phone touches its edge, is ignored, as iOS's swipe home ignores one. For
 //! whoever asked for less motion, the window only fades.
+//!
+//! An app's window opens as the reverse of that move, on the same spring: it grows out of its icon, straight to the
+//! whole screen, as an iPhone's app zooms out of its icon (`Pull::opening`). A finger on the line as it opens takes
+//! it from where it's got to, and lets it go home or on open as a pull does.
 
-use std::time::Instant;
+use web_time::Instant;
 
 use crate::geometry::{Bounds, Point, Size, point};
 use crate::motion::{Spring, Velocity};
@@ -62,7 +66,14 @@ pub struct Pull {
     target: Option<f32>,
     velocity: f32,
     stepped: Instant,
+    /// It's an app's window opening out of its icon (`opening`), on the straight way between them rather than through
+    /// the card, and where it had got to as a finger took it.
+    straight: bool,
+    from: f32,
 }
+
+/// No finger: an opening's, until one takes it.
+const NO_FINGER: u64 = u64::MAX;
 
 /// What a finger's move or lift did to a pull.
 pub enum Pulled {
@@ -74,7 +85,31 @@ pub enum Pulled {
 
 impl Pull {
     pub fn new(finger: u64, start: Point<f32>) -> Pull {
-        Pull { finger, start, pulling: false, velocity_in: Velocity::default(), p: 0.0, target: None, velocity: 0.0, stepped: Instant::now() }
+        Pull { finger, start, pulling: false, velocity_in: Velocity::default(), p: 0.0, target: None, velocity: 0.0, stepped: super::now(), straight: false, from: 0.0 }
+    }
+
+    /// An app's window opening out of its icon: home, on its way to the app, from the moment it's first shown.
+    pub fn opening() -> Pull {
+        Pull { finger: NO_FINGER, start: point(0.0, 0.0), pulling: true, velocity_in: Velocity::default(), p: 1.0, target: Some(0.0), velocity: 0.0, stepped: super::now(), straight: true, from: 1.0 }
+    }
+
+    /// Whether it's an opening no finger has taken yet.
+    #[cfg_attr(not(any(target_os = "android", target_os = "ios")), allow(dead_code))]
+    pub fn opens(&self) -> bool {
+        self.finger == NO_FINGER
+    }
+
+    /// Finger `finger`, landing on the line at `at`, takes an opening from where it's got to, as iOS's swipe home
+    /// takes an app still zooming open: it follows the finger from there.
+    #[cfg_attr(not(any(target_os = "android", target_os = "ios")), allow(dead_code))]
+    pub fn take(&mut self, finger: u64, at: Point<f32>) {
+        (self.finger, self.start, self.from, self.target, self.velocity) = (finger, at, self.p, None, 0.0);
+        self.velocity_in = Velocity::default();
+    }
+
+    /// The spring starts now, as its window is first shown.
+    pub fn shown(&mut self) {
+        self.stepped = super::now();
     }
 
     pub fn finger(&self) -> u64 {
@@ -108,10 +143,11 @@ impl Pull {
             self.pulling = true;
         }
         let inward = (-along / size.width).max(0.0);
-        // It follows the finger, and past the card (`HELD`) slows to a stop, as a rubber band does.
-        self.p = HELD * (inward / HELD).tanh();
+        // It follows the finger, and past the card (`HELD`) slows to a stop, as a rubber band does; an opening taken
+        // follows it from where it had got to.
+        self.p = if self.straight { (self.from + inward).min(1.0) } else { HELD * (inward / HELD).tanh() };
         self.velocity_in.add(point(inward, 0.0), crate::motion::now());
-        Pulled::Kept(Some(moved(self.p, size, icon, reduced)))
+        Pulled::Kept(Some(moved(self.p, size, icon, reduced, self.straight)))
     }
 
     /// The finger's let go, or the system took it (`cancelled`): it goes home if it came in past `PULLED` or was
@@ -121,22 +157,23 @@ impl Pull {
             return false;
         }
         let (inward, velocity) = (self.velocity_in.last().map_or(0.0, |at| at.x), self.velocity_in.get(crate::motion::now()).x);
-        let home = !cancelled && (inward >= PULLED || velocity > FLICKED);
+        // An opening taken goes home where it's let go nearer home than the app.
+        let home = !cancelled && (inward >= PULLED || velocity > FLICKED || (self.straight && self.p > 0.5 && velocity >= 0.0));
         self.target = Some(if home { 1.0 } else { 0.0 });
         self.velocity = if home { velocity.max(0.0) } else { 0.0 };
-        self.stepped = Instant::now();
+        self.stepped = super::now();
         true
     }
 
     /// Steps the spring to now: → the window as it then is, and whether it's still, where it was going (1 home).
     pub fn step(&mut self, size: Size<f32>, icon: Option<Bounds<f32>>, reduced: bool) -> (Moved, Option<f32>) {
-        let Some(target) = self.target else { return (moved(self.p, size, icon, reduced), None) };
-        let now = Instant::now();
+        let Some(target) = self.target else { return (moved(self.p, size, icon, reduced, self.straight), None) };
+        let now = super::now();
         let dt = now.duration_since(self.stepped).as_secs_f32();
         self.stepped = now;
         let still;
         (self.p, self.velocity, still) = spring(self.p, self.velocity, target, dt);
-        (moved(self.p, size, icon, reduced), still.then_some(target))
+        (moved(self.p, size, icon, reduced, self.straight), still.then_some(target))
     }
 }
 
@@ -150,8 +187,10 @@ pub fn spring(p: f32, velocity: f32, target: f32, dt: f32) -> (f32, f32, bool) {
 
 /// The window at `p` of its way home, on a window `size` big, into `icon` where it opened from one, as the page's
 /// `moves` has it: whole at 0, a card at `HELD`, its right edge `HELD` of the width in, and in its icon, or shrunk
-/// away, at 1, fading out over its last part; what's under it dimmed at first.
-fn moved(p: f32, size: Size<f32>, icon: Option<Bounds<f32>>, reduced: bool) -> Moved {
+/// away, at 1, fading out over its last part; what's under it dimmed at first. `straight` goes from the whole screen to
+/// its icon with no card between, as an app opening out of its icon does, its corners rounding as it leaves the whole
+/// screen.
+fn moved(p: f32, size: Size<f32>, icon: Option<Bounds<f32>>, reduced: bool, straight: bool) -> Moved {
     if reduced {
         return Moved { opacity: 1.0 - p, ..Moved::STILL };
     }
@@ -167,8 +206,13 @@ fn moved(p: f32, size: Size<f32>, icon: Option<Bounds<f32>>, reduced: bool) -> M
         None => (0.5, -0.3 * width, 0.0),
     };
     let between = |from: (f32, f32, f32), to: (f32, f32, f32), t: f32| (from.0 + (to.0 - from.0) * t, from.1 + (to.1 - from.1) * t, from.2 + (to.2 - from.2) * t);
-    let (scale, x, y) = if p <= HELD { between((1.0, 0.0, 0.0), held, p / HELD) } else { between(held, gone, (p - HELD) / (1.0 - HELD)) };
+    let (scale, x, y) = match straight {
+        true => between((1.0, 0.0, 0.0), gone, p),
+        false if p <= HELD => between((1.0, 0.0, 0.0), held, p / HELD),
+        false => between(held, gone, (p - HELD) / (1.0 - HELD)),
+    };
     let fades = if icon.is_some() { HELD + (1.0 - HELD) * FADES } else { HELD };
     let opacity = if p <= fades { 1.0 } else { 1.0 - (p - fades) / (1.0 - fades) };
-    Moved { scale, x, y, opacity, corner: CORNER / CARD, dim: 0.3 * (1.0 - p) }
+    let corner = if straight { CORNER / CARD * (p / HELD).min(1.0) } else { CORNER / CARD };
+    Moved { scale, x, y, opacity, corner, dim: 0.3 * (1.0 - p) }
 }

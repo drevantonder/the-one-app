@@ -53,7 +53,8 @@ mod android;
 /// A native screen's semantic tree as AccessKit's, for each phone's screen reader.
 #[cfg(any(target_os = "android", target_os = "ios"))]
 pub(crate) mod a11y;
-/// The rail's home line over a phone's app windows, pulled home (`Windows::line`).
+/// The rail's home line over a phone's app windows, pulled home (`Windows::line`), and an app's window opening out of
+/// its icon.
 #[cfg_attr(not(any(target_os = "android", target_os = "ios")), allow(dead_code))]
 pub(crate) mod rail;
 mod conformance;
@@ -984,7 +985,15 @@ impl Windows {
         let Some(window) = self.windows.get_mut(&id) else { return false };
         let (room, icon) = (window.room(), window.icon);
         let Ok(screen) = &mut window.screen else { return false };
-        let Some(pull) = window.pull.as_mut() else {
+        // A finger on the line takes an app opening out of its icon from where it's got to.
+        if let Some(pull) = window.pull.as_mut().filter(|pull| pull.opens())
+            && phase == crate::view::touch::Phase::Down
+            && screen.on_line(at)
+        {
+            pull.take(finger, at);
+            return true;
+        }
+        let Some(pull) = window.pull.as_mut().filter(|pull| !pull.opens()) else {
             if phase != crate::view::touch::Phase::Down || window.root || !screen.on_line(at) {
                 return false;
             }
@@ -1109,8 +1118,8 @@ impl Windows {
         }
     }
 
-    /// Steps each window's pull let go: home, every app's window closes; back, it's as it was.
-    #[cfg(any(target_os = "android", target_os = "ios"))]
+    /// Steps each window's pull let go, and each opening: home, every app's window closes; back, it's as it was.
+    #[cfg(any(target_os = "android", target_os = "ios", feature = "fake"))]
     fn spring(&mut self) {
         let mut home = false;
         let mut back = false;
@@ -1196,6 +1205,15 @@ impl Windows {
         screens.chain(showing).chain(frame).chain(pulled).chain(check).chain(idle).min()
     }
 
+    /// Whether its windows are a phone's: each the whole screen, an app's over the Home Screen, which it opens out of.
+    #[cfg(any(target_os = "android", target_os = "ios", feature = "fake"))]
+    fn on_phone(&self) -> bool {
+        #[cfg(feature = "fake")]
+        return self.display.is_phone();
+        #[cfg(not(feature = "fake"))]
+        cfg!(any(target_os = "android", target_os = "ios"))
+    }
+
     /// Whether the display says when it shows each frame, and has since its frames were last asked for: a display link
     /// just started takes a while to tick (a Mac's two or three refreshes), and the loop's own clock stands in for it
     /// till then, so what started moving isn't held on its first frame.
@@ -1207,7 +1225,7 @@ impl Windows {
     /// for one (`requestAnimationFrame`).
     fn framing(&self) -> bool {
         self.check.as_ref().is_some_and(conformance::Check::moving)
-            || self.windows.values().any(|window| window.on_screen() && (window.moving || window.slide.is_some() || window.screen.as_ref().is_ok_and(Screen::framing)))
+            || self.windows.values().any(|window| window.on_screen() && (window.moving || window.slide.is_some() || window.pull.as_ref().is_some_and(rail::Pull::springing) || window.screen.as_ref().is_ok_and(Screen::framing)))
     }
 
     /// Makes what draws again, on a new GPU device, where the one it drew with was lost, as a browser makes a lost
@@ -1279,7 +1297,7 @@ impl Windows {
                 }
             }
         }
-        #[cfg(any(target_os = "android", target_os = "ios"))]
+        #[cfg(any(target_os = "android", target_os = "ios", feature = "fake"))]
         self.spring();
         #[cfg(any(target_os = "ios", feature = "fake"))]
         self.slide();
@@ -1354,6 +1372,8 @@ impl Windows {
         // draw on every frame (an iPhone's main thread, 120 times a second). A change before it has is drawn at once,
         // so what the page answers just after a tick isn't held a refresh; idle, every change is.
         let ticking = self.ticking();
+        #[cfg(any(target_os = "android", target_os = "ios", feature = "fake"))]
+        let phone = self.on_phone();
         if shown.is_some() {
             for window in self.windows.values_mut() {
                 window.presented = false;
@@ -1368,6 +1388,18 @@ impl Windows {
                     continue;
                 }
                 window.shown = true;
+                // On a phone, an app's window grows out of the icon it was opened from, from the frame it first shows
+                // in, as the reverse of its move home (`rail::Pull::opening`).
+                #[cfg(any(target_os = "android", target_os = "ios", feature = "fake"))]
+                if phone && !window.root && !window.panel && window.icon.is_some() && window.pull.is_none() {
+                    let mut opening = rail::Pull::opening();
+                    let reduced = window.screen.as_ref().is_ok_and(|screen| screen.reduced_motion);
+                    let room = window.room();
+                    let (moved, _) = opening.step(Size { width: room.width.0, height: room.height.0 }, window.icon, reduced);
+                    opening.shown();
+                    self.display.set_moved(&window.parts[0].native, moved);
+                    window.pull = Some(opening);
+                }
                 // A panel shows as it's summoned.
                 if !window.panel {
                     self.display.show(&window.parts[0].native);
