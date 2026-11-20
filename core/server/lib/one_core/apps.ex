@@ -310,15 +310,11 @@ defmodule OneCore.Apps do
     do: Enum.filter(covering(whose || at), &allows?(&1, at, trusted))
 
   @doc """
-  Who an app installed for `at` as `name`, which keeps each person's data apart (`own` is `:subject`) or not, runs
-  for here, as its jobs and services do: whoever it was installed for, and each who keeps something with it, as the
-  servers acting for whoever it's installed for keep them (`OneCore.Apps.Installed.subjects/2`), or the people this
-  server is for, whose own it is. Where it runs for each is `runs?/3`'s.
+  Who an app installed for `at`, which keeps each person's data apart (`own` is `:subject`) or not, runs for here, as
+  its services do: whoever it was installed for, and where it keeps each person's apart, whoever this server is for,
+  its machine's people. Where it runs for each is `runs?/3`'s.
   """
-  def runs_for(at, name, own) do
-    subjects = if Servers.here?(at), do: Installed.subjects(at, name), else: Servers.here()
-    [at | if(own == :subject, do: subjects, else: [])]
-  end
+  def runs_for(at, own), do: [at | if(own == :subject, do: Servers.here(), else: [])]
 
   @doc """
   Whether this server is of the narrowest scope that's up of those that run such a call (`servers/3`), and so takes

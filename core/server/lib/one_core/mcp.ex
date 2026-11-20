@@ -53,7 +53,7 @@ defmodule OneCore.Mcp do
 
   alias OneCore.Call.State
   alias OneCore.Mcp.Principal
-  alias OneCore.Apps.{Calls, Icons, Installed, Store, Version}
+  alias OneCore.Apps.{Calls, Icons, Store, Version}
 
   # The rules every agent is told first, here and in the network's `/llms.txt` (`core/edge/mcp/mcp.ts`).
   @external_resource Path.expand("../../priv/rules.md", __DIR__)
@@ -304,18 +304,13 @@ defmodule OneCore.Mcp do
   end
 
   # What another server asks of this one for whoever it acts for, which `Principal.asking/3` checked, as one check
-  # for every kind: a service's function, an app's function or scheduled job, that someone keeps their own data with
-  # an app, and a hook.
+  # for every kind: a service's function, an app's function or scheduled job, and a hook.
   defp result("services/call", %{"app" => app, "service" => service} = params, _from, _principal, forwarded) do
     between(forwarded, fn -> Services.run(app, service, params["function"], params["arguments"]) end)
   end
 
   defp result("apps/call", %{"installed" => at, "app" => app} = params, _from, principal, forwarded) do
     between(forwarded, fn -> Calls.function(at, app, params["function"], params["arguments"], principal, true) end)
-  end
-
-  defp result("apps/subject", %{"installed" => at, "app" => name}, _from, {_actor, subject}, forwarded) do
-    between(forwarded, fn -> {:ok, Installed.subject(at, name, User.owner(subject))} end)
   end
 
   # A group's server asks one of the network's for its word that it acts for a member of the group, which the

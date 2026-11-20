@@ -13,7 +13,7 @@ defmodule OneCore.Apps.Calls do
   require OpenTelemetry.Tracer, as: Tracer
   require Histogram
   alias OneCore.Call.State
-  alias OneCore.Apps.{Installed, Version}
+  alias OneCore.Apps.Version
 
   @doc """
   Calls an app's tool for `asked`: who asked and who it's for, `{by, for}`, or one who that is both. Gives
@@ -504,8 +504,6 @@ defmodule OneCore.Apps.Calls do
   # installed for is said to be theirs where it runs, so its jobs and services act for them too.
   defp new_call(at, name, versions, ask, {actor, subject}, forwarded) do
     whose = whose(at, versions[name], subject)
-
-    if whose != at and Apps.runs?(at, versions[name].trusted, whose), do: Installed.subject(at, name, whose)
 
     own = "#{whose}/own/#{name}"
 

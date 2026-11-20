@@ -34,11 +34,9 @@ defmodule OneCore.Apps.Installed do
 
   An app that keeps each person's data apart (`own/0`, `OneCore.Apps.Calls.whose/3`), installed for the network, has
   an own artifact for each person who keeps something with it, as an Android app installed for every user of a device
-  has a data folder for each. Who they are is kept beside the network's installs, the blob
-  `<owner>/subjects/<name>/<who>` for each, so its jobs run and its services act for each of them (`subjects/2`).
+  has a data folder for each, which is all that says who they are.
   """
-  require Logger
-  alias OneCore.{Artifact, Bucket, Cache, Call, Servers}
+  alias OneCore.{Artifact, Bucket}
 
   @blob "installs"
 
@@ -205,48 +203,6 @@ defmodule OneCore.Apps.Installed do
         do: String.replace_prefix(blob, "#{artifact}/installed/", "")
   end
 
-  @doc """
-  Says that `who` keeps their own data with the app installed for `owner` as `name`, which keeps each person's apart.
-  Said once: each server keeps that it has. Only the owner's servers write beside their installs, so a person's own
-  server running their call of a network's app (`OneCore.Apps.runs?/3`) has one of the network's say it
-  (`apps/subject`), and says it again with their next call where none answered.
-  """
-  def subject(owner, name, who) do
-    Cache.fetch(__MODULE__, {owner, name, who}, fn ->
-      if Servers.here?(owner) do
-        Bucket.write("#{owner}/subjects/#{name}/#{who}", "")
-        {:commit, :ok}
-      else
-        elsewhere(owner, name, who)
-      end
-    end)
-  end
-
-  defp elsewhere(owner, name, who) do
-    Call.run_elsewhere({"apps/subject", %{installed: owner, app: name}}, {nil, who}, false, {owner, OneCore.Apps.servers(owner)}, name)
-  rescue
-    unanswered ->
-      Logger.warning("#{who} isn't said to keep their own data with #{name} yet: #{Exception.message(unanswered)}")
-      {:ignore, :ok}
-  catch
-    {Call, {:forwarded, _said}} -> {:commit, :ok}
-  end
-
-  @doc "Who keeps their own data with the app installed for `owner` as `name`, besides `owner`: each user or group."
-  def subjects(owner, name) do
-    for blob <- Bucket.list("#{owner}/subjects/#{name}/"),
-        do: String.replace_prefix(blob, "#{owner}/subjects/#{name}/", "")
-  end
-
-  @doc "Forgets who kept their own data with the app installed for `owner` as `name`, once it's removed for good."
-  def unsubjected(owner, name) do
-    for who <- subjects(owner, name) do
-      Bucket.remove("#{owner}/subjects/#{name}/#{who}")
-      Cache.invalidate(__MODULE__, {owner, name, who})
-    end
-
-    :ok
-  end
 
   @doc "Whether `name` is one an app is installed by: `:ok`, or `{:error, why}`."
   def named(name) do

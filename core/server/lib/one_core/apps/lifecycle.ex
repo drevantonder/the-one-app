@@ -443,11 +443,6 @@ defmodule OneCore.Apps.Lifecycle do
              :ok <- Enum.find_value(required_by, :ok, &with(%{} <- move(owner, &1, {:uninstall, %{"deleted_with" => name}}), do: nil)),
              %{} = record <- move(owner, name, {:uninstall, %{"with" => required_by}}) do
           ran(owner)
-          # What theirs kept, the same app installed for everyone reads for them now, so it acts for them too.
-          for each <- group,
-              {at, %Version{own: :subject}} <- [beyond(owner, each)],
-              do: Installed.subject(at, each, owner)
-
           records = Installed.read(owner)
           went = for other <- required_by, do: %{"name" => other, "app" => records[other]["app"]}
           about = %{"for" => owner, "name" => name, "app" => record["app"], "with" => went, "artifacts" => artifacts}
@@ -481,14 +476,17 @@ defmodule OneCore.Apps.Lifecycle do
   The own artifacts that the app installed for `owner` as `name` keeps and nothing else reads, by their names, which go
   to Recently Deleted with it and are removed for good with it: whoever it was installed for's, unless the same name
   installed for everyone keeps each person's data apart (`OneCore.Apps.Calls.whose/3`), and so reads it for them now;
-  and where it keeps each person's apart, the own artifact of each who keeps something with it and hasn't it
-  installed for themselves.
+  and where it keeps each person's apart, the own artifact of each user or group with something in theirs, which is
+  all that says who keeps something with it, and hasn't it installed for themselves.
   """
   def owns(owner, name) do
     mine = if match?({_at, %Version{own: :subject}}, beyond(owner, name)), do: [], else: ["#{owner}/own/#{name}"]
 
     theirs =
-      for who <- Installed.subjects(owner, name),
+      for folder <- Bucket.folders("users/") ++ Bucket.folders("groups/"),
+          who = String.trim_trailing(folder, "/"),
+          who != owner,
+          Bucket.list("#{who}/own/#{name}/") != [],
           not Map.has_key?(Map.new(Apps.versions([who])), name),
           do: "#{who}/own/#{name}"
 
@@ -576,7 +574,6 @@ defmodule OneCore.Apps.Lifecycle do
       if match?(%{"state" => "recently_deleted"}, records[each]) do
         with nil <- move(owner, each, :purge) do
           for own <- owns(owner, each), blob <- Bucket.list(own <> "/"), do: Bucket.remove(blob)
-          Installed.unsubjected(owner, each)
           Installed.unmarked(records[each]["app"], owner)
           outcome
         end
@@ -598,7 +595,7 @@ defmodule OneCore.Apps.Lifecycle do
   read, since it keeps everyone's together (`own/0` is `:installed`). Gives the copies superseded.
   """
   def supersede(owner, artifact) do
-    {at, version} = Enum.find(Apps.versions([owner]), {nil, nil}, fn {_name, version} -> version.artifact == artifact end)
+    {_at, version} = Enum.find(Apps.versions([owner]), {nil, nil}, fn {_name, version} -> version.artifact == artifact end)
 
     copies =
       if version && (owner == @network or String.starts_with?(owner, "groups/")),
@@ -610,7 +607,7 @@ defmodule OneCore.Apps.Lifecycle do
         Enum.all?(holders, &covers?(owner, &1)),
         records = for(holder <- holders, {name, %{"app" => ^copy}} <- Installed.read(holder), do: {holder, name}),
         not Enum.any?(records, fn {holder, name} -> stranded?(owner, holder, name, version) end),
-        moved = for({holder, name} <- records, do: superseded(owner, at, version, holder, name)),
+        moved = for({holder, name} <- records, do: superseded(owner, version, holder, name)),
         not Enum.any?(moved, &match?({:error, _why}, &1)) do
       # What says it's installed for someone with no record of it any more, as a move from before moves unmarked
       # left, goes, so it's installed for nobody.
@@ -620,12 +617,11 @@ defmodule OneCore.Apps.Lifecycle do
     end
   end
 
-  # Moves `holder`'s record of `name` into the install of the same app for `owner` as `at`, or to its artifact.
-  defp superseded(owner, at, version, holder, name) do
+  # Moves `holder`'s record of `name` into the install of the same app for `owner`, or to its artifact.
+  defp superseded(owner, version, holder, name) do
     inside = owner in Apps.chain(holder)
 
     with record when not is_tuple(record) <- move(holder, name, {:superseded, version.artifact, inside}) do
-      if inside and holder != owner and version.own == :subject, do: Installed.subject(owner, at, holder)
       ran(holder)
       record
     end

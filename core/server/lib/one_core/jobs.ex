@@ -4,10 +4,9 @@ defmodule OneCore.Jobs do
 
   A job is due at each whole multiple of its `every` seconds since 1970, so every server knows when without any
   telling another. At each of those times, and when this server starts or an app's version changes, the app is
-  asked to have what's due called (`OneCore.Apps.Calls.schedule/3`), for each one it was installed for, and where it keeps
-  each person's data apart, for each who keeps something with it (`OneCore.Apps.Installed.subjects/2`). Every server asks,
-  and the app keeping the schedule is what makes one of them make each call, once, of those acting for whoever the
-  app was installed for: a time that passed with no server up is made up for by the first that's back.
+  asked to have what's due called (`OneCore.Apps.Calls.schedule/3`), for each one it was installed for. Every server
+  that would run it asks, and the app keeping the schedule is what makes one of them make each call, once: a time that
+  passed with no server up is made up for by the first that's back. What's done for a person is their timer's.
 
   An app also sets a timer for someone as they do something (`Database.timer/5` in the `database` app), kept with
   their data and said by an alarm, a key `<whose>/alarms/<installed for>/<app>/<due>`, which the database holding
@@ -68,12 +67,10 @@ defmodule OneCore.Jobs do
   # (`OneCore.Edge.Unreachable`): then nothing is asked this time, and what was due since `at` is asked for at the
   # next, once it does. Said once each time it stops answering.
   defp asked(clock, scheduled, at, now) do
-    for {owner, name, jobs, trusted, own} <- scheduled,
+    for {owner, name, jobs, trusted, _own} <- scheduled,
         Enum.any?(jobs, &(div(now, &1.every) > div(at, &1.every))),
-        subject <- Apps.runs_for(owner, name, own),
-        whose = if(own == :subject, do: subject, else: owner),
-        Apps.runs?(owner, trusted, whose) and Apps.first?(owner, trusted, whose) do
-      Task.Supervisor.start_child(OneCore.Asks, fn -> Calls.schedule(owner, name, subject) end)
+        Apps.runs?(owner, trusted) and Apps.first?(owner, trusted, owner) do
+      Task.Supervisor.start_child(OneCore.Asks, fn -> Calls.schedule(owner, name, owner) end)
     end
 
     if div(now, @alarms) > div(at, @alarms), do: alarmed(now)
