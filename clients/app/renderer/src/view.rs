@@ -398,16 +398,16 @@ pub struct Screen {
     heard: u64,
 }
 
-/// What a frame cost: the mutations its JS made that it applied, since the frame before (`applied` counts them as they
-/// come), how long its JS thread spent running since the frame before, and how long laying its tree out and painting
-/// it all took, as a browser's performance panel says a frame's.
+/// What its frames cost since it was last asked (`Screen::cost`), as a browser's performance panel says a frame's: the
+/// mutations its JS made that it applied, how long its JS thread spent running, how long laying its tree out and
+/// painting it all took, and how many times it painted. Frames that changed nothing cost their JS all the same.
 #[derive(Clone, Copy, Default)]
 pub(crate) struct Cost {
-    pub mutations: u64,
-    applied: u64,
-    pub script: Duration,
-    pub layout: Duration,
-    pub paint: Duration,
+    mutations: u64,
+    script: Duration,
+    layout: Duration,
+    paint: Duration,
+    painted: u32,
 }
 
 impl Screen {
@@ -808,7 +808,7 @@ impl Screen {
                 } {
                     Err(error) => self.mismatched = Some(format!("{error:#}")),
                     Ok(()) => {
-                        self.cost.applied += 1;
+                        self.cost.mutations += 1;
                         self.changed();
                     }
                 },
@@ -967,11 +967,9 @@ impl Screen {
         self.tell_room(size);
         self.paint_frames(scale, text, atlas);
         let started = Instant::now();
-        // A frame that changes nothing costs nothing: the scene drawn last is kept.
-        let Some(plan) = self.plan(size, scale) else {
-            (self.cost.mutations, self.cost.layout, self.cost.paint) = (0, Duration::ZERO, Duration::ZERO);
-            return;
-        };
+        self.cost.script += self.js.script();
+        // A frame that changes nothing paints nothing: the scene drawn last is kept.
+        let Some(plan) = self.plan(size, scale) else { return };
         scene.clear();
         let drawn = self.draw(&plan, text, atlas, scene);
         let modal = drawn.modal;
@@ -982,9 +980,8 @@ impl Screen {
         scene.finish();
         self.settle_focus(modal);
         self.tell_placed(intersections);
-        self.cost.paint = started.elapsed();
-        self.cost.script = self.js.script();
-        self.cost.mutations = std::mem::take(&mut self.cost.applied);
+        self.cost.paint += started.elapsed();
+        self.cost.painted += 1;
     }
 
     /// The page is told when its room, its motion, its insets or the device's pressure change, as a frame's host tells
@@ -1206,7 +1203,7 @@ impl Screen {
             measured = lay_out(painter.layout, painter.text, root, available);
             self.again |= painter.layout.measure_lists(painter.tree);
         }
-        self.cost.layout = laying_out.elapsed();
+        self.cost.layout += laying_out.elapsed();
         match measured {
             Err(error) => log::error!("its layout failed: {error}"),
             Ok(()) => {

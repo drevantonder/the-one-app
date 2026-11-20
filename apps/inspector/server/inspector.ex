@@ -99,7 +99,7 @@ defmodule Inspector do
       op(
         "replay",
         false,
-        "Plays a press, from a node by a selector or a point, along `moves` (each {dx, dy, ms}; one with neither holds still) on the paused clock, drawing every frame of a display `hz` (60) times a second until `after` ms (2000) past its end or nothing moves, as a person's swipe, fling, drag or pull through the window's own gesture and spring code. Gives each frame's cost and work, where `track` was drawn (x, y) and how far what scrolls under the press shows scrolled, its pictures with `snap`, and how many frames went `over` their budget.",
+        "Plays a press, from a node by a selector or a point, along `moves` (each {dx, dy, ms}; one with neither holds still) on the paused clock, drawing every frame of a display `hz` (60) times a second until `after` ms (2000) past its end or nothing moves, as a person's swipe, fling, drag or pull through the window's own gesture and spring code. Gives each frame's cost and work since the frame before (its JS's time and mutations too, where nothing changed), where `track` was drawn (x, y), or `gone` once it isn't, and how far what scrolls under the press shows scrolled, its pictures with `snap`, and how many frames went `over` their budget: their JS, painting and GPU time together longer than a refresh.",
         Map.merge(Map.merge(@selector, @point), %{
           moves: %{type: "array", items: %{type: "object", properties: %{dx: %{type: "number"}, dy: %{type: "number"}, ms: %{type: "number", minimum: 0}}, required: ["ms"]}},
           lift: %{type: "boolean", description: "false to hold it down at the end"},
@@ -126,7 +126,17 @@ defmodule Inspector do
         %{key: %{type: "string"}, shift: %{type: "boolean"}, alt: %{type: "boolean"}, ctrl: %{type: "boolean"}, meta: %{type: "boolean"}},
         ["key"]
       ),
-      op("scroll", false, "Scrolls the window by dx and dy CSS pixels, down and right positive.", %{dx: %{type: "number"}, dy: %{type: "number"}}),
+      op(
+        "scroll",
+        false,
+        "Scrolls what's around a node, by a selector, or at a point (the window's top left unless given), by dx and dy CSS pixels, down and right positive, as a wheel's turn or, with `phase` and `momentum`, a trackpad's scroll. Gives how far it's `scrolled`.",
+        Map.merge(Map.merge(@selector, @point), %{
+          dx: %{type: "number"},
+          dy: %{type: "number"},
+          phase: %{type: "string", enum: ["began", "changed", "ended", "cancelled", "mayBegin"], description: "a trackpad's fingers, as AppKit says their phase"},
+          momentum: %{type: "boolean", description: "the trackpad's momentum after its fingers lift"}
+        })
+      ),
       op(
         "drag",
         false,
@@ -142,7 +152,7 @@ defmodule Inspector do
       op(
         "settle",
         true,
-        "Waits until nothing's pending that ends by itself, or `deadline` ms (5000), and says what still is: requests the app asked that aren't answered, timers (an interval never ends, so isn't waited for), animations.",
+        "Waits until nothing's pending that ends by itself, or `deadline` ms (5000), and says what still is: requests the app asked that aren't answered, timers (an interval never ends, so isn't waited for), transitions, and what the page moves a frame at a time or a list flung (`animation`). With the clock paused, nothing moves by itself, so what moves is listed but isn't waited for.",
         %{deadline: %{type: "number", minimum: 0}}
       )
     ]

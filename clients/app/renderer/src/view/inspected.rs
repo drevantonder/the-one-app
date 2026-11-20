@@ -253,6 +253,8 @@ impl Screen {
         let clock = self.js.clock().clone();
         clock.pause();
         self.idle();
+        // Its first frame's cost is what's done from here.
+        self.cost = Default::default();
         let start = clock.now();
         let mut frames = Vec::new();
         for ms in at {
@@ -272,7 +274,8 @@ impl Screen {
     /// `hz` times a second (60 unless it says), each frame drawn by `draw` as the window draws one, until `after` ms
     /// past its end (2000 unless it says) or nothing moves. → each frame's cost, where `track` (a selector) was drawn
     /// (`x`, `y`), how far what scrolls under its start shows scrolled (`scroll`, its stretch past an end with it), and
-    /// the frame's budget (`budget_ms`), and how many frames' painting took longer (`over`). With `frame_ms`, its
+    /// the frame's budget (`budget_ms`), and how many frames took longer to make (`over`, `inspect::over`). A frame where
+    /// what `track` selects isn't drawn says it's `gone`. With `frame_ms`, its
     /// frames are drawn only that often, as a device others load draws them, and pressed as that presses a window
     /// (each frame's `pressure`). `leaving` is how much that was taken out is still drawn going at its end.
     pub fn replay(&mut self, request: &Request, draw: &mut dyn FnMut(&mut Screen) -> anyhow::Result<Value>) -> anyhow::Result<Value> {
@@ -284,33 +287,33 @@ impl Screen {
         let every = 1000.0 / request.f64("input_hz").unwrap_or(hz).clamp(1.0, 1000.0);
         let after = request.f64("after").unwrap_or(2000.0).max(0.0);
         let track = match request.inputs.get("track") {
-            Some(Value::Object(selector)) => {
-                let selector = Request { id: Value::Null, op: "query".into(), inputs: selector.clone() };
-                Some(inspect::one(&self.tree, &selector).context("`track` selects no node")?)
-            }
+            Some(Value::Object(selector)) => Some(Request { id: Value::Null, op: "query".into(), inputs: selector.clone() }),
             _ => None,
         };
         let trace = super::finger::Trace { start, moves, lift };
         let paced = request.f64("frame_ms").map(|ms| ms.max(1.0));
-        let frames = self.play(&trace, every, hz, paced, after, track, Some(draw))?;
+        let frames = self.play(&trace, every, hz, paced, after, track.as_ref(), Some(draw))?;
         let budget = 1000.0 / hz;
-        let over = frames.iter().filter(|frame| frame["paint_ms"].as_f64().is_some_and(|ms| ms > budget)).count();
+        let over = inspect::over(&frames, budget);
         // What's been taken out but is still drawn going, which `after` should have seen go.
         let leaving = self.tree.going().count();
         Ok(json!({"hz": hz, "budget_ms": (budget * 100.0).round() / 100.0, "over": over, "leaving": leaving, "frames": frames, "time": self.js.clock().now(), "paused": true}))
     }
 
-    /// What the frame painted last cost, as `profile` says it: the mutations its JS made that it applied since the
-    /// frame before (`mutations`), how long its JS thread ran meanwhile (`script_ms`), how long it took to lay out (`layout_ms`) and to style, lay out and paint all told
-    /// (`paint_ms`), and, as `renderer` drew it, its draw calls (`draws`), what its GPU did (`work`,
-    /// `Renderer::work`) and what its atlas holds (`atlas`).
-    pub fn cost(&self, renderer: &crate::render::renderer::Renderer) -> Value {
+    /// What its frames cost since this was last asked, as `profile` says it: the mutations its JS made that it applied
+    /// (`mutations`), how long its JS thread ran (`script_ms`), how long it took to lay out (`layout_ms`) and to style,
+    /// lay out and paint all told (`paint_ms`), how many times it painted (`painted`: none where nothing changed, more
+    /// than one where it painted again before the display's refresh), and, as `renderer` last drew it, its draw calls
+    /// (`draws`), what its GPU did (`work`, `Renderer::work`) and what its atlas holds (`atlas`).
+    pub fn cost(&mut self, renderer: &crate::render::renderer::Renderer) -> Value {
         let ms = |time: Duration| (time.as_secs_f64() * 100_000.0).round() / 100.0;
+        let cost = std::mem::take(&mut self.cost);
         json!({
-            "mutations": self.cost.mutations,
-            "script_ms": ms(self.cost.script),
-            "layout_ms": ms(self.cost.layout),
-            "paint_ms": ms(self.cost.paint),
+            "mutations": cost.mutations,
+            "script_ms": ms(cost.script),
+            "layout_ms": ms(cost.layout),
+            "paint_ms": ms(cost.paint),
+            "painted": cost.painted,
             "draws": renderer.draws(),
             "work": renderer.work(),
             "atlas": renderer.sprite_atlas().usage(),
@@ -376,10 +379,10 @@ impl Screen {
         if self.settling.is_empty() {
             return;
         }
-        let mut pending = inspect::pending(&self.unanswered, &self.js.timers(), self.transitions.len(), self.changed.is_some(), self.busy());
+        let mut pending = inspect::pending(&self.unanswered, &self.js.timers(), self.transitions.len(), self.js.framing() || self.coasting(), self.changed.is_some(), self.busy());
         // What a frame's page asked and hasn't heard back is this one's to wait for too.
         for child in self.frames.values() {
-            pending.extend(inspect::pending(&child.screen.unanswered, &[], 0, false, false));
+            pending.extend(inspect::pending(&child.screen.unanswered, &[], 0, child.screen.js.framing(), false, false));
         }
         // A picture decoding in the background is drawn once it's ready.
         let pictures = self.pictures.pending() + self.frames.values().map(|child| child.screen.pictures.pending()).sum::<usize>();

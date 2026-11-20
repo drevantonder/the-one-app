@@ -521,7 +521,7 @@ fn replay(windows: &mut Windows, id: renderer::platform::WindowId, request: &ren
             for (name, value) in selector {
                 query[name] = value.clone();
             }
-            ask(windows, id, query).and_then(|found| found["result"]["nodes"][0]["node"].as_u64())
+            Some(query)
         }
         _ => None,
     };
@@ -559,6 +559,8 @@ fn replay(windows: &mut Windows, id: renderer::platform::WindowId, request: &ren
     let refresh = 1000.0 / hz;
     let begun = renderer::platform::fake_time();
     let (mut next, mut frames, mut drawn) = (0, Vec::new(), windows.frames(id));
+    // Its first frame's cost is what's done from here.
+    windows.cost(id);
     let elapsed = || renderer::platform::fake_time() - begun;
     loop {
         // The display's next refresh, and each move before it at its own time, as a device delivers them.
@@ -576,19 +578,25 @@ fn replay(windows: &mut Windows, id: renderer::platform::WindowId, request: &ren
         windows.run((tick - JUST_BEFORE - elapsed()).max(0.0));
         let drew = windows.frames(id) > drawn;
         drawn = windows.frames(id);
-        let mut frame = match drew {
-            true => windows.cost(id).unwrap_or_default(),
-            false => json!({"mutations": 0, "script_ms": 0.0, "layout_ms": 0.0, "paint_ms": 0.0, "draws": 0, "work": {"quads": 0, "shadows": 0, "sprites": 0, "backdrops": 0, "rasters": 0, "copied": 0, "uploaded": 0}}),
-        };
+        // What it cost since the frame before, every frame drawn meanwhile and its JS, which a frame that drew nothing
+        // costs too.
+        let mut frame = windows.cost(id).unwrap_or_default();
+        if !drew {
+            frame["draws"] = json!(0);
+            frame["work"] = json!({"quads": 0, "shadows": 0, "sprites": 0, "backdrops": 0, "rasters": 0, "copied": 0, "uploaded": 0});
+        }
         frame["at"] = json!((tick * 100.0).round() / 100.0);
         frame["pressure"] = json!(windows.pressure());
         frame["drawn"] = json!(drew);
-        if let Some(node) = track
-            && let Some(found) = ask(windows, id, json!({"op": "query", "node": node}))
-            && let Some(rect) = found["result"]["nodes"][0]["rect"].as_object()
-        {
-            frame["x"] = rect["x"].clone();
-            frame["y"] = rect["y"].clone();
+        // What's tracked, where it's drawn, or that it's gone, as a page that's left takes it with it.
+        if let Some(query) = &track {
+            match ask(windows, id, query.clone()).and_then(|found| found["result"]["nodes"][0]["rect"].as_object().cloned()) {
+                Some(rect) => {
+                    frame["x"] = rect["x"].clone();
+                    frame["y"] = rect["y"].clone();
+                }
+                None => frame["gone"] = json!(true),
+            }
         }
         if let Some(scrolled) = windows.with(id, |screen| screen.scrolled_under(renderer::geometry::point(x, y))).flatten() {
             frame["scroll"] = json!({"x": scrolled.x, "y": scrolled.y});
@@ -610,7 +618,7 @@ fn replay(windows: &mut Windows, id: renderer::platform::WindowId, request: &ren
     // What's been taken out but is still drawn going, which `after` should have seen go.
     let leaving = ask(windows, id, json!({"op": "window"})).and_then(|answer| answer["result"]["leaving"].as_u64()).unwrap_or(0);
     let budget = refresh;
-    let over = frames.iter().filter(|frame| frame["paint_ms"].as_f64().is_some_and(|ms| ms > budget)).count();
+    let over = renderer::inspect::over(&frames, budget);
     Ok(json!({"hz": hz, "budget_ms": (budget * 100.0).round() / 100.0, "over": over, "leaving": leaving, "frames": frames, "time": renderer::platform::fake_time(), "paused": true}))
 }
 

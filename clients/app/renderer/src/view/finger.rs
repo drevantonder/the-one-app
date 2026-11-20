@@ -12,7 +12,6 @@ use super::Screen;
 use crate::geometry::{Point, point};
 use crate::inspect::{self, Request};
 use crate::motion::Velocity;
-use crate::tree::Id;
 
 /// How far a finger moves before it pans, in points: UIScrollView's slop, as the phones' hosts have it.
 const SLOP: f32 = 10.0;
@@ -142,11 +141,13 @@ impl Screen {
     /// (a machine others load, as Telemetry measures one): each is a long one, which presses it as a window's do
     /// (`platform::Deadlines`), and it draws as pressed, as a window would, its pressure as it was again after.
     #[allow(clippy::too_many_arguments)]
-    pub(super) fn play(&mut self, trace: &Trace, every: f64, hz: f64, paced: Option<f64>, after: f64, track: Option<Id>, mut draw: Option<&mut dyn FnMut(&mut Screen) -> anyhow::Result<Value>>) -> anyhow::Result<Vec<Value>> {
+    pub(super) fn play(&mut self, trace: &Trace, every: f64, hz: f64, paced: Option<f64>, after: f64, track: Option<&Request>, mut draw: Option<&mut dyn FnMut(&mut Screen) -> anyhow::Result<Value>>) -> anyhow::Result<Vec<Value>> {
         let clock = self.js.clock().clone();
         if draw.is_some() {
             clock.pause();
             self.idle();
+            // Its first frame's cost is what's done from here.
+            self.cost = Default::default();
         }
         let paused = clock.paused();
         let refresh = 1000.0 / hz;
@@ -185,9 +186,15 @@ impl Screen {
             let mut drawn = draw(self)?;
             drawn["at"] = json!((frame * 100.0).round() / 100.0);
             drawn["pressure"] = json!(self.pressure.name());
-            if let Some(rect) = track.and_then(|id| self.rects.get(&id)) {
-                drawn["x"] = json!((rect.x * 100.0).round() / 100.0);
-                drawn["y"] = json!((rect.y * 100.0).round() / 100.0);
+            // What's tracked, where it's drawn, or that it's gone, as a page that's left takes it with it.
+            if let Some(selector) = track {
+                match inspect::one(&self.tree, selector).ok().and_then(|id| self.rects.get(&id)) {
+                    Some(rect) => {
+                        drawn["x"] = json!((rect.x * 100.0).round() / 100.0);
+                        drawn["y"] = json!((rect.y * 100.0).round() / 100.0);
+                    }
+                    None => drawn["gone"] = json!(true),
+                }
             }
             if let Some(scrolled) = self.scrolled_under(trace.start) {
                 drawn["scroll"] = json!({"x": scrolled.x, "y": scrolled.y});

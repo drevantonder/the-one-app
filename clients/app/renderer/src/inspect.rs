@@ -345,7 +345,7 @@ pub struct Asked {
 /// (`Thread::timers`, each `{in, every?}`), how many properties are on their way (`moving`), whether what it draws
 /// changed since the frame drawn last (`changed`), so a frame is due, which what changed starts moving in, and whether
 /// its JS thread is still running what it was sent (`running`), or starting.
-pub fn pending(asked: &HashMap<String, Asked>, timers: &[Value], moving: usize, changed: bool, running: bool) -> Vec<Value> {
+pub fn pending(asked: &HashMap<String, Asked>, timers: &[Value], moving: usize, animating: bool, changed: bool, running: bool) -> Vec<Value> {
     let mut pending: Vec<Value> = asked
         .values()
         .map(|asked| json!({"kind": "request", "method": asked.method, "tool": asked.tool, "ms": asked.since.elapsed().as_millis() as u64}))
@@ -358,6 +358,10 @@ pub fn pending(asked: &HashMap<String, Asked>, timers: &[Value], moving: usize, 
     if moving > 0 {
         pending.push(json!({"kind": "transition", "properties": moving}));
     }
+    // What its page moves a frame at a time (a spring on `requestAnimationFrame`), or a list flung.
+    if animating {
+        pending.push(json!({"kind": "animation"}));
+    }
     if changed {
         pending.push(json!({"kind": "frame"}));
     }
@@ -367,12 +371,20 @@ pub fn pending(asked: &HashMap<String, Asked>, timers: &[Value], moving: usize, 
     pending
 }
 
+/// How many of a replay's or a profile's `frames` took longer than `budget` ms to make: their JS, laying out and
+/// painting, and their GPU's time where it was waited for, all of which the frame waits on before the display's refresh
+/// shows it.
+pub fn over(frames: &[Value], budget: f64) -> usize {
+    let ms = |frame: &Value, name: &str| frame[name].as_f64().unwrap_or(0.0);
+    frames.iter().filter(|frame| ms(frame, "script_ms") + ms(frame, "paint_ms") + ms(frame, "gpu_ms") > budget).count()
+}
+
 /// Whether nothing's pending that ends by itself: no request unanswered, no frame due, and, while the clock runs, no
 /// timer but intervals and nothing on its way.
 pub fn settled(pending: &[Value], paused: bool) -> bool {
     pending.iter().all(|pending| match pending["kind"].as_str() {
         Some("timer") => paused || pending.get("every").is_some_and(|every| !every.is_null()),
-        Some("transition") => paused,
+        Some("transition" | "animation") => paused,
         _ => false,
     })
 }

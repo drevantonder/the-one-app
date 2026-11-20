@@ -1762,10 +1762,10 @@ impl Windows {
         self.windows.get(&id).map_or(0, |window| window.frames)
     }
 
-    /// What window `id`'s last frame cost, as the inspector's `profile` says it (`Screen::cost`).
-    pub fn cost(&self, id: WindowId) -> Option<serde_json::Value> {
-        let window = self.windows.get(&id)?;
-        Some(window.screen.as_ref().ok()?.cost(window.parts[0].renderer.as_ref()?))
+    /// What window `id`'s frames cost since this was last asked, as the inspector's `profile` says it (`Screen::cost`).
+    pub fn cost(&mut self, id: WindowId) -> Option<serde_json::Value> {
+        let window = self.windows.get_mut(&id)?;
+        Some(window.screen.as_mut().ok()?.cost(window.parts[0].renderer.as_ref()?))
     }
 
     /// What window `id` last drew, the GPU it drew it with and its atlas.

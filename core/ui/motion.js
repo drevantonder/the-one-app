@@ -212,7 +212,8 @@ function curve(frames, way, values, stretches, budget, before, apple) {
   // Its legend above it.
   const y = (v) => height - pad - ((v - low) / (high - low)) * (height - 2 * pad - 20)
   const line = (points, colour, dash = "") => `<polyline fill="none" stroke="${colour}" stroke-width="2" ${dash && `stroke-dasharray="${dash}"`} points="${points.map(([t, v]) => `${x(t).toFixed(1)},${y(v).toFixed(1)}`).join(" ")}"/>`
-  const over = frames.filter((frame) => frame.paint_ms > budget)
+  // A frame waits on its JS, its painting and its GPU before the refresh shows it (the harness's `inspect::over`).
+  const over = frames.filter((frame) => (frame.script_ms ?? 0) + frame.paint_ms + (frame.gpu_ms ?? 0) > budget)
   return `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 ${width} ${height}" width="${width}" height="${height}" font-family="system-ui" font-size="11">
 <rect width="100%" height="100%" fill="white"/>
 <line x1="${pad}" y1="${y(0)}" x2="${width - pad}" y2="${y(0)}" stroke="#ddd"/>
