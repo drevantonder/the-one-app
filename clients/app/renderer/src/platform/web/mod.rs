@@ -83,6 +83,36 @@ struct Host {
     reduced_motion: bool,
 }
 
+thread_local! {
+    /// What the browser's `PressureObserver` last said of its CPU.
+    static PRESSURE: Cell<crate::platform::Pressure> = const { Cell::new(crate::platform::Pressure::Nominal) };
+}
+
+/// Hears the browser's own pressure, its CPU's, where it has the Compute Pressure API (Chromium's): one that hasn't, or
+/// whose page may not use it (a permissions policy), leaves it nominal.
+fn observe_pressure() {
+    use crate::platform::Pressure;
+    let Ok(observing) = js_sys::Reflect::get(&js_sys::global(), &"PressureObserver".into()).and_then(|class| class.dyn_into::<js_sys::Function>()) else { return };
+    let heard = Closure::<dyn FnMut(js_sys::Array)>::new(|records: js_sys::Array| {
+        let last = records.at(-1);
+        let state = js_sys::Reflect::get(&last, &"state".into()).ok().and_then(|state| state.as_string());
+        PRESSURE.set(match state.as_deref() {
+            Some("critical") => Pressure::Critical,
+            Some("serious") => Pressure::Serious,
+            Some("fair") => Pressure::Fair,
+            _ => Pressure::Nominal,
+        });
+    });
+    let Ok(observer) = js_sys::Reflect::construct(&observing, &js_sys::Array::of1(heard.as_ref())) else { return };
+    heard.forget();
+    let observe = js_sys::Reflect::get(&observer, &"observe".into()).and_then(|observe| observe.dyn_into::<js_sys::Function>());
+    if let Ok(promise) = observe.and_then(|observe| observe.call1(&observer, &"cpu".into())).and_then(|promise| promise.dyn_into::<js_sys::Promise>()) {
+        let refused = Closure::<dyn FnMut(JsValue)>::new(|_| {});
+        let _ = promise.catch(&refused);
+        refused.forget();
+    }
+}
+
 /// The one window a frame has: its page's.
 const WINDOW: WindowId = 1;
 
@@ -395,9 +425,10 @@ impl Display {
 
     pub fn flush(&self) {}
 
-    /// How pressed the device is, as its system says: it says nothing here yet.
+    /// How pressed the device is, as the browser's own Compute Pressure API last said, where it has one
+    /// (`observe_pressure`).
     pub fn pressure(&self) -> crate::platform::Pressure {
-        crate::platform::Pressure::Nominal
+        PRESSURE.get()
     }
 
     /// The display's refresh interval, where it says: it doesn't here, so frame timing takes its frames' median.
@@ -706,6 +737,7 @@ pub async fn open(canvas: web_sys::HtmlCanvasElement, scale: f32, page: String, 
     let room = Size { width: canvas.width() as f32 / scale, height: canvas.height() as f32 / scale };
     let media = |query: &str| web_sys::window().and_then(|window| window.match_media(query).ok().flatten()).is_some_and(|list| list.matches());
     HOST.set(Some(Host { canvas, calls, dark: media("(prefers-color-scheme: dark)"), reduced_motion: media("(prefers-reduced-motion: reduce)") }));
+    observe_pressure();
     let tokens = load(&tables).map_err(|error| JsError::new(&format!("{error:#}")))?;
     let context = crate::render::context::Context::create().await.map_err(|error| JsError::new(&format!("{error:#}")))?;
     let mut windows = Windows::made(Display, Ok(context)).map_err(|error| JsError::new(&format!("{error:#}")))?;
