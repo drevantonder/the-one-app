@@ -2,7 +2,8 @@
 // (renderer.ts's `Props`), which Solid's universal renderer tells the host as mutations (renderer.native.ts). The UI
 // library's components import them as `#primitives`, which is these in the native build and the DOM's (primitives.tsx)
 // in the DOM's, so each component is the same code on both.
-import { createContext, createSignal, merge, omit, onCleanup, Repeat, Show, useContext, type Element } from "solid-js"
+import { createContext, createSignal, merge, omit, onCleanup, onSettled, Repeat, Show, useContext, type Element } from "solid-js"
+import { tellDrawn } from "../bridge.native.ts"
 import { createElement, detach, insert, insertNode, render as draw, root, spread, unsupported } from "./renderer.native.ts"
 import { layer } from "./layer.ts"
 import type { Mutations, Type } from "./renderer.ts"
@@ -162,7 +163,8 @@ export const VirtualizedList: typeof Page.VirtualizedList = (props) => {
   return node as unknown as Element
 }
 
-export const render: typeof Page.render = (code) => draw(code as never)
+/// Draws the page, and tells its client once what it asked for as it opened has settled, as the DOM's `render` does.
+export const render: typeof Page.render = (code) => draw((() => (onSettled(() => void tellDrawn()), code())) as never)
 
 /** A box over the whole window, at the root, after the page, so it's drawn over it. A modal one says so
  * (`aria-modal`): the host holds the keyboard and the screen reader in it, and what's behind it is inert, as the DOM's

@@ -46,9 +46,12 @@ configureClientErrors({
   },
 })
 
+/// What the page has asked its client that isn't answered yet, as the DOM's bridge keeps it, for `tellDrawn`.
+const asked = new Set<Promise<unknown>>()
+
 function ask<T>(method: string, params: object): Promise<T> {
   const id = ++requests
-  return new Promise((done, failed) => {
+  const answer = new Promise<T>((done, failed) => {
     waiting.set(id, ({ result, error }) => {
       waiting.delete(id)
       if (error) failed(new Error(error.message))
@@ -56,6 +59,18 @@ function ask<T>(method: string, params: object): Promise<T> {
     })
     host?.post({ jsonrpc: "2.0", id, method, params })
   })
+  asked.add(answer)
+  void answer.then(() => asked.delete(answer), () => asked.delete(answer))
+  return answer
+}
+
+/// Tells the client the page has drawn, as the DOM's bridge does: once it has rendered and everything it asked for
+/// has been answered, which the host times its opening to (`Opening` in clients/app/src/native.rs).
+export async function tellDrawn() {
+  await greeted
+  do await Promise.allSettled(asked)
+  while (await new Promise((later) => setTimeout(() => later(asked.size))))
+  host?.post({ jsonrpc: "2.0", method: "notifications/one/drawn", params: {} })
 }
 
 /** What the client says of where the page is shown, as the DOM's bridge reads it: whether the window names the app
