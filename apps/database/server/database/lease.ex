@@ -50,6 +50,11 @@ defmodule Database.Lease do
   key, or a server that's stopping, would have everyone pass their calls to it and wait. It still holds the lease
   the log gave it before it started, which everyone passes their calls to already.
 
+  A server whose machine has a battery, a laptop or a tablet, takes no lease while a server that stays on is up of
+  those acting for whose the database is, and hands on one it holds at the next call asked of it (`gives_way?/1`): it
+  sleeps when it's closed and goes out of the others' reach wherever it's carried, and every call of theirs would wait
+  on it. It takes one only while none of those is up.
+
   A server whose own work on the database fails, as one out of files does, hands its lease on as well, and takes
   none for a while: an app's own error is its caller's, but one opening its copy or reading SQLite's log is this
   server's, and every call passed to it would fail the same way while it kept the lease.
@@ -171,6 +176,7 @@ defmodule Database.Lease do
         cond do
           not OneCore.Server.up?() -> {:keep_state, data, {:reply, from, :not_up}}
           failed?(data) -> {:keep_state, data, {:reply, from, :failed}}
+          gives_way?(data) -> {:keep_state, data, {:reply, from, :gives_way}}
           true -> moved(take(data, if(free, do: "handed_on", else: "free")), [{:reply, from, :ok}])
         end
 
@@ -195,17 +201,18 @@ defmodule Database.Lease do
       when elem(ask, 0) in [:transaction, :schedule],
       do: {:keep_state_and_data, {:reply, from, {:held_by, server}}}
 
-  def handle_event({:call, _from} = type, {_codec, {:transaction, schema, fun, job}} = content, state, data) do
-    transact({type, content}, state, data, fn db ->
-      migrate(db, schema)
-      result = fun.(db)
-      if job, do: mark(db, job)
-      result
-    end)
+  def handle_event({:call, from} = type, {_codec, {:transaction, schema, fun, job}} = content, state, data) do
+    given_way(from, data) ||
+      transact({type, content}, state, data, fn db ->
+        migrate(db, schema)
+        result = fun.(db)
+        if job, do: mark(db, job)
+        result
+      end)
   end
 
-  def handle_event({:call, _from} = type, {_codec, {:schedule, jobs, _fire, now}} = content, state, data),
-    do: transact({type, content}, state, data, &due(&1, jobs, now))
+  def handle_event({:call, from} = type, {_codec, {:schedule, jobs, _fire, now}} = content, state, data),
+    do: given_way(from, data) || transact({type, content}, state, data, &due(&1, jobs, now))
 
   # A job's call ended. One that committed no transaction is marked as run now, unless the lease has gone: then the
   # server holding it makes the call.
@@ -455,7 +462,7 @@ defmodule Database.Lease do
 
     case List.last(entries) || Log.entry(data.artifact, snapshot) do
       free when free in [nil, %{server: nil}] ->
-        if OneCore.Server.up?() and not failed?(data),
+        if OneCore.Server.up?() and not failed?(data) and not gives_way?(data),
           do: take(data, if(free, do: "handed_on", else: "free")),
           else: {{:following, nil}, data}
 
@@ -479,6 +486,35 @@ defmodule Database.Lease do
     if wrote == :ok, do: Counter.add(:"one.database.lease.moves", 1, %{"one.app" => app(data.artifact), "one.reason" => why})
     look(data)
   end
+
+  # A server whose machine has a battery, a laptop or a tablet, holds no lease while one that stays on is up of those
+  # acting for whose the database is (`holders/1`): it sleeps when it's closed, and goes wherever it's carried, out of
+  # the others' reach, and every call of every server would wait on it. One that holds it hands it on at the next call
+  # asked of it, which goes on with nobody holding it, and a server that stays on takes it at once.
+  defp gives_way?(data) do
+    OneCore.Servers.battery?(data.server) == true and
+      Enum.any?(holders(OneCore.User.owner(OneCore.Artifact.name(data.artifact))), &stays_on?/1)
+  end
+
+  defp stays_on?(server), do: OneCore.Servers.battery?(server) == false and OneCore.Servers.ready?(server) == true
+
+  defp given_way(from, %{db: db} = data) when db != nil do
+    if gives_way?(data) do
+      data = close(data)
+      wrote = Log.write(data.artifact, data.number + 1, %{server: nil})
+      Logger.info("#{data.artifact.prefix}: a server that stays on is up, so this one hands its lease on at #{data.number + 1}: #{wrote}")
+      {:next_state, {:following, nil}, data, {:reply, from, {:held_by, nil}}}
+    end
+  end
+
+  defp given_way(_from, _data), do: nil
+
+  @doc """
+  The servers that may hold the lease of a database of `whose`, a user, a group or the network, in the order a call is
+  passed to them: those acting for them that allow the app's code, narrowest first (`OneCore.Apps.servers/1`), and of
+  those, ones whose machine has no battery before ones whose has.
+  """
+  def holders(whose), do: Enum.sort_by(OneCore.Apps.servers(whose), &(OneCore.Servers.battery?(&1) == true))
 
   # Whether `server` answers the relay and is staying: one the relay says isn't ready, as one draining to restart, is
   # leaving, and hands its lease on as it stops.

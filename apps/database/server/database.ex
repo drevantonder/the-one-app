@@ -9,7 +9,7 @@ defmodule Database do
   def icon, do: "icon.svg"
 
   @impl true
-  def requires, do: %{"core" => ">= 0.29.73"}
+  def requires, do: %{"core" => ">= 0.34.70"}
 
   require Logger
   alias Database.Lease
@@ -98,7 +98,7 @@ defmodule Database do
       # This server is stopping, or not one of its network's yet, so it takes no lease that others would then come
       # to it for: the call goes to one of the servers that are, which takes it.
       :not_up ->
-        Call.forward(call, OneCore.Apps.servers(OneCore.User.owner(OneCore.Artifact.name(call.own))))
+        Call.forward(call, Lease.holders(OneCore.User.owner(OneCore.Artifact.name(call.own))))
         held = if server, do: "#{holder} holds it and didn't answer", else: "nobody holds it"
         raise "This server is starting or stopping, so it doesn't take a database over, #{held}, and no other server took it. Try again in a moment."
 
@@ -106,8 +106,14 @@ defmodule Database do
       # the servers acting for whoever the database is, which takes the lease and runs it, and one passed on here is
       # answered as one this server would pass on again, so the server that passed it takes the lease (`Call.forward/2`).
       :failed ->
-        Call.forward(call, OneCore.Apps.servers(OneCore.User.owner(OneCore.Artifact.name(call.own))))
+        Call.forward(call, Lease.holders(OneCore.User.owner(OneCore.Artifact.name(call.own))))
         raise "This server's copy of #{app}'s database failed just now, so it handed its lease on, and no other server took it. Try again in a moment."
+
+      # This server's machine has a battery, and one of the servers acting for whose the database is stays on and is
+      # up: that one takes the lease (`Database.Lease`).
+      :gives_way ->
+        Call.forward(call, Lease.holders(OneCore.User.owner(OneCore.Artifact.name(call.own))))
+        raise "This server's machine has a battery, so it leaves #{app}'s database to a server that stays on, and none of those took it. Try again in a moment."
     end
   end
 
