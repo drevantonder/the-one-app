@@ -43,9 +43,8 @@ export function OpenCategory(props: { owner: Owner; made: string; open: boolean;
     const [across, down] = [Math.max(x - area().x, area().x + area().width - x), Math.max(y - area().y, area().y + area().height - y)]
     return { x: x - across, y: y - down, width: 2 * across, height: 2 * down }
   }
-  // A tap on an app opens it, and one beside them, which the grid's Pressable has too, closes it.
-  let app = false
-  const beside = () => (app ? (app = false) : tapping() && close())
+  // A tap beside its apps closes it; one on an app is the app's (`Pressable`).
+  const beside = () => tapping() && close()
   return (
     <View role="dialog" aria-label={category()?.category} aria-hidden={props.open ? undefined : "true"} style={[looks.dialog, looks.categoryLayer, !props.open && looks.inert, looks.sized(windowWidth(), viewport().height)]}>
       {/* What's behind blurs and dims through a veil. */}
@@ -61,8 +60,7 @@ export function OpenCategory(props: { owner: Owner; made: string; open: boolean;
                 {(entrypoint) => {
                   // What's held here is an app of the App Library, as there: its menu, or carried onto Home's pages.
                   const held = holds(() => ({ item: opens(entrypoint()), listed: entrypoint(), page: 0, index: -1, from: "library" }), () => true)
-                  const pressed = (behind: boolean, from?: Parameters<typeof press>[3]) => ((app = !behind), press(entrypoint(), props.owner, behind, from))
-                  return <Tile name={entrypoint().name} icon={entrypoint().icon} size={60} scale={1} badge={badgeOf(entrypoint() as Entrypoint, props.owner)} holds={held} onPress={pressed} />
+                  return <Tile name={entrypoint().name} icon={entrypoint().icon} size={60} scale={1} badge={badgeOf(entrypoint() as Entrypoint, props.owner)} holds={held} onPress={(behind, from) => press(entrypoint(), props.owner, behind, from)} />
                 }}
               </For>
             </View>

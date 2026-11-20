@@ -365,14 +365,17 @@ export function View(props: ViewProps) {
 /// `Touchable…` family). With a role of what's pressed (`button`, `menuitem`, `option`, …) the keyboard reaches it.
 /// `onPress` is told where it was (`clientX`, `currentTarget.getBoundingClientRect()`), and a `disabled` one isn't
 /// pressed. How it looks hovered or pressed is its style's (`backgroundColor: { default: …, pressed: … }`), not a
-/// function of its state, and a touch held is `onContextMenu`, not `onLongPress`.
+/// function of its state, and a touch held is `onContextMenu`, not `onLongPress`. A press is the innermost one's under
+/// it, as React Native's responder, UIKit's hit-testing and Flutter's gesture arena give it: one in another (an app's
+/// icon in its category's square) is pressed alone, as a native host presses it.
 export function Pressable(props: PressableProps) {
   const own = merge(omit(props, "style", "children", "autoFocus", "tabIndex", "onPress", "disabled", "onLayout", "onIntersection", "onDrop", ...moved), droppable(props), {
     get tabindex() {
       return props.tabIndex
     },
     get onClick() {
-      return props.disabled ? undefined : props.onPress
+      const press = props.onPress
+      return props.disabled || !press ? undefined : (event: MouseEvent) => (event.stopPropagation(), press(event as unknown as Located))
     },
     get "aria-disabled"() {
       return props.disabled ? "true" : props["aria-disabled"]

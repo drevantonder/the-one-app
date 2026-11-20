@@ -89,8 +89,7 @@ export function Library(props: { owner: Owner; size?: { width: number; height: n
   const width = () => props.size?.width ?? Math.min(1440, room().width - 2 * inline())
   const laid = createMemo(() => shelf(width()))
   const opening = (key: () => string) => (event: Located) => {
-    // An app pressed in its square opens the app, not the category too.
-    if (Date.now() - pressedApp < 100 || !state().matches("nothing")) return
+    if (!state().matches("nothing")) return
     ahead(key)(event)
     home.send({ type: "open", category: key() })
   }
@@ -212,7 +211,6 @@ function LibraryEntrypoint(props: { entrypoint: Listed; owner: Owner; icon: numb
         held.onPointerDown?.(event)
       }}
       onPress={(event) => {
-        pressedApp = Date.now()
         if (tapping() && state().matches("nothing")) press(props.entrypoint, props.owner, false, from(event))
       }}
       style={[looks.entry, props.small && looks.entrySmall]}
@@ -226,5 +224,3 @@ function LibraryEntrypoint(props: { entrypoint: Listed; owner: Owner; icon: numb
   )
 }
 
-/// When an app in the App Library was last pressed, which its category's square, under it, doesn't take as its own.
-let pressedApp = 0
