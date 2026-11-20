@@ -2492,6 +2492,12 @@ impl Windows {
         self.windows.get(&id).map_or(0, |window| window.frames)
     }
 
+    /// Whether something on window `id` is on its way somewhere it'll arrive at (`Screen::arriving`): moving, but not
+    /// by a loop alone (a spinner), which never arrives.
+    pub fn arriving(&self, id: WindowId) -> bool {
+        self.windows.get(&id).is_some_and(|window| window.screen.as_ref().is_ok_and(Screen::arriving))
+    }
+
     /// Whether window `id` is on screen (`Window::on_screen`): not a panel put away.
     pub fn on_screen(&self, id: WindowId) -> bool {
         self.windows.get(&id).is_some_and(Window::on_screen)

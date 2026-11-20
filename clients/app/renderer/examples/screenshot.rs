@@ -670,13 +670,18 @@ fn input(windows: &mut Windows, id: renderer::platform::WindowId, request: &rend
         }
         // The frame the window's page presented last, drawn on what it kept from frames before, beside one drawn
         // afresh as it is now (`Windows::afresh`): how many of their pixels differ, and where, as a frame must be the same however
-        // it was come to; with both pictures where they differ. What's still moving (a spinner, which never comes to
-        // rest) is drawn afresh a moment on from its last frame, so is only said to be moving; what isn't on the screen
-        // (a panel put away) shows nothing, and is judged as it's shown again.
+        // it was come to; with both pictures where they differ. What's still on its way is drawn afresh a moment on
+        // from its last frame, so is only said to be moving; a loop (a spinner) is drawn at the time its last frame
+        // was, so it's compared; what isn't on the screen (a panel put away) shows nothing, and is judged as it's shown
+        // again.
         "fresh" => {
             drawn(windows, id);
-            if windows.wanted() {
+            if windows.arriving(id) {
                 return Ok(json!({"moving": true}));
+            }
+            if windows.wanted() {
+                let (now, refresh) = (renderer::platform::fake_time(), 1000.0 / 60.0);
+                windows.run(((now / refresh).floor() + 1.0) * refresh - now);
             }
             if !windows.on_screen(id) {
                 return Ok(json!({"shown": false}));

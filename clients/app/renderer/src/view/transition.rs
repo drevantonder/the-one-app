@@ -601,7 +601,18 @@ impl Transitions {
 
     /// The nodes with something on its way, which are styled again each frame until it's arrived.
     pub fn moving(&self) -> HashSet<Id> {
-        self.moving.keys().map(|(id, _)| *id).chain(self.dragged.keys().copied()).chain(self.animated.iter().copied()).chain(self.flips.keys().copied()).collect()
+        self.on_the_way().chain(self.animated.iter().copied()).collect()
+    }
+
+    /// How many nodes move by a loop and nothing else (`animation`, a spinner), which never arrives: it's at rest as
+    /// a test's end has it, as Flutter's tests pump a while rather than wait for an endless animation to end.
+    pub fn repeating(&self) -> usize {
+        let arriving: HashSet<Id> = self.on_the_way().collect();
+        self.animated.iter().filter(|id| !arriving.contains(id)).count()
+    }
+
+    fn on_the_way(&self) -> impl Iterator<Item = Id> + '_ {
+        self.moving.keys().map(|(id, _)| *id).chain(self.dragged.keys().copied()).chain(self.flips.keys().copied())
     }
 
     /// The nodes moving only by their own move, growth and fade (`translateX`, `translateY`, `scale`, `opacity`),

@@ -118,7 +118,8 @@ impl Screen {
                     "failed": self.failed,
                     "focused": self.focus.focused,
                     "leaving": self.tree.going().count(),
-                    "moving": self.transitions.moving().len(),
+                    "moving": self.transitions.moving().len() - self.transitions.repeating(),
+                    "repeating": self.transitions.repeating(),
                     "blank": self.pictures.blank + self.frames.values().map(|child| child.screen.pictures.blank).sum::<usize>(),
                     "picture_ms": self.frames.values().map(|child| child.screen.pictures.slowest).fold(self.pictures.slowest, Duration::max).as_millis() as u64,
                     "js_bytes": self.js_memory(),
@@ -519,7 +520,7 @@ impl Screen {
         let (told, waiting): (Vec<_>, Vec<_>) = std::mem::take(&mut self.settling).into_iter().partition(|(until, _)| settled || *until <= now);
         self.settling = waiting;
         for (_, tell) in told {
-            tell(json!({"settled": settled, "pending": pending}));
+            tell(json!({"settled": settled, "pending": pending, "repeating": self.transitions.repeating()}));
         }
     }
 }
