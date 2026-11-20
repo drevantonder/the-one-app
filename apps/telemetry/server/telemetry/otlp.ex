@@ -13,8 +13,9 @@ defmodule Telemetry.Otlp do
     and `max`. A sum's `count` is its value.
   """
 
-  # What a client's export says of the client, kept on each of its metric's points (`points/1`).
-  @client ~w(one.device one.for service.name os.type)
+  # What a client's export says of the client, kept on each of its metric's points (`points/1`): its build too, as its
+  # spans and log lines keep, so a number is told apart by the build that measured it.
+  @client ~w(one.device one.for service.name service.version os.type)
 
   @messages %{
     "traces" => {:opentelemetry_exporter_trace_service_pb, :export_trace_service_request},
