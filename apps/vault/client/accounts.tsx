@@ -438,9 +438,7 @@ function ItemScreen(props: { item: Item }) {
       </Section>
       <Section heading={item().hosts.length === 1 ? "Website" : "Websites"}>
         <Show when={item().hosts.length} fallback={<Empty>None: its secrets go nowhere.</Empty>}>
-          <List>
-            <For each={item().hosts}>{(host) => <Row heading={host} />}</For>
-          </List>
+          <List each={item().hosts}>{(host) => <Row heading={host} />}</List>
         </Show>
       </Section>
       <Section heading="Access">
@@ -566,10 +564,8 @@ function AddSheet() {
   const types = () => contents().types.filter((type) => type.section === section() && type.create && type.trusted)
   return (
     <Sheet heading={section() ? `Add ${titled(section()!.replace(/s$/, ""))}` : ""} open={!!section()} onClose={shut}>
-      <List>
-        <For each={types()} keyed={(type) => type.id}>
-          {(type) => <Row start={<Image src={type().icon ?? ""} alt="" style={look.tile} />} heading={titled(type().name)} onPress={() => (shut(), create(type()))} />}
-        </For>
+      <List each={types()} keyed={(type) => type.id}>
+        {(type) => <Row start={<Image src={type().icon ?? ""} alt="" style={look.tile} />} heading={titled(type().name)} onPress={() => (shut(), create(type()))} />}
       </List>
     </Sheet>
   )

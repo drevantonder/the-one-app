@@ -309,25 +309,23 @@ function Detail(props: { thing: Thing; all: All; groups?: Groups }) {
       </Show>
       <Show when={runnable().length}>
         <Section heading="Services">
-          <List>
-            <For each={runnable()} keyed={(service) => `${service.app}/${service.service}`}>
-              {(service) => (
-                <Row
-                  heading={service().called}
-                  end={
-                    <Switch
-                      aria-label={service().called}
-                      value={service().on}
-                      onValueChange={async (on) => {
-                        // What it needs of the machine is read as it's switched on, where its owner decides.
-                        if (on && !(await confirm({ heading: `Switch on ${service().called}?`, text: service().needs, action: "Switch On" }))) return refresh(mine)
-                        doing(() => call(on ? "install_service" : "uninstall_service", { app: service().app, service: service().service, server: server()!.id }, { subject: server()!.subject }))
-                      }}
-                    />
-                  }
-                />
-              )}
-            </For>
+          <List each={runnable()} keyed={(service) => `${service.app}/${service.service}`}>
+            {(service) => (
+              <Row
+                heading={service().called}
+                end={
+                  <Switch
+                    aria-label={service().called}
+                    value={service().on}
+                    onValueChange={async (on) => {
+                      // What it needs of the machine is read as it's switched on, where its owner decides.
+                      if (on && !(await confirm({ heading: `Switch on ${service().called}?`, text: service().needs, action: "Switch On" }))) return refresh(mine)
+                      doing(() => call(on ? "install_service" : "uninstall_service", { app: service().app, service: service().service, server: server()!.id }, { subject: server()!.subject }))
+                    }}
+                  />
+                }
+              />
+            )}
           </List>
         </Section>
       </Show>
@@ -455,26 +453,22 @@ function Things(props: { all: All; groups?: Groups }) {
       <Screen heading="Devices" back>
         <Show when={props.all.waiting.length}>
           <Section heading="Waiting to sign in">
-            <List>
-              <For each={props.all.waiting} keyed={(device) => device.request}>
-                {(device) => (
-                  <Row
-                    heading={`${device().name} · the One App`}
-                    text={[since(device().at), device().place && `near ${device().place}`].filter(Boolean).join(" · ")}
-                    current={answering() === device().request}
-                    onPress={() => setAnswering(device().request)}
-                  />
-                )}
-              </For>
+            <List each={props.all.waiting} keyed={(device) => device.request}>
+              {(device) => (
+                <Row
+                  heading={`${device().name} · the One App`}
+                  text={[since(device().at), device().place && `near ${device().place}`].filter(Boolean).join(" · ")}
+                  current={answering() === device().request}
+                  onPress={() => setAnswering(device().request)}
+                />
+              )}
             </List>
           </Section>
         </Show>
         <Answer device={props.all.waiting.find((device) => device.request === answering())} />
         <Section heading="Your Devices">
           <Show when={props.all.devices.length} fallback={<Empty>No devices yet.</Empty>}>
-            <List>
-              <For each={props.all.devices} keyed={(device) => device.id}>{row}</For>
-            </List>
+            <List each={props.all.devices} keyed={(device) => device.id}>{row}</List>
           </Show>
         </Section>
         <Show when={props.all.servers.length}>

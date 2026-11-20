@@ -1,5 +1,5 @@
 // Computer Use: the screens your agents can use, and one of them as it is now, with who last used it and for what.
-import { createEffect, createMemo, createSignal, Errored, For, Loading, refresh, Show } from "solid-js"
+import { createEffect, createMemo, createSignal, Errored, Loading, refresh, Show } from "solid-js"
 import { Button, call, changed, client, Empty, List, LiveScreen, Problem, render, Row, Screen, Section, since, Skeleton, Split, visible } from "ui"
 
 /** A screen agents can use, as `computer-use_screens` answers it. */
@@ -92,10 +92,8 @@ function App() {
       <Split open={!!opened()} onClose={() => setOpen()} detail={<Show when={opened()} fallback={<Empty>Pick a screen to watch it.</Empty>}><Detail screen={opened()!} /></Show>}>
         <Screen heading="Computer Use">
           <ThisPhone />
-          <List>
-            <For each={screens()} keyed={address}>
-              {(screen) => <Row heading={screen().name} text={usage(screen().used)} current={open() === address(screen())} onPress={() => setOpen(address(screen()))} />}
-            </For>
+          <List each={screens()} keyed={address}>
+            {(screen) => <Row heading={screen().name} text={usage(screen().used)} current={open() === address(screen())} onPress={() => setOpen(address(screen()))} />}
           </List>
         </Screen>
       </Split>

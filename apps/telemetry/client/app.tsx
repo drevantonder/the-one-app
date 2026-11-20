@@ -393,17 +393,15 @@ function Alerted() {
       <Loading fallback={<Skeleton rows={1} />}>
         <Show when={alerts().alerts.length}>
           <Section heading="Alerts">
-            <List>
-              <For each={alerts().alerts} keyed={(alert) => alert.id}>
-                {(alert) => (
-                  <Row
-                    start={<View style={[alert().state !== "resolved" && look.wrong]}><Icon name={alert().state === "resolved" ? "check" : "warning-circle"} /></View>}
-                    heading={alert().title}
-                    text={alert().text ?? undefined}
-                    end={alert().ended ? `Resolved ${since(alert().ended!, "narrow")}` : since(alert().began, "narrow")}
-                  />
-                )}
-              </For>
+            <List each={alerts().alerts} keyed={(alert) => alert.id}>
+              {(alert) => (
+                <Row
+                  start={<View style={[alert().state !== "resolved" && look.wrong]}><Icon name={alert().state === "resolved" ? "check" : "warning-circle"} /></View>}
+                  heading={alert().title}
+                  text={alert().text ?? undefined}
+                  end={alert().ended ? `Resolved ${since(alert().ended!, "narrow")}` : since(alert().began, "narrow")}
+                />
+              )}
             </List>
           </Section>
         </Show>

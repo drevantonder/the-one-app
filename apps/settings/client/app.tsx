@@ -158,18 +158,16 @@ function Sidebar(props: { shown?: string }) {
       </For>
       <Show when={apps().filter((app) => wanted(app.title)).length}>
         <Section heading="Apps">
-          <List>
-            <For each={apps().filter((app) => wanted(app.title))} keyed={(app) => `${app.for}:${app.name}`}>
-              {(app) => (
-                <Row
-                  start={<Tile icon={app().icon} />}
-                  heading={app().title}
-                  end={<Show when={app().update}><Badge variant="secondary">Update</Badge></Show>}
-                  current={props.shown === `app:${app().for}:${app().name}`}
-                  onPress={() => choose(`app:${app().for}:${app().name}`)}
-                />
-              )}
-            </For>
+          <List each={apps().filter((app) => wanted(app.title))} keyed={(app) => `${app.for}:${app.name}`}>
+            {(app) => (
+              <Row
+                start={<Tile icon={app().icon} />}
+                heading={app().title}
+                end={<Show when={app().update}><Badge variant="secondary">Update</Badge></Show>}
+                current={props.shown === `app:${app().for}:${app().name}`}
+                onPress={() => choose(`app:${app().for}:${app().name}`)}
+              />
+            )}
           </List>
         </Section>
       </Show>
@@ -293,17 +291,15 @@ function Updates() {
           </List>
           <Show when={ready().length}>
             <Section heading="Apps">
-              <List>
-                <For each={ready()} keyed={(app) => `${app.for}:${app.name}`}>
-                  {(app) => (
-                    <Row
-                      start={<Tile icon={app().icon} />}
-                      heading={app().title}
-                      text={app().update!.why ?? "Update ready"}
-                      end={<Button variant="outline" loading={working() === app().name} onPress={press(app().name, () => call("apps_update", { name: app().name }, { subject: app().for }))}>Update</Button>}
-                    />
-                  )}
-                </For>
+              <List each={ready()} keyed={(app) => `${app.for}:${app.name}`}>
+                {(app) => (
+                  <Row
+                    start={<Tile icon={app().icon} />}
+                    heading={app().title}
+                    text={app().update!.why ?? "Update ready"}
+                    end={<Button variant="outline" loading={working() === app().name} onPress={press(app().name, () => call("apps_update", { name: app().name }, { subject: app().for }))}>Update</Button>}
+                  />
+                )}
               </List>
             </Section>
           </Show>

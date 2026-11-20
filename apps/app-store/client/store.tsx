@@ -424,10 +424,8 @@ function Page(props: { market: Market; all: Owners; listed: Listed }) {
         </View>
       </View>
       <Show when={props.listed.app} fallback={<Quiet>Ask your AI to check it and install it.</Quiet>}>
-        <List>
-          <For each={props.all.owners} keyed={(owner) => owner.who}>
-            {(owner) => <Where market={props.market} all={props.all} owner={owner()} listed={props.listed} />}
-          </For>
+        <List each={props.all.owners} keyed={(owner) => owner.who}>
+          {(owner) => <Where market={props.market} all={props.all} owner={owner()} listed={props.listed} />}
         </List>
         <For each={props.all.owners} keyed={(owner) => owner.who}>
           {(owner) => <Failed all={props.all} owner={owner()} listed={props.listed} />}

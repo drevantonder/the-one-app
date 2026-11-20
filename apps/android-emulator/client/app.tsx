@@ -1,5 +1,5 @@
 // Android Emulator: your emulators on every machine, and one of them live, to use as a phone, start, stop or remove.
-import { createMemo, createSignal, Errored, For, Loading, Match, refresh, Show, Switch } from "solid-js"
+import { createMemo, createSignal, Errored, Loading, Match, refresh, Show, Switch } from "solid-js"
 import { Button, call, changed, confirm, Empty, List, LiveScreen, Menu, Problem, render, Row, Screen, since, Skeleton, Split, Status, Steps, toast } from "ui"
 
 /** An emulator, as `android-emulator_list` answers it. */
@@ -107,10 +107,8 @@ function App() {
         <Split open={!!opened()} onClose={() => setOpen()} detail={<Show when={opened()} fallback={<Show when={emulators().length}><Empty>Pick an emulator to use it.</Empty></Show>}><Detail emulator={opened()!} /></Show>}>
           <Screen heading="Android Emulator">
             <Show when={emulators().length} fallback={<Empty>No emulators. Your agents create them as they need them.</Empty>}>
-              <List>
-                <For each={emulators()} keyed={(e) => e.name}>
-                  {(e) => <Row heading={e().name} text={[e().description, says(e()), e().machine, e().last_used && `used ${since(e().last_used)}`].filter(Boolean).join(" · ")} current={open() === e().name} onPress={() => setOpen(e().name)} />}
-                </For>
+              <List each={emulators()} keyed={(e) => e.name}>
+                {(e) => <Row heading={e().name} text={[e().description, says(e()), e().machine, e().last_used && `used ${since(e().last_used)}`].filter(Boolean).join(" · ")} current={open() === e().name} onPress={() => setOpen(e().name)} />}
               </List>
             </Show>
           </Screen>

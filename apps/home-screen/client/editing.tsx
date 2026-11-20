@@ -33,10 +33,8 @@ export function Gallery(props: { owner: Owner }) {
         when={picked()}
         fallback={
           <Show when={props.owner.widgets.length} fallback={<Empty>No widgets yet.</Empty>}>
-            <List>
-              <For each={props.owner.widgets} keyed={(widget) => widget.widget}>
-                {(widget) => <Row heading={widget().name} start={widget().opens ? <Image src={src(widget().opens!.icon)} alt="" style={looks.widgetIcon} /> : undefined} onPress={() => (setPicked(widget()), setSize(widget().sizes[0]))} />}
-              </For>
+            <List each={props.owner.widgets} keyed={(widget) => widget.widget}>
+              {(widget) => <Row heading={widget().name} start={widget().opens ? <Image src={src(widget().opens!.icon)} alt="" style={looks.widgetIcon} /> : undefined} onPress={() => (setPicked(widget()), setSize(widget().sizes[0]))} />}
             </List>
           </Show>
         }

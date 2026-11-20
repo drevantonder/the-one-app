@@ -1,7 +1,7 @@
 // Backups: the destinations backups go, each saying when it was last backed up and how big it is, or
 // what's wrong; how often they're made and which are kept. A destination opens beside the list with its backups,
 // Restore, Check and Stop Backing Up Here. Backups are the network's, so every call is for the network.
-import { createMemo, createSignal, Errored, For, Loading, Match, refresh, Show, Switch } from "solid-js"
+import { createMemo, createSignal, Errored, Loading, Match, refresh, Show, Switch } from "solid-js"
 import { Button, call, changed, confirm, Empty, Field, Icon, Input, List, Problem, RadioGroup, Row, Screen, Section, Select, Sheet, since, size, Skeleton, Spinner, Split, Status, styles, Text, toast, tokens, View } from "ui"
 
 const look = styles({
@@ -140,10 +140,8 @@ function Opened(props: { destination: Destination }) {
       </List>
       <Show when={destination().backups.length}>
         <Section heading="Backups">
-          <List>
-            <For each={destination().backups} keyed={(backup) => backup.name}>
-              {(backup) => <Row heading={when(backup().at)} text={`${size(backup().bytes)} · ${size(backup().sent_bytes)} sent · ${took(backup().took)}`} onPress={() => setRestoring({ destination: destination(), backup: backup().name })} />}
-            </For>
+          <List each={destination().backups} keyed={(backup) => backup.name}>
+            {(backup) => <Row heading={when(backup().at)} text={`${size(backup().bytes)} · ${size(backup().sent_bytes)} sent · ${took(backup().took)}`} onPress={() => setRestoring({ destination: destination(), backup: backup().name })} />}
           </List>
         </Section>
       </Show>
@@ -310,10 +308,8 @@ function Backups(props: { all: All }) {
       <Split open={!!opened()} onClose={() => setOpen()} detail={<Show when={opened()} fallback={<Show when={destinations().length}><Empty>Pick a destination to see its backups.</Empty></Show>}><Opened destination={opened()!} /></Show>}>
         <Screen heading="Backups" back action={<Show when={destinations().length}><Button loading={working() === "now" || backingUp()} onPress={now}>Back Up Now</Button></Show>}>
           <Show when={destinations().length} fallback={<Empty action={<Button onPress={() => setAdding(true)}>Add Destination</Button>}>Nothing is backed up yet.</Empty>}>
-            <List>
-              <For each={destinations()} keyed={(destination) => destination.name}>
-                {(destination) => <Row heading={destination().name} text={<Text style={[warns(destination()) && look.warns]}>{about(destination())}</Text>} current={open() === destination().name} onPress={() => setOpen(destination().name)} />}
-              </For>
+            <List each={destinations()} keyed={(destination) => destination.name}>
+              {(destination) => <Row heading={destination().name} text={<Text style={[warns(destination()) && look.warns]}>{about(destination())}</Text>} current={open() === destination().name} onPress={() => setOpen(destination().name)} />}
             </List>
             <List>
               <Row start={<Icon name="plus" />} heading="Add Destination" onPress={() => setAdding(true)} />

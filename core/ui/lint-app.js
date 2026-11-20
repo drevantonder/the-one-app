@@ -1,6 +1,7 @@
 // `bun run lint:app apps/<app>/client`, from the repo's root: type checks an app's page against the UI library
 // alone, as its tsconfig.json says by extending tsconfig.app.json, with TypeScript's own checker. It fails on an element of
-// the DOM's, `document`, `window` or any other Web API, a stylesheet, and a prop a native host can't draw. A server runs it
+// the DOM's, `document`, `window` or any other Web API, a stylesheet, a prop a native host can't draw, and a `For` as a
+// `List`'s rows, which makes them all at once (`List each` makes those near the window). A server runs it
 // too, as the UI library it serves holds it (build.js), on the app it deploys, where an entrypoint says its `runtime_version`
 // (`OneCore.Entrypoint.lint/3`). Its errors are TypeScript's, a line each: file, line, column and message, as the folder names it.
 // A raw colour or length in a static style is a warning, not an error: "make it a token" (a line each, as an error's, but
@@ -22,6 +23,8 @@ if (!String(base).endsWith("tsconfig.app.json")) {
 // its own (`declare const window: any`), reach it by `globalThis` or `self`, or be a file the checker skips (`.js`). The UI
 // library is how a page reaches its screen: `touch()`, `viewport()`, `link()` and `visible()` say what `window` would.
 const DOM = new Set(["window", "document"])
+/** What's said as a warning: a deploy gives it with its own. */
+const noted = []
 function dom() {
   const found = []
   const root = resolve(folder)
@@ -76,6 +79,17 @@ function dom() {
       }
       // `declare const document: Document`, `declare global { var window: … }`
       if (node.type === "VariableDeclaration" && node.declare) for (const one of node.declarations) names(one.id, (name) => DOM.has(name) && refuse(one, name))
+      // `<List><For each={…}>…</For></List>`: `For` makes every row at once, which a long list on a native host has no
+      // memory for (its sandbox's), where `<List each={…}>` makes only those near the window (`VirtualizedList`). A `For`
+      // beside a list's own rows, as a few fields and a row about them are, is said as a warning.
+      const named = (element) => element.openingElement?.name?.name
+      if (node.type === "JSXElement" && named(node) === "List") {
+        const rows = node.children.filter((one) => !(one.type === "JSXText" && !one.value.trim()))
+        for (const child of rows.filter((one) => one.type === "JSXElement" && named(one) === "For")) {
+          if (rows.length === 1) found.push(`${at(child)}: error: a \`For\` as a \`List\`'s rows makes every row at once, which a long list can't start with on a native host: write \`<List each={…} keyed={…}>{(item) => <Row … />}</List>\`, which makes only the rows near the window`)
+          else noted.push(`${at(child)}: warning: a \`For\` beside other rows in a \`List\` makes every row at once: fine for a few, but a long list's rows go in a \`List each={…}\` of their own`)
+        }
+      }
       // `globalThis.document`, `self["window"]`
       const object = unwrapped(node.object)
       if (node.type === "MemberExpression" && object?.type === "Identifier" && ["globalThis", "self"].includes(object.name)) {
@@ -106,4 +120,5 @@ for (const path of readdirSync(root, { recursive: true })) {
   }
 }
 for (const warning of made.warnings) console.log(warning.replaceAll(`${root}/`, ""))
+for (const warning of noted) console.log(warning)
 process.exit(tsc.exitCode || refused || refusedDom.length ? 1 : 0)

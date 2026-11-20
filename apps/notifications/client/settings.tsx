@@ -1,6 +1,6 @@
 // Notifications, as Settings draws it: whether this phone or browser is woken by them, and each app that has told you
 // something, which you hear from or not.
-import { createMemo, Errored, For, Loading, refresh, Show } from "solid-js"
+import { createMemo, Errored, Loading, refresh, Show } from "solid-js"
 import { call, changed, client, Empty, List, Problem, Row, Screen, Section, Skeleton, Switch, toast } from "ui"
 import { type Push, PushState } from "./push.tsx"
 
@@ -34,10 +34,8 @@ export default function NotificationSettings() {
           <Show when={state().push}>{(push) => <PushState push={push()} settings={state().settings} again={() => refresh(state)} />}</Show>
           <Section heading="Allow Notifications">
             <Show when={state().apps.length} fallback={<Empty>No app has told you anything yet.</Empty>}>
-              <List>
-                <For each={state().apps} keyed={(app) => app.app}>
-                  {(app) => <Row heading={app().name} end={<Switch aria-label={app().name} value={app().allowed} onValueChange={(on) => allow(app().app, on)} />} />}
-                </For>
+              <List each={state().apps} keyed={(app) => app.app}>
+                {(app) => <Row heading={app().name} end={<Switch aria-label={app().name} value={app().allowed} onValueChange={(on) => allow(app().app, on)} />} />}
               </List>
             </Show>
           </Section>

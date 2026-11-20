@@ -3,7 +3,7 @@
 // by a link that works once. Each says whether it unlocks their key on a new device: one whose PRF output derives a
 // key, which it says the next time it's used, gets the key encrypted to it by a device that holds it, here, once its
 // person says it may. Whoever uses it has their key from then on, so a passkey nobody here allowed never does.
-import { createEffect, createMemo, Errored, For, Loading, refresh, Show } from "solid-js"
+import { createEffect, createMemo, Errored, Loading, refresh, Show } from "solid-js"
 import { Button, call, changed, confirm, Empty, List, open, Problem, Row, Screen, Skeleton, toast, visible } from "ui"
 import { on, Remove } from "./mine.tsx"
 
@@ -91,26 +91,24 @@ export default function SignInAndSecurity() {
         {(all) => (
           <Screen heading="Sign In & Security" back action={opening()}>
             <Show when={all().passkeys.length} fallback={<Empty>No passkeys yet.</Empty>}>
-            <List>
-              <For each={all().passkeys} keyed={(passkey) => passkey.id}>
-            {(passkey) => {
-              const only = () => all().passkeys.length === 1
-              return (
-                <Row
-                  heading={passkey().name}
-                  text={`${unlocks(passkey())} · ${only() ? "Your only one" : `Made ${on(passkey().added)}`}`}
-                  action={
-                    passkey().prf_key === null ? (
-                      <Button variant="secondary" onPress={opens("sign-in_unlock_with_passkey")}>Set Up</Button>
-                    ) : waiting(passkey()) && holds() ? (
-                      <Button variant="secondary" onPress={() => allow(passkey())}>Allow</Button>
-                    ) : undefined
-                  }
-                  end={<Remove name={passkey().name} disabled={only()} onPress={() => remove(passkey())} />}
-                />
-              )
-            }}
-          </For>
+            <List each={all().passkeys} keyed={(passkey) => passkey.id}>
+          {(passkey) => {
+            const only = () => all().passkeys.length === 1
+            return (
+              <Row
+                heading={passkey().name}
+                text={`${unlocks(passkey())} · ${only() ? "Your only one" : `Made ${on(passkey().added)}`}`}
+                action={
+                  passkey().prf_key === null ? (
+                    <Button variant="secondary" onPress={opens("sign-in_unlock_with_passkey")}>Set Up</Button>
+                  ) : waiting(passkey()) && holds() ? (
+                    <Button variant="secondary" onPress={() => allow(passkey())}>Allow</Button>
+                  ) : undefined
+                }
+                end={<Remove name={passkey().name} disabled={only()} onPress={() => remove(passkey())} />}
+              />
+            )
+          }}
             </List>
             </Show>
           </Screen>

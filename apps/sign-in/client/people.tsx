@@ -3,7 +3,7 @@
 // takes someone out; each person changes the name they go by here, from their own row. Anyone makes a group, which
 // has a Home Screen of its own that its members see, and its owners add someone in the network to it and take members
 // out. Groups are each person's own, so they're asked for as the person, wherever the app was opened.
-import { createMemo, createSignal, Errored, For, Loading, refresh, Show } from "solid-js"
+import { createMemo, createSignal, Errored, Loading, refresh, Show } from "solid-js"
 import { Button, call, changed, confirm, Empty, Field, Icon, Input, List, Menu, Problem, Row, Screen, Section, share, Sheet, Skeleton, Split, styles, toast, tokens, View } from "ui"
 
 const look = styles({
@@ -225,22 +225,20 @@ function GroupScreen(props: { group: Group; all: All }) {
   return (
     <Screen heading={props.group.called} back action={<Show when={owns()}><Button variant="outline" onPress={() => setAdding("member")}>Add Member</Button></Show>}>
       <Section heading="Members">
-        <List>
-          <For each={props.group.members}>
-            {(member) => (
-              <Row
-                heading={props.all.named(member)}
-                text={props.group.owners.includes(member) ? "Owner" : undefined}
-                end={
-                  <Show when={owns() && member !== props.all.me}>
-                    <Button variant="ghost" size="icon" aria-label={`Remove ${props.all.named(member)}`} onPress={() => remove(member)}>
-                      <Icon name="trash" />
-                    </Button>
-                  </Show>
-                }
-              />
-            )}
-          </For>
+        <List each={props.group.members}>
+          {(member) => (
+            <Row
+              heading={props.all.named(member)}
+              text={props.group.owners.includes(member) ? "Owner" : undefined}
+              end={
+                <Show when={owns() && member !== props.all.me}>
+                  <Button variant="ghost" size="icon" aria-label={`Remove ${props.all.named(member)}`} onPress={() => remove(member)}>
+                    <Icon name="trash" />
+                  </Button>
+                </Show>
+              }
+            />
+          )}
         </List>
       </Section>
     </Screen>
@@ -253,10 +251,8 @@ function AddMember(props: { all: All; group?: Group }) {
   return (
     <Sheet heading="Add Member" open={adding() === "member"} onClose={() => setAdding()}>
       <Show when={outside().length} fallback={<Empty>Everyone in the network is in it.</Empty>}>
-        <List>
-          <For each={outside()} keyed={(person) => person.who}>
-            {(person) => <Row heading={props.all.named(person().who)} text={person().who.replace("users/", "")} onPress={() => (setAdding(), change("permissions_share", { artifact: opened()!, relation: "member", who: person().who }, props.all.me))} />}
-          </For>
+        <List each={outside()} keyed={(person) => person.who}>
+          {(person) => <Row heading={props.all.named(person().who)} text={person().who.replace("users/", "")} onPress={() => (setAdding(), change("permissions_share", { artifact: opened()!, relation: "member", who: person().who }, props.all.me))} />}
         </List>
       </Show>
     </Sheet>
@@ -271,28 +267,22 @@ function UsersAndGroups(props: { all: All }) {
         <Screen heading="People & Groups" back action={props.all.invites ? <Button onPress={() => setInviting(true)}>Invite</Button> : undefined}>
           <Show when={props.all.joined.length}>
             <Section heading="Users">
-              <List>
-                <For each={props.all.joined} keyed={(person) => person.who}>
-                  {(person) => <PersonRow person={person()} all={props.all} />}
-                </For>
+              <List each={props.all.joined} keyed={(person) => person.who}>
+                {(person) => <PersonRow person={person()} all={props.all} />}
               </List>
             </Section>
           </Show>
           <Show when={props.all.invited.length}>
             <Section heading="Invited">
-              <List>
-                <For each={props.all.invited} keyed={(person) => person.who}>
-                  {(person) => <PersonRow person={person()} all={props.all} />}
-                </For>
+              <List each={props.all.invited} keyed={(person) => person.who}>
+                {(person) => <PersonRow person={person()} all={props.all} />}
               </List>
             </Section>
           </Show>
           <Section heading="Groups">
             <Show when={props.all.groups.length} fallback={<Empty>You're in no groups yet.</Empty>}>
-              <List>
-                <For each={props.all.groups} keyed={({ group }) => group}>
-                  {(group) => <Row heading={group().called} text={new Intl.ListFormat("en").format(group().members.map(props.all.named))} current={opened() === group().group} onPress={() => setOpened(group().group)} />}
-                </For>
+              <List each={props.all.groups} keyed={({ group }) => group}>
+                {(group) => <Row heading={group().called} text={new Intl.ListFormat("en").format(group().members.map(props.all.named))} current={opened() === group().group} onPress={() => setOpened(group().group)} />}
               </List>
             </Show>
             <List>

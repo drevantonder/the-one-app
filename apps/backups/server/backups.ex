@@ -51,7 +51,7 @@ defmodule Backups do
   @impl true
   def requires do
     %{
-      "core" => ">= 0.30.0",
+      "core" => ">= 0.32.107",
       "database" => "to keep where and when you back up",
       "vault" => "to keep your storage's keys"
     }

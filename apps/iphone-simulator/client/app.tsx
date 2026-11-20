@@ -1,5 +1,5 @@
 // iPhone Simulator: your simulators on every Mac, and one of them live, to use as an iPhone, start, stop or remove.
-import { createMemo, createSignal, Errored, For, Loading, Match, refresh, Show, Switch } from "solid-js"
+import { createMemo, createSignal, Errored, Loading, Match, refresh, Show, Switch } from "solid-js"
 import { Button, call, changed, confirm, Empty, List, LiveScreen, Menu, Problem, render, Row, Screen, since, Skeleton, Split, Status, Steps, toast } from "ui"
 
 /** A simulator, as `iphone-simulator_list` answers it. */
@@ -110,10 +110,8 @@ function App() {
         <Split open={!!opened()} onClose={() => setOpen()} detail={<Show when={opened()} fallback={<Show when={simulators().length}><Empty>Pick a simulator to use it.</Empty></Show>}><Detail simulator={opened()!} /></Show>}>
           <Screen heading="iPhone Simulator">
             <Show when={simulators().length} fallback={<Empty>No simulators. Your agents create them as they need them.</Empty>}>
-              <List>
-                <For each={simulators()} keyed={(e) => e.name}>
-                  {(e) => <Row heading={e().name} text={[e().description, says(e()), e().machine, e().last_used && `used ${since(e().last_used)}`].filter(Boolean).join(" · ")} current={open() === e().name} onPress={() => setOpen(e().name)} />}
-                </For>
+              <List each={simulators()} keyed={(e) => e.name}>
+                {(e) => <Row heading={e().name} text={[e().description, says(e()), e().machine, e().last_used && `used ${since(e().last_used)}`].filter(Boolean).join(" · ")} current={open() === e().name} onPress={() => setOpen(e().name)} />}
               </List>
             </Show>
           </Screen>
