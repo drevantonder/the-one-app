@@ -1,11 +1,35 @@
 import { createSignal } from "solid-js"
-import { Badge, Button, Checkbox, Icon, List, Menu, Metadata, Row, type Scenes, Section, styles, Text, tokens, View } from "ui"
+import { Badge, Button, Checkbox, createListbox, Icon, List, Menu, Metadata, Row, type Scenes, Search, Section, styles, Text, tokens, View } from "ui"
 
 const look = styles({
   column: { gap: tokens.grid[2] },
   row: { flexDirection: "row", gap: tokens.grid[2] },
   time: { color: tokens.colour.secondaryLabel },
 })
+
+/// A search and its results, a listbox the field drives while it keeps the keyboard, and which was opened, as text, so a
+/// check can say.
+const Results = () => {
+  const fruit = ["Apple", "Banana", "Cherry", "Grape"]
+  const [words, setWords] = createSignal("")
+  const [opened, setOpened] = createSignal("nothing")
+  const found = () => fruit.filter((one) => one.toLowerCase().includes(words().toLowerCase()))
+  const results = createListbox({ onOpen: (index) => setOpened(found()[index]) })
+  return (
+    <View style={look.column}>
+      <Search {...results.field()} placeholder="Search fruit" aria-label="Search fruit" value={words()} onChangeText={(text) => (setWords(text), results.choose(0))} onKeyDown={results.keys} />
+      <List listbox={results} label="Fruit">
+        {found().map((one) => (
+          <Row heading={one} onPress={() => setOpened(one)} />
+        ))}
+      </List>
+      <Text>{`Opened: ${opened()}`}</Text>
+    </View>
+  )
+}
+
+const option = (name: string, selected = true) => ({ states: { of: { role: "option", name }, is: { selected } } })
+const search = { role: "combobox", name: "Search fruit" }
 
 const Rows = () => {
   const [notes, setNotes] = createSignal(["First note", "Second note", "Third note"])
@@ -135,6 +159,21 @@ export default {
         { expect: { focused: "Note 26 19 Nov" }, within: 8000 },
         { expect: { shown: "Note 26 19 Nov" } },
       ],
+    },
+  },
+  // What people expect of a listbox the field that has the keyboard drives, from the UI SDK's own tests
+  // (tests/specs/listbox.spec.ts at the commit listbox.ts names), as its root's keyboard has them: the arrows move,
+  // stopping at the ends, Home and End go to them, the one chosen is the one Enter opens, and a press opens one.
+  "Lists/Search results, a listbox": {
+    size: [750, 475],
+    render: () => <Results />,
+    checks: {
+      "The first is chosen to begin with": [search, { expect: option("Apple") }, { expect: option("Banana", false) }],
+      "The arrows move, stopping at the ends": [search, { key: "ArrowUp" }, { expect: option("Apple") }, ...Array.from({ length: 4 }, () => ({ key: "ArrowDown" })), { expect: option("Grape") }],
+      "Home and End move to the first and last": [search, { key: "End" }, { expect: option("Grape") }, { key: "Home" }, { expect: option("Apple") }],
+      "Enter opens the one chosen": [search, { key: "ArrowDown" }, { key: "Enter" }, { expect: { text: "Opened: Banana" } }],
+      "A press opens one": [{ role: "option", name: "Cherry" }, { expect: { text: "Opened: Cherry" } }],
+      "Typing chooses the first of what it finds": [search, { key: "End" }, { type: "an" }, { expect: option("Banana") }, { expect: { gone: { role: "option", name: "Grape" } } }],
     },
   },
   "Lists/Rows with headings of their own, by the keyboard": {

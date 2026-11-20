@@ -51,6 +51,24 @@ const Fields = () => {
   )
 }
 
+/// A field whose problem the app sets as it's typed in, as a form checks an address: none until something's typed.
+const Checked = () => {
+  const [email, setEmail] = createSignal("")
+  const wrong = () => (email() && !/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(email()) ? "That isn't an email address" : undefined)
+  return (
+    <View style={look.narrow(320)}>
+      <Field label="Email" hint="Where your receipts go" error={wrong()}>
+        <Input inputMode="email" value={email()} onChangeText={setEmail} />
+      </Field>
+      <Field label="Off" disabled>
+        <Input value="Can't change this" />
+      </Field>
+    </View>
+  )
+}
+
+const email = { role: "textbox", name: "Email" }
+
 /// A field and what's in it, as text, so a scene's tree says what was typed and where.
 const Echoed = (props: { label: string; value?: string; multiline?: boolean }) => {
   const [value, setValue] = createSignal(props.value ?? "")
@@ -166,6 +184,19 @@ export default {
     },
   },
   "Fields/Every kind": () => <Fields />,
+  // What people expect of a field, from the UI SDK's own tests (tests/specs/field.spec.ts at the commit field.ts
+  // names): its label names its control, its hint shows under it, a problem the app sets shows in the hint's place and
+  // marks the control invalid, and goes as what's typed comes right; one that's off is off.
+  "Fields/A problem as it's typed": {
+    size: [750, 475],
+    render: () => <Checked />,
+    checks: {
+      "Its label names its control, and its hint shows": [{ expect: { shown: email } }, { expect: { text: "Where your receipts go" } }, { expect: { states: { of: email, is: { invalid: false } } } }],
+      "A problem shows in its hint's place and marks it invalid": [email, { type: "andre@" }, { expect: { text: "That isn't an email address" } }, { expect: { gone: "Where your receipts go" } }, { expect: { states: { of: email, is: { invalid: true } } } }],
+      "It goes as what's typed comes right": [email, { type: "andre@" }, { expect: { states: { of: email, is: { invalid: true } } } }, { type: "example.com" }, { expect: { states: { of: email, is: { invalid: false } } } }, { expect: { text: "Where your receipts go" } }],
+      "One that's off is off": [{ expect: { states: { of: { role: "textbox", name: "Off" }, is: { disabled: true } } } }],
+    },
+  },
   // A finger selects in a field as in a phone's own: held on a word, or tapping it twice, it selects it, with handles
   // at its ends and the system's menu over it, or under it where the status bar leaves no room; held, the system's
   // magnifier shows; a tap on the caret shows Paste.
