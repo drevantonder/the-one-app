@@ -60,7 +60,7 @@
             "trusted": true,
             "component": "accounts",
             "in": "settings",
-            "name": "Accounts",
+            "name": "Vault",
             "group": "network",
             "order": 3,
             "count": null,

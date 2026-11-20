@@ -78,10 +78,10 @@ defmodule Vault do
   @impl true
   def hooks, do: ["settings.sections"]
 
-  # The Vault is Settings' Accounts: your accounts, passwords and keys, and what apps keep here.
+  # The Vault is a section of Settings: your accounts, passwords and keys, and what apps keep here.
   @impl true
   def hook("settings.sections", _about, _call),
-    do: [%{in: "settings", name: "Accounts", component: "accounts", icon: "client/icon.svg", group: "network", order: 3}]
+    do: [%{in: "settings", name: "Vault", component: "accounts", icon: "client/icon.svg", group: "network", order: 3}]
 
   @impl true
   def tools do

@@ -134,7 +134,7 @@ function Opened(props: { destination: Destination }) {
           <Row heading="On" end={destination().machine} />
         </Show>
         <Show when={destination().item}>
-          <Row heading="Keys" end={`${destination().item}, in Accounts`} />
+          <Row heading="Keys" end={`${destination().item}, in the Vault`} />
         </Show>
         <Row heading="Size" end={size(destination().size)} />
       </List>
@@ -159,7 +159,7 @@ function Opened(props: { destination: Destination }) {
 }
 
 /// Adds a destination: a folder on one of the network's machines, as on a disk plugged into it, or S3-compatible storage
-/// whose keys are an item in Accounts for Everyone. It's tried before it's added, so a typo shows here.
+/// whose keys are an item in the Vault for Everyone. It's tried before it's added, so a typo shows here.
 function AddSheet(props: { machines: All["machines"] }) {
   const [kind, setKind] = createSignal("folder")
   const [machine, setMachine] = createSignal<string>()
@@ -203,7 +203,7 @@ function AddSheet(props: { machines: All["machines"] }) {
         <Field label="Bucket" error={error("bucket")}>
           <Input placeholder="backups" autoCapitalize="none" autoCorrect={false} spellCheck={false} value={typed().bucket} onChangeText={type("bucket")} onSubmitEditing={add} required />
         </Field>
-        <Field label="Keys" hint="An item in Accounts for Everyone, with an access key ID and a secret access key, switched on for Backups." error={error("item")}>
+        <Field label="Keys" hint="An item in the Vault for Everyone, with an access key ID and a secret access key, switched on for Backups." error={error("item")}>
           <Input placeholder="Backups Storage" value={typed().item} onChangeText={type("item")} onSubmitEditing={add} required />
         </Field>
       </Show>

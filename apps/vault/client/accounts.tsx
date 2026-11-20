@@ -897,7 +897,7 @@ export default function Accounts() {
         onClose={() => (setOpen(), setSecure(false))}
         detail={<Show when={item()} fallback={<Show when={secure()}><SecurityScreen /></Show>}>{(item) => <Detail item={item()} />}</Show>}
       >
-        <Screen heading="Accounts" back>
+        <Screen heading="Vault" back>
           <Whose />
           <Readiness />
           <For each={waiting()} keyed={(request) => request.id}>{(request) => <Banner request={request()} />}</For>
