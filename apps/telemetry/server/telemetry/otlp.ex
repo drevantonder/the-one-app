@@ -13,6 +13,9 @@ defmodule Telemetry.Otlp do
     and `max`. A sum's `count` is its value.
   """
 
+  # What a client's export says of the client, kept on each of its metric's points (`points/1`).
+  @client ~w(one.device one.for service.name os.type)
+
   @messages %{
     "traces" => {:opentelemetry_exporter_trace_service_pb, :export_trace_service_request},
     "metrics" => {:opentelemetry_exporter_metrics_service_pb, :export_metrics_service_request},
@@ -103,9 +106,12 @@ defmodule Telemetry.Otlp do
 
   defp points(%{resource: resource, scope_metrics: scopes}) do
     under = attributes(resource)
+    # A client's export says which device and person it's from (`stamp/3`), and which client on what system: each of
+    # its points keeps that, to be split by, as its spans do. A server's says only which server, `server`.
+    client = if under["one.device"], do: Map.take(under, @client), else: %{}
 
     for scope <- scopes, metric <- scope.metrics, point <- data(metric.data) do
-      Map.merge(point, %{"name" => metric.name, "server" => under["host.name"]})
+      Map.merge(point, %{"name" => metric.name, "server" => under["host.name"], "attributes" => Map.merge(client, point["attributes"])})
     end
   end
 
