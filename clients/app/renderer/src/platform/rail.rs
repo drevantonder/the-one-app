@@ -94,7 +94,6 @@ impl Pull {
     }
 
     /// Whether it's an opening no finger has taken yet.
-    #[cfg_attr(not(any(target_os = "android", target_os = "ios")), allow(dead_code))]
     pub fn opens(&self) -> bool {
         self.finger == NO_FINGER
     }
@@ -107,7 +106,7 @@ impl Pull {
         self.velocity_in = Velocity::default();
     }
 
-    /// The spring starts now, as its window is first shown.
+    /// The spring starts now, as its window first shows something.
     pub fn shown(&mut self) {
         self.stepped = super::now();
     }
