@@ -444,7 +444,8 @@ defmodule OneCore.Apps.Deploy do
 
     # One server builds each one's apps again: four building the same apps at once wrote the same blobs at once,
     # which R2 refuses ("Reduce your concurrent request rate for the same object"), and lost to each other.
-    ours = for whose <- Enum.uniq(for {whose, _} <- stale, do: whose), Servers.claims?("#{whose}/rebuild", code), do: whose
+    # Claimed for this build, as the network's core apps are taken to it under the same claim, just before.
+    ours = for whose <- Enum.uniq(for {whose, _} <- stale, do: whose), Servers.claims?("#{whose}/rebuild", Builds.build()), do: whose
 
     for {whose, artifact} <- stale,
         whose in ours,
