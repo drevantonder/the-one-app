@@ -84,6 +84,15 @@ impl Context {
         super::renderer::Pipelines::slot(&self.pipelines, format, premultiplied).wait();
     }
 
+    /// Waits for the pipelines on their way (`prepare`) to be compiled.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub(crate) fn wait_compiled(&self) {
+        let slots: Vec<_> = self.pipelines.lock().expect("nothing panics holding it").iter().map(|(_, _, slot)| slot.clone()).collect();
+        for slot in slots {
+            slot.wait();
+        }
+    }
+
     /// Whether the pipelines for targets of `format` are compiled, or aren't on their way: a renderer made for one now
     /// doesn't wait for them.
     pub(crate) fn compiled(&self, format: wgpu::TextureFormat, premultiplied: bool) -> bool {

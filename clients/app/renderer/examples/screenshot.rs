@@ -222,6 +222,7 @@ fn main() -> anyhow::Result<()> {
     let resident = || memory_stats::memory_stats().map_or(0, |memory| memory.physical_mem);
     let before = resident();
     let mut windows = Windows::fake(scale, 60.0, clock.clone())?;
+    windows.prepared();
     // A phone's window (`--touch`) is the whole of its screen, as every window there but a panel is.
     if touch && panel.is_none() {
         windows.phone(Size { width: Pixels(width), height: Pixels(height) });

@@ -1398,6 +1398,10 @@ impl Windows {
         if self.context.lost() {
             self.recover();
         }
+        // Each window waiting for its pipelines has its renderer once they're compiled, on whatever turns the loop: a
+        // harness's own turns too, as well as the windows' thread woken as they are (`Context::prepare`).
+        #[cfg(not(target_arch = "wasm32"))]
+        self.compiled();
         for (id, part, input) in self.display.events() {
             // The fake platform's pages are as quick as what comes, the same each time: each has run what came before it
             // (`wait`), unless a seed has it busy (`Thread::seed`).
@@ -2113,6 +2117,13 @@ impl Windows {
     pub fn fake(scale: f32, hz: f64, clock: crate::js::Clock) -> anyhow::Result<Windows> {
         fake::keep_time(clock);
         Self::made(Display::new(scale, hz), Context::new())
+    }
+
+    /// Waits for the pipelines its windows draw with, compiled as it started (`Context::prepare`), as a harness that
+    /// turns its loop itself on a paused clock does, so its first frame is drawn on its first turn, as every run's is.
+    #[cfg(feature = "fake")]
+    pub fn prepared(&self) {
+        self.context.wait_compiled();
     }
 
     /// Whether the loop wants the display's next frame: something on a window moves.
