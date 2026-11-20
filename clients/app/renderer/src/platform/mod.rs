@@ -698,6 +698,11 @@ impl Windows {
         true
     }
 
+    /// Whether something's open over window `id`'s page (a sheet, a menu), which Back shuts first.
+    pub fn covered(&self, id: WindowId) -> bool {
+        self.windows.get(&id).is_some_and(|window| window.screen.as_ref().is_ok_and(|screen| screen.covered().is_some()))
+    }
+
     /// Hides window `id`, or shows it again, as a phone's root window is while the page over it shows an app it
     /// draws itself.
     pub fn hide(&mut self, id: WindowId, hidden: bool) {

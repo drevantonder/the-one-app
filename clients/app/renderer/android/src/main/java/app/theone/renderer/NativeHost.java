@@ -9,6 +9,7 @@ import android.view.HapticFeedbackConstants;
 import android.view.View;
 import android.view.ViewGroup;
 import android.view.ViewOutlineProvider;
+import androidx.activity.BackEventCompat;
 import androidx.activity.ComponentActivity;
 import androidx.activity.OnBackPressedCallback;
 import androidx.annotation.Keep;
@@ -97,12 +98,48 @@ public final class NativeHost {
     /**
      * Back goes to the newest window, else the root, from the first that opens: added after the activity's own, it's
      * asked first. What it doesn't take (the root with nothing open over its page) goes on to the activity's.
+     *
+     * An app's window that Back closes follows the back gesture as it's made, as Material's predictive back has a
+     * screen do: smaller, toward the edge it's swiped from, its corners rounding, what's under it showing round it;
+     * let go, it goes, and taken back, it springs back.
      */
     private static void listen() {
         if (back != null) return;
         back = new OnBackPressedCallback(true) {
+            private NativeView going;
+
+            @Override public void handleOnBackStarted(BackEventCompat event) {
+                NativeView to = open.isEmpty() ? null : open.get(open.size() - 1);
+                going = to != null && to.closes() ? to : null;
+            }
+
+            @Override public void handleOnBackProgressed(BackEventCompat event) {
+                if (going == null) return;
+                // Material's: 90% at the most, moved toward the edge by a twentieth of the width less 8 dp.
+                float progress = event.getProgress();
+                float width = going.getWidth() / going.getResources().getDisplayMetrics().density;
+                float toward = event.getSwipeEdge() == BackEventCompat.EDGE_LEFT ? 1 : -1;
+                moved(going, 1 - 0.1f * progress, toward * (width / 20 - 8) * progress, 0, 1, 32 * progress, 0);
+            }
+
+            @Override public void handleOnBackCancelled() {
+                if (going == null) return;
+                NativeView stays = going;
+                going = null;
+                stays.animate().scaleX(1).scaleY(1).translationX(0).setDuration(200).withEndAction(() -> moved(stays, 1, 0, 0, 1, 0, 0)).start();
+            }
+
             @Override public void handleOnBackPressed() {
                 NativeView to = open.isEmpty() ? root : open.get(open.size() - 1);
+                if (to != null && to == going) {
+                    // It goes as it is, fading, then closes.
+                    going = null;
+                    to.animate().alpha(0).scaleX(to.getScaleX() * 0.95f).scaleY(to.getScaleY() * 0.95f).setDuration(150).withEndAction(() -> {
+                        if (!to.back()) moved(to, 1, 0, 0, 1, 0, 0);
+                    }).start();
+                    return;
+                }
+                going = null;
                 if (to != null && to.back()) return;
                 setEnabled(false);
                 activity.getOnBackPressedDispatcher().onBackPressed();

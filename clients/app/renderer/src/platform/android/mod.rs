@@ -608,6 +608,12 @@ pub extern "system" fn Java_app_theone_renderer_NativeView_nativeBack(_: JNIEnv,
     with_windows(|windows| windows.back(id as WindowId)).unwrap_or(false).into()
 }
 
+/// Whether something's open over window `id`'s page, which Back shuts rather than closing the window.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_app_theone_renderer_NativeView_nativeCovered(_: JNIEnv, _: JObject, id: jlong) -> jboolean {
+    with_windows(|windows| windows.covered(id as WindowId)).unwrap_or(false).into()
+}
+
 /// A finger: `action` is MotionEvent's (0 down, 1 up, 2 move, 3 cancel), at `x`, `y` in device pixels. A finger
 /// that moves further than `slop` pans what scrolls under it, and what it pressed isn't pressed. One on an input gives
 /// it the keyboard as it lifts, as a phone's own fields do, so one that lands there to scroll doesn't. One that

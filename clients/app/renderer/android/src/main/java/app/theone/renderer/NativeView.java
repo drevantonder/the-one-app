@@ -84,6 +84,11 @@ public final class NativeView extends SurfaceView implements SurfaceHolder.Callb
         return nativeBack(id);
     }
 
+    /** Whether Back would close it: an app's window, with nothing open over its page. */
+    boolean closes() {
+        return !nativeCovered(id);
+    }
+
     /** What Rust asks, done on the UI thread once Rust has returned. */
     public void command(String command) {
         post(() -> apply(command));
@@ -320,6 +325,7 @@ public final class NativeView extends SurfaceView implements SurfaceHolder.Callb
     private native void nativeSurface(long id, android.view.Surface surface, int width, int height);
     private native void nativeSurfaceDestroyed(long id);
     private native boolean nativeBack(long id);
+    private native boolean nativeCovered(long id);
     private native void nativeActive(long id, boolean active);
     private native boolean nativeTouch(long id, int action, float x, float y, float slop, boolean stopped, float ago);
     private native boolean nativePan(long id, float x, float y, float dx, float dy);
