@@ -11,8 +11,9 @@
 // gesture and spring code a window runs, and for each it keeps, in `--out`:
 //
 // - `filmstrip.png`: eight of its frames, from the press to where it comes to rest;
-// - `curve.svg`: how far what moved had gone at each frame, beside where the finger was, each frame that took longer
-//   than a frame's time to paint marked red;
+// - `curve.svg`: how far what moved had gone at each frame, beside where the finger was and where iOS would have it
+//   from the lift (a node let go springing back by SwiftUI's `.spring`, a list flung slowing as UIScrollView does),
+//   each frame that took longer than a frame's time to paint marked red;
 // - `frames.json`: every frame's time, position and cost, as `replay` gives it;
 //
 // and it says, motion by motion, how many frames it took to come to rest and how many went over their budget, and how
@@ -138,8 +139,52 @@ function finger(stretches, t, way) {
   return { along: x, down: y, "scrolled along": -x, "scrolled down": -y }[way] ?? 0
 }
 
+/// iOS's own motion, as Apple gives it: SwiftUI's springs (`.spring(duration:bounce:)`: a mass of 1, stiffness
+/// (2π/duration)², damping 4π(1 − bounce)/duration), its default `.spring` 0.5 s with no bounce, which a node let go
+/// springs back by, and UIScrollView's normal deceleration, 0.998 of its speed kept each millisecond.
+export const swiftui = { spring: [500, 0], smooth: [500, 0], snappy: [500, 0.15], bouncy: [500, 0.3] }
+const DECELERATION = 0.998
+
+/// Where a spring of `duration` ms and `bounce`, `from` its rest and moving `velocity` a second, is `t` ms later.
+export function spring([duration, bounce], from, velocity, t) {
+  const response = Math.max(duration / 1000, 0.01)
+  const fraction = bounce >= 0 ? 1 - bounce : 1 / (1 + bounce)
+  const [k, c, s] = [(2 * Math.PI / response) ** 2, (4 * Math.PI * fraction) / response, t / 1000]
+  const natural = Math.sqrt(k)
+  const ratio = c / (2 * natural)
+  if (Math.abs(ratio - 1) < 1e-4) return (from + (velocity + natural * from) * s) * Math.exp(-natural * s)
+  if (ratio < 1) {
+    const damped = natural * Math.sqrt(1 - ratio * ratio)
+    return Math.exp(-ratio * natural * s) * (from * Math.cos(damped * s) + ((velocity + ratio * natural * from) / damped) * Math.sin(damped * s))
+  }
+  const root = natural * Math.sqrt(ratio * ratio - 1)
+  const [r1, r2] = [-ratio * natural + root, -ratio * natural - root]
+  const a = (velocity - r2 * from) / (r1 - r2)
+  return a * Math.exp(r1 * s) + (from - a) * Math.exp(r2 * s)
+}
+
+/// What iOS would draw after the press lifts, frame by frame from the first after it, where it says: a node let go
+/// springs back by SwiftUI's `.spring` from where it was drawn at the speed the finger had; what scrolls, flung at
+/// the finger's speed, slows as UIScrollView does. A pause before the lift leaves no speed. → each frame's value,
+/// or none before the lift, or none where iOS gives nothing to compare (a stretch past an end springing back).
+function ios(frames, way, values, stretches) {
+  const lift = stretches.reduce((sum, { ms }) => sum + ms, 0)
+  const last = stretches.at(-1)
+  const speed = last.dx || last.dy ? ((way.endsWith("along") ? last.dx ?? 0 : last.dy ?? 0) / last.ms) * 1000 : 0
+  const at = frames.findIndex((frame) => frame.at >= lift)
+  if (at < 0) return undefined
+  const [start, rest] = [values[at], values.at(-1)]
+  if (way.startsWith("scrolled")) {
+    // A scroll still stretched past its end, or that comes to one, springs back as iOS's does, which Apple doesn't give.
+    if (frames.slice(at).some((frame) => (frame.scroll?.y ?? 0) < 0 || (frame.scroll?.x ?? 0) < 0) || values.slice(at).some((value) => Math.abs(value - start) > Math.abs(rest - start) + 0.5)) return undefined
+    const velocity = -speed
+    return frames.map((frame, n) => (n < at ? undefined : start + (velocity * (DECELERATION ** (frame.at - frames[at].at) - 1)) / Math.log(DECELERATION) / 1000))
+  }
+  return frames.map((frame, n) => (n < at ? undefined : rest + spring(swiftui.spring, start - rest, speed, frame.at - frames[at].at)))
+}
+
 /// The curve: what moved, and the finger, over time, each frame over its budget red.
-function curve(frames, way, values, stretches, budget, before) {
+function curve(frames, way, values, stretches, budget, before, apple) {
   const [width, height, pad] = [640, 320, 40]
   const end = Math.max(...frames.map((frame) => frame.at), ...(before?.frames.map((frame) => frame.at) ?? []))
   const fingers = frames.map((frame) => finger(stretches, frame.at, way))
@@ -155,10 +200,11 @@ function curve(frames, way, values, stretches, budget, before) {
 <line x1="${pad}" y1="${y(0)}" x2="${width - pad}" y2="${y(0)}" stroke="#ddd"/>
 ${line(frames.map((frame, at) => [frame.at, fingers[at]]), "#999", "4 4")}
 ${before ? line(before.frames.map((frame, at) => [frame.at, before.values[at]]), "#e8a23a") : ""}
+${apple ? line(frames.flatMap((frame, at) => (apple[at] === undefined ? [] : [[frame.at, apple[at]]])), "#3a9a4a", "2 3") : ""}
 ${line(frames.map((frame, at) => [frame.at, values[at]]), "#2f6fde")}
 ${over.map((frame) => `<circle cx="${x(frame.at).toFixed(1)}" cy="${y(values[frames.indexOf(frame)]).toFixed(1)}" r="3" fill="#d33"/>`).join("")}
 <text x="${pad}" y="16">${way}, in points, over ${Math.round(end)} ms</text>
-<text x="${width - pad}" y="16" text-anchor="end" fill="#2f6fde">drawn</text><text x="${width - pad}" y="30" text-anchor="end" fill="#999">finger</text>${before ? `<text x="${width - pad}" y="44" text-anchor="end" fill="#e8a23a">before</text>` : ""}${over.length ? `<text x="${pad}" y="30" fill="#d33">${over.length} frames over ${budget.toFixed(1)} ms</text>` : ""}
+<text x="${width - pad}" y="16" text-anchor="end" fill="#2f6fde">drawn</text><text x="${width - pad}" y="30" text-anchor="end" fill="#999">finger</text>${before ? `<text x="${width - pad}" y="44" text-anchor="end" fill="#e8a23a">before</text>` : ""}${apple ? `<text x="${width - pad}" y="${before ? 58 : 44}" text-anchor="end" fill="#3a9a4a">iOS</text>` : ""}${over.length ? `<text x="${pad}" y="30" fill="#d33">${over.length} frames over ${budget.toFixed(1)} ms</text>` : ""}
 <text x="${pad}" y="${height - 12}">0</text><text x="${width - pad}" y="${height - 12}" text-anchor="end">${Math.round(end)} ms</text>
 <text x="4" y="${y(high) + 4}">${Math.round(high)}</text><text x="4" y="${y(low) + 4}">${Math.round(low)}</text>
 </svg>`
@@ -247,11 +293,16 @@ async function play(built, scene, name, motion, hz, folder) {
   const before = beforeAt && existsSync(join(beforeAt, "frames.json")) ? JSON.parse(readFileSync(join(beforeAt, "frames.json"), "utf8")) : undefined
   const beforeTravel = before && { frames: before.frames, values: travel(before.frames)[1] }
   writeFileSync(join(folder, "frames.json"), JSON.stringify({ hz, budget, way, frames: kept }))
-  writeFileSync(join(folder, "curve.svg"), curve(frames, way, values, stretches, budget, beforeTravel))
+  const apple = ios(frames, way, values, stretches)
+  writeFileSync(join(folder, "curve.svg"), curve(frames, way, values, stretches, budget, beforeTravel, apple))
   filmstrip(frames, join(folder, "filmstrip.png"))
   const worst = Math.max(...frames.map((frame) => frame.paint_ms))
   const rest = frames.at(-1).at
   const said = [`  ${hz} Hz: ${way} ${Math.round(Math.max(...values.map(Math.abs)))} pt, at rest after ${Math.round(rest)} ms (${frames.length} frames), ${over} over its ${budget} ms budget, the worst ${worst} ms, in ${Math.round(performance.now() - started)} ms`]
+  if (apple) {
+    const compared = frames.flatMap((frame, n) => (apple[n] === undefined ? [] : [Math.abs(values[n] - apple[n])]))
+    said.push(`  ${hz} Hz against iOS (${way.startsWith("scrolled") ? "UIScrollView's deceleration" : "SwiftUI's .spring"}, from the lift): at most ${Math.max(...compared).toFixed(1)} pt apart`)
+  }
   const judged = judge(frames, hz)
   if (judged.length)
     said.push(`  ${hz} Hz on devices: ${judged.map(({ tier, dropped, drawn, worst }) => `${tier} drops ${dropped} of ${drawn} frames (the worst ${worst.ms.toFixed(1)} ms, its ${worst.by})`).join("; ")}`)
