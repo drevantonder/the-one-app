@@ -110,14 +110,16 @@ export function OwnerPill(props: { owners: Owner[] }) {
       </View>
       <Menu.Positioner>
         <Menu.Content>
-          <For each={props.owners}>
+          {/* Each owner's item stays as the owners are asked for again, as anything changes, so a press on one isn't
+              lost to a new one drawn in its place. */}
+          <For each={props.owners} keyed={(owner) => owner.key}>
             {(owner, index) => (
               <Menu.Item value={String(index())}>
                 <View style={looks.ownerItem}>
                   <View style={looks.opacity(index() === at() ? 1 : 0)}>
                     <Icon name="check" />
                   </View>
-                  <Text>{owner.name}</Text>
+                  <Text>{owner().name}</Text>
                 </View>
               </Menu.Item>
             )}
