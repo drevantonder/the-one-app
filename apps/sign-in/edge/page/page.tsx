@@ -381,8 +381,8 @@ function shows(): Shows {
       if (how() === "away") return { heading: "Sign in on another device", button: shares ? "Share Link" : copied() ? "Copied" : "Copy Link", onSignIn: share, stop: "Back", onStop: () => setHow("passkey"), elsewhere: true }
       if (how() === "passkey") return { heading: "Sign in", note: "Check this code where you sign in", code: shown, problem: why, button: "Sign in", onSignIn: () => location.assign(link.href), stop: "Use Another Device", onStop: () => setHow("away") }
       if (number() !== undefined)
-        return { heading: "Check your devices", note: "On another of your devices, open Devices and enter", code: String(number()), status: "Waiting for approval…", quiet: true, button: "Use a Passkey Instead", onSignIn: () => setHow("passkey"), stop: "Back", onStop: () => setNumber() }
-      return { heading: "Sign in", problem: why, button: "Continue", onSignIn: name, stop: "Use a Passkey", onStop: () => setHow("passkey"), asksWho: true }
+        return { heading: "Check your devices", note: "On another of your devices, open Devices and enter", code: String(number()), status: "Waiting for approval…", quiet: true, button: google() ? "Use Google or a Passkey Instead" : "Use a Passkey Instead", onSignIn: () => setHow("passkey"), stop: "Back", onStop: () => setNumber() }
+      return { heading: "Sign in", problem: why, button: "Continue", onSignIn: name, stop: google() ? "Use Google or a Passkey" : "Use a Passkey", onStop: () => setHow("passkey"), asksWho: true }
     case "device":
       switch (now.stage) {
         case "checking":
