@@ -83,12 +83,9 @@ export function Library(props: { owner: Owner; size?: { width: number; height: n
   const inline = () => (props.size ? 0 : room().wide ? room().side : 20)
   const width = () => props.size?.width ?? Math.min(1440, room().width - 2 * inline())
   const laid = createMemo(() => shelf(width()))
-  // Tapped again as it shrinks back into its place, it turns and grows again.
   const opening = (key: () => string) => (event: Located) => {
     // An app pressed in its square opens the app, not the category too.
-    if (Date.now() - pressedApp < 100) return
-    const back = state().matches({ category: "closing" }) && state().context.category === key()
-    if (!state().matches("nothing") && !back) return
+    if (Date.now() - pressedApp < 100 || !state().matches("nothing")) return
     places[key()] = event.currentTarget.getBoundingClientRect()
     home.send({ type: "open", category: key() })
   }

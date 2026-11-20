@@ -112,7 +112,7 @@ export function createPaging(props: { owners: Owner[] }, layout: Screens) {
   /// Whether the pages are dragged along by the host, as a finger, a trackpad's fingers or a mouse goes, where nothing's
   /// carried: the screen's own drag, with no turn of the page's JS a move.
   const dragsAlong = () =>
-    !reducedMotion() && (state().matches("nothing") || state().matches({ editing: "still" }) || state().matches({ category: "closing" }))
+    !reducedMotion() && (state().matches("nothing") || state().matches({ editing: "still" }))
   /// The pages, along: the host drags them as the finger goes, giving past the first and the App Library as a rubber
   /// band, as an iPhone's do; let go, they go to the page the finger's motion would carry them nearest to (`settle`),
   /// springing there from where they are at the finger's speed.
@@ -156,10 +156,9 @@ export function createPaging(props: { owners: Owner[] }, layout: Screens) {
     onPointerDown: (event: Pressed) => {
       finger.pointer = { x: event.clientX, y: event.clientY }
       if (event.pointerType === "mouse" || event.button) return
-      // A category shrinking back into its place lets the pages under it have the finger, and while something's
-      // carried, every finger but the one carrying it has them, one at a time.
+      // While something's carried, every finger but the one carrying it has them, one at a time.
       const second = carrying() && event.pointerId !== finger.carrier && !swipe
-      if (!second && !home.getSnapshot().matches("nothing") && !home.getSnapshot().matches({ category: "closing" }) && !home.getSnapshot().matches({ editing: "still" })) return
+      if (!second && !home.getSnapshot().matches("nothing") && !home.getSnapshot().matches({ editing: "still" })) return
       const { owner } = home.getSnapshot().context.at
       stop(down)
       stop(sideways(owner))
@@ -179,7 +178,7 @@ export function createPaging(props: { owners: Owner[] }, layout: Screens) {
       const axis = Math.abs(dx) > Math.abs(dy) ? "x" : "y"
       // A hold that began has the finger, and up and down is the page's own where it scrolls, and nobody's while
       // editing, but a second finger's while something's carried: an app, which goes to another owner, not a widget.
-      const free = home.getSnapshot().matches("nothing") || home.getSnapshot().matches({ category: "closing" }) || home.getSnapshot().matches({ editing: "still" }) || (carrying() && swipe.id !== finger.carrier)
+      const free = home.getSnapshot().matches("nothing") || home.getSnapshot().matches({ editing: "still" }) || (carrying() && swipe.id !== finger.carrier)
       const vertical = carrying() ? !home.getSnapshot().context.held?.item?.widget : !home.getSnapshot().matches("editing")
       // Along, a phone's pages are the host's to drag (`along`), where it drags them.
       const refused = !free || (axis === "y" && (!vertical || kindOf(swipe.owner) !== "home")) || (axis === "x" && dragsAlong())

@@ -181,8 +181,6 @@ export type Event =
   /** A category was tapped in the App Library, or closed. */
   | { type: "open"; category: string }
   | { type: "close" }
-  /** An opened category has grown out of its place, or shrunk back into it: its animations have finished. */
-  | { type: "zoomed" }
   /** A finger stayed on an item or on empty space, or a mouse right-clicked it, for its menu, by whoever arranges it. */
   | { type: "hold"; held: Held }
   /** Edit Home Screen, from that menu, or a hold on a page's empty space: the owner's pages, as they are, to edit. */
@@ -453,18 +451,12 @@ export const machine = setup({
         pick: { target: "nothing", actions: ["pick", "glide"] },
       },
     },
-    // A category, grown out of its place in the App Library as an iPhone's folder does: its apps are let be until
-    // it's open, and it shrinks back into its place as it closes. Either can be changed midway, as a finger changes its
-    // mind: closed as it grows, or tapped again as it shrinks, it turns back from where it got to. It's open, or gone,
-    // once its animations say they're done (`zoomed`), whichever way they ended up going.
+    // A category opened over the App Library, as an iPhone's. It's open the moment it's tapped and closed the moment
+    // it's told, as a finger changes its mind: how it grows out of its place and shrinks back into it is the
+    // renderer's to draw, from wherever it's got to, and nothing here waits for it.
     category: {
-      initial: "opening",
       exit: "forget",
-      states: {
-        opening: { on: { zoomed: "open", close: "closing" } },
-        open: { on: { close: "closing", hold: { target: "#home.holding", actions: "hold" } } },
-        closing: { on: { zoomed: "#home.nothing", open: "opening" } },
-      },
+      on: { close: "nothing", hold: { target: "holding", actions: "hold" } },
     },
     // What a finger holds, lifted over the blurred Home Screen, with its menu: Edit Home Screen, and taking it off.
     // Carried from the App Library, it brings Home forward, on the owner it was last on.

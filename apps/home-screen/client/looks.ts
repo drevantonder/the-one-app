@@ -10,9 +10,6 @@ export const looks = styles({
   // The owner pill is its button, whose press and open fill it whole.
   ownerPill: { paddingInline: 0 },
   glass: { paddingInline: tokens.grid[1], pointerEvents: "auto", backgroundColor: tokens.colour.glass, boxShadow: tokens.shadow.glass, backdropFilter: tokens.material.glass },
-  panel: { position: "absolute", overflow: "hidden", borderRadius: tokens.radius.large, backgroundColor: tokens.colour.tile },
-  // What's in an opened category, at the panel's size in its middle, which shows more of it as it grows.
-  inPanel: { position: "absolute", paddingTop: tokens.grid[6], paddingInline: tokens.grid[4], paddingBottom: tokens.grid[4] },
   menu: { position: "absolute", overflow: "hidden", borderRadius: tokens.radius.large, backgroundColor: tokens.colour.glass, backdropFilter: tokens.material.glass, boxShadow: tokens.shadow.window, color: tokens.colour.label },
   overview: { position: "absolute", zIndex: 15, backgroundColor: tokens.colour.veil, backdropFilter: tokens.material.thin, transitionProperty: ["opacity"], transition: tokens.motion.settle },
   gone: { opacity: 0 },
@@ -60,6 +57,7 @@ export const looks = styles({
   square: (size: number) => ({ width: size, height: size }),
   wide: (width: number) => ({ width }),
   tall: (height: number) => ({ height }),
+  atLeast: (minHeight: number) => ({ minHeight }),
   scaled: (width: number, height: number, scale: number) => ({ width, height, scale }),
   opacity: (opacity: number) => ({ opacity }),
   faded: (opacity: number, scale: number) => ({ opacity, scale }),
@@ -129,9 +127,15 @@ export const looks = styles({
   dialog: { position: "absolute", top: 0, start: 0 },
   categoryLayer: { zIndex: 10 },
   heldLayer: { zIndex: 20 },
-  categoryTitle: { position: "absolute", font: tokens.type.title, textAlign: "center" },
-  titled: (start: number, width: number, top: number, opacity: number, translateY: number) => ({ start, width, top, opacity, translateY }),
-  opened: { display: "grid", gridTemplateColumns: { repeat: 3 }, rowGap: tokens.grid[4], columnGap: tokens.grid[3] },
+  // It grows out of its square and shrinks back into it, and the veil over what's behind blurs and dims with it, on
+  // one spring, which a change on the way turns from where it is.
+  veils: { opacity: { default: 1, entering: 0, exiting: 0 }, transitionProperty: ["opacity"], transition: tokens.motion.smooth },
+  grows: { position: "absolute", pointerEvents: "none", scale: { default: 1, entering: 0.3, exiting: 0.3 }, opacity: { default: 1, entering: 0, exiting: 0 }, transitionProperty: ["scale", "opacity"], transition: tokens.motion.smooth },
+  openedArea: { position: "absolute", overflow: "hidden", pointerEvents: "auto" },
+  opened: { gap: tokens.grid[8] },
+  categoryTitle: { font: tokens.type.largeTitle },
+  // Its apps as Home's, spread across, four on a phone.
+  openedApps: { display: "grid", gridTemplateColumns: { fill: sizes.found }, justifyContent: "space-between", rowGap: tokens.grid[4], columnGap: tokens.grid[3] },
   copy: { position: "absolute", display: "grid", pointerEvents: "none" },
   // What's held grows a little as it's lifted, and a menu opens from small, each with a spring.
   lifting: { display: "grid", scale: { default: 1.06, entering: 1 }, transitionProperty: ["scale"], transition: tokens.motion.snappy },

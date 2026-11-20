@@ -1300,5 +1300,14 @@
         "name": "Productivity"
       }
     ]
+  },
+  "App Library, a category open": {
+    "like": "App Library",
+    "taps": [
+      {
+        "role": "group",
+        "name": "Productivity"
+      }
+    ]
   }
 }

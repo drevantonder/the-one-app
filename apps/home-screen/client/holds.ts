@@ -42,7 +42,7 @@ export function holds(held: () => Held | undefined, arranges: () => boolean, men
   }
   const hold = (event: Located) => {
     const what = held()
-    if (!menu() || !what || !(home.getSnapshot().matches("nothing") || home.getSnapshot().matches({ category: "open" }))) return
+    if (!menu() || !what || !(home.getSnapshot().matches("nothing") || home.getSnapshot().matches("category"))) return
     fired = !!start
     if (!what.item && !what.listed) return arranges() && home.send({ type: "edit", editing: pending() })
     home.send({ type: "hold", held: { ...what, rect: event.currentTarget.getBoundingClientRect() } })
