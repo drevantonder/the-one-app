@@ -106,6 +106,12 @@ fn main() -> anyhow::Result<()> {
     // What its tools answer now, which a `changed` request moves on.
     let answers = std::rc::Rc::new(std::cell::RefCell::new(answers));
     let answering = answers.clone();
+    // What the page logged as an error (an uncaught one, a promise nothing handled, what an `<Errored>` caught), as it
+    // tells its client (`notifications/message`): the run fails with them, as a browser's console fails a test, but
+    // for those `--errors` (a JSON list of words) says a scene shows on purpose, as a page that can't reach its server.
+    let expected: Vec<String> = flag("--errors").and_then(|errors| serde_json::from_str(&errors).ok()).unwrap_or_default();
+    let threw: std::rc::Rc<std::cell::RefCell<Vec<String>>> = Default::default();
+    let throwing = threw.clone();
 
     let latency: f64 = flag("--latency").and_then(|ms| ms.parse().ok()).unwrap_or(0.0);
     if let Some(times) = flag("--slower").and_then(|times| times.parse().ok()) {
@@ -153,6 +159,13 @@ fn main() -> anyhow::Result<()> {
     let js = Thread::start(&page, files, None, clock.clone(), touch)?;
     // What the page asks its client, answered from `answers`, as record.js answers it.
     let asked: renderer::Asked = Box::new(move |message, _| {
+        if message["method"] == "notifications/message" && message["params"]["level"] == "error" {
+            let data = &message["params"]["data"];
+            let message = data["message"].as_str().unwrap_or_default();
+            if !expected.iter().any(|words| message.contains(words.as_str())) {
+                throwing.borrow_mut().push(format!("{message} ({}:{})", data["file"].as_str().unwrap_or("?"), data["line"]));
+            }
+        }
         let answers = answering.borrow();
         let id = message.get("id")?.clone();
         let (method, params) = (message["method"].as_str().unwrap_or_default(), &message["params"]);
@@ -370,7 +383,8 @@ fn main() -> anyhow::Result<()> {
         anyhow::bail!("its page crashed: {why}");
     }
     // What the display showed that it mustn't have, last, as its failure.
-    let wrong = windows.wrong();
+    let mut wrong = windows.wrong();
+    wrong.extend(threw.borrow().iter().map(|error| format!("the page threw: {error}")));
     if !wrong.is_empty() {
         anyhow::bail!("{}", wrong.join("; "));
     }

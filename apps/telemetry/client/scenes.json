@@ -327,7 +327,10 @@
         "alerts": [],
         "forwarding": null
       }
-    }
+    },
+    "errors": [
+      "Couldn't reach the network"
+    ]
   },
   "Alerts Unreachable": {
     "like": "Overview",
@@ -335,6 +338,9 @@
       "telemetry_alerts": {
         "$error": "surface holds telemetry's database and answers the network's relay, but it didn't answer this server within 4003 ms, so this server doesn't take it over. Check this server's connection, then try again."
       }
-    }
+    },
+    "errors": [
+      "didn't answer this server"
+    ]
   }
 }

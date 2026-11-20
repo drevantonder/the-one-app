@@ -235,7 +235,10 @@
         "$error": "Couldn't reach the server"
       }
     },
-    "component": "devices"
+    "component": "devices",
+    "errors": [
+      "Couldn't reach the server"
+    ]
   },
   "Passkeys": {
     "like": "Server",
@@ -247,7 +250,10 @@
       "sign-in_devices": {
         "$error": "Couldn't reach it"
       }
-    }
+    },
+    "errors": [
+      "Couldn't reach it"
+    ]
   },
   "People & Groups": {
     "answers": {

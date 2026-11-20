@@ -56,12 +56,19 @@
       "android-emulator_list": {
         "$error": "The server isn't answering"
       }
-    }
+    },
+    "errors": [
+      "The server isn't answering"
+    ]
   },
   "A running emulator (live picture left out)": {
     "like": "Emulators",
     "taps": [
       "pixel-1"
+    ],
+    "errors": [
+      "Live video didn't connect",
+      "The screen gave no picture either"
     ]
   },
   "A starting emulator": {

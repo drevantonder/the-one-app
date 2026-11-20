@@ -102,6 +102,9 @@
         "$error": "Couldn't reach the network"
       }
     },
-    "component": "deleted"
+    "component": "deleted",
+    "errors": [
+      "Couldn't reach the network"
+    ]
   }
 }

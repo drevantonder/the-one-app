@@ -209,6 +209,9 @@
       "git-repos_list": {
         "$error": "Couldn't reach the server"
       }
-    }
+    },
+    "errors": [
+      "Couldn't reach the server"
+    ]
   }
 }

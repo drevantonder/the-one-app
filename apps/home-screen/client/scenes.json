@@ -862,6 +862,9 @@
         },
         "keeps": "older iPhone"
       }
+    },
+    "answers": {
+      "ui/open-link": {}
     }
   },
   "Home, couldn't load": {
@@ -878,7 +881,10 @@
           }
         ]
       }
-    }
+    },
+    "errors": [
+      "Couldn't reach the server"
+    ]
   },
   "Launcher on a computer": {
     "like": "Home, two pages",
@@ -893,7 +899,8 @@
         "theme": null,
         "launcher": true,
         "mac": true
-      }
+      },
+      "ui/open-link": {}
     },
     "checks": {
       "A trackpad's swipe goes to the App Library, the pointer nudged as it goes and its momentum after": [

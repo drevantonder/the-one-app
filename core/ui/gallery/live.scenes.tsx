@@ -22,6 +22,7 @@ const gone = async ({ action }: ScreenInputs) => {
 export default {
   "Live screen/Pictures": {
     taps: ["Wait a Second"],
+    errors: ["Live video didn't connect"],
     render: () => (
       <View style={look.column}>
         <LiveScreen label="The desktop" screen={pictures} />
@@ -35,6 +36,7 @@ export default {
     </LiveScreen>
   ),
   "Live screen/Can't reach it": {
+    errors: ["Live video didn't connect", "The screen gave no picture either"],
     taps: Array.from({ length: 6 }, () => "Wait a Second"),
     render: () => (
       <View style={look.column}>

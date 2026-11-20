@@ -437,6 +437,54 @@
       }
     }
   },
+  "Updates, an update that goes away": {
+    "like": "Updates, an app that can't update",
+    "checks": {
+      "App Store's failed update goes while Updates is open, and searching throws nothing": [
+        {
+          "expect": {
+            "text": "This update can't be installed yet"
+          }
+        },
+        "Search Settings",
+        {
+          "type": "chr"
+        },
+        {
+          "answers": {
+            "apps": {
+              "for": "users/sam",
+              "apps": [
+                {
+                  "name": "app-store",
+                  "for": "network",
+                  "app": "network/apps/app-store",
+                  "state": "installed",
+                  "trusted": true,
+                  "requires": {},
+                  "required_by": [],
+                  "update": null
+                }
+              ]
+            }
+          }
+        },
+        {
+          "expect": {
+            "gone": "This update can't be installed yet"
+          }
+        },
+        {
+          "type": "o"
+        },
+        {
+          "expect": {
+            "text": "Chrome"
+          }
+        }
+      ]
+    }
+  },
   "Settings, on a phone with no login": {
     "like": "Settings, on a phone",
     "answers": {
@@ -879,7 +927,18 @@
           }
         }
       ]
-    }
+    },
+    "uses": [
+      "sign-in",
+      "vault",
+      "notifications",
+      "home-screen",
+      "backups",
+      "soft-delete"
+    ],
+    "errors": [
+      "No answer for"
+    ]
   },
   "An app": {
     "like": "Settings",
@@ -955,7 +1014,10 @@
       "settings_sections": {
         "$error": "Couldn't reach your network."
       }
-    }
+    },
+    "errors": [
+      "Couldn't reach your network."
+    ]
   },
   "Devices": {
     "like": "Settings",

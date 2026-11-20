@@ -457,10 +457,11 @@ export declare function Widget(props: {
 // finger points at it (`touch`), what its window keeps at each edge (`safeArea`, top, right, bottom and left: a phone's
 // status bar and home indicator), the gestures played on it, frame by frame (`motions`, core/ui/motion.js), and what
 // people do with it and what must hold as they do (`checks`, `bun motion.js --checks`), with the seeds a check once
-// failed on (`seeds`). Its name is its family's and its own: "Buttons/Variants".
+// failed on (`seeds`). A page that logs an error fails the scene, as a browser's console does a test, but for the
+// words a scene that shows an error says it logs (`errors`: "Couldn't reach the network"). Its name is its family's and its own: "Buttons/Variants".
 export type Scene =
   | (() => Element)
-  | { render: () => Element; taps?: Tap[]; alone?: boolean; size?: [number, number]; touch?: boolean; safeArea?: [number, number, number, number]; motions?: Record<string, Motion>; checks?: Record<string, CheckStep[]>; seeds?: number[] }
+  | { render: () => Element; taps?: Tap[]; alone?: boolean; size?: [number, number]; touch?: boolean; errors?: string[]; safeArea?: [number, number, number, number]; motions?: Record<string, Motion>; checks?: Record<string, CheckStep[]>; seeds?: number[] }
 /** A step of a check, as a test's (Playwright's, the UI SDK's): what's done, as a tap is (pressed, a key, typed), a
  * press held `hold` ms or tapped `clicks` times (an `agent`'s comes as an agent's request to a device's window does, by the inspector, though
  * nobody could press it, as on a panel put away), a button held `down` on something and let go (`up`), input played as
@@ -468,9 +469,10 @@ export type Scene =
  * it: a trackpad's swipe with its phases and momentum, the pointer's nudges, a finger's `touch`es, each with its
  * `phase`), time passing (`wait`, ms), the app in the background that long and back (`away`, ms), which fails where it
  * draws meanwhile, as a phone's GPU refuses that, a panel put away or summoned (`putAway`, `summon`), or the device's own
- * Back (`back`), as Android's key is; or what must
+ * Back (`back`), as Android's key is; the client's answers changed to these tools' and the page told that something
+ * changed (`answers`, as an update going away is), or what must
  * hold then (`expect`), waited for a second, or `within` ms. */
-export type CheckStep = Tap | { press: Tap; hold?: number; clicks?: number; agent?: true } | { down: Tap } | { up: true } | { trace: string } | { wait: number } | { away: number } | { putAway: true } | { summon: true } | { back: true } | { expect: Expect; within?: number }
+export type CheckStep = Tap | { press: Tap; hold?: number; clicks?: number; agent?: true } | { down: Tap } | { up: true } | { trace: string } | { wait: number } | { away: number } | { putAway: true } | { summon: true } | { back: true } | { answers: Record<string, unknown> } | { expect: Expect; within?: number }
 /** What must hold: what's drawn whole and in the window (`shown`), what isn't there (`gone`), what has the keyboard
  * (`focused`), words somewhere on it (`text`), a node's states (`states`: `{ of, is: { expanded: true } }`), how opaque
  * it's drawn (`drawn`: `{ of, opacity }`, a pressed look), the glass's blur drawn or not (`blur`), and what the input with the

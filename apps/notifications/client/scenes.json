@@ -78,7 +78,10 @@
       "notifications_inbox": {
         "$error": "The server didn't answer."
       }
-    }
+    },
+    "errors": [
+      "The server didn't answer."
+    ]
   },
   "Inbox, a phone not woken": {
     "like": "Inbox, empty",

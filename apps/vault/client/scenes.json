@@ -386,7 +386,10 @@
         "$error": "Couldn't reach the server"
       }
     },
-    "component": "accounts"
+    "component": "accounts",
+    "errors": [
+      "Couldn't reach the server"
+    ]
   },
   "Chrome Profiles": {
     "like": "Empty",

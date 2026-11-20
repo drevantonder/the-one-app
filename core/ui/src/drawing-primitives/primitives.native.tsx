@@ -161,15 +161,20 @@ type Cell = { at: () => number; place: (index: number) => void; box: Element; di
  * row in a box. */
 export const VirtualizedList: typeof Page.VirtualizedList = (props) => {
   const rest = () => omit(props, "data", "renderItem", "estimatedItemSize", "keep")
-  /** What `renderItem` is told of row `index`, as it changes. */
-  const info = (index: () => number) => ({
-    get item() {
-      return props.data[index()]
-    },
-    get index() {
-      return index()
-    },
-  })
+  /** What `renderItem` is told of row `index`, as it changes. A row whose index the data no longer reaches, as it shrinks,
+   * still shows the item it had until the list drops it: what it draws runs once more as the data changes, before it's
+   * dropped, and must not find it gone. */
+  const info = (index: () => number) => {
+    let kept: unknown
+    return {
+      get item() {
+        return (kept = props.data[index()] ?? kept) as never
+      },
+      get index() {
+        return index()
+      },
+    }
+  }
   if (Number((globalThis as { mutations?: Mutations }).mutations?.list ?? 0) < 2) {
     const node = createElement("box")
     spread(node, rest())

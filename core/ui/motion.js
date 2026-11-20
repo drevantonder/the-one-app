@@ -252,7 +252,7 @@ async function run(at, folder, scene, requests, seed = 0) {
   // that one's device pixels a point, where it's drawn at one here; on a device, as that decodes them.
   const slowest = devices.tiers.find((tier) => tier.name === (scene.touch ? "low-end Android" : "Intel UHD laptop at 4K"))
   const slower = hostScore && !ssh ? ["--slower", String((hostScore / slowest.cpu) * slowest.scale ** 2)] : []
-  const args = [at, join(folder, "end.png"), join(folder, "end.json"), "--ui", here("dist/client"), "--answers", join(folder, "answers.json"), "--size", `${scene.size[0]}x${scene.size[1]}`, "--scale", String(device?.scale ?? 1), "--requests", "-", ...(dark ? ["--dark"] : []), ...(scene.touch ? ["--touch"] : []), ...(scene.safeArea ? ["--safe-area", scene.safeArea.join(",")] : []), "--time-zone", scene.timeZone ?? "UTC", ...(seed ? ["--seed", String(seed)] : []), ...panel, ...slower]
+  const args = [at, join(folder, "end.png"), join(folder, "end.json"), "--ui", here("dist/client"), "--answers", join(folder, "answers.json"), "--size", `${scene.size[0]}x${scene.size[1]}`, "--scale", String(device?.scale ?? 1), "--requests", "-", ...(dark ? ["--dark"] : []), ...(scene.touch ? ["--touch"] : []), ...(scene.errors ? ["--errors", JSON.stringify(scene.errors)] : []), ...(scene.safeArea ? ["--safe-area", scene.safeArea.join(",")] : []), "--time-zone", scene.timeZone ?? "UTC", ...(seed ? ["--seed", String(seed)] : []), ...panel, ...slower]
   if (ssh) {
     const { stdout, stderr, failed } = await runThere(at, folder, args, lines)
     return { answers: stdout.split("\n").filter(Boolean).map((line) => JSON.parse(line)), said: stderr.trim(), failed }
@@ -271,9 +271,9 @@ export async function scenesOf(target, built, folder, all = false) {
     return Object.entries(scenes)
       .map(([name, scene]) => ({ name, ...whole(scene) }))
       .filter((scene) => all || (checking ? scene.checks : scene.motions))
-      .map(({ name, page, component, uses = [], answers = {}, taps = [], size = [390, 844], touch = false, timeZone = "UTC", safeArea, motions, checks, seeds }) => {
+      .map(({ name, page, component, uses = [], answers = {}, taps = [], size = [390, 844], touch = false, timeZone = "UTC", safeArea, errors, motions, checks, seeds }) => {
         const [at, link] = (page ?? (component ? `${COMPONENTS}/${component}.html` : "client/index.html")).split("#")
-        return { name, page: at, link, uses, answers, taps, size, touch, timeZone, safeArea, motions, checks, seeds }
+        return { name, page: at, link, uses, answers, taps, size, touch, timeZone, safeArea, errors, motions, checks, seeds }
       })
   }
   // The gallery lists its own, drawn at `#scenes`.
@@ -285,7 +285,7 @@ export async function scenesOf(target, built, folder, all = false) {
   if (!text) throw new Error(`The gallery listed no scenes: ${listed.said}`)
   return JSON.parse(JSON.parse(`"${text}"`))
     .filter((scene) => all || (checking ? scene.checks : scene.motions))
-    .map(({ name, taps = [], size = [390, 844], touch = false, safeArea, motions, checks, seeds }) => ({ name, page: "index.html", link: name, answers: {}, taps, size, touch, safeArea, motions, checks, seeds }))
+    .map(({ name, taps = [], size = [390, 844], touch = false, safeArea, errors, motions, checks, seeds }) => ({ name, page: "index.html", link: name, answers: {}, taps, size, touch, safeArea, errors, motions, checks, seeds }))
 }
 
 /// How far what moved had gone at each frame: what `follow` names where it's said and moved, else what scrolls.
@@ -562,6 +562,7 @@ function requests(steps, folder) {
     else if (step.putAway) out.push({ request: { op: "put_away" } })
     else if (step.summon) out.push({ request: { op: "summon" } })
     else if (step.back) out.push({ request: { op: "back" } })
+    else if (step.answers) out.push({ request: { op: "changed", answers: step.answers } })
     // An agent's press comes the inspector's way, as to a device's window, though nobody could press it (a panel put away).
     else if (step.press) out.push({ request: { op: "tap", ...selector(step.press), hold: step.hold, clicks: step.clicks, ...(step.agent ? { inspector: true } : {}) } })
     else if (step.down) out.push({ request: { op: "down", ...selector(step.down) } })

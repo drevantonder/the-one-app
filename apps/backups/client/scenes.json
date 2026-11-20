@@ -196,6 +196,9 @@
         "$error": "Couldn't reach the network"
       }
     },
-    "component": "backups"
+    "component": "backups",
+    "errors": [
+      "Couldn't reach the network"
+    ]
   }
 }
