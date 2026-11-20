@@ -4,7 +4,7 @@
 // --target x86_64-pc-windows-msvc` for a Windows one, which draws on its own GPU over ssh with Direct3D 12).
 //
 // It draws every scene of the gallery there, the first frames of each as it opens and every frame of each of its
-// motions at 60 Hz, each waited for on its GPU (the harness's `--gpu`), at two device pixels a point, as a phone's or a
+// motions at 60 Hz, each waited for on its GPU, as the harness times its passes there (`gpu_ms`), at two device pixels a point, as a phone's or a
 // laptop's at 4K is. Each frame's work (`work`: the pixels of each kind of thing drawn, the pixels copied, the bytes
 // uploaded, and its draw calls) is the same on any device; how long its GPU took is that device's. It fits the cost of
 // each (non-negative least squares) on half the scenes and says how far off that fit is on the other half, the
@@ -69,7 +69,7 @@ scenes.forEach((scene, n) => {
   const played = Object.values(scene.motions ?? {}).map((motion) => ({ op: "replay", ...selector(motion.from), ...moves(motion.gesture), hz: 60, after: 600 }))
   const requests = [{ op: "clock", step: 1000 }, ...taps, { op: "profile", at: [0, 17, 33, 50], snap: false }, ...played]
   writeFileSync(join(folder, "requests.jsonl"), requests.map((request, id) => JSON.stringify({ v: 1, id: id + 1, ...request })).join("\n"))
-  lines.push(`screenshot.exe ${n}\\page ${n}\\end.png ${n}\\end.json --ui ui --answers ${n}\\answers.json --size ${scene.size[0]}x${scene.size[1]} --scale 2 --gpu ${scene.touch ? "--touch " : ""}--requests ${n}\\requests.jsonl > ${n}\\answers.jsonl 2> ${n}\\said.txt`)
+  lines.push(`screenshot.exe ${n}\\page ${n}\\end.png ${n}\\end.json --ui ui --answers ${n}\\answers.json --size ${scene.size[0]}x${scene.size[1]} --scale 2 ${scene.touch ? "--touch " : ""}--requests ${n}\\requests.jsonl > ${n}\\answers.jsonl 2> ${n}\\said.txt`)
 })
 cpSync(here("dist/client"), join(batch, "ui"), { recursive: true, dereference: true })
 cpSync(harness, join(batch, "screenshot.exe"))

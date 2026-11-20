@@ -465,6 +465,13 @@ impl Stamps {
     /// chosen, if one is.
     fn begin(&mut self, device: &wgpu::Device) {
         let _ = device.poll(wgpu::PollType::Poll);
+        self.read();
+        self.writing = self.read.iter().position(|(_, _, held)| held.is_none());
+        self.passes.borrow_mut().clear();
+    }
+
+    /// What's been read back of the frames the GPU has finished: the latest's time.
+    fn read(&mut self) {
         for (buffer, mapped, held) in &mut self.read {
             let Some(passes) = held.as_ref() else { continue };
             if !mapped.swap(false, std::sync::atomic::Ordering::Acquire) {
@@ -486,8 +493,6 @@ impl Stamps {
             buffer.unmap();
             *held = None;
         }
-        self.writing = self.read.iter().position(|(_, _, held)| held.is_none());
-        self.passes.borrow_mut().clear();
     }
 
     /// The timestamps of a pass about to begin, one that draws, and `blurs` (a backdrop's glass), while there's room
@@ -742,9 +747,13 @@ impl Renderer {
         self.rasters.insert(id, (texture, bound));
     }
 
-    /// Waits until the GPU has done all it was given: how long a frame took it, timed from its `draw`.
-    pub fn finish(&self) {
+    /// Waits until the GPU has done all it was given, and reads its timestamps of the frame it last drew, which `gpu`
+    /// then says.
+    pub fn finish(&mut self) {
         let _ = self.device.poll(wgpu::PollType::wait_indefinitely());
+        if let Some(stamps) = &mut self.stamps {
+            stamps.read();
+        }
     }
 
     /// How many draw calls the last frame made: each batch, shadow tile, raster and blur pass drawn, but what was kept

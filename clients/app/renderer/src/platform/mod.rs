@@ -813,7 +813,6 @@ impl Windows {
         let mut scene = crate::render::scene::Scene::default();
         let (text, atlas) = (&mut self.text, &self.atlas);
         let snaps = crate::inspect::snaps(&request);
-        let gpu = request.bool("gpu");
         let mut afresh = true;
         let mut draw = |screen: &mut Screen| -> anyhow::Result<serde_json::Value> {
             if std::mem::take(&mut afresh) {
@@ -821,14 +820,9 @@ impl Windows {
             } else {
                 screen.paint(room, scale, text, atlas, &mut scene);
             }
-            let drawing = web_time::Instant::now();
             renderer.draw(&scene, [0.0, 0.0]);
+            renderer.finish();
             let mut frame = screen.cost(&renderer);
-            // How long its GPU took, waited for, where it's asked: on a real GPU, that GPU's time for the frame.
-            if gpu {
-                renderer.finish();
-                frame["gpu_ms"] = serde_json::json!((drawing.elapsed().as_secs_f64() * 100_000.0).round() / 100.0);
-            }
             if snaps {
                 let (width, height, rgba) = renderer.read().ok_or_else(|| anyhow::anyhow!("nothing was drawn"))?;
                 for (name, value) in crate::inspect::png(width, height, rgba)?.as_object().into_iter().flatten() {
@@ -2057,10 +2051,13 @@ impl Windows {
         self.windows.get(&id).map_or(0, |window| window.frames)
     }
 
-    /// What window `id`'s frames cost since this was last asked, as the inspector's `profile` says it (`Screen::cost`).
+    /// What window `id`'s frames cost since this was last asked, as the inspector's `profile` says it (`Screen::cost`),
+    /// its GPU waited for, to say its time for the last.
     pub fn cost(&mut self, id: WindowId) -> Option<serde_json::Value> {
         let window = self.windows.get_mut(&id)?;
-        Some(window.screen.as_mut().ok()?.cost(window.parts[0].renderer.as_ref()?))
+        let renderer = window.parts[0].renderer.as_mut()?;
+        renderer.finish();
+        Some(window.screen.as_mut().ok()?.cost(renderer))
     }
 
     /// What window `id` last drew, the GPU it drew it with and its atlas.
@@ -2211,9 +2208,10 @@ pub(crate) enum Input {
     Picked(crate::tree::Id, String),
 }
 
-/// How long this thread has run on a CPU, as its system counts it (POSIX's `CLOCK_THREAD_CPUTIME_ID`, Windows'
-/// `GetThreadTimes`): what its JS cost, whatever else the machine ran meanwhile, which its time by the clock isn't, so
-/// a busy machine's doesn't read as a slow page; on the web, which can't ask, its time by the clock.
+/// How long this thread has run on a CPU, as its system counts it (POSIX's `CLOCK_THREAD_CPUTIME_ID`): what its JS
+/// cost, whatever else the machine ran meanwhile, which its time by the clock isn't, so a busy machine's doesn't read as
+/// a slow page. On the web, which can't ask, and on Windows, its time by the clock: Windows counts a thread's time
+/// (`GetThreadTimes`) in its scheduler's ticks of 15.6 ms, longer than a frame's work, which read as 0 or 15.6 ms.
 #[cfg(unix)]
 pub fn on_cpu() -> std::time::Duration {
     let mut time = libc::timespec { tv_sec: 0, tv_nsec: 0 };
@@ -2222,18 +2220,7 @@ pub fn on_cpu() -> std::time::Duration {
     std::time::Duration::new(time.tv_sec as u64, time.tv_nsec as u32)
 }
 
-#[cfg(windows)]
-pub fn on_cpu() -> std::time::Duration {
-    use ::windows::Win32::Foundation::FILETIME;
-    let [mut created, mut exited, mut kernel, mut user] = [FILETIME::default(); 4];
-    // Safety: the current thread's pseudo-handle, and the times it writes into.
-    let _ = unsafe { ::windows::Win32::System::Threading::GetThreadTimes(::windows::Win32::System::Threading::GetCurrentThread(), &mut created, &mut exited, &mut kernel, &mut user) };
-    let ticks = |time: FILETIME| (u64::from(time.dwHighDateTime) << 32) | u64::from(time.dwLowDateTime);
-    // In ticks of 100 ns.
-    std::time::Duration::from_nanos((ticks(kernel) + ticks(user)) * 100)
-}
-
-#[cfg(target_arch = "wasm32")]
+#[cfg(any(windows, target_arch = "wasm32"))]
 pub fn on_cpu() -> std::time::Duration {
     thread_local!(static SINCE: web_time::Instant = web_time::Instant::now());
     SINCE.with(web_time::Instant::elapsed)

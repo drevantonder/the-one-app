@@ -2,7 +2,7 @@
 //!
 //!     cargo run -p renderer --example screenshot --features fake -- <page's built folder> <out.png> <out.json> \
 //!       [--ui core/ui/dist/client] [--answers answers.json] [--size 480x360] [--scale 2] [--dark] [--requests <file>|-]
-//!       [--safe-area <top>,<right>,<bottom>,<left>] [--touch] [--panel <corner>] [--gpu] [--measure] [--seed <n>]
+//!       [--safe-area <top>,<right>,<bottom>,<left>] [--touch] [--panel <corner>] [--measure] [--seed <n>]
 //!       [--latency <ms> [--cached <tool>,…]] [--slower <times>] [--time-zone <IANA name>]
 //!
 //! It runs the module the folder's `index.html` loads, as `bun app.js` built it, with the UI library a native host
@@ -32,8 +32,6 @@
 //! what its page changed reaches the window one to three of its turns late, as a page slower than its window's does,
 //! and of what the window tells its page together, which its thread runs in one turn, now and then one waits for a turn
 //! of its own (`Thread::seed`).
-//! `--gpu` waits for the GPU after each frame drawn, and says how long that took with its cost (`gpu_ms`): on a real
-//! GPU, its time for the frame, as a device that draws it would take.
 //! `--latency` has each tool's answer come that many milliseconds of the page's clock after it was asked, as a round
 //! trip to a server takes, but for the tools `--cached` names, which a client answers at once from what it keeps
 //! (a tool that only reads): so a page that opens on what isn't kept, or asks again for what an answer said, opens
@@ -74,7 +72,6 @@ fn main() -> anyhow::Result<()> {
     let scale: f32 = flag("--scale").and_then(|scale| scale.parse().ok()).unwrap_or(2.0);
     let dark = args.iter().any(|arg| arg == "--dark");
     let touch = args.iter().any(|arg| arg == "--touch");
-    let gpu_times = args.iter().any(|arg| arg == "--gpu");
     let panel: Option<f32> = flag("--panel").and_then(|corner| corner.parse().ok());
     // What the window keeps for itself at each edge, as a phone's status bar and home indicator, or a title bar.
     let safe: Vec<f32> = flag("--safe-area").map(|edges| edges.split(',').filter_map(|edge| edge.parse().ok()).collect()).unwrap_or_default();
@@ -274,16 +271,13 @@ fn main() -> anyhow::Result<()> {
     for line in requests.lines().filter(|line| !line.trim().is_empty()) {
         // A frame is drawn before each, as a window draws what the last one changed before the next comes.
         frame(&mut windows);
-        let mut request = match renderer::inspect::Request::parse(line) {
+        let request = match renderer::inspect::Request::parse(line) {
             Ok(request) => request,
             Err(refused) => {
                 println!("{refused}");
                 continue;
             }
         };
-        if gpu_times && matches!(request.op.as_str(), "profile" | "replay") {
-            request.inputs.insert("gpu".into(), json!(true));
-        }
         // What a person does comes as the display's input, on the platform's time, as a host's does; with a seed, a
         // moment or two after what came before, so it lands as things are on their way somewhere.
         // As an agent's request reaches a device's window, by the inspector's socket (`"inspector": true`), it goes to
@@ -710,6 +704,9 @@ fn replay(windows: &mut Windows, id: renderer::platform::WindowId, request: &ren
         // What it cost since the frame before, every frame drawn meanwhile and its JS, which a frame that drew nothing
         // costs too.
         let mut frame = windows.cost(id).unwrap_or_default();
+        if !drew && let Some(frame) = frame.as_object_mut() {
+            frame.remove("gpu_ms");
+        }
         if !drew {
             frame["draws"] = json!(0);
             frame["work"] = json!({"quads": 0, "shadows": 0, "sprites": 0, "backdrops": 0, "rasters": 0, "copied": 0, "uploaded": 0});

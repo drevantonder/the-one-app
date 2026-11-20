@@ -321,11 +321,13 @@ impl Screen {
     /// lay out and paint all told (`paint_ms`), how many times it painted (`painted`: none where nothing changed, more
     /// than one where it painted again before the display's refresh), its thread's CPU time drawing those frames for
     /// the GPU (`draw_ms`), and, as `renderer` last drew it, its draw calls (`draws`), what its GPU did (`work`,
-    /// `Renderer::work`) and what its atlas holds (`atlas`).
+    /// `Renderer::work`), its GPU's time by its timestamps of its passes, where it takes them, once it's waited for
+    /// (`gpu_ms`, `Renderer::finish`: a frame that draws everything again costs it there, on a software GPU too), and
+    /// what its atlas holds (`atlas`).
     pub fn cost(&mut self, renderer: &crate::render::renderer::Renderer) -> Value {
         let ms = |time: Duration| (time.as_secs_f64() * 100_000.0).round() / 100.0;
         let cost = std::mem::take(&mut self.cost);
-        json!({
+        let mut said = json!({
             "mutations": cost.mutations,
             "script_ms": ms(cost.script),
             "layout_ms": ms(cost.layout),
@@ -335,7 +337,11 @@ impl Screen {
             "draws": renderer.draws(),
             "work": renderer.work(),
             "atlas": renderer.sprite_atlas().usage(),
-        })
+        });
+        if let Some((gpu, _)) = renderer.gpu() {
+            said["gpu_ms"] = json!(ms(gpu));
+        }
+        said
     }
 
     /// Moves the clock on by `ms`, paused, running each timer due in that time at its own time, in order, each once

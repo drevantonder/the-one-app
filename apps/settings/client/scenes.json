@@ -339,6 +339,22 @@
     ],
     "touch": true
   },
+  "Settings, narrow, scrolled": {
+    "like": "Settings, on a phone",
+    "size": [
+      390,
+      480
+    ],
+    "touch": false,
+    "motions": {
+      "A mouse wheel's notches scroll it": {
+        "gesture": {
+          "trace": "traces/windows-wheel-narrow.json"
+        },
+        "keeps": "Intel UHD laptop at 4K"
+      }
+    }
+  },
   "Updates, an app that can't update": {
     "like": "Settings",
     "answers": {

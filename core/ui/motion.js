@@ -1,7 +1,11 @@
 // Plays every scene's gestures (its `motions`) on a native host's headless harness, frame by frame, on its paused
 // clock: `bun motion.js [<folder>…] [--scene <words>] [--hz 60,120] [--out <dir>] [--against <dir>] [--dark]
-// [--release] [--watch]` in core/ui, after `bun build.js` and `cargo build -p renderer --example screenshot --features fake`
-// (`--release` too for `--release`, whose costs are a shipped build's).
+// [--release] [--watch] [--ssh <host> --harness <its build of the harness>]` in core/ui, after `bun build.js` and `cargo
+// build -p renderer --example screenshot --features fake` (`--release` too for `--release`, whose costs are a shipped
+// build's). `--ssh` plays them on a real device instead, as calibrate.js draws there (a Windows one's harness built with
+// `cargo xwin build --release … --target x86_64-pc-windows-msvc`, which draws with Direct3D 12 over ssh), at its tier's
+// device pixels a point, and judges its tier by each frame's own times there: its GPU's (its timestamps), its thread's
+// painting and drawing, and its JS's.
 //
 // A folder is the gallery (core/ui/gallery, its scenes in `*.scenes.tsx`) or an app's (apps/<app>, in
 // `client/scenes.json`), as `scenes.js` takes them; with none, the gallery and every app with a motion. A motion is
@@ -54,8 +58,11 @@ const only = option("--scene")?.toLowerCase()
 const dark = flag("--dark")
 const checking = flag("--checks")
 const seeds = Number(option("--seeds") ?? 3)
-const folders = args.filter((arg, at) => !arg.startsWith("--") && !["--out", "--against", "--hz", "--scene", "--seeds"].includes(args[at - 1])).map((folder) => resolve(folder))
-const harness = join(root, `target/${flag("--release") ? "release" : "debug"}/examples/screenshot`)
+const folders = args.filter((arg, at) => !arg.startsWith("--") && !["--out", "--against", "--hz", "--scene", "--seeds", "--ssh", "--harness"].includes(args[at - 1])).map((folder) => resolve(folder))
+// On a device of devices.json's tiers over ssh (the one whose `measured` it is), with a harness built for it, its own
+// GPU and CPU draw each frame, as calibrate.js has them, and its tier is judged by the times it took there.
+const ssh = option("--ssh")
+const harness = ssh ? option("--harness") && resolve(option("--harness")) : join(root, `target/${flag("--release") ? "release" : "debug"}/examples/screenshot`)
 const env = { ...process.env, VK_ICD_FILENAMES: process.env.VK_ICD_FILENAMES ?? "/usr/share/vulkan/icd.d/lvp_icd.json" }
 
 
@@ -191,6 +198,48 @@ export function usedApp(app, out) {
   return usedApps.get(app)
 }
 
+/// The folder on `--ssh`'s device that each run there is in, with the UI library and the harness beside them, made
+/// as the first run needs it and taken away as this ends.
+let remote
+function onDevice() {
+  if (remote) return remote
+  const said = (command) => {
+    const ran = Bun.spawnSync(["ssh", ssh, command], { stdout: "pipe", stderr: "pipe" })
+    if (ran.exitCode !== 0) throw new Error(`${ssh}: ${command}: ${ran.stderr.toString().trim()}`)
+    return ran.stdout.toString().trim()
+  }
+  remote = `${said("echo %TEMP%")}\\one-motion-${process.pid}`
+  const staged = join(out, ".device")
+  rmSync(staged, { recursive: true, force: true })
+  cpSync(here("dist/client"), join(staged, "ui"), { recursive: true, dereference: true })
+  cpSync(harness, join(staged, "screenshot.exe"))
+  const sent = Bun.spawnSync(["sh", "-c", `tar -C "${staged}" -cf - . | ssh ${ssh} 'mkdir "${remote}" && tar -xf - -C "${remote}"'`], { stdout: "pipe", stderr: "pipe" })
+  if (sent.exitCode !== 0) throw new Error(`${ssh}: the harness didn't go there: ${sent.stderr.toString().trim()}`)
+  process.on("exit", () => Bun.spawnSync(["ssh", ssh, `rmdir /s /q "${remote}"`]))
+  return remote
+}
+
+/// Runs the harness on `--ssh`'s device, in a folder of its own there with what it's given: its page, its answers and
+/// its requests. → what it said on stdout and stderr, and whether it failed; its `end.json` back in `folder`.
+async function runThere(at, folder, args, lines) {
+  const base = onDevice()
+  const run = `${base}\\${basename(folder)}-${Math.random().toString(36).slice(2, 8)}`
+  const staged = join(folder, ".device")
+  rmSync(staged, { recursive: true, force: true })
+  cpSync(at, join(staged, "page"), { recursive: true, dereference: true })
+  cpSync(join(folder, "answers.json"), join(staged, "answers.json"))
+  writeFileSync(join(staged, "requests.jsonl"), lines)
+  const there = args.map((arg) => (arg === at ? `${run}\\page` : arg === join(folder, "answers.json") ? `${run}\\answers.json` : arg === "-" ? `${run}\\requests.jsonl` : arg.startsWith(folder) ? `${run}\\${basename(arg)}` : arg === here("dist/client") ? `${base}\\ui` : arg))
+  const command = `mkdir "${run}" && tar -xf - -C "${run}" && "${base}\\screenshot.exe" ${there.map((arg) => `"${arg}"`).join(" ")} & type "${run}\\end.json" 1>&2 & rmdir /s /q "${run}"`
+  const ran = Bun.spawn(["sh", "-c", `tar -C "${staged}" -cf - . | ssh ${ssh} '${command}'`], { stdout: "pipe", stderr: "pipe" })
+  const [stdout, stderr] = await Promise.all([new Response(ran.stdout).text(), new Response(ran.stderr).text(), ran.exited])
+  rmSync(staged, { recursive: true, force: true })
+  // Its tree, which it writes at its end, comes back after what it said.
+  const tree = stderr.lastIndexOf("\n{")
+  if (tree >= 0) writeFileSync(join(folder, "end.json"), stderr.slice(tree + 1))
+  return { stdout, stderr: tree >= 0 ? stderr.slice(0, tree) : stderr, failed: ran.exitCode !== 0 || !stdout.trim() }
+}
+
 /// The harness run on a scene, with `requests`: each answer, and its stderr. → `{ answers, said }`.
 async function run(at, folder, scene, requests, seed = 0) {
   const answers = { ...scene.answers, "ui/initialize": scene.answers?.["ui/initialize"] ?? { hostContext: { link: scene.link, containerDimensions: { width: scene.size[0], height: scene.size[1] }, deviceCapabilities: { touch: scene.touch, hover: !scene.touch } } } }
@@ -200,10 +249,15 @@ async function run(at, folder, scene, requests, seed = 0) {
   const client = scene.answers?.["one/client"]
   const panel = client?.launcher && client?.mac ? ["--panel", "0"] : []
   // Its pictures decode as slowly as on the slowest device of its kind: as this machine's CPU is to that one's, at
-  // that one's device pixels a point, where it's drawn at one here.
+  // that one's device pixels a point, where it's drawn at one here; on a device, as that decodes them.
   const slowest = devices.tiers.find((tier) => tier.name === (scene.touch ? "low-end Android" : "Intel UHD laptop at 4K"))
-  const slower = hostScore ? ["--slower", String((hostScore / slowest.cpu) * slowest.scale ** 2)] : []
-  const harnessed = Bun.spawn([harness, at, join(folder, "end.png"), join(folder, "end.json"), "--ui", here("dist/client"), "--answers", join(folder, "answers.json"), "--size", `${scene.size[0]}x${scene.size[1]}`, "--scale", "1", "--requests", "-", ...(dark ? ["--dark"] : []), ...(scene.touch ? ["--touch"] : []), "--time-zone", scene.timeZone ?? "UTC", ...(seed ? ["--seed", String(seed)] : []), ...panel, ...slower], { stdin: new TextEncoder().encode(lines), stdout: "pipe", stderr: "pipe", env })
+  const slower = hostScore && !ssh ? ["--slower", String((hostScore / slowest.cpu) * slowest.scale ** 2)] : []
+  const args = [at, join(folder, "end.png"), join(folder, "end.json"), "--ui", here("dist/client"), "--answers", join(folder, "answers.json"), "--size", `${scene.size[0]}x${scene.size[1]}`, "--scale", String(device?.scale ?? 1), "--requests", "-", ...(dark ? ["--dark"] : []), ...(scene.touch ? ["--touch"] : []), "--time-zone", scene.timeZone ?? "UTC", ...(seed ? ["--seed", String(seed)] : []), ...panel, ...slower]
+  if (ssh) {
+    const { stdout, stderr, failed } = await runThere(at, folder, args, lines)
+    return { answers: stdout.split("\n").filter(Boolean).map((line) => JSON.parse(line)), said: stderr.trim(), failed }
+  }
+  const harnessed = Bun.spawn([harness, ...args], { stdin: new TextEncoder().encode(lines), stdout: "pipe", stderr: "pipe", env })
   const [stdout, stderr] = await Promise.all([new Response(harnessed.stdout).text(), new Response(harnessed.stderr).text(), harnessed.exited])
   return { answers: stdout.split("\n").filter(Boolean).map((line) => JSON.parse(line)), said: stderr.trim(), failed: harnessed.exitCode !== 0 }
 }
@@ -370,6 +424,8 @@ function apart(frames, values, before) {
 const devices = JSON.parse(readFileSync(here("devices.json"), "utf8"))
 const cpuName = process.platform === "darwin" ? Bun.spawnSync(["sysctl", "-n", "machdep.cpu.brand_string"]).stdout.toString() : (readFileSync("/proc/cpuinfo", "utf8").match(/model name\s*:\s*(.*)/)?.[1] ?? "")
 const hostScore = Object.entries(devices.hosts).find(([name]) => cpuName.includes(name))?.[1]
+const device = ssh && devices.tiers.find((tier) => tier.measured === ssh)
+if (ssh && !device) throw new Error(`No tier in devices.json is measured on ${ssh}`)
 
 /// What each tier with `hz` frames a second would take for each of `frames`, played at one device pixel a point: its
 /// CPU's time for the frame (painting it and drawing it for the GPU) and its JS's since the frame before (this machine's, as its Geekbench score is to the
@@ -377,6 +433,17 @@ const hostScore = Object.entries(devices.hosts).find(([name]) => cpuName.include
 /// measured takes for the frame's work at the tier's pixels, as its GPU's score is to the tier's), the frame dropped
 /// where either is longer than the tier's frame. → each tier's name, the frames dropped of those drawn, the worst and why.
 export function judge(frames, hz) {
+  // Drawn on the device itself, its own frames' times: the GPU's by its timestamps, its thread's painting and drawing.
+  if (device) {
+    if (device.hz !== hz) return []
+    const times = frames.filter((frame) => frame.draws > 0).map((frame) => {
+      const [gpuMs, cpuMs, jsMs] = [frame.gpu_ms ?? 0, frame.paint_ms + frame.draw_ms, frame.script_ms ?? 0]
+      const ms = Math.max(gpuMs, cpuMs, jsMs)
+      return { ms, by: ms === gpuMs ? "GPU" : ms === jsMs ? "JS" : "CPU" }
+    })
+    const worst = times.reduce((worst, time) => (time.ms > worst.ms ? time : worst), { ms: 0, by: "" })
+    return [{ tier: device.name, dropped: times.filter((time) => time.ms > 1000 / hz).length, drawn: times.length, worst }]
+  }
   return devices.tiers
     .filter((tier) => tier.hz === hz)
     .map((tier) => {
@@ -442,9 +509,9 @@ async function play(built, scene, name, motion, hz, folder) {
   // Every frame within the budget of the device it's to keep (`keeps`), at that device's rate, its JS too, the frames a
   // press lands and lifts on as much as any: what a press sets off starts on the next frame, as on iOS, not a hitch on.
   const tier = motion.keeps && devices.tiers.find((tier) => tier.name === motion.keeps)
-  if (motion.keeps && (!tier || !hostScore)) failed.push(tier ? `this CPU isn't one of devices.json's hosts, to judge "${motion.keeps}" by` : `no tier named "${motion.keeps}" in devices.json`)
-  const device = tier?.hz === hz && hostScore && judge(frames, hz).find(({ tier }) => tier === motion.keeps)
-  if (device?.dropped) failed.push(`${device.tier} drops ${device.dropped} of ${device.drawn} frames (the worst ${device.worst.ms.toFixed(1)} ms, its ${device.worst.by})`)
+  if (motion.keeps && (!tier || (!hostScore && !device))) failed.push(tier ? `this CPU isn't one of devices.json's hosts, to judge "${motion.keeps}" by` : `no tier named "${motion.keeps}" in devices.json`)
+  const keeping = tier?.hz === hz && (hostScore || device) && judge(frames, hz).find(({ tier }) => tier === motion.keeps)
+  if (keeping?.dropped) failed.push(`${keeping.tier} drops ${keeping.dropped} of ${keeping.drawn} frames (the worst ${keeping.worst.ms.toFixed(1)} ms, its ${keeping.worst.by})`)
   if (failed.length) {
     process.exitCode = 1
     said.push(`  ${hz} Hz FAILS: ${failed.join("; ")}`)
@@ -713,8 +780,10 @@ async function round(targets) {
     // Each motion at each rate on a harness of its own, a few at once.
     const jobs = scenes.flatMap((scene) => Object.entries(scene.motions).flatMap(([motion, played]) => rates.map((hz) => ({ scene, motion, played, hz }))))
     const results = []
-    for (let at = 0; at < jobs.length; at += 4)
-      results.push(...(await Promise.all(jobs.slice(at, at + 4).map(({ scene, motion, played, hz }) => play(built, scene, motion, played, hz, join(out, name, scene.name.replace(/[^\w.-]+/g, "-"), motion.replace(/[^\w.-]+/g, "-"), `${hz}hz`)).then((result) => ({ scene, motion, ...result }))))))
+    // One at a time on a device, whose GPU each frame's time is of.
+    const together = ssh ? 1 : 4
+    for (let at = 0; at < jobs.length; at += together)
+      results.push(...(await Promise.all(jobs.slice(at, at + together).map(({ scene, motion, played, hz }) => play(built, scene, motion, played, hz, join(out, name, scene.name.replace(/[^\w.-]+/g, "-"), motion.replace(/[^\w.-]+/g, "-"), `${hz}hz`)).then((result) => ({ scene, motion, ...result }))))))
     let heading
     for (const result of results) {
       const title = `${name} · ${result.scene.name} · ${result.motion}`
@@ -733,8 +802,8 @@ if (import.meta.main) {
   if (!existsSync(here("dist/build/app.js"))) throw new Error("Build the UI library first: `bun build.js` in core/ui")
   if (!existsSync(harness)) throw new Error("Build the native harness first: `cargo build -p renderer --example screenshot --features fake`")
   // A debug build's CPU is several times a shipped one's.
-  if (!flag("--release")) console.log("Its CPU times are a debug build's: --release for a shipped build's")
-  if (!hostScore) console.log(`This CPU (${cpuName.trim()}) has no Geekbench score in devices.json's hosts, so devices are judged by their GPUs alone`)
+  if (!flag("--release") && !ssh) console.log("Its CPU times are a debug build's: --release for a shipped build's")
+  if (!hostScore && !ssh) console.log(`This CPU (${cpuName.trim()}) has no Geekbench score in devices.json's hosts, so devices are judged by their GPUs alone`)
   const started = performance.now()
   if (checking) {
     const { said, failed } = await checks(folders.length ? folders : everything())
