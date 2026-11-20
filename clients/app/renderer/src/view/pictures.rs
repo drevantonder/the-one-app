@@ -7,8 +7,6 @@ use std::hash::{Hash, Hasher};
 use std::sync::{Arc, Condvar, Mutex};
 use std::time::Duration;
 
-use web_time::Instant;
-
 use crate::geometry::{DevicePixels, Size};
 use crate::render::atlas::{Atlas, AtlasKey, AtlasTile};
 
@@ -56,19 +54,32 @@ pub fn decoding_takes(times: f32) {
     SLOWER.store(times.to_bits(), std::sync::atomic::Ordering::Relaxed);
 }
 
-/// What's decoded, waiting to go in the atlas, and how many are still decoding.
+/// What's decoded, waiting to go in the atlas, each with when it's there (for a harness, as late as the device it
+/// stands for would have it; on a device, as it's decoded), and how many are still decoding.
 #[derive(Default)]
 struct Decoding {
-    done: Vec<(u64, Option<Decoded>)>,
+    done: Vec<(u64, Option<Decoded>, Option<f64>)>,
     running: usize,
+}
+
+/// Now, in ms: for a harness, its own clock's, which a picture's time is told by, the same on any machine however
+/// busy; on a device, since it started.
+fn now() -> f64 {
+    #[cfg(feature = "fake")]
+    return crate::platform::fake_time();
+    #[cfg(not(feature = "fake"))]
+    {
+        static STARTED: std::sync::OnceLock<web_time::Instant> = std::sync::OnceLock::new();
+        STARTED.get_or_init(web_time::Instant::now).elapsed().as_secs_f64() * 1000.0
+    }
 }
 
 #[derive(Default)]
 pub(super) struct Pictures {
     /// Each picture asked for, by its key in the atlas: its size there, or none where it didn't decode.
     sizes: HashMap<u64, Option<Picture>>,
-    /// What's decoding, by its key, and when it was asked for.
-    asked: HashMap<u64, Instant>,
+    /// What's decoding, by its key, and when it was asked for (`now`).
+    asked: HashMap<u64, f64>,
     decoding: Arc<(Mutex<Decoding>, Condvar)>,
     /// What's decoded and not yet in the atlas, which the next frame that draws it puts there.
     ready: HashMap<u64, Option<Decoded>>,
@@ -93,13 +104,19 @@ fn hash(key: impl Hash) -> u64 {
 }
 
 impl Pictures {
-    /// Takes what's been decoded since it was last asked. → whether anything was.
+    /// Takes what's been decoded since it was last asked and is there by now. → whether anything was.
     pub(super) fn take(&mut self) -> bool {
-        let done = std::mem::take(&mut self.decoding.0.lock().unwrap_or_else(std::sync::PoisonError::into_inner).done);
+        let now = now();
+        let done: Vec<_> = {
+            let mut decoding = self.decoding.0.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+            let (there, later) = std::mem::take(&mut decoding.done).into_iter().partition(|(_, _, at)| at.is_none_or(|at| at <= now));
+            decoding.done = later;
+            there
+        };
         let any = !done.is_empty();
-        for (id, decoded) in done {
+        for (id, decoded, at) in done {
             if let Some(asked) = self.asked.remove(&id) {
-                self.slowest = self.slowest.max(asked.elapsed());
+                self.slowest = self.slowest.max(Duration::from_secs_f64((at.unwrap_or(now) - asked).max(0.0) / 1000.0));
             }
             self.sizes.insert(id, decoded.as_ref().map(|decoded| decoded.picture));
             self.ready.insert(id, decoded);
@@ -112,6 +129,22 @@ impl Pictures {
     pub(super) fn pending(&self) -> usize {
         let decoding = self.decoding.0.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
         decoding.running + decoding.done.len()
+    }
+
+    /// Whether one's decoding, or decoded and there by now, to take: what a harness draws again for, not one that's
+    /// there only later on its clock, which comes as its time does (`due`).
+    pub(super) fn decoding(&self) -> bool {
+        let decoding = self.decoding.0.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let now = now();
+        decoding.running > 0 || decoding.done.iter().any(|(_, _, at)| at.is_none_or(|at| at <= now))
+    }
+
+    /// How long until the next decoded is there, in ms, where one's waiting to be: when a harness's clock has
+    /// something due.
+    pub(super) fn due(&self) -> Option<f64> {
+        let decoding = self.decoding.0.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
+        let now = now();
+        decoding.done.iter().filter_map(|(_, _, at)| *at).map(|at| (at - now).max(0.0)).reduce(f64::min)
     }
 
     /// Waits for what's decoding: for a harness, which draws what a step left once it's done.
@@ -184,12 +217,13 @@ impl Pictures {
             return Some((picture, tile));
         }
         if let std::collections::hash_map::Entry::Vacant(asked) = self.asked.entry(id) {
-            asked.insert(Instant::now());
+            let when = now();
+            asked.insert(when);
             let (decoding, wake, src) = (self.decoding.clone(), self.wake.clone(), src.to_owned());
             decoding.0.lock().unwrap_or_else(std::sync::PoisonError::into_inner).running += 1;
-            let done = move |decoded: Option<Decoded>| {
+            let done = move |decoded: Option<Decoded>, at: Option<f64>| {
                 let mut state = decoding.0.lock().unwrap_or_else(std::sync::PoisonError::into_inner);
-                state.done.push((id, decoded));
+                state.done.push((id, decoded, at));
                 state.running -= 1;
                 drop(state);
                 decoding.1.notify_all();
@@ -199,15 +233,20 @@ impl Pictures {
             };
             // The browser decodes it, as it's asked with a promise, on the web.
             #[cfg(target_arch = "wasm32")]
-            wasm_bindgen_futures::spawn_local(async move { done(crate::platform::web::decode(&src, device).await) });
+            wasm_bindgen_futures::spawn_local(async move { done(crate::platform::web::decode(&src, device).await, None) });
             #[cfg(not(target_arch = "wasm32"))]
             run(Box::new(move || {
                 #[cfg(feature = "fake")]
-                let started = Instant::now();
+                let started = crate::platform::on_cpu();
                 let decoded = super::paint::decode(&src, device);
+                // For a harness, it's there as late as on the device it stands for: its decoding's time on a CPU here,
+                // `SLOWER` times over, on the harness's clock from when it was asked for, so a busy machine's doesn't
+                // make it later; on a device, once it's decoded.
                 #[cfg(feature = "fake")]
-                std::thread::sleep(started.elapsed().mul_f32((f32::from_bits(SLOWER.load(std::sync::atomic::Ordering::Relaxed)) - 1.0).max(0.0)));
-                done(decoded)
+                let at = Some(when + (crate::platform::on_cpu().saturating_sub(started)).as_secs_f64() * 1000.0 * f64::from(f32::from_bits(SLOWER.load(std::sync::atomic::Ordering::Relaxed))));
+                #[cfg(not(feature = "fake"))]
+                let at = None;
+                done(decoded, at)
             }));
         }
         latest(self)

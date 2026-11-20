@@ -1794,10 +1794,14 @@ impl Windows {
                     }
                 }
             }
+            // What the turn set off decoding has decoded, so when it's there is known before time moves on past it.
+            self.wait();
             let now = fake::time();
             let left = started + ms - now;
             // The display's next refresh, at least a microsecond on, so a clock a hair short of one isn't moved by nothing.
-            let tick = self.display.wanted().then(|| refresh - now.rem_euclid(refresh)).map(|next| if next < 0.001 { next + refresh } else { next });
+            // The display ticks while the loop wants frames, or a window has what came meanwhile to draw (a picture
+            // that's there at its time).
+            let tick = (self.display.wanted() || self.windows.values().any(|window| window.dirty && window.on_screen())).then(|| refresh - now.rem_euclid(refresh)).map(|next| if next < 0.001 { next + refresh } else { next });
             let timer = self.windows.values().filter_map(|window| window.screen.as_ref().ok()?.timer_due()).reduce(f64::min).map(|due| due.max(0.0));
             let next = tick.into_iter().chain(timer).reduce(f64::min).filter(|next| *next <= left);
             // The platform's time moves on once, its pages' clock with it, then each page runs what's due by then.

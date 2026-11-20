@@ -350,9 +350,10 @@ impl Screen {
     }
 
     /// Whether what it shows is still on its way somewhere: a transition, a node let go springing back, a list
-    /// flung, or what its page asked a frame for. A loop (a spinner) never arrives, so isn't.
+    /// flung, what its page asked a frame for, or for a harness, a picture decoded that's there only later on its clock.
+    /// A loop (a spinner) never arrives, so isn't.
     pub fn arriving(&self) -> bool {
-        self.transitions.arriving() || self.coasting() || self.js.framing() || self.late.as_ref().is_some_and(super::Late::holding)
+        self.transitions.arriving() || self.coasting() || self.js.framing() || self.late.as_ref().is_some_and(super::Late::holding) || self.pictures.due().is_some()
     }
 
     /// Its page's thread as a busy device's, as `seed` says (`Thread::seed`): what it's called with together now and then
@@ -367,9 +368,10 @@ impl Screen {
         self.pointer
     }
 
-    /// When its page's next timer is due, in ms from now on its clock, if it has one.
+    /// When its page's next timer is due, or a picture it decoded is there for a harness, in ms from now on its clock.
     pub fn timer_due(&self) -> Option<f64> {
-        self.js.due()
+        // A picture decoded is there at its time, for a harness (`Pictures::due`), as a timer is.
+        self.js.due().into_iter().chain(self.pictures.due()).chain(self.frames.values().filter_map(|child| child.screen.pictures.due())).reduce(f64::min)
     }
 
     fn moved(&mut self, ms: f64, frames: bool) {

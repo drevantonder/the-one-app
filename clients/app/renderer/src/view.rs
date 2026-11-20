@@ -552,7 +552,7 @@ impl Screen {
     /// Whether a picture it drew, or a frame's page did, is decoding, or is decoded and not yet drawn: a harness draws
     /// again once it's waited for them (`idle`).
     pub fn decoding(&self) -> bool {
-        self.pictures.pending() > 0 || self.frames.values().any(|child| child.screen.decoding())
+        self.pictures.decoding() || self.frames.values().any(|child| child.screen.decoding())
     }
 
     /// Whether its app is starting: it hasn't heard back from what it asked (`waiting`), or its JS hasn't yet run
@@ -698,7 +698,9 @@ impl Screen {
         let now = Instant::now();
         let settle = self.settling.iter().map(|(until, _)| until.saturating_duration_since(now)).min();
         let frames = self.frames.values().filter_map(|child| child.screen.due());
-        settle.into_iter().chain(self.blinks()).chain(frames).min()
+        // For a harness, a picture decoded is there at its time on its clock (`Pictures::due`).
+        let pictures = self.pictures.due().map(|ms| Duration::from_secs_f64(ms / 1000.0));
+        settle.into_iter().chain(self.blinks()).chain(frames).chain(pictures).min()
     }
 
     /// Whether its page, or a frame's in it, asked for the display's next frame (`requestAnimationFrame`).
