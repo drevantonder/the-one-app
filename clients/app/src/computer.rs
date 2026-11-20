@@ -59,9 +59,9 @@ pub(crate) enum Told {
     Resize(Option<f64>, Option<f64>),
     /// Opens it again, as the device's session starts again, or its page was updated.
     Reload,
-    /// The program before it, which started it as it updated, has ended: what only one may have is its now, the
-    /// channel and the launcher's shortcut (`opened`).
-    Handed,
+    /// Takes the launcher's shortcut, as it starts, or as the program before it, which started it as it updated, has
+    /// ended (`handed`); with how many times it was asked before (`shortcut`).
+    Shortcut(u32),
     /// The program it started as it updated is up: it lets go of the launcher's shortcut and ends (`restart`).
     Ending,
     /// Its servers say this program is behind them: it says Update Required.
@@ -260,17 +260,116 @@ pub fn run() {
         Err(error) => return eprintln!("{error:#}"),
     };
     keep_log(&home);
-    // Started again by itself as it updates (`restart`), it doesn't hand over to the one that's ending, which hands
-    // over to it once it's ready (`opened`). What it starts isn't started again.
+    // Started again by itself as it updates (`restart`), it's the app once the program before has ended (`handed`).
+    // What it starts isn't started again.
     let restarted = std::env::var_os("ONE_RESTARTED").is_some();
     unsafe { std::env::remove_var("ONE_RESTARTED") };
     RESTARTED.store(restarted, Ordering::Relaxed);
-    if !restarted && hosts::again(&home, link.as_deref()) {
+    if !restarted && !claim(&home, link.as_deref()) {
         return;
     }
-    if let Err(error) = launcher(home, link.and_then(|link| crate::link(&link)), started) {
+    if let Err(error) = launcher(home, restarted, link.and_then(|link| crate::link(&link)), started) {
         eprintln!("{error:#}");
     }
+}
+
+/// The system's lock on `app.lock` in the app's home, which the program that's the app holds until it ends, as
+/// Electron's `requestSingleInstanceLock` and Tauri's single-instance plugin hold one: so only one app runs, however
+/// it was started, and every other start hands over to it (`claim`).
+static INSTANCE: OnceLock<std::fs::File> = OnceLock::new();
+
+/// The lock file `<name>.lock` in `home`.
+fn lock_file(home: &std::path::Path, name: &str) -> std::io::Result<std::fs::File> {
+    std::fs::create_dir_all(home)?;
+    std::fs::OpenOptions::new().create(true).truncate(false).write(true).open(home.join(format!("{name}.lock")))
+}
+
+/// Takes the system's lock on `<name>.lock` in `home`: → the file holding it until it's dropped or this program ends,
+/// or none where another program holds it.
+fn try_lock(home: &std::path::Path, name: &str) -> std::io::Result<Option<std::fs::File>> {
+    let file = lock_file(home, name)?;
+    match file.try_lock() {
+        Ok(()) => Ok(Some(file)),
+        Err(std::fs::TryLockError::WouldBlock) => Ok(None),
+        Err(std::fs::TryLockError::Error(error)) => Err(error),
+    }
+}
+
+/// Makes this program the app (`INSTANCE`), unless another is, or a program an update started is about to be
+/// (`handed`): then it tells that one it was started again, with the `one:` link it was started with (`hosts::again`).
+/// That one serves its channel a moment after it's the app, so a start in that moment asks again every tenth of a
+/// second, for up to half a minute, as an app's own window does (`host::connect`). → whether this is the app.
+fn claim(home: &std::path::Path, link: Option<&str>) -> bool {
+    for _ in 0..300 {
+        let claimed = try_lock(home, "app").and_then(|app| Ok(app.zip(try_lock(home, "restart")?)));
+        match claimed {
+            Ok(Some((app, _))) => return INSTANCE.set(app).is_ok(),
+            Ok(None) => {}
+            Err(error) => {
+                eprintln!("couldn't tell whether the app is running: {error}");
+                return false;
+            }
+        }
+        if hosts::again(home, link) {
+            return false;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(100));
+    }
+    eprintln!("the app is running, but didn't answer");
+    false
+}
+
+/// Started by the program before it as it updated (`restart`), this one is the app once that one has ended: it holds
+/// `restart.lock` till then, so no other start takes the app's lock in between (`claim`), and waits for the app's
+/// lock, which the system lets go of as that program ends, and on Windows for that program itself, as the system may
+/// close its channel, a named pipe only one program may serve, after it lets go of its lock. It then serves the
+/// channel and takes the launcher's shortcut. It waited for its standard input to close, which on Windows came before
+/// the channel of the one before had closed, and then had no channel for as long as it ran, so another start was a
+/// second app (20 Nov).
+fn handed(home: &std::path::Path) -> anyhow::Result<()> {
+    let restart = lock_file(home, "restart")?;
+    restart.lock()?;
+    #[cfg(windows)]
+    let before = starter().map(|before| before.0 as usize);
+    let home = home.to_owned();
+    std::thread::spawn(move || {
+        // A build before this one holds no lock, and holds this one's standard input until it ends; this one's
+        // gives it none, so it's read to its end at once.
+        let _ = std::io::Read::read_to_end(&mut std::io::stdin(), &mut Vec::new());
+        #[cfg(windows)]
+        if let Some(before) = before.map(|before| windows::Win32::Foundation::HANDLE(before as *mut std::ffi::c_void)) {
+            unsafe {
+                windows::Win32::System::Threading::WaitForSingleObject(before, windows::Win32::System::Threading::INFINITE);
+                let _ = windows::Win32::Foundation::CloseHandle(before);
+            }
+        }
+        match lock_file(&home, "app").and_then(|app| app.lock().map(|()| app)) {
+            Ok(app) => drop(INSTANCE.set(app)),
+            Err(error) => return eprintln!("it isn't the app: {error}"),
+        }
+        drop(restart);
+        if let Err(error) = hosts::serve(&home) {
+            eprintln!("its channel didn't start: {error:#}");
+        }
+        tell(Told::Shortcut(0))
+    });
+    Ok(())
+}
+
+/// The program that started this one, on Windows, to wait on: opened while it runs, as it does until this one's up,
+/// so its id is still its.
+#[cfg(windows)]
+fn starter() -> Option<windows::Win32::Foundation::HANDLE> {
+    use windows::Win32::System::Diagnostics::ToolHelp::{CreateToolhelp32Snapshot, PROCESSENTRY32W, Process32FirstW, Process32NextW, TH32CS_SNAPPROCESS};
+    let snapshot = unsafe { CreateToolhelp32Snapshot(TH32CS_SNAPPROCESS, 0) }.ok()?;
+    let mut entry = PROCESSENTRY32W { dwSize: size_of::<PROCESSENTRY32W>() as u32, ..Default::default() };
+    let mut listed = unsafe { Process32FirstW(snapshot, &mut entry) }.is_ok();
+    while listed && entry.th32ProcessID != std::process::id() {
+        listed = unsafe { Process32NextW(snapshot, &mut entry) }.is_ok();
+    }
+    let _ = unsafe { windows::Win32::Foundation::CloseHandle(snapshot) };
+    listed.then_some(())?;
+    unsafe { windows::Win32::System::Threading::OpenProcess(windows::Win32::System::Threading::PROCESS_SYNCHRONIZE, false, entry.th32ParentProcessID) }.ok()
 }
 
 /// What it says (`eprintln!`) goes to its own log, `app.log` in its home, the one before as `app.log.1`, where nothing
@@ -321,10 +420,7 @@ fn says_to_nowhere() -> bool {
     }
 }
 
-fn launcher(home: std::path::PathBuf, link: Option<String>, started: std::time::Instant) -> anyhow::Result<()> {
-    // Started by the program before it, it takes the channel and the shortcut once that one has ended (`Told::Handed`),
-    // read before what tells it the app's up (`opened`) runs.
-    let restarted = RESTARTED.load(Ordering::Relaxed);
+fn launcher(home: std::path::PathBuf, restarted: bool, link: Option<String>, started: std::time::Instant) -> anyhow::Result<()> {
     #[cfg(target_os = "linux")]
     gtk::glib::set_prgname(Some(::client::NAME));
     #[cfg_attr(not(target_os = "macos"), allow(unused_mut))]
@@ -339,6 +435,11 @@ fn launcher(home: std::path::PathBuf, link: Option<String>, started: std::time::
         event_loop.set_activation_policy(ActivationPolicy::Accessory);
     }
     let _ = PROXY.set(Mutex::new(event_loop.create_proxy()));
+    // Started by the program before it, it's the app, with the channel and the shortcut, once that one has ended,
+    // which is once this one's up (`opened`), so it's told then.
+    if restarted {
+        handed(&home)?;
+    }
     *OPENED.lock().expect("nothing panics holding it") = link;
     // The native windows' thread starts now, its GPU and the pipelines it draws with (`Context::prepare`) with it,
     // as the client opens and its session is settled, rather than as the Home Screen first asks for it, which waited
@@ -375,7 +476,7 @@ fn launcher(home: std::path::PathBuf, link: Option<String>, started: std::time::
     if let Err(error) = toasts() {
         eprintln!("this device shows this app's notifications as another app's: {error:#}");
     }
-    let mut _shortcut = if restarted { None } else { shortcut(&home) };
+    let mut _shortcut = if restarted { None } else { shortcut(&home, 0) };
     // Started again as it updated, the app windows that were open open again, once it's signed in: before, an app's
     // page can't be read. The launcher, open as the native one is, isn't an app's window.
     if let Some(reopen) = std::env::var("ONE_REOPEN").ok().and_then(|reopen| serde_json::from_str::<Vec<(String, Option<String>)>>(&reopen).ok()) {
@@ -492,12 +593,7 @@ fn launcher(home: std::path::PathBuf, link: Option<String>, started: std::time::
                 }
                 std::process::exit(0)
             }
-            Event::UserEvent(Told::Handed) => {
-                if let Err(error) = hosts::serve(&home) {
-                    eprintln!("its channel didn't start: {error:#}");
-                }
-                _shortcut = shortcut(&home);
-            }
+            Event::UserEvent(Told::Shortcut(asked)) => _shortcut = shortcut(&home, asked),
             _ => {}
         }
     })
@@ -522,8 +618,12 @@ fn alert(said: &str) {
 /// which macOS leaves free (Spotlight is ⌘Space, the input source ⌃Space); on Windows and Linux Alt+Space is the
 /// window menu's, and Super+Space the input source's, so it's Super+Alt+Space there. A file `shortcut` in the client's
 /// folder says another, as `alt+Space` (global-hotkey's words), or nothing for none; Linux's is X11's, and a Wayland
-/// session has none. → what keeps it, for as long as the app runs.
-fn shortcut(home: &std::path::Path) -> Option<(global_hotkey::GlobalHotKeyManager, global_hotkey::hotkey::HotKey)> {
+/// session has none. One another program has is asked for again every tenth of a second, for up to 5 s
+/// (`Told::Shortcut`), as the system lets go of one a program had a moment after it ends: an X server once it gets to
+/// that program's closed connection, as global-hotkey sends its ungrab without flushing it (2 of 20 updates on Linux
+/// left the app with none, 20 Nov). `asked` is how many times it was before. → what keeps it, for as long as the app
+/// runs.
+fn shortcut(home: &std::path::Path, asked: u32) -> Option<(global_hotkey::GlobalHotKeyManager, global_hotkey::hotkey::HotKey)> {
     use global_hotkey::hotkey::HotKey;
     use global_hotkey::{GlobalHotKeyEvent, GlobalHotKeyManager, HotKeyState};
     let default = if cfg!(target_os = "macos") { "alt+Space" } else { "super+alt+Space" };
@@ -541,6 +641,13 @@ fn shortcut(home: &std::path::Path) -> Option<(global_hotkey::GlobalHotKeyManage
     let keeper = GlobalHotKeyManager::new().and_then(|keeper| keeper.register(key).map(|()| keeper));
     let keeper = match keeper {
         Ok(keeper) => keeper,
+        Err(global_hotkey::Error::AlreadyRegistered(_)) if asked < 50 => {
+            crate::spawn(async move {
+                tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+                tell(Told::Shortcut(asked + 1))
+            });
+            return None;
+        }
         Err(error) => {
             eprintln!("the launcher has no shortcut ({chosen}): {error}");
             return None;
@@ -568,9 +675,9 @@ static RESTARTED: AtomicBool = AtomicBool::new(false);
 
 /// Starts the app again on the build it was just updated to: the app windows that are open open again in it, and the
 /// launcher shows again if it was showing. This program ends only once the new one says it's up (`opened`), on its
-/// standard output, and the new one takes what only one may have once its standard input, held here, closes as this
-/// one ends. One that ends before it's up leaves this one running, Telemetry hearing why, and the next update tries
-/// again: so a build that can't start never leaves the device with no app (20 Nov).
+/// standard output, and the new one is the app once this one has ended (`handed`). One that ends before it's up
+/// leaves this one running, Telemetry hearing why, and the next update tries again: so a build that can't start never
+/// leaves the device with no app (20 Nov).
 fn restart(shown: bool) {
     use std::io::BufRead;
     // Asked again before the new one's up, it starts one program, not two (two did, 19 Nov).
@@ -586,7 +693,7 @@ fn restart(shown: bool) {
             return eprintln!("couldn't start again: {error}");
         }
     };
-    command.env("ONE_RESTARTED", "1").env("ONE_REOPEN", reopen).stdin(std::process::Stdio::piped()).stdout(std::process::Stdio::piped());
+    command.env("ONE_RESTARTED", "1").env("ONE_REOPEN", reopen).stdin(std::process::Stdio::null()).stdout(std::process::Stdio::piped());
     if shown {
         command.env_remove("ONE_HIDDEN");
     } else {
@@ -599,16 +706,13 @@ fn restart(shown: bool) {
             return eprintln!("couldn't start again: {error}");
         }
     };
-    let (handing, said) = (started.stdin.take(), started.stdout.take());
+    let said = started.stdout.take();
     std::thread::spawn(move || {
         let up = said.is_some_and(|said| std::io::BufReader::new(said).lines().map_while(Result::ok).any(|line| line == "ready"));
         if up {
-            // Held open until this program ends, which closes it: the new one takes over then, once this one has let
-            // go of its shortcut (`Told::Ending`).
-            std::mem::forget(handing);
+            // The new one is the app once this one has let go of its shortcut and ended (`Told::Ending`).
             return tell(Told::Ending);
         }
-        drop(handing);
         let ended = started.wait().map_or_else(|error| error.to_string(), |status| status.to_string());
         crate::updater::report("one.client.update.failed", json!({"error": format!("its new build ended before it was up: {ended}")}));
         STARTED.store(false, Ordering::Relaxed);
@@ -616,13 +720,13 @@ fn restart(shown: bool) {
 }
 
 /// The app is up: its window made and its client opened. Started by the program before it as it updated (`restart`),
-/// it says so to that one, which ends, and then takes what only one may have (`Told::Handed`).
+/// it says so to that one, which ends, and this one is the app then (`handed`).
 pub(crate) fn opened() {
-    use std::io::{Read, Write};
+    use std::io::Write;
     if !RESTARTED.swap(false, Ordering::Relaxed) {
         return;
     }
-    let said = std::io::stdout().write_all(b"ready\n").and_then(|()| std::io::stdout().flush());
+    let _ = std::io::stdout().write_all(b"ready\n").and_then(|()| std::io::stdout().flush());
     // Its standard output goes nowhere from now on, as the program it told is ending.
     if let Ok(nowhere) = std::fs::OpenOptions::new().write(true).open(if cfg!(windows) { "NUL" } else { "/dev/null" }) {
         #[cfg(unix)]
@@ -635,13 +739,6 @@ pub(crate) fn opened() {
             let _ = unsafe { windows::Win32::System::Console::SetStdHandle(windows::Win32::System::Console::STD_OUTPUT_HANDLE, handle) };
         }
     }
-    if said.is_err() {
-        return tell(Told::Handed);
-    }
-    std::thread::spawn(|| {
-        let _ = std::io::stdin().read_to_end(&mut Vec::new());
-        tell(Told::Handed)
-    });
 }
 
 /// Has the device open `one:` links with this program, as Tauri's deep links did: Linux by a desktop entry that takes
