@@ -1,0 +1,18 @@
+#!/usr/bin/env bash
+# Signs a Mac's program or app bundle with the owner's Developer ID, on this machine, with rcodesign, taking
+# `rcodesign sign`'s arguments:
+#
+#     tooling/developer-id-sign [--binary-identifier <id>] [--code-signature-flags runtime] <program or bundle>
+#
+# macOS's firewall lets signed software take connections without asking, and its privacy settings (Local Network,
+# Automation, Contacts...) know a signed program by its identifier and team from one build to the next, where they knew
+# an unsigned one by its hash. Not notarized: what `one` downloads isn't quarantined, so Gatekeeper never assesses it.
+# The identity is 1Password's ("Developer ID Application identity", in `ptc-nosudo`), or DEVELOPER_ID_P12 (the .p12 in
+# base64) and DEVELOPER_ID_P12_PASSWORD, as the repo's GitHub secrets name them.
+set -euo pipefail
+# rcodesign is the one `mise.toml` names, run where this was, so paths given are read from there.
+rcodesign=$(mise -C "$(dirname "$0")/.." which rcodesign)
+exec "$rcodesign" sign \
+  --p12-file <(if [[ -n ${DEVELOPER_ID_P12:-} ]]; then base64 -d <<<"$DEVELOPER_ID_P12"; else op read -n "op://ptc-nosudo/Developer ID Application identity/developer-id.p12"; fi) \
+  --p12-password-file <(printf %s "${DEVELOPER_ID_P12_PASSWORD:-$(op read -n "op://ptc-nosudo/Developer ID Application identity password/password")}") \
+  "$@" >/dev/null

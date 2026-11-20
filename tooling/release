@@ -246,7 +246,7 @@ triple() {
 client_inputs() {
   { echo "$key" && tooling/input-hash clients/app "$(triple "$1")" && sha256sum core/protocol.json &&
     { [[ $1 != macos-* ]] || { find clients/app/macos -type f -print0 | sort -z | xargs -0 sha256sum &&
-      sed -n '/^developer_id_signed() {$/,/^}$/p; /^mac_bundle_signed() {$/,/^}$/p' tooling/release; }; } &&
+      cat tooling/developer-id-sign && sed -n '/^mac_bundle_signed() {$/,/^}$/p' tooling/release; }; } &&
     git ls-files -z core/ui/src core/ui/build.js core/ui/tables.ts core/ui/package.json core/ui/bun.lock | xargs -0 sha256sum; } |
     sha256sum | cut -d' ' -f1
 }
@@ -395,26 +395,13 @@ fi
 
 servers=($(printf '%s\n' "${mine[@]}" | sed -n 's|^server/||p'))
 
-# Signs a Mac's program, or its bundle, with the owner's Developer ID, here, with rcodesign: macOS's firewall lets signed
-# software take connections without asking, and its privacy settings (Local Network) know it by its identifier and team
-# from one build to the next, where they knew an unsigned one by its hash. Not notarized, nor with the hardened runtime:
-# what `one` downloads isn't quarantined, so Gatekeeper never assesses it. The identity is 1Password's ("Developer ID
-# Application identity"), or DEVELOPER_ID_P12 (the .p12 in base64) and DEVELOPER_ID_P12_PASSWORD, as GitHub's secrets
-# name them.
-developer_id_signed() {
-  rcodesign sign \
-    --p12-file <(if [[ -n ${DEVELOPER_ID_P12:-} ]]; then base64 -d <<<"$DEVELOPER_ID_P12"; else op read -n "op://ptc-nosudo/Developer ID Application identity/developer-id.p12"; fi) \
-    --p12-password-file <(printf %s "${DEVELOPER_ID_P12_PASSWORD:-$(op read -n "op://ptc-nosudo/Developer ID Application identity password/password")}") \
-    "$@" >/dev/null
-}
-
 # A Mac's `one`, gzipped in `$1`, signed in its app bundle, `clients/app/macos`, which is the same for every build: the
 # app puts it in place around each build before it runs it (`cli::serving::bundled`), seal and all, so the seal
 # rcodesign makes must be the one there.
 mac_bundle_signed() {
   local folder bundle
   folder=$(mktemp -d) && bundle=$folder/app.app && cp -R clients/app/macos "$bundle" && mkdir "$bundle/Contents/MacOS" &&
-    gunzip -c "$1" >"$bundle/Contents/MacOS/one" && chmod +x "$bundle/Contents/MacOS/one" && developer_id_signed "$bundle" &&
+    gunzip -c "$1" >"$bundle/Contents/MacOS/one" && chmod +x "$bundle/Contents/MacOS/one" && tooling/developer-id-sign "$bundle" &&
     { cmp -s "$bundle/Contents/_CodeSignature/CodeResources" clients/app/macos/Contents/_CodeSignature/CodeResources ||
       { echo "The Mac app's seal isn't clients/app/macos's: put rcodesign's in its place." >&2 && false; }; } &&
     gzip -9 -c "$bundle/Contents/MacOS/one" >"$1" && rm -r "$folder"
@@ -591,8 +578,8 @@ for kind in "${servers[@]}"; do
     DESCRIPTION="the One App server" tooling/windows-name "$erts/one-server.exe"
   else
     "$objcopy" --strip-all "$(echo "$release"/erts-*/bin/beam.smp)"; fi
-  # A Mac's VM is signed with the Developer ID (`developer_id_signed`), as `app.theone.server`.
-  [[ $kind != macos-* ]] || developer_id_signed --binary-identifier app.theone.server "$(echo "$release"/erts-*/bin/beam.smp)"
+  # A Mac's VM is signed with the Developer ID, as `app.theone.server`.
+  [[ $kind != macos-* ]] || tooling/developer-id-sign --binary-identifier app.theone.server "$(echo "$release"/erts-*/bin/beam.smp)"
   # A Mac's and Linux' VM is named for what it is, as Activity Monitor and `ps` list a process by its file's name: the
   # emulator erlexec starts is `$EMU.smp`, and the release's `erl` says which, where it says `beam`. `The One App server`
   # on a Mac, as its helpers are named, and `one-server` on Linux, where a name has no spaces.

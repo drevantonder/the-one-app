@@ -2,12 +2,12 @@
 # Builds and publishes an app's helper app for a Mac: a small macOS app of the app's own, whose source is a folder of
 # its `server/bin/` (`main.swift` and its `Info.plist`, which names it), that its service runs there so macOS asks
 # its person for a permission in the helper's name and keeps what they allow it (Computer Use's). It's built on the
-# Mac `ssh mac` reaches, with the app's icon (`client/icon.svg`, or `icon.png` or `icon.svg` beside its SKILL.md) made a helper's (`tooling/helper-icon`), and signed with the owner's
-# Developer ID, so macOS keeps what's allowed through every build of it: an app that isn't signed by a developer is
-# known by its build, and asked for again with each. A developer's signature has the hardened runtime, under which
-# macOS won't even ask for calendars, contacts or control of another app (Automation) without the
-# entitlement for it, so each helper's are in its folder, as `<CFBundleExecutable>.entitlements`. The keychain holding the identity, `ptc-build`, is unlocked
-# and locked again in the same connection, its password read there.
+# Mac `ssh mac` reaches, with the app's icon (`client/icon.svg`, or `icon.png` or `icon.svg` beside its SKILL.md) made
+# a helper's (`tooling/helper-icon`), and signed here with the owner's Developer ID (`tooling/developer-id-sign`), so
+# macOS keeps what's allowed through every build of it: an app that isn't signed by a developer is known by its build,
+# and asked for again with each. A developer's signature has the hardened runtime, under which macOS won't even ask
+# for calendars, contacts or control of another app (Automation) without the entitlement for it, so each helper's are
+# in its folder, as `<CFBundleExecutable>.entitlements`.
 #
 # The build is the app bundle as a .tar.gz, at `server/bin/<name>/macos-aarch64`, which a deploy from this checkout
 # brings. Then, as `tooling/publish-nifs` does for a NIF, it's uploaded as a file of the GitHub Release
@@ -64,20 +64,17 @@ mkdir -p "$bundle/Contents/MacOS" "$bundle/Contents/Resources"
 cp helper/Info.plist "$bundle/Contents/"
 swiftc -O -o "$bundle/Contents/MacOS/$program" helper/*.swift >&2
 iconutil -c icns AppIcon.iconset -o "$bundle/Contents/Resources/AppIcon.icns"
-keychain=$HOME/Library/Keychains/ptc-build.keychain-db
-trap 'security lock-keychain "$keychain"' EXIT
-# The password goes to security on its standard input, never in a command line, where ps and logs see it.
-printf 'unlock-keychain -p "%s" "%s"\n' "$(cat ~/.config/ptc/build-keychain-pw)" "$keychain" | security -i >/dev/null
-codesign --force --options runtime --entitlements "helper/$program.entitlements" --timestamp --keychain "$keychain" \
-  --sign "Developer ID Application" "$bundle" >&2
-codesign --verify --strict "$bundle" >&2
 tar -czf - --no-mac-metadata --no-xattrs -C out "$name.app"
 BUILD
 
 build=$source/macos-aarch64
+mkdir "$work/out"
 tar -c -C "$work" helper AppIcon.iconset build |
-  ssh -o ConnectTimeout=15 mac 'd=$(mktemp -d) && trap "rm -r \"$d\"" EXIT && tar -x -C "$d" && nice -n 19 taskpolicy -d throttle bash "$d/build" "$d"' >"$build"
-tar -tzf "$build" >/dev/null
+  ssh -o ConnectTimeout=15 mac 'd=$(mktemp -d) && trap "rm -r \"$d\"" EXIT && tar -x -C "$d" && nice -n 19 taskpolicy -d throttle bash "$d/build" "$d"' |
+  tar -xz -C "$work/out"
+bundle=$(echo "$work"/out/*.app)
+"$tools/tooling/developer-id-sign" --code-signature-flags runtime --entitlements-xml-path "$(echo "$work"/helper/*.entitlements)" "$bundle"
+tar -czf "$build" -C "$work/out" "$(basename "$bundle")"
 
 repo=$(gh repo view --json nameWithOwner -q .nameWithOwner)
 release=nifs-${commit:0:12}
