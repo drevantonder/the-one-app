@@ -115,10 +115,10 @@ for (const path of readdirSync(root, { recursive: true })) {
   try {
     styled(readFileSync(join(root, path), "utf8"), join(root, path), made)
   } catch (error) {
-    console.error(error.message.replaceAll(`${root}/`, ""))
+    console.error(error.message.replaceAll(`${root}${sep}`, ""))
     refused = true
   }
 }
-for (const warning of made.warnings) console.log(warning.replaceAll(`${root}/`, ""))
+for (const warning of made.warnings) console.log(warning.replaceAll(`${root}${sep}`, ""))
 for (const warning of noted) console.log(warning)
 process.exit(tsc.exitCode || refused || refusedDom.length ? 1 : 0)

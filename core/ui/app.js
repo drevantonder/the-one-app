@@ -8,10 +8,10 @@
 // itself is built here too. A build that fails says why on stderr, a problem to a line with its file and line, and
 // exits with 1.
 import { existsSync, readdirSync, readFileSync, writeFileSync } from "node:fs"
-import { dirname, extname, join, relative } from "node:path"
+import { dirname, extname, join, posix, relative, resolve, sep } from "node:path"
 import { fileURLToPath } from "node:url"
 import solid from "@solidjs/vite-plugin"
-import { build, parseAst } from "vite"
+import { build, normalizePath, parseAst } from "vite"
 import { newMade, stylesCss, stylesPlugin, stylesTable } from "./tables.ts"
 
 const [source, out] = process.argv.slice(2)
@@ -22,7 +22,7 @@ const shared = { "solid-js": "/ui/client/solid.js", "solid-js/internal": "/ui/cl
 /** The app's styles (src/styles.ts), made as each module is built. */
 const made = newMade()
 
-const pages = readdirSync(source, { recursive: true }).filter((path) => path.endsWith(".html") && !path.split("/").includes("node_modules"))
+const pages = readdirSync(source, { recursive: true }).filter((path) => path.endsWith(".html") && !path.split(sep).includes("node_modules"))
 // The modules it exports, by their names: `./profile` is `profile`.
 const manifest = join(source, "package.json")
 const exported = Object.entries((existsSync(manifest) && JSON.parse(readFileSync(manifest, "utf8")).exports) || {}).map(([name, file]) => [name.replace(/^\.\//, ""), join(source, file)])
@@ -59,8 +59,8 @@ try {
         generateBundle(_, bundle) {
           for (const chunk of Object.values(bundle)) {
             if (chunk.type !== "chunk" || !exported.some(([name]) => name === chunk.name) || !chunk.viteMetadata?.importedCss.size) continue
-            const here = dirname(chunk.fileName)
-            const links = [...chunk.viteMetadata.importedCss].map((css) => `\ndocument.head.append(Object.assign(document.createElement("link"), { rel: "stylesheet", href: new URL(${JSON.stringify(`./${relative(here, css)}`)}, import.meta.url).href }))`)
+            const here = posix.dirname(chunk.fileName)
+            const links = [...chunk.viteMetadata.importedCss].map((css) => `\ndocument.head.append(Object.assign(document.createElement("link"), { rel: "stylesheet", href: new URL(${JSON.stringify(`./${posix.relative(here, css)}`)}, import.meta.url).href }))`)
             // After its code and before its sourcemap's comment, so the lines the sourcemap maps stay where they were.
             chunk.code = chunk.code.replace(/(\n\/\/# sourceMappingURL=.*)?$/, (comment = "") => links.join("") + comment)
           }
@@ -113,5 +113,5 @@ function describe(problem) {
     }
   }
   const where = file ? `${relative(source, file)}${at.line ? `:${at.line}:${at.column}` : ""}: ` : ""
-  return `${where}${message.replace(`${file}: `, "").replaceAll(source + "/", "")}${frame ? `\n${frame}` : ""}`
+  return `${where}${message.replace(`${file}: `, "").replaceAll(`${normalizePath(resolve(source))}/`, "")}${frame ? `\n${frame}` : ""}`
 }
