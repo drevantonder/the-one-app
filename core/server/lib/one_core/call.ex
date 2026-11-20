@@ -411,7 +411,7 @@ defmodule OneCore.Call do
   """
   def forward(ask, principal, forwarded, owner) do
     if forwarded, do: throw({__MODULE__, :forwarding_loop})
-    servers = Servers.acting(owner) -- [Server.key()]
+    servers = Servers.covering(owner) -- [Server.key()]
     elsewhere(ask, principal, servers)
     why = Enum.map_join(servers, "; ", &Server.error_message(:unreachable, &1))
     raise "No server acting for #{owner} answered" <> if(why == "", do: "", else: ": " <> why)

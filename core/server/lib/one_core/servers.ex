@@ -32,8 +32,20 @@ defmodule OneCore.Servers do
   @doc "The keys of the servers to ask for `owner`: the ones on their list, then the ones acting for the network."
   def acting(owner), do: Enum.uniq(listed(owner) ++ listed(@network))
 
-  @doc "Whether the server whose key is `key` is one `owner` let act for them: it's on their list, or the network's."
-  def acts_for?(key, owner), do: key in listed(owner) or key in listed(@network)
+  @doc """
+  The keys of the servers to ask for `whose`, a user, a group or the network, narrowest first: those acting for them,
+  then those acting for the network, which holds everyone, each both ways (`acts_for/1`).
+  """
+  def covering(whose) do
+    own = if whose == @network, do: [], else: for(key <- listed(whose), whose in members(key), do: key)
+    Enum.uniq(own ++ for(key <- listed(@network), @network in members(key), do: key))
+  end
+
+  @doc """
+  Whether the server whose key is `key` acts for `who`, a user, a group or the network: for them, or for the network,
+  which holds everyone, both ways: it's on their list, and it chose them (`acts_for/1`).
+  """
+  def acts_for?(key, who), do: Enum.any?(acts_for(key), &(&1 in [who, @network]))
 
   @doc "Who the server whose key is `key` acts for: its owner first, and whoever its owner chose."
   def members(key), do: cached({:members, key}, fn -> read("servers/#{key}/members", []) end)
@@ -51,10 +63,13 @@ defmodule OneCore.Servers do
   Who this server acts for (`acts_for/1`). It's asked while the server starts its apps too, before it's reached,
   whose key is then only in its file.
   """
-  def here, do: acts_for(Server.key() || elem(OneCore.Iroh.key(Server.key_file()), 1))
+  def here, do: acts_for(key())
 
-  @doc "Whether this server acts for `owner`: it's a member of this server that has it on their list, or the network is, which is everyone."
-  def here?(owner), do: Enum.any?(here(), &(&1 in [owner, @network]))
+  @doc "Whether this server acts for `who` (`acts_for?/2`)."
+  def here?(who), do: acts_for?(key(), who)
+
+  # This server's key, which while it starts is only in its file.
+  defp key, do: Server.key() || elem(OneCore.Iroh.key(Server.key_file()), 1)
 
   @doc """
   What whoever asked for `what`, an app installed for `owner`, is told when none of `servers`, the ones that run

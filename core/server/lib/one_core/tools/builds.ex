@@ -41,7 +41,7 @@ defmodule OneCore.Tools.Builds do
   # talk; and `apps`, whether what runs on the server that answers is what's installed, `synced`, or it's `syncing`
   # (`OneCore.Apps.sync/2`).
   defp list(by, owner) do
-    keys = Servers.acting(owner)
+    keys = Servers.covering(owner)
     devices = Bucket.list("#{by}/devices/")
     # Each blob is a trip across the internet where the bucket is far away, so they're all read at once.
     latest = Task.async(&Builds.latest/0)
