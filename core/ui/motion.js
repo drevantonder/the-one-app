@@ -249,7 +249,8 @@ const cpuName = process.platform === "darwin" ? Bun.spawnSync(["sysctl", "-n", "
 const hostScore = Object.entries(devices.hosts).find(([name]) => cpuName.includes(name))?.[1]
 
 /// What each tier with `hz` frames a second would take for each of `frames`, played at one device pixel a point: its
-/// CPU's time for the frame (this machine's, as its Geekbench score is to the tier's) and its GPU's (what the device
+/// CPU's time for the frame and its JS's since the frame before (this machine's, as its Geekbench score is to the
+/// tier's) and its GPU's (what the device
 /// measured takes for the frame's work at the tier's pixels, as its GPU's score is to the tier's), the frame dropped
 /// where either is longer than the tier's frame. → each tier's name, the frames dropped of those drawn, the worst and why.
 export function judge(frames, hz) {
@@ -265,8 +266,10 @@ export function judge(frames, hz) {
           const work = frame.work
           const shaded = gpu ? ["quads", "shadows", "sprites", "backdrops", "rasters", "copied"].reduce((sum, kind) => sum + (work[kind] / 1e6) * pixels * gpu.costs[kind], 0) : 0
           const gpuMs = gpu ? (shaded + (work.uploaded / 1e6) * pixels * gpu.costs.uploaded + gpu.constant) * (anchor.gpu / tier.gpu) + frame.draws * gpu.costs.draws * (tier.draws ?? 1) * (anchor.cpu / tier.cpu) : 0
-          const cpuMs = hostScore ? (frame.paint_ms * hostScore) / tier.cpu : 0
-          return { ms: Math.max(gpuMs, cpuMs), by: gpuMs >= cpuMs ? "GPU" : "CPU" }
+          // Its JS runs on a thread of its own beside the one that paints, and a frame waits for whichever's longer.
+          const [cpuMs, jsMs] = hostScore ? [frame.paint_ms, frame.script_ms ?? 0].map((ms) => (ms * hostScore) / tier.cpu) : [0, 0]
+          const ms = Math.max(gpuMs, cpuMs, jsMs)
+          return { ms, by: ms === gpuMs ? "GPU" : ms === jsMs ? "JS" : "CPU" }
         })
       const budget = 1000 / tier.hz
       const worst = times.reduce((worst, time) => (time.ms > worst.ms ? time : worst), { ms: 0, by: "" })
@@ -297,8 +300,9 @@ async function play(built, scene, name, motion, hz, folder) {
   writeFileSync(join(folder, "curve.svg"), curve(frames, way, values, stretches, budget, beforeTravel, apple))
   filmstrip(frames, join(folder, "filmstrip.png"))
   const worst = Math.max(...frames.map((frame) => frame.paint_ms))
+  const script = Math.max(...frames.map((frame) => frame.script_ms ?? 0))
   const rest = frames.at(-1).at
-  const said = [`  ${hz} Hz: ${way} ${Math.round(Math.max(...values.map(Math.abs)))} pt, at rest after ${Math.round(rest)} ms (${frames.length} frames), ${over} over its ${budget} ms budget, the worst ${worst} ms, in ${Math.round(performance.now() - started)} ms`]
+  const said = [`  ${hz} Hz: ${way} ${Math.round(Math.max(...values.map(Math.abs)))} pt, at rest after ${Math.round(rest)} ms (${frames.length} frames), ${over} over its ${budget} ms budget, the worst ${worst} ms painting and ${script} ms of JS, in ${Math.round(performance.now() - started)} ms`]
   if (apple) {
     const compared = frames.flatMap((frame, n) => (apple[n] === undefined ? [] : [Math.abs(values[n] - apple[n])]))
     said.push(`  ${hz} Hz against iOS (${way.startsWith("scrolled") ? "UIScrollView's deceleration" : "SwiftUI's .spring"}, from the lift): at most ${Math.max(...compared).toFixed(1)} pt apart`)
