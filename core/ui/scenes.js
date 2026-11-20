@@ -30,14 +30,14 @@
 // reads, which a client answers at once from what it keeps: its first content is when it's had every answer, and a
 // scene whose page takes longer than OPENS_WITHIN_MS to it, as one that asks again for what an answer said or opens on
 // a tool that changes something does, fails, which the exit status says.
-import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs"
-import { basename, dirname, join, resolve } from "node:path"
+import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from "node:fs"
+import { basename, join, resolve } from "node:path"
 import { fileURLToPath } from "node:url"
 import { chromium } from "playwright-core"
 import { PNG } from "pngjs"
 import pixelmatch from "pixelmatch"
 import { outline } from "./src/drawing-primitives/outline.ts"
-import { beside, servedAsIs } from "./motion.js"
+import { build, COMPONENTS, pageFolder, usedApp } from "./motion.js"
 
 const here = (path) => fileURLToPath(new URL(path, import.meta.url))
 const root = here("../../")
@@ -79,46 +79,6 @@ async function scenesOf(target, built, serve) {
   // The gallery lists its own, drawn at `#scenes`.
   const listed = await serve.text("index.html", "scenes")
   return JSON.parse(listed).map(({ name, taps, size = sized ?? [390, 844], touch = false }) => ({ name, page: "index.html", link: name, answers: {}, taps, size, touch }))
-}
-
-/// Where an app's exported components are built (its client, as a server builds it), for a scene that names one
-/// (`component`) rather than a page: the component alone, drawn in grouped cards, as Settings draws its sections.
-const COMPONENTS = "components"
-
-/// An app's own packages, which its client's package.json names, as a server installs them before it builds the app.
-/// → why they didn't install, if they didn't.
-function install(client) {
-  const manifest = join(client, "package.json")
-  if (!existsSync(manifest)) return
-  const about = JSON.parse(readFileSync(manifest, "utf8"))
-  if (!Object.keys({ ...about.dependencies, ...about.devDependencies }).length) return
-  const made = Bun.spawnSync(["bun", "install", "--frozen-lockfile", "--ignore-scripts"], { cwd: client })
-  if (made.exitCode !== 0) return made.stderr.toString().trim()
-}
-
-/// Builds `target`'s client into `built`'s COMPONENTS, with a page beside each module it exports that draws it, when one
-/// of its scenes names a component. → why it didn't build, if it didn't.
-function components(target, built) {
-  const all = existsSync(join(target, "client/scenes.json")) ? Object.values(JSON.parse(readFileSync(join(target, "client/scenes.json"), "utf8"))) : []
-  const named = [...new Set(all.map((scene) => scene.component).filter(Boolean))]
-  if (!named.length) return
-  const at = join(built, COMPONENTS)
-  const make = Bun.spawnSync(["bun", here("dist/build/app.js"), join(target, "client"), at])
-  if (make.exitCode !== 0) return make.stderr.toString().trim()
-  for (const component of named) {
-    writeFileSync(join(at, `${component}.scene.js`), `import { ListStyle, render } from "/ui/client/ui.js"
-import Shown from "./${component}.js"
-render(() => ListStyle({ value: "insetGrouped", get children() { return Shown({}) } }))
-`)
-    writeFileSync(join(at, `${component}.html`), `<!doctype html>
-<html lang="en">
-<script src="/ui/client/colour-mode.js"></script>
-<link rel="stylesheet" href="/ui/client/ui.css">
-<meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<script type="module" src="./${component}.scene.js"></script>
-`)
-  }
 }
 
 /// A stand-in client for a page in a frame: it answers what the page asks from `answers`, as a client would. The frame
@@ -302,23 +262,7 @@ const kept = (() => {
 function native(built, scene, folder, used) {
   if (!existsSync(harness)) return { missing: "the native harness isn't built (`cargo build -p renderer --example screenshot --features fake`)" }
   if (hosted < needed) return { missing: `the native host's runtime version is ${hosted}, the UI library needs ${needed}: nothing to compare until it's ${needed}` }
-  // The harness loads the module the folder's `index.html` names, from beside it: the page's, with what it loads.
-  const at = join(folder, "page")
-  rmSync(at, { recursive: true, force: true })
-  mkdirSync(at)
-  writeFileSync(join(at, "index.html"), readFileSync(join(built, scene.page), "utf8").replace(/(src|href)="(\.\.\/)+/g, '$1="').replace(/(src|href)="\.\//g, '$1="'))
-  // A component's page is beside the modules its client's build made, which it loads from beside it.
-  if (scene.page.startsWith(`${COMPONENTS}/`)) {
-    for (const entry of readdirSync(join(built, COMPONENTS))) if (!entry.endsWith(".html")) symlinkSync(join(built, COMPONENTS, entry), join(at, entry))
-  } else {
-    symlinkSync(join(built, "assets"), join(at, "assets"))
-    beside(join(built, dirname(scene.page)), at)
-  }
-  for (const app of scene.uses ?? []) {
-    mkdirSync(join(at, app))
-    symlinkSync(used.get(app), join(at, app, "client"))
-  }
-  if (existsSync(join(built, dirname(scene.page), "styles.json"))) cpSync(join(built, dirname(scene.page), "styles.json"), join(at, "styles.json"))
+  const at = pageFolder(built, scene.page, folder, scene.uses)
   const answers = { ...scene.answers, "ui/initialize": scene.answers["ui/initialize"] ?? { hostContext: { link: scene.link, containerDimensions: { width: scene.size[0], height: scene.size[1] }, deviceCapabilities: { touch: scene.touch, hover: !scene.touch } } } }
   writeFileSync(join(folder, "answers.json"), JSON.stringify(answers))
   // The harness's clock stands still, so what moves as the page opens and after each tap is moved on to where it
@@ -384,38 +328,15 @@ const report = []
 for (const target of targets) {
   const name = basename(target)
   const built = join(out, name, "build")
-  // An app whose scenes are all of components has no page to build, and may have none at all.
   const scenes = existsSync(join(target, "client/scenes.json")) ? JSON.parse(readFileSync(join(target, "client/scenes.json"), "utf8")) : {}
-  const ofComponent = (scene) => !!scene && (scene.component || ofComponent(scenes[scene.like]))
-  const pages = !Object.keys(scenes).length || Object.values(scenes).some((scene) => !ofComponent(scene))
-  const packages = install(join(target, "client"))
-  if (packages) {
-    report.push(`${name}: its packages didn't install\n${packages}`)
-    continue
-  }
-  const make = pages ? Bun.spawnSync(["bun", here("dist/build/app.js"), target, built]) : { exitCode: 0 }
-  if (pages) servedAsIs(target, built)
-  if (make.exitCode !== 0) {
-    report.push(`${name}: didn't build\n${make.stderr.toString().trim()}`)
-    continue
-  }
-  const unbuilt = components(target, built)
+  const unbuilt = build(target, built)
   if (unbuilt) {
-    report.push(`${name}: its components didn't build\n${unbuilt}`)
+    report.push(`${name}: ${unbuilt}`)
     continue
   }
   // The apps whose components its scenes draw, each built once and kept in `out`.
   const used = new Map()
-  for (const app of new Set(Object.values(scenes).flatMap((scene) => scene.uses ?? []))) {
-    const folder = join(out, ".uses", app)
-    if (!existsSync(folder)) {
-      const packages = install(join(root, "apps", app, "client"))
-      if (packages) throw new Error(`${app}'s packages didn't install: ${packages}`)
-      const made = Bun.spawnSync(["bun", here("dist/build/app.js"), join(root, "apps", app, "client"), folder])
-      if (made.exitCode !== 0) throw new Error(`${app}'s components didn't build: ${made.stderr}`)
-    }
-    used.set(app, folder)
-  }
+  for (const app of new Set(Object.values(scenes).flatMap((scene) => scene.uses ?? []))) used.set(app, usedApp(app, out))
   const serve = server(built, target, used)
   serve.text = async (page, link) => {
     const tab = await browser.newPage()

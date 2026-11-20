@@ -93,13 +93,18 @@ export function pageFolder(built, page, folder, uses = []) {
   rmSync(at, { recursive: true, force: true })
   mkdirSync(at, { recursive: true })
   writeFileSync(join(at, "index.html"), readFileSync(join(built, page), "utf8").replace(/(src|href)="(\.\.\/)+/g, '$1="').replace(/(src|href)="\.\//g, '$1="'))
-  symlinkSync(join(built, "assets"), join(at, "assets"))
-  beside(join(built, dirname(page)), at)
+  // A component's page is beside the modules its client's build made, which it loads from beside it.
+  if (page.startsWith(`${COMPONENTS}/`)) {
+    for (const entry of readdirSync(join(built, COMPONENTS))) if (!entry.endsWith(".html")) symlinkSync(join(built, COMPONENTS, entry), join(at, entry))
+  } else {
+    symlinkSync(join(built, "assets"), join(at, "assets"))
+    beside(join(built, dirname(page)), at)
+  }
   for (const app of uses) {
     mkdirSync(join(at, app))
-    symlinkSync(usedApp(app), join(at, app, "client"))
+    symlinkSync(usedApp(app, out), join(at, app, "client"))
   }
-  if (existsSync(join(built, "styles.json"))) cpSync(join(built, "styles.json"), join(at, "styles.json"))
+  if (existsSync(join(built, dirname(page), "styles.json"))) cpSync(join(built, dirname(page), "styles.json"), join(at, "styles.json"))
   return at
 }
 
@@ -120,13 +125,65 @@ export function beside(from, at) {
   for (const entry of readdirSync(from)) if (AS_IS.test(entry) && !existsSync(join(at, entry))) symlinkSync(join(from, entry), join(at, entry))
 }
 
-/// An app another's page uses, its client built once a run, beside `--out`'s. → where.
+/// Where an app's exported components are built (its client, as a server builds it), for a scene that names one
+/// (`component`) rather than a page: the component alone, drawn in grouped cards, as Settings draws its sections.
+export const COMPONENTS = "components"
+
+/// An app's own packages, which its client's package.json names, as a server installs them before it builds the app.
+/// → why they didn't install, if they didn't.
+function install(client) {
+  const manifest = join(client, "package.json")
+  if (!existsSync(manifest)) return
+  const about = JSON.parse(readFileSync(manifest, "utf8"))
+  if (!Object.keys({ ...about.dependencies, ...about.devDependencies }).length) return
+  const made = Bun.spawnSync(["bun", "install", "--frozen-lockfile", "--ignore-scripts"], { cwd: client })
+  if (made.exitCode !== 0) return made.stderr.toString().trim()
+}
+
+/// Builds `target` into `built` as a server builds an app: its packages, its page where one of its scenes draws a page
+/// (an app whose scenes are all of components has none, and may have no page at all), what it keeps as it is, and its
+/// client into COMPONENTS, with a page beside each module a scene names, that draws it. → why it didn't build, if it didn't.
+export function build(target, built) {
+  const packages = install(join(target, "client"))
+  if (packages) return `its packages didn't install\n${packages}`
+  const scenes = existsSync(join(target, "client/scenes.json")) ? JSON.parse(readFileSync(join(target, "client/scenes.json"), "utf8")) : {}
+  const ofComponent = (scene) => !!scene && (scene.component || ofComponent(scenes[scene.like]))
+  if (!Object.keys(scenes).length || Object.values(scenes).some((scene) => !ofComponent(scene))) {
+    const made = Bun.spawnSync(["bun", here("dist/build/app.js"), target, built])
+    servedAsIs(target, built)
+    if (made.exitCode !== 0) return `didn't build\n${made.stderr.toString().trim()}`
+  }
+  const named = [...new Set(Object.values(scenes).map((scene) => scene.component).filter(Boolean))]
+  if (!named.length) return
+  const at = join(built, COMPONENTS)
+  const made = Bun.spawnSync(["bun", here("dist/build/app.js"), join(target, "client"), at])
+  if (made.exitCode !== 0) return `its components didn't build\n${made.stderr.toString().trim()}`
+  for (const component of named) {
+    writeFileSync(join(at, `${component}.scene.js`), `import { ListStyle, render } from "/ui/client/ui.js"
+import Shown from "./${component}.js"
+render(() => ListStyle({ value: "insetGrouped", get children() { return Shown({}) } }))
+`)
+    writeFileSync(join(at, `${component}.html`), `<!doctype html>
+<html lang="en">
+<script src="/ui/client/colour-mode.js"></script>
+<link rel="stylesheet" href="/ui/client/ui.css">
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<script type="module" src="./${component}.scene.js"></script>
+`)
+  }
+}
+
+/// An app another's page uses, its client built once a run, in `out`'s `.uses`. → where.
 const usedApps = new Map()
-function usedApp(app) {
+export function usedApp(app, out) {
   if (!usedApps.has(app)) {
     const folder = join(out, ".uses", app)
     rmSync(folder, { recursive: true, force: true })
-    const made = Bun.spawnSync(["bun", here("dist/build/app.js"), join(root, "apps", app, "client"), folder])
+    const client = join(root, "apps", app, "client")
+    const packages = install(client)
+    if (packages) throw new Error(`${app}'s packages didn't install: ${packages}`)
+    const made = Bun.spawnSync(["bun", here("dist/build/app.js"), client, folder])
     if (made.exitCode !== 0) throw new Error(`${app}'s components didn't build: ${made.stderr}`)
     usedApps.set(app, folder)
   }
@@ -158,8 +215,11 @@ export async function scenesOf(target, built, folder, all = false) {
     const whole = (scene) => (scene.like ? { ...whole(scenes[scene.like]), taps: undefined, ...scene, answers: { ...whole(scenes[scene.like]).answers, ...scene.answers } } : scene)
     return Object.entries(scenes)
       .map(([name, scene]) => ({ name, ...whole(scene) }))
-      .filter((scene) => (all || (checking ? scene.checks : scene.motions)) && !scene.component)
-      .map(({ name, page = "client/index.html", uses = [], answers = {}, taps = [], size = [390, 844], touch = false, motions, checks, seeds }) => ({ name, page: page.split("#")[0], link: page.split("#")[1], uses, answers, taps, size, touch, motions, checks, seeds }))
+      .filter((scene) => all || (checking ? scene.checks : scene.motions))
+      .map(({ name, page, component, uses = [], answers = {}, taps = [], size = [390, 844], touch = false, motions, checks, seeds }) => {
+        const [at, link] = (page ?? (component ? `${COMPONENTS}/${component}.html` : "client/index.html")).split("#")
+        return { name, page: at, link, uses, answers, taps, size, touch, motions, checks, seeds }
+      })
   }
   // The gallery lists its own, drawn at `#scenes`.
   const listing = { link: "scenes", size: [390, 844], answers: {} }
@@ -529,7 +589,7 @@ const STOPS = 40
 /// nothing.
 async function walk(built, scene, folder) {
   mkdirSync(folder, { recursive: true })
-  const at = pageFolder(built, scene.page, folder)
+  const at = pageFolder(built, scene.page, folder, scene.uses)
   const taps = scene.taps.flatMap((tap) => [pressed(tap), { op: "clock", step: 1000 }])
   const look = [{ op: "query" }, { op: "snap" }]
   // Each picture two of the caret's blinks after the keyboard came, where a field's caret shows.
@@ -570,10 +630,9 @@ async function checks(targets) {
   for (const target of targets) {
     const name = target.endsWith("core/ui/gallery") ? "gallery" : target.split("/").at(-1)
     const built = join(out, name, ".build")
-    const make = Bun.spawnSync(["bun", here("dist/build/app.js"), target, built])
-    servedAsIs(target, built)
-    if (make.exitCode !== 0) {
-      said.push(`${name}: didn't build\n${make.stderr.toString().trim()}`)
+    const unbuilt = build(target, built)
+    if (unbuilt) {
+      said.push(`${name}: ${unbuilt}`)
       failed++
       continue
     }
@@ -627,10 +686,9 @@ async function round(targets) {
   for (const target of targets) {
     const name = basename(target)
     const built = join(out, name, ".build")
-    const make = Bun.spawnSync(["bun", here("dist/build/app.js"), target, built])
-    servedAsIs(target, built)
-    if (make.exitCode !== 0) {
-      said.push(`${name}: didn't build\n${make.stderr.toString().trim()}`)
+    const unbuilt = build(target, built)
+    if (unbuilt) {
+      said.push(`${name}: ${unbuilt}`)
       continue
     }
     const scenes = (await scenesOf(target, built, join(out, name, ".scenes"))).filter((scene) => !only || scene.name.toLowerCase().includes(only))
