@@ -48,6 +48,7 @@
     }
   },
   "Screens, a phone not allowed yet": {
+    "touch": true,
     "answers": {
       "computer-use_screens": {
         "screens": []
