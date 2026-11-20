@@ -334,6 +334,12 @@ async function play(built, scene, name, motion, hz, folder) {
   const back = motion.steady ? values.findIndex((value, n) => n > 0 && frames[n].at <= end && (value - values[n - 1]) * toward < -1) : -1
   if (back >= 0) failed.push(`it went back ${Math.abs(values[back] - values[back - 1]).toFixed(0)} pt at frame ${back + 1} (${frames[back].at} ms)`)
   if (plain >= 0) failed.push(`glass not blurred from frame ${plain + 1} of ${frames.length} (${frames[plain].at} ms, pressure ${frames[plain].pressure})`)
+  // Every frame within the budget of the device it's to keep (`keeps`), at that device's rate, its JS too, the frames a
+  // press lands and lifts on as much as any: what a press sets off starts on the next frame, as on iOS, not a hitch on.
+  const tier = motion.keeps && devices.tiers.find((tier) => tier.name === motion.keeps)
+  if (motion.keeps && (!tier || !hostScore)) failed.push(tier ? `this CPU isn't one of devices.json's hosts, to judge "${motion.keeps}" by` : `no tier named "${motion.keeps}" in devices.json`)
+  const device = tier?.hz === hz && hostScore && judge(frames, hz).find(({ tier }) => tier === motion.keeps)
+  if (device?.dropped) failed.push(`${device.tier} drops ${device.dropped} of ${device.drawn} frames (the worst ${device.worst.ms.toFixed(1)} ms, its ${device.worst.by})`)
   if (failed.length) {
     process.exitCode = 1
     said.push(`  ${hz} Hz FAILS: ${failed.join("; ")}`)

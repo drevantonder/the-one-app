@@ -802,7 +802,28 @@
     "like": "Home, two pages",
     "page": "client/index.html#library",
     "checks": {
-      "Back from the background": [{ "away": 2000 }, { "expect": { "text": "Utilities" } }]
+      "Back from the background": [
+        {
+          "away": 2000
+        },
+        {
+          "expect": {
+            "text": "Utilities"
+          }
+        }
+      ]
+    },
+    "motions": {
+      "Open a category": {
+        "from": {
+          "role": "group",
+          "name": "Utilities"
+        },
+        "gesture": {
+          "moves": []
+        },
+        "keeps": "older iPhone"
+      }
     }
   },
   "Home, couldn't load": {
@@ -1284,6 +1305,16 @@
         },
         "frameMs": 92,
         "blurred": true
+      },
+      "Open a category": {
+        "from": {
+          "role": "group",
+          "name": "Utilities"
+        },
+        "gesture": {
+          "moves": []
+        },
+        "keeps": "mid browser on WebGPU"
       }
     }
   },
@@ -1359,6 +1390,16 @@
           "moves": []
         },
         "frameMs": 92
+      },
+      "Close it": {
+        "from": {
+          "x": 700,
+          "y": 500
+        },
+        "gesture": {
+          "moves": []
+        },
+        "keeps": "mid browser on WebGPU"
       }
     }
   },
@@ -1369,7 +1410,19 @@
         "role": "group",
         "name": "Productivity"
       }
-    ]
+    ],
+    "motions": {
+      "Close it": {
+        "from": {
+          "x": 300,
+          "y": 700
+        },
+        "gesture": {
+          "moves": []
+        },
+        "keeps": "older iPhone"
+      }
+    }
   },
   "General, opens at login": {
     "component": "general",

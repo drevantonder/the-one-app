@@ -473,9 +473,10 @@ export type Expect = { shown?: Tap; gone?: Tap; focused?: Tap; text?: string; st
  * what scrolls under it is always watched). `steady`: what moves never goes back against its way before its input
  * ends, as a swipe that bounces does. `frameMs`: its frames drawn only that often,
  * as a device others load draws them (Telemetry's frame interval), which presses it as a window's late frames do.
- * `blurred`: glass shows blurred in every frame after its first, as a veil it opens does. However it's played, what it
- * takes out is gone once it settles. */
-export type Motion = { from?: Tap; gesture: Gesture; follow?: Tap; frameMs?: number; blurred?: boolean; steady?: boolean }
+ * `blurred`: glass shows blurred in every frame after its first, as a veil it opens does. `keeps`: the tier of
+ * core/ui/devices.json whose budget each of its frames keeps, at that tier's rate, the frames a press lands and lifts
+ * on too, their JS, painting and GPU as that device would take them. However it's played, what it takes out is gone once it settles. */
+export type Motion = { from?: Tap; gesture: Gesture; follow?: Tap; frameMs?: number; blurred?: boolean; steady?: boolean; keeps?: string }
 /** How a press moves, in points and points a second: swiped at a steady `speed` (800 unless said) and let go; flung,
  * a short quick flick; dragged with `pauses` of a fifth of a second along the way; a sheet pulled down and let go; or
  * each stretch it moves (`moves`, a stretch with neither `dx` nor `dy` holding still), held at the end unless `lift`. */
