@@ -373,6 +373,9 @@ pub struct Screen {
     /// fetched it (`fetched`), or none while it's on its way or wasn't found; and what fetches one, the window's.
     fetched: HashMap<String, Option<String>>,
     pub fetch: Option<Box<dyn FnMut(&str)>>,
+    /// What a fetch brought back off the window's own turn, which it takes as its page's posts (`fetched`, as each
+    /// comes): a harness's, which reads its page's files as the page asks.
+    pub arrived: std::sync::Arc<std::sync::Mutex<Vec<(String, Option<String>)>>>,
     /// Where each node was drawn in the last frame, for the inspector, and the frame's size and scale.
     rects: Rects,
     painted: (Size<f32>, f32),
@@ -498,6 +501,7 @@ impl Screen {
             pictures: Default::default(),
             fetched: HashMap::new(),
             fetch: None,
+            arrived: Default::default(),
             rects: Rects::new(),
             painted: (Size::default(), 1.0),
             unanswered: HashMap::new(),
@@ -751,6 +755,11 @@ impl Screen {
     /// Applies what the app's JS has posted since it was last asked, all at once, as it's one turn's or more, and
     /// answers what it asked that the host answers at once. → whether anything came.
     pub fn pump(&mut self) -> bool {
+        let arrived = std::mem::take(&mut *self.arrived.lock().unwrap_or_else(std::sync::PoisonError::into_inner));
+        let fetched = !arrived.is_empty();
+        for (src, data) in arrived {
+            self.fetched(&src, data);
+        }
         let (posted, heard) = self.js.take();
         // Where its page's batches are held back (`late`), each is applied once its turns have gone by, in order, as a
         // page slower than its window gets there.
@@ -777,7 +786,7 @@ impl Screen {
                 ready
             }
         };
-        let mut came = !posted.is_empty() || self.started.is_none() || self.pictures.take();
+        let mut came = fetched || !posted.is_empty() || self.started.is_none() || self.pictures.take();
         #[cfg(not(target_arch = "wasm32"))]
         {
             came |= self.video_pump();

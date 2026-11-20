@@ -163,6 +163,25 @@ fn main() -> anyhow::Result<()> {
     screen.theme = Some(if dark { Appearance::Dark } else { Appearance::Light });
     screen.touch = touch;
     screen.panel = panel.map(|corner| renderer::Panel { corner, fill: false, whole: false });
+    // A picture its page names by its path (Settings' `updates.svg`) is one of its files, read as an app's window
+    // fetches it from its app's (`OneCore.Entrypoint` serves them as deployed), a `data:` address, or none where it
+    // isn't there.
+    let (arrived, pictures) = (screen.arrived.clone(), folder.clone());
+    screen.fetch = Some(Box::new(move |src: &str| {
+        let data = Url::parse("file:///index.html").and_then(|page| page.join(src)).ok().and_then(|url| {
+            let path = pictures.join(url.path().trim_start_matches('/'));
+            let kind = match path.extension().and_then(|kind| kind.to_str()).unwrap_or_default() {
+                "svg" => "image/svg+xml",
+                "png" => "image/png",
+                "jpg" | "jpeg" => "image/jpeg",
+                "gif" => "image/gif",
+                "webp" => "image/webp",
+                _ => "application/octet-stream",
+            };
+            std::fs::read(path).ok().map(|bytes| format!("data:{kind};base64,{}", data_encoding::BASE64.encode(&bytes)))
+        });
+        arrived.lock().unwrap_or_else(std::sync::PoisonError::into_inner).push((src.to_owned(), data));
+    }));
     // With a seed, a page slower than its window: one batch in four of what it changed held back one to three of the
     // window's turns, the window drawing and telling it what it has meanwhile.
     let seed: u64 = flag("--seed").and_then(|seed| seed.parse().ok()).unwrap_or(0);

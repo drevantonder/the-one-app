@@ -37,6 +37,7 @@ import { chromium } from "playwright-core"
 import { PNG } from "pngjs"
 import pixelmatch from "pixelmatch"
 import { outline } from "./src/drawing-primitives/outline.ts"
+import { beside, servedAsIs } from "./motion.js"
 
 const here = (path) => fileURLToPath(new URL(path, import.meta.url))
 const root = here("../../")
@@ -309,7 +310,10 @@ function native(built, scene, folder, used) {
   // A component's page is beside the modules its client's build made, which it loads from beside it.
   if (scene.page.startsWith(`${COMPONENTS}/`)) {
     for (const entry of readdirSync(join(built, COMPONENTS))) if (!entry.endsWith(".html")) symlinkSync(join(built, COMPONENTS, entry), join(at, entry))
-  } else symlinkSync(join(built, "assets"), join(at, "assets"))
+  } else {
+    symlinkSync(join(built, "assets"), join(at, "assets"))
+    beside(join(built, dirname(scene.page)), at)
+  }
   for (const app of scene.uses ?? []) {
     mkdirSync(join(at, app))
     symlinkSync(used.get(app), join(at, app, "client"))
@@ -390,6 +394,7 @@ for (const target of targets) {
     continue
   }
   const make = pages ? Bun.spawnSync(["bun", here("dist/build/app.js"), target, built]) : { exitCode: 0 }
+  if (pages) servedAsIs(target, built)
   if (make.exitCode !== 0) {
     report.push(`${name}: didn't build\n${make.stderr.toString().trim()}`)
     continue

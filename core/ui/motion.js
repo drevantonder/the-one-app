@@ -35,7 +35,7 @@
 // in the window. It says, check by check, which passed, and for
 // one that failed, its seed, which step and why; it exits 1 where one failed.
 import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, symlinkSync, watch, writeFileSync } from "node:fs"
-import { basename, join, relative, resolve } from "node:path"
+import { basename, dirname, join, relative, resolve } from "node:path"
 import { fileURLToPath } from "node:url"
 import { PNG } from "pngjs"
 import pixelmatch from "pixelmatch"
@@ -92,8 +92,26 @@ export function pageFolder(built, page, folder) {
   mkdirSync(at, { recursive: true })
   writeFileSync(join(at, "index.html"), readFileSync(join(built, page), "utf8").replace(/(src|href)="(\.\.\/)+/g, '$1="').replace(/(src|href)="\.\//g, '$1="'))
   symlinkSync(join(built, "assets"), join(at, "assets"))
+  beside(join(built, dirname(page)), at)
   if (existsSync(join(built, "styles.json"))) cpSync(join(built, "styles.json"), join(at, "styles.json"))
   return at
+}
+
+/// What a server serves of an app's client as it was deployed, beside what it built (`OneCore.Entrypoint.build`): its
+/// pictures, sounds, videos and fonts, which a page names by their paths (Settings' `updates.svg`), put in `built` as
+/// the server has them.
+const AS_IS = /\.(svg|png|jpe?g|gif|webp|avif|ico|mp3|wav|ogg|m4a|aac|mp4|webm|mov|woff2?|ttf|otf)$/i
+export function servedAsIs(target, built) {
+  const client = join(target, "client")
+  if (!existsSync(client)) return
+  for (const file of readdirSync(client, { recursive: true }).map(String).filter((file) => AS_IS.test(file) && !file.split("/").includes("node_modules")))
+    cpSync(join(client, file), join(built, "client", file))
+}
+
+/// What's beside a page in `from` that it names by path, as `servedAsIs` put it, linked beside it in `at`.
+export function beside(from, at) {
+  if (!existsSync(from)) return
+  for (const entry of readdirSync(from)) if (AS_IS.test(entry) && !existsSync(join(at, entry))) symlinkSync(join(from, entry), join(at, entry))
 }
 
 /// The harness run on a scene, with `requests`: each answer, and its stderr. → `{ answers, said }`.
@@ -491,6 +509,7 @@ async function checks(targets) {
     const name = target.endsWith("core/ui/gallery") ? "gallery" : target.split("/").at(-1)
     const built = join(out, name, ".build")
     const make = Bun.spawnSync(["bun", here("dist/build/app.js"), target, built])
+    servedAsIs(target, built)
     if (make.exitCode !== 0) {
       said.push(`${name}: didn't build\n${make.stderr.toString().trim()}`)
       failed++
@@ -544,6 +563,7 @@ async function round(targets) {
     const name = basename(target)
     const built = join(out, name, ".build")
     const make = Bun.spawnSync(["bun", here("dist/build/app.js"), target, built])
+    servedAsIs(target, built)
     if (make.exitCode !== 0) {
       said.push(`${name}: didn't build\n${make.stderr.toString().trim()}`)
       continue
