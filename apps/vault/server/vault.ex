@@ -71,9 +71,6 @@ defmodule Vault do
     ]
   end
 
-  # Requests that waited too long are kept expired, and what ended long ago is let go (`Vault.Requests`).
-  @impl true
-  def jobs, do: [%{tool: "expire", every: 3600}]
 
   @impl true
   def hooks, do: ["settings.sections"]
@@ -579,7 +576,7 @@ defmodule Vault do
       },
       %{
         name: "expire",
-        description: "Marks requests that waited a week as expired, and lets go of those that ended a month ago. The clock calls it each hour",
+        description: "Marks requests that waited a week as expired, and lets go of those that ended a month ago. The Vault's timer calls it when the next one does",
         inputs: %{type: "object", properties: %{}},
         outputs: %{type: "object", properties: %{expired: %{type: "integer"}}, required: ["expired"]}
       },
@@ -995,6 +992,7 @@ defmodule Vault do
     app = if name = inputs["app"], do: Access.who!(call, name)
     by = with %{agent: agent} <- SignIns.began(call), do: agent, else: (_ -> nil)
     id = Requests.create(call, db, title, fields, Map.get(inputs, "hosts", []), app, by, inputs["why"])
+    timed(call, db)
     link = if address = Application.get_env(:one_core, :address), do: "#{address}/vault/request?id=#{id}"
     where = if link, do: "Give them this link: #{link}. It", else: "Ask them to open Vault on a device of theirs: it"
     %{id: id, link: link, message: "#{where} shows the request, to answer on their own device. You never see what they type."}
@@ -1004,14 +1002,20 @@ defmodule Vault do
     Access.person!(call, "Answering a request")
     db = Store.own(call)
 
-    Store.quietly("Answering the request", fn ->
-      values = if given = inputs["values"], do: JSON.decode!(Store.encryption(call).secret(call, given))
-      Requests.answer(call, db, id, Map.put(inputs, "values", values))
-    end)
+    answered =
+      Store.quietly("Answering the request", fn ->
+        values = if given = inputs["values"], do: JSON.decode!(Store.encryption(call).secret(call, given))
+        Requests.answer(call, db, id, Map.put(inputs, "values", values))
+      end)
+
+    timed(call, db)
+    answered
   end
 
   def call("expire", _inputs, call) do
-    expired = Requests.expire(call, Store.own(call))
+    db = Store.own(call)
+    expired = Requests.expire(call, db)
+    timed(call, db)
     if expired > 0, do: Call.changed(call)
     %{expired: expired}
   end
@@ -1087,4 +1091,8 @@ defmodule Vault do
   end
 
   defp opened(_sealed, _key), do: raise("What the browser sent isn't whole.")
+
+  # Has the Vault's timer go off when a request next waits a week or ended a month ago (`Database.timer/5`), kept in
+  # its own database, where One Core's clock finds it.
+  defp timed(call, db), do: Call.app(call, "database").timer(call, "expire", %{}, Requests.next(call, db))
 end

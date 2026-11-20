@@ -5,10 +5,10 @@ defmodule Vault.Requests do
 
       waiting --allowed with an item, or new values--> allowed
       waiting --Don't Allow----------------------------> declined
-      waiting --a week with no answer (the job)--------> expired
+      waiting --a week with no answer (the timer)------> expired
 
-  Each move is written only from `waiting`, so a request ends once. `expire/2`, the Vault's scheduled job, writes
-  `expired` and lets go of what ended a month ago.
+  Each move is written only from `waiting`, so a request ends once. `expire/2`, called by the Vault's timer when the
+  next request waits too long or ended a month ago (`next/2`), writes `expired` and lets go of what ended then.
   """
 
   alias Vault.{Access, Items, Store}
@@ -116,7 +116,18 @@ defmodule Vault.Requests do
     end
   end
 
-  @doc "The scheduled job: what waited a week is `expired`, and what ended a month ago is let go."
+  @doc """
+  When a request next waits a week, or ended a month ago, in seconds since 1970, which the Vault's timer is set for,
+  or `nil` with none.
+  """
+  def next(call, db) do
+    Store.transaction(call, db, fn d ->
+      waits = "select min(case when state = 'waiting' then at + ? else at + ? end) as next from requests"
+      with [%{"next" => next}] <- Store.query(d, waits, [@waits, @kept]), do: next
+    end)
+  end
+
+  @doc "What waited a week is `expired`, and what ended a month ago is let go."
   def expire(call, db) do
     now = Store.now()
 
