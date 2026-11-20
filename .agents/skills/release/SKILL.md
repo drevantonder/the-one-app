@@ -51,15 +51,15 @@ Nothing is watched after a release: each server verifies a build before it keeps
 forward.
 
 Any release mixes with what's live, a breaking one too, since a release that changes the wire speaks the protocol
-before beside its own. Release the servers first, then the edge from the commit they run, then the clients; an app
-that requires the new platform is deployed once every server is on it. `tooling/release` refuses a build that speaks
+before beside its own. Release the servers first, then the edge from the commit they run, then the clients. `tooling/release` refuses a build that speaks
 no protocol a server, the edge or a device that talks with them does, naming which: drop an old protocol only
 once none of them speaks only it. Devices are otherwise not waited for, since their people update them.
 
 | Changed | Release |
 | --- | --- |
-| An app (`apps/<name>/`, here or in a network's repo) | `ONE_SUBJECT=network one deploy --name <name> --files-from apps/<name>`, from that repo, into each network it's released to (about 12 s). Refused, someone else's newer change is live: rebase and deploy again, never `--force` |
-| An app with a NIF (`server/nif/`) | `tooling/nifs`, then the same deploy. A Mac's NIF whose inputs haven't changed is the one last published (or cached here); one that changed is built on a Mac (a few minutes): GitHub's macOS runner, or the Mac `ssh mac` reaches when GitHub has no runner for it within 5 minutes (`tooling/on-mac`) |
+| One of this repo's apps (`apps/<name>/`) | `tooling/release server`: every network's servers take the core's apps to the commit of the build they start on (`OneCore.Apps.Lifecycle.update_core_apps/0`), each whose folder changed, as a new version every install of it takes, so no release names a network |
+| An app of a network's own repo | `ONE_SUBJECT=network one deploy --name <name> --files-from apps/<name>`, from that repo, into its network (about 12 s). Refused, someone else's newer change is live: rebase and deploy again, never `--force` |
+| An app with a NIF (`server/nif/`) | `tooling/nifs` first. A Mac's NIF whose inputs haven't changed is the one last published (or cached here); one that changed is built on a Mac (a few minutes): GitHub's macOS runner, or the Mac `ssh mac` reaches when GitHub has no runner for it within 5 minutes (`tooling/on-mac`) |
 | An app's native code (`server/nif/`, `server/bin/`) | Also `tooling/publish-nifs` once it's on `main`: it publishes the new builds to a GitHub Release and pushes their `server/checksums.json`, from which every network updating the app from git gets them. A Mac's are built on a Mac (`tooling/on-mac`) |
 | The UI library (`core/ui/`) | The server, which ships it and builds every app again against it, then the edge, which serves it to browsers |
 | The edge (`core/edge/`, an app's `edge/`, `clients/web/`, and the app's window page `clients/app/page/`, which every app on a build it runs on loads from its next start, phones too) | `bun install && flock ~/.cache/the-one-app/release-server.lock bun edge.js deploy https://<the network's host>` in `core/edge/`; it reads the Cloudflare token (`CLOUDFLARE_API_TOKEN` overrides) and the page signing key from 1Password itself, and refuses without them |
@@ -73,13 +73,13 @@ Windows' builds, `server/windows-x86_64`, `one/windows-x86_64`, `one-cli/windows
 built only for a network with a Windows server or device. The owner's Surface is one, a server of the live network
 since 18 Nov.
 
-An app change that uses something new in `core/server/` says so in its `requires`, `"core" => ">= 0.16.0"`, and is
-deployed once every server is on that version.
+An app change that uses something new in `core/server/` says so in its `requires`, `"core" => ">= 0.16.0"`: a
+server still on an older build has it `waiting_for_server` until its update.
 
-A server release deploys no apps. This repo's apps are published as any author's are: deployed, each that
-changed, into each network the release serves, the owner's (its address is in Agent Memory), where they're the
-network's own trusted apps, so every install of them takes the new version at once. A new network gets them from
-whoever makes it (`tooling/network`).
+This repo's apps are the network's own trusted apps, deployed from git at the commit of the build each network's
+servers run: by a new network's first server (`found/1`), and by each server that starts on the network's latest
+build (`update_core_apps/0`), never taking one deployed from a newer commit back. A network being built
+(`tooling/network`) deploys them from the checkout, and a change to one reaches it as its code reloader says.
 
 On a device that is also a server, `one update` is the network's Update Now. What a server did is in the log of the
 program keeping it running (`one serve run`), `journalctl --user -u one-server-<key's first 12>` on Linux.

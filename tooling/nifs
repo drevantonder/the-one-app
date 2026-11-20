@@ -5,7 +5,7 @@
 # `apps/<name>/server/nif/<crate>/<kind>.so` and `apps/<name>/server/bin/<crate>/<kind>`. An app is the same
 # files on every server of a network, so it's deployed with all of them:
 #
-#     tooling/nifs [kind...] && ONE_SUBJECT=network one deploy --name <name> --files-from apps/<name>
+#     tooling/nifs [kind...]
 #
 # Each kind is built in one place, so every build of a commit is the same bytes, and an app deployed again from
 # an unchanged folder is unchanged: Linux's and Windows' on Linux, Linux's with zig for the same glibc as a server's VM

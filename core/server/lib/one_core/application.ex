@@ -67,10 +67,18 @@ defmodule OneCore.Application do
           Apps.started()
           OneCore.Hooks.observe("started", %{"server" => key}, {nil, OneCore.Servers.owner()})
           if not Application.get_env(:one_core, :installed, false), do: Release.told(%{"server_daemon_status" => "running"})
-          # A new network's first server makes it, once it's running (`OneCore.Apps.Lifecycle.found/1`).
-          if owner = Application.get_env(:one_core, :first_owner) do
-            with {:error, why} <- OneCore.Apps.Lifecycle.found("users/" <> owner),
-                 do: Logger.error("users/#{owner} isn't the network's first owner: #{why}")
+          # A new network's first server makes it, once it's running (`OneCore.Apps.Lifecycle.found/1`), and every
+          # installed server of a network takes its core apps to the build it started on (`update_core_apps/0`).
+          cond do
+            owner = Application.get_env(:one_core, :first_owner) ->
+              with {:error, why} <- OneCore.Apps.Lifecycle.found("users/" <> owner),
+                   do: Logger.error("users/#{owner} isn't the network's first owner: #{why}")
+
+            Application.get_env(:one_core, :installed, false) ->
+              with {:error, why} <- OneCore.Apps.Lifecycle.update_core_apps(), do: Logger.error(why)
+
+            true ->
+              :ok
           end
         end
 

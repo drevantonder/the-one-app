@@ -94,31 +94,62 @@ defmodule OneCore.Apps.Lifecycle do
   @doc """
   Makes a new network of `who`, its first owner, on its first server, installed from the core's releases, as
   `one serve on` installs it (`clients/cli/src/serving.rs`): every app of the core at this server's commit is deployed
-  for the network from git, as their author publishes them, which then offers each one's updates, and the ones a
-  network starts with are installed (`make_first_owner/1`). A network that has a first owner has nothing done:
-  `:ok`, or `{:error, why}`.
+  for the network (`update_core_apps/0`), and the ones a network starts with are installed (`make_first_owner/1`). A
+  network that has a first owner has nothing done: `:ok`, or `{:error, why}`.
   """
   def found(who) do
     if OneCore.User.first_owner() == nil and Servers.here?("network") do
-      [_version, metadata] = String.split(OneCore.Builds.build(), "+", parts: 2)
-      [_count, short | _] = String.split(metadata, ".")
-
-      with {:ok, copy} <- Git.fetch(@core, true),
-           {:ok, commit} <- Git.commit(copy, short),
-           {:ok, files} <- Git.files(copy, commit, "apps") do
-        from = %{"source" => @core, "ref" => nil, "commit" => commit}
-
-        for {name, files} <- Enum.group_by(files, &hd(Path.split(elem(&1, 0))), fn {path, data} -> {Path.relative_to(path, hd(Path.split(path))), data} end) do
-          case Deploy.deploy("network", name, Map.new(files), from, true, fn _version -> false end) do
-            {:ok, _number, _warnings} -> Logger.info("#{name} is deployed for the network")
-            failed -> Logger.error("#{name} wasn't deployed for the network: #{inspect(failed)}")
-          end
-        end
-
-        make_first_owner(who)
-      end
+      with :ok <- update_core_apps(), do: make_first_owner(who)
     else
       :ok
+    end
+  end
+
+  @doc """
+  Takes the network's core apps to this server's build, as each of its servers starts on one: every app of the core
+  at the build's commit is deployed for the network from git, as their author publishes them, and taken by whatever
+  has it installed, as an update is (`updating/2`). So a release of the core is a release of its apps to every
+  network, with nothing told which networks there are. Only a server on the network's latest build does it, and
+  only for an app that isn't deployed yet, was deployed with no commit, or was deployed from a commit this one has
+  whose folder changed since: one deployed from a newer commit is never taken back. `:ok`, or `{:error, why}`.
+  """
+  def update_core_apps do
+    [_version, metadata] = String.split(OneCore.Builds.build(), "+", parts: 2)
+    [_count, short | _] = String.split(metadata, ".")
+    latest = OneCore.Builds.latest()["server-code"]["build"]
+
+    with true <- Servers.here?("network") and latest in [nil, OneCore.Builds.build()],
+         {:ok, copy} <- Git.fetch(@core, true),
+         {:ok, commit} <- Git.commit(copy, short),
+         {:ok, files} <- Git.files(copy, commit, "apps") do
+      from = %{"source" => @core, "ref" => nil, "commit" => commit}
+      folders = Enum.group_by(files, &hd(Path.split(elem(&1, 0))), fn {path, data} -> {Path.relative_to(path, hd(Path.split(path))), data} end)
+
+      for {name, files} <- folders, behind?(copy, name, commit) do
+        installed? = fn _version -> Apps.app("network", name) == "network/apps/#{name}" end
+
+        case Deploy.deploy("network", name, Map.new(files), from, true, installed?) do
+          {:ok, number, _warnings} -> Logger.info("#{name} is deployed for the network at the core's #{short}, as version #{number}")
+          failed -> Logger.error("#{name} wasn't deployed for the network at the core's #{short}: #{inspect(failed)}")
+        end
+      end
+
+      # What the new versions require that isn't there is installed, as for an update.
+      with {:error, why} <- required("network"), do: Logger.warning("The core's apps at #{short}: #{why}")
+      :ok
+    else
+      false -> :ok
+      {:error, why} -> {:error, "The core's apps weren't taken to #{short}: #{why}"}
+    end
+  end
+
+  # Whether the network's core app `name` is behind the core at `commit`, as `update_core_apps/0` says.
+  defp behind?(copy, name, commit) do
+    case Store.about("network/apps/#{name}") do
+      about when about == %{} -> true
+      %{"from" => %{"commit" => was}} when is_binary(was) ->
+        was != commit and Git.ancestor?(copy, was, commit) and Git.tree(copy, was, "apps/#{name}") != Git.tree(copy, commit, "apps/#{name}")
+      _deployed_with_no_commit -> true
     end
   end
 
