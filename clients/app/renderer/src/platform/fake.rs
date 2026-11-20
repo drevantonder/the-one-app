@@ -38,6 +38,9 @@ pub struct Display {
     /// where the system puts the menu (`placed`).
     text_menu: RefCell<std::collections::HashMap<WindowId, (crate::view::TextMenu, crate::geometry::Bounds<f32>)>>,
     magnifier: RefCell<std::collections::HashMap<WindowId, crate::view::Magnifier>>,
+    /// A phone's screen, in points, where it's a phone's (`phone`): every window but a panel is the whole of it,
+    /// whatever it was asked to be, as an iPhone's and an Android phone's are.
+    phone: Cell<Option<Size<Pixels>>>,
 }
 
 /// A phone's system's menu for text: 44 points tall, as UIEditMenuInteraction's, and so wide an item, 8 from what
@@ -70,6 +73,10 @@ pub struct NativeWindow {
     scale: f32,
     /// How far across it's drawn, swiped back from the left edge, as an iPhone's window is (`slide`).
     slid: Cell<f32>,
+    /// How it's drawn over what's under it (`set_moved`), and whether it's on the screen (`show`, `put_away`), as a
+    /// compositor shows it (`Windows::screen`).
+    moved: Cell<super::rail::Moved>,
+    shown: Cell<bool>,
 }
 
 /// A window as `Display::arrange` places it.
@@ -117,6 +124,11 @@ impl NativeWindow {
     pub fn slid(&self) -> f32 {
         self.slid.get()
     }
+
+    /// How it's drawn over what's under it, and whether it's on the screen.
+    pub(crate) fn composed(&self) -> (super::rail::Moved, bool) {
+        (self.moved.get(), self.shown.get())
+    }
 }
 
 impl Display {
@@ -135,7 +147,13 @@ impl Display {
             keyboard: RefCell::default(),
             text_menu: RefCell::default(),
             magnifier: RefCell::default(),
+            phone: Cell::new(None),
         }
+    }
+
+    /// It's a phone's screen, `screen` points big (`phone`).
+    pub fn phone(&self, screen: Size<Pixels>) {
+        self.phone.set(Some(screen));
     }
 
     /// Something happened to window `id`, which the loop hears on its next turn.
@@ -194,15 +212,20 @@ impl Display {
 
     pub fn open(&self, id: WindowId, options: &WindowOptions) -> anyhow::Result<NativeWindow> {
         let device = |points: f32| DevicePixels((points * self.scale).round() as i32);
-        Ok(NativeWindow { id, size: Cell::new(Size { width: device(options.size.width.0), height: device(options.size.height.0) }), scale: self.scale, slid: Cell::new(0.0) })
+        let size = match self.phone.get() {
+            Some(screen) if options.panel.is_none() => screen,
+            _ => options.size,
+        };
+        Ok(NativeWindow { id, size: Cell::new(Size { width: device(size.width.0), height: device(size.height.0) }), scale: self.scale, slid: Cell::new(0.0), moved: Cell::new(super::rail::Moved::STILL), shown: Cell::new(false) })
     }
 
     /// A part of a panel's: a window of its own for each pane of the system's glass its page asks for, as on a Mac.
     pub fn open_part(&self, parent: &NativeWindow, _: usize) -> anyhow::Result<NativeWindow> {
-        Ok(NativeWindow { id: parent.id, size: Cell::new(Size { width: DevicePixels(1), height: DevicePixels(1) }), scale: self.scale, slid: Cell::new(0.0) })
+        Ok(NativeWindow { id: parent.id, size: Cell::new(Size { width: DevicePixels(1), height: DevicePixels(1) }), scale: self.scale, slid: Cell::new(0.0), moved: Cell::new(super::rail::Moved::STILL), shown: Cell::new(true) })
     }
 
     pub fn summon(&self, window: &NativeWindow, _: &super::Places, _: Size<Pixels>) {
+        window.shown.set(true);
         self.summoned.borrow_mut().push(window.id);
     }
 
@@ -219,7 +242,9 @@ impl Display {
         self.wrong.take()
     }
 
-    pub fn put_away(&self, _: &NativeWindow, _: bool) {}
+    pub fn put_away(&self, window: &NativeWindow, _: bool) {
+        window.shown.set(false);
+    }
 
     pub fn arrange(&self, _: &[(Handle, crate::geometry::Bounds<f32>, f32)], draw: &mut dyn FnMut()) {
         draw();
@@ -227,7 +252,9 @@ impl Display {
 
     pub fn attach(&self, _: &NativeWindow, _: &NativeWindow) {}
 
-    pub fn show(&self, _: &NativeWindow) {}
+    pub fn show(&self, window: &NativeWindow) {
+        window.shown.set(true);
+    }
 
     pub fn close(&self, _: &NativeWindow) {}
 
@@ -283,7 +310,9 @@ impl Display {
     }
 
     #[allow(dead_code)]
-    pub fn set_moved(&self, _: &NativeWindow, _: super::rail::Moved) {}
+    pub fn set_moved(&self, window: &NativeWindow, moved: super::rail::Moved) {
+        window.moved.set(moved);
+    }
 
     pub fn flush(&self) {}
 

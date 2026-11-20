@@ -122,37 +122,17 @@ fn main() -> anyhow::Result<()> {
     let coming: std::rc::Rc<std::cell::RefCell<Vec<(f64, Value)>>> = Default::default();
     let sent = coming.clone();
 
-    // The page's files at `file:///`, as its own folder, with the UI library's under /ui/client/.
     let folder = std::fs::canonicalize(folder)?;
     let ui = flag("--ui").map(PathBuf::from);
-    let root = folder.clone();
-    let mut files: Files = Box::new(move |url: &Url| {
-        let path = url.path();
-        let file = match (path.strip_prefix("/ui/client/"), &ui) {
-            (Some(file), Some(ui)) => ui.join(file),
-            _ => root.join(path.trim_start_matches('/')),
-        };
-        std::fs::read_to_string(&file).map_err(|error| anyhow::anyhow!("{}: {error}", file.display()))
-    });
-    let html = std::fs::read_to_string(folder.join("index.html"))?;
-    let module = html
-        .split("<script")
-        .find_map(|tag| tag.contains("type=\"module\"").then(|| tag.split("src=\"").nth(1)?.split('"').next()).flatten())
-        .ok_or_else(|| anyhow::anyhow!("index.html loads no module"))?;
-    let page = Url::parse("file:///index.html")?.join(module)?;
-    // The tables: the UI library's tokens and styles, and the page's own styles, where it has them.
-    let mut tokens_page = 0;
-    for table in ["file:///ui/client/tokens.json", "file:///ui/client/styles.json", "file:///styles.json"] {
-        let Ok(text) = files(&Url::parse(table)?) else { continue };
-        if table.ends_with("tokens.json") {
-            renderer::tokens::load_table(&text)?;
-        } else {
-            renderer::load_styles(&text)?;
-            if table == "file:///styles.json" {
-                tokens_page = renderer::tokens::load_page(&text)?;
-            }
-        }
-    }
+    let (page, files, tokens_page) = built(&folder, ui.clone())?;
+    // The app the Home Screen's page opens over it as a phone's app does (`ui/open-link`), from where its icon is:
+    // `--open <app>=<its page's built folder>`, with its window's snapshot (`--snapshot <stem>`, as
+    // `WindowOptions::snapshot` names one) where it has one.
+    let opening: Option<(String, PathBuf)> = flag("--open").and_then(|open| open.split_once('=').map(|(app, folder)| (app.to_owned(), PathBuf::from(folder))));
+    let snapshot = flag("--snapshot").map(PathBuf::from);
+    let opens: std::rc::Rc<std::cell::RefCell<Vec<Value>>> = Default::default();
+    let opens_to = opens.clone();
+    let opened_app = opening.as_ref().map(|(app, _)| app.clone());
 
     let started = std::time::Instant::now();
     let clock = flag("--time-zone").map_or_else(Clock::fixed, |zone| Clock::fixed_in(&zone));
@@ -169,6 +149,12 @@ fn main() -> anyhow::Result<()> {
         let answers = answering.borrow();
         let id = message.get("id")?.clone();
         let (method, params) = (message["method"].as_str().unwrap_or_default(), &message["params"]);
+        if method == "ui/open-link" && params["url"].as_str().and_then(|url| url.strip_prefix("one:")).zip(opened_app.as_deref()).is_some_and(|(url, app)| url.starts_with(app)) {
+            if params["behind"] != true {
+                opens_to.borrow_mut().push(params["from"].clone());
+            }
+            return Some(json!({"jsonrpc": "2.0", "id": id, "result": {}}));
+        }
         let answer = match (method, params["name"].as_str()) {
             ("tools/call", Some(tool)) => match answers.get(tool) {
                 // `{ "$error": "…" }` is the tool's refusal, as the scenes (core/ui/scenes.js) answer it.
@@ -189,7 +175,8 @@ fn main() -> anyhow::Result<()> {
             _ => Some(answer),
         }
     });
-    let mut screen = Screen::new(js, Some(asked), Size { width, height }, insets);
+    let mut screen = Screen::new(js, Some(asked));
+    screen.insets = insets;
     screen.page = tokens_page;
     screen.theme = Some(if dark { Appearance::Dark } else { Appearance::Light });
     screen.touch = touch;
@@ -228,20 +215,20 @@ fn main() -> anyhow::Result<()> {
         };
         screen.late = Some(renderer::Late::new(Box::new(move || if random(4) == 0 { 1 + random(3) as u32 } else { 0 })));
     }
-    // Its JS runs on a thread of its own, as in a window: each step is drawn once what it set off has run. A panel is
-    // summoned as it opens, its page still starting, as a launcher's first summon can come as the app starts.
-    if panel.is_none() {
-        screen.idle();
-    }
     screen.seed(seed);
     // A window of the fake platform's, drawn by the loop every host's windows are (`Windows::turn`).
     let gpu = std::time::Instant::now();
     let resident = || memory_stats::memory_stats().map_or(0, |memory| memory.physical_mem);
     let before = resident();
-    let mut windows = Windows::fake(scale, 60.0, clock)?;
+    let mut windows = Windows::fake(scale, 60.0, clock.clone())?;
+    // A phone's window (`--touch`) is the whole of its screen, as every window there but a panel is.
+    if touch && panel.is_none() {
+        windows.phone(Size { width: Pixels(width), height: Pixels(height) });
+    }
     // With a seed, adversarial as a busy device and a person are: refreshes late, input as things move.
     windows.seed(seed);
-    let options = WindowOptions { title: "screenshot".into(), app_id: "screenshot".into(), size: Size { width: Pixels(width), height: Pixels(height) }, tag: json!({}), panel, places: None, frame: None, root: false, icon: None, owner: None, snapshot: None };
+    // A page that opens another app over it is a phone's Home Screen, its root window.
+    let options = WindowOptions { title: "screenshot".into(), app_id: "screenshot".into(), size: Size { width: Pixels(width), height: Pixels(height) }, tag: json!({}), panel, places: None, frame: None, root: opening.is_some(), icon: None, owner: None, snapshot: None };
     let said = std::rc::Rc::new(std::cell::RefCell::new(Vec::new()));
     let saying = said.clone();
     // Why its page crashed, if it did, which fails the run: a page never dies quietly.
@@ -254,9 +241,69 @@ fn main() -> anyhow::Result<()> {
         Event::Crashed(why) => *crashing.borrow_mut() = Some(why),
         _ => {}
     })?;
+    // Its JS runs on a thread of its own, as in a window: each step is drawn once what it set off has run. A panel is
+    // summoned as it opens, its page still starting, as a launcher's first summon can come as the app starts.
     if panel.is_some() {
         windows.summon(id, std::time::Instant::now(), None);
-        windows.wait();
+    }
+    windows.wait();
+    // The app `--open` names, opened over the Home Screen as its page asks, from its icon, as a phone's app opens an
+    // app's window (`clients/app/src/native.rs`): the size it asks for is a computer's, which a phone's window isn't,
+    // and its tools answer `--latency` ms after they're asked, as the first page's do.
+    if let Some((app, built_in)) = opening {
+        let (page, files, tokens_page) = built(&built_in, ui.clone())?;
+        let mut files = Some(files);
+        let coming: std::rc::Rc<std::cell::RefCell<Vec<(f64, Value)>>> = Default::default();
+        let mut opened: Option<renderer::platform::WindowId> = None;
+        let clock = clock.clone();
+        let answers = answers.clone();
+        BETWEEN.set(Some(Box::new(move |windows: &mut Windows| {
+            let now = renderer::platform::fake_time();
+            if let Some(opened) = opened {
+                let due: Vec<Value> = {
+                    let mut coming = coming.borrow_mut();
+                    let (due, later) = coming.drain(..).partition(|(at, _)| *at <= now);
+                    *coming = later;
+                    due.into_iter().map(|(_, answer)| answer).collect()
+                };
+                for answer in &due {
+                    windows.with(opened, |screen| screen.message(answer));
+                }
+            }
+            let Some(from) = opens.borrow_mut().pop() else { return };
+            let Some(files) = files.take() else { return };
+            let Ok(js) = Thread::start(&page, files, None, clock.clone(), touch) else { return };
+            let (answers, sent) = (answers.clone(), coming.clone());
+            let asked: renderer::Asked = Box::new(move |message, _| {
+                let id = message.get("id")?.clone();
+                let (method, params) = (message["method"].as_str().unwrap_or_default(), &message["params"]);
+                let answers = answers.borrow();
+                let answer = match (method, params["name"].as_str()) {
+                    ("tools/call", Some(tool)) => match answers.get(tool) {
+                        Some(answer) => json!({"jsonrpc": "2.0", "id": id, "result": {"content": [{"type": "text", "text": answer.to_string()}]}}),
+                        None => json!({"jsonrpc": "2.0", "id": id, "result": {"isError": true, "content": [{"type": "text", "text": format!("No answer for {tool}")}]}}),
+                    },
+                    _ => match answers.get(method) {
+                        Some(result) => json!({"jsonrpc": "2.0", "id": id, "result": result}),
+                        None => json!({"jsonrpc": "2.0", "id": id, "error": {"code": -32601, "message": format!("{method} isn't answered here")}}),
+                    },
+                };
+                if method == "tools/call" && latency > 0.0 {
+                    sent.borrow_mut().push((renderer::platform::fake_time() + latency, answer));
+                    return None;
+                }
+                Some(answer)
+            });
+            let mut screen = Screen::new(js, Some(asked));
+            screen.page = tokens_page;
+            screen.theme = Some(if dark { Appearance::Dark } else { Appearance::Light });
+            screen.touch = touch;
+            screen.text_size = touch.then_some(17.0);
+            let at = |edge: &str| from[edge].as_f64().unwrap_or_default() as f32;
+            let icon = from.is_object().then(|| renderer::geometry::Bounds { origin: renderer::geometry::point(at("x"), at("y")), size: Size { width: at("width"), height: at("height") } });
+            let options = WindowOptions { title: app.clone(), app_id: "screenshot".into(), size: Size { width: Pixels(1024.0), height: Pixels(720.0) }, tag: json!({"entrypoint": app}), panel: None, places: None, frame: None, root: false, icon, owner: None, snapshot: snapshot.clone() };
+            opened = windows.open(options, Ok(screen), |_| {}).ok();
+        })));
     }
     let ran = started.elapsed();
     if let Some(why) = windows.with(id, |screen| screen.didnt_start().map(str::to_owned)).flatten() {
@@ -293,6 +340,7 @@ fn main() -> anyhow::Result<()> {
     // changed; again once the pictures it decodes in the background are ready, as a window is woken to.
     let frame = |windows: &mut Windows| {
         loop {
+            between(windows);
             windows.wait();
             windows.tick();
             let turning = std::time::Instant::now();
@@ -754,6 +802,7 @@ fn replay(windows: &mut Windows, id: renderer::platform::WindowId, request: &ren
         let now = renderer::platform::fake_time();
         let boundary = ((now / refresh).floor() + 1.0) * refresh;
         let tick = if boundary - now < 0.001 { boundary + refresh } else { boundary } - begun;
+        between(windows);
         while let Some((t, event)) = samples.get(next).filter(|(t, _)| *t <= tick) {
             windows.run((t - elapsed()).max(0.0));
             deliver(windows, id, event)?;
@@ -796,9 +845,22 @@ fn replay(windows: &mut Windows, id: renderer::platform::WindowId, request: &ren
         if let Some(scrolled) = windows.with(id, |screen| screen.scrolled_under(renderer::geometry::point(x, y))).flatten() {
             frame["scroll"] = json!({"x": scrolled.x, "y": scrolled.y});
         }
-        if snaps && let Some((w, h, rgba)) = windows.presented(id) {
+        // On a phone, the screen as its compositor shows it, each window over the one under it as it's moved, and each
+        // window's own picture (`own`), as it presented it.
+        let stacked = windows.composed();
+        let phone = stacked.as_array().is_some_and(|stacked| stacked.len() > 1);
+        if phone {
+            frame["windows"] = stacked.clone();
+        }
+        if snaps && let Some((w, h, rgba)) = if phone { windows.screen() } else { windows.presented(id) } {
             for (name, value) in renderer::inspect::png(w, h, rgba)?.as_object().into_iter().flatten() {
                 frame[name] = value.clone();
+            }
+        }
+        if snaps && phone {
+            let top = stacked.as_array().and_then(|stacked| stacked.last()).and_then(|top| top["window"].as_u64());
+            if let Some((w, h, rgba)) = top.and_then(|top| windows.presented(top as renderer::platform::WindowId)) {
+                frame["own"] = renderer::inspect::png(w, h, rgba)?["png"].clone();
             }
         }
         frames.push(frame);
@@ -870,3 +932,52 @@ fn press(windows: &mut Windows, id: renderer::platform::WindowId, x: f32, y: f32
 
 /// How long before a refresh what the display shows at it is read: what's drawn after is shown at the next.
 const JUST_BEFORE: f64 = 0.01;
+
+thread_local! {
+    /// What the harness does between the display's frames, as a host's app does around its windows: an app's window
+    /// opened over the Home Screen as its page asked (`--open`), and what its tools answered as it's due.
+    static BETWEEN: std::cell::RefCell<Option<Box<dyn FnMut(&mut Windows)>>> = const { std::cell::RefCell::new(None) };
+}
+
+fn between(windows: &mut Windows) {
+    let hook = BETWEEN.take();
+    if let Some(mut hook) = hook {
+        hook(windows);
+        BETWEEN.set(Some(hook));
+    }
+}
+
+/// The page `bun app.js` built in `folder`: its module, what reads its files (at `file:///`, its own folder, with the UI
+/// library's under /ui/client/, from `ui`), and its own table of tokens (`Screen::page`), loaded with the UI library's.
+fn built(folder: &std::path::Path, ui: Option<PathBuf>) -> anyhow::Result<(Url, Files, u32)> {
+    let folder = std::fs::canonicalize(folder)?;
+    let root = folder.clone();
+    let mut files: Files = Box::new(move |url: &Url| {
+        let path = url.path();
+        let file = match (path.strip_prefix("/ui/client/"), &ui) {
+            (Some(file), Some(ui)) => ui.join(file),
+            _ => root.join(path.trim_start_matches('/')),
+        };
+        std::fs::read_to_string(&file).map_err(|error| anyhow::anyhow!("{}: {error}", file.display()))
+    });
+    let html = std::fs::read_to_string(folder.join("index.html"))?;
+    let module = html
+        .split("<script")
+        .find_map(|tag| tag.contains("type=\"module\"").then(|| tag.split("src=\"").nth(1)?.split('"').next()).flatten())
+        .ok_or_else(|| anyhow::anyhow!("index.html loads no module"))?;
+    let page = Url::parse("file:///index.html")?.join(module)?;
+    // The tables: the UI library's tokens and styles, and the page's own styles, where it has them.
+    let mut tokens_page = 0;
+    for table in ["file:///ui/client/tokens.json", "file:///ui/client/styles.json", "file:///styles.json"] {
+        let Ok(text) = files(&Url::parse(table)?) else { continue };
+        if table.ends_with("tokens.json") {
+            renderer::tokens::load_table(&text)?;
+        } else {
+            renderer::load_styles(&text)?;
+            if table == "file:///styles.json" {
+                tokens_page = renderer::tokens::load_page(&text)?;
+            }
+        }
+    }
+    Ok((page, files, tokens_page))
+}

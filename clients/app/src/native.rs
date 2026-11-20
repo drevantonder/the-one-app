@@ -803,7 +803,7 @@ async fn window(started: Instant, entrypoint: &str, subject: Option<&str>, link:
         // none.
         let top = if launcher { 0.0 } else { BAR.0 as f32 };
         let insets = renderer::geometry::Edges { top, right: 0.0, bottom: 0.0, left: 0.0 };
-        let opened = match begun.screen(state, Size { width: options.size.width.0, height: options.size.height.0 }, insets) {
+        let opened = match begun.screen(state, insets) {
             Ok(mut screen) => {
                 Opening::step(&timed, "screen made");
                 screen.theme = theme(chosen.as_deref());
@@ -959,15 +959,17 @@ fn started(entrypoint: &str, subject: Option<&str>, to: UnboundedSender<Value>, 
 }
 
 impl Started {
-    /// Its screen, on the native thread: what its page asks answered as `state` says, and a picture it names by an
-    /// address fetched as one of its app's files, as a web view's page loads it.
-    fn screen(self, mut state: State, room: Size<f32>, insets: renderer::geometry::Edges<f32>) -> anyhow::Result<Screen> {
+    /// Its screen, on the native thread: what its page asks answered as `state` says, `insets` of its window its own
+    /// (`Screen::insets`), and a picture it names by an address fetched as one of its app's files, as a web view's page
+    /// loads it.
+    fn screen(self, mut state: State, insets: renderer::geometry::Edges<f32>) -> anyhow::Result<Screen> {
         let Started { js, to, asked, page, number } = self;
         state.page = number;
         let state = Arc::new(Mutex::new(state));
         let (respond_to, respond_asked) = (to.clone(), asked.clone());
         let asked_by_app: renderer::Asked = Box::new(move |message, appearance| respond(message, appearance, &state, &respond_to, &respond_asked));
-        let mut screen = Screen::new(js?, Some(asked_by_app), room, insets);
+        let mut screen = Screen::new(js?, Some(asked_by_app));
+        screen.insets = insets;
         let next_picture = std::cell::Cell::new(0u64);
         screen.fetch = Some(Box::new(move |src: &str| {
             let Ok(address) = page.join(src) else { return };
@@ -1027,8 +1029,7 @@ async fn reloaded(window: Arc<OnceLock<WindowId>>, entrypoint: String, subject: 
     let (reloaded_to, reloaded) = tokio::sync::oneshot::channel::<anyhow::Result<bool>>();
     Native::get()?.run(move |windows| {
         let Some(id) = window.get().copied() else { return drop(reloaded_to.send(Ok(false))) };
-        let Some((room, insets)) = windows.with(id, |screen| (screen.room(), screen.insets)) else { return drop(reloaded_to.send(Ok(false))) };
-        let screen = begun.screen(state, room, insets).map(|mut screen| {
+        let screen = begun.screen(state, Default::default()).map(|mut screen| {
             screen.theme = theme(chosen.as_deref());
             screen.page = tokens_page;
             screen.make_frame = trusted.then(|| frames(window.clone()));
@@ -1061,7 +1062,7 @@ async fn frame(window: Arc<OnceLock<WindowId>>, node: renderer::tree::Id, src: &
     let src = src.to_owned();
     Native::get()?.run(move |windows| {
         let Some(id) = window.get() else { return };
-        windows.with(*id, |parent| match started.screen(state, Size { width: 0.0, height: 0.0 }, Default::default()) {
+        windows.with(*id, |parent| match started.screen(state, Default::default()) {
             Ok(mut screen) => {
                 screen.page = tokens_page;
                 parent.framed(node, &src, screen)

@@ -304,8 +304,9 @@ pub struct Screen {
     /// which the UI library's `safe-top`, `safe-right`, `safe-bottom` and `safe-left` lengths are.
     pub insets: Edges<f32>,
     /// The room its page has, and whether it asked for less motion, as the page was last told them with its insets
-    /// (its host context's `containerDimensions` and `reducedMotion`).
-    room: Size<f32>,
+    /// (its host context's `containerDimensions` and `reducedMotion`). Its room is its window's from the start
+    /// (`Windows::open`), which only the window knows: a phone's is its screen, whatever it was asked to be.
+    pub(crate) room: Size<f32>,
     told: Option<(Size<f32>, bool, Edges<f32>, crate::platform::Pressure)>,
     /// When what it draws first changed since the frame drawn last, on its clock: what moves as that changed sets off
     /// then, as CSS's transitions do as a style changes, not when a frame next happens to be drawn, so a clock moved
@@ -433,9 +434,9 @@ pub(crate) struct Cost {
 }
 
 impl Screen {
-    /// The screen of an app whose JS is starting on its own thread, which it draws as that posts, with `room` logical
-    /// pixels to draw in, `insets` of them its window's own (`Screen::insets`).
-    pub fn new(js: Thread, asked: Option<Asked>, room: Size<f32>, insets: Edges<f32>) -> Screen {
+    /// The screen of an app whose JS is starting on its own thread, which it draws as that posts, in the room the window
+    /// it's opened in has (`Windows::open`).
+    pub fn new(js: Thread, asked: Option<Asked>) -> Screen {
         let mut screen = Screen {
             tree: Tree::default(),
             js,
@@ -471,8 +472,8 @@ impl Screen {
             panel: None,
             notice: None,
             visible: true,
-            insets,
-            room,
+            insets: Edges::default(),
+            room: Size::default(),
             told: None,
             changed: None,
             asked,
@@ -554,6 +555,11 @@ impl Screen {
     /// The room its page has, in logical pixels (`room`).
     pub fn room(&self) -> Size<f32> {
         self.room
+    }
+
+    /// The room its page was last told it has, if it's been told one: what its page is laid out for.
+    pub fn told_room(&self) -> Option<Size<f32>> {
+        self.told.map(|(room, ..)| room)
     }
 
     /// Calls `wake` as its app's JS thread, or a frame's, posts what this hasn't applied (`pump`).

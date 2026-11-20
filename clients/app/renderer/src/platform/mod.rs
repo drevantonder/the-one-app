@@ -549,6 +549,9 @@ impl Windows {
             self.display.attach(&native, &owner.parts[0].native);
         }
         if let Ok(screen) = &mut screen {
+            // Its page is laid out in the room its window has from its first frame, which only the window knows: a
+            // phone's is its screen whatever it was asked to be, and a computer's app opens where it was left.
+            screen.room = if options.panel.is_some() { Size { width: options.size.width.0, height: options.size.height.0 } } else { Size { width: native.size().width.0, height: native.size().height.0 } };
             // A phone's app window has the rail's home line; its Home Screen doesn't.
             screen.rail = cfg!(any(target_os = "android", target_os = "ios")) && !options.root;
             screen.appearance = appearance();
@@ -1428,6 +1431,15 @@ impl Windows {
             } else {
                 match &mut window.screen {
                     Ok(screen) => {
+                        // In its first second, its page is laid out in the room its window has, never in another it
+                        // was told of first, which it's drawn at for a frame as it's told the real one.
+                        #[cfg(feature = "fake")]
+                        if since(window.opened) < std::time::Duration::from_secs(1)
+                            && let Some(told) = screen.told_room()
+                            && (told.width != room.width.0 || told.height != room.height.0)
+                        {
+                            self.display.wrong(format!("{} was laid out {}×{} in its first second, in a window {}×{}", window.title, told.width, told.height, room.width.0, room.height.0));
+                        }
                         screen.paint(room, scale, &mut self.text, &self.atlas, &mut window.scene);
                         window.moving = screen.take_again();
                         let calls = screen.text_input(&mut window.text_input);
@@ -1935,6 +1947,84 @@ impl Windows {
         if let Some(window) = self.windows.get_mut(&id) {
             window.dirty = true;
         }
+    }
+
+    /// It's a phone's screen, `screen` points big: every window but a panel is the whole of it, whatever it was asked
+    /// to be, as an iPhone's and an Android phone's are.
+    pub fn phone(&self, screen: Size<Pixels>) {
+        self.display.phone(screen);
+    }
+
+    /// The windows on the screen, the root window first and the rest as they opened, each with how it's drawn over
+    /// what's under it (`rail::Moved`).
+    fn stacked(&self) -> Vec<WindowId> {
+        let mut ids: Vec<WindowId> = self.windows.iter().filter(|(_, window)| window.parts[0].native.composed().1).map(|(id, _)| *id).collect();
+        ids.sort_by_key(|id| (!self.windows[id].root, *id));
+        ids
+    }
+
+    /// Each window on the screen, bottom first: its id, its title, how it's drawn over what's under it, whether it
+    /// shows its snapshot, and the room its page was last told and the room it has, in points.
+    pub fn composed(&self) -> serde_json::Value {
+        let listed: Vec<serde_json::Value> = self
+            .stacked()
+            .into_iter()
+            .map(|id| {
+                let window = &self.windows[&id];
+                let (moved, _) = window.parts[0].native.composed();
+                let told = window.screen.as_ref().ok().and_then(Screen::told_room);
+                let room = window.room();
+                serde_json::json!({
+                    "window": id,
+                    "title": window.title,
+                    "moved": {"scale": moved.scale, "x": moved.x, "y": moved.y, "opacity": moved.opacity, "dim": moved.dim},
+                    "snapshot": window.picture.is_some(),
+                    "told": told.map(|told| serde_json::json!({"width": told.width, "height": told.height})),
+                    "room": {"width": room.width.0, "height": room.height.0},
+                })
+            })
+            .collect();
+        serde_json::json!(listed)
+    }
+
+    /// The screen as its compositor shows it: each window on it what it last presented, over those under it, grown and
+    /// moved about its middle, as opaque and with corners as round as it's moved to, what's under it dimmed by its
+    /// `dim` (`rail::Moved`), as an iPhone's Core Animation draws its card: its width, height and pixels.
+    pub fn screen(&mut self) -> Option<(u32, u32, Vec<u8>)> {
+        let stacked = self.stacked();
+        let first = *stacked.first()?;
+        let (width, height, mut rgba) = self.presented(first)?;
+        for id in stacked.into_iter().skip(1) {
+            let scale = self.windows[&id].parts[0].native.scale();
+            let (moved, _) = self.windows[&id].parts[0].native.composed();
+            let Some((w, h, drawn)) = self.presented(id) else { continue };
+            for pixel in rgba.chunks_exact_mut(4) {
+                for channel in &mut pixel[..3] {
+                    *channel = (f32::from(*channel) * (1.0 - moved.dim)).round() as u8;
+                }
+            }
+            // Where each pixel of the screen comes from on the window: back through its transform, about its middle.
+            let (middle_x, middle_y) = (w as f32 / 2.0, h as f32 / 2.0);
+            let corner = moved.corner * scale;
+            for (y, x) in (0..height).flat_map(|y| (0..width).map(move |x| (y, x))) {
+                let from_x = middle_x + (x as f32 + 0.5 - middle_x - moved.x * scale) / moved.scale;
+                let from_y = middle_y + (y as f32 + 0.5 - middle_y - moved.y * scale) / moved.scale;
+                if from_x < 0.0 || from_y < 0.0 || from_x >= w as f32 || from_y >= h as f32 {
+                    continue;
+                }
+                // Outside its round corners.
+                let (dx, dy) = ((corner - from_x).max(from_x - (w as f32 - corner)), (corner - from_y).max(from_y - (h as f32 - corner)));
+                if dx > 0.0 && dy > 0.0 && dx.hypot(dy) > corner {
+                    continue;
+                }
+                let (from, to) = (((from_y as u32 * w + from_x as u32) * 4) as usize, ((y * width + x) * 4) as usize);
+                let alpha = f32::from(drawn[from + 3]) / 255.0 * moved.opacity;
+                for channel in 0..3 {
+                    rgba[to + channel] = (f32::from(drawn[from + channel]) * alpha + f32::from(rgba[to + channel]) * (1.0 - alpha)).round() as u8;
+                }
+            }
+        }
+        Some((width, height, rgba))
     }
 
     /// What window `id` last presented, as its compositor shows it: its width, height and pixels. A panel's parts are
