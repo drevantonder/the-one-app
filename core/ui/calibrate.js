@@ -11,9 +11,9 @@
 // calibration error, then fits on them all, and keeps the device's costs in devices.json's `measured`, with its CPU's
 // time for the same frames (`paint_ms`, a frame's styling, layout and scene).
 import { cpSync, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs"
-import { join, resolve } from "node:path"
+import { basename, join, resolve } from "node:path"
 import { fileURLToPath } from "node:url"
-import { moves, pageFolder, scenesOf, selector } from "./motion.js"
+import { FACES, moves, pageFolder, scenesOf, selector } from "./motion.js"
 
 const here = (path) => fileURLToPath(new URL(path, import.meta.url))
 const args = process.argv.slice(2)
@@ -73,6 +73,7 @@ scenes.forEach((scene, n) => {
 })
 cpSync(here("dist/client"), join(batch, "ui"), { recursive: true, dereference: true })
 cpSync(harness, join(batch, "screenshot.exe"))
+for (const face of FACES) cpSync(face, join(batch, basename(face)))
 writeFileSync(join(batch, "run.cmd"), ["@echo off", "cd /d %~dp0", ...lines].join("\r\n"))
 
 // There, and back.

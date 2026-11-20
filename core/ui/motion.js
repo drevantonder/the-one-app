@@ -103,6 +103,10 @@ export function copied(harness, out) {
   return join(kept, basename(harness))
 }
 
+/// The faces the harness falls back to where its own font hasn't a character, this machine's, which a device it's sent
+/// to is sent beside it (renderer's `fake::fallback_fonts`).
+export const FACES = ["/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", "/usr/share/fonts/truetype/noto/NotoColorEmoji.ttf"]
+
 /// Why a capped harness was stopped, by its exit status, if it was.
 export const stopped = (status) => ({ 137: `it used more than ${MEMORY}B of memory, and was stopped`, 124: `it ran for ${MINUTES} minutes, and was stopped` })[status]
 
@@ -254,6 +258,7 @@ function onDevice() {
   rmSync(staged, { recursive: true, force: true })
   cpSync(library("client"), join(staged, "ui"), { recursive: true, dereference: true })
   cpSync(harness, join(staged, "screenshot.exe"))
+  for (const face of FACES) cpSync(face, join(staged, basename(face)))
   const sent = Bun.spawnSync(["sh", "-c", `tar -C "${staged}" -cf - . | ssh ${ssh} 'mkdir "${remote}" && tar -xf - -C "${remote}"'`], { stdout: "pipe", stderr: "pipe" })
   if (sent.exitCode !== 0) throw new Error(`${ssh}: the harness didn't go there: ${sent.stderr.toString().trim()}`)
   process.on("exit", () => Bun.spawnSync(["ssh", ssh, `rmdir /s /q "${remote}"`]))

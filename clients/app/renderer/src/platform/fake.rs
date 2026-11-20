@@ -401,11 +401,17 @@ pub fn now() -> web_time::Instant {
 
 /// The faces a Linux device falls back to where Allo hasn't a character, a symbol's (⇧, ⋮) and an emoji's, from the
 /// harness's host (Debian's and Ubuntu's `fonts-dejavu-core` and `fonts-noto-color-emoji`), so it draws what a device
-/// does and not a gap.
+/// does and not a gap; on a device it's sent to that hasn't them (`motion.js --ssh`, a Windows one), from beside it,
+/// where they're sent with it, so it draws the same glyphs as here.
 pub fn fallback_fonts() -> anyhow::Result<Vec<Vec<u8>>> {
+    let beside = |path: &str| Some(std::env::current_exe().ok()?.parent()?.join(std::path::Path::new(path).file_name()?));
     ["/usr/share/fonts/truetype/dejavu/DejaVuSans.ttf", "/usr/share/fonts/truetype/noto/NotoColorEmoji.ttf"]
         .into_iter()
-        .map(|path| std::fs::read(path).map_err(|error| anyhow::anyhow!("the harness falls back to {path}, which it couldn't read (apt install fonts-dejavu-core fonts-noto-color-emoji): {error}")))
+        .map(|path| {
+            std::fs::read(path)
+                .or_else(|error| beside(path).map_or(Err(error), std::fs::read))
+                .map_err(|error| anyhow::anyhow!("the harness falls back to {path}, which it couldn't read (apt install fonts-dejavu-core fonts-noto-color-emoji): {error}"))
+        })
         .collect()
 }
 
