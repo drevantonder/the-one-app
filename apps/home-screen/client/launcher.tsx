@@ -1,6 +1,6 @@
 // The computer's launcher: its keys, its search floating over its card, and what the search found.
 import { createEffect, createMemo, For, Show, untrack } from "solid-js"
-import { ScrollView, Empty, type Keyed, leave, sizeChanged, Text, TextInput, View, viewport, visible } from "ui"
+import { ScrollView, Empty, type Keyed, leave, reducedMotion, sizeChanged, Text, TextInput, View, viewport, visible } from "ui"
 import { ACROSS, cell as cellOf, group, INSET, PAGE, PILLS, SEARCH, SEARCH_HEIGHT, CARD_TOP } from "./layout.ts"
 import { type At, type Placed } from "./machine.ts"
 import { type Item, type Listed } from "./types.ts"
@@ -304,12 +304,28 @@ export function createLauncher(props: { owners: Owner[] }, layout: Screens, pagi
 /// The launcher's panel: its search, and its card with Home, the App Library or what was found in it.
 export function LauncherPanel(props: { owners: Owner[]; layout: Screens; paging: Paging; launching: Launching }) {
   const { pages, laid } = props.layout
-  const { card, cardLeft, lead, trackX, turnOf, flingOf, opacityOf, wheel } = props.paging
+  const { card, cardLeft, lead, trackX, wheeling, leaving, opacityOf, along, wheel } = props.paging
   const { showing, words } = props.launching
-  // How far the owner shown's pages have given past their last screenful, on the way to the App Library.
-  const pastHome = () => {
-    const owner = state().context.at.owner
-    return Math.max(0, trackX(owner) - Math.max(0, props.layout.homes(owner).length - 1) * PAGE)
+  // The owner shown, and how far along their pages and the App Library are drawn: for whoever asked for less motion,
+  // never past Home's last screenful, over which the App Library cross-fades.
+  const shown = () => state().context.at.owner
+  const homeEnd = (owner: number) => Math.max(0, props.layout.homes(owner).length - 1) * PAGE
+  const across = () => (reducedMotion() ? Math.min(trackX(shown()), homeEnd(shown())) : trackX(shown()))
+  // Home and the App Library are both there, side by side, but while what was found shows, or for whoever asked for less
+  // motion, the one not shown fades out.
+  const there = (section: "home" | "library") => showing() === section || (showing() !== "search" && !reducedMotion())
+  // Where the App Library is drawn along: the page after the shown owner's last, a card's width on.
+  const libraryAt = () => (reducedMotion() ? across() : trackX(shown(), props.layout.homes(shown()).length * PAGE))
+  // How far the owner shown's pages have gone past their last screenful, on the way to the App Library.
+  const pastHome = () => Math.max(0, trackX(shown()) - homeEnd(shown()))
+  // The strip slides by its spring as it goes along, but not as another owner comes to be shown in its place, whose
+  // pages are lined up where they go already, nor as a wheel moves it one to one.
+  let was = untrack(shown)
+  const slides = () => {
+    const now = shown()
+    const same = now === was
+    was = now
+    return same && !wheeling() && !reducedMotion()
   }
   return (
     <>
@@ -317,8 +333,11 @@ export function LauncherPanel(props: { owners: Owner[]; layout: Screens; paging:
           <LauncherSearch />
         </View>
         <View onWheel={wheel} style={[looks.surface, looks.card, looks.at(0, CARD_TOP, card().width, card().height), looks.shifted(cardLeft())]}>
+          {/* Home's pages and the App Library after them, in one strip the host drags along as a trackpad's fingers or
+              the pointer go (`along`) and slides to where they're going by its spring, as an iPhone's are. */}
+          <View {...along} style={[looks.cover, slides() && looks.turning, looks.shifted(-across())]}>
           {/* Home: each owner's pages, the owner shown's in place, the others rolled above and below it, faded. */}
-          <View role="main" aria-label="Home" inert={showing() !== "home" || undefined} style={[looks.fading, looks.cover, showing() !== "home" && looks.inert, looks.faded(showing() === "home" ? 1 : 0, showing() === "home" ? 1 : 1.03)]}>
+          <View role="main" aria-label="Home" inert={showing() !== "home" || undefined} style={[looks.fading, looks.cover, showing() !== "home" && looks.inert, looks.faded(there("home") ? 1 : 0, 1)]}>
             <For each={props.owners} keyed={(owner) => owner.key}>
               {(owner, index) => {
                 const shown = () => index() === state().context.at.owner
@@ -336,26 +355,26 @@ export function LauncherPanel(props: { owners: Owner[]; layout: Screens; paging:
                     inert={!shown() || undefined}
                     style={[looks.owner, looks.rolling, !shown() && looks.inert, looks.at(INSET, PILLS, ACROSS * PAGE, room().height), looks.drifted(shown() ? 1 : 0, (index() - state().context.at.owner) * 40)]}
                   >
-                    <View style={[looks.track, looks.slid(lead(index()) + turnOf(index())[0]() - trackX(index()), opacityOf(index())[0]())]}>
-                      <View style={[looks.turning, flingOf(index())[0]() !== undefined && looks.flung(flingOf(index())[0]()!), looks.shifted(-turnOf(index())[0]())]}>
-                        <For each={pages()[index()] ?? []} keyed={false}>
-                          {(placed, at) => <Page page={at} placed={placed()} />}
-                        </For>
-                      </View>
+                    {/* Each other owner's pages are lined up where the shown owner's are, ready for a roll to them. */}
+                    <View style={[looks.track, looks.slid(lead(index()) + across() - trackX(index()), opacityOf(index())[0]())]}>
+                      <For each={pages()[index()] ?? []} keyed={false}>
+                        {(placed, at) => <Page page={at} placed={placed()} />}
+                      </For>
                     </View>
                   </View>
                 )
               }}
             </For>
-            {/* Whose pages they are at the top, as a phone has it: part of Home, going with its pages as they give
-                on the way to the App Library and fading with them. */}
-            <View style={[looks.row, looks.top(0), looks.tall(PILLS), looks.shifted(-pastHome()), looks.opacity(state().matches("editing") ? 0.6 : 1)]}>
-              <OwnerPill owners={props.owners} />
-            </View>
           </View>
-          {/* The App Library, in the same card, cross-fading in, scrolling what's taller. */}
-          <View inert={showing() !== "library" || undefined} style={[looks.layer, looks.fading, showing() !== "library" && looks.inert, looks.fill(INSET, 0, 0), looks.faded(showing() === "library" ? 1 : 0, showing() === "library" ? 1 : 0.965)]}>
+          {/* The App Library, the page after Home's last, scrolling what's taller; for whoever asked for less motion,
+              cross-fading in over Home. */}
+          <View inert={showing() !== "library" || undefined} style={[looks.layer, looks.fading, showing() !== "library" && looks.inert, looks.fill(INSET, 0, 0), looks.shifted(libraryAt()), looks.opacity(there("library") ? 1 : 0)]}>
             <Library owner={props.owners[0]} size={{ width: card().width - 2 * INSET, height: card().height - INSET - PILLS }} />
+          </View>
+          </View>
+          {/* Whose pages they are at the top, as a phone has it: over Home, sliding off with it to the App Library. */}
+          <View inert={showing() !== "home" || undefined} style={[looks.row, looks.top(0), looks.tall(PILLS), !wheeling() && looks.sliding, looks.shifted(-pastHome()), looks.opacity(!there("home") || leaving() ? 0 : state().matches("editing") ? 0.6 : 1)]}>
+            <OwnerPill owners={props.owners} />
           </View>
           {/* What was typed found, as it's typed, and as it goes, what it last found. */}
           <View inert={showing() !== "search" || undefined} style={[looks.owner, looks.fading, showing() !== "search" && looks.inert, looks.at(INSET, INSET, card().width - 2 * INSET, card().height - 2 * INSET), looks.drifted(showing() === "search" ? 1 : 0, showing() === "search" ? 0 : -8)]}>

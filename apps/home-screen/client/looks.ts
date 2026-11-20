@@ -42,9 +42,10 @@ export const looks = styles({
   search: { flexDirection: "row", alignItems: "center", zIndex: 6 },
   owner: { position: "absolute", overflow: "hidden" },
   track: { position: "absolute", top: 0, start: 0, flexDirection: "row" },
+  // What goes with the pages without being dragged with them: sliding with them by the same spring, and fading out of
+  // their way.
+  sliding: { transitionProperty: ["translateX", "opacity"], transition: tokens.motion.snappy },
   turning: { flexDirection: "row", transitionProperty: ["translateX"], transition: tokens.motion.snappy },
-  // Turned as a swipe left them, at its speed.
-  flung: (transitionVelocity: number) => ({ transitionProperty: ["translateX"], transition: tokens.motion.snappy, transitionVelocity }),
   layer: { position: "absolute", alignItems: "center" },
   row: { position: "absolute", start: 0, end: 0, alignItems: "center", justifyContent: "center" },
   inert: { pointerEvents: "none" },

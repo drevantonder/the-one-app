@@ -14,7 +14,7 @@ import { type Paging } from "./paging.ts"
 
 export function Phone(props: { owners: Owner[]; layout: Screens; paging: Paging }) {
   const { homes, pages, laid, library } = props.layout
-  const { downY, xOf, opacityOf, sectionsX, swipes, along, wheel } = props.paging
+  const { downY, xOf, opacityOf, sectionsX, swipes, along, leaving, wheel } = props.paging
   // The owner shown, how far along their pages and the App Library are, and how wide their Home is.
   const shown = () => state().context.at.owner
   const across = () => xOf(shown())[0]()
@@ -72,7 +72,7 @@ export function Phone(props: { owners: Owner[]; layout: Screens; paging: Paging 
         </View>
         {/* Whose pages they are, over Home's, which goes with them as they slide off to the App Library. */}
         <View inert={library() || undefined} style={[looks.topRow, looks.paging, looks.top(room().safe.top), looks.tall(TOP_ROW), looks.shifted(-sectionsX())]}>
-          <View style={[looks.live, looks.opacity(state().matches("editing") ? 0.6 : 1)]}>
+          <View style={[looks.live, looks.sliding, looks.opacity(leaving() ? 0 : state().matches("editing") ? 0.6 : 1)]}>
             <OwnerPill owners={props.owners} />
           </View>
         </View>

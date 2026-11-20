@@ -786,6 +786,52 @@
       }
     }
   },
+  "Launcher, swiped": {
+    "like": "Launcher on a computer",
+    "motions": {
+      "Dragged to the App Library": {
+        "from": {
+          "x": 700,
+          "y": 400
+        },
+        "follow": "Notes",
+        "gesture": {
+          "swipe": [
+            -500,
+            0
+          ],
+          "speed": 1200
+        }
+      },
+      "Flicked to the App Library": {
+        "from": {
+          "x": 700,
+          "y": 400
+        },
+        "follow": "Notes",
+        "gesture": {
+          "fling": [
+            -140,
+            0
+          ]
+        }
+      },
+      "Dragged a little and let go": {
+        "from": {
+          "x": 700,
+          "y": 400
+        },
+        "follow": "Notes",
+        "gesture": {
+          "drag": [
+            -200,
+            0
+          ],
+          "speed": 400
+        }
+      }
+    }
+  },
   "Launcher, one page": {
     "like": "Home, one page of apps",
     "size": [
@@ -816,6 +862,28 @@
         "theme": null,
         "launcher": true,
         "mac": true
+      }
+    }
+  },
+  "Launcher, App Library swiped back": {
+    "like": "Launcher, App Library",
+    "motions": {
+      "Dragged back to Home": {
+        "from": {
+          "x": 300,
+          "y": 500
+        },
+        "follow": {
+          "role": "group",
+          "name": "Productivity"
+        },
+        "gesture": {
+          "swipe": [
+            500,
+            0
+          ],
+          "speed": 1200
+        }
       }
     }
   },

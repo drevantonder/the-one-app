@@ -60,31 +60,25 @@ export function createPaging(props: { owners: Owner[] }, layout: Screens) {
   /// How far an owner's pages are moved along so fewer than fill the card are in its middle.
   const lead = (owner: number) => (Math.max(0, ACROSS - (pages()[owner]?.length ?? 1)) * PAGE) / 2
   const cardLeft = () => (viewport().width - card().width) / 2
-  /// How far an owner's pages are moved along in the card, at `x`: there, and past Home's last screenful, on the way
-  /// to the App Library, which cross-fades in, giving rather than sliding on.
+  /// How far an owner's pages are drawn moved along at `x`, as far as `x` along Home, and past its last screenful, on
+  /// to the App Library, the page after it: in the launcher, whose card shows `ACROSS` pages side by side, as far again
+  /// as the card is wide for the one turn there (`libraryReach` times), as an iPhone's App Library is a whole screen
+  /// on. `xAt` is where `x` is for pages drawn moved `drawn` along.
+  const libraryReach = () => (untrack(launcher) ? ACROSS : 1)
   const trackX = (owner: number, x = xOf(owner)[0]()) => {
-    const end = Math.max(0, homes(owner).length - 1) * PAGE
-    return x > end ? end + give(x - end, PAGE) : x
+    const end = homeEnd(owner)
+    return x > end ? end + (x - end) * libraryReach() : x
   }
-  /// How far an owner's pages have been turned in the card, in points, which the host's own spring moves them by, as
-  /// it draws: by the arrow keys and the dots, from rest, and as a swipe's fingers lift, at their speed (`flingOf`, of
-  /// the way a second). Where they are is the rest, which follows the fingers.
-  const turns: [() => number, (x: number) => void][] = []
-  const turnOf = (owner: number) => (turns[owner] ??= createSignal(0))
-  const flings: [() => number | undefined, (speed: number | undefined) => void][] = []
-  const flingOf = (owner: number) => (flings[owner] ??= createSignal<number | undefined>(undefined))
-  /// Whether the launcher's pages turn by the host's spring: unless they're to cross-fade.
-  const turnsByHost = () => untrack(launcher) && !untrack(reducedMotion)
-  /// Turns an owner's pages in the launcher to `to` by the host's spring, from where they're drawn, setting off at
-  /// `velocity`, in points a second, where a swipe left them moving.
-  const turn = (owner: number, to: number, velocity?: number) => {
-    const moving = sideways(owner)
-    stop(moving)
-    const by = untrack(() => trackX(owner, to) - trackX(owner, moving.value))
-    flingOf(owner)[1](velocity && by ? velocity / by : undefined)
-    turnOf(owner)[1](untrack(turnOf(owner)[0]) + by)
-    jump(moving, to)
+  const xAt = (owner: number, drawn: number) => {
+    const end = homeEnd(owner)
+    return drawn > end ? end + (drawn - end) / libraryReach() : drawn
   }
+  /// Whether a wheel's turns are moving the pages one to one, as a trackpad's fingers do where the system says nothing
+  /// of when they lift, which their spring doesn't follow.
+  const [wheeling, setWheeling] = createSignal(false)
+  /// Whether the pages are dragged from Home's last screenful, on the way to the App Library maybe: the owner pill over
+  /// them, which the host's drag doesn't move, steps out of its way until they're back on Home.
+  const [leaving, setLeaving] = createSignal(false)
   /// Where a page of an owner is drawn in the window: its left and top, and how much larger it's drawn.
   const pageAt = (owner: number, page: number) => {
     if (untrack(launcher)) return { x: untrack(cardLeft) + INSET + untrack(() => lead(owner)) + page * PAGE - Math.min(sideways(owner).value, homeEnd(owner)), y: CARD_TOP + PILLS, scale: untrack(room).scale }
@@ -124,36 +118,42 @@ export function createPaging(props: { owners: Owner[] }, layout: Screens) {
     const roll = smooth && !untrack(launcher) ? glide : jump
     roll(down, at.owner * height())
     const [moving, to] = [sideways(at.owner), at.screen * pitch()]
-    if (smooth && turnsByHost()) return turn(at.owner, to)
-    // A phone's pages are where they're going at once, and the host draws them sliding there (`along`); for whoever
-    // asked for less motion, they cross-fade.
+    // The pages are where they're going at once, and the host draws them sliding there (`along`); for whoever asked
+    // for less motion, they cross-fade.
     if (smooth && untrack(reducedMotion)) glide(moving, to)
     else jump(moving, to)
   }
 
-  /// Whether a phone's pages are dragged along by the host, as the finger goes, where nothing's carried: the screen's
-  /// own drag, with no turn of the page's JS a move.
+  /// Whether the pages are dragged along by the host, as a finger, a trackpad's fingers or a mouse goes, where nothing's
+  /// carried: the screen's own drag, with no turn of the page's JS a move.
   const dragsAlong = () =>
-    !launcher() && !reducedMotion() && (state().matches("nothing") || state().matches({ editing: "still" }) || state().matches({ category: "closing" }))
-  /// A phone's pages, along: the host drags them as the finger goes, giving past the first and the App Library as a
-  /// rubber band, as an iPhone's do; let go, they go to the page the finger's motion would carry them nearest to
-  /// (`settle`), springing there from where they are at the finger's speed.
+    !reducedMotion() && (state().matches("nothing") || state().matches({ editing: "still" }) || state().matches({ category: "closing" }))
+  /// The pages, along: the host drags them as the finger goes, giving past the first and the App Library as a rubber
+  /// band, as an iPhone's do; let go, they go to the page the finger's motion would carry them nearest to (`settle`),
+  /// springing there from where they are at the finger's speed.
   const along = {
     get drag() {
       return dragsAlong() ? ("x" as const) : undefined
     },
     get dragConstraints() {
       const owner = state().context.at.owner
-      const x = xOf(owner)[0]()
-      return { left: Math.max(0, (stops(owner) - 1) * room().width - x), right: x }
+      const drawn = trackX(owner)
+      return { left: Math.max(0, trackX(owner, (stops(owner) - 1) * pitch()) - drawn), right: drawn }
     },
     // UIScrollView's rubber band.
     dragElastic: 0.55,
+    onDragStart: () => {
+      const { at } = home.getSnapshot().context
+      setLeaving(at.screen === homes(at.owner).length - 1)
+    },
     onDragEnd: ({ offset, velocity, canceled }: Dragged) => {
+      setLeaving(false)
       if (canceled) return
       const owner = home.getSnapshot().context.at.owner
       const from = Math.round(sideways(owner).value / pitch())
-      const screen = settle(from, from - offset.x / pitch(), -velocity.x, stops(owner), pitch())
+      // Where it was let go, and how fast, as far along as the pages are: slower past Home, to the App Library.
+      const at = untrack(() => xAt(owner, trackX(owner, from * pitch()) - offset.x))
+      const screen = settle(from, at / pitch(), -velocity.x / (at > homeEnd(owner) ? libraryReach() : 1), stops(owner), pitch())
       quietFor(350)
       jump(sideways(owner), screen * pitch())
       home.send({ type: "settled", at: { owner, screen } })
@@ -283,7 +283,7 @@ export function createPaging(props: { owners: Owner[] }, layout: Screens) {
       gesture.axis = Math.abs(event.deltaX) > Math.abs(event.deltaY) ? "x" : "y"
       const moving = sideways(gesture.owner)
       if (gesture.axis === "x") stop(moving)
-      Object.assign(gesture, { base: moving.value - x + event.deltaX, from: Math.round(moving.value / pitch()) })
+      Object.assign(gesture, { base: trackX(gesture.owner, moving.value) - x + event.deltaX, from: Math.round(moving.value / pitch()) })
     }
     if (gesture.axis === "y") {
       if (Math.abs(y) < 30) return
@@ -294,14 +294,17 @@ export function createPaging(props: { owners: Owner[] }, layout: Screens) {
     const end = (stops(gesture.owner) - 1) * pitch()
     const lifted = isMomentum || isEnding || (event as Wheeled).phase === "ended" || (event as Wheeled).phase === "cancelled"
     if (!lifted) {
-      const value = gesture.base + x
+      // One to one with the fingers, as they're drawn: slower past Home, to the App Library.
+      const value = xAt(gesture.owner, gesture.base + x)
+      setWheeling(true)
       return jump(moving, value < 0 ? give(value, pitch()) : value > end ? end + give(value - end, pitch()) : value)
     }
     gesture.done = true
-    const velocity = isEnding ? 0 : axisVelocity[0] * 1000
+    setWheeling(false)
+    const velocity = (isEnding ? 0 : axisVelocity[0] * 1000) / (moving.value > homeEnd(gesture.owner) ? libraryReach() : 1)
     const screen = settle(gesture.from, moving.value / pitch(), velocity, stops(gesture.owner), pitch())
-    if (turnsByHost()) turn(gesture.owner, screen * pitch(), velocity)
-    else glide(moving, screen * pitch(), velocity)
+    if (untrack(reducedMotion)) glide(moving, screen * pitch(), velocity)
+    else jump(moving, screen * pitch())
     home.send({ type: "settled", at: { owner: gesture.owner, screen } })
   })
   const wheel = (event: Wheeled) => trackpad.feedWheel({ deltaX: event.deltaX, deltaY: event.deltaY, deltaMode: 0, timeStamp: event.timeStamp, momentum: event.momentum, phase: event.phase } as WheelEventData)
@@ -340,7 +343,7 @@ export function createPaging(props: { owners: Owner[] }, layout: Screens) {
       slide(home.getSnapshot().context.at, true)
     }
   }
-  return { height, pitch, downY, xOf, opacityOf, underCarry, sectionsX, card, lead, cardLeft, trackX, turnOf, flingOf, pageAt, pageUnder, swiping, swipes, along, wheel, release }
+  return { height, pitch, downY, xOf, opacityOf, underCarry, sectionsX, card, lead, cardLeft, trackX, wheeling, leaving, pageAt, pageUnder, swiping, swipes, along, wheel, release }
 }
 
 export type Paging = ReturnType<typeof createPaging>
