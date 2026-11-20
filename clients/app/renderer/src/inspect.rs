@@ -91,8 +91,9 @@
 //! - `settle` (`deadline`, ms, 5000 unless given) → `{settled, ms, pending}`: waits until nothing's pending that ends
 //!   by itself, or the deadline, and says what still is: `request`s the app asked its client that aren't answered
 //!   (`method`, `tool`, `ms`), `timer`s (`in`, ms, and `every` for an interval, which never ends by itself so is
-//!   listed but not waited for), `transition`s on their way (`properties`, how many), and a `frame` that's due as
-//!   what it draws changed, which what changed starts moving in. While the clock's paused only requests and frames
+//!   listed but not waited for), `transition`s on their way (`properties`, how many), a `frame` that's due as
+//!   what it draws changed, which what changed starts moving in, its `script` running, and a frame's `page` on its
+//!   way (`src`), with all its frames' pages have pending, as its own. While the clock's paused only requests and frames
 //!   are waited for.
 
 use std::collections::HashMap;

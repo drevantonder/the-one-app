@@ -476,29 +476,36 @@ impl Screen {
         came | self.idle()
     }
 
+    /// What's pending on it, as `settle` lists it (`inspect::pending`), and on each of its frames' pages, as Playwright's
+    /// network idle counts a page's frames: a frame's page asked for and not here yet (`page`), and whatever its page has
+    /// pending, as its own page's is.
+    fn pending(&self) -> Vec<Value> {
+        // Put away or in the background, it's given no frames: what moves a frame at a time, or by the renderer, can't end
+        // by itself till it's shown, when it's where its time has taken it.
+        let (moving, animating) = if self.visible { (self.transitions.len(), self.js.framing() || self.coasting()) } else { (0, false) };
+        let mut pending = inspect::pending(&self.unanswered, &self.js.timers(), moving, animating, self.changed.is_some(), self.js.busy());
+        // A page busy with something else (`Thread::seed`) runs what's held for it once it's free, as a timer does.
+        if let Some(free) = self.js.holding() {
+            pending.push(json!({"kind": "busy", "in": free}));
+        }
+        // A picture decoding in the background is drawn once it's ready.
+        if self.pictures.pending() > 0 {
+            pending.push(json!({"kind": "picture", "decoding": self.pictures.pending()}));
+        }
+        pending.extend(self.asking.iter().map(|(_, src)| json!({"kind": "page", "src": src})));
+        for child in self.frames.values() {
+            pending.extend(child.screen.pending());
+        }
+        pending
+    }
+
     /// Tells each `settle` waiting that it's settled, if it is, or what's pending once its deadline has come.
     pub(super) fn tell_settled(&mut self) {
         self.tap_ready();
         if self.settling.is_empty() {
             return;
         }
-        // Put away or in the background, it's given no frames: what moves a frame at a time, or by the renderer, can't end
-        // by itself till it's shown, when it's where its time has taken it.
-        let (moving, animating) = if self.visible { (self.transitions.len(), self.js.framing() || self.coasting()) } else { (0, false) };
-        let mut pending = inspect::pending(&self.unanswered, &self.js.timers(), moving, animating, self.changed.is_some(), self.busy());
-        // A page busy with something else (`Thread::seed`) runs what's held for it once it's free, as a timer does.
-        if let Some(free) = self.js.holding() {
-            pending.push(json!({"kind": "busy", "in": free}));
-        }
-        // What a frame's page asked and hasn't heard back is this one's to wait for too.
-        for child in self.frames.values() {
-            pending.extend(inspect::pending(&child.screen.unanswered, &[], 0, child.screen.js.framing(), false, false));
-        }
-        // A picture decoding in the background is drawn once it's ready.
-        let pictures = self.pictures.pending() + self.frames.values().map(|child| child.screen.pictures.pending()).sum::<usize>();
-        if pictures > 0 {
-            pending.push(json!({"kind": "picture", "decoding": pictures}));
-        }
+        let pending = self.pending();
         let settled = inspect::settled(&pending, self.js.clock().paused());
         let now = Instant::now();
         let (told, waiting): (Vec<_>, Vec<_>) = std::mem::take(&mut self.settling).into_iter().partition(|(until, _)| settled || *until <= now);

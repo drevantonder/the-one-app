@@ -334,7 +334,7 @@ async function run(at, folder, scene, requests, seed = 0) {
   // that one's device pixels a point, where it's drawn at one here; on a device, as that decodes them.
   const slowest = devices.tiers.find((tier) => tier.name === (scene.touch ? "low-end Android" : "Intel UHD laptop at 4K"))
   const slower = hostScore && !ssh ? ["--slower", String((hostScore / slowest.cpu) * slowest.scale ** 2)] : []
-  const args = [at, join(folder, "end.png"), join(folder, "end.json"), "--ui", library("client"), "--answers", join(folder, "answers.json"), "--size", `${scene.size[0]}x${scene.size[1]}`, "--scale", String(device?.scale ?? 1), "--requests", "-", ...(dark ? ["--dark"] : []), ...(scene.touch ? ["--touch"] : []), ...(scene.errors ? ["--errors", JSON.stringify(scene.errors)] : []), ...(scene.safeArea ? ["--safe-area", scene.safeArea.join(",")] : []), "--time-zone", scene.timeZone ?? "UTC", ...(seed ? ["--seed", String(seed)] : []), ...panel, ...slower]
+  const args = [at, join(folder, "end.png"), join(folder, "end.json"), "--ui", library("client"), "--answers", join(folder, "answers.json"), "--size", `${scene.size[0]}x${scene.size[1]}`, "--scale", String(device?.scale ?? 1), "--requests", "-", ...(dark ? ["--dark"] : []), ...(scene.touch ? ["--touch"] : []), ...(scene.errors ? ["--errors", JSON.stringify(scene.errors)] : []), ...(scene.safeArea ? ["--safe-area", scene.safeArea.join(",")] : []), ...(scene.latency ? ["--latency", String(scene.latency)] : []), "--time-zone", scene.timeZone ?? "UTC", ...(seed ? ["--seed", String(seed)] : []), ...panel, ...slower]
   if (ssh) {
     const { stdout, stderr, failed } = await runThere(at, folder, args, lines)
     return { answers: stdout.split("\n").filter(Boolean).map((line) => JSON.parse(line)), said: stderr.trim(), failed }
@@ -353,9 +353,9 @@ export async function scenesOf(target, built, folder, all = false) {
     return Object.entries(scenes)
       .map(([name, scene]) => ({ name, ...whole(scene) }))
       .filter((scene) => all || (checking ? scene.checks : scene.motions))
-      .map(({ name, page, component, uses = [], answers = {}, taps = [], size = [390, 844], touch = false, timeZone = "UTC", safeArea, errors, motions, checks, seeds }) => {
+      .map(({ name, page, component, uses = [], answers = {}, taps = [], size = [390, 844], touch = false, timeZone = "UTC", safeArea, errors, latency, motions, checks, seeds }) => {
         const [at, link] = (page ?? (component ? `${COMPONENTS}/${component}.html` : "client/index.html")).split("#")
-        return { name, page: at, link, uses, answers, taps, size, touch, timeZone, safeArea, errors, motions, checks, seeds }
+        return { name, page: at, link, uses, answers, taps, size, touch, timeZone, safeArea, errors, latency, motions, checks, seeds }
       })
   }
   // The gallery lists its own, drawn at `#scenes`.
@@ -695,6 +695,11 @@ function requests(steps, folder) {
     else if (!step.expect) out.push({ request: pressed(step) })
     else {
       const { shown, gone, focused, text, states, drawn, blur, keyboard, margins, tall, textMenu, handles, magnifier, dimmed, js } = step.expect
+      // Whether `settle` says it's settled, waiting a moment, as a check after it reads the page: never while an answer
+      // it waits on is on its way (Playwright's network idle).
+      if (step.expect.settled !== undefined) out.push({ request: { op: "settle", deadline: 300 }, judge: (answer) => answer?.result?.settled !== step.expect.settled && (step.expect.settled ? `it hadn't settled: ${JSON.stringify(answer?.result?.pending)}` : "it said it had settled, with what it waits for on its way") })
+      // Where something's drawn, so what comes in above it isn't seen to push it.
+      if (step.expect.at) out.push({ request: { op: "query", ...selector(step.expect.at.of) }, judge: (answer) => { const y = answer?.result?.nodes?.[0]?.rect?.y; return (y === undefined || Math.abs(y - step.expect.at.y) > 1) && `${named(step.expect.at.of)} is drawn at y ${y}, not ${step.expect.at.y}` } })
       if (js !== undefined) out.push({ request: { op: "window" }, judge: (answer) => answer?.result?.js_bytes > js * 1e6 && `its JS holds ${(answer.result.js_bytes / 1e6).toFixed(1)} MB, over ${js} MB` })
       // Each waited for, as Playwright's assertions are, a second at most, or `within` ms.
       const until = (tap, state, said, is) => ({ request: { op: "wait_for", ...selector(tap), state, ...(is ? { is } : {}), ...(step.within !== undefined ? { timeout: step.within } : {}) }, judge: (answer) => !answer?.result?.met && said(answer) })

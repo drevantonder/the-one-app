@@ -37,7 +37,8 @@
 //! `--latency` has each tool's answer come that many milliseconds of the page's clock after it was asked, as a round
 //! trip to a server takes, but for the tools `--cached` names, which a client answers at once from what it keeps
 //! (a tool that only reads): so a page that opens on what isn't kept, or asks again for what an answer said, opens
-//! slowly here as on a device. The page's clock runs as it opens until it's had every answer, at most 5 s.
+//! slowly here as on a device. The page's clock runs as it opens until it's had every answer, at most 5 s; one due
+//! later comes with the first frame drawn once the clock's been stepped to it.
 //! `--slower` has each picture take that many times as long to decode as on this machine, as on a device with a slower
 //! CPU, where they come later after the page asks for them: the inspector's `window` says the longest one took
 //! (`picture_ms`).
@@ -338,7 +339,20 @@ fn main() -> anyhow::Result<()> {
     let worst_turn = std::cell::Cell::new(std::time::Duration::ZERO);
     // A frame: its page has run what it was sent, the display shows a frame, and the loop takes its turn, drawing what
     // changed; again once the pictures it decodes in the background are ready, as a window is woken to.
+    // What's come by its time on the page's clock (`--latency`), as each request's frame is drawn: an answer still on its
+    // way is a request `settle` waits for.
+    let arriving = coming.clone();
     let frame = |windows: &mut Windows| {
+        let now = renderer::platform::fake_time();
+        let due: Vec<Value> = {
+            let mut coming = arriving.borrow_mut();
+            let (due, later) = coming.drain(..).partition(|(at, _)| *at <= now);
+            *coming = later;
+            due.into_iter().map(|(_, answer)| answer).collect()
+        };
+        for answer in &due {
+            windows.with(id, |screen| screen.message(answer));
+        }
         loop {
             between(windows);
             windows.wait();

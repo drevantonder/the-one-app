@@ -3,7 +3,8 @@
 import { createSignal, Show, useContext } from "solid-js"
 import type { JSX } from "@solidjs/web"
 import { Pressable, ScrollView, Text, View } from "#primitives"
-import { copy } from "#bridge"
+import { copy, touch } from "#bridge"
+import { ListStyle } from "./list.tsx"
 import { Button, Icon, Spinner } from "./button.tsx"
 import { Middle } from "./screen.tsx"
 import { messages, readable, whole } from "../words.ts"
@@ -16,10 +17,11 @@ const look = styles({
   middle: { maxWidth: "none", alignItems: "center", justifyContent: "center", padding: tokens.length.gutter, textAlign: "center" },
   fill: { flexGrow: 1 },
   grey: { color: tokens.colour.secondaryLabel },
+  // A list's card, and each line a row of it, a heading's line over a grey line's, as tall as such a row, so what
+  // replaces it takes the room it took.
   skeleton: {
     alignSelf: "stretch",
-    borderWidth: tokens.length.hairline,
-    borderColor: tokens.colour.quinaryLabel,
+    boxShadow: tokens.shadow.edge,
     borderRadius: tokens.radius.large,
     backgroundColor: tokens.colour.card,
     overflow: "hidden",
@@ -28,10 +30,20 @@ const look = styles({
     transition: tokens.motion.settle,
   },
   late: { opacity: 1 },
-  line: { justifyContent: "center", gap: tokens.grid[2], padding: tokens.grid[3] },
+  // As a row's insides are, in each list style (list.tsx's `Row`).
+  line: { justifyContent: "center", minHeight: tokens.length.row, paddingBlock: tokens.grid[2], paddingInline: tokens.grid[3] },
+  flatLine: { flexDirection: "row", justifyContent: "flex-start", alignItems: "center", gap: tokens.grid[2], paddingBlock: 0, paddingInline: tokens.grid[2] },
+  groupedLine: { minHeight: tokens.length.groupedRow, paddingBlock: tokens.grid[1.5] },
+  sidebarLine: { minHeight: tokens.length.sidebarRow },
   next: { borderTopWidth: tokens.length.hairline, borderColor: tokens.colour.quinaryLabel },
-  bar: { width: "40%", height: tokens.grid[3], borderRadius: tokens.radius.small, backgroundColor: tokens.colour.quinaryLabel, animationName: "pulse", animation: tokens.motion.pulse },
+  // A line of words, as tall as one, its words a bar across the middle of it, as iOS's placeholder draws text.
+  bar: { position: "relative", width: "40%", font: tokens.type.medium, color: tokens.colour.transparent },
+  shade: { position: "absolute", top: "20%", bottom: "20%", start: 0, end: 0, borderRadius: tokens.radius.small, backgroundColor: tokens.colour.quinaryLabel, animationName: "pulse", animation: tokens.motion.pulse },
   longer: { width: "70%" },
+  flatLonger: { width: "30%" },
+  groupedBar: { font: tokens.type.groupedRow },
+  sidebarBar: { font: tokens.type.sidebarRow },
+  captionBar: { font: tokens.type.caption },
   // As the mockup's: a box tinted by how much it needs the user, its symbol in that colour, its words plain, and the
   // action that fixes it at its end.
   problem: {
@@ -111,17 +123,28 @@ export function Empty(props: { children?: JSX.Element; action?: JSX.Element }) {
 }
 
 /// `<Skeleton rows={3} />`: grey shapes the shape of the list that's coming, once it's taken longer than a blink,
-/// so a quick load shows nothing in between. It's what `<Loading fallback>` shows.
+/// so a quick load shows nothing in between: each row as tall as a list's row with a heading and a line of text, so
+/// the list takes its place without moving what's around it. It's what `<Loading fallback>` shows.
 export function Skeleton(props: { rows?: number }) {
+  const style = useContext(ListStyle)
+  const flat = () => !touch() && style === "plain"
+  const grouped = () => !touch() && style === "insetGrouped"
+  const sidebar = () => !touch() && style === "sidebar"
   const [late, setLate] = createSignal(false)
   setTimeout(() => setLate(true), 100)
   return (
     <View role="status" aria-busy="true" aria-label={messages.loading} style={look.state}>
       <View style={[look.skeleton, late() && look.late]}>
         {Array.from({ length: props.rows ?? 3 }, (_, i) => (
-          <View style={[look.line, i > 0 && look.next]}>
-            <View style={look.bar} />
-            <View style={[look.bar, look.longer]} />
+          <View style={[look.line, flat() && look.flatLine, grouped() && look.groupedLine, sidebar() && look.sidebarLine, i > 0 && look.next]}>
+            <View style={[look.bar, grouped() && look.groupedBar, sidebar() && look.sidebarBar]}>
+              <Text>{"\u00a0"}</Text>
+              <View style={look.shade} />
+            </View>
+            <View style={[look.bar, look.longer, flat() && look.flatLonger, style !== "plain" && !touch() && look.captionBar]}>
+              <Text>{"\u00a0"}</Text>
+              <View style={look.shade} />
+            </View>
           </View>
         ))}
       </View>

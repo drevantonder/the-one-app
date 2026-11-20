@@ -490,8 +490,9 @@ export type CheckStep = Tap | { press: Tap; hold?: number; clicks?: number; agen
  * `{ items: ["cut", "copy", "paste", "selectAll"] }`, or false), so many handles drawn (`handles`), and its magnifier
  * or not (`magnifier`), what's over the page dimming it (`dimmed`, as a sheet's or an alert's scrim does), and at most `js`
  * MB held by its page's JS, collected first (the inspector's `js_bytes`), as a page that keeps what it no longer shows
- * grows past it. */
-export type Expect = { shown?: Tap; gone?: Tap; focused?: Tap; text?: string; states?: { of: Tap; is: Record<string, boolean | string> }; drawn?: { of: Tap; opacity: number }; blur?: boolean; dimmed?: boolean; keyboard?: Record<string, unknown>; margins?: number; tall?: { of: Tap; height: number }; textMenu?: { items?: string[] } | false; handles?: number; magnifier?: boolean; js?: number }
+ * grows past it, whether `settle` says it's `settled`, and where something is drawn (`at`: `{ of, y }`, in points,
+ * within one), so what comes in above it is seen not to push it. */
+export type Expect = { shown?: Tap; gone?: Tap; focused?: Tap; text?: string; states?: { of: Tap; is: Record<string, boolean | string> }; drawn?: { of: Tap; opacity: number }; blur?: boolean; dimmed?: boolean; keyboard?: Record<string, unknown>; margins?: number; tall?: { of: Tap; height: number }; textMenu?: { items?: string[] } | false; handles?: number; magnifier?: boolean; js?: number; settled?: boolean; at?: { of: Tap; y: number } }
 /** A press that goes down on what `from` names (as a tap does) and moves as `gesture` says, or input played as a device
  * delivered it (a `trace` file of events, as a check's `trace`), with what's watched move (`follow`, named as a tap is;
  * what scrolls under it is always watched). `steady`: what moves never goes back against its way before its input
