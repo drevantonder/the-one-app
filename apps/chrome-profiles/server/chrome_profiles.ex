@@ -17,7 +17,8 @@ defmodule ChromeProfiles do
   Which browser is on which profile is a note in its person's own artifact of the app's, `browsers/<session>`, written as
   `open` or `update` opens it: Chrome hands a browser that's starting the note's profile, and refuses to close it
   (`chrome.closing`) until it's saved or discarded, unless the note says not to save it. An update's note says when
-  it ends: the job `save_updates` saves and closes any past it, once.
+  it ends: `save_updates`, called by its person's timer at the end of their next update, or when a save that went
+  quiet is next tried again (`Database.timer/5`), saves and closes any past it, once.
 
   An update's note also holds its `state`, so every app and agent sees the same one. It changes only as `@steps`
   says, and every app watching is told as it does: `starting` (its container made, which may mean building or
@@ -124,9 +125,6 @@ defmodule ChromeProfiles do
 
   @impl true
   def hooks, do: ["chrome.starting", "chrome.closing", "vault.types"]
-
-  @impl true
-  def jobs, do: [%{tool: "save_updates", every: 60}]
 
   # It has no app: its profiles are items of a type of the Vault's, which lists them and draws one with this app's
   # component (`vault.types`), so it draws itself.
@@ -376,6 +374,7 @@ defmodule ChromeProfiles do
     end
 
     step(call, session, "opened")
+    timed(call)
 
     %{
       profile: name,
@@ -424,7 +423,20 @@ defmodule ChromeProfiles do
         session
       end
 
+    timed(call)
     %{saved: saved, stopped: stopped}
+  end
+
+  # Has its person's timer call `save_updates` when their next update ends, or a save or a close that couldn't be is
+  # next tried again, as `save_updates` does once one hasn't moved in @lost_minutes (`Database.timer/5`).
+  defp timed(call) do
+    times =
+      for {_session, %{"update" => until} = note} <- notes(call), until != nil do
+        if note["state"] in ~w(saving failed), do: (note["at"] || 0) + @lost_minutes * 60_000, else: until
+      end
+
+    next = if times != [], do: div(Enum.min(times), 1000) + 1
+    Call.app(call, "database").timer(call, "save_updates", %{}, next)
   end
 
   # A profile is an item of the Vault's, in a section of its own, drawn by `client/profile.tsx`.
