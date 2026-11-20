@@ -98,6 +98,12 @@ impl Context {
         Ok(Self { instance, adapter, device, queue, pipelines: Default::default(), lost })
     }
 
+    /// The GPU memory its allocator has taken from the system (`reserved`) and what it's given out of that
+    /// (`allocated`), in bytes, where its backend says (Direct3D 12's and Vulkan's; Metal's makes each texture alone).
+    pub fn memory(&self) -> Option<(u64, u64)> {
+        self.device.generate_allocator_report().map(|report| (report.total_reserved_bytes, report.total_allocated_bytes))
+    }
+
     /// Whether its device was lost (`lost`).
     pub fn lost(&self) -> bool {
         self.lost.load(Ordering::Relaxed)

@@ -734,6 +734,27 @@ impl Renderer {
         &self.atlas
     }
 
+    /// The bytes of GPU memory it holds: its surface's images (three, `desired_maximum_frame_latency` 2's), or its
+    /// offscreen texture and readback, and each texture of its own (a frame kept, a backdrop's, a raster, a shadow's
+    /// tile), by kind.
+    pub fn memory(&self) -> serde_json::Value {
+        let bytes = |texture: &wgpu::Texture| u64::from(texture.width()) * u64::from(texture.height()) * u64::from(texture.format().block_copy_size(None).unwrap_or(4));
+        let surface = match &self.target {
+            Target::Surface { config, .. } => 3 * u64::from(config.width) * u64::from(config.height) * u64::from(config.format.block_copy_size(None).unwrap_or(4)),
+            Target::Offscreen { texture, readback, .. } => bytes(texture) + readback.size(),
+        };
+        let backdrop = self.backdrop.iter().flat_map(|backdrop| backdrop.source.iter().chain(backdrop.levels.iter().flatten().flatten())).map(|(texture, _)| bytes(texture));
+        let blurred = self.blurred.values().map(|(view, _)| bytes(view.texture()));
+        serde_json::json!({
+            "surface": surface,
+            "kept": self.kept.as_ref().map_or(0, |kept| bytes(&kept.texture)),
+            "backdrop": backdrop.chain(blurred).sum::<u64>(),
+            "rasters": self.rasters.values().map(|(texture, _)| bytes(texture)).sum::<u64>(),
+            "tiles": self.tiles.values().map(|(texture, _)| bytes(texture)).sum::<u64>(),
+            "buffer": self.buffer.as_ref().map_or(0, wgpu::Buffer::size),
+        })
+    }
+
     /// Lets go of its surface, waiting for what's drawn on it, before its window goes.
     pub fn destroy(&mut self) {
         self.reserved = None;

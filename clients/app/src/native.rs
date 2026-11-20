@@ -690,6 +690,7 @@ async fn window(started: Instant, entrypoint: &str, subject: Option<&str>, link:
                     if launcher {
                         let _ = to.send(json!({"id": "listen", "command": "listen", "args": {}}));
                     }
+                    crate::memory::changed();
                 }
                 // How long the launcher took to show as it was summoned, to its first frame.
                 Event::Shown(took) => {
@@ -700,10 +701,12 @@ async fn window(started: Instant, entrypoint: &str, subject: Option<&str>, link:
                         views.client.report(json!({"name": "one.client.native.summon.duration", "value": ms, "attributes": {"one.view": app, "one.system.busy": load.busy()}}));
                     }
                     let _ = to.send(json!({"id": "visible", "command": "visible", "args": {"onScreen": true}}));
+                    crate::memory::changed();
                 }
                 Event::Frames(frames) => frames_reported(&app, &frames),
                 Event::PutAway => {
                     let _ = to.send(json!({"id": "visible", "command": "visible", "args": {"onScreen": false}}));
+                    crate::memory::changed();
                 }
                 // Its person is using something else, so a new build waiting for what they typed to be sent looks
                 // again (`updater::ready`), as a web view's window does as its frames say they're done typing.
@@ -714,6 +717,7 @@ async fn window(started: Instant, entrypoint: &str, subject: Option<&str>, link:
                 }
                 // Closed before it was done, the recovery key wasn't seen or used.
                 Event::Closed => {
+                    crate::memory::changed();
                     if let Some(told) = sheet.as_ref().and_then(|sheet| sheet.done.lock().expect("nothing panics holding it").take()) {
                         let _ = told.send(false);
                     }

@@ -724,6 +724,30 @@ impl Windows {
         self.windows.get(&id).is_some_and(|window| window.screen.as_ref().is_ok_and(|screen| screen.covered().is_some()))
     }
 
+    /// Where its memory is, in bytes: the GPU's allocator (`Context::memory`, where its backend says), the atlas,
+    /// and each window's, by its entrypoint, whether it's a panel (the launcher) and on screen, what its renderers hold
+    /// (`Renderer::memory`) and what its JS held as it was last collected (`Screen::js_memory`).
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn memory(&self) -> serde_json::Value {
+        let gpu = self.context.memory().map(|(reserved, allocated)| serde_json::json!({"reserved": reserved, "allocated": allocated}));
+        let windows: Vec<serde_json::Value> = self
+            .windows
+            .values()
+            .map(|window| {
+                let renderers: Vec<serde_json::Value> = window.parts.iter().filter_map(|part| part.renderer.as_ref().map(Renderer::memory)).collect();
+                let screen = window.screen.as_ref().ok();
+                serde_json::json!({
+                    "entrypoint": window.tag["entrypoint"],
+                    "panel": window.panel,
+                    "on_screen": window.on_screen(),
+                    "renderers": renderers,
+                    "js": screen.map_or(0, Screen::js_memory),
+                })
+            })
+            .collect();
+        serde_json::json!({"gpu": gpu, "atlas": self.atlas.usage()["bytes"], "windows": windows})
+    }
+
     /// Hides window `id`, or shows it again, as a phone's root window is while the page over it shows an app it
     /// draws itself.
     pub fn hide(&mut self, id: WindowId, hidden: bool) {

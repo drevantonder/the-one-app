@@ -526,6 +526,12 @@ impl Screen {
         self.js.busy() || self.frames.values().any(|child| child.screen.busy())
     }
 
+    /// The bytes its JS held as it was last collected, and its frames' (`Thread::memory`).
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn js_memory(&self) -> usize {
+        self.js.memory() + self.frames.values().map(|child| child.screen.js_memory()).sum::<usize>()
+    }
+
     /// Why its app's module didn't run, once it's known it didn't.
     pub fn didnt_start(&self) -> Option<&str> {
         self.started.as_ref()?.as_ref().err().map(String::as_str)

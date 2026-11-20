@@ -37,6 +37,7 @@ pub mod computer;
 #[cfg(desktop)]
 pub mod host;
 mod hosts;
+mod memory;
 mod native;
 
 #[cfg(mobile)]

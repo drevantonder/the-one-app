@@ -248,11 +248,13 @@ impl Sandbox {
     /// Collects what its JS no longer holds, as a browser does while nothing's happening, and puts off its next
     /// collection until it holds twice as much and 8 MB more, within its memory, so what it's sent doesn't wait on one:
     /// QuickJS's collector goes through all it holds at once, 15 to 25 ms for a long list's page.
-    fn collect(&self) {
+    /// → the bytes it holds once it's collected.
+    fn collect(&self) -> usize {
         block_on(async {
             self.runtime.run_gc().await;
             let held = usize::try_from(self.runtime.memory_usage().await.malloc_size).unwrap_or(0);
             self.runtime.set_gc_threshold((held * 2 + (8 << 20)).min(MEMORY * 3 / 4).max(held + (4 << 20))).await;
+            held
         })
     }
 
@@ -294,6 +296,8 @@ struct Shared {
     waiting: AtomicBool,
     /// Its window closed: what's running stops.
     stop: Arc<AtomicBool>,
+    /// The bytes its JS held as it was last collected.
+    memory: std::sync::atomic::AtomicUsize,
 }
 
 #[derive(Default)]
@@ -375,7 +379,7 @@ impl Thread {
                             if still.is_some_and(|still| still <= wait) {
                                 collect = false;
                                 let collecting = std::time::Instant::now();
-                                sandbox.collect();
+                                on.memory.store(sandbox.collect(), Ordering::Relaxed);
                                 spent += collecting.elapsed();
                             }
                             None
@@ -418,6 +422,11 @@ impl Thread {
     /// A frame is shown at `time`, on its clock: what asked for one runs (`requestAnimationFrame`).
     pub fn frame(&mut self, time: f64) {
         self.call(Call::Frame(time));
+    }
+
+    /// The bytes its JS held as it was last collected, once it had been still a moment.
+    pub fn memory(&self) -> usize {
+        self.shared.memory.load(Ordering::Relaxed)
     }
 
     /// How long its thread has spent running its JS since this was last asked: what a frame's JS cost.
