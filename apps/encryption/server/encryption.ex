@@ -464,7 +464,12 @@ defmodule Encryption do
            else: (_ -> nil)
 
     check = with {:ok, check, _tag} <- Artifact.read(key, "check"), do: check, else: (:absent -> nil)
-    wrapped = with {:ok, wrapped, _tag} <- Artifact.read(key, "owners/" <> call.actor), do: wrapped, else: (:absent -> nil)
+    # A scheduled call is nobody's, so no key is encrypted to its owner's.
+    wrapped =
+      with actor when is_binary(actor) <- call.actor,
+           {:ok, wrapped, _tag} <- Artifact.read(key, "owners/" <> actor),
+           do: wrapped,
+           else: (_ -> nil)
 
     %{
       owner: call.subject,
