@@ -16,7 +16,7 @@ use std::path::PathBuf;
 use std::rc::Rc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Condvar, Mutex, mpsc};
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use anyhow::anyhow;
 use futures_lite::future::block_on;
@@ -69,6 +69,8 @@ impl Sandbox {
     /// something. It and its imports are read by `files`, each compiled once and kept in `cache`.
     /// QuickJS stops what it runs, as an uncatchable error, once `stop` is set: its window closed.
     fn start(page: &Url, files: Files, cache: Option<PathBuf>, clock: Clock, touch: bool, stop: Arc<AtomicBool>) -> anyhow::Result<Sandbox> {
+        let began = Instant::now();
+        let loads: Rc<RefCell<Loads>> = Rc::default();
         let runtime = AsyncRuntime::new()?;
         let rejected: Rc<RefCell<Vec<(Persistent<Value<'static>>, Persistent<Value<'static>>)>>> = Rc::default();
         let to = rejected.clone();
@@ -78,7 +80,7 @@ impl Sandbox {
             runtime.set_gc_threshold(MEMORY / 4).await;
             runtime.set_max_stack_size(STACK).await;
             let components = Arc::new(Mutex::new(HashSet::new()));
-            runtime.set_loader(Resolve { components: components.clone() }, Modules { files, cache, components, styled: HashSet::new() }).await;
+            runtime.set_loader(Resolve { components: components.clone() }, Modules { files, cache, components, styled: HashSet::new(), loads: loads.clone() }).await;
             runtime.set_interrupt_handler(Some(Box::new(move || stop.load(Ordering::Relaxed)))).await;
             // QuickJS tells of a rejected promise with no handler as it's rejected, and again if one is added after.
             runtime
@@ -95,7 +97,7 @@ impl Sandbox {
         let context = block_on(AsyncContext::full(&runtime))?;
         let posted: Rc<RefCell<Vec<Posted>>> = Rc::default();
         let app = page.to_string();
-        let (host, started) = block_on(context.with(|ctx| -> anyhow::Result<_> {
+        let (host, started, said) = block_on(context.with(|ctx| -> anyhow::Result<_> {
             let globals = ctx.globals();
             globals.set("mutations", mutations(&ctx, &posted)?)?;
             let to = posted.clone();
@@ -111,13 +113,31 @@ impl Sandbox {
             // five, as iOS's and Android's browsers say, a computer's none.
             let touch_points = if touch { 5 } else { 0 };
             let host: rquickjs::Object = run(&ctx, ctx.eval(format!("const FIXED = {fixed}, LOCALE = {locale}, TOUCH_POINTS = {touch_points}, shim = (() => {{\n{EVENT_TARGET_SHIM}\n}})();\n{PRELUDE}")))?;
+            let preluded = began.elapsed();
             run(&ctx, crate::intl::init(&ctx, &clock.time_zone()))?;
             run(&ctx, ctx.eval::<(), _>(INTL))?;
+            let intl = began.elapsed() - preluded;
             let started = run(&ctx, Module::import(&ctx, page.as_str()))?;
-            Ok((Persistent::save(&ctx, host), Persistent::save(&ctx, started)))
+            // Where its start went, in its log: what a page's opening says (`Opening`) is the window's, and this is
+            // its JS's, as it ran before its first frame.
+            let ms = |took: Duration| took.as_millis();
+            let loads = loads.borrow();
+            let said = format!(
+                "its runtime and prelude {} ms, Intl {} ms, its modules read in {} ms, {} compiled and {} loaded as kept bytecode, read, compiled and run in {} ms",
+                ms(preluded),
+                ms(intl),
+                ms(loads.read),
+                loads.compiled,
+                loads.kept,
+                ms(began.elapsed() - preluded - intl),
+            );
+            drop(loads);
+            Ok((Persistent::save(&ctx, host), Persistent::save(&ctx, started), said))
         }))?;
         let sandbox = Sandbox { host, context, runtime, posted, rejected, clock };
+        let running = Instant::now();
         sandbox.settle()?;
+        eprintln!("{page}'s JS started in {} ms: {said}, then ran until it waited in {} ms", began.elapsed().as_millis(), running.elapsed().as_millis());
         // What its module threw as it ran, which its promise holds.
         block_on(sandbox.context.with(|ctx| {
             let started = run(&ctx, started.restore(&ctx))?;
@@ -658,6 +678,16 @@ struct Modules {
     cache: Option<PathBuf>,
     components: Arc<Mutex<HashSet<String>>>,
     styled: HashSet<Url>,
+    loads: Rc<RefCell<Loads>>,
+}
+
+/// How a page's modules were loaded as it started, for what it says of its start (`Sandbox::start`): how long reading
+/// them took, and how many were compiled and how many loaded as the bytecode kept of them (`cache`).
+#[derive(Default)]
+struct Loads {
+    read: Duration,
+    compiled: u32,
+    kept: u32,
 }
 
 impl Modules {
@@ -678,7 +708,9 @@ impl Loader for Modules {
     fn load<'js>(&mut self, ctx: &Ctx<'js>, name: &str, _: Option<ImportAttributes<'js>>) -> rquickjs::Result<Module<'js, Declared>> {
         let refused = |why: String| rquickjs::Error::new_loading_message(name, why);
         let url = Url::parse(name).map_err(|error| refused(error.to_string()))?;
+        let reading = Instant::now();
         let source = (self.files)(&url).map_err(|error| refused(format!("{error:#}")))?;
+        self.loads.borrow_mut().read += reading.elapsed();
         self.style(&url).map_err(|error| refused(format!("its styles: {error:#}")))?;
         let kept = self.cache.as_ref().map(|cache| {
             let mut key = Sha256::new();
@@ -690,10 +722,12 @@ impl Loader for Modules {
         if let Some(bytecode) = kept.as_ref().and_then(|kept| std::fs::read(kept).ok()) {
             // Bytecode this program compiled itself, from these very bytes at this very address.
             if let Ok(module) = unsafe { Module::load(ctx.clone(), &bytecode) } {
+                self.loads.borrow_mut().kept += 1;
                 return Ok(module);
             }
         }
         let module = Module::declare(ctx.clone(), name, source)?;
+        self.loads.borrow_mut().compiled += 1;
         if let (Some(kept), Ok(bytecode)) = (kept, module.write(WriteOptions::default())) {
             let _ = std::fs::create_dir_all(kept.parent().expect("it's in the cache"));
             let _ = std::fs::write(kept, bytecode);

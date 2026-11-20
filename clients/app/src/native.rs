@@ -600,8 +600,8 @@ async fn window(started: Instant, entrypoint: &str, subject: Option<&str>, link:
     };
     let tokens_page = load(&tables)?;
     Opening::step(&view, "tables loaded");
-    // An app's window, and a phone's Home Screen, shows its last frame as it opens again.
-    let snapshot = (app_window || (launcher && cfg!(mobile))).then(|| snapshot_file(entrypoint, subject, &module, &tables)).flatten();
+    // An app's window, and the Home Screen, shows its last frame as it opens again.
+    let snapshot = (app_window || launcher).then(|| snapshot_file(entrypoint, subject, &module, &tables)).flatten();
     let native = Native::get()?;
     let window: Arc<OnceLock<WindowId>> = Arc::default();
     let begun = start(entrypoint, subject, link, launcher, Place::Window(window.clone()), &module, page)?;
@@ -802,8 +802,9 @@ async fn window(started: Instant, entrypoint: &str, subject: Option<&str>, link:
 /// Where an app's window is kept where it was left (`WindowOptions::frame`): a computer's app window's, by its app,
 /// its page and who it's for.
 /// Where a window's last frame is kept (`WindowOptions::snapshot`), named by whose it is, their network, what it shows
-/// for whom (`entrypoint`, `subject`) and its page's build (its `module`, the UI library's `tables` and this program's),
-/// so it's never shown to another person, or by another build. None while no one's signed in. They all go as the
+/// for whom (`entrypoint`, `subject`) and its page's build (its `module` and the UI library's `tables`), so it's never
+/// shown to another person, or for another build of its page; a new build of this program shows it until its page has
+/// drawn, as an update's first start would otherwise show nothing. None while no one's signed in. They all go as the
 /// device signs out (`forget_snapshots`).
 fn snapshot_file(entrypoint: &str, subject: Option<&str>, module: &Url, tables: &[String]) -> Option<std::path::PathBuf> {
     use sha2::{Digest, Sha256};
@@ -811,7 +812,7 @@ fn snapshot_file(entrypoint: &str, subject: Option<&str>, module: &Url, tables: 
     let who = client.who()?;
     let address = client.address().unwrap_or_default();
     let mut hash = Sha256::new();
-    for part in [who.as_str(), &address, entrypoint, subject.unwrap_or_default(), module.as_str(), ::client::BUILD].into_iter().chain(tables.iter().map(String::as_str)) {
+    for part in [who.as_str(), &address, entrypoint, subject.unwrap_or_default(), module.as_str()].into_iter().chain(tables.iter().map(String::as_str)) {
         hash.update(part.as_bytes());
         hash.update([0]);
     }
@@ -872,17 +873,18 @@ fn start(entrypoint: &str, subject: Option<&str>, link: &str, launcher: bool, pl
     let asked: Arc<Mutex<HashMap<String, Asked>>> = Arc::default();
     let to = channel(entrypoint, subject, link, launcher, asked.clone(), native, place)?;
     let kept = crate::app().shell.home()?.join("native");
-    // Each build keeps its pages' compiled JS apart, as another build's is no use to it: what the builds before kept goes,
-    // once, as this one first starts a page.
+    // Pages' compiled JS is kept for the QuickJS that compiled it (`renderer::js::QUICKJS`), so a newer build on the
+    // same QuickJS starts its pages from it, and an update's first start doesn't compile each again (V8's code cache is
+    // kept so): what another QuickJS kept goes, once, as this one first starts a page.
     static PRUNED: std::sync::Once = std::sync::Once::new();
     PRUNED.call_once(|| {
-        for before in std::fs::read_dir(&kept).into_iter().flatten().flatten().filter(|entry| entry.file_name() != ::client::BUILD) {
+        for before in std::fs::read_dir(&kept).into_iter().flatten().flatten().filter(|entry| entry.file_name() != renderer::js::QUICKJS) {
             if let Err(error) = std::fs::remove_dir_all(before.path()) {
                 eprintln!("{} wasn't removed: {error}", before.path().display());
             }
         }
     });
-    let cache = kept.join(::client::BUILD);
+    let cache = kept.join(renderer::js::QUICKJS);
     let (files_to, files_asked, files_view) = (to.clone(), asked.clone(), format!("{}|{entrypoint}", subject.unwrap_or_default()));
     let next = std::sync::atomic::AtomicU64::new(0);
     let files: Files = Box::new(move |url: &Url| {

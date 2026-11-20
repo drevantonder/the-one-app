@@ -1231,7 +1231,8 @@ impl Windows {
                 if let Some(window) = self.windows.get_mut(&id) {
                     (window.on_event)(Event::PutAway);
                 }
-                return;
+                // Its frame as it was put away is what it shows as it opens again (`WindowOptions::snapshot`).
+                return self.keep_snapshot(id);
             }
             Input::Focus(active) => {
                 screen.activate(active);

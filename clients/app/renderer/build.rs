@@ -8,6 +8,7 @@
 
 fn main() {
     println!("cargo::rerun-if-changed=build.rs");
+    quickjs();
     println!("cargo::rerun-if-changed=flutter");
     match std::env::var("CARGO_CFG_TARGET_OS").as_deref() {
         Ok("macos") => text_input(&["src/platform/mac/text_input.mm"], &["flutter/flutter/shell/platform/darwin/macos/framework/Source/FlutterTextInputPlugin.mm"]),
@@ -77,4 +78,18 @@ fn x11() {
     let _ = std::fs::remove_file(&named);
     std::os::unix::fs::symlink(library, &named).expect("OUT_DIR is ours");
     println!("cargo::rustc-link-search=native={}", out.display());
+}
+
+/// Which QuickJS this is, as `QUICKJS`: its crate's version and where it's from, as the workspace's lock pins them, so a
+/// page's bytecode a build of this program compiled is kept for the next build on the same QuickJS (`js::QUICKJS`),
+/// as V8's code cache is kept for its version, and compiled again only once QuickJS changes.
+fn quickjs() {
+    let lock = std::path::Path::new(&std::env::var("CARGO_MANIFEST_DIR").expect("cargo says")).join("../../../Cargo.lock");
+    println!("cargo::rerun-if-changed={}", lock.display());
+    let text = std::fs::read_to_string(&lock).expect("the workspace has its lock");
+    let package = text.split("[[package]]").find(|package| package.contains("name = \"rquickjs-sys\"")).expect("rquickjs-sys is locked");
+    let said: String = package.lines().filter(|line| line.starts_with("version") || line.starts_with("source")).collect();
+    // FNV-1a, as a folder's name.
+    let hash = said.bytes().fold(0xcbf29ce484222325_u64, |hash, byte| (hash ^ u64::from(byte)).wrapping_mul(0x100000001b3));
+    println!("cargo::rustc-env=QUICKJS={hash:016x}");
 }
