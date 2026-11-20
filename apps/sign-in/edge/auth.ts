@@ -10,7 +10,7 @@
 // asks anything here. What a person goes by is a line there too, `people/<name>`: the name they chose as they
 // joined, and their email where how they signed in has one, which a server tells apps of by `people`.
 import { env, waitUntil } from "cloudflare:workers";
-import { betterAuth } from "better-auth";
+import { betterAuth, getCurrentAdapter } from "better-auth";
 import { APIError, createAuthEndpoint, createAuthMiddleware, getAuthoritativeSessionFromCtx, getOAuthState, getSessionFromCtx } from "better-auth/api";
 import { jwt } from "better-auth/plugins";
 import { cimd } from "@better-auth/cimd";
@@ -553,7 +553,7 @@ export function options(origin: string, secret: string, database: BetterAuthOpti
       validateUserInfo: async ({ source }) => {
         if (source.oauth?.providerId !== "google" || source.action !== "create-user") return;
         if ((await getOAuthState())?.invite || (await admits(source.oauth.profile ?? {}))) return;
-        return { error: "not_invited", message: "This network lets your Google account in only with an invitation. Ask its owner for one." };
+        return { error: "not_invited", errorDescription: "This network lets your Google account in only with an invitation. Ask its owner for one." };
       },
     },
     // A network with a Google client signs people in with it too, choosing the account each time.
@@ -566,7 +566,8 @@ export function options(origin: string, secret: string, database: BetterAuthOpti
         create: {
           before: async (user, ctx) => {
             if (ctx?.params?.id !== "google") return;
-            const adapter = ctx.context.adapter;
+            // Better Auth makes the user in a transaction, which a query outside it would wait for.
+            const adapter = await getCurrentAdapter(ctx.context.adapter);
             const invitee = await invitedToGoogle(adapter);
             if (invitee) {
               await adapter.deleteMany({ model: "invite", where: [{ field: "userId", value: invitee.id }] });
