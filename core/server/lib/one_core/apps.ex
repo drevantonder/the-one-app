@@ -353,7 +353,8 @@ defmodule OneCore.Apps do
   @doc """
   Says what's installed for `owner` changed, and returns once a sync that read it after that has finished: whether
   anything that runs here changed. A sync reads what runs for them (`OneCore.Apps.Installed.running/1`), and runs
-  each app's latest version, or with `only`, a list of apps, only theirs, as a deploy knows which changed. `loaded` are
+  each app's latest version, or with `only`, only those apps', each by its artifact with its latest version where
+  whoever said so knew it (its `number`, `code` and whether it's `trusted`), as a deploy does, or `nil`. `loaded` are
   versions already loaded here, each as `OneCore.Apps.Store.newer/3` gives one, held by the caller. An app whose latest version took over has its processes follow it, and its services installed here
   that weren't running start.
 
@@ -381,7 +382,8 @@ defmodule OneCore.Apps do
     runs = loads?(owner)
     {latest, here} = ask({:latest, runs})
     looked = Enum.uniq(Map.values(installed)) -- (known ++ here)
-    newer = Store.newer(if(only == :all, do: looked, else: Enum.filter(looked, &(&1 in only))), latest, runs)
+    {looked, told} = if only == :all, do: {looked, %{}}, else: {Enum.filter(looked, &is_map_key(only, &1)), Map.reject(only, &is_nil(elem(&1, 1)))}
+    newer = Store.newer(looked, latest, runs, told)
     {changed, any} = ask({:looked, owner, installed, loaded ++ newer, Map.keys(latest) ++ here})
     # A process waiting for a sync, as one whose own code brought the newer version in does, can't follow until it ends.
     waiting = ask(:waiting)
@@ -624,7 +626,7 @@ defmodule OneCore.Apps do
   # What two syncs waiting as one look at: every app, if either does.
   defp wider(:all, _only), do: :all
   defp wider(_only, :all), do: :all
-  defp wider(was, only), do: Enum.uniq(was ++ only)
+  defp wider(was, only), do: Map.merge(was, only, fn _artifact, was, told -> told || was end)
 
   # Whoever a request is for, and the network, whose apps it may run, are looked at behind it if this server last
   # looked at them more than five minutes ago, once however many requests come meanwhile. One it has never looked at

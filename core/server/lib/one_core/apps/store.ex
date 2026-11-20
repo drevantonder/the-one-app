@@ -270,17 +270,17 @@ defmodule OneCore.Apps.Store do
   that isn't newer is, and said in the log: one app never stops the others. The first answer a bucket that didn't
   answer gives after has this server look again (`OneCore.Bucket`), which finds it newer then.
   """
-  def newer(artifacts, latest, load \\ true) do
+  def newer(artifacts, latest, load \\ true, told \\ %{}) do
     caller = self()
 
     artifacts
-    |> Task.async_stream(&newer(&1, latest, load, caller), max_concurrency: 16, timeout: :infinity)
+    |> Task.async_stream(&newer(&1, latest, load, caller, told[&1]), max_concurrency: 16, timeout: :infinity)
     |> Enum.flat_map(fn {:ok, newer} -> newer end)
   end
 
   # Each is loaded beside the others, and held for the caller before the process that loaded it ends.
-  defp newer(artifact, latest, load, caller) do
-    with %{"number" => number, "code" => code} = in_bucket <- unanswered(artifact, fn -> about(artifact) end),
+  defp newer(artifact, latest, load, caller, told) do
+    with %{"number" => number, "code" => code} = in_bucket <- told || unanswered(artifact, fn -> about(artifact) end),
          true <- number > Map.get(latest, artifact, 0),
          version when version != nil <-
            unanswered(artifact, fn -> version(artifact, code, load, trusted?(in_bucket)) end),

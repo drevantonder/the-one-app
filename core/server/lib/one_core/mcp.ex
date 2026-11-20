@@ -213,7 +213,14 @@ defmodule OneCore.Mcp do
   # Another server saying there's something new in the bucket for some owners, in some apps if it says which, or with
   # no owners, this server saying it can reach its network's address again.
   defp told("reload", %{"owners" => owners} = params) when owners != nil do
-    only = if is_list(params["apps"]), do: Enum.filter(params["apps"], &is_binary/1), else: :all
+    # Each app with its new version, where the server that deployed it says (`versions`), which isn't read again.
+    versions = if is_map(params["versions"]), do: params["versions"], else: %{}
+
+    only =
+      if is_list(params["apps"]),
+        do: for(app <- params["apps"], is_binary(app), into: %{}, do: {app, deployed_version(versions[app])}),
+        else: :all
+
     deployed = for {name, at} <- params["deployed"] || %{}, is_binary(name) and is_integer(at), into: %{}, do: {name, at}
     for owner <- List.wrap(owners), User.owner?(owner), do: Apps.reload(owner, only, if(deployed != %{}, do: deployed))
   end
@@ -223,6 +230,12 @@ defmodule OneCore.Mcp do
   # Another server saying where an app is in its life for someone moved, which this one's clients ask again.
   defp told("changed", params),
     do: Apps.changed(for owner <- List.wrap(params["owners"]), is_binary(owner), User.owner?(owner), do: owner)
+
+  # An app's new version as the server that deployed it said (`versions`): its number, code and whether it's trusted.
+  defp deployed_version(%{"number" => number, "code" => code} = version) when is_integer(number) and is_binary(code),
+    do: Map.take(version, ["number", "code", "trusted"])
+
+  defp deployed_version(_version), do: nil
 
   # What a request says of itself.
   defp meta(%{"_meta" => %{} = meta}), do: meta

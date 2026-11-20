@@ -81,7 +81,7 @@ defmodule OneCore.Apps.Deploy do
              # names them.
              :ok <- step("listed", fn -> listed(artifact) end),
              {:ok, number} <- step("keep", fn -> Store.keep(artifact, name, version, built, files, from, trusted, was) end),
-             :ok <- committed(owner, name, number, version, install, began) do
+             :ok <- committed(owner, name, %{"number" => number, "code" => version.code, "trusted" => trusted}, version, install, began) do
           warnings = Enum.join(Enum.reject([warnings, styling | untasked(name, version, built)], &(&1 == "")), "\n")
           {:ok, number, warnings}
         end
@@ -119,7 +119,7 @@ defmodule OneCore.Apps.Deploy do
   # once this one runs it, as the others load it: one restarting onto a new build answers nothing until it's up, and
   # held every deploy that long (133 s while a network updated). It supersedes the narrower copies of itself, once
   # it's answered.
-  defp committed(owner, name, number, %Version{artifact: artifact} = version, install, began) do
+  defp committed(owner, name, %{"number" => number} = latest, %Version{artifact: artifact} = version, install, began) do
     forget()
     moved = step("installed", fn -> if install, do: Installed.change(owner, name, {:deployed, artifact, nil}), else: %{} end)
     # The other servers load it while this one takes it over.
@@ -128,10 +128,11 @@ defmodule OneCore.Apps.Deploy do
 
     Task.Supervisor.start_child(OneCore.Asks, fn ->
       OpenTelemetry.Ctx.attach(trace)
-      step("notify", fn -> Server.notify_servers(owners, "reload", %{apps: [artifact], deployed: %{name => began}}) end)
+      versions = %{artifact => latest}
+      step("notify", fn -> Server.notify_servers(owners, "reload", %{apps: [artifact], versions: versions, deployed: %{name => began}}) end)
     end)
 
-    step("sync", fn -> if install, do: Apps.sync(owner, [{artifact, number, {:ok, version}}], [artifact]) end)
+    step("sync", fn -> if install, do: Apps.sync(owner, [{artifact, number, {:ok, version}}], %{artifact => nil}) end)
     # This server's clients are told it moved, and when its deploy began, as the others tell theirs.
     if install, do: Apps.changed([owner], nil, %{name => began})
 
