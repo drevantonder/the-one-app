@@ -37,7 +37,8 @@ defmodule OneCore.Apps.Installed do
   has a data folder for each. Who they are is kept beside the network's installs, the blob
   `<owner>/subjects/<name>/<who>` for each, so its jobs run and its services act for each of them (`subjects/2`).
   """
-  alias OneCore.{Artifact, Bucket, Cache}
+  require Logger
+  alias OneCore.{Artifact, Bucket, Cache, Call, Servers}
 
   @blob "installs"
 
@@ -206,13 +207,29 @@ defmodule OneCore.Apps.Installed do
 
   @doc """
   Says that `who` keeps their own data with the app installed for `owner` as `name`, which keeps each person's apart.
-  Said once: each server keeps that it has.
+  Said once: each server keeps that it has. Only the owner's servers write beside their installs, so a person's own
+  server running their call of a network's app (`OneCore.Apps.runs?/4`) has one of the network's say it
+  (`apps/subject`), and says it again with their next call where none answered.
   """
   def subject(owner, name, who) do
     Cache.fetch(__MODULE__, {owner, name, who}, fn ->
-      Bucket.write("#{owner}/subjects/#{name}/#{who}", "")
-      {:commit, :ok}
+      if Servers.here?(owner) do
+        Bucket.write("#{owner}/subjects/#{name}/#{who}", "")
+        {:commit, :ok}
+      else
+        elsewhere(owner, name, who)
+      end
     end)
+  end
+
+  defp elsewhere(owner, name, who) do
+    Call.run_elsewhere({"apps/subject", %{installed: owner, app: name}}, {nil, who}, false, owner, name)
+  rescue
+    unanswered ->
+      Logger.warning("#{who} isn't said to keep their own data with #{name} yet: #{Exception.message(unanswered)}")
+      {:ignore, :ok}
+  catch
+    {Call, {:forwarded, _said}} -> {:commit, :ok}
   end
 
   @doc "Who keeps their own data with the app installed for `owner` as `name`, besides `owner`: each user or group."

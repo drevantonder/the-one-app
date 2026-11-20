@@ -506,7 +506,7 @@ defmodule OneCore.Apps.Calls do
   defp new_call(at, name, versions, ask, {actor, subject}, forwarded) do
     whose = whose(at, versions[name], subject)
 
-    if whose != at and Apps.runs?(at, versions[name].trusted), do: Installed.subject(at, name, whose)
+    if whose != at and Apps.runs?(at, versions[name].trusted, whose, actor), do: Installed.subject(at, name, whose)
 
     own = "#{whose}/own/#{name}"
 

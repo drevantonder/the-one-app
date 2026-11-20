@@ -53,7 +53,7 @@ defmodule OneCore.Mcp do
 
   alias OneCore.Call.State
   alias OneCore.Mcp.Principal
-  alias OneCore.Apps.{Calls, Icons, Store, Version}
+  alias OneCore.Apps.{Calls, Icons, Installed, Store, Version}
 
   # The rules every agent is told first, here and in the network's `/llms.txt` (`core/edge/mcp/mcp.ts`).
   @external_resource Path.expand("../../priv/rules.md", __DIR__)
@@ -317,6 +317,13 @@ defmodule OneCore.Mcp do
     function = fn -> Calls.function(at, app, params["function"], params["arguments"], principal, true) end
     asks = Servers.acts_for?(from, at) or (at == "network" and User.owner(subject) in Servers.acts_for(from))
     between(asks && forwarded, function)
+  end
+
+  # A person's own server has one of the network's say that they keep their own data with its app
+  # (`Installed.subject/3`): only they, as it acts for them.
+  defp result("apps/subject", %{"installed" => at, "app" => name}, from, {_actor, subject}, forwarded) do
+    who = User.owner(subject)
+    between(who in Servers.acts_for(from) && forwarded, fn -> {:ok, Installed.subject(at, name, who)} end)
   end
 
   defp result("apps/schedule", %{"installed" => at, "app" => app}, from, {_actor, subject}, forwarded) do
