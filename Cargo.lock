@@ -5,7 +5,7 @@ version = 4
 [[package]]
 name = "accesskit"
 version = "0.25.2"
-source = "git+https://github.com/drevantonder/accesskit?rev=688806ffef103203be0546844661724041a5505c#688806ffef103203be0546844661724041a5505c"
+source = "git+https://github.com/ptc-au/accesskit?rev=688806ffef103203be0546844661724041a5505c#688806ffef103203be0546844661724041a5505c"
 dependencies = [
  "uuid",
 ]
@@ -13,7 +13,7 @@ dependencies = [
 [[package]]
 name = "accesskit_android"
 version = "0.9.1"
-source = "git+https://github.com/drevantonder/accesskit?rev=688806ffef103203be0546844661724041a5505c#688806ffef103203be0546844661724041a5505c"
+source = "git+https://github.com/ptc-au/accesskit?rev=688806ffef103203be0546844661724041a5505c#688806ffef103203be0546844661724041a5505c"
 dependencies = [
  "accesskit",
  "accesskit_consumer",
@@ -24,7 +24,7 @@ dependencies = [
 [[package]]
 name = "accesskit_consumer"
 version = "0.39.2"
-source = "git+https://github.com/drevantonder/accesskit?rev=688806ffef103203be0546844661724041a5505c#688806ffef103203be0546844661724041a5505c"
+source = "git+https://github.com/ptc-au/accesskit?rev=688806ffef103203be0546844661724041a5505c#688806ffef103203be0546844661724041a5505c"
 dependencies = [
  "accesskit",
  "hashbrown 0.17.1",
@@ -7580,7 +7580,7 @@ dependencies = [
 [[package]]
 name = "rquickjs-sys"
 version = "0.14.0"
-source = "git+https://github.com/drevantonder/rquickjs?rev=b57d6e6e70f012c75a4e60e5fb7b420f95b1fe65#b57d6e6e70f012c75a4e60e5fb7b420f95b1fe65"
+source = "git+https://github.com/ptc-au/rquickjs?rev=b57d6e6e70f012c75a4e60e5fb7b420f95b1fe65#b57d6e6e70f012c75a4e60e5fb7b420f95b1fe65"
 dependencies = [
  "bindgen",
  "cc",
