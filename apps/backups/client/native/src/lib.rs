@@ -168,7 +168,7 @@ fn files(root: &Path, at: &Path, names: &mut Vec<String>) -> Result<()> {
         if path.is_dir() {
             files(root, &path, names)?;
         } else {
-            names.push(path.strip_prefix(root)?.to_string_lossy().replace('\\', "/"));
+            names.push(path.strip_prefix(root)?.iter().map(|part| part.to_string_lossy()).collect::<Vec<_>>().join("/"));
         }
     }
     Ok(())
