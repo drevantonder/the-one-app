@@ -147,11 +147,10 @@ defmodule ComputerUse.Desktop do
   Streams the screen as WebRTC video to the app whose SDP offer `request` has, as JSON, with the ICE servers to use
   and WebRTC's sender for each kind of machine (`webrtc`'s `sender`): this computer's, on its person's screen, answers
   it and carries on by itself until the app goes. On a Mac the helper starts it, so macOS allows it Screen Recording
-  and Accessibility as it does Cua Driver; on Linux it's given the graphical session's display (X11's). Gives the SDP
-  answer.
+  and Accessibility as it does Cua Driver; on Linux it's given the graphical session's display (X11's); on Windows this
+  server runs in its person's session already. Gives the SDP answer.
   """
   def stream(service, request) do
-    if match?({:win32, _}, :os.type()), do: raise("A Windows PC's own screen has no live video yet: it's shown a picture at a time.")
     request = JSON.decode!(request)
     folder = OneCore.Service.folder(service)
     sender = sender(folder, request["sender"])
@@ -161,6 +160,7 @@ defmodule ComputerUse.Desktop do
       case :os.type() do
         {:unix, :darwin} -> "screencapturekit"
         {:unix, :linux} -> "x11"
+        {:win32, _} -> "graphicscapture"
       end
 
     config = Map.merge(Map.take(request, ["offer", "iceServers"]), %{"log" => Path.join(folder, "stream.log"), "source" => %{"kind" => source}})
@@ -181,6 +181,11 @@ defmodule ComputerUse.Desktop do
         {:unix, :linux} ->
           %{stdout: sdp, stderr: why} = OneCore.Command.run([sender, file], 30, env: session())
           {sdp, why}
+
+        # Windows has no sh for OneCore.Command; the sender answers within seconds or says why.
+        {:win32, _} ->
+          {said, _} = System.cmd(sender, [file], stderr_to_stdout: true)
+          if String.starts_with?(said, "v=0"), do: {said, ""}, else: {"", said}
       end
 
     if String.starts_with?(answer, "v=0"), do: answer, else: raise("Couldn't stream its screen: #{String.trim(why)}")
@@ -201,10 +206,11 @@ defmodule ComputerUse.Desktop do
       case :os.type() do
         {:unix, :darwin} -> "macos-#{arch}"
         {:unix, :linux} -> "linux-#{arch}"
+        {:win32, _} -> "windows-x86_64"
       end
 
     %{"url" => url, "sha256" => sha256} = senders[target] || raise "WebRTC has no sender for #{target}"
-    file = Path.join(folder, "stream-#{sha256}")
+    file = Path.join(folder, "stream-#{sha256}" <> if(match?({:win32, _}, :os.type()), do: ".exe", else: ""))
 
     if not File.exists?(file) do
       %{status: 200, body: body} = Req.get!(url, decode_body: false, retry: false, receive_timeout: 300_000)
