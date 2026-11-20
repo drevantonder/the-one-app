@@ -50,7 +50,9 @@ export function createMenu(props: MenuProps) {
     setShown(!!to)
   }
   const close = () => open(undefined)
-  const select = (value: string) => (close(), props.onSelect?.(value))
+  // What's chosen is told before it closes, as Radix's and Ark's menus do: whoever opened it may still be waiting for
+  // the choice, and closing it first tells them it was dismissed.
+  const select = (value: string) => (props.onSelect?.(value), close())
   const layer = createDismissable({ open: () => !!at(), onDismiss: close })
   // Opened, the keyboard is on its first item. Its size stays what it was last laid out as, which its host says again
   // whenever it changes: a host tells a node's layout only as it changes, so one moved into the layer at the size it had

@@ -445,8 +445,8 @@ export const machine = setup({
         edit: { target: "editing", actions: "edit" },
       },
     },
-    // The owner switcher's list of every owner, on Home. Picking one ends it, in whichever order its menu tells of the
-    // two.
+    // The owner switcher's list of every owner, on Home. Picking one ends it; its menu tells of the pick before it
+    // closes.
     listing: {
       on: {
         dismiss: "nothing",
