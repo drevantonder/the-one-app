@@ -859,11 +859,16 @@ impl Renderer {
                     .map(|(one, backdrop)| {
                         use std::hash::{Hash, Hasher};
                         let mut hasher = std::collections::hash_map::DefaultHasher::new();
-                        let before = if one == 0 { &drawn.batches[..at] } else { &drawn.batches[..=at] };
-                        (drawn.over, before, one, backdrop.blur.0.to_bits()).hash(&mut hasher);
+                        // What's drawn before it: the batches before, and the backdrops of its own batch before it, not
+                        // it, so a backdrop fading (a veil coming in) blurs what's behind it once, not each frame; and
+                        // the region it blurs.
+                        // Safety: the scene's primitives are `#[repr(C)]` structs of numbers, as `push_instances` reads.
+                        let earlier = unsafe { std::slice::from_raw_parts(backdrops.as_ptr().cast::<u8>(), std::mem::size_of_val(&backdrops[..one])) };
                         let shown = backdrop.bounds.intersect(&backdrop.content_mask.bounds);
                         let (x, y) = (shown.origin.x.0 - origin[0], shown.origin.y.0 - origin[1]);
-                        let mut blur = self.plan_blur(size, backdrop.blur.0, [x, y, x + shown.size.width.0, y + shown.size.height.0]);
+                        let region = [x, y, x + shown.size.width.0, y + shown.size.height.0];
+                        (drawn.over, &drawn.batches[..at], earlier, backdrop.blur.0.to_bits(), region.map(f32::to_bits)).hash(&mut hasher);
+                        let mut blur = self.plan_blur(size, backdrop.blur.0, region);
                         blur.behind = Some(hasher.finish());
                         blur
                     })
@@ -1302,7 +1307,7 @@ impl Renderer {
         }
         let size = (frame.width(), frame.height());
         let mut work = self.work.get();
-        work.blurred += f64::from(size.0) * f64::from(size.1);
+        work.blurred += f64::from(blur.region[2] - blur.region[0]) * f64::from(blur.region[3] - blur.region[1]);
         self.work.set(work);
         if self.backdrop.as_ref().is_none_or(|backdrop| backdrop.size != size) {
             self.backdrop = Some(BackdropTextures { size, source: None, levels: Default::default() });

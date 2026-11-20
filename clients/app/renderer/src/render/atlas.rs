@@ -28,8 +28,9 @@ struct AtlasState {
     storage: AtlasStorage,
     tiles_by_key: HashMap<AtlasKey, AtlasTile>,
     uploads: Vec<PendingUpload>,
-    /// How many times what's in it has changed: a frame whose sprites are the same bytes as another's, with this the
-    /// same too, looks the same.
+    /// How many times what's in a tile has been drawn over (a video's next frame): a frame whose sprites are the same
+    /// bytes as another's, with this the same too, looks the same. A tile added changes none a frame drew before, as
+    /// none is ever let go of and its room given to another.
     generation: u64,
     /// How many textures it has made, whose bind groups a renderer keeps (`Renderer::atlas_group`).
     made: u64,
@@ -100,7 +101,9 @@ impl Atlas {
     /// before the next frame that draws it.
     pub(crate) fn write(&self, tile: &AtlasTile, size: Size<DevicePixels>, data: Vec<u8>) {
         let bounds = crate::geometry::Bounds { origin: crate::geometry::point(tile.bounds.origin.x + DevicePixels(1), tile.bounds.origin.y + DevicePixels(1)), size };
-        self.0.lock().uploads.push(PendingUpload { id: tile.texture_id, bounds, data });
+        let mut lock = self.0.lock();
+        lock.generation += 1;
+        lock.uploads.push(PendingUpload { id: tile.texture_id, bounds, data });
     }
 
     pub(crate) fn get_or_insert_with<'a>(
@@ -169,7 +172,6 @@ impl AtlasState {
     }
 
     fn flush(&mut self) {
-        self.generation += u64::from(!self.uploads.is_empty());
         for upload in self.uploads.drain(..) {
             self.uploaded += upload.data.len() as u64;
             let texture = &self.storage[upload.id];
