@@ -25,6 +25,11 @@
 // version) gives nothing, which it says. It says too how quickly the native host drew each (the harness's
 // `--measure`): its first frame, a frame when nothing changes, as its first field is typed in and as its first list
 // scrolls, the memory drawing took and what a second window adds, to compare a change's before and after.
+//
+// As a page opens there, each tool's answer comes a round trip after it's asked (LATENCY_MS), but a tool's that only
+// reads, which a client answers at once from what it keeps: its first content is when it's had every answer, and a
+// scene whose page takes longer than OPENS_WITHIN_MS to it, as one that asks again for what an answer said or opens on
+// a tool that changes something does, fails, which the exit status says.
 import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs"
 import { basename, dirname, join, resolve } from "node:path"
 import { fileURLToPath } from "node:url"
@@ -262,6 +267,29 @@ async function web(browser, serve, key, scene, folder) {
   return drawn ? { problems } : { missing: `it drew nothing${problems.length ? `: ${problems.join("; ")}` : ""}` }
 }
 
+// A round trip to a server, as a live network's take, and how soon a page opened should show its first content.
+const LATENCY_MS = 150
+const OPENS_WITHIN_MS = 300
+
+// The tools a client answers from what it keeps as a page opens: those that only read, as each app's `tools/0` and One
+// Core's own definitions say (`read_only: true`), named as a client calls them.
+const kept = (() => {
+  const tools = new Set()
+  const read = (file, prefix) => {
+    const text = readFileSync(file, "utf8")
+    const named = [...text.matchAll(/name: "([\w-]+)"/g)]
+    named.forEach((match, at) => {
+      if (/read_only: true/.test(text.slice(match.index, named[at + 1]?.index ?? text.length))) tools.add(prefix + match[1])
+    })
+  }
+  read(join(root, "core/server/lib/one_core/tools/definitions.ex"), "")
+  for (const app of readdirSync(join(root, "apps"))) {
+    const server = join(root, "apps", app, "server")
+    if (existsSync(server)) for (const file of readdirSync(server, { recursive: true })) if (String(file).endsWith(".ex")) read(join(server, String(file)), `${app}_`)
+  }
+  return [...tools]
+})()
+
 /// A scene drawn by a native host's headless harness, or nothing where it hasn't been built or can't draw the page.
 function native(built, scene, folder, used) {
   if (!existsSync(harness)) return { missing: "the native harness isn't built (`cargo build -p renderer --example screenshot --features fake`)" }
@@ -286,7 +314,7 @@ function native(built, scene, folder, used) {
   // settles, as the DOM's is, and what's laid out once it's drawn (onLayout) is drawn again.
   const requests = [{ op: "clock", step: 1000 }, ...scene.taps.flatMap((tap) => [tap.key ? { op: "key", ...tap } : tap.type ? { op: "type", text: tap.type } : { op: "tap", ...(typeof tap === "object" ? tap : { name: tap }) }, { op: "clock", step: 1000 }])].map((request, at) => JSON.stringify({ v: 1, id: at + 1, ...request })).join("\n")
   const run = Bun.spawnSync(
-    [harness, at, join(folder, "native.png"), join(folder, "native.json"), "--ui", here("dist/client"), "--answers", join(folder, "answers.json"), "--size", `${scene.size[0]}x${scene.size[1]}`, "--scale", "2", "--measure", ...(dark ? ["--dark"] : []), ...(scene.touch ? ["--touch"] : []), ...(requests ? ["--requests", "-"] : [])],
+    [harness, at, join(folder, "native.png"), join(folder, "native.json"), "--ui", here("dist/client"), "--answers", join(folder, "answers.json"), "--size", `${scene.size[0]}x${scene.size[1]}`, "--scale", "2", "--measure", "--latency", String(LATENCY_MS), "--cached", kept.join(","), ...(dark ? ["--dark"] : []), ...(scene.touch ? ["--touch"] : []), ...(requests ? ["--requests", "-"] : [])],
     { stdin: requests ? new TextEncoder().encode(requests) : undefined, env: { ...process.env, VK_ICD_FILENAMES: process.env.VK_ICD_FILENAMES ?? "/usr/share/vulkan/icd.d/lvp_icd.json" } },
   )
   if (run.exitCode !== 0 || !existsSync(join(folder, "native.json"))) return { missing: run.stderr.toString().trim().split("\n").at(-1) || "the harness drew nothing" }
@@ -301,8 +329,8 @@ function native(built, scene, folder, used) {
 }
 
 /// How quickly the native host drew a scene, as a line.
-const timings = ({ first_frame_ms, worst_paint_ms, idle_ms, typing_ms, scrolling_ms, memory_mb, window_mb }) =>
-  [`first frame ${first_frame_ms} ms`, `worst frame ${worst_paint_ms} ms on its thread`, `frame ${idle_ms} ms idle`, typing_ms != null && `${typing_ms} ms typing`, scrolling_ms != null && `${scrolling_ms} ms scrolling`, `${memory_mb} MB`, `${window_mb} MB a window more`].filter(Boolean).join(", ")
+const timings = ({ first_frame_ms, first_content_ms, worst_paint_ms, idle_ms, typing_ms, scrolling_ms, memory_mb, window_mb }) =>
+  [`first frame ${first_frame_ms} ms`, first_content_ms != null && `first content ${first_content_ms} ms`, `worst frame ${worst_paint_ms} ms on its thread`, `frame ${idle_ms} ms idle`, typing_ms != null && `${typing_ms} ms typing`, scrolling_ms != null && `${scrolling_ms} ms scrolling`, `${memory_mb} MB`, `${window_mb} MB a window more`].filter(Boolean).join(", ")
 
 /// How much of two pictures differs, from 0 to 1, where they're the same size, with where in `diff`.
 function differs(one, other, diff) {
@@ -404,6 +432,10 @@ for (const target of targets) {
     if (drawn.missing) said.push(`  native: ${drawn.missing}`)
     else if (shown.tree !== undefined) compared(said, "DOM and native", shown.tree, drawn.tree, join(folder, "dom.png"), join(folder, "native.png"), join(folder, "diff.png"))
     if (drawn.measured) said.push(`  native: ${timings(drawn.measured)}`)
+    if (drawn.measured?.first_content_ms > OPENS_WITHIN_MS) {
+      said.push(`  opens slowly: its first content came ${drawn.measured.first_content_ms} ms after it opened, over ${OPENS_WITHIN_MS} ms, with each answer a client doesn't keep ${LATENCY_MS} ms away`)
+      process.exitCode = 1
+    }
     if (onWeb.missing) said.push(`  web: ${onWeb.missing}`)
     else if (onTheWeb && !drawn.missing) {
       const part = differs(join(folder, "native.png"), join(folder, "web.png"), join(folder, "web-diff.png"))

@@ -3,6 +3,7 @@
 //!     cargo run -p renderer --example screenshot --features fake -- <page's built folder> <out.png> <out.json> \
 //!       [--ui core/ui/dist/client] [--answers answers.json] [--size 480x360] [--scale 2] [--dark] [--requests <file>|-]
 //!       [--safe-area <top>,<right>,<bottom>,<left>] [--touch] [--panel <corner>] [--gpu] [--measure] [--seed <n>]
+//!       [--latency <ms> [--cached <tool>,…]]
 //!
 //! It runs the module the folder's `index.html` loads, as `bun app.js` built it, with the UI library a native host
 //! loads from `--ui` (`bun run build` in core/ui), and answers what the page asks its client from `--answers`, as
@@ -28,6 +29,10 @@
 //! what its page changed reaches the window one to three of its turns late, as a page slower than its window's does.
 //! `--gpu` waits for the GPU after each frame drawn, and says how long that took with its cost (`gpu_ms`): on a real
 //! GPU, its time for the frame, as a device that draws it would take.
+//! `--latency` has each tool's answer come that many milliseconds of the page's clock after it was asked, as a round
+//! trip to a server takes, but for the tools `--cached` names, which a client answers at once from what it keeps
+//! (a tool that only reads): so a page that opens on what isn't kept, or asks again for what an answer said, opens
+//! slowly here as on a device. The page's clock runs as it opens until it's had every answer, at most 5 s.
 //! `--measure` says, on stderr after the rest, how quickly it draws, as a line `measured {…}`: its first
 //! frame (`first_frame_ms`, from the GPU's start to the frame read back), a frame's time when nothing changes
 //! (`idle_ms`), as its first text field takes a character a frame (`typing_ms`) and as its first list scrolls
@@ -76,6 +81,11 @@ fn main() -> anyhow::Result<()> {
         Some(answers) => serde_json::from_str(&std::fs::read_to_string(answers)?)?,
         None => json!({}),
     };
+    let latency: f64 = flag("--latency").and_then(|ms| ms.parse().ok()).unwrap_or(0.0);
+    let cached: Vec<String> = flag("--cached").map(|tools| tools.split(',').map(str::to_owned).collect()).unwrap_or_default();
+    // The answers on their way, each with when it comes on the page's clock (`--latency`).
+    let coming: std::rc::Rc<std::cell::RefCell<Vec<(f64, Value)>>> = Default::default();
+    let sent = coming.clone();
 
     // The page's files at `file:///`, as its own folder, with the UI library's under /ui/client/.
     let folder = std::fs::canonicalize(folder)?;
@@ -116,7 +126,7 @@ fn main() -> anyhow::Result<()> {
     let asked: renderer::Asked = Box::new(move |message, _| {
         let id = message.get("id")?.clone();
         let (method, params) = (message["method"].as_str().unwrap_or_default(), &message["params"]);
-        Some(match (method, params["name"].as_str()) {
+        let answer = match (method, params["name"].as_str()) {
             ("tools/call", Some(tool)) => match answers.get(tool) {
                 // `{ "$error": "…" }` is the tool's refusal, as the scenes (core/ui/scenes.js) answer it.
                 Some(answer) if answer.get("$error").is_some() => json!({"jsonrpc": "2.0", "id": id, "result": {"isError": true, "content": [{"type": "text", "text": answer["$error"].as_str().unwrap_or_default()}]}}),
@@ -127,7 +137,14 @@ fn main() -> anyhow::Result<()> {
                 Some(result) => json!({"jsonrpc": "2.0", "id": id, "result": result}),
                 None => json!({"jsonrpc": "2.0", "id": id, "error": {"code": -32601, "message": format!("{method} isn't answered here")}}),
             },
-        })
+        };
+        match params["name"].as_str() {
+            Some(tool) if method == "tools/call" && latency > 0.0 && !cached.iter().any(|kept| kept == tool) => {
+                sent.borrow_mut().push((renderer::platform::fake_time() + latency, answer));
+                None
+            }
+            _ => Some(answer),
+        }
     });
     let mut screen = Screen::new(js, Some(asked), Size { width, height }, insets);
     screen.page = tokens_page;
@@ -171,6 +188,31 @@ fn main() -> anyhow::Result<()> {
     })?;
     if panel.is_some() {
         windows.summon(id, std::time::Instant::now(), None);
+    }
+    // With `--latency`, the page's clock runs as it opens, each answer coming when it's due, until it's had them all:
+    // its first content is then, on that clock.
+    let opened = renderer::platform::fake_time();
+    let mut first_content = None;
+    if latency > 0.0 {
+        loop {
+            windows.run(1000.0 / 60.0);
+            let now = renderer::platform::fake_time();
+            let due: Vec<Value> = {
+                let mut coming = coming.borrow_mut();
+                let (due, later) = coming.drain(..).partition(|(at, _)| *at <= now);
+                *coming = later;
+                due.into_iter().map(|(_, answer)| answer).collect()
+            };
+            for answer in &due {
+                windows.with(id, |screen| screen.message(answer));
+            }
+            if !due.is_empty() {
+                first_content = Some(now - opened);
+            }
+            if (coming.borrow().is_empty() && windows.with(id, |screen| !screen.starting()).unwrap_or(true)) || now - opened > 5000.0 {
+                break;
+            }
+        }
     }
     let first_frame = std::cell::Cell::new(None);
     let worst_turn = std::cell::Cell::new(std::time::Duration::ZERO);
@@ -297,7 +339,7 @@ fn main() -> anyhow::Result<()> {
         second.destroy();
         eprintln!(
             "measured {}",
-            json!({"first_frame_ms": ms(first_frame_ms), "worst_paint_ms": ms(Some(worst_paint_ms)), "idle_ms": ms(idle), "typing_ms": ms(typing), "scrolling_ms": ms(scrolling), "memory_mb": memory_mb, "window_mb": window_mb})
+            json!({"first_frame_ms": ms(first_frame_ms), "first_content_ms": ms(first_content), "worst_paint_ms": ms(Some(worst_paint_ms)), "idle_ms": ms(idle), "typing_ms": ms(typing), "scrolling_ms": ms(scrolling), "memory_mb": memory_mb, "window_mb": window_mb})
         );
     }
     Ok(())
