@@ -20,7 +20,7 @@ defmodule Encryption do
 
   # It reads which apps run inside a call as `call.loaded` names them.
   @impl true
-  def requires, do: %{"core" => ">= 0.32.196"}
+  def requires, do: %{"core" => ">= 0.32.202"}
 
   # Nothing looks into it as it runs (`server-debug`): what it's given and keeps are keys, and what they decrypt.
   @impl true
@@ -82,7 +82,7 @@ defmodule Encryption do
   @doc """
   What a device needs of an artifact to encrypt for it, for an app's read-only tool to answer: the artifact's
   name, its `epoch`, the `servers` that open it, by their keys, and the ones that `may` be chosen, which are those
-  that cover whose it is, their own first (`OneCore.Servers.covering/1`), each with what its machine is called.
+  that cover whose it is, their own first, then a group's they're in, then the network's (`OneCore.Apps.covering/1`), each with what its machine is called.
   """
   def unlocked_on(%Call{} = call, %Artifact{} = artifact) do
     Map.merge(
@@ -92,7 +92,7 @@ defmodule Encryption do
         servers: servers(artifact),
         may:
           for(
-            server <- OneCore.Servers.covering(OneCore.User.owner(Artifact.name(artifact))),
+            server <- OneCore.Apps.covering(OneCore.User.owner(Artifact.name(artifact))),
             do: %{key: server, name: OneCore.Servers.name(server)}
           )
       },

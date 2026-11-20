@@ -291,14 +291,12 @@ defmodule OneCore.Apps do
   @doc """
   Whether the server whose key is `key` allows the code of an app installed for `at`, which is `trusted` or not: an
   untrusted one runs anywhere, in its sandbox, and a trusted one with its machine's access where it's the network's,
-  or installed for whoever the server acts for as its own (`OneCore.Servers.acts_for/1`), or for one of the network's
-  owners on one of the network's servers, which they own. Who owns the network is what the apps that validate
-  `reach` say.
+  or installed for whoever the server acts for as its own (`OneCore.Servers.acts_for/1`).
   """
   def allows?(key, at, trusted), do: allowed?(Servers.acts_for(key), at, trusted)
 
   defp allowed?(scopes, at, trusted),
-    do: not trusted or at == @network or at in scopes or (@network in scopes and owns_network?(at))
+    do: not trusted or at == @network or at in scopes
 
   @doc "Whether this server loads the code of the apps installed for `owner`: it allows a trusted one's (`allows?/3`)."
   def loads?(owner), do: allowed?(Servers.here(), owner, true)
@@ -336,12 +334,6 @@ defmodule OneCore.Apps do
       groups(Servers.here()) != [] -> true
       true -> not Enum.any?(grouped(whose), up?)
     end
-  end
-
-  # Asked of the network's apps by this server, as nobody, as everything about the network is.
-  defp owns_network?(owner) do
-    about = %{"who" => owner, "relation" => "owner", "artifact" => @network}
-    Hooks.validate("reach", about, {nil, @network}) == :ok
   end
 
   # Whose apps a server runs whether or not it's asked for them: the network's, those of whoever it acts for, and
