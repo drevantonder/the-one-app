@@ -75,7 +75,7 @@ export function HomePage(props: { owner: Owner; index: number; page: number; pla
       {...gestures}
       style={[looks.slots, looks.sized(props.laid.width, props.laid.height)]}
     >
-      <Show when={props.placed.length || editingHere()} fallback={<View style={[looks.empty, looks.top(props.laid.top)]}><Empty>No apps on this page.</Empty></View>}>
+      <Show when={props.placed.length || editingHere()} fallback={<View style={looks.empty(props.laid.top, props.laid.left, props.laid.right, props.laid.bottom)}><Empty>No apps on this page.</Empty></View>}>
         <For each={props.placed} keyed={({ item }) => (item.item.widget ?? item.item.entrypoint) + (item.item.size ?? "")}>
           {(placed) => (
             <HomeCell

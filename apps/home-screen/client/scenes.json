@@ -796,6 +796,20 @@
         "store": "app-store",
         "apps": []
       }
+    },
+    "checks": {
+      "Its words keep the page's margins": [
+        {
+          "expect": {
+            "text": "No apps on this page."
+          }
+        },
+        {
+          "expect": {
+            "margins": 16
+          }
+        }
+      ]
     }
   },
   "App Library": {

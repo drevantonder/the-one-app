@@ -100,7 +100,8 @@ export const looks = styles({
   iconImage: (borderRadius: number) => ({ borderRadius }),
   name: { font: tokens.type.caption, lineClamp: 1, textAlign: "center", maxWidth: "100%" },
   smallName: { font: tokens.type.small },
-  empty: { position: "absolute", start: 0, end: 0 },
+  // An empty page's words, inside its margins and in its middle, as iOS's ContentUnavailableView is.
+  empty: (top: number, start: number, end: number, bottom: number) => ({ position: "absolute", top, start, end, bottom, alignItems: "center", justifyContent: "center", textAlign: "center" }),
   placed: (start: number, top: number, width: number, height: number, translateX: number, translateY: number, rotate: number, opacity: number) => ({ position: "absolute", start, top, width, height, translateX, translateY, rotate, opacity }),
   installing: { position: "absolute", borderRadius: tokens.radius.full, backgroundColor: tokens.colour.overlay, color: tokens.colour.background, alignItems: "center", justifyContent: "center" },
   minus: { position: "absolute", zIndex: 2, borderRadius: tokens.radius.full, backgroundColor: tokens.colour.secondaryLabel, color: tokens.colour.background, alignItems: "center", justifyContent: "center" },

@@ -393,7 +393,7 @@ function requests(steps, folder) {
     else if (step.trace) out.push({ request: { op: "trace", events: JSON.parse(readFileSync(join(folder, step.trace), "utf8")) } })
     else if (!step.expect) out.push({ request: pressed(step) })
     else {
-      const { shown, gone, focused, text, states, drawn, blur, keyboard } = step.expect
+      const { shown, gone, focused, text, states, drawn, blur, keyboard, margins } = step.expect
       // Each waited for, as Playwright's assertions are, a second at most, or `within` ms.
       const until = (tap, state, said, is) => ({ request: { op: "wait_for", ...selector(tap), state, ...(is ? { is } : {}), ...(step.within !== undefined ? { timeout: step.within } : {}) }, judge: (answer) => !answer?.result?.met && said(answer) })
       if (shown) out.push(until(shown, "shown", (answer) => `${named(shown)} isn't shown: ${why(answer)}`))
@@ -416,6 +416,17 @@ function requests(steps, folder) {
             return off.length ? `the keyboard is asked for ${off.map(([key]) => `${key} ${JSON.stringify(asked[key])}`).join(", ")}` : undefined
           },
         })
+      if (margins !== undefined) {
+        let width
+        out.push({ request: { op: "window" }, judge: (answer) => void (width = answer?.result?.width) })
+        out.push({
+          request: { op: "query", text: "" },
+          judge: (answer) => {
+            const near = (answer?.result?.nodes ?? []).filter((node) => ["text", "raw-text"].includes(node.kind) && node.opacity > 0 && node.seen > 0 && node.rect && (node.rect.x < margins || node.rect.x + node.rect.width > width - margins))
+            return near.length ? near.map((node) => `"${node.name}" is drawn ${Math.round(Math.min(node.rect.x, width - node.rect.x - node.rect.width))} pt from the window's edge`).join(", ") : undefined
+          },
+        })
+      }
       if (blur) out.push({ request: { op: "profile", at: [0], snap: false }, judge: (answer) => !(answer?.result?.frames?.[0]?.work?.backdrops > 0) && "no blur is drawn" })
     }
     for (const one of out.slice(from)) one.step = `step ${at + 1}`
