@@ -76,7 +76,8 @@ impl Context {
         let (device, queue) = adapter
             .request_device(&wgpu::DeviceDescriptor {
             label: None,
-            required_features: wgpu::Features::empty(),
+            // Its passes' GPU time, which every frame says, where the GPU can say it (`renderer::Stamps`).
+            required_features: adapter.features() & wgpu::Features::TIMESTAMP_QUERY,
             // Direct3D 12 makes room for this many descriptors up front (1,000,000 unless said, ~100 MB on an
             // integrated GPU); a frame binds a few hundred.
             required_limits: wgpu::Limits { max_non_sampler_bindings: 65_536, ..adapter.limits() },

@@ -1054,7 +1054,12 @@ impl Windows {
                 window.timing.input("drag");
             }
             let refresh = self.display.refresh();
-            let (interval, frames) = window.timing.drawn(painted - began, painted.elapsed(), moving, refresh);
+            let drawn = window.parts.iter().filter_map(|part| part.renderer.as_ref());
+            let (acquire, gpu) = drawn.fold((std::time::Duration::ZERO, None), |(acquire, gpu), renderer| {
+                (acquire + renderer.acquired(), renderer.gpu().map(|part| gpu.unwrap_or_default() + part).or(gpu))
+            });
+            let frame = frame_timing::Frame { at: web_time::Instant::now(), paint: painted - began, draw: painted.elapsed(), acquire, gpu };
+            let (interval, frames) = window.timing.drawn(frame, moving, refresh);
             if let Some(interval) = interval {
                 self.deadlines.frame(frame_timing::Timing::long(interval, refresh.unwrap_or(FRAME)));
             }

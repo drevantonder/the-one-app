@@ -167,15 +167,21 @@ pub(crate) fn reported(entrypoint: &str, started: Instant, why: &str) {
 }
 
 /// Tells Telemetry how smoothly something moved on `app`'s window, and says it in the app's log: how many frames, their
-/// intervals' median and 95th percentile, how many were long (shown twice or more), the display's refresh and the
-/// time this thread spent painting and drawing a frame. Each is a histogram by the app, what moved it and the display's rate, so
-/// `metric` reads them over time.
+/// intervals' median and 95th percentile, how many were long (shown twice or more) and where, the display's refresh,
+/// and each part of a frame's 95th percentile (`renderer::platform::Frame`). Each is a histogram by the app, what
+/// moved it and the display's rate, so `metric` reads them over time.
 fn frames_reported(app: &str, frames: &renderer::platform::Frames) {
     let ms = |time: std::time::Duration| (time.as_secs_f64() * 100_000.0).round() / 100.0;
     let hz = (1.0 / frames.refresh.as_secs_f64()).round();
     let load = Load::now();
+    let gpu = frames.gpu.map_or("unknown".to_owned(), |gpu| format!("{} ms", ms(gpu)));
+    // The first long frame, by its parts, and where each long one was, so a cost one moment pays shows where it is.
+    let first = frames.first_long.map_or(String::new(), |frame| {
+        let gpu = frame.gpu.map_or("unknown".to_owned(), |gpu| format!("{} ms", ms(gpu)));
+        format!(" at {:?}; the first's paint {} ms, draw {} ms (waiting {} ms for an image), GPU {gpu}", frames.long_at, ms(frame.paint), ms(frame.draw), ms(frame.acquire))
+    });
     eprintln!(
-        "{app}'s {} took {} ms: {} frames, interval p50 {} ms, p95 {} ms, longest {} ms, {} long at {hz} Hz, paint p95 {} ms, draw p95 {} ms, {load}",
+        "{app}'s {} took {} ms: {} frames, interval p50 {} ms, p95 {} ms, longest {} ms, {} long at {hz} Hz{first}; p95 paint {} ms, draw {} ms, waiting for an image {} ms, GPU {gpu}; {load}",
         frames.kind,
         ms(frames.took),
         frames.frames,
@@ -184,21 +190,29 @@ fn frames_reported(app: &str, frames: &renderer::platform::Frames) {
         ms(frames.longest),
         frames.long,
         ms(frames.paint),
-        ms(frames.draw)
+        ms(frames.draw),
+        ms(frames.acquire),
     );
     let Ok(views) = crate::views() else { return };
     let attributes = json!({"one.view": app, "one.motion": frames.kind, "one.display.hz": hz, "one.system.busy": load.busy()});
     if let Some(average) = load.average {
         views.client.report(json!({"name": "system.cpu.load_average.1m", "value": average, "attributes": attributes}));
     }
-    for (name, value) in [
+    let gpu = frames.gpu.map(|gpu| ("one.client.native.frame.gpu.p95", ms(gpu)));
+    let records = [
         ("one.client.native.frames", f64::from(frames.frames)),
         ("one.client.native.frames.long", f64::from(frames.long)),
         ("one.client.native.frame.interval.p95", ms(frames.p95)),
         ("one.client.native.frame.paint.p95", ms(frames.paint)),
         ("one.client.native.frame.draw.p95", ms(frames.draw)),
-    ] {
+        ("one.client.native.frame.acquire.p95", ms(frames.acquire)),
+    ];
+    for (name, value) in records.into_iter().chain(gpu) {
         views.client.report(json!({"name": name, "value": value, "attributes": attributes}));
+    }
+    // Where in a motion each long frame was, 0 the interval after its first frame.
+    for at in &frames.long_at {
+        views.client.report(json!({"name": "one.client.native.frame.long.at", "value": at, "attributes": attributes}));
     }
 }
 

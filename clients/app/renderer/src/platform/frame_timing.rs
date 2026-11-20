@@ -24,14 +24,32 @@ pub struct Frames {
     pub p50: Duration,
     pub p95: Duration,
     pub longest: Duration,
-    /// How many were over 1.5× the display's interval, so it showed a frame twice.
+    /// How many were over 1.5× the display's interval, so it showed a frame twice, and where each was among them (0
+    /// the interval after its first frame).
     pub long: u32,
+    pub long_at: Vec<u32>,
     /// The display's interval: what it says, or else the median of these frames'.
     pub refresh: Duration,
-    /// The 95th percentile of the time this thread spent on a frame painting it (laying it out and making its scene),
-    /// and drawing it (its GPU commands, waiting for an image to draw on and handing it to the display).
+    /// The 95th percentile of each part of a frame (`Frame`).
     pub paint: Duration,
     pub draw: Duration,
+    pub acquire: Duration,
+    pub gpu: Option<Duration>,
+    /// The first long frame, what it took.
+    pub first_long: Option<Frame>,
+}
+
+/// One frame: when it was handed to the display, and what it took. `paint` is this thread laying it out and making
+/// its scene; `draw` its GPU commands, waiting for an image to draw on (`acquire`, which a display that hasn't shown
+/// the frames before keeps it waiting for) and handing it to the display; `gpu` the GPU's time on its passes, where
+/// the GPU says, a frame or two behind.
+#[derive(Debug, Clone, Copy)]
+pub struct Frame {
+    pub at: Instant,
+    pub paint: Duration,
+    pub draw: Duration,
+    pub acquire: Duration,
+    pub gpu: Option<Duration>,
 }
 
 /// A window's frames while something on it moves.
@@ -39,8 +57,7 @@ pub struct Frames {
 pub(crate) struct Timing {
     /// What moved it, as the last input said (`input`).
     kind: Option<&'static str>,
-    /// When each frame was handed to the display, and how long this thread spent painting and drawing it.
-    frames: Vec<(Instant, Duration, Duration)>,
+    frames: Vec<Frame>,
 }
 
 impl Timing {
@@ -52,14 +69,12 @@ impl Timing {
         }
     }
 
-    /// A frame was drawn, after `paint` and `draw` on this thread: `moving` says whether something on it still moves.
-    /// → how long after the frame before it was, while something moves, and what its frames did, once it's still after
-    /// moving.
-    pub(crate) fn drawn(&mut self, paint: Duration, draw: Duration, moving: bool, refresh: Option<Duration>) -> (Option<Duration>, Option<Frames>) {
-        let now = Instant::now();
-        let interval = self.frames.last().map(|(at, ..)| now.duration_since(*at));
+    /// `frame` was drawn: `moving` says whether something on it still moves. → how long after the frame before it was,
+    /// while something moves, and what its frames did, once it's still after moving.
+    pub(crate) fn drawn(&mut self, frame: Frame, moving: bool, refresh: Option<Duration>) -> (Option<Duration>, Option<Frames>) {
+        let interval = self.frames.last().map(|last| frame.at.duration_since(last.at));
         if moving || !self.frames.is_empty() {
-            self.frames.push((now, paint, draw));
+            self.frames.push(frame);
         }
         (interval, if moving { None } else { self.end(refresh) })
     }
@@ -71,7 +86,7 @@ impl Timing {
 
     /// Whether what moved has been still long enough to be said, though its page still asks for frames.
     pub(crate) fn idle(&self) -> bool {
-        self.frames.last().is_some_and(|(at, ..)| at.elapsed() >= STILL)
+        self.frames.last().is_some_and(|last| last.at.elapsed() >= STILL)
     }
 
     /// What its frames did, and it's ready for the next: none, under three frames.
@@ -81,25 +96,29 @@ impl Timing {
         if frames.len() < 3 {
             return None;
         }
-        let mut intervals: Vec<Duration> = frames.windows(2).map(|pair| pair[1].0.duration_since(pair[0].0)).collect();
-        intervals.sort();
-        let mut paint: Vec<Duration> = frames.iter().map(|(_, paint, _)| *paint).collect();
-        paint.sort();
-        let mut draw: Vec<Duration> = frames.iter().map(|(.., draw)| *draw).collect();
-        draw.sort();
-        let at = |sorted: &[Duration], quantile: f32| sorted[((sorted.len() - 1) as f32 * quantile).round() as usize];
-        let refresh = refresh.unwrap_or_else(|| at(&intervals, 0.5));
+        let between: Vec<Duration> = frames.windows(2).map(|pair| pair[1].at.duration_since(pair[0].at)).collect();
+        let at = |mut all: Vec<Duration>, quantile: f32| {
+            all.sort();
+            all[((all.len() - 1) as f32 * quantile).round() as usize]
+        };
+        let refresh = refresh.unwrap_or_else(|| at(between.clone(), 0.5));
+        let long_at: Vec<u32> = (0..between.len() as u32).filter(|index| Timing::long(between[*index as usize], refresh)).collect();
+        let gpu: Vec<Duration> = frames.iter().filter_map(|frame| frame.gpu).collect();
         Some(Frames {
             kind,
             frames: frames.len() as u32,
-            took: frames[frames.len() - 1].0.duration_since(frames[0].0),
-            p50: at(&intervals, 0.5),
-            p95: at(&intervals, 0.95),
-            longest: intervals[intervals.len() - 1],
-            long: intervals.iter().filter(|interval| Timing::long(**interval, refresh)).count() as u32,
+            took: frames[frames.len() - 1].at.duration_since(frames[0].at),
+            p50: at(between.clone(), 0.5),
+            p95: at(between.clone(), 0.95),
+            longest: at(between, 1.0),
+            long: long_at.len() as u32,
+            first_long: long_at.first().map(|index| frames[*index as usize + 1]),
+            long_at,
             refresh,
-            paint: at(&paint, 0.95),
-            draw: at(&draw, 0.95),
+            paint: at(frames.iter().map(|frame| frame.paint).collect(), 0.95),
+            draw: at(frames.iter().map(|frame| frame.draw).collect(), 0.95),
+            acquire: at(frames.iter().map(|frame| frame.acquire).collect(), 0.95),
+            gpu: (!gpu.is_empty()).then(|| at(gpu, 0.95)),
         })
     }
 }

@@ -356,6 +356,90 @@ pub struct Renderer {
     draws: std::cell::Cell<u32>,
     /// What the last frame's GPU did (`Work`).
     work: std::cell::Cell<Work>,
+    /// Its passes' time on the GPU, where the GPU can say (`Stamps`), and how long it last waited for an image of its
+    /// surface to draw on.
+    stamps: Option<Stamps>,
+    acquired: web_time::Duration,
+}
+
+/// How many passes a frame's GPU time is taken of, each a timestamp as it begins and one as it ends.
+const STAMPED: u32 = 32;
+
+/// Timestamps of a frame's passes, as WebGPU's `timestamp-query` takes them (at a pass's start and end: a tiled GPU's
+/// stage boundaries), resolved into one of a few buffers that are read back once the GPU's done, never waited for:
+/// the GPU time of the frame drawn a frame or two before.
+struct Stamps {
+    set: wgpu::QuerySet,
+    resolved: wgpu::Buffer,
+    /// Each buffer read back, whether it's mapped, and how many timestamps it holds, while it's in use.
+    read: Vec<(wgpu::Buffer, Arc<std::sync::atomic::AtomicBool>, Option<u32>)>,
+    /// The buffer this frame's go to, and how many it's taken.
+    writing: Option<usize>,
+    taken: std::cell::Cell<u32>,
+    /// Nanoseconds a tick.
+    period: f64,
+    gpu: Option<web_time::Duration>,
+}
+
+impl Stamps {
+    fn new(device: &wgpu::Device, queue: &wgpu::Queue) -> Option<Stamps> {
+        if !device.features().contains(wgpu::Features::TIMESTAMP_QUERY) {
+            return None;
+        }
+        let bytes = u64::from(STAMPED * 2) * 8;
+        let set = device.create_query_set(&wgpu::QuerySetDescriptor { label: None, ty: wgpu::QueryType::Timestamp, count: STAMPED * 2 });
+        let resolved = device.create_buffer(&wgpu::BufferDescriptor { label: None, size: bytes, usage: wgpu::BufferUsages::QUERY_RESOLVE | wgpu::BufferUsages::COPY_SRC, mapped_at_creation: false });
+        let read = (0..3)
+            .map(|_| (device.create_buffer(&wgpu::BufferDescriptor { label: None, size: bytes, usage: wgpu::BufferUsages::COPY_DST | wgpu::BufferUsages::MAP_READ, mapped_at_creation: false }), Arc::default(), None))
+            .collect();
+        Some(Stamps { set, resolved, read, writing: None, taken: Default::default(), period: f64::from(queue.get_timestamp_period()), gpu: None })
+    }
+
+    /// As a frame starts: what the GPU has finished of the frames before is read, and a buffer free for this one's
+    /// chosen, if one is.
+    fn begin(&mut self, device: &wgpu::Device) {
+        let _ = device.poll(wgpu::PollType::Poll);
+        for (buffer, mapped, held) in &mut self.read {
+            let Some(count) = *held else { continue };
+            if !mapped.swap(false, std::sync::atomic::Ordering::Acquire) {
+                continue;
+            }
+            if let Ok(view) = buffer.get_mapped_range(..u64::from(count) * 8) {
+                let ticks: &[u64] = bytemuck::cast_slice(&view);
+                let total: u64 = ticks.chunks_exact(2).map(|pass| pass[1].saturating_sub(pass[0])).sum();
+                self.gpu = Some(web_time::Duration::from_nanos((total as f64 * self.period) as u64));
+            }
+            buffer.unmap();
+            *held = None;
+        }
+        self.writing = self.read.iter().position(|(_, _, held)| held.is_none());
+        self.taken.set(0);
+    }
+
+    /// The timestamps of a pass about to begin, while there's room for them this frame.
+    fn pass(&self) -> Option<wgpu::RenderPassTimestampWrites<'_>> {
+        let at = self.taken.get();
+        (self.writing.is_some() && at + 2 <= STAMPED * 2).then(|| {
+            self.taken.set(at + 2);
+            wgpu::RenderPassTimestampWrites { query_set: &self.set, beginning_of_pass_write_index: Some(at), end_of_pass_write_index: Some(at + 1) }
+        })
+    }
+
+    /// As the frame's commands are finished: its timestamps resolved and copied out to be read back.
+    fn resolve(&self, encoder: &mut wgpu::CommandEncoder) {
+        let (Some(writing), count @ 1..) = (self.writing, self.taken.get()) else { return };
+        encoder.resolve_query_set(&self.set, 0..count, &self.resolved, 0);
+        encoder.copy_buffer_to_buffer(&self.resolved, 0, &self.read[writing].0, 0, u64::from(count) * 8);
+    }
+
+    /// Once they're submitted: read back when the GPU's done with them.
+    fn submitted(&mut self) {
+        let (Some(writing), count @ 1..) = (self.writing.take(), self.taken.get()) else { return };
+        let (buffer, mapped, held) = &mut self.read[writing];
+        let mapped = mapped.clone();
+        buffer.map_async(wgpu::MapMode::Read, ..u64::from(count) * 8, move |done| mapped.store(done.is_ok(), std::sync::atomic::Ordering::Release));
+        *held = Some(count);
+    }
 }
 
 /// The frame's batches' instances: the bind group of its data, and each batch's offset in it.
@@ -521,6 +605,8 @@ impl Renderer {
             atlas_groups: Default::default(),
             draws: Default::default(),
             work: Default::default(),
+            stamps: Stamps::new(&context.device, &context.queue),
+            acquired: Default::default(),
         }
     }
 
@@ -639,6 +725,10 @@ impl Renderer {
         self.atlas.before_frame();
         self.draws.set(0);
         self.work.set(Work { uploaded: self.atlas.uploaded(), ..Work::default() });
+        if let Some(stamps) = &mut self.stamps {
+            stamps.begin(&self.device);
+        }
+        let acquiring = web_time::Instant::now();
         let (frame, view, texture) = match &self.target {
             Target::Surface { surface, config } => {
                 // A surface its window has outgrown, or lost, is configured again and its frame taken from that, so the
@@ -661,6 +751,7 @@ impl Renderer {
             }
             Target::Offscreen { texture, view, .. } => (None, view.clone(), texture.clone()),
         };
+        self.acquired = acquiring.elapsed();
         let size = (texture.width(), texture.height());
 
         // The frame's data: its globals, then each batch's instances, then each backdrop's blur's parameters.
@@ -837,11 +928,28 @@ impl Renderer {
         // What's behind no backdrop this frame isn't kept; what's still drawn starts the next frame unused.
         self.blurred.retain(|_, (_, used)| std::mem::take(used));
 
+        if let Some(stamps) = &self.stamps {
+            stamps.resolve(&mut encoder);
+        }
         self.queue.submit([encoder.finish()]);
+        if let Some(stamps) = &mut self.stamps {
+            stamps.submitted();
+        }
         if let Some(frame) = frame {
             self.queue.present(frame);
         }
         true
+    }
+
+    /// The GPU time of the last frame it has, summed over its passes, where the GPU says (a frame or two behind).
+    pub fn gpu(&self) -> Option<web_time::Duration> {
+        self.stamps.as_ref()?.gpu
+    }
+
+    /// How long the last frame waited for an image of its surface to draw on, which a display that hasn't shown the
+    /// frames before keeps it waiting for.
+    pub fn acquired(&self) -> web_time::Duration {
+        self.acquired
     }
 
     /// Writes the frame's data into its buffer, grown to hold it.
@@ -884,6 +992,7 @@ impl Renderer {
                 resolve_target: None,
                 ops: wgpu::Operations { load, store: wgpu::StoreOp::Store },
             })],
+            timestamp_writes: self.stamps.as_ref().and_then(Stamps::pass),
             ..Default::default()
         });
         pass.set_bind_group(0, globals, &[]);
@@ -1056,6 +1165,7 @@ impl Renderer {
                     resolve_target: None,
                     ops: wgpu::Operations { load: wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT), store: wgpu::StoreOp::Store },
                 })],
+                timestamp_writes: self.stamps.as_ref().and_then(Stamps::pass),
                 ..Default::default()
             });
             pass.set_pipeline(&self.pipelines.tiles().0);
@@ -1174,6 +1284,7 @@ impl Renderer {
                     resolve_target: None,
                     ops: wgpu::Operations { load: wgpu::LoadOp::Clear(wgpu::Color::TRANSPARENT), store: wgpu::StoreOp::Store },
                 })],
+                timestamp_writes: self.stamps.as_ref().and_then(Stamps::pass),
                 ..Default::default()
             });
             pass.set_pipeline(&self.pipelines.backdrops().1);
