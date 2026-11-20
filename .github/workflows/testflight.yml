@@ -1,0 +1,63 @@
+# Builds a network's iPhone app for TestFlight on GitHub's macOS runner, signs it with the team's Apple Distribution
+# identity and uploads it, as `tooling/testflight` asks: the commit, the Rust the machine releasing has, and the
+# network's `app/` folder, a gzipped tar in base64. The identity and the App Store Connect API key are the repo's
+# secrets (DISTRIBUTION_P12, DISTRIBUTION_P12_PASSWORD, APP_STORE_CONNECT_KEY), as 1Password keeps them.
+name: TestFlight
+
+on:
+  workflow_dispatch:
+    inputs:
+      commit:
+        description: The commit to build
+        required: true
+      rust:
+        description: The Rust to build with, as `rustc -V` names it on the machine releasing
+        required: true
+      network:
+        description: The network's `app/` folder, as `git archive --format=tar.gz` makes it, in base64
+        required: true
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: macos-26
+    steps:
+      # Its build is named from the commits that lead to it (`tooling/version`).
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.commit }}
+          fetch-depth: 0
+      - uses: dtolnay/rust-toolchain@master
+        with:
+          toolchain: ${{ inputs.rust }}
+          targets: aarch64-apple-ios
+      - uses: oven-sh/setup-bun@v2
+        with:
+          bun-version: 1.4.4
+      - uses: taiki-e/install-action@v2
+        with:
+          tool: tauri-cli@2.12.4
+      - run: brew install xcodegen
+      - uses: Swatinem/rust-cache@v2
+      # The identity, in a keychain of the run's own that codesign and xcodebuild find.
+      - env:
+          P12: ${{ secrets.DISTRIBUTION_P12 }}
+          PASSWORD: ${{ secrets.DISTRIBUTION_P12_PASSWORD }}
+        run: |
+          keychain=$RUNNER_TEMP/signing.keychain-db password=$(openssl rand -hex 16)
+          security create-keychain -p "$password" "$keychain"
+          security set-keychain-settings -lut 7200 "$keychain"
+          security unlock-keychain -p "$password" "$keychain"
+          base64 -d <<<"$P12" >"$RUNNER_TEMP/distribution.p12"
+          security import "$RUNNER_TEMP/distribution.p12" -k "$keychain" -P "$PASSWORD" -T /usr/bin/codesign -T /usr/bin/xcodebuild
+          rm "$RUNNER_TEMP/distribution.p12"
+          security set-key-partition-list -S apple-tool:,apple: -k "$password" "$keychain" >/dev/null
+          security list-keychains -d user -s "$keychain" $(security list-keychains -d user | tr -d '"')
+      - env:
+          NETWORK: ${{ inputs.network }}
+        run: base64 -d <<<"$NETWORK" | tar -xz -C "$RUNNER_TEMP"
+      - env:
+          ASC_KEY: ${{ secrets.APP_STORE_CONNECT_KEY }}
+        run: tooling/testflight --build "$RUNNER_TEMP/app" <<<"$ASC_KEY"
