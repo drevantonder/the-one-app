@@ -85,7 +85,8 @@ defmodule OneCore.Jobs do
       %{clock | unreachable: true}
   end
 
-  # Has each alarm that's due, of whoever this server looks at, make what's due.
+  # Has each alarm that's due, of whoever this server looks at, make what's due. Where the bucket won't list them yet,
+  # as for a server whose start the presigner hasn't heard of, they're looked for again the next minute.
   defp alarmed(now) do
     for whose <- looked_at(),
         key <- Bucket.list(whose <> "/alarms/"),
@@ -93,6 +94,8 @@ defmodule OneCore.Jobs do
         due <= now do
       Task.Supervisor.start_child(OneCore.Asks, fn -> Calls.schedule(at, name, whose) end)
     end
+  rescue
+    refused in Bucket.Refused -> Logger.info("Alarms are looked for again in a minute: #{Exception.message(refused)}")
   end
 
   # Whose alarms this server looks at: everyone's, and the network's, for one acting for the network, which it lists
