@@ -20,9 +20,10 @@ permissions:
 
 jobs:
   build:
-    # GitHub's Xcode 27 image, the only one with iOS 27's SDK, which App Store Connect asks an upload to be built with
-    # from April 2027 (ITMS-90725): macos-26's newest is Xcode 26.6.
-    runs-on: xcode-27
+    # Not yet GitHub's Xcode 27 image, the only one with iOS 27's SDK, which App Store Connect asks an upload to be built
+    # with from April 2027 (ITMS-90725): there, the app's link finds no `init_plugin_notification`, the Swift half of
+    # Tauri's notification plugin.
+    runs-on: macos-26
     steps:
       # Its build is named from the commits that lead to it (`tooling/version`).
       - uses: actions/checkout@v4
