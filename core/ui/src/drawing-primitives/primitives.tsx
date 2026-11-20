@@ -328,6 +328,9 @@ export interface ViewProps extends Listens {
    * growing into its window). */
   layoutId?: string
   onDragStart?: () => void
+  /** Dragged on, as Motion's `onDrag`: how far it's held from where its style puts it, as it moves. A host before
+   * this one doesn't say it. */
+  onDrag?: (event: Pick<Dragged, "offset">) => void
   /** Let go: how far it went and how fast it was going, in pixels a second. It springs from where it is, at that
    * speed, to where its style puts it, which this may move. */
   onDragEnd?: (event: Dragged) => void
@@ -537,7 +540,7 @@ const droppable = (props: ViewProps) => ({
 
 /** What a page moved by hand listens for (renderer.ts's `Moved`), which `movable` draws. */
 // A drag and a move as a node is laid out again are a native host's (`drag`, `layout`), which the DOM leaves where its style puts it.
-const moved = ["onPointerDown", "onPointerMove", "onPointerUp", "onPointerCancel", "onContextMenu", "onWheel", "drag", "dragConstraints", "dragElastic", "onDragStart", "onDragEnd", "layout", "layoutId"] as const
+const moved = ["onPointerDown", "onPointerMove", "onPointerUp", "onPointerCancel", "onContextMenu", "onWheel", "drag", "dragConstraints", "dragElastic", "onDragStart", "onDrag", "onDragEnd", "layout", "layoutId"] as const
 
 /// A box's or a scroll's `ref` and `onContextMenu` for what it moves by hand: its pointers (`follows`), and a
 /// right-click or a touch held, in place of the device's own menu.

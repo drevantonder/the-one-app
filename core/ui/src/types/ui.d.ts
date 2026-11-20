@@ -128,6 +128,9 @@ export type ViewProps = Listens & {
    * growing into its window). */
   layoutId?: string
   onDragStart?: () => void
+  /** Dragged on, as Motion's `onDrag`: how far it's held from where its style puts it, as it moves. A host before
+   * this one doesn't say it. */
+  onDrag?: (event: Pick<Dragged, "offset">) => void
   /** Let go: how far it went and how fast it was going, in pixels a second. It springs from where it is, at that
    * speed, to where its style puts it, which this may move. */
   onDragEnd?: (event: Dragged) => void

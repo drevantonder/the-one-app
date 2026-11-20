@@ -5,7 +5,8 @@
 //! which it gives as UIScrollView's rubber band against what it's dragged within, as loose as `dragElastic` says (0
 //! none, Motion's default 0.5, UIScrollView's 0.55). Let go,
 //! its page hears `dragend` once, with how far it went (`offset`) and how fast it was going (`velocity`, pixels a
-//! second), and it springs from where it is, at that speed, to where its style puts it, wherever its page moves that
+//! second), and while it's dragged, `drag` as it moves, with how far it's held from where its style puts it (`offset`,
+//! its give included), as Motion's `onDrag` says, so what goes with it can (a pager's dots past its last page), and it springs from where it is, at that speed, to where its style puts it, wherever its page moves that
 //! meanwhile (`transition::Transitions::release`).
 
 use serde_json::{Value, json};
@@ -202,6 +203,7 @@ impl Screen {
         let constraints = node.prop("dragConstraints");
         let bound = |side: &str| constraints.and_then(|constraints| constraints[side].as_f64()).map(|px| px as f32);
         let elastic = node.prop("dragElastic").and_then(Value::as_f64).map_or(ELASTIC, |elastic| elastic as f32);
+        let told = node.listens("drag");
         // As stretchy as UIScrollView's against its bounds: what it's dragged within, as a pager's strip is the window.
         let within = self.tree.parent(id).and_then(|parent| self.rects.get(&parent)).or(self.rects.get(&id));
         let size = within.map_or((0.0, 0.0), |rect| (rect.width, rect.height));
@@ -213,6 +215,9 @@ impl Screen {
         let shown = point(give(by.x, bound("left"), bound("right"), size.0), give(by.y, bound("top"), bound("bottom"), size.1));
         self.transitions.hold(id, shown);
         self.changed();
+        if told {
+            self.tell(id, "drag", json!({"offset": {"x": shown.x, "y": shown.y}}));
+        }
     }
 
     /// The press came up at `at`, or the system took it (`cancelled`): a node dragged is let go, springing on at the

@@ -107,6 +107,7 @@ impl Node {
             "range" => "onRange",
             "drop" => "onDrop",
             "dragstart" => "onDragStart",
+            "drag" => "onDrag",
             "dragend" => "onDragEnd",
             _ => return false,
         };
