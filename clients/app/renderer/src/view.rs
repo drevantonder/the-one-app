@@ -2103,7 +2103,17 @@ impl Screen {
         if visible {
             self.focus.autofocused.extend(self.tree.autofocused());
         }
+        // Its frames' pages are told by their own `shown`, above.
         self.message(&json!({"jsonrpc": "2.0", "method": "ui/notifications/host-context-changed", "params": {"visible": visible}}));
+    }
+
+    /// Its page, and each frame's, is told whether it's seen (`hostContext.visible`, as the DOM's `visibilityState`
+    /// says it): not while it's put away, or its app is in the background, where it keeps what it shows and the keyboard.
+    pub fn seen(&mut self, seen: bool) {
+        for child in self.frames.values_mut() {
+            child.screen.seen(seen);
+        }
+        self.message(&json!({"jsonrpc": "2.0", "method": "ui/notifications/host-context-changed", "params": {"visible": seen}}));
     }
 
     /// It was summoned by a shortcut that ends with `key` (as the DOM's `KeyboardEvent.key` names it): that key, still

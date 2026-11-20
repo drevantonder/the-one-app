@@ -732,6 +732,14 @@ impl Windows {
             return;
         }
         self.background = background;
+        // Its pages aren't seen meanwhile, as a browser's page in a tab behind isn't, so what each does only while it's
+        // seen waits (a toast's time, a refresh).
+        for window in self.windows.values_mut() {
+            let put_away = window.panel && !window.visible;
+            if let Ok(screen) = &mut window.screen {
+                screen.seen(!background && !put_away);
+            }
+        }
         let parts: Vec<(WindowId, usize)> = self.windows.iter().flat_map(|(id, window)| (0..window.parts.len()).map(|part| (*id, part))).collect();
         for (id, part) in parts {
             self.input(id, part, if background { Input::SurfaceLost } else { Input::Surface });
