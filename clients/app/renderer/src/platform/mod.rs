@@ -2052,6 +2052,14 @@ impl Windows {
     /// Each window's page has run all it's been sent, and what it posted is applied, as `posted` applies it once its
     /// JS wakes the loop. → whether anything came.
     pub fn wait(&mut self) -> bool {
+        // What draws them is there too, where they're driven by a harness rather than a thread of their own (`Native`):
+        // the pipelines `Context::prepare` compiles on a thread of its own, which such a thread is told of as they are
+        // (`compiled`), but nothing tells a harness's, whose clock stands still meanwhile, so a window that would have
+        // drawn by then on a device drew nothing at all.
+        if Native::started().is_none() && self.windows.values().any(|window| window.parts[0].renderer.is_none()) {
+            self.context.compiling(crate::render::renderer::OFFSCREEN_FORMAT, false);
+            self.compiled();
+        }
         let mut came = false;
         for window in self.windows.values_mut() {
             if let Ok(screen) = &mut window.screen
