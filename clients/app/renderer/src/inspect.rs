@@ -38,6 +38,10 @@
 //!   the display drawn as the window draws one, each with what `profile`'s says, `at` (ms since it went down), where
 //!   `track` was drawn (`x`, `y`) and how far what scrolls under its start shows scrolled (`scroll`, with its stretch
 //!   past an end); `over` counts the frames whose painting took longer than `budget_ms`, a frame's time at `hz`.
+//! - `host` → `{ok, checks, paced, refresh_hz, ticks, presented, inputs}`, after a second and a half: whether its host
+//!   keeps the renderer's contract with it (`platform`'s), its window kept moving for a second, then still, each check
+//!   `{check, ok, said}`: a tick each refresh, a frame presented each tick, nothing while still, and inputs timed by
+//!   the device, in order. A native window answers it; the headless harness, which has no host, doesn't.
 //! - `tap` (a selector, or a point) → `{tapped, editing}`: the pointer moves to the point, or the node's middle, and
 //!   presses there as a mouse does, so what takes it is what a person's press reaches, as the window drew it (what
 //!   doesn't take the pointer, `pointerEvents: "none"`, and what's clipped away are passed over): an input takes the

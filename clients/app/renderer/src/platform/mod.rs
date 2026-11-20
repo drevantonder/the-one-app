@@ -4,6 +4,24 @@
 //! frames. What the rest of the program asks of them (open one, tell one's app something) is a job run on that thread
 //! (`Native::run`), as GPUI's foreground executor runs its work: on a computer a thread of its own, and on a phone the
 //! app's UI thread, where its views are (`android`, `ios`).
+//!
+//! # The contract with a host
+//!
+//! The look is the same everywhere (the scene, its text and its motion are worked out here, the same on every host);
+//! how smooth it is depends on what each platform's host gives the windows. So each gives the same three things, and
+//! the inspector's `host` op checks them the same way on a live window of any host (`conformance`), as
+//! `examples/host.rs` does on a computer:
+//!
+//! - **Input as it happened**, in order (`Display::events`, or a phone's touches handed to its window's screen), each
+//!   with the device's own time for it, which how fast a finger went is worked out from (`motion::Velocity`), and,
+//!   while a press moves, where the device predicts it's going (`Input::Predicted`: iOS's `predictedTouches`,
+//!   Android's `MotionPredictor`, the web's `getPredictedEvents`). No host gives the device's time yet, so each event
+//!   is timed as it's handled, which events handled together get wrong: the check says so.
+//! - **A tick each time the display shows a frame** (`Display::frame`), with when it showed it, while a frame is
+//!   wanted (`Display::request_frame`), and none while nothing moves: X11's Present, a Mac's CVDisplayLink, Windows'
+//!   compositor clock (DComposition), Android's Choreographer, an iPhone's CADisplayLink, the web's
+//!   `requestAnimationFrame`. A display that says nothing (`Display::paced` false) is ticked at 60 Hz by the loop.
+//! - **A surface to present on**: a frame presented each tick while something moves, and nothing while it's still.
 
 use std::collections::HashMap;
 use std::sync::{Arc, OnceLock};
@@ -33,6 +51,7 @@ pub(crate) mod a11y;
 /// The rail's home line over a phone's app windows, pulled home (`Windows::line`).
 #[cfg_attr(not(any(target_os = "android", target_os = "ios")), allow(dead_code))]
 pub(crate) mod rail;
+mod conformance;
 mod snapshot;
 mod frame_timing;
 pub use frame_timing::Frames;
@@ -382,6 +401,9 @@ pub struct Windows {
     next: WindowId,
     /// When the display last showed a frame, as its platform says, or the loop's own clock stood in for it.
     framed: web_time::Instant,
+    /// The inspector's `host` check under way, and what the host has done since it started.
+    check: Option<conformance::Check>,
+    record: conformance::Record,
 }
 
 /// How often frames come where a platform says nothing of its display's: a 60 Hz display's.
@@ -399,7 +421,7 @@ impl Windows {
             let context = context?;
             let atlas = Arc::new(Atlas::new(&context));
             let text = TextSystem::new(crate::FONT, crate::fonts()?, true);
-            Ok(Windows { display, context, atlas, text, windows: HashMap::new(), next: 1, framed: web_time::Instant::now() })
+            Ok(Windows { display, context, atlas, text, windows: HashMap::new(), next: 1, framed: web_time::Instant::now(), check: None, record: Default::default() })
         })();
         if let Err(error) = &made {
             *UNSTARTED.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = Some(format!("{error:#}"));
@@ -549,6 +571,15 @@ impl Windows {
         let Some(window) = self.windows.get_mut(&id) else {
             return reply(crate::inspect::answer(&request.id, Err(anyhow::anyhow!("there's no window {id} open"))));
         };
+        // Whether the host keeps its contract: its window kept moving, then still, what it does meanwhile recorded.
+        if request.op == "host" {
+            if self.check.is_some() {
+                return reply(crate::inspect::answer(&request.id, Err(anyhow::anyhow!("a check is under way: ask again once it's said what held"))));
+            }
+            self.record = Default::default();
+            self.check = Some(conformance::Check { window: id, started: web_time::Instant::now(), id: request.id, reply });
+            return;
+        }
         let (room, scale) = (window.room(), window.parts[0].native.scale());
         let Ok(screen) = &mut window.screen else {
             return reply(crate::inspect::answer(&request.id, Err(anyhow::anyhow!("its app didn't open"))));
@@ -791,13 +822,15 @@ impl Windows {
         let frame = (self.framing() && !self.display.paced()).then(|| FRAME.saturating_sub(self.framed.elapsed()));
         // A pull's spring steps at a 120 Hz display's frames.
         let pulled = self.windows.values().any(|window| window.pull.as_ref().is_some_and(rail::Pull::springing)).then_some(std::time::Duration::from_micros(8_333));
-        screens.chain(showing).chain(frame).chain(pulled).min()
+        let check = self.check.as_ref().map(conformance::Check::due);
+        screens.chain(showing).chain(frame).chain(pulled).chain(check).min()
     }
 
     /// Whether a window on screen wants the display's next frame: something on it moves by itself, or its page asked
     /// for one (`requestAnimationFrame`).
     fn framing(&self) -> bool {
-        self.windows.values().any(|window| window.on_screen() && (window.moving || window.screen.as_ref().is_ok_and(Screen::framing)))
+        self.check.as_ref().is_some_and(conformance::Check::moving)
+            || self.windows.values().any(|window| window.on_screen() && (window.moving || window.screen.as_ref().is_ok_and(Screen::framing)))
     }
 
     /// Makes what draws again, on a new GPU device, where the one it drew with was lost, as a browser makes a lost
@@ -856,6 +889,15 @@ impl Windows {
         let shown = self.display.frame().or_else(|| (framing && !self.display.paced() && self.framed.elapsed() >= FRAME).then(web_time::Instant::now));
         if let Some(at) = shown {
             self.framed = at;
+            if let Some(check) = &self.check {
+                self.record.tick(at);
+                // The window it checks moves on each tick while it's kept moving.
+                if check.moving()
+                    && let Some(window) = self.windows.get_mut(&check.window)
+                {
+                    window.moving = true;
+                }
+            }
             for window in self.windows.values_mut().filter(|window| window.on_screen()) {
                 window.dirty |= std::mem::take(&mut window.moving);
                 if let Ok(screen) = &mut window.screen {
@@ -980,6 +1022,9 @@ impl Windows {
                 continue;
             }
             window.missed = 0;
+            if self.check.is_some() {
+                self.record.present();
+            }
             let moving = window.moving || window.screen.as_ref().is_ok_and(Screen::framing);
             if window.screen.as_ref().is_ok_and(Screen::held) {
                 window.timing.input("drag");
@@ -1000,6 +1045,10 @@ impl Windows {
         }
         self.display.request_frame(self.framing());
         self.display.flush();
+        if let Some(check) = self.check.take_if(|check| check.over()) {
+            let said = check.said(&self.record, self.display.paced());
+            (check.reply)(crate::inspect::answer(&check.id, Ok(said)));
+        }
     }
 
     /// Keeps window `id`'s frame as its snapshot (`WindowOptions::snapshot`), drawn afresh offscreen as it is now,
@@ -1034,6 +1083,9 @@ impl Windows {
 
     /// What the display said happened to part `part` of window `id`, where it is in its page.
     fn input(&mut self, id: WindowId, part: usize, input: Input) {
+        if self.check.is_some() {
+            self.record.input(input.kind(), None);
+        }
         // Ctrl-W closes the window, as a Linux or Windows app's does, and Ctrl-Q on Linux quits the app (a Mac's are
         // ⌘W and ⌘Q, its menu bar's).
         let (closes, quits) = match &input {
@@ -1269,6 +1321,20 @@ fn whole_points(bounds: crate::geometry::Bounds<f32>) -> crate::geometry::Bounds
 }
 
 impl Input {
+    /// What it is, as the inspector's `host` check names it.
+    fn kind(&self) -> &'static str {
+        match self {
+            Input::Moved(_) => "moved",
+            Input::Predicted(_) => "predicted",
+            Input::Down(..) => "down",
+            Input::Up(..) => "up",
+            Input::Wheel(..) => "wheel",
+            Input::Key(_) => "key",
+            Input::Left => "left",
+            _ => "other",
+        }
+    }
+
     /// The same, at `by` further along and down: a part's point, in its page.
     fn moved_by(self, by: crate::geometry::Point<f32>) -> Input {
         let moved = |at: crate::geometry::Point<f32>| crate::geometry::point(at.x + by.x, at.y + by.y);

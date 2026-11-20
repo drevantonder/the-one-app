@@ -1623,7 +1623,7 @@ impl ::client::DeviceTools for Inspector {
                     "structuredContent": {"width": answer["result"]["width"], "height": answer["result"]["height"]},
                 }),
                 // Each frame's picture is an image after what it cost, as a tool's answer with pictures has them.
-                None if tool == "profile" => {
+                None if tool == "profile" || tool == "replay" => {
                     let mut result = answer["result"].take();
                     let pictures: Vec<Value> = result["frames"]
                         .as_array_mut()
