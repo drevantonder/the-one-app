@@ -70,4 +70,5 @@ jobs:
           path: ~/tunnel/tunnel
           retention-days: 1
       - name: Stay up
-        run: timeout "${{ inputs.minutes }}m" bash -c 'until [ -e ~/done ]; do sleep 5; done' || true
+        # macOS has no timeout(1).
+        run: end=$((SECONDS + ${{ inputs.minutes }} * 60)); until [ -e ~/done ] || [ $SECONDS -ge $end ]; do sleep 5; done
