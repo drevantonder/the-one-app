@@ -596,6 +596,12 @@ pub fn server() -> Option<Value> {
 /// stops, or when the system stops it, after the server has, and non-zero for the system to start it again. What it
 /// reported is told before it ends, a failure most of all.
 pub async fn run(client: Arc<Client>) -> Result<()> {
+    // A server keeps a file open for each database it holds, each connection and each log, and launchd gives a program
+    // it runs 256 (systemd 1024), which a server taking an update runs out of ("Too many open files", 19 Nov). So this
+    // takes as many as the system lets it, as Go's runtime does as it starts, and the server it runs inherits them: a
+    // limit in the LaunchAgent would be read only as it's loaded again, at the next login.
+    #[cfg(unix)]
+    rlimit::increase_nofile_limit(u64::MAX).context("couldn't raise how many files the server may open")?;
     let here = Here::of(&client::home()?);
     client.service("server");
     let reports = Reports { client: client.clone(), server: here.key()? };

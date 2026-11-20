@@ -25,9 +25,10 @@ backups_client = { path = "../../apps/backups/client/native" }
 encryption_client = { path = "../../apps/encryption/client/native" }
 git_repos_client = { path = "../../apps/git-repos/client/native" }
 
-# Who's running this, and their login shell (`serving`).
+# Who's running this, and their login shell, and how many files the server it runs may open (`serving`).
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
+rlimit = "0.11"
 
 # How Windows keeps a server running (`serving`): the job object it's held in, its log, the pipe it says it's
 # running on, and its time zone's IANA name.
