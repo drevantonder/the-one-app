@@ -97,7 +97,9 @@ const look = styles({
     userSelect: "none",
     opacity: { default: 1, hover: 0.9, pressed: 0.7 },
     boxShadow: { default: "none", focused: tokens.shadow.focus },
-    transitionProperty: ["opacity", "backgroundColor", "boxShadow"],
+    // Pressed, it dims at once, and comes back at once as it's let go, as a Mac's buttons do: what hover and focus
+    // change still fades.
+    transitionProperty: { default: ["opacity", "backgroundColor", "boxShadow"], pressed: ["backgroundColor", "boxShadow"] },
     transition: tokens.motion.quick,
   },
   secondary: { backgroundColor: { default: tokens.colour.quinaryLabel, hover: tokens.colour.quaternaryLabel }, color: tokens.colour.label, opacity: { default: 1, pressed: 0.7 } },
