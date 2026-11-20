@@ -6,6 +6,7 @@ defmodule OneCore.Apps.Deploy do
   (`OneCore.Apps.Store`) and runs at once.
   """
   require Logger
+  require OpenTelemetry.Tracer, as: Tracer
   alias OneCore.Call.State
   alias OneCore.{Entrypoint, Bucket, Builds, Sandbox, Server, Servers}
   alias OneCore.Apps
@@ -59,17 +60,17 @@ defmodule OneCore.Apps.Deploy do
 
     with :ok <- check(name, files),
          # An untrusted app runs no NIF or program of its own, so nothing is downloaded for one.
-         {:ok, files} <- if(trusted, do: Precompiled.fill(files), else: {:ok, files}),
+         {:ok, files} <- step("precompiled", fn -> if(trusted, do: Precompiled.fill(files), else: {:ok, files}) end),
          _ = stage.("Building its app"),
-         {:ok, built} <- built(owner, name, files, trusted),
+         {:ok, built} <- step("build", fn -> built(owner, name, files, trusted) end),
          built = Store.deployment(built),
          _ = stage.(if(trusted, do: "Compiling its code", else: "Compiling its code in its sandbox")),
-         {:ok, version, warnings} <- loaded(artifact, built, trusted) do
+         {:ok, version, warnings} <- step("compile", fn -> loaded(artifact, built, trusted) end) do
       # The deploy holds the version it loaded until it ends, however it ends: what it's installed for holds it after.
       try do
         install = install?.(version)
 
-        with {:ok, styling} <- Entrypoint.lint(files, version, trusted),
+        with {:ok, styling} <- step("lint", fn -> Entrypoint.lint(files, version, trusted) end),
              :ok <- if(why = Version.waiting(name, version), do: {:error, why}, else: :ok),
              :ok <- described(name, version),
              :ok <- if(install, do: fits_deploy(owner, name, version), else: :ok),
@@ -77,8 +78,8 @@ defmodule OneCore.Apps.Deploy do
              _ = stage.("Keeping it in the bucket"),
              # Its files, what it describes and that it's listed are written first, and none is read until `latest`
              # names them.
-             :ok <- listed(artifact),
-             {:ok, number} <- Store.keep(artifact, name, version, built, files, from, trusted, was),
+             :ok <- step("listed", fn -> listed(artifact) end),
+             {:ok, number} <- step("keep", fn -> Store.keep(artifact, name, version, built, files, from, trusted, was) end),
              :ok <- committed(owner, name, number, version, install) do
           warnings = Enum.join(Enum.reject([warnings, styling | untasked(name, version, built)], &(&1 == "")), "\n")
           {:ok, number, warnings}
@@ -117,17 +118,24 @@ defmodule OneCore.Apps.Deploy do
   # narrower copies of itself.
   defp committed(owner, name, number, %Version{artifact: artifact} = version, install) do
     forget()
-    moved = if install, do: Installed.change(owner, name, {:deployed, artifact, nil}), else: %{}
-    if install, do: Apps.sync(owner, [{artifact, number, {:ok, version}}])
-    Server.notify_servers(Enum.uniq([owner | Installed.installed_for(artifact)]))
+    moved = step("installed", fn -> if install, do: Installed.change(owner, name, {:deployed, artifact, nil}), else: %{} end)
+    step("sync", fn -> if install, do: Apps.sync(owner, [{artifact, number, {:ok, version}}]) end)
+    step("notify", fn -> Server.notify_servers(Enum.uniq([owner | Installed.installed_for(artifact)])) end)
 
     case moved do
       {:error, why} ->
         {:error, "#{name} is deployed as version #{number}, and isn't installed for #{owner}: #{why}"}
 
       _ ->
-        if install, do: Lifecycle.supersede(owner, artifact)
+        step("supersede", fn -> if install, do: Lifecycle.supersede(owner, artifact) end)
         :ok
+    end
+  end
+
+  # A step of a deploy, as a span of the call's trace, so its trace says where a deploy's time goes.
+  defp step(name, run) do
+    Tracer.with_span "deploy #{name}" do
+      run.()
     end
   end
 
