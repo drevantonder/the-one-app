@@ -449,7 +449,9 @@ defmodule OneCore.Apps.Deploy do
   A server does it once it's up, on a build no published server build is newer than: so a server release rebuilds
   every app once, and a server left on an older build never builds them back. For each whose apps they are, one
   server does it (`rebuilds?/2`), and the others run what it built as each version reaches them. One another server
-  built meanwhile against the same UI library is done, not a failure.
+  built meanwhile against the same UI library is done, not a failure. Once a newer server build is out, it stops: that
+  build builds them all again, and this server is about to take it, which builds nothing well while it goes (each app
+  left failed as it restarted, the YAML library it reads a skill with said "malformed yaml" on 20 Nov).
   """
   def rebuild do
     code = Entrypoint.library().code
@@ -472,6 +474,7 @@ defmodule OneCore.Apps.Deploy do
         {_number, hash, _tag} <- [Store.latest(artifact)],
         # It stays as installed, or not, as it was.
         install? = fn _version -> Apps.app(whose, name) == artifact end,
+        newest?(),
         {:error, why} <- [rebuilt(whose, name, Store.source(artifact, hash), install?)],
         built_with(artifact) != code,
         do: Logger.error("#{artifact}'s app wasn't built again against this server's UI library: #{why}")
