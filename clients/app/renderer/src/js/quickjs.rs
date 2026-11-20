@@ -273,8 +273,16 @@ pub struct Thread {
     calls: mpsc::Sender<Call>,
     shared: Arc<Shared>,
     clock: Clock,
-    /// How many calls it's been sent.
+    /// How many calls it's been sent, and of those how many reached its thread: the rest are held (`seed`).
     sent: u64,
+    posted: u64,
+    /// The number of the last call that told it something (`send`), rather than run its timers or a frame.
+    told: u64,
+    /// With a seed (`seed`), a xorshift's state, and the calls held while its thread is busy with something else, until
+    /// when on its clock.
+    random: u64,
+    held: Vec<Call>,
+    until: f64,
 }
 
 enum Call {
@@ -284,6 +292,27 @@ enum Call {
     Fire,
     /// A frame is shown, at this time on its clock: what asked for one runs.
     Frame(f64),
+    /// Calls that came while its thread was busy with something else, which it runs together in one turn.
+    Batch(Vec<Call>),
+}
+
+impl Call {
+    /// How many calls it is.
+    fn len(&self) -> u64 {
+        match self {
+            Call::Batch(calls) => calls.len() as u64,
+            _ => 1,
+        }
+    }
+
+    fn run(self, sandbox: &Sandbox, threw: &mut Vec<anyhow::Error>) {
+        match self {
+            Call::Send(to, message) => threw.extend(sandbox.send(to, &message).err()),
+            Call::Frame(time) => threw.extend(sandbox.frame(time).err()),
+            Call::Fire => {}
+            Call::Batch(calls) => calls.into_iter().for_each(|call| call.run(sandbox, threw)),
+        }
+    }
 }
 
 /// A xorshift's next number below `below`, from `state`, where it's seeded (not 0).
@@ -411,23 +440,20 @@ impl Thread {
                 // takes what came in two.
                 let apart = || roll(&mut on.split.lock().unwrap_or_else(std::sync::PoisonError::into_inner), 3) == 0;
                 for call in first.into_iter().chain(std::iter::from_fn(|| (!apart()).then(|| queue.try_recv().ok()).flatten())) {
-                    ran += 1;
-                    match call {
-                        Call::Send(to, message) => threw.extend(sandbox.send(to, &message).err()),
-                        Call::Frame(time) => threw.extend(sandbox.frame(time).err()),
-                        Call::Fire => {}
-                    }
+                    ran += call.len();
+                    call.run(&sandbox, &mut threw);
                 }
                 spent += crate::platform::on_cpu().saturating_sub(running);
             }
         })?;
-        Ok(Thread { calls, shared, clock, sent: 0 })
+        Ok(Thread { calls, shared, clock, sent: 0, posted: 0, told: 0, random: 0, held: Vec::new(), until: 0.0 })
     }
 
     /// Tells the UI library what the person did (`ui.event`), or a message from its client (`ui.message`), for its
     /// thread to run when it can.
     pub fn send(&mut self, to: &'static str, message: serde_json::Value) {
         self.call(Call::Send(to, message));
+        self.told = self.sent;
     }
 
     /// Has it run the timers that are due, as its clock was moved or paused, and wait again till its next.
@@ -455,23 +481,51 @@ impl Thread {
         self.shared.posts().framing
     }
 
-    /// Whether, and how, it's adversarial, the same each time for the same seed, as GPUI's randomized executor is: of
-    /// the calls that came together, which its thread runs in one turn, now and then one waits for a turn of its own,
-    /// what it changed meanwhile going to its window first, as a busy device's thread takes what came in two. 0 for
-    /// never.
-    pub fn seed(&self, seed: u64) {
+    /// Whether, and how, it's adversarial, the same each time for the same seed, as GPUI's randomized executor is: its
+    /// thread is now and then busy with something else for 10 to 120 ms of its clock, so the calls that come meanwhile
+    /// reach it together in one turn (a key and the Tab after it, a press's down and up, a frame), and of calls that
+    /// come together, now and then one waits for a turn of its own, what it changed meanwhile going to its window
+    /// first, as a busy device's thread takes what came in two. 0 for neither.
+    pub fn seed(&mut self, seed: u64) {
+        self.random = seed.wrapping_mul(0xA24B_AED4_963E_E407) | u64::from(seed != 0);
         *self.shared.split.lock().unwrap_or_else(std::sync::PoisonError::into_inner) = seed.wrapping_mul(0x9FB2_1C65_1E98_DF25) | u64::from(seed != 0);
     }
 
     fn call(&mut self, call: Call) {
+        self.sent += 1;
+        let now = self.clock.now();
+        if self.held.is_empty() && roll(&mut self.random, 4) == 1 {
+            self.until = now + 10.0 + roll(&mut self.random, 110) as f64;
+        }
+        if self.until > now {
+            return self.held.push(call);
+        }
+        self.release();
+        self.post(call);
+    }
+
+    fn post(&mut self, call: Call) {
+        let calls = call.len();
         if self.calls.send(call).is_ok() {
-            self.sent += 1;
+            self.posted += calls;
+        }
+    }
+
+    /// What was held while its thread was busy goes to it, together.
+    fn release(&mut self) {
+        if !self.held.is_empty() {
+            let held = std::mem::take(&mut self.held);
+            self.post(Call::Batch(held));
         }
     }
 
     /// What it's given its host since this was last asked: what it did with what it was sent, a batch at a time, and
-    /// how many of the calls it was sent it had run by then (`sent`).
-    pub fn take(&self) -> (Vec<Posted>, u64) {
+    /// how many of the calls it was sent it had run by then (`sent`). What was held while its thread was busy goes to
+    /// it once that's past.
+    pub fn take(&mut self) -> (Vec<Posted>, u64) {
+        if self.until <= self.clock.now() {
+            self.release();
+        }
         self.shared.waiting.store(false, Ordering::Release);
         let mut posts = self.shared.posts();
         (posts.posted.drain(..).collect(), posts.ran)
@@ -480,6 +534,17 @@ impl Thread {
     /// How many calls it's been sent: the last one's number.
     pub fn sent(&self) -> u64 {
         self.sent
+    }
+
+    /// Where calls are held for it while it's busy with something else (`seed`), how long till it's free, in ms on its
+    /// clock.
+    pub fn holding(&self) -> Option<f64> {
+        (!self.held.is_empty()).then(|| self.until - self.clock.now())
+    }
+
+    /// The number of the last call that told it something (`send`): what the person did, or its client said.
+    pub fn told(&self) -> u64 {
+        self.told
     }
 
     /// Calls `wake`, from its thread, as it posts what its window hasn't taken: at once if it already has.
@@ -494,10 +559,11 @@ impl Thread {
         self.shared.posts().started.clone()
     }
 
-    /// Whether it has something it was sent to run yet, or hasn't started: what it then posts is on its way.
+    /// Whether its thread has something it was sent to run yet, or hasn't started: what it then posts is on its way.
+    /// What's held for it (`seed`) isn't its yet.
     pub fn busy(&self) -> bool {
         let posts = self.shared.posts();
-        !posts.ended && (posts.started.is_none() || posts.ran < self.sent)
+        !posts.ended && (posts.started.is_none() || posts.ran < self.posted)
     }
 
     /// Whether it has run call number `call` (`sent`), or ended.
@@ -506,17 +572,20 @@ impl Thread {
         posts.ended || (posts.started.is_some() && posts.ran >= call)
     }
 
-    /// Waits until it has run all it was sent, or ended.
+    /// Waits until it has run all that's reached its thread, or ended.
     pub fn wait(&self) {
         let mut posts = self.shared.posts();
-        while !posts.ended && (posts.started.is_none() || posts.ran < self.sent) {
+        while !posts.ended && (posts.started.is_none() || posts.ran < self.posted) {
             posts = self.shared.turned.wait(posts).unwrap_or_else(std::sync::PoisonError::into_inner);
         }
     }
 
-    /// When its next timer is due, in ms from now on its clock, if it has one.
+    /// When its next timer is due, in ms from now on its clock, if it has one, or what's held for it while it's busy
+    /// (`seed`), which it runs, with its timers, once it's free.
     pub fn due(&self) -> Option<f64> {
-        Some(self.shared.posts().due? - self.clock.now())
+        let due = self.shared.posts().due;
+        let due = if self.held.is_empty() { due? } else { due.unwrap_or(self.until).max(self.until) };
+        Some(due - self.clock.now())
     }
 
     /// Each of its timers: when it's due, in ms from now (`in`), and how often an interval runs (`every`).

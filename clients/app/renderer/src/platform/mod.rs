@@ -23,7 +23,7 @@
 //!   `requestAnimationFrame`. A display that says nothing (`Display::paced` false) is ticked at 60 Hz by the loop.
 //! - **A surface to present on**: a frame presented each tick while something moves, and nothing while it's still.
 
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::sync::{Arc, OnceLock};
 
 use crate::geometry::{DevicePixels, Pixels, Point, Size};
@@ -411,6 +411,15 @@ struct Window {
     presented: bool,
     /// How many frames it's presented, all told.
     frames: u64,
+    /// What the person did that waits, in order, for its page to catch up with what they did before (`Windows::input`).
+    waiting: VecDeque<Waiting>,
+}
+
+/// Input that waits for its window's page (`Windows::input`): part of the window it's on, or a finger, and when it
+/// happened, where its system says.
+enum Waiting {
+    Input(usize, Input),
+    Touch { finger: u64, at: Point<f32>, phase: crate::view::touch::Phase, happened: Option<web_time::Instant>, fingers: crate::view::touch::Fingers },
 }
 
 /// A window let go of from a swipe back, springing back to where it was or off to the right (`target`, in points), from
@@ -575,6 +584,7 @@ impl Windows {
                 presented: false,
                 frames: 0,
                 timing: Default::default(),
+                waiting: VecDeque::new(),
             },
         );
         Ok(id)
@@ -591,6 +601,65 @@ impl Windows {
             }
             screen.unused();
             window.timing.applied(started.elapsed());
+        }
+        self.catch_up(id);
+    }
+
+    /// Whether what the person does to window `id` now waits, behind what already does, or for its page: what's
+    /// `discrete` (a press, a key) waits until the page has run what they did before (`Screen::caught_up`), as a
+    /// browser runs each input event once its page has run the one before, so a Tab or a press acts on what the page
+    /// made of the key or press before it, never on a frame from before it. What's continuous (the pointer or a finger
+    /// moving) waits only behind what does, so it comes after it.
+    fn waits(&mut self, id: WindowId, discrete: bool) -> bool {
+        let Some(window) = self.windows.get(&id) else { return false };
+        let Ok(screen) = &window.screen else { return false };
+        if !window.waiting.is_empty() || (discrete && !screen.caught_up()) {
+            return true;
+        }
+        if discrete {
+            self.lay_out(id);
+        }
+        false
+    }
+
+    /// Window `id`'s page laid out as it is now, where what it changed isn't yet, for what the person does next to hit,
+    /// as a browser lays its page out before it hit-tests a click: it's painted now, and its next frame shows that.
+    fn lay_out(&mut self, id: WindowId) {
+        let Some(window) = self.windows.get_mut(&id) else { return };
+        let (room, scale) = (window.room(), window.parts[0].native.scale());
+        let Ok(screen) = &mut window.screen else { return };
+        if !screen.laid_out() {
+            screen.paint(room, scale, &mut self.text, &self.atlas, &mut window.scene);
+            window.dirty = true;
+        }
+    }
+
+    /// What waited for window `id`'s page is done, in order, while its page has caught up.
+    fn catch_up(&mut self, id: WindowId) {
+        loop {
+            #[cfg(feature = "fake")]
+            self.wait();
+            let Some(window) = self.windows.get_mut(&id) else { return };
+            let Ok(screen) = &window.screen else { return window.waiting.clear() };
+            let discrete = match window.waiting.front() {
+                None => return,
+                Some(Waiting::Input(_, input)) => input.waits() == Some(true),
+                Some(Waiting::Touch { finger, phase, .. }) => phase.discrete(screen, *finger),
+            };
+            if discrete && !screen.caught_up() {
+                return;
+            }
+            if discrete {
+                self.lay_out(id);
+            }
+            let Some(window) = self.windows.get_mut(&id) else { return };
+            match window.waiting.pop_front().expect("there's one") {
+                Waiting::Input(part, input) => self.act(id, part, input),
+                Waiting::Touch { finger, at, phase, happened, fingers } => {
+                    let ago = happened.map(|happened| since(happened).as_secs_f64() * 1000.0);
+                    self.touched(id, finger, at, phase, ago, fingers);
+                }
+            }
         }
     }
 
@@ -631,6 +700,7 @@ impl Windows {
         let Some(window) = self.windows.get_mut(&id) else { return false };
         let Ok(screen) = &mut window.screen else { return false };
         screen.reload(page);
+        window.waiting.clear();
         window.opened = now();
         (window.drawn, window.reloading, window.dirty) = (false, true, true);
         true
@@ -901,10 +971,8 @@ impl Windows {
     /// says when: the rail's line's where it lands on it, and otherwise its page's (`view::touch`), the window swiped
     /// back from its left edge where the host leaves that to its app, as an iPhone's apps draw it. `fingers` is how the
     /// system differs. → whether it pans, which a host that flings flings as it lifts.
+    /// A finger that lands, or lifts to press, waits for its page, and its moves behind it (`waits`).
     pub(crate) fn touch(&mut self, id: WindowId, finger: u64, at: Point<f32>, phase: crate::view::touch::Phase, ago: Option<f64>, fingers: crate::view::touch::Fingers) -> bool {
-        use crate::view::touch::Touched;
-        #[cfg_attr(not(any(target_os = "ios", feature = "fake")), allow(unused_mut))]
-        let mut fingers = fingers;
         if self.check.is_some() {
             self.record.input("touch", ago.and_then(|ago| now().checked_sub(std::time::Duration::from_secs_f64(ago / 1000.0))));
         }
@@ -912,6 +980,22 @@ impl Windows {
         if self.line(id, finger, at, phase) {
             return false;
         }
+        let discrete = self.windows.get(&id).and_then(|window| window.screen.as_ref().ok()).is_some_and(|screen| phase.discrete(screen, finger));
+        if self.waits(id, discrete) {
+            let happened = ago.and_then(|ago| now().checked_sub(std::time::Duration::from_secs_f64(ago / 1000.0)));
+            if let Some(window) = self.windows.get_mut(&id) {
+                window.waiting.push_back(Waiting::Touch { finger, at, phase, happened, fingers });
+            }
+            return false;
+        }
+        self.touched(id, finger, at, phase, ago, fingers)
+    }
+
+    /// Finger `finger` on window `id`, its page caught up (`touch`).
+    fn touched(&mut self, id: WindowId, finger: u64, at: Point<f32>, phase: crate::view::touch::Phase, ago: Option<f64>, fingers: crate::view::touch::Fingers) -> bool {
+        use crate::view::touch::Touched;
+        #[cfg_attr(not(any(target_os = "ios", feature = "fake")), allow(unused_mut))]
+        let mut fingers = fingers;
         let Some(window) = self.windows.get_mut(&id) else { return false };
         window.dirty = true;
         let native = &window.parts[0].native;
@@ -1126,6 +1210,10 @@ impl Windows {
             self.recover();
         }
         for (id, part, input) in self.display.events() {
+            // The fake platform's pages are as quick as what comes, the same each time: each has run what came before it
+            // (`wait`), unless a seed has it busy (`Thread::seed`).
+            #[cfg(feature = "fake")]
+            self.wait();
             self.input(id, part, input);
         }
         for window in self.windows.values_mut() {
@@ -1351,6 +1439,11 @@ impl Windows {
                 (window.on_event)(Event::Shown(asked.elapsed()));
             }
         }
+        // What waited for a page that's caught up now is done.
+        let waiting: Vec<WindowId> = self.windows.iter().filter(|(_, window)| !window.waiting.is_empty()).map(|(id, _)| *id).collect();
+        for id in waiting {
+            self.catch_up(id);
+        }
         self.pressed();
         // The display's frames are wanted while something moves, and while a change waits for its next tick; a link
         // just started, or stopped, hasn't ticked.
@@ -1425,6 +1518,19 @@ impl Windows {
         if self.check.is_some() {
             self.record.input(input.kind(), None);
         }
+        if let Some(discrete) = input.waits()
+            && self.waits(id, discrete)
+        {
+            if let Some(window) = self.windows.get_mut(&id) {
+                window.waiting.push_back(Waiting::Input(part, input));
+            }
+            return;
+        }
+        self.act(id, part, input);
+    }
+
+    /// What the display said happened to part `part` of window `id`, its page caught up where it waits (`input`).
+    fn act(&mut self, id: WindowId, part: usize, input: Input) {
         // Ctrl-W closes the window, as a Linux or Windows app's does, and Ctrl-Q on Linux quits the app (a Mac's are
         // ⌘W and ⌘Q, its menu bar's).
         let (closes, quits) = match &input {
@@ -1699,16 +1805,18 @@ impl Windows {
     }
 
     /// Each window's page has run all it's been sent, and what it posted is applied, as `posted` applies it once its
-    /// JS wakes the loop. → whether any window has something to draw.
+    /// JS wakes the loop. → whether anything came.
     pub fn wait(&mut self) -> bool {
+        let mut came = false;
         for window in self.windows.values_mut() {
             if let Ok(screen) = &mut window.screen
                 && screen.idle()
             {
                 window.dirty = true;
+                came = true;
             }
         }
-        self.windows.values().any(|window| window.dirty)
+        came
     }
 
     /// The display shows a frame now, which the loop hears on its turn. A panel just put on the screen with nothing
@@ -1775,7 +1883,8 @@ impl Windows {
 
     /// The fake platform's time moves on by `ms`, its pages' clock with it: each of their timers due meanwhile runs at
     /// its own time, and while the loop wants frames the display ticks each refresh, the loop taking a turn for each,
-    /// as a host's do. What each page sent is run before each turn (`wait`).
+    /// as a host's do. What each page sent is run before each turn (`wait`), and what a turn sent one (input that
+    /// waited for it) is run and drawn at once, on a turn of its own, as its post wakes a host's loop (`posted`).
     pub fn run(&mut self, ms: f64) {
         let refresh = self.display.refresh().unwrap_or(FRAME).as_secs_f64() * 1000.0;
         let started = fake::time();
@@ -1784,13 +1893,16 @@ impl Windows {
             self.wait();
             let drawn: u64 = self.windows.values().map(|window| window.frames).sum();
             self.turn();
+            if self.wait() {
+                self.turn();
+            }
             // A frame drawn on a device others load keeps its thread busy, the display's refreshes going by unseen.
             let busy = self.display.frame_ms();
             if busy > 0.0 && self.windows.values().map(|window| window.frames).sum::<u64>() > drawn {
                 fake::advance(busy);
                 for window in self.windows.values_mut() {
                     if let Ok(screen) = &mut window.screen {
-                        screen.advance(0.0);
+                        window.dirty |= screen.advance(0.0);
                     }
                 }
             }
@@ -1809,7 +1921,7 @@ impl Windows {
             fake::advance(by);
             for window in self.windows.values_mut() {
                 if let Ok(screen) = &mut window.screen {
-                    screen.advance(0.0);
+                    window.dirty |= screen.advance(0.0);
                 }
             }
             if next.is_none() {
@@ -1949,7 +2061,30 @@ fn whole_points(bounds: crate::geometry::Bounds<f32>) -> crate::geometry::Bounds
     crate::geometry::Bounds { origin: crate::geometry::point(left, top), size: Size { width: right - left, height: bottom - top } }
 }
 
+impl crate::view::touch::Phase {
+    /// Whether a finger in this phase is discrete input (`Windows::waits`): it lands, or lifts to press.
+    fn discrete(self, screen: &Screen, finger: u64) -> bool {
+        use crate::view::touch::Phase;
+        match self {
+            Phase::Down => true,
+            Phase::Moved => false,
+            Phase::Up | Phase::Cancelled => screen.lift_presses(finger),
+        }
+    }
+}
+
 impl Input {
+    /// Whether it's the page's, and waits for it (`Windows::waits`): a press, a key, what's typed or picked, which do,
+    /// or the pointer moving, which only follows what does. The wheel scrolls at once, as a browser's compositor
+    /// scrolls, and what's the window's or the system's is the window's.
+    fn waits(&self) -> Option<bool> {
+        match self {
+            Input::Down(..) | Input::Up(..) | Input::Key(_) | Input::Ime(_) | Input::TextInputClient(_) | Input::Picked(..) | Input::Dropped(..) => Some(true),
+            Input::Moved(_) | Input::Predicted(_) | Input::Left => Some(false),
+            _ => None,
+        }
+    }
+
     /// What it is, as the inspector's `host` check names it.
     fn kind(&self) -> &'static str {
         match self {

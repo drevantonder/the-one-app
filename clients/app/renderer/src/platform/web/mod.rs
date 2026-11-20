@@ -336,6 +336,16 @@ impl Thread {
         self.sent
     }
 
+    /// Nothing seeds a browser's page's thread.
+    pub fn holding(&self) -> Option<f64> {
+        None
+    }
+
+    /// What it's sent always tells it something.
+    pub fn told(&self) -> u64 {
+        self.sent
+    }
+
     pub fn on_post(&self, wake: impl Fn() + Send + 'static) {
         WAKE.set(Some(Box::new(wake)));
         WOKEN.set(false);

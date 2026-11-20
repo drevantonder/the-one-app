@@ -344,16 +344,18 @@ impl Screen {
     }
 
     /// Moves the clock on by `ms`, paused, running each timer due in that time at its own time, in order: for a host
-    /// whose display ticks of its own (the fake platform's), which this waits on the app's JS thread for.
-    pub fn advance(&mut self, ms: f64) {
-        self.moved(ms, false);
+    /// whose display ticks of its own (the fake platform's), which this waits on the app's JS thread for. → whether
+    /// its page changed anything, which its window draws.
+    pub fn advance(&mut self, ms: f64) -> bool {
+        self.moved(ms, false)
     }
 
     /// Whether what it shows is still on its way somewhere: a transition, a node let go springing back, a list
-    /// flung, what its page asked a frame for, or for a harness, a picture decoded that's there only later on its clock.
+    /// flung, what its page asked a frame for, or for a harness, a picture decoded that's there only later on its clock,
+    /// or its page busy (`seed`).
     /// A loop (a spinner) never arrives, so isn't.
     pub fn arriving(&self) -> bool {
-        self.transitions.arriving() || self.coasting() || self.js.framing() || self.late.as_ref().is_some_and(super::Late::holding) || self.pictures.due().is_some()
+        self.transitions.arriving() || self.coasting() || self.js.framing() || self.js.holding().is_some() || self.late.as_ref().is_some_and(super::Late::holding) || self.pictures.due().is_some()
     }
 
     /// Its page's thread as a busy device's, as `seed` says (`Thread::seed`): what it's called with together now and then
@@ -374,11 +376,11 @@ impl Screen {
         self.js.due().into_iter().chain(self.pictures.due()).chain(self.frames.values().filter_map(|child| child.screen.pictures.due())).reduce(f64::min)
     }
 
-    fn moved(&mut self, ms: f64, frames: bool) {
+    fn moved(&mut self, ms: f64, frames: bool) -> bool {
         let frame_ms = 1000.0 / self.hz;
         let clock = self.js.clock().clone();
         clock.pause();
-        self.idle();
+        let mut came = self.idle();
         let mut left = ms;
         loop {
             // The next frame's, at least a microsecond on, so a clock a hair short of one isn't stepped by nothing.
@@ -392,11 +394,11 @@ impl Screen {
                 self.frame(web_time::Instant::now());
             }
             self.js.fire();
-            self.idle();
+            came |= self.idle();
         }
         clock.advance(left);
         self.js.fire();
-        self.idle();
+        came | self.idle()
     }
 
     /// Tells each `settle` waiting that it's settled, if it is, or what's pending once its deadline has come.
@@ -408,6 +410,10 @@ impl Screen {
         // by itself till it's shown, when it's where its time has taken it.
         let (moving, animating) = if self.visible { (self.transitions.len(), self.js.framing() || self.coasting()) } else { (0, false) };
         let mut pending = inspect::pending(&self.unanswered, &self.js.timers(), moving, animating, self.changed.is_some(), self.busy());
+        // A page busy with something else (`Thread::seed`) runs what's held for it once it's free, as a timer does.
+        if let Some(free) = self.js.holding() {
+            pending.push(json!({"kind": "busy", "in": free}));
+        }
         // What a frame's page asked and hasn't heard back is this one's to wait for too.
         for child in self.frames.values() {
             pending.extend(inspect::pending(&child.screen.unanswered, &[], 0, child.screen.js.framing(), false, false));

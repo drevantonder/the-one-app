@@ -134,6 +134,12 @@ impl Screen {
         touched
     }
 
+    /// Whether finger `id`, lifted, presses what it's on, as it does unless it panned, swiped or stopped a fling: what its
+    /// lift does is then its page's, which waits for the page to have run what came before (`Windows::touch`).
+    pub fn lift_presses(&self, id: u64) -> bool {
+        self.finger.as_ref().is_some_and(|finger| finger.id == id && !finger.panning && !finger.stopped && finger.swipe.is_none())
+    }
+
     /// Whether the finger it follows landed on an input.
     pub fn finger_on_input(&self) -> bool {
         self.finger.as_ref().is_some_and(|finger| finger.on_input)

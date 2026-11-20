@@ -383,10 +383,11 @@ pub fn over(frames: &[Value], budget: f64) -> usize {
 }
 
 /// Whether nothing's pending that ends by itself: no request unanswered, no frame due, and, while the clock runs, no
-/// timer but intervals and nothing on its way.
+/// timer but intervals, its page not busy (`busy`) and nothing on its way.
 pub fn settled(pending: &[Value], paused: bool) -> bool {
     pending.iter().all(|pending| match pending["kind"].as_str() {
         Some("timer") => paused || pending.get("every").is_some_and(|every| !every.is_null()),
+        Some("busy") => paused,
         Some("transition" | "animation") => paused,
         _ => false,
     })

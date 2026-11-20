@@ -565,6 +565,19 @@ impl Screen {
         self.waiting() || !self.js.ran(self.heard)
     }
 
+    /// Whether its page, and each frame's, has run all it was told (`Thread::told`), and what that changed is applied:
+    /// what the person does next is then done to what the page made of what they did before, as a browser runs each
+    /// input event once the page has run the one before. Its timers and frames needn't have run.
+    pub fn caught_up(&self) -> bool {
+        self.editing.heard >= self.js.told() && self.frames.values().all(|child| child.screen.caught_up())
+    }
+
+    /// Whether what's applied of its page, and each frame's, is laid out as it was last painted, which what the person
+    /// does is hit and moved through by.
+    pub fn laid_out(&self) -> bool {
+        self.tree.unchanged() && self.frames.values().all(|child| child.screen.laid_out())
+    }
+
     /// Whether its app's JS, or a frame's, has something it was sent to run yet, or hasn't started.
     fn busy(&self) -> bool {
         self.js.busy() || self.frames.values().any(|child| child.screen.busy())
@@ -709,7 +722,7 @@ impl Screen {
 
     /// Whether its page, or a frame's in it, asked for the display's next frame (`requestAnimationFrame`).
     pub fn framing(&self) -> bool {
-        self.js.framing() || self.frames.values().any(|child| child.screen.framing())
+        self.js.framing() || self.late.as_ref().is_some_and(Late::holding) || self.frames.values().any(|child| child.screen.framing())
     }
 
     /// The display showed a frame `at`: what asked for one runs, told when, on its clock.
@@ -769,9 +782,11 @@ impl Screen {
                 posted
             }
             Some(late) => {
-                if !posted.is_empty() {
-                    let turns = (late.hold)();
-                    late.held.push_back((turns, posted, heard));
+                // What ran and changed nothing is heard with the batch before it, or at once with none held.
+                match late.held.back_mut() {
+                    _ if !posted.is_empty() => late.held.push_back(((late.hold)(), posted, heard)),
+                    Some((.., held)) => *held = heard,
+                    None => self.editing.heard = heard,
                 }
                 let mut ready = Vec::new();
                 while let Some((turns, ..)) = late.held.front_mut() {

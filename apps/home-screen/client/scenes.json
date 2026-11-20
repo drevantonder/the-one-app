@@ -922,6 +922,14 @@
       ],
       "Put away, an agent opens a category": [
         {
+          "expect": {
+            "states": {
+              "of": "App Library",
+              "is": {}
+            }
+          }
+        },
+        {
           "putAway": true
         },
         {
