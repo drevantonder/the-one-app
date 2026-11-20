@@ -3,7 +3,8 @@
 //! parts' (`renderer::platform::Windows::memory`), each in MB, and how many command encoders the GPU holds
 //! (`one.client.gpu.encoders`), each with the state it was in (`one.state`: `background`
 //! with nothing on screen, `launcher` while it's summoned, `windows` with an app's window open) and how many windows
-//! were on screen (`one.windows`), so `telemetry metric` shows each state's over time, and over its state's budget
+//! were on screen (`one.windows`) and its system (`os.type`, as Telemetry adds a metric's points up whichever device
+//! they're from), so `telemetry metric` shows each state's over time, and over its state's budget
 //! (`budget`) an error (`one.client.memory.over`).
 
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -76,7 +77,7 @@ fn measure() {
             said(Some(js)),
         );
         let Ok(views) = crate::views() else { return };
-        let attributes = json!({"one.state": state, "one.windows": shown.len()});
+        let attributes = json!({"one.state": state, "one.windows": shown.len(), "os.type": std::env::consts::OS});
         let records = [("one.client.memory", process), ("one.client.memory.surfaces", Some(surfaces)), ("one.client.memory.textures", Some(textures)), ("one.client.memory.gpu", gpu), ("one.client.memory.js", Some(js))];
         for (name, bytes) in records {
             if let Some(bytes) = bytes {
