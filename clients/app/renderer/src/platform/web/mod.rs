@@ -373,6 +373,14 @@ impl Thread {
     /// A browser's JS can't be waited on: what it was sent runs once this turn ends.
     pub fn wait(&self) {}
 
+    /// A browser collects its JS itself, as it sees fit.
+    pub fn collect(&mut self) {}
+
+    /// None that it says: what a browser's JS holds is its own (`performance.memory` is Chrome's alone).
+    pub fn memory(&self) -> usize {
+        0
+    }
+
     pub fn due(&self) -> Option<f64> {
         None
     }
