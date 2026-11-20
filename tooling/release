@@ -123,7 +123,7 @@ publish() {
       for (const target of kind ? [kind] : TARGETS.filter((target) => lists[target] || builds.some((other) => other.kind === target))) {
         const list = (lists[target] ??= {});
         const was = list[what];
-        list[what] = { build, sha256, size, signature, ...(inputs && { inputs }), ...(serves && { serves }), link: { method: "GET", url: `${at}/${sha256}` } };
+        list[what] = { build, sha256, size, signature, ...(inputs && { inputs }), ...(serves && { serves }), link: { method: "GET", url: `${at}/${sha256}`, headers: {} } };
         if (serves) list[what].serving = was?.serves === serves ? (was.serving ?? was.build) : build;
       }
     }
