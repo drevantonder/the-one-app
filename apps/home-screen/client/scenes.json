@@ -293,7 +293,6 @@
           }
         ],
         "widgets": [],
-        "store": "app-store",
         "apps": [
           {
             "app": "notes",
@@ -364,6 +363,9 @@
       },
       "mail_unread": {
         "count": 12
+      },
+      "settings_sections": {
+        "sections": []
       }
     }
   },
@@ -716,7 +718,6 @@
           }
         ],
         "widgets": [],
-        "store": "app-store",
         "apps": [
           {
             "app": "notes",
@@ -793,7 +794,6 @@
         ],
         "library": [],
         "widgets": [],
-        "store": "app-store",
         "apps": []
       }
     },
@@ -1270,7 +1270,6 @@
           }
         ],
         "widgets": [],
-        "store": "app-store",
         "apps": [
           {
             "app": "notes",
@@ -1551,6 +1550,153 @@
               "role": "heading",
               "name": "Utilities"
             }
+          }
+        }
+      ]
+    }
+  },
+  "Launcher, a background app with a section": {
+    "like": "Launcher on a computer",
+    "answers": {
+      "home-screen_pages": {
+        "who": "users/mira",
+        "arranges": true,
+        "pages": [
+          {
+            "items": [],
+            "hidden": false
+          }
+        ],
+        "library": [
+          {
+            "category": "Productivity",
+            "entrypoints": [
+              {
+                "entrypoint": "notes/client/index.html",
+                "name": "Notes",
+                "icon": "data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2064%2064%22%3E%3Crect%20width%3D%2264%22%20height%3D%2264%22%20rx%3D%2214%22%20fill%3D%22%23f5a623%22%2F%3E%3Ccircle%20cx%3D%2232%22%20cy%3D%2232%22%20r%3D%2212%22%20fill%3D%22white%22%20fill-opacity%3D%22.85%22%2F%3E%3C%2Fsvg%3E",
+                "app": "network/apps/notes",
+                "category": "Productivity",
+                "title": "Notes",
+                "installed": {
+                  "for": "network",
+                  "name": "notes",
+                  "removes": false
+                }
+              }
+            ]
+          },
+          {
+            "category": "Utilities",
+            "entrypoints": [
+              {
+                "entrypoint": null,
+                "name": "Containers",
+                "icon": "data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2064%2064%22%3E%3Crect%20width%3D%2264%22%20height%3D%2264%22%20rx%3D%2214%22%20fill%3D%22%23f5a623%22%2F%3E%3Ccircle%20cx%3D%2232%22%20cy%3D%2232%22%20r%3D%2212%22%20fill%3D%22white%22%20fill-opacity%3D%22.85%22%2F%3E%3C%2Fsvg%3E",
+                "app": "network/apps/containers",
+                "category": "Utilities",
+                "title": "Containers",
+                "installed": {
+                  "for": "network",
+                  "name": "containers",
+                  "removes": false
+                }
+              }
+            ]
+          },
+          {
+            "category": "AI",
+            "entrypoints": [
+              {
+                "entrypoint": null,
+                "name": "AI Gateway",
+                "icon": "data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2064%2064%22%3E%3Crect%20width%3D%2264%22%20height%3D%2264%22%20rx%3D%2214%22%20fill%3D%22%23f5a623%22%2F%3E%3Ccircle%20cx%3D%2232%22%20cy%3D%2232%22%20r%3D%2212%22%20fill%3D%22white%22%20fill-opacity%3D%22.85%22%2F%3E%3C%2Fsvg%3E",
+                "app": "network/apps/ai-gateway",
+                "category": "AI",
+                "title": "AI Gateway",
+                "installed": {
+                  "for": "network",
+                  "name": "ai-gateway",
+                  "removes": false
+                }
+              }
+            ]
+          }
+        ],
+        "widgets": [],
+        "apps": []
+      },
+      "settings_sections": {
+        "sections": [
+          {
+            "id": "ai-gateway/gateway",
+            "app": "ai-gateway",
+            "title": "AI Gateway",
+            "icon": null,
+            "app_icon": "data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2064%2064%22%3E%3Crect%20width%3D%2264%22%20height%3D%2264%22%20rx%3D%2214%22%20fill%3D%22%23f5a623%22%2F%3E%3Ccircle%20cx%3D%2232%22%20cy%3D%2232%22%20r%3D%2212%22%20fill%3D%22white%22%20fill-opacity%3D%22.85%22%2F%3E%3C%2Fsvg%3E",
+            "trusted": true,
+            "component": "gateway",
+            "in": "app",
+            "name": null,
+            "group": null,
+            "order": 0,
+            "kinds": null,
+            "service": false,
+            "needs": null,
+            "count": null
+          },
+          {
+            "id": "stay-awake/mac",
+            "app": "stay-awake",
+            "title": "Stay Awake",
+            "icon": null,
+            "app_icon": "data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2064%2064%22%3E%3Crect%20width%3D%2264%22%20height%3D%2264%22%20rx%3D%2214%22%20fill%3D%22%23f5a623%22%2F%3E%3Ccircle%20cx%3D%2232%22%20cy%3D%2232%22%20r%3D%2212%22%20fill%3D%22white%22%20fill-opacity%3D%22.85%22%2F%3E%3C%2Fsvg%3E",
+            "trusted": true,
+            "component": "mac",
+            "in": "device",
+            "name": null,
+            "group": null,
+            "order": 0,
+            "kinds": null,
+            "service": true,
+            "needs": null,
+            "count": null
+          }
+        ]
+      }
+    },
+    "taps": [
+      {
+        "type": "gate"
+      }
+    ],
+    "checks": {
+      "A background app with a Settings section is found, under Background Apps": [
+        {
+          "expect": {
+            "text": "Background Apps"
+          }
+        },
+        {
+          "expect": {
+            "text": "AI Gateway"
+          }
+        }
+      ]
+    }
+  },
+  "Launcher, a background app with no section": {
+    "like": "Launcher, a background app with a section",
+    "taps": [
+      {
+        "type": "contain"
+      }
+    ],
+    "checks": {
+      "A background app with no Settings section isn't found": [
+        {
+          "expect": {
+            "text": "No apps match."
           }
         }
       ]

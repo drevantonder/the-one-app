@@ -18,7 +18,19 @@ export interface Owner extends Pages {
 /// You, everyone, then each of your groups, in the order they're listed. A network with nothing that keeps groups
 /// has none. Yours and everyone's are asked for beside the groups, which they don't wait on.
 export const owners = createMemo(async () => {
-  const pages = (who: { subject?: string; name: string }) => json<Pages>("home-screen_pages", {}, who.subject).then((pages): Owner => ({ ...pages, ...who, key: who.subject ?? "you" }))
+  // An app with no screen of its own is listed only if it has a section in Settings, which opening it shows, as macOS
+  // opens a menu-bar app's preferences: its own page, or a section of the sidebar (a device's page isn't about it).
+  const sections = json<{ sections: { app: string; in: string }[] }>("settings_sections").then(({ sections }) => new Set(sections.filter((section) => section.in !== "device").map((section) => section.app)), () => new Set<string>())
+  const pages = (who: { subject?: string; name: string }) =>
+    Promise.all([json<Pages>("home-screen_pages", {}, who.subject), sections]).then(([pages, has]): Owner => ({
+      ...pages,
+      ...who,
+      key: who.subject ?? "you",
+      library: pages.library.flatMap((category) => {
+        const entrypoints = category.entrypoints.filter((listed) => listed.entrypoint || has.has(listed.installed.name))
+        return entrypoints.length ? [{ ...category, entrypoints }] : []
+      }),
+    }))
   const groups = json<{ groups: { group: string; called: string }[] }>("permissions_groups").then(({ groups }) => groups, (): { group: string; called: string }[] => [])
   const [yours, everyone, theirs] = await Promise.all([pages({ name: "You" }), pages({ subject: "network", name: "Everyone" }), groups.then((groups) => Promise.all(groups.map(({ group, called }) => pages({ subject: group, name: called }))))])
   return [yours, everyone, ...theirs]
@@ -88,13 +100,11 @@ export const pending = () => {
 /// An app of an App Library as an entrypoint, which it opens, or nothing, for an app with none.
 export const opens = (listed: Listed): Entrypoint | undefined => (listed.entrypoint ? (listed as Entrypoint) : undefined)
 
-/// Opens an app of an App Library: its entrypoint, or for an app with none, the App Store at its page, by a link
-/// (`one:app-store#app=…`), growing out of its icon as any app does.
+/// Opens an app of an App Library: its entrypoint, or for an app with none, its section in Settings, by a link
+/// (`one:settings#<app>`), growing out of its icon as any app does.
 export const press = (listed: Listed, owner: Owner, behind?: boolean, from?: From) => {
   if (opens(listed)) return launch(opens(listed)!, owner, behind, from)
-  const store = untrack(owners)?.[0]?.store
-  if (behind || !store) return
-  open(`${store}#app=${encodeURIComponent(listed.app)}`, { from })
+  if (!behind) open(`settings#${listed.installed.name}`, { from })
 }
 
 /// Who a call about an install is for: a group or the network, or for a user's own, nobody said.

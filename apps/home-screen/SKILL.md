@@ -27,8 +27,10 @@ Its words:
   (`pages`), its own and everyone's; for everyone, only everyone's. Each app is there once, as the narrowest
   install's, and a group's opens for the group. An app installed lands there, not on a page. An app goes on an
   owner's pages only where it opens for them, installed for them or for everyone (`pages`' `apps`).
-- A background app, with no entrypoint, is only in the App Library, under Background Apps, and opens its App Store
-  page: `add` refuses it and `arrange` skips it, each saying why.
+- A background app, with no entrypoint, is only in the App Library, under Background Apps, and opens its section in
+  Settings (its own page there, or a section of its sidebar); one with no section isn't listed on a computer's or a
+  phone's screens, which ask Settings for them (`settings_sections`). `add` refuses it and `arrange` skips it, each
+  saying why.
 - One about whoever opens it (`subject: "user"`) is only in a user's App Library, wherever it's installed, and opens
   for them.
 - Installing an app puts its code on a server, so for the network only its owners and those they let (`installer`,

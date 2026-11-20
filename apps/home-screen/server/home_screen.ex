@@ -9,7 +9,7 @@ defmodule HomeScreen do
   broader owner they're within (a user's has their groups' and the network's too, a group's the network's), each app
   once. An app installed since goes there, not on a page. An app about whoever opens it (`subject: "user"`, as Vault
   and Devices say) is only in a user's, and is opened for them. A background app, one with no entrypoint of its own
-  (Gmail, Database), is only ever in the App Library, where it opens the App Store at its page: there's nothing of it
+  (Gmail, Database), is only ever in the App Library, where it opens its section in Settings: there's nothing of it
   to put on a page. The App Store is an app like any other, in its app's category.
 
   Every tool here is asked for whoever's Home Screen it is, as an app opened from it is. What draws them is this
@@ -60,7 +60,7 @@ defmodule HomeScreen do
       required: ["entrypoint", "app", "name", "icon", "category"]
     }
 
-    # An app as the App Library has it: an entrypoint of its, or an app with none, which opens the App Store at its page.
+    # An app as the App Library has it: an entrypoint of its, or an app with none, which opens its section in Settings.
     listed =
       entrypoint
       |> put_in([:properties, :entrypoint], %{
@@ -117,8 +117,7 @@ defmodule HomeScreen do
         description: """
         Gives your Home Screen: its pages, in order, each what's on it and whether it's hidden (`pages`), its App
         Library, every app that runs for you by category, yours, your groups' and everyone's (`library`), the widgets
-        that could be put on a page (`widgets`), the App Store, which opens a background app's page (`store`), the
-        apps that open on its pages (`apps`), and whether you may arrange it. Asked for a group or for the network, it's
+        that could be put on a page (`widgets`), the apps that open on its pages (`apps`), and whether you may arrange it. Asked for a group or for the network, it's
         theirs.
         """,
         inputs: none,
@@ -158,10 +157,6 @@ defmodule HomeScreen do
               }
             },
             widgets: %{type: "array", items: widget, description: "The widgets that could be put on a page"},
-            store: %{
-              type: ["string", "null"],
-              description: "The App Store, by the name it's installed by, which opens a background app's page"
-            },
             apps: %{
               type: "array",
               description: "The apps that open on its pages: theirs and the network's, each by its artifact and its name",
@@ -172,7 +167,7 @@ defmodule HomeScreen do
               }
             }
           },
-          required: ["who", "arranges", "pages", "library", "widgets", "store", "apps"]
+          required: ["who", "arranges", "pages", "library", "widgets", "apps"]
         }
       },
       %{
@@ -296,7 +291,6 @@ defmodule HomeScreen do
       pages: pages,
       library: library,
       widgets: widgets,
-      store: Enum.find_value(apps, &(Enum.any?(&1.entrypoints, fn entrypoint -> entrypoint.category == "app-store" end) && &1.name)),
       apps: for(app <- apps, do: %{app: app.app, name: app.name})
     }
   end
@@ -416,7 +410,7 @@ defmodule HomeScreen do
   # and for each broader owner they're within: a user's has theirs, their groups' and the network's, a group's its own
   # and the network's. An app installed for more than one of them is there once, as the narrowest's. An app about
   # whoever opens it is only in a user's. Each is there as its entrypoints, but the launcher, or with none, as itself,
-  # which opens the App Store at its page. Each says who it's
+  # which opens its section in Settings. Each says who it's
   # `installed` for, by what name, and whether whoever asks may remove it: an owner of whoever that is.
   defp library(call) do
     entries =
