@@ -50,10 +50,12 @@ Section
   nsExec::Exec `powershell -NoProfile -NonInteractive -Command "${SERVERS} | Stop-ScheduledTask"`
   nsExec::Exec `taskkill /f /t /im one.exe`
   ; One still running, as another user's, can't be written over but can be moved aside, as `one update` does: it
-  ; carries on, and the next start is the new one.
-  Delete "$INSTDIR\one.old"
+  ; carries on, and the next start is the new one. Each is put aside under a name of its own, as `one update` puts
+  ; them (`one.<ms>.old`), and those put aside before that nothing runs any more go.
+  Delete "$INSTDIR\one.*.old"
   ${If} ${FileExists} "$INSTDIR\one.exe"
-    Rename "$INSTDIR\one.exe" "$INSTDIR\one.old"
+    System::Call 'kernel32::GetTickCount64()l.r0'
+    Rename "$INSTDIR\one.exe" "$INSTDIR\one.$0.old"
   ${EndIf}
   File "/oname=one.exe" "${PROGRAM}"
   WriteUninstaller "$INSTDIR\uninstall.exe"
@@ -93,7 +95,7 @@ Section Uninstall
   DeleteRegKey HKCU "Software\Classes\one"
   nsExec::Exec `powershell -NoProfile -NonInteractive -Command "$$d = '$INSTDIR'; $$p = [Environment]::GetEnvironmentVariable('Path', 'User'); [Environment]::SetEnvironmentVariable('Path', (($$p -split ';') | ? { $$_ -and $$_ -ne $$d }) -join ';', 'User')"`
   Delete /REBOOTOK "$INSTDIR\one.exe"
-  Delete /REBOOTOK "$INSTDIR\one.old"
+  Delete /REBOOTOK "$INSTDIR\one.*.old"
   Delete "$INSTDIR\uninstall.exe"
   RMDir /REBOOTOK "$INSTDIR"
   DeleteRegKey HKCU "${UNINSTALL}"

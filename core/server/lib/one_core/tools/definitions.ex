@@ -764,9 +764,9 @@ defmodule OneCore.Tools.Definitions do
             type: ["object", "null"],
             description:
               "The network's update, as its updater says, if its edge has one: `network_update_status` (up_to_date, " <>
-                "preparing, restarting or held), the `build` it takes every server to, how many " <>
+                "preparing or restarting), the `build` it takes every server to, how many " <>
                 "are `done` `of` those taking part, what it's `waiting_for` (quiet: a lone server waits " <>
-                "for no calls a while, or Update Now), why it's `held`, the servers `skipped` as asleep or gone, " <>
+                "for no calls a while, or Update Now), the servers that `went_back` from it and why, which the rest go on without, the servers `skipped` as asleep or gone, " <>
                 "those `behind` its build, and when each step was reached, in ms after the build was published (`timings`)"
           },
           edge: %{type: ["string", "null"], description: "The build the network's edge is, if it says"},
@@ -883,9 +883,8 @@ defmodule OneCore.Tools.Definitions do
       task_support: :optional,
       description: """
       Software Update's Update Now: has the network's update (`builds`' `network`) take every server to the latest build
-      published to the network now, where a lone server waits for a quiet moment before it restarts, or try again
-      where it's held. It answers once the network is up to date, or held, saying which server
-      didn't take it and why. Servers take each build published by themselves, so it's needed only for those.
+      released now, where a lone server waits for a quiet moment before it restarts, those that went back from it
+      too. It answers once the network is up to date, saying any server that went back from it and why. Servers take each build published by themselves, so it's needed only for those.
       """,
       inputs: %{type: "object", properties: %{}},
       outputs: %{

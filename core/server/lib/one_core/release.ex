@@ -253,8 +253,8 @@ defmodule OneCore.Release do
   @update_now 600_000
 
   @doc """
-  Update Now: tells the network's updater to take every server to the latest build now, or try again where it's held,
-  and gives what it says once it's up to date or held, as every server is told (`instructed/1`), or after
+  Update Now: tells the network's updater to take every server to the latest build now, those that went back from it too, and gives
+  what it says once it's up to date, as every server is told (`instructed/1`), or after
   `@update_now`, as it is then.
   """
   def update_now do
@@ -273,7 +273,7 @@ defmodule OneCore.Release do
   defp await_network(update, until) do
     left = until - System.monotonic_time(:millisecond)
 
-    if update["network_update_status"] in ["up_to_date", "held"] or left <= 0 do
+    if update["network_update_status"] == "up_to_date" or left <= 0 do
       update
     else
       receive do
@@ -286,19 +286,22 @@ defmodule OneCore.Release do
 
   @doc """
   The network's update, `update`, as a person reads it, in Software Update's words: "Up to date · 0.20.1",
-  "Updating… 2 of 4", "Waiting for a quiet moment", "Update failed · linux: why".
+  "Updating… 2 of 4", "Waiting for a quiet moment", and after either, each server that went back and why: "surface didn't
+  update: why".
   """
   def software_update(nil), do: "This network's edge has no updater yet."
 
   def software_update(update) do
     version = (update["build"] || "") |> String.split("+") |> hd()
 
-    case {update["network_update_status"], update["waiting_for"]} do
-      {"up_to_date", _} -> "Up to date · #{version}"
-      {"held", _} -> "Update failed · #{update["held"]["name"] || "a server"}: #{update["held"]["why"]}"
-      {_, "quiet"} -> "Waiting for a quiet moment · #{version}"
-      _ -> "Updating… #{update["done"]} of #{update["of"]}"
-    end
+    now =
+      case {update["network_update_status"], update["waiting_for"]} do
+        {"up_to_date", _} -> "Up to date · #{version}"
+        {_, "quiet"} -> "Waiting for a quiet moment · #{version}"
+        _ -> "Updating… #{update["done"]} of #{update["of"]}"
+      end
+
+    Enum.join([now | for(%{"name" => name, "why" => why} <- update["went_back"] || [], do: "#{name} didn't update: #{why}")], " · ")
   end
 
   # How long this server goes without a call before it's quiet enough to restart, as the one ready server, in

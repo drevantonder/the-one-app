@@ -11,8 +11,9 @@
 //     restarting ──► up to date
 //
 //     any state ──a newer build──► preparing, for the newer one
-//     preparing or restarting ──a server goes back, or doesn't finish──►
-//       held (which, why): Try Again (Update Now), or a newer build, starts it again
+//     preparing or restarting ──a server goes back, or doesn't finish──► it's behind (which, why), and the rest go
+//       on: a machine can be off or broken, and one mustn't keep every other from a build. Update Now, or a newer
+//       build, has it try again
 //     up to date ──a server that missed one is back──► preparing, for it alone
 //
 // A server that's asleep or gone as an update begins, or goes while it's under way, is skipped, and caught up under
@@ -25,8 +26,9 @@
 // told something, and its alarm only marks what didn't finish in time: a server that hears nothing new from it has
 // nothing to do.
 import { DurableObject } from "cloudflare:workers";
+import { relay } from "../relay/common.ts";
 
-type NetworkUpdateStatus = "up_to_date" | "preparing" | "restarting" | "held";
+type NetworkUpdateStatus = "up_to_date" | "preparing" | "restarting";
 type ServerUpdateStatus = "up_to_date" | "downloading" | "checked" | "verifying";
 /** What a server is told to do: prepare the build, take it now, or take it once it has had no calls for a while. */
 type Instruction = "prepare" | "go" | "go_when_quiet";
@@ -88,7 +90,8 @@ interface State {
   waiting_for?: "quiet" | null;
   /** Update Now was asked, so a lone server restarts without waiting for a quiet moment. */
   now?: boolean;
-  held?: { server: string; name?: string; why: string } | null;
+  /** The servers that went back from this build, or didn't take it in time, and why: each tries again with Update Now or a newer build. */
+  went_back?: { server: string; name?: string; why: string }[];
   /** When what's under way is taken as not finishing, in ms since 1970. */
   until?: number | null;
   /** When each step of the whole was reached, in ms after the build was published. */
@@ -125,8 +128,10 @@ export class NetworkUpdater extends DurableObject<Env> {
         this.begin(state, state.build && !newer(input.published, state.build) ? state.build : input.published, presence, reported);
       }
     } else if ("now" in input) {
-      if (state.network_update_status === "held" || (state.network_update_status === "up_to_date" && state.build)) this.begin(state, state.build!, presence, reported);
-      else state.now = true;
+      // Update Now takes everyone not on the build to it, those behind too, and one under way on without waiting.
+      if (state.network_update_status !== "preparing" && state.network_update_status !== "restarting") {
+        if (state.build) this.begin(state, state.build, presence, reported);
+      } else state.now = true;
     } else if ("reported" in input) {
       const { key, ...said } = input.reported;
       reported[key] = { ...reported[key], ...said };
@@ -149,17 +154,22 @@ export class NetworkUpdater extends DurableObject<Env> {
     return { status, ...((changed || concerned) && { broadcast: JSON.stringify({ jsonrpc: "2.0", method: MESSAGE, params: status }) }) };
   }
 
-  /** What didn't finish in time: the update is held. Nobody is told until something next comes in. */
+  /**
+   * What didn't finish in time: each server late is behind, and the update goes on without them, as the relay asks it
+   * again with who's here, which tells every server what's next.
+   */
   async alarm() {
     const state = await this.ctx.storage.get<State>("state");
     if (!state?.until || state.until > Date.now()) return;
     const reported = await this.reported();
     const preparing = state.network_update_status === "preparing";
-    const late = state.servers.find((server) => server.ready === undefined && (preparing ? server.prepared === undefined : server.went !== undefined));
+    const late = state.servers.filter((server) => server.ready === undefined && (preparing ? server.prepared === undefined : server.went !== undefined));
     const why = preparing ? `didn't finish preparing within ${PREPARING / 60_000} min` : `didn't take it within ${RESTARTING / 60_000} min`;
-    this.hold(state, late?.key ?? "", late && reported[late.key]?.name, why);
+    for (const server of late) this.wentBack(state, server.key, reported[server.key]?.name, why);
+    state.until = null;
     await this.ctx.storage.put("state", state);
     said(state, this.status(state, reported));
+    await relay(this.env.RELAY, (relay) => relay.updated({ status: true }));
   }
 
   async reported(): Promise<Record<string, Reported>> {
@@ -181,7 +191,7 @@ export class NetworkUpdater extends DurableObject<Env> {
       skipped: behind.filter((key) => !presence[key]?.server_ready),
       waiting_for: null,
       now: false,
-      held: null,
+      went_back: [],
       until: Date.now() + PREPARING,
       timings: {},
     } satisfies State);
@@ -199,12 +209,13 @@ export class NetworkUpdater extends DurableObject<Env> {
   /** Moves the update on as far as what's known of every server lets it. */
   step(state: State, presence: Record<string, Presence | null>, reported: Record<string, Reported>) {
     const status = state.network_update_status;
-    if (status === "held") return;
     if (status === "up_to_date") {
-      // One that missed an update is back.
+      // One that missed an update is back. One behind tries again with Update Now or a newer build, not each time it
+      // says what it is, which would fail as it did.
+      const wentBack = new Set((state.went_back ?? []).map(({ server }) => server));
       const back =
         state.build &&
-        Object.keys(reported).some((key) => this.takes(key, presence, reported) && !on(state, reported[key]) && presence[key]?.server_ready);
+        Object.keys(reported).some((key) => this.takes(key, presence, reported) && !wentBack.has(key) && !on(state, reported[key]) && presence[key]?.server_ready);
       if (back) this.begin(state, state.build!, presence, reported);
       return;
     }
@@ -215,9 +226,9 @@ export class NetworkUpdater extends DurableObject<Env> {
       if (server.prepared === undefined && said.server_update_status === "checked" && on(state, next)) server.prepared = at;
       if (server.started === undefined && on(state, said)) server.started = at;
       if (server.ready === undefined && on(state, said) && said.server_update_status === "up_to_date" && presence[server.key]?.server_ready) server.ready = at;
-      // Back on the pair it was on, saying why: it went back, or couldn't prepare.
+      // Back on the pair it was on, saying why: it went back, or couldn't prepare. It's behind, and the rest go on.
       if (server.begun && server.ready === undefined && said.server_update_status === "up_to_date" && !on(state, said) && said.went_back)
-        return this.hold(state, server.key, said.name, said.went_back);
+        this.wentBack(state, server.key, said.name, said.went_back);
     }
     // One that's gone, but for one restarting to take it, is caught up once it's back.
     const gone = state.servers.filter((server) => server.ready === undefined && !presence[server.key]?.connected && server.went === undefined);
@@ -262,17 +273,16 @@ export class NetworkUpdater extends DurableObject<Env> {
     if (state.published) state.timings.ready = Date.now() - state.published;
   }
 
-  hold(state: State, server: string, name: string | undefined, why: string) {
-    state.network_update_status = "held";
-    state.held = { server, ...(name && { name }), why };
-    state.waiting_for = null;
-    state.until = null;
+  /** Takes `server` out of the update, saying why, as behind: the rest go on without it. */
+  wentBack(state: State, server: string, name: string | undefined, why: string) {
+    state.servers = state.servers.filter((taking) => taking.key !== server);
+    state.went_back = [...(state.went_back ?? []).filter((back) => back.server !== server), { server, ...(name && { name }), why }];
   }
 
   /** What every server taking part is to do now, by its key. */
   instructions(state: State, reported: Record<string, Reported>): Record<string, Instruction> {
     const told: Record<string, Instruction> = {};
-    if (state.network_update_status === "held" || state.network_update_status === "up_to_date") return told;
+    if (state.network_update_status === "up_to_date") return told;
     for (const server of state.servers) {
       if (server.ready !== undefined) continue;
       if (state.network_update_status === "preparing" && server.prepared === undefined) told[server.key] = "prepare";
@@ -300,7 +310,7 @@ export class NetworkUpdater extends DurableObject<Env> {
       done: state.servers.filter((server) => server.ready !== undefined).length,
       of: state.servers.length,
       waiting_for: state.waiting_for ?? null,
-      held: state.held ?? null,
+      went_back: (state.went_back ?? []).map(({ server, why }) => ({ server, name: name(server), why })),
       skipped: state.skipped.map(name),
       edge: state.edge ?? null,
       servers: this.instructions(state, reported),
@@ -315,10 +325,10 @@ export class NetworkUpdater extends DurableObject<Env> {
 /**
  * Says what the update is now, as it changes, in the line Telemetry's Tail Worker keeps as a span
  * (`apps/telemetry/edge/worker.ts`): `network update`, from when its build was published to now, with its status,
- * build and how far it is, and as an error, which server held it and why, so Telemetry raises an alert.
+ * build and how far it is, and as an error, which servers are behind and why, so Telemetry raises an alert.
  */
 function said(state: State, status: ReturnType<NetworkUpdater["status"]>) {
-  const held = status.held && `${status.held.name ?? status.held.server.slice(0, 8)}: ${status.held.why}`;
+  const wentBack = status.went_back.length ? status.went_back.map(({ name, why }) => `${name}: ${why}`).join("; ") : null;
   const attributes = {
     "one.update.status": status.network_update_status,
     ...(status.build && { "one.update.build": status.build }),
@@ -326,9 +336,9 @@ function said(state: State, status: ReturnType<NetworkUpdater["status"]>) {
     "one.update.of": status.of,
     "one.update.skipped": status.skipped.length,
     ...(status.waiting_for && { "one.update.waiting_for": status.waiting_for }),
-    ...(status.held && { "one.update.held.server": status.held.name ?? status.held.server }),
+    ...(status.went_back.length && { "one.update.went_back": status.went_back.map(({ name }) => name).join(", ") }),
   };
-  console.log(JSON.stringify({ telemetry: { name: "network update", start: state.published ?? Date.now(), end: Date.now(), attributes, ...(held && { error: held }) } }));
+  console.log(JSON.stringify({ telemetry: { name: "network update", start: state.published ?? Date.now(), end: Date.now(), attributes, ...(wentBack && { error: wentBack }) } }));
 }
 
 /**

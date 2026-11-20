@@ -1186,15 +1186,23 @@ pub fn build_of(program: &Path) -> Option<String> {
     String::from_utf8_lossy(&output.stdout).split_whitespace().nth(1).map(str::to_owned)
 }
 
-/// Puts the program `new` in place of `program`, in one step. Windows replaces no program that's running, but lets
-/// it be renamed: the one before is put aside, and goes the next time.
+/// Puts the program `new` in place of `program`, in one step. Windows replaces or removes no program that's running,
+/// but lets it be renamed: the one before is put aside under a name of its own (`one.<ms>.old`), as one put aside
+/// before may still be running (the app, or the `one serve run` that's putting this in place, started from it), and
+/// those put aside before that nothing runs any more go.
 fn put(new: &Path, program: &Path) -> Result<()> {
     let program = program.canonicalize()?;
     #[cfg(windows)]
     {
-        let aside = program.with_extension("old");
-        let _ = fs::remove_file(&aside);
-        fs::rename(&program, &aside)?;
+        let stem = program.file_stem().unwrap_or_default().to_string_lossy().into_owned();
+        let folder = program.parent().context("a program is in a folder")?;
+        for aside in fs::read_dir(folder)?.flatten().map(|entry| entry.path()) {
+            let name = aside.file_name().unwrap_or_default().to_string_lossy();
+            if name.starts_with(&format!("{stem}.")) && name.ends_with(".old") {
+                let _ = fs::remove_file(&aside);
+            }
+        }
+        fs::rename(&program, program.with_extension(format!("{}.old", now())))?;
     }
     Ok(fs::rename(new, program)?)
 }
