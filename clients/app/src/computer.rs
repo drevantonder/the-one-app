@@ -335,6 +335,14 @@ fn launcher(home: std::path::PathBuf, link: Option<String>, started: std::time::
     }
     let _ = PROXY.set(Mutex::new(event_loop.create_proxy()));
     *OPENED.lock().expect("nothing panics holding it") = link;
+    // The native windows' thread starts now, its GPU and the pipelines it draws with (`Context::prepare`) with it,
+    // as the client opens and its session is settled, rather than as the Home Screen first asks for it, which waited
+    // for them in turn (0.6 s of its first frame on the owner's Mac, 20 Nov).
+    std::thread::spawn(|| {
+        if let Err(error) = renderer::platform::Native::get() {
+            eprintln!("no native window here: {error:#}");
+        }
+    });
     crate::begin(Computer, started);
 
     menu_events();
