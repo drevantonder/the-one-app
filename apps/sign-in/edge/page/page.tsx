@@ -81,7 +81,7 @@ type Stage =
   | { stage: "ready"; app: App }
   | { stage: "created" }
   | { stage: "unlocked"; name?: string }
-  | { stage: "failed"; why: string }
+  | { stage: "failed"; why: string; ended?: boolean }
 
 const [stage, setStage] = createSignal<Stage>({ stage: "checking" })
 /// How the app's own window lets its device in: by who's signing in, whose devices are asked, by a passkey with the
@@ -165,7 +165,7 @@ async function begin() {
       if (data) return claim()
       // A code that ended says so, rather than asking them to sign in for nothing.
       const { state } = await (await fetch(`/sign-in/auth/device/state?user_code=${encodeURIComponent(flow.code)}`)).json()
-      return setStage(state === "waiting" ? { stage: "needsSignIn" } : { stage: "failed", why: ended[state as keyof typeof ended] ?? ended.unknown })
+      return setStage(state === "waiting" ? { stage: "needsSignIn" } : { stage: "failed", why: ended[state as keyof typeof ended] ?? ended.unknown, ended: true })
     }
   } catch (error) {
     setStage({ stage: "failed", why: (error as Error).message })
@@ -178,11 +178,11 @@ async function claim() {
   const { data, error } = await auth.device({ query: { user_code: (flow as { code: string }).code } })
   if (error?.status === 429) return setStage({ stage: "failed", why: "That's too many tries. Try again later." })
   // Better Auth's server answers an expired code `expired_token`, which its client's types leave out.
-  if ((error?.error as string | undefined) === "expired_token") return setStage({ stage: "failed", why: "Expired. Start again on the device." })
-  if (error) return setStage({ stage: "failed", why: "No device is showing that code." })
+  if ((error?.error as string | undefined) === "expired_token") return setStage({ stage: "failed", why: ended.expired, ended: true })
+  if (error) return setStage({ stage: "failed", why: ended.unknown, ended: true })
   // Someone else opened this link first, and it's theirs to answer.
-  if (!data.client_id) return setStage({ stage: "failed", why: "Someone else is approving this device." })
-  if (data.status !== "pending") return setStage({ stage: "failed", why: "Already approved." })
+  if (!data.client_id) return setStage({ stage: "failed", why: "Someone else is approving this device.", ended: true })
+  if (data.status !== "pending") return setStage({ stage: "failed", why: ended.approved, ended: true })
   // What the device calls itself, which this network's hook adds (`edge/auth.ts`).
   setStage({ stage: "comparing", name: (data as { name?: string }).name ?? "A device", device: data.client_id })
 }
@@ -413,12 +413,14 @@ function shows(): Shows {
             stop: "Stop",
             onStop: () => respond(false),
           }
+        // Done, as Google's and GitHub's device pages are: nothing left to answer here.
         case "approved":
-          return { heading: `Approve ${now.name}?`, done: now.unlocked ? `It's yours now, and holds your key: ${now.name}. Go back to it.` : `It's yours now: ${now.name}. Go back to it.` }
+          return { mark: doneMark, heading: `${now.name} is signed in`, done: now.unlocked ? "It holds your key too. You can close this page and go back to it." : "You can close this page and go back to it." }
         case "denied":
-          return { heading: `Approve ${now.name}?`, done: `Denied: ${now.name} wasn't approved.` }
+          return { heading: `${now.name} wasn't approved`, done: "You can close this page." }
+        // A code that has ended is started again only on its device, so there's nothing to try again here.
         default:
-          return { heading: "Approve a device", problem: failed, button: "Try Again", onSignIn: begin }
+          return { heading: "Approve a device", problem: failed, ...(now.stage === "failed" && now.ended ? {} : { button: "Try Again", onSignIn: begin }) }
       }
     case "assistant":
       switch (now.stage) {
@@ -457,6 +459,9 @@ function shows(): Shows {
       return google() ? { heading: "Sign in", problem: refused, ...withGoogleFirst("Use a Passkey") } : { heading: "Sign in", button: "Sign in", onSignIn: signIn }
   }
 }
+
+/// The check mark a device page shows once it's done.
+const doneMark = <span class="done-mark"><Icon name="check" /></span>
 
 /// Continue with Google as the button, and the passkey as the second way, `passkey` saying what that does.
 const withGoogleFirst = (passkey: string) => ({ button: "Continue with Google", onSignIn: withGoogle, stop: passkey, onStop: signIn })

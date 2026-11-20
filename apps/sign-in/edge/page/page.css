@@ -102,3 +102,18 @@
   font: var(--title-weight) var(--text-title) / 1.15 var(--font-mono);
   letter-spacing: 0.08em;
 }
+
+/* Done, as Google's and GitHub's device pages show it: a check mark where the network's mark was. */
+.done-mark {
+  display: grid;
+  place-items: center;
+  width: 5.5rem;
+  height: 5.5rem;
+  border-radius: 50%;
+  background: var(--green);
+  color: white;
+}
+.done-mark svg {
+  width: 3rem;
+  height: 3rem;
+}
