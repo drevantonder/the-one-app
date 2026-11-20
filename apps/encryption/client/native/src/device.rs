@@ -17,7 +17,7 @@ pub struct Encrypts;
 
 impl InputResolver for Encrypts {
     fn formats(&self) -> &'static [&'static str] {
-        &["secret", "owner-key", "artifact-keys", "passkey-keys"]
+        &["secret", "passkey-keys"]
     }
 
     fn resolve<'a>(&'a self, client: &'a Client, input: Input<'a>) -> BoxFuture<'a, Result<Option<String>>> {
@@ -25,11 +25,6 @@ impl InputResolver for Encrypts {
             let Input { app, format, says, typed, inputs, subject } = input;
             let filled = match (format, typed) {
                 ("secret", Some(text)) => secret(client, app, says, text, subject).await?,
-                ("owner-key", typed) => match owner_key_for(client, inputs, typed, subject).await? {
-                    Some(key) => key,
-                    None => return Ok(None),
-                },
-                ("artifact-keys", None) => artifact_keys(client, app, says, inputs, subject).await?,
                 ("passkey-keys", None) => passkey_keys(client, app, says, inputs, subject).await?,
                 _ => return Ok(None),
             };
@@ -60,8 +55,8 @@ async fn unlocked_on(client: &Client, app: &str, says: &Value, subject: Option<&
 }
 
 /// The key an owner signs which servers open each of their artifacts with: Ed25519, from their key (HKDF, RFC 5869),
-/// so every device that holds that signs and checks alike, and a server, which never holds it, can't say its owner
-/// chose it. Only a device signs, so it's here, and a server's NIF is built without it.
+/// as the sign-in page derives it to sign as their passkey hands the keys over (`apps/sign-in/edge/page/passkey.ts`),
+/// so a device that holds the key checks with it, and a server, which never holds it, can't say its owner chose it.
 fn signer(owner: &Key) -> iroh_base::SecretKey {
     let mut seed = zeroize::Zeroizing::new([0; 32]);
     hkdf::Hkdf::<sha2::Sha256>::new(None, owner.as_slice())
@@ -70,7 +65,7 @@ fn signer(owner: &Key) -> iroh_base::SecretKey {
     iroh_base::SecretKey::from_bytes(&seed)
 }
 
-/// What an owner signs of an artifact as they choose the servers that open it: those servers at that epoch.
+/// What an owner signs of an artifact as their passkey hands its keys to servers: those servers at that epoch.
 fn signed_list(artifact: &str, epoch: u32, servers: &[String]) -> Vec<u8> {
     let mut servers = servers.to_vec();
     servers.sort();
@@ -181,69 +176,6 @@ async fn owner_key_of(client: &Client, subject: Option<&str>) -> Result<(Key, St
     Ok((cipher::key(&key)?, owner))
 }
 
-/// The key of `subject`, or of whoever this client asks for, encrypted to the device the input `device` names: the
-/// one typed as a recovery key, this device's copy, or for someone who has none yet, a new one, for this device
-/// itself. Nothing where this device holds no copy to give, so the tool says what it does without one.
-async fn owner_key_for(
-    client: &Client,
-    inputs: &Map<String, Value>,
-    typed: Option<&str>,
-    subject: Option<&str>,
-) -> Result<Option<String>> {
-    let holds = tool_for(client, HOLDS, json!({}), subject).await?;
-    let (owner, me) = (holds["owner"].as_str().unwrap_or_default(), client.device_key().public().to_string());
-    let device = inputs.get("device").and_then(Value::as_str).unwrap_or(&me);
-    let key = match (typed, holds["check"].as_str()) {
-        (Some(typed), Some(check)) => {
-            let key = cipher::recovered(typed)?;
-            if cipher::check(&key) != check {
-                bail!("That isn't your recovery key. Check it against what you wrote down.")
-            }
-            key
-        }
-        (Some(_), None) => bail!("There's no key to recover: nothing of yours is encrypted yet."),
-        (None, Some(_)) if holds["slot"].is_null() => return Ok(None),
-        (None, Some(_)) => owner_key_of(client, subject).await?.0,
-        (None, None) if device == me => cipher::owner(),
-        (None, None) => return Ok(None),
-    };
-    let to: PublicKey = device.parse().context("that isn't a device's key")?;
-    let slot = cipher::seal(&to, &cipher::for_device(owner, device), key.as_slice())?;
-    Ok(Some(json!({"check": cipher::check(&key), "slot": BASE64.encode(&slot)}).to_string()))
-}
-
-/// The keys of the artifact an app's tool names, encrypted to each server in the input `servers`, which its owner
-/// signs. Taking a server off starts a new epoch, whose key it was never given; so does any choosing where the list
-/// before wasn't one its owner signed, since a server could have left one out.
-async fn artifact_keys(
-    client: &Client,
-    app: &str,
-    says: &Value,
-    inputs: &Map<String, Value>,
-    subject: Option<&str>,
-) -> Result<String> {
-    let unlocked_on = unlocked_on(client, app, says, subject).await?;
-    let artifact = unlocked_on["artifact"].as_str().context("the tool didn't name the artifact")?;
-    let was = unlocked_on["epoch"].as_u64().unwrap_or_default() as u32;
-    let (had, servers) = (keys(&unlocked_on["servers"]), keys(inputs.get("servers").unwrap_or(&Value::Null)));
-    let signed = matches!(chosen(client, &unlocked_on, subject).await, Ok(true));
-    let epoch = if was == 0 || !signed || had.iter().any(|server| !servers.contains(server)) { was + 1 } else { was };
-    let (owner, _) = owner_key_of(client, subject).await?;
-    let joined = cipher::joined(&cipher::artifact(&owner, artifact, epoch));
-    let mut slots = Map::new();
-    for server in &servers {
-        let to: PublicKey = server.parse().context("that isn't a server's key")?;
-        slots.insert(
-            server.clone(),
-            BASE64.encode(&cipher::seal(&to, &cipher::for_server(artifact, server), &joined)?).into(),
-        );
-    }
-    let signer = signer(&owner);
-    let signature = data_encoding::HEXLOWER.encode(&signer.sign(&signed_list(artifact, epoch, &servers)).to_bytes());
-    let signer = signer.public().to_string();
-    Ok(json!({"artifact": artifact, "epoch": epoch, "was": was, "slots": slots, "signature": signature, "signer": signer}).to_string())
-}
-
 /// The owner's key, encrypted to the one passkey the input `passkey` names, which its person allowed, as the app's
 /// tool an input names (`passkeys`) lists it with a `prf_key`: by its credential ID, with the key it was encrypted to.
 /// Whoever uses a passkey it's encrypted to has the key, so it's never encrypted to one nobody named.
@@ -317,7 +249,17 @@ pub async fn recovery_key(client: &Client, subject: Option<&str>) -> Result<Stri
 }
 
 /// Lets this device hold the key of `subject`, or of whoever this client asks for, with the recovery key its person
-/// typed in its window.
+/// typed in its window: it's encrypted to this device here, as a passkey's is on the sign-in page, and kept with
+/// `store`, which keeps it only if it's that person's key.
 pub async fn recover(client: &Client, recovery_key: &str, subject: Option<&str>) -> Result<()> {
-    tool_for(client, "encryption_approve", json!({"key": recovery_key}), subject).await.map(drop)
+    let holds = tool_for(client, HOLDS, json!({}), subject).await?;
+    let (owner, me) = (holds["owner"].as_str().unwrap_or_default(), client.device_key().public());
+    let Some(check) = holds["check"].as_str() else { bail!("There's no key to recover: nothing of yours is encrypted yet.") };
+    let key = cipher::recovered(recovery_key)?;
+    if cipher::check(&key) != check {
+        bail!("That isn't your recovery key. Check it against what you wrote down.")
+    }
+    let slot = cipher::seal(&me, &cipher::for_device(owner, &me.to_string()), key.as_slice())?;
+    let device = json!({"key": me.to_string(), "name": client::name(), "check": check, "slot": BASE64.encode(&slot)});
+    tool_for(client, "encryption_store", json!({"device": device}), subject).await.map(drop)
 }

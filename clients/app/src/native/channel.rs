@@ -255,15 +255,11 @@ pub(super) fn respond(
                 Some(Ok(json!({})))
             }
         },
-        // What the launcher's sign-in page asks, which only it may: where the device signs in, and what it does there:
-        // asks the devices of whoever its person names (`claim`), or opens its link in the device's browser, where
-        // their passkey is.
+        // What the launcher's sign-in page asks, which only it may: where the device signs in, and to open its link in
+        // the device's browser, where their passkey is.
         "one/sign-in" if state.signing_in => Some(signing_in().ok_or_else(|| json!({"code": -32000, "message": "This device is signed in"}))),
-        "one/sign-in/claim" | "one/sign-in/browser" if state.signing_in => {
-            let (command, args) = match method {
-                "one/sign-in/claim" => ("claim", json!({"person": params["person"]})),
-                _ => ("open_url", json!({"url": signing_in().map(|signing_in| signing_in["link"].clone())})),
-            };
+        "one/sign-in/browser" if state.signing_in => {
+            let (command, args) = ("open_url", json!({"url": signing_in().map(|signing_in| signing_in["link"].clone())}));
             state.next += 1;
             let at = format!("m{}.{}", state.page, state.next);
             asked.lock().expect("nothing panics holding it").insert(at.clone(), Asked::Message(id));

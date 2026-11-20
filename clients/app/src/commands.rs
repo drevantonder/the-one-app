@@ -4,9 +4,7 @@ use std::sync::atomic::Ordering;
 
 #[cfg(desktop)]
 use ::client::Connection;
-use ::client::State;
 use serde_json::{Value, json};
-use url::Url;
 
 use crate::*;
 
@@ -181,24 +179,6 @@ pub(crate) async fn retry() -> Result<(), String> {
         computer::talks();
     }
     Ok(())
-}
-
-/// Names whose this device is, while it signs in, which asks their devices to let it in, as the network's sign-in page
-/// does (`/device/claim`, apps/sign-in/edge/auth.ts). → the number they enter on one of them, or what the network
-/// said instead (nobody goes by that, asked too often).
-pub(crate) async fn claim(person: String) -> Result<Value, String> {
-    let Some((_, State::SignIn { code, .. })) = app().start.borrow().clone() else { return Err("This device is signed in".into()) };
-    let link = Url::parse(&code.link).map_err(|error| error.to_string())?;
-    let user_code = link.query_pairs().find(|(name, _)| name == "user_code").map(|(_, code)| code.into_owned()).unwrap_or_default();
-    let at = link.join("/sign-in/auth/device/claim").map_err(|error| error.to_string())?;
-    let web = ::client::web().map_err(|error| format!("{error:#}"))?;
-    let response = web.post(at).json(&json!({"userCode": user_code, "person": person})).send().await.map_err(|_| "Can't reach your network. Try again.".to_owned())?;
-    let ok = response.status().is_success();
-    let said: Value = response.json().await.unwrap_or_default();
-    if !ok {
-        return Err(said["message"].as_str().unwrap_or("That didn't work. Try again.").to_owned());
-    }
-    Ok(json!({"number": said["number"]}))
 }
 
 /// The device is back online or the window in front again, so a client whose network didn't answer asks it again

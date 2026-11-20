@@ -427,7 +427,6 @@ pub(crate) async fn command(label: &str, command: &str, args: Value) -> Result<V
             app().shell.open_url(&url).map(done)
         }
         "retry" => retry().await.map(done),
-        "claim" => claim(text("person").unwrap_or_default()).await,
         "apps" => apps(text("subject")).await,
         "request" => request(text("view").unwrap_or_default(), text("method").unwrap_or_default(), args["params"].clone()).await,
         "refresh" => refresh(text("view").unwrap_or_default()).await.map(done),
