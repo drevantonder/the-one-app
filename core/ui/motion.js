@@ -39,7 +39,7 @@
 // in the window. Every scene on a computer (not `touch`) is walked round by Tab too, and what the keyboard comes to
 // must draw otherwise than it does without it. It says, check by check, which passed, and for
 // one that failed, its seed, which step and why; it exits 1 where one failed.
-import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, symlinkSync, watch, writeFileSync } from "node:fs"
+import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, symlinkSync, watch, writeFileSync } from "node:fs"
 import { basename, dirname, join, relative, resolve } from "node:path"
 import { fileURLToPath } from "node:url"
 import { PNG } from "pngjs"
@@ -63,7 +63,24 @@ const folders = args.filter((arg, at) => !arg.startsWith("--") && !["--out", "--
 // GPU and CPU draw each frame, as calibrate.js has them, and its tier is judged by the times it took there.
 const ssh = option("--ssh")
 const harness = ssh ? option("--harness") && resolve(option("--harness")) : join(root, `target/${flag("--release") ? "release" : "debug"}/examples/screenshot`)
-const env = { ...process.env, VK_ICD_FILENAMES: process.env.VK_ICD_FILENAMES ?? "/usr/share/vulkan/icd.d/lvp_icd.json" }
+/// How every harness runs, here and in scenes.js, on a machine others share: Vulkan on lavapipe, which draws on the
+/// CPU with 2 threads rather than one a core (`LP_NUM_THREADS`), as a few run at once.
+export const env = { ...process.env, VK_ICD_FILENAMES: process.env.VK_ICD_FILENAMES ?? "/usr/share/vulkan/icd.d/lvp_icd.json", LP_NUM_THREADS: process.env.LP_NUM_THREADS ?? "2" }
+/// The most a harness may use, and for how long: a page that grows or never ends is stopped, not the machine.
+const MEMORY = "3G"
+const MINUTES = 10
+/// `command` run within those, in a systemd scope of its own on Linux, where systemd is; elsewhere as it is.
+export const capped = (command) => (Bun.which("systemd-run") ? ["systemd-run", "--user", "--scope", "--quiet", "-p", `MemoryMax=${MEMORY}`, "-p", "MemorySwapMax=0", "timeout", `${MINUTES}m`, ...command] : command)
+/// When a file under `paths` last changed, the latest.
+const changed = (...paths) => Math.max(...paths.map((path) => (statSync(path).isDirectory() ? Math.max(0, ...readdirSync(path, { recursive: true }).map((file) => statSync(join(path, file)).mtimeMs)) : statSync(path).mtimeMs)))
+/// What's built that's older than what it's built from, as after a pull, so what a run draws and checks would be of the
+/// build, not the source: the UI library, or the harness where it's built. → what to build again, if anything.
+export function stale(harness) {
+  if (!existsSync(here("dist/build/app.js")) || changed(here("src"), here("tables.ts"), here("build.js")) > statSync(here("dist/build/app.js")).mtimeMs) return "Build the UI library: `bun build.js` in core/ui"
+  if (existsSync(harness) && changed(join(root, "clients/app/renderer/src"), join(root, "clients/app/renderer/examples")) > statSync(harness).mtimeMs) return `Build the native harness again, which is older than the renderer: \`cargo build -p renderer --example screenshot --features fake${harness.includes("/release/") ? " --release" : ""}\``
+}
+/// Why a capped harness was stopped, by its exit status, if it was.
+export const stopped = (status) => ({ 137: `it used more than ${MEMORY}B of memory, and was stopped`, 124: `it ran for ${MINUTES} minutes, and was stopped` })[status]
 
 
 /// Every folder with motions, or with `--checks` every folder with scenes: the gallery, and each app's.
@@ -257,9 +274,9 @@ async function run(at, folder, scene, requests, seed = 0) {
     const { stdout, stderr, failed } = await runThere(at, folder, args, lines)
     return { answers: stdout.split("\n").filter(Boolean).map((line) => JSON.parse(line)), said: stderr.trim(), failed }
   }
-  const harnessed = Bun.spawn([harness, ...args], { stdin: new TextEncoder().encode(lines), stdout: "pipe", stderr: "pipe", env })
+  const harnessed = Bun.spawn(capped([harness, ...args]), { stdin: new TextEncoder().encode(lines), stdout: "pipe", stderr: "pipe", env })
   const [stdout, stderr] = await Promise.all([new Response(harnessed.stdout).text(), new Response(harnessed.stderr).text(), harnessed.exited])
-  return { answers: stdout.split("\n").filter(Boolean).map((line) => JSON.parse(line)), said: stderr.trim(), failed: harnessed.exitCode !== 0 }
+  return { answers: stdout.split("\n").filter(Boolean).map((line) => JSON.parse(line)), said: [stderr.trim(), stopped(harnessed.exitCode)].filter(Boolean).join("\n"), failed: harnessed.exitCode !== 0 }
 }
 
 /// A folder's scenes that have motions, or with `all`, every one an app's page draws, each with its page, link,
@@ -845,7 +862,7 @@ async function round(targets) {
 
 // Run, rather than imported for what it shares (calibrate.js).
 if (import.meta.main) {
-  if (!existsSync(here("dist/build/app.js"))) throw new Error("Build the UI library first: `bun build.js` in core/ui")
+  if (stale(ssh ? undefined : harness)) throw new Error(stale(ssh ? undefined : harness))
   if (!existsSync(harness)) throw new Error("Build the native harness first: `cargo build -p renderer --example screenshot --features fake`")
   // A debug build's CPU is several times a shipped one's.
   if (!flag("--release") && !ssh) console.log("Its CPU times are a debug build's: --release for a shipped build's")
