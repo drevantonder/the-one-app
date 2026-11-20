@@ -42,10 +42,19 @@ pub const REFUSED: VarInt = VarInt::from_u32(1);
 
 pub const STOPPED: VarInt = VarInt::from_u32(2);
 
-/// How long a connection that's asked nothing stays open. To keep one open, something has to be said over it every
-/// few seconds, and through a relay each of those wakes the relay. So a connection is let go once it's idle, and
-/// made again when there's something to ask.
-const IDLE: Duration = Duration::from_secs(2);
+/// How long a connection that's asked nothing stays open. An open connection keeps track of which of its paths
+/// answer, and what's asked next goes over one that does; a new one starts on the paths iroh remembers for that server
+/// (`Reached::connect`), which it forgets only a minute after the last connection to it closed, and one of those may
+/// have stopped answering one way since. So a connection lasts that long too, and a server asked something at least
+/// once a minute is always asked over one that knows. Keeping it open has something said over it every `THERE`,
+/// through the relay too where that's one of its paths.
+const IDLE: Duration = Duration::from_secs(60);
+
+/// How long one path of a connection lasts once nothing arrives over it, a direct one that stopped answering, as when
+/// a laptop changes networks or wakes: iroh abandons it, and the connection goes on over another, the relay if
+/// that's all there is, with what was sent over that path sent again there. Each path is said something every
+/// `THERE` (iroh's default is 15 s, and 5 s between).
+const MOVES: Duration = Duration::from_secs(2);
 
 /// How long a connection lasts once nothing arrives over it, which is how a server that went away while it ran a
 /// call, or before it answered one just sent, is found out: both ends send a QUIC keep-alive every `THERE`, which
@@ -80,6 +89,8 @@ pub async fn endpoint(key: SecretKey, network: Option<&Network>, port: u16) -> R
             QuicTransportConfig::builder()
                 .max_idle_timeout(Some(SILENT.try_into()?))
                 .keep_alive_interval(THERE)
+                .default_path_keep_alive_interval(THERE)
+                .default_path_max_idle_timeout(MOVES)
                 // The Android emulator's network drops a batch of UDP datagrams sent as one (GSO) without an error, so
                 // a direct path there passes its handshake and pings but no answer of any size: a phone's datagrams
                 // go one at a time, which its radio's speed doesn't notice.
@@ -288,10 +299,11 @@ impl Reached {
     }
 
     /// Whether the server is there: an empty message, which a server answers at once with nothing. One that doesn't
-    /// in time is gone, and so is this connection to it.
+    /// in time is gone, and so is this connection to it. It has as long as a path that stopped answering takes to
+    /// be given up for another (`MOVES`), and then to answer: a connection whose direct path broke is still there.
     async fn there(&self) -> bool {
         let probe = async { self.send(b"").await?.read_to_end(LIMIT).await.ok() };
-        let there = timeout(THERE, probe).await.is_ok_and(|response| response.is_some());
+        let there = timeout(MOVES + THERE, probe).await.is_ok_and(|response| response.is_some());
         if there {
             *self.received.lock().expect("no ask panics") = Instant::now();
         } else {
