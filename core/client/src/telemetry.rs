@@ -62,7 +62,14 @@ impl Telemetry {
         let resource = Resource::builder_empty().with_attributes(attributes(resource)).build();
         let kept = Kept(home);
         let spans = opentelemetry_otlp::SpanExporter::builder().with_http().with_http_client(kept.clone()).build();
-        let numbers = opentelemetry_otlp::MetricExporter::builder().with_http().with_http_client(kept.clone()).build();
+        // Each export says what was measured since the one before (delta), as the server's do (config/runtime.exs) and
+        // Telemetry adds them up: the SDK's default, cumulative, sent each measurement again every minute until the
+        // program ended, so one memory report was counted for hours.
+        let numbers = opentelemetry_otlp::MetricExporter::builder()
+            .with_http()
+            .with_http_client(kept.clone())
+            .with_temporality(opentelemetry_sdk::metrics::Temporality::Delta)
+            .build();
         let lines = opentelemetry_otlp::LogExporter::builder().with_http().with_http_client(kept).build();
         let (spans, numbers, lines) = (spans.expect("no I/O"), numbers.expect("no I/O"), lines.expect("no I/O"));
         let traces = SdkTracerProvider::builder()
