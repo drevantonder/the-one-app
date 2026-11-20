@@ -448,7 +448,9 @@ impl Windows {
     pub fn open(&mut self, options: WindowOptions, mut screen: Result<Screen, String>, on_event: impl FnMut(Event) + 'static) -> anyhow::Result<WindowId> {
         let id = self.next;
         self.next += 1;
+        let asked = web_time::Instant::now();
         let native = self.display.open(id, &options)?;
+        let windowed = asked.elapsed();
         if let Some(owner) = options.owner.and_then(|owner| self.windows.get(&owner)) {
             self.display.attach(&native, &owner.parts[0].native);
         }
@@ -481,7 +483,10 @@ impl Windows {
                 screen.on_post(Arc::new(move || native.lock().unwrap_or_else(std::sync::PoisonError::into_inner).run(move |windows| windows.posted(id))));
             }
         }
+        let rendering = web_time::Instant::now();
         let renderer = self.renderer(&native)?;
+        // Where a window's opening went, which a page's own (`Opening` in clients/app/src/native.rs) has as one step.
+        eprintln!("{} opened in {} ms: the system's window {} ms, its renderer {} ms", options.title, asked.elapsed().as_millis(), windowed.as_millis(), rendering.elapsed().as_millis());
         let opened = web_time::Instant::now();
         let device = native.device_size();
         let picture = options.snapshot.as_deref().filter(|_| screen.is_ok()).and_then(|stem| snapshot::read(stem, (device.width.0 as u32, device.height.0 as u32)));

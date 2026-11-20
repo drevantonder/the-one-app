@@ -625,7 +625,9 @@ async fn window(started: Instant, entrypoint: &str, subject: Option<&str>, link:
     // Whether it opened, as the windows' thread says: a job that's dropped, as a phone's is where its windows
     // couldn't start, says why there.
     let (opened_to, opened) = tokio::sync::oneshot::channel::<Result<(), String>>();
+    let timed = made.clone();
     native.run(move |windows| {
+        Opening::step(&timed, "on the windows' thread");
         let (size, panel) = match (launcher && cfg!(desktop), &sheet) {
             (true, _) => ((computer::SIZE.width as f32, computer::SIZE.height as f32), Some(computer::CORNER)),
             (false, Some(_)) => ((440.0, 360.0), None),
@@ -748,6 +750,7 @@ async fn window(started: Instant, entrypoint: &str, subject: Option<&str>, link:
         let insets = renderer::geometry::Edges { top, right: 0.0, bottom: 0.0, left: 0.0 };
         let opened = match begun.screen(state, Size { width: options.size.width.0, height: options.size.height.0 }, insets) {
             Ok(mut screen) => {
+                Opening::step(&timed, "screen made");
                 screen.theme = theme(chosen.as_deref());
                 // A phone's is under a finger from the start, so it's drawn with its tokens' touch values from its
                 // first frame (pointer: coarse), as the page is told (`deviceCapabilities`).
