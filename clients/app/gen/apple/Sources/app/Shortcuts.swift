@@ -73,6 +73,64 @@ struct OpenApp: OpenIntent {
     }
 }
 
+/// Tells Device Activity whether this iPhone is on its charger, as a Shortcuts automation runs it when the phone is
+/// plugged in or unplugged, without opening the app: the app's Rust tells it (`charger` in src/lib.rs), once its client
+/// has opened.
+@available(iOS 17.0, *)
+struct OnCharger: AppIntent {
+    static let title: LocalizedStringResource = "On Charger"
+    static let description = IntentDescription("Tells your network whether this iPhone is on its charger.")
+    static let openAppWhenRun = false
+
+    @Parameter(title: "On Charger") var on: Bool
+
+    static var parameterSummary: some ParameterSummary {
+        Summary("On charger: \(\.$on)")
+    }
+
+    func perform() async throws -> some IntentResult {
+        guard await OneChargerReported.report(charging: on) else {
+            throw OnChargerFailed()
+        }
+        return .result()
+    }
+}
+
+@available(iOS 17.0, *)
+struct OnChargerFailed: Error, CustomLocalizedStringResourceConvertible {
+    var localizedStringResource: LocalizedStringResource { "Your network wasn't told. Is the One App signed in?" }
+}
+
+/// Where the app's Rust says whether Device Activity was told (`charger` in src/lib.rs), for each `OnCharger` it was
+/// given, by the id it was given with.
+@objc(OneChargerReported)
+final class OneChargerReported: NSObject {
+    private static let waiting = NSLock()
+    nonisolated(unsafe) private static var reports: [Int: CheckedContinuation<Bool, Never>] = [:]
+    nonisolated(unsafe) private static var last = 0
+
+    static func report(charging: Bool) async -> Bool {
+        guard let charger: AnyClass = NSClassFromString("OneCharger") else { return false }
+        return await withCheckedContinuation { reported in
+            waiting.lock()
+            last += 1
+            let id = last
+            reports[id] = reported
+            waiting.unlock()
+            let said = try? JSONSerialization.data(withJSONObject: ["id": id, "charging": charging])
+            let text = said.flatMap { String(data: $0, encoding: .utf8) } ?? "{}"
+            _ = (charger as AnyObject).perform(NSSelectorFromString("report:"), with: text as NSString)
+        }
+    }
+
+    @objc static func reported(_ id: Int, ok: Bool) {
+        waiting.lock()
+        let reported = reports.removeValue(forKey: id)
+        waiting.unlock()
+        reported?.resume(returning: ok)
+    }
+}
+
 /// The app's one App Shortcut, which iOS offers in Shortcuts, Spotlight, Siri and the Action button with no setting
 /// up: Open [app] in the One App, for each app listed. iOS takes ten an app at most, so it's one, with the app as its
 /// parameter.
