@@ -397,6 +397,11 @@ export function Pressable(props: PressableProps) {
   )
 }
 
+/** Which of two things drawn comes first in the page's tree, as a sort compares them: as the DOM's
+ * `compareDocumentPosition` says. Anything not drawn is as early as anything. */
+export const documentOrder = (a: unknown, b: unknown) =>
+  a instanceof Node && b instanceof Node && a !== b ? (a.compareDocumentPosition(b) & Node.DOCUMENT_POSITION_FOLLOWING ? -1 : 1) : 0
+
 /** A scroll view's props. */
 export interface ScrollViewProps extends ViewProps {
   onScroll?: (event: Scrolled) => void

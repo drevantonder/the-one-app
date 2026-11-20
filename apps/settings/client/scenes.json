@@ -791,6 +791,80 @@
       ]
     }
   },
+  "Settings, the sidebar by the keyboard": {
+    "like": "Settings",
+    "checks": {
+      "The arrow keys move through the sidebar, which opens what they come to": [
+        "Vault",
+        {
+          "expect": {
+            "focused": "Vault"
+          }
+        },
+        {
+          "key": "ArrowDown"
+        },
+        {
+          "expect": {
+            "focused": "Notifications",
+            "states": {
+              "of": "Notifications",
+              "is": {
+                "current": true
+              }
+            }
+          }
+        },
+        {
+          "key": "ArrowUp"
+        },
+        {
+          "expect": {
+            "focused": "Vault",
+            "states": {
+              "of": "Vault",
+              "is": {
+                "current": true
+              }
+            }
+          }
+        },
+        {
+          "key": "b"
+        },
+        {
+          "expect": {
+            "focused": "Backups"
+          }
+        },
+        {
+          "key": "End"
+        },
+        {
+          "expect": {
+            "focused": "Gmail"
+          }
+        },
+        {
+          "key": "Home"
+        },
+        {
+          "expect": {
+            "focused": "AV Andre van Tonder Sign In & Security"
+          }
+        },
+        {
+          "key": "Tab",
+          "shift": true
+        },
+        {
+          "expect": {
+            "focused": "Search Settings"
+          }
+        }
+      ]
+    }
+  },
   "An app": {
     "like": "Settings",
     "page": "client/index.html#app:network:containers"

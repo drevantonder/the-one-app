@@ -4,7 +4,7 @@
 // in the DOM's, so each component is the same code on both.
 import { createContext, createMemo, createRoot, createSignal, getOwner, merge, omit, onCleanup, onSettled, Repeat, runWithOwner, Show, untrack, useContext, type Element } from "solid-js"
 import { tellDrawn } from "../bridge.native.ts"
-import { createElement, detach, insert, insertNode, render as draw, root, spread } from "./renderer.native.ts"
+import { createElement, detach, insert, insertNode, render as draw, root, spread, type Node } from "./renderer.native.ts"
 import { layer } from "./layer.ts"
 import type { Mutations, Type } from "./renderer.ts"
 import type * as Page from "../types/ui.d.ts"
@@ -37,6 +37,21 @@ export const Pressable: typeof Page.Pressable = (props) =>
     }),
   )
 export const View: typeof Page.View = (props) => Pressable(props)
+
+/** Which of two nodes comes first in the page's tree, as a sort compares them: as the DOM's `compareDocumentPosition`
+ * says. Anything not in it is as early as anything. */
+export const documentOrder = (a: unknown, b: unknown) => {
+  const path = (node: unknown) => {
+    const up: Node[] = []
+    for (let at = node as Node | undefined; at; at = at.parent) up.unshift(at)
+    return up
+  }
+  const [one, other] = [path(a), path(b)]
+  const split = one.findIndex((node, at) => node !== other[at])
+  if (!one.length || !other.length || one[0] !== other[0] || split < 0) return 0
+  const parent = one[split - 1]
+  return parent.children.indexOf(one[split]) - parent.children.indexOf(other[split])
+}
 
 const scroll = primitive("scroll")
 export const ScrollView: typeof Page.ScrollView = (props) => scroll(renamed(props, ["tabIndex", "autoFocus", "onDrop"], { tabindex: (it) => it.tabIndex, autofocus: (it) => it.autoFocus, onDrop: dropped }))

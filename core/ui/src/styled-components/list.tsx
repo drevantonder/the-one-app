@@ -13,6 +13,7 @@ import { duration, tokens } from "../tokens.ts"
 import type { Located } from "../types/ui.d.ts"
 import { createHold, together } from "../behavior-primitives/drag.ts"
 import { insides, type Listbox } from "../headless-components/listbox.ts"
+import { createList } from "../headless-components/list.ts"
 import { createSwipeActions } from "../behavior-primitives/swipe-actions.ts"
 
 const look = styles({
@@ -187,6 +188,20 @@ export const ListStyle = createContext<"plain" | "insetGrouped" | "sidebar">("pl
 /** Whether a row is an option of a listbox, which its list's slot is for it. */
 const InListbox = createContext(false)
 
+/** The keyboard of the lists in it, one tab stop for all their rows (`ListKeys`). */
+const Scope = createContext<ReturnType<typeof createList> | null>(null)
+/** The keyboard of the list a row is in, and the list. */
+const Keys = createContext<{ keys: ReturnType<typeof createList>; list: object } | null>(null)
+/** Where a long list's row is in it, which a native host places by that rather than its order in the tree. */
+const At = createContext<(() => number) | null>(null)
+
+/** `<ListKeys>…</ListKeys>`: the lists in it are one to the keyboard, their rows one tab stop, Up and Down going on
+ * from one list to the next, as a Mac's sidebar's sections are one list. A `Split`'s list side is. */
+export function ListKeys(props: { children?: JSX.Element }) {
+  const style = useContext(ListStyle)
+  return <Scope value={createList({ opens: () => !touch() && style === "sidebar" })}>{props.children}</Scope>
+}
+
 /// `<List><Row heading="Notes" /><Row heading="Reminders" /></List>`: things of one kind, one under another, in one
 /// group that stops at a readable width however wide the room is. With no rows it shows nothing.
 /// `<List each={notes()} keyed={(note) => note.id}>{(note) => <Row heading={note().text} />}</List>`: a row for each
@@ -196,14 +211,19 @@ const InListbox = createContext(false)
 /// for less motion a new row fades in and one taken out just goes. A list that changes in any other way (filled, a
 /// row changed for another) just shows what it's given. Its rows are its items, by `keyed` (as `For`'s), by
 /// themselves where it says none, and each is given its item as an accessor, `(note) => <Row heading={note().text} />`,
-/// as a row going out of sight is reused for one coming into it, as RecyclerView's are.
+/// as a row going out of sight is reused for one coming into it, as RecyclerView's are. On a computer its rows are one
+/// tab stop: Up and Down move between them, Home and End to its ends, and letters typed to the next that starts with
+/// them, as a Mac's and Windows' lists move, and in a `sidebar` the row the keyboard comes to opens beside it.
 export function List<T>(props: { listbox?: Listbox; label?: string; each?: readonly T[]; keyed?: (item: T) => unknown; children?: JSX.Element | ((item: () => T, index: () => number) => JSX.Element) }) {
   const style = useContext(ListStyle)
   // On a computer a plain list and a sidebar are rows on the window; grouped cards are cards there too.
   const flat = () => !touch() && style !== "insetGrouped"
   const grouped = () => !touch() && style === "insetGrouped"
   const each = props.each !== undefined
-  const rows = each ? undefined : children(() => <InListbox value={!!props.listbox}>{props.children as JSX.Element}</InListbox>)
+  // A listbox's keyboard is its own (the field it's for); every other list's is its rows', with the lists beside it.
+  const scope = useContext(Scope)
+  const keys = props.listbox ? null : { keys: scope ?? createList({ opens: () => !touch() && style === "sidebar" }), list: {} }
+  const rows = each ? undefined : children(() => <Keys value={keys}><InListbox value={!!props.listbox}>{props.children as JSX.Element}</InListbox></Keys>)
   const values = (): readonly unknown[] => (each ? (props.each ?? []) : rows!.toArray())
   const { slots, laid } = createSlots(values, (value) => (each && props.keyed ? props.keyed(value as T) : value))
   createEffect(() => slots().filter((one) => one.state() !== "going").length, (count) => void (props.listbox && insides.get(props.listbox)!.rows(count)))
@@ -211,7 +231,7 @@ export function List<T>(props: { listbox?: Listbox; label?: string; each?: reado
   /// row is reused for another as it goes out of sight (`VirtualizedList`), so what it shows is its slot as that changes
   /// (`one`), and `each`'s rows are given their item as an accessor, as `For`'s are by a key.
   const slotted = (one: () => Slot<unknown>, at: () => number) => {
-    const node = each ? (props.children as (item: () => T, index: () => number) => JSX.Element)(() => one().value() as T, at) : (one().value() as JSX.Element)
+    const node = each ? <At value={at}>{(props.children as (item: () => T, index: () => number) => JSX.Element)(() => one().value() as T, at)}</At> : (one().value() as JSX.Element)
     // How tall it was laid out, which a slot it's given as it's reused is told too: its height didn't change, so no
     // layout says so.
     let height: number | undefined
@@ -238,7 +258,7 @@ export function List<T>(props: { listbox?: Listbox; label?: string; each?: reado
   }
   return (
     <Show when={slots().length}>
-      <View role={props.listbox ? "listbox" : "list"} id={props.listbox?.id} aria-label={props.label} style={[look.list, flat() && look.flat, grouped() && look.groupedList]}>
+      <View role={props.listbox ? "listbox" : "list"} id={props.listbox?.id} aria-label={props.label} onKeyDown={keys?.keys.keydown} style={[look.list, flat() && look.flat, grouped() && look.groupedList]}>
         <Show
           when={each}
           fallback={
@@ -247,13 +267,11 @@ export function List<T>(props: { listbox?: Listbox; label?: string; each?: reado
             </View>
           }
         >
-          <InListbox value={!!props.listbox}>
-            <VirtualizedList
-              style={[look.rows, flat() && look.flatRows]}
-              data={slots()}
-              renderItem={(row) => slotted(() => row.item, () => row.index)}
-            />
-          </InListbox>
+          <Keys value={keys}>
+            <InListbox value={!!props.listbox}>
+              <VirtualizedList style={[look.rows, flat() && look.flatRows]} data={slots()} renderItem={(row) => slotted(() => row.item, () => row.index)} />
+            </InListbox>
+          </Keys>
         </Show>
       </View>
     </Show>
@@ -347,7 +365,19 @@ export function Row(props: RowProps): JSX.Element {
     </>
   )
   const moving = () => [swipe.settling() && look.settling, swipe.offset() > 0 && look.moved(direction() === "rtl" ? swipe.offset() : -swipe.offset())]
-  return (
+  // Its place in its list's keyboard: where it's drawn, or in a long list, where it is in it.
+  const list = useContext(Keys)
+
+  const keyboard = list?.keys.row({
+    node: () => drawn(),
+    list: list.list,
+    at: useContext(At) ?? undefined,
+    label: () => (typeof props.heading === "string" ? props.heading : ""),
+    pressable: () => !!props.onPress,
+    current: () => !!props.current,
+    open: () => props.onPress?.(),
+  })
+  const drawn = children(() => (
     <RowMenu value={setMenu}>
       <View
         role={inListbox ? undefined : "listitem"}
@@ -369,7 +399,15 @@ export function Row(props: RowProps): JSX.Element {
           when={props.onPress}
           fallback={<View style={[look.inside, !touch() && look.flatInside, grouped() && look.groupedInside, sidebar() && look.sidebarInside, !!props.control && look.after, moving()]}>{inside()}</View>}
         >
-          <Pressable role={inListbox ? undefined : "button"} aria-current={props.current ? "true" : undefined} onPress={pressed} style={[look.inside, look.pressable, !touch() && look.flatInside, !touch() && look.flatPressable, grouped() && look.groupedInside, sidebar() && look.sidebarInside, inListbox && look.quiet, !!props.control && look.after, props.current && look.openFocused, moving()]}>
+          <Pressable
+            role={inListbox ? undefined : "button"}
+            aria-current={props.current ? "true" : undefined}
+            tabIndex={keyboard?.tabIndex}
+            autoFocus={keyboard?.autoFocus}
+            onFocus={() => (keyboard?.onFocus(), chosen())}
+            onBlur={keyboard?.onBlur}
+            onPress={pressed}
+            style={[look.inside, look.pressable, !touch() && look.flatInside, !touch() && look.flatPressable, grouped() && look.groupedInside, sidebar() && look.sidebarInside, inListbox && look.quiet, !!props.control && look.after, props.current && look.openFocused, moving()]}>
             {inside()}
           </Pressable>
         </Show>
@@ -385,5 +423,7 @@ export function Row(props: RowProps): JSX.Element {
         </Show>
       </View>
     </RowMenu>
-  )
+  ))
+
+  return drawn as unknown as JSX.Element
 }

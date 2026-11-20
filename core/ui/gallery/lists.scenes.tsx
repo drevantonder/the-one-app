@@ -55,7 +55,29 @@ const Details = () => (
 export default {
   "Lists/Metadata on a computer": { size: [750, 475], render: Details },
   "Lists/Metadata under a finger": { touch: true, render: Details },
-  "Lists/Sections on a computer": { size: [750, 475], render: Sections },
+  "Lists/Sections on a computer": {
+    size: [750, 475],
+    render: Sections,
+    checks: {
+      // Each list is one tab stop, the row open beside it first, and the arrows, Home, End and letters move in it.
+      "The keyboard in a list": [
+        { key: "Tab" },
+        { expect: { focused: "GitHub github.com and api.github.com" } },
+        { key: "ArrowDown" },
+        { expect: { focused: "OpenRouter 14 Nov" } },
+        { key: "ArrowDown" },
+        { expect: { focused: "OpenRouter 14 Nov" } },
+        { key: "Home" },
+        { expect: { focused: "Cloudflare API api.cloudflare.com" } },
+        { key: "o" },
+        { expect: { focused: "OpenRouter 14 Nov" } },
+        { key: "Tab" },
+        { expect: { focused: "Stripe secret key 1" } },
+        { key: "Tab", shift: true },
+        { expect: { focused: "OpenRouter 14 Nov" } },
+      ],
+    },
+  },
   "Lists/Sections under a finger": { touch: true, render: Sections },
   "Lists/Rows": () => (
     <List>

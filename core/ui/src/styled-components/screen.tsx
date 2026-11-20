@@ -8,7 +8,7 @@ import { back as goBack, covers, go, keydown, step, titled, touch, viewport } fr
 import { BarEnd, Button, Icon } from "./button.tsx"
 import { messages } from "../words.ts"
 import { ActionBar, type Action } from "./actions.tsx"
-import { ListStyle } from "./list.tsx"
+import { ListKeys, ListStyle } from "./list.tsx"
 import { Choose, Collect } from "./collect.ts"
 import { negative, styles } from "../styles.ts"
 import { tokens } from "../tokens.ts"
@@ -316,7 +316,7 @@ const open: (() => void)[] = []
 /// a list and what it opens (`detail`): beside it where there's room, pushed over it where there isn't, while
 /// `open`. Each side scrolls by itself, and the split is as tall as what it's in. While it's open the device's own
 /// back, Escape, and the detail's Back button close it, or beside its list, where a detail has none, the list's: it
-/// calls `onClose`, and the app sets `open` false.
+/// calls `onClose`, and the app sets `open` false. Its list side's lists are one to the keyboard (`ListKeys`).
 export function Split(props: { open?: boolean; onClose?: () => void; detail?: JSX.Element; children?: JSX.Element }) {
   const room = useContext(Room)
   const history = useContext(Went)
@@ -357,7 +357,9 @@ export function Split(props: { open?: boolean; onClose?: () => void; detail?: JS
         <Room value={() => (beside() ? listWidth() : room())}>
           <Edge value={() => ({ start: edge().start, end: edge().end && !beside() })}>
           <Opened value={() => (props.open ? close : undefined)}>
-            <Middle value={() => false}>{props.children}</Middle>
+            <Middle value={() => false}>
+              <ListKeys>{props.children}</ListKeys>
+            </Middle>
           </Opened>
           </Edge>
         </Room>
