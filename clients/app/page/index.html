@@ -9,7 +9,6 @@
   <meta name="theme-color" content="#000000" media="(prefers-color-scheme: dark)">
   <title>the One App</title>
   <link rel="stylesheet" href="tokens.css">
-  <link rel="stylesheet" href="ui.css">
   <link rel="stylesheet" href="client.css">
   <!-- XState 5.33.3's UMD build, as core/ui has it, which the window's states are written with (window-machine.js). -->
   <script src="xstate.umd.min.js"></script>
@@ -76,7 +75,7 @@
       <button id="reload" class="press ring">Reload</button>
     </div>
   </div>
-  <!-- A server refuses this client for being behind it: an alert, as iOS's Update Required, the UI library's (ui.css),
+  <!-- A server refuses this client for being behind it: an alert, as iOS's Update Required, the UI library's look (client.css),
        with Update on a computer, and on a phone Try Again, with who updates it or, from TestFlight, Update. -->
   <dialog id="update-required" class="ui-dialog alert" role="alertdialog" aria-labelledby="update-required-heading" aria-describedby="update-required-text">
     <div class="panel">

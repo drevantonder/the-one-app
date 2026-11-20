@@ -4,7 +4,7 @@
   "identifier": "app.theone.client",
   "build": {
     "windows": { "staticVCRuntime": false },
-    "frontendDist": ["page/index.html", "page/client.css", "page/client.js", "page/apps.js", "page/bridge.js", "page/chrome.js", "page/draw.js", "page/gestures.js", "page/move-machine.js", "page/page-machine.js", "page/rail.js", "page/shortcuts.js", "page/util.js", "page/window-machine.js", "page/host.js", "page/xstate.umd.min.js", "../../icons/Logo.png", "../../core/ui/src/tokens.css", "../../core/ui/src/ui.css", "../../core/ui/src/Allo-Variable.woff2", "../../core/ui/src/Allo-LICENSE.txt"]
+    "frontendDist": ["page/index.html", "page/client.css", "page/client.js", "page/apps.js", "page/bridge.js", "page/chrome.js", "page/draw.js", "page/gestures.js", "page/move-machine.js", "page/page-machine.js", "page/rail.js", "page/shortcuts.js", "page/util.js", "page/window-machine.js", "page/host.js", "page/xstate.umd.min.js", "../../icons/Logo.png", "../../core/ui/src/tokens.css", "../../core/ui/src/Allo-Variable.woff2", "../../core/ui/src/Allo-LICENSE.txt"]
   },
   "app": {
     "withGlobalTauri": true,
