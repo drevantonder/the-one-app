@@ -54,6 +54,18 @@ pub fn decoding_takes(times: f32) {
     SLOWER.store(times.to_bits(), std::sync::atomic::Ordering::Relaxed);
 }
 
+/// How long decoding `src` into `pixels` pixels takes on the machine a harness runs on, in ms: its bytes' share and its
+/// pixels', as the decodes of the Home Screen's and App Store's scenes took there (an SVG's bytes are parsed and its
+/// paths filled, 0.5 µs a byte and 0.1 a pixel; a PNG's or a JPEG's are inflated and scaled, 0.01 and 0.055). A picture
+/// is so there at the same time on the harness's clock on every run and every machine, where the CPU time it measured
+/// varied fourfold from run to run for the same icon (0.53 to 2.38 ms), and with it which copy of a picture a frame drew
+/// (the App Library's icons, sharp on one run and smoothed on the next, which read as two GPUs sampling apart).
+#[cfg(feature = "fake")]
+fn decoding_ms(src: &str, pixels: u32) -> f64 {
+    let (per_byte, per_pixel) = if src.starts_with("data:image/svg+xml") { (0.0005, 0.0001) } else { (0.00001, 0.000055) };
+    src.len() as f64 * per_byte + f64::from(pixels) * per_pixel
+}
+
 /// What's decoded, waiting to go in the atlas, each with when it's there (for a harness, as late as the device it
 /// stands for would have it; on a device, as it's decoded), and how many are still decoding.
 #[derive(Default)]
@@ -246,14 +258,12 @@ impl Pictures {
             wasm_bindgen_futures::spawn_local(async move { done(crate::platform::web::decode(&src, device).await, None) });
             #[cfg(not(target_arch = "wasm32"))]
             run(Box::new(move || {
-                #[cfg(feature = "fake")]
-                let started = crate::platform::on_cpu();
                 let decoded = super::paint::decode(&src, device);
-                // For a harness, it's there as late as on the device it stands for: its decoding's time on a CPU here,
-                // `SLOWER` times over, on the harness's clock from when it was asked for, so a busy machine's doesn't
-                // make it later; on a device, once it's decoded.
+                // For a harness, it's there as late as on the device it stands for: its decoding's time here
+                // (`decoding_ms`), `SLOWER` times over, on the harness's clock from when it was asked for, so a busy
+                // machine's doesn't make it later; on a device, once it's decoded.
                 #[cfg(feature = "fake")]
-                let at = Some(when + (crate::platform::on_cpu().saturating_sub(started)).as_secs_f64() * 1000.0 * f64::from(f32::from_bits(SLOWER.load(std::sync::atomic::Ordering::Relaxed))));
+                let at = Some(when + decoding_ms(&src, decoded.as_ref().map_or(device.width * device.height, |decoded| decoded.picture.width * decoded.picture.height)) * f64::from(f32::from_bits(SLOWER.load(std::sync::atomic::Ordering::Relaxed))));
                 #[cfg(not(feature = "fake"))]
                 let at = None;
                 done(decoded, at)
