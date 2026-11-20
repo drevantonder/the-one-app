@@ -84,7 +84,8 @@ export BUILD_SIGNING_KEY
 # kind of machine, `<target>.json`, the latest of each name for it, `server-code` in every one, with its link there.
 # A `one` keeps `serving`, the build that first had what a server runs of it (`serves`), so one that changed only the
 # app around `one serve run` restarts no server. The builds before stay, as a machine may be downloading one as the
-# next is published, and what neither the lists before nor now name goes. A server and a client release publish one at
+# next is published, and what neither the lists before nor now name goes once it's an hour old: releases minutes apart
+# took a build from servers still downloading it (20 Nov, 404 on four of five). A server and a client release publish one at
 # a time, each reading the lists as the one before left them, by GitHub's API: at once, or reading them by their links,
 # which give them a minute or more old, each wrote lists from before the other published, so the other's builds went
 # from them, and its files with them (20 Nov: server-code back from 0.34.18 to 0.34.12, and a Mac's download 404).
@@ -118,7 +119,9 @@ publish() {
     const at = `https://github.com/${REPO}/releases/download/${TAG}`;
     const TARGETS = ["linux-x86_64", "linux-aarch64", "macos-aarch64", "windows-x86_64"];
     // Read by the GitHub API, as each list by its link (`${at}/<target>.json`) is a minute or more old.
-    const have = new Set(JSON.parse(gh("release", "view", TAG, "--json", "assets")).assets.map(({ name }) => name));
+    const assets = JSON.parse(gh("release", "view", TAG, "--json", "assets")).assets;
+    const have = new Set(assets.map(({ name }) => name));
+    const recent = new Set(assets.filter(({ createdAt }) => Date.now() - Date.parse(createdAt) < 3_600_000).map(({ name }) => name));
     const before = Object.fromEntries(TARGETS.map((target) => [target, have.has(`${target}.json`) ? JSON.parse(gh("release", "download", TAG, "-p", `${target}.json`, "-O", "-")) : null]));
     const lists = structuredClone(before);
     for (const { what, kind, build, inputs, serves, sha256, signature, size } of builds) {
@@ -140,7 +143,7 @@ publish() {
       for (const target of changed) writeFileSync(`${out}/${target}.json`, JSON.stringify(lists[target], null, 2));
       if (changed.length) gh("release", "upload", TAG, "--clobber", ...changed.map((target) => `${out}/${target}.json`));
       const named = new Set([...Object.values(before), ...Object.values(lists)].flatMap((list) => Object.values(list ?? {}).map(({ sha256 }) => sha256)));
-      for (const name of have) if (/^[0-9a-f]{64}$/.test(name) && !named.has(name)) gh("release", "delete-asset", TAG, name, "-y");
+      for (const name of have) if (/^[0-9a-f]{64}$/.test(name) && !named.has(name) && !recent.has(name)) gh("release", "delete-asset", TAG, name, "-y");
     } finally {
       rmSync(out, { recursive: true, force: true });
     }
