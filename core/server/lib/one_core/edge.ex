@@ -3,7 +3,7 @@ defmodule OneCore.Edge do
   A server at its network's edge: it signs what it asks there with its key, and shows a token that says why it's
   one of the network's own. The pieces of the edge check both (`core/edge/ask.ts`, `core/edge/presigner/presigner.ts`).
   """
-  alias OneCore.{Iroh, Server}
+  alias OneCore.{Cache, Iroh, Server}
   alias OneCore.Edge.Unreachable
 
   # The list this server is on: its owner's, whom it was started for.
@@ -93,11 +93,15 @@ defmodule OneCore.Edge do
   # The time by the edge's clock, in milliseconds: this server's, as far from it as the edge last said (`ask!/2`).
   defp now, do: System.system_time(:millisecond) + :persistent_term.get({__MODULE__, :skew}, 0)
 
-  @doc "The headers of an ask of `path` there, with `body`: this server's signature of it, and its token."
+  @doc """
+  The headers of an ask of `path` there, with `body`: this server's signature of it, its token, and the tokens it
+  keeps of other servers' word that it acts for someone too (`token/2`).
+  """
   def signed(path, body) do
     at = Integer.to_string(now())
     signature = sign("one/ask/1\n#{path}\n#{at}\n#{body}")
-    [{"one-key", key()}, {"one-at", at}, {"one-signature", signature}, {"one-token", token()}]
+    tokens = for {:token, _who} = kept <- Cache.keys(__MODULE__), token = Cache.fetch(__MODULE__, kept, fn -> {:ignore, nil} end), do: token
+    [{"one-key", key()}, {"one-at", at}, {"one-signature", signature}, {"one-token", token()}, {"one-tokens", Enum.join(Enum.reject(tokens, &is_nil/1), " ")}]
   end
 
   @doc """
@@ -120,6 +124,34 @@ defmodule OneCore.Edge do
   def token(client) do
     until = now() + @lasts
     encode(%{list: list(), by: key(), until: until, signature: sign("one/token/1\n#{client}\n#{list()}\n#{until}")})
+  end
+
+  # How long one server's word that another acts for someone lasts, in milliseconds: so whoever's taken out of a
+  # group is acted for by its servers for that long at most after.
+  @vouched :timer.minutes(5)
+
+  @doc """
+  A token that the server whose key is `server` acts for `who`, a user, too: this server's word, which it gives as one
+  of the network's, which act for everyone, to a group's server for each of the group's members
+  (`OneCore.Apps.acts_for?/2`), as it gives a client its token, for five minutes.
+  """
+  def token(server, who) do
+    until = now() + @vouched
+    list = who <> "/"
+    encode(%{list: list, by: key(), until: until, signature: sign("one/token/1\n#{server}\n#{list}\n#{until}")})
+  end
+
+  @doc """
+  The token another server gave that this one acts for `who` too (`token/2`), as `fetch` gets it, `{:ok, token}`,
+  kept until a minute before it ends, and shown with every ask meanwhile (`signed/2`). `nil` where it was refused.
+  """
+  def vouched(who, fetch) do
+    Cache.fetch(__MODULE__, {:token, who}, fn ->
+      case fetch.() do
+        {:ok, token} -> {:commit, token, expire: @vouched - :timer.minutes(1)}
+        _refused -> {:ignore, nil}
+      end
+    end)
   end
 
   defp encode(token), do: Base.url_encode64(JSON.encode!(token), padding: false)

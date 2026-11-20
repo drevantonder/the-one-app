@@ -318,6 +318,26 @@ defmodule OneCore.Mcp do
     between(forwarded, fn -> {:ok, Installed.subject(at, name, User.owner(subject))} end)
   end
 
+  # A group's server asks one of the network's for its word that it acts for a member of the group, which the
+  # presigner takes as it does a device's token (`OneCore.Edge.token/2`): it's given only by a server acting for the
+  # network, for whoever the apps that decide `reach` say is a member.
+  defp result("servers/token", %{"who" => who}, from, {_actor, group}, forwarded) do
+    between(forwarded, fn ->
+      about = %{"who" => who, "relation" => "member", "artifact" => group}
+
+      cond do
+        not (Servers.here?("network") and String.starts_with?(group, "groups/") and group in Servers.acts_for(from)) ->
+          {:error, "Only one of the network's servers vouches for a group's server, and only for the group's members"}
+
+        Hooks.validate("reach", about, {nil, "network"}) != :ok ->
+          {:error, "#{who} isn't a member of #{group}"}
+
+        true ->
+          {:ok, Edge.token(from, who)}
+      end
+    end)
+  end
+
   defp result("apps/schedule", %{"installed" => at, "app" => app}, _from, {_actor, subject}, forwarded) do
     between(forwarded, fn -> Calls.schedule(at, app, subject, true) end)
   end
@@ -619,7 +639,7 @@ defmodule OneCore.Mcp do
   # itself, and nothing else. A client may say an app asked that didn't, which is its person's to do, and gives them
   # nothing they couldn't do themselves.
   defp caller(_name, %{"actor" => _} = meta, {_actor, subject}, from),
-    do: {:ok, if(Servers.acts_for?(from, User.owner(subject) || "network"), do: meta["caller"])}
+    do: {:ok, if(Apps.acts_for?(from, User.owner(subject) || "network"), do: meta["caller"])}
 
   defp caller(name, %{"app" => app}, {actor, subject}, _from) when is_binary(app) do
     # The app is whoever the page was opened for's, or for a trusted app, the person's own, asking for someone else.

@@ -29,7 +29,7 @@ defmodule OneCore.Services do
   then in their lists' order.
   """
   def servers(app, service, who) do
-    running = fn -> for key <- Servers.covering(owner(who)), {app, service} in Servers.installed(key), do: key end
+    running = fn -> for key <- OneCore.Apps.covering(owner(who)), {app, service} in Servers.installed(key), do: key end
     running = with [] <- running.(), :ok <- reload(who), do: running.()
     Enum.sort_by(running, &(&1 != Server.key()))
   end
@@ -41,7 +41,7 @@ defmodule OneCore.Services do
   """
   def list(who) do
     reload(who)
-    acting = Servers.covering(owner(who))
+    acting = OneCore.Apps.covering(owner(who))
 
     for {app, version} <- Enum.sort(Apps.running(who)), service <- version.services do
       servers = Enum.filter(acting, &({version.artifact, service.name} in Servers.installed(&1)))

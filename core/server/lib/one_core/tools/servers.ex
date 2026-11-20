@@ -26,7 +26,7 @@ defmodule OneCore.Tools.Servers do
   def run("remove_server", %{"key" => key}, {_actor, subject} = principal, forward, _request) do
     at(subject, forward)
     reaches!(principal, subject, "owner")
-    acting = Servers.covering(subject)
+    acting = OneCore.Apps.covering(subject)
     with {:error, why} <- Servers.remove(key, subject), do: raise(why)
     Server.notify(acting, [subject])
     %{server: key, for: subject}
@@ -45,7 +45,7 @@ defmodule OneCore.Tools.Servers do
   end
 
   def run("services", _inputs, {_actor, subject}, _pass, _request) do
-    servers = Servers.covering(User.owner(subject) || "network")
+    servers = OneCore.Apps.covering(User.owner(subject) || "network")
     names = Map.new(servers, &{&1, Servers.name(&1)})
     %{server: Server.key(), servers: servers, names: names, services: Services.list(subject)}
   end

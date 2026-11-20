@@ -50,7 +50,7 @@ defmodule OneCore.Mcp.Principal do
       not is_binary(subject) ->
         {:error, "A server says who it asks for too"}
 
-      not (Servers.acts_for?(from, whose) or asks) ->
+      not (OneCore.Apps.acts_for?(from, whose) or asks) ->
         {:error, "Only a server acting for #{whose} says it asks for them"}
 
       true ->
@@ -94,7 +94,7 @@ defmodule OneCore.Mcp.Principal do
   defp here(by) do
     owner = User.owner(by)
 
-    if owner == nil or Servers.here?(owner),
+    if owner == nil or OneCore.Apps.here?(owner),
       do: :ok,
       else: {:error, "This server doesn't act for #{owner}. The ones that do are the ones to ask."}
   end

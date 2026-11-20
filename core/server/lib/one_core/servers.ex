@@ -33,10 +33,11 @@ defmodule OneCore.Servers do
   def covering(whose), do: Enum.uniq(own(whose) ++ own(@network))
 
   @doc "The keys of the servers that are up, of every server there is by its own blobs (`ready?/1`)."
-  def up do
-    keys = cached(:all, fn -> for blob <- Bucket.list("servers/"), [key, "members"] <- [Path.split(Path.relative_to(blob, "servers"))], do: key end)
-    Enum.filter(keys, &(ready?(&1) == true))
-  end
+  def up, do: Enum.filter(all(), &(ready?(&1) == true))
+
+  @doc "The keys of every server there is, by its own blobs."
+  def all,
+    do: cached(:all, fn -> for blob <- Bucket.list("servers/"), [key, "members"] <- [Path.split(Path.relative_to(blob, "servers"))], do: key end)
 
   @doc "The keys of the servers acting for `whose` as their own, both ways (`acts_for/1`)."
   def own(whose), do: for(key <- listed(whose), whose in members(key), do: key)
@@ -386,6 +387,9 @@ defmodule OneCore.Servers do
     # A network with no list has no server yet, and whichever writes its list is its first. A bucket that refuses
     # says this isn't the one to.
     if owner == @network, do: Bucket.write("#{@network}/servers", JSON.encode!([key]))
+    # A server acts for whoever's list it's on that it chose, both ways, as the presigner has it too: on their list,
+    # it says whom it's for, its own blob, before it reads that it's on it. One it chose before keeps them.
+    Bucket.write("servers/#{key}/members", JSON.encode!([owner]))
     key in read("#{owner}/servers", [])
   rescue
     Bucket.Refused -> false

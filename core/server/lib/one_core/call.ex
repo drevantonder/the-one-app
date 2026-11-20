@@ -203,7 +203,7 @@ defmodule OneCore.Call do
     if why = refused(call, name, relation), do: raise(why)
     # Its blobs are whoever's it is, whom this server may not act for. One that does runs the call.
     owner = User.owner(name) || "network"
-    if not Servers.here?(owner), do: forward(call, owner)
+    if not OneCore.Apps.here?(owner), do: forward(call, owner)
     %Artifact{prefix: name <> "/", reached: {call.app_artifact, {actor, subject}, relation}}
   end
 
@@ -413,7 +413,7 @@ defmodule OneCore.Call do
   """
   def forward(ask, principal, forwarded, owner) do
     if forwarded, do: throw({__MODULE__, :forwarding_loop})
-    servers = Servers.covering(owner) -- [Server.key()]
+    servers = OneCore.Apps.covering(owner) -- [Server.key()]
     elsewhere(ask, principal, servers)
     why = Enum.map_join(servers, "; ", &Server.error_message(:unreachable, &1))
     raise "No server acting for #{owner} answered" <> if(why == "", do: "", else: ": " <> why)

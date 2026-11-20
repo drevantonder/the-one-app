@@ -233,7 +233,60 @@ defmodule OneCore.Apps do
   `at`'s own by default: it allows the app's code (`allows?/3`) and acts for whose data it is
   (`OneCore.Servers.here?/1`). Of the servers that do, the narrowest that's up takes a call (`first?/3`).
   """
-  def runs?(at, trusted, whose \\ nil), do: allowed?(Servers.here(), at, trusted) and Servers.here?(whose || at)
+  def runs?(at, trusted, whose \\ nil), do: allowed?(Servers.here(), at, trusted) and here?(whose || at)
+
+  @doc """
+  Whether the server whose key is `key` acts for `who`, a user, a group or the network, as scopes nest: for them or
+  for the network (`OneCore.Servers.acts_for?/2`), or as a group's server for one of its members, as the apps that
+  decide `reach` say, kept for five minutes.
+  """
+  def acts_for?(key, who), do: Servers.acts_for?(key, who) or Enum.any?(groups(Servers.acts_for(key)), &member?(who, &1))
+
+  @doc """
+  Whether this server acts for `who` (`acts_for?/2`). For one of its groups' members it does by the network's word: a
+  token one of the network's servers gives it, which it shows the presigner with what it asks for them
+  (`OneCore.Edge.token/2`).
+  """
+  def here?(who), do: Servers.here?(who) or Enum.any?(groups(Servers.here()), &vouched?(who, &1))
+
+  @doc """
+  The keys of the servers acting for `whose`, a user, a group or the network, narrowest first: their own, then a
+  group's they're in, then the network's.
+  """
+  def covering(whose), do: Enum.uniq(Servers.own(whose) ++ grouped(whose) ++ Servers.own(@network))
+
+  # The keys of the servers of the groups `who`, a user, is in.
+  defp grouped("users/" <> _ = who), do: for(key <- Servers.all(), Enum.any?(groups(Servers.acts_for(key)), &member?(who, &1)), do: key)
+  defp grouped(_who), do: []
+
+  defp groups(scopes), do: Enum.filter(scopes, &String.starts_with?(&1, "groups/"))
+
+  # Whether the user `who` is a member of `group`, as the apps that decide `reach` say, kept for five minutes.
+  defp member?("users/" <> _ = who, group) do
+    OneCore.Cache.fetch(__MODULE__.Members, {who, group}, fn ->
+      about = %{"who" => who, "relation" => "member", "artifact" => group}
+      {:commit, Hooks.validate("reach", about, {nil, @network}) == :ok, expire: :timer.minutes(5)}
+    end)
+  end
+
+  defp member?(_who, _group), do: false
+
+  # Whether one of the network's servers gives this one, as `group`'s, its word that it acts for `who`, a member.
+  defp vouched?("users/" <> _ = who, group) do
+    ask = {"servers/token", %{who: who}}
+    word = fn -> Call.forward(ask, {nil, group}, false, @network) end
+    OneCore.Edge.vouched(who, fn -> with({:forwarded, %{"answer" => token}} <- forwarded(word), do: {:ok, token}) end) != nil
+  end
+
+  defp vouched?(_who, _group), do: false
+
+  defp forwarded(fun) do
+    fun.()
+  rescue
+    _unanswered -> nil
+  catch
+    {Call, outcome} -> outcome
+  end
 
   @doc """
   Whether the server whose key is `key` allows the code of an app installed for `at`, which is `trusted` or not: an
@@ -252,11 +305,11 @@ defmodule OneCore.Apps do
 
   @doc """
   The keys of the servers that run a call of an app installed for `at`, `trusted` or not, that keeps `whose` data,
-  `at`'s own by default: those acting for whose it is, narrowest first (`OneCore.Servers.covering/1`), that allow
+  `at`'s own by default: those acting for whose it is, narrowest first (`covering/1`), that allow
   the app's code.
   """
   def servers(at, trusted \\ true, whose \\ nil),
-    do: Enum.filter(Servers.covering(whose || at), &allows?(&1, at, trusted))
+    do: Enum.filter(covering(whose || at), &allows?(&1, at, trusted))
 
   @doc """
   Who an app installed for `at` as `name`, which keeps each person's data apart (`own` is `:subject`) or not, runs
@@ -271,10 +324,18 @@ defmodule OneCore.Apps do
 
   @doc """
   Whether this server is of the narrowest scope that's up of those that run such a call (`servers/3`), and so takes
-  it: it acts for whose data it is as their own, or none of their own that allows the app's code is up.
+  it: it acts for whose data it is as their own, or none of their own that allows the app's code is up and it's a
+  group's they're in, or none of those is up either.
   """
   def first?(at, trusted, whose) do
-    whose in Servers.here() or not Enum.any?(Servers.own(whose), &(allows?(&1, at, trusted) and Servers.ready?(&1) == true))
+    up? = &(allows?(&1, at, trusted) and Servers.ready?(&1) == true)
+
+    cond do
+      whose in Servers.here() -> true
+      Enum.any?(Servers.own(whose), up?) -> false
+      groups(Servers.here()) != [] -> true
+      true -> not Enum.any?(grouped(whose), up?)
+    end
   end
 
   # Asked of the network's apps by this server, as nobody, as everything about the network is.
