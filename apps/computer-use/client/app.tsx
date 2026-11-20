@@ -1,6 +1,6 @@
 // Computer Use: the screens your agents can use, and one of them as it is now, with who last used it and for what.
 import { createEffect, createMemo, createSignal, Errored, Loading, refresh, Show } from "solid-js"
-import { Button, call, changed, client, Empty, List, LiveScreen, Problem, render, Row, Screen, Section, since, Skeleton, Split, visible } from "ui"
+import { Button, call, changed, client, Empty, List, LiveScreen, Problem, render, Row, Screen, Section, since, Skeleton, Split, styles, Text, tokens, visible } from "ui"
 
 /** A screen agents can use, as `computer-use_screens` answers it. */
 interface AgentScreen {
@@ -11,6 +11,11 @@ interface AgentScreen {
   height: number
   used?: { doing?: string; by?: string; at: number }
 }
+
+const look = styles({
+  // A link in a sentence's words, in the accent, as the gallery's Text/Inline link is.
+  link: { color: tokens.colour.blue, fontWeight: tokens.weight.medium },
+})
 
 const address = (screen: AgentScreen) => `${screen.app}/${screen.name}`
 const name = (who?: string) => who?.split("/").pop()
@@ -65,8 +70,15 @@ function ThisPhone() {
         />
         <List>
           <Row
-            text="Restricted setting? Allow it under ⋮ in App Info."
-            action={<Button variant="ghost" onPress={() => client({ settings: "app" })}>App Info</Button>}
+            text={
+              <>
+                Restricted setting? Allow it under ⋮ in{" "}
+                <Text role="link" tabIndex={0} onPress={() => client({ settings: "app" })} style={look.link}>
+                  App Info
+                </Text>
+                .
+              </>
+            }
           />
         </List>
       </Show>
