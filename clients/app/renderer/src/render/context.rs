@@ -99,9 +99,16 @@ impl Context {
     }
 
     /// The GPU memory its allocator has taken from the system (`reserved`) and what it's given out of that
-    /// (`allocated`), in bytes, where its backend says (Direct3D 12's and Vulkan's; Metal's makes each texture alone).
-    pub fn memory(&self) -> Option<(u64, u64)> {
-        self.device.generate_allocator_report().map(|report| (report.total_reserved_bytes, report.total_allocated_bytes))
+    /// (`allocated`), in bytes, where its backend says (Direct3D 12's and Vulkan's; Metal's makes each texture alone),
+    /// and how many command encoders it holds (`encoders`): wgpu keeps every one it's needed at once, and a driver
+    /// keeps what each recorded at most (Intel's Direct3D 12, 0.3 to 0.6 MB a render pass).
+    pub fn memory(&self) -> serde_json::Value {
+        let report = self.device.generate_allocator_report();
+        serde_json::json!({
+            "reserved": report.as_ref().map(|report| report.total_reserved_bytes),
+            "allocated": report.as_ref().map(|report| report.total_allocated_bytes),
+            "encoders": self.device.get_internal_counters().hal.command_encoders.read(),
+        })
     }
 
     /// Whether its device was lost (`lost`).

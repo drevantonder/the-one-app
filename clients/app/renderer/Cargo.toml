@@ -35,7 +35,8 @@ unicode-segmentation = "1"
 url = "2"
 # The GPU, by wgpu, as GPUI draws with it: each platform's own backend, named below (Vulkan on Linux and Android, Metal
 # on a Mac and an iPhone, Direct3D 12 on Windows), and the WGSL our shaders are written in, which WebGPU runs on the web.
-wgpu = { version = "30.0.2", default-features = false, features = ["std", "wgsl"] }
+# Its counters say how many of each thing it holds, which the app's memory report says of its command encoders.
+wgpu = { version = "30.0.2", default-features = false, features = ["std", "wgsl", "counters"] }
 # `Instant`, which is std's, and on the web, where std's has no clock, the browser's `performance.now()`.
 web-time = "1"
 # The typeface the UI library ships as WOFF2 (core/ui/src/Allo-Variable.woff2), which the text system reads as TTF.

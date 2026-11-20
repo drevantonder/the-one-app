@@ -1,6 +1,7 @@
 //! How much memory the app uses, as its system counts it, and where that is, told to Telemetry once what's on
 //! screen has settled after it changes: `one.client.memory` is the process's, and `one.client.memory.<part>` its
-//! parts' (`renderer::platform::Windows::memory`), each in MB with the state it was in (`one.state`: `background`
+//! parts' (`renderer::platform::Windows::memory`), each in MB, and how many command encoders the GPU holds
+//! (`one.client.gpu.encoders`), each with the state it was in (`one.state`: `background`
 //! with nothing on screen, `launcher` while it's summoned, `windows` with an app's window open) and how many windows
 //! were on screen (`one.windows`), so `telemetry metric` shows each state's over time and a regression stands out.
 
@@ -47,11 +48,12 @@ fn measure() {
         let js: u64 = all.iter().map(|window| window["js"].as_u64().unwrap_or(0)).sum();
         // The GPU's allocator's, where its backend says (not Metal, whose textures a Mac counts as their own).
         let gpu = parts["gpu"]["reserved"].as_u64();
+        let encoders = parts["gpu"]["encoders"].as_u64().unwrap_or(0);
         let process = process();
         let mb = |bytes: u64| (bytes as f64 / 1e5).round() / 10.0;
         let said = |bytes: Option<u64>| bytes.map_or("unknown".to_owned(), |bytes| format!("{} MB", mb(bytes)));
         eprintln!(
-            "the app's memory, {state} with {} windows on screen of {}: {} all told; its windows' surfaces {}, textures {}, the GPU's allocator {}, JS {}; {parts}",
+            "the app's memory, {state} with {} windows on screen of {}: {} all told; its windows' surfaces {}, textures {}, the GPU's allocator {} and {encoders} command encoders, JS {}; {parts}",
             shown.len(),
             all.len(),
             said(process),
@@ -68,6 +70,7 @@ fn measure() {
                 views.client.report(json!({"name": name, "value": mb(bytes), "attributes": attributes}));
             }
         }
+        views.client.report(json!({"name": "one.client.gpu.encoders", "value": encoders, "attributes": attributes}));
     });
 }
 

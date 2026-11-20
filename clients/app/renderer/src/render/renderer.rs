@@ -652,15 +652,25 @@ impl Renderer {
         }
     }
 
-    /// Takes an image of its surface to draw on now, while its window's on the screen, and keeps it for its next
-    /// frame: a Mac's window going from the screen is drawn on first as it's back, where wgpu gives no image for a
-    /// window macOS hasn't yet said is visible again (`occlusionState`), which it says a few frames after it's shown,
-    /// and each summon of the launcher waited 30 to 45 ms for it.
-    pub fn reserve(&mut self) {
-        if let (None, Target::Surface { surface, .. }) = (&self.reserved, &self.target)
-            && let wgpu::CurrentSurfaceTexture::Success(frame) = surface.get_current_texture()
-        {
-            self.reserved = Some(frame);
+    /// Its window is going from the screen. On Windows its surface's images (three, each the window's size) go,
+    /// configured as small as a surface is until its next frame configures it at its window's size again, as a resize
+    /// does: a DirectComposition swap chain is any size. On a Mac, it takes an image to draw on now, while its window's
+    /// on the screen, and keeps it for its next frame, as a Mac's window going from the screen is drawn on first as
+    /// it's back, where wgpu gives no image for a window macOS hasn't yet said is visible again (`occlusionState`),
+    /// which it says a few frames after it's shown, and each summon of the launcher waited 30 to 45 ms for it. On X11,
+    /// Vulkan's swap chain is its window's size (`currentExtent`), and it keeps its images.
+    pub fn put_away(&mut self) {
+        let Target::Surface { surface, config } = &mut self.target else { return };
+        if cfg!(target_os = "macos") {
+            if self.reserved.is_none()
+                && let wgpu::CurrentSurfaceTexture::Success(frame) = surface.get_current_texture()
+            {
+                self.reserved = Some(frame);
+            }
+        } else if cfg!(windows) && (config.width, config.height) != (1, 1) {
+            (config.width, config.height) = (1, 1);
+            surface.configure(&self.device, config);
+            self.size = (1, 1);
         }
     }
 

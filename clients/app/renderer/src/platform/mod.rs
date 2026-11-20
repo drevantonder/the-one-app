@@ -740,9 +740,10 @@ impl Windows {
         }
         window.visible = false;
         window.summoned = None;
-        // Its next frame's images taken while it's still on the screen, so it's drawn at once as it's summoned.
+        // Its surfaces let go of their images, or on a Mac its next frame's taken while it's still on the screen, so
+        // it's drawn at once as it's summoned (`Renderer::put_away`).
         for renderer in window.parts.iter_mut().filter_map(|part| part.renderer.as_mut()) {
-            renderer.reserve();
+            renderer.put_away();
         }
         if let Some(frames) = window.timing.end(self.display.refresh()) {
             (window.on_event)(Event::Frames(frames));
@@ -778,7 +779,7 @@ impl Windows {
     /// (`Renderer::memory`) and what its JS held as it was last collected (`Screen::js_memory`).
     #[cfg(not(target_arch = "wasm32"))]
     pub fn memory(&self) -> serde_json::Value {
-        let gpu = self.context.memory().map(|(reserved, allocated)| serde_json::json!({"reserved": reserved, "allocated": allocated}));
+        let gpu = self.context.memory();
         let windows: Vec<serde_json::Value> = self
             .windows
             .values()
