@@ -353,6 +353,14 @@ const devices = () => ({
   // Naming whoever's signing in says whether they're here, and notifies them, so one address names only so many.
   rateLimit: [{ pathMatcher: (path: string) => path === "/device/claim", window: NAMED.window, max: 10 }],
   endpoints: {
+    /**
+     * Where a device's code is (`RequestState`), or `unknown` for one Better Auth has forgotten or never made, so the
+     * sign-in page says a code has ended before it asks anyone to sign in for it.
+     */
+    deviceState: createAuthEndpoint("/device/state", { method: "GET", query: z.object({ user_code: z.string() }) }, async (ctx) => {
+      const code = await ctx.context.adapter.findOne<DeviceCode>({ model: "deviceCode", where: [{ field: "userCode", value: plain(ctx.query.user_code) }] });
+      return ctx.json({ state: code ? state(code) : "unknown" });
+    }),
     /** The ways besides a passkey someone signs in here, which the sign-in page offers: Google, where it's set up. */
     socialProviders: createAuthEndpoint("/social-providers", { method: "GET" }, async (ctx) =>
       ctx.json({ providers: env.GOOGLE_CLIENT_ID ? ["google"] : [] }),
@@ -592,8 +600,10 @@ export function options(origin: string, secret: string, database: BetterAuthOpti
     // Better Auth limits how often an address asks only where NODE_ENV says production, which a Worker's doesn't,
     // and counts in memory, which each copy of a Worker has its own of.
     rateLimit: { enabled: true, storage: "database" },
-    // Cloudflare says where a request came from in a header of its own.
-    advanced: { ipAddress: { ipAddressHeaders: ["cf-connecting-ip"] } },
+    // Cloudflare says where a request came from in a header of its own. Its cookies are named the One App's, since a
+    // browser sends a parent domain's cookies too, and another Better Auth there names its own `better-auth.*`,
+    // which it would send first: a network at v2.ptcau.app wasn't signed in by its own after another's on ptcau.app.
+    advanced: { ipAddress: { ipAddressHeaders: ["cf-connecting-ip"] }, cookiePrefix: "one" },
     plugins: [
       jwt({ disableSettingJwtHeader: true }),
       passkey({

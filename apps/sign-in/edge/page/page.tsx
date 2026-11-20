@@ -129,6 +129,14 @@ async function ask<T = unknown>(path: string, body: object): Promise<T> {
   return data
 }
 
+/// What a device's code that isn't waiting any more says, as the edge has it (`/device/state` in `edge/auth.ts`).
+const ended = {
+  expired: "This code expired. Start again on the device.",
+  approved: "Already approved.",
+  denied: "This device was stopped. Start again on it.",
+  unknown: "No device is showing that code. Start again on the device.",
+}
+
 /// Starts answering what the page was opened for, or does so again after it failed: an assistant is named, and a
 /// device's code is claimed once this person is signed in here.
 async function begin() {
@@ -154,7 +162,10 @@ async function begin() {
     }
     if (flow.flow === "device") {
       const { data } = await auth.getSession()
-      return data ? claim() : setStage({ stage: "needsSignIn" })
+      if (data) return claim()
+      // A code that ended says so, rather than asking them to sign in for nothing.
+      const { state } = await (await fetch(`/sign-in/auth/device/state?user_code=${encodeURIComponent(flow.code)}`)).json()
+      return setStage(state === "waiting" ? { stage: "needsSignIn" } : { stage: "failed", why: ended[state as keyof typeof ended] ?? ended.unknown })
     }
   } catch (error) {
     setStage({ stage: "failed", why: (error as Error).message })
