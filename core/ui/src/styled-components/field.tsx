@@ -69,7 +69,7 @@ const look = styles({
     justifyContent: "center",
     borderRadius: tokens.radius.small,
     backgroundColor: tokens.colour.field,
-    boxShadow: { default: tokens.shadow.field, focused: tokens.shadow.focus },
+    boxShadow: { default: tokens.shadow.tick, focused: tokens.shadow.focus },
     color: tokens.colour.onAccent,
   },
   // Ticked, as a computer's own checkbox is: its accent with a white tick.

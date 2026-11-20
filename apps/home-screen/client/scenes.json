@@ -2551,6 +2551,21 @@
       "one/client": {
         "theme": null
       }
+    },
+    "checks": {
+      "Its radios' rings stand off the page": [
+        {
+          "expect": {
+            "contrast": {
+              "of": {
+                "role": "radio",
+                "name": "Dark"
+              },
+              "least": 3
+            }
+          }
+        }
+      ]
     }
   },
   "Colour Mode, dark chosen": {

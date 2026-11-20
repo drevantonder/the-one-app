@@ -23,7 +23,7 @@ const look = styles({
   place: { position: "absolute", top: 0, bottom: 0, start: 0, end: 0, alignItems: "stretch", justifyContent: "flex-end" },
   middle: { alignItems: "center", justifyContent: "center", padding: tokens.grid[4] },
   panel: {
-    maxHeight: "92%", backgroundColor: tokens.colour.background, color: tokens.colour.label, boxShadow: tokens.shadow.window,
+    maxHeight: "92%", backgroundColor: tokens.colour.elevated, color: tokens.colour.label, boxShadow: tokens.shadow.window,
     borderTopStartRadius: tokens.radius.large, borderTopEndRadius: tokens.radius.large, pointerEvents: "auto", overflow: "hidden",
     // Up from the foot, it reaches the window's edge, and what's in it stays clear of the home indicator and the
     // keyboard, as an iPhone's sheet's does.

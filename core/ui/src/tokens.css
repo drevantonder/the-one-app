@@ -6,7 +6,8 @@
   --quaternary-label: color-mix(in oklab, var(--label) 20%, transparent);
   --quinary-label: color-mix(in oklab, var(--label) 10%, transparent);
   --background: light-dark(oklch(0.977 0.003 286.35), oklch(0 0 0));
-  --card: light-dark(oklch(1 0 0), oklch(0.145 0 0));
+  --card: light-dark(oklch(1 0 0), oklch(1 0 0 / 11%));
+  --elevated: light-dark(oklch(0.977 0.003 286.35), oklch(0.225 0 0));
   --background-gradient: light-dark(oklch(0.962 0.004 286.32), oklch(0 0 0));
   --selection: color-mix(in oklab, var(--label) 10%, transparent);
   --stripe: color-mix(in oklab, var(--label) 2.5%, transparent);
@@ -15,7 +16,7 @@
   --glass: light-dark(oklch(1 0 0 / 80%), oklch(0.26 0 0 / 80%));
   --veil: color-mix(in oklab, var(--background) 55%, transparent);
   --tile: color-mix(in oklab, var(--label) 14%, transparent);
-  --field: light-dark(oklch(1 0 0 / 70%), oklch(1 0 0 / 6%));
+  --field: light-dark(oklch(1 0 0 / 70%), oklch(1 0 0 / 10%));
   --transparent: oklch(0 0 0 / 0%);
   --on-accent: oklch(1 0 0);
   --loader: color-mix(in oklab, var(--label) 40%, transparent);
@@ -101,6 +102,7 @@
   --shadow-window: 0px 0px 0px 0.5px oklch(0 0 0 / 16%), 0px 4px 8px 0px oklch(0 0 0 / 6%), 0px 12px 32px 0px oklch(0 0 0 / 14%), 0px 16px 48px 8px oklch(0 0 0 / 6%), inset 0px 0px 0px 0.5px oklch(0 0 0 / 10%), inset 0px 0.5px 0px 0px oklch(1 0 0 / 90%);
   --shadow-pill: 0px 0px 0px 0.5px oklch(0 0 0 / 12%), 0px 1px 3px 0px oklch(0 0 0 / 6%), inset 0px 0.5px 0px 0px oklch(1 0 0 / 90%);
   --shadow-field: inset 0px 0px 0px 0.5px oklch(0 0 0 / 14%);
+  --shadow-tick: inset 0px 0px 0px 1px oklch(0 0 0 / 45%);
   --shadow-key: inset 0px 0px 0px 1px oklch(0 0 0 / 16%);
   --shadow-edge: inset 0px 0px 0px 0.5px oklch(0 0 0 / 10%), inset 0px 0.5px 0px 0px oklch(1 0 0 / 90%);
   --shadow-wrong-edge: inset 0px 0px 0px 1px oklch(0.614 0.204 25.56);
@@ -162,6 +164,7 @@
   --shadow-window: 0px 0px 0px 0.5px oklch(0 0 0 / 75%), 0px 4px 8px 0px oklch(0 0 0 / 40%), 0px 12px 32px 0px oklch(0 0 0 / 60%), 0px 16px 48px 8px oklch(0 0 0 / 20%), inset 0px 0px 0px 0.5px oklch(1 0 0 / 14%), inset 0px 0.5px 0px 0px oklch(1 0 0 / 12%);
   --shadow-pill: inset 0px 0px 0px 0.5px oklch(1 0 0 / 12%), inset 0px 0.5px 0px 0px oklch(1 0 0 / 18%);
   --shadow-field: inset 0px 0px 0px 0.5px oklch(1 0 0 / 12%);
+  --shadow-tick: inset 0px 0px 0px 1px oklch(1 0 0 / 40%);
   --shadow-key: inset 0px 0px 0px 1px oklch(1 0 0 / 20%);
   --shadow-edge: inset 0px 0px 0px 0.5px oklch(1 0 0 / 14%), inset 0px 0.5px 0px 0px oklch(1 0 0 / 12%);
   --shadow-wrong-edge: inset 0px 0px 0px 1px oklch(0.7 0.191 23.4);
@@ -177,6 +180,7 @@
     --shadow-window: 0px 0px 0px 0.5px oklch(0 0 0 / 75%), 0px 4px 8px 0px oklch(0 0 0 / 40%), 0px 12px 32px 0px oklch(0 0 0 / 60%), 0px 16px 48px 8px oklch(0 0 0 / 20%), inset 0px 0px 0px 0.5px oklch(1 0 0 / 14%), inset 0px 0.5px 0px 0px oklch(1 0 0 / 12%);
     --shadow-pill: inset 0px 0px 0px 0.5px oklch(1 0 0 / 12%), inset 0px 0.5px 0px 0px oklch(1 0 0 / 18%);
     --shadow-field: inset 0px 0px 0px 0.5px oklch(1 0 0 / 12%);
+    --shadow-tick: inset 0px 0px 0px 1px oklch(1 0 0 / 40%);
     --shadow-key: inset 0px 0px 0px 1px oklch(1 0 0 / 20%);
     --shadow-edge: inset 0px 0px 0px 0.5px oklch(1 0 0 / 14%), inset 0px 0.5px 0px 0px oklch(1 0 0 / 12%);
     --shadow-wrong-edge: inset 0px 0px 0px 1px oklch(0.7 0.191 23.4);

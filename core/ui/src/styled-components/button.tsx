@@ -103,7 +103,7 @@ const look = styles({
     transition: tokens.motion.quick,
   },
   secondary: { backgroundColor: { default: tokens.colour.quinaryLabel, hover: tokens.colour.quaternaryLabel }, color: tokens.colour.label, opacity: { default: 1, pressed: 0.7 } },
-  outline: { backgroundColor: { default: tokens.colour.background, hover: tokens.colour.quinaryLabel }, color: tokens.colour.label, boxShadow: { default: tokens.shadow.edge, focused: tokens.shadow.focus }, opacity: { default: 1, pressed: 0.7 } },
+  outline: { backgroundColor: { default: tokens.colour.field, hover: tokens.colour.quinaryLabel }, color: tokens.colour.label, boxShadow: { default: tokens.shadow.edge, focused: tokens.shadow.focus }, opacity: { default: 1, pressed: 0.7 } },
   ghost: { backgroundColor: { hover: tokens.colour.quinaryLabel }, color: { default: tokens.colour.secondaryLabel, hover: tokens.colour.label }, opacity: { default: 1, pressed: 0.7 } },
   // Red words on a red tint, as Raycast's: the colour says what it does, not how much it matters.
   destructive: { backgroundColor: { default: tokens.colour.redTint, hover: tokens.colour.redTint }, color: tokens.colour.red },
@@ -129,7 +129,7 @@ const look = styles({
   },
   badgeSecondary: { backgroundColor: tokens.colour.quinaryLabel, color: tokens.colour.label },
   badgeDestructive: { backgroundColor: tokens.colour.red, color: tokens.colour.onAccent },
-  badgeOutline: { backgroundColor: tokens.colour.background, color: tokens.colour.label, boxShadow: tokens.shadow.edge },
+  badgeOutline: { backgroundColor: tokens.colour.field, color: tokens.colour.label, boxShadow: tokens.shadow.edge },
 })
 
 /// `<Icon name="plus" />`: one of the UI library's icons, by Phosphor's name for it, an icon's size, in the colour of

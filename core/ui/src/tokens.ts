@@ -64,8 +64,13 @@ const blue = ["oklch(0.573 0.199 261.84)", "oklch(0.714 0.139 249.06)"] as const
 const colours = {
   background: colour("oklch(0.977 0.003 286.35)", "oklch(0 0 0)"),
   foreground: colour(...ink),
-  /** What's raised off the page: a list, a menu, a sheet. */
-  card: colour("oklch(1 0 0)", "oklch(0.145 0 0)"),
+  /** What's raised off what it's on: a group of rows, a problem. In dark it's white at 11%, so each level up is
+   * lighter, as iOS's dark grouped lists are: `#1C1C1E` on the black page (secondarySystemGroupedBackground), and
+   * about `#2C2C2E` on a sheet or an alert (its elevated twin), as the widgets' tiles are. */
+  card: colour("oklch(1 0 0)", "oklch(1 0 0 / 11%)"),
+  /** What's over the page and holds cards of its own, under a finger: a sheet, an alert. The page's colour in light,
+   * and in dark iOS's elevated background (`#1C1C1E`), off the black page. */
+  elevated: colour("oklch(0.977 0.003 286.35)", "oklch(0.225 0 0)"),
   primary: colour(...ink),
   primaryForeground: colour("oklch(1 0 0)", "oklch(0 0 0)"),
   /** A quiet fill: a secondary button, what's hovered, a skeleton: the text at 10% over the page. */
@@ -200,8 +205,10 @@ const roles = {
   quaternaryLabel: alpha(label, 20),
   quinaryLabel: alpha(label, 10),
   background: colours.background,
-  /** What's raised off the page: a group of rows, a menu, a problem, what's loading in place of a list. */
+  /** What's raised off what it's on: a group of rows, a problem, what's loading in place of a list. */
   card: colours.card,
+  /** What's over the page under a finger: a sheet, an alert. */
+  elevated: colours.elevated,
   backgroundGradient: colour("oklch(0.962 0.004 286.32)", "oklch(0 0 0)"),
   selection: alpha(label, 10),
   /** Every other row of metadata: the text at 2.5%. */
@@ -219,8 +226,9 @@ const roles = {
   veil: alpha(colours.background, 55),
   /** A tile's tint, as an App Library category's square is. */
   tile: alpha(label, 14),
-  /** What's typed in: a field's fill, a little lighter than what it's on. */
-  field: colour("oklch(1 0 0 / 70%)", "oklch(1 0 0 / 6%)"),
+  /** What's typed in, and an outline button: a field's fill, a little lighter than what it's on, as iOS's
+   * tertiarySystemFill is in dark. */
+  field: colour("oklch(1 0 0 / 70%)", "oklch(1 0 0 / 10%)"),
   /** Nothing: what has no fill of its own where something else has one. */
   transparent: colour("oklch(0 0 0 / 0%)"),
   /** Words and icons on an accent. */
@@ -352,6 +360,9 @@ export const tokens = {
     ),
     /** A field's edge: a half-pixel line inside. */
     field: lightDark([{ x: 0, y: 0, blur: 0, spread: 0.5, colour: "oklch(0 0 0 / 14%)", inset: true }], [{ x: 0, y: 0, blur: 0, spread: 0.5, colour: "oklch(1 0 0 / 12%)", inset: true }]),
+    /** A checkbox's and a radio's ring, off: a whole point, at 3:1 or more against what it's on (WCAG's non-text
+     * contrast), as iOS's and macOS's are drawn. */
+    tick: lightDark([{ x: 0, y: 0, blur: 0, spread: 1, colour: "oklch(0 0 0 / 45%)", inset: true }], [{ x: 0, y: 0, blur: 0, spread: 1, colour: "oklch(1 0 0 / 40%)", inset: true }]),
     /** A key's chip: an outline, as Raycast draws ⌘ and K. */
     key: lightDark([{ x: 0, y: 0, blur: 0, spread: 1, colour: "oklch(0 0 0 / 16%)", inset: true }], [{ x: 0, y: 0, blur: 0, spread: 1, colour: "oklch(1 0 0 / 20%)", inset: true }]),
     /** A raised thing's edge inside: a half-pixel line, lit along the top. */
