@@ -547,7 +547,7 @@ defmodule OneCore.Sandbox.Check do
   defp relative(nil), do: "?"
 
   defp relative(source),
-    do: source |> to_string() |> String.split("/") |> Enum.drop_while(&(&1 != "server")) |> Enum.join("/")
+    do: source |> to_string() |> Path.split() |> Enum.drop_while(&(&1 != "server")) |> Path.join()
 
   # Every call to a function of another module that the module's code makes, and every capture of one, with its
   # file and line.
