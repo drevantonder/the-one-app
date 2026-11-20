@@ -492,7 +492,7 @@ defmodule OneCore.Mcp do
 
           # Whether its app is trusted goes too: the client lets only a trusted app's page change the device
           # or ask for someone else (`clients/app/page/bridge.js`). So does the runtime version its native page needs
-          # (`runtimeVersion`), which a native host that has it draws itself, and one that hasn't opens in a web view.
+          # (`runtimeVersion`), which a native host that has it draws itself, and one that hasn't says it needs updating.
           entrypoint ->
             Map.merge(resource, %{
               name: entrypoint.name,

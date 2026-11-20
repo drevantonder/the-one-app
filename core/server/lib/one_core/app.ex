@@ -383,9 +383,9 @@ defmodule OneCore.App do
     something changed, so it only reads what the app keeps.
   - An entrypoint says its `runtime_version`, the runtime version its page needs of a native host
     (`RUNTIME_VERSION` in `core/ui/src/drawing-primitives/renderer.ts`, 5 now): its page is written with the UI library
-    alone (the UI library's skill), so a computer, an iPhone or Android that has that version draws it itself, and a
-    browser or an MCP App draws it on the DOM. A computer doesn't open one with none, or one needing a newer version
-    than it has, and says why in its window; an older phone opens it in its web view. Deploying type checks it against
+    alone (the UI library's skill), so a computer, an iPhone or Android that has that version draws it itself, a browser
+    draws it with the same renderer on its WebGPU, and an MCP App on the DOM. A computer or a phone doesn't open one
+    needing a newer version than it has, and says why in its window. Deploying type checks it against
     the UI library (`OneCore.Entrypoint.lint/3`) and refuses it with the checker's errors where it isn't, and gives its warnings with the deploy's: a raw
     colour or length in a style, which should be a token.
   - An app's settings are in Settings, where it adds a section, or a group in another's page, by the hook
@@ -408,7 +408,7 @@ defmodule OneCore.App do
     an app. One that isn't is named for what it does (`client/sign-in.html`), not `client/index.html`, an app's. It
     says its `runtime_version` beside it, as an entrypoint does, for a native host to draw it.
   - An app is drawn on a home screen under its `name` and `icon`, natively on a computer, an iPhone and Android, and
-    on the DOM in a browser. It's written in Solid 2.0 with the UI library, and its source is the folder `client/`:
+    by the same renderer in a browser. It's written in Solid 2.0 with the UI library, and its source is the folder `client/`:
     each `.html` there is a page, whose script is the app's, and the rest is whatever the app's made of. Its look is
     the UI library's components and `styles()` beside what uses them, never a stylesheet. The UI library gives every
     page its look, so a page is no more than this:

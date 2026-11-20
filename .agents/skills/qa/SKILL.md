@@ -57,9 +57,9 @@ WebGPU on SwiftShader, which draws on the CPU, so only for a change to the web p
 harness (`cargo build -p renderer --example screenshot --features fake`). What counts is **what changed since `--against`** on our renderer
 (`changed.png`): a tree that changed, or pictures more than 2% apart, is looked at. A difference that's meant is said
 in the commit; one that isn't is fixed. Our renderer is the reference, judged against DESIGN.md (Raycast-inspired), not
-the browser: it will draw the web too. Until it does, browsers, MCP hosts and older phones still show the DOM, so a
-large DOM-vs-native difference it reports (`dom.png`, `native.png`, `diff.png`) is worth a look, but matching the DOM
-isn't the goal. A native host that hasn't the runtime version the UI library needs draws nothing, which it says.
+the browser: it draws the web too. Until the DOM is gone, MCP hosts and the sign-in and Vault pages in a browser still
+show it, so a large DOM-vs-native difference it reports (`dom.png`, `native.png`, `diff.png`) is worth a look, but
+matching the DOM isn't the goal. A native host that hasn't the runtime version the UI library needs draws nothing, which it says.
 
 ### Checks: every change to the UI library or the renderer
 
