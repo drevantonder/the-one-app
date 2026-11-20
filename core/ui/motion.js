@@ -29,8 +29,10 @@
 // SDK's own tests do (keyboard, pointer, focus, dismissing, typeahead, placement), and what must hold as they do, on
 // the fake platform's window, once as it is and again with `--seeds` (3 unless said) seeds that make it adversarial
 // (the harness's `--seed`: refreshes late, input as things move, presses held as long as a person might), and with
-// each seed a check once failed on (`seeds`). Every check also comes to rest, leaves nothing drawn going, and any
-// menu, list or dialog open at its end is drawn whole in the window. It says, check by check, which passed, and for
+// each seed a check once failed on (`seeds`). Every check also comes to rest, leaves nothing drawn going, draws every
+// picture, each within a few hundred ms of its page asking for it as the slowest device of its kind decodes it
+// (devices.json's CPU scores, the harness's `--slower`), and any menu, list or dialog open at its end is drawn whole
+// in the window. It says, check by check, which passed, and for
 // one that failed, its seed, which step and why; it exits 1 where one failed.
 import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, symlinkSync, watch, writeFileSync } from "node:fs"
 import { basename, join, relative, resolve } from "node:path"
@@ -102,7 +104,11 @@ async function run(at, folder, scene, requests, seed = 0) {
   // A computer's launcher is a panel, drawn as one (a Mac's, its glass the system's), as its client says it is.
   const client = scene.answers?.["one/client"]
   const panel = client?.launcher && client?.mac ? ["--panel", "0"] : []
-  const harnessed = Bun.spawn([harness, at, join(folder, "end.png"), join(folder, "end.json"), "--ui", here("dist/client"), "--answers", join(folder, "answers.json"), "--size", `${scene.size[0]}x${scene.size[1]}`, "--scale", "1", "--requests", "-", ...(dark ? ["--dark"] : []), ...(scene.touch ? ["--touch"] : []), ...(seed ? ["--seed", String(seed)] : []), ...panel], { stdin: new TextEncoder().encode(lines), stdout: "pipe", stderr: "pipe", env })
+  // Its pictures decode as slowly as on the slowest device of its kind: as this machine's CPU is to that one's, at
+  // that one's device pixels a point, where it's drawn at one here.
+  const slowest = devices.tiers.find((tier) => tier.name === (scene.touch ? "low-end Android" : "Intel UHD laptop at 4K"))
+  const slower = hostScore ? ["--slower", String((hostScore / slowest.cpu) * slowest.scale ** 2)] : []
+  const harnessed = Bun.spawn([harness, at, join(folder, "end.png"), join(folder, "end.json"), "--ui", here("dist/client"), "--answers", join(folder, "answers.json"), "--size", `${scene.size[0]}x${scene.size[1]}`, "--scale", "1", "--requests", "-", ...(dark ? ["--dark"] : []), ...(scene.touch ? ["--touch"] : []), ...(seed ? ["--seed", String(seed)] : []), ...panel, ...slower], { stdin: new TextEncoder().encode(lines), stdout: "pipe", stderr: "pipe", env })
   const [stdout, stderr] = await Promise.all([new Response(harnessed.stdout).text(), new Response(harnessed.stderr).text(), harnessed.exited])
   return { answers: stdout.split("\n").filter(Boolean).map((line) => JSON.parse(line)), said: stderr.trim(), failed: harnessed.exitCode !== 0 }
 }
@@ -363,6 +369,9 @@ const pressed = (tap) => (tap.key ? { op: "key", ...tap } : tap.type ? { op: "ty
 
 /// The roles a layer over the page has, which a check's end finds drawn whole in the window wherever it's open.
 const LAYERS = ["menu", "listbox", "dialog", "alertdialog"]
+/// The longest a picture may take to show from when its page asks for it, on the slowest device of its kind: a few
+/// hundred ms, as the App Store's icons on iOS show with their page or fade in just after.
+const PICTURE_MS = 300
 
 /// Why a node `wait_for` waited on isn't as it should be: what a person sees of it, or its states.
 const why = (answer, is) => {
@@ -431,10 +440,14 @@ function requests(steps, folder) {
     }
     for (const one of out.slice(from)) one.step = `step ${at + 1}`
   }
-  // Its end: at rest, nothing drawn going, and each layer open drawn whole in the window.
+  // Its end: at rest, nothing drawn going, every picture drawn, none later than PICTURE_MS after it was asked for,
+  // and each layer open drawn whole in the window.
   const end = out.length
   out.push({ request: { op: "clock", step: 2000 } })
-  out.push({ request: { op: "window" }, judge: (answer) => (answer?.result?.leaving ? `${answer.result.leaving} nodes taken out are still drawn` : answer?.result?.moving ? `${answer.result.moving} nodes are still moving` : undefined) })
+  out.push({ request: { op: "settle", deadline: 1000 }, judge: (answer) => !answer?.result?.settled && `it hadn't settled: ${JSON.stringify(answer?.result?.pending)}` })
+  const atRest = ({ leaving, moving, blank, picture_ms }) =>
+    leaving ? `${leaving} nodes taken out are still drawn` : moving ? `${moving} nodes are still moving` : blank ? `${blank} pictures are drawn empty` : picture_ms > PICTURE_MS ? `a picture took ${picture_ms} ms to show, where ${PICTURE_MS} is the most` : undefined
+  out.push({ request: { op: "window" }, judge: (answer) => answer?.result && atRest(answer.result) })
   for (const role of LAYERS)
     out.push({ request: { op: "wait_for", role, state: "shown", timeout: 0 }, judge: (answer) => answer?.result?.node && !answer.result.met && `the ${role} open isn't shown: ${why(answer)}` })
   for (const one of out.slice(end)) one.step = "at its end"

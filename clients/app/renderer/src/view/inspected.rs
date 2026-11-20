@@ -56,6 +56,8 @@ impl Screen {
                     "focused": self.focus.focused,
                     "leaving": self.tree.going().count(),
                     "moving": self.transitions.moving().len(),
+                    "blank": self.pictures.blank + self.frames.values().map(|child| child.screen.pictures.blank).sum::<usize>(),
+                    "picture_ms": self.frames.values().map(|child| child.screen.pictures.slowest).fold(self.pictures.slowest, Duration::max).as_millis() as u64,
                 })
             }
             "tree" => self.inspected_tree(),

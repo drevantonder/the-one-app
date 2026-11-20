@@ -3,7 +3,7 @@
 //!     cargo run -p renderer --example screenshot --features fake -- <page's built folder> <out.png> <out.json> \
 //!       [--ui core/ui/dist/client] [--answers answers.json] [--size 480x360] [--scale 2] [--dark] [--requests <file>|-]
 //!       [--safe-area <top>,<right>,<bottom>,<left>] [--touch] [--panel <corner>] [--gpu] [--measure] [--seed <n>]
-//!       [--latency <ms> [--cached <tool>,…]]
+//!       [--latency <ms> [--cached <tool>,…]] [--slower <times>]
 //!
 //! It runs the module the folder's `index.html` loads, as `bun app.js` built it, with the UI library a native host
 //! loads from `--ui` (`bun run build` in core/ui), and answers what the page asks its client from `--answers`, as
@@ -37,6 +37,9 @@
 //! trip to a server takes, but for the tools `--cached` names, which a client answers at once from what it keeps
 //! (a tool that only reads): so a page that opens on what isn't kept, or asks again for what an answer said, opens
 //! slowly here as on a device. The page's clock runs as it opens until it's had every answer, at most 5 s.
+//! `--slower` has each picture take that many times as long to decode as on this machine, as on a device with a slower
+//! CPU, where they come later after the page asks for them: the inspector's `window` says the longest one took
+//! (`picture_ms`).
 //! `--measure` says, on stderr after the rest, how quickly it draws, as a line `measured {…}`: its first
 //! frame (`first_frame_ms`, from the GPU's start to the frame read back), a frame's time when nothing changes
 //! (`idle_ms`), as its first text field takes a character a frame (`typing_ms`) and as its first list scrolls
@@ -87,6 +90,9 @@ fn main() -> anyhow::Result<()> {
         None => json!({}),
     };
     let latency: f64 = flag("--latency").and_then(|ms| ms.parse().ok()).unwrap_or(0.0);
+    if let Some(times) = flag("--slower").and_then(|times| times.parse().ok()) {
+        renderer::decoding_takes(times);
+    }
     let cached: Vec<String> = flag("--cached").map(|tools| tools.split(',').map(str::to_owned).collect()).unwrap_or_default();
     // The answers on their way, each with when it comes on the page's clock (`--latency`).
     let coming: std::rc::Rc<std::cell::RefCell<Vec<(f64, Value)>>> = Default::default();

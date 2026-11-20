@@ -1381,14 +1381,17 @@ impl Painter<'_> {
         let src = match self.fetched.get(src) {
             _ if src.starts_with("data:") => src,
             Some(Some(data)) => data.as_str(),
-            Some(None) => return,
-            None => return self.wanted.push(src.to_owned()),
+            Some(None) => return self.pictures.drew_blank(),
+            None => {
+                self.pictures.drew_blank();
+                return self.wanted.push(src.to_owned());
+            }
         };
         let device = Size { width: (content.size.width * self.scale).round() as u32, height: (content.size.height * self.scale).round() as u32 };
         if device.width == 0 || device.height == 0 {
             return;
         }
-        let Some((picture, tile)) = self.pictures.get(self.atlas, src, device) else { return };
+        let Some((picture, tile)) = self.pictures.get(self.atlas, src, device) else { return self.pictures.drew_blank() };
         let fit = (content.size.width / picture.width as f32).min(content.size.height / picture.height as f32);
         let size = Size { width: picture.width as f32 * fit, height: picture.height as f32 * fit };
         let bounds = Bounds {

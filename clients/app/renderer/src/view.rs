@@ -34,6 +34,8 @@ mod list;
 mod videos;
 mod paint;
 mod pictures;
+#[cfg(feature = "fake")]
+pub use pictures::decoding_takes;
 mod selection;
 pub mod touch;
 pub use frames::Make as MakeFrame;

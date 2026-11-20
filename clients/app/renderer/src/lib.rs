@@ -26,6 +26,8 @@ mod video;
 pub use style::load_styles;
 pub use view::inspected::Reply;
 pub use view::touch;
+#[cfg(feature = "fake")]
+pub use view::decoding_takes;
 pub use view::{Appearance, Asked, Cursor, FONT, Late, MakeFrame, Notice, Panel, Screen, Title, TitleRow, WindowButton, fonts};
 
 /// This host's runtime version (`RUNTIME_VERSION` in core/ui/src/drawing-primitives/renderer.ts). An entrypoint that needs a

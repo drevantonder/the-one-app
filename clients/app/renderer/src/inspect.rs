@@ -14,9 +14,11 @@
 //! `id` names an element), every one given matching, in the tree's order; `nth` picks a later match than the first.
 //! A point is `x` and `y`, in CSS pixels from the window's top left, as `rect`s are.
 //!
-//! - `window` → `{entrypoint, width, height, scale, time, paused, failed, focused, leaving, moving}`: what it shows,
-//!   its size, its clock, why it can't draw, if it can't (its JS threw, or sent what this host doesn't speak), the
-//!   node with the keyboard, how many nodes taken out are still drawn going, and how many are on their way somewhere.
+//! - `window` → `{entrypoint, width, height, scale, time, paused, failed, focused, leaving, moving, blank,
+//!   picture_ms}`: what it shows, its size, its clock, why it can't draw, if it can't (its JS threw, or sent what this
+//!   host doesn't speak), the node with the keyboard, how many nodes taken out are still drawn going, how many are on
+//!   their way somewhere, how many pictures the frame drawn last drew empty (decoding, or that didn't decode or come),
+//!   and the longest a picture took from being asked for to its window having it to draw.
 //! - `tree` → `{tree}`: the semantic tree (`Tree::semantics`), as a screen reader reads it, each node with its `rect`.
 //! - `query` (a selector) → `{nodes}`: each node that matches, with its `node`, `kind`, `role`, `name`, `rect`, the
 //!   `style` and `class` it was given, its colours and lengths `resolved` from the design tokens, `source`, the

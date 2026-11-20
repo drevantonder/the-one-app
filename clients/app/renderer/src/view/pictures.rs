@@ -2,9 +2,12 @@
 //! one never holds up a frame: a box draws the same picture as it was last decoded at another size, or nothing, until
 //! it's ready, and the window is woken to draw it then.
 
-use std::collections::{HashMap, HashSet};
+use std::collections::HashMap;
 use std::hash::{Hash, Hasher};
 use std::sync::{Arc, Condvar, Mutex};
+use std::time::Duration;
+
+use web_time::Instant;
 
 use crate::geometry::{DevicePixels, Size};
 use crate::render::atlas::{Atlas, AtlasKey, AtlasTile};
@@ -38,6 +41,18 @@ fn run(job: Job) {
     let _ = jobs.lock().unwrap_or_else(std::sync::PoisonError::into_inner).send(job);
 }
 
+/// How many times as long as here a picture takes to decode on the device a harness stands for (`decoding_takes`).
+#[cfg(feature = "fake")]
+static SLOWER: std::sync::atomic::AtomicU32 = std::sync::atomic::AtomicU32::new(1f32.to_bits());
+
+/// Each picture decodes `times` as slowly as on this machine, as on a device with a slower CPU (the Surface's is a
+/// third as fast as a current desktop's): for a harness, so a page that has many to decode shows them as late as that
+/// device would.
+#[cfg(feature = "fake")]
+pub fn decoding_takes(times: f32) {
+    SLOWER.store(times.to_bits(), std::sync::atomic::Ordering::Relaxed);
+}
+
 /// What's decoded, waiting to go in the atlas, and how many are still decoding.
 #[derive(Default)]
 struct Decoding {
@@ -49,8 +64,8 @@ struct Decoding {
 pub(super) struct Pictures {
     /// Each picture asked for, by its key in the atlas: its size there, or none where it didn't decode.
     sizes: HashMap<u64, Option<Picture>>,
-    /// What's decoding, by its key.
-    asked: HashSet<u64>,
+    /// What's decoding, by its key, and when it was asked for.
+    asked: HashMap<u64, Instant>,
     decoding: Arc<(Mutex<Decoding>, Condvar)>,
     /// What's decoded and not yet in the atlas, which the next frame that draws it puts there.
     ready: HashMap<u64, Option<Decoded>>,
@@ -60,6 +75,12 @@ pub(super) struct Pictures {
     pub(super) decoded: u64,
     /// What wakes its window as one's decoded.
     pub(super) wake: Option<Arc<dyn Fn() + Send + Sync>>,
+    /// The longest a picture took from when it was asked for to when its window had it to draw.
+    pub(super) slowest: Duration,
+    /// How many pictures the frame drawn last drew empty: decoding, or that didn't decode or come.
+    pub(super) blank: usize,
+    /// How many the frame being drawn has drawn empty.
+    drawing_blank: usize,
 }
 
 fn hash(key: impl Hash) -> u64 {
@@ -74,7 +95,9 @@ impl Pictures {
         let done = std::mem::take(&mut self.decoding.0.lock().unwrap_or_else(std::sync::PoisonError::into_inner).done);
         let any = !done.is_empty();
         for (id, decoded) in done {
-            self.asked.remove(&id);
+            if let Some(asked) = self.asked.remove(&id) {
+                self.slowest = self.slowest.max(asked.elapsed());
+            }
             self.sizes.insert(id, decoded.as_ref().map(|decoded| decoded.picture));
             self.ready.insert(id, decoded);
             self.decoded += 1;
@@ -97,9 +120,15 @@ impl Pictures {
         }
     }
 
+    /// A picture the frame being drawn has drawn empty.
+    pub(super) fn drew_blank(&mut self) {
+        self.drawing_blank += 1;
+    }
+
     /// What's been decoded and wasn't drawn this frame goes: the atlas alone keeps a picture's pixels.
     pub(super) fn drawn(&mut self) {
         self.ready.clear();
+        self.blank = std::mem::take(&mut self.drawing_blank);
     }
 
     /// Forgets every picture put in the atlas, as the atlas is made again (its GPU was lost): each is decoded again as
@@ -151,7 +180,8 @@ impl Pictures {
             self.latest.insert(address, (id, picture));
             return Some((picture, tile));
         }
-        if self.asked.insert(id) {
+        if let std::collections::hash_map::Entry::Vacant(asked) = self.asked.entry(id) {
+            asked.insert(Instant::now());
             let (decoding, wake, src) = (self.decoding.clone(), self.wake.clone(), src.to_owned());
             decoding.0.lock().unwrap_or_else(std::sync::PoisonError::into_inner).running += 1;
             let done = move |decoded: Option<Decoded>| {
@@ -168,7 +198,14 @@ impl Pictures {
             #[cfg(target_arch = "wasm32")]
             wasm_bindgen_futures::spawn_local(async move { done(crate::platform::web::decode(&src, device).await) });
             #[cfg(not(target_arch = "wasm32"))]
-            run(Box::new(move || done(super::paint::decode(&src, device))));
+            run(Box::new(move || {
+                #[cfg(feature = "fake")]
+                let started = Instant::now();
+                let decoded = super::paint::decode(&src, device);
+                #[cfg(feature = "fake")]
+                std::thread::sleep(started.elapsed().mul_f32((f32::from_bits(SLOWER.load(std::sync::atomic::Ordering::Relaxed)) - 1.0).max(0.0)));
+                done(decoded)
+            }));
         }
         latest(self)
     }
