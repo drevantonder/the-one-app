@@ -384,7 +384,8 @@ defmodule OneCore.App do
   - An entrypoint says its `runtime_version`, the runtime version its page needs of a native host
     (`RUNTIME_VERSION` in `core/ui/src/drawing-primitives/renderer.ts`, 5 now): its page is written with the UI library
     alone (the UI library's skill), so a computer, an iPhone or Android that has that version draws it itself, a browser
-    draws it with the same renderer on its WebGPU, and an MCP App on the DOM. A computer or a phone doesn't open one
+    draws it with the same renderer on its WebGPU, and so does an assistant showing it as an MCP App, in a frame of
+    the web's (`core/edge/mcp/mcp.ts`). A computer or a phone doesn't open one
     needing a newer version than it has, and says why in its window. Deploying type checks it against
     the UI library (`OneCore.Entrypoint.lint/3`) and refuses it with the checker's errors where it isn't, and gives its warnings with the deploy's: a raw
     colour or length in a style, which should be a token.

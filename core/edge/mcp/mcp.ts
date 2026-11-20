@@ -153,10 +153,48 @@ async function mcp(request: Request, env: Env, ctx: ExecutionContext) {
   // A browser or an assistant someone let in. One that's since become nobody's signs in, or is let in, again.
   const who = await signedIn(request, env);
   if ("refused" in who) return who.refused;
-  const answer = await forward(env, await request.text(), { device: who.device }, [`${who.who}/`, NETWORK], request.headers, mode(new URL(request.url)), { signal: request.signal, ctx });
-  if (!(await nobodys(answer))) return withCookies(answer, who.cookies);
+  const body = await request.text();
+  const answer = await forward(env, body, { device: who.device }, [`${who.who}/`, NETWORK], request.headers, mode(new URL(request.url)), { signal: request.signal, ctx });
+  if (!(await nobodys(answer))) return withCookies(!who.session && who.apps ? await drawn(answer, body, new URL(request.url).origin, who.apps) : answer, who.cookies);
   return who.challenge ? new Response(null, { status: 401, headers: { "www-authenticate": who.challenge } }) : refuse(401, "Sign in again");
 }
+
+/**
+ * An app's page read by an assistant that shows it, as an MCP App, in a frame of its own: drawn by the renderer, as the
+ * web client draws it, in the renderer's frame from here (`clients/web/renderer`), which loads it from where the
+ * assistant's apps' files are (`apps`), in a frame of its own origin, as the web client's is. The page the assistant
+ * shows only passes messages between them, as the renderer is WebAssembly, which an MCP App's own page may not compile,
+ * and says the frame's origin is what it frames (`frameDomains`). Any other answer goes as it is.
+ */
+async function drawn(answer: Response, body: string, origin: string, apps: string) {
+  if (answer.headers.get("content-type") !== "application/json") return answer;
+  const uri = (JSON.parse(body) as Call).params?.uri;
+  const read = await answer.clone().json<{ result?: { contents?: { uri: string; mimeType: string; text?: string; _meta?: object }[] } }>();
+  const [content] = read.result?.contents ?? [];
+  if (typeof uri !== "string" || content?.mimeType !== "text/html;profile=mcp-app" || content.uri !== uri) return answer;
+  const [, , app, version, ...path] = uri.split("/");
+  const frame = `${origin}/renderer/#${origin}${apps}/${app}/${app}@${version}/${path.join("/")}`;
+  const page = `<!doctype html>
+<meta charset="utf-8">
+<style>html, body { margin: 0; height: 100%; overflow: hidden; } iframe { display: block; border: 0; width: 100%; height: 100%; }</style>
+<iframe src="${frame}" sandbox="allow-scripts allow-forms" allow="clipboard-write"></iframe>
+<script>
+  const frame = document.querySelector("iframe");
+  addEventListener("message", ({ source, data }) => {
+    if (source === frame.contentWindow) {
+      // A host sizes a page by what it says, which a page of ours says only where it's asked to (\`sizeChanged\`).
+      if (data?.method === "ui/notifications/initialized") parent.postMessage({ jsonrpc: "2.0", method: "ui/notifications/size-changed", params: { height: ${HEIGHT} } }, "*");
+      parent.postMessage(data, "*");
+    } else if (source === parent) frame.contentWindow.postMessage(data, "*");
+  });
+</script>
+`;
+  const ui = { csp: { frameDomains: [origin] } };
+  return Response.json({ ...read, result: { ...read.result, contents: [{ ...content, text: page, _meta: { ...content._meta, ui } }] } });
+}
+
+/** How tall an MCP App's page is in an assistant's chat, as its renderer's page says nothing of it. */
+const HEIGHT = 600;
 
 /** How an agent calls tools at `/mcp`: in code mode with `?code` (`OneCore.Mcp`), and otherwise as MCP's tools. */
 const mode = (url: URL) => (url.searchParams.has("code") ? "code" : undefined);

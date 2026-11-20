@@ -129,14 +129,11 @@ export class Who extends WorkerEntrypoint {
     if (!request.headers.has("authorization")) {
       const { headers, response: signedIn } = await auth.api.getSession({ headers: request.headers, returnHeaders: true });
       if (signedIn) {
-        const { secret } = await auth.$context;
-        const signature = await crypto.subtle.sign("HMAC", await signing(secret), signs(signedIn.session.id));
-        const hex = bytesToHex(new Uint8Array(signature));
         return {
           device: await browserDevice(signedIn.session.id),
           who: who(signedIn.user),
           session: signedIn.session.id,
-          apps: `/apps/${signedIn.session.id}.${hex}`,
+          apps: await appsAddress(auth, signedIn.session.id),
           // Better Auth sends a session that's being used a later end.
           cookies: headers.getSetCookie(),
         };
@@ -148,9 +145,14 @@ export class Who extends WorkerEntrypoint {
     let claims: Record<string, unknown> | undefined;
     const refused = await requireMcpAuth(auth, async (_, verified) => ((claims = verified), new Response()), { resource })(request);
     if (!claims) return { refused };
+    const device = await assistant(claims.azp as string, claims.sub as string);
+    // Its apps' files are at an address of their own too, for the page of an MCP App it shows, whose frame asks with
+    // no token (`core/edge/mcp/mcp.ts`): signed with who it is, until its token ends.
+    const shown: Shown = { device, who: claims.who as string, until: (claims.exp as number) * 1000 };
     return {
-      device: await assistant(claims.azp as string, claims.sub as string),
-      who: claims.who as string,
+      device,
+      who: shown.who,
+      apps: await appsAddress(auth, `${ASSISTANT}${btoa(JSON.stringify(shown)).replace(/\+/g, "-").replace(/\//g, "_").replace(/=+$/, "")}`),
       challenge: `Bearer error="invalid_token", resource_metadata="${metadata}"`,
     };
   }
@@ -161,6 +163,19 @@ let key: Promise<CryptoKey> | undefined;
 const signing = (secret: string) => (key ??= crypto.subtle.importKey("raw", new TextEncoder().encode(secret), { name: "HMAC", hash: "SHA-256" }, false, ["sign", "verify"]));
 /** What's signed for a session. */
 const signs = (session: string) => new TextEncoder().encode(`apps/${session}`);
+/** Where a session's apps' files are: `/apps/<session>.<its signature>`. */
+async function appsAddress(auth: Auth, session: string) {
+  const { secret } = await auth.$context;
+  return `/apps/${session}.${bytesToHex(new Uint8Array(await crypto.subtle.sign("HMAC", await signing(secret), signs(session))))}`;
+}
+/** An assistant's session, in the address of its apps' files: this, then what it is, who it's for and until when
+ * (`Shown`), as base64url's JSON. A browser's is Better Auth's session's id, which has no `-`. */
+const ASSISTANT = "assistant-";
+interface Shown {
+  device: string;
+  who: string;
+  until: number;
+}
 
 /**
  * The sessions of apps' pages this copy of the Worker found in the database, believed for `BELIEVED` seconds, or
@@ -175,6 +190,10 @@ async function appsSession(auth: Auth, url: URL): Promise<Signed | null> {
   const signature = Uint8Array.from(hex.match(/../g) ?? [], (byte) => parseInt(byte, 16));
   if (!(await crypto.subtle.verify("HMAC", await signing(secret), signature, signs(session)))) return null;
   const now = Date.now();
+  if (session.startsWith(ASSISTANT)) {
+    const { device, who, until } = JSON.parse(atob(session.slice(ASSISTANT.length).replace(/-/g, "+").replace(/_/g, "/"))) as Shown;
+    return until > now ? { device, who } : null;
+  }
   const known = believed.get(session);
   if (known && known.until > now) return known.signed;
   const stored = await adapter.findOne<{ userId: string; expiresAt: Date }>({ model: "session", where: [{ field: "id", value: session }] });
