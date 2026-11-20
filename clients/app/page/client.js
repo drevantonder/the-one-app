@@ -1506,6 +1506,9 @@ async function respond(view, method, params) {
         ...(!inFrame && titleRow()),
         // Whether the window names it above it, in its title bar (`titled`), so its first screen doesn't.
         titled: Boolean(own) && !titleBar.hidden && !inFrame,
+        // What `titled` was called until 20 Nov, which a page built before then reads: told too until every app is built
+        // after it, or its first screen draws its title again beside the window's.
+        breadcrumb: Boolean(own) && !titleBar.hidden && !inFrame,
         // Whether its network answers, which the window keeps it told of.
         connection: shown.getSnapshot().context.connection,
       },

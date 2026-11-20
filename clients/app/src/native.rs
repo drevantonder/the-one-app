@@ -1187,6 +1187,9 @@ fn respond(
                 // Whether its window's title row names it, so its first screen doesn't: a page in a frame is named by
                 // nothing above it, nor is the recovery key window's.
                 "titled": cfg!(desktop) && !state.framed && state.sheet.is_none(),
+                // What `titled` was called until 20 Nov, which a page built before then reads: told too until every app
+                // is built after it, or its first screen draws its title again beside the window's.
+                "breadcrumb": cfg!(desktop) && !state.framed && state.sheet.is_none(),
                 // The place its link names, as its address's `#` says on the DOM (`link()`).
                 "link": state.fragment,
                 "connection": "online",
