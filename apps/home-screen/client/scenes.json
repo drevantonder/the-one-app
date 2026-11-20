@@ -966,6 +966,36 @@
             }
           }
         }
+      ],
+      "Summoned again after opening an app from its search, what's typed starts a new search": [
+        {
+          "type": "Notes"
+        },
+        {
+          "key": "Enter"
+        },
+        {
+          "putAway": true
+        },
+        {
+          "summon": true
+        },
+        {
+          "type": "Tasks"
+        },
+        {
+          "expect": {
+            "gone": "No apps match."
+          }
+        },
+        {
+          "expect": {
+            "text": "Tasks"
+          }
+        },
+        {
+          "wait": 1000
+        }
       ]
     }
   },

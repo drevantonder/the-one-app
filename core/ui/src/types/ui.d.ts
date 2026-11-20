@@ -243,6 +243,8 @@ export type TextInputProps = Pick<Semantics, "role" | "aria-label" | "aria-descr
   enterKeyHint?: EnterKeyHint
   disabled?: boolean
   readOnly?: boolean
+  /** All its text is selected as it takes the keyboard, so what's typed replaces it, as React Native's `selectTextOnFocus` does. */
+  selectTextOnFocus?: boolean
   required?: boolean
   autoFocus?: boolean
   autoCapitalize?: Props["autocapitalize"]

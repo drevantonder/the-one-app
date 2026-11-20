@@ -1913,6 +1913,11 @@ impl Screen {
         if let Some(id) = id.filter(|id| self.tree.nodes.get(id).is_some_and(|node| node.listens("focus"))) {
             self.event(id, "focus", None);
         }
+        // An input that says `selecttextonfocus` (React Native's `selectTextOnFocus`) has all its text selected as it
+        // takes the keyboard.
+        if let Some(id) = id.filter(|id| self.editing.fields.contains_key(id) && self.tree.nodes.get(id).is_some_and(|node| node.is("selecttextonfocus"))) {
+            self.edit(id, Field::select_all);
+        }
     }
 
     /// A key went down where the keyboard is, as the DOM's `KeyboardEvent` has it: Tab moves the keyboard, what

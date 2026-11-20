@@ -87,7 +87,7 @@ export const Path: typeof Page.Path = (props) => {
  * as the host names them. */
 export const TextInput: typeof Page.TextInput = (props) =>
   primitive("input")(
-    renamed(props, ["value", "inputMode", "secureTextEntry", "enterKeyHint", "onSubmitEditing", "onChangeText", "readOnly", "autoFocus", "autoCapitalize", "autoCorrect", "spellCheck", "autoComplete"], {
+    renamed(props, ["value", "inputMode", "secureTextEntry", "enterKeyHint", "onSubmitEditing", "onChangeText", "readOnly", "selectTextOnFocus", "autoFocus", "autoCapitalize", "autoCorrect", "spellCheck", "autoComplete"], {
       editing: (it) => (it.value === undefined ? undefined : { text: it.value, selection: { base: it.value.length, extent: it.value.length }, composing: null }),
       type: (it) => (it.multiline ? undefined : it.secureTextEntry ? "password" : it.inputMode && ["email", "url", "tel", "search"].includes(it.inputMode) ? it.inputMode : undefined),
       inputmode: (it) => it.inputMode,
@@ -95,6 +95,7 @@ export const TextInput: typeof Page.TextInput = (props) =>
       onAction: (it) => it.onSubmitEditing && (() => it.onSubmitEditing!()),
       onInput: (it) => it.onChangeText && ((event: { currentTarget: { value: string } }) => it.onChangeText!(event.currentTarget.value)),
       readonly: (it) => it.readOnly,
+      selecttextonfocus: (it) => it.selectTextOnFocus,
       autofocus: (it) => it.autoFocus,
       autocapitalize: (it) => it.autoCapitalize ?? (literal(it) ? "none" : undefined),
       autocorrect: (it) => it.autoCorrect ?? (literal(it) ? false : undefined),

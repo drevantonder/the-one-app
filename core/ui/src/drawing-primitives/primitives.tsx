@@ -775,6 +775,9 @@ export interface TextInputProps extends Pick<Semantics, "role" | "aria-label" | 
   disabled?: boolean
   /** Shown, chosen and copied, but not typed in: React Native's `readOnly` (the web's), not its older `editable`. */
   readOnly?: boolean
+  /** All its text is selected as it takes the keyboard, so what's typed replaces it, as React Native's
+   * `selectTextOnFocus` does: a search box that keeps its last search. */
+  selectTextOnFocus?: boolean
   required?: boolean
   style?: Styles
   /** What's in it now, each time that changes: its one change handler, React Native's `onChangeText`, with no
@@ -798,10 +801,10 @@ const actions: Record<EnterKeyHint, TextInputAction> = { enter: "newline", done:
 /// names its action key (a phone's Done, Go, Search, Send), and `onSubmitEditing` is told it was pressed: Return in one
 /// line, as an input method that's composing doesn't. In several lines Return is a new line unless `enterKeyHint`
 /// says otherwise. What a page drawn on the DOM gives it besides (`pattern`, a form's `name`) reaches the element. A
-/// `readOnly` one is all selected as it's focused, to copy. Its text runs the way its first strong character does
+/// `readOnly` one, or one with `selectTextOnFocus`, is all selected as it's focused, to copy or to type over. Its text runs the way its first strong character does
 /// (`dir="auto"`), so Hebrew or Arabic starts at the right.
 export function TextInput(props: TextInputProps) {
-  const own = omit(props as TextInputProps & { class?: string }, "style", "class", "multiline", "enterKeyHint", "autoCorrect", "autoFocus", "onSubmitEditing", "onKeyDown", "onFocus", "onChangeText", "inputMode", "secureTextEntry", "readOnly", "autoCapitalize", "spellCheck", "autoComplete")
+  const own = omit(props as TextInputProps & { class?: string }, "style", "class", "multiline", "enterKeyHint", "autoCorrect", "autoFocus", "onSubmitEditing", "onKeyDown", "onFocus", "onChangeText", "inputMode", "secureTextEntry", "readOnly", "selectTextOnFocus", "autoCapitalize", "spellCheck", "autoComplete")
   const action = (): TextInputAction => (props.enterKeyHint ? actions[props.enterKeyHint] : props.multiline ? "newline" : "done")
   const keyed = (event: KeyboardEvent) => {
     props.onKeyDown?.(event)
@@ -817,7 +820,7 @@ export function TextInput(props: TextInputProps) {
     queueMicrotask(() => props.value !== undefined && field.value !== props.value && (field.value = props.value))
   }
   const focused = (event: FocusEvent) => {
-    if (props.readOnly) (event.currentTarget as HTMLInputElement).select()
+    if (props.readOnly || props.selectTextOnFocus) (event.currentTarget as HTMLInputElement).select()
     props.onFocus?.()
   }
   // A page in a frame of another origin, as an app's is, isn't given `autofocus`: it's focused as it's drawn, and

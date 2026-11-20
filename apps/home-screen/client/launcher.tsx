@@ -64,11 +64,12 @@ export const launcherKeys = (props: { move: (key: string) => boolean; open: () =
   }
 }
 
-/// The launcher's search, floating over its card: bare and large, with the keyboard as the launcher's summoned.
+/// The launcher's search, floating over its card: bare and large, with the keyboard as the launcher's summoned, and
+/// the last search selected, so typing starts a new one, as Spotlight's does.
 export function LauncherSearch() {
   return (
     <View style={looks.launcherSearch}>
-      <TextInput inputMode="search" enterKeyHint="search" placeholder="Search apps…" aria-label="Search apps" autoFocus value={query()} onChangeText={(text) => (setQuery(text), setChosenResult(0))} style={looks.bare} />
+      <TextInput inputMode="search" enterKeyHint="search" placeholder="Search apps…" aria-label="Search apps" autoFocus selectTextOnFocus value={query()} onChangeText={(text) => (setQuery(text), setChosenResult(0))} style={looks.bare} />
     </View>
   )
 }
