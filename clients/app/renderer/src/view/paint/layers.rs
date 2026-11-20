@@ -106,6 +106,7 @@ impl Painter<'_> {
         // it's no image, which would be drawn afresh too.
         let kept = !self.animating && self.framed.is_empty();
         let mut drawn = std::mem::replace(&mut self.parts, parts);
+        scene.sort();
         drawn.push(Part::Scene(std::sync::Arc::new(scene), None));
         for part in &mut drawn {
             if let Part::Scene(scene, image) = part {
@@ -164,7 +165,9 @@ impl Painter<'_> {
             self.animating = true;
         } else if self.recording.is_some() && self.layered.contains(&id) {
             // A layer of its own in the one being drawn: drawn into it each frame, where that's moved it.
-            let scene = std::mem::take(&mut *self.scene);
+            // In the order it was drawn, as its image draws its batches (`recording`).
+            let mut scene = std::mem::take(&mut *self.scene);
+            scene.sort();
             self.parts.push(Part::Scene(std::sync::Arc::new(scene), None));
             self.parts.push(Part::Sublayer(Sublayer { taffy_node, offset, transform, mask, opacity, parent, pointer }));
             return;

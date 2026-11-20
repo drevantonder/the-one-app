@@ -219,6 +219,11 @@ impl Scene {
 
     pub fn finish(&mut self) {
         self.occlude();
+        self.sort();
+    }
+
+    /// Each kind of primitive in the order it was drawn, which its batches are drawn in (`batches`).
+    pub(crate) fn sort(&mut self) {
         self.shadows.sort_by_key(|shadow| shadow.order);
         self.quads.sort_by_key(|quad| quad.order);
         self.underlines.sort_by_key(|underline| underline.order);
@@ -293,6 +298,18 @@ impl Scene {
     }
 
     pub(crate) fn batches(&self) -> impl Iterator<Item = PrimitiveBatch<'_>> {
+        // Batches are drawn by order across kinds, so a kind out of order draws over what was drawn after it: a
+        // layer's image drew a badge's digits under its own fill.
+        debug_assert!(
+            self.shadows.is_sorted_by_key(|one| one.order)
+                && self.quads.is_sorted_by_key(|one| one.order)
+                && self.underlines.is_sorted_by_key(|one| one.order)
+                && self.monochrome_sprites.is_sorted_by_key(|one| one.order)
+                && self.polychrome_sprites.is_sorted_by_key(|one| one.order)
+                && self.backdrops.is_sorted_by_key(|one| one.order)
+                && self.rasters.is_sorted_by_key(|one| one.order),
+            "a scene's primitives are drawn in batches by their order, so each kind is sorted first (`Scene::sort`)"
+        );
         BatchIterator {
             shadows: &self.shadows,
             shadows_start: 0,
