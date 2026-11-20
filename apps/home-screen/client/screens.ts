@@ -1,6 +1,6 @@
 import { createEffect, createMemo, untrack } from "solid-js"
 import { link, safeArea, viewport } from "ui"
-import { ACROSS, launcherRoom, measure } from "./layout.ts"
+import { launcherRoom, measure } from "./layout.ts"
 import { type Kind, pack, type Page, shown, spans } from "./machine.ts"
 import { home, state, seen, editing, editingOwner, launcher, room, setRoom, kept, setKept } from "./store.ts"
 import { type Owner } from "./owners.ts"
@@ -35,13 +35,6 @@ export function createScreens(props: { owners: Owner[] }) {
   /// then the App Library, the same for everyone, a screenful.
   const screens = createMemo(() => {
     const fit = room().fit
-    // The launcher shows `ACROSS` pages side by side and turns them one at a time: a screenful from each page but the last,
-    // which while they're edited has its own, with room beside it for another.
-    if (launcher())
-      return pages().map((homes, owner) => [
-        ...Array.from({ length: Math.max(1, homes.length - (editingOwner(owner) ? ACROSS - 2 : ACROSS - 1)) }, (_, at) => ({ kind: "home" as Kind, from: at, count: Math.min(ACROSS, homes.length - at) })),
-        { kind: "library" as Kind, from: 0, count: 1 },
-      ])
     return pages().map((homes) => [...Array.from({ length: Math.ceil(homes.length / fit) }, (_, at) => ({ kind: "home" as Kind, from: at * fit, count: Math.min(fit, homes.length - at * fit) })), { kind: "library" as Kind, from: 0, count: 1 }])
   })
   /// Each owner's Home screenfuls, which their row of pages has.

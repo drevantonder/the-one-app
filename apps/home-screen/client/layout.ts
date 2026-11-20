@@ -63,7 +63,7 @@ export function measure(width: number, height: number, safe: Insets): Room {
 /// tallest. Two of them are side by side in its card, which pages by one.
 export function launcherRoom(safe: Insets): Room {
   const scale = PAGE / PHONE
-  return { width: PAGE, height: (ROWS * ROW + (ROWS - 1) * ROW_GAP) * scale + 8, wide: true, fit: 1, scale, side: 0, gap: 0, launcher: true, safe }
+  return { width: ACROSS * PAGE, height: (ROWS * ROW + (ROWS - 1) * ROW_GAP) * scale + 8, wide: true, fit: ACROSS, scale, side: 0, gap: 0, launcher: true, safe }
 }
 
 /// A launcher's card, its one size: `ACROSS` of `room`'s pages, each its six rows, with the owner switcher over them and

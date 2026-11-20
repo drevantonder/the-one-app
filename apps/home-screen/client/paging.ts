@@ -60,19 +60,6 @@ export function createPaging(props: { owners: Owner[] }, layout: Screens) {
   /// How far an owner's pages are moved along so fewer than fill the card are in its middle.
   const lead = (owner: number) => (Math.max(0, ACROSS - (pages()[owner]?.length ?? 1)) * PAGE) / 2
   const cardLeft = () => (viewport().width - card().width) / 2
-  /// How far an owner's pages are drawn moved along at `x`, as far as `x` along Home, and past its last screenful, on
-  /// to the App Library, the page after it: in the launcher, whose card shows `ACROSS` pages side by side, as far again
-  /// as the card is wide for the one turn there (`libraryReach` times), as an iPhone's App Library is a whole screen
-  /// on. `xAt` is where `x` is for pages drawn moved `drawn` along.
-  const libraryReach = () => (untrack(launcher) ? ACROSS : 1)
-  const trackX = (owner: number, x = xOf(owner)[0]()) => {
-    const end = homeEnd(owner)
-    return x > end ? end + (x - end) * libraryReach() : x
-  }
-  const xAt = (owner: number, drawn: number) => {
-    const end = homeEnd(owner)
-    return drawn > end ? end + (drawn - end) / libraryReach() : drawn
-  }
   /// Whether a wheel's turns are moving the pages one to one, as a trackpad's fingers do where the system says nothing
   /// of when they lift, which their spring doesn't follow.
   const [wheeling, setWheeling] = createSignal(false)
@@ -137,8 +124,8 @@ export function createPaging(props: { owners: Owner[] }, layout: Screens) {
     },
     get dragConstraints() {
       const owner = state().context.at.owner
-      const drawn = trackX(owner)
-      return { left: Math.max(0, trackX(owner, (stops(owner) - 1) * pitch()) - drawn), right: drawn }
+      const x = xOf(owner)[0]()
+      return { left: Math.max(0, (stops(owner) - 1) * pitch() - x), right: x }
     },
     // UIScrollView's rubber band.
     dragElastic: 0.55,
@@ -151,9 +138,7 @@ export function createPaging(props: { owners: Owner[] }, layout: Screens) {
       if (canceled) return
       const owner = home.getSnapshot().context.at.owner
       const from = Math.round(sideways(owner).value / pitch())
-      // Where it was let go, and how fast, as far along as the pages are: slower past Home, to the App Library.
-      const at = untrack(() => xAt(owner, trackX(owner, from * pitch()) - offset.x))
-      const screen = settle(from, at / pitch(), -velocity.x / (at > homeEnd(owner) ? libraryReach() : 1), stops(owner), pitch())
+      const screen = settle(from, from - offset.x / pitch(), -velocity.x, stops(owner), pitch())
       quietFor(350)
       jump(sideways(owner), screen * pitch())
       home.send({ type: "settled", at: { owner, screen } })
@@ -283,7 +268,7 @@ export function createPaging(props: { owners: Owner[] }, layout: Screens) {
       gesture.axis = Math.abs(event.deltaX) > Math.abs(event.deltaY) ? "x" : "y"
       const moving = sideways(gesture.owner)
       if (gesture.axis === "x") stop(moving)
-      Object.assign(gesture, { base: trackX(gesture.owner, moving.value) - x + event.deltaX, from: Math.round(moving.value / pitch()) })
+      Object.assign(gesture, { base: moving.value - x + event.deltaX, from: Math.round(moving.value / pitch()) })
     }
     if (gesture.axis === "y") {
       if (Math.abs(y) < 30) return
@@ -294,14 +279,13 @@ export function createPaging(props: { owners: Owner[] }, layout: Screens) {
     const end = (stops(gesture.owner) - 1) * pitch()
     const lifted = isMomentum || isEnding || (event as Wheeled).phase === "ended" || (event as Wheeled).phase === "cancelled"
     if (!lifted) {
-      // One to one with the fingers, as they're drawn: slower past Home, to the App Library.
-      const value = xAt(gesture.owner, gesture.base + x)
+      const value = gesture.base + x
       setWheeling(true)
       return jump(moving, value < 0 ? give(value, pitch()) : value > end ? end + give(value - end, pitch()) : value)
     }
     gesture.done = true
     setWheeling(false)
-    const velocity = (isEnding ? 0 : axisVelocity[0] * 1000) / (moving.value > homeEnd(gesture.owner) ? libraryReach() : 1)
+    const velocity = isEnding ? 0 : axisVelocity[0] * 1000
     const screen = settle(gesture.from, moving.value / pitch(), velocity, stops(gesture.owner), pitch())
     if (untrack(reducedMotion)) glide(moving, screen * pitch(), velocity)
     else jump(moving, screen * pitch())
@@ -343,7 +327,7 @@ export function createPaging(props: { owners: Owner[] }, layout: Screens) {
       slide(home.getSnapshot().context.at, true)
     }
   }
-  return { height, pitch, downY, xOf, opacityOf, underCarry, sectionsX, card, lead, cardLeft, trackX, wheeling, leaving, pageAt, pageUnder, swiping, swipes, along, wheel, release }
+  return { height, pitch, downY, xOf, opacityOf, underCarry, sectionsX, card, lead, cardLeft, wheeling, leaving, pageAt, pageUnder, swiping, swipes, along, wheel, release }
 }
 
 export type Paging = ReturnType<typeof createPaging>

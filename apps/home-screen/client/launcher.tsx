@@ -304,20 +304,20 @@ export function createLauncher(props: { owners: Owner[] }, layout: Screens, pagi
 /// The launcher's panel: its search, and its card with Home, the App Library or what was found in it.
 export function LauncherPanel(props: { owners: Owner[]; layout: Screens; paging: Paging; launching: Launching }) {
   const { pages, laid } = props.layout
-  const { card, cardLeft, lead, trackX, wheeling, leaving, opacityOf, along, wheel } = props.paging
+  const { card, cardLeft, lead, xOf, pitch, wheeling, leaving, opacityOf, along, wheel } = props.paging
   const { showing, words } = props.launching
   // The owner shown, and how far along their pages and the App Library are drawn: for whoever asked for less motion,
   // never past Home's last screenful, over which the App Library cross-fades.
   const shown = () => state().context.at.owner
-  const homeEnd = (owner: number) => Math.max(0, props.layout.homes(owner).length - 1) * PAGE
-  const across = () => (reducedMotion() ? Math.min(trackX(shown()), homeEnd(shown())) : trackX(shown()))
+  const homeEnd = (owner: number) => Math.max(0, props.layout.homes(owner).length - 1) * pitch()
+  const across = () => (reducedMotion() ? Math.min(xOf(shown())[0](), homeEnd(shown())) : xOf(shown())[0]())
   // Home and the App Library are both there, side by side, but while what was found shows, or for whoever asked for less
   // motion, the one not shown fades out.
   const there = (section: "home" | "library") => showing() === section || (showing() !== "search" && !reducedMotion())
-  // Where the App Library is drawn along: the page after the shown owner's last, a card's width on.
-  const libraryAt = () => (reducedMotion() ? across() : trackX(shown(), props.layout.homes(shown()).length * PAGE))
+  // Where the App Library is drawn along: the screenful after the shown owner's last.
+  const libraryAt = () => (reducedMotion() ? across() : props.layout.homes(shown()).length * pitch())
   // How far the owner shown's pages have gone past their last screenful, on the way to the App Library.
-  const pastHome = () => Math.max(0, trackX(shown()) - homeEnd(shown()))
+  const pastHome = () => Math.max(0, xOf(shown())[0]() - homeEnd(shown()))
   // The strip slides by its spring as it goes along, but not as another owner comes to be shown in its place, whose
   // pages are lined up where they go already, nor as a wheel moves it one to one.
   let was = untrack(shown)
@@ -356,7 +356,7 @@ export function LauncherPanel(props: { owners: Owner[]; layout: Screens; paging:
                     style={[looks.owner, looks.rolling, !shown() && looks.inert, looks.at(INSET, PILLS, ACROSS * PAGE, room().height), looks.drifted(shown() ? 1 : 0, (index() - state().context.at.owner) * 40)]}
                   >
                     {/* Each other owner's pages are lined up where the shown owner's are, ready for a roll to them. */}
-                    <View style={[looks.track, looks.slid(lead(index()) + across() - trackX(index()), opacityOf(index())[0]())]}>
+                    <View style={[looks.track, looks.slid(lead(index()) + across() - xOf(index())[0](), opacityOf(index())[0]())]}>
                       <For each={pages()[index()] ?? []} keyed={false}>
                         {(placed, at) => <Page page={at} placed={placed()} />}
                       </For>
@@ -384,7 +384,7 @@ export function LauncherPanel(props: { owners: Owner[]; layout: Screens; paging:
           </View>
           {/* Their dots at the foot, with the App Library's glyph. */}
           <View inert={showing() === "search" || undefined} style={[looks.row, looks.fading, showing() === "search" && looks.inert, looks.bottom(0), looks.tall(PILLS), looks.opacity(showing() === "search" ? 0 : 1)]}>
-            <DotsPill owners={props.owners} laid={laid().screens} pages={(owner) => pages()[owner]?.length ?? 1} />
+            <DotsPill owners={props.owners} laid={laid().screens} />
           </View>
         </View>
     </>

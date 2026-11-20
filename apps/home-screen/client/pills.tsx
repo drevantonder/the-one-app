@@ -1,7 +1,7 @@
 // The pills: the owner's name, which opens the list of every owner, and the page dots with the App Library's glyph.
 import { For } from "solid-js"
 import { type Element, haptic, Icon, Menu, Pressable, type Pressed, Text, View } from "ui"
-import { ACROSS, BAR, DOTS } from "./layout.ts"
+import { BAR, DOTS } from "./layout.ts"
 import { type Kind } from "./machine.ts"
 import { looks } from "./looks.ts"
 import { home, state, seen, along, rolled, editingOwner, launcher } from "./store.ts"
@@ -33,21 +33,19 @@ function Roll(props: { count: number; height: number; row: (index: number) => El
 /// An owner's page dots, a dot a screenful, the one shown brighter; tapping one goes there, and sliding along them
 /// moves a screenful every 28 points, as an iPhone's do. While their pages are edited, a tap opens the page overview.
 /// Only the owner shown's take a finger.
-function Dots(props: { owner: Owner; index: number; count: number; size: number; shows?: number }) {
+function Dots(props: { owner: Owner; index: number; count: number; size: number }) {
   const current = () => (seen().owner === props.index ? seen().screen : (state().context.last[props.index] ?? 0))
-  // A dot a page, the pages shown lit: a screenful's in the launcher, which shows `shows` from its first. As the pages
-  // move, each is lit as much as its page shows.
+  // A dot a screenful, as many pages side by side as fit, the one shown lit; as the pages move, each is lit as much as
+  // its screenful shows.
   // The App Library, after the last screenful of pages, lights the glyph and none of them.
   const library = () => state().context.screens[props.index]?.indexOf("library") ?? -1
   const onLibrary = () => library() >= 0 && current() >= library()
-  const lit = (screen: number) => !onLibrary() && screen >= current() && screen < current() + (props.shows ?? 1)
+  const lit = (screen: number) => !onLibrary() && screen === current()
   const shown = (screen: number) => {
     const from = seen().owner === props.index ? along() : current()
-    // Where several pages are lit at once, as in the launcher, moving on to the App Library dims them as it comes.
-    const leaving = (props.shows ?? 1) < 2 || library() < 1 ? 0 : Math.max(0, Math.min(1, from - (library() - 1)))
-    return Math.max(0, Math.min(1, screen + 1 - from, from + (props.shows ?? 1) - screen)) * (1 - leaving)
+    return Math.max(0, Math.min(1, screen + 1 - from, from + 1 - screen))
   }
-  const last = () => props.count - (props.shows ?? 1)
+  const last = () => props.count - 1
   let slid: { x: number; from: number; sliding: boolean; id: number } | undefined
   let quietDots = 0
   const slide = {
@@ -135,8 +133,8 @@ export function OwnerPill(props: { owners: Owner[] }) {
 /// stays where it is as the owners move, and on the App Library too, its dots rolling to the next owner's and taking
 /// their number. While pages are edited the glyph stays, dimmed, and goes nowhere. In the launcher's footer it's
 /// `flat`: no pill of its own.
-export function DotsPill(props: { owners: Owner[]; laid: Kind[][]; pages?: (owner: number) => number; flat?: boolean }) {
-  const count = (owner: number) => props.pages?.(owner) ?? (props.laid[owner] ?? []).filter((kind) => kind === "home").length
+export function DotsPill(props: { owners: Owner[]; laid: Kind[][]; flat?: boolean }) {
+  const count = (owner: number) => (props.laid[owner] ?? []).filter((kind) => kind === "home").length
   const library = () => props.laid[seen().owner]?.[seen().screen] === "library"
   const go = () => {
     if (state().matches("editing")) return
@@ -148,7 +146,7 @@ export function DotsPill(props: { owners: Owner[]; laid: Kind[][]; pages?: (owne
     // iOS 26's Liquid Glass, the pages blurred through it with a rim of light and a soft shadow, but in the launcher's
     // footer, which is flat.
     <View style={[looks.pill, !props.flat && looks.glass, looks.tall(height())]}>
-      <Roll count={props.owners.length} height={height()} row={(index) => <Dots owner={props.owners[index]} index={index} count={count(index)} size={props.flat ? 5 : 7} shows={props.pages ? ACROSS : 1} />} />
+      <Roll count={props.owners.length} height={height()} row={(index) => <Dots owner={props.owners[index]} index={index} count={count(index)} size={props.flat ? 5 : 7} />} />
       <Pressable
         role="button"
         aria-label="App Library"
