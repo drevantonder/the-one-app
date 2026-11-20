@@ -1,6 +1,6 @@
 // A phone's Home Screen: every owner's pages one above another, each a row of screenfuls, the App Library after them,
 // and the owner pill and dots over them.
-import { For } from "solid-js"
+import { For, untrack } from "solid-js"
 import { View } from "ui"
 import { lefts, TOP_ROW } from "./layout.ts"
 import { looks } from "./looks.ts"
@@ -14,20 +14,39 @@ import { type Paging } from "./paging.ts"
 
 export function Phone(props: { owners: Owner[]; layout: Screens; paging: Paging }) {
   const { homes, pages, laid, library } = props.layout
-  const { downY, xOf, opacityOf, sectionsX, swipes, wheel } = props.paging
+  const { downY, xOf, opacityOf, sectionsX, swipes, along, wheel } = props.paging
+  // The owner shown, how far along their pages and the App Library are, and how wide their Home is.
+  const shown = () => state().context.at.owner
+  const across = () => xOf(shown())[0]()
+  const homeWidth = (owner: number) => Math.max(1, homes(owner).length) * room().width
+  // Each other owner's pages are moved so the page they were last on is where the shown owner's is, ready for a swipe
+  // up or down to them.
+  const lined = (owner: number) => (owner === shown() ? 0 : across() - Math.min(xOf(owner)[0](), homeWidth(owner) - room().width))
+  // The strip slides by its spring as it goes along, but not as another owner comes to be shown in its place, whose
+  // pages are lined up where they go already.
+  let was = untrack(shown)
+  const slides = () => {
+    const now = shown()
+    const same = now === was
+    was = now
+    return same
+  }
   return (
     <>
+        {/* Home's pages and the App Library after them, in one strip the host drags along as the finger goes (`along`)
+            and slides to where they're going by its spring. */}
         <View
           {...swipes}
+          {...along}
           onWheel={wheel}
-          style={[looks.sections, looks.sized(room().width * 2, room().height), looks.shifted(-sectionsX())]}
+          style={[looks.sections, slides() && looks.paging, looks.tall(room().height), looks.shifted(-across())]}
         >
-          <View role="main" aria-label="Home" style={[looks.clipped, looks.rigid, looks.sized(room().width, room().height)]}>
-            <View style={[looks.owners, looks.wide(room().width), looks.lowered(-downY())]}>
+          <View role="main" aria-label="Home" style={[looks.clipped, looks.rigid, looks.sized(homeWidth(shown()), room().height)]}>
+            <View style={[looks.owners, looks.lowered(-downY())]}>
               <For each={props.owners} keyed={(owner) => owner.key}>
                 {(owner, index) => (
-                  <View role="region" aria-label={owner().name} style={[looks.clipped, looks.sized(room().width, room().height)]}>
-                    <View style={[looks.screens, looks.slid(-Math.min(xOf(index())[0](), Math.max(0, homes(index()).length - 1) * room().width), opacityOf(index())[0]())]}>
+                  <View role="region" aria-label={owner().name} style={[looks.sized(homeWidth(index()), room().height)]}>
+                    <View style={[looks.screens, looks.slid(lined(index()), opacityOf(index())[0]())]}>
                       <For each={homes(index())} keyed={false}>
                         {(screen) => (
                           <View style={[looks.slots, looks.sized(room().width, room().height)]}>
@@ -52,7 +71,7 @@ export function Phone(props: { owners: Owner[]; layout: Screens; paging: Paging 
           <Library owner={props.owners[0]} />
         </View>
         {/* Whose pages they are, over Home's, which goes with them as they slide off to the App Library. */}
-        <View inert={library() || undefined} style={[looks.topRow, looks.top(room().safe.top), looks.tall(TOP_ROW), looks.shifted(-sectionsX())]}>
+        <View inert={library() || undefined} style={[looks.topRow, looks.paging, looks.top(room().safe.top), looks.tall(TOP_ROW), looks.shifted(-sectionsX())]}>
           <View style={[looks.live, looks.opacity(state().matches("editing") ? 0.6 : 1)]}>
             <OwnerPill owners={props.owners} />
           </View>

@@ -86,6 +86,8 @@ export const looks = styles({
   // The whole of it: the window, its two sections side by side, each owner's pages over another's, and a screenful.
   root: { position: "relative", overflow: "hidden", color: tokens.colour.label },
   sections: { position: "absolute", top: 0, start: 0, flexDirection: "row" },
+  // A phone's pages and what goes with them, slid to where they're going by the host's spring.
+  paging: { transitionProperty: ["translateX"], transition: tokens.motion.smooth },
   clipped: { position: "relative", overflow: "hidden" },
   owners: { position: "absolute", top: 0, start: 0 },
   screens: { position: "absolute", top: 0, start: 0, flexDirection: "row" },

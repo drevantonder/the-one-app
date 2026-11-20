@@ -1,10 +1,10 @@
 import { createEffect, createSignal, onSettled, untrack } from "solid-js"
 import { type WheelEventData, WheelGestures } from "wheel-gestures"
-import { createVelocityTracker, haptic, keydown, type Pressed, reducedMotion, viewport, type Wheeled } from "ui"
+import { createVelocityTracker, type Dragged, haptic, keydown, type Pressed, reducedMotion, viewport, type Wheeled } from "ui"
 import { give, glide, jump, settle, spring, type Spring, stop } from "./pager.ts"
 import { ACROSS, card as cardOf, cell as cellOf, INSET, lefts, PAGE, PILLS, CARD_TOP } from "./layout.ts"
 import { type At, carries } from "./machine.ts"
-import { home, setSeen, setAlong, setRolled, launcher, room, laidPage, quietFor, finger } from "./store.ts"
+import { home, setSeen, setAlong, setRolled, launcher, room, laidPage, quietFor, finger, state } from "./store.ts"
 import { type Owner, draft, keep } from "./owners.ts"
 import { type Screens } from "./screens.ts"
 
@@ -125,8 +125,39 @@ export function createPaging(props: { owners: Owner[] }, layout: Screens) {
     roll(down, at.owner * height())
     const [moving, to] = [sideways(at.owner), at.screen * pitch()]
     if (smooth && turnsByHost()) return turn(at.owner, to)
-    if (smooth) glide(moving, to)
+    // A phone's pages are where they're going at once, and the host draws them sliding there (`along`); for whoever
+    // asked for less motion, they cross-fade.
+    if (smooth && untrack(reducedMotion)) glide(moving, to)
     else jump(moving, to)
+  }
+
+  /// Whether a phone's pages are dragged along by the host, as the finger goes, where nothing's carried: the screen's
+  /// own drag, with no turn of the page's JS a move.
+  const dragsAlong = () =>
+    !launcher() && !reducedMotion() && (state().matches("nothing") || state().matches({ editing: "still" }) || state().matches({ category: "closing" }))
+  /// A phone's pages, along: the host drags them as the finger goes, giving past the first and the App Library as a
+  /// rubber band, as an iPhone's do; let go, they go to the page the finger's motion would carry them nearest to
+  /// (`settle`), springing there from where they are at the finger's speed.
+  const along = {
+    get drag() {
+      return dragsAlong() ? ("x" as const) : undefined
+    },
+    get dragConstraints() {
+      const owner = state().context.at.owner
+      const x = xOf(owner)[0]()
+      return { left: Math.max(0, (stops(owner) - 1) * room().width - x), right: x }
+    },
+    // UIScrollView's rubber band.
+    dragElastic: 0.55,
+    onDragEnd: ({ offset, velocity, canceled }: Dragged) => {
+      if (canceled) return
+      const owner = home.getSnapshot().context.at.owner
+      const from = Math.round(sideways(owner).value / pitch())
+      const screen = settle(from, from - offset.x / pitch(), -velocity.x, stops(owner), pitch())
+      quietFor(350)
+      jump(sideways(owner), screen * pitch())
+      home.send({ type: "settled", at: { owner, screen } })
+    },
   }
 
   // A finger on the pages moves them, as a phone's: once it has moved far enough to say which way, along an owner's
@@ -167,7 +198,8 @@ export function createPaging(props: { owners: Owner[] }, layout: Screens) {
       // editing, but a second finger's while something's carried: an app, which goes to another owner, not a widget.
       const free = home.getSnapshot().matches("nothing") || home.getSnapshot().matches({ category: "closing" }) || home.getSnapshot().matches({ editing: "still" }) || (carrying() && swipe.id !== finger.carrier)
       const vertical = carrying() ? !home.getSnapshot().context.held?.item?.widget : !home.getSnapshot().matches("editing")
-      const refused = !free || (axis === "y" && (!vertical || kindOf(swipe.owner) !== "home"))
+      // Along, a phone's pages are the host's to drag (`along`), where it drags them.
+      const refused = !free || (axis === "y" && (!vertical || kindOf(swipe.owner) !== "home")) || (axis === "x" && dragsAlong())
       // Either way the pages go on: all of them, or the way the finger doesn't swipe, which it takes at once below.
       slide(home.getSnapshot().context.at, true)
       if (refused) return void (swipe = undefined)
@@ -308,7 +340,7 @@ export function createPaging(props: { owners: Owner[] }, layout: Screens) {
       slide(home.getSnapshot().context.at, true)
     }
   }
-  return { height, pitch, downY, xOf, opacityOf, underCarry, sectionsX, card, lead, cardLeft, trackX, turnOf, flingOf, pageAt, pageUnder, swiping, swipes, wheel, release }
+  return { height, pitch, downY, xOf, opacityOf, underCarry, sectionsX, card, lead, cardLeft, trackX, turnOf, flingOf, pageAt, pageUnder, swiping, swipes, along, wheel, release }
 }
 
 export type Paging = ReturnType<typeof createPaging>
