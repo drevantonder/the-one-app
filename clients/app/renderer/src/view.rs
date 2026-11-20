@@ -397,6 +397,8 @@ pub struct Screen {
     unanswered: HashMap<String, inspect::Asked>,
     /// The inspector's `settle`s waiting: until when, and what to tell when it's settled or that time comes.
     settling: Vec<(Instant, Box<dyn FnOnce(Value)>)>,
+    /// The inspector's taps waiting for what they press (`tap_ready`).
+    tapping: Vec<inspected::Tapping>,
     /// How tall its page says its content is (`ui/notifications/size-changed`), which a frame showing it is drawn as.
     content_height: Option<f32>,
     /// Something is open over its page (a sheet, a menu), as its page says (`notifications/one/over`): Back shuts that
@@ -521,6 +523,7 @@ impl Screen {
             painted: (Size::default(), 1.0),
             unanswered: HashMap::new(),
             settling: Vec::new(),
+            tapping: Vec::new(),
             content_height: None,
             over: false,
             layer: false,
@@ -738,7 +741,7 @@ impl Screen {
     /// frame of what moves, or the caret's blink. The window calls `fire` then. The app's timers are its JS thread's.
     pub fn due(&self) -> Option<Duration> {
         let now = Instant::now();
-        let settle = self.settling.iter().map(|(until, _)| until.saturating_duration_since(now)).min();
+        let settle = self.settling.iter().map(|(until, _)| *until).chain(self.tapping.iter().map(inspected::Tapping::deadline)).map(|until| until.saturating_duration_since(now)).min();
         let frames = self.frames.values().filter_map(|child| child.screen.due());
         // For a harness, a picture decoded is there at its time on its clock (`Pictures::due`).
         let pictures = self.pictures.due().map(|ms| Duration::from_secs_f64(ms / 1000.0));

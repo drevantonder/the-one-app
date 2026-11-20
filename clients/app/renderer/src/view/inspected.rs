@@ -14,6 +14,20 @@ use crate::tree::{Id, Kind};
 /// What tells the inspector's client the answer, once it has one.
 pub type Reply = Box<dyn FnOnce(Value)>;
 
+/// A tap waiting for the node it presses (`Screen::tap_ready`): until when, and where it was drawn when last looked at.
+pub(super) struct Tapping {
+    deadline: Instant,
+    request: Request,
+    reply: Reply,
+    was: Option<inspect::Rect>,
+}
+
+impl Tapping {
+    pub(super) fn deadline(&self) -> Instant {
+        self.deadline
+    }
+}
+
 impl Screen {
     /// Answers an inspector request, but `snap`, which is the window's to answer, as it has its pixels. It reads where
     /// each node was drawn as the last frame laid it out, so it's asked once a frame has been drawn after what changed
@@ -31,7 +45,23 @@ impl Screen {
             // The window calls `fire` at the deadline, as `due` says.
             return self.tell_settled();
         }
+        // A tap on a node waits for it, as Playwright's click does (actionability): for it to be there, drawn, still
+        // and reached by a press there, a second at most unless `timeout` says, as the harness's taps do
+        // (examples/screenshot.rs).
+        if request.op == "tap" && request.selects() {
+            let deadline = Instant::now() + Duration::from_secs_f64(request.f64("timeout").unwrap_or(1000.0).max(0.0) / 1000.0);
+            self.tapping.push(Tapping { deadline, request, reply, was: None });
+            return self.tap_ready();
+        }
+        self.answer(request, reply);
+    }
+
+    fn answer(&mut self, request: Request, reply: Reply) {
         let result = self.act(&request);
+        self.acted(&request, result, reply);
+    }
+
+    fn acted(&mut self, request: &Request, result: anyhow::Result<Value>, reply: Reply) {
         let answer = inspect::answer(&request.id, result);
         // What acts is told once the app's JS has run what it did, as a test's click resolves once its handlers have
         // run; what reads, at once.
@@ -39,6 +69,32 @@ impl Screen {
         match acts && self.js.busy() {
             true => self.replies.push((answer, reply)),
             false => reply(answer),
+        }
+    }
+
+    /// Presses what each tap waiting for its node selects, once it's laid out, not drawn transparent, where it was laid
+    /// out the last time it looked (as each frame's paint and each turn's pump tell it) or nothing on the screen moves,
+    /// and a press there reaches it, not something over it (a tap that can't says so before it presses anything); at its
+    /// deadline, it's pressed as it is, which says what's wrong.
+    pub(super) fn tap_ready(&mut self) {
+        if self.tapping.is_empty() {
+            return;
+        }
+        let now = Instant::now();
+        let still = !self.arriving();
+        for mut tapping in std::mem::take(&mut self.tapping) {
+            let shown = inspect::one(&self.tree, &tapping.request).ok().filter(|node| self.placed(*node).is_none_or(|placed| placed.opacity > 0.0));
+            let rect = shown.and_then(|node| self.rects.get(&node).copied());
+            let late = tapping.deadline <= now;
+            if rect.is_some() && (still || rect == tapping.was) || late {
+                let result = self.act(&tapping.request);
+                if result.is_ok() || late {
+                    self.acted(&tapping.request, result, tapping.reply);
+                    continue;
+                }
+            }
+            tapping.was = rect;
+            self.tapping.push(tapping);
         }
     }
 
@@ -419,6 +475,7 @@ impl Screen {
 
     /// Tells each `settle` waiting that it's settled, if it is, or what's pending once its deadline has come.
     pub(super) fn tell_settled(&mut self) {
+        self.tap_ready();
         if self.settling.is_empty() {
             return;
         }

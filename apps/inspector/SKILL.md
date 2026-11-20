@@ -18,7 +18,9 @@ else.
 - `tree` gives the semantic tree, each node's id, role, name, value, states, actions and `rect` (CSS pixels from the
   window's top left). `query` finds nodes by `role`, `name` (exact), `text` (words in the name), `key` or `node` (its
   id), with their rects and styles: start here rather than with a picture.
-- `tap` presses a node by the same selector, or what's at `x` and `y`. Tapping a row's text presses the row.
+- `tap` presses a node by the same selector, or what's at `x` and `y`. Tapping a row's text presses the row. A tap on a
+  node waits for it to be there, drawn, still and not under something else, a second unless `timeout` says, so tap
+  what a press just opened at once, without a `settle` first.
 - `type` types `text` into an input (by `role`, `name`, `key` or `node`), or the one with the keyboard. `key` presses
   `Enter`, `Escape`, `Tab`, `Backspace`, a letter.
 - `settle` waits until the app has heard back from whatever it asked and its timers are done, and says what's still

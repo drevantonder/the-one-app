@@ -118,7 +118,12 @@ defmodule Inspector do
         %{}
       ),
       op("close", false, "Closes the window as its system does, by its close button, ⌘W or Alt-F4: a launcher's put away instead. Gives whether it `closed`.", %{}),
-      op("tap", false, "Presses a node, by a selector, or what's at a point, as a finger does: an input takes the keyboard, and what listens for click gets one. Gives `tapped`, the node that took it.", Map.merge(@selector, @point)),
+      op(
+        "tap",
+        false,
+        "Presses a node, by a selector, or what's at a point, as a finger does: an input takes the keyboard, and what listens for click gets one. A node is waited for, as a test's click waits, until it's there, drawn, still and not under something else, `timeout` ms at most (1000). Gives `tapped`, the node that took it.",
+        Map.merge(Map.merge(@selector, @point), %{timeout: %{type: "number", minimum: 0}})
+      ),
       op("type", false, "Types text into an input, by a selector, or the one with the keyboard, a character at a time. Gives the node and its `value`.", Map.put(@selector, :text, %{type: "string", description: "what to type; with a selector, `text` is what's typed, so pick the input by `role`, `name`, `key` or `node`"}), ["text"]),
       op(
         "key",

@@ -392,14 +392,21 @@ fn main() -> anyhow::Result<()> {
             continue;
         }
         let deadline = request.f64("deadline").unwrap_or(5000.0);
+        let tap = request.op == "tap";
         let answered = std::rc::Rc::new(std::cell::RefCell::new(None));
         let to = answered.clone();
         windows.inspect(id, request, Box::new(move |answer| *to.borrow_mut() = Some(answer)));
         windows.wait();
         windows.turn();
-        // A `settle` not settled at once is told so at its deadline, as the loop waits for what's due.
+        // A `settle` not settled at once is told so at its deadline, as the loop waits for what's due; a tap waiting for
+        // what it presses (`Screen::tap_ready`) is told once it's pressed it, its time running meanwhile, a frame at a
+        // time, as a device's does while an agent waits, where `settle` says what's pending on a paused clock.
         let asked = std::time::Instant::now();
         while answered.borrow().is_none() && asked.elapsed().as_secs_f64() * 1000.0 < deadline + 1000.0 {
+            if tap {
+                windows.run(1000.0 / 60.0);
+                continue;
+            }
             std::thread::sleep(windows.due().unwrap_or(std::time::Duration::from_millis(10)).min(std::time::Duration::from_millis(100)));
             windows.wait();
             windows.turn();
