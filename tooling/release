@@ -37,7 +37,7 @@
 # Erlang/OTP builds them for Windows, with the Visual C++ runtime they need beside them, from the installer that comes
 # with them, One Core's Rust NIFs built for that machine (by `tooling/nifs`), and the UI library's build, and the Bun it
 # builds apps with, and on Windows Git, named by their SHA-256, which it downloads the first time (`OneCore.Programs`).
-# A Mac's VM is signed on the Mac, which must be awake. The builds are in
+# The builds are in
 # target/builds/<build> of the checkout it builds in, on Linux ~/.cache/the-one-app/release-<server or client>.
 #
 # A server for a kind of machine, `server/<kind>`, is published in two parts, which a machine puts together (`one
@@ -392,6 +392,19 @@ fi
 
 servers=($(printf '%s\n' "${mine[@]}" | sed -n 's|^server/||p'))
 
+# Signs a Mac's program, or its bundle, with the owner's Developer ID, here, with rcodesign: macOS's firewall lets signed
+# software take connections without asking, and its privacy settings (Local Network) know it by its identifier and team
+# from one build to the next, where they knew an unsigned one by its hash. Not notarized, nor with the hardened runtime:
+# what `one` downloads isn't quarantined, so Gatekeeper never assesses it. The identity is 1Password's ("Developer ID
+# Application identity"), or DEVELOPER_ID_P12 (the .p12 in base64) and DEVELOPER_ID_P12_PASSWORD, as GitHub's secrets
+# name them.
+developer_id_signed() {
+  rcodesign sign \
+    --p12-file <(if [[ -n ${DEVELOPER_ID_P12:-} ]]; then base64 -d <<<"$DEVELOPER_ID_P12"; else op read -n "op://ptc-nosudo/Developer ID Application identity/developer-id.p12"; fi) \
+    --p12-password-file <(printf %s "${DEVELOPER_ID_P12_PASSWORD:-$(op read -n "op://ptc-nosudo/Developer ID Application identity password/password")}") \
+    "$@" >/dev/null
+}
+
 # `one`, which is the app too, and on Linux `one-cli`, the same without its window, for a machine with no screen,
 # which has no GTK or WebKitGTK; `one update` keeps each on its own. Building it for another kind of machine needs
 # that machine's system libraries, so each kind builds its own. Each builds at once, beside the servers, in a target
@@ -562,22 +575,8 @@ for kind in "${servers[@]}"; do
     DESCRIPTION="the One App server" tooling/windows-name "$erts/one-server.exe"
   else
     "$objcopy" --strip-all "$(echo "$release"/erts-*/bin/beam.smp)"; fi
-  # A Mac's VM is signed with the Developer ID, on the Mac and in the background there, as macOS's firewall lets
-  # signed software take connections without asking. Without the hardened runtime, which would need entitlements for
-  # its JIT. The keychain is the one `tooling/mac-helper` signs with.
-  if [[ $kind == macos-* ]]; then
-    beam=$(echo "$release"/erts-*/bin/beam.smp)
-    ssh -o ConnectTimeout=15 mac "bash -c $(printf %q "$(cat <<'SIGN'
-keychain=$HOME/Library/Keychains/ptc-build.keychain-db
-d=$(mktemp -d) && trap 'rm -r "$d"; security lock-keychain "$keychain"' EXIT && cat >"$d/beam.smp"
-# The password goes to security on its standard input, never in a command line, where ps and logs see it.
-printf 'unlock-keychain -p "%s" "%s"\n' "$(cat ~/.config/ptc/build-keychain-pw)" "$keychain" | security -i >/dev/null
-nice -n 19 taskpolicy -d throttle codesign --force --timestamp --keychain "$keychain" --sign "Developer ID Application" "$d/beam.smp" >&2
-codesign --verify --strict "$d/beam.smp" >&2 && cat "$d/beam.smp"
-SIGN
-)")" <"$beam" >"$beam.signed"
-    cat "$beam.signed" >"$beam" && rm "$beam.signed"
-  fi
+  # A Mac's VM is signed with the Developer ID (`developer_id_signed`), as `app.theone.server`.
+  [[ $kind != macos-* ]] || developer_id_signed --binary-identifier app.theone.server "$(echo "$release"/erts-*/bin/beam.smp)"
   # A Mac's and Linux' VM is named for what it is, as Activity Monitor and `ps` list a process by its file's name: the
   # emulator erlexec starts is `$EMU.smp`, and the release's `erl` says which, where it says `beam`. `The One App server`
   # on a Mac, as its helpers are named, and `one-server` on Linux, where a name has no spaces.

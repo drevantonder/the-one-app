@@ -11,6 +11,8 @@ zig = "0.15.2"
 "github:rust-cross/cargo-xwin" = "0.23.1"
 # And DXC, which compiles Windows' shaders ahead of time (clients/app/renderer/build.rs).
 "github:microsoft/DirectXShaderCompiler" = "1.9.2609"
+# What signs a Mac's server and app with the owner's Developer ID (`tooling/release`), here.
+"github:indygreg/apple-platform-rs" = "0.29.0"
 # What builds the web client's renderer (`clients/web/renderer`, `core/edge/edge.js`): wasm-bindgen, at the version
 # its crate pins, and binaryen's wasm-opt.
 "github:wasm-bindgen/wasm-bindgen" = "0.2.130"
