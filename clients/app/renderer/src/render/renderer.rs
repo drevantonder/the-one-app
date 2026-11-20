@@ -412,11 +412,12 @@ impl Renderer {
         .copied()
         .find(|mode| capabilities.alpha_modes.contains(mode))
         .unwrap_or(capabilities.alpha_modes[0]);
-        // The most recent frame shown, as soon as it's drawn, as Blade's `DisplaySync::Recent` did.
-        let present_mode = [wgpu::PresentMode::Mailbox, wgpu::PresentMode::FifoRelaxed, wgpu::PresentMode::Immediate]
-            .into_iter()
-            .find(|mode| capabilities.present_modes.contains(mode))
-            .unwrap_or(wgpu::PresentMode::Fifo);
+        // Each frame shown on the display's refresh, never as soon as it's drawn: Mailbox, the newest frame at each
+        // refresh, where the system has it (Vulkan, Direct3D 12), else Fifo, every frame in turn, as a Mac's and a
+        // phone's Metal have it. Immediate, which Blade's `DisplaySync::Recent` was on Metal (a CAMetalLayer's
+        // `displaySyncEnabled` off), handed each frame to the compositor whenever it was done, so it showed some
+        // twice and skipped others as they came either side of its refresh: what moved never moved smoothly on a Mac.
+        let present_mode = if capabilities.present_modes.contains(&wgpu::PresentMode::Mailbox) { wgpu::PresentMode::Mailbox } else { wgpu::PresentMode::Fifo };
         let (width, height) = extent(size);
         let config = wgpu::SurfaceConfiguration {
             // A backdrop blurs what's drawn so far, read from the frame where the surface lets a shader read it
@@ -433,10 +434,10 @@ impl Renderer {
             width,
             height,
             present_mode,
-            // Two images, one shown and one drawn (wgpu keeps one more than this), where Blade kept three: a
-            // window's surface is a third smaller (the launcher's on a Mac, 1840×1502, ~11 MB), and as a window
-            // draws only as it changes, no frame waits for a third.
-            desired_maximum_frame_latency: 1,
+            // Three images, as Blade kept and Apple has a CAMetalLayer keep: one shown, one waiting for the next
+            // refresh and one drawn, so a frame drawn as the display's link says never waits for the one still on
+            // screen, as it did with two.
+            desired_maximum_frame_latency: 2,
             alpha_mode,
             view_formats: vec![],
             color_space: wgpu::SurfaceColorSpace::Auto,
