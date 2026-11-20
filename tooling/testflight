@@ -203,4 +203,6 @@ until state=$(asc "/v1/buildUploads/$upload" | jq -c .data.attributes.state) && 
   sleep 15
 done
 [[ $(jq -r .state <<<"$state") == COMPLETE ]] || { echo "Apple refused it: $(jq -c .errors <<<"$state")" >&2 && exit 1; }
+# What Apple warns of, as it emails it too: ITMS-90725, an SDK it will soon refuse.
+jq -r '.warnings[]? | "Apple warns: ITMS-\(.code): \(.description)"' <<<"$state"
 echo "Uploaded $number ($build): Apple processes it, then its testers' phones take it by themselves"
