@@ -555,6 +555,9 @@ const why = (answer, is) => {
 function requests(steps, folder) {
   const named = (tap) => (typeof tap === "string" ? tap : tap.name ?? tap.text ?? JSON.stringify(tap))
   const out = []
+  // What the window looked like before anything's done, which `dimmed` compares what's over the page with.
+  let before
+  if (steps.some((step) => step.expect?.dimmed)) out.push({ request: { op: "snap" }, judge: (answer) => void (before = answer?.result?.png) })
   for (const [at, step] of steps.entries()) {
     const from = out.length
     if (step.wait !== undefined) out.push({ request: { op: "clock", step: step.wait } })
@@ -570,7 +573,7 @@ function requests(steps, folder) {
     else if (step.trace) out.push({ request: { op: "trace", events: JSON.parse(readFileSync(join(folder, step.trace), "utf8")) } })
     else if (!step.expect) out.push({ request: pressed(step) })
     else {
-      const { shown, gone, focused, text, states, drawn, blur, keyboard, margins, tall, textMenu, handles, magnifier } = step.expect
+      const { shown, gone, focused, text, states, drawn, blur, keyboard, margins, tall, textMenu, handles, magnifier, dimmed } = step.expect
       // Each waited for, as Playwright's assertions are, a second at most, or `within` ms.
       const until = (tap, state, said, is) => ({ request: { op: "wait_for", ...selector(tap), state, ...(is ? { is } : {}), ...(step.within !== undefined ? { timeout: step.within } : {}) }, judge: (answer) => !answer?.result?.met && said(answer) })
       if (shown) out.push(until(shown, "shown", (answer) => `${named(shown)} isn't shown: ${why(answer)}`))
@@ -610,6 +613,20 @@ function requests(steps, folder) {
           judge: (answer) => {
             const heights = (answer?.result?.nodes ?? []).map((node) => node.rect?.height).filter((height) => height !== undefined)
             return !heights.some((height) => Math.abs(height - tall.height) <= 1) && `${named(tall.of)} is ${heights.length ? heights.map((height) => `${height} pt`).join(" and ") : "not drawn"} tall, not ${tall.height} pt`
+          },
+        })
+      // What's over the page dims it: the window's corner, which no layer over it covers, is darker than it was.
+      if (dimmed)
+        out.push({
+          request: { op: "snap" },
+          judge: (answer) => {
+            const corner = (png) => {
+              const { data, width } = PNG.sync.read(Buffer.from(png, "base64"))
+              let sum = 0
+              for (let y = 0; y < 8; y++) for (let x = 0; x < 8; x++) for (let c = 0; c < 3; c++) sum += data[(y * width + x) * 4 + c]
+              return sum / (8 * 8 * 3)
+            }
+            return answer?.result?.png && before && corner(answer.result.png) > corner(before) * 0.9 && `the page behind it isn't dimmed: its corner is as light as before (${Math.round(corner(answer.result.png))} of ${Math.round(corner(before))})`
           },
         })
       if (blur !== undefined) out.push({ request: { op: "profile", at: [0], snap: false }, judge: (answer) => (answer?.result?.frames?.[0]?.work?.backdrops > 0) !== blur && (blur ? "no blur is drawn" : "a blur is drawn") })

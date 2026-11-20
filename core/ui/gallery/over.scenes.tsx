@@ -179,6 +179,7 @@ export default {
     render: () => <Asking />,
     checks: {
       "It opens over the page, its glass blurred": ["Use Key", { expect: { shown: { role: "alertdialog" } } }, { expect: { blur: true } }],
+      "It dims the page behind it": ["Use Key", { wait: 400 }, { expect: { dimmed: true } }],
       "Its answer closes it": ["Use Key", { wait: 400 }, "Allow", { expect: { text: "Answered: yes" } }, { expect: { gone: { role: "alertdialog" } } }],
       "Escape closes it, its button with the keyboard": [{ key: "Tab" }, { key: "Enter" }, { wait: 400 }, { key: "Escape" }, { expect: { gone: { role: "alertdialog" } } }, { expect: { focused: { role: "button", name: "Use Key" } } }],
       "Its keyboard starts on what does least, and Tab stays in it": ["Use Key", { wait: 400 }, { expect: { focused: { role: "button", name: "Don't Allow" } } }, { key: "Tab" }, { expect: { focused: { role: "button", name: "Allow" } } }, { key: "Tab" }, { expect: { focused: { role: "button", name: "Don't Allow" } } }],

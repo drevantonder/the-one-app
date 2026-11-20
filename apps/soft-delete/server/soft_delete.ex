@@ -137,6 +137,7 @@ defmodule SoftDelete do
                         description: "The app whose uninstalling deleted it, by the name it was installed by"
                       },
                       title: %{type: "string", description: "The name of the app its artifacts are of, as people read it"},
+                      icon: %{type: ["string", "null"], description: "That app's icon, a data: address"},
                       installed: %{
                         type: "boolean",
                         description: "Whether that app is installed for its owner, to open it once it's restored"
@@ -155,7 +156,7 @@ defmodule SoftDelete do
                         description: "Why purging it last failed; it's tried again the next day"
                       }
                     },
-                    ["item", "state", "artifacts", "app", "title", "installed", "owner", "names", "by", "at", "purges", "why"]
+                    ["item", "state", "artifacts", "app", "title", "icon", "installed", "owner", "names", "by", "at", "purges", "why"]
                   )
               }
             },
@@ -329,6 +330,8 @@ defmodule SoftDelete do
   end
 
   def call("list", _inputs, call) do
+    icons = Map.new(Call.deployed(call), &{Path.basename(&1[:app]), &1[:icon]})
+
     deleted =
       for {id, %{"state" => state} = record} <- records(call), state in ["deleted", "purging"], owns_item?(call, record) do
         %{
@@ -337,6 +340,7 @@ defmodule SoftDelete do
           artifacts: record["artifacts"],
           app: record["app"]["name"],
           title: record["title"],
+          icon: icons[record["app"]["name"] || app_of(hd(record["artifacts"]))],
           installed: installed?(record),
           owner: record["owner"],
           names: names(record),

@@ -2464,6 +2464,109 @@
       720
     ]
   },
+  "Recently Deleted, an app and its older copy": {
+    "like": "Recently Deleted",
+    "answers": {
+      "soft-delete_list": {
+        "deleted": [
+          {
+            "item": "a1",
+            "state": "deleted",
+            "artifacts": [
+              "users/sam/made/messenger/chats",
+              "users/sam/made/messenger/accounts"
+            ],
+            "app": "messenger",
+            "title": "Messenger",
+            "icon": "data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A//www.w3.org/2000/svg%22%20viewBox%3D%220%200%2032%2032%22%3E%3Crect%20width%3D%2232%22%20height%3D%2232%22%20rx%3D%228%22%20fill%3D%22%23f5a623%22/%3E%3C/svg%3E",
+            "installed": false,
+            "owner": "users/sam",
+            "names": null,
+            "purges": 1769731200000,
+            "why": null
+          },
+          {
+            "item": "a2",
+            "state": "deleted",
+            "artifacts": [
+              "users/sam/apps/messenger"
+            ],
+            "app": null,
+            "title": "Messenger",
+            "icon": "data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A//www.w3.org/2000/svg%22%20viewBox%3D%220%200%2032%2032%22%3E%3Crect%20width%3D%2232%22%20height%3D%2232%22%20rx%3D%228%22%20fill%3D%22%23f5a623%22/%3E%3C/svg%3E",
+            "installed": true,
+            "owner": "users/sam",
+            "names": null,
+            "purges": 1769644800000,
+            "why": null
+          },
+          {
+            "item": "a3",
+            "state": "deleted",
+            "artifacts": [
+              "users/sam/made/notes/groceries"
+            ],
+            "app": null,
+            "title": "Notes",
+            "icon": "data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A//www.w3.org/2000/svg%22%20viewBox%3D%220%200%2032%2032%22%3E%3Crect%20width%3D%2232%22%20height%3D%2232%22%20rx%3D%228%22%20fill%3D%22%23f5a623%22/%3E%3C/svg%3E",
+            "installed": true,
+            "owner": "users/sam",
+            "names": null,
+            "purges": 1769558400000,
+            "why": null
+          }
+        ]
+      }
+    },
+    "checks": {
+      "Each is named as a person knows it, not by its slug": [
+        {
+          "expect": {
+            "text": "Messenger"
+          }
+        },
+        {
+          "expect": {
+            "gone": "messenger"
+          }
+        }
+      ],
+      "Pressing a row shows what it is and restores nothing": [
+        "Messenger",
+        {
+          "expect": {
+            "gone": {
+              "role": "alertdialog"
+            }
+          }
+        },
+        {
+          "expect": {
+            "text": "Restore"
+          }
+        }
+      ],
+      "Delete Now asks over a dimmed page": [
+        "More for Messenger",
+        "Delete Now",
+        {
+          "expect": {
+            "shown": {
+              "role": "alertdialog"
+            }
+          }
+        },
+        {
+          "wait": 400
+        },
+        {
+          "expect": {
+            "dimmed": true
+          }
+        }
+      ]
+    }
+  },
   "AI": {
     "like": "Settings",
     "page": "client/index.html#sign-in/ai",

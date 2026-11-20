@@ -77,8 +77,8 @@ const colours = {
   warning: colour(...orange),
   /** A hairline, a field's edge, and what a pressed row fills with: the text at 10%. */
   border: colour("oklch(0.224 0.008 285.76 / 10%)", "oklch(1 0 0 / 10%)"),
-  /** What dims the page under a sheet: a light page is washed, a dark one dimmed. */
-  overlay: colour("oklch(1 0 0 / 25%)", "oklch(0 0 0 / 40%)"),
+  /** What dims the page under a sheet or an alert, as iOS's and macOS's do: black over a light page as over a dark one. */
+  overlay: colour("oklch(0 0 0 / 30%)", "oklch(0 0 0 / 40%)"),
 }
 
 /** Lengths. A computer's are rems of 16px; under a finger what's pressed is a 44px target and text a step larger, which

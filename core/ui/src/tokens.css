@@ -10,7 +10,7 @@
   --background-gradient: light-dark(oklch(0.962 0.004 286.32), oklch(0 0 0));
   --selection: color-mix(in oklab, var(--label) 10%, transparent);
   --stripe: color-mix(in oklab, var(--label) 2.5%, transparent);
-  --overlay: light-dark(oklch(1 0 0 / 25%), oklch(0 0 0 / 40%));
+  --overlay: light-dark(oklch(0 0 0 / 30%), oklch(0 0 0 / 40%));
   --panel: light-dark(oklch(0.991 0.001 286.38 / 92%), oklch(0.185 0 0 / 92%));
   --glass: light-dark(oklch(1 0 0 / 80%), oklch(0.26 0 0 / 80%));
   --veil: color-mix(in oklab, var(--background) 55%, transparent);

@@ -477,15 +477,15 @@ export type Scene =
 export type CheckStep = Tap | { press: Tap; hold?: number; clicks?: number; agent?: true } | { down: Tap } | { up: true } | { trace: string } | { wait: number } | { away: number } | { putAway: true } | { summon: true } | { back: true } | { answers: Record<string, unknown> } | { expect: Expect; within?: number }
 /** What must hold: what's drawn whole and in the window (`shown`), what isn't there (`gone`), what has the keyboard
  * (`focused`), words somewhere on it (`text`), a node's states (`states`: `{ of, is: { expanded: true } }`), how opaque
- * it's drawn (`drawn`: `{ of, opacity }`, a pressed look), the glass's blur drawn or not (`blur`), and what the input with the
+ * it's drawn (`drawn`: `{ of, opacity }`, a pressed look), the glass's blur drawn or not (`blur`), what's over the page dimming it (`dimmed`, as a sheet's or an alert's scrim does), and what the input with the
  * keyboard asks the platform's keyboard for (`keyboard`, as Flutter's `TextInputConfiguration` says it to iOS and
  * Android: `{ textCapitalization: "TextCapitalization.none", autocorrect: false }`), and every text drawn in the window
  * at least `margins` points in from its sides, as a page's margins keep it, and what's drawn as tall as it should be (`tall`:
  * a node of that name, `height` points, within one), as a type size is; and what a phone's system is asked to show of
  * a finger's selection: its menu for text with these items, inside the safe area, or none (`textMenu`:
  * `{ items: ["cut", "copy", "paste", "selectAll"] }`, or false), so many handles drawn (`handles`), and its magnifier
- * or not (`magnifier`). */
-export type Expect = { shown?: Tap; gone?: Tap; focused?: Tap; text?: string; states?: { of: Tap; is: Record<string, boolean | string> }; drawn?: { of: Tap; opacity: number }; blur?: boolean; keyboard?: Record<string, unknown>; margins?: number; tall?: { of: Tap; height: number }; textMenu?: { items?: string[] } | false; handles?: number; magnifier?: boolean }
+ * or not (`magnifier`), and what's over the page dimming it (`dimmed`, as a sheet's or an alert's scrim does). */
+export type Expect = { shown?: Tap; gone?: Tap; focused?: Tap; text?: string; states?: { of: Tap; is: Record<string, boolean | string> }; drawn?: { of: Tap; opacity: number }; blur?: boolean; dimmed?: boolean; keyboard?: Record<string, unknown>; margins?: number; tall?: { of: Tap; height: number }; textMenu?: { items?: string[] } | false; handles?: number; magnifier?: boolean }
 /** A press that goes down on what `from` names (as a tap does) and moves as `gesture` says, or input played as a device
  * delivered it (a `trace` file of events, as a check's `trace`), with what's watched move (`follow`, named as a tap is;
  * what scrolls under it is always watched). `steady`: what moves never goes back against its way before its input
