@@ -5,7 +5,8 @@
 //! with nothing on screen, `launcher` while it's summoned, `windows` with an app's window open) and how many windows
 //! were on screen (`one.windows`) and its system (`os.type`, as Telemetry adds a metric's points up whichever device
 //! they're from), so `telemetry metric` shows each state's over time, and over its state's budget
-//! (`budget`) an error (`one.client.memory.over`).
+//! (`budget`) an error (`one.client.memory.over`), as is a page's JS over a quarter of what it may have
+//! (`one.client.memory.js.over`).
 
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
@@ -90,6 +91,14 @@ fn measure() {
         {
             let error = format!("the app holds {} MB {state} beside its windows' surfaces, over its {} MB budget", mb(process.saturating_sub(surfaces)), budget(state));
             views.client.report(json!({"name": "one.client.memory.over", "error": error, "attributes": attributes}));
+        }
+        // A page's JS holding a quarter of all it may, which is far more than a page holds, so a leak shows long before
+        // a page runs out (`renderer::js::memory_limit`).
+        let limit = renderer::js::memory_limit() as u64;
+        for window in all.iter().filter(|window| window["js"].as_u64().is_some_and(|js| js > limit / 4)) {
+            let page = window["entrypoint"].as_str().unwrap_or_default();
+            let error = format!("{page}'s JS holds {} MB, over a quarter of the {} MB a page may have", mb(window["js"].as_u64().unwrap_or(0)), mb(limit));
+            views.client.report(json!({"name": "one.client.memory.js.over", "error": error, "attributes": attributes}));
         }
     });
 }

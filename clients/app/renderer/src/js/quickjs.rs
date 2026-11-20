@@ -47,8 +47,40 @@ fn web(ctx: &Ctx) -> rquickjs::Result<()> {
     llrt_crypto::init(ctx)
 }
 
-/// How much memory and stack an app's JS may have.
-const MEMORY: usize = 64 << 20;
+/// How much memory a page's JS may have: a sixteenth of its device's, from 256 MB to 2 GB, as V8 sizes its heap by its
+/// device's memory and iOS an app's: 256 MB on a phone of 4 GB, 1 GB on a computer of 16. It's for a page that runs
+/// away, not a budget: a page holds 4 to 25 MB (21 Nov: Telemetry's, with a few hundred alerts, 22 MB), and a refresh
+/// briefly twice that. Several pages share the app's process (the launcher's and each window's), so it's a share a few
+/// can reach at once and the app still keep within what its system lets it have (iOS stops an app at about half its
+/// device's memory). A quarter of it is told to Telemetry (the client's `memory`), and at three quarters its page is
+/// warned (`notifications/one/memory_warning`), as iOS's `didReceiveMemoryWarning` warns an app.
+pub fn memory_limit() -> usize {
+    static LIMIT: std::sync::LazyLock<usize> = std::sync::LazyLock::new(|| (device_memory() / 16).clamp(256 << 20, 2 << 30));
+    *LIMIT
+}
+
+/// The device's memory, in bytes, as its system says it; 0 where it doesn't.
+#[cfg(any(target_os = "linux", target_os = "android"))]
+fn device_memory() -> usize {
+    let (pages, size) = unsafe { (libc::sysconf(libc::_SC_PHYS_PAGES), libc::sysconf(libc::_SC_PAGESIZE)) };
+    usize::try_from(pages).unwrap_or(0).saturating_mul(usize::try_from(size).unwrap_or(0))
+}
+
+#[cfg(target_vendor = "apple")]
+fn device_memory() -> usize {
+    let (mut bytes, mut size) = (0u64, std::mem::size_of::<u64>());
+    let read = unsafe { libc::sysctlbyname(c"hw.memsize".as_ptr(), (&raw mut bytes).cast(), &raw mut size, std::ptr::null_mut(), 0) };
+    if read == 0 { usize::try_from(bytes).unwrap_or(usize::MAX) } else { 0 }
+}
+
+#[cfg(windows)]
+fn device_memory() -> usize {
+    use windows::Win32::System::SystemInformation::{GlobalMemoryStatusEx, MEMORYSTATUSEX};
+    let mut status = MEMORYSTATUSEX { dwLength: std::mem::size_of::<MEMORYSTATUSEX>() as u32, ..Default::default() };
+    unsafe { GlobalMemoryStatusEx(&raw mut status) }.map_or(0, |()| usize::try_from(status.ullTotalPhys).unwrap_or(usize::MAX))
+}
+
+/// How much stack an app's JS may have.
 const STACK: usize = 1 << 20;
 
 /// One app's JS, running.
@@ -62,6 +94,8 @@ struct Sandbox {
     /// Promises rejected with nothing to handle them yet, and why, as QuickJS tells of them.
     rejected: Rc<RefCell<Vec<(Persistent<Value<'static>>, Persistent<Value<'static>>)>>>,
     clock: Clock,
+    /// Whether it's been warned it holds near all the memory it may have (`collect`).
+    warned: std::cell::Cell<bool>,
 }
 
 impl Sandbox {
@@ -75,9 +109,9 @@ impl Sandbox {
         let rejected: Rc<RefCell<Vec<(Persistent<Value<'static>>, Persistent<Value<'static>>)>>> = Rc::default();
         let to = rejected.clone();
         block_on(async {
-            runtime.set_memory_limit(MEMORY).await;
+            runtime.set_memory_limit(memory_limit()).await;
             // Collected while it's idle (`collect`), not as it allocates.
-            runtime.set_gc_threshold(MEMORY / 4).await;
+            runtime.set_gc_threshold(16 << 20).await;
             runtime.set_max_stack_size(STACK).await;
             let components = Arc::new(Mutex::new(HashSet::new()));
             runtime.set_loader(Resolve { components: components.clone() }, Modules { files, cache, components, styled: HashSet::new(), loads: loads.clone() }).await;
@@ -134,7 +168,7 @@ impl Sandbox {
             drop(loads);
             Ok((Persistent::save(&ctx, host), Persistent::save(&ctx, started), said))
         }))?;
-        let sandbox = Sandbox { host, context, runtime, posted, rejected, clock };
+        let sandbox = Sandbox { host, context, runtime, posted, rejected, clock, warned: std::cell::Cell::new(false) };
         let running = Instant::now();
         sandbox.settle()?;
         eprintln!("{page}'s JS started in {} ms: {said}, then ran until it waited in {} ms", began.elapsed().as_millis(), running.elapsed().as_millis());
@@ -252,16 +286,25 @@ impl Sandbox {
     }
 
     /// Collects what its JS no longer holds, as a browser does while nothing's happening, and puts off its next
-    /// collection until it holds twice as much and 8 MB more, within its memory, so what it's sent doesn't wait on one:
-    /// QuickJS's collector goes through all it holds at once, 15 to 25 ms for a long list's page.
+    /// collection until it holds twice as much and 8 MB more, within half its memory, so what it's sent doesn't wait on
+    /// one: QuickJS's collector goes through all it holds at once, 15 to 25 ms for a long list's page. Holding three
+    /// quarters of its memory, it's warned once, until it holds less than half (`memory_limit`).
     /// → the bytes it holds once it's collected.
-    fn collect(&self) -> usize {
-        block_on(async {
+    fn collect(&self) -> anyhow::Result<usize> {
+        let limit = memory_limit();
+        let held = block_on(async {
             self.runtime.run_gc().await;
             let held = usize::try_from(self.runtime.memory_usage().await.malloc_size).unwrap_or(0);
-            self.runtime.set_gc_threshold((held * 2 + (8 << 20)).min(MEMORY * 3 / 4).max(held + (4 << 20))).await;
+            self.runtime.set_gc_threshold((held * 2 + (8 << 20)).min(limit / 2).max(held + (4 << 20))).await;
             held
-        })
+        });
+        if held > limit / 4 * 3 && !self.warned.replace(true) {
+            self.send("message", &serde_json::json!({"jsonrpc": "2.0", "method": "notifications/one/memory_warning"}))?;
+        }
+        if held < limit / 2 {
+            self.warned.set(false);
+        }
+        Ok(held)
     }
 
     /// What it has given its host since this was last asked.
@@ -318,7 +361,10 @@ impl Call {
             Call::Send(to, message) => threw.extend(sandbox.send(to, &message).err()),
             Call::Frame(time) => threw.extend(sandbox.frame(time).err()),
             Call::Fire => {}
-            Call::Collect => memory.store(sandbox.collect(), Ordering::Relaxed),
+            Call::Collect => match sandbox.collect() {
+                Ok(held) => memory.store(held, Ordering::Relaxed),
+                Err(error) => threw.push(error),
+            },
             Call::Batch(calls) => calls.into_iter().for_each(|call| call.run(sandbox, threw, memory)),
         }
     }
@@ -449,7 +495,10 @@ impl Thread {
                             if still.is_some_and(|still| still <= wait) {
                                 collect = false;
                                 let collecting = crate::platform::on_cpu();
-                                on.memory.store(sandbox.collect(), Ordering::Relaxed);
+                                match sandbox.collect() {
+                                    Ok(held) => on.memory.store(held, Ordering::Relaxed),
+                                    Err(error) => threw.push(error),
+                                }
                                 spent += crate::platform::on_cpu().saturating_sub(collecting);
                             }
                             None
@@ -798,13 +847,13 @@ fn caught(error: rquickjs::CaughtError) -> anyhow::Error {
     }
 }
 
-/// QuickJS ran out of the memory a page may have (`MEMORY`).
+/// QuickJS ran out of the memory a page may have (`memory_limit`).
 #[derive(Debug)]
 struct OutOfMemory;
 
 impl std::fmt::Display for OutOfMemory {
     fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        write!(f, "it ran out of memory ({} MB)", MEMORY >> 20)
+        write!(f, "it ran out of memory ({} MB)", memory_limit() >> 20)
     }
 }
 
