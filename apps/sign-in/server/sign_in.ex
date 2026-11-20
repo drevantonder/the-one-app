@@ -434,7 +434,10 @@ defmodule SignIn do
     if new != [] do
       {names, are} = {named.(new), if(length(new) == 1, do: "is", else: "are")}
       title = "#{Enum.join(names, ", ")} #{are} waiting for the network's key"
-      owners = Enum.filter(Call.tool(call, "permissions", "members", %{"of" => "network"})["members"], &owns_network?(call, &1))
+      # Its owners among the people it keeps, which it reads as nobody, as the clock runs it: a list of the network's
+      # users is only a user's to ask for.
+      people = for "people/" <> name <- Artifact.list(call.own, "people/"), do: "users/" <> name
+      owners = Enum.filter(people, &owns_network?(call, &1))
 
       for owner <- owners,
           do: Call.tool(call, "notifications", "send", %{"title" => title, "text" => "Open Sign In & Security and use your passkey.", "to" => owner, "section" => "passkeys"})
