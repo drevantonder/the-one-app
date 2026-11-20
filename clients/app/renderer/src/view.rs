@@ -353,11 +353,13 @@ pub struct Screen {
 }
 
 /// What a frame cost: the mutations its JS made that it applied, since the frame before (`applied` counts them as they
-/// come), and how long laying its tree out and painting it all took, as a browser's performance panel says a frame's.
+/// come), how long its JS thread spent running since the frame before, and how long laying its tree out and painting
+/// it all took, as a browser's performance panel says a frame's.
 #[derive(Clone, Copy, Default)]
 pub(crate) struct Cost {
     pub mutations: u64,
     applied: u64,
+    pub script: Duration,
     pub layout: Duration,
     pub paint: Duration,
 }
@@ -874,6 +876,7 @@ impl Screen {
         self.settle_focus(modal);
         self.tell_placed(intersections);
         self.cost.paint = started.elapsed();
+        self.cost.script = self.js.script();
         self.cost.mutations = std::mem::take(&mut self.cost.applied);
     }
 

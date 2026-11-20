@@ -290,6 +290,8 @@ struct Posts {
     framing: bool,
     /// When, on its clock, its last turn ended.
     turned: f64,
+    /// How long it's spent running its JS (timers, calls, collecting what it dropped) since this was last taken.
+    script: Duration,
 }
 
 /// How long its JS is still before what it dropped is collected: a pause in scrolling or typing, as a browser's idle
@@ -321,13 +323,15 @@ impl Thread {
                 Err(error) => return on.post(|posts| posts.started = Some(Err(format!("{error:#}")))),
             };
             // Whether it's run something since it last collected.
-            let (mut threw, mut ran, mut collect) = (Vec::new(), 0, true);
+            let (mut threw, mut ran, mut collect, mut spent) = (Vec::new(), 0, true, Duration::ZERO);
             loop {
                 // A timer due now runs now, its clock paused or not.
+                let firing = std::time::Instant::now();
                 while sandbox.due().is_some_and(|due| due <= 0.0) {
                     threw.extend(sandbox.fire().err());
                     collect = true;
                 }
+                spent += firing.elapsed();
                 let (due, timers, framing) = (sandbox.due(), sandbox.timers(), sandbox.framing());
                 let now = time.now();
                 // It's started once what its module posted as it ran is here too, so its window shows that.
@@ -336,6 +340,7 @@ impl Thread {
                     posts.posted.extend(sandbox.take());
                     posts.posted.extend(threw.drain(..).map(|error: anyhow::Error| Posted::Threw(format!("{error:#}"))));
                     posts.ran += std::mem::take(&mut ran);
+                    posts.script += std::mem::take(&mut spent);
                     posts.due = due.map(|due| now + due);
                     (posts.timers, posts.turned, posts.framing) = (timers, now, framing);
                 });
@@ -349,7 +354,9 @@ impl Thread {
                         Err(mpsc::RecvTimeoutError::Timeout) => {
                             if still.is_some_and(|still| still <= wait) {
                                 collect = false;
+                                let collecting = std::time::Instant::now();
                                 sandbox.collect();
+                                spent += collecting.elapsed();
                             }
                             None
                         }
@@ -361,6 +368,7 @@ impl Thread {
                     },
                 };
                 collect |= first.is_some();
+                let running = std::time::Instant::now();
                 // Every call that's come runs in this turn, and what they changed goes back as one batch.
                 for call in first.into_iter().chain(std::iter::from_fn(|| queue.try_recv().ok())) {
                     ran += 1;
@@ -370,6 +378,7 @@ impl Thread {
                         Call::Fire => {}
                     }
                 }
+                spent += running.elapsed();
             }
         })?;
         Ok(Thread { calls, shared, clock, sent: 0 })
@@ -389,6 +398,11 @@ impl Thread {
     /// A frame is shown at `time`, on its clock: what asked for one runs (`requestAnimationFrame`).
     pub fn frame(&mut self, time: f64) {
         self.call(Call::Frame(time));
+    }
+
+    /// How long its thread has spent running its JS since this was last asked: what a frame's JS cost.
+    pub fn script(&self) -> Duration {
+        std::mem::take(&mut self.shared.posts().script)
     }
 
     /// Whether it asked for a frame, as its last turn left it.

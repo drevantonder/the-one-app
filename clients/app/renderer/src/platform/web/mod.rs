@@ -293,6 +293,11 @@ impl Thread {
         false
     }
 
+    /// Nothing: the browser runs the page's JS, beside the renderer, and its own Performance panel times it.
+    pub fn script(&self) -> std::time::Duration {
+        std::time::Duration::ZERO
+    }
+
     pub fn take(&self) -> (Vec<Posted>, u64) {
         WOKEN.set(false);
         (POSTED.with_borrow_mut(std::mem::take), RAN.get())

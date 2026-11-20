@@ -23,8 +23,8 @@
 //! - `snap` → `{png, width, height}`: the window as drawn, a PNG in base64, at its scale.
 //! - `profile` (`at`, ms from now, in order: `[0, 80, 200, 400]` unless given; `snap`: false for no pictures) →
 //!   `{frames, time, paused}`: the clock paused and stepped to each time, as `clock` steps it, and the frame there
-//!   drawn, each `{at, mutations, layout_ms, paint_ms, draws, work, atlas, png, width, height}`: the mutations its JS
-//!   made that it applied since the frame before, how long laying it out took and painting it all told (styling,
+//!   drawn, each `{at, mutations, script_ms, layout_ms, paint_ms, draws, work, atlas, png, width, height}`: the
+//!   mutations its JS made that it applied since the frame before, how long its JS thread ran meanwhile, how long laying it out took and painting it all told (styling,
 //!   layout and its scene), its draw calls, what its GPU did, the same on any GPU (`work`: the device pixels of
 //!   `quads`, `shadows`, `sprites`, `backdrops` and `rasters` it drew, as often as each is drawn over, the pixels it
 //!   `copied` of the frames before, and the bytes it `uploaded`), and its glyph and picture atlas's `tiles`,

@@ -273,13 +273,14 @@ impl Screen {
     }
 
     /// What the frame painted last cost, as `profile` says it: the mutations its JS made that it applied since the
-    /// frame before (`mutations`), how long it took to lay out (`layout_ms`) and to style, lay out and paint all told
+    /// frame before (`mutations`), how long its JS thread ran meanwhile (`script_ms`), how long it took to lay out (`layout_ms`) and to style, lay out and paint all told
     /// (`paint_ms`), and, as `renderer` drew it, its draw calls (`draws`), what its GPU did (`work`,
     /// `Renderer::work`) and what its atlas holds (`atlas`).
     pub fn cost(&self, renderer: &crate::render::renderer::Renderer) -> Value {
         let ms = |time: Duration| (time.as_secs_f64() * 100_000.0).round() / 100.0;
         json!({
             "mutations": self.cost.mutations,
+            "script_ms": ms(self.cost.script),
             "layout_ms": ms(self.cost.layout),
             "paint_ms": ms(self.cost.paint),
             "draws": renderer.draws(),
