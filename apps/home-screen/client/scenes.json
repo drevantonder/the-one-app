@@ -425,6 +425,54 @@
           ],
           "speed": 600
         }
+      },
+      "Dragged past half slowly, as UIKit's recording": {
+        "from": {
+          "x": 330,
+          "y": 450
+        },
+        "follow": "Notes",
+        "gesture": {
+          "moves": [
+            {
+              "dx": -230,
+              "ms": 1500
+            }
+          ],
+          "lift": true
+        }
+      },
+      "Dragged short of half slowly, as UIKit's recording": {
+        "from": {
+          "x": 300,
+          "y": 450
+        },
+        "follow": "Notes",
+        "gesture": {
+          "moves": [
+            {
+              "dx": -120,
+              "ms": 1200
+            }
+          ],
+          "lift": true
+        }
+      },
+      "Swiped quickly, as UIKit's recording": {
+        "from": {
+          "x": 330,
+          "y": 450
+        },
+        "follow": "Notes",
+        "gesture": {
+          "moves": [
+            {
+              "dx": -250,
+              "ms": 250
+            }
+          ],
+          "lift": true
+        }
       }
     }
   },

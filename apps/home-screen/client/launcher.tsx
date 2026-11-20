@@ -335,7 +335,7 @@ export function LauncherPanel(props: { owners: Owner[]; layout: Screens; paging:
         <View onWheel={wheel} style={[looks.surface, looks.card, looks.at(0, CARD_TOP, card().width, card().height), looks.shifted(cardLeft())]}>
           {/* Home's pages and the App Library after them, in one strip the host drags along as a trackpad's fingers or
               the pointer go (`along`) and slides to where they're going by its spring, as an iPhone's are. */}
-          <View {...along} style={[looks.cover, slides() && looks.turning, looks.shifted(-across())]}>
+          <View {...along} style={[looks.cover, slides() && looks.paging, looks.shifted(-across())]}>
           {/* Home: each owner's pages, the owner shown's in place, the others rolled above and below it, faded. */}
           <View role="main" aria-label="Home" inert={showing() !== "home" || undefined} style={[looks.fading, looks.cover, showing() !== "home" && looks.inert, looks.faded(there("home") ? 1 : 0, 1)]}>
             <For each={props.owners} keyed={(owner) => owner.key}>

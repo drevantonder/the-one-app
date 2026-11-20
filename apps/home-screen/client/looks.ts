@@ -44,8 +44,7 @@ export const looks = styles({
   track: { position: "absolute", top: 0, start: 0, flexDirection: "row" },
   // What goes with the pages without being dragged with them: sliding with them by the same spring, and fading out of
   // their way.
-  sliding: { transitionProperty: ["translateX", "opacity"], transition: tokens.motion.snappy },
-  turning: { flexDirection: "row", transitionProperty: ["translateX"], transition: tokens.motion.snappy },
+  sliding: { transitionProperty: ["translateX", "opacity"], transition: tokens.motion.paging },
   layer: { position: "absolute", alignItems: "center" },
   row: { position: "absolute", start: 0, end: 0, alignItems: "center", justifyContent: "center" },
   inert: { pointerEvents: "none" },
@@ -87,8 +86,8 @@ export const looks = styles({
   // The whole of it: the window, its two sections side by side, each owner's pages over another's, and a screenful.
   root: { position: "relative", overflow: "hidden", color: tokens.colour.label },
   sections: { position: "absolute", top: 0, start: 0, flexDirection: "row" },
-  // A phone's pages and what goes with them, slid to where they're going by the host's spring.
-  paging: { transitionProperty: ["translateX"], transition: tokens.motion.smooth },
+  // The pages and what goes with them, slid to where they're going by the host's spring, UIScrollView's paging's.
+  paging: { transitionProperty: ["translateX"], transition: tokens.motion.paging },
   clipped: { position: "relative", overflow: "hidden" },
   owners: { position: "absolute", top: 0, start: 0 },
   screens: { position: "absolute", top: 0, start: 0, flexDirection: "row" },
