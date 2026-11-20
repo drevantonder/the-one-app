@@ -7,12 +7,14 @@
 //! through TURN (`relay`), here over TCP, so neither learns the other's addresses.
 //!
 //! The source is where the frames come from and where what the viewer does goes (`source`): `scrcpy`, an Android
-//! phone's own H.264 from scrcpy's server.
+//! phone's own H.264 from scrcpy's server; `x11`, a Linux display's, encoded here.
 //!
 //! The data channel (id 0, negotiated) carries what the UI library's LiveScreen sends (`input::Input`).
 mod input;
 mod scrcpy;
 mod session;
+#[cfg(target_os = "linux")]
+mod x11;
 
 use serde::Deserialize;
 use std::sync::mpsc::Sender;
@@ -38,6 +40,8 @@ pub struct IceServer {
 #[serde(tag = "kind", rename_all = "lowercase")]
 pub enum SourceConfig {
     Scrcpy(scrcpy::Config),
+    #[cfg(target_os = "linux")]
+    X11(x11::Config),
 }
 
 /// What reaches a session from elsewhere: a frame, or the source having ended.
@@ -59,6 +63,8 @@ pub trait Source {
 fn start(config: SourceConfig, events: Sender<Event>) -> anyhow::Result<Box<dyn Source>> {
     Ok(match config {
         SourceConfig::Scrcpy(config) => Box::new(scrcpy::Scrcpy::start(config, events)?),
+        #[cfg(target_os = "linux")]
+        SourceConfig::X11(config) => Box::new(x11::X11::start(config, events)?),
     })
 }
 

@@ -21,3 +21,9 @@ turn-client-proto = "0.8"
 
 [target.'cfg(unix)'.dependencies]
 libc = "0.2"
+
+# A Linux display's screen (X11): its pictures, with its pointer, encoded as H.264 with Cisco's OpenH264, built from its source, and
+# what the viewer does played on it through XTest.
+[target.'cfg(target_os = "linux")'.dependencies]
+openh264 = "0.9"
+x11rb = { version = "0.14", features = ["randr", "xfixes", "xtest"] }
