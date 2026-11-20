@@ -193,7 +193,8 @@ if ((await $`bun x wrangler deployments list --name ${edge.name}`.cwd(here).quie
   const out = `${built}/relay-bundle`;
   await $`bun x wrangler deploy --dry-run --outdir ${out} -c ${relayConfig}`.cwd(here).quiet();
   const hash = new Bun.CryptoHasher("sha256").update(JSON.stringify(relayed));
-  for (const file of [...new Glob("**/*").scanSync(out)].filter((file) => !file.endsWith(".map")).sort()) hash.update(file).update(await Bun.file(`${out}/${file}`).bytes());
+  // Its modules, not the source map or the README Wrangler writes beside them, which says when it was built.
+  for (const file of [...new Glob("**/*").scanSync(out)].filter((file) => !/(\.map|README\.md)$/.test(file)).sort()) hash.update(file).update(await Bun.file(`${out}/${file}`).bytes());
   const tag = hash.digest("hex").slice(0, 24);
   const status = await $`bun x wrangler deployments status --name ${relayWorker.name} --json`.cwd(here).quiet().nothrow();
   const live = status.exitCode === 0 && JSON.parse(status.text()).versions?.[0]?.version_id;
