@@ -12,8 +12,8 @@
 //
 //     any state ──a newer build──► preparing, for the newer one
 //     preparing or restarting ──a server goes back, or doesn't finish──► it's behind (which, why), and the rest go
-//       on: a machine can be off or broken, and one mustn't keep every other from a build. Update Now, or a newer
-//       build, has it try again
+//       on: a machine can be off or broken, and one mustn't keep every other from a build. It tries again by itself
+//       1, 5 and then every 15 min after it went back (`RETRIES`), or at once with Update Now or a newer build
 //     up to date ──a server that missed one is back──► preparing, for it alone
 //
 // A server that's asleep or gone as an update begins, or goes while it's under way, is skipped, and caught up under
@@ -23,8 +23,8 @@
 // It hears only through the relay's Durable Object, which calls it: a build released (`core.ts`) or Update Now (`/relay/update`), what each server says of itself as it changes (`/relay/seen`), and a
 // server coming or going there. Each time it's given who's here (`Presence`), and answers with what it is, and what
 // every server is to do, which the relay tells them all (`notifications/one/update`). So it decides only as it's
-// told something, and its alarm only marks what didn't finish in time: a server that hears nothing new from it has
-// nothing to do.
+// told something, and its alarm only marks what didn't finish in time, and when one behind tries again: a server that
+// hears nothing new from it has nothing to do.
 import { DurableObject } from "cloudflare:workers";
 import { relay } from "../relay/common.ts";
 
@@ -90,8 +90,10 @@ interface State {
   waiting_for?: "quiet" | null;
   /** Update Now was asked, so a lone server restarts without waiting for a quiet moment. */
   now?: boolean;
-  /** The servers that went back from this build, or didn't take it in time, and why: each tries again with Update Now or a newer build. */
-  went_back?: { server: string; name?: string; why: string }[];
+  /** The servers that went back from this build, or didn't take it in time, why, and when each tries again. */
+  went_back?: { server: string; name?: string; why: string; retry_at?: number }[];
+  /** How many times each server went back from this build, which its next try waits longer for (`RETRIES`). */
+  tries?: Record<string, number>;
   /** When what's under way is taken as not finishing, in ms since 1970. */
   until?: number | null;
   /** When each step of the whole was reached, in ms after the build was published. */
@@ -106,6 +108,8 @@ interface State {
 /** How long every server has to prepare, and a server that restarts to be back, as `serving.rs`'s `START`, and more. */
 const PREPARING = 10 * 60_000;
 const RESTARTING = 5 * 60_000;
+/** How long a server that went back waits before it tries again, after its first time, its second, and every time after. */
+const RETRIES = [1, 5, 15].map((minutes) => minutes * 60_000);
 
 const MESSAGE = "notifications/one/update";
 
@@ -144,7 +148,8 @@ export class NetworkUpdater extends DurableObject<Env> {
     this.step(state, presence, reported);
 
     await this.ctx.storage.put("state", state);
-    if (state.until) await this.ctx.storage.setAlarm(state.until);
+    const alarm = alarmAt(state);
+    if (alarm !== null) await this.ctx.storage.setAlarm(alarm);
     else await this.ctx.storage.deleteAlarm();
     const status = this.status(state, reported);
     const changed = JSON.stringify([state, this.instructions(state, reported)]) !== before;
@@ -156,20 +161,24 @@ export class NetworkUpdater extends DurableObject<Env> {
 
   /**
    * What didn't finish in time: each server late is behind, and the update goes on without them, as the relay asks it
-   * again with who's here, which tells every server what's next.
+   * again with who's here, which tells every server what's next. And once one behind is due to try again, the relay
+   * asks it as Update Now does, which takes each not on the build to it.
    */
   async alarm() {
     const state = await this.ctx.storage.get<State>("state");
-    if (!state?.until || state.until > Date.now()) return;
-    const reported = await this.reported();
-    const preparing = state.network_update_status === "preparing";
-    const late = state.servers.filter((server) => server.ready === undefined && (preparing ? server.prepared === undefined : server.went !== undefined));
-    const why = preparing ? `didn't finish preparing within ${PREPARING / 60_000} min` : `didn't take it within ${RESTARTING / 60_000} min`;
-    for (const server of late) this.wentBack(state, server.key, reported[server.key]?.name, why);
-    state.until = null;
-    await this.ctx.storage.put("state", state);
-    said(state, this.status(state, reported));
-    await relay(this.env.RELAY, (relay) => relay.updated({ status: true }));
+    if (!state) return;
+    if (state.until && state.until <= Date.now()) {
+      const reported = await this.reported();
+      const preparing = state.network_update_status === "preparing";
+      const late = state.servers.filter((server) => server.ready === undefined && (preparing ? server.prepared === undefined : server.went !== undefined));
+      const why = preparing ? `didn't finish preparing within ${PREPARING / 60_000} min` : `didn't take it within ${RESTARTING / 60_000} min`;
+      for (const server of late) this.wentBack(state, server.key, reported[server.key]?.name, why);
+      state.until = null;
+      await this.ctx.storage.put("state", state);
+      said(state, this.status(state, reported));
+    }
+    const due = (alarmAt(state) ?? Infinity) <= Date.now();
+    await relay(this.env.RELAY, (relay) => relay.updated(due ? { now: true } : { status: true }));
   }
 
   async reported(): Promise<Record<string, Reported>> {
@@ -180,6 +189,7 @@ export class NetworkUpdater extends DurableObject<Env> {
   /** Begins taking `build`: every server that's ready and not on its pair prepares it, and the rest are skipped. */
   begin(state: State, build: string, presence: Record<string, Presence | null>, reported: Record<string, Reported>) {
     const published = state.build === build && state.published ? state.published : Date.now();
+    const tries = state.build === build ? (state.tries ?? {}) : {};
     state.build = build;
     const known = Object.keys(reported).filter((key) => this.takes(key, presence, reported));
     const behind = known.filter((key) => !on(state, reported[key]));
@@ -192,6 +202,7 @@ export class NetworkUpdater extends DurableObject<Env> {
       waiting_for: null,
       now: false,
       went_back: [],
+      tries,
       until: Date.now() + PREPARING,
       timings: {},
     } satisfies State);
@@ -210,7 +221,7 @@ export class NetworkUpdater extends DurableObject<Env> {
   step(state: State, presence: Record<string, Presence | null>, reported: Record<string, Reported>) {
     const status = state.network_update_status;
     if (status === "up_to_date") {
-      // One that missed an update is back. One behind tries again with Update Now or a newer build, not each time it
+      // One that missed an update is back. One behind tries again once its wait is over (`alarm`), not each time it
       // says what it is, which would fail as it did.
       const wentBack = new Set((state.went_back ?? []).map(({ server }) => server));
       const back =
@@ -273,10 +284,13 @@ export class NetworkUpdater extends DurableObject<Env> {
     if (state.published) state.timings.ready = Date.now() - state.published;
   }
 
-  /** Takes `server` out of the update, saying why, as behind: the rest go on without it. */
+  /** Takes `server` out of the update, saying why, as behind: the rest go on without it, and it tries again (`RETRIES`). */
   wentBack(state: State, server: string, name: string | undefined, why: string) {
+    const tries = (state.tries?.[server] ?? 0) + 1;
+    state.tries = { ...state.tries, [server]: tries };
+    const retry_at = Date.now() + RETRIES[Math.min(tries, RETRIES.length) - 1];
     state.servers = state.servers.filter((taking) => taking.key !== server);
-    state.went_back = [...(state.went_back ?? []).filter((back) => back.server !== server), { server, ...(name && { name }), why }];
+    state.went_back = [...(state.went_back ?? []).filter((back) => back.server !== server), { server, ...(name && { name }), why, retry_at }];
   }
 
   /** What every server taking part is to do now, by its key. */
@@ -310,7 +324,7 @@ export class NetworkUpdater extends DurableObject<Env> {
       done: state.servers.filter((server) => server.ready !== undefined).length,
       of: state.servers.length,
       waiting_for: state.waiting_for ?? null,
-      went_back: (state.went_back ?? []).map(({ server, why }) => ({ server, name: name(server), why })),
+      went_back: (state.went_back ?? []).map(({ server, why, retry_at }) => ({ server, name: name(server), why, retry_at: retry_at ?? null })),
       skipped: state.skipped.map(name),
       edge: state.edge ?? null,
       servers: this.instructions(state, reported),
@@ -320,6 +334,16 @@ export class NetworkUpdater extends DurableObject<Env> {
       },
     };
   }
+}
+
+/**
+ * When the alarm is due: what's under way taken as not finishing (`until`), or, once nothing is, the first server
+ * behind trying again.
+ */
+function alarmAt(state: State): number | null {
+  const retries = state.network_update_status === "up_to_date" ? (state.went_back ?? []).flatMap(({ retry_at }) => (retry_at ? [retry_at] : [])) : [];
+  const at = Math.min(state.until ?? Infinity, ...retries);
+  return at === Infinity ? null : at;
 }
 
 /**
