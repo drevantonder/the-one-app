@@ -446,9 +446,10 @@ defmodule OneCore.Tools.Definitions do
       `required_by`, its `update`, the hash of the files it was deployed from (`source`), and, if it was installed from a git repo, where
       from (`from`): its `source`, the `ref` asked for, the `commit`, whether it had changes not committed (`dirty`),
       and the `hash` of the files as installed, which differs from `source` once it's changed since. A trusted app
-      updates by itself; `apps_update` updates an untrusted one. `apps_check` looks for newer versions now.
+      updates by itself; `apps_update` updates an untrusted one. `apps_check` looks for newer versions now. With
+      `name`, only the apps installed by that name, as `npm ls <package>` lists one.
       """,
-      inputs: %{type: "object", properties: %{}},
+      inputs: %{type: "object", properties: %{name: %{type: "string", description: "Only the apps installed by this name"}}},
       outputs: %{
         type: "object",
         properties: %{

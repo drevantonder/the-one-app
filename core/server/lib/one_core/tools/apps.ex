@@ -56,12 +56,13 @@ defmodule OneCore.Tools.Apps do
     end
   end
 
-  def run("apps", _inputs, {_actor, subject}, _pass, _request) do
+  def run("apps", inputs, {_actor, subject}, _pass, _request) do
     owner = User.owner(subject)
 
     installed =
       for at <- Apps.chain(subject),
           {name, record} <- Enum.sort(Installed.read(at)),
+          inputs["name"] in [nil, name],
           at == owner or record["state"] in ["installing", "installed"],
           do: {at, name, record}
 
