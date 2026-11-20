@@ -26,14 +26,13 @@ import { machine } from "./window-machine.js"
 /// Home Screen's window shows the launcher alone, and an app's own window shows that app (`own`), each where the
 /// launcher is in a phone's. Either opens every other app in its own window.
 export let windows = false
-/// On Android, the runtime version of the renderer the app draws natively with, over this page (`runtimeVersion` in
-/// src/lib.rs): an app whose page is needs that version or an older one opens there, any other in a frame
-/// here. 0 where it doesn't.
+/// On a phone, the runtime version of the renderer the app draws every app natively with, over this page
+/// (`runtimeVersion` in src/lib.rs): an app whose page needs a newer one says so, as this app needs updating. 0 where
+/// it doesn't, as in a browser, which draws each app in a frame here with the renderer it loads.
 let runtimeVersion = 0
-/// The apps that opened in a frame here as their native window couldn't.
-const framed = new Set()
-/// On a phone, the launcher is drawn natively, as its root window, under every app's (`open_launcher`), where it can
-/// be; otherwise it's in a frame here, as an app that can't be is.
+/// Why a phone can't open an app's page natively: its page needs a newer renderer than the app's, or newer tables.
+const NEWER = "It needs a newer version of the One App. Update it, then open it again."
+/// On a phone, the launcher is drawn natively, as its root window, under every app's (`open_launcher`).
 export let nativeLauncher = false
 /// Whether the native launcher was last told it shows, which it doesn't while an app in a frame here is in front, and
 /// whether something is open over its page, which back shuts first.
@@ -58,7 +57,6 @@ export const open = new Map()
 export const key = (entrypoint, subject) => `${subject ?? ""}|${entrypoint}`
 /// The pages in an app's frames (the UI library's `Frame`), each another app's, answered as its own app's page is,
 /// by the number its address has (`frame`): known by its window once it has said it from a frame of the page it's in.
-/// (`framed`, below, is something else: Android's apps drawn in this page's frames rather than natively.)
 /** @type {Map<string, View & { in: View, window?: Window }>} */
 export const nested = new Map()
 
@@ -324,23 +322,22 @@ export function go(link, subject, behind, from) {
     rail()
     return true
   }
-  // On a phone, an app opens natively, over this page, and one that needs a newer host in a frame here. One whose
-  // native window should have opened and didn't says why, as a frame that didn't open does (`notes`). Its window is
-  // told where its icon is, which pulled home by its rail's line it goes back into.
-  const at = key(page, subject)
-  const needed = needs.get(page) ?? 0
-  if (runtimeVersion && needed && needed <= runtimeVersion && !framed.has(at) && at !== baseKey()) {
+  // On a phone, an app opens natively, over this page. One whose native window didn't open, or that needs a newer
+  // renderer than this app's, says why, as a frame that didn't open does (`notes`). Its window is told where its icon
+  // is, which pulled home by its rail's line it goes back into. A page that names no runtime version (an app's page
+  // that's no entrypoint, as a sign-in page) opens in a frame here until every phone's app draws those natively too.
+  if (runtimeVersion && needs.has(page) && key(page, subject) !== baseKey()) {
     if (behind) return true
+    /** @param {unknown} why */
+    const failed = (why) => {
+      unopened = { entrypoint: page, link, subject, why: String(why) }
+      notes()
+    }
+    if ((needs.get(page) ?? 0) > runtimeVersion) return failed(NEWER), true
     unopened = undefined
     notes()
     const icon = from && [from.x, from.y, from.width, from.height]
-    invoke("open_window", { entrypoint: page, subject, link: fragment ? `${page}#${fragment}` : page, icon }).then(
-      (opened) => opened || (framed.add(at), go(link, subject, behind, from)),
-      (why) => {
-        unopened = { entrypoint: page, link, subject, why: String(why) }
-        notes()
-      },
-    )
+    invoke("open_window", { entrypoint: page, subject, link: fragment ? `${page}#${fragment}` : page, icon }).then((opened) => opened || failed(NEWER), failed)
     return true
   }
   const tapped = performance.now()
@@ -436,34 +433,32 @@ export function start() {
   const home = open.get(baseKey())
   if (home) page(home, { type: "retry" })
   else if (nativeLauncher) on({ type: "drawn", key: baseKey() })
-  else if (phone && !own && runtimeVersion && (needs.get(launcher) ?? Infinity) <= runtimeVersion && !framed.has(baseKey())) openLauncher()
+  else if (phone && !own && runtimeVersion) openLauncher()
   else load(base(), own?.subject)
   // The app that was showing when the page was loaded again is gone, so the launcher shows.
   restart()
   show(null, 0)
 }
 
-/// Opens the launcher natively, as the phone's root window: drawn, it's the launcher here; or its frame is.
+/// Opens the launcher natively, as the phone's root window: drawn, it's the launcher here; one that needs a newer
+/// renderer, or doesn't open, says why.
 function openLauncher() {
-  invoke("open_launcher", { entrypoint: launcher }).then(
-    (opened) => {
-      if (!opened) return framedLauncher()
-      nativeLauncher = launcherShown = true
-      on({ type: "drawn", key: baseKey() })
-    },
-    framedLauncher,
-  )
+  /** @param {unknown} why */
+  const failed = (why) => on({ type: "failed", key: baseKey(), why: String(why) })
+  if ((needs.get(launcher) ?? 0) > runtimeVersion) return failed(NEWER)
+  invoke("open_launcher", { entrypoint: launcher }).then((opened) => {
+    if (!opened) return failed(NEWER)
+    nativeLauncher = launcherShown = true
+    on({ type: "drawn", key: baseKey() })
+  }, failed)
 }
-
-/// The launcher in a frame here, as it can't be drawn natively, or no longer can (`launcher`).
-function framedLauncher() {
-  nativeLauncher = false
-  framed.add(baseKey())
-  load(base(), own?.subject)
-  show(null, 0)
-}
+// The native launcher closed, as its new version needs a newer renderer, or its servers are ahead (Update Required):
+// the window says why.
 listen("launcher", ({ payload }) => {
-  if (payload?.native === false && nativeLauncher) framedLauncher()
+  if (payload?.native === false && nativeLauncher) {
+    nativeLauncher = false
+    on({ type: "failed", key: baseKey(), why: NEWER })
+  }
   if (typeof payload?.over === "boolean") (launcherOver = payload.over), gestures()
 })
 // The native launcher opens an app, or starts it as a finger lands on its icon, as its frame's page asks (`go`).

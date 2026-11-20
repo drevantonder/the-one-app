@@ -155,6 +155,7 @@ export const machine = setup({
         ...fingers,
         update: { guard: "updateReady", target: "updating" },
         tooOld: "needs_updating",
+        failed: { guard: "launcher", target: "launcher_failed", actions: assign({ why: ({ event }) => event.why }) },
         link: { actions: ["link", "follow"] },
         seen: { actions: ["seen", "listen"] },
       },
