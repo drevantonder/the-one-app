@@ -45,6 +45,105 @@ enum Asked {
     Start(tokio::sync::oneshot::Sender<Value>),
 }
 
+/// How a window's page opened, step by step, from being asked to its first frame, by its view
+/// (`<subject>|<entrypoint>`): which says, in the log and to Telemetry, where its time went (`Opening::drawn`).
+static OPENING: std::sync::LazyLock<Mutex<HashMap<String, Opening>>> = std::sync::LazyLock::new(Default::default);
+
+/// A window's page opening: when it was asked to, each step's time since then, the module files it read, and each
+/// request it asked as it opened, by its id, with what it was and when. Its first frame may come before what it
+/// asked is answered, which it draws as it's waiting for: it's ready once it's drawn and its page says what it asked
+/// for has settled (`notifications/one/drawn`, the UI library's `tellDrawn`), as a browser's page is shown at its
+/// Largest Contentful Paint.
+struct Opening {
+    started: Instant,
+    steps: Vec<(String, u64, Option<u64>, Option<String>)>,
+    asking: HashMap<String, (String, Instant)>,
+    files: (u32, u64),
+    drawn: Option<u64>,
+    settled: bool,
+    app: String,
+}
+
+impl Opening {
+    /// Does `what` to `view`'s opening, while it's opening.
+    fn with(view: &str, what: impl FnOnce(&mut Opening)) {
+        if let Some(opening) = OPENING.lock().expect("nothing panics holding it").get_mut(view) {
+            what(opening)
+        }
+    }
+
+    /// A step of `view`'s opening, now.
+    fn step(view: &str, step: &str) {
+        Self::with(view, |opening| opening.steps.push((step.to_owned(), opening.started.elapsed().as_millis() as u64, None, None)));
+    }
+
+    /// `view`'s page asked `id`, `what` it is, as it opened.
+    fn asked(view: &str, id: &str, what: String) {
+        Self::with(view, |opening| drop(opening.asking.insert(id.to_owned(), (what, Instant::now()))));
+    }
+
+    /// `view`'s page says what it asked for as it opened has settled.
+    fn settled(view: &str) {
+        Self::step(view, "settled");
+        Self::with(view, |opening| opening.settled = true);
+        Self::ready(view);
+    }
+
+    /// `view`'s page was answered `id`, by the server this client asks (`Client::asking`), or read a module file.
+    fn answered(view: &str, id: &str) {
+        Self::with(view, |opening| {
+            let Some((what, sent)) = opening.asking.remove(id) else { return };
+            let took = sent.elapsed().as_millis() as u64;
+            if what == "file" {
+                opening.files = (opening.files.0 + 1, opening.files.1.max(took));
+                return;
+            }
+            let at = sent.duration_since(opening.started).as_millis() as u64;
+            let server = crate::views().ok().and_then(|views| views.client.asking());
+            opening.steps.push((what, at, Some(took), server));
+        });
+    }
+
+    /// `view`'s first frame.
+    fn drawn(view: &str, app: &str) {
+        Self::with(view, |opening| {
+            let (files, slowest) = opening.files;
+            let ms = opening.started.elapsed().as_millis() as u64;
+            opening.steps.push((format!("{files} files read, the slowest in {slowest} ms; drawn"), ms, None, None));
+            opening.drawn = Some(ms);
+            opening.app = app.to_owned();
+        });
+        Self::ready(view);
+    }
+
+    /// `view`'s page is ready, once it's drawn and what it asked as it opened is answered: how it opened, in the log,
+    /// a line, and to Telemetry, a record each step (`one.client.open.step`, how long since it was asked to open, or
+    /// for a request how long it took).
+    fn ready(view: &str) {
+        let mut openings = OPENING.lock().expect("nothing panics holding it");
+        if !openings.get(view).is_some_and(|opening| opening.drawn.is_some() && opening.settled) {
+            return;
+        }
+        let Some(opening) = openings.remove(view) else { return };
+        drop(openings);
+        let (ms, app) = (opening.started.elapsed().as_millis() as u64, opening.app);
+        let said: Vec<String> = opening
+            .steps
+            .iter()
+            .map(|(step, at, took, server)| match (took, server) {
+                (Some(took), server) => format!("{step} at {at} ms took {took} ms ({})", server.as_deref().unwrap_or("no server")),
+                (None, _) => format!("{step} {at} ms"),
+            })
+            .collect();
+        eprintln!("{app} was ready in {ms} ms: {}", said.join(", "));
+        let Ok(views) = crate::views() else { return };
+        for (step, at, took, server) in opening.steps {
+            let step = step.split(" at ").next().unwrap_or_default().to_owned();
+            views.client.report(json!({"name": "one.client.open.step", "took": took.unwrap_or(at), "attributes": {"one.view": app, "one.step": step, "one.server": server}}));
+        }
+    }
+}
+
 /// Opens `entrypoint`'s window here if its page is of a version this program speaks, at `link`, for
 /// `subject`. → whether it did; if not, it opens in a web view, as it needs a newer host. One that should have and
 /// didn't is an error, which Telemetry hears too, for whoever opened it to show.
@@ -403,6 +502,10 @@ async fn window(started: Instant, entrypoint: &str, subject: Option<&str>, link:
         _ => probe(entrypoint, subject, false).await?,
     };
     let Some(Page { page, module, trusted, tables, name: listed, icon }) = page else { return Ok(false) };
+    let view = format!("{}|{entrypoint}", subject.unwrap_or_default());
+    let opening = Opening { started, steps: Vec::new(), asking: HashMap::new(), files: (0, 0), drawn: None, settled: false, app: String::new() };
+    OPENING.lock().expect("nothing panics holding it").insert(view.clone(), opening);
+    Opening::step(&view, "listed");
     let launcher = matches!(kind, Kind::Launcher(..));
     let sheet = match &kind {
         Kind::Sheet(sheet) => Some(sheet.clone()),
@@ -432,13 +535,13 @@ async fn window(started: Instant, entrypoint: &str, subject: Option<&str>, link:
     let window: Arc<OnceLock<WindowId>> = Arc::default();
     let begun = start(entrypoint, subject, link, launcher, Place::Window(window.clone()), &module, page)?;
     let (to, asked) = (begun.to.clone(), begun.asked.clone());
-    let view = format!("{}|{entrypoint}", subject.unwrap_or_default());
 
     // Where the device is with its network, as a page asks as it opens: the Colour Mode chosen on it, if one was.
     let (start_to, start) = tokio::sync::oneshot::channel();
     asked.lock().expect("nothing panics holding it").insert("start".into(), Asked::Start(start_to));
     let _ = to.send(json!({"id": "start", "command": "start", "args": {"entrypoint": entrypoint}}));
     let start = start.await?;
+    Opening::step(&view, "started");
     let chosen = start["theme"].as_str().map(str::to_owned);
     let name = listed.or_else(|| start["name"].as_str().map(str::to_owned)).unwrap_or_else(|| entrypoint.split('/').next().unwrap_or_default().to_owned());
 
@@ -480,6 +583,7 @@ async fn window(started: Instant, entrypoint: &str, subject: Option<&str>, link:
                 // How long it took to open, from being asked to, as a page tells the app's window it has drawn.
                 Event::Drawn => {
                     let ms = started.elapsed().as_millis() as u64;
+                    Opening::drawn(&format!("{}|{entrypoint}", subject.as_deref().unwrap_or_default()), &app);
                     let _ = to.send(json!({"id": "opened", "command": "opened", "args": {"view": app, "ms": ms}}));
                     // A computer's launcher is drawn put away, and is on screen once it's summoned (`Shown`).
                     if !(launcher && cfg!(desktop)) {
@@ -701,12 +805,13 @@ fn start(entrypoint: &str, subject: Option<&str>, link: &str, launcher: bool, pl
         }
     });
     let cache = kept.join(::client::BUILD);
-    let (files_to, files_asked) = (to.clone(), asked.clone());
+    let (files_to, files_asked, files_view) = (to.clone(), asked.clone(), format!("{}|{entrypoint}", subject.unwrap_or_default()));
     let next = std::sync::atomic::AtomicU64::new(0);
     let files: Files = Box::new(move |url: &Url| {
         let id = format!("f{}", next.fetch_add(1, std::sync::atomic::Ordering::Relaxed));
         let (answer_to, answer) = mpsc::channel();
         files_asked.lock().expect("nothing panics holding it").insert(id.clone(), Asked::File(answer_to));
+        Opening::asked(&files_view, &id, "file".to_owned());
         let _ = files_to.send(json!({"id": id, "file": url.as_str()}));
         let file = answer.recv()?.map_err(|error| anyhow::anyhow!("{error}"))?;
         Ok(String::from_utf8(file)?)
@@ -943,6 +1048,12 @@ fn respond(
         }
         return None;
     }
+    // Its page has drawn what it asked for as it opened, which its opening is timed to.
+    if method == "notifications/one/drawn" {
+        let view = state.lock().expect("nothing panics holding it").view.clone();
+        Opening::settled(&view);
+        return None;
+    }
     // Any other notification needs no answer, and none is heard here yet.
     let id = message.get("id").cloned()?;
     let params = &message["params"];
@@ -1153,6 +1264,8 @@ fn respond(
             }
             params["_meta"] = Value::Object(meta);
             asked.lock().expect("nothing panics holding it").insert(at.clone(), Asked::Message(id));
+            let what = params["name"].as_str().or(params["uri"].as_str()).map_or_else(|| method.to_owned(), |name| format!("{method} {name}"));
+            Opening::asked(&state.view, &at, what);
             let _ = to.send(json!({"id": at, "command": "request", "args": {"view": state.view, "method": method, "params": params}}));
             None
         }
@@ -1345,6 +1458,7 @@ fn channel(
             }
             let Some(id) = message["id"].as_str() else { continue };
             let Some(waiting) = asked.lock().expect("nothing panics holding it").remove(id) else { continue };
+            Opening::answered(&view, id);
             let result = match message.get("error") {
                 Some(error) => Err(error.clone()),
                 None => Ok(message["result"].clone()),

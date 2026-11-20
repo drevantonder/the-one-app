@@ -297,6 +297,14 @@ pub struct Client {
 }
 
 impl Client {
+    /// Which server this client asks now, by its key's first 12 hex digits, and how it reaches it (`direct` or
+    /// `relay`), for what it reports of a request: `None` where it reaches none, or it's reaching one now.
+    pub fn asking(&self) -> Option<String> {
+        let reach = self.reach.try_lock().ok()?;
+        let open = reach.open.as_ref().filter(|open| open.open())?;
+        Some(format!("{} {}", &open.connection().remote_id().to_string()[..12], open.path()))
+    }
+
     /// Opens the client kept in `home`, which fills in of a tool's inputs what One Core does and what `resolvers` do,
     /// and answers a server's call of `tools`, the device's own. It opens whether or not its device is in its network:
     /// where that is, is its `state`, which it moves on by itself from here (`sessions`). Only a home it can't read
