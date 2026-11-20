@@ -1160,11 +1160,12 @@ fn latest(builds: &Map<String, Value>) -> Option<&str> {
 
 /// Downloads the build `one` of the program `program` beside it, and gives where, once it has said it's that build.
 /// It's beside the file a link to it names, as on a Mac `~/.local/bin/one` is a link to the program in the One App's
-/// bundle.
+/// bundle, under a name of this process's own (`one.<pid>.new`): the app and the server's `one serve run` each take
+/// the same program at once, which on Windows one couldn't write while the other held it (os error 32).
 async fn fetched_program(one: &Value, program: &Path) -> Result<PathBuf> {
     let build = one["build"].as_str().context("a build says which it is")?;
     ensure!(count(build) >= count(BUILD), "The network's build of one, {build}, is older than this one, {BUILD}.");
-    let packed = program.canonicalize()?.with_extension("new.gz");
+    let packed = program.canonicalize()?.with_extension(format!("{}.new.gz", std::process::id()));
     fetch(&name(), one, &packed).await?;
     let new = packed.with_extension("");
     let unpacked =
@@ -1342,7 +1343,7 @@ impl Here {
     /// Puts the build `build` of the program, kept beside it since an update took it or the one before (`take`), in
     /// place of `program`.
     fn put_program(&self, build: &str, program: &Path) -> Result<()> {
-        let new = program.canonicalize()?.with_extension("new");
+        let new = program.canonicalize()?.with_extension(format!("{}.new", std::process::id()));
         fs::copy(self.program(build), &new)
             .with_context(|| format!("The build {build} of one, which the server's record pairs with its build, isn't kept here"))?;
         put(&new, program)

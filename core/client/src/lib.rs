@@ -187,12 +187,18 @@ pub unsafe fn started_without_window(vm: *mut std::ffi::c_void, context: *mut st
 #[cfg(target_os = "android")]
 static WITHOUT_WINDOW: std::sync::OnceLock<(usize, usize)> = std::sync::OnceLock::new();
 
-/// What asks over the web: the presigner at a network's address, and the bucket by a link. Its TLS is the one iroh
-/// reaches the relay with.
+/// What asks over the web: the presigner at a network's address, the bucket by a link, and the core's release, whose
+/// builds every update downloads. Its TLS is the one iroh reaches the relay with.
 pub fn web() -> Result<reqwest::Client> {
     let tls = iroh::tls::CaTlsConfig::default().client_config(iroh::tls::default_provider())?;
-    Ok(reqwest::Client::builder().tls_backend_preconfigured(tls).connect_timeout(CONNECT).build()?)
+    Ok(reqwest::Client::builder().tls_backend_preconfigured(tls).connect_timeout(WEB_CONNECT).build()?)
 }
+
+/// How long connecting over the web may take: TCP sends a connection's first packet again after one second and then
+/// three more, so two lost on a lossy link take seven. At three seconds, an update's download from GitHub timed out
+/// now and then from machines whose every other connection worked (20 Nov). What must fail fast says so itself
+/// (`.timeout(CONNECT)`).
+const WEB_CONNECT: Duration = Duration::from_secs(15);
 
 fn hex(bytes: &[u8]) -> String {
     data_encoding::HEXLOWER.encode(bytes)
