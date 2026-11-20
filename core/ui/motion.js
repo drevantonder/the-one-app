@@ -40,9 +40,12 @@
 // (the harness's `--seed`: refreshes late, input as things move, presses held as long as a person might), and with
 // each seed a check once failed on (`seeds`). Every check also comes to rest, leaves nothing drawn going, draws every
 // picture, each within a few hundred ms of its page asking for it as the slowest device of its kind decodes it
-// (devices.json's CPU scores, the harness's `--slower`), and any menu, list or dialog open at its end is drawn whole
-// in the window. Every scene on a computer (not `touch`) is walked round by Tab too, and what the keyboard comes to
-// must draw otherwise than it does without it. It says, check by check, which passed, and for
+// (devices.json's CPU scores, the harness's `--slower`), any menu, list or dialog open at its end is drawn whole in
+// the window, and its last frame, drawn on what the window kept from frames before, is the one drawn afresh. Every
+// scene is drawn the same too, the frame it keeps against one afresh, at rest, back from the background, with the
+// system's appearance switched and on a computer its window made smaller; and every scene on a computer (not `touch`)
+// is walked round by Tab, and what the keyboard comes to must draw otherwise than it does without it. It says, check
+// by check, which passed, and for
 // one that failed, its seed, which step and why; it exits 1 where one failed.
 import { cpSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, symlinkSync, watch, writeFileSync } from "node:fs"
 import { basename, dirname, join, relative, resolve } from "node:path"
@@ -85,6 +88,7 @@ export function stale(harness) {
   if (!existsSync(here("dist/build/app.js")) || changed(here("src"), here("tables.ts"), here("build.js")) > statSync(here("dist/build/app.js")).mtimeMs) return "Build the UI library: `bun build.js` in core/ui"
   if (existsSync(harness) && changed(join(root, "clients/app/renderer/src"), join(root, "clients/app/renderer/examples")) > statSync(harness).mtimeMs) return `Build the native harness again, which is older than the renderer: \`cargo build -p renderer --example screenshot --features fake${harness.includes("/release/") ? " --release" : ""}\``
 }
+
 /// The UI library's build a pass runs: its own, until the pass copies it (`copied`).
 let dist = here("dist")
 /// `path` in the UI library's build a pass runs.
@@ -267,7 +271,7 @@ function onDevice() {
 
 /// Runs the harness on `--ssh`'s device, in a folder of its own there with what it's given: its page, its answers and
 /// its requests. → what it said on stdout and stderr, and whether it failed; its `end.json` back in `folder`.
-async function runThere(at, folder, args, lines) {
+export async function runThere(at, folder, args, lines) {
   const base = onDevice()
   const run = `${base}\\${basename(folder)}-${Math.random().toString(36).slice(2, 8)}`
   const staged = join(folder, ".device")
@@ -276,8 +280,10 @@ async function runThere(at, folder, args, lines) {
   cpSync(join(folder, "answers.json"), join(staged, "answers.json"))
   writeFileSync(join(staged, "requests.jsonl"), lines)
   const there = args.map((arg) => (arg === at ? `${run}\\page` : arg === join(folder, "answers.json") ? `${run}\\answers.json` : arg === "-" ? `${run}\\requests.jsonl` : arg.startsWith(folder) ? `${run}\\${basename(arg)}` : arg === library("client") ? `${base}\\ui` : arg))
-  const command = `mkdir "${run}" && tar -xf - -C "${run}" && "${base}\\screenshot.exe" ${there.map((arg) => `"${arg}"`).join(" ")} & type "${run}\\end.json" 1>&2 & rmdir /s /q "${run}"`
-  const ran = Bun.spawn(["sh", "-c", `tar -C "${staged}" -cf - . | ssh ${ssh} '${command}'`], { stdout: "pipe", stderr: "pipe" })
+  // Each argument quoted as Windows' C runtime reads one, a quote in it escaped (an `--errors` list's), and the whole
+  // quoted for the shell here.
+  const command = `mkdir "${run}" && tar -xf - -C "${run}" && "${base}\\screenshot.exe" ${there.map((arg) => `"${arg.replaceAll('"', '\\"')}"`).join(" ")} & type "${run}\\end.json" 1>&2 & rmdir /s /q "${run}"`
+  const ran = Bun.spawn(["sh", "-c", `tar -C "${staged}" -cf - . | ssh ${ssh} '${command.replaceAll("'", "'\\''")}'`], { stdout: "pipe", stderr: "pipe" })
   const [stdout, stderr] = await Promise.all([new Response(ran.stdout).text(), new Response(ran.stderr).text(), ran.exited])
   rmSync(staged, { recursive: true, force: true })
   // Its tree, which it writes at its end, comes back after what it said.
@@ -792,6 +798,7 @@ function requests(steps, folder) {
   const atRest = ({ leaving, moving, blank, picture_ms }) =>
     leaving ? `${leaving} nodes taken out are still drawn` : moving ? `${moving} nodes are still moving` : blank ? `${blank} pictures are drawn empty` : picture_ms > PICTURE_MS ? `a picture took ${picture_ms} ms to show, where ${PICTURE_MS} is the most` : undefined
   out.push({ request: { op: "window" }, judge: (answer) => answer?.result && atRest(answer.result) })
+  out.push({ request: { op: "fresh" }, judge: (answer) => unlike(answer) })
   for (const role of LAYERS)
     out.push({ request: { op: "wait_for", role, state: "shown", timeout: 0 }, judge: (answer) => answer?.result?.node && !answer.result.met && `the ${role} open isn't shown: ${why(answer)}` })
   for (const one of out.slice(end)) one.step = "at its end"
@@ -882,6 +889,46 @@ async function walk(built, scene, folder) {
   return unseen.length ? `Tab's keyboard focus draws nothing on ${[...new Set(unseen)].join(", ")}` : undefined
 }
 
+/// Why a frame drawn on what the window kept from frames before isn't the one drawn afresh (`fresh`), if it isn't: the
+/// two pictures kept beside `folder`, as `kept.png` and `afresh.png`, where given one.
+const unlike = (answer, folder) => {
+  if (answer?.error) return answer.error
+  const { differ, of, box, kept, afresh } = answer?.result ?? {}
+  if (!differ) return
+  if (folder && kept) for (const [name, png] of [["kept", kept], ["afresh", afresh]]) writeFileSync(join(folder, `${name}.png`), Buffer.from(png, "base64"))
+  return `the frame drawn on what it kept differs from one drawn afresh in ${differ} of ${of} pixels${box ? `, from ${box.x},${box.y} ${box.width}×${box.height} px` : ""}`
+}
+
+/// A scene drawn the same however it came to be, as a frame drawn on what was kept from frames before must be, by what
+/// changes under a page that isn't its own: opened and at rest, then after the app's been in the background and back
+/// (`away`, which on an iPhone draws it in the other appearance and back for the app switcher), the system's
+/// appearance switched, and on a computer its window made smaller. → why it failed, or nothing.
+async function agrees(built, scene, folder) {
+  mkdirSync(folder, { recursive: true })
+  const at = pageFolder(built, scene.page, folder, scene.uses)
+  const taps = scene.taps.flatMap((tap) => [pressed(tap), { op: "clock", step: 1000 }])
+  const rest = { op: "clock", step: 2000 }
+  const changes = [
+    ["at rest", []],
+    ["back from the background", [{ op: "away", ms: 1000 }]],
+    [`switched to ${dark ? "Light" : "Dark"}`, [{ op: "appearance", dark: !dark }]],
+    ...(scene.touch ? [] : [["made smaller", [{ op: "resize", width: scene.size[0] - 120, height: scene.size[1] - 80 }]]]),
+  ]
+  const asked = [{ op: "clock", step: 1000 }, ...taps, ...changes.flatMap(([, ops]) => [...ops, rest, { op: "fresh" }]), crash]
+  const done = await run(at, folder, scene, asked)
+  if (done.failed) return `the harness failed: ${done.said.split("\n").at(-1)}`
+  const answers = done.answers.slice(1 + taps.length)
+  if (crashed(answers.at(-1))) return crashed(answers.at(-1))
+  let n = 0
+  for (const [what, ops] of changes) {
+    n += ops.length + 1
+    const own = join(folder, what.replace(/[^\w.-]+/g, "-"))
+    mkdirSync(own, { recursive: true })
+    const why = unlike(answers[n++], own)
+    if (why) return `${what}: ${why} (${own})`
+  }
+}
+
 /// Plays every check of `targets`' scenes. → each line it says, and how many failed.
 async function checks(targets) {
   const said = []
@@ -896,14 +943,16 @@ async function checks(targets) {
       failed++
       continue
     }
-    // Every scene on a computer is walked by Tab too, and those with checks played.
-    const scenes = (await scenesOf(target, built, join(out, name, ".scenes"), true)).filter((scene) => (scene.checks || !scene.touch) && (!only || scene.name.toLowerCase().includes(only)))
+    // Every scene is drawn the same however it came to be, each on a computer walked by Tab too, and those with checks
+    // played.
+    const scenes = (await scenesOf(target, built, join(out, name, ".scenes"), true)).filter((scene) => !only || scene.name.toLowerCase().includes(only))
     for (const scene of scenes) {
       // A trace a check plays is beside its scenes: the gallery's, or an app's client.
       scene.from = target.endsWith("core/ui/gallery") ? target : join(target, "client")
       const own = join(out, name, scene.name.replace(/[^\w.-]+/g, "-"))
       const results = scene.checks ? await check(built, scene, own) : []
       if (!scene.touch) results.push({ name: "Tab shows where the keyboard is", seed: 0, failed: await walk(built, scene, join(own, "tab")) })
+      results.push({ name: "Drawn the same however it came to be", seed: 0, failed: await agrees(built, scene, join(own, "fresh")) })
       for (const [check, runs] of Object.entries(Object.groupBy(results, (result) => result.name))) {
         const bad = runs.filter((run) => run.failed)
         bad.length ? failed++ : passed++

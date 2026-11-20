@@ -1,5 +1,6 @@
 // Draws every scene on the DOM and on a native host, and compares the two: `bun scenes.js [<folder>…] [--out <dir>]
-// [--against <dir>] [--dark] [--size <width>x<height>] [--release] [--web]` in core/ui, after `bun build.js` (and, for the native half, `cargo build -p renderer
+// [--against <dir>] [--dark] [--size <width>x<height>] [--release] [--web] [--ssh <host> --harness <its build of the
+// harness>]` in core/ui, after `bun build.js` (and, for the native half, `cargo build -p renderer
 // --example screenshot --features fake`, `--release` too for `--release`, whose timings are a shipped build's). `--against` compares each scene with an earlier run's too, our renderer's drawing where both have one (the DOM's where not), kept in that
 // `--out`: what a change did to how things look, drawn before it (on main) and after.
 //
@@ -18,7 +19,9 @@
 // Each scene is drawn on the DOM in headless Chromium, in a frame a stand-in client answers, with `--web` by our
 // renderer there too (its web frame, clients/web/renderer, on Chromium's WebGPU: on a machine with no GPU,
 // SwiftShader's, which draws every frame on the CPU, so it's for a change to the web platform; elsewhere native and
-// web draw with the same renderer), and on a native host by
+// web draw with the same renderer), with `--ssh` on a device's GPU too, by its own build of the harness (a Windows
+// one's Direct3D 12, as motion.js plays there: where each node is laid out there and here, and how much of the
+// pictures differs, `device.png` beside `afresh.png`, drawn the same way here), and on a native host by
 // its headless harness (clients/app/renderer's `screenshot` example), each as a picture and its semantic tree as text
 // (src/drawing-primitives/outline.ts). It says, scene by scene, whether the trees are the same and how much of the pictures
 // differs, and keeps them all in `--out` to look at. A native host that can't draw a page yet (an older runtime
@@ -38,7 +41,7 @@ import { PNG } from "pngjs"
 import pixelmatch from "pixelmatch"
 import { outline } from "./src/drawing-primitives/outline.ts"
 import { messages } from "./src/words.ts"
-import { build, capped, COMPONENTS, copied, env, library, pageFolder, stale, stopped, usedApp } from "./motion.js"
+import { build, capped, COMPONENTS, copied, env, library, pageFolder, runThere, stale, stopped, usedApp } from "./motion.js"
 
 const here = (path) => fileURLToPath(new URL(path, import.meta.url))
 const root = here("../../")
@@ -51,7 +54,9 @@ const onTheWeb = flag("--web")
 // Every scene in a window this size, as a computer's, where it says none of its own.
 const sized = option("--size")?.split("x").map(Number)
 const against = option("--against") && resolve(option("--against"))
-const folders = args.filter((arg, at) => !arg.startsWith("--") && !["--out", "--against", "--size"].includes(args[at - 1])).map((folder) => resolve(folder))
+// A device over ssh (`--ssh`, with its own build of the harness, `--harness`) draws each scene too, as motion.js plays there.
+const ssh = option("--ssh")
+const folders = args.filter((arg, at) => !arg.startsWith("--") && !["--out", "--against", "--size", "--ssh", "--harness"].includes(args[at - 1])).map((folder) => resolve(folder))
 const targets = folders.length ? folders : [here("gallery"), ...readdirSync(join(root, "apps")).map((app) => join(root, "apps", app)).filter((app) => existsSync(join(app, "client/scenes.json")))]
 let harness = join(root, `target/${flag("--release") ? "release" : "debug"}/examples/screenshot`)
 // The runtime version the UI library needs, and the native host's: a host whose version is older draws nothing of a
@@ -269,11 +274,10 @@ function native(built, scene, folder, used) {
   writeFileSync(join(folder, "answers.json"), JSON.stringify(answers))
   // The harness's clock stands still, so what moves as the page opens and after each tap is moved on to where it
   // settles, as the DOM's is, and what's laid out once it's drawn (onLayout) is drawn again.
-  const requests = [{ op: "clock", step: 1000 }, ...scene.taps.flatMap((tap) => [tap.key ? { op: "key", ...tap } : tap.type ? { op: "type", text: tap.type } : { op: "tap", ...(typeof tap === "object" ? tap : { name: tap }) }, { op: "clock", step: 1000 }])].map((request, at) => JSON.stringify({ v: 1, id: at + 1, ...request })).join("\n")
-  const run = Bun.spawnSync(
-    capped([harness, at, join(folder, "native.png"), join(folder, "native.json"), "--ui", library("client"), "--answers", join(folder, "answers.json"), "--size", `${scene.size[0]}x${scene.size[1]}`, "--scale", "2", "--measure", "--latency", String(LATENCY_MS), "--cached", kept.join(","), ...(dark ? ["--dark"] : []), ...(scene.touch ? ["--touch"] : []), ...(scene.errors ? ["--errors", JSON.stringify(scene.errors)] : []), "--time-zone", scene.timeZone, ...(requests ? ["--requests", "-"] : [])]),
-    { stdin: requests ? new TextEncoder().encode(requests) : undefined, env },
-  )
+  // With a device to draw it too, each ends at rest with where every node is and a picture drawn afresh, to compare.
+  const requests = [{ op: "clock", step: 1000 }, ...scene.taps.flatMap((tap) => [tap.key ? { op: "key", ...tap } : tap.type ? { op: "type", text: tap.type } : { op: "tap", ...(typeof tap === "object" ? tap : { name: tap }) }, { op: "clock", step: 1000 }]), ...(ssh ? DRAWN : [])].map((request, at) => JSON.stringify({ v: 1, id: at + 1, ...request })).join("\n")
+  const asked = [at, join(folder, "native.png"), join(folder, "native.json"), "--ui", library("client"), "--answers", join(folder, "answers.json"), "--size", `${scene.size[0]}x${scene.size[1]}`, "--scale", "2", "--measure", "--latency", String(LATENCY_MS), "--cached", kept.join(","), ...(dark ? ["--dark"] : []), ...(scene.touch ? ["--touch"] : []), ...(scene.errors ? ["--errors", JSON.stringify(scene.errors)] : []), "--time-zone", scene.timeZone, "--requests", "-"]
+  const run = Bun.spawnSync(capped([harness, ...asked]), { stdin: new TextEncoder().encode(requests), env })
   if (run.exitCode !== 0 || !existsSync(join(folder, "native.json"))) return { missing: stopped(run.exitCode) ?? (run.stderr.toString().trim().split("\n").at(-1) || "the harness drew nothing") }
   const nodes = JSON.parse(readFileSync(join(folder, "native.json"), "utf8"))
   // Its tree: each node's role, name and what it is (its states, by ARIA's names, beside them), and its words.
@@ -282,7 +286,32 @@ function native(built, scene, folder, used) {
   const tree = outline({ states: {}, children: (Array.isArray(nodes) ? nodes : [nodes]).map(semantic) })
   writeFileSync(join(folder, "native.txt"), tree)
   const measured = run.stderr.toString().match(/^measured (.*)$/m)
-  return { tree, measured: measured && JSON.parse(measured[1]) }
+  return { tree, measured: measured && JSON.parse(measured[1]), answers: answered(run.stdout.toString()), at, asked, requests }
+}
+
+/// What each scene ends with where a device draws it too: at rest, where each node is, and a picture drawn afresh.
+const DRAWN = [{ op: "clock", step: 3000 }, { op: "query" }, { op: "snap" }]
+const answered = (stdout) => stdout.split("\n").filter(Boolean).map((line) => JSON.parse(line))
+
+/// A scene drawn on `--ssh`'s device by its own GPU, as here: where each node is laid out there and here, and how much
+/// of the two pictures differs, beyond what one GPU's rounding does differently from another's. → what it says.
+async function onDevice(drawn, folder) {
+  const there = await runThere(drawn.at, folder, drawn.asked, drawn.requests)
+  const theirs = answered(there.stdout)
+  if (there.failed || theirs.length < DRAWN.length) return [`  device: it drew nothing: ${there.stderr.trim().split("\n").at(-1)}`]
+  const [[, ours, mine], [, its, picture]] = [drawn.answers, theirs].map((answers) => answers.slice(-DRAWN.length))
+  const said = []
+  const [here, away] = [ours, its].map((answer) => answer?.result?.nodes ?? [])
+  const box = ({ rect }) => (rect ? `${rect.x},${rect.y} ${rect.width}×${rect.height}` : "nowhere")
+  const moved = here.filter((node, at) => !away[at] || ["x", "y", "width", "height"].some((edge) => Math.abs((node.rect?.[edge] ?? 0) - (away[at].rect?.[edge] ?? 0)) > 0.5))
+  if (here.length !== away.length) said.push(`  device: ${away.length} nodes there, ${here.length} here`)
+  if (moved.length) said.push(`  device: ${moved.length} nodes laid out elsewhere, as ${moved.slice(0, 3).map((node) => `${node.role ?? node.kind} "${node.name ?? ""}" at ${box(node)} here, ${box(away[here.indexOf(node)] ?? {})} there`).join("; ")}`)
+  if (!mine?.result?.png || !picture?.result?.png) return [...said, `  device: no picture: ${picture?.error ?? mine?.error}`]
+  writeFileSync(join(folder, "afresh.png"), Buffer.from(mine.result.png, "base64"))
+  writeFileSync(join(folder, "device.png"), Buffer.from(picture.result.png, "base64"))
+  const part = differs(join(folder, "afresh.png"), join(folder, "device.png"), join(folder, "device-diff.png"))
+  said.push(`  here and on the device: pictures ${part === undefined ? "aren't the same size" : `${(part * 100).toFixed(1)}% different${part > 0.005 ? " (over 0.5%)" : ""}`}`)
+  return said
 }
 
 /// How quickly the native host drew a scene, as a line.
@@ -382,6 +411,7 @@ for (const target of targets) {
       said.push(`  opens slowly: its first content came ${drawn.measured.first_content_ms} ms after it opened, over ${OPENS_WITHIN_MS} ms, with each answer a client doesn't keep ${LATENCY_MS} ms away`)
       process.exitCode = 1
     }
+    if (ssh && !drawn.missing) said.push(...(await onDevice(drawn, folder)))
     if (onWeb.missing) said.push(`  web: ${onWeb.missing}`)
     else if (onTheWeb && !drawn.missing) {
       const part = differs(join(folder, "native.png"), join(folder, "web.png"), join(folder, "web-diff.png"))

@@ -2216,8 +2216,7 @@ impl Windows {
         }
         let scale = window.parts[0].native.scale();
         let (width, height) = ((window.room.width.0 * scale).round() as u32, (window.room.height.0 * scale).round() as u32);
-        let dark = window.screen.as_ref().ok().and_then(|screen| screen.theme).unwrap_or(appearance()) == crate::Appearance::Dark;
-        let glass: [u8; 3] = if dark { [30, 30, 32] } else { [236, 236, 238] };
+        let glass = glass(window);
         let mut rgba: Vec<u8> = (0..width * height).flat_map(|_| [glass[0], glass[1], glass[2], 255]).collect();
         for part in &mut window.parts {
             let (left, top) = ((part.bounds.origin.x * scale).round() as i64, (part.bounds.origin.y * scale).round() as i64);
@@ -2385,6 +2384,31 @@ impl Windows {
         self.windows.get(&id).map_or(0, |window| window.frames)
     }
 
+    /// The system's appearance becomes `appearance`, as a person switching between Light and Dark makes it (or their
+    /// schedule does): every window is told, as its host tells it.
+    pub fn appearance(&mut self, appearance: crate::Appearance) {
+        fake::appear(appearance);
+        for id in self.windows.keys().copied().collect::<Vec<_>>() {
+            self.display.push(id, Input::Appearance(appearance));
+        }
+    }
+
+    /// `rgba`, a picture of window `id`'s page `width` pixels wide, as its compositor shows it (`presented`): a
+    /// panel's only where its parts are, on the system's glass.
+    pub fn on_glass(&self, id: WindowId, width: u32, rgba: &mut [u8]) {
+        let Some(window) = self.windows.get(&id).filter(|window| window.parts.len() > 1 || window.panel) else { return };
+        let (glass, scale) = (glass(window), window.parts[0].native.scale());
+        let shown = |x: f32, y: f32| window.parts.iter().any(|part| part.bounds.contains(&crate::geometry::point(x, y)));
+        for (at, pixel) in rgba.chunks_mut(4).enumerate() {
+            let (x, y) = ((at as u32 % width) as f32 + 0.5, (at as u32 / width) as f32 + 0.5);
+            let alpha = if shown(x / scale, y / scale) { u32::from(pixel[3]) } else { 0 };
+            for channel in 0..3 {
+                pixel[channel] = ((u32::from(pixel[channel]) * alpha + u32::from(glass[channel]) * (255 - alpha)) / 255) as u8;
+            }
+            pixel[3] = 255;
+        }
+    }
+
     /// Whether input to window `id` waits for its page to catch up (`waits`), not handled yet.
     pub fn waiting(&self, id: WindowId) -> bool {
         self.windows.get(&id).is_some_and(|window| !window.waiting.is_empty())
@@ -2420,6 +2444,15 @@ pub use fake::time as fake_time;
 /// How long since `at`, by `now`.
 pub(crate) fn since(at: web_time::Instant) -> std::time::Duration {
     now().saturating_duration_since(at)
+}
+
+/// The system's glass a panel is shown over, a flat grey of its Colour Mode here.
+#[cfg(feature = "fake")]
+fn glass(window: &Window) -> [u8; 3] {
+    match window.screen.as_ref().ok().and_then(|screen| screen.theme).unwrap_or(appearance()) {
+        crate::Appearance::Dark => [30, 30, 32],
+        crate::Appearance::Light => [236, 236, 238],
+    }
 }
 
 /// Whether what draws on `native` would draw at once: the pipelines its surface draws with are compiled

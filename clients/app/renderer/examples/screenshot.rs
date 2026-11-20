@@ -15,8 +15,8 @@
 //! lavapipe, where there's no GPU), or on Windows Direct3D 12's (WARP, Windows' own software one, where there's none). `--requests` gives it the inspector's requests first, one a line
 //! (`renderer::inspect`), as a native window takes them on its socket, from a file or stdin (`-`), each answered on
 //! stdout, a frame drawn before each: `{"v":1,"id":1,"op":"tap","text":"Backups"}`. What a person does (`tap`, `hover`, `key`,
-//! `scroll`, `drag`, `replay`, `away`, the app going to the background and back, a panel's `put_away` and `summon`, and the
-//! device's `back`)
+//! `scroll`, `drag`, `replay`, `away`, the app going to the background and back, a panel's `put_away` and `summon`, the
+//! device's `back`, the system's `appearance` switched and the window's `resize`)
 //! comes as the display's input, each event at its own time, a click held down 80 ms,
 //! and what it presses scrolled into sight first, as Playwright's click does. Its clock is paused: `clock`'s `step`
 //! moves it, the display ticking each frame meanwhile; and after the requests, until what it shows comes to rest but
@@ -179,7 +179,6 @@ fn main() -> anyhow::Result<()> {
     let mut screen = Screen::new(js, Some(asked));
     screen.insets = insets;
     screen.page = tokens_page;
-    screen.theme = Some(if dark { Appearance::Dark } else { Appearance::Light });
     screen.touch = touch;
     // A phone's, as an iPhone's host says its person's text size: its body text's 17 pt, which the `phone` tokens are made for.
     screen.text_size = touch.then_some(17.0);
@@ -223,6 +222,8 @@ fn main() -> anyhow::Result<()> {
     let before = resident();
     let mut windows = Windows::fake(scale, 60.0, clock.clone())?;
     windows.prepared();
+    // `--dark` is the system's, as a phone's or a computer's Dark mode is, which the app follows, so it can change.
+    windows.appearance(if dark { Appearance::Dark } else { Appearance::Light });
     // A phone's window (`--touch`) is the whole of its screen, as every window there but a panel is.
     if touch && panel.is_none() {
         windows.phone(Size { width: Pixels(width), height: Pixels(height) });
@@ -298,8 +299,7 @@ fn main() -> anyhow::Result<()> {
             });
             let mut screen = Screen::new(js, Some(asked));
             screen.page = tokens_page;
-            screen.theme = Some(if dark { Appearance::Dark } else { Appearance::Light });
-            screen.touch = touch;
+                    screen.touch = touch;
             screen.text_size = touch.then_some(17.0);
             let at = |edge: &str| from[edge].as_f64().unwrap_or_default() as f32;
             let icon = from.is_object().then(|| renderer::geometry::Bounds { origin: renderer::geometry::point(at("x"), at("y")), size: Size { width: at("width"), height: at("height") } });
@@ -526,8 +526,9 @@ fn ask(windows: &mut Windows, id: renderer::platform::WindowId, mut request: Val
 /// events, each at its own time, with the display's frames between, as a host gives a window input, and its time
 /// moved on with the display ticking through it. On a phone's window (`--touch`), a press is a finger's. And what the
 /// platform's keyboard was told (`keyboard`), and what its menu for text and magnifier were asked to show, with the
-/// handles drawn (`text_selection`), which only the fake platform knows.
-const INPUT: [&str; 17] = ["tap", "hover", "down", "up", "key", "scroll", "drag", "replay", "trace", "clock", "wait_for", "away", "put_away", "summon", "back", "keyboard", "text_selection"];
+/// handles drawn (`text_selection`), which only the fake platform knows; the system's appearance switched
+/// (`appearance`), the window resized (`resize`), and its last frame beside one drawn afresh (`fresh`).
+const INPUT: [&str; 20] = ["tap", "hover", "down", "up", "key", "scroll", "drag", "replay", "trace", "clock", "wait_for", "away", "put_away", "summon", "back", "keyboard", "text_selection", "appearance", "resize", "fresh"];
 
 /// The longest it's run for, at the end, for what it shows to come to rest.
 const SETTLE_MS: f64 = 3000.0;
@@ -649,6 +650,52 @@ fn input(windows: &mut Windows, id: renderer::platform::WindowId, request: &rend
         // The app goes to the background for `ms` and comes back, as a phone's does (`Windows::away`): `drawn` is how
         // many frames it drew meanwhile, which a phone's GPU refuses.
         "away" => Ok(json!({"drawn": windows.away(request.f64("ms").unwrap_or(1000.0))})),
+        // The system's appearance switched to Dark (`dark`) or Light, as a person or their schedule does.
+        "appearance" => {
+            windows.appearance(if request.bool("dark") { Appearance::Dark } else { Appearance::Light });
+            windows.run(0.0);
+            Ok(json!({}))
+        }
+        // The window made `width` × `height` points, as a person drags a computer's window's edge or a phone turns.
+        "resize" => {
+            let (width, height) = (request.f64("width"), request.f64("height").ok_or_else(|| anyhow::anyhow!("say its height"))?);
+            windows.resize(id, width.map(|width| width as f32), height as f32);
+            windows.run(0.0);
+            Ok(json!({}))
+        }
+        // The frame the window's page presented last, drawn on what it kept from frames before, beside one drawn
+        // afresh as it is now (`snap`): how many of their pixels differ, and where, as a frame must be the same however
+        // it was come to; with both pictures where they differ. What's still moving (a spinner, which never comes to
+        // rest) is drawn afresh a moment on from its last frame, so is only said to be moving.
+        "fresh" => {
+            drawn(windows, id);
+            if windows.wanted() {
+                return Ok(json!({"moving": true}));
+            }
+            let (width, height, kept) = windows.presented(id).ok_or_else(|| anyhow::anyhow!("it has presented nothing"))?;
+            let snap = ask(windows, id, json!({"op": "snap"})).ok_or_else(|| anyhow::anyhow!("its window didn't answer"))?;
+            let png = snap["result"]["png"].as_str().ok_or_else(|| anyhow::anyhow!("it drew nothing afresh: {}", snap["error"]))?;
+            let mut afresh = image::load_from_memory(&data_encoding::BASE64.decode(png.as_bytes())?)?.to_rgba8();
+            windows.on_glass(id, width, &mut afresh);
+            if afresh.dimensions() != (width, height) {
+                anyhow::bail!("it presented {width}×{height} px, and drew {:?} afresh", afresh.dimensions());
+            }
+            // A channel more than a few levels apart, past what blending in another order or a curve's edge rounds to.
+            let (mut differ, mut left, mut top, mut right, mut bottom) = (0u32, width, height, 0, 0);
+            for (at, (was, now)) in kept.chunks(4).zip(afresh.as_raw().chunks(4)).enumerate() {
+                if was.iter().zip(now).any(|(was, now)| was.abs_diff(*now) > 8) {
+                    let (x, y) = (at as u32 % width, at as u32 / width);
+                    (differ, left, top, right, bottom) = (differ + 1, left.min(x), top.min(y), right.max(x + 1), bottom.max(y + 1));
+                }
+            }
+            let mut answer = json!({"differ": differ, "of": width * height});
+            if differ > 0 {
+                answer["box"] = json!({"x": left, "y": top, "width": right - left, "height": bottom - top});
+                answer["kept"] = renderer::inspect::png(width, height, kept)?["png"].clone();
+                answer["afresh"] = renderer::inspect::png(width, height, afresh.into_raw())?["png"].clone();
+            }
+            Ok(answer)
+        }
         // A panel (`--panel`) put away, as its shortcut or a click outside it does a launcher, and summoned again.
         "put_away" => {
             windows.put_away(id, false);

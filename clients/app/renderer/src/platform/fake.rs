@@ -415,8 +415,19 @@ pub fn fallback_fonts() -> anyhow::Result<Vec<Vec<u8>>> {
         .collect()
 }
 
+/// Whether the system is in Dark mode, which a harness says (`Windows::appearance`): Light until it does.
+static DARK: std::sync::atomic::AtomicBool = std::sync::atomic::AtomicBool::new(false);
+
 pub fn appearance() -> crate::Appearance {
-    crate::Appearance::Light
+    match DARK.load(std::sync::atomic::Ordering::Relaxed) {
+        true => crate::Appearance::Dark,
+        false => crate::Appearance::Light,
+    }
+}
+
+/// The system's appearance is now `appearance`, as a person switching between Light and Dark makes it.
+pub fn appear(appearance: crate::Appearance) {
+    DARK.store(appearance == crate::Appearance::Dark, std::sync::atomic::Ordering::Relaxed);
 }
 
 pub fn reduced_motion() -> bool {
