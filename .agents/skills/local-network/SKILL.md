@@ -41,8 +41,8 @@ then `one vault grant --servers <key>` (`one vault security` lists them).
 ## Signing a device in
 
 A device that isn't `<folder>/client` (a phone, the simulator, another client home) signs in at the network's
-address, which it prints. Put `{"address": "<the address>"}` in its home's `network` file (or build it with
-`TAURI_ONE_ADDRESS`), open it, and it shows a code. Then, as whoever it's to be, one step:
+address, which it prints. Put `{"address": "<the address>"}` in its home's `network` file (or in its own resources: `clients/app/README.md`),
+open it, and it shows a code. Then, as whoever it's to be, one step:
 
     ONE_AS=alice one sign-in approve --code WDJB-MJHT
 

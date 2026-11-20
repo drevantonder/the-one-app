@@ -24,19 +24,14 @@ fn main() {
     });
     println!("cargo:rustc-env=ONE_BUILD={build}");
 
-    // What the app is to the system it's on is its build's Tauri identifier: `clients/app/tauri.conf.json`'s, or the
-    // one a build merges over it, as a network's own does with `cargo tauri build --config <its file>`, which hands
-    // it on as `TAURI_CONFIG`. It names the folder a client on a computer is kept in (`NAME`), so the CLI, built
-    // without Tauri, keeps what the app does.
-    println!("cargo:rerun-if-env-changed=TAURI_CONFIG");
+    // What the app is to the system it's on is its Tauri identifier, `clients/app/tauri.conf.json`'s. It names the
+    // folder a client on a computer is kept in (`NAME`), so the CLI, built without Tauri, keeps what the app does.
     println!("cargo:rerun-if-changed=../../clients/app/tauri.conf.json");
-    let identifier = |config: &str| {
-        serde_json::from_str::<Value>(config).expect("Tauri's config is JSON")["identifier"].as_str().map(str::to_owned)
-    };
-    let merged = std::env::var("TAURI_CONFIG").ok().and_then(|config| identifier(&config));
-    let base =
-        std::fs::read_to_string("../../clients/app/tauri.conf.json").expect("clients/app/tauri.conf.json is there");
-    let identifier = merged.or_else(|| identifier(&base)).expect("Tauri's config has an identifier");
+    let config = std::fs::read_to_string("../../clients/app/tauri.conf.json").expect("clients/app/tauri.conf.json is there");
+    let identifier = serde_json::from_str::<Value>(&config).expect("Tauri's config is JSON")["identifier"]
+        .as_str()
+        .expect("Tauri's config has an identifier")
+        .to_owned();
     // A debug build is a different app to the system, as Chrome Canary and Electron's and Expo's development builds
     // are: its own folder, never the installed one's, so a build tried from a checkout can't open its person's own
     // client. `ONE_HOME` still says where it's kept instead.

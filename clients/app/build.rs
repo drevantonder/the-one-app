@@ -22,16 +22,13 @@ fn main() {
     }
 }
 
-/// A computer's app's name (`NAME` in lib.rs), as `tauri.conf.json` has it and whatever a network's build merges over
-/// it (`TAURI_CONFIG`), as a phone's Tauri build has it.
+/// A computer's app's name (`NAME` in lib.rs), as `tauri.conf.json` has it.
 #[cfg(feature = "window")]
 fn name() {
     let folder = std::path::PathBuf::from(std::env::var("CARGO_MANIFEST_DIR").expect("cargo says"));
     println!("cargo::rerun-if-changed=tauri.conf.json");
-    println!("cargo::rerun-if-env-changed=TAURI_CONFIG");
     let config: serde_json::Value = serde_json::from_slice(&std::fs::read(folder.join("tauri.conf.json")).expect("tauri.conf.json")).expect("it's JSON");
-    let merged: Option<serde_json::Value> = std::env::var("TAURI_CONFIG").ok().and_then(|config| serde_json::from_str(&config).ok());
-    let name = merged.as_ref().and_then(|merged| merged["productName"].as_str()).or(config["productName"].as_str()).expect("the app has a name");
+    let name = config["productName"].as_str().expect("the app has a name");
     let to = std::path::PathBuf::from(std::env::var("OUT_DIR").expect("cargo says")).join("name.rs");
     std::fs::write(to, format!("pub(crate) const NAME: &str = {name:?};\n")).expect("OUT_DIR takes it");
 }

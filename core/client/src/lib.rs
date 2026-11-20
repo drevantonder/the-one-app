@@ -250,9 +250,56 @@ pub fn home() -> Result<PathBuf> {
 /// (`build.rs`): a client of its own, never the installed one's.
 pub const NAME: &str = env!("ONE_IDENTIFIER");
 
-/// The address of the network an app was built for, if it was: what `TAURI_ONE_ADDRESS` was as it was built. Tauri's
-/// builds for phones give the Rust build only the variables whose names start with TAURI.
-const BUILT_FOR: Option<&str> = option_env!("TAURI_ONE_ADDRESS");
+/// The `network` file an app made for one network has among its resources, if it has one: `{"address": "https://..."}`,
+/// which the network's finishing puts in the plain build, as white-label apps are made (`tooling/testflight`). An app
+/// with none starts on no network until one is given. Its resources are beside its program, or a Mac bundle's
+/// `Contents/Resources`, or on Android its APK's `assets`.
+fn bundled() -> Result<Option<NetworkConfig>> {
+    let Some(network) = bundled_file() else { return Ok(None) };
+    Ok(Some(serde_json::from_slice(&network).context("the app's own `network` isn't a network's address")?))
+}
+
+#[cfg(not(target_os = "android"))]
+fn bundled_file() -> Option<Vec<u8>> {
+    let program = env::current_exe().ok()?.canonicalize().ok()?;
+    let folder = program.parent()?;
+    #[cfg(target_os = "macos")]
+    let folder = &folder.parent()?.join("Resources");
+    fs::read(folder.join("network")).ok()
+}
+
+#[cfg(target_os = "android")]
+fn bundled_file() -> Option<Vec<u8>> {
+    use jni::objects::JObject;
+    let (vm, context) = android_context();
+    let vm = unsafe { jni::JavaVM::from_raw(vm.cast()) }.ok()?;
+    let mut env = vm.attach_current_thread().ok()?;
+    let context = unsafe { JObject::from_raw(context.cast()) };
+    let mut read = || -> jni::errors::Result<Vec<u8>> {
+        let assets = env.call_method(&context, "getAssets", "()Landroid/content/res/AssetManager;", &[])?.l()?;
+        let name = env.new_string("network")?;
+        let stream = env.call_method(&assets, "open", "(Ljava/lang/String;)Ljava/io/InputStream;", &[(&name).into()])?.l()?;
+        let buffer = env.new_byte_array(4096)?;
+        let mut bytes = Vec::new();
+        loop {
+            let count = env.call_method(&stream, "read", "([B)I", &[(&buffer).into()])?.i()?;
+            if count < 0 {
+                break;
+            }
+            let mut chunk = vec![0i8; count as usize];
+            env.get_byte_array_region(&buffer, 0, &mut chunk)?;
+            bytes.extend(chunk.into_iter().map(|byte| byte as u8));
+        }
+        env.call_method(&stream, "close", "()V", &[])?;
+        Ok(bytes)
+    };
+    let bytes = read();
+    // An app with no `network` among its assets: AssetManager says so by throwing.
+    if bytes.is_err() {
+        let _ = env.exception_clear();
+    }
+    bytes.ok()
+}
 
 /// A client, kept in its home folder: its `key`, where its `network` is or its `servers` are, and what servers
 /// answered (`kept`).
@@ -327,8 +374,8 @@ impl Client {
             Ok(network) => {
                 Some(serde_json::from_slice::<NetworkConfig>(&network).context("`network` isn't a network's address")?)
             }
-            // An app built for one network knows its address.
-            Err(error) if error.kind() == ErrorKind::NotFound => BUILT_FOR.map(NetworkConfig::at),
+            // An app made for one network knows its address.
+            Err(error) if error.kind() == ErrorKind::NotFound => bundled()?,
             Err(error) => return Err(error).context("couldn't read `network`"),
         };
         let key = key(&home.join("key"))?;

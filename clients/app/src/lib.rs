@@ -35,8 +35,7 @@ mod native;
 
 #[cfg(mobile)]
 pub(crate) mod page;
-// The app's name, as `tauri.conf.json` has it, and whatever a network's build merges over it (`TAURI_CONFIG`), as a
-// phone's Tauri build has it (`build.rs`).
+// The app's name, as `tauri.conf.json` has it (`build.rs`).
 #[cfg(desktop)]
 include!(concat!(env!("OUT_DIR"), "/name.rs"));
 mod updater;
