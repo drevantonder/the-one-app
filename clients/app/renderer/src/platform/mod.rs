@@ -752,12 +752,34 @@ impl Windows {
         }
     }
 
-    /// What draws `native`, where it has a surface to draw on yet and the app isn't in the background.
+    /// What draws `native`, where it has a surface to draw on yet, the app isn't in the background, and the pipelines
+    /// it draws with are compiled: until they are, it has none, so the windows' thread never waits for them, and is
+    /// given one as they are (`compiled`).
     fn renderer(&self, native: &NativeWindow) -> anyhow::Result<Option<Renderer>> {
-        if self.background || !native.has_surface() {
+        if self.background || !native.has_surface() || !drawable(&self.context, native) {
             return Ok(None);
         }
         drawn_on(&self.context, self.atlas.clone(), native).map(Some)
+    }
+
+    /// The pipelines a kind of window draws with are compiled (`Context::prepare`): each window waiting for them has
+    /// its renderer now, and is drawn.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub(crate) fn compiled(&mut self) {
+        let waiting: Vec<WindowId> = self.windows.iter().filter(|(_, window)| window.parts[0].renderer.is_none()).map(|(id, _)| *id).collect();
+        for id in waiting {
+            let made = match self.renderer(&self.windows[&id].parts[0].native) {
+                Ok(made) => made,
+                Err(error) => {
+                    log::error!("native window {id} can't draw: {error:#}");
+                    continue;
+                }
+            };
+            if let Some(window) = self.windows.get_mut(&id) {
+                window.parts[0].renderer = made;
+                window.dirty = true;
+            }
+        }
     }
 
     /// Whether a window holds something its person typed that its app hasn't taken (`Screen::typed`): any app's, and
@@ -1418,7 +1440,9 @@ impl Windows {
             // where it has a snapshot, which it shows until then.
             let starting = (window.pending || window.screen.as_ref().is_ok_and(Screen::starting)) && since(window.opened) < SHOWN_WITHIN;
             if !window.shown {
-                if starting && window.picture.is_none() {
+                // Not before it can be drawn, so it never shows with nothing drawn on it: as its pipelines compile
+                // (`compiled`).
+                if (starting && window.picture.is_none()) || (window.parts[0].native.has_surface() && window.parts[0].renderer.is_none() && !self.background) {
                     continue;
                 }
                 window.shown = true;
@@ -2367,6 +2391,21 @@ pub use fake::time as fake_time;
 /// How long since `at`, by `now`.
 pub(crate) fn since(at: web_time::Instant) -> std::time::Duration {
     now().saturating_duration_since(at)
+}
+
+/// Whether what draws on `native` would draw at once: the pipelines its surface draws with are compiled
+/// (`Context::compiled`).
+#[cfg(not(feature = "fake"))]
+fn drawable(context: &Context, native: &NativeWindow) -> bool {
+    let (format, premultiplied) = crate::render::context::surface_pipelines(native.transparent());
+    context.compiled(format, premultiplied)
+}
+
+/// Whether what draws on `native` on the fake platform would draw at once: its offscreen image's pipelines are
+/// compiled.
+#[cfg(feature = "fake")]
+fn drawable(context: &Context, _: &NativeWindow) -> bool {
+    context.compiled(crate::render::renderer::OFFSCREEN_FORMAT, false)
 }
 
 /// What draws on `native`: its surface, which the system shows.

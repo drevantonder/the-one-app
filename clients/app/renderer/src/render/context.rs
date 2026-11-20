@@ -6,7 +6,7 @@
 
 use anyhow::Context as _;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, OnceLock};
 
 /// The GPU, shared by what draws: every window's surface and every offscreen texture, with the pipelines each format
 /// of target draws with, compiled once for every window.
@@ -22,8 +22,17 @@ pub struct Context {
 }
 
 /// The pipelines each format of target draws with, by that format and whether it's premultiplied, compiled once for
-/// every window: by the first that draws to one, or ahead of it (`Context::prepare`).
-pub(crate) type Compiled = Arc<Mutex<Vec<(wgpu::TextureFormat, bool, Arc<super::renderer::Pipelines>)>>>;
+/// every window: by the first that draws to one, or ahead of it (`Context::prepare`). Each is a slot of its own, so
+/// one being compiled holds up only what needs it.
+pub(crate) type Compiled = Arc<Mutex<Vec<(wgpu::TextureFormat, bool, Arc<OnceLock<Arc<super::renderer::Pipelines>>>)>>>;
+
+/// The pipelines a window's surface draws with on this platform, as `Renderer::new` picks them where its surface offers
+/// them: BGRA (Android's RGBA), premultiplied where it's see-through on Windows and Linux (Metal composites no surface
+/// premultiplied, and a phone's windows are never see-through).
+pub(crate) fn surface_pipelines(transparent: bool) -> (wgpu::TextureFormat, bool) {
+    let format = if cfg!(target_os = "android") { wgpu::TextureFormat::Rgba8Unorm } else { wgpu::TextureFormat::Bgra8Unorm };
+    (format, transparent && cfg!(any(target_os = "windows", target_os = "linux")))
+}
 
 /// The one backend each platform draws with: the browser's WebGPU on the web.
 const BACKENDS: wgpu::Backends = if cfg!(target_arch = "wasm32") {
@@ -44,19 +53,32 @@ impl Context {
     /// composites no surface premultiplied (it offers Opaque and PostMultiplied), so a Mac's windows draw only straight
     /// alpha too. Compiling the premultiplied pipelines first had the first window wait for them and then compile its
     /// own: a Mac's Home Screen (its renderer 279 ms, 20 Nov), and the Surface's windows reopened after an update
-    /// (2 s, issue 26).
+    /// (2 s, issue 26). Each is said to be on its way before this returns (`compiled`), and the windows' thread is told
+    /// as each is compiled (`Windows::compiled`), so no window waits on that thread for them, and none waits on
+    /// another's.
     #[cfg(not(target_arch = "wasm32"))]
     pub fn prepare(&self) {
         let (device, queue, compiled) = (self.device.clone(), self.queue.clone(), self.pipelines.clone());
-        let format = if cfg!(target_os = "android") { wgpu::TextureFormat::Rgba8Unorm } else { wgpu::TextureFormat::Bgra8Unorm };
-        let kinds: &'static [bool] = if cfg!(any(target_os = "windows", target_os = "linux")) { &[false, true] } else { &[false] };
+        let mut sets = vec![surface_pipelines(false), surface_pipelines(true)];
+        sets.dedup();
+        // Then a window's snapshot's, drawn offscreen as a phone's app goes to the background.
+        sets.push((super::renderer::OFFSCREEN_FORMAT, false));
+        let slots: Vec<_> = sets.into_iter().map(|(format, premultiplied)| (format, premultiplied, super::renderer::Pipelines::slot(&compiled, format, premultiplied))).collect();
         std::thread::spawn(move || {
-            for &premultiplied in kinds {
+            for (format, premultiplied, _) in slots {
                 super::renderer::Pipelines::shared(&device, &queue, &compiled, format, premultiplied);
+                if let Some(native) = crate::platform::Native::started() {
+                    native.run(crate::platform::Windows::compiled);
+                }
             }
-            // Then a window's snapshot's, drawn offscreen as a phone's app goes to the background.
-            super::renderer::Pipelines::shared(&device, &queue, &compiled, super::renderer::OFFSCREEN_FORMAT, false);
         });
+    }
+
+    /// Whether the pipelines for targets of `format` are compiled, or aren't on their way: a renderer made for one now
+    /// doesn't wait for them.
+    pub(crate) fn compiled(&self, format: wgpu::TextureFormat, premultiplied: bool) -> bool {
+        let compiled = self.pipelines.lock().expect("nothing panics holding it");
+        compiled.iter().find(|(f, p, _)| *f == format && *p == premultiplied).is_none_or(|(_, _, slot)| slot.get().is_some())
     }
 
     #[cfg(not(target_arch = "wasm32"))]

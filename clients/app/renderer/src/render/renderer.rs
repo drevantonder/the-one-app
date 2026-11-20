@@ -272,24 +272,34 @@ impl Pipelines {
     }
 
     /// The pipelines for targets of `format`, compiled the first time a renderer draws to one, or ahead of it
-    /// (`Context::prepare`), which one that comes meanwhile waits for.
+    /// (`Context::prepare`), which one that comes meanwhile waits for: only it, as each format's are compiled apart.
     pub(crate) fn shared(device: &wgpu::Device, queue: &wgpu::Queue, compiled: &super::context::Compiled, format: wgpu::TextureFormat, premultiplied: bool) -> Arc<Pipelines> {
+        Self::slot(compiled, format, premultiplied)
+            .get_or_init(|| {
+                let pipelines = Arc::new(Pipelines::new(device, queue, format, premultiplied));
+                // The rest compiled in the background where there are threads; on the web, as each is first drawn.
+                #[cfg(not(target_arch = "wasm32"))]
+                {
+                    let compiling = pipelines.clone();
+                    std::thread::spawn(move || {
+                        compiling.backdrops();
+                        compiling.tiles();
+                    });
+                }
+                pipelines
+            })
+            .clone()
+    }
+
+    /// Where the pipelines for targets of `format` are kept, once they're compiled.
+    pub(crate) fn slot(compiled: &super::context::Compiled, format: wgpu::TextureFormat, premultiplied: bool) -> Arc<std::sync::OnceLock<Arc<Pipelines>>> {
         let mut compiled = compiled.lock().expect("nothing panics holding it");
-        if let Some((_, _, pipelines)) = compiled.iter().find(|(f, p, _)| *f == format && *p == premultiplied) {
-            return pipelines.clone();
+        if let Some((_, _, slot)) = compiled.iter().find(|(f, p, _)| *f == format && *p == premultiplied) {
+            return slot.clone();
         }
-        let pipelines = Arc::new(Pipelines::new(device, queue, format, premultiplied));
-        compiled.push((format, premultiplied, pipelines.clone()));
-        // The rest compiled in the background where there are threads; on the web, as each is first drawn.
-        #[cfg(not(target_arch = "wasm32"))]
-        {
-            let compiling = pipelines.clone();
-            std::thread::spawn(move || {
-                compiling.backdrops();
-                compiling.tiles();
-            });
-        }
-        pipelines
+        let slot = Arc::default();
+        compiled.push((format, premultiplied, Arc::clone(&slot)));
+        slot
     }
 }
 
