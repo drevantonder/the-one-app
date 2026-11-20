@@ -1,8 +1,7 @@
 //! How pressed the device is, as the W3C Compute Pressure API says it (`PressureObserver`'s states, which are Apple's
 //! `ProcessInfo.ThermalState`'s): the worse of what its system says (`Display::pressure`: heat, a battery saver) and
-//! what its windows' own frames say, by how many of the last missed the display's refresh. Under serious pressure or
-//! worse, glass is drawn as reduced transparency has it (`Screen::pressure`), and once the frames are on time and the
-//! system calm again, as it was.
+//! what its windows' own frames say, by how many of the last missed the display's refresh, which their pages hear
+//! (`Screen::pressure`).
 
 use std::collections::VecDeque;
 use std::time::Duration;

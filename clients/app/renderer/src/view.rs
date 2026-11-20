@@ -239,9 +239,11 @@ pub struct Screen {
     pub appearance: Appearance,
     /// The person asked for less motion, as the device says.
     pub reduced_motion: bool,
-    /// How pressed the device is (`platform::Pressure`): serious or worse, glass is drawn as reduced transparency has
-    /// it, until it eases. What moves goes on moving: a cross-fade costs a frame no less than a slide, and turning to
-    /// one mid-slide is a glitch. The page hears it as `hostContext.pressure`.
+    /// How pressed the device is (`platform::Pressure`), which the page hears as `hostContext.pressure`, to do less as a
+    /// web page's `PressureObserver` would. What's drawn is drawn as ever: what moves goes on moving, as a cross-fade
+    /// costs a frame no less than a slide, and glass keeps its blur, which a still page behind it costs once
+    /// (`Renderer`'s kept blurs), where drawn plain it showed that page sharp through its tint for the seconds
+    /// pressure took to ease (20 Nov, the App Library's categories on a loaded Mac).
     pub pressure: crate::platform::Pressure,
     /// The device's own text size, which a phone has, in pixels: 1rem is it, and the `phone` tokens hold.
     pub text_size: Option<f32>,
@@ -867,7 +869,7 @@ impl Screen {
             Some(size) => (true, (size * 100.0).round() as u16),
             None => (false, Conditions::default().rem),
         };
-        Conditions { dark: self.dark(), touch: self.touch, phone, reduced_motion: self.reduced_motion, reduced_transparency: self.pressure >= crate::platform::Pressure::Serious, insets, title_bar, page: self.page, rem }
+        Conditions { dark: self.dark(), touch: self.touch, phone, reduced_motion: self.reduced_motion, insets, title_bar, page: self.page, rem }
     }
 
     /// Its insets as MCP Apps' host context says them (`safeAreaInsets`).

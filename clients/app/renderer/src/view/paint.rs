@@ -898,7 +898,7 @@ impl Painter<'_> {
                 if let Some(fill) = self.fill {
                     self.quad(bounds, mask, fill, Edges::default(), Hsla::default(), radii, false, opacity);
                 }
-            } else if let Some((blur, saturate, _)) = look.material.filter(|_| !self.conditions.reduced_transparency) {
+            } else if let Some((blur, saturate, _)) = look.material {
                 self.scene.insert_primitive(Backdrop {
                     order: 0,
                     opacity,
