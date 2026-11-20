@@ -2,7 +2,7 @@ import { createEffect, createSignal, onSettled, untrack } from "solid-js"
 import { type WheelEventData, WheelGestures } from "wheel-gestures"
 import { createVelocityTracker, type Dragged, haptic, keydown, type Pressed, reducedMotion, viewport, type Wheeled } from "ui"
 import { give, glide, jump, settle, spring, type Spring, stop } from "./pager.ts"
-import { ACROSS, card as cardOf, cell as cellOf, INSET, lefts, PAGE, PILLS, CARD_TOP } from "./layout.ts"
+import { along as alongOf, card as cardOf, cell as cellOf, INSET, lefts, PILLS, CARD_TOP } from "./layout.ts"
 import { type At, carries } from "./machine.ts"
 import { home, setSeen, setAlong, setRolled, launcher, room, laidPage, quietFor, finger, state } from "./store.ts"
 import { type Owner, draft, keep } from "./owners.ts"
@@ -57,8 +57,6 @@ export function createPaging(props: { owners: Owner[] }, layout: Screens) {
   }
 
   const card = () => cardOf(room())
-  /// How far an owner's pages are moved along so fewer than fill the card are in its middle.
-  const lead = (owner: number) => (Math.max(0, ACROSS - (pages()[owner]?.length ?? 1)) * PAGE) / 2
   const cardLeft = () => (viewport().width - card().width) / 2
   /// Whether a wheel's turns are moving the pages one to one, as a trackpad's fingers do where the system says nothing
   /// of when they lift, which their spring doesn't follow.
@@ -68,7 +66,7 @@ export function createPaging(props: { owners: Owner[] }, layout: Screens) {
   const [leaving, setLeaving] = createSignal(false)
   /// Where a page of an owner is drawn in the window: its left and top, and how much larger it's drawn.
   const pageAt = (owner: number, page: number) => {
-    if (untrack(launcher)) return { x: untrack(cardLeft) + INSET + untrack(() => lead(owner)) + page * PAGE - Math.min(sideways(owner).value, homeEnd(owner)), y: CARD_TOP + PILLS, scale: untrack(room).scale }
+    if (untrack(launcher)) return { x: untrack(cardLeft) + INSET + alongOf(untrack(room), page) - Math.min(sideways(owner).value, homeEnd(owner)), y: CARD_TOP + PILLS, scale: untrack(room).scale }
     const fit = untrack(room).fit
     const screen = Math.floor(page / fit)
     const count = untrack(screens)[owner]?.[screen]?.count ?? 1
@@ -327,7 +325,7 @@ export function createPaging(props: { owners: Owner[] }, layout: Screens) {
       slide(home.getSnapshot().context.at, true)
     }
   }
-  return { height, pitch, downY, xOf, opacityOf, underCarry, sectionsX, card, lead, cardLeft, wheeling, leaving, pageAt, pageUnder, swiping, swipes, along, wheel, release }
+  return { height, pitch, downY, xOf, opacityOf, underCarry, sectionsX, card, cardLeft, wheeling, leaving, pageAt, pageUnder, swiping, swipes, along, wheel, release }
 }
 
 export type Paging = ReturnType<typeof createPaging>

@@ -59,16 +59,21 @@ export function measure(width: number, height: number, safe: Insets): Room {
   return { width, height, wide, fit, scale, side, gap, launcher: false, safe }
 }
 
-/// A launcher's room: a page's, a phone's page drawn `PAGE` wide, as tall as its six rows, which are a phone's
-/// tallest. Two of them are side by side in its card, which pages by one.
+/// A launcher's room: its card's width, a screenful, which holds `ACROSS` of a phone's pages drawn `PAGE` wide side by
+/// side, `INSET` in from its sides, as tall as its six rows, which are a phone's tallest. It pages a screenful at a
+/// time, so the screenful before and after are wholly outside it, as SpringBoard's are.
 export function launcherRoom(safe: Insets): Room {
   const scale = PAGE / PHONE
-  return { width: ACROSS * PAGE, height: (ROWS * ROW + (ROWS - 1) * ROW_GAP) * scale + 8, wide: true, fit: ACROSS, scale, side: 0, gap: 0, launcher: true, safe }
+  return { width: ACROSS * PAGE + 2 * INSET, height: (ROWS * ROW + (ROWS - 1) * ROW_GAP) * scale + 8, wide: true, fit: ACROSS, scale, side: INSET, gap: 0, launcher: true, safe }
 }
 
-/// A launcher's card, its one size: `ACROSS` of `room`'s pages, each its six rows, with the owner switcher over them and
-/// the dots under them.
-export const card = (room: Room) => ({ width: ACROSS * PAGE + 2 * INSET, height: PILLS + room.height + PILLS })
+/// Where a launcher's page is along its owner's pages, from the first's left: in its screenful's columns, the first
+/// page of a screenful in the first, so fewer pages than fit leave the last columns empty, as a full screenful has them.
+export const along = (room: Room, page: number) => Math.floor(page / ACROSS) * room.width + (page % ACROSS) * PAGE
+
+/// A launcher's card, its one size: a screenful of `room`'s pages, each its six rows, with the owner switcher over them
+/// and the dots under them.
+export const card = (room: Room) => ({ width: room.width, height: PILLS + room.height + PILLS })
 
 /// What a launcher's page asks its panel to be: its search and its card, one above the other, as much as they take and
 /// no more, so its host centres them on the screen as one.

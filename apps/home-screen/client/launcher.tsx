@@ -1,7 +1,7 @@
 // The computer's launcher: its keys, its search floating over its card, and what the search found.
 import { createEffect, createMemo, For, Show, untrack } from "solid-js"
 import { ScrollView, Empty, type Keyed, leave, reducedMotion, sizeChanged, Text, TextInput, View, viewport, visible } from "ui"
-import { ACROSS, cell as cellOf, group, INSET, PAGE, PILLS, SEARCH, SEARCH_HEIGHT, CARD_TOP } from "./layout.ts"
+import { along as alongOf, cell as cellOf, group, INSET, PAGE, PILLS, SEARCH, SEARCH_HEIGHT, CARD_TOP } from "./layout.ts"
 import { type At, type Placed } from "./machine.ts"
 import { type Item, type Listed } from "./types.ts"
 import { looks } from "./looks.ts"
@@ -304,7 +304,7 @@ export function createLauncher(props: { owners: Owner[] }, layout: Screens, pagi
 /// The launcher's panel: its search, and its card with Home, the App Library or what was found in it.
 export function LauncherPanel(props: { owners: Owner[]; layout: Screens; paging: Paging; launching: Launching }) {
   const { pages, laid } = props.layout
-  const { card, cardLeft, lead, xOf, pitch, wheeling, leaving, opacityOf, along, wheel } = props.paging
+  const { card, cardLeft, xOf, pitch, wheeling, leaving, opacityOf, along, wheel } = props.paging
   const { showing, words } = props.launching
   // The owner shown, and how far along their pages and the App Library are drawn: for whoever asked for less motion,
   // never past Home's last screenful, over which the App Library cross-fades.
@@ -342,7 +342,7 @@ export function LauncherPanel(props: { owners: Owner[]; layout: Screens; paging:
               {(owner, index) => {
                 const shown = () => index() === state().context.at.owner
                 const Page = (inner: { page: number; placed: Placed<Cell>[] }) => (
-                  <View style={[looks.slots, looks.rigid, looks.sized(PAGE, room().height)]}>
+                  <View style={[looks.absolute, looks.at(INSET + alongOf(room(), inner.page), 0, PAGE, room().height)]}>
                     <View style={[looks.absolute, looks.placedPage((laidPage().height * (room().scale - 1)) / 2, (laidPage().width * (room().scale - 1)) / 2, room().scale)]}>
                       <HomePage owner={owner()} index={index()} page={inner.page} placed={inner.placed} laid={laidPage()} scale={room().scale} />
                     </View>
@@ -353,10 +353,10 @@ export function LauncherPanel(props: { owners: Owner[]; layout: Screens; paging:
                     role="region"
                     aria-label={owner().name}
                     inert={!shown() || undefined}
-                    style={[looks.owner, looks.rolling, !shown() && looks.inert, looks.at(INSET, PILLS, ACROSS * PAGE, room().height), looks.drifted(shown() ? 1 : 0, (index() - state().context.at.owner) * 40)]}
+                    style={[looks.owner, looks.rolling, !shown() && looks.inert, looks.at(0, PILLS, room().width, room().height), looks.drifted(shown() ? 1 : 0, (index() - state().context.at.owner) * 40)]}
                   >
                     {/* Each other owner's pages are lined up where the shown owner's are, ready for a roll to them. */}
-                    <View style={[looks.track, looks.slid(lead(index()) + across() - xOf(index())[0](), opacityOf(index())[0]())]}>
+                    <View style={[looks.track, looks.slid(across() - xOf(index())[0](), opacityOf(index())[0]())]}>
                       <For each={pages()[index()] ?? []} keyed={false}>
                         {(placed, at) => <Page page={at} placed={placed()} />}
                       </For>

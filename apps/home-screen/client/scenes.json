@@ -896,6 +896,331 @@
       }
     }
   },
+  "Launcher, two pages and a widget": {
+    "like": "Launcher on a computer",
+    "answers": {
+      "home-screen_pages": {
+        "who": "users/mira",
+        "arranges": true,
+        "pages": [
+          {
+            "items": [
+              {
+                "widget": "maps/widget",
+                "name": "Devices",
+                "size": "4x4",
+                "sizes": [
+                  "4x4"
+                ],
+                "opens": {
+                  "entrypoint": "maps/client/index.html",
+                  "name": "Maps",
+                  "icon": "data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2064%2064%22%3E%3Crect%20width%3D%2264%22%20height%3D%2264%22%20rx%3D%2214%22%20fill%3D%22%2316a085%22%2F%3E%3Ccircle%20cx%3D%2232%22%20cy%3D%2232%22%20r%3D%2212%22%20fill%3D%22white%22%20fill-opacity%3D%22.85%22%2F%3E%3C%2Fsvg%3E",
+                  "app": "maps",
+                  "category": "Travel"
+                }
+              },
+              {
+                "entrypoint": "notes/client/index.html",
+                "name": "Notes",
+                "icon": "data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2064%2064%22%3E%3Crect%20width%3D%2264%22%20height%3D%2264%22%20rx%3D%2214%22%20fill%3D%22%23f5a623%22%2F%3E%3Ccircle%20cx%3D%2232%22%20cy%3D%2232%22%20r%3D%2212%22%20fill%3D%22white%22%20fill-opacity%3D%22.85%22%2F%3E%3C%2Fsvg%3E",
+                "app": "notes",
+                "category": "Productivity"
+              }
+            ],
+            "hidden": false
+          },
+          {
+            "items": [
+              {
+                "entrypoint": "tasks/client/index.html",
+                "name": "Tasks",
+                "icon": "data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2064%2064%22%3E%3Crect%20width%3D%2264%22%20height%3D%2264%22%20rx%3D%2214%22%20fill%3D%22%234a90d9%22%2F%3E%3Ccircle%20cx%3D%2232%22%20cy%3D%2232%22%20r%3D%2212%22%20fill%3D%22white%22%20fill-opacity%3D%22.85%22%2F%3E%3C%2Fsvg%3E",
+                "app": "tasks",
+                "category": "Productivity",
+                "badge": "tasks_due"
+              }
+            ],
+            "hidden": false
+          }
+        ],
+        "library": [
+          {
+            "category": "Productivity",
+            "entrypoints": [
+              {
+                "entrypoint": "notes/client/index.html",
+                "name": "Notes",
+                "icon": "data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2064%2064%22%3E%3Crect%20width%3D%2264%22%20height%3D%2264%22%20rx%3D%2214%22%20fill%3D%22%23f5a623%22%2F%3E%3Ccircle%20cx%3D%2232%22%20cy%3D%2232%22%20r%3D%2212%22%20fill%3D%22white%22%20fill-opacity%3D%22.85%22%2F%3E%3C%2Fsvg%3E",
+                "app": "notes",
+                "category": "Productivity",
+                "title": "Notes",
+                "installed": {
+                  "for": "users/mira",
+                  "name": "notes",
+                  "removes": true
+                }
+              },
+              {
+                "entrypoint": "tasks/client/index.html",
+                "name": "Tasks",
+                "icon": "data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2064%2064%22%3E%3Crect%20width%3D%2264%22%20height%3D%2264%22%20rx%3D%2214%22%20fill%3D%22%234a90d9%22%2F%3E%3Ccircle%20cx%3D%2232%22%20cy%3D%2232%22%20r%3D%2212%22%20fill%3D%22white%22%20fill-opacity%3D%22.85%22%2F%3E%3C%2Fsvg%3E",
+                "app": "tasks",
+                "category": "Productivity",
+                "badge": "tasks_due",
+                "title": "Tasks",
+                "installed": {
+                  "for": "users/mira",
+                  "name": "tasks",
+                  "removes": true
+                }
+              },
+              {
+                "entrypoint": "journal/client/index.html",
+                "name": "Journal",
+                "icon": "data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2064%2064%22%3E%3Crect%20width%3D%2264%22%20height%3D%2264%22%20rx%3D%2214%22%20fill%3D%22%23e67e22%22%2F%3E%3Ccircle%20cx%3D%2232%22%20cy%3D%2232%22%20r%3D%2212%22%20fill%3D%22white%22%20fill-opacity%3D%22.85%22%2F%3E%3C%2Fsvg%3E",
+                "app": "journal",
+                "category": "Productivity",
+                "title": "Journal",
+                "installed": {
+                  "for": "users/mira",
+                  "name": "journal",
+                  "removes": true
+                }
+              }
+            ]
+          },
+          {
+            "category": "Communication",
+            "entrypoints": [
+              {
+                "entrypoint": "mail/client/index.html",
+                "name": "Mail",
+                "icon": "data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2064%2064%22%3E%3Crect%20width%3D%2264%22%20height%3D%2264%22%20rx%3D%2214%22%20fill%3D%22%23d0021b%22%2F%3E%3Ccircle%20cx%3D%2232%22%20cy%3D%2232%22%20r%3D%2212%22%20fill%3D%22white%22%20fill-opacity%3D%22.85%22%2F%3E%3C%2Fsvg%3E",
+                "app": "mail",
+                "category": "Communication",
+                "badge": "mail_unread",
+                "title": "Mail",
+                "installed": {
+                  "for": "users/mira",
+                  "name": "mail",
+                  "removes": true
+                }
+              },
+              {
+                "entrypoint": "chat/client/index.html",
+                "name": "Chat",
+                "icon": "data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2064%2064%22%3E%3Crect%20width%3D%2264%22%20height%3D%2264%22%20rx%3D%2214%22%20fill%3D%22%232ecc71%22%2F%3E%3Ccircle%20cx%3D%2232%22%20cy%3D%2232%22%20r%3D%2212%22%20fill%3D%22white%22%20fill-opacity%3D%22.85%22%2F%3E%3C%2Fsvg%3E",
+                "app": "chat",
+                "category": "Communication",
+                "title": "Chat",
+                "installed": {
+                  "for": "users/mira",
+                  "name": "chat",
+                  "removes": true
+                }
+              }
+            ]
+          },
+          {
+            "category": "Media",
+            "entrypoints": [
+              {
+                "entrypoint": "photos/client/index.html",
+                "name": "Photos",
+                "icon": "data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2064%2064%22%3E%3Crect%20width%3D%2264%22%20height%3D%2264%22%20rx%3D%2214%22%20fill%3D%22%239b59b6%22%2F%3E%3Ccircle%20cx%3D%2232%22%20cy%3D%2232%22%20r%3D%2212%22%20fill%3D%22white%22%20fill-opacity%3D%22.85%22%2F%3E%3C%2Fsvg%3E",
+                "app": "photos",
+                "category": "Media",
+                "title": "Photos",
+                "installed": {
+                  "for": "users/mira",
+                  "name": "photos",
+                  "removes": true
+                }
+              },
+              {
+                "entrypoint": "music/client/index.html",
+                "name": "Music",
+                "icon": "data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2064%2064%22%3E%3Crect%20width%3D%2264%22%20height%3D%2264%22%20rx%3D%2214%22%20fill%3D%22%23e91e63%22%2F%3E%3Ccircle%20cx%3D%2232%22%20cy%3D%2232%22%20r%3D%2212%22%20fill%3D%22white%22%20fill-opacity%3D%22.85%22%2F%3E%3C%2Fsvg%3E",
+                "app": "music",
+                "category": "Media",
+                "title": "Music",
+                "installed": {
+                  "for": "users/mira",
+                  "name": "music",
+                  "removes": true
+                }
+              }
+            ]
+          },
+          {
+            "category": "Travel",
+            "entrypoints": [
+              {
+                "entrypoint": "maps/client/index.html",
+                "name": "Maps",
+                "icon": "data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2064%2064%22%3E%3Crect%20width%3D%2264%22%20height%3D%2264%22%20rx%3D%2214%22%20fill%3D%22%2316a085%22%2F%3E%3Ccircle%20cx%3D%2232%22%20cy%3D%2232%22%20r%3D%2212%22%20fill%3D%22white%22%20fill-opacity%3D%22.85%22%2F%3E%3C%2Fsvg%3E",
+                "app": "maps",
+                "category": "Travel",
+                "title": "Maps",
+                "installed": {
+                  "for": "users/mira",
+                  "name": "maps",
+                  "removes": true
+                }
+              }
+            ]
+          },
+          {
+            "category": "Utilities",
+            "entrypoints": [
+              {
+                "entrypoint": "weather/client/index.html",
+                "name": "Weather",
+                "icon": "data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2064%2064%22%3E%3Crect%20width%3D%2264%22%20height%3D%2264%22%20rx%3D%2214%22%20fill%3D%22%233498db%22%2F%3E%3Ccircle%20cx%3D%2232%22%20cy%3D%2232%22%20r%3D%2212%22%20fill%3D%22white%22%20fill-opacity%3D%22.85%22%2F%3E%3C%2Fsvg%3E",
+                "app": "weather",
+                "category": "Utilities",
+                "title": "Weather",
+                "installed": {
+                  "for": "users/mira",
+                  "name": "weather",
+                  "removes": true
+                }
+              },
+              {
+                "entrypoint": "clock/client/index.html",
+                "name": "Clock",
+                "icon": "data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2064%2064%22%3E%3Crect%20width%3D%2264%22%20height%3D%2264%22%20rx%3D%2214%22%20fill%3D%22%2334495e%22%2F%3E%3Ccircle%20cx%3D%2232%22%20cy%3D%2232%22%20r%3D%2212%22%20fill%3D%22white%22%20fill-opacity%3D%22.85%22%2F%3E%3C%2Fsvg%3E",
+                "app": "clock",
+                "category": "Utilities",
+                "title": "Clock",
+                "installed": {
+                  "for": "users/mira",
+                  "name": "clock",
+                  "removes": true
+                }
+              },
+              {
+                "entrypoint": "files/client/index.html",
+                "name": "Files",
+                "icon": "data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2064%2064%22%3E%3Crect%20width%3D%2264%22%20height%3D%2264%22%20rx%3D%2214%22%20fill%3D%22%237f8c8d%22%2F%3E%3Ccircle%20cx%3D%2232%22%20cy%3D%2232%22%20r%3D%2212%22%20fill%3D%22white%22%20fill-opacity%3D%22.85%22%2F%3E%3C%2Fsvg%3E",
+                "app": "files",
+                "category": "Utilities",
+                "title": "Files",
+                "installed": {
+                  "for": "users/mira",
+                  "name": "files",
+                  "removes": true
+                }
+              }
+            ]
+          },
+          {
+            "category": "Finance",
+            "entrypoints": [
+              {
+                "entrypoint": "budget/client/index.html",
+                "name": "Budget",
+                "icon": "data:image/svg+xml,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2064%2064%22%3E%3Crect%20width%3D%2264%22%20height%3D%2264%22%20rx%3D%2214%22%20fill%3D%22%2327ae60%22%2F%3E%3Ccircle%20cx%3D%2232%22%20cy%3D%2232%22%20r%3D%2212%22%20fill%3D%22white%22%20fill-opacity%3D%22.85%22%2F%3E%3C%2Fsvg%3E",
+                "app": "budget",
+                "category": "Finance",
+                "title": "Budget",
+                "installed": {
+                  "for": "users/mira",
+                  "name": "budget",
+                  "removes": true
+                }
+              }
+            ]
+          }
+        ],
+        "widgets": [],
+        "store": "app-store",
+        "apps": [
+          {
+            "app": "notes",
+            "name": "Notes"
+          },
+          {
+            "app": "tasks",
+            "name": "Tasks"
+          },
+          {
+            "app": "mail",
+            "name": "Mail"
+          },
+          {
+            "app": "chat",
+            "name": "Chat"
+          },
+          {
+            "app": "photos",
+            "name": "Photos"
+          },
+          {
+            "app": "music",
+            "name": "Music"
+          },
+          {
+            "app": "maps",
+            "name": "Maps"
+          },
+          {
+            "app": "weather",
+            "name": "Weather"
+          },
+          {
+            "app": "clock",
+            "name": "Clock"
+          },
+          {
+            "app": "files",
+            "name": "Files"
+          },
+          {
+            "app": "budget",
+            "name": "Budget"
+          },
+          {
+            "app": "journal",
+            "name": "Journal"
+          }
+        ]
+      },
+      "maps_widget": {
+        "part": "column",
+        "title": "Devices",
+        "gap": 8,
+        "parts": [
+          {
+            "part": "item",
+            "title": "MacBook Air",
+            "subtitle": "macOS"
+          },
+          {
+            "part": "item",
+            "title": "linux",
+            "subtitle": "Linux"
+          },
+          {
+            "part": "item",
+            "title": "personal-network-server",
+            "subtitle": "On linux"
+          },
+          {
+            "part": "item",
+            "title": "ptc-network-server",
+            "subtitle": "On linux"
+          },
+          {
+            "part": "item",
+            "title": "workspace",
+            "subtitle": "Linux"
+          }
+        ]
+      }
+    }
+  },
   "Launcher, App Library": {
     "like": "Home, two pages",
     "page": "client/index.html#library",
