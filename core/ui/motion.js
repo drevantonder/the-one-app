@@ -573,7 +573,8 @@ function requests(steps, folder) {
     else if (step.trace) out.push({ request: { op: "trace", events: JSON.parse(readFileSync(join(folder, step.trace), "utf8")) } })
     else if (!step.expect) out.push({ request: pressed(step) })
     else {
-      const { shown, gone, focused, text, states, drawn, blur, keyboard, margins, tall, textMenu, handles, magnifier, dimmed } = step.expect
+      const { shown, gone, focused, text, states, drawn, blur, keyboard, margins, tall, textMenu, handles, magnifier, dimmed, js } = step.expect
+      if (js !== undefined) out.push({ request: { op: "window" }, judge: (answer) => answer?.result?.js_bytes > js * 1e6 && `its JS holds ${(answer.result.js_bytes / 1e6).toFixed(1)} MB, over ${js} MB` })
       // Each waited for, as Playwright's assertions are, a second at most, or `within` ms.
       const until = (tap, state, said, is) => ({ request: { op: "wait_for", ...selector(tap), state, ...(is ? { is } : {}), ...(step.within !== undefined ? { timeout: step.within } : {}) }, judge: (answer) => !answer?.result?.met && said(answer) })
       if (shown) out.push(until(shown, "shown", (answer) => `${named(shown)} isn't shown: ${why(answer)}`))

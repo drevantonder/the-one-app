@@ -342,5 +342,1272 @@
     "errors": [
       "didn't answer this server"
     ]
+  },
+  "A Long Day": {
+    "like": "Overview",
+    "size": [
+      1024,
+      720
+    ],
+    "answers": {
+      "telemetry_alerts": {
+        "alerts": [
+          {
+            "id": 100,
+            "kind": "failing",
+            "state": "firing",
+            "title": "Tool 0 is failing",
+            "text": "1 calls failed in the last hour.",
+            "began": 1767224400000,
+            "last": 1767224400000
+          },
+          {
+            "id": 101,
+            "kind": "disk",
+            "state": "resolved",
+            "title": "Tool 1 is failing",
+            "text": "2 calls failed in the last hour.",
+            "began": 1767223800000,
+            "last": 1767224100000,
+            "ended": 1767224200000
+          },
+          {
+            "id": 102,
+            "kind": "slow",
+            "state": "resolved",
+            "title": "Tool 2 is failing",
+            "text": "3 calls failed in the last hour.",
+            "began": 1767223200000,
+            "last": 1767223800000,
+            "ended": 1767224000000
+          },
+          {
+            "id": 103,
+            "kind": "failing",
+            "state": "resolved",
+            "title": "Tool 3 is failing",
+            "text": "4 calls failed in the last hour.",
+            "began": 1767222600000,
+            "last": 1767223500000,
+            "ended": 1767223800000
+          },
+          {
+            "id": 104,
+            "kind": "disk",
+            "state": "resolved",
+            "title": "Tool 4 is failing",
+            "text": "5 calls failed in the last hour.",
+            "began": 1767222000000,
+            "last": 1767223200000,
+            "ended": 1767223600000
+          },
+          {
+            "id": 105,
+            "kind": "slow",
+            "state": "firing",
+            "title": "Tool 5 is failing",
+            "text": "6 calls failed in the last hour.",
+            "began": 1767221400000,
+            "last": 1767222900000
+          },
+          {
+            "id": 106,
+            "kind": "failing",
+            "state": "resolved",
+            "title": "Tool 6 is failing",
+            "text": "7 calls failed in the last hour.",
+            "began": 1767220800000,
+            "last": 1767222600000,
+            "ended": 1767223200000
+          },
+          {
+            "id": 107,
+            "kind": "disk",
+            "state": "resolved",
+            "title": "Tool 7 is failing",
+            "text": "8 calls failed in the last hour.",
+            "began": 1767220200000,
+            "last": 1767222300000,
+            "ended": 1767223000000
+          },
+          {
+            "id": 108,
+            "kind": "slow",
+            "state": "resolved",
+            "title": "Tool 8 is failing",
+            "text": "9 calls failed in the last hour.",
+            "began": 1767219600000,
+            "last": 1767222000000,
+            "ended": 1767222800000
+          },
+          {
+            "id": 109,
+            "kind": "failing",
+            "state": "resolved",
+            "title": "Tool 9 is failing",
+            "text": "1 calls failed in the last hour.",
+            "began": 1767219000000,
+            "last": 1767221700000,
+            "ended": 1767222600000
+          },
+          {
+            "id": 110,
+            "kind": "disk",
+            "state": "firing",
+            "title": "Tool 10 is failing",
+            "text": "2 calls failed in the last hour.",
+            "began": 1767218400000,
+            "last": 1767221400000
+          },
+          {
+            "id": 111,
+            "kind": "slow",
+            "state": "resolved",
+            "title": "Tool 11 is failing",
+            "text": "3 calls failed in the last hour.",
+            "began": 1767217800000,
+            "last": 1767221100000,
+            "ended": 1767222200000
+          },
+          {
+            "id": 112,
+            "kind": "failing",
+            "state": "resolved",
+            "title": "Tool 12 is failing",
+            "text": "4 calls failed in the last hour.",
+            "began": 1767217200000,
+            "last": 1767220800000,
+            "ended": 1767222000000
+          },
+          {
+            "id": 113,
+            "kind": "disk",
+            "state": "resolved",
+            "title": "Tool 13 is failing",
+            "text": "5 calls failed in the last hour.",
+            "began": 1767216600000,
+            "last": 1767220500000,
+            "ended": 1767221800000
+          },
+          {
+            "id": 114,
+            "kind": "slow",
+            "state": "resolved",
+            "title": "Tool 14 is failing",
+            "text": "6 calls failed in the last hour.",
+            "began": 1767216000000,
+            "last": 1767220200000,
+            "ended": 1767221600000
+          },
+          {
+            "id": 115,
+            "kind": "failing",
+            "state": "firing",
+            "title": "Tool 15 is failing",
+            "text": "7 calls failed in the last hour.",
+            "began": 1767215400000,
+            "last": 1767219900000
+          },
+          {
+            "id": 116,
+            "kind": "disk",
+            "state": "resolved",
+            "title": "Tool 16 is failing",
+            "text": "8 calls failed in the last hour.",
+            "began": 1767214800000,
+            "last": 1767219600000,
+            "ended": 1767221200000
+          },
+          {
+            "id": 117,
+            "kind": "slow",
+            "state": "resolved",
+            "title": "Tool 17 is failing",
+            "text": "9 calls failed in the last hour.",
+            "began": 1767214200000,
+            "last": 1767219300000,
+            "ended": 1767221000000
+          },
+          {
+            "id": 118,
+            "kind": "failing",
+            "state": "resolved",
+            "title": "Tool 18 is failing",
+            "text": "1 calls failed in the last hour.",
+            "began": 1767213600000,
+            "last": 1767219000000,
+            "ended": 1767220800000
+          },
+          {
+            "id": 119,
+            "kind": "disk",
+            "state": "resolved",
+            "title": "Tool 19 is failing",
+            "text": "2 calls failed in the last hour.",
+            "began": 1767213000000,
+            "last": 1767218700000,
+            "ended": 1767220600000
+          },
+          {
+            "id": 120,
+            "kind": "slow",
+            "state": "firing",
+            "title": "Tool 20 is failing",
+            "text": "3 calls failed in the last hour.",
+            "began": 1767212400000,
+            "last": 1767218400000
+          },
+          {
+            "id": 121,
+            "kind": "failing",
+            "state": "resolved",
+            "title": "Tool 21 is failing",
+            "text": "4 calls failed in the last hour.",
+            "began": 1767211800000,
+            "last": 1767218100000,
+            "ended": 1767220200000
+          },
+          {
+            "id": 122,
+            "kind": "disk",
+            "state": "resolved",
+            "title": "Tool 22 is failing",
+            "text": "5 calls failed in the last hour.",
+            "began": 1767211200000,
+            "last": 1767217800000,
+            "ended": 1767220000000
+          },
+          {
+            "id": 123,
+            "kind": "slow",
+            "state": "resolved",
+            "title": "Tool 23 is failing",
+            "text": "6 calls failed in the last hour.",
+            "began": 1767210600000,
+            "last": 1767217500000,
+            "ended": 1767219800000
+          },
+          {
+            "id": 124,
+            "kind": "failing",
+            "state": "resolved",
+            "title": "Tool 24 is failing",
+            "text": "7 calls failed in the last hour.",
+            "began": 1767210000000,
+            "last": 1767217200000,
+            "ended": 1767219600000
+          },
+          {
+            "id": 125,
+            "kind": "disk",
+            "state": "firing",
+            "title": "Tool 25 is failing",
+            "text": "8 calls failed in the last hour.",
+            "began": 1767209400000,
+            "last": 1767216900000
+          },
+          {
+            "id": 126,
+            "kind": "slow",
+            "state": "resolved",
+            "title": "Tool 26 is failing",
+            "text": "9 calls failed in the last hour.",
+            "began": 1767208800000,
+            "last": 1767216600000,
+            "ended": 1767219200000
+          },
+          {
+            "id": 127,
+            "kind": "failing",
+            "state": "resolved",
+            "title": "Tool 27 is failing",
+            "text": "1 calls failed in the last hour.",
+            "began": 1767208200000,
+            "last": 1767216300000,
+            "ended": 1767219000000
+          },
+          {
+            "id": 128,
+            "kind": "disk",
+            "state": "resolved",
+            "title": "Tool 28 is failing",
+            "text": "2 calls failed in the last hour.",
+            "began": 1767207600000,
+            "last": 1767216000000,
+            "ended": 1767218800000
+          },
+          {
+            "id": 129,
+            "kind": "slow",
+            "state": "resolved",
+            "title": "Tool 29 is failing",
+            "text": "3 calls failed in the last hour.",
+            "began": 1767207000000,
+            "last": 1767215700000,
+            "ended": 1767218600000
+          },
+          {
+            "id": 130,
+            "kind": "failing",
+            "state": "firing",
+            "title": "Tool 30 is failing",
+            "text": "4 calls failed in the last hour.",
+            "began": 1767206400000,
+            "last": 1767215400000
+          },
+          {
+            "id": 131,
+            "kind": "disk",
+            "state": "resolved",
+            "title": "Tool 31 is failing",
+            "text": "5 calls failed in the last hour.",
+            "began": 1767205800000,
+            "last": 1767215100000,
+            "ended": 1767218200000
+          },
+          {
+            "id": 132,
+            "kind": "slow",
+            "state": "resolved",
+            "title": "Tool 32 is failing",
+            "text": "6 calls failed in the last hour.",
+            "began": 1767205200000,
+            "last": 1767214800000,
+            "ended": 1767218000000
+          },
+          {
+            "id": 133,
+            "kind": "failing",
+            "state": "resolved",
+            "title": "Tool 33 is failing",
+            "text": "7 calls failed in the last hour.",
+            "began": 1767204600000,
+            "last": 1767214500000,
+            "ended": 1767217800000
+          },
+          {
+            "id": 134,
+            "kind": "disk",
+            "state": "resolved",
+            "title": "Tool 34 is failing",
+            "text": "8 calls failed in the last hour.",
+            "began": 1767204000000,
+            "last": 1767214200000,
+            "ended": 1767217600000
+          },
+          {
+            "id": 135,
+            "kind": "slow",
+            "state": "firing",
+            "title": "Tool 35 is failing",
+            "text": "9 calls failed in the last hour.",
+            "began": 1767203400000,
+            "last": 1767213900000
+          },
+          {
+            "id": 136,
+            "kind": "failing",
+            "state": "resolved",
+            "title": "Tool 36 is failing",
+            "text": "1 calls failed in the last hour.",
+            "began": 1767202800000,
+            "last": 1767213600000,
+            "ended": 1767217200000
+          },
+          {
+            "id": 137,
+            "kind": "disk",
+            "state": "resolved",
+            "title": "Tool 37 is failing",
+            "text": "2 calls failed in the last hour.",
+            "began": 1767202200000,
+            "last": 1767213300000,
+            "ended": 1767217000000
+          },
+          {
+            "id": 138,
+            "kind": "slow",
+            "state": "resolved",
+            "title": "Tool 38 is failing",
+            "text": "3 calls failed in the last hour.",
+            "began": 1767201600000,
+            "last": 1767213000000,
+            "ended": 1767216800000
+          },
+          {
+            "id": 139,
+            "kind": "failing",
+            "state": "resolved",
+            "title": "Tool 39 is failing",
+            "text": "4 calls failed in the last hour.",
+            "began": 1767201000000,
+            "last": 1767212700000,
+            "ended": 1767216600000
+          },
+          {
+            "id": 140,
+            "kind": "disk",
+            "state": "firing",
+            "title": "Tool 40 is failing",
+            "text": "5 calls failed in the last hour.",
+            "began": 1767200400000,
+            "last": 1767212400000
+          },
+          {
+            "id": 141,
+            "kind": "slow",
+            "state": "resolved",
+            "title": "Tool 41 is failing",
+            "text": "6 calls failed in the last hour.",
+            "began": 1767199800000,
+            "last": 1767212100000,
+            "ended": 1767216200000
+          },
+          {
+            "id": 142,
+            "kind": "failing",
+            "state": "resolved",
+            "title": "Tool 42 is failing",
+            "text": "7 calls failed in the last hour.",
+            "began": 1767199200000,
+            "last": 1767211800000,
+            "ended": 1767216000000
+          },
+          {
+            "id": 143,
+            "kind": "disk",
+            "state": "resolved",
+            "title": "Tool 43 is failing",
+            "text": "8 calls failed in the last hour.",
+            "began": 1767198600000,
+            "last": 1767211500000,
+            "ended": 1767215800000
+          },
+          {
+            "id": 144,
+            "kind": "slow",
+            "state": "resolved",
+            "title": "Tool 44 is failing",
+            "text": "9 calls failed in the last hour.",
+            "began": 1767198000000,
+            "last": 1767211200000,
+            "ended": 1767215600000
+          },
+          {
+            "id": 145,
+            "kind": "failing",
+            "state": "firing",
+            "title": "Tool 45 is failing",
+            "text": "1 calls failed in the last hour.",
+            "began": 1767197400000,
+            "last": 1767210900000
+          },
+          {
+            "id": 146,
+            "kind": "disk",
+            "state": "resolved",
+            "title": "Tool 46 is failing",
+            "text": "2 calls failed in the last hour.",
+            "began": 1767196800000,
+            "last": 1767210600000,
+            "ended": 1767215200000
+          },
+          {
+            "id": 147,
+            "kind": "slow",
+            "state": "resolved",
+            "title": "Tool 47 is failing",
+            "text": "3 calls failed in the last hour.",
+            "began": 1767196200000,
+            "last": 1767210300000,
+            "ended": 1767215000000
+          },
+          {
+            "id": 148,
+            "kind": "failing",
+            "state": "resolved",
+            "title": "Tool 48 is failing",
+            "text": "4 calls failed in the last hour.",
+            "began": 1767195600000,
+            "last": 1767210000000,
+            "ended": 1767214800000
+          },
+          {
+            "id": 149,
+            "kind": "disk",
+            "state": "resolved",
+            "title": "Tool 49 is failing",
+            "text": "5 calls failed in the last hour.",
+            "began": 1767195000000,
+            "last": 1767209700000,
+            "ended": 1767214600000
+          },
+          {
+            "id": 150,
+            "kind": "slow",
+            "state": "firing",
+            "title": "Tool 50 is failing",
+            "text": "6 calls failed in the last hour.",
+            "began": 1767194400000,
+            "last": 1767209400000
+          },
+          {
+            "id": 151,
+            "kind": "failing",
+            "state": "resolved",
+            "title": "Tool 51 is failing",
+            "text": "7 calls failed in the last hour.",
+            "began": 1767193800000,
+            "last": 1767209100000,
+            "ended": 1767214200000
+          },
+          {
+            "id": 152,
+            "kind": "disk",
+            "state": "resolved",
+            "title": "Tool 52 is failing",
+            "text": "8 calls failed in the last hour.",
+            "began": 1767193200000,
+            "last": 1767208800000,
+            "ended": 1767214000000
+          },
+          {
+            "id": 153,
+            "kind": "slow",
+            "state": "resolved",
+            "title": "Tool 53 is failing",
+            "text": "9 calls failed in the last hour.",
+            "began": 1767192600000,
+            "last": 1767208500000,
+            "ended": 1767213800000
+          },
+          {
+            "id": 154,
+            "kind": "failing",
+            "state": "resolved",
+            "title": "Tool 54 is failing",
+            "text": "1 calls failed in the last hour.",
+            "began": 1767192000000,
+            "last": 1767208200000,
+            "ended": 1767213600000
+          },
+          {
+            "id": 155,
+            "kind": "disk",
+            "state": "firing",
+            "title": "Tool 55 is failing",
+            "text": "2 calls failed in the last hour.",
+            "began": 1767191400000,
+            "last": 1767207900000
+          },
+          {
+            "id": 156,
+            "kind": "slow",
+            "state": "resolved",
+            "title": "Tool 56 is failing",
+            "text": "3 calls failed in the last hour.",
+            "began": 1767190800000,
+            "last": 1767207600000,
+            "ended": 1767213200000
+          },
+          {
+            "id": 157,
+            "kind": "failing",
+            "state": "resolved",
+            "title": "Tool 57 is failing",
+            "text": "4 calls failed in the last hour.",
+            "began": 1767190200000,
+            "last": 1767207300000,
+            "ended": 1767213000000
+          },
+          {
+            "id": 158,
+            "kind": "disk",
+            "state": "resolved",
+            "title": "Tool 58 is failing",
+            "text": "5 calls failed in the last hour.",
+            "began": 1767189600000,
+            "last": 1767207000000,
+            "ended": 1767212800000
+          },
+          {
+            "id": 159,
+            "kind": "slow",
+            "state": "resolved",
+            "title": "Tool 59 is failing",
+            "text": "6 calls failed in the last hour.",
+            "began": 1767189000000,
+            "last": 1767206700000,
+            "ended": 1767212600000
+          }
+        ],
+        "kinds": [
+          {
+            "kind": "failing",
+            "about": "A tool keeps failing"
+          },
+          {
+            "kind": "disk",
+            "about": "A disk is nearly full"
+          },
+          {
+            "kind": "slow",
+            "about": "A tool is slow"
+          }
+        ],
+        "forwarding": "https://logs.example.com/ingest"
+      }
+    },
+    "checks": {
+      "Holds no more as it's scrolled and refreshed": [
+        {
+          "press": "Tool 0 is failing"
+        },
+        {
+          "key": "End"
+        },
+        {
+          "answers": {
+            "telemetry_alerts": {
+              "alerts": [
+                {
+                  "id": 100,
+                  "kind": "failing",
+                  "state": "firing",
+                  "title": "Tool 0 is failing",
+                  "text": "1 calls failed in the last hour.",
+                  "began": 1767224400000,
+                  "last": 1767224460000
+                },
+                {
+                  "id": 101,
+                  "kind": "disk",
+                  "state": "resolved",
+                  "title": "Tool 1 is failing",
+                  "text": "2 calls failed in the last hour.",
+                  "began": 1767223800000,
+                  "last": 1767224160000,
+                  "ended": 1767224200000
+                },
+                {
+                  "id": 102,
+                  "kind": "slow",
+                  "state": "resolved",
+                  "title": "Tool 2 is failing",
+                  "text": "3 calls failed in the last hour.",
+                  "began": 1767223200000,
+                  "last": 1767223860000,
+                  "ended": 1767224000000
+                },
+                {
+                  "id": 103,
+                  "kind": "failing",
+                  "state": "resolved",
+                  "title": "Tool 3 is failing",
+                  "text": "4 calls failed in the last hour.",
+                  "began": 1767222600000,
+                  "last": 1767223560000,
+                  "ended": 1767223800000
+                },
+                {
+                  "id": 104,
+                  "kind": "disk",
+                  "state": "resolved",
+                  "title": "Tool 4 is failing",
+                  "text": "5 calls failed in the last hour.",
+                  "began": 1767222000000,
+                  "last": 1767223260000,
+                  "ended": 1767223600000
+                },
+                {
+                  "id": 105,
+                  "kind": "slow",
+                  "state": "firing",
+                  "title": "Tool 5 is failing",
+                  "text": "6 calls failed in the last hour.",
+                  "began": 1767221400000,
+                  "last": 1767222960000
+                },
+                {
+                  "id": 106,
+                  "kind": "failing",
+                  "state": "resolved",
+                  "title": "Tool 6 is failing",
+                  "text": "7 calls failed in the last hour.",
+                  "began": 1767220800000,
+                  "last": 1767222660000,
+                  "ended": 1767223200000
+                },
+                {
+                  "id": 107,
+                  "kind": "disk",
+                  "state": "resolved",
+                  "title": "Tool 7 is failing",
+                  "text": "8 calls failed in the last hour.",
+                  "began": 1767220200000,
+                  "last": 1767222360000,
+                  "ended": 1767223000000
+                },
+                {
+                  "id": 108,
+                  "kind": "slow",
+                  "state": "resolved",
+                  "title": "Tool 8 is failing",
+                  "text": "9 calls failed in the last hour.",
+                  "began": 1767219600000,
+                  "last": 1767222060000,
+                  "ended": 1767222800000
+                },
+                {
+                  "id": 109,
+                  "kind": "failing",
+                  "state": "resolved",
+                  "title": "Tool 9 is failing",
+                  "text": "1 calls failed in the last hour.",
+                  "began": 1767219000000,
+                  "last": 1767221760000,
+                  "ended": 1767222600000
+                },
+                {
+                  "id": 110,
+                  "kind": "disk",
+                  "state": "firing",
+                  "title": "Tool 10 is failing",
+                  "text": "2 calls failed in the last hour.",
+                  "began": 1767218400000,
+                  "last": 1767221460000
+                },
+                {
+                  "id": 111,
+                  "kind": "slow",
+                  "state": "resolved",
+                  "title": "Tool 11 is failing",
+                  "text": "3 calls failed in the last hour.",
+                  "began": 1767217800000,
+                  "last": 1767221160000,
+                  "ended": 1767222200000
+                },
+                {
+                  "id": 112,
+                  "kind": "failing",
+                  "state": "resolved",
+                  "title": "Tool 12 is failing",
+                  "text": "4 calls failed in the last hour.",
+                  "began": 1767217200000,
+                  "last": 1767220860000,
+                  "ended": 1767222000000
+                },
+                {
+                  "id": 113,
+                  "kind": "disk",
+                  "state": "resolved",
+                  "title": "Tool 13 is failing",
+                  "text": "5 calls failed in the last hour.",
+                  "began": 1767216600000,
+                  "last": 1767220560000,
+                  "ended": 1767221800000
+                },
+                {
+                  "id": 114,
+                  "kind": "slow",
+                  "state": "resolved",
+                  "title": "Tool 14 is failing",
+                  "text": "6 calls failed in the last hour.",
+                  "began": 1767216000000,
+                  "last": 1767220260000,
+                  "ended": 1767221600000
+                },
+                {
+                  "id": 115,
+                  "kind": "failing",
+                  "state": "firing",
+                  "title": "Tool 15 is failing",
+                  "text": "7 calls failed in the last hour.",
+                  "began": 1767215400000,
+                  "last": 1767219960000
+                },
+                {
+                  "id": 116,
+                  "kind": "disk",
+                  "state": "resolved",
+                  "title": "Tool 16 is failing",
+                  "text": "8 calls failed in the last hour.",
+                  "began": 1767214800000,
+                  "last": 1767219660000,
+                  "ended": 1767221200000
+                },
+                {
+                  "id": 117,
+                  "kind": "slow",
+                  "state": "resolved",
+                  "title": "Tool 17 is failing",
+                  "text": "9 calls failed in the last hour.",
+                  "began": 1767214200000,
+                  "last": 1767219360000,
+                  "ended": 1767221000000
+                },
+                {
+                  "id": 118,
+                  "kind": "failing",
+                  "state": "resolved",
+                  "title": "Tool 18 is failing",
+                  "text": "1 calls failed in the last hour.",
+                  "began": 1767213600000,
+                  "last": 1767219060000,
+                  "ended": 1767220800000
+                },
+                {
+                  "id": 119,
+                  "kind": "disk",
+                  "state": "resolved",
+                  "title": "Tool 19 is failing",
+                  "text": "2 calls failed in the last hour.",
+                  "began": 1767213000000,
+                  "last": 1767218760000,
+                  "ended": 1767220600000
+                },
+                {
+                  "id": 120,
+                  "kind": "slow",
+                  "state": "firing",
+                  "title": "Tool 20 is failing",
+                  "text": "3 calls failed in the last hour.",
+                  "began": 1767212400000,
+                  "last": 1767218460000
+                },
+                {
+                  "id": 121,
+                  "kind": "failing",
+                  "state": "resolved",
+                  "title": "Tool 21 is failing",
+                  "text": "4 calls failed in the last hour.",
+                  "began": 1767211800000,
+                  "last": 1767218160000,
+                  "ended": 1767220200000
+                },
+                {
+                  "id": 122,
+                  "kind": "disk",
+                  "state": "resolved",
+                  "title": "Tool 22 is failing",
+                  "text": "5 calls failed in the last hour.",
+                  "began": 1767211200000,
+                  "last": 1767217860000,
+                  "ended": 1767220000000
+                },
+                {
+                  "id": 123,
+                  "kind": "slow",
+                  "state": "resolved",
+                  "title": "Tool 23 is failing",
+                  "text": "6 calls failed in the last hour.",
+                  "began": 1767210600000,
+                  "last": 1767217560000,
+                  "ended": 1767219800000
+                },
+                {
+                  "id": 124,
+                  "kind": "failing",
+                  "state": "resolved",
+                  "title": "Tool 24 is failing",
+                  "text": "7 calls failed in the last hour.",
+                  "began": 1767210000000,
+                  "last": 1767217260000,
+                  "ended": 1767219600000
+                },
+                {
+                  "id": 125,
+                  "kind": "disk",
+                  "state": "firing",
+                  "title": "Tool 25 is failing",
+                  "text": "8 calls failed in the last hour.",
+                  "began": 1767209400000,
+                  "last": 1767216960000
+                },
+                {
+                  "id": 126,
+                  "kind": "slow",
+                  "state": "resolved",
+                  "title": "Tool 26 is failing",
+                  "text": "9 calls failed in the last hour.",
+                  "began": 1767208800000,
+                  "last": 1767216660000,
+                  "ended": 1767219200000
+                },
+                {
+                  "id": 127,
+                  "kind": "failing",
+                  "state": "resolved",
+                  "title": "Tool 27 is failing",
+                  "text": "1 calls failed in the last hour.",
+                  "began": 1767208200000,
+                  "last": 1767216360000,
+                  "ended": 1767219000000
+                },
+                {
+                  "id": 128,
+                  "kind": "disk",
+                  "state": "resolved",
+                  "title": "Tool 28 is failing",
+                  "text": "2 calls failed in the last hour.",
+                  "began": 1767207600000,
+                  "last": 1767216060000,
+                  "ended": 1767218800000
+                },
+                {
+                  "id": 129,
+                  "kind": "slow",
+                  "state": "resolved",
+                  "title": "Tool 29 is failing",
+                  "text": "3 calls failed in the last hour.",
+                  "began": 1767207000000,
+                  "last": 1767215760000,
+                  "ended": 1767218600000
+                },
+                {
+                  "id": 130,
+                  "kind": "failing",
+                  "state": "firing",
+                  "title": "Tool 30 is failing",
+                  "text": "4 calls failed in the last hour.",
+                  "began": 1767206400000,
+                  "last": 1767215460000
+                },
+                {
+                  "id": 131,
+                  "kind": "disk",
+                  "state": "resolved",
+                  "title": "Tool 31 is failing",
+                  "text": "5 calls failed in the last hour.",
+                  "began": 1767205800000,
+                  "last": 1767215160000,
+                  "ended": 1767218200000
+                },
+                {
+                  "id": 132,
+                  "kind": "slow",
+                  "state": "resolved",
+                  "title": "Tool 32 is failing",
+                  "text": "6 calls failed in the last hour.",
+                  "began": 1767205200000,
+                  "last": 1767214860000,
+                  "ended": 1767218000000
+                },
+                {
+                  "id": 133,
+                  "kind": "failing",
+                  "state": "resolved",
+                  "title": "Tool 33 is failing",
+                  "text": "7 calls failed in the last hour.",
+                  "began": 1767204600000,
+                  "last": 1767214560000,
+                  "ended": 1767217800000
+                },
+                {
+                  "id": 134,
+                  "kind": "disk",
+                  "state": "resolved",
+                  "title": "Tool 34 is failing",
+                  "text": "8 calls failed in the last hour.",
+                  "began": 1767204000000,
+                  "last": 1767214260000,
+                  "ended": 1767217600000
+                },
+                {
+                  "id": 135,
+                  "kind": "slow",
+                  "state": "firing",
+                  "title": "Tool 35 is failing",
+                  "text": "9 calls failed in the last hour.",
+                  "began": 1767203400000,
+                  "last": 1767213960000
+                },
+                {
+                  "id": 136,
+                  "kind": "failing",
+                  "state": "resolved",
+                  "title": "Tool 36 is failing",
+                  "text": "1 calls failed in the last hour.",
+                  "began": 1767202800000,
+                  "last": 1767213660000,
+                  "ended": 1767217200000
+                },
+                {
+                  "id": 137,
+                  "kind": "disk",
+                  "state": "resolved",
+                  "title": "Tool 37 is failing",
+                  "text": "2 calls failed in the last hour.",
+                  "began": 1767202200000,
+                  "last": 1767213360000,
+                  "ended": 1767217000000
+                },
+                {
+                  "id": 138,
+                  "kind": "slow",
+                  "state": "resolved",
+                  "title": "Tool 38 is failing",
+                  "text": "3 calls failed in the last hour.",
+                  "began": 1767201600000,
+                  "last": 1767213060000,
+                  "ended": 1767216800000
+                },
+                {
+                  "id": 139,
+                  "kind": "failing",
+                  "state": "resolved",
+                  "title": "Tool 39 is failing",
+                  "text": "4 calls failed in the last hour.",
+                  "began": 1767201000000,
+                  "last": 1767212760000,
+                  "ended": 1767216600000
+                },
+                {
+                  "id": 140,
+                  "kind": "disk",
+                  "state": "firing",
+                  "title": "Tool 40 is failing",
+                  "text": "5 calls failed in the last hour.",
+                  "began": 1767200400000,
+                  "last": 1767212460000
+                },
+                {
+                  "id": 141,
+                  "kind": "slow",
+                  "state": "resolved",
+                  "title": "Tool 41 is failing",
+                  "text": "6 calls failed in the last hour.",
+                  "began": 1767199800000,
+                  "last": 1767212160000,
+                  "ended": 1767216200000
+                },
+                {
+                  "id": 142,
+                  "kind": "failing",
+                  "state": "resolved",
+                  "title": "Tool 42 is failing",
+                  "text": "7 calls failed in the last hour.",
+                  "began": 1767199200000,
+                  "last": 1767211860000,
+                  "ended": 1767216000000
+                },
+                {
+                  "id": 143,
+                  "kind": "disk",
+                  "state": "resolved",
+                  "title": "Tool 43 is failing",
+                  "text": "8 calls failed in the last hour.",
+                  "began": 1767198600000,
+                  "last": 1767211560000,
+                  "ended": 1767215800000
+                },
+                {
+                  "id": 144,
+                  "kind": "slow",
+                  "state": "resolved",
+                  "title": "Tool 44 is failing",
+                  "text": "9 calls failed in the last hour.",
+                  "began": 1767198000000,
+                  "last": 1767211260000,
+                  "ended": 1767215600000
+                },
+                {
+                  "id": 145,
+                  "kind": "failing",
+                  "state": "firing",
+                  "title": "Tool 45 is failing",
+                  "text": "1 calls failed in the last hour.",
+                  "began": 1767197400000,
+                  "last": 1767210960000
+                },
+                {
+                  "id": 146,
+                  "kind": "disk",
+                  "state": "resolved",
+                  "title": "Tool 46 is failing",
+                  "text": "2 calls failed in the last hour.",
+                  "began": 1767196800000,
+                  "last": 1767210660000,
+                  "ended": 1767215200000
+                },
+                {
+                  "id": 147,
+                  "kind": "slow",
+                  "state": "resolved",
+                  "title": "Tool 47 is failing",
+                  "text": "3 calls failed in the last hour.",
+                  "began": 1767196200000,
+                  "last": 1767210360000,
+                  "ended": 1767215000000
+                },
+                {
+                  "id": 148,
+                  "kind": "failing",
+                  "state": "resolved",
+                  "title": "Tool 48 is failing",
+                  "text": "4 calls failed in the last hour.",
+                  "began": 1767195600000,
+                  "last": 1767210060000,
+                  "ended": 1767214800000
+                },
+                {
+                  "id": 149,
+                  "kind": "disk",
+                  "state": "resolved",
+                  "title": "Tool 49 is failing",
+                  "text": "5 calls failed in the last hour.",
+                  "began": 1767195000000,
+                  "last": 1767209760000,
+                  "ended": 1767214600000
+                },
+                {
+                  "id": 150,
+                  "kind": "slow",
+                  "state": "firing",
+                  "title": "Tool 50 is failing",
+                  "text": "6 calls failed in the last hour.",
+                  "began": 1767194400000,
+                  "last": 1767209460000
+                },
+                {
+                  "id": 151,
+                  "kind": "failing",
+                  "state": "resolved",
+                  "title": "Tool 51 is failing",
+                  "text": "7 calls failed in the last hour.",
+                  "began": 1767193800000,
+                  "last": 1767209160000,
+                  "ended": 1767214200000
+                },
+                {
+                  "id": 152,
+                  "kind": "disk",
+                  "state": "resolved",
+                  "title": "Tool 52 is failing",
+                  "text": "8 calls failed in the last hour.",
+                  "began": 1767193200000,
+                  "last": 1767208860000,
+                  "ended": 1767214000000
+                },
+                {
+                  "id": 153,
+                  "kind": "slow",
+                  "state": "resolved",
+                  "title": "Tool 53 is failing",
+                  "text": "9 calls failed in the last hour.",
+                  "began": 1767192600000,
+                  "last": 1767208560000,
+                  "ended": 1767213800000
+                },
+                {
+                  "id": 154,
+                  "kind": "failing",
+                  "state": "resolved",
+                  "title": "Tool 54 is failing",
+                  "text": "1 calls failed in the last hour.",
+                  "began": 1767192000000,
+                  "last": 1767208260000,
+                  "ended": 1767213600000
+                },
+                {
+                  "id": 155,
+                  "kind": "disk",
+                  "state": "firing",
+                  "title": "Tool 55 is failing",
+                  "text": "2 calls failed in the last hour.",
+                  "began": 1767191400000,
+                  "last": 1767207960000
+                },
+                {
+                  "id": 156,
+                  "kind": "slow",
+                  "state": "resolved",
+                  "title": "Tool 56 is failing",
+                  "text": "3 calls failed in the last hour.",
+                  "began": 1767190800000,
+                  "last": 1767207660000,
+                  "ended": 1767213200000
+                },
+                {
+                  "id": 157,
+                  "kind": "failing",
+                  "state": "resolved",
+                  "title": "Tool 57 is failing",
+                  "text": "4 calls failed in the last hour.",
+                  "began": 1767190200000,
+                  "last": 1767207360000,
+                  "ended": 1767213000000
+                },
+                {
+                  "id": 158,
+                  "kind": "disk",
+                  "state": "resolved",
+                  "title": "Tool 58 is failing",
+                  "text": "5 calls failed in the last hour.",
+                  "began": 1767189600000,
+                  "last": 1767207060000,
+                  "ended": 1767212800000
+                },
+                {
+                  "id": 159,
+                  "kind": "slow",
+                  "state": "resolved",
+                  "title": "Tool 59 is failing",
+                  "text": "6 calls failed in the last hour.",
+                  "began": 1767189000000,
+                  "last": 1767206760000,
+                  "ended": 1767212600000
+                }
+              ],
+              "kinds": [
+                {
+                  "kind": "failing",
+                  "about": "A tool keeps failing"
+                },
+                {
+                  "kind": "disk",
+                  "about": "A disk is nearly full"
+                },
+                {
+                  "kind": "slow",
+                  "about": "A tool is slow"
+                }
+              ],
+              "forwarding": "https://logs.example.com/ingest"
+            }
+          }
+        },
+        {
+          "answers": {}
+        },
+        {
+          "answers": {}
+        },
+        {
+          "key": "Home"
+        },
+        {
+          "answers": {}
+        },
+        {
+          "answers": {}
+        },
+        {
+          "key": "End"
+        },
+        {
+          "answers": {}
+        },
+        {
+          "key": "Home"
+        },
+        {
+          "expect": {
+            "shown": "Tool 0 is failing",
+            "js": 18.5
+          }
+        }
+      ]
+    }
   }
 }

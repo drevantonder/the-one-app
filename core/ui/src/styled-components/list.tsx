@@ -349,18 +349,12 @@ export function Row(props: RowProps): JSX.Element {
   const opens = () => !!props.onPress && style !== "plain" && (touch() || style === "insetGrouped") && !props.destructive
   const inside = () => (
     <>
-      <Show when={props.start}>
-        <View style={look.start}>{props.start}</View>
-      </Show>
+      <Show when={props.start}>{(start) => <View style={look.start}>{start()}</View>}</Show>
       <View style={[look.words, flat() && look.flatWords]}>
         <Text style={[look.heading, flat() && look.flatHeading, style !== "plain" && look.groupedHeading, grouped() && look.groupedSize, sidebar() && look.sidebarSize, props.destructive && look.destructive]}>{heading()}</Text>
-        <Show when={props.text}>
-          <Text style={[look.text, flat() && look.flatText, style !== "plain" && !touch() && look.groupedText]}>{props.text}</Text>
-        </Show>
+        <Show when={props.text}>{(text) => <Text style={[look.text, flat() && look.flatText, style !== "plain" && !touch() && look.groupedText]}>{text()}</Text>}</Show>
       </View>
-      <Show when={props.end}>
-        <View style={look.end}>{props.end}</View>
-      </Show>
+      <Show when={props.end}>{(end) => <View style={look.end}>{end()}</View>}</Show>
       <Show when={opens()}>
         <View style={look.chevron}>
           <Icon name="caret-right" />
@@ -396,9 +390,7 @@ export function Row(props: RowProps): JSX.Element {
             <View style={look.highlight} />
           </Show>
         </Show>
-        <Show when={props.control}>
-          <View style={[look.control, moving()]}>{props.control}</View>
-        </Show>
+        <Show when={props.control}>{(control) => <View style={[look.control, moving()]}>{control()}</View>}</Show>
         <Show
           when={props.onPress}
           fallback={<View style={[look.inside, !touch() && look.flatInside, grouped() && look.groupedInside, sidebar() && look.sidebarInside, !!props.control && look.after, moving()]}>{inside()}</View>}
@@ -415,9 +407,7 @@ export function Row(props: RowProps): JSX.Element {
             {inside()}
           </Pressable>
         </Show>
-        <Show when={props.action}>
-          <View style={[look.action, moving()]}>{props.action}</View>
-        </Show>
+        <Show when={props.action}>{(action) => <View style={[look.action, moving()]}>{action()}</View>}</Show>
         <Show when={menu()?.destructive()}>
           {(item) => (
             <Pressable aria-hidden="true" onPress={() => (menu()?.select(item().value), swipe.close())} style={[look.swipe, swipe.settling() && look.settling, look.swiped(swipe.offset())]}>

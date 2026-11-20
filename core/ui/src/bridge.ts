@@ -40,7 +40,7 @@ let requests = 0
 
 addEventListener("message", ({ source, data }) => {
   if (source !== host) return
-  if (data?.method === "notifications/one/changed") for (const listener of listeners) listener()
+  if (data?.method === "notifications/one/changed") tell()
   else if (data?.method === "ui/notifications/host-context-changed") dress(data.params)
   // The device's own back, where a device has one and something is open over the page: the topmost shuts.
   else if (data?.method === "notifications/one/back") topmost()?.shut()
@@ -94,7 +94,16 @@ const ask = <Result>(method: string, params: object = {}) => {
 const [connected, setConnected] = createSignal<Connection>("online")
 
 const [shown, setShown] = createSignal(document.visibilityState === "visible")
-document.addEventListener("visibilitychange", () => setShown(document.visibilityState === "visible"))
+document.addEventListener("visibilitychange", () => {
+  setShown(document.visibilityState === "visible")
+  if (missed) tell()
+})
+/** Whether a change came while the page wasn't shown, which it's told of once it is (`changed`). */
+let missed = false
+function tell() {
+  missed = !shown()
+  if (!missed) for (const listener of listeners) listener()
+}
 
 /// `createEffect(visible, (now, was) => now && was === false && refresh(phone))`: whether this page is shown, as it
 /// changes: not while its app is in the background or its person is in another app, as Settings. For what's asked
@@ -361,11 +370,16 @@ export const haptic = (kind: Haptic): void =>
 export type Haptic = "light" | "medium" | "heavy" | "rigid" | "soft" | "selection" | "success" | "warning" | "error"
 
 /// `changed(() => refresh(notes))`: runs what it's given whenever what this page was answered has changed, to ask
-/// again and draw it. → the function that stops it.
+/// again and draw it, but not while the page isn't shown: a change then is told once, as it's shown again, as a
+/// browser's background tab does nothing until it's looked at. → the function that stops it.
 export function changed(listener: () => void): () => void {
   listeners.add(listener)
   return () => void listeners.delete(listener)
 }
+
+/// `memoryWarning(() => setKept([]))`: what a native host tells a page that holds nearly all the memory it may have.
+/// A browser never tells a page that, so on the DOM it never runs. → the function that stops it.
+export const memoryWarning = (_listener: () => void): (() => void) => () => {}
 
 
 /// `leave()`: tells the client the user is done with the app, as MCP Apps' `request-teardown`: the window goes back to

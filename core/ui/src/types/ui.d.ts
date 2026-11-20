@@ -484,8 +484,10 @@ export type CheckStep = Tap | { press: Tap; hold?: number; clicks?: number; agen
  * a node of that name, `height` points, within one), as a type size is; and what a phone's system is asked to show of
  * a finger's selection: its menu for text with these items, inside the safe area, or none (`textMenu`:
  * `{ items: ["cut", "copy", "paste", "selectAll"] }`, or false), so many handles drawn (`handles`), and its magnifier
- * or not (`magnifier`), and what's over the page dimming it (`dimmed`, as a sheet's or an alert's scrim does). */
-export type Expect = { shown?: Tap; gone?: Tap; focused?: Tap; text?: string; states?: { of: Tap; is: Record<string, boolean | string> }; drawn?: { of: Tap; opacity: number }; blur?: boolean; dimmed?: boolean; keyboard?: Record<string, unknown>; margins?: number; tall?: { of: Tap; height: number }; textMenu?: { items?: string[] } | false; handles?: number; magnifier?: boolean }
+ * or not (`magnifier`), what's over the page dimming it (`dimmed`, as a sheet's or an alert's scrim does), and at most `js`
+ * MB held by its page's JS, collected first (the inspector's `js_bytes`), as a page that keeps what it no longer shows
+ * grows past it. */
+export type Expect = { shown?: Tap; gone?: Tap; focused?: Tap; text?: string; states?: { of: Tap; is: Record<string, boolean | string> }; drawn?: { of: Tap; opacity: number }; blur?: boolean; dimmed?: boolean; keyboard?: Record<string, unknown>; margins?: number; tall?: { of: Tap; height: number }; textMenu?: { items?: string[] } | false; handles?: number; magnifier?: boolean; js?: number }
 /** A press that goes down on what `from` names (as a tap does) and moves as `gesture` says, or input played as a device
  * delivered it (a `trace` file of events, as a check's `trace`), with what's watched move (`follow`, named as a tap is;
  * what scrolls under it is always watched). `steady`: what moves never goes back against its way before its input
@@ -528,7 +530,14 @@ export declare function upload(file: File | Blob): Promise<string>
 /** The device's own picker of files to open, from a press: of `accept`'s kinds (`.png`, `image/*`), one or
  * `multiple`. → the files chosen, none where it was cancelled. */
 export declare function pickFiles(options?: { accept?: string[]; multiple?: boolean }): Promise<File[]>
+/** `changed(() => refresh(notes))`: runs `listener` whenever what this page was answered has changed, to ask again and
+ * draw it, but not while the page isn't shown (`visible`): a change then is told once, as it's shown again, as a
+ * browser's background tab does nothing until it's looked at. → the function that stops it. */
 export declare function changed(listener: () => void): () => void
+/** `memoryWarning(() => setKept([]))`: runs `listener` as the page holds nearly all the memory it may have, for it to
+ * let go of what it can make again, as iOS's `didReceiveMemoryWarning` tells an app. A browser never tells it. → the
+ * function that stops it. */
+export declare function memoryWarning(listener: () => void): () => void
 export declare function toast(text: string | Error, options?: { action?: { label: string; run: () => void } }): Promise<void>
 export declare function confirm(question: { heading: string; text?: string; action?: string; destructive?: boolean }): Promise<boolean>
 /** `behind` only starts it, as a finger lands on its icon; `from` is where its icon or widget is drawn, with its corners'

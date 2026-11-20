@@ -12,6 +12,13 @@ import { readable } from "./words.ts"
 const host = (globalThis as { host?: Host }).host
 const waiting = new Map<number, (response: { result?: unknown; error?: { message: string } }) => void>()
 const listeners = new Set<() => void>()
+const warned = new Set<() => void>()
+/** Whether a change came while the page wasn't shown, which it's told of once it is (`changed`). */
+let missed = false
+const tell = () => {
+  missed = !shown()
+  if (!missed) for (const listener of listeners) listener()
+}
 let requests = 0
 /** What listens for each key pressed (`keydown`). */
 const keys = new Set<(event: Page.Keyed) => void>()
@@ -24,7 +31,8 @@ const keys = new Set<(event: Page.Keyed) => void>()
     if (told.name === "keydown" && told.id === 0) for (const listener of keys) listener({ key: told.key ?? "", shiftKey: !!told.shiftKey, altKey: !!told.altKey, ctrlKey: !!told.ctrlKey, metaKey: !!told.metaKey, preventDefault() {} })
   },
   message(message: { id?: number; method?: string; result?: unknown; error?: { message: string } }) {
-    if (message.method === "notifications/one/changed") for (const listener of listeners) listener()
+    if (message.method === "notifications/one/changed") tell()
+    else if (message.method === "notifications/one/memory_warning") for (const listener of warned) listener()
     else if (message.method === "ui/notifications/host-context-changed") dress((message as { params?: object }).params)
     // The device's own back, where something is open over the page: the topmost shuts.
     else if (message.method === "notifications/one/back") topmost()?.shut()
@@ -154,7 +162,10 @@ function dress(context?: Context) {
   if (context?.safeAreaInsets) setInsets(context.safeAreaInsets)
   if (context?.containerDimensions) setSize(context.containerDimensions)
   if (context && "reducedMotion" in context) setStill(context.reducedMotion === true)
-  if (context && "visible" in context) setShown(context.visible !== false)
+  if (context && "visible" in context) {
+    setShown(context.visible !== false)
+    if (missed) tell()
+  }
   if (context?.pressure && context.pressure !== pressure) {
     pressure = context.pressure
     for (const observer of observing) observer.said(pressure)
@@ -195,6 +206,10 @@ export const open: typeof Page.open = async (app, { subject, behind, from } = {}
 export const changed: typeof Page.changed = (listener) => {
   listeners.add(listener)
   return () => void listeners.delete(listener)
+}
+export const memoryWarning: typeof Page.memoryWarning = (listener) => {
+  warned.add(listener)
+  return () => void warned.delete(listener)
 }
 /** What's open over the page, as the DOM's bridge keeps it (`covers`), which its host hears of, so its Back shuts it. */
 const over: { shut: () => void; layer: boolean }[] = []
