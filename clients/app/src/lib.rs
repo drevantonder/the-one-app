@@ -74,7 +74,22 @@ impl Views {
         let mut shown = self.subscriptions.lock().expect("no view panics");
         let new = || {
             let view = view.to_owned();
-            Subscription::new(self.client.clone(), move || app().shell.emit("changed", json!(view)))
+            Subscription::new(self.client.clone(), move || {
+                app().shell.emit("changed", json!(view));
+                // The client's list of files is taken once a new version's files are all kept (`keep_whole`): the open
+                // apps it no longer names load again then, on it.
+                if view == "client" {
+                    spawn(async {
+                        let Ok(views) = views() else { return };
+                        let Ok(listed) = views.listed(None).await else { return };
+                        let outdated = views.outdated(None, &listed);
+                        if !outdated.is_empty() {
+                            eprintln!("{outdated:?} were loaded against a version this client no longer lists");
+                            app().shell.emit("stale", json!(outdated));
+                        }
+                    });
+                }
+            })
         };
         shown.entry(view.to_owned()).or_insert_with(new).clone()
     }
@@ -172,10 +187,13 @@ impl Views {
     /// The open apps loaded against a version of their app, or a build of the UI library, that `changed` says
     /// isn't the one there is now, each as its address names it: a server says the UI library's build (`library`),
     /// and the version each app of the owners whose apps moved runs at (`apps`, by owner). A version that's
-    /// still one of them is current, as an app opened for another owner may be on its own. Another app's files an
-    /// app shows, as the launcher shows every app's icon, aren't what it runs. They have loaded nothing once this has
-    /// named them.
-    fn stale(&self, changed: &Value) -> Vec<String> {
+    /// still one of them is current, as an app opened for another owner may be on its own, and so is one this client's
+    /// list (`listed`) still names, as its new version's files aren't all kept yet: it loads again once they are, as
+    /// the list that names them is taken (`subscription`), not before, onto the same version again. Another app's
+    /// files an app shows, as the launcher shows every app's icon, aren't what it runs. They have loaded nothing once
+    /// this has named them.
+    fn stale(&self, changed: &Value, listed: &Value) -> Vec<String> {
+        let listed: HashSet<&str> = resources(listed).collect();
         let gone = |name: &str, code: &str| {
             if name == "ui" {
                 return changed["library"].as_str().is_some_and(|library| library != code);
@@ -187,7 +205,7 @@ impl Views {
         let mut loaded = self.loaded.lock().expect("no view panics");
         let stale: Vec<String> = loaded
             .iter()
-            .filter(|(app, files)| runs(app, files).any(|(_, name, code)| gone(name, code)))
+            .filter(|(app, files)| runs(app, files).any(|(file, name, code)| gone(name, code) && !listed.contains(file)))
             .map(|(app, _)| app.clone())
             .collect();
         loaded.retain(|app, _| !stale.contains(app));
@@ -964,7 +982,8 @@ async fn opens() {
             if message["method"] != "notifications/one/changed" {
                 continue;
             }
-            let stale = views.stale(&message["params"]);
+            let listed = views.listed(None).await.unwrap_or_default();
+            let stale = views.stale(&message["params"], &listed);
             if !stale.is_empty() {
                 eprintln!("a server said {stale:?} were loaded against what's gone");
                 app.shell.emit("stale", json!(stale));
