@@ -150,10 +150,18 @@ impl Screen {
                 let node = self.key(&key);
                 json!({"node": node})
             }
+            "hover" => {
+                let (x, y) = match request.selects() {
+                    true => self.rects.get(&inspect::one(&self.tree, request)?).map(|rect| rect.centre()).context("that node isn't drawn")?,
+                    false => request.point().context("say where to hover: a node, by a selector, or a point, x and y")?,
+                };
+                self.pointer_moved(crate::geometry::point(x, y));
+                json!({"hovered": {"x": x, "y": y}})
+            }
             "scroll" => {
                 let (dx, dy) = (request.f32("dx").unwrap_or(0.0), request.f32("dy").unwrap_or(0.0));
-                // What scrolls around the node selected, or the window.
-                let at = if request.selects() { self.rects.get(&inspect::one(&self.tree, request)?).map(|rect| rect.centre()) } else { None };
+                // What scrolls around the node selected, or at a point, or the window.
+                let at = if request.selects() { self.rects.get(&inspect::one(&self.tree, request)?).map(|rect| rect.centre()) } else { request.point() };
                 let (x, y) = at.unwrap_or((0.0, 0.0));
                 // The trackpad's phase, as a Mac's says it, where it's given.
                 let fingers = request.inputs.get("phase").and_then(Value::as_str).and_then(|named| super::Phase::FINGERS.into_iter().find(|one| *one == named));

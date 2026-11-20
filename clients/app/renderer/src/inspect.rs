@@ -42,6 +42,8 @@
 //!   keeps the renderer's contract with it (`platform`'s), its window kept moving for a second, then still, each check
 //!   `{check, ok, said}`: a tick each refresh, a frame presented each tick, nothing while still, and inputs timed by
 //!   the device, in order. A native window answers it; the headless harness, which has no host, doesn't.
+//! - `hover` (a selector, or a point) → `{hovered}`: the pointer moves to the point, or the node's middle, pressing
+//!   nothing, as Playwright's `hover`: what's under it is hovered and told the pointer moved.
 //! - `tap` (a selector, or a point) → `{tapped, editing}`: the pointer moves to the point, or the node's middle, and
 //!   presses there as a mouse does, so what takes it is what a person's press reaches, as the window drew it (what
 //!   doesn't take the pointer, `pointerEvents: "none"`, and what's clipped away are passed over): an input takes the
@@ -58,7 +60,7 @@
 //!   what has it, what listens for `keydown` hears it, and an input edits by it as a Linux field does (Ctrl+C, X, V,
 //!   Z, Shift+Z, Y and A, Ctrl+arrows by word, Shift to select, Home and End), with a clipboard of the window's own
 //!   in the headless harness.
-//! - `scroll` (`dx`, `dy` in CSS pixels, and a selector of what's in what scrolls; `phase`, a trackpad's fingers' by
+//! - `scroll` (`dx`, `dy` in CSS pixels, and a selector of what's in what scrolls, or a point; `phase`, a trackpad's fingers' by
 //!   AppKit's names, and `momentum`, as a Mac says them, `view::Phase`) → `{scrolled: {x, y}}`.
 //! - `drag` (a selector, or a point, where it starts; `dx`, `dy` in CSS pixels; `steps`, 10 unless given, and `ms`,
 //!   200) → `{dragged}`: the pointer goes down there, moves `dx`, `dy` in `steps` even moves, and comes up, as
