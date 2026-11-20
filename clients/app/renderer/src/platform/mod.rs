@@ -1057,6 +1057,8 @@ impl Windows {
                 (window.on_event)(Event::Drawn);
             }
             if let Some(asked) = window.summoned.take() {
+                let ms = |time: std::time::Duration| time.as_secs_f64() * 1000.0;
+                eprintln!("the launcher's first frame as it was summoned took {:.1} ms to paint and {:.1} ms to draw", ms(painted - began), ms(painted.elapsed()));
                 (window.on_event)(Event::Shown(asked.elapsed()));
             }
         }
