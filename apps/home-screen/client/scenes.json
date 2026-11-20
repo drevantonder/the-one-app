@@ -1334,5 +1334,21 @@
         "name": "Productivity"
       }
     ]
+  },
+  "General, opens at login": {
+    "component": "general",
+    "answers": {
+      "one/client": {
+        "login": true
+      }
+    }
+  },
+  "General, doesn't open at login": {
+    "component": "general",
+    "answers": {
+      "one/client": {
+        "login": false
+      }
+    }
   }
 }

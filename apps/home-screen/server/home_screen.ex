@@ -30,13 +30,17 @@ defmodule HomeScreen do
   @impl true
   def entrypoints, do: [%{page: "client/index.html", category: "launcher", runtime_version: 4}]
 
-  # Colour Mode is in Settings' Appearance (`settings.sections`), drawn by this app's component.
+  # Colour Mode is in Settings' Appearance, and whether a computer's app opens at login in its General
+  # (`settings.sections`), each drawn by this app's component.
   @impl true
   def hooks, do: ["settings.sections"]
 
   @impl true
   def hook("settings.sections", _about, _call),
-    do: [%{in: "settings", name: "Appearance", component: "appearance", icon: "client/colour-mode.svg", group: "general", order: 2}]
+    do: [
+      %{in: "settings", name: "Appearance", component: "appearance", icon: "client/colour-mode.svg", group: "general", order: 2},
+      %{in: "settings", name: "General", component: "general", icon: "client/general.svg", group: "general", order: 4}
+    ]
 
   @impl true
   def tools do

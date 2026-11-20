@@ -529,6 +529,8 @@ export type Client = {
   }
   push?: { state: "notAsked" | "denied" | "registering" | "registered" | "homeScreen" } | { state: "failed"; why: string }
   computerUse?: { on: boolean }
+  /** Whether a computer's app opens when its person logs in, as the system says; null where this device or build has none. */
+  login?: boolean | null
   theme: "light" | "dark" | null
   pinsShortcuts?: boolean
   settings?: boolean
@@ -545,6 +547,8 @@ export type ClientChange = {
   statusBar?: boolean
   leave?: boolean
   serve?: boolean
+  /** A computer's app opens when its person logs in, or not. */
+  login?: boolean
   update?: boolean
   push?: boolean
   settings?: "accessibility" | "app"

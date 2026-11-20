@@ -35,6 +35,8 @@ mod shortcuts;
 #[cfg(desktop)]
 pub mod computer;
 #[cfg(desktop)]
+mod login;
+#[cfg(desktop)]
 pub mod host;
 mod hosts;
 mod memory;
@@ -378,7 +380,17 @@ fn client() -> Result<Value, String> {
         "push": notifications::push(),
         "settings": cfg!(target_os = "ios"),
         "computerUse": computer_use_client::phone(),
+        "login": login(),
     }))
+}
+
+/// Whether the app opens when this device's person logs in, as the system says; null on a device that has no such
+/// thing (a phone's), or whose build keeps none (`login`).
+fn login() -> Option<bool> {
+    #[cfg(desktop)]
+    return login::enabled();
+    #[cfg(mobile)]
+    None
 }
 
 /// Makes this device a server of its person's, or with `on` false, no longer one, as `one serve on` and `one serve

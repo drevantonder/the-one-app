@@ -365,6 +365,9 @@ fn launcher(home: std::path::PathBuf, link: Option<String>, started: std::time::
     if let Err(error) = links() {
         eprintln!("this device's one: links don't open this app: {error:#}");
     }
+    if !restarted {
+        crate::login::begin(&home);
+    }
     #[cfg(all(windows, not(debug_assertions)))]
     if let Err(error) = toasts() {
         eprintln!("this device shows this app's notifications as another app's: {error:#}");

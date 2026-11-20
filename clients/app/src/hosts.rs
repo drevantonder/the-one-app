@@ -362,6 +362,12 @@ async fn change(args: &Value) -> Result<Value, String> {
         let _ = which;
         return Err("This device has no Settings to open here.".into());
     }
+    if let Some(on) = args.get("login") {
+        #[cfg(desktop)]
+        return crate::login::set(on == true).map(|()| json!({"message": ""})).map_err(|error| format!("{error:#}"));
+        #[cfg(mobile)]
+        return Err(format!("This device has no login items ({on})."));
+    }
     if let Some(on) = args.get("serve") {
         return serve(on == true).await.map(|message| json!({"message": message}));
     }
