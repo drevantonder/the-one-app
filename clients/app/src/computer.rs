@@ -301,7 +301,9 @@ fn keep_log(home: &std::path::Path) {
     }
 }
 
-/// Whether its standard error goes nowhere: to `/dev/null`, or on Windows, a windowed program's none.
+/// Whether its standard error goes nowhere: to `/dev/null`, or on Windows anywhere but a file or a pipe, as `one.exe`
+/// is a console program, which says to a console of its own wherever it's started from but a terminal, and the
+/// Windows app kept no log at all (20 Nov).
 fn says_to_nowhere() -> bool {
     #[cfg(unix)]
     {
@@ -312,7 +314,10 @@ fn says_to_nowhere() -> bool {
     }
     #[cfg(windows)]
     {
-        unsafe { windows::Win32::System::Console::GetStdHandle(windows::Win32::System::Console::STD_ERROR_HANDLE) }.is_ok_and(|handle| handle.is_invalid() || handle.0.is_null())
+        use windows::Win32::Storage::FileSystem::{FILE_TYPE_DISK, FILE_TYPE_PIPE, GetFileType};
+        let kept = unsafe { windows::Win32::System::Console::GetStdHandle(windows::Win32::System::Console::STD_ERROR_HANDLE) }
+            .is_ok_and(|handle| !handle.is_invalid() && !handle.0.is_null() && matches!(unsafe { GetFileType(handle) }, FILE_TYPE_DISK | FILE_TYPE_PIPE));
+        !kept
     }
 }
 
