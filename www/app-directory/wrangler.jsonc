@@ -6,7 +6,7 @@
   // Its stylesheet, at /apps/style.css.
   "assets": { "directory": "public" },
   "d1_databases": [
-    { "binding": "DB", "database_name": "one-www-app-directory", "database_id": "e111ce4f-b0b4-4b6f-a06b-dd53167a168c" }
+    { "binding": "DB", "database_name": "one-www-app-directory", "database_id": "338b0917-b3b5-4046-bdc1-3e31f4e73434" }
   ],
   // At most 10 installs a minute from one address, counted by Cloudflare's rate limiter, which keeps nothing of ours.
   "ratelimits": [{ "name": "INSTALLS", "namespace_id": "4801", "simple": { "limit": 10, "period": 60 } }]

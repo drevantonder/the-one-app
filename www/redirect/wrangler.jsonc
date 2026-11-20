@@ -1,0 +1,8 @@
+{
+  "name": "one-www-redirect",
+  "main": "redirect.js",
+  "compatibility_date": "2026-11-01",
+  "workers_dev": false,
+  // drevan.me is Andre van Tonder's own Cloudflare account's, so this Worker is deployed there.
+  "routes": [{ "pattern": "one.drevan.me", "custom_domain": true }]
+}

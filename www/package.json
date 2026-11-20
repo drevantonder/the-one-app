@@ -1,6 +1,6 @@
 {
   "name": "www",
-  "description": "the One App's own website at one.drevan.me: the gateway, the marketing page and the app directory, each a Worker.",
+  "description": "the One App's own website at one.ptcau.dev: the gateway, the marketing page and the app directory, each a Worker.",
   "private": true,
   "type": "module",
   "devDependencies": {

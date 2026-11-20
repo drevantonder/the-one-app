@@ -3,7 +3,7 @@
   "main": "gateway.ts",
   "compatibility_date": "2026-11-01",
   "workers_dev": false,
-  "routes": [{ "pattern": "one.drevan.me", "custom_domain": true }],
+  "routes": [{ "pattern": "one.ptcau.dev", "custom_domain": true }],
   "services": [
     { "binding": "APP_DIRECTORY", "service": "one-www-app-directory" },
     { "binding": "MARKETING", "service": "one-www-marketing" }

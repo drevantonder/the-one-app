@@ -1,6 +1,6 @@
 # App directory
 
-Every app anyone has installed, ranked by installs, at <https://one.drevan.me/apps>. Nobody submits an app:
+Every app anyone has installed, ranked by installs, at <https://one.ptcau.dev/apps>. Nobody submits an app:
 it lives in any GitHub repo at `apps/<name>/`, with a `SKILL.md` whose front matter has its `name` and
 `description`, and what a person reads of it in its `metadata`'s `subtitle`, `about` and `category`, each on one line,
 and it's listed the first time an installer says it installed it. Each is listed as a network's marketplace lists it:
@@ -13,7 +13,7 @@ a repo's apps as a network's Marketplace lists them, so the list isn't empty bef
 
 After installing an app, unless `DO_NOT_TRACK` is set (`1`, or any value but empty and `0`), an installer makes one call:
 
-    POST https://one.drevan.me/apps/api/installs
+    POST https://one.ptcau.dev/apps/api/installs
     Content-Type: application/json
 
     {"source": "ptc-au/the-one-app", "app": "gmail", "commit": "c6ebcc7", "listing": {"title": "Gmail",
@@ -31,7 +31,7 @@ An installer doesn't wait on it or retry it, and nothing it installs depends on 
 
 ## Reading the list
 
-    GET https://one.drevan.me/apps/api/apps[?period=week]
+    GET https://one.ptcau.dev/apps/api/apps[?period=week]
 
     {"period": "all", "apps": [{"source": "ptc-au/the-one-app", "name": "gmail", "title": "Gmail",
       "icon": "data:…", "subtitle": "…", "about": "…", "category": "Connectors", "entrypoints": […], "widgets": […],

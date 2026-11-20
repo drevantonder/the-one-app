@@ -9,7 +9,7 @@ defmodule AppStore do
   alias OneCore.Call
 
   # The app directory's list (www/app-directory/README.md): every app anyone has installed from a git repo.
-  @directory "https://one.drevan.me/apps/api/apps"
+  @directory "https://one.ptcau.dev/apps/api/apps"
 
   @impl true
   def icon, do: "client/icon.svg"

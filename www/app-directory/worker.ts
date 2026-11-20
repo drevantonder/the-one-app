@@ -126,7 +126,7 @@ const installs = (n: number) => `${number(n)} ${n === 1 ? "install" : "installs"
 
 const TRUST = `<p class="trust">An app's server code runs on your own machine, with full access to it. Nothing here is reviewed by us: have your agent read an app before you install it. Apps are listed and ranked by anonymous install counts; installing with <code>DO_NOT_TRACK=1</code> sends none.</p>`;
 
-const ORIGIN = "https://one.drevan.me";
+const ORIGIN = "https://one.ptcau.dev";
 const CARD = { url: `${ORIGIN}/social-card.png`, alt: "the One App: make using AI to its full potential easy." };
 
 /** The tags that make a link to a page a card in a chat or on social media, and its canonical address. */

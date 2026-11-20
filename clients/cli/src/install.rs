@@ -20,7 +20,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{Value, json};
 
 /// Where an installer says it installed an app, for the directory of apps (`www/app-directory/README.md`).
-const DIRECTORY: &str = "https://one.drevan.me/apps/api/installs";
+const DIRECTORY: &str = "https://one.ptcau.dev/apps/api/installs";
 const LOCK: &str = "apps.lock";
 
 /// Where an app comes from: a repo as it's written in a lock file (`owner/repo` on GitHub, a git URL, or a

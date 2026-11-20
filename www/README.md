@@ -1,11 +1,12 @@
 # www
 
-the One App's own website, at <https://one.drevan.me>: three Workers on Cloudflare, each deployable on its own.
+the One App's own website, at <https://one.ptcau.dev>: three Workers on Cloudflare, each deployable on its own.
 
-- `gateway/` answers one.drevan.me (a custom domain) and sends `/apps` and everything under it to the app
+- `gateway/` answers one.ptcau.dev (a custom domain) and sends `/apps` and everything under it to the app
   directory, and the rest to the marketing site, by service binding.
 - `marketing/` is one static page.
 - `app-directory/` is the app directory: its pages, its API and its counts in D1 (its own README).
+- `redirect/` answers the old address, one.drevan.me, with a 308 to the same path here.
 
 Run it all on this machine, from this folder:
 
@@ -17,7 +18,8 @@ Run it all on this machine, from this folder:
 The Workers are TypeScript, which wrangler builds without checking. `bun run typecheck` checks them;
 `bun run types` makes each Worker's `worker-configuration.d.ts` again after its `wrangler.jsonc` changes.
 
-Deploy, with `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID` set, each from its own folder, the gateway last:
+Deploy to Power to Change Australia's Cloudflare account (PTC Systems), with `CLOUDFLARE_API_TOKEN` and
+`CLOUDFLARE_ACCOUNT_ID` set, each from its own folder, the gateway last:
 
     cd app-directory && bunx wrangler deploy
     cd marketing && bunx wrangler deploy

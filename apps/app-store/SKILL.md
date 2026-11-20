@@ -10,7 +10,7 @@ metadata:
 
 The App Store is the app a person installs and removes apps with, as VS Code's Extensions view is: Marketplace, every
 app the network can install, and Installed, what's installed for each owner they see. `marketplace` lists the
-first: every app anyone in the network deployed, then the app directory's (one.drevan.me/apps) that aren't
+first: every app anyone in the network deployed, then the app directory's (one.ptcau.dev/apps) that aren't
 among them, each with what it requires and why. Installing and the rest are One Core's own tools (`install`,
 `uninstall`, `apps`, `apps_update`, `apps_retry`, `apps_trust`), which an agent calls itself. An uninstalled app
 is restored, with what it kept, in Recently Deleted (`soft-delete restore`), as everything deleted is.
