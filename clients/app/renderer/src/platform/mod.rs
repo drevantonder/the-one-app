@@ -744,7 +744,7 @@ impl Windows {
             rail::Phase::Down => {}
             rail::Phase::Moved => {
                 let was = pull.pulling();
-                match pull.moved(at, Size { width: room.width.0, height: room.height.0 }, icon, screen.reducing_motion()) {
+                match pull.moved(at, Size { width: room.width.0, height: room.height.0 }, icon, screen.reduced_motion) {
                     rail::Pulled::Kept(Some(moved)) => {
                         self.display.set_moved(&window.parts[0].native, moved);
                         if !was {
@@ -776,7 +776,7 @@ impl Windows {
         let mut back = false;
         for window in self.windows.values_mut() {
             let (room, icon) = (window.room(), window.icon);
-            let reduced = window.screen.as_ref().is_ok_and(Screen::reducing_motion);
+            let reduced = window.screen.as_ref().is_ok_and(|screen| screen.reduced_motion);
             let Some(pull) = window.pull.as_mut().filter(|pull| pull.springing()) else { continue };
             let (moved, still) = pull.step(Size { width: room.width.0, height: room.height.0 }, icon, reduced);
             match still {

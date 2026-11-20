@@ -239,8 +239,9 @@ pub struct Screen {
     pub appearance: Appearance,
     /// The person asked for less motion, as the device says.
     pub reduced_motion: bool,
-    /// How pressed the device is (`platform::Pressure`): serious or worse, what moves goes as reduced motion has it,
-    /// and glass as reduced transparency has it, until it eases. The page hears it as `hostContext.pressure`.
+    /// How pressed the device is (`platform::Pressure`): serious or worse, glass is drawn as reduced transparency has
+    /// it, until it eases. What moves goes on moving: a cross-fade costs a frame no less than a slide, and turning to
+    /// one mid-slide is a glitch. The page hears it as `hostContext.pressure`.
     pub pressure: crate::platform::Pressure,
     /// The device's own text size, which a phone has, in pixels: 1rem is it, and the `phone` tokens hold.
     pub text_size: Option<f32>,
@@ -642,16 +643,11 @@ impl Screen {
     /// answered at once (`Asked`) or later, as a browser's frame's client does.
     fn place(&mut self, answer: &mut Value) {
         answer["result"]["hostContext"]["containerDimensions"] = json!({"width": self.room.width, "height": self.room.height});
-        answer["result"]["hostContext"]["reducedMotion"] = json!(self.reducing_motion());
+        answer["result"]["hostContext"]["reducedMotion"] = json!(self.reduced_motion);
         answer["result"]["hostContext"]["pressure"] = json!(self.pressure.name());
         answer["result"]["hostContext"]["safeAreaInsets"] = self.safe_area();
         answer["result"]["hostContext"]["visible"] = json!(self.visible);
-        self.told = Some((self.room, self.reducing_motion(), self.insets, self.pressure));
-    }
-
-    /// Whether what moves goes as reduced motion has it: its person asked, or the device is pressed seriously.
-    pub fn reducing_motion(&self) -> bool {
-        self.reduced_motion || self.pressure >= crate::platform::Pressure::Serious
+        self.told = Some((self.room, self.reduced_motion, self.insets, self.pressure));
     }
 
     /// Logs what the app's JS threw, as a browser's console does, and carries on.
@@ -872,7 +868,7 @@ impl Screen {
             Some(size) => (true, (size * 100.0).round() as u16),
             None => (false, Conditions::default().rem),
         };
-        Conditions { dark: self.dark(), touch: self.touch, phone, reduced_motion: self.reducing_motion(), reduced_transparency: self.pressure >= crate::platform::Pressure::Serious, insets, title_bar, page: self.page, rem }
+        Conditions { dark: self.dark(), touch: self.touch, phone, reduced_motion: self.reduced_motion, reduced_transparency: self.pressure >= crate::platform::Pressure::Serious, insets, title_bar, page: self.page, rem }
     }
 
     /// Its insets as MCP Apps' host context says them (`safeAreaInsets`).
@@ -942,12 +938,12 @@ impl Screen {
     /// an MCP App.
     fn tell_room(&mut self, size: Size<Pixels>) {
         self.room = Size { width: size.width.0, height: size.height.0 };
-        let now = (self.room, self.reducing_motion(), self.insets, self.pressure);
+        let now = (self.room, self.reduced_motion, self.insets, self.pressure);
         if self.told.is_some_and(|told| told != now) {
             self.told = Some(now);
             let context = json!({
                 "containerDimensions": {"width": self.room.width, "height": self.room.height},
-                "reducedMotion": self.reducing_motion(),
+                "reducedMotion": self.reduced_motion,
                 "pressure": self.pressure.name(),
                 "safeAreaInsets": self.safe_area(),
             });
