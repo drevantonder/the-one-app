@@ -350,13 +350,15 @@ function choose(item: Item) {
 /// app's by its page for it (client/<component>.html) in a frame of its own, where it keeps what an app of its own may
 /// do, or else its own.
 function Detail(props: { item: Item }) {
-  const drawn = () => {
-    const type = typeOf(props.item)
-    return type?.component && type.trusted ? type : undefined
-  }
+  // The same type while what draws its item is: the list asked again, as it is whenever anything changes, gives new
+  // objects, and a new one would draw the item from scratch, losing what's open in it (a live screen's stream).
+  const type = createMemo(() => typeOf(props.item), {
+    equals: (a, b) => a?.id === b?.id && a?.app === b?.app && a?.component === b?.component && a?.trusted === b?.trusted && a?.prefix === b?.prefix,
+  })
+  const drawn = () => (type()?.component && type()!.trusted ? type() : undefined)
   const framed = () => {
-    const type = typeOf(props.item)
-    return type?.component && !type.trusted ? `${type.app}/client/${type.component}.html#${encodeURIComponent(shown(props.item))}` : undefined
+    const it = type()
+    return it?.component && !it.trusted ? `${it.app}/client/${it.component}.html#${encodeURIComponent(shown(props.item))}` : undefined
   }
   return (
     <Show when={drawn()} keyed fallback={<Show when={framed()} keyed fallback={<ItemScreen item={props.item} />}>{(src) => <Frame src={src} subject={whose()} title={shown(props.item)} style={look.fill} />}</Show>}>

@@ -177,7 +177,11 @@ function Sidebar(props: { shown?: string }) {
 
 /// What's open: a section of an app's, Updates, or an app's page.
 function Detail(props: { id: string }) {
-  const section = () => added().find((one) => one.id === props.id && one.in === "settings")
+  // The same section while what draws it is: `added` asked again, as it is whenever anything changes, gives new
+  // objects, and a new one would draw the section from scratch, losing what's open in it (a live screen's stream).
+  const section = createMemo(() => added().find((one) => one.id === props.id && one.in === "settings"), {
+    equals: (a, b) => a?.id === b?.id && a?.app === b?.app && a?.component === b?.component && a?.name === b?.name && a?.title === b?.title,
+  })
   const app = () => apps().find((one) => props.id === `app:${one.for}:${one.name}`)
   return (
     <Show when={section()} keyed fallback={<Show when={props.id === "updates"} fallback={<Show when={app()} keyed>{(app) => <AppPage app={app} />}</Show>}><Updates /></Show>}>
