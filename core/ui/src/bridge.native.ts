@@ -74,18 +74,18 @@ export async function tellDrawn() {
 }
 
 /** What the client says of where the page is shown, as the DOM's bridge reads it: whether the window names the app
- * above it (a computer's app window, whose breadcrumb a first screen's title gives way to), whether its network
+ * above it (a computer's app window, whose title a first screen's title gives way to), whether its network
  * answers, what the device keeps for itself at each edge, the window's size and whether its person asked for less
  * motion. */
 /** Whether the window names the app above it, which a first screen's title gives way to (the Screen's). */
-export const [breadcrumb, setBreadcrumb] = createSignal(false)
+export const [titled, setTitled] = createSignal(false)
 const [connected, setConnected] = createSignal<ReturnType<typeof Page.connection>>("online")
 const [insets, setInsets] = createSignal({ top: 0, right: 0, bottom: 0, left: 0 })
 const [size, setSize] = createSignal({ width: 0, height: 0 })
 const [still, setStill] = createSignal(false)
 const [shown, setShown] = createSignal(true)
 interface Context {
-  breadcrumb?: boolean
+  titled?: boolean
   connection?: ReturnType<typeof Page.connection>
   safeAreaInsets?: ReturnType<typeof Page.safeArea>
   containerDimensions?: { width: number; height: number }
@@ -149,7 +149,7 @@ const [opened, setOpened] = createSignal<string>()
 function dress(context?: Context) {
   if (context?.link) setOpened(context.link)
   if (context?.deviceCapabilities && "touch" in context.deviceCapabilities) setFingered(context.deviceCapabilities.touch === true)
-  if (context && "breadcrumb" in context) setBreadcrumb(context.breadcrumb === true)
+  if (context && "titled" in context) setTitled(context.titled === true)
   if (context?.connection) setConnected(context.connection)
   if (context?.safeAreaInsets) setInsets(context.safeAreaInsets)
   if (context?.containerDimensions) setSize(context.containerDimensions)

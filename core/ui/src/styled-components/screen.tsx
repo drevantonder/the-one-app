@@ -4,7 +4,7 @@
 import { children, createContext, createEffect, createSignal, onSettled, Show, useContext } from "solid-js"
 import type { JSX } from "@solidjs/web"
 import { Pressable, ScrollView, Text, View } from "#primitives"
-import { back as goBack, breadcrumb, covers, go, keydown, step, touch, viewport } from "#bridge"
+import { back as goBack, covers, go, keydown, step, titled, touch, viewport } from "#bridge"
 import { BarEnd, Button, Icon } from "./button.tsx"
 import { messages } from "../words.ts"
 import { ActionBar, type Action } from "./actions.tsx"
@@ -25,7 +25,7 @@ const look = styles({
   // Where the window names the app above it, its first screen doesn't name it again, and keeps its place.
   unnamed: { opacity: 0 },
   // On a computer the bar is the window's title row, its unified toolbar, as macOS's System Settings and Raycast have
-  // it: at the window's top, after the window's controls and breadcrumb where it's at the window's start, and before
+  // it: at the window's top, after the window's controls and title where it's at the window's start, and before
   // the controls at its end where it's at its end.
   titleRow: { paddingTop: 0 },
   atStart: { paddingStart: tokens.length.titleBarStart },
@@ -118,7 +118,7 @@ export function History(props: { value: Went; children?: JSX.Element }) {
   )
   return <Went value={() => props.value}>{props.children}</Went>
 }
-/** Which of the window's edges a screen's bar reaches, where its title row's controls and breadcrumb are: a split's
+/** Which of the window's edges a screen's bar reaches, where its title row's controls and title are: a split's
  * list beside what it opens reaches the start, and what it opens the end. */
 const Edge = createContext<() => { start: boolean; end: boolean }>(() => ({ start: true, end: true }))
 /** Whether a state is all there is of a split's detail beside its list, which it fills, in its middle. */
@@ -129,8 +129,8 @@ export const Middle = createContext<() => boolean>(() => false)
 /// menu), then what's in it, one part under another. With `back` the bar starts with a Back button, which calls
 /// `onBack`, as the device's own back gesture does: a screen with `back` says where it goes, but in a split's detail,
 /// which it closes. A split's list closes what's open beside it first. An
-/// app's first screen has no Back: the window's rail, its title bar's Home on a computer, and the device's back leave
-/// the app. Where the window's breadcrumb names the app, its first screen's heading gives way to it. With `largeTitle`
+/// app's first screen has no Back: the window's rail and the device's back leave the app. Where the window's title
+/// names the app, its first screen's heading gives way to it. With `largeTitle`
 /// the screen draws its name large itself, as iOS's App Store's pages do, and the bar's shows once that has scrolled away.
 export function Screen(props: { heading?: JSX.Element; action?: JSX.Element; back?: boolean; onBack?: () => void; largeTitle?: boolean; children?: JSX.Element }) {
   const opened = useContext(Opened)
@@ -148,9 +148,9 @@ export function Screen(props: { heading?: JSX.Element; action?: JSX.Element; bac
   const history = useContext(Went)
   const style = useContext(ListStyle)
   const edge = useContext(Edge)
-  // Only an app's first screen, which has no Back, gives way to the breadcrumb.
+  // Only an app's first screen, which has no Back, gives way to the window's title.
   const [scrolled, setScrolled] = createSignal(0)
-  const named = () => (!!props.back || !breadcrumb()) && (!props.largeTitle || scrolled() > LARGE)
+  const named = () => (!!props.back || !titled()) && (!props.largeTitle || scrolled() > LARGE)
   // On a computer, as Raycast's: the bar's buttons and menus' items are the screen's actions, in the footer's pills and
   // its action panel (⌘K), after what the row chosen can do; under a finger they stay in the bar.
   const computer = !touch()

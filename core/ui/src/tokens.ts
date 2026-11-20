@@ -296,7 +296,7 @@ export const tokens = {
     safeLeft: length(px(0)),
     safeRight: length(px(0)),
     /** Where a computer's window has its title row over the page, which its top bar is (`titleBar` in its host
-     * context): where in it the page's own may start, after the window's controls and breadcrumb, and how far from
+     * context): where in it the page's own may start, after the window's controls and title, and how far from
      * its end, before the controls there. With none, a gutter's. The host sets them as they change. */
     titleBarStart: length(rem(1)),
     titleBarEnd: length(rem(1)),

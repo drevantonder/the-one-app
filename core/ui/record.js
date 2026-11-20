@@ -1,7 +1,7 @@
 // Records a page as a native host would get it: `bun record.js <the page's built folder> <answers.json>` runs the
 // page's own bundle, as app.js built it for the DOM, with the UI library built for a native host (dist/client/native),
 // as a host's sandbox would, answers each tool it calls from answers.json (`{ "<tool>": <its answer> }`), and anything else it asks its client by
-// its method (`{ "ui/initialize": { "hostContext": { "breadcrumb": true } } }`), and prints
+// its method (`{ "ui/initialize": { "hostContext": { "titled": true } } }`), and prints
 // the mutations it made, one a line, then its semantic tree (src/drawing-primitives/outline.ts), which the same
 // page's tree on the DOM is to match (`outlineOf` in a page, from `bun record.js --dom`). Build the UI library first.
 import { readFileSync } from "node:fs"

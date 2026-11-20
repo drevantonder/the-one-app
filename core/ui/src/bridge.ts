@@ -15,13 +15,13 @@ interface JsonRpcResponse {
 
 /** What the client says of where the page is shown: light or dark, how far in from each edge what the device
  * keeps for itself reaches, whether the window names the app above it (an app's own window on a computer, in its
- * title bar's breadcrumb), and whether its network answers. */
+ * title bar), and whether its network answers. */
 interface HostContext {
   theme?: "light" | "dark" | null
   safeAreaInsets?: { top: number; right: number; bottom: number; left: number }
-  breadcrumb?: boolean
+  titled?: boolean
   /** Where a computer's window has its title row over the page, the page's top bar: where in it the page's own may
-   * start, after the window's controls and breadcrumb, and how much of its end the window's controls take. */
+   * start, after the window's controls and title, and how much of its end the window's controls take. */
   titleBar?: { start: number; end: number }
   connection?: Connection
 }
@@ -109,17 +109,17 @@ export const connection = () => (greet(), connected())
 /// Light or dark, where the client says which (Colour Mode), and otherwise the device's own: as
 /// `color-scheme` for colours, and as a `light` or `dark` class for what can't follow it (tokens.css). And what the
 /// device keeps for itself at each edge, as `--safe-top` and the rest (tokens.ts's `safeTop`), whether the window names
-/// the app above it (`breadcrumb`), and whether its network answers.
+/// the app above it (`titled`), and whether its network answers.
 function dress(context: HostContext | undefined) {
   if (context?.connection) setConnected(context.connection)
   const root = document.documentElement
   if (context?.safeAreaInsets) for (const [edge, inset] of Object.entries(context.safeAreaInsets)) root.style.setProperty(`--safe-${edge}`, `${inset}px`)
   if (context?.safeAreaInsets) setInsets(context.safeAreaInsets)
-  if (context && "breadcrumb" in context) setNamed(context.breadcrumb === true)
+  if (context && "titled" in context) setNamed(context.titled === true)
   if (context?.titleBar) {
     root.style.setProperty("--title-bar-start", `${context.titleBar.start}px`)
     root.style.setProperty("--title-bar-end", `${context.titleBar.end}px`)
-    titled = true
+    underTitleRow = true
   }
   if (!context || !("theme" in context)) return
   root.style.colorScheme = context.theme ?? ""
@@ -131,10 +131,10 @@ const [insets, setInsets] = createSignal({ top: 0, right: 0, bottom: 0, left: 0 
 /// Whether the window's title row is over this page (`titleBar`): then its top bar is the window's title bar, which
 /// moves the window held anywhere nothing is pressed, and does what the system's does double-clicked, as macOS's
 /// System Settings' and Raycast's unified toolbars do.
-let titled = false
+let underTitleRow = false
 const pressable = "a, button, input, select, textarea, [contenteditable], [tabindex], [role=button], [role=link], [role=tab], [role=switch], [role=checkbox], [role=searchbox], [role=combobox], [role=menuitem], [role=option]"
 const inTitleRow = (event: MouseEvent) =>
-  titled && event.button === 0 && event.clientY < insets().top && !(event.target instanceof Element && event.target.closest(pressable))
+  underTitleRow && event.button === 0 && event.clientY < insets().top && !(event.target instanceof Element && event.target.closest(pressable))
 /// Where it was pressed, until the pointer moves far enough to drag the window, as a title bar's own does: a drag that
 /// started at the press would take the pointer from the page, and the second press of a double-click with it.
 let pressedAt: { x: number; y: number } | undefined
@@ -193,9 +193,9 @@ function toTop() {
 }
 
 const [named, setNamed] = createSignal(false)
-/** Whether the window names the app above it, in its title bar's breadcrumb (an app's own window on a computer),
- * which a first screen's title gives way to. */
-export const breadcrumb = () => named()
+/** Whether the window names the app above it, in its title bar (an app's own window on a computer), which a first
+ * screen's title gives way to. */
+export const titled = () => named()
 
 /// Whether the device has itself just shown the user going back (an iPhone's swipe in from the edge): the page
 /// mustn't show it a second time.
