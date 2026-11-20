@@ -81,6 +81,14 @@ app is faulted the same way, by its own PID.
   it, and leaves it stopped if it's killed, so `kill -CONT` it after.
 - Packets dropped: the UDP of its port (`<folder>/standby/port`), both ways, as under A network path that's open one
   way; its relay, over TCP, still carries it.
+- Behind a firewall with a far relay, as a laptop after it wakes: it answers the relay, and the edge reaches it, but
+  the other servers can't in time. Drop every UDP port it listens on (`ss -uanp`, by its PID), and delay its relay
+  connection 1.5 s each way with netem on `lo` for that connection's port alone (a `prio` qdisc with a `u32` filter
+  on `sport` and `dport`).
+- Its relay connection lost: the relay connection is the one to the edge's port (`gateway` in `<folder>/edge.env`)
+  with the most `segs_out` in `ss -tnpi`. Reset it with `ss -K` on that port, or drop it silently, as a sleep or a
+  network change does, with iptables `DROP` on `lo` for its port both ways. A new `GET /relay` in `edge.log` is it
+  connecting again: within seconds of a reset, and of a silent drop once its pings go unanswered.
 
 ## Logs and stopping
 
