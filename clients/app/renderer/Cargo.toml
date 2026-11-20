@@ -146,6 +146,7 @@ windows = { version = "0.62", features = [
   "UI_Composition",
   "UI_Composition_Desktop",
   "Win32_Graphics_DirectComposition",
+  "Win32_Graphics_DirectWrite",
   "Win32_Graphics_Dwm",
   "Win32_Graphics_Gdi",
   "Win32_System_Com",

@@ -383,7 +383,12 @@ impl TextSystem {
             let _ = (text, at);
             fallback(character)
         }
-        #[cfg(not(any(target_vendor = "apple", target_arch = "wasm32")))]
+        #[cfg(target_os = "windows")]
+        {
+            let _ = (text, at);
+            fallback(character)
+        }
+        #[cfg(not(any(target_vendor = "apple", target_os = "windows", target_arch = "wasm32")))]
         {
             let _ = (text, at);
             fallback(&mut self.fonts, character)
@@ -705,10 +710,85 @@ fn fallback(character: char) -> Option<String> {
     Some(unsafe { font.family_name() }.to_string())
 }
 
+/// The family of the face Windows draws `character` in where its UI font (Segoe UI) hasn't it, as DirectWrite's system
+/// fallback maps it for any app (`IDWriteFontFallback::MapCharacters`): Segoe UI Symbol for ⇧, Segoe UI Emoji for an
+/// emoji. Fontique's own fallback goes by script, and a symbol's (Common) finds nothing.
+#[cfg(target_os = "windows")]
+fn fallback(character: char) -> Option<String> {
+    use windows::core::{implement, w, OutRef};
+    use windows::Win32::Graphics::DirectWrite::*;
+
+    /// The one character, as the text DirectWrite maps.
+    #[implement(IDWriteTextAnalysisSource)]
+    struct Source(Vec<u16>);
+
+    impl IDWriteTextAnalysisSource_Impl for Source_Impl {
+        fn GetTextAtPosition(&self, position: u32, text: *mut *mut u16, length: *mut u32) -> windows::core::Result<()> {
+            let rest = self.0.get(position as usize..).unwrap_or_default();
+            // SAFETY: DirectWrite passes valid out pointers, and the text outlives the call.
+            unsafe {
+                *text = if rest.is_empty() { std::ptr::null_mut() } else { rest.as_ptr().cast_mut() };
+                *length = rest.len() as u32;
+            }
+            Ok(())
+        }
+        fn GetTextBeforePosition(&self, position: u32, text: *mut *mut u16, length: *mut u32) -> windows::core::Result<()> {
+            let before = &self.0[..(position as usize).min(self.0.len())];
+            // SAFETY: as `GetTextAtPosition`.
+            unsafe {
+                *text = if before.is_empty() { std::ptr::null_mut() } else { before.as_ptr().cast_mut() };
+                *length = before.len() as u32;
+            }
+            Ok(())
+        }
+        fn GetParagraphReadingDirection(&self) -> DWRITE_READING_DIRECTION {
+            DWRITE_READING_DIRECTION_LEFT_TO_RIGHT
+        }
+        fn GetLocaleName(&self, position: u32, length: *mut u32, locale: *mut *mut u16) -> windows::core::Result<()> {
+            // SAFETY: as `GetTextAtPosition`; the locale is a static string.
+            unsafe {
+                *length = (self.0.len() as u32).saturating_sub(position);
+                *locale = w!("en-us").as_ptr().cast_mut();
+            }
+            Ok(())
+        }
+        fn GetNumberSubstitution(&self, position: u32, length: *mut u32, _: OutRef<IDWriteNumberSubstitution>) -> windows::core::Result<()> {
+            // SAFETY: as `GetTextAtPosition`.
+            unsafe { *length = (self.0.len() as u32).saturating_sub(position) };
+            Ok(())
+        }
+    }
+
+    static FALLBACK: std::sync::OnceLock<Option<IDWriteFontFallback>> = std::sync::OnceLock::new();
+    let system = FALLBACK
+        .get_or_init(|| {
+            // SAFETY: a shared factory, and the system's fallback, which DirectWrite owns.
+            unsafe { DWriteCreateFactory::<IDWriteFactory2>(DWRITE_FACTORY_TYPE_SHARED).ok()?.GetSystemFontFallback().ok() }
+        })
+        .as_ref()?;
+    let mut utf16 = [0u16; 2];
+    let source: IDWriteTextAnalysisSource = Source(character.encode_utf16(&mut utf16).to_vec()).into();
+    let (mut length, mut font, mut scale) = (0, None, 0.0);
+    // SAFETY: the source and the out pointers are valid for the call.
+    unsafe {
+        system
+            .MapCharacters(&source, 0, character.len_utf16() as u32, None::<&IDWriteFontCollection>, w!("Segoe UI"), DWRITE_FONT_WEIGHT_NORMAL, DWRITE_FONT_STYLE_NORMAL, DWRITE_FONT_STRETCH_NORMAL, &mut length, &mut font, &mut scale)
+            .ok()?;
+        let names = font?.GetFontFamily().ok()?.GetFamilyNames().ok()?;
+        let (mut at, mut found) = (0, windows::core::BOOL::default());
+        let _ = names.FindLocaleName(w!("en-us"), &mut at, &mut found);
+        let at = if found.as_bool() { at } else { 0 };
+        let mut name = vec![0u16; names.GetStringLength(at).ok()? as usize + 1];
+        names.GetString(at, &mut name).ok()?;
+        name.pop();
+        Some(String::from_utf16_lossy(&name))
+    }
+}
+
 /// The family of the first face, by name, that has `character`, as Android's Skia walks its
 /// fallback fonts for one: fontique's own fallback goes by script, and a symbol's (Common, as ⇧ and ⋮ are) finds
-/// nothing in Windows', Android's or Linux's.
-#[cfg(not(any(target_vendor = "apple", target_arch = "wasm32")))]
+/// nothing in Android's or Linux's.
+#[cfg(not(any(target_vendor = "apple", target_os = "windows", target_arch = "wasm32")))]
 fn fallback(fonts: &mut FontContext, character: char) -> Option<String> {
     let collection = &mut fonts.collection;
     let mut families: Vec<String> = collection.family_names().map(str::to_owned).collect();
