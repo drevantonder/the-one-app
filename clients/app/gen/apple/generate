@@ -1,29 +1,14 @@
 #!/bin/sh
-# Makes app.xcodeproj from project.yml for the app a Tauri config names, which is the One App's own
-# (`clients/app/tauri.conf.json`), or a network's, as `cargo tauri ios build --config <its file>` merges it:
+# Makes app.xcodeproj from project.yml for the One App, as `clients/app/tauri.conf.json` names it:
 #
-#     ./generate [<its file>]
+#     ./generate
 #
-# Its identifier names the app, its notification extension and the App Group they share, so they line up. The hosts
-# of its app links (`plugins.deep-link.mobile`) are its network's, whose passkeys the app's web view uses
-# (`webcredentials`), as each one's `/.well-known/apple-app-site-association` says; the deep-link plugin adds the
-# app links themselves (`applinks`) as the app is built.
+# Its identifier names the app, its notification extension and the App Group they share, so they line up. A network's
+# own app is this one, finished for it once it's built (`tooling/testflight`).
 set -e
 here=$(cd "$(dirname "$0")" && pwd)
-named() { plutil -extract identifier raw -o - "$1" 2>/dev/null; }
-ONE_IDENTIFIER=$( { [ -n "${1-}" ] && named "$1"; } || named "$here/../../tauri.conf.json")
-ONE_NAME=$( { [ -n "${1-}" ] && plutil -extract productName raw -o - "$1" 2>/dev/null; } || plutil -extract productName raw -o - "$here/../../tauri.conf.json")
+config=$here/../../tauri.conf.json
+ONE_IDENTIFIER=$(plutil -extract identifier raw -o - "$config")
+ONE_NAME=$(plutil -extract productName raw -o - "$config")
 export ONE_IDENTIFIER ONE_NAME
-[ -n "${1-}" ] && config=$(cd "$(dirname "$1")" && pwd)/$(basename "$1")
 cd "$here" && xcodegen generate
-[ -n "${config-}" ] || exit 0
-entitlements="$here/app_iOS/app_iOS.entitlements"
-domains=":com.apple.developer.associated-domains"
-i=0
-while plutil -extract "plugins.deep-link.mobile.$i" json -o /dev/null "$config" 2>/dev/null; do
-  if host=$(plutil -extract "plugins.deep-link.mobile.$i.host" raw -o - "$config" 2>/dev/null); then
-    /usr/libexec/PlistBuddy -c "Print $domains" "$entitlements" >/dev/null 2>&1 || /usr/libexec/PlistBuddy -c "Add $domains array" "$entitlements"
-    /usr/libexec/PlistBuddy -c "Add $domains: string webcredentials:$host" "$entitlements"
-  fi
-  i=$((i + 1))
-done

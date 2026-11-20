@@ -13,13 +13,13 @@ incremental `one` build took 12 minutes instead of 1 or 2), so don't use `taskpo
 simulators and Chrome had it above 200 with CPU to spare, so don't add to what uses its memory: shut down and delete a
 simulator you booted, and remove your `~/scratch/` checkout, when you're done.
 
-Work in a checkout of your own there under `~/scratch/`, at your commit, with the network's `app/` beside it, as its
-repo's main has it on the remote (`git -C <the network's repo> fetch origin main && git -C <it> archive origin/main
-app`), never a checkout's files, which may be behind. Clone it whole, not `--depth 1`: the app's version and build
-number are `tooling/version`'s count of commits, so a shallow clone builds an app numbered 1.
+Work in a checkout of your own there under `~/scratch/`, at your commit. Clone it whole, not `--depth 1`: the app's
+version and build number are `tooling/version`'s count of commits, so a shallow clone builds an app numbered 1.
 
-An app is a network's: the commands that build it are in that repo's `app/README.md`, and what they need in
-`clients/app/README.md`. This is what neither says.
+What's built is the One App, plain, and a network's app is that build finished for it (`clients/app/README.md`):
+its settings, in its repo's `app/` as its main has it on the remote (`git -C <the network's repo> fetch origin main &&
+git -C <it> archive origin/main app`), never go in this repo, its GitHub runs or a checkout's files, which may be
+behind. `tooling/testflight` is how a build is finished; this is what it and the README don't say.
 
 ## What exists
 
@@ -57,20 +57,19 @@ An app is a network's: the commands that build it are in that repo's `app/README
 ## Building and signing
 
 1. Turn signing off in your checkout: `CODE_SIGNING_ALLOWED: NO` in `gen/apple/project.yml`'s settings for both
-   targets, `app_iOS` and `Notifications`, then `gen/apple/generate` with the network's config.
-   An `.xcconfig` doesn't do it: `cargo tauri ios build` takes none. Then the network's iPhone build command, with its
-   `app/tauri.conf.json` given to both `generate` and the build (its README does), since that's what writes
-   `applinks:` and `webcredentials:` into `gen/apple/app_iOS/app_iOS.entitlements`: its archive succeeds and its export fails (`errSecInternalComponent`), and the app is
-   `gen/apple/build/app_iOS.xcarchive/Products/Applications/<name>.app`. Or build for the simulator with
-   `--target aarch64-sim --debug`, which needs no signing.
+   targets, `app_iOS` and `Notifications`, then `gen/apple/generate`.
+   An `.xcconfig` doesn't do it: `cargo tauri ios build` takes none. Then `cargo tauri ios build --archive-only
+   --no-sign`, and the app is `gen/apple/build/app_iOS.xcarchive/Products/Applications/<name>.app`. Or build for the
+   simulator with `--target aarch64-sim --debug`, which needs no signing. Finish it for the network as
+   `tooling/testflight` does: its identifier and link schemes in each target's `Info.plist` (`AppGroup` too), and its
+   address in the app's `network` file.
 2. Put each target's profile in it as `embedded.mobileprovision`, and sign it with that profile's own entitlements
    less `keychain-access-groups` (a wildcard, which a signature can't hold), which keeps its
    `com.apple.security.application-groups`, `group.app.theone.client`: `security cms -D -i <profile> > p.plist`,
    `plutil -extract Entitlements xml1 -o e.plist p.plist`, then `/usr/libexec/PlistBuddy -c "Delete :<key>" e.plist`
    (`plutil` reads the dots in `com.apple...` as a path). A profile's `com.apple.developer.associated-domains` is `*`,
-   which a signature can't hold either: set it to the app's own, as `gen/apple/generate` and the build wrote them in
-   `gen/apple/app_iOS/app_iOS.entitlements` (`webcredentials:` and `applinks:` its network's domain), or its web view
-   offers no passkeys. Sign
+   which a signature can't hold either: set it to the network's own (`webcredentials:` and `applinks:` its domain), or
+   its web view offers no passkeys. Sign
    `PlugIns/Notifications.appex` first, then the app; with no profile for the extension, remove `PlugIns/` instead.
 3. Unlock the keychain and `codesign` in the same ssh connection: `security -i` reads `unlock-keychain -p ...` on
    stdin, then `codesign --force --keychain <it> --sign "Apple Development" --entitlements <file> <app>`. The
@@ -88,9 +87,9 @@ refuses (`Locked`). `one builds` shows the phone's new build only once the app h
 
 The owner's phone takes the One App from TestFlight, which updates it by itself; its Update Required's Update opens
 TestFlight. `tooling/testflight <the network's repo>` publishes main, as `tooling/release client` does whenever the
-phone's native code changed, on GitHub's macOS runner (`.github/workflows/testflight.yml`): it archives unsigned (`--archive-only --no-sign`), signs each target ad hoc with its own
-entitlements, which the export keeps, exports it with the App Store profiles and Apple Distribution
-(`xcodebuild -exportArchive`) and uploads with the API key. Apple processes it by itself in a few minutes, which
+phone's native code changed: GitHub's macOS runner builds it plain (`.github/workflows/iphone.yml`), and the script
+finishes it on Linux, signs it with rcodesign, the App Store profiles and Apple Distribution, and uploads it with the
+API key (App Store Connect's `buildUploads`), with no Mac. Apple processes it by itself in a few minutes, which
 nothing waits for: then the internal group "The One App" has the build (`hasAccessToAllBuilds`) and its testers take
 it automatically. App Store Connect's `processingState` says where it is, and Apple emails if it rejects it.
 

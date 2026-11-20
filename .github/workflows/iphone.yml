@@ -26,6 +26,12 @@ jobs:
         with:
           ref: ${{ inputs.commit }}
           fetch-depth: 0
+      # The newest Xcode the runner has that isn't a beta, whose iOS SDK App Store Connect asks an upload to be built
+      # with (ITMS-90725: iOS 27's from April 2027); the runner's default is older.
+      - uses: maxim-lobanov/setup-xcode@v1
+        with:
+          xcode-version: latest-stable
+      - run: xcodebuild -version
       - uses: dtolnay/rust-toolchain@master
         with:
           toolchain: ${{ inputs.rust }}

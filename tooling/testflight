@@ -1,19 +1,26 @@
 #!/usr/bin/env bash
-# Builds a network's iPhone app at the commit checked out, which is on main, signs it for the App Store, uploads it to
-# TestFlight, whose internal group has every build, and ends once Apple has taken the upload: Apple processes it in a
-# few minutes by itself, and its testers' phones take it then, as App Store Connect says (`processingState`), with
-# nothing here waiting for that (the `iphone` skill says how each step is done, and why):
+# Makes a network's iPhone app at the commit checked out, which is on main, and uploads it to TestFlight, whose internal
+# group has every build, as white-label apps are made (fastlane's `resign`): GitHub's macOS runner builds the One App
+# plain, with no network in it (`.github/workflows/iphone.yml`), and this finishes it here, on Linux, for the network
+# whose repo it's given, so nothing of a network is in the public repo's runs, whose logs anyone can read:
 #
 #     tooling/testflight <the network's repo>
 #
-# It builds only what a phone doesn't get otherwise: its page comes from the network's edge, and its apps from their
+# Its `app/`, as that repo's main has it on the remote, says the app's name, bundle identifier and the schemes and
+# hosts of its links, as Tauri's config says them (`tauri.conf.json`: `productName`, `identifier`,
+# `plugins.deep-link.mobile`), and its network's address (`address`), which goes in the app as its `network` file, read
+# as it starts (`bundled` in core/client). It's written in the app's and its notification extension's Info.plist, and
+# each is signed with the team's Apple Distribution identity, its App Store profile and that profile's entitlements,
+# with the network's hosts as its associated domains (`webcredentials:` for its passkeys, `applinks:` for the links
+# that open in it), by rcodesign. It's uploaded with the App Store Connect API key (`buildUploads`), and this ends once
+# Apple has taken it: Apple processes it, and its testers' phones take it then, by themselves. An app's icon is the One
+# App's: App Store Connect takes only one in a compiled asset catalog (`Assets.car`), which only a Mac's `actool` makes.
+#
+# It finishes only what a phone doesn't get otherwise: its page comes from the network's edge, and its apps from their
 # servers, so a build whose native code, what Rust builds for the phone (`tooling/input-hash`) and its Xcode project
 # (`clients/app/gen/apple`), is as TestFlight's latest build had it is left as it is, as is one a newer build there has
-# the changes of. `tooling/release client` runs it for a network with an iPhone among its devices.
-#
-# It's built, signed and uploaded on GitHub's macOS runner, by its workflow (`.github/workflows/testflight.yml`), which
-# runs this script there (`--build`) with the network's `app/` beside it. Each line it prints says how many seconds
-# into it it is. The build number is the commit's count of commits (`tooling/version`).
+# the changes of. `tooling/release client` runs it for a network with an iPhone among its devices. Each line it prints
+# says how many seconds into it it is. The build number is the commit's count of commits (`tooling/version`).
 set -euo pipefail
 
 # The team that signs the One App, and its App Store Connect API key, an Admin's, whose .p8 is in 1Password.
@@ -21,88 +28,38 @@ team=X96JC3HCV7
 key_id=R49QVKSHMK
 issuer=2dac44a7-07fb-45f2-85a8-e7f63345f838
 
-# Asks App Store Connect's API for `$1`, with a token its key signs (ES256, for 20 minutes).
-asc() {
-  bun -e '
-    const { createPrivateKey, sign } = require("node:crypto");
-    const { ASC_KEY, key_id, issuer } = process.env;
-    const part = (it) => Buffer.from(JSON.stringify(it)).toString("base64url");
-    const now = Math.floor(Date.now() / 1000);
-    const unsigned = `${part({ alg: "ES256", kid: key_id, typ: "JWT" })}.${part({ iss: issuer, iat: now, exp: now + 1200, aud: "appstoreconnect-v1" })}`;
-    const signature = sign("sha256", Buffer.from(unsigned), { key: createPrivateKey(ASC_KEY), dsaEncoding: "ieee-p1363" }).toString("base64url");
-    const response = await fetch(`https://api.appstoreconnect.apple.com${process.argv[1]}`, { headers: { authorization: `Bearer ${unsigned}.${signature}` } });
-    if (!response.ok) throw new Error(`App Store Connect said ${response.status} to ${process.argv[1]}: ${await response.text()}`);
-    console.log(await response.text());
-  ' "$1"
-}
-
-if [[ ${1:-} == --build ]]; then
-  # On the runner, at the commit, with the network's `app/` in `$2`: archives the app unsigned, as no Apple account is
-  # signed in to Xcode there, then exports it for the App Store, signed with the team's Apple Distribution identity
-  # (the workflow puts it in a keychain of the run's own) and each target's App Store profile, fetched with the API
-  # key. It's manual signing: Xcode's automatic signing exports only with Apple's cloud-managed
-  # certificates, which App Store Connect refuses this key (403). Then it uploads it with the key, which arrives on
-  # standard input and is read first, before anything else reads what's there, into a folder of its own for these
-  # commands alone.
-  network=$(cd "$2" && pwd)
-  work=$(mktemp -d) && trap 'rm -rf "$work"' EXIT
-  cat >"$work/AuthKey_$key_id.p8" && exec </dev/null
-  ASC_KEY=$(cat "$work/AuthKey_$key_id.p8") && export ASC_KEY key_id issuer
-  # Each target's App Store profile, from App Store Connect, where Xcode finds it by its name.
-  profiles="$HOME/Library/Developer/Xcode/UserData/Provisioning Profiles" && mkdir -p "$profiles"
-  for name in "The One App App Store" "The One App Notifications App Store"; do
-    profile=$(asc "/v1/profiles?filter%5Bname%5D=$(jq -rn --arg name "$name" '$name | @uri')&filter%5BprofileState%5D=ACTIVE" | jq -c '.data[0].attributes')
-    [[ $profile != null ]] || { echo "App Store Connect has no profile \"$name\"" >&2 && exit 1; }
-    jq -r .profileContent <<<"$profile" | base64 -d >"$profiles/$(jq -r .uuid <<<"$profile").mobileprovision"
-  done
-  cd "$(dirname "$0")/../clients/app"
-  git clean -qfdx gen/apple
-  # Its name is the commit's, said before the build changes the Xcode project's files git tracks, which would make
-  # every phone's build `.dirty` (`core/client/build.rs`).
-  ONE_BUILD=$(../../tooling/version) && export ONE_BUILD
-  gen/apple/generate "$network/tauri.conf.json"
-  TAURI_ONE_ADDRESS=$(cat "$network/address") APPLE_DEVELOPMENT_TEAM=$team \
-    cargo tauri ios build --archive-only --no-sign --config "$network/tauri.conf.json"
-  archive=gen/apple/build/app_iOS.xcarchive
-  app=$(echo "$archive"/Products/Applications/*.app)
-  # The export signs each target with the entitlements its binary has, so each is signed first, ad hoc, with its own:
-  # the app's with its bundle identifier written in, as Xcode would have.
-  id=$(/usr/libexec/PlistBuddy -c "Print :CFBundleIdentifier" "$app/Info.plist")
-  sed "s/\$(PRODUCT_BUNDLE_IDENTIFIER)/$id/g" gen/apple/app_iOS/app_iOS.entitlements >"$work/app.entitlements"
-  codesign --force --sign - --entitlements gen/apple/Notifications/Notifications.entitlements "$app/PlugIns/Notifications.appex"
-  codesign --force --sign - --entitlements "$work/app.entitlements" "$app"
-  cat >"$work/export.plist" <<PLIST
-<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0"><dict>
-  <key>method</key><string>app-store-connect</string>
-  <key>teamID</key><string>$team</string>
-  <key>signingStyle</key><string>manual</string>
-  <key>signingCertificate</key><string>Apple Distribution</string>
-  <key>provisioningProfiles</key><dict>
-    <key>$id</key><string>The One App App Store</string>
-    <key>$id.notifications</key><string>The One App Notifications App Store</string>
-  </dict>
-</dict></plist>
-PLIST
-  auth=(-authenticationKeyPath "$work/AuthKey_$key_id.p8" -authenticationKeyID "$key_id" -authenticationKeyIssuerID "$issuer")
-  xcodebuild -exportArchive -archivePath "$archive" -exportOptionsPlist "$work/export.plist" -exportPath "$work/out" -allowProvisioningUpdates "${auth[@]}"
-  (cd "$work" && unzip -q out/*.ipa -d signed && codesign --verify --strict --deep signed/Payload/*.app)
-  API_PRIVATE_KEYS_DIR=$work xcrun altool --upload-app -f "$work"/out/*.ipa -t ios --apiKey "$key_id" --apiIssuer "$issuer"
-  exit
-fi
-
 [[ -d ${1:-} ]] || { echo "tooling/testflight <the network's repo>" >&2 && exit 1; }
 network=$(cd "$1" && pwd)
 cd "$(dirname "$0")/.."
 [[ $(uname) != Linux ]] || exec > >(while IFS= read -r line; do printf '%4ds %s\n' "$SECONDS" "$line"; done) 2>&1
 ASC_KEY=$(op document get "PTC Builds App Store Connect API key (key $key_id)" --vault ptc-nosudo) || exit 1
 export ASC_KEY key_id issuer
+work=$(umask 077 && mktemp -d) && trap 'rm -rf "$work"' EXIT
 
-# The network's app as its repo's main has it on the remote, which is what's built, whatever its checkout here has:
+# Asks App Store Connect's API `$2` (GET where it's not said) of `$1`, with the JSON `$3`, by a token its key signs
+# (ES256, for 20 minutes), and says what it answered.
+asc() {
+  bun -e '
+    const { createPrivateKey, sign } = require("node:crypto");
+    const { ASC_KEY, key_id, issuer } = process.env;
+    const [path, method = "GET", body] = process.argv.slice(1);
+    const part = (it) => Buffer.from(JSON.stringify(it)).toString("base64url");
+    const now = Math.floor(Date.now() / 1000);
+    const unsigned = `${part({ alg: "ES256", kid: key_id, typ: "JWT" })}.${part({ iss: issuer, iat: now, exp: now + 1200, aud: "appstoreconnect-v1" })}`;
+    const signature = sign("sha256", Buffer.from(unsigned), { key: createPrivateKey(ASC_KEY), dsaEncoding: "ieee-p1363" }).toString("base64url");
+    const headers = { authorization: `Bearer ${unsigned}.${signature}`, "content-type": "application/json" };
+    const response = await fetch(`https://api.appstoreconnect.apple.com${path}`, { method, headers, body });
+    if (!response.ok) throw new Error(`App Store Connect said ${response.status} to ${method} ${path}: ${await response.text()}`);
+    console.log(await response.text());
+  ' "$@"
+}
+
+# The network's app as its repo's main has it on the remote, which is what's made, whatever its checkout here has:
 # only its objects are read, never its files.
 git -C "$network" fetch -q origin main
-identifier=$(git -C "$network" show origin/main:app/tauri.conf.json | jq -r '.identifier // empty')
+git -C "$network" archive origin/main app | tar -x -C "$work"
+config=$work/app/tauri.conf.json
+identifier=$(jq -r '.identifier // empty' "$config")
 identifier=${identifier:-$(jq -r .identifier clients/app/tauri.conf.json)}
 app=$(asc "/v1/apps?filter%5BbundleId%5D=$identifier" | jq -r '.data[0].id // empty')
 [[ -n $app ]] || { echo "App Store Connect has no app $identifier: its owner makes it on the website." >&2 && exit 1; }
@@ -130,10 +87,9 @@ if [[ -n $latest ]]; then
   fi
 fi
 
-echo "Building $build for TestFlight on GitHub's macOS runner, as $number"
-run=$(gh workflow run testflight.yml --ref main -f commit="$commit" -f rust="$(rustc -V | cut -d' ' -f2)" \
-  -f network="$(git -C "$network" archive --format=tar.gz origin/main app | base64 -w0)" 2>&1 | grep -o 'https://github.com/.*/actions/runs/[0-9]*') ||
-  { echo "GitHub wasn't asked to build it" >&2 && exit 1; }
+echo "Building $build for iPhone, plain, on GitHub's macOS runner"
+run=$(gh workflow run iphone.yml --ref main -f commit="$commit" -f rust="$(rustc -V | cut -d' ' -f2)" 2>&1 |
+  grep -o 'https://github.com/.*/actions/runs/[0-9]*') || { echo "GitHub wasn't asked to build it" >&2 && exit 1; }
 id=${run##*/}
 # `gh run watch` ends at the first of GitHub's API calls that fails, as some do while many releases watch at once, so
 # one that ends early is started again, after the 30 s GitHub asks a client to wait.
@@ -141,5 +97,102 @@ until [[ $(gh run view "$id" --json status --jq .status 2>/dev/null) == complete
   gh run watch "$id" --interval 30 >/dev/null 2>&1 || sleep 30
 done
 [[ $(gh run view "$id" --json conclusion --jq .conclusion) == success ]] ||
-  { echo "TestFlight's build failed on GitHub: gh run view $id --log-failed" >&2 && exit 1; }
-echo "Uploaded $number ($build): Apple processes it, then its testers' phones take it by themselves: $run"
+  { echo "The iPhone's build failed on GitHub: gh run view $id --log-failed" >&2 && exit 1; }
+gh run download "$id" -n iphone -D "$work"
+(cd "$work" && unzip -q iphone.zip && rm iphone.zip)
+bundle=$(echo "$work"/Payload/*.app)
+
+# Each target's App Store profile, the newest App Store Connect has for its bundle ID.
+profile() {
+  local bundle_id
+  bundle_id=$(asc "/v1/bundleIds?filter%5Bidentifier%5D=$1" | jq -r --arg id "$1" '.data[] | select(.attributes.identifier == $id) | .id')
+  [[ -n $bundle_id ]] || { echo "App Store Connect has no bundle ID $1" >&2 && return 1; }
+  asc "/v1/bundleIds/$bundle_id/profiles?limit=200" | jq -r '[.data[].attributes | select(.profileType == "IOS_APP_STORE" and .profileState == "ACTIVE")]
+    | sort_by(.expirationDate) | last | .profileContent // empty' | base64 -d >"$2"
+  [[ -s $2 ]] || { echo "App Store Connect has no App Store profile for $1" >&2 && return 1; }
+}
+profile "$identifier" "$bundle/embedded.mobileprovision"
+profile "$identifier.notifications" "$bundle/PlugIns/Notifications.appex/embedded.mobileprovision"
+
+# The network's name, identifier, link schemes and address in the app, and each target's entitlements: its profile's,
+# less what's a wildcard there, which a signature can't hold (`keychain-access-groups`, `associated-domains`), with the
+# network's hosts as the app's associated domains.
+jq -c '{address: $address}' --arg address "$(cat "$work/app/address")" -n >"$bundle/network"
+python3 -I - "$bundle" "$identifier" "$config" "$work" <<'PYTHON'
+import json, plistlib, sys
+from pathlib import Path
+
+bundle, identifier, config, work = Path(sys.argv[1]), sys.argv[2], json.loads(Path(sys.argv[3]).read_text()), Path(sys.argv[4])
+links = config.get("plugins", {}).get("deep-link", {}).get("mobile", [])
+schemes = [scheme for link in links for scheme in ([link["scheme"]] if isinstance(link["scheme"], str) else link["scheme"])]
+domains = [f"{kind}:{link['host']}" for link in links if "host" in link for kind in ["webcredentials"] + ["applinks"] * bool(link.get("appLink"))]
+
+def edit(info_plist, change):
+    info = plistlib.loads(info_plist.read_bytes())
+    change(info)
+    info_plist.write_bytes(plistlib.dumps(info, fmt=plistlib.FMT_BINARY))
+
+def app(info):
+    info["CFBundleIdentifier"] = identifier
+    info["AppGroup"] = f"group.{identifier}"
+    if "productName" in config:
+        info["CFBundleDisplayName"] = config["productName"]
+    own = [scheme for kind in info.get("CFBundleURLTypes", []) for scheme in kind.get("CFBundleURLSchemes", [])]
+    wanted = list(dict.fromkeys(own + [scheme for scheme in schemes if scheme not in ("http", "https")]))
+    info["CFBundleURLTypes"] = [{"CFBundleURLName": f"{identifier}.one", "CFBundleURLSchemes": wanted}]
+
+def extension(info):
+    info["CFBundleIdentifier"] = f"{identifier}.notifications"
+    info["AppGroup"] = f"group.{identifier}"
+
+def entitlements(target, name, domains):
+    profile = (target / "embedded.mobileprovision").read_bytes()
+    granted = plistlib.loads(profile[profile.index(b"<?xml"):profile.index(b"</plist>") + 8])["Entitlements"]
+    granted.pop("keychain-access-groups", None)
+    granted.pop("com.apple.developer.associated-domains", None)
+    if domains:
+        granted["com.apple.developer.associated-domains"] = domains
+    (work / name).write_bytes(plistlib.dumps(granted))
+    print(f"{target.name}: {json.dumps(granted)}")
+
+edit(bundle / "Info.plist", app)
+extension_bundle = bundle / "PlugIns" / "Notifications.appex"
+edit(extension_bundle / "Info.plist", extension)
+entitlements(bundle, "app.entitlements", domains)
+entitlements(extension_bundle, "notifications.entitlements", [])
+PYTHON
+
+# Signed by rcodesign, the one `mise.toml` names: the extension first, then the app around it.
+op document get "Apple Distribution identity" --vault ptc-nosudo --out-file "$work/distribution.p12" >/dev/null
+op read -n "op://ptc-nosudo/Apple Distribution identity password/password" >"$work/distribution.password"
+rcodesign=$(mise which rcodesign)
+sign() { "$rcodesign" sign --p12-file "$work/distribution.p12" --p12-password-file "$work/distribution.password" "$@" >/dev/null; }
+sign --entitlements-xml-file "$work/notifications.entitlements" "$bundle/PlugIns/Notifications.appex"
+sign --entitlements-xml-file "$work/app.entitlements" --exclude 'PlugIns/**' "$bundle"
+rm "$work/distribution.p12" "$work/distribution.password"
+(cd "$work" && python3 -I -m zipfile -c app.ipa Payload)
+
+echo "Uploading $number ($build) as $identifier"
+ipa=$work/app.ipa
+upload=$(asc /v1/buildUploads POST "$(jq -nc --arg app "$app" --arg number "$number" '{data: {type: "buildUploads",
+  attributes: {cfBundleShortVersionString: $number, cfBundleVersion: $number, platform: "IOS"},
+  relationships: {app: {data: {type: "apps", id: $app}}}}}')" | jq -r .data.id)
+file=$(asc /v1/buildUploadFiles POST "$(jq -nc --arg upload "$upload" --argjson size "$(stat -c %s "$ipa")" '{data: {type: "buildUploadFiles",
+  attributes: {fileName: "app.ipa", fileSize: $size, uti: "com.apple.ipa", assetType: "ASSET"},
+  relationships: {buildUpload: {data: {type: "buildUploads", id: $upload}}}}}')")
+# Its parts, each where App Store Connect says, as it says.
+while read -r part; do
+  mapfile -t headers < <(jq -r '.requestHeaders[] | "-H", "\(.name): \(.value)"' <<<"$part")
+  tail -c +$(($(jq .offset <<<"$part") + 1)) "$ipa" | head -c "$(jq .length <<<"$part")" |
+    curl -fsS -o /dev/null -X "$(jq -r .method <<<"$part")" "${headers[@]}" --data-binary @- "$(jq -r .url <<<"$part")"
+done < <(jq -c '.data.attributes.uploadOperations[]' <<<"$file")
+file=$(jq -r .data.id <<<"$file")
+asc "/v1/buildUploadFiles/$file" PATCH "$(jq -nc --arg file "$file" --arg hash "$(md5sum "$ipa" | cut -d' ' -f1)" '{data: {type: "buildUploadFiles",
+  id: $file, attributes: {uploaded: true, sourceFileChecksums: {file: {hash: $hash, algorithm: "MD5"}}}}}')" >/dev/null
+# App Store Connect checks an upload by itself, and says how that went only when it's asked, so it's asked every 15 s
+# until it says, as altool asked it.
+until state=$(asc "/v1/buildUploads/$upload" | jq -c .data.attributes.state) && [[ $(jq -r .state <<<"$state") =~ ^(COMPLETE|FAILED)$ ]]; do
+  sleep 15
+done
+[[ $(jq -r .state <<<"$state") == COMPLETE ]] || { echo "Apple refused it: $(jq -c .errors <<<"$state")" >&2 && exit 1; }
+echo "Uploaded $number ($build): Apple processes it, then its testers' phones take it by themselves"
