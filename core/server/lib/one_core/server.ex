@@ -242,7 +242,7 @@ defmodule OneCore.Server do
   Tells the other servers running what's `owners'` that there's something new of theirs in the bucket to `look` for: a
   app's version, a server, a service installed, with `params` saying more: `apps`, which changed, or for `invalidate`,
   the `hooks` whose results were decided from what has since changed. Each has looked or forgotten, or couldn't be
-  reached, when this returns.
+  reached or didn't within its deadline (`OneCore.Asks.each/3`), when this returns.
   """
   def notify_servers(owners, what \\ "reload", params \\ %{}),
     do: notify(Enum.uniq(Enum.flat_map(owners, &told/1)), owners, what, params)
@@ -263,7 +263,8 @@ defmodule OneCore.Server do
   def notify(servers, owners, what \\ "reload", params \\ %{}) do
     params = Map.put(params, :owners, owners)
     notification = JSON.encode!(%{jsonrpc: "2.0", method: "notifications/one/" <> what, params: params})
-    Stream.run(Task.async_stream(servers -- [key()], &ask(&1, notification), timeout: :infinity))
+    OneCore.Asks.each(servers -- [key()], &ask(&1, notification))
+    :ok
   end
 
   # A connection is opened when there's none, to where the server says it is now. One whose connection no longer
