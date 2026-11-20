@@ -58,13 +58,20 @@ struct Opening {
     started: Instant,
     steps: Vec<(String, u64, Option<u64>, Option<String>)>,
     asking: HashMap<String, (String, Instant)>,
-    files: (u32, u64),
-    drawn: Option<u64>,
+    /// The module files it read: how many, the slowest, and when the last was read, since it was asked to open.
+    files: (u32, u64, u64),
+    live: Option<u64>,
     settled: bool,
     app: String,
 }
 
 impl Opening {
+    /// `view` begins opening, asked to at `started`.
+    fn begin(view: &str, started: Instant) {
+        let opening = Opening { started, steps: Vec::new(), asking: HashMap::new(), files: (0, 0, 0), live: None, settled: false, app: String::new() };
+        OPENING.lock().expect("nothing panics holding it").insert(view.to_owned(), opening);
+    }
+
     /// Does `what` to `view`'s opening, while it's opening.
     fn with(view: &str, what: impl FnOnce(&mut Opening)) {
         if let Some(opening) = OPENING.lock().expect("nothing panics holding it").get_mut(view) {
@@ -95,7 +102,7 @@ impl Opening {
             let Some((what, sent)) = opening.asking.remove(id) else { return };
             let took = sent.elapsed().as_millis() as u64;
             if what == "file" {
-                opening.files = (opening.files.0 + 1, opening.files.1.max(took));
+                opening.files = (opening.files.0 + 1, opening.files.1.max(took), opening.started.elapsed().as_millis() as u64);
                 return;
             }
             let at = sent.duration_since(opening.started).as_millis() as u64;
@@ -104,25 +111,32 @@ impl Opening {
         });
     }
 
-    /// `view`'s first frame.
+    /// `view`'s first frame, its snapshot's where it has one.
     fn drawn(view: &str, app: &str) {
+        Self::step(view, "drawn");
+        Self::with(view, |opening| opening.app = app.to_owned());
+    }
+
+    /// `view`'s page's first frame, and when the last of its module's files it read before it was read.
+    fn live(view: &str) {
         Self::with(view, |opening| {
-            let (files, slowest) = opening.files;
+            let (files, slowest, last) = opening.files;
+            opening.steps.push((format!("bundle read, {files} files, the slowest in {slowest} ms"), last, None, None));
             let ms = opening.started.elapsed().as_millis() as u64;
-            opening.steps.push((format!("drawn, {files} files read, the slowest in {slowest} ms"), ms, None, None));
-            opening.drawn = Some(ms);
-            opening.app = app.to_owned();
+            opening.steps.push(("live".to_owned(), ms, None, None));
+            opening.live = Some(ms);
         });
         Self::ready(view);
     }
 
-    /// `view`'s page is ready, once it's drawn and what it asked as it opened is answered: how it opened, in the log,
-    /// a line, and to Telemetry, each step's milliseconds as a histogram by its view and step (`one.client.open.step`:
-    /// how long since it was asked to open, or for a request how long it took), and `ready`'s, so each step's
-    /// percentiles are read per device.
+    /// `view`'s page is ready, once its page is drawn and what it asked as it opened is answered: how it opened, in
+    /// the log, a line, and to Telemetry, each step's milliseconds as a histogram by its view and step
+    /// (`one.client.open.step`: how long since it was asked to open, or for a request how long it took), and `ready`'s,
+    /// so each step's percentiles are read per device; and the open as a span to its page's first frame, with every
+    /// step, which Telemetry's `open` alert reads.
     fn ready(view: &str) {
         let mut openings = OPENING.lock().expect("nothing panics holding it");
-        if !openings.get(view).is_some_and(|opening| opening.drawn.is_some() && opening.settled) {
+        if !openings.get(view).is_some_and(|opening| opening.live.is_some() && opening.settled) {
             return;
         }
         let Some(opening) = openings.remove(view) else { return };
@@ -138,6 +152,8 @@ impl Opening {
             .collect();
         eprintln!("{app} was ready in {ms} ms: {}", said.join(", "));
         let Ok(views) = crate::views() else { return };
+        let live = opening.live.unwrap_or(ms);
+        views.client.report(json!({"name": "one.client.native.open", "took": live, "attributes": {"one.view": app, "one.steps": said.join(", ")}}));
         let steps = opening.steps.into_iter().map(|(step, at, took, _server)| (step, took.unwrap_or(at))).chain([("ready".to_owned(), ms)]);
         for (step, ms) in steps {
             // What's said after its name, as how many files it read, isn't the step's.
@@ -348,7 +364,9 @@ fn listed_page<'a>(listed: &'a Value, entrypoint: &str) -> Option<&'a Value> {
 /// Whether `entrypoint`'s page is needs a runtime version this program has, its tables too, and if it is, what
 /// it's drawn with.
 async fn probe(entrypoint: &str, subject: Option<&str>, framed: bool) -> anyhow::Result<Option<Page>> {
+    let view = format!("{}|{entrypoint}", subject.unwrap_or_default());
     let listed = crate::hosts::command("native", "apps", json!({"subject": subject})).await.map_err(|error| anyhow::anyhow!(error))?;
+    Opening::step(&view, "listed");
     let Some(resource) = listed_page(&listed, entrypoint) else { return Ok(None) };
     // A page in a frame that names no runtime version (a component's, which no entrypoint names) is tried: one that
     // isn't drawn natively doesn't start, and the page the frame's in opens in a web view instead.
@@ -366,9 +384,11 @@ async fn probe(entrypoint: &str, subject: Option<&str>, framed: bool) -> anyhow:
     let page = Url::parse(&origin(entrypoint, subject))?.join(entrypoint)?;
     let html = crate::hosts::file(page.as_str()).await.map_err(|error| anyhow::anyhow!(error))?;
     let html = BASE64.decode(html["body"].as_str().unwrap_or_default().as_bytes())?;
+    Opening::step(&view, "page read");
     let module = module_script(&String::from_utf8_lossy(&html)).ok_or_else(|| anyhow::anyhow!("its page loads no module"))?;
     // Its tables: the UI library's, and its app's styles, which its build writes beside every page (`core/ui/app.js`).
     let Some(tables) = tables(&[page.join("/ui/client/tokens.json")?, page.join("/ui/client/styles.json")?, page.join("styles.json")?]).await? else { return Ok(None) };
+    Opening::step(&view, "tables read");
     let name = resource["name"].as_str().filter(|name| !name.is_empty()).map(str::to_owned);
     Ok(Some(Page { module: page.join(&module)?, page, trusted, tables, name, icon }))
 }
@@ -590,6 +610,8 @@ pub(crate) fn recovery(typed: bool, subject: Option<String>, owner: Option<Windo
 }
 
 async fn window(started: Instant, entrypoint: &str, subject: Option<&str>, link: &str, mut kind: Kind) -> anyhow::Result<bool> {
+    let view = format!("{}|{entrypoint}", subject.unwrap_or_default());
+    Opening::begin(&view, started);
     let page = match &kind {
         Kind::Sheet(_) => Some(client_page(RECOVERY, "Recovery Key").await?),
         Kind::Unopened(unopened) | Kind::Launcher(_, Some(Instead::Unopened(unopened))) => Some(client_page(UNOPENED, &unopened.name).await?),
@@ -597,11 +619,10 @@ async fn window(started: Instant, entrypoint: &str, subject: Option<&str>, link:
         Kind::Launcher(_, Some(Instead::Behind)) => Some(client_page(UPDATE, NAME).await?),
         _ => probe(entrypoint, subject, false).await?,
     };
-    let Some(Page { page, module, trusted, tables, name: listed, icon }) = page else { return Ok(false) };
-    let view = format!("{}|{entrypoint}", subject.unwrap_or_default());
-    let opening = Opening { started, steps: Vec::new(), asking: HashMap::new(), files: (0, 0), drawn: None, settled: false, app: String::new() };
-    OPENING.lock().expect("nothing panics holding it").insert(view.clone(), opening);
-    Opening::step(&view, "listed");
+    let Some(Page { page, module, trusted, tables, name: listed, icon }) = page else {
+        OPENING.lock().expect("nothing panics holding it").remove(&view);
+        return Ok(false);
+    };
     let made = view.clone();
     let launcher = matches!(kind, Kind::Launcher(..));
     let sheet = match &kind {
@@ -681,12 +702,13 @@ async fn window(started: Instant, entrypoint: &str, subject: Option<&str>, link:
             let (to, app, entrypoint, sheet) = (to.clone(), app.clone(), entrypoint.clone(), sheet.clone());
             let (subject, link, shown) = (subject.clone(), link.clone(), window.clone());
             let mut opened = false;
+            let opening_view = format!("{}|{entrypoint}", subject.as_deref().unwrap_or_default());
             move |event: Event| match event {
                 // How long it took to open, from being asked to, as a page tells the app's window it has drawn: once, as
                 // a page loaded again in it (`reloaded`) says its own (`Opening`).
                 Event::Drawn => {
                     let ms = started.elapsed().as_millis() as u64;
-                    Opening::drawn(&format!("{}|{entrypoint}", subject.as_deref().unwrap_or_default()), &app);
+                    Opening::drawn(&opening_view, &app);
                     crate::deployed(&app);
                     if !std::mem::replace(&mut opened, true) {
                         let _ = to.send(json!({"id": "opened", "command": "opened", "args": {"view": app, "ms": ms}}));
@@ -713,6 +735,7 @@ async fn window(started: Instant, entrypoint: &str, subject: Option<&str>, link:
                     let _ = to.send(json!({"id": "visible", "command": "visible", "args": {"onScreen": true}}));
                     crate::memory::changed();
                 }
+                Event::Live => Opening::live(&opening_view),
                 Event::Frames(frames) => frames_reported(&app, &frames),
                 Event::PutAway => {
                     let _ = to.send(json!({"id": "visible", "command": "visible", "args": {"onScreen": false}}));
@@ -1007,14 +1030,12 @@ fn frames(window: Arc<OnceLock<WindowId>>) -> renderer::MakeFrame {
 /// (`Windows::reload`), whose frame stays on screen until the new page has started. What the page before asked that's
 /// still unanswered is forgotten, so nothing meant for it reaches the new one. → whether its window was open.
 async fn reloaded(window: Arc<OnceLock<WindowId>>, entrypoint: String, subject: Option<String>, link: String, to: UnboundedSender<Value>, asked: Arc<Mutex<HashMap<String, Asked>>>) -> anyhow::Result<bool> {
-    let started_at = Instant::now();
+    let view = format!("{}|{entrypoint}", subject.as_deref().unwrap_or_default());
+    Opening::begin(&view, Instant::now());
     let Some(Page { page, module, trusted, tables, .. }) = probe(&entrypoint, subject.as_deref(), false).await? else {
+        OPENING.lock().expect("nothing panics holding it").remove(&view);
         anyhow::bail!("its new version is no page this host draws")
     };
-    let view = format!("{}|{entrypoint}", subject.as_deref().unwrap_or_default());
-    let opening = Opening { started: started_at, steps: Vec::new(), asking: HashMap::new(), files: (0, 0), drawn: None, settled: false, app: String::new() };
-    OPENING.lock().expect("nothing panics holding it").insert(view.clone(), opening);
-    Opening::step(&view, "listed");
     let tokens_page = load(&tables)?;
     let begun = started(&entrypoint, subject.as_deref(), to.clone(), asked.clone(), &module, page);
     let number = begun.number;

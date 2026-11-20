@@ -12,6 +12,7 @@ defmodule Telemetry.Alerts do
   | `failing` | Half or more of an app's tool calls failed, of 10 or more in 10 min | 10 min with fewer |
   | `unanswered` | An app didn't answer, in 2 or more of the last 5 minutes: a hook it didn't answer in time (`one.hook.timeouts`), or its database's server kept a call waiting without running it (`one.database.lease.wait`, `not_answered`) | 5 min without |
   | `deploy` | An app's deploy took over its 500 ms budget to show in a window, from when it began (`one.client.deploy.window`), in 2 or more of the last 10 minutes: a server release building every app again is one | 10 min without |
+  | `open` | An app's window took over its 300 ms budget, from being asked to open to its page's first frame, the last time it opened on a device (`one.client.native.open`, which a client says of each open, with each step's time) | It opens within its budget there, or hasn't opened there for a day |
   | `backup` | A destination's last backup is older than its schedule and a day, or its last backup failed, as Backups last said (`one.backup`, which it says each hour and as each backup ends) | Backups says it's backed up, or that the destination is gone |
 
   Each alert is a row of Telemetry's database, one per kind and key (the server, the build, the error's kind, the
@@ -71,7 +72,9 @@ defmodule Telemetry.Alerts do
     # Each app's slowest deploy to show in a window, per minute.
     "create table deploys (app text not null, minute integer not null, slowest integer not null, primary key (app, minute)) without rowid",
     # What Backups last said of each destination (`one.backup`).
-    "create table backups (destination text primary key, at integer not null, last integer not null, every integer not null, outcome text not null, problem text)"
+    "create table backups (destination text primary key, at integer not null, last integer not null, every integer not null, outcome text not null, problem text)",
+    # Each app's window's last open on each device, and its steps (`one.client.native.open`).
+    "create table opens (device text not null, view text not null, name text, at integer not null, took integer not null, steps text, primary key (device, view)) without rowid"
   ]
 
   @kinds %{
@@ -81,14 +84,18 @@ defmodule Telemetry.Alerts do
     "failing" => "Half or more of an app's tool calls fail, of 10 or more in 10 minutes",
     "unanswered" => "An app doesn't answer for more than a minute",
     "deploy" => "An app's deploys take over 500 ms to show in its window, in 2 or more of the last 10 minutes",
-    "backup" => "A backup isn't made within its schedule and a day, or the last one failed"
+    "backup" => "A backup isn't made within its schedule and a day, or the last one failed",
+    "open" => "An app's window took over 300 ms to show its page the last time it opened on a device"
   }
 
   # How long a deploy has to show in a window, from when it began, in milliseconds.
   @deploy_budget 500
+  # How long an app's window has to show its page, from being asked to open, in milliseconds: a cached app's should
+  # feel instant.
+  @open_budget 300
 
   # How long each kind's alert stays after its symptom was last seen before it's resolved, in milliseconds.
-  @cool %{"server" => 0, "update" => 0, "error" => 0, "failing" => 10 * 60_000, "unanswered" => 5 * 60_000, "deploy" => 10 * 60_000, "backup" => 0}
+  @cool %{"server" => 0, "update" => 0, "error" => 0, "failing" => 10 * 60_000, "unanswered" => 5 * 60_000, "deploy" => 10 * 60_000, "backup" => 0, "open" => 0}
 
   @doc "Each kind of alert, with what fires it."
   def kinds, do: @kinds
@@ -208,6 +215,14 @@ defmodule Telemetry.Alerts do
     case span["status"] do
       %{"code" => "error", "message" => why} -> [{:server, server, a["host.name"], ms(span["end"]), {:failed, why}}]
       _ -> [{:server, server, a["host.name"], ms(span["end"]), :started}]
+    end
+  end
+
+  # A client's window that opened (`one.steps`, as it said each step), not one that didn't (`error`).
+  defp span(%{"name" => "one.client.native.open", "attributes" => %{"one.view" => view} = a} = span) do
+    case span["status"] do
+      %{"code" => "error"} -> []
+      _ -> [{:open, a["one.device"] || span["server"] || "", view, Read.from(span), ms(span["end"]), ms(span["end"]) - ms(span["start"]), a["one.steps"]}]
     end
   end
 
@@ -356,9 +371,22 @@ defmodule Telemetry.Alerts do
           )
     end
 
+    for {:open, device, view, from, at, took, steps} <- signals do
+      query(
+        db,
+        """
+        insert into opens (device, view, name, at, took, steps) values (?, ?, ?, ?, ?, ?)
+        on conflict (device, view) do update set name = excluded.name, at = excluded.at, took = excluded.took,
+          steps = excluded.steps where excluded.at >= opens.at
+        """,
+        [device, view, from, at, took, steps]
+      )
+    end
+
     # What no rule looks at any more.
     query(db, "delete from minutes where minute < ?", [now - 15 * @minute])
     query(db, "delete from deploys where minute < ?", [now - 15 * @minute])
+    query(db, "delete from opens where at < ?", [now - @day])
     query(db, "delete from seen where last < ?", [now - Store.days() * 86_400_000])
     query(db, "delete from servers where max(coalesce(failed, 0), coalesce(started, 0), coalesce(looping, 0)) < ?", [now - Store.days() * 86_400_000])
     query(db, "delete from alerts where ended < ?", [now - 7 * 86_400_000])
@@ -459,6 +487,15 @@ defmodule Telemetry.Alerts do
          }}
       end
 
+    opens =
+      for row <- query(db, "select * from opens where took > ?", [@open_budget]), into: %{} do
+        {{"open", "#{row["device"]}|#{row["view"]}"},
+         %{
+           title: "#{called.(row["view"])} is slow to open#{String.replace_prefix(row["name"] || "", "App", "")}",
+           text: "It took #{row["took"]} ms to show its page, over its #{@open_budget} ms budget: #{row["steps"]}."
+         }}
+      end
+
     # A destination's last backup older than its schedule and a day, or one that failed: as Time Machine says it
     # couldn't complete the backup after a missed day.
     backups =
@@ -472,7 +509,7 @@ defmodule Telemetry.Alerts do
          }}
       end
 
-    Enum.reduce([servers, update, errors, failing, unanswered, deploys, backups], &Map.merge/2)
+    Enum.reduce([servers, update, errors, failing, unanswered, deploys, opens, backups], &Map.merge/2)
   end
 
   # When the last backup was, as a person says it.

@@ -103,6 +103,9 @@ pub type Job = Box<dyn FnOnce(&mut Windows) + Send>;
 pub enum Event {
     /// Its first frame is drawn: on screen, or for a panel put away, ready to show.
     Drawn,
+    /// Its first frame of its page is drawn, where its first was its snapshot (`WindowOptions::snapshot`): as a
+    /// browser's first contentful paint is its page's, not what it showed before.
+    Live,
     /// It was closed: by the person, or by `close`.
     Closed,
     /// Its page uses what this host can't draw, which it says in its place: why.
@@ -421,6 +424,8 @@ struct Window {
     dirty: bool,
     moving: bool,
     drawn: bool,
+    /// Whether a frame of its page is drawn, not its snapshot (`Live`).
+    live: bool,
     /// Its page is loading again in its place (`reload`), until it's drawn.
     reloading: bool,
     /// How many frames running it had nothing to draw on (`Window::missed`).
@@ -616,6 +621,7 @@ impl Windows {
                 dirty: true,
                 moving: false,
                 drawn: false,
+                live: false,
                 reloading: false,
                 missed: 0,
                 text_input: Default::default(),
@@ -752,7 +758,7 @@ impl Windows {
         screen.reload(page);
         window.waiting.clear();
         window.opened = now();
-        (window.drawn, window.reloading, window.dirty) = (false, true, true);
+        (window.drawn, window.live, window.reloading, window.dirty) = (false, false, true, true);
         true
     }
 
@@ -1390,8 +1396,9 @@ impl Windows {
                     if !window.drawn {
                         let glass = screen.glass().to_vec();
                         window.arrange(&self.display, &self.context, &self.atlas, &glass);
-                        window.drawn = true;
+                        (window.drawn, window.live) = (true, true);
                         (window.on_event)(Event::Drawn);
+                        (window.on_event)(Event::Live);
                     }
                 }
                 continue;
@@ -1505,6 +1512,9 @@ impl Windows {
                 window.drawn = true;
                 window.reloading = false;
                 (window.on_event)(Event::Drawn);
+            }
+            if window.picture.is_none() && !std::mem::replace(&mut window.live, true) {
+                (window.on_event)(Event::Live);
             }
             if let Some(asked) = window.summoned.take() {
                 let ms = |time: std::time::Duration| time.as_secs_f64() * 1000.0;
