@@ -138,7 +138,8 @@ if ((${#want_servers[@]} && ${#want_clients[@]})); then
     pid=${!part}
     until [[ -e $pair/$part ]] || ! kill -0 "$pid" 2>/dev/null; do sleep 1; done
   done
-  built=($(cat "$pair"/server "$pair"/client 2>/dev/null))
+  # A part that built nothing wrote no file, so only the parts that built are read.
+  built=($(cat "$pair"/server "$pair"/client 2>/dev/null || :))
   status=0
   if ((${#built[@]})); then
     build=$(tooling/version)
