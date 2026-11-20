@@ -244,13 +244,14 @@ impl Pipelines {
         })
     }
 
-    /// The pipelines for targets of `format`, compiled the first time a renderer draws to one.
-    fn shared(context: &Context, format: wgpu::TextureFormat, premultiplied: bool) -> Arc<Pipelines> {
-        let mut compiled = context.pipelines.lock().expect("nothing panics holding it");
+    /// The pipelines for targets of `format`, compiled the first time a renderer draws to one, or ahead of it
+    /// (`Context::prepare`), which one that comes meanwhile waits for.
+    pub(crate) fn shared(device: &wgpu::Device, queue: &wgpu::Queue, compiled: &super::context::Compiled, format: wgpu::TextureFormat, premultiplied: bool) -> Arc<Pipelines> {
+        let mut compiled = compiled.lock().expect("nothing panics holding it");
         if let Some((_, _, pipelines)) = compiled.iter().find(|(f, p, _)| *f == format && *p == premultiplied) {
             return pipelines.clone();
         }
-        let pipelines = Arc::new(Pipelines::new(&context.device, &context.queue, format, premultiplied));
+        let pipelines = Arc::new(Pipelines::new(device, queue, format, premultiplied));
         compiled.push((format, premultiplied, pipelines.clone()));
         // The rest compiled in the background where there are threads; on the web, as each is first drawn.
         #[cfg(not(target_arch = "wasm32"))]
@@ -500,7 +501,7 @@ impl Renderer {
             device: context.device.clone(),
             queue: context.queue.clone(),
             target,
-            pipelines: Pipelines::shared(context, format, premultiplied),
+            pipelines: Pipelines::shared(&context.device, &context.queue, &context.pipelines, format, premultiplied),
             format,
             premultiplied,
             size,

@@ -15,11 +15,15 @@ pub struct Context {
     pub(crate) adapter: wgpu::Adapter,
     pub(crate) device: wgpu::Device,
     pub(crate) queue: wgpu::Queue,
-    pub(crate) pipelines: Mutex<Vec<(wgpu::TextureFormat, bool, Arc<super::renderer::Pipelines>)>>,
+    pub(crate) pipelines: Compiled,
     /// Its device was lost (its GPU was reset, as a Windows driver's TDR resets it, or went), so nothing drawn with
     /// it draws again: what draws makes everything again, on a new one (`Windows::recover`).
     lost: Arc<AtomicBool>,
 }
+
+/// The pipelines each format of target draws with, by that format and whether it's premultiplied, compiled once for
+/// every window: by the first that draws to one, or ahead of it (`Context::prepare`).
+pub(crate) type Compiled = Arc<Mutex<Vec<(wgpu::TextureFormat, bool, Arc<super::renderer::Pipelines>)>>>;
 
 /// The one backend each platform draws with: the browser's WebGPU on the web.
 const BACKENDS: wgpu::Backends = if cfg!(target_arch = "wasm32") {
@@ -33,6 +37,20 @@ const BACKENDS: wgpu::Backends = if cfg!(target_arch = "wasm32") {
 };
 
 impl Context {
+    /// Compiles, in the background, the pipelines a window of this platform draws its frames with, as it starts, so its
+    /// first window's first frame doesn't wait for its GPU to compile them (half a second on a Mac's Metal): its
+    /// format (`Renderer::new`), see-through first, as the Home Screen's panel is, then opaque.
+    #[cfg(not(target_arch = "wasm32"))]
+    pub fn prepare(&self) {
+        let (device, queue, compiled) = (self.device.clone(), self.queue.clone(), self.pipelines.clone());
+        let format = if cfg!(target_os = "android") { wgpu::TextureFormat::Rgba8Unorm } else { wgpu::TextureFormat::Bgra8Unorm };
+        std::thread::spawn(move || {
+            for premultiplied in [true, false] {
+                super::renderer::Pipelines::shared(&device, &queue, &compiled, format, premultiplied);
+            }
+        });
+    }
+
     #[cfg(not(target_arch = "wasm32"))]
     pub fn new() -> anyhow::Result<Self> {
         futures_lite::future::block_on(Self::create())

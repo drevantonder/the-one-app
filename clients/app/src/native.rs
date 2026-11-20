@@ -576,6 +576,7 @@ async fn window(started: Instant, entrypoint: &str, subject: Option<&str>, link:
     let opening = Opening { started, steps: Vec::new(), asking: HashMap::new(), files: (0, 0), drawn: None, settled: false, app: String::new() };
     OPENING.lock().expect("nothing panics holding it").insert(view.clone(), opening);
     Opening::step(&view, "listed");
+    let made = view.clone();
     let launcher = matches!(kind, Kind::Launcher(..));
     let sheet = match &kind {
         Kind::Sheet(sheet) => Some(sheet.clone()),
@@ -793,7 +794,10 @@ async fn window(started: Instant, entrypoint: &str, subject: Option<&str>, link:
         }
     });
     match opened.await {
-        Ok(Ok(())) => Ok(true),
+        Ok(Ok(())) => {
+            Opening::step(&made, "window made");
+            Ok(true)
+        }
         Ok(Err(why)) => anyhow::bail!("its window didn't open: {why}"),
         Err(_) => anyhow::bail!("its device's native windows didn't start: {}", renderer::platform::unstarted().unwrap_or_else(|| "it didn't say why".into())),
     }
@@ -875,14 +879,18 @@ fn start(entrypoint: &str, subject: Option<&str>, link: &str, launcher: bool, pl
     let kept = crate::app().shell.home()?.join("native");
     // Pages' compiled JS is kept for the QuickJS that compiled it (`renderer::js::QUICKJS`), so a newer build on the
     // same QuickJS starts its pages from it, and an update's first start doesn't compile each again (V8's code cache is
-    // kept so): what another QuickJS kept goes, once, as this one first starts a page.
+    // kept so): what another QuickJS kept goes, once, as this one first starts a page, behind it, as it may be a folder
+    // of every app's bytecode, which no page waits for.
     static PRUNED: std::sync::Once = std::sync::Once::new();
     PRUNED.call_once(|| {
-        for before in std::fs::read_dir(&kept).into_iter().flatten().flatten().filter(|entry| entry.file_name() != renderer::js::QUICKJS) {
-            if let Err(error) = std::fs::remove_dir_all(before.path()) {
-                eprintln!("{} wasn't removed: {error}", before.path().display());
+        let kept = kept.clone();
+        std::thread::spawn(move || {
+            for before in std::fs::read_dir(&kept).into_iter().flatten().flatten().filter(|entry| entry.file_name() != renderer::js::QUICKJS) {
+                if let Err(error) = std::fs::remove_dir_all(before.path()) {
+                    eprintln!("{} wasn't removed: {error}", before.path().display());
+                }
             }
-        }
+        });
     });
     let cache = kept.join(renderer::js::QUICKJS);
     let (files_to, files_asked, files_view) = (to.clone(), asked.clone(), format!("{}|{entrypoint}", subject.unwrap_or_default()));

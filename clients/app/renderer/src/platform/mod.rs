@@ -429,6 +429,8 @@ impl Windows {
     fn made(display: Display, context: anyhow::Result<Context>) -> anyhow::Result<Windows> {
         let made = (|| {
             let context = context?;
+            #[cfg(not(target_arch = "wasm32"))]
+            context.prepare();
             let atlas = Arc::new(Atlas::new(&context));
             let text = TextSystem::new(crate::FONT, crate::fonts()?, true);
             Ok(Windows { display, context, atlas, text, windows: HashMap::new(), next: 1, framed: web_time::Instant::now(), check: None, record: Default::default(), deadlines: Default::default(), pressure: Pressure::Nominal, system: (web_time::Instant::now(), Pressure::Nominal) })
