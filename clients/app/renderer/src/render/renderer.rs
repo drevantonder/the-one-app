@@ -317,6 +317,9 @@ struct BackdropTextures {
 }
 
 pub struct Renderer {
+    /// An image of its surface taken ahead, as its window went from the screen (`reserve`), drawn on first as it's
+    /// back; let go before the surface it's of.
+    reserved: Option<wgpu::SurfaceTexture>,
     device: wgpu::Device,
     queue: wgpu::Queue,
     target: Target,
@@ -599,6 +602,7 @@ impl Renderer {
             ..Default::default()
         });
         Self {
+            reserved: None,
             device: context.device.clone(),
             queue: context.queue.clone(),
             target,
@@ -634,8 +638,21 @@ impl Renderer {
             && (config.width, config.height) != size
         {
             (config.width, config.height) = size;
+            self.reserved = None;
             surface.configure(&self.device, config);
             self.size = size;
+        }
+    }
+
+    /// Takes an image of its surface to draw on now, while its window's on the screen, and keeps it for its next
+    /// frame: a Mac's window going from the screen is drawn on first as it's back, where wgpu gives no image for a
+    /// window macOS hasn't yet said is visible again (`occlusionState`), which it says a few frames after it's shown,
+    /// and each summon of the launcher waited 30 to 45 ms for it.
+    pub fn reserve(&mut self) {
+        if let (None, Target::Surface { surface, .. }) = (&self.reserved, &self.target)
+            && let wgpu::CurrentSurfaceTexture::Success(frame) = surface.get_current_texture()
+        {
+            self.reserved = Some(frame);
         }
     }
 
@@ -719,6 +736,7 @@ impl Renderer {
 
     /// Lets go of its surface, waiting for what's drawn on it, before its window goes.
     pub fn destroy(&mut self) {
+        self.reserved = None;
         let _ = self.device.poll(wgpu::PollType::wait_indefinitely());
     }
 
@@ -746,11 +764,14 @@ impl Renderer {
             stamps.begin(&self.device);
         }
         let acquiring = web_time::Instant::now();
+        let reserved = self.reserved.take();
         let (frame, view, texture) = match &self.target {
             Target::Surface { surface, config } => {
                 // A surface its window has outgrown, or lost, is configured again and its frame taken from that, so the
-                // frame drawn as a window changes size isn't dropped.
-                let frame = match surface.get_current_texture() {
+                // frame drawn as a window changes size isn't dropped. An image taken ahead is drawn on first, where it's
+                // the surface's size.
+                let reserved = reserved.filter(|frame| (frame.texture.width(), frame.texture.height()) == (config.width, config.height));
+                let frame = match reserved.map_or_else(|| surface.get_current_texture(), wgpu::CurrentSurfaceTexture::Success) {
                     wgpu::CurrentSurfaceTexture::Lost | wgpu::CurrentSurfaceTexture::Outdated => {
                         surface.configure(&self.device, config);
                         surface.get_current_texture()

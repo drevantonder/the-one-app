@@ -691,6 +691,10 @@ impl Windows {
         }
         window.visible = false;
         window.summoned = None;
+        // Its next frame's images taken while it's still on the screen, so it's drawn at once as it's summoned.
+        for renderer in window.parts.iter_mut().filter_map(|part| part.renderer.as_mut()) {
+            renderer.reserve();
+        }
         if let Some(frames) = window.timing.end(self.display.refresh()) {
             (window.on_event)(Event::Frames(frames));
         }
@@ -1015,9 +1019,9 @@ impl Windows {
                 window.shown = true;
                 self.display.show(&window.parts[0].native);
             }
-            // A panel put away is drawn as its page changes, never shown, so its text is shaped, its glyphs and
-            // pictures are in the atlas and its surfaces have had a frame by the time it's summoned, and the frame it
-            // shows with is as quick as any after (26 to 52 ms on Linux's first summon after the app started, where
+            // A panel put away is painted as its page changes, never shown, so its text is shaped and its glyphs and
+            // pictures are in the atlas, and drawn once, so its surfaces have had a frame, by the time it's summoned,
+            // and the frame it shows with is as quick as any after (26 to 52 ms on Linux's first summon after the app started, where
             // later ones take 7). What moves asks for no more frames while it's away. A window with no surface yet
             // (Android's view, until it's laid out) is drawn once it has one.
             // Its first frame drawn so is when it's opened (`Drawn`), as it's ready to show: when it's first summoned is
@@ -1028,9 +1032,11 @@ impl Windows {
                     && window.parts[0].renderer.is_some()
                 {
                     screen.paint(window.room, window.parts[0].native.scale(), &mut self.text, &self.atlas, &mut window.scene);
-                    let glass = screen.glass().to_vec();
-                    window.arrange(&self.display, &self.context, &self.atlas, &glass);
+                    // Drawn once, so its surfaces have had a frame; after that it's painted alone, and the image it
+                    // took as it went (`put_away`) is kept for the frame it's summoned with.
                     if !window.drawn {
+                        let glass = screen.glass().to_vec();
+                        window.arrange(&self.display, &self.context, &self.atlas, &glass);
                         window.drawn = true;
                         (window.on_event)(Event::Drawn);
                     }
