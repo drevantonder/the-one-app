@@ -5,8 +5,8 @@ use super::params::BlurParams;
 const LEVELS: usize = 4;
 
 /// The textures a backdrop's blur is drawn through, for frames of `size`: for each level (half its size, a quarter,
-/// …) the frame shrunk to it and the two passes of its blur, each made as a blur first needs it, as only the widest
-/// blur's last level has the two passes; and the frame copied, where it can't be read as it is.
+/// …) the frame shrunk to it and the two passes of its blur, each made as a blur at that level first needs it; and
+/// the frame copied, where it can't be read as it is.
 pub(super) struct BackdropTextures {
     pub(super) size: (u32, u32),
     pub(super) source: Option<(wgpu::Texture, wgpu::TextureView)>,
@@ -55,10 +55,18 @@ impl Renderer {
         let region = [out(area[0], size.0, false), out(area[1], size.1, false), out(area[2], size.0, true), out(area[3], size.1, true)];
         let (width, height) = halved(size, level);
         let sigma = sigma / (1 << level) as f32;
-        let shrink = self.push(bytemuck::bytes_of(&BlurParams { step: [0.0, 0.0], sigma: 0.0, pad: 0.0 }));
-        let across = self.push(bytemuck::bytes_of(&BlurParams { step: [1.0 / width as f32, 0.0], sigma, pad: 0.0 }));
-        let down = self.push(bytemuck::bytes_of(&BlurParams { step: [0.0, 1.0 / height as f32], sigma, pad: 0.0 }));
+        let shrink = self.push(bytemuck::bytes_of(&BlurParams { step: [1.0 / size.0 as f32, 1.0 / size.1 as f32], sigma: 0.0, shrink: step as f32 }));
+        let across = self.push(bytemuck::bytes_of(&BlurParams { step: [1.0 / width as f32, 0.0], sigma, shrink: 0.0 }));
+        let down = self.push(bytemuck::bytes_of(&BlurParams { step: [0.0, 1.0 / height as f32], sigma, shrink: 0.0 }));
         Blur { level, region, shrink, across, down, behind: None }
+    }
+
+    /// The blur kept from the frames before of what's behind a backdrop, where what's drawn before it is the same, as
+    /// this frame's.
+    pub(super) fn kept_blur(&mut self, blur: &Blur) -> Option<wgpu::TextureView> {
+        let (view, used) = self.blurred.get_mut(&blur.behind?)?;
+        *used = true;
+        Some(view.clone())
     }
 
     /// Blurs what's drawn into `frame` so far, as `blur` says, into the backdrop's textures: shrunk, then blurred
@@ -66,10 +74,6 @@ impl Renderer {
     /// last. Only the textures this blur goes through are made, each the first time one needs it, and the frame is
     /// read as it is where its surface lets a shader read it.
     pub(super) fn blur_behind(&mut self, encoder: &mut wgpu::CommandEncoder, frame: &wgpu::Texture, view: &wgpu::TextureView, globals: &wgpu::BindGroup, buffer: &wgpu::Buffer, blur: &Blur) -> wgpu::TextureView {
-        if let Some((view, used)) = blur.behind.and_then(|behind| self.blurred.get_mut(&behind)) {
-            *used = true;
-            return view.clone();
-        }
         let size = (frame.width(), frame.height());
         let mut work = self.work.get();
         work.blurred += f64::from(blur.region[2] - blur.region[0]) * f64::from(blur.region[3] - blur.region[1]);
@@ -92,8 +96,7 @@ impl Renderer {
             (texture, view)
         };
         let backdrop = self.backdrop.as_mut().expect("made above");
-        let wanted = (0..blur.level).map(|at| (at, 0)).chain([(blur.level - 1, 1), (blur.level - 1, 2)]);
-        for (at, which) in wanted {
+        for (at, which) in [(blur.level - 1, 0), (blur.level - 1, 1), (blur.level - 1, 2)] {
             if backdrop.levels[at][which].is_none() {
                 backdrop.levels[at][which] = Some(make(halved(size, at + 1), wgpu::TextureUsages::RENDER_ATTACHMENT | wgpu::TextureUsages::COPY_SRC));
             }
@@ -111,15 +114,11 @@ impl Renderer {
         }
         let backdrop = self.backdrop.as_ref().expect("made above");
         let level = |at: usize, which: usize| &backdrop.levels[at][which].as_ref().expect("made above").1;
-        let mut passes = Vec::new();
-        let mut from = if readable { view } else { &backdrop.source.as_ref().expect("copied above").1 };
-        for at in 0..blur.level {
-            passes.push((from, level(at, 0), blur.shrink, at + 1));
-            from = level(at, 0);
-        }
-        let (across, down) = (level(blur.level - 1, 1), level(blur.level - 1, 2));
-        passes.push((from, across, blur.across, blur.level));
-        passes.push((across, down, blur.down, blur.level));
+        let from = if readable { view } else { &backdrop.source.as_ref().expect("copied above").1 };
+        let (shrunk, across, down) = (level(blur.level - 1, 0), level(blur.level - 1, 1), level(blur.level - 1, 2));
+        // Shrunk to its level in one pass, not halved a pass at a time: each pass costs a command list or two
+        // (`draw_batches`).
+        let passes = [(from, shrunk, blur.shrink, blur.level), (shrunk, across, blur.across, blur.level), (across, down, blur.down, blur.level)];
         // Each pass draws only the region, at its level, of the texture it draws into.
         let region = |level: usize, (width, height): (u32, u32)| {
             let [left, top, right, bottom] = blur.region.map(|edge| edge >> level);

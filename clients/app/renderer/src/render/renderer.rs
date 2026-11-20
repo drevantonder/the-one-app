@@ -58,6 +58,10 @@ pub(crate) const OFFSCREEN_FORMAT: wgpu::TextureFormat = wgpu::TextureFormat::Rg
 /// (`Renderer::idle`).
 const IDLE: web_time::Duration = web_time::Duration::from_secs(2);
 
+/// How many textures a renderer keeps that its frames let go of (`Renderer::spare`): a launcher's pages a wheel turns
+/// let go of a page's raster as they take another of its size.
+const SPARE: usize = 2;
+
 pub struct Renderer {
     /// When it last drew a frame (`idle`).
     drew: web_time::Instant,
@@ -93,6 +97,12 @@ pub struct Renderer {
     /// What the last frame drew, batch by batch (`Drawn`), and what of the frames before was the same and is kept.
     last: Drawn,
     kept: Option<Kept>,
+    /// Textures a frame let go of (a raster's, a frame kept), each taken again by the next that needs one of its size,
+    /// format and use, rather than made (`made`): one a window's size is more than a heap of 8 MB (`Context::create`),
+    /// so a heap of its own, which Intel's Direct3D 12 driver makes resident as it's made, waiting on its GPU, and
+    /// frees as it goes: on a Surface, a launcher's pages turned by a wheel made and freed one each few frames. The last
+    /// `SPARE` are kept, and none once it idles.
+    spare: Vec<wgpu::Texture>,
     /// The bind group of the frame's data for its batches' instances, each at its offset, and how much of the data
     /// from there it binds; made again only as the data's buffer is, or a batch needs more.
     instances: Option<(wgpu::Buffer, u64, wgpu::BindGroup)>,
@@ -153,6 +163,9 @@ struct Work {
     uploaded: u64,
     blurred: f64,
 }
+
+/// What a layer's texture is for, a raster's or a frame kept: drawn into, sampled, and copied out of.
+const LAYER: wgpu::TextureUsages = wgpu::TextureUsages::RENDER_ATTACHMENT.union(wgpu::TextureUsages::TEXTURE_BINDING).union(wgpu::TextureUsages::COPY_SRC);
 
 struct Kept {
     texture: wgpu::Texture,
@@ -264,6 +277,7 @@ impl Renderer {
             tiles: Default::default(),
             last: Drawn::default(),
             kept: None,
+            spare: Vec::new(),
             instances: None,
             rasters: Default::default(),
             blurred: Default::default(),
@@ -422,6 +436,7 @@ impl Renderer {
         serde_json::json!({
             "surface": surface,
             "kept": self.kept.as_ref().map_or(0, |kept| bytes(&kept.texture)),
+            "spare": self.spare.iter().map(bytes).sum::<u64>(),
             "backdrop": backdrop.chain(blurred).sum::<u64>(),
             "rasters": self.rasters.values().map(|(texture, _)| bytes(texture)).sum::<u64>(),
             "tiles": self.tiles.values().map(|(texture, _)| bytes(texture)).sum::<u64>(),
@@ -431,7 +446,7 @@ impl Renderer {
 
     /// How long until it's drawn nothing for a while (`IDLE`), where it holds what it lets go of then (`idle`).
     pub fn idle_in(&self) -> Option<web_time::Duration> {
-        (self.kept.is_some() || self.backdrop.is_some() || !self.blurred.is_empty()).then(|| IDLE.saturating_sub(self.drew.elapsed()))
+        (self.kept.is_some() || !self.spare.is_empty() || self.backdrop.is_some() || !self.blurred.is_empty()).then(|| IDLE.saturating_sub(self.drew.elapsed()))
     }
 
     /// It's drawn nothing for a while (`IDLE`): it lets go of the frame it kept and its backdrops' textures and blurs,
@@ -440,6 +455,7 @@ impl Renderer {
     /// tab's tiles.
     pub fn idle(&mut self) {
         self.kept = None;
+        self.spare.clear();
         self.backdrop = None;
         self.blurred.clear();
     }
@@ -490,6 +506,32 @@ impl Renderer {
     /// How long the last frame took to finish its commands and submit them, and to present its image.
     pub fn submitted(&self) -> (web_time::Duration, web_time::Duration) {
         (self.submitted, self.presented)
+    }
+
+    /// A texture of `size` in its target's format, for `usage`: one it let go of lately (`spare`), else made.
+    fn made(&mut self, (width, height): (u32, u32), usage: wgpu::TextureUsages) -> wgpu::Texture {
+        let fits = |texture: &wgpu::Texture| (texture.width(), texture.height()) == (width, height) && texture.format() == self.format && texture.usage() == usage;
+        if let Some(at) = self.spare.iter().position(fits) {
+            return self.spare.remove(at);
+        }
+        self.device.create_texture(&wgpu::TextureDescriptor {
+            label: None,
+            size: wgpu::Extent3d { width, height, depth_or_array_layers: 1 },
+            mip_level_count: 1,
+            sample_count: 1,
+            dimension: wgpu::TextureDimension::D2,
+            format: self.format,
+            usage,
+            view_formats: &[],
+        })
+    }
+
+    /// Keeps a texture a frame let go of for the next that needs one like it (`spare`), letting go of the oldest kept.
+    fn let_go(&mut self, texture: wgpu::Texture) {
+        if self.spare.len() >= SPARE {
+            self.spare.remove(0);
+        }
+        self.spare.push(texture);
     }
 
     /// An atlas texture's bind group, kept till the atlas makes another texture (which may be in its place).

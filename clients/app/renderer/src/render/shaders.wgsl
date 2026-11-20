@@ -1362,11 +1362,12 @@ struct Backdrop {
 @group(1) @binding(0) var<storage, read> b_backdrops: array<Backdrop>;
 
 struct BlurParams {
-    // One texel along the way this pass blurs, in the source's coordinates (0 to 1).
+    // One texel along the way this pass blurs, in the source's coordinates (0 to 1); shrinking, one texel each way.
     step: vec2<f32>,
     // The Gaussian's sigma, in the source's texels.
     sigma: f32,
-    pad: f32,
+    // With no `sigma`, how many of the source's texels each way one of the target's is.
+    shrink: f32,
 }
 @group(1) @binding(0) var<uniform> blur: BlurParams;
 
@@ -1386,11 +1387,20 @@ fn vs_blur(@builtin(vertex_index) vertex_id: u32) -> BlurVarying {
 }
 
 // One way of a separable Gaussian: two taps a sample, between texels, for linear filtering to weigh. With no
-// `sigma`, it's what's under each texel, as linear filtering averages it: the source halved, four texels to one.
+// `sigma`, it's the average of the `shrink` × `shrink` texels under each: a tap at the middle of each 2 × 2 of them,
+// which linear filtering averages, as halving the source that many times over did.
 @fragment
 fn fs_blur(input: BlurVarying) -> @location(0) vec4<f32> {
     if (blur.sigma <= 0.0) {
-        return textureSample(t_sprite, s_sprite, input.uv);
+        let taps = max(i32(blur.shrink) / 2, 1);
+        var sum = vec4<f32>(0.0);
+        for (var y = 0; y < taps; y++) {
+            for (var x = 0; x < taps; x++) {
+                let offset = vec2<f32>(f32(2 * x + 1 - taps), f32(2 * y + 1 - taps));
+                sum += textureSample(t_sprite, s_sprite, input.uv + blur.step * offset);
+            }
+        }
+        return sum / f32(taps * taps);
     }
     let sigma = max(blur.sigma, 0.5);
     let reach = min(i32(ceil(sigma * 3.0)), 48);

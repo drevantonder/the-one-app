@@ -22,7 +22,7 @@ pub(super) struct GammaParams {
 pub(super) struct BlurParams {
     pub(super) step: [f32; 2],
     pub(super) sigma: f32,
-    pub(super) pad: f32,
+    pub(super) shrink: f32,
 }
 
 /// Ratios for brightening and darkening glyphs' edges for contrast, GPUI's defaults: a gamma of 1.8.
