@@ -65,6 +65,23 @@ reach the other only one way on an address, as a firewall or a Mac's local netwo
 with `sudo iptables -I OUTPUT -p udp --sport <from's port> --dport <to's port> -d <address> -j DROP` (the relay is
 TCP, so it's untouched), and remove it with `-D` in place of `-I` when you're done: the machine is shared.
 
+## Faults
+
+What a person's network meets, one server at a time, while the tools you're checking run: with `--standby`, make
+the fault in `standby` and call tools as the client does, which asks `server`. Each must answer from the servers
+that do, naming the one that didn't in `failed`, or fail fast saying why; never hang or answer nothing. A device's
+app is faulted the same way, by its own PID.
+
+- Frozen, as a machine asleep: `kill -STOP $(cat <folder>/standby.pid)`, and `-CONT` after. Its connections go
+  silent and are given up in 4 s (`SILENT`, `core/client/src/transport.rs`), so a frozen one is the easy case.
+- Stuck, as a server that's connected and says it's still running, but never answers: its apps' process suspended,
+  `elixir --sname f$$ --cookie $(cat <folder>/cookie) --rpc-eval <its node> ':sys.suspend(OneCore.Apps)'`, and
+  `:sys.resume` after. Nothing below the app gives up on that, so only a deadline does: this is the one that hangs.
+- Slow: `cpulimit -p $(cat <folder>/standby.pid) -l 2` (apt's or Homebrew's `cpulimit`), which stops and continues
+  it, and leaves it stopped if it's killed, so `kill -CONT` it after.
+- Packets dropped: the UDP of its port (`<folder>/standby/port`), both ways, as under A network path that's open one
+  way; its relay, over TCP, still carries it.
+
 ## Logs and stopping
 
 Everything is in the folder: `server.log`, `reloader.log`, `edge.log`, `bucket.log` (and `standby.log` with that flag), the

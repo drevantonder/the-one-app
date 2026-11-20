@@ -10,7 +10,8 @@
 # keeps goes: its bucket, each server's home, a client's home and the logs. A new network has every app of this
 # repo deployed for it, and installs the ones a network starts with (`OneCore.Apps.Lifecycle.make_first_owner/1`); after that,
 # deploy an app you change into it. Starting again in the same folder carries on with what's there, on the same
-# ports. Its PID is in the folder's `pid`, and `kill $(cat <folder>/pid)` (or Ctrl-C) stops all of it.
+# ports. Its PID is in the folder's `pid`, and `kill $(cat <folder>/pid)` (or Ctrl-C) stops all of it. Each server's
+# is in `<folder>/<server>.pid`.
 #
 # It's a network being built, so nobody signs in, and a client says which user it is: ONE_AS=<name> before a
 # command acts as that user, and ONE_SUBJECT=groups/<name> or ONE_SUBJECT=network has it run for a group or the network.
@@ -135,6 +136,8 @@ start() {
     mix network "$folder" "$1" --name "$1" --reloader "$(node_name reloader)" "${as[@]}" "${at_address[@]}") \
     >"$folder/$1.log" 2>&1 &
   started+=($!)
+  # Its node's program, which a fault is made in (the skill local-network's Faults).
+  echo $! >"$folder/$1.pid"
   if ! wait_for "A server is running" "$folder/$1.log"; then
     approve=$(grep -o 'add_server --key [0-9a-f]*' "$folder/$1.log") || { cat "$folder/$1.log" >&2 && exit 1; }
     ONE_AS=owner ONE_SUBJECT=network ONE_HOME=$folder/client "$one" $approve
