@@ -379,7 +379,8 @@ function scopeOf(ast: any, code: string, file: string, made: Made, seen = new Se
   for (const statement of ast.body) {
     if (statement.type === "ImportDeclaration" && /^\.\.?\//.test(statement.source.value)) {
       const base = join(dirname(file), statement.source.value)
-      const target = [base, `${base}.ts`, `${base}.tsx`, `${base}.js`, join(base, "index.ts")].find((path) => existsSync(path) && statSync(path).isFile())
+      // Only a module of code has tokens: a picture it imports (`import mark from "./logo.png"`) has none.
+      const target = [base, `${base}.ts`, `${base}.tsx`, `${base}.js`, join(base, "index.ts")].find((path) => /\.[cm]?[jt]sx?$/.test(path) && existsSync(path) && statSync(path).isFile())
       if (!target || seen.has(target)) continue
       const theirs = scopeOf(parseAst(readFileSync(target, "utf8"), { lang: lang(target) }), readFileSync(target, "utf8"), target, made, seen).scope
       for (const specifier of statement.specifiers) if (specifier.type === "ImportSpecifier" && theirs[specifier.imported.name ?? specifier.imported.value]) scope[specifier.local.name] = theirs[specifier.imported.name ?? specifier.imported.value]
