@@ -29,6 +29,15 @@ else.
   applied since the frame before, `layout_ms` and `paint_ms` (styling, layout and painting all told), GPU `draws`
   and the glyph `atlas`'s use. Tap what starts the motion, then profile at once. A frame where nothing changed costs
   nothing. The clock stays paused: resume it with `clock`.
+- `replay` checks how a gesture moves: a press goes down on a node (or at `x`, `y`), moves along `moves` (each
+  `{dx, dy, ms}`, one with neither holding still) and lifts, on the paused clock, every frame of a display `hz` (60,
+  or 120) times a second drawn until it comes to rest, each with its cost, its GPU `work`, where `track` (a selector)
+  was drawn and how far what scrolls shows scrolled, and how many went `over` their budget. A fling is a short quick
+  move (300 px in 80 ms), a rubber band one past a list's end. `bun motion.js` in the One App's repo plays the same on
+  a scene, with no window, and judges it against kinds of devices.
+- `host` checks the device's host keeps the renderer's contract: a tick each display refresh, a frame presented each
+  tick while something moves, nothing while still, and inputs with the device's own times. Move the pointer over the
+  window while it runs (a second and a half).
 
 A device is its person's: you inspect only theirs. Tapping and typing act as they would, so don't send, buy or delete
 there unless they asked.

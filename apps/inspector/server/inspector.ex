@@ -83,6 +83,7 @@ defmodule Inspector do
                   layout_ms: %{type: "number", description: "laying out its tree"},
                   paint_ms: %{type: "number", description: "styling, laying out and painting it, all told"},
                   draws: %{type: "integer", description: "its GPU draw calls"},
+                  work: %{type: "object", description: "what its GPU did, the same on any GPU: the device pixels of quads, shadows, sprites, backdrops and rasters it drew, as often as each is drawn over, the pixels it copied of the frames before and the bytes it uploaded"},
                   atlas: %{type: "object", description: "the glyph and picture atlas: its tiles, textures, bytes on the GPU, and how much of them is filled, 0 to 1"},
                   width: %{type: "integer"},
                   height: %{type: "integer"}
@@ -95,6 +96,27 @@ defmodule Inspector do
           required: ["frames"]
         }
       },
+      op(
+        "replay",
+        false,
+        "Plays a press, from a node by a selector or a point, along `moves` (each {dx, dy, ms}; one with neither holds still) on the paused clock, drawing every frame of a display `hz` (60) times a second until `after` ms (2000) past its end or nothing moves, as a person's swipe, fling, drag or pull through the window's own gesture and spring code. Gives each frame's cost and work, where `track` was drawn (x, y) and how far what scrolls under the press shows scrolled, its pictures with `snap`, and how many frames went `over` their budget.",
+        Map.merge(Map.merge(@selector, @point), %{
+          moves: %{type: "array", items: %{type: "object", properties: %{dx: %{type: "number"}, dy: %{type: "number"}, ms: %{type: "number", minimum: 0}}, required: ["ms"]}},
+          lift: %{type: "boolean", description: "false to hold it down at the end"},
+          hz: %{type: "number", minimum: 1, description: "the display's frames a second: 60 or 120"},
+          input_hz: %{type: "number", minimum: 1, description: "its moves a second, hz unless given"},
+          after: %{type: "number", minimum: 0},
+          track: %{type: "object", description: "a selector of a node to follow, as `query` takes one"},
+          snap: %{type: "boolean", description: "true for each frame's picture"}
+        }),
+        ["moves"]
+      ),
+      op(
+        "host",
+        true,
+        "Whether the device's host keeps the renderer's contract with it: the window is kept moving for a second, then still, and it says what held: a tick each display refresh, a frame presented each tick, nothing while still, and inputs with the device's own times, in order (move the pointer or a finger over it as it runs).",
+        %{}
+      ),
       op("tap", false, "Presses a node, by a selector, or what's at a point, as a finger does: an input takes the keyboard, and what listens for click gets one. Gives `tapped`, the node that took it.", Map.merge(@selector, @point)),
       op("type", false, "Types text into an input, by a selector, or the one with the keyboard, a character at a time. Gives the node and its `value`.", Map.put(@selector, :text, %{type: "string", description: "what to type; with a selector, `text` is what's typed, so pick the input by `role`, `name`, `key` or `node`"}), ["text"]),
       op(
