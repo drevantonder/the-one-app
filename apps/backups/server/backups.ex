@@ -402,7 +402,7 @@ defmodule Backups do
   end
 
   # Says how each destination stands where a person hears of it: to Telemetry, whose `backup` alert fires on it, and
-  # to the network's owners, told once when it starts to need them, and again only after it's backed up.
+  # to the network's owner, told once when it starts to need them, and again only after it's backed up.
   defp stand(call) do
     standing = transaction(call, &standing/1)
 
@@ -437,7 +437,8 @@ defmodule Backups do
     :ok
   end
 
-  # Tells each of the network's owners that `destination` couldn't be backed up, as Time Machine does.
+  # Tells the network's owner that `destination` couldn't be backed up, as Time Machine does: its first owner, whom
+  # the network keeps, since a call the clock makes as nobody can't list who else owns it.
   defp tell(call, destination) do
     when_last =
       case destination.last do
@@ -445,14 +446,11 @@ defmodule Backups do
         at -> "The last backup to #{destination.name} was #{ago(System.os_time(:millisecond) - at)}."
       end
 
-    members = Call.tool(call, "permissions", "members", %{"of" => "network"})["members"]
-
-    for who <- members,
-        Call.tool(call, "permissions", "check", %{"who" => who, "artifact" => "network", "relation" => "owner"})["may"] do
+    if owner = OneCore.User.first_owner() do
       Call.app(call, "notifications").send(call, %{
         "title" => "Backups couldn't complete the backup",
         "text" => when_last,
-        "to" => who,
+        "to" => owner,
         "section" => "backups"
       })
     end
