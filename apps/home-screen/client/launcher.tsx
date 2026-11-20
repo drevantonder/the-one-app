@@ -349,12 +349,13 @@ export function LauncherPanel(props: { owners: Owner[]; layout: Screens; paging:
                     </View>
                   </View>
                 )
+                // As wide as all their screenfuls, which the strip slides along: it clips what rolls above and below.
                 return (
                   <View
                     role="region"
                     aria-label={owner().name}
                     inert={!shown() || undefined}
-                    style={[looks.owner, looks.rolling, !shown() && looks.inert, looks.at(0, PILLS, room().width, room().height), looks.drifted(shown() ? 1 : 0, (index() - state().context.at.owner) * 40)]}
+                    style={[looks.owner, looks.rolling, !shown() && looks.inert, looks.at(0, PILLS, room().width * Math.max(1, props.layout.homes(index()).length), room().height), looks.drifted(shown() ? 1 : 0, (index() - state().context.at.owner) * 40)]}
                   >
                     {/* Each other owner's pages are lined up where the shown owner's are, ready for a roll to them. */}
                     <View style={[looks.track, looks.shifted(across() - xOf(index())[0]())]}>
