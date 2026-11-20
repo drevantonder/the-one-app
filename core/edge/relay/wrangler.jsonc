@@ -1,0 +1,23 @@
+{
+  // The relay, a Worker of its own (`worker.ts`), which `edge.js` deploys only when it changed, with Workers Routes for
+  // its paths at the network's address.
+  "name": "network-relay",
+  "main": "worker.ts",
+  "compatibility_date": "2026-11-01",
+  "workers_dev": false,
+  // Its Durable Object takes a deploy's code once it hibernates, or after 5 seconds where it's busy, rather than
+  // Cloudflare's 5 minutes, so the edge and it are on different code no longer than the edge tries a call to it again
+  // (`SWITCH` in `common.ts`).
+  "durable_objects": {
+    "bindings": [
+      { "name": "RELAY", "class_name": "Relay" },
+      // The network's updater, in the edge.
+      { "name": "UPDATER", "class_name": "NetworkUpdater", "script_name": "network-edge" }
+    ],
+    "code_update_strategy": { "mode": "deferred", "max_delay": 5 }
+  },
+  // v1 moved it, with what it keeps, from the edge's Worker.
+  "migrations": [{ "tag": "v1", "transferred_classes": [{ "from": "Relay", "from_script": "network-edge", "to": "Relay" }] }],
+  // Who the network's own are, as the edge says.
+  "services": [{ "binding": "NETWORK", "service": "network-edge", "entrypoint": "Network" }]
+}

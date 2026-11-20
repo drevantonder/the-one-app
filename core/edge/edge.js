@@ -6,9 +6,9 @@
 // Deployed with the network's address, the edge answers there: Cloudflare attaches that name to it, making its DNS
 // record and certificate, if the name is on a zone of the same account. Without one it answers only at workers.dev.
 //
-// That's the edge's one Worker (`wrangler.jsonc`, `edge.ts`), with the web client's files (`clients/web`) as its
-// assets, and each app's edge function: an app that has one holds an ordinary Worker in the folder `edge` of its own
-// (`apps/<name>/edge`), with a `wrangler.jsonc` and a `package.json` that names the first part of each path it
+// That's the edge's Worker (`wrangler.jsonc`, `edge.ts`), with the web client's files (`clients/web`) as its assets,
+// the relay's (`relay/wrangler.jsonc`, `relay/worker.ts`), and each app's edge function: an app that has one holds an
+// ordinary Worker in the folder `edge` of its own (`apps/<name>/edge`), with a `wrangler.jsonc` and a `package.json` that names the first part of each path it
 // answers (`"paths": ["mcp"]`). The edge's list of them is made here. A part is built in `target/edge-dev/<name>` or
 // `target/edge-deploy/<name>`, a copy as deep in the repo as the folder it's of, so nothing that building leaves behind
 // is among its app's files, and what it reaches in the repo by a path from itself it still reaches. A deploy never
@@ -137,20 +137,30 @@ for (const { part, worker, tail } of workers.sort((a, b) => b.tail - a.tail)) {
 // and the renderer's files, which it sends as they're kept compressed (`web/web.ts`); its build, by which the relay knows
 // which servers talk with it (`relay/relay.ts`); and which part answers which path, and the part that says who a
 // request is from, bound.
-const bare = {
+const own = {
   ...edge,
   main: relative(built, `${here}/${edge.main}`),
   assets: { directory: "web", binding: "ASSETS", run_worker_first: [...Object.keys(paths).flatMap((path) => [`/${path}`, `/${path}/*`]), "/renderer/*"] },
   vars: { VERSION: version, PARTS: parts },
 };
 const full = tailed({
-  ...bare,
-  services: [...workers.map(({ binding, worker }) => ({ binding, service: worker.name })), ...(who ? [who] : []).map(({ binding, service, entrypoint }) => ({ binding, service, entrypoint }))],
+  ...own,
+  services: [...edge.services, ...workers.map(({ binding, worker }) => ({ binding, service: worker.name })), ...(who ? [who] : []).map(({ binding, service, entrypoint }) => ({ binding, service, entrypoint }))],
   ...(at && { routes: [{ pattern: at.hostname, custom_domain: true }] }),
 });
 await Bun.write(`${built}/edge.jsonc`, JSON.stringify(full, null, 2));
 const edgeConfig = relative(here, `${built}/edge.jsonc`);
 const partConfigs = workers.map(({ part }) => relative(here, `${part}/wrangler.jsonc`));
+// The relay, a Worker of its own (`relay/worker.ts`), with Workers Routes for its own paths at the network's address,
+// which take them before the edge's Custom Domain does.
+const relayWorker = (await import(`${here}/relay/wrangler.jsonc`)).default;
+const relayed = tailed({
+  ...relayWorker,
+  main: relative(built, `${here}/relay/${relayWorker.main}`),
+  ...(at && { routes: ["relay", "relay/outside", "ping"].map((path) => `${at.hostname}/${path}`) }),
+});
+await Bun.write(`${built}/relay.jsonc`, JSON.stringify(relayed, null, 2));
+const relayConfig = relative(here, `${built}/relay.jsonc`);
 
 const wrangler = (...args) => Bun.spawn(["bun", "x", "wrangler", ...args], { cwd: here, env: process.env, stdio: ["inherit", "inherit", "inherit"] }).exited;
 // A part's D1 databases are made what they should be by their migrations (`migrations_dir`), as Wrangler applies
@@ -166,19 +176,35 @@ const migrate = async (/** @type {{worker: any}} */ { worker }, /** @type {strin
 if (what === "dev") {
   const kept = rest.indexOf("--persist-to");
   for (const [at, part] of workers.entries()) await migrate(part, partConfigs[at], ["--local", ...(kept >= 0 ? rest.slice(kept, kept + 2) : [])]);
-  process.exit(await wrangler("dev", ...[edgeConfig, ...partConfigs].flatMap((config) => ["-c", config]), ...rest));
+  process.exit(await wrangler("dev", ...[edgeConfig, relayConfig, ...partConfigs].flatMap((config) => ["-c", config]), ...rest));
 }
 // A Worker is deployed after the ones it's bound to, each with its secrets if it has any: a file `secrets` beside
 // its `wrangler.jsonc`, which only it holds, such as the edge's keys to the bucket and an app's part's to an outside
-// service. The edge and its parts are bound to each other, and Cloudflare refuses a binding to a Worker that isn't
-// there yet, so on an account that has no edge yet it's deployed first without its bindings to them and its address.
-const deploy = async (/** @type {string} */ config, /** @type {string} */ secrets) => {
-  const failed = await wrangler("deploy", "-c", config, ...(existsSync(secrets) ? ["--secrets-file", relative(here, secrets)] : []));
+// service. The edge, the relay and the parts are bound to each other, and Cloudflare refuses a binding to a Worker that
+// isn't there yet, so on an account that has no edge yet it's deployed first without its bindings to the others and
+// its address.
+const deploy = async (/** @type {string} */ config, /** @type {string} */ secrets, /** @type {string[]} */ ...more) => {
+  const failed = await wrangler("deploy", "-c", config, ...(existsSync(secrets) ? ["--secrets-file", relative(here, secrets)] : []), ...more);
   if (failed) process.exit(failed);
 };
 if ((await $`bun x wrangler deployments list --name ${edge.name}`.cwd(here).quiet().nothrow()).exitCode !== 0) {
-  await Bun.write(`${built}/bare.jsonc`, JSON.stringify(bare, null, 2));
+  const bindings = edge.durable_objects.bindings.filter(({ script_name }) => !script_name);
+  await Bun.write(`${built}/bare.jsonc`, JSON.stringify({ ...own, services: [], durable_objects: { ...edge.durable_objects, bindings } }, null, 2));
   await deploy(relative(here, `${built}/bare.jsonc`), `${here}/secrets`);
+}
+// The relay is deployed only when what it runs changed: a deploy ends every connection it holds. Its version is tagged
+// with a hash of its bundle and config, as the build Wrangler would upload, and one with the same tag isn't deployed again.
+{
+  const out = `${built}/relay-bundle`;
+  await $`bun x wrangler deploy --dry-run --outdir ${out} -c ${relayConfig}`.cwd(here).quiet();
+  const hash = new Bun.CryptoHasher("sha256").update(JSON.stringify(relayed));
+  for (const file of [...new Glob("**/*").scanSync(out)].filter((file) => !file.endsWith(".map")).sort()) hash.update(file).update(await Bun.file(`${out}/${file}`).bytes());
+  const tag = hash.digest("hex").slice(0, 24);
+  const status = await $`bun x wrangler deployments status --name ${relayWorker.name} --json`.cwd(here).quiet().nothrow();
+  const live = status.exitCode === 0 && JSON.parse(status.text()).versions?.[0]?.version_id;
+  const deployed = live && JSON.parse((await $`bun x wrangler versions view ${live} --name ${relayWorker.name} --json`.cwd(here).quiet()).text()).annotations?.["workers/tag"];
+  if (deployed === tag) console.log(`The relay is as deployed (${tag}), so it's left running`);
+  else await deploy(relayConfig, `${here}/relay/secrets`, "--tag", tag);
 }
 for (const [at, part] of workers.entries()) {
   await deploy(partConfigs[at], `${root}/apps/${part.app}/edge/secrets`);

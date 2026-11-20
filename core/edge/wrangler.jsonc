@@ -9,19 +9,20 @@
   "workers_dev": false,
   // The rules every agent is told first, which servers tell it too (`core/server/priv/rules.md`), as text.
   "rules": [{ "type": "Text", "globs": ["**/*.md"] }],
-  // The relay's Durable Object (`relay/relay.ts`), the network's updater (`updater/updater.ts`) and when a list of
-  // servers last changed (`Changes` in `presigner/presigner.ts`). They take a deploy's code once they hibernate, or after
-  // 5 seconds where they're busy, rather than Cloudflare's 5 minutes, so the Worker and they are on different code no
-  // longer than the Worker tries a call to the relay again (`SWITCH` in `relay/relay.ts`).
+  // The network's updater (`updater/updater.ts`) and when a list of servers last changed (`Changes` in
+  // `presigner/presigner.ts`), which take a deploy's code once they're idle, or after 5 seconds where they're busy; and
+  // the relay's Durable Object, in the relay's own Worker (`relay/worker.ts`).
   "durable_objects": {
     "bindings": [
-      { "name": "RELAY", "class_name": "Relay" },
       { "name": "UPDATER", "class_name": "NetworkUpdater" },
-      { "name": "CHANGES", "class_name": "Changes" }
+      { "name": "CHANGES", "class_name": "Changes" },
+      { "name": "RELAY", "class_name": "Relay", "script_name": "network-relay" }
     ],
     "code_update_strategy": { "mode": "deferred", "max_delay": 5 }
   },
-  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["Relay", "NetworkUpdater", "Changes"] }],
+  "migrations": [{ "tag": "v1", "new_sqlite_classes": ["NetworkUpdater", "Changes"] }],
+  // The relay's Worker, which the edge passes the relay's paths to where they reach it (`relay/relay.ts`).
+  "services": [{ "binding": "RELAY_WORKER", "service": "network-relay" }],
   // Its secrets, which only it holds: BUCKET is the bucket's S3 address with the bucket's name as its path, and
   // FIRST_SERVER is what the network's first server shows once. `wrangler dev` takes them from its environment.
   "secrets": { "required": ["BUCKET", "ACCESS_KEY_ID", "SECRET_ACCESS_KEY", "FIRST_SERVER"] }
