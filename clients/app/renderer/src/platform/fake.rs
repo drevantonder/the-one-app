@@ -34,6 +34,30 @@ pub struct Display {
     /// What each window's input with the keyboard last asked the platform's keyboard for (Flutter's
     /// `TextInputConfiguration`, as `TextInput.setClient` gives it), as a phone's keyboard is told.
     keyboard: RefCell<std::collections::HashMap<WindowId, serde_json::Value>>,
+    /// What each window last asked its system's menu for text and its magnifier to show, as a phone's are asked, with
+    /// where the system puts the menu (`placed`).
+    text_menu: RefCell<std::collections::HashMap<WindowId, (crate::view::TextMenu, crate::geometry::Bounds<f32>)>>,
+    magnifier: RefCell<std::collections::HashMap<WindowId, crate::view::Magnifier>>,
+}
+
+/// A phone's system's menu for text: 44 points tall, as UIEditMenuInteraction's, and so wide an item, 8 from what
+/// it's for.
+const MENU_HEIGHT: f32 = 44.0;
+const MENU_ITEM: f32 = 72.0;
+const MENU_GAP: f32 = 8.0;
+
+/// Where a phone's system puts its menu for text shown for `menu.rect` in a window `width` wide: as wide as its items,
+/// centred over it and inside the window, above it where there's room in the window and below it where there isn't,
+/// as Android's floating toolbar is placed in the whole of its window, which an app drawn edge to edge has under its
+/// status bar too.
+fn placed(menu: &crate::view::TextMenu, width: f32) -> crate::geometry::Bounds<f32> {
+    let items = [menu.cut, menu.copy, menu.paste, menu.select_all, menu.select].iter().filter(|item| **item).count();
+    let size = Size { width: (MENU_ITEM * items as f32).min(width), height: MENU_HEIGHT };
+    let rect = menu.rect;
+    let x = (rect.origin.x + rect.size.width / 2.0 - size.width / 2.0).clamp(0.0, (width - size.width).max(0.0));
+    let above = rect.origin.y - MENU_GAP - size.height;
+    let y = if above >= 0.0 { above } else { rect.origin.y + rect.size.height + MENU_GAP };
+    crate::geometry::Bounds { origin: crate::geometry::point(x, y), size }
 }
 
 /// How often a refresh comes late where the display is adversarial, a frame dropped, as a busy device's are: one in
@@ -109,6 +133,8 @@ impl Display {
             summoned: RefCell::default(),
             wrong: RefCell::default(),
             keyboard: RefCell::default(),
+            text_menu: RefCell::default(),
+            magnifier: RefCell::default(),
         }
     }
 
@@ -215,7 +241,27 @@ impl Display {
 
     pub fn set_appearance(&self, _: &NativeWindow, _: Option<crate::Appearance>) {}
 
-    pub fn text_menu(&self, _: &NativeWindow, _: crate::view::TextMenu) {}
+    pub fn text_menu(&self, window: &NativeWindow, menu: Option<crate::view::TextMenu>) {
+        let mut shown = self.text_menu.borrow_mut();
+        match menu {
+            Some(menu) => _ = shown.insert(window.id, (menu, placed(&menu, window.size.get().width.0 as f32 / window.scale))),
+            None => _ = shown.remove(&window.id),
+        }
+    }
+
+    pub fn magnifier(&self, window: &NativeWindow, magnifier: Option<crate::view::Magnifier>) {
+        let mut shown = self.magnifier.borrow_mut();
+        match magnifier {
+            Some(magnifier) => _ = shown.insert(window.id, magnifier),
+            None => _ = shown.remove(&window.id),
+        }
+    }
+
+    /// What window `id` last asked its system's menu for text to show, with where the system put it, and where its
+    /// magnifier shows, if it does.
+    pub(crate) fn text_selection(&self, id: WindowId) -> (Option<(crate::view::TextMenu, crate::geometry::Bounds<f32>)>, Option<crate::view::Magnifier>) {
+        (self.text_menu.borrow().get(&id).copied(), self.magnifier.borrow().get(&id).copied())
+    }
 
     pub fn set_cursor(&self, _: &NativeWindow, _: Cursor) {}
 

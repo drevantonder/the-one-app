@@ -407,7 +407,9 @@ impl Display {
     pub fn activate(&self, _: &NativeWindow) {}
 
     /// A browser has its own menu for text.
-    pub fn text_menu(&self, _: &NativeWindow, _: crate::view::TextMenu) {}
+    /// A phone's browser's menu for text and its magnifier are its own field's, which a canvas has none of.
+    pub fn text_menu(&self, _: &NativeWindow, _: Option<crate::view::TextMenu>) {}
+    pub fn magnifier(&self, _: &NativeWindow, _: Option<crate::view::Magnifier>) {}
 
     /// A page has none of the system's own parts to draw light or dark.
     pub fn set_appearance(&self, _: &NativeWindow, _: Option<crate::Appearance>) {}

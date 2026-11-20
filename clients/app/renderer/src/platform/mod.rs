@@ -427,6 +427,10 @@ struct Window {
     missed: u32,
     /// What its text input plugin was last told.
     text_input: crate::view::TextInputConnection,
+    /// The system's menu for text and its magnifier as its host was last asked to show them, on a phone
+    /// (`Screen::text_menu_shown`, `Screen::magnifier`).
+    text_menu: Option<crate::view::TextMenu>,
+    magnifier: Option<crate::view::Magnifier>,
     on_event: Box<dyn FnMut(Event)>,
     tag: serde_json::Value,
     /// A panel's file of where it was dragged to on each screen (`WindowOptions::places`).
@@ -612,6 +616,8 @@ impl Windows {
                 reloading: false,
                 missed: 0,
                 text_input: Default::default(),
+                text_menu: None,
+                magnifier: None,
                 on_event: Box::new(on_event),
                 tag: options.tag,
                 places: options.places,
@@ -1428,6 +1434,17 @@ impl Windows {
                         if !calls.is_empty() {
                             self.display.text_input(&window.parts[0].native, &calls);
                         }
+                        // The system's menu for what a finger selected, and its magnifier, where they are now.
+                        let menu = screen.text_menu_shown();
+                        if menu != window.text_menu {
+                            window.text_menu = menu;
+                            self.display.text_menu(&window.parts[0].native, menu);
+                        }
+                        let magnifier = screen.magnifier();
+                        if magnifier != window.magnifier {
+                            window.magnifier = magnifier;
+                            self.display.magnifier(&window.parts[0].native, magnifier);
+                        }
                         self.display.set_title_row(&window.parts[0].native, screen.title_row());
                     }
                     Err(why) => crate::view::paint_message(why, appearance(), room, scale, &mut self.text, &self.atlas, &mut window.scene),
@@ -1654,8 +1671,8 @@ impl Windows {
                 // The system's own menu for text, where it was clicked in this part.
                 if let Some(mut menu) = screen.take_text_menu() {
                     let origin = window.parts[part].bounds.origin;
-                    menu.at = crate::geometry::point(menu.at.x - origin.x, menu.at.y - origin.y);
-                    self.display.text_menu(&window.parts[part].native, menu);
+                    menu.rect.origin = crate::geometry::point(menu.rect.origin.x - origin.x, menu.rect.origin.y - origin.y);
+                    self.display.text_menu(&window.parts[part].native, Some(menu));
                 }
             }
             Input::Up(at, button) => {
@@ -1889,6 +1906,28 @@ impl Windows {
     /// `TextInputConfiguration`), if one has it.
     pub fn keyboard(&self, id: WindowId) -> Option<serde_json::Value> {
         self.display.keyboard(id)
+    }
+
+    /// What window `id`'s system was last asked to show of a finger's selection: its menu for text, what of it can be
+    /// done, what it's for and where the system put it; its magnifier; and the handles the window draws, each in its
+    /// points, with its safe area.
+    pub fn text_selection(&self, id: WindowId) -> serde_json::Value {
+        use serde_json::json;
+        let rect = |rect: crate::geometry::Bounds<f32>| json!({"x": rect.origin.x, "y": rect.origin.y, "width": rect.size.width, "height": rect.size.height});
+        let (menu, magnifier) = self.display.text_selection(id);
+        let screen = self.windows.get(&id).and_then(|window| window.screen.as_ref().ok());
+        let menu = menu.map(|(menu, placed)| {
+            let items: Vec<&str> = [("cut", menu.cut), ("copy", menu.copy), ("paste", menu.paste), ("select", menu.select), ("selectAll", menu.select_all)].into_iter().filter(|(_, shown)| *shown).map(|(item, _)| item).collect();
+            json!({"items": items, "for": rect(menu.rect), "rect": rect(placed)})
+        });
+        let handles: Vec<serde_json::Value> = screen.map(|screen| screen.handles().iter().map(|handle| json!({"end": format!("{:?}", handle.end).to_lowercase(), "rect": rect(handle.bounds())})).collect()).unwrap_or_default();
+        let insets = screen.map(|screen| screen.insets).unwrap_or_default();
+        json!({
+            "menu": menu,
+            "magnifier": magnifier.map(|magnifier| json!({"x": magnifier.at.x, "y": magnifier.at.y})),
+            "handles": handles,
+            "safeArea": {"top": insets.top, "right": insets.right, "bottom": insets.bottom, "left": insets.left},
+        })
     }
 
     /// Window `id` is drawn again on the next turn, though nothing on it changed.

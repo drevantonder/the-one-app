@@ -454,14 +454,15 @@ export declare function Widget(props: {
 // (core/ui/gallery) and for comparing what the DOM and a native host draw (core/ui/scenes.js). A scene is what to
 // draw, or that with what to press first (`taps`, by what each is named or says), whether it's drawn only by itself
 // (`alone`: something over the page), how big its window is (`size`, a phone's 390 × 844 unless said) and whether a
-// finger points at it (`touch`), the gestures played on it, frame by frame (`motions`, core/ui/motion.js), and what
+// finger points at it (`touch`), what its window keeps at each edge (`safeArea`, top, right, bottom and left: a phone's
+// status bar and home indicator), the gestures played on it, frame by frame (`motions`, core/ui/motion.js), and what
 // people do with it and what must hold as they do (`checks`, `bun motion.js --checks`), with the seeds a check once
 // failed on (`seeds`). Its name is its family's and its own: "Buttons/Variants".
 export type Scene =
   | (() => Element)
-  | { render: () => Element; taps?: Tap[]; alone?: boolean; size?: [number, number]; touch?: boolean; motions?: Record<string, Motion>; checks?: Record<string, CheckStep[]>; seeds?: number[] }
+  | { render: () => Element; taps?: Tap[]; alone?: boolean; size?: [number, number]; touch?: boolean; safeArea?: [number, number, number, number]; motions?: Record<string, Motion>; checks?: Record<string, CheckStep[]>; seeds?: number[] }
 /** A step of a check, as a test's (Playwright's, the UI SDK's): what's done, as a tap is (pressed, a key, typed), a
- * press held `hold` ms (an `agent`'s comes as an agent's request to a device's window does, by the inspector, though
+ * press held `hold` ms or tapped `clicks` times (an `agent`'s comes as an agent's request to a device's window does, by the inspector, though
  * nobody could press it, as on a panel put away), a button held `down` on something and let go (`up`), input played as
  * a device delivered it (`trace`, a JSON file of `{ ms, kind, … }` beside the scenes, as the harness's `trace` takes
  * it: a trackpad's swipe with its phases and momentum, the pointer's nudges, a finger's `touch`es, each with its
@@ -469,15 +470,18 @@ export type Scene =
  * draws meanwhile, as a phone's GPU refuses that, a panel put away or summoned (`putAway`, `summon`), or the device's own
  * Back (`back`), as Android's key is; or what must
  * hold then (`expect`), waited for a second, or `within` ms. */
-export type CheckStep = Tap | { press: Tap; hold?: number; agent?: true } | { down: Tap } | { up: true } | { trace: string } | { wait: number } | { away: number } | { putAway: true } | { summon: true } | { back: true } | { expect: Expect; within?: number }
+export type CheckStep = Tap | { press: Tap; hold?: number; clicks?: number; agent?: true } | { down: Tap } | { up: true } | { trace: string } | { wait: number } | { away: number } | { putAway: true } | { summon: true } | { back: true } | { expect: Expect; within?: number }
 /** What must hold: what's drawn whole and in the window (`shown`), what isn't there (`gone`), what has the keyboard
  * (`focused`), words somewhere on it (`text`), a node's states (`states`: `{ of, is: { expanded: true } }`), how opaque
  * it's drawn (`drawn`: `{ of, opacity }`, a pressed look), the glass's blur drawn or not (`blur`), and what the input with the
  * keyboard asks the platform's keyboard for (`keyboard`, as Flutter's `TextInputConfiguration` says it to iOS and
  * Android: `{ textCapitalization: "TextCapitalization.none", autocorrect: false }`), and every text drawn in the window
  * at least `margins` points in from its sides, as a page's margins keep it, and what's drawn as tall as it should be (`tall`:
- * a node of that name, `height` points, within one), as a type size is. */
-export type Expect = { shown?: Tap; gone?: Tap; focused?: Tap; text?: string; states?: { of: Tap; is: Record<string, boolean | string> }; drawn?: { of: Tap; opacity: number }; blur?: boolean; keyboard?: Record<string, unknown>; margins?: number; tall?: { of: Tap; height: number } }
+ * a node of that name, `height` points, within one), as a type size is; and what a phone's system is asked to show of
+ * a finger's selection: its menu for text with these items, inside the safe area, or none (`textMenu`:
+ * `{ items: ["cut", "copy", "paste", "selectAll"] }`, or false), so many handles drawn (`handles`), and its magnifier
+ * or not (`magnifier`). */
+export type Expect = { shown?: Tap; gone?: Tap; focused?: Tap; text?: string; states?: { of: Tap; is: Record<string, boolean | string> }; drawn?: { of: Tap; opacity: number }; blur?: boolean; keyboard?: Record<string, unknown>; margins?: number; tall?: { of: Tap; height: number }; textMenu?: { items?: string[] } | false; handles?: number; magnifier?: boolean }
 /** A press that goes down on what `from` names (as a tap does) and moves as `gesture` says, or input played as a device
  * delivered it (a `trace` file of events, as a check's `trace`), with what's watched move (`follow`, named as a tap is;
  * what scrolls under it is always watched). `steady`: what moves never goes back against its way before its input

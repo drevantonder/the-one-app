@@ -226,8 +226,20 @@ impl Display {
 
     pub fn set_cursor(&self, _: &NativeWindow, _: crate::Cursor) {}
 
-    /// A phone's field has its own menu for text, by its own touch and hold.
-    pub fn text_menu(&self, _: &NativeWindow, _: crate::view::TextMenu) {}
+    /// Shows Android's floating text toolbar for what a finger selected (`TextMenu`), placed by its rectangle, or
+    /// takes it away (`NativeView.menu`).
+    pub fn text_menu(&self, window: &NativeWindow, menu: Option<crate::view::TextMenu>) {
+        let menu = menu.map(|menu| {
+            let rect = menu.rect;
+            json!({"rect": {"x": rect.origin.x, "y": rect.origin.y, "width": rect.size.width, "height": rect.size.height}, "cut": menu.cut, "copy": menu.copy, "paste": menu.paste, "selectAll": menu.select_all})
+        });
+        window.apply(json!({"menu": menu}));
+    }
+
+    /// Shows Android's magnifier over what a finger moving a selection is at, or takes it away (`NativeView.magnify`).
+    pub fn magnifier(&self, window: &NativeWindow, magnifier: Option<crate::view::Magnifier>) {
+        window.apply(json!({"magnifier": magnifier.map(|magnifier| json!({"x": magnifier.at.x, "y": magnifier.at.y}))}));
+    }
 
     /// A phone's window has none of the system's own parts to draw light or dark.
     pub fn set_appearance(&self, _: &NativeWindow, _: Option<crate::Appearance>) {}
@@ -602,7 +614,7 @@ pub extern "system" fn Java_app_theone_renderer_NativeView_nativeCovered(_: JNIE
 /// its fling, which Java runs (`OverScroller`) and a finger landing `stopped`. → whether it pans, which Java flings as
 /// it lifts.
 #[unsafe(no_mangle)]
-pub extern "system" fn Java_app_theone_renderer_NativeView_nativeTouch(_: JNIEnv, _: JObject, id: jlong, action: jint, x: jfloat, y: jfloat, slop: jfloat, stopped: jboolean, ago: jfloat) -> jboolean {
+pub extern "system" fn Java_app_theone_renderer_NativeView_nativeTouch(_: JNIEnv, _: JObject, id: jlong, action: jint, x: jfloat, y: jfloat, slop: jfloat, stopped: jboolean, ago: jfloat, hold: jfloat) -> jboolean {
     let id = id as WindowId;
     let panning = with_windows(|windows| {
         let density = windows.windows.get(&id)?.parts[0].native.density;
@@ -612,7 +624,7 @@ pub extern "system" fn Java_app_theone_renderer_NativeView_nativeTouch(_: JNIEnv
             2 => Phase::Moved,
             _ => Phase::Cancelled,
         };
-        let fingers = Fingers { slop: slop / density, flings: true, stopped: stopped != 0, edge: None };
+        let fingers = Fingers { slop: slop / density, flings: true, stopped: stopped != 0, edge: None, hold: f64::from(hold) };
         Some(windows.touch(id, 0, point(x / density, y / density), phase, Some(f64::from(ago).max(0.0)), fingers))
     });
     panning.flatten().unwrap_or(false).into()
@@ -646,26 +658,14 @@ pub extern "system" fn Java_app_theone_renderer_NativeView_nativePredicted(_: JN
     });
 }
 
-/// A finger held in an input: the word under it is selected, for Android's Cut, Copy and Paste menu. Elsewhere it's the
-/// page's, whose pointer events carry on, as iOS's do: what it's on holds it as it likes (a row's menu, an icon lifted
-/// and dragged).
+/// Android closed its floating text toolbar itself (a press outside it, or one of its items chosen): it isn't shown again
+/// till a finger asks for it.
 #[unsafe(no_mangle)]
-pub extern "system" fn Java_app_theone_renderer_NativeView_nativeLongPress(_: JNIEnv, _: JObject, id: jlong, x: jfloat, y: jfloat) {
-    let id = id as WindowId;
+pub extern "system" fn Java_app_theone_renderer_NativeView_nativeMenuClosed(_: JNIEnv, _: JObject, id: jlong) {
     with_windows(|windows| {
-        let Some(window) = windows.windows.get_mut(&id) else { return };
-        // A finger held on the rail's line is the line's.
-        if window.pull.is_some() {
-            return;
-        }
-        let density = window.parts[0].native.density;
-        let at = point(x / density, y / density);
+        let Some(window) = windows.windows.get_mut(&(id as WindowId)) else { return };
         let Ok(screen) = &mut window.screen else { return };
-        if !screen.finger_held(at) {
-            return;
-        }
-        window.dirty = true;
-        window.parts[0].native.apply(json!({"menu": true}));
+        screen.text_menu_closed();
     });
 }
 

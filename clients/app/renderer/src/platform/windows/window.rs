@@ -545,14 +545,18 @@ impl Display {
     }
 
     /// Shows Windows' menu for text where a field was right-clicked (`TextMenu`), as muda shows a context menu: its
-    /// choice is its key (`menu_chosen`).
-    pub fn text_menu(&self, window: &NativeWindow, menu: crate::view::TextMenu) {
+    /// choice is its key (`menu_chosen`). It goes by itself.
+    pub fn text_menu(&self, window: &NativeWindow, menu: Option<crate::view::TextMenu>) {
         use muda::ContextMenu;
+        let Some(menu) = menu else { return };
         let shown = super::super::text_menu_of(menu, window.state.id);
-        let at = muda::dpi::LogicalPosition::new(f64::from(menu.at.x), f64::from(menu.at.y));
+        let at = muda::dpi::LogicalPosition::new(f64::from(menu.rect.origin.x), f64::from(menu.rect.origin.y));
         // SAFETY: the window's own, on its thread.
         unsafe { shown.show_context_menu_for_hwnd(window.hwnd.0 as isize, Some(at.into())) };
     }
+
+    /// A computer's fields have no magnifier: a pointer selects exactly.
+    pub fn magnifier(&self, _: &NativeWindow, _: Option<crate::view::Magnifier>) {}
 
     /// Its frame's caption buttons are drawn light or dark as `theme` says, or as Windows is.
     pub fn set_appearance(&self, window: &NativeWindow, theme: Option<crate::Appearance>) {

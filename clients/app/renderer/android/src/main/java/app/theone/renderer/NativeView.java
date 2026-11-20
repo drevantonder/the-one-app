@@ -32,7 +32,7 @@ import org.json.JSONObject;
  * An app's native window: a surface the renderer crate draws on (`renderer::platform::android`), by its window's id. It
  * passes on what a finger does, bridges the keyboard (TextInputPlugin, from Flutter's embedder) and autofill, and does
  * what Rust asks of it (`command`): Flutter's text input method calls (`TextInput.setClient`, `setEditingState`,
- * `show`…), or showing the Cut, Copy and Paste menu.
+ * `show`…), or showing the Cut, Copy and Paste menu or the magnifier.
  * Kept whole (`@Keep`) as a release build shrinks it: Rust calls it by name.
  */
 @Keep
@@ -45,7 +45,6 @@ public final class NativeView extends SurfaceView implements SurfaceHolder.Callb
     private final long id;
     private final TextInputPlugin input;
     private float downX, downY;
-    private final Runnable longPress = this::longPress;
     /**
      * A finger's speed, and the fling it leaves what it panned with as it lifts: Android's own (`OverScroller`, as a
      * ScrollView's and a RecyclerView's), stepped a display frame at a time, each step what's under where the finger
@@ -56,7 +55,14 @@ public final class NativeView extends SurfaceView implements SurfaceHolder.Callb
     private boolean panning;
     private int flungX, flungY;
     private final Runnable flinging = this::flinging;
+    /**
+     * Android's floating text toolbar for what a finger selected (`menu`), what it offers, and the selection's
+     * rectangle it's placed by, in the view's pixels; and Android's magnifier, while a finger moves a selection.
+     */
     private ActionMode menu;
+    private JSONObject offered;
+    private final Rect selection = new Rect();
+    private android.widget.Magnifier magnifier;
 
     NativeView(Context context, long id) {
         super(context);
@@ -97,7 +103,8 @@ public final class NativeView extends SurfaceView implements SurfaceHolder.Callb
     private void apply(String command) {
         try {
             JSONObject c = new JSONObject(command);
-            if (c.optBoolean("menu")) showMenu();
+            if (c.has("menu")) menu(c.optJSONObject("menu"));
+            if (c.has("magnifier")) magnify(c.optJSONObject("magnifier"));
             if (c.has("pick")) pick(c.getJSONObject("pick"));
             if (c.has("share")) NativeHost.share(c.getString("share"));
             if (c.has("haptic")) NativeHost.haptic(this, c.getString("haptic"));
@@ -159,7 +166,7 @@ public final class NativeView extends SurfaceView implements SurfaceHolder.Callb
                 input.hideTextInput(this);
                 break;
             case "TextInput.clearClient":
-                if (menu != null) menu.finish();
+                menu(null);
                 input.clearTextInputClient();
                 break;
             default:
@@ -202,18 +209,13 @@ public final class NativeView extends SurfaceView implements SurfaceHolder.Callb
             speed.clear();
             downX = e.getX();
             downY = e.getY();
-            postDelayed(longPress, ViewConfiguration.getLongPressTimeout());
-        } else if (action == MotionEvent.ACTION_MOVE) {
-            if (Math.abs(e.getX() - downX) > slop || Math.abs(e.getY() - downY) > slop) removeCallbacks(longPress);
-        } else {
-            removeCallbacks(longPress);
         }
         // A second finger isn't followed.
         if (action > MotionEvent.ACTION_CANCEL) return true;
         if (speed != null) speed.addMovement(e);
         // How long ago Android says it happened, which how fast the finger went is worked out from.
         float ago = android.os.SystemClock.uptimeMillis() - e.getEventTime();
-        boolean pans = nativeTouch(id, action, e.getX(), e.getY(), slop, stopped, ago);
+        boolean pans = nativeTouch(id, action, e.getX(), e.getY(), slop, stopped, ago, ViewConfiguration.getLongPressTimeout());
         // What's dragged is drawn where Android predicts the finger will be as the next frame shows, so it keeps up.
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE && action != MotionEvent.ACTION_CANCEL) {
             if (predictor == null) predictor = new MotionPredictor(getContext());
@@ -247,10 +249,6 @@ public final class NativeView extends SurfaceView implements SurfaceHolder.Callb
         else fling.forceFinished(true);
     }
 
-    private void longPress() {
-        nativeLongPress(id, downX, downY);
-    }
-
     /** A key from a keyboard that isn't on screen (a physical one, or `adb shell input`), to the field, as the input method's own. */
     @Override public boolean dispatchKeyEvent(KeyEvent event) {
         InputConnection connection = input.getLastInputConnection();
@@ -258,30 +256,70 @@ public final class NativeView extends SurfaceView implements SurfaceHolder.Callb
         return super.dispatchKeyEvent(event);
     }
 
-    /** Cut, Copy, Paste and Select All for the field, as Android's floating text toolbar. */
-    private void showMenu() {
-        if (menu != null) menu.finish();
+    /**
+     * Cut, Copy, Paste and Select All, those Rust offers (`TextMenu`), as Android's floating text toolbar, placed by the
+     * selection's rectangle (in points), or none: moved where only its rectangle changed, made again where what it
+     * offers did. What's chosen is done by the field's input connection, as a keyboard's, which says what it did.
+     */
+    private void menu(JSONObject asked) throws org.json.JSONException {
+        if (asked == null) {
+            offered = null;
+            ActionMode shown = menu;
+            menu = null;
+            if (shown != null) shown.finish();
+            return;
+        }
+        JSONObject rect = asked.getJSONObject("rect");
+        float density = getResources().getDisplayMetrics().density;
+        float x = (float) rect.getDouble("x") * density, y = (float) rect.getDouble("y") * density;
+        selection.set(Math.round(x), Math.round(y), Math.round(x + (float) rect.getDouble("width") * density), Math.round(y + (float) rect.getDouble("height") * density));
+        String[] items = {"cut", "copy", "paste", "selectAll"};
+        boolean same = menu != null && offered != null;
+        for (String item : items) same = same && offered.optBoolean(item) == asked.optBoolean(item);
+        if (same) {
+            menu.invalidateContentRect();
+            return;
+        }
+        menu(null);
+        offered = asked;
         menu = startActionMode(new ActionMode.Callback2() {
             @Override public boolean onCreateActionMode(ActionMode mode, Menu m) {
-                m.add(Menu.NONE, android.R.id.cut, 0, android.R.string.cut);
-                m.add(Menu.NONE, android.R.id.copy, 1, android.R.string.copy);
-                m.add(Menu.NONE, android.R.id.paste, 2, android.R.string.paste);
-                m.add(Menu.NONE, android.R.id.selectAll, 3, android.R.string.selectAll);
+                int[] ids = {android.R.id.cut, android.R.id.copy, android.R.id.paste, android.R.id.selectAll};
+                int[] titles = {android.R.string.cut, android.R.string.copy, android.R.string.paste, android.R.string.selectAll};
+                for (int i = 0; i < items.length; i++) if (asked.optBoolean(items[i])) m.add(Menu.NONE, ids[i], i, titles[i]);
                 return true;
             }
             @Override public boolean onPrepareActionMode(ActionMode mode, Menu m) { return false; }
             @Override public boolean onActionItemClicked(ActionMode mode, MenuItem item) {
+                // Closed first, so what the item does (Select All selecting) can show it again.
+                mode.finish();
                 InputConnection connection = input.getLastInputConnection();
                 if (connection != null) connection.performContextMenuAction(item.getItemId());
-                if (item.getItemId() != android.R.id.selectAll) mode.finish();
                 return true;
             }
-            @Override public void onDestroyActionMode(ActionMode mode) { menu = null; }
+            // Closed by Android or an item, not by Rust's asking: Rust is told, so it doesn't show it again.
+            @Override public void onDestroyActionMode(ActionMode mode) {
+                if (mode != menu) return;
+                menu = null;
+                offered = null;
+                nativeMenuClosed(id);
+            }
             @Override public void onGetContentRect(ActionMode mode, View view, Rect outRect) {
-                Rect rect = input.clientRect();
-                if (rect != null) outRect.set(rect);
+                outRect.set(selection);
             }
         }, ActionMode.TYPE_FLOATING);
+    }
+
+    /** Android's magnifier over what's at `at` (in points), as its own fields show it while a selection is moved, or none. */
+    private void magnify(JSONObject at) throws org.json.JSONException {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.P) return;
+        if (at == null) {
+            if (magnifier != null) magnifier.dismiss();
+            return;
+        }
+        if (magnifier == null) magnifier = new android.widget.Magnifier(this);
+        float density = getResources().getDisplayMetrics().density;
+        magnifier.show((float) at.getDouble("x") * density, (float) at.getDouble("y") * density);
     }
 
     @Override public boolean onCheckIsTextEditor() {
@@ -327,10 +365,10 @@ public final class NativeView extends SurfaceView implements SurfaceHolder.Callb
     private native boolean nativeBack(long id);
     private native boolean nativeCovered(long id);
     private native void nativeActive(long id, boolean active);
-    private native boolean nativeTouch(long id, int action, float x, float y, float slop, boolean stopped, float ago);
+    private native boolean nativeTouch(long id, int action, float x, float y, float slop, boolean stopped, float ago, float hold);
     private native boolean nativePan(long id, float x, float y, float dx, float dy);
     private native void nativePredicted(long id, float x, float y);
-    private native void nativeLongPress(long id, float x, float y);
+    private native void nativeMenuClosed(long id);
 
     private native void nativePicked(long id, long node, String value);
 

@@ -98,6 +98,8 @@ impl Screen {
             TextInputClient::PerformAction(client, action) if connection.client == Some(client) => {
                 self.action(client, action.trim_start_matches("TextInputAction."));
             }
+            TextInputClient::DismissSystemContextMenu(client) if connection.client == Some(client) => self.text_menu_closed(),
+            TextInputClient::PerformCustomAction(client, action) if connection.client == Some(client) && action == "select" => self.select_at_caret(),
             TextInputClient::UpdateEditingStateWithTag(client, filled) if connection.client == Some(client) => {
                 for (id, value) in filled {
                     if self.editing.fields.contains_key(&id) {
@@ -122,7 +124,9 @@ impl Screen {
     /// A keyboard that keeps the editing state itself says input `id`'s is now `value` (what it typed, selected and is
     /// composing), or a password manager filled it: taken as it is, and its app told.
     pub fn set_editing(&mut self, id: Id, value: &editing::Value) {
+        let Some(before) = self.value(id) else { return };
         self.edit(id, |field| field.keyboard(value));
+        self.overlay_keyboard(id, &before);
     }
 
     /// Input `id`'s editing state.
@@ -239,15 +243,6 @@ impl Screen {
         if self.states.pressed.take().is_some() {
             self.changed();
         }
-    }
-
-    /// Selects the word at `at` in the input there, as a finger held on it does; → whether there was one.
-    pub fn select_word(&mut self, at: Point<f32>) -> bool {
-        let Some(id) = self.under(at).into_iter().find(|id| self.editing.fields.contains_key(id)) else { return false };
-        self.focus(Some(id));
-        let index = self.editing.drawn.get(&id).map_or(usize::MAX, |drawn| drawn.index_at(at));
-        self.edit(id, |field| field.press(index.min(field.display().len()), false, 2, false));
-        true
     }
 
     /// Where node `id` was drawn in the last frame.

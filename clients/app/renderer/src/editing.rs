@@ -141,6 +141,11 @@ pub enum TextInputClient {
     /// A password manager filled these inputs of its autofill group (`TextInputConfiguration.fields`), each by its id
     /// (its `uniqueIdentifier`).
     UpdateEditingStateWithTag(u64, Vec<(u64, Value)>),
+    /// The system's menu for text closed by itself (a press outside it, or an item chosen), as Flutter's engine says it
+    /// on its platform channel.
+    DismissSystemContextMenu(u64),
+    /// An item of the system's menu for text that the screen does was chosen, by its id: `select`, iOS's Select.
+    PerformCustomAction(u64, String),
 }
 
 impl TextInputClient {
@@ -150,6 +155,8 @@ impl TextInputClient {
         match method {
             "TextInputClient.updateEditingState" => Some(TextInputClient::UpdateEditingState(client, Value::from_flutter(&arguments[1]))),
             "TextInputClient.performAction" => Some(TextInputClient::PerformAction(client, arguments[1].as_str()?.to_owned())),
+            "ContextMenu.onDismissSystemContextMenu" => Some(TextInputClient::DismissSystemContextMenu(client)),
+            "ContextMenu.onPerformCustomAction" => Some(TextInputClient::PerformCustomAction(client, arguments[1].as_str()?.to_owned())),
             "TextInputClient.updateEditingStateWithTag" => {
                 let filled = arguments[1].as_object()?.iter().filter_map(|(id, value)| Some((id.parse().ok()?, Value::from_flutter(value)))).collect();
                 Some(TextInputClient::UpdateEditingStateWithTag(client, filled))

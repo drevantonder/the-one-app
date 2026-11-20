@@ -408,8 +408,9 @@ fn ask(windows: &mut Windows, id: renderer::platform::WindowId, mut request: Val
 /// The inspector's requests that a person's input answers, and its clock's: on the fake platform, the display's own
 /// events, each at its own time, with the display's frames between, as a host gives a window input, and its time
 /// moved on with the display ticking through it. On a phone's window (`--touch`), a press is a finger's. And what the
-/// platform's keyboard was told (`keyboard`), which only the fake platform knows.
-const INPUT: [&str; 15] = ["tap", "down", "up", "key", "scroll", "drag", "replay", "trace", "clock", "wait_for", "away", "put_away", "summon", "back", "keyboard"];
+/// platform's keyboard was told (`keyboard`), and what its menu for text and magnifier were asked to show, with the
+/// handles drawn (`text_selection`), which only the fake platform knows.
+const INPUT: [&str; 16] = ["tap", "down", "up", "key", "scroll", "drag", "replay", "trace", "clock", "wait_for", "away", "put_away", "summon", "back", "keyboard", "text_selection"];
 
 /// The longest it's run for, at the end, for what it shows to come to rest.
 const SETTLE_MS: f64 = 3000.0;
@@ -529,6 +530,9 @@ fn input(windows: &mut Windows, id: renderer::platform::WindowId, request: &rend
         // What the input with the keyboard asked the platform's keyboard for (Flutter's `TextInputConfiguration`:
         // `textCapitalization`, `autocorrect`, `inputType`…), as a phone's keyboard is told; null where none has it.
         "keyboard" => Ok(json!({"keyboard": windows.keyboard(id)})),
+        // What the system's menu for text was asked to show (its items, what it's for and where the system put it),
+        // where its magnifier shows, and the handles drawn, as a phone's are, with the window's safe area.
+        "text_selection" => Ok(windows.text_selection(id)),
         // As Playwright's `locator.waitFor` and its assertions do: what's selected comes to be `state` (`shown`: drawn
         // whole and in the window; `gone`: not there; `focused`: with the keyboard; `there`: there at all; `drawn`: at
         // `opacity`), with its

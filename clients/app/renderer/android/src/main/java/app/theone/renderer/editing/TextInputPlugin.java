@@ -162,11 +162,6 @@ public class TextInputPlugin implements ListenableEditingState.EditingStateWatch
     return android;
   }
 
-  /** Where the field with the keyboard is in the view, in its pixels, as its transform said. */
-  public Rect clientRect() {
-    return lastClientRect == null ? null : new Rect(lastClientRect);
-  }
-
   /** A field's place in the view, in its pixels, from its `rect` in CSS pixels. */
   public Rect rectOf(JSONObject field) {
     JSONObject rect = field == null ? null : field.optJSONObject("rect");

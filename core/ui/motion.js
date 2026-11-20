@@ -252,7 +252,7 @@ async function run(at, folder, scene, requests, seed = 0) {
   // that one's device pixels a point, where it's drawn at one here; on a device, as that decodes them.
   const slowest = devices.tiers.find((tier) => tier.name === (scene.touch ? "low-end Android" : "Intel UHD laptop at 4K"))
   const slower = hostScore && !ssh ? ["--slower", String((hostScore / slowest.cpu) * slowest.scale ** 2)] : []
-  const args = [at, join(folder, "end.png"), join(folder, "end.json"), "--ui", here("dist/client"), "--answers", join(folder, "answers.json"), "--size", `${scene.size[0]}x${scene.size[1]}`, "--scale", String(device?.scale ?? 1), "--requests", "-", ...(dark ? ["--dark"] : []), ...(scene.touch ? ["--touch"] : []), "--time-zone", scene.timeZone ?? "UTC", ...(seed ? ["--seed", String(seed)] : []), ...panel, ...slower]
+  const args = [at, join(folder, "end.png"), join(folder, "end.json"), "--ui", here("dist/client"), "--answers", join(folder, "answers.json"), "--size", `${scene.size[0]}x${scene.size[1]}`, "--scale", String(device?.scale ?? 1), "--requests", "-", ...(dark ? ["--dark"] : []), ...(scene.touch ? ["--touch"] : []), ...(scene.safeArea ? ["--safe-area", scene.safeArea.join(",")] : []), "--time-zone", scene.timeZone ?? "UTC", ...(seed ? ["--seed", String(seed)] : []), ...panel, ...slower]
   if (ssh) {
     const { stdout, stderr, failed } = await runThere(at, folder, args, lines)
     return { answers: stdout.split("\n").filter(Boolean).map((line) => JSON.parse(line)), said: stderr.trim(), failed }
@@ -271,9 +271,9 @@ export async function scenesOf(target, built, folder, all = false) {
     return Object.entries(scenes)
       .map(([name, scene]) => ({ name, ...whole(scene) }))
       .filter((scene) => all || (checking ? scene.checks : scene.motions))
-      .map(({ name, page, component, uses = [], answers = {}, taps = [], size = [390, 844], touch = false, timeZone = "UTC", motions, checks, seeds }) => {
+      .map(({ name, page, component, uses = [], answers = {}, taps = [], size = [390, 844], touch = false, timeZone = "UTC", safeArea, motions, checks, seeds }) => {
         const [at, link] = (page ?? (component ? `${COMPONENTS}/${component}.html` : "client/index.html")).split("#")
-        return { name, page: at, link, uses, answers, taps, size, touch, timeZone, motions, checks, seeds }
+        return { name, page: at, link, uses, answers, taps, size, touch, timeZone, safeArea, motions, checks, seeds }
       })
   }
   // The gallery lists its own, drawn at `#scenes`.
@@ -285,7 +285,7 @@ export async function scenesOf(target, built, folder, all = false) {
   if (!text) throw new Error(`The gallery listed no scenes: ${listed.said}`)
   return JSON.parse(JSON.parse(`"${text}"`))
     .filter((scene) => all || (checking ? scene.checks : scene.motions))
-    .map(({ name, taps = [], size = [390, 844], touch = false, motions, checks, seeds }) => ({ name, page: "index.html", link: name, answers: {}, taps, size, touch, motions, checks, seeds }))
+    .map(({ name, taps = [], size = [390, 844], touch = false, safeArea, motions, checks, seeds }) => ({ name, page: "index.html", link: name, answers: {}, taps, size, touch, safeArea, motions, checks, seeds }))
 }
 
 /// How far what moved had gone at each frame: what `follow` names where it's said and moved, else what scrolls.
@@ -563,13 +563,13 @@ function requests(steps, folder) {
     else if (step.summon) out.push({ request: { op: "summon" } })
     else if (step.back) out.push({ request: { op: "back" } })
     // An agent's press comes the inspector's way, as to a device's window, though nobody could press it (a panel put away).
-    else if (step.press) out.push({ request: { op: "tap", ...selector(step.press), hold: step.hold, ...(step.agent ? { inspector: true } : {}) } })
+    else if (step.press) out.push({ request: { op: "tap", ...selector(step.press), hold: step.hold, clicks: step.clicks, ...(step.agent ? { inspector: true } : {}) } })
     else if (step.down) out.push({ request: { op: "down", ...selector(step.down) } })
     else if (step.up) out.push({ request: { op: "up" } })
     else if (step.trace) out.push({ request: { op: "trace", events: JSON.parse(readFileSync(join(folder, step.trace), "utf8")) } })
     else if (!step.expect) out.push({ request: pressed(step) })
     else {
-      const { shown, gone, focused, text, states, drawn, blur, keyboard, margins, tall } = step.expect
+      const { shown, gone, focused, text, states, drawn, blur, keyboard, margins, tall, textMenu, handles, magnifier } = step.expect
       // Each waited for, as Playwright's assertions are, a second at most, or `within` ms.
       const until = (tap, state, said, is) => ({ request: { op: "wait_for", ...selector(tap), state, ...(is ? { is } : {}), ...(step.within !== undefined ? { timeout: step.within } : {}) }, judge: (answer) => !answer?.result?.met && said(answer) })
       if (shown) out.push(until(shown, "shown", (answer) => `${named(shown)} isn't shown: ${why(answer)}`))
@@ -612,6 +612,25 @@ function requests(steps, folder) {
           },
         })
       if (blur !== undefined) out.push({ request: { op: "profile", at: [0], snap: false }, judge: (answer) => (answer?.result?.frames?.[0]?.work?.backdrops > 0) !== blur && (blur ? "no blur is drawn" : "a blur is drawn") })
+      // What a phone's system was asked to show of a finger's selection: its menu for text with these items (or none,
+      // `textMenu: false`), drawn inside the safe area; so many handles; its magnifier or not.
+      if (textMenu !== undefined || handles !== undefined || magnifier !== undefined)
+        out.push({
+          request: { op: "text_selection" },
+          judge: (answer) => {
+            const { menu, handles: drawn = [], magnifier: shown, safeArea } = answer?.result ?? {}
+            const wrong = []
+            if (textMenu === false && menu) wrong.push(`the menu for text shows ${menu.items.join(", ")}`)
+            if (textMenu && !menu) wrong.push("no menu for text shows")
+            if (textMenu?.items && menu && menu.items.join() !== textMenu.items.join()) wrong.push(`the menu for text has ${menu.items.join(", ")}`)
+            if (textMenu && menu && menu.rect.y < safeArea.top) wrong.push(`the menu for text is drawn at y ${menu.rect.y}, over the safe area's top ${safeArea.top}`)
+            const over = (a, b) => a.x < b.x + b.width && b.x < a.x + a.width && a.y < b.y + b.height && b.y < a.y + a.height
+            if (menu && drawn.some((handle) => over(menu.rect, handle.rect))) wrong.push("the menu for text covers a handle")
+            if (handles !== undefined && drawn.length !== handles) wrong.push(`${drawn.length} handles are drawn`)
+            if (magnifier !== undefined && Boolean(shown) !== magnifier) wrong.push(shown ? "the magnifier shows" : "no magnifier shows")
+            return wrong.join("; ") || undefined
+          },
+        })
     }
     for (const one of out.slice(from)) one.step = `step ${at + 1}`
   }

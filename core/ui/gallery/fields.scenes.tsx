@@ -3,6 +3,7 @@ import { Checkbox, Field, Input, RadioGroup, type Scenes, Search, Select, styles
 
 const look = styles({
   form: { gap: tokens.grid[4] },
+  top: { paddingTop: tokens.length.safeTop, paddingStart: tokens.grid[4], paddingEnd: tokens.grid[4] },
   narrow: (width: number) => ({ gap: tokens.grid[2], width }),
 })
 
@@ -103,6 +104,16 @@ const Keyboards = () => (
     </Field>
   </View>
 )
+/// A search at the top of a phone's screen, under its status bar, as the App Library's is, with words in it.
+const Top = () => (
+  <View style={look.top}>
+    <Search value="Telemetry tools" aria-label="Search" />
+  </View>
+)
+const search = { role: "searchbox", name: "Search" }
+/// What a phone's system offers for a word selected, and at a caret.
+const selected = { items: ["cut", "copy", "paste", "selectAll"] }
+
 /// What a field's keyboard is asked for, as Flutter's TextInputConfiguration says it.
 const kept = { textCapitalization: "TextCapitalization.none", autocorrect: false }
 const sentences = { textCapitalization: "TextCapitalization.sentences", autocorrect: true }
@@ -125,6 +136,25 @@ export default {
     },
   },
   "Fields/Every kind": () => <Fields />,
+  // A finger selects in a field as in a phone's own: held on a word, or tapping it twice, it selects it, with handles
+  // at its ends and the system's menu over it, or under it where the status bar leaves no room; held, the system's
+  // magnifier shows; a tap on the caret shows Paste.
+  "Fields/Selected by a finger": {
+    render: () => <Top />,
+    touch: true,
+    safeArea: [62, 0, 34, 0],
+    checks: {
+      "Held, a word is selected, magnified, and the menu shows as it lifts, under the status bar": [
+        { down: search },
+        { wait: 600 },
+        { expect: { magnifier: true, handles: 2, textMenu: false } },
+        { up: true },
+        { expect: { textMenu: selected, handles: 2, magnifier: false } },
+      ],
+      "Two taps select a word, with its handles and the menu": [{ press: search, clicks: 2 }, { expect: { textMenu: selected, handles: 2 } }],
+      "A tap on the caret shows Paste": [search, { wait: 500 }, search, { expect: { textMenu: { items: ["paste", "select", "selectAll"] }, handles: 0 } }],
+    },
+  },
   // What each field asks a phone's keyboard for: a search, an address, a username or a code taken as it's typed, as
   // UISearchBar and Android's SearchView are; text capitalised as sentences and corrected.
   "Fields/What each asks the keyboard for": {

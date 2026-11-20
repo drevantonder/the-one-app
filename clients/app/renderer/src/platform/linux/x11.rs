@@ -695,10 +695,11 @@ impl Display {
     }
 
     /// Shows GTK's menu for text where a field was right-clicked (`TextMenu`), as a GNOME app's fields have, as muda
-    /// makes it, on the app's GTK thread, where there is one: its choice is its key (`menu_chosen`).
-    pub fn text_menu(&self, window: &NativeWindow, menu: crate::view::TextMenu) {
+    /// makes it, on the app's GTK thread, where there is one: its choice is its key (`menu_chosen`). It goes by itself.
+    pub fn text_menu(&self, window: &NativeWindow, menu: Option<crate::view::TextMenu>) {
         use gtk::prelude::*;
         use muda::ContextMenu;
+        let Some(menu) = menu else { return };
         thread_local! {
             // The menu showing, kept as long as it shows: its GTK menu is muda's.
             static SHOWN: RefCell<Option<muda::Menu>> = const { RefCell::new(None) };
@@ -714,6 +715,9 @@ impl Display {
             SHOWN.with(|kept| kept.replace(Some(shown)));
         });
     }
+
+    /// A computer's fields have no magnifier: a pointer selects exactly.
+    pub fn magnifier(&self, _: &NativeWindow, _: Option<crate::view::Magnifier>) {}
 
     /// An app's window is where it is on the screen, `width` by `height`, as it's moved or resized, which it keeps
     /// (`WindowOptions::frame`).

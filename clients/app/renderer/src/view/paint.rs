@@ -291,6 +291,8 @@ pub(super) struct Painter<'a> {
     pub(super) selected: Option<(Id, (usize, usize))>,
     /// The caret shows in this frame, as it blinks.
     pub(super) caret: bool,
+    /// The input whose selection a finger made, which shows its handles (`text_selection`).
+    pub(super) handles: Option<Id>,
     pub(super) pictures: &'a mut pictures::Pictures,
     /// Pictures by address, fetched, and those this frame wanted that weren't yet.
     pub(super) fetched: &'a HashMap<String, Option<String>>,
@@ -1132,23 +1134,22 @@ impl Painter<'_> {
         let clip = if multiline { padding } else { content }.intersect(&mask);
         // A point along line `line`, `x` from where its paragraph starts, in the window.
         let at = |line: usize, x: f32| point(origin.x + (x - scroll.x) * grown, origin.y + line as f32 * line_height * grown);
-        if let (true, Some(field), false) = (focused, field, empty) {
-            let (start, end) = field.selection();
-            if start < end {
-                let tint = colour_token("blue", self.conditions).opacity(0.3);
-                for (line, x0, x1) in paragraph.spans(start, end) {
-                    let bounds = Bounds { origin: at(line, x0 + offset(line)), size: Size { width: (x1 - x0) * grown, height: line_height * grown } };
-                    self.quad(bounds, clip, tint, Edges::default(), Hsla::default(), Corners::default(), false, opacity);
-                }
+        let drawn = Drawn { paragraph, empty, origin, offsets, grown, scroll, seen };
+        let selection = field.filter(|_| focused && !empty).map(Field::selection).filter(|(start, end)| start < end);
+        if let Some((start, end)) = selection {
+            let tint = colour_token("blue", self.conditions).opacity(0.3);
+            for bounds in drawn.spans(start, end) {
+                self.quad(bounds, clip, tint, Edges::default(), Hsla::default(), Corners::default(), false, opacity);
             }
         }
         let area = Bounds { origin: point(origin.x - scroll.x * grown, origin.y), size: content.size };
-        self.paint_text(&paragraph, &[], area, width, grown, Text { color, ..text }, opacity, clip);
+        self.paint_text(&drawn.paragraph, &[], area, width, grown, Text { color, ..text }, opacity, clip);
+        let paragraph = &drawn.paragraph;
         if let (true, Some(field)) = (focused, field) {
             // What an input method is composing is underlined, as every platform's own fields draw it.
             if let Some((start, end)) = field.composed() {
                 for (line, x0, x1) in paragraph.spans(start, end) {
-                    let below = at(line, x0 + offset(line));
+                    let below = at(line, x0 + drawn.offsets.get(line).copied().unwrap_or(0.0));
                     let bounds = Bounds { origin: point(below.x, below.y + (line_height - 2.0) * grown), size: Size { width: (x1 - x0) * grown, height: grown } };
                     self.quad(bounds, clip, text.color, Edges::default(), Hsla::default(), Corners::default(), false, opacity);
                 }
@@ -1159,7 +1160,16 @@ impl Painter<'_> {
                 self.quad(bounds, clip, text.color, Edges::default(), Hsla::default(), Corners::default(), false, opacity);
             }
         }
-        self.drawn.insert(id, Drawn { paragraph, empty, origin, offsets, grown, scroll, seen });
+        // What a finger selected has its handles at its ends, over what's around the field, as a phone's own do.
+        if let (Some((start, end)), true) = (selection, self.handles == Some(id)) {
+            let tint = colour_token("blue", self.conditions);
+            for handle in super::text_selection::handles(drawn.caret_at(start, false), drawn.caret_at(end, true)) {
+                for (bounds, corners) in handle.shapes() {
+                    self.quad(bounds, mask, tint, Edges::default(), Hsla::default(), corners, false, opacity);
+                }
+            }
+        }
+        self.drawn.insert(id, drawn);
         most
     }
 

@@ -502,17 +502,21 @@ impl Display {
     }
 
     /// Shows a Mac's menu for text where a field was Control-clicked or right-clicked (`TextMenu`), as muda shows a
-    /// context menu, on the main thread: its choice is its key (`menu_chosen`).
-    pub fn text_menu(&self, window: &NativeWindow, menu: crate::view::TextMenu) {
+    /// context menu, on the main thread: its choice is its key (`menu_chosen`). It goes by itself.
+    pub fn text_menu(&self, window: &NativeWindow, menu: Option<crate::view::TextMenu>) {
         use muda::ContextMenu;
+        let Some(menu) = menu else { return };
         let (view, id) = (window.view, window.shared.id);
         DispatchQueue::main().exec_async(move || {
             let shown = super::super::text_menu_of(menu, id);
-            let at = muda::dpi::LogicalPosition::new(f64::from(menu.at.x), f64::from(menu.at.y));
+            let at = muda::dpi::LogicalPosition::new(f64::from(menu.rect.origin.x), f64::from(menu.rect.origin.y));
             // SAFETY: the window's view, which lives as long as the window, on the main thread.
             unsafe { shown.show_context_menu_for_nsview(view as *const c_void, Some(at.into())) };
         });
     }
+
+    /// A computer's fields have no magnifier: a pointer selects exactly.
+    pub fn magnifier(&self, _: &NativeWindow, _: Option<crate::view::Magnifier>) {}
 
     /// Its title bar and glass are drawn light or dark as `theme` says (Aqua, Dark Aqua), or as the Mac is.
     pub fn set_appearance(&self, window: &NativeWindow, theme: Option<crate::Appearance>) {

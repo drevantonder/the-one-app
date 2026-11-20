@@ -425,8 +425,20 @@ impl Display {
 
     pub fn set_cursor(&self, _: &NativeWindow, _: crate::Cursor) {}
 
-    /// A phone's field has its own menu for text, by its own touch and hold.
-    pub fn text_menu(&self, _: &NativeWindow, _: crate::view::TextMenu) {}
+    /// Shows the field's edit menu for what a finger selected (UIEditMenuInteraction's, UIKit's own items) beside its
+    /// rectangle, or takes it away (`text_input.mm`).
+    pub fn text_menu(&self, native: &NativeWindow, menu: Option<crate::view::TextMenu>) {
+        let rect = menu.map(|menu| menu.rect).unwrap_or_default();
+        let f = f64::from;
+        unsafe { text_input_menu(native.text_input.0, menu.is_some(), f(rect.origin.x), f(rect.origin.y), f(rect.size.width), f(rect.size.height)) };
+    }
+
+    /// Shows iOS's magnifier over what a finger moving a selection is at, or takes it away (`text_input.mm`).
+    pub fn magnifier(&self, native: &NativeWindow, magnifier: Option<crate::view::Magnifier>) {
+        let (at, caret) = magnifier.map(|magnifier| (magnifier.at, magnifier.caret)).unwrap_or_default();
+        let f = f64::from;
+        unsafe { text_input_magnifier(native.text_input.0, magnifier.is_some(), f(at.x), f(at.y), f(caret.origin.x), f(caret.origin.y), f(caret.size.width), f(caret.size.height)) };
+    }
 
     /// A phone's window has none of the system's own parts to draw light or dark.
     pub fn set_appearance(&self, _: &NativeWindow, _: Option<crate::Appearance>) {}
@@ -804,6 +816,9 @@ unsafe extern "C" {
     fn text_input_new(controller: *mut UIViewController, context: *mut c_void, send: extern "C" fn(*mut c_void, *const c_char, *const c_char)) -> *mut c_void;
     fn text_input_free(plugin: *mut c_void);
     fn text_input_call(plugin: *mut c_void, method: *const c_char, arguments: *const c_char);
+    fn text_input_menu(plugin: *mut c_void, shown: bool, x: f64, y: f64, width: f64, height: f64);
+    #[allow(clippy::too_many_arguments)]
+    fn text_input_magnifier(plugin: *mut c_void, shown: bool, x: f64, y: f64, caret_x: f64, caret_y: f64, caret_width: f64, caret_height: f64);
 }
 
 /// What window `context`'s text input plugin says, as Flutter's text input channel's method calls, for its screen,

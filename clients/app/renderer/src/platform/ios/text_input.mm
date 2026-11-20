@@ -2,7 +2,9 @@
 // what it has of Flutter's engine standing in for the native host: its text input delegate, which says what the
 // plugin's view did as Flutter's text input channel's method calls, as FlutterEngine.mm's does, and a C interface to it
 // for the window's Rust (`mod.rs`). The calls are JSON: the screen's `TextInput` calls go in (`text_input_call`), and
-// the plugin's `TextInputClient` calls come out (the `send` it's made with).
+// the plugin's `TextInputClient` calls come out (the `send` it's made with). With its field's edit menu
+// (UIEditMenuInteraction's, `text_input_menu`) and iOS's magnifier (`UITextLoupeSession`, `text_input_magnifier`) for
+// what a finger selects, whose handles the renderer draws.
 
 #import "flutter/shell/platform/darwin/common/InternalFlutterSwiftCommon/InternalFlutterSwiftCommon.h"
 #import "flutter/shell/platform/darwin/common/framework/Headers/FlutterCodecs.h"
@@ -84,6 +86,37 @@ NSObject const* FlutterMethodNotImplemented = [[NSObject alloc] init];
 @property(nonatomic, readonly) FlutterTextInputPlugin* plugin;
 @property(nonatomic) void* context;
 @property(nonatomic) TextInputSend send;
+// Whether the field's edit menu is shown, as the screen asked, and what was selected as it showed; and the magnifier
+// showing.
+@property(nonatomic) BOOL menuShown;
+@property(nonatomic) NSRange menuSelection;
+@property(nonatomic, strong) id loupe;
+@end
+
+// What the field's view keeps (FlutterTextInputPlugin.mm's): where its edit menu is, which moved there moves the menu
+// showing rather than showing it again, which would close it and say so; and its delegate and client, which its Select
+// tells.
+@interface FlutterTextInputView (EditMenu)
+@property(nonatomic, assign) CGRect editMenuTargetRect;
+@property(nonatomic, assign) int textInputClient;
+- (id<FlutterTextInputDelegate>)textInputDelegate;
+@end
+
+// The edit menu's Select, which UIKit offers at a caret, as its own fields do: the screen selects the word there, as
+// Flutter's engine tells its framework of a custom item (`ContextMenu.onPerformCustomAction`). A selection offers none.
+@implementation FlutterTextInputView (Select)
+- (void)select:(id)sender {
+  [self.textInputDelegate flutterTextInputView:self
+      performContextMenuCustomActionWithActionID:@"select"
+                                 textInputClient:self.textInputClient];
+}
+
+- (void)validateCommand:(UICommand*)command {
+  [super validateCommand:command];
+  if (command.action == @selector(select:) && !self.selectedTextRange.isEmpty) {
+    command.attributes |= UIMenuElementAttributesHidden;
+  }
+}
 @end
 
 @implementation TextInput
@@ -225,11 +258,31 @@ NSObject const* FlutterMethodNotImplemented = [[NSObject alloc] init];
   callback(@YES);
 }
 
-// Flutter's own edit menu's (ContextMenu) and its platform plugin's: a native window shows the system's, which asks
-// none of these.
+// The edit menu closed by itself (a press outside it, or an item chosen): the screen's told, as Flutter's engine tells
+// its framework, so it isn't shown again till a finger asks. One the screen took away it knows of, and one closed by an
+// item that changed what's selected (Select All, Paste) the screen shows again or not by that change, which reached
+// it first.
 - (void)flutterTextInputView:(FlutterTextInputView*)textInputView
     willDismissEditMenuWithTextInputClient:(int)client {
+  if (!_menuShown) {
+    return;
+  }
+  _menuShown = NO;
+  if (!NSEqualRanges(((FlutterTextRange*)textInputView.selectedTextRange).range, _menuSelection)) {
+    return;
+  }
+  [self invokeMethod:@"ContextMenu.onDismissSystemContextMenu" arguments:@[ @(client) ]];
 }
+
+- (void)flutterTextInputView:(FlutterTextInputView*)textInputView
+    performContextMenuCustomActionWithActionID:(NSString*)actionID
+                               textInputClient:(int)client {
+  // The screen does it, after the menu closes: that closing is the item's, not a person's.
+  _menuShown = NO;
+  [self invokeMethod:@"ContextMenu.onPerformCustomAction" arguments:@[ @(client), actionID ]];
+}
+
+// Flutter's own edit menu's other items: the system's menu does these itself.
 
 - (void)flutterTextInputView:(FlutterTextInputView*)textInputView shareSelectedText:(NSString*)selectedText {
 }
@@ -241,11 +294,6 @@ NSObject const* FlutterMethodNotImplemented = [[NSObject alloc] init];
 }
 
 - (void)flutterTextInputView:(FlutterTextInputView*)textInputView translateSelectedText:(NSString*)selectedText {
-}
-
-- (void)flutterTextInputView:(FlutterTextInputView*)textInputView
-    performContextMenuCustomActionWithActionID:(NSString*)actionID
-                               textInputClient:(int)client {
 }
 @end
 
@@ -272,6 +320,56 @@ void text_input_call(void* input, const char* method, const char* arguments) {
   [text_input.plugin handleMethodCall:call
                                result:^(id result){
                                }];
+}
+
+// The field's edit menu, UIKit's own (what it offers is what the field can do: Cut, Copy, Paste, Select, Select All,
+// Look Up…), beside `x`, `y`, `width`, `height` in the window's points, or none (`shown` false): moved where it's
+// already shown.
+void text_input_menu(void* input, bool shown, double x, double y, double width, double height) {
+  if (@available(iOS 16.0, *)) {
+    TextInput* text_input = (__bridge TextInput*)input;
+    FlutterTextInputPlugin* plugin = text_input.plugin;
+    if (!shown) {
+      if (text_input.menuShown) {
+        text_input.menuShown = NO;
+        [plugin hideEditMenu];
+      }
+      return;
+    }
+    CGRect rect = CGRectMake(x, y, width, height);
+    FlutterTextInputView* view = (FlutterTextInputView*)plugin.textInputView;
+    if (text_input.menuShown && view) {
+      view.editMenuTargetRect = [plugin.viewController.view convertRect:rect toView:view];
+      [view.editMenuInteraction updateVisibleMenuPositionAnimated:NO];
+      text_input.menuSelection = ((FlutterTextRange*)view.selectedTextRange).range;
+      return;
+    }
+    NSDictionary* target = @{@"x" : @(x), @"y" : @(y), @"width" : @(width), @"height" : @(height)};
+    text_input.menuShown = [plugin showEditMenu:@{@"targetRect" : target}];
+    text_input.menuSelection = ((FlutterTextRange*)view.selectedTextRange).range;
+  }
+}
+
+// iOS's magnifier over what's at `x`, `y` in the window's points, with the caret it follows, as its own fields show it
+// while a selection is moved, or none (`shown` false).
+void text_input_magnifier(void* input, bool shown, double x, double y, double caret_x, double caret_y, double caret_width, double caret_height) {
+  if (@available(iOS 17.0, *)) {
+    TextInput* text_input = (__bridge TextInput*)input;
+    UITextLoupeSession* loupe = text_input.loupe;
+    if (!shown) {
+      [loupe invalidate];
+      text_input.loupe = nil;
+      return;
+    }
+    CGPoint at = CGPointMake(x, y);
+    if (!loupe) {
+      loupe = [UITextLoupeSession beginLoupeSessionAtPoint:at
+                                   fromSelectionWidgetView:nil
+                                                    inView:text_input.plugin.viewController.view];
+      text_input.loupe = loupe;
+    }
+    [loupe moveToPoint:at withCaretRect:CGRectMake(caret_x, caret_y, caret_width, caret_height) trackingCaret:YES];
+  }
 }
 
 }  // extern "C"

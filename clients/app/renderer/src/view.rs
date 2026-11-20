@@ -37,6 +37,8 @@ mod pictures;
 #[cfg(feature = "fake")]
 pub use pictures::decoding_takes;
 mod selection;
+mod text_selection;
+pub use text_selection::Magnifier;
 pub mod touch;
 pub use frames::Make as MakeFrame;
 pub(crate) mod inspected;
@@ -141,15 +143,19 @@ pub enum WindowButton {
 /// window's edge (`WindowButton`) and as tall as the row.
 pub const CAPTION_BUTTON: f32 = 46.0;
 
-/// The system's own menu for text in a field a secondary click was on, where it was, in points of the page, and what
-/// of it can be done: as every system's fields have (`Screen::take_text_menu`), whose choice comes back as its key.
+/// The system's own menu for text in a field, and what of it can be done, as every system's fields have: on a computer
+/// where a secondary click was (`Screen::take_text_menu`), whose choice comes back as its key; on a phone over or
+/// under what a finger selected (`Screen::text_menu_shown`), which the system's own field does itself. `rect` is
+/// what it's shown beside, in points of the page: a click's point, or a selection's rectangle. `select` selects the
+/// word at the caret, as iOS's menu's Select.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct TextMenu {
-    pub at: Point<f32>,
+    pub rect: Bounds<f32>,
     pub cut: bool,
     pub copy: bool,
     pub paste: bool,
     pub select_all: bool,
+    pub select: bool,
 }
 
 pub struct Notice {
@@ -732,7 +738,7 @@ impl Screen {
         // For a harness, a picture decoded is there at its time on its clock (`Pictures::due`).
         let pictures = self.pictures.due().map(|ms| Duration::from_secs_f64(ms / 1000.0));
         let hover = self.hover_after.map(|at| Duration::from_secs_f64((at - self.js.clock().now()).max(0.0) / 1000.0));
-        settle.into_iter().chain(self.blinks()).chain(frames).chain(pictures).chain(hover).min()
+        settle.into_iter().chain(self.blinks()).chain(self.finger_hold()).chain(frames).chain(pictures).chain(hover).min()
     }
 
     /// Whether its page, or a frame's in it, asked for the display's next frame (`requestAnimationFrame`).
@@ -784,6 +790,7 @@ impl Screen {
                 self.hover(at);
             }
         }
+        self.finger_held();
     }
 
     /// Applies what the app's JS has posted since it was last asked, all at once, as it's one turn's or more, and
@@ -1098,6 +1105,7 @@ impl Screen {
             stretched: self.stretched().into_iter().collect(),
             fields,
             caret,
+            handles: self.handles_on(),
             hovering: self.chrome.action.as_ref().is_some_and(hovering),
             notice: self.notice.as_ref().map(|notice| (notice.text.clone(), notice.action.as_ref().map(|(label, _)| label.clone()))),
             title: self.title.as_ref().map(|title| (title.name.clone(), title.start)),
@@ -1172,6 +1180,7 @@ impl Screen {
         let Plan { conditions, window, scale, now, caret, everything, ref changed, ref moving, ref below, ref layered, still, .. } = *plan;
         let line = self.line();
         let stretched = self.stretched();
+        let handles = self.handles_on();
         let mut painter = Painter {
             tree: &self.tree,
             layout: &mut self.layout,
@@ -1196,6 +1205,7 @@ impl Screen {
             texts: &mut self.editing.texts,
             selected: self.editing.selected.map(|selected| (selected.id, selected.range())),
             caret,
+            handles,
             pictures: &mut self.pictures,
             fetched: &self.fetched,
             wanted: Vec::new(),
@@ -1687,15 +1697,7 @@ impl Screen {
                 if !(start..end).contains(&index) {
                     self.press_input(input, at, 1, false);
                 }
-                let field = &self.editing.fields[&input];
-                let selected = !field.selected().is_empty();
-                self.text_menu = Some(TextMenu {
-                    at,
-                    cut: selected && !field.secure && !field.readonly,
-                    copy: selected && !field.secure,
-                    paste: !field.readonly,
-                    select_all: !field.value().text.is_empty(),
-                });
+                self.text_menu = Some(self.text_menu_of(input, Bounds { origin: at, size: Size::default() }));
             }
             return self.pointer_event(&chain, "contextmenu", at, button, None);
         }
@@ -1716,10 +1718,12 @@ impl Screen {
         self.changed();
         self.states.focus_visible = false;
         self.click_focus(&chain);
-        // Presses close together in time and place count as a double or triple click, by GTK's defaults.
-        let now = Instant::now();
+        // Presses close together in time and place count as a double or triple click, by GTK's defaults; a finger's
+        // taps further apart (`touch::DOUBLE_TAP_SLOP`).
+        let now = self.input_time();
+        let near = if self.touch { touch::DOUBLE_TAP_SLOP } else { 5.0 };
         let clicks = match self.editing.last_press {
-            Some((when, was, clicks)) if now - when < Duration::from_millis(400) && (was.x - at.x).abs() < 5.0 && (was.y - at.y).abs() < 5.0 => (clicks + 1).min(3),
+            Some((when, was, clicks)) if now - when < 400.0 && (was.x - at.x).abs() < near && (was.y - at.y).abs() < near => (clicks + 1).min(3),
             _ => 1,
         };
         self.editing.last_press = Some((now, at, clicks));
@@ -1897,6 +1901,7 @@ impl Screen {
             return;
         }
         self.changed();
+        self.editing.overlay = None;
         if let Some(input) = self.focus.focused.filter(|focused| self.editing.fields.contains_key(focused)) {
             self.edit(input, Field::blur);
         }
@@ -2203,8 +2208,7 @@ impl Screen {
         let field = self.editing.fields.get(&id).filter(|field| !field.secure && !field.readonly)?;
         let drawn = self.editing.drawn.get(&id)?;
         let (line, x) = field.placed().unwrap_or_else(|| editing::Layout::caret(drawn, field.caret(), field.upstream()));
-        let height = drawn.paragraph.line_height * drawn.grown;
-        Some(Bounds { origin: point(drawn.origin.x + (x - drawn.scroll.x) * drawn.grown, drawn.origin.y + line as f32 * height), size: Size { width: drawn.grown, height } })
+        Some(drawn.line_rect(line, x, x + 1.0))
     }
 
     /// Its title row, where its window has one over its page (a unified toolbar): how tall it is, and where in it
@@ -2414,13 +2418,16 @@ struct Editing {
     heard: u64,
     drawn: HashMap<Id, Drawn>,
     selecting: Option<Id>,
-    last_press: Option<(Instant, Point<f32>, u8)>,
+    /// When on the page's clock, in ms.
+    last_press: Option<(f64, Point<f32>, u8)>,
     blink: f64,
     /// Each selectable text as it was last drawn, what's selected of one, and whether a press is selecting
     /// (`selection`).
     texts: HashMap<Id, selection::Shown>,
     selected: Option<selection::Selected>,
     selecting_text: bool,
+    /// What a finger selected in an input, with its handles and the system's menu (`text_selection`).
+    overlay: Option<text_selection::Overlay>,
 }
 
 /// What the window draws of its own over its page, as it was last drawn: where its page's top bar starts in its title
@@ -2482,6 +2489,8 @@ struct Seen {
     stretched: std::collections::BTreeMap<Id, Point<f32>>,
     fields: Vec<(Id, String, editing::Value, Option<(usize, f32)>, bool)>,
     caret: bool,
+    /// The input a finger's selection shows its handles in.
+    handles: Option<Id>,
     hovering: bool,
     notice: Option<(String, Option<String>)>,
     title: Option<(String, f32)>,
@@ -2556,6 +2565,23 @@ pub(crate) struct Drawn {
 }
 
 impl Drawn {
+    /// Where the caret before byte `index` of its display text is drawn, in the window: a line tall, a point wide.
+    fn caret_at(&self, index: usize, upstream: bool) -> Bounds<f32> {
+        let (line, x) = editing::Layout::caret(self, index, upstream);
+        self.line_rect(line, x, x + 1.0)
+    }
+
+    /// Where bytes `start..end` of its display text are drawn, in the window: a rectangle on each line they're on.
+    fn spans(&self, start: usize, end: usize) -> Vec<Bounds<f32>> {
+        self.paragraph.spans(start, end).into_iter().map(|(line, x0, x1)| self.line_rect(line, x0 + self.offsets.get(line).copied().unwrap_or(0.0), x1 + self.offsets.get(line).copied().unwrap_or(0.0))).collect()
+    }
+
+    /// Line `line` from `x0` to `x1` along its paragraph, in the window.
+    fn line_rect(&self, line: usize, x0: f32, x1: f32) -> Bounds<f32> {
+        let height = self.paragraph.line_height * self.grown;
+        Bounds { origin: point(self.origin.x + (x0 - self.scroll.x) * self.grown, self.origin.y + line as f32 * height), size: Size { width: (x1 - x0) * self.grown, height } }
+    }
+
     /// The byte of its display text nearest to `at`, in the window.
     fn index_at(&self, at: Point<f32>) -> usize {
         self.hit(at).0
