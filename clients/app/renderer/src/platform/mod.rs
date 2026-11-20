@@ -229,8 +229,8 @@ pub struct WindowOptions {
     pub owner: Option<WindowId>,
     /// Where its frame is kept as it's left (it loses the keyboard, the app goes to the background, it closes), which
     /// it shows as it opens again, while its page starts and hears back from what it first asks, as iOS shows an app's
-    /// last snapshot as it launches (`snapshot`). Whoever opens it names it by whose it is and its app's build, so it
-    /// never shows another person's, or another build's.
+    /// last snapshot as it launches (`snapshot`), a new build of its page's too. Whoever opens it names it by whose it
+    /// is, so it never shows another person's.
     pub snapshot: Option<std::path::PathBuf>,
 }
 

@@ -626,7 +626,7 @@ async fn window(started: Instant, entrypoint: &str, subject: Option<&str>, link:
     let tokens_page = load(&tables)?;
     Opening::step(&view, "tables loaded");
     // An app's window, and the Home Screen, shows its last frame as it opens again.
-    let snapshot = (app_window || launcher).then(|| snapshot_file(entrypoint, subject, &module, &tables)).flatten();
+    let snapshot = (app_window || launcher).then(|| snapshot_file(entrypoint, subject)).flatten();
     let native = Native::get()?;
     let window: Arc<OnceLock<WindowId>> = Arc::default();
     let begun = start(entrypoint, subject, link, launcher, Place::Window(window.clone()), &module, page)?;
@@ -821,18 +821,18 @@ async fn window(started: Instant, entrypoint: &str, subject: Option<&str>, link:
 
 /// Where an app's window is kept where it was left (`WindowOptions::frame`): a computer's app window's, by its app,
 /// its page and who it's for.
-/// Where a window's last frame is kept (`WindowOptions::snapshot`), named by whose it is, their network, what it shows
-/// for whom (`entrypoint`, `subject`) and its page's build (its `module` and the UI library's `tables`), so it's never
-/// shown to another person, or for another build of its page; a new build of this program shows it until its page has
-/// drawn, as an update's first start would otherwise show nothing. None while no one's signed in. They all go as the
-/// device signs out (`forget_snapshots`).
-fn snapshot_file(entrypoint: &str, subject: Option<&str>, module: &Url, tables: &[String]) -> Option<std::path::PathBuf> {
+/// Where a window's last frame is kept (`WindowOptions::snapshot`), named by whose it is, their network and what it
+/// shows for whom (`entrypoint`, `subject`), so it's never shown to another person. A new build of its page, or of
+/// this program, shows the last one until its page has started, as iOS shows an app's last screen after an update,
+/// where every deploy and release had it open on nothing. None while no one's signed in. They all go as the device
+/// signs out (`forget_snapshots`).
+fn snapshot_file(entrypoint: &str, subject: Option<&str>) -> Option<std::path::PathBuf> {
     use sha2::{Digest, Sha256};
     let client = &crate::views().ok()?.client;
     let who = client.who()?;
     let address = client.address().unwrap_or_default();
     let mut hash = Sha256::new();
-    for part in [who.as_str(), &address, entrypoint, subject.unwrap_or_default(), module.as_str()].into_iter().chain(tables.iter().map(String::as_str)) {
+    for part in [who.as_str(), &address, entrypoint, subject.unwrap_or_default()] {
         hash.update(part.as_bytes());
         hash.update([0]);
     }
